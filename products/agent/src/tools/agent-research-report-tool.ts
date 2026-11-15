@@ -1,9 +1,13 @@
 import type { AgentResearchReportSource as ResearchSource } from '../agent/research-report-input.ts';
 import { prepareProtectedResearchReport, createAgentResearchReportProjector, bindAgentResearchSourceOwner, bindAgentResearchReportSourceOwner, type PreparedResearchReport } from '../agent/protected-research-report.ts';
+import { AgentResearchRunRegistry } from '../agent/research-run-registry.ts';
+import { AgentResearchSourceRegistry, type AgentResearchSourceRecord } from '../agent/research-source-registry.ts';
+import { bindResearchArtifacts, researchLedgers } from '../agent/research-ledgers.ts';
+import type { ShellPathService } from '@/runtime/index.ts';
 import type { ProtectedSourceOwner } from '@goodvibes-jev/engine/platform/platform/security';
 import type { ArtifactDescriptor, ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
-import { assertCurrentToolEffect, assertCurrentToolInvocation, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import { assertCurrentToolEffect, assertCurrentToolInvocation, ToolInputProjectionError, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 
 export interface AgentResearchReportToolArgs {
   readonly runId?: unknown;
@@ -13,6 +17,7 @@ export interface AgentResearchReportToolArgs {
   readonly summary?: unknown;
   readonly reportMarkdown?: unknown;
   readonly sources?: unknown;
+  readonly sourceIds?: unknown;
   readonly findings?: unknown;
   readonly gaps?: unknown;
   readonly recommendations?: unknown;
@@ -26,7 +31,8 @@ export interface AgentResearchReportToolArgs {
   readonly explicitUserRequest?: unknown;
 }
 
-type AgentResearchReportArtifactStore = Pick<ArtifactStore, 'create'>;
+type AgentResearchReportArtifactStore = Pick<ArtifactStore, 'create'> & Partial<Pick<ArtifactStore, 'get'>>;
+type ResearchLedgerPaths = Pick<ShellPathService, 'resolveProjectPath'>;
 
 interface CitationCoverage {
   readonly sourceCount: number;
@@ -385,10 +391,10 @@ function runIdFromArgs(args: AgentResearchReportToolArgs): string {
   return readString(args.runId) || readString(args.id);
 }
 
-function reportNextRouteLines(descriptor: ArtifactDescriptor, args: AgentResearchReportToolArgs): readonly string[] {
+function reportNextRouteLines(descriptor: ArtifactDescriptor, args: AgentResearchReportToolArgs, runOpen: boolean): readonly string[] {
   const filename = descriptor.filename ?? `${descriptor.id}.md`;
   const title = readString(args.title);
-  const runId = runIdFromArgs(args);
+  const runId = runOpen ? runIdFromArgs(args) : '';
   return [
     `  inspect research action:"report_artifact" artifactId:${routeString(descriptor.id)}`,
     `  artifact agent_artifacts mode:"show" artifactId:${routeString(descriptor.id)} includeContent:true`,
@@ -397,7 +403,7 @@ function reportNextRouteLines(descriptor: ArtifactDescriptor, args: AgentResearc
     `  promoteKnowledge agent_knowledge_ingest sourceKind:"artifact" artifactId:${routeString(descriptor.id)}`,
     ...(runId ? [
       `  completeRun research action:"complete" id:${routeString(runId)} reportArtifactId:${routeString(descriptor.id)}`,
-      `  note run ${runId} is still open: saving the report does not complete it`,
+      `  note run ${runId} is still open`,
     ] : []),
     `  reports research action:"reports"${title ? ` query:${routeString(title)}` : ''}`,
   ];
@@ -430,6 +436,7 @@ async function saveResearchReport(
       tags: readTags(args.tags),
       sourceCount: sources.length,
       sources: sourceMetadata(sources),
+      ...(readList(args.sourceIds).length > 0 ? { sourceIds: readList(args.sourceIds) } : {}),
       citationCoverage: coverage,
       ...(includeVisualReport ? { visualReport: visualReportMetadata(args, sources, coverage) } : {}),
       explicitUserRequest,
@@ -454,9 +461,79 @@ function coverageFromMetadata(metadata: ArtifactDescriptor['metadata']): Citatio
   };
 }
 
+/** A stored source as a report source: the same fields a caller would type. */
+function reportSource(record: AgentResearchSourceRecord): Record<string, unknown> {
+  return {
+    title: record.title,
+    ...(record.url ? { url: record.url } : {}),
+    ...(record.publisher ? { publisher: record.publisher } : {}),
+    ...(record.publishedAt ? { publishedAt: record.publishedAt } : {}),
+    ...(record.accessedAt ? { accessedAt: record.accessedAt } : {}),
+    credibility: record.credibility,
+    ...(record.note || record.summary ? { note: record.note || record.summary } : {}),
+  };
+}
+
+function hasGivenSources(value: unknown): boolean {
+  return Array.isArray(value) ? value.length > 0 : readString(value) !== '';
+}
+
+/**
+ * A report for a run takes its sources from the source store: the ids given in
+ * `sourceIds`, or with none given the run's reviewed sources. Sources typed in
+ * `sources` are used as given (this also leaves arguments that were already
+ * prepared untouched). Details are fixed sentences: they name no value.
+ */
+export function withStoredReportSources(args: Record<string, unknown>, paths: ResearchLedgerPaths | undefined): Record<string, unknown> {
+  const runId = readString(args.runId) || readString(args.id);
+  const ids = readList(args.sourceIds);
+  // Typed sources are cited as given; sourceIds beside them name the stored sources to mark used.
+  if (hasGivenSources(args.sources)) return args;
+  if (!runId && ids.length === 0) return args;
+  if (!paths) throw new ToolInputProjectionError('unconfigured', 'The research source store is not available in this session; give the sources in `sources`.');
+  const store = AgentResearchSourceRegistry.fromShellPaths(paths);
+  let records: AgentResearchSourceRecord[];
+  if (ids.length > 0) {
+    records = ids.map(id => store.get(id) ?? (() => { throw new ToolInputProjectionError('invalid', 'A source id in sourceIds is not in the research source store. List sources with research action:"sources".'); })());
+  } else {
+    const run = AgentResearchRunRegistry.fromShellPaths(paths).get(runId);
+    if (!run) throw new ToolInputProjectionError('invalid', 'The run named by runId is not in the research run ledger. List runs with research action:"runs".');
+    records = run.sourceIds.map(id => store.get(id)).filter((record): record is AgentResearchSourceRecord => record?.status === 'reviewed');
+    if (records.length === 0) throw new ToolInputProjectionError('invalid', 'The run has no reviewed sources. Review its sources with research action:"review_source", or give sources or sourceIds.');
+  }
+  return { ...args, sources: records.map(reportSource), sourceIds: records.map(record => record.id) };
+}
+
+/**
+ * After the save: the named sources are marked used by this report and the run
+ * is completed with it. Each outcome is reported by name; a refusal here never
+ * turns the saved report into a failure.
+ */
+function settleResearchRun(paths: ResearchLedgerPaths, runId: string, sourceIds: readonly string[], artifactId: string): { readonly lines: readonly string[]; readonly runOpen: boolean } {
+  const lines: string[] = [];
+  const used: string[] = [];
+  if (sourceIds.length > 0) {
+    const store = AgentResearchSourceRegistry.fromShellPaths(paths);
+    for (const id of sourceIds) {
+      try { used.push(store.markUsed(id, { reportArtifactId: artifactId }).id); }
+      catch (error) { lines.push(`  source ${id} not marked used: ${error instanceof Error ? error.message : String(error)}`); }
+    }
+    if (used.length > 0) lines.push(`  sources marked used by this report: ${used.join(', ')}`);
+  }
+  try {
+    const run = AgentResearchRunRegistry.fromShellPaths(paths).complete(runId, { reportArtifactId: artifactId, sourceIds: used });
+    lines.push(`  run ${run.id} completed with this report`);
+    return { lines, runOpen: false };
+  } catch (error) {
+    lines.push(`  run ${runId} not completed: ${error instanceof Error ? error.message : String(error)}`);
+    return { lines, runOpen: true };
+  }
+}
+
 export function createAgentResearchReportTool(
   artifactStore?: AgentResearchReportArtifactStore,
   sourceOwner?: ProtectedSourceOwner,
+  ledgers: () => ResearchLedgerPaths | undefined = () => undefined,
 ): Tool {
   return {
     definition: {
@@ -465,7 +542,7 @@ export function createAgentResearchReportTool(
       parameters: {
         type: 'object',
         properties: {
-          runId: { type: 'string', description: 'Optional visible research run id. Only used to print the complete route; saving the report does not complete the run.' },
+          runId: { type: 'string', description: 'Optional research run id. Without sources, the report uses the run\'s reviewed sources; after the save those sources are marked used and the run is completed with this report.' },
           id: { type: 'string', description: 'Alias for runId when saving through the high-level research adapter.' },
           title: { type: 'string', description: 'Report title.' },
           question: { type: 'string', description: 'Research question answered by the report.' },
@@ -474,7 +551,12 @@ export function createAgentResearchReportTool(
           sources: {
             type: 'array',
             items: { type: 'object' },
-            description: 'At least one reviewed source with title, url, and credibility. Credential-redacted, userinfo-bearing or malformed URLs are withheld in full with urlOmitted:true; ordinary query and section references are preserved.',
+            description: 'Reviewed sources with title, url, and credibility, when they are not in the source store. Credential-redacted, userinfo-bearing or malformed URLs are withheld in full with urlOmitted:true; ordinary query and section references are preserved.',
+          },
+          sourceIds: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Source store ids to cite instead of typing sources; omit both with runId to cite the run\'s reviewed sources.',
           },
           findings: {
             type: 'array',
@@ -504,7 +586,7 @@ export function createAgentResearchReportTool(
           confirm: { type: 'boolean', description: 'Optional legacy audit field; does not authorize report writes.' },
           explicitUserRequest: { type: 'string', description: 'Optional request text retained with report metadata.' },
         },
-        required: ['title', 'question', 'sources'],
+        required: ['title', 'question'],
         additionalProperties: false,
       },
       sideEffects: ['state'],
@@ -513,7 +595,6 @@ export function createAgentResearchReportTool(
     execute: async (rawArgs: Record<string, unknown>, options) => {
       if (!artifactStore?.create) return failure('Research report export is unavailable because this runtime did not provide an artifact store.');
       let prepared: PreparedResearchReport | undefined;
-      let saved: ArtifactDescriptor | undefined;
       try {
         const assertWrite = () => {
           options?.signal?.throwIfAborted();
@@ -521,14 +602,14 @@ export function createAgentResearchReportTool(
           if (!admitted) throw new Error('Research report writes require current recorded effect admission.');
         };
         assertWrite();
-        prepared = await prepareProtectedResearchReport(sourceOwner, rawArgs, { signal: options?.signal, assertCurrent: assertWrite });
+        prepared = await prepareProtectedResearchReport(sourceOwner, withStoredReportSources(rawArgs, ledgers()), { signal: options?.signal, assertCurrent: assertWrite });
         const args = prepared.args as unknown as AgentResearchReportToolArgs & { readonly sources: readonly ResearchSource[] };
-        prepared.assertCurrent();
         if (args.preview === true) return output(preview(args, args.sources));
-        const assertCommit = () => { assertWrite(); prepared?.assertCurrent(); };
-        const descriptor = await saveResearchReport(artifactStore, args, assertCommit);
-        saved = descriptor;
-        assertCommit();
+        // One check before the write; once the store has written, the result is the save.
+        const descriptor = await saveResearchReport(artifactStore, args, prepared.assertCurrent);
+        const runId = runIdFromArgs(args);
+        const paths = ledgers();
+        const settled = runId && paths ? settleResearchRun(paths, runId, readList(args.sourceIds), descriptor.id) : undefined;
         const coverage = coverageFromMetadata(descriptor.metadata);
         const lines = [
           'Saved Agent research report artifact',
@@ -541,17 +622,16 @@ export function createAgentResearchReportTool(
           coverage ? `  citationCoverage ${coverage.citedSourceIds.length}/${coverage.sourceCount} cited; uncited ${coverage.missingSourceIds.length}; unknown ${coverage.unknownCitationIds.length}` : '',
           coverage && coverage.repairSuggestions.length > 0 ? `  citationRepair ${coverage.repairSuggestions.join(' ')}` : '',
           ...(descriptor.sha256 ? [`  recorded checksum ${descriptor.sha256}`] : []),
+          ...(settled?.lines ?? []),
           '  nextRoutes',
-          ...reportNextRouteLines(descriptor, args),
+          ...reportNextRouteLines(descriptor, args, settled ? settled.runOpen : Boolean(runId)),
           '  policy sourced markdown saved as artifact; content not printed',
           `  inspect agent_artifacts mode:"show" artifactId:"${descriptor.id}" includeContent:true`,
         ].filter(Boolean);
         return output(lines.join('\n'));
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        // The artifact exists; the failure came from a check after it was written.
-        if (saved) return failure(`Agent research report artifact ${saved.id} was saved, but a check after the save failed (${message}). Do not save the report again; inspect it with agent_artifacts mode:"show" artifactId:${routeString(saved.id)}.`);
-        return failure(message);
+        if (error instanceof ToolInputProjectionError) throw error;
+        return failure(error instanceof Error ? error.message : String(error));
       } finally { await prepared?.release(); }
     },
   };
@@ -569,5 +649,8 @@ export function registerAgentResearchReportTool(
     if (ownerScope === 'report-only') bindAgentResearchReportSourceOwner(registry, sourceOwner);
     else bindAgentResearchSourceOwner(registry, sourceOwner);
   }
-  registry.register(createAgentResearchReportTool(artifactStore, sourceOwner), { inputProjection: createAgentResearchReportProjector(sourceOwner) });
+  bindResearchArtifacts(registry, artifactStore);
+  const ledgers = () => researchLedgers(registry);
+  registry.register(createAgentResearchReportTool(artifactStore, sourceOwner, ledgers),
+    { inputProjection: createAgentResearchReportProjector(sourceOwner, undefined, args => withStoredReportSources(args, ledgers())) });
 }

@@ -1,7 +1,6 @@
 import type { ProtectedSourceOwner, ResearchReferenceOperation } from '@goodvibes-jev/engine/platform/platform/security';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { captureOwnedJson } from '@goodvibes-jev/engine/platform/platform/gate';
-import { isDeepStrictEqual } from 'node:util';
 import type { CommandContext } from '../input/command-registry.ts';
 import { AgentResearchRunRegistry, type AgentResearchRunRecord } from '../agent/research-run-registry.ts';
 import { AgentResearchSourceRegistry, researchSourceReportLine, type AgentResearchSourceRecord } from '../agent/research-source-registry.ts';
@@ -9,11 +8,6 @@ import type { AgentResearchToolArgs } from './agent-research-tool.ts';
 
 type ToolResult = Awaited<ReturnType<Tool['execute']>>;
 type Dispatch = (child: Tool, args: Record<string, unknown>, assertSource?: () => void) => Promise<ToolResult>;
-
-/** The run was edited by something else mid-collection; the runner must not write over that change. */
-class ResearchRunChangedError extends Error {
-  constructor() { super('Research run changed during source collection.'); }
-}
 
 function error(message: string): { readonly success: false; readonly error: string } {
   return { success: false, error: message };
@@ -189,15 +183,14 @@ export async function runPublicSearch(
   }
   const webArgs = searchArgs({ ...args, query });
   assertCurrent();
-  const selectedRun = JSON.stringify(run);
-  const assertRun = () => { assertCurrent(); if (run && shellPaths && JSON.stringify(AgentResearchRunRegistry.fromShellPaths(shellPaths).get(run.id)) !== selectedRun) throw new ResearchRunChangedError(); };
-  const webResult = await dispatch(webSearchTool, webArgs, assertRun);
+  // A search writes nothing to the run, so an edit to the run meanwhile changes nothing here.
+  const webResult = await dispatch(webSearchTool, webArgs, assertCurrent);
   assertCurrent();
   if (!webResult.success) return { success: false, error: readString(webResult.error) || 'web_search failed.' };
   const payload = parseSearchPayload(webResult.output);
   const results = readRecordArray(payload?.results);
   const withUrl = results.filter(result => readString(result.url));
-  const sourceCandidates = (await prepareSearchReferences(withUrl, sourceOwner, { signal, assertCurrent: assertRun }))
+  const sourceCandidates = (await prepareSearchReferences(withUrl, sourceOwner, { signal, assertCurrent }))
     .map((result, index) => candidateFromSearchResult(query, result, index));
   return {
     success: true,
@@ -291,7 +284,7 @@ export async function runAdmittedResearchRunner(
 ): Promise<ToolResult> {
   // Once a run exists, any later failure must say which run it left behind.
   let activeRun: AgentResearchRunRecord | undefined;
-  let savedSourceTotal = 0;
+  const savedSourceIds: string[] = [];
   const runRegistryForFailure = shellPaths ? AgentResearchRunRegistry.fromShellPaths(shellPaths) : undefined;
   try {
     assertCurrent();
@@ -332,13 +325,13 @@ export async function runAdmittedResearchRunner(
       return error(`Cannot run admitted research runner for ${run.status} research run ${run.id}. Create a follow-up run instead.`);
     }
 
-    const selectedRun = captureOwnedJson(run);
-    const assertRun = () => { assertCurrent(); if (!isDeepStrictEqual(captureOwnedJson(runRegistry.get(run.id)), selectedRun)) throw new ResearchRunChangedError(); };
-    assertRun();
-    const webResult = await dispatch(webSearchTool, searchArgs({ ...args, query: run.question }), assertRun);
-    assertRun();
+    // The run is not re-read between steps: each checkpoint below is one locked
+    // read-modify-write that refuses a run that was cancelled, completed or failed
+    // meanwhile, and an unrelated edit (a note) is kept, not treated as a conflict.
+    assertCurrent();
+    const webResult = await dispatch(webSearchTool, searchArgs({ ...args, query: run.question }), assertCurrent);
+    assertCurrent();
     if (!webResult.success) {
-      assertRun();
       assertWrite();
       run = runRegistry.checkpoint(run.id, {
         status: 'blocked',
@@ -356,18 +349,17 @@ export async function runAdmittedResearchRunner(
     const payload = parseSearchPayload(webResult.output);
     const results = readRecordArray(payload?.results);
     const withUrl = results.filter(result => readString(result.url));
-    const candidates = (await prepareSearchReferences(withUrl, sourceOwner, { signal, assertCurrent: assertRun }))
+    const candidates = (await prepareSearchReferences(withUrl, sourceOwner, { signal, assertCurrent }))
       .map((result, index) => candidateFromSearchResult(run.question, result, index));
     const saved: { readonly source: AgentResearchSourceRecord; readonly created: boolean }[] = [];
     for (const candidate of candidates) {
-      assertRun(); assertWrite();
+      assertWrite();
       const entry = sourceFromCandidate(sourceRegistry, run.question, candidate);
-      if (entry) { saved.push(entry); savedSourceTotal = saved.length; }
+      if (entry) { saved.push(entry); savedSourceIds.push(entry.source.id); }
     }
     const sourceIds = saved.map((entry) => entry.source.id);
     const createdCount = saved.filter((entry) => entry.created).length;
     const duplicateCount = saved.length - createdCount;
-    assertRun();
     assertWrite();
     run = runRegistry.checkpoint(run.id, {
       status: 'running',
@@ -418,9 +410,8 @@ export async function runAdmittedResearchRunner(
     const message = err instanceof Error ? err.message : String(err);
     if (!activeRun) return error(message);
     const aborted = signal?.aborted === true || (err instanceof Error && err.name === 'AbortError');
-    const changedElsewhere = err instanceof ResearchRunChangedError;
     let blocked = false;
-    if (!aborted && !changedElsewhere && runRegistryForFailure) {
+    if (!aborted && runRegistryForFailure) {
       try {
         assertWrite();
         runRegistryForFailure.checkpoint(activeRun.id, {
@@ -431,6 +422,6 @@ export async function runAdmittedResearchRunner(
         blocked = true;
       } catch { /* the run keeps its last recorded state; the message below says so */ }
     }
-    return error(`Admitted research runner stopped for run ${activeRun.id}: ${message}. ${savedSourceTotal > 0 ? `${savedSourceTotal} source(s) were already saved.` : 'No sources were saved.'} ${blocked ? 'The run is now blocked.' : 'The run was left exactly as it is.'} Retry with runId:${quote(activeRun.id)} instead of starting a new run.`);
+    return error(`Admitted research runner stopped for run ${activeRun.id}: ${message}. ${savedSourceIds.length > 0 ? `${savedSourceIds.length} source(s) were already saved: ${savedSourceIds.join(', ')}.` : 'No sources were saved.'} ${blocked ? 'The run is now blocked.' : 'The run was left exactly as it is.'} Retry with runId:${quote(activeRun.id)} instead of starting a new run.`);
   }
 }

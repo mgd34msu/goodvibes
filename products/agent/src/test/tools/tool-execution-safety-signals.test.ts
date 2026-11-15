@@ -10,24 +10,19 @@ function throwing(error: unknown): Tool {
   };
 }
 
-describe('tool execution safety keeps cancellation a signal and explains a hold', () => {
+describe('tool execution safety leaves cancellation and holds to the tool runtime', () => {
   test('a cancelled call is rethrown so the host reports it as cancelled', async () => {
     const tool = throwing(new ToolInputProjectionError('cancelled'));
     wrapToolExecutionSafety(tool);
     await expect(tool.execute({})).rejects.toThrow('Tool input projection cancelled.');
   });
 
-  test('a held or stale call is a failed result that says it is not the arguments and not to retry', async () => {
+  test('a held or stale call is rethrown so the tool runtime words it once', async () => {
     for (const problem of ['held', 'stale'] as const) {
       const tool = throwing(new ToolInputProjectionError(problem));
       wrapToolExecutionSafety(tool);
-      const result = await tool.execute({});
-      expect(result.success).toBe(false);
-      expect(result.error).toContain(`Tool input projection ${problem}.`);
+      await expect(tool.execute({})).rejects.toBeInstanceOf(ToolInputProjectionError);
     }
-    const held = throwing(new ToolInputProjectionError('held'));
-    wrapToolExecutionSafety(held);
-    expect((await held.execute({})).error).toContain('do not retry');
   });
 
   test('a call whose signal was aborted is rethrown, not reported as an ordinary failure', async () => {

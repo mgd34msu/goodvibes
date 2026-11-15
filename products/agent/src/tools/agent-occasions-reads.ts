@@ -184,12 +184,15 @@ export async function handleState(deps: AgentOccasionsToolDeps): Promise<ToolOut
   if (!result.ok) return fail(['Could not read the occasions store.', `  ${result.error ?? 'no reason given'}`]);
   const response = narrowOccasionsState(result.data);
   if (!response) return fail([OCCASIONS_RESPONSE_UNREADABLE]);
+  // An older daemon may not report every count; a missing one is left out, never printed as undefined.
+  const counts = [`${response.acknowledgements} recorded answers`, `${response.openItems} still open`, `${response.interviews} interviews`];
+  if (typeof response.giftRecords === 'number') counts.push(`${response.giftRecords} gift records`);
+  if (typeof response.mirrors === 'number') counts.push(`${response.mirrors} calendar mirrors`);
   const lines = [
     `Occasions store: ${homeRelativePath(response.path, homedir())}`,
-    `  ${response.acknowledgements} recorded answers, ${response.openItems} still open,`
-    + ` ${response.interviews} interviews, ${response.giftRecords} gift records, ${response.mirrors} calendar mirrors.`,
+    `  ${counts.join(', ')}.`,
   ];
-  if (response.corruption !== null) {
+  if (typeof response.corruption === 'string') {
     lines.push(`  The file existed and could not be read: ${response.corruption}`);
     lines.push('  Say that. It is not an empty store.');
   }

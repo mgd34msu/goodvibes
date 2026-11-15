@@ -263,3 +263,93 @@ export function createPaymentWindowCommand<Context extends PaymentWindowCommandC
     await refresh();
   };
 }
+
+/** What `payments.checkout.approve` answered, or null when it is not that shape. */
+function readAdvanceApproval(value: unknown): { merchantDomain: string; item: string; amount: string; expiresAt: string } | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const record = value as Record<string, unknown>;
+  const { approved, merchantDomain, item, amount, expiresAt } = record;
+  if (approved !== true || typeof merchantDomain !== 'string' || typeof item !== 'string'
+    || typeof amount !== 'string' || typeof expiresAt !== 'string') return null;
+  return { merchantDomain, item, amount, expiresAt };
+}
+
+/** `/payments approve <merchant> <item> <maximum>`: the merchant is the first word, the maximum the last. */
+export function parseAdvanceApprovalArgs(args: readonly string[]): { merchantDomain: string; item: string; amount: string } | null {
+  const words = args.map(word => word.trim()).filter(Boolean);
+  if (words.length < 3) return null;
+  return { merchantDomain: words[0]!, item: words.slice(1, -1).join(' '), amount: words[words.length - 1]! };
+}
+
+/**
+ * The owner approves one purchase in advance: merchant, item and the most it may
+ * cost. Optional unless payments.confirmEveryPurchase is on; a matching purchase
+ * then needs no answer up to that amount. The owner sees the three facts in a
+ * picker and approves with one choice; the daemon reads the amount and refuses
+ * one it cannot match before recording anything.
+ */
+export function createPaymentApproveCommand<Context extends PaymentWindowCommandContext>(policy: PaymentWindowCommandPolicy<Context>) {
+  return async function approvePurchaseInAdvance(context: Context, args: readonly string[]): Promise<void> {
+    if (!policy.isOwner(context)) {
+      context.print('[payments] Type /payments approve <merchant> <item> <maximum> in the owner terminal to approve a purchase in advance.');
+      return;
+    }
+    const requested = parseAdvanceApprovalArgs(args);
+    if (!requested) {
+      context.print('[payments] Usage: /payments approve <merchant> <item> <maximum>, for example /payments approve shop.example USB-C cable 25.00. Nothing was approved.');
+      return;
+    }
+    const open = context.openSelection;
+    if (!open) { context.print('[payments] Approving needs the picker, which this surface does not have. Use the terminal app or the web UI Purchases panel.'); return; }
+    const ownerAbort = new AbortController();
+    let connection: RetainedOperatorConnection;
+    try {
+      connection = new RetainedOperatorConnection({
+        owner: () => policy.owner(context), home: () => policy.home(context),
+        read: observation => policy.read(context, observation), files: policy.files,
+        environment: policy.environment, fetchImpl: policy.fetchImpl, signal: ownerAbort.signal,
+      });
+    } catch {
+      context.print('[payments] Check the selected daemon and its paired owner credential, then run /payments approve again. Nothing was approved.');
+      return;
+    }
+    const finish = () => { ownerAbort.abort(); void connection.close(); };
+    const report = (message: string) => { context.print(message); context.renderRequest(); };
+    const summary = `Merchant: ${text(requested.merchantDomain)}\nItem: ${text(requested.item)}\nAt most: ${text(requested.amount)}\n\n`
+      + 'A purchase matching these three, begun in the next five minutes, needs no further answer up to this amount. The approval is used once.';
+    const approve = async () => {
+      try {
+        const auth = await connection.run((operator, signal) => operator.control.auth.current({}, { signal }));
+        if (!isPairedOperatorPrincipal(auth, ['read:payments', 'write:payments'], connection.expectedPrincipalId)) {
+          throw new Error('A current paired administrative payment owner is required.');
+        }
+        const result = readAdvanceApproval(await connection.run((operator, signal) => operator.invoke(
+          'payments.checkout.approve', { ...requested, confirm: true },
+          { signal, headers: { 'x-goodvibes-explicit-user-request': 'true' } },
+        )));
+        if (!result) throw new Error('Unexpected approval answer.');
+        report(`[payments] Approved in advance: ${text(result.item)} from ${text(result.merchantDomain)}, at most ${text(result.amount)}, until ${new Date(result.expiresAt).toLocaleString()}.`);
+      } catch (error) {
+        // A refusal from the daemon names what was wrong (an amount it cannot read, a full approval list); a transport error is not echoed.
+        const reason = error instanceof Error && /amount|approval|payments\./i.test(error.message) ? ` ${text(error.message)}` : '';
+        report(`[payments] The approval was not confirmed.${reason} Check /payments pending and the paired owner credential, then try /payments approve again.`);
+      } finally { finish(); }
+    };
+    try {
+      open.call(context, 'Approve this purchase in advance?', [
+        { id: 'approve', label: 'Approve this purchase', detail: summary },
+        { id: 'back', label: 'Do not approve', detail: summary },
+      ], { allowSearch: false, primaryVerbLabel: 'Choose', signal: connection.signal }, result => {
+        if (result === null || result.action !== 'select' || result.item.id !== 'approve') {
+          report('[payments] Nothing was approved.');
+          finish();
+          return;
+        }
+        void approve();
+      });
+    } catch {
+      report('[payments] The picker could not open. Nothing was approved.');
+      finish();
+    }
+  };
+}

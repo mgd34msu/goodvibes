@@ -38,10 +38,10 @@ function scene(kind: 'action' | 'method') {
   const root = mkdtempSync(join(tmpdir(), 'agent-operator-failure-')); roots.push(root);
   mkdirSync(join(root, '.goodvibes', 'daemon'), { recursive: true });
   writeFileSync(join(root, '.goodvibes', 'daemon', 'operator-tokens.json'), JSON.stringify({ token: 'fixture-private-operator-token' }));
-  const requests: Array<{ url: string; method: string; body: string }> = [];
+  const requests: Array<{ url: string; method: string; body: string; ownerRequest: string | null }> = [];
   let duringRequest: (() => void) | undefined, beforeBody: (() => void) | undefined;
   const server = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(request) {
-    requests.push({ url: request.url, method: request.method, body: await request.text() });
+    requests.push({ url: request.url, method: request.method, body: await request.text(), ownerRequest: request.headers.get('x-goodvibes-explicit-user-request') });
     duringRequest?.();
     return Response.json({ status: 'queued' });
   } }); servers.push(server);
@@ -81,10 +81,23 @@ test.each(['profile.read', 'profile.person', 'profile.get'])('%s is not readable
   const result = await f.fixture.run({ methodId, input: { name: 'Sam', fieldId: 'location.timezone' } });
   expect(result.success).toBe(false); expect(errorOf(result)).toContain('profile tool'); expect(f.requests).toHaveLength(0);
 });
-test.each(['payments.purchase.cancel', 'payments.purchase.approve', 'payments.checkout.begin'])('%s is owner-only and never sent', async methodId => {
+test.each(['payments.purchase.approve', 'payments.purchase.securityCode', 'payments.checkout.approve'])('%s is owner-only and never sent', async methodId => {
   const f = scene('method');
   const result = await f.fixture.run({ methodId, input: { purchaseId: 'p1' }, confirm: true, explicitUserRequest: 'owner asked to stop it' });
   expect(result.success).toBe(false); expect(errorOf(result)).toContain('/payments'); expect(f.requests).toHaveLength(0);
+});
+test('an admitted purchase stop is sent with the owner-request signal; an unadmitted one is not sent', async () => {
+  const f = scene('method');
+  const held = await f.tool.execute({ methodId: 'payments.purchase.cancel', input: { purchaseId: 'p1', operationId: 'o1' } });
+  expect(held.success).toBe(false); expect(f.requests).toHaveLength(0);
+  expect(await f.fixture.run({ methodId: 'payments.purchase.cancel', input: { purchaseId: 'p1', operationId: 'o1' } })).toMatchObject({ success: true });
+  expect(f.requests).toHaveLength(1);
+  expect(f.requests[0]!.ownerRequest).toBe('true'); expect(JSON.parse(f.requests[0]!.body)).toMatchObject({ purchaseId: 'p1', confirm: true });
+});
+test('an ordinary write carries no owner-request signal', async () => {
+  const f = scene('method');
+  expect(await f.fixture.run({ methodId: 'automation.jobs.run', input: { jobId: 'nightly' } })).toMatchObject({ success: true });
+  expect(f.requests[0]!.ownerRequest).toBeNull();
 });
 test('removing an occasion through the method tool needs the ask-once confirmation', async () => {
   const f = scene('method');

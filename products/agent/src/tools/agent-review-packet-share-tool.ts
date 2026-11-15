@@ -1,12 +1,14 @@
-import type { ArtifactDescriptor, ArtifactRecord, ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
-import type { ChannelDeliveryRouter } from '@goodvibes-jev/engine/platform/platform/channels';
+import type { ArtifactDescriptor, ArtifactRecord, ArtifactReference, ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
+import type { ChannelDeliveryRequest, ChannelDeliveryRouter } from '@goodvibes-jev/engine/platform/platform/channels';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { ToolInputProjectionError, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { agentArtifactEffectGuard, captureAgentArtifactSource } from './agent-artifact-effect.ts';
 import { evaluateOutwardEffect, getSessionUntrustedContentLedger } from '../trust/untrusted-content.ts';
 import {
+  buildAgentChannelDeliveryPreview,
   deliverAgentChannelMessage,
   formatAgentChannelDeliveryResult,
+  type AgentChannelDeliveryInput,
 } from '../agent/channel-delivery.ts';
 
 export interface AgentReviewPacketShareToolArgs {
@@ -140,33 +142,42 @@ function buildPacketEvidenceLines(summary: ReviewPacketArchiveSummary): readonly
     `Related artifacts: ${formatIdList(summary.relatedArtifactIds)}`,
     `Route-decision receipts: ${formatIdList(summary.routeDecisionArtifactIds)}`,
     `Reveal: ${summary.revealIncludedInHandoff ? 'included in handoff when available' : 'not included in handoff'}`,
-    `Export route: ${archiveExportRoute(summary)}`,
   ];
 }
 
-function buildShareMessage(summary: ReviewPacketArchiveSummary, customMessage: string | undefined): string {
+function buildShareMessage(summary: ReviewPacketArchiveSummary, customMessage: string | undefined, attached: boolean): string {
   return [
     customMessage ?? 'GoodVibes Agent reviewer packet is ready.',
     '',
     'Reviewer packet evidence:',
     ...buildPacketEvidenceLines(summary),
+    attached ? `Archive file: ${summary.filename} is attached.` : `Archive file: ${summary.filename} follows separately.`,
   ].join('\n');
 }
 
 function formatShareResult(input: {
   readonly summary: ReviewPacketArchiveSummary;
   readonly delivery: Awaited<ReturnType<typeof deliverAgentChannelMessage>>;
+  readonly attached: boolean;
 }): string {
   return [
-    'Agent review packet shared',
+    input.attached ? 'Agent review packet shared, archive attached' : 'Agent review packet shared as a message; the archive file was not attached',
     `archive ${input.summary.artifactId} ${input.summary.filename}`,
     `comparison ${input.summary.comparisonId}`,
     `included artifacts ${input.summary.artifactCount}`,
-    `export ${archiveExportRoute(input.summary)}`,
     '',
     formatAgentChannelDeliveryResult(input.delivery),
-    'policy delivered only a plain-text archive reference; original artifact bytes remain local',
+    input.attached
+      ? 'archive attached: the reviewer received the ZIP with the message'
+      : `archive not attached: this surface cannot carry files. The message names the archive; export it with ${archiveExportRoute(input.summary)} and send exports/${input.summary.filename} to the reviewer yourself.`,
   ].join('\n');
+}
+
+/** Whether the strategy that takes this request carries files: a fact the strategy declares. */
+function surfaceCarriesFiles(router: AgentReviewPacketShareChannelRouter, input: AgentChannelDeliveryInput): boolean {
+  const request = buildAgentChannelDeliveryPreview(input).request as unknown as ChannelDeliveryRequest;
+  return router.listStrategies().some(strategy => strategy.canHandle(request)
+    && (strategy as { readonly supportsAttachments?: boolean }).supportsAttachments === true);
 }
 
 export function createAgentReviewPacketShareTool(
@@ -176,7 +187,7 @@ export function createAgentReviewPacketShareTool(
   return {
     definition: {
       name: 'agent_review_packet_share',
-      description: 'Share one reviewer archive reference after recorded effect admission.',
+      description: 'Share one reviewer archive after recorded effect admission: attached where the surface carries files, otherwise named in the message.',
       parameters: {
         type: 'object',
         properties: {
@@ -244,7 +255,18 @@ export function createAgentReviewPacketShareTool(
         return failure(error instanceof Error ? error.message : String(error));
       }
       const title = readString(args.title) ?? 'GoodVibes Agent review packet';
-      const message = buildShareMessage(summary, readString(args.message));
+      // The target alone, to ask which strategy takes it; the message is filled in below.
+      const target: AgentChannelDeliveryInput = {
+        message: 'review packet',
+        ...(readString(args.channel) ? { channel: readString(args.channel) } : {}),
+        ...(readString(args.route) ? { route: readString(args.route) } : {}),
+        ...(readString(args.webhook) ? { webhook: readString(args.webhook) } : {}),
+        ...(readString(args.link) ? { link: readString(args.link) } : {}),
+      };
+      let attached: boolean;
+      try { attached = surfaceCarriesFiles(channelDeliveryRouter, target); }
+      catch (error) { return failure(`${error instanceof Error ? error.message : String(error)} Nothing was sent.`); }
+      const message = buildShareMessage(summary, readString(args.message), attached);
       // Set just before the delivery call: a throw after that point cannot say the message was not sent.
       let deliveryStarted = false;
       try {
@@ -271,16 +293,14 @@ export function createAgentReviewPacketShareTool(
         assertCurrent();
         if (!decision.allowed) return failure([decision.reason ?? 'Outward effect held.', decision.fix].filter(Boolean).join(' '));
         deliveryStarted = true;
-        const delivery = await deliverAgentChannelMessage(channelDeliveryRouter, {
-          message,
-          title,
-          ...(readString(args.channel) ? { channel: readString(args.channel) } : {}),
-          ...(readString(args.route) ? { route: readString(args.route) } : {}),
-          ...(readString(args.webhook) ? { webhook: readString(args.webhook) } : {}),
-          ...(readString(args.link) ? { link: readString(args.link) } : {}),
-        }, { signal: executionOptions?.signal, assertCurrent });
-        assertCurrent();
-        return output(formatShareResult({ summary, delivery }));
+        // The archive goes as an attachment only where the surface carries files; the same decision above covers it.
+        const input: AgentChannelDeliveryInput & { readonly attachments?: readonly ArtifactReference[] } = {
+          ...target, message, title,
+          ...(attached ? { attachments: [{ artifactId: summary.artifactId, label: summary.filename }] } : {}),
+        };
+        const delivery = await deliverAgentChannelMessage(channelDeliveryRouter, input, { signal: executionOptions?.signal, assertCurrent });
+        // Once the delivery has returned, the result is the delivery.
+        return output(formatShareResult({ summary, delivery, attached }));
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         if (deliveryStarted) {

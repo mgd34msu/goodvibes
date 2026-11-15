@@ -12,12 +12,9 @@
  * answers with metadata and a `materialComplete` flag so a surface can render
  * "CVV not set" without the daemon ever emitting one. See docs/payments.md §3.1.
  *
- * `payments.checkout.fillCard` is what makes the capability able to buy
- * anything, and it does NOT weaken the rule above. A card that can never reach
- * a checkout field cannot buy anything, so the daemon types it, taking a card
- * id and field targets, and answering with field names and a boolean. The model
- * orchestrates the purchase and never holds the instrument, which was always
- * the property that mattered.
+ * No verb types a card either: the purchase the daemon runs
+ * (`payments.checkout.begin`) reads the material in-process and types it, so
+ * the model orchestrates the purchase and never holds the instrument.
  *
  * Scopes: reads take `read:payments`, writes take `write:payments`. Card
  * creation and deletion are admin-only, because anything that can rewrite the
@@ -39,8 +36,6 @@ import {
   PAYMENTS_CARDS_LIST_OUTPUT_SCHEMA,
   PAYMENTS_CHECKOUT_BEGIN_INPUT_SCHEMA,
   PAYMENTS_CHECKOUT_BEGIN_OUTPUT_SCHEMA,
-  PAYMENTS_CHECKOUT_FILL_CARD_INPUT_SCHEMA,
-  PAYMENTS_CHECKOUT_FILL_CARD_OUTPUT_SCHEMA,
   PAYMENTS_PURCHASES_LIST_INPUT_SCHEMA,
   PAYMENTS_PURCHASES_LIST_OUTPUT_SCHEMA,
   PAYMENTS_PURCHASE_STATUS_INPUT_SCHEMA,
@@ -136,11 +131,11 @@ export const builtinGatewayPaymentsMethodDescriptors: readonly GatewayMethodDesc
     id: 'payments.checkout.approve',
     title: 'Approve One Purchase',
     description:
-      'Record that a human approves one specific purchase, out of band from the conversation that will run it: the merchant\'s registrable domain, the item, and the amount (the same string a later begin call passes as requestedMax). Mints a persisted, single-use approval bound to exactly those fields, expiring in five minutes; payments.checkout.begin consumes it and refuses without one. Requires confirm: true and the explicit-user-request context, the same confirmation gate every destructive verb on this daemon uses. The response never carries card material; this verb never touches a card at all. ws-only invoke verb with no REST binding.',
+      'The owner approves one purchase in advance, out of band from the conversation that will run it: the merchant\'s registrable domain, the item, and the most it may cost. Optional unless payments.confirmEveryPurchase is on. The amount is read in the budget currency ("25" and "25.00" are the same amount) and an amount no purchase could match is refused before anything is recorded. Mints a persisted, single-use approval bound to those fields, expiring in five minutes; a matching payments.checkout.begin spends it, and it answers that purchase\'s approval window for a total up to its amount. Requires confirm: true and the explicit-user-request context, the same confirmation gate every destructive verb on this daemon uses; /payments approve and the web UI send both. The response never carries card material; this verb never touches a card at all.',
     category: 'payments',
     scopes: ['write:payments'],
     access: 'admin',
-    transport: ['ws'],
+    http: { method: 'POST', path: '/api/payments/checkout/approve' },
     dangerous: true,
     inputSchema: objectSchema({
       confirm: BOOLEAN_SCHEMA,
@@ -161,25 +156,13 @@ export const builtinGatewayPaymentsMethodDescriptors: readonly GatewayMethodDesc
     id: 'payments.checkout.begin',
     title: 'Buy What Is In This Checkout',
     description:
-      "Admit one checkout against an open browser page and return a durable accepted acknowledgement before its approval/veto wait. Supply a stable requestId saved before sending; after a lost response, query payments.purchase.status with that ID. Reusing an admitted ID never starts another execution, even with changed input. The paired owner must have authorized the exact merchant/item/amount through payments.checkout.approve. The daemon parses amounts, checks cart/merchant/taint/recurrence and budget, runs the shipping ladder and owner window, fills stored addresses/card and submits once. Accepted does not mean purchased. Status retains processing, refusal, cancellation, verification and uncertain-submission outcomes. Disconnecting the caller does not cancel the operation; stopping or shutdown drains its actual work. An uncertain merchant submission is never retried automatically.",
+      "Admit one checkout against an open browser page and return a durable accepted acknowledgement before its approval/veto wait. Supply a stable requestId saved before sending; after a lost response, query payments.purchase.status with that ID. Reusing an admitted ID never starts another execution, even with changed input. Inside the owner's limits no prior approval is needed; with payments.confirmEveryPurchase on, a begin must state requestedMax and spend a matching payments.checkout.approve. cardId may be omitted to pay with payments.defaultCardId, and merchantDiscovered is read as sent. The daemon parses amounts, checks cart/merchant/taint/recurrence and budget, runs the shipping ladder and owner window, fills stored addresses/card and submits once. Accepted does not mean purchased. Status retains processing, refusal, cancellation, verification and uncertain-submission outcomes. Disconnecting the caller does not cancel the operation; stopping or shutdown drains its actual work. An uncertain merchant submission is never retried automatically.",
     category: 'payments',
     scopes: ['write:payments'],
     access: 'admin',
     http: { method: 'POST', path: '/api/payments/checkout/begin' },
     inputSchema: PAYMENTS_CHECKOUT_BEGIN_INPUT_SCHEMA,
     outputSchema: PAYMENTS_CHECKOUT_BEGIN_OUTPUT_SCHEMA,
-  }),
-  methodDescriptor({
-    id: 'payments.checkout.fillCard',
-    title: 'Fill the Card into a Checkout',
-    description:
-      'Have the daemon type the stored card into the payment fields of an open browser page. Takes the browser session, the page, and a list of {field, ref} targets naming where each part of the card goes, the caller identifies the fields on whatever checkout it is looking at, so the daemon needs no knowledge of any merchant. The response is the list of field NAMES that were filled plus a boolean; it never carries the value, its length, or a masked form, and a failure names the field that did not accept input rather than what was typed into it. Refused unless a purchase decision is already in flight on that exact page and the page is still on the registrable domain the purchase was decided against, so the card is typed as part of an approved checkout or not at all. Also refused when the browser has no card-material redaction installed, because a snapshot taken afterwards would otherwise hand back what was just typed.',
-    category: 'payments',
-    scopes: ['write:payments'],
-    access: 'admin',
-    http: { method: 'POST', path: '/api/payments/checkout/fill-card' },
-    inputSchema: PAYMENTS_CHECKOUT_FILL_CARD_INPUT_SCHEMA,
-    outputSchema: PAYMENTS_CHECKOUT_FILL_CARD_OUTPUT_SCHEMA,
   }),
   methodDescriptor({
     id: 'payments.purchases.list',

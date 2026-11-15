@@ -21,9 +21,9 @@ export interface AgentReviewPacketPresetsToolArgs {
   readonly explicitUserRequest?: unknown;
 }
 
-export type AgentReviewPacketPresetArtifactStore = Pick<ArtifactStore, 'create'> & Partial<Pick<ArtifactStore, 'get' | 'list' | 'readContent'>>;
+export type AgentReviewPacketPresetArtifactStore = Pick<ArtifactStore, 'create'> & Partial<Pick<ArtifactStore, 'get' | 'list' | 'readContent' | 'delete'>>;
 
-export type AgentReviewPacketPresetMode = 'list' | 'show' | 'save' | 'refresh';
+export type AgentReviewPacketPresetMode = 'list' | 'show' | 'save' | 'refresh' | 'delete';
 export type ReviewPacketArtifactRole =
   | 'documentExport'
   | 'comparison'
@@ -191,7 +191,8 @@ export function parseMode(value: unknown): AgentReviewPacketPresetMode {
   if (mode === 'show' || mode === 'get') return 'show';
   if (mode === 'save' || mode === 'create') return 'save';
   if (mode === 'refresh' || mode === 'update') return 'refresh';
-  throw new Error(`Unknown agent_review_packet_presets mode: ${mode}. Use mode:"list", mode:"show", mode:"save", or mode:"refresh".`);
+  if (mode === 'delete' || mode === 'remove') return 'delete';
+  throw new Error(`Unknown agent_review_packet_presets mode: ${mode}. Use mode:"list", mode:"show", mode:"save", mode:"refresh", or mode:"delete".`);
 }
 
 export function defaultPacketSummary(input: {

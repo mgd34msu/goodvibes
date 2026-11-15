@@ -1,6 +1,7 @@
 import type { ShellPathService } from '@/runtime/index.ts';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { assertCurrentToolEffect, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import { bindResearchLedgers, researchArtifactExists, unknownReportArtifact } from '../agent/research-ledgers.ts';
 import {
   AgentResearchRunRegistry,
   researchRunLogTail,
@@ -306,7 +307,7 @@ function createInput(args: AgentResearchRunsToolArgs, explicitUserRequest: strin
   };
 }
 
-function createAgentResearchRunsTool(shellPaths?: Pick<ShellPathService, 'resolveProjectPath'>): Tool {
+function createAgentResearchRunsTool(shellPaths?: Pick<ShellPathService, 'resolveProjectPath'>, toolRegistry?: ToolRegistry): Tool {
   return {
     definition: {
       name: 'agent_research_runs',
@@ -315,7 +316,7 @@ function createAgentResearchRunsTool(shellPaths?: Pick<ShellPathService, 'resolv
         type: 'object',
         properties: {
           mode: { type: 'string', enum: MODES, description: 'Research run operation.' },
-          id: { type: 'string', description: 'Research run id or title for show/control/delete.' },
+          id: { type: 'string', description: 'Research run id, or a title that names exactly one run, for show/control/delete.' },
           query: { type: 'string', description: 'Search text for search/list filtering.' },
           status: { type: 'string', enum: STATUS_VALUES, description: 'Optional status filter for list, or non-terminal checkpoint status.' },
           title: { type: 'string', description: 'Short research run title.' },
@@ -346,6 +347,8 @@ function createAgentResearchRunsTool(shellPaths?: Pick<ShellPathService, 'resolv
       const args = rawArgs as AgentResearchRunsToolArgs;
       const mode = readMode(args.mode);
       try {
+        // A store this build cannot write still lists; the mode below reports it.
+        try { registry.pauseInterruptedRunsOnce(); } catch { /* reported by the mode itself */ }
         options?.signal?.throwIfAborted();
         options?.assertCurrent?.(rawArgs);
         const assertWrite = () => {
@@ -415,6 +418,8 @@ function createAgentResearchRunsTool(shellPaths?: Pick<ShellPathService, 'resolv
         }
         if (mode === 'complete') {
           assertWrite();
+          const reportArtifactId = readString(args.reportArtifactId);
+          if (reportArtifactId && researchArtifactExists(toolRegistry, reportArtifactId) === false) return failure(unknownReportArtifact(reportArtifactId).message);
           return output(formatMutationResult('Completed Agent research run', registry.complete(requireId(args), {
             note: readString(args.note),
             reportArtifactId: readString(args.reportArtifactId),
@@ -440,5 +445,13 @@ export function registerAgentResearchRunsTool(
   registry: ToolRegistry,
   shellPaths?: Pick<ShellPathService, 'resolveProjectPath'>,
 ): void {
-  registry.register(createAgentResearchRunsTool(shellPaths));
+  bindResearchLedgers(registry, shellPaths);
+  registry.register(createAgentResearchRunsTool(shellPaths, registry));
+  if (!shellPaths) return;
+  // Runs left `running` by a session that ended are paused once at start-up,
+  // after the first prompt is ready, so the cockpit does not count them as live work.
+  const timer = setTimeout(() => {
+    try { AgentResearchRunRegistry.fromShellPaths(shellPaths).pauseInterruptedRunsOnce(); } catch { /* the tool's next use retries */ }
+  }, 0);
+  timer.unref?.();
 }

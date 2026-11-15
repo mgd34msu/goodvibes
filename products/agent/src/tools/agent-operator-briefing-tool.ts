@@ -115,20 +115,25 @@ function classifyHttpFailure(route: OperatorRouteDescriptor, status: number): Op
   };
 }
 
-const ROUTE_TIMEOUT_MS = 5_000;
+/** One deadline for the whole briefing: every read runs at once, so the slowest one bounds the wait. */
+const BRIEFING_DEADLINE_MS = 5_000;
+
+function unanswered(signal: AbortSignal, deadlineMs: number): string {
+  return signal.reason instanceof DOMException && signal.reason.name === 'TimeoutError'
+    ? `no answer within ${deadlineMs / 1000}s` : 'cancelled';
+}
 
 async function fetchOperatorRoute(
   baseUrl: string,
   token: string,
   route: OperatorRouteDescriptor,
   signal: AbortSignal,
+  deadlineMs: number,
 ): Promise<OperatorRouteResult> {
-  // Each route has its own budget: one slow route is reported as unavailable and the others are still read.
-  const routeSignal = AbortSignal.any([signal, AbortSignal.timeout(ROUTE_TIMEOUT_MS)]);
   try {
     const response = await fetch(`${baseUrl}${route.path}`, {
       headers: { authorization: `Bearer ${token}` },
-      signal: routeSignal,
+      signal,
     });
     const body = await readResponseBody(response);
     if (!response.ok) return classifyHttpFailure(route, response.status);
@@ -142,7 +147,7 @@ async function fetchOperatorRoute(
       ok: false,
       route,
       kind: 'connected_host_unavailable',
-      error: signal.aborted ? 'request unavailable' : routeSignal.aborted ? `no answer within ${ROUTE_TIMEOUT_MS / 1000}s` : 'request unavailable',
+      error: signal.aborted ? unanswered(signal, deadlineMs) : `request failed: ${error instanceof Error ? error.message : String(error)}`,
     };
   }
 }
@@ -247,7 +252,7 @@ function formatNativeWork(snapshot: WorkLedgerReadSnapshot): string {
 export function createAgentOperatorBriefingTool(
   shellPaths: ShellPathService,
   configManager: AgentConnectedHostConfigReader,
-  nativeReadTimeoutMs: number = ROUTE_TIMEOUT_MS,
+  deadlineMs: number = BRIEFING_DEADLINE_MS,
 ): Tool {
   return {
     definition: {
@@ -261,74 +266,45 @@ export function createAgentOperatorBriefingTool(
       sideEffects: ['network'],
     },
     execute: async (_args, options) => {
+      if (options?.signal?.aborted) return { success: false, error: 'briefing_cancelled: the call was cancelled before anything was read' };
+      // The connection is resolved once; every read of this briefing uses it.
       const connection = resolveAgentConnectedHostConnection(configManager, shellPaths.homeDirectory);
-      if (!connection.token) return { success: false, error: 'auth_required: no connected-host operator token' };
-      const controller = new AbortController();
-      const onAbort = () => controller.abort();
-      options?.signal?.addEventListener('abort', onAbort, { once: true });
-      if (options?.signal?.aborted) controller.abort();
+      const token = connection.token;
+      if (!token) return { success: false, error: 'auth_required: no connected-host operator token' };
+      const signal = AbortSignal.any([AbortSignal.timeout(deadlineMs), ...(options?.signal ? [options.signal] : [])]);
+      // No streams, subscriptions, retries, history, or lifecycle calls. The
+      // snapshot reader is disposed when the briefing ends, which aborts its request.
+      const platformClient = createBrowserGoodVibesPlatform({ baseUrl: connection.baseUrl,
+        getAuthToken: () => token, retry: { maxAttempts: 1 },
+        fetch: (input, init) => fetch(input, { ...init, signal: init?.signal ? AbortSignal.any([init.signal, signal]) : signal }) });
       let reader: WorkLedgerReadClient | undefined;
-      let rejectCancelled = () => {};
-      const cancelled = new Promise<never>((_resolve, reject) => {
-        rejectCancelled = () => reject(new Error('briefing cancelled'));
-        controller.signal.addEventListener('abort', rejectCancelled, { once: true });
-        if (controller.signal.aborted) rejectCancelled();
-      });
-      function current(): void {
-        const selected = resolveAgentConnectedHostConnection(configManager, shellPaths.homeDirectory);
-        if (controller.signal.aborted || selected.baseUrl !== connection.baseUrl
-          || selected.token !== connection.token || selected.tokenPath !== connection.tokenPath) {
-          controller.abort();
-          throw new Error('briefing binding changed or cancelled');
-        }
-      }
-      async function run(): Promise<string> {
-        current();
-        // No streams, subscriptions, retries, history, or lifecycle calls. This
-        // platform instance owns no persistent resources; its requests are aborted
-        // below, and the snapshot reader is always disposed.
-        const platformClient = createBrowserGoodVibesPlatform({ baseUrl: connection.baseUrl,
-          getAuthToken: () => { current(); return connection.token; }, retry: { maxAttempts: 1 },
-          fetch: async (input, init) => {
-            current();
-            const response = await fetch(input, init);
-            current();
-            return response;
-          } });
-        let nativeWork: NativeWorkReading = { text: '  native work: unavailable (read failed; no historical fallback)', available: false };
+      const readNative = async (): Promise<NativeWorkReading> => {
         try {
-          const projectId = await getOperatorWorkLedgerProject(platformClient.operator, { signal: AbortSignal.any([controller.signal, AbortSignal.timeout(nativeReadTimeoutMs)]) });
-          current();
-          reader = createOperatorWorkLedgerReadClient(platformClient.operator, projectId, { requestTimeoutMs: nativeReadTimeoutMs });
-          const snapshot = await reader.readSnapshot();
-          current();
-          nativeWork = { text: formatNativeWork(snapshot), available: true };
-        } catch {
-          current();
-        } finally {
-          reader?.dispose();
-          reader = undefined;
+          const projectId = await getOperatorWorkLedgerProject(platformClient.operator, { signal });
+          if (signal.aborted) throw signal.reason;
+          reader = createOperatorWorkLedgerReadClient(platformClient.operator, projectId, { requestTimeoutMs: deadlineMs });
+          const snapshot = await Promise.race([reader.readSnapshot(), new Promise<never>((_resolve, reject) => {
+            if (signal.aborted) reject(signal.reason);
+            signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+          })]);
+          return { text: formatNativeWork(snapshot), available: true };
+        } catch (error) {
+          // The host's own error text is not repeated (it can carry request details); its status is.
+          const status = isRecord(error) || error instanceof Error ? (error as { status?: unknown }).status : undefined;
+          const cause = signal.aborted ? unanswered(signal, deadlineMs) : typeof status === 'number' ? `HTTP ${status}` : 'read failed';
+          return { text: `  native work: unavailable (${cause}; no historical fallback)`, available: false };
         }
-        const results: OperatorRouteResult[] = [];
-        for (const route of briefingRoutes()) {
-          if (route.id === 'workLedger.project' || route.id === 'workLedger.snapshot') continue;
-          current();
-          results.push(await fetchOperatorRoute(connection.baseUrl, connection.token!, route, controller.signal));
-          current();
-        }
-        return formatBriefing(nativeWork, results);
-      }
+      };
       try {
-        const output = await Promise.race([run(), cancelled]);
-        current();
-        return { success: true, output };
-      } catch {
-        return { success: false, error: 'briefing_unavailable: cancelled, timed out, or connected host changed; retry against the current host' };
+        const routes = briefingRoutes().filter(route => route.id !== 'workLedger.project' && route.id !== 'workLedger.snapshot');
+        const [nativeWork, results] = await Promise.all([
+          readNative(),
+          Promise.all(routes.map(route => fetchOperatorRoute(connection.baseUrl, token, route, signal, deadlineMs))),
+        ]);
+        if (options?.signal?.aborted) return { success: false, error: 'briefing_cancelled: the call was cancelled before the host answered' };
+        return { success: true, output: formatBriefing(nativeWork, results) };
       } finally {
-        controller.abort();
         reader?.dispose();
-        controller.signal.removeEventListener('abort', rejectCancelled);
-        options?.signal?.removeEventListener('abort', onAbort);
       }
     },
   };

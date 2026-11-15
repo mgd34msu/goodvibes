@@ -34,8 +34,10 @@
  * `profile.read` "the ONE read that returns closed-tier content in bulk, which
  * is why it is never callable from a message-composition path", and a model
  * turn can compose an outbound message. People stay reachable one at a time
- * through `person`, by a name he used in this turn's instruction, and every
- * such read is disclosed.
+ * through `person`, and only when his own message this turn names the person
+ * (or contains the words that point at them): the runtime hands the tool that
+ * message and the tool checks it, so a web page or an email that steers the
+ * model toward someone reaches nothing. Every such read is disclosed.
  */
 
 import { homedir } from 'node:os';
@@ -139,6 +141,21 @@ type ToolOutcome = { readonly success: boolean; readonly output: string };
 
 interface AgentProfileToolDeps {
   readonly invoke: ProfileGatewayInvoke;
+  /** The owner's own message for the turn this call belongs to, from the runtime; never from the model. */
+  readonly currentOwnerMessage?: (() => string | null | undefined) | undefined;
+}
+
+/** Case, width and spacing folded, so "Sam" matches "sam's" and "my  wife" matches "My wife". */
+function foldForMatch(text: string): string {
+  return text.normalize('NFKC').toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+/** True when `phrase` occurs in `message` as whole words. */
+function messageNames(message: string, phrase: string): boolean {
+  const folded = foldForMatch(phrase);
+  if (folded.length < 2) return false;
+  const escaped = folded.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(^|[^\\p{L}\\p{N}])${escaped}($|[^\\p{L}\\p{N}])`, 'u').test(foldForMatch(message));
 }
 
 function readString(value: unknown): string {
@@ -233,18 +250,28 @@ async function handleGet(deps: AgentProfileToolDeps, fieldId: string): Promise<T
 
 async function handlePerson(
   deps: AgentProfileToolDeps,
+  ownerMessage: string,
   name: string,
   namedInInstruction: string,
 ): Promise<ToolOutcome> {
   if (!name) return fail(['`name` is required. There is no call that lists everyone.']);
-  if (!namedInInstruction) {
-    // §10 makes this structural rather than a judgement call: a People line
-    // reaches a turn only because HE pointed at that person in this turn's
-    // instruction. "Email the vendor and cc anyone relevant" names nobody and
-    // must reach nothing.
+  // §10 makes this structural rather than a judgement call: a People line
+  // reaches a turn only because HE pointed at that person in this turn's own
+  // message. The message comes from the runtime, so text the model read
+  // elsewhere cannot stand in for it. "Email the vendor and cc anyone relevant"
+  // names nobody and reaches nothing.
+  if (!ownerMessage) {
     return fail([
-      '`namedInInstruction` is required: his words in this turn that pointed at this person.',
-      'If he did not name or refer to anyone this turn, do not look anyone up.',
+      `Nothing was read about ${name}: there is no message from him in this turn to check the name against.`,
+      'Look someone up only in a turn where he named them.',
+    ]);
+  }
+  if (!messageNames(ownerMessage, name) && !(namedInInstruction && messageNames(ownerMessage, namedInInstruction))) {
+    return fail([
+      `Nothing was read: he did not name ${name} this turn.`,
+      namedInInstruction
+        ? `"${namedInInstruction}" is not in his message either. Pass in namedInInstruction the exact words of his message that point at this person (for example "my wife").`
+        : 'If he referred to them another way (for example "my wife"), pass those exact words of his message as namedInInstruction.',
     ]);
   }
   const result = await deps.invoke(PROFILE_METHOD_IDS.person, { name });
@@ -268,6 +295,8 @@ async function handleProvenance(deps: AgentProfileToolDeps, fieldId: string): Pr
   if (!response) return fail([PROFILE_RESPONSE_UNREADABLE]);
   if (!response.present) return ok([`${response.fieldId} is not in your profile, so there is nothing to trace.`]);
   const lines = [`${response.fieldId}:`];
+  // The same receipt a closed-tier `get` carries, relayed when the daemon gives one.
+  const disclosure = (response as { readonly disclosure?: unknown }).disclosure;
   if (response.provenance) {
     lines.push(`  from ${response.provenance.surface} on ${response.provenance.date}`);
     lines.push(`  you said: "${response.provenance.said}"`);
@@ -290,6 +319,7 @@ async function handleProvenance(deps: AgentProfileToolDeps, fieldId: string): Pr
     }
     lines.push('  action:"undo" puts the most recent one back.');
   }
+  if (typeof disclosure === 'string' && disclosure) lines.push(`Say this in your reply: ${disclosure}`);
   return ok(lines);
 }
 
@@ -509,8 +539,8 @@ export function createAgentProfileTool(deps: AgentProfileToolDeps): Tool {
           text: { type: 'string', description: 'The note to append, or the line to forget, without its list marker.' },
           // No lineIndex: a prose line is named by its content. See handleForget.
 
-          name: { type: 'string', description: 'One person, by a name he used this turn. There is no list-everyone call.' },
-          namedInInstruction: { type: 'string', description: 'His words this turn that pointed at that person. Required for person.' },
+          name: { type: 'string', description: 'One person, by a name he used in his message this turn. There is no list-everyone call.' },
+          namedInInstruction: { type: 'string', description: 'person: when his message points at them without the name (for example "my wife"), those exact words of his message. Checked against his message.' },
           authority: {
             type: 'string',
             enum: [...PROFILE_AUTHORITIES],
@@ -568,7 +598,7 @@ export function createAgentProfileTool(deps: AgentProfileToolDeps): Tool {
             case 'get':
               return handleGet(currentDeps, fieldId);
             case 'person':
-              return handlePerson(currentDeps, readString(args.name), readString(args.namedInInstruction));
+              return handlePerson(currentDeps, readString(deps.currentOwnerMessage?.()), readString(args.name), readString(args.namedInInstruction));
             case 'provenance':
               return handleProvenance(currentDeps, fieldId);
             case 'status':
@@ -614,6 +644,8 @@ export function createAgentProfileTool(deps: AgentProfileToolDeps): Tool {
 
 export interface RegisterAgentProfileToolOptions {
   readonly invoke: ProfileGatewayInvoke;
+  /** The owner's message for the current turn; a person lookup is refused unless it names the person. */
+  readonly currentOwnerMessage?: (() => string | null | undefined) | undefined;
 }
 
 export function registerAgentProfileTool(
@@ -629,7 +661,7 @@ export function registerAgentProfileTool(
     }
     return;
   }
-  registry.register(createAgentProfileTool({ invoke: options.invoke }), {
+  registry.register(createAgentProfileTool({ invoke: options.invoke, currentOwnerMessage: options.currentOwnerMessage }), {
     inputProjection: createAgentLocalStateInputProjector(args => {
       const descriptors = captureCatalogMethods(options, ['invoke']);
       const action = normalizeProfileAction(args.action) ?? normalizeProfileAction(args.mode);

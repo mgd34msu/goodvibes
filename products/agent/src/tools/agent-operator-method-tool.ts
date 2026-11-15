@@ -7,7 +7,8 @@ import type { ShellPathService } from '@/runtime/index.ts';
 import type { AgentConnectedHostConfigReader } from '../agent/routine-schedule-promotion.ts';
 import { assertOperatorEffect, captureOperatorConnection } from '../agent/operator-connection-owner.ts';
 import { publishOperatorMethodReceipt } from '../agent/operator-method-receipt.ts';
-import { assertSafeOperatorPathValue, createOperatorInputProjector, findConnectedOperatorMethod, operatorExecutionConnection, operatorExecutionWireInput, operatorExecutionRequestPolicy, operatorMethodIsReadOnly, operatorMethodIsOutward } from './agent-operator-input-projector.ts';
+import { appendOperatorQuery, substituteOperatorPath } from '../agent/operator-contract-routes.ts';
+import { createOperatorInputProjector, findConnectedOperatorMethod, operatorExecutionConnection, operatorExecutionWireInput, operatorExecutionRequestPolicy, operatorMethodIsReadOnly, operatorMethodIsOutward } from './agent-operator-input-projector.ts';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -51,14 +52,19 @@ type WatcherMethodId =
   | 'watchers.delete';
 
 const READ_ONLY_HTTP_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
-// The daemon requires a person's own confirmation (a confirm flag and the explicit-request header) for
-// these, and a model-supplied string must not stand in for it. Refused here with the way the owner does it.
+// The owner's own acts: answering a purchase window over his limits, typing a card's security code,
+// recording what the merchant history shows, and approving a purchase in advance. Refused here with
+// the way the owner does each one.
 const OWNER_ONLY_PAYMENT_METHOD_IDS = new Set([
-  'payments.purchase.approve', 'payments.purchase.deny', 'payments.purchase.cancel',
-  'payments.purchase.reconcile', 'payments.checkout.begin', 'payments.purchase.securityCode',
+  'payments.purchase.approve', 'payments.purchase.deny', 'payments.purchase.reconcile',
+  'payments.purchase.securityCode', 'payments.checkout.approve',
 ]);
+// Inside the owner's limits the Agent starts and stops purchases itself. The daemon takes these only
+// with the owner-request signal; this tool sends it after this call's own admission passed, never
+// because an argument asked for it.
+const AGENT_PURCHASE_METHOD_IDS = new Set(['payments.checkout.begin', 'payments.purchase.cancel']);
 // The profile tool owns these reads and its disclosure rules; the generic path has none of them.
-const PROFILE_TOOL_ONLY_METHOD_IDS = new Set(['profile.read', 'profile.person', 'profile.get']);
+const PROFILE_TOOL_ONLY_METHOD_IDS = new Set(['profile.read', 'profile.person', 'profile.get', 'profile.provenance']);
 // These native routes independently admit this paired invocation on the server.
 const AUTONOMOUS_NATIVE_STATE_METHOD_IDS = new Set([
   'channels.drafts.save', 'channels.drafts.delete', 'channels.routing.assign', 'channels.routing.delete',
@@ -100,32 +106,6 @@ function cloneInput(input: unknown): JsonRecord {
   return { ...captureStrictJudgmentJson(input) };
 }
 
-function encodePathValue(value: unknown, name: string): string {
-  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
-    const text = String(value);
-    assertSafeOperatorPathValue(text, name);
-    return encodeURIComponent(text);
-  }
-  throw new Error(`operator method path parameter '${name}' must be a string, number, or boolean.`);
-}
-
-function substitutePath(pathTemplate: string, payload: JsonRecord): string {
-  let path = pathTemplate.replace(/\{([^}]+)\}/g, (_match, rawName: string) => {
-    const name = rawName.trim();
-    if (!(name in payload)) throw new Error(`operator method path parameter '${name}' is required.`);
-    const encoded = encodePathValue(payload[name], name);
-    delete payload[name];
-    return encoded;
-  });
-  path = path.replace(/:([A-Za-z][A-Za-z0-9_]*)/g, (match, name: string) => {
-    if (!(name in payload)) return match;
-    const encoded = encodePathValue(payload[name], name);
-    delete payload[name];
-    return encoded;
-  });
-  return path;
-}
-
 function prepareOperatorRoute(method: OperatorContractMethod, input: unknown): PreparedOperatorRoute {
   const httpMethod = method.http?.method?.toUpperCase();
   const pathTemplate = method.http?.path;
@@ -133,23 +113,10 @@ function prepareOperatorRoute(method: OperatorContractMethod, input: unknown): P
     throw new Error(`operator method '${method.id}' is not invokable over HTTP.`);
   }
   const payload = cloneInput(input);
-  const path = substitutePath(pathTemplate, payload);
+  // The one path builder: it also refuses '', '.' and '..' as a path value, which URL parsing
+  // would collapse into another route than the one admitted.
+  const path = substituteOperatorPath(pathTemplate, payload);
   return { method, httpMethod, path, payload };
-}
-
-function appendQuery(path: string, payload: JsonRecord): string {
-  const query = new URLSearchParams();
-  for (const [key, value] of Object.entries(payload)) {
-    if (value === undefined || value === null) continue;
-    if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
-      query.set(key, String(value));
-    } else {
-      query.set(key, JSON.stringify(value));
-    }
-  }
-  const queryString = query.toString();
-  if (!queryString) return path;
-  return `${path}${path.includes('?') ? '&' : '?'}${queryString}`;
 }
 
 function isServiceMethodId(methodId: string): methodId is ServiceMethodId {
@@ -610,13 +577,13 @@ export function createAgentOperatorMethodTool(
       if (OWNER_ONLY_PAYMENT_METHOD_IDS.has(method.id)) {
         return {
           success: false,
-          error: `operator method '${method.id}' moves or settles money and needs the owner's own confirmation, which this tool cannot give. Nothing was sent. Ask the owner to do it themselves with /payments or in the WebUI; payments.purchase.status and payments.purchases.list can be read here to tell them where it stands.`,
+          error: `operator method '${method.id}' is the owner's own act (answering a purchase window, typing a card security code, recording what the merchant history shows, or approving a purchase in advance). Nothing was sent. Ask the owner: /payments pending answers windows and codes, /payments approve <merchant> <item> <maximum> approves a purchase in advance, and the web UI Purchases panel does both. payments.purchase.status and payments.purchases.list can be read here to tell him where it stands; payments.checkout.begin and payments.purchase.cancel can be called here.`,
         };
       }
       if (PROFILE_TOOL_ONLY_METHOD_IDS.has(method.id)) {
         return {
           success: false,
-          error: `operator method '${method.id}' is not callable through agent_operator_method: it returns the owner's personal profile data, which only the profile tool may read (it withholds the People section and requires the owner's own words to name a person). Call the profile tool with action:"read", "get" or "person" instead.`,
+          error: `operator method '${method.id}' is not callable through agent_operator_method: it returns the owner's personal profile data, which only the profile tool may read (it withholds the People section and requires the owner's own words to name a person). Call the profile tool with action:"read", "get", "person" or "provenance" instead.`,
         };
       }
       // Capability-advertisement honesty: the operator contract marks a
@@ -687,16 +654,19 @@ export function createAgentOperatorMethodTool(
             ...(PROFILE_QUOTE_METHOD_IDS.has(methodSnapshot.id) ? { said: '' } : {}),
             ...(methodSnapshot.id === 'occasions.remove' ? { confirmed: true } : {}) }
           : AUTONOMOUS_NATIVE_STATE_METHOD_IDS.has(methodSnapshot.id)
-            ? { ...retainedPayload, admission: 'autonomous' } : retainedPayload;
+            ? { ...retainedPayload, admission: 'autonomous' }
+            : methodSnapshot.id === 'payments.purchase.cancel' ? { ...retainedPayload, confirm: true } : retainedPayload;
+        const ownerRequest = AGENT_PURCHASE_METHOD_IDS.has(methodSnapshot.id);
         // A read-only HTTP method carries its input in the query, so the query is built from the
         // same payload that is screened below, not from the pre-projection one.
-        const requestPath = readOnlyHttp ? appendQuery(route.path, wirePayload) : route.path;
+        const requestPath = readOnlyHttp ? appendOperatorQuery(route.path, wirePayload) : route.path;
         if (requiresEffect) {
           const requestPolicy = operatorExecutionRequestPolicy(rawArgs, options, shellPaths, configManager, 'method');
           if (!requestPolicy) throw new Error('Connected operator source policy is unavailable.');
           await requestPolicy.screen({ toolName: 'agent_operator_method', methodId: methodSnapshot.id,
             endpoint: `${connection.baseUrl}${requestPath}`, payload: wirePayload }, { signal: options?.signal, assertCurrent });
         }
+        // The owner-request signal for a purchase rides only on a call whose admission was just confirmed here.
         assertCurrent();
         stage = 'sending';
         const response = await fetch(`${connection.baseUrl}${requestPath}`, {
@@ -706,6 +676,7 @@ export function createAgentOperatorMethodTool(
           headers: {
             authorization: `Bearer ${connection.token}`,
             ...(READ_ONLY_HTTP_METHODS.has(route.httpMethod) ? {} : { 'content-type': 'application/json' }),
+            ...(ownerRequest ? { 'x-goodvibes-explicit-user-request': 'true' } : {}),
           },
           ...(READ_ONLY_HTTP_METHODS.has(route.httpMethod) ? {} : { body: JSON.stringify(wirePayload) }),
         });

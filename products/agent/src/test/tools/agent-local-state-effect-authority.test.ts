@@ -77,7 +77,7 @@ test.each(['cancel', 'revoke'] as const)('work-plan physical write holds %s trig
 });
 
 test('work-plan list/get preserve corrupt and expired files without read-side housekeeping effects', async () => {
-  const f = fixture(); f.store.addItem('Original plan'); const plan = f.store.getActivePlan({ readOnly: true });
+  const f = fixture(); f.store.addItem('Original plan'); const plan = f.store.getActivePlan();
   const options = { homeDirectory: f.home, surfaceRoot: 'agent', projectId: 'local', projectRoot: f.workspace };
   writeFileSync(f.store.filePath, '{torn');
   const reader = new WorkPlanStore(options);
@@ -125,10 +125,16 @@ function occasionsFixture() {
   const register = (registry: Parameters<typeof registerAgentOccasionsTool>[0]) => registerAgentOccasionsTool(registry, { invoke });
   return { ...f, profile, catalog, invoke, register, profilePath, statePath };
 }
-const occasion = { action: 'confirm', title: 'Family day', date: '03-14', kind: 'remember-only' };
+/** A confirm writes the line a propose returned, so each test proposes first. */
+async function proposedOccasion(invoke: OccasionsGatewayInvoke): Promise<Record<string, unknown>> {
+  const proposed = await createAgentOccasionsTool({ invoke }).execute({ action: 'propose', title: 'Family day', date: '03-14', kind: 'remember-only' });
+  const proposal = /proposal:"(p-[0-9a-f]+)"/.exec(String(proposed.output))?.[1];
+  if (!proposal) throw new Error(`No proposal: ${String(proposed.output)}`);
+  return { action: 'confirm', proposal, kind: 'remember-only' };
+}
 
 test('actual Occasions profile writes use recorded autonomous source and require no caller flags', async () => {
-  const f = occasionsFixture();
+  const f = occasionsFixture(), occasion = await proposedOccasion(f.invoke);
   const result = await admitLocalState(f.register, 'occasions', occasion, { directory: f.workspace });
   expect(result.success).toBe(true);
   const bytes = readFileSync(f.profilePath, 'utf8');
@@ -140,7 +146,7 @@ test('actual Occasions profile writes use recorded autonomous source and require
 });
 
 test('caller flags and copied delegation cannot modify the actual profile', async () => {
-  const f = occasionsFixture(), before = readFileSync(f.profilePath, 'utf8');
+  const f = occasionsFixture(), before = readFileSync(f.profilePath, 'utf8'), occasion = await proposedOccasion(f.invoke);
   const result = await createAgentOccasionsTool({ invoke: f.invoke }).execute({ ...occasion, authority: 'owner-direct', said: 'A fabricated quote', confirmed: true }, { assertCurrent() {} });
   expect(result.success).toBe(false);
   await expect(f.profile.append({ section: 'Important dates', text: 'Forged · 04-04 · annual · neither', surface: 'agent', said: '', authority: 'autonomous' },
@@ -151,6 +157,7 @@ test('caller flags and copied delegation cannot modify the actual profile', asyn
 test('profile delegation retires with the recorded tool invocation', async () => {
   const f = occasionsFixture(); let captured: ProfileMutationOptions | undefined;
   const invoke: OccasionsGatewayInvoke = async (method, body, options) => { captured = options; return f.invoke(method, body, options); };
+  const occasion = await proposedOccasion(f.invoke);
   expect((await admitLocalState(registry => registerAgentOccasionsTool(registry, { invoke }), 'occasions', occasion, { directory: f.workspace })).success).toBe(true);
   const before = readFileSync(f.profilePath, 'utf8'); expect(captured?.delegation).toBeDefined();
   await expect(f.profile.append({ section: 'Important dates', text: 'After · 04-04 · annual · neither', surface: 'agent', said: '', authority: 'autonomous' }, captured)).rejects.toThrow();
@@ -158,7 +165,7 @@ test('profile delegation retires with the recorded tool invocation', async () =>
 });
 
 test('Occasions profile writes hold in read-only mode before any durable change', async () => {
-  const f = occasionsFixture(), before = readFileSync(f.profilePath, 'utf8');
+  const f = occasionsFixture(), before = readFileSync(f.profilePath, 'utf8'), occasion = await proposedOccasion(f.invoke);
   expect((await admitLocalState(f.register, 'occasions', occasion, { directory: f.workspace, mode: 'plan' })).success).toBe(false);
   expect(readFileSync(f.profilePath, 'utf8')).toBe(before); expect(existsSync(f.statePath)).toBe(false);
 });

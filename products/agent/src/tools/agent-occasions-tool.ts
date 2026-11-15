@@ -27,7 +27,9 @@
  * §4.5, a date captured from conversation is confirmed ONCE, at the time. So
  * `propose` writes nothing and hands back the daemon's own one-line
  * confirmation, which already carries the kind question when the kind is missing.
- * That is one interaction, not two.
+ * That is one interaction, not two. It also hands back a proposal token for that
+ * exact line; `confirm` takes the token plus the kind he chose and sends the
+ * proposed values, so what is written is what he heard, not a retyped copy.
  *
  * §4.9, `later` is a distinct answer, not a decline. It is offered alongside yes
  * and no, and nothing here folds it into either.
@@ -51,6 +53,7 @@
  * looks, so nothing there takes an authority or can refuse a write.
  */
 
+import { randomBytes } from 'node:crypto';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { captureProfileDelegation } from '@goodvibes-jev/engine/platform/platform/owner-profile';
 import { assertCurrentToolEffect, ToolInputProjectionError, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
@@ -80,6 +83,8 @@ import {
   type OccasionsAuthority,
   type OccasionsAction,
   type OccasionsMethodId,
+  type OccasionsPlansProposeInput,
+  type OccasionsProposeInput,
   type OccasionsRecurrenceWord,
 } from './agent-occasions-types.ts';
 import {
@@ -142,6 +147,67 @@ function readRecurrence(
     ]);
   }
   return { recurrence: raw };
+}
+
+// ── Proposals ──────────────────────────────────────────────────────────────
+
+/**
+ * A line put to him by `propose` or `plan_propose`, kept until he answers.
+ * Process-wide so the token survives the tool being rebuilt; bounded, and gone
+ * when the Agent restarts (the refusal then says to propose again).
+ */
+type PendingProposal =
+  | { readonly target: 'occasion'; readonly line: string; readonly values: OccasionsProposeInput; readonly expiresAt: number }
+  | { readonly target: 'plan'; readonly line: string; readonly values: OccasionsPlansProposeInput; readonly expiresAt: number };
+
+const PROPOSALS = new Map<string, PendingProposal>();
+const PROPOSAL_LIMIT = 64;
+const PROPOSAL_LIFETIME_MS = 24 * 60 * 60 * 1000;
+
+function rememberProposal(proposal: PendingProposal): string {
+  const now = Date.now();
+  for (const [token, entry] of PROPOSALS) if (entry.expiresAt <= now) PROPOSALS.delete(token);
+  while (PROPOSALS.size >= PROPOSAL_LIMIT) PROPOSALS.delete(PROPOSALS.keys().next().value as string);
+  const token = `p-${randomBytes(4).toString('hex')}`;
+  PROPOSALS.set(token, proposal);
+  return token;
+}
+
+/**
+ * The proposal a confirm names, or the refusal. A value passed beside the token
+ * that differs from the proposal is refused: what he agreed to is the line, and a
+ * changed value needs a new line read to him.
+ */
+function takeProposal(
+  args: Record<string, unknown>,
+  target: PendingProposal['target'],
+  fields: readonly string[],
+): { readonly token: string; readonly proposal: PendingProposal } | ToolOutcome {
+  const propose = target === 'occasion' ? 'propose' : 'plan_propose';
+  const token = readString(args.proposal);
+  if (!token) {
+    return fail([
+      `\`proposal\` is required: the token action:"${propose}" returned for the line he agreed to. Nothing was recorded.`,
+      `Call action:"${propose}" first and read him the line it returns.`,
+    ]);
+  }
+  const proposal = PROPOSALS.get(token);
+  if (!proposal || proposal.target !== target || proposal.expiresAt <= Date.now()) {
+    return fail([
+      `There is no open proposal ${token} here (a proposal lasts a day and does not survive an Agent restart). Nothing was recorded.`,
+      `Call action:"${propose}" again and read him the new line.`,
+    ]);
+  }
+  const values = proposal.values as Record<string, unknown>;
+  const changed = fields.filter(field => args[field] !== undefined && args[field] !== ''
+    && (typeof args[field] === 'string' ? readString(args[field]) : args[field]) !== values[field]);
+  if (changed.length > 0) {
+    return fail([
+      `Proposal ${token} was for: ${proposal.line}. This call changes ${changed.join(', ')}, so nothing was recorded.`,
+      `To record a different value, call action:"${propose}" with it and read him the new line.`,
+    ]);
+  }
+  return { token, proposal };
 }
 
 /** What the daemon said about a refused write, relayed rather than reworded. */
@@ -294,14 +360,15 @@ async function handlePropose(
 
   // Every optional field is spread only when present, so the body carries no
   // key the verb did not declare.
-  const result = await deps.invoke(OCCASIONS_METHOD_IDS.propose, {
+  const values: OccasionsProposeInput = {
     title,
     date,
     ...(kind === undefined ? {} : { kind }),
     ...(person ? { person } : {}),
     ...(recurrence.recurrence === undefined ? {} : { recurrence: recurrence.recurrence }),
     ...(leadDays === undefined ? {} : { leadDays }),
-  });
+  };
+  const result = await deps.invoke(OCCASIONS_METHOD_IDS.propose, values);
   if (!result.ok) return fail([`Could not work out what to record for ${title}.`, `  ${result.error ?? 'no reason given'}`]);
   const response = narrowOccasionsProposal(result.data);
   if (!response) return fail([OCCASIONS_RESPONSE_UNREADABLE]);
@@ -324,9 +391,13 @@ async function handlePropose(
   for (const other of response.conflictsWith) {
     lines.push(`  He has already recorded a different date for this: ${other}. Ask which is right.`);
   }
-  lines.push('  When he confirms, call action:"confirm" with the same title and date, plus the kind he chose.');
+  const token = rememberProposal({ target: 'occasion', line: response.line, values, expiresAt: Date.now() + PROPOSAL_LIFETIME_MS });
+  lines.push(`  When he confirms, call action:"confirm" with proposal:"${token}"${response.needsKind ? ' and the kind he chose' : ''}.`
+    + ' A changed value needs a new proposal.');
   return ok(lines);
 }
+
+const OCCASION_PROPOSAL_FIELDS = ['title', 'date', 'person', 'recurrence', 'leadDays'] as const;
 
 async function handleConfirm(
   deps: AgentOccasionsToolDeps,
@@ -334,11 +405,11 @@ async function handleConfirm(
   authority: OccasionsAuthority | 'autonomous',
   said: string,
 ): Promise<ToolOutcome> {
-  const title = readString(args.title);
-  const date = readString(args.date);
-  const kind = readString(args.kind);
-  if (!title) return fail(['`title` is required.']);
-  if (!date) return fail(['`date` is required.']);
+  const taken = takeProposal(args, 'occasion', OCCASION_PROPOSAL_FIELDS);
+  if (isOutcome(taken)) return taken;
+  const { token, proposal } = taken;
+  if (proposal.target !== 'occasion') return fail([OCCASIONS_RESPONSE_UNREADABLE]);
+  const kind = readString(args.kind) || readString(proposal.values.kind);
   if (!kind) {
     return fail([
       `\`kind\` is required: ${OCCASIONS_KIND_WORDS.join(', ')}.`,
@@ -349,19 +420,11 @@ async function handleConfirm(
     return fail([`\`kind\` must be one of ${OCCASIONS_KIND_WORDS.join(', ')}. Got "${kind}".`]);
   }
   if (authority !== 'autonomous' && !said) return fail(['`said` is required: his verbatim words for this date.']);
-  const recurrence = readRecurrence(args.recurrence);
-  if (isOutcome(recurrence)) return recurrence;
-  const person = readString(args.person);
-  const leadDays = readNumber(args.leadDays);
-  if (args.leadDays !== undefined && leadDays === undefined) return fail(['`leadDays` must be a number of days. Nothing was recorded.']);
+  const title = proposal.values.title;
 
   const result = await deps.invoke(OCCASIONS_METHOD_IDS.confirm, {
-    title,
-    date,
+    ...proposal.values,
     kind,
-    ...(person ? { person } : {}),
-    ...(recurrence.recurrence === undefined ? {} : { recurrence: recurrence.recurrence }),
-    ...(leadDays === undefined ? {} : { leadDays }),
     surface: OCCASIONS_RECORDING_SURFACE,
     said,
     authority,
@@ -370,6 +433,7 @@ async function handleConfirm(
   const response = narrowOccasionsWrite(result.data);
   if (!response) return fail([OCCASIONS_RESPONSE_UNREADABLE]);
   if (!response.ok) return refusedWrite(title, response.reason);
+  PROPOSALS.delete(token);
   return ok([
     `Say this in your reply: ${response.disclosure || `Recorded ${title} in your profile.`}`,
     'It is a line in his own file, which he can edit by hand. Do not confirm it again later.',
@@ -399,7 +463,9 @@ async function handleRemove(
   const dropped = response.droppedRecords;
   return ok([
     `Say this in your reply: ${response.disclosure || `Removed ${occasionId} from your profile.`}`,
-    `The line is gone, along with ${dropped} record${dropped === 1 ? '' : 's'} the machine kept about it.`,
+    typeof dropped === 'number'
+      ? `The line is gone, along with ${dropped} record${dropped === 1 ? '' : 's'} the machine kept about it.`
+      : 'The line is gone.',
   ]);
 }
 
@@ -416,13 +482,14 @@ async function handlePlanPropose(
   if (args.away !== undefined && typeof args.away !== 'boolean') return fail(['`away` must be true or false. Nothing was recorded.']);
   const away = args.away === true;
 
-  const result = await deps.invoke(OCCASIONS_METHOD_IDS.plansPropose, {
+  const values: OccasionsPlansProposeInput = {
     title,
     from,
     to,
     away,
     ...(destination ? { destination } : {}),
-  });
+  };
+  const result = await deps.invoke(OCCASIONS_METHOD_IDS.plansPropose, values);
   if (!result.ok) return fail([`Could not work out what to record for ${title}.`, `  ${result.error ?? 'no reason given'}`]);
   const response = narrowOccasionsProposal(result.data);
   if (!response) return fail([OCCASIONS_RESPONSE_UNREADABLE]);
@@ -432,9 +499,12 @@ async function handlePlanPropose(
     `  Nothing is written yet. This is what would be: ${response.line}`,
     '  A plan never prompts him about anything. It is here so nothing is suggested into that window,',
     '  and so a reminder that would land while he is away moves earlier instead.',
-    '  When he confirms, call action:"plan_confirm" with the same values.',
+    `  When he confirms, call action:"plan_confirm" with proposal:"${rememberProposal({ target: 'plan', line: response.line, values, expiresAt: Date.now() + PROPOSAL_LIFETIME_MS })}".`
+    + ' A changed value needs a new proposal.',
   ]);
 }
+
+const PLAN_PROPOSAL_FIELDS = ['title', 'from', 'to', 'away', 'destination'] as const;
 
 async function handlePlanConfirm(
   deps: AgentOccasionsToolDeps,
@@ -442,22 +512,15 @@ async function handlePlanConfirm(
   authority: OccasionsAuthority | 'autonomous',
   said: string,
 ): Promise<ToolOutcome> {
-  const title = readString(args.title);
-  const from = readString(args.from);
-  const to = readString(args.to);
-  if (!title) return fail(['`title` is required.']);
-  if (!from || !to) return fail(['`from` and `to` are both required, as YYYY-MM-DD.']);
+  const taken = takeProposal(args, 'plan', PLAN_PROPOSAL_FIELDS);
+  if (isOutcome(taken)) return taken;
+  const { token, proposal } = taken;
+  if (proposal.target !== 'plan') return fail([OCCASIONS_RESPONSE_UNREADABLE]);
   if (authority !== 'autonomous' && !said) return fail(['`said` is required: his verbatim words for this plan.']);
-  const destination = readString(args.destination);
-  if (args.away !== undefined && typeof args.away !== 'boolean') return fail(['`away` must be true or false. Nothing was recorded.']);
-  const away = args.away === true;
+  const title = proposal.values.title;
 
   const result = await deps.invoke(OCCASIONS_METHOD_IDS.plansConfirm, {
-    title,
-    from,
-    to,
-    away,
-    ...(destination ? { destination } : {}),
+    ...proposal.values,
     surface: OCCASIONS_RECORDING_SURFACE,
     said,
     authority,
@@ -466,6 +529,7 @@ async function handlePlanConfirm(
   const response = narrowOccasionsWrite(result.data);
   if (!response) return fail([OCCASIONS_RESPONSE_UNREADABLE]);
   if (!response.ok) return refusedWrite(title, response.reason);
+  PROPOSALS.delete(token);
   return ok([`Say this in your reply: ${response.disclosure || `Recorded ${title} in your profile.`}`]);
 }
 
@@ -541,7 +605,7 @@ export function createAgentOccasionsTool(deps: AgentOccasionsToolDeps): Tool {
           action: {
             type: 'string',
             enum: [...OCCASIONS_ACTIONS],
-            description: 'Which action to run. propose/plan_propose each need a paired confirm.',
+            description: 'Which action to run. propose/plan_propose return a proposal token; confirm/plan_confirm take it.',
           },
           occasionId: { type: 'string', description: 'Which occasion. action:"pending" and action:"list" both name it.' },
           answer: {
@@ -554,12 +618,13 @@ export function createAgentOccasionsTool(deps: AgentOccasionsToolDeps): Tool {
           stepId: { type: 'string', description: 'Which question he just answered.' },
           text: { type: 'string', description: 'His answer to one interview question, in his words.' },
           landedOn: { type: 'string', description: 'What he actually settled on. Closes the interview.' },
-          title: { type: 'string', description: 'What the occasion or plan is called, in his words.' },
-          date: { type: 'string', description: 'MM-DD for something annual, YYYY-MM-DD for a one-off.' },
+          proposal: { type: 'string', description: 'confirm/plan_confirm: the token propose/plan_propose returned for the line he agreed to. Exactly that line is written.' },
+          title: { type: 'string', description: 'propose/plan_propose: what the occasion or plan is called, in his words.' },
+          date: { type: 'string', description: 'propose: MM-DD for something annual, YYYY-MM-DD for a one-off.' },
           kind: {
             type: 'string',
             enum: [...OCCASIONS_KIND_WORDS],
-            description: 'HE picks this: gift-giving offers a gift, remember-only does not.',
+            description: 'HE picks this: gift-giving offers a gift, remember-only does not. On confirm, the kind he chose.',
           },
           person: { type: 'string', description: 'Who it is about, as a plain label. Omit when the title already says.' },
           recurrence: {

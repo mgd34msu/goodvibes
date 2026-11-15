@@ -1,6 +1,7 @@
 import type { ShellPathService } from '@/runtime/index.ts';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { assertCurrentToolEffect, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import { bindResearchLedgers, researchArtifactExists, unknownReportArtifact } from '../agent/research-ledgers.ts';
 import {
   AgentResearchSourceRegistry,
   researchSourceReportLine,
@@ -322,7 +323,7 @@ function addInput(args: AgentResearchSourcesToolArgs): AgentResearchSourceCreate
   };
 }
 
-function createAgentResearchSourcesTool(shellPaths?: Pick<ShellPathService, 'resolveProjectPath'>): Tool {
+function createAgentResearchSourcesTool(shellPaths?: Pick<ShellPathService, 'resolveProjectPath'>, toolRegistry?: ToolRegistry): Tool {
   return {
     definition: {
       name: 'agent_research_sources',
@@ -425,6 +426,7 @@ function createAgentResearchSourcesTool(shellPaths?: Pick<ShellPathService, 'res
         if (mode === 'use') {
           assertWrite();
           const reportArtifactId = readString(args.reportArtifactId);
+          if (reportArtifactId && researchArtifactExists(toolRegistry, reportArtifactId) === false) return failure(unknownReportArtifact(reportArtifactId).message);
           const note = readString(args.note);
           return output(formatMutationResult('Marked Agent research source used', registry.markUsed(requireId(args), {
             ...(reportArtifactId ? { reportArtifactId } : {}),
@@ -446,5 +448,6 @@ export function registerAgentResearchSourcesTool(
   registry: ToolRegistry,
   shellPaths?: Pick<ShellPathService, 'resolveProjectPath'>,
 ): void {
-  registry.register(createAgentResearchSourcesTool(shellPaths));
+  bindResearchLedgers(registry, shellPaths);
+  registry.register(createAgentResearchSourcesTool(shellPaths, registry));
 }

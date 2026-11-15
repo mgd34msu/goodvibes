@@ -50,8 +50,11 @@ function wrote(disclosure: string, changes: readonly Record<string, unknown>[] =
 const directories: string[] = [];
 afterEach(() => { for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true }); });
 
+/** What the runtime reports as his message this turn; each person test sets it. */
+let ownerMessage: string | null = null;
+
 function admittedTool(invoke: ProfileGatewayInvoke): Tool {
-  const raw = createAgentProfileTool({ invoke });
+  const raw = createAgentProfileTool({ invoke, currentOwnerMessage: () => ownerMessage });
   const directory = makeProjectTempDir('agent-profile-relay'); directories.push(directory);
   return { definition: raw.definition, async execute(args, options) {
     if (!['set', 'append', 'forget', 'undo'].includes(String(args.action ?? args.mode))) return raw.execute(args, options);
@@ -353,17 +356,26 @@ describe('profile tool: third-party containment', () => {
     expect(result.output).not.toContain('Dave from work');
   });
 
-  test('person needs a name and his own words pointing at that person', async () => {
+  test('person needs a name, and his message this turn must name or point at that person', async () => {
     const calls: RecordedCall[] = [];
     const { tool } = stubTool(() => ({ name: 'Sarah', lines: [], disclosure: '' }), calls);
+    ownerMessage = 'email my sister the tickets';
 
-    const noName = await tool.execute({ action: 'person', namedInInstruction: 'email my sister the tickets' });
+    const noName = await tool.execute({ action: 'person', namedInInstruction: 'my sister' });
     expect(noName.success).toBe(false);
     expect(noName.output).toContain('There is no call that lists everyone.');
 
-    const noInstruction = await tool.execute({ action: 'person', name: 'Sarah' });
-    expect(noInstruction.success).toBe(false);
-    expect(noInstruction.output).toContain('`namedInInstruction` is required');
+    // The model supplies a name his message never used: nothing is read.
+    const unnamed = await tool.execute({ action: 'person', name: 'Sarah' });
+    expect(unnamed.success).toBe(false);
+    expect(unnamed.output).toContain('he did not name Sarah this turn');
+
+    // A pointer the model wrote that is not in his message is not evidence either.
+    const invented = await tool.execute({ action: 'person', name: 'Sarah', namedInInstruction: 'look up Sarah' });
+    expect(invented.success).toBe(false);
+
+    ownerMessage = null;
+    expect((await tool.execute({ action: 'person', name: 'Sarah', namedInInstruction: 'my sister' })).success).toBe(false);
 
     expect(calls).toHaveLength(0);
   });
@@ -374,26 +386,23 @@ describe('profile tool: third-party containment', () => {
       lines: [{ lineIndex: 8, section: 'People', text: 'Sarah, sister, sarah@example.com' }],
       disclosure: "Used Sarah's details from your profile.",
     }));
+    ownerMessage = 'Email my sister the tickets';
 
-    const result = await tool.execute({
-      action: 'person',
-      name: 'Sarah',
-      namedInInstruction: 'email my sister the tickets',
-    });
+    const result = await tool.execute({ action: 'person', name: 'Sarah', namedInInstruction: 'my sister' });
 
     expect(result.success).toBe(true);
     expect(result.output).toContain('sarah@example.com');
     expect(result.output).toContain("Used Sarah's details from your profile.");
+
+    ownerMessage = "Send Sarah's tickets over";
+    expect((await tool.execute({ action: 'person', name: 'sarah' })).success).toBe(true);
   });
 
   test('a person who is not recorded is reported plainly, with no receipt', async () => {
     const { tool } = stubTool(() => ({ name: 'Nobody', lines: [], disclosure: '' }));
+    ownerMessage = 'send it to Nobody';
 
-    const result = await tool.execute({
-      action: 'person',
-      name: 'Nobody',
-      namedInInstruction: 'send it to Nobody',
-    });
+    const result = await tool.execute({ action: 'person', name: 'Nobody' });
 
     expect(result.success).toBe(true);
     expect(result.output).toContain('No one called Nobody is recorded in your profile.');

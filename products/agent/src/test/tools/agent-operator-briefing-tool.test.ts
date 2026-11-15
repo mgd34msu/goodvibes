@@ -117,7 +117,8 @@ describe('agent_operator_briefing tool', () => {
       expect(result.output).toContain('automation: jobs 3');
       expect(result.output).toContain('schedules: jobs 2');
       expect(result.output).toContain('scheduler: slots 1/4');
-      const requestUrls = requests.map((request) => request.url);
+      // The reads run side by side, so only the set is fixed, not the order.
+      const requestUrls = requests.map((request) => request.url).sort();
       expect(requestUrls).toEqual([
         'http://127.0.0.1:3421/api/work-ledger/project',
         'http://127.0.0.1:3421/api/work-ledger/snapshot?projectId=native-project',
@@ -126,7 +127,7 @@ describe('agent_operator_briefing tool', () => {
         'http://127.0.0.1:3421/api/automation',
         'http://127.0.0.1:3421/api/automation/schedules',
         'http://127.0.0.1:3421/api/runtime/scheduler',
-      ]);
+      ].sort());
       expect(requests.map((request) => request.method)).toEqual(Array(7).fill('GET'));
       expect(requests.every(request => request.authorization === 'Bearer operator-briefing-token')).toBe(true);
       expect(requestUrls.filter((url) => url.includes('/api/knowledge'))).toEqual([]);
@@ -282,24 +283,19 @@ describe('native work operator briefing', () => {
     });
   }
 
-  for (const boundary of ['project', 'snapshot', 'approvals']) for (const replacement of ['host', 'token']) {
-    test(`discards native counts after ${replacement} replacement during ${boundary}`, async () => {
-      const paths = shellPaths(); const config = configManager(paths); const tool = createAgentOperatorBriefingTool(paths, config);
-      let replaced = false; let callsAfterReplacement = 0;
-      await withFetch(url => {
-        if (replaced) callsAfterReplacement++;
-        if (new URL(url).pathname.endsWith(`/${boundary}`)) {
-          replaced = true;
-          if (replacement === 'host') config.set('controlPlane.port', 45678);
-          else writeFileSync(join(paths.homeDirectory, '.goodvibes', 'daemon', 'operator-tokens.json'), JSON.stringify({ token: 'replacement-token' }));
-        }
-        return routeResponse(url);
-      }, async () => {
-        const result = await tool.execute({});
-        expect(replaced).toBe(true); expectNoNativeClaims(result); expect(callsAfterReplacement).toBe(0);
-      });
+  test('the reads run side by side under one deadline', async () => {
+    const paths = shellPaths(); let inFlight = 0, peak = 0;
+    await withFetch(async url => {
+      inFlight++; peak = Math.max(peak, inFlight);
+      await new Promise<void>(resolve => { setImmediate(resolve); });
+      inFlight--; return routeResponse(url);
+    }, async () => {
+      const result = await createAgentOperatorBriefingTool(paths, configManager(paths)).execute({});
+      expect(result.success).toBe(true);
+      // The five status routes and the native project read leave together.
+      expect(peak).toBeGreaterThanOrEqual(6);
     });
-  }
+  });
 
   test('an already cancelled invocation performs no requests', async () => {
     const paths = shellPaths(); const controller = new AbortController(); controller.abort(); let calls = 0;

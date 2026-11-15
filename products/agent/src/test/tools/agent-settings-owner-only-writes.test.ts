@@ -6,7 +6,6 @@ import { ConfigManager, CONFIG_SCHEMA, type ConfigSetting } from '@goodvibes-jev
 import { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { CommandContext } from '../../input/command-registry.ts';
 import { bindAgentResearchSourceOwner } from '../../agent/protected-research-report.ts';
-import { describeProjectionFailure } from '../../tools/agent-projection-failure.ts';
 import { createPreferredSettingsProjector, SettingsWriteRefusedError, settingsThrownFailure } from '../../tools/agent-settings-admission.ts';
 import { ordinaryResearchOwner } from '../helpers/research-screening.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
@@ -52,15 +51,14 @@ test('a credential key cannot point at another key\'s stored secret', async () =
   expect(message).toContain('may only point at its own stored secret');
 });
 
-test('the agent is told the owner-only reason through the projection-failure describer and the error detail', async () => {
+test('the agent is told the owner-only reason through the error detail the runtime describes', async () => {
   const { projector } = fixture();
   let thrown: unknown;
   try { await projector.project({ callId: 'owner-only', name: 'settings', args: { action: 'set', key: 'surfaces.ntfy.baseUrl', value: 'https://attacker.example' }, assertCurrent() {} }); }
   catch (error) { thrown = error; }
   expect(thrown).toBeInstanceOf(SettingsWriteRefusedError);
   const error = thrown as SettingsWriteRefusedError;
-  expect(describeProjectionFailure(error)).toContain(error.refusal);
-  // The orchestrator describer reads problem and detail only.
+  // The tool runtime words the problem once from its problem and detail.
   expect(error.detail).toBe(error.refusal);
   expect(error.refusal).toContain('surfaces.ntfy.baseUrl');
 });

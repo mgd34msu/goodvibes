@@ -1,9 +1,11 @@
-import { existsSync, readFileSync } from 'node:fs';
-import { defineLifecycle } from '@goodvibes-jev/engine/platform/platform/utils';
+import { randomBytes } from 'node:crypto';
+import { existsSync, rmSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { defineLifecycle, holdProcessLock, type HeldProcessLock } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { ShellPathService } from '@/runtime/index.ts';
-import { runStoreFileUpdateSync, writeStoreFile } from '@/utils/store-file.ts';
+import { readJsonStore, updateJsonStore, type JsonStoreSpec } from '@/utils/store-file.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
-import { assertNoSecretLikeText, assertStoreRewritable } from './persona-registry.ts';
+import { assertNoSecretLikeText } from './persona-registry.ts';
 
 export type AgentResearchRunStatus = 'planned' | 'running' | 'paused' | 'blocked' | 'cancelled' | 'completed' | 'failed';
 /**
@@ -48,6 +50,8 @@ export interface AgentResearchRunRecord {
   readonly nextSteps: readonly string[];
   readonly sourceIds: readonly string[];
   readonly checkpoints: readonly AgentResearchRunCheckpoint[];
+  /** The session that set the run `running`; a run whose session ended is paused. */
+  readonly runningSession?: string;
   readonly reportArtifactId?: string;
   readonly note?: string;
   readonly error?: string;
@@ -108,6 +112,9 @@ type AgentResearchRunStorePaths = Pick<ShellPathService, 'resolveProjectPath'>;
 
 const STORE_VERSION = 1;
 const TERMINAL_STATUSES = new Set<AgentResearchRunStatus>(['cancelled', 'completed', 'failed']);
+/** A run keeps its first checkpoint and the newest ones, up to this many in all. */
+export const MAX_RESEARCH_RUN_CHECKPOINTS = 50;
+const SESSION_ID = /^[a-z0-9-]{1,40}$/;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -223,6 +230,7 @@ function parseRun(value: unknown): AgentResearchRunRecord | null {
   const cancelledAt = readString(value.cancelledAt).trim();
   const completedAt = readString(value.completedAt).trim();
   const failedAt = readString(value.failedAt).trim();
+  const runningSession = readString(value.runningSession).trim();
   return {
     id,
     title,
@@ -237,6 +245,7 @@ function parseRun(value: unknown): AgentResearchRunRecord | null {
     checkpoints: Array.isArray(value.checkpoints)
       ? value.checkpoints.map(parseCheckpoint).filter((entry): entry is AgentResearchRunCheckpoint => entry !== null)
       : [],
+    ...(SESSION_ID.test(runningSession) ? { runningSession } : {}),
     ...(reportArtifactId ? { reportArtifactId } : {}),
     ...(note ? { note } : {}),
     ...(error ? { error } : {}),
@@ -251,21 +260,84 @@ function parseRun(value: unknown): AgentResearchRunRecord | null {
   };
 }
 
-function parseStore(raw: string, forWrite = false): ResearchRunStoreFile {
-  const parsed: unknown = JSON.parse(raw);
-  if (!isRecord(parsed)) {
-    if (forWrite) assertStoreRewritable(parsed, 'runs', 0, STORE_VERSION);
-    return { version: STORE_VERSION, runs: [] };
-  }
-  const runs = Array.isArray(parsed.runs)
-    ? parsed.runs.map(parseRun).filter((entry): entry is AgentResearchRunRecord => entry !== null)
-    : [];
-  if (forWrite) assertStoreRewritable(parsed, 'runs', runs.length, STORE_VERSION);
-  return { version: STORE_VERSION, runs };
+const RUN_STORE: JsonStoreSpec<AgentResearchRunRecord> = {
+  label: 'research run store',
+  entriesKey: 'runs',
+  version: STORE_VERSION,
+  parseEntry: parseRun,
+};
+
+/** First checkpoint plus the newest, so the ledger stays bounded and the run's origin stays visible. */
+function boundedCheckpoints(checkpoints: readonly AgentResearchRunCheckpoint[]): readonly AgentResearchRunCheckpoint[] {
+  if (checkpoints.length <= MAX_RESEARCH_RUN_CHECKPOINTS) return checkpoints;
+  return [checkpoints[0]!, ...checkpoints.slice(-(MAX_RESEARCH_RUN_CHECKPOINTS - 1))];
 }
 
-function formatStore(store: ResearchRunStoreFile): string {
-  return `${JSON.stringify(store, null, 2)}\n`;
+/**
+ * One lookup for reads and writes: an exact id first; a title only when
+ * exactly one run has it. Several runs with one title is a refusal that lists
+ * their ids, so a show and a later delete always reach the same run.
+ */
+export function resolveResearchRun(runs: readonly AgentResearchRunRecord[], idOrTitle: string): AgentResearchRunRecord | null {
+  const lookup = idOrTitle.trim().toLowerCase();
+  if (!lookup) return null;
+  const byId = runs.find((run) => run.id.toLowerCase() === lookup);
+  if (byId) return byId;
+  const byTitle = runs.filter((run) => run.title.toLowerCase() === lookup);
+  if (byTitle.length > 1) {
+    throw new Error(`${byTitle.length} research runs are titled "${idOrTitle.trim()}": ${byTitle.map((run) => run.id).join(', ')}. Name one by its id.`);
+  }
+  return byTitle[0] ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// Which session is running a run
+// ---------------------------------------------------------------------------
+
+/**
+ * This process's session. While one of its runs is `running` it holds a
+ * kernel-released lock named after it, so another process can tell whether
+ * the session that set a run running is still there: the lock can be taken
+ * only once that process is gone.
+ */
+const PROCESS_SESSION = `${process.pid.toString(36)}-${randomBytes(4).toString('hex')}`;
+const heldSessions = new Map<string, HeldProcessLock>();
+const reconciledStores = new Set<string>();
+
+function sessionLockPath(storePath: string, session: string): string {
+  return join(dirname(storePath), 'run-sessions', `${session}.writer.sqlite`);
+}
+
+function holdProcessSession(storePath: string): string {
+  const path = sessionLockPath(storePath, PROCESS_SESSION);
+  if (!heldSessions.has(path)) {
+    const lock = holdProcessLock(path);
+    if (!lock) throw new Error('This session could not mark the research run as its own; retry.');
+    heldSessions.set(path, lock);
+  }
+  return PROCESS_SESSION;
+}
+
+function releaseProcessSession(storePath: string): void {
+  const path = sessionLockPath(storePath, PROCESS_SESSION);
+  const lock = heldSessions.get(path);
+  if (!lock) return;
+  heldSessions.delete(path);
+  lock.release();
+  rmSync(path, { force: true });
+}
+
+/** True when the session is gone: no run marker, or its lock can be taken. */
+function sessionEnded(storePath: string, session: string | undefined): boolean {
+  if (session === PROCESS_SESSION) return false;
+  if (!session) return true;
+  const path = sessionLockPath(storePath, session);
+  if (!existsSync(path)) return true;
+  const lock = holdProcessLock(path);
+  if (!lock) return false;
+  lock.release();
+  rmSync(path, { force: true });
+  return true;
 }
 
 export function researchRunStorePath(shellPaths: AgentResearchRunStorePaths): string {
@@ -356,17 +428,48 @@ export class AgentResearchRunRegistry {
   }
 
   public get(idOrTitle: string): AgentResearchRunRecord | null {
-    const lookup = idOrTitle.trim().toLowerCase();
-    if (!lookup) return null;
-    return this.list().find((run) => (
-      run.id.toLowerCase() === lookup
-      || run.title.toLowerCase() === lookup
-    )) ?? null;
+    return resolveResearchRun(this.list(), idOrTitle);
+  }
+
+  /** {@link pauseInterruptedRuns} the first time this process asks for this store; later calls do nothing. */
+  public pauseInterruptedRunsOnce(): readonly AgentResearchRunRecord[] {
+    if (reconciledStores.has(this.storePath)) return [];
+    const paused = this.pauseInterruptedRuns();
+    reconciledStores.add(this.storePath);
+    return paused;
+  }
+
+  /**
+   * Pause every `running` run whose session has ended (its process exited or
+   * was killed), with a note `resume` reads. A run of a live session, in this
+   * process or another, is left alone.
+   */
+  public pauseInterruptedRuns(): readonly AgentResearchRunRecord[] {
+    const interrupted = this.readStore().runs.filter((run) => run.status === 'running' && sessionEnded(this.storePath, run.runningSession));
+    if (interrupted.length === 0) return [];
+    const ids = new Map(interrupted.map((run) => [run.id, run.runningSession]));
+    return updateJsonStore(this.storePath, RUN_STORE, (store) => {
+      const timestamp = nowIso();
+      const paused: AgentResearchRunRecord[] = [];
+      const runs = store.entries.map((run) => {
+        if (run.status !== 'running' || !ids.has(run.id) || ids.get(run.id) !== run.runningSession) return run;
+        const { runningSession: _session, ...rest } = run;
+        const next: AgentResearchRunRecord = {
+          ...rest,
+          status: 'paused',
+          note: `Interrupted when ${run.runningSession ? `session ${run.runningSession}` : 'an earlier session'} ended; resume to continue.`,
+          pausedAt: timestamp,
+          updatedAt: timestamp,
+        };
+        paused.push(next);
+        return next;
+      });
+      return paused.length ? { value: paused, entries: runs } : { value: paused };
+    }).value;
   }
 
   public create(input: AgentResearchRunCreateInput): AgentResearchRunRecord {
-    return runStoreFileUpdateSync(this.storePath, () => {
-      const store = this.readStore(true);
+    return this.mutate((runs) => {
       const title = normalizeText(input.title);
       const question = normalizeText(input.question);
       const goal = input.goal?.trim() || question;
@@ -378,7 +481,7 @@ export class AgentResearchRunRegistry {
       if (!question) throw new Error('question is required.');
       if (!goal) throw new Error('goal is required.');
       assertRunContentSafe([title, question, goal, ...plan, ...nextSteps, ...sourceIds, note ?? '']);
-      const id = this.uniqueId(store.runs, title);
+      const id = this.uniqueId(runs, title);
       const timestamp = nowIso();
       const run: AgentResearchRunRecord = {
         id,
@@ -397,8 +500,7 @@ export class AgentResearchRunRegistry {
         createdAt: timestamp,
         updatedAt: timestamp,
       };
-      this.writeStore({ version: STORE_VERSION, runs: [...store.runs, run] });
-      return run;
+      return { value: run, runs: [...runs, run] };
     });
   }
 
@@ -514,7 +616,7 @@ export class AgentResearchRunRegistry {
         progress,
         nextSteps: nextSteps.length > 0 ? nextSteps : run.nextSteps,
         sourceIds: mergedSourceIds,
-        checkpoints: [...run.checkpoints, checkpoint],
+        checkpoints: boundedCheckpoints([...run.checkpoints, checkpoint]),
         note,
         startedAt: run.startedAt ?? timestamp,
         updatedAt: timestamp,
@@ -564,12 +666,10 @@ export class AgentResearchRunRegistry {
   }
 
   public delete(id: string): AgentResearchRunRecord {
-    return runStoreFileUpdateSync(this.storePath, () => {
-      const store = this.readStore(true);
-      const run = this.find(store.runs, id);
+    return this.mutate((runs) => {
+      const run = resolveResearchRun(runs, id);
       if (!run) throw new Error(`Research run ${id} not found.`);
-      this.writeStore({ version: STORE_VERSION, runs: store.runs.filter((entry) => entry.id !== run.id) });
-      return run;
+      return { value: run, runs: runs.filter((entry) => entry.id !== run.id) };
     });
   }
 
@@ -585,26 +685,26 @@ export class AgentResearchRunRegistry {
   }
 
   private update(id: string, updater: (run: AgentResearchRunRecord) => AgentResearchRunRecord): AgentResearchRunRecord {
-    return runStoreFileUpdateSync(this.storePath, () => {
-      const store = this.readStore(true);
-      const existing = this.find(store.runs, id);
+    return this.mutate((runs) => {
+      const existing = resolveResearchRun(runs, id);
       if (!existing) throw new Error(`Research run ${id} not found.`);
-      const updated = updater(existing);
-      this.writeStore({
-        version: STORE_VERSION,
-        runs: store.runs.map((run) => run.id === existing.id ? updated : run),
-      });
-      return updated;
+      const { runningSession: _session, ...changed } = updater(existing);
+      // A running run names the session running it; any other status names none.
+      const updated: AgentResearchRunRecord = changed.status === 'running'
+        ? { ...changed, runningSession: existing.status === 'running' && existing.runningSession ? existing.runningSession : holdProcessSession(this.storePath) }
+        : changed;
+      return { value: updated, runs: runs.map((run) => run.id === existing.id ? updated : run) };
     });
   }
 
-  private find(runs: readonly AgentResearchRunRecord[], idOrTitle: string): AgentResearchRunRecord | null {
-    const lookup = idOrTitle.trim().toLowerCase();
-    if (!lookup) return null;
-    return runs.find((run) => (
-      run.id.toLowerCase() === lookup
-      || run.title.toLowerCase() === lookup
-    )) ?? null;
+  /** One locked read-modify-write: one read, at most one write; entries this build cannot read are written back as found. */
+  private mutate<T>(change: (runs: readonly AgentResearchRunRecord[]) => { readonly value: T; readonly runs: readonly AgentResearchRunRecord[] }): T {
+    const { value, runs } = updateJsonStore(this.storePath, RUN_STORE, (store) => {
+      const next = change(store.entries);
+      return { value: next, entries: next.runs };
+    }).value;
+    if (!runs.some((run) => run.status === 'running' && run.runningSession === PROCESS_SESSION)) releaseProcessSession(this.storePath);
+    return value;
   }
 
   private uniqueId(runs: readonly AgentResearchRunRecord[], title: string): string {
@@ -618,18 +718,12 @@ export class AgentResearchRunRegistry {
     throw new Error(`Could not allocate id for research run ${title}.`);
   }
 
-  private readStore(forWrite = false): ResearchRunStoreFile {
-    if (!existsSync(this.storePath)) return { version: STORE_VERSION, runs: [] };
-    // An unreadable file is an error, never an empty ledger: every save
-    // rewrites the whole file, so reading it as empty would erase the history.
-    try {
-      return parseStore(readFileSync(this.storePath, 'utf8'), forWrite);
-    } catch (error) {
-      throw new Error(`Could not read Agent research run store: ${error instanceof Error ? error.message : String(error)}`);
+  /** A file that is not JSON is reported, never read as an empty ledger; the next save copies it aside first. */
+  private readStore(): ResearchRunStoreFile {
+    const contents = readJsonStore(this.storePath, RUN_STORE);
+    if (contents.unreadable !== undefined) {
+      throw new Error(`Could not read Agent research run store at ${this.storePath}: it is ${contents.unreadable}. Repair the file, or save a run to copy it aside and start a fresh ledger.`);
     }
-  }
-
-  private writeStore(store: ResearchRunStoreFile): void {
-    writeStoreFile(this.storePath, formatStore(store));
+    return { version: STORE_VERSION, runs: contents.entries };
   }
 }

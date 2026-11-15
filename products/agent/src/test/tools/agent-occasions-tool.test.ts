@@ -305,75 +305,57 @@ describe('occasions tool: capture', () => {
     expect(result.output).toContain('Ask which is right');
   });
 
+  const PROPOSED = { ok: true, reason: null, line: 'Our anniversary · 2015-09-12 · annual', confirmation: 'Noted Our anniversary as 2015-09-12, right?', needsKind: true, conflictsWith: [] };
+  const WRITTEN = { ok: true, reason: null, occasionId: 'our-anniversary', disclosure: 'Recorded your anniversary.', droppedRecords: 0 };
+  const proposalToken = (output: string): string => /proposal:"(p-[0-9a-f]+)"/.exec(output)?.[1] ?? '';
+
   test('confirm refuses without a kind and never reaches the daemon', async () => {
-    const { run, calls } = toolWith(() => answers({ ok: true, reason: null, occasionId: 'x', disclosure: '', droppedRecords: 0 }));
-    const result = await run({
-      action: 'confirm',
-      title: 'Our anniversary',
-      date: '2015-09-12',
-      said: 'our anniversary is the twelfth of September',
-      authority: 'owner-direct',
-    });
+    const { run, calls } = toolWith((methodId) => answers(methodId === 'occasions.propose' ? PROPOSED : WRITTEN));
+    const proposal = proposalToken((await run({ action: 'propose', title: 'Our anniversary', date: '2015-09-12' })).output);
+    const result = await run({ action: 'confirm', proposal, authority: 'owner-direct' });
     expect(result.success).toBe(false);
     expect(result.output).toContain('Ask him which');
-    expect(calls).toEqual([]);
+    expect(calls.map(call => call.methodId)).toEqual(['occasions.propose']);
   });
 
-  test('confirm records delegated source without trusting a claimed human quotation', async () => {
-    const { run, calls } = toolWith(() => answers({
-      ok: true,
-      reason: null,
-      occasionId: 'our-anniversary',
-      disclosure: 'Recorded your anniversary.',
-      droppedRecords: 0,
-    }));
-    const result = await run({
-      action: 'confirm',
-      title: 'Our anniversary',
-      date: '2015-09-12',
-      kind: 'gift-giving',
-      person: 'Jane',
-      said: 'our anniversary is the twelfth of September',
-      authority: 'owner-direct',
-    });
+  test('confirm writes exactly the proposed values, with the kind he chose', async () => {
+    const { run, calls } = toolWith((methodId) => answers(methodId === 'occasions.propose' ? PROPOSED : WRITTEN));
+    const proposal = proposalToken((await run({ action: 'propose', title: 'Our anniversary', date: '2015-09-12', person: 'Jane' })).output);
+    expect(proposal).not.toBe('');
+    const result = await run({ action: 'confirm', proposal, kind: 'gift-giving', said: 'our anniversary is the twelfth of September', authority: 'owner-direct' });
     expect(result.success).toBe(true);
-    expect(calls[0]?.body).toMatchObject({
-      title: 'Our anniversary',
-      date: '2015-09-12',
-      kind: 'gift-giving',
-      person: 'Jane',
-      surface: 'agent',
-      said: '',
-      authority: 'autonomous',
-    });
+    expect(calls[1]?.body).toMatchObject({ title: 'Our anniversary', date: '2015-09-12', kind: 'gift-giving', person: 'Jane', surface: 'agent', said: '', authority: 'autonomous' });
     expect(result.output).toContain('Recorded your anniversary.');
   });
 
-  test('recorded delegated confirmation needs no caller authority or quotation flags', async () => {
-    const { run, calls } = toolWith(() => answers({ ok: true, reason: null, occasionId: 'x', disclosure: 'Recorded x.', droppedRecords: 0 }));
-    const result = await run({ action: 'confirm', title: 'x', date: '01-01', kind: 'neither', said: 'x' });
-    expect(result.success).toBe(true);
-    expect(calls[0]?.body.authority).toBe('autonomous');
-    expect(calls[0]?.body.said).toBe('');
+  test('a confirm that changes a proposed value records nothing', async () => {
+    const { run, calls } = toolWith((methodId) => answers(methodId === 'occasions.propose' ? PROPOSED : WRITTEN));
+    const proposal = proposalToken((await run({ action: 'propose', title: 'Our anniversary', date: '09-12' })).output);
+    const result = await run({ action: 'confirm', proposal, date: '2015-09-12', kind: 'gift-giving' });
+    expect(result.success).toBe(false);
+    expect(result.output).toContain('changes date');
+    expect(calls.map(call => call.methodId)).toEqual(['occasions.propose']);
+  });
+
+  test('a confirm without a known proposal records nothing', async () => {
+    const { run, calls } = toolWith(() => answers(WRITTEN));
+    const result = await run({ action: 'confirm', title: 'x', date: '01-01', kind: 'neither' });
+    expect(result.success).toBe(false);
+    expect(result.output).toContain('action:"propose"');
+    expect(calls).toEqual([]);
   });
 
   test('an untrusted authority is forwarded as-is so the daemon refuses it, not laundered', async () => {
-    const { run, calls } = toolWith(() => answers({
+    const { run, calls } = toolWith((methodId) => answers(methodId === 'occasions.propose' ? PROPOSED : {
       ok: false,
       reason: 'A fact from a web page cannot be written to your profile.',
       occasionId: 'x',
       disclosure: '',
       droppedRecords: 0,
     }));
-    const result = await run({
-      action: 'confirm',
-      title: 'Somebody birthday',
-      date: '04-04',
-      kind: 'gift-giving',
-      said: 'the page said so',
-      authority: 'web-page',
-    });
-    expect(calls[0]?.body.authority).toBe('web-page');
+    const proposal = proposalToken((await run({ action: 'propose', title: 'Somebody birthday', date: '04-04' })).output);
+    const result = await run({ action: 'confirm', proposal, kind: 'gift-giving', said: 'the page said so', authority: 'web-page' });
+    expect(calls[1]?.body.authority).toBe('web-page');
     expect(result.success).toBe(false);
     expect(result.output).toContain('cannot be written');
     expect(result.output).toContain('Do not try again with different values');

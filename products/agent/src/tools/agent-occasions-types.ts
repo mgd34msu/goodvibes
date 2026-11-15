@@ -209,6 +209,8 @@ export type OccasionsGiftsResponse = OperatorMethodOutput<'occasions.gifts'>;
 export type OccasionsConflictResolveResponse = OperatorMethodOutput<'occasions.conflict.resolve'>;
 export type OccasionsPlansResponse = OperatorMethodOutput<'occasions.plans.list'>;
 
+export type OccasionsProposeInput = OperatorMethodInput<'occasions.propose'>;
+export type OccasionsPlansProposeInput = OperatorMethodInput<'occasions.plans.propose'>;
 export type OccasionsConfirmInput = OperatorMethodInput<'occasions.confirm'>;
 export type OccasionsRemoveInput = OperatorMethodInput<'occasions.remove'>;
 export type OccasionsPlansConfirmInput = OperatorMethodInput<'occasions.plans.confirm'>;
@@ -229,20 +231,41 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-/** The renderers read these list items field by field, so the shape is checked once here. */
+/** Optional on the wire for an older daemon: absent is fine, a wrong type is not. */
+function optionalString(value: unknown): boolean { return value === undefined || value === null || typeof value === 'string'; }
+function optionalNumber(value: unknown): boolean { return value === undefined || value === null || typeof value === 'number'; }
+function optionalBoolean(value: unknown): boolean { return value === undefined || typeof value === 'boolean'; }
+
+/**
+ * Each check below covers every field its renderer prints. A field the renderer
+ * treats as optional (it prints nothing when absent) is checked only for its type.
+ */
 function isListOccasionView(value: unknown): boolean {
   if (!isRecord(value) || !isRecord(value.occasion)) return false;
   const occasion = value.occasion;
-  return typeof occasion.title === 'string' && typeof occasion.recurrence === 'string' && typeof occasion.kind === 'string';
+  return typeof occasion.id === 'string' && typeof occasion.title === 'string' && typeof occasion.recurrence === 'string'
+    && typeof occasion.kind === 'string' && optionalString(occasion.person) && optionalBoolean(occasion.mirrored)
+    && optionalString(value.nextOccurrence) && optionalBoolean(value.inLeadWindow) && optionalString(value.answer);
+}
+
+function isUnparsedLine(value: unknown): boolean {
+  return isRecord(value) && typeof value.text === 'string' && typeof value.reason === 'string' && typeof value.lineIndex === 'number';
 }
 
 function isNudgeSubject(value: unknown): boolean {
-  return isRecord(value) && typeof value.occasionId === 'string' && typeof value.title === 'string' && typeof value.kind === 'string';
+  return isRecord(value) && typeof value.occasionId === 'string' && typeof value.title === 'string' && typeof value.kind === 'string'
+    && optionalString(value.person);
 }
 
 function isInterviewProgress(value: unknown): boolean {
-  return isRecord(value) && typeof value.interviewId === 'string' && typeof value.complete === 'boolean'
-    && (value.nextStep === null || (isRecord(value.nextStep) && typeof value.nextStep.id === 'string' && typeof value.nextStep.prompt === 'string'));
+  return isRecord(value) && typeof value.interviewId === 'string' && typeof value.complete === 'boolean' && optionalString(value.landedOn)
+    && (value.nextStep === null || (isRecord(value.nextStep) && typeof value.nextStep.id === 'string' && typeof value.nextStep.prompt === 'string'
+      && optionalString(value.nextStep.opensFrom)));
+}
+
+function isSweepReport(value: unknown): boolean {
+  return isRecord(value) && ['expiredAcknowledgements', 'orphanedRecords', 'expiredOpenItems', 'agedGiftRecords', 'droppedInterviews', 'staleMirrors']
+    .every(key => typeof value[key] === 'number');
 }
 
 export function narrowOccasionsList(value: unknown): OccasionsListResponse | null {
@@ -251,8 +274,9 @@ export function narrowOccasionsList(value: unknown): OccasionsListResponse | nul
   if (!Array.isArray(value.occasions) || !Array.isArray(value.conflicts)) return null;
   if (!Array.isArray(value.unparsed)) return null;
   if (!value.occasions.every(isListOccasionView)) return null;
-  if (!value.conflicts.every(conflict => isRecord(conflict) && typeof conflict.title === 'string' && Array.isArray(conflict.dates))) return null;
-  if (!value.unparsed.every(line => isRecord(line) && typeof line.text === 'string')) return null;
+  if (!value.conflicts.every(conflict => isRecord(conflict) && typeof conflict.title === 'string' && typeof conflict.occasionId === 'string'
+    && Array.isArray(conflict.dates))) return null;
+  if (!value.unparsed.every(isUnparsedLine)) return null;
   return value as unknown as OccasionsListResponse;
 }
 
@@ -264,8 +288,8 @@ export function narrowOccasionsPending(value: unknown): OccasionsPendingResponse
   if (!isRecord(value)) return null;
   if (typeof value.today !== 'string') return null;
   if (value.nudge !== null && !isRecord(value.nudge)) return null;
-  if (isRecord(value.nudge) && (typeof value.nudge.message !== 'string' || !Array.isArray(value.nudge.subjects)
-    || !value.nudge.subjects.every(isNudgeSubject))) return null;
+  if (isRecord(value.nudge) && (typeof value.nudge.message !== 'string' || typeof value.nudge.answerable !== 'boolean'
+    || !Array.isArray(value.nudge.subjects) || !value.nudge.subjects.every(isNudgeSubject))) return null;
   if (!Array.isArray(value.conflicts) || !Array.isArray(value.interviews)) return null;
   if (!value.conflicts.every(conflict => isRecord(conflict) && typeof conflict.message === 'string' && typeof conflict.occasionId === 'string')) return null;
   if (!value.interviews.every(isInterviewProgress)) return null;
@@ -280,6 +304,8 @@ export function narrowOccasionsState(value: unknown): OccasionsStateResponse | n
   if (!isRecord(value)) return null;
   if (typeof value.path !== 'string' || typeof value.acknowledgements !== 'number') return null;
   if (typeof value.openItems !== 'number' || typeof value.interviews !== 'number') return null;
+  if (!optionalNumber(value.giftRecords) || !optionalNumber(value.mirrors) || !optionalString(value.corruption)) return null;
+  if (value.lastSweep !== undefined && value.lastSweep !== null && !isSweepReport(value.lastSweep)) return null;
   return value as unknown as OccasionsStateResponse;
 }
 
@@ -298,41 +324,50 @@ export function narrowOccasionsSweep(value: unknown): OccasionsSweepResponse | n
   // destination is pushed independently, so an aggregate `delivered` can read
   // true while one channel was refused. A build that could not see this array
   // would report a partial failure as a clean delivery.
-  if (!Array.isArray(value.deliveries)) return null;
+  if (!Array.isArray(value.deliveries) || !value.deliveries.every(delivery => isRecord(delivery)
+    && typeof delivery.channel === 'string' && typeof delivery.delivered === 'boolean' && optionalString(delivery.failure))) return null;
+  if (value.nudge !== null && value.nudge !== undefined && !(isRecord(value.nudge) && typeof value.nudge.message === 'string')) return null;
+  if (!optionalString(value.hold) || !optionalNumber(value.mirrored)) return null;
+  if (!value.conflictMessages.every(message => typeof message === 'string')) return null;
   return value as unknown as OccasionsSweepResponse;
 }
 
 export function narrowOccasionsProposal(value: unknown): OccasionsProposalResponse | null {
   if (!isRecord(value)) return null;
-  if (typeof value.ok !== 'boolean' || typeof value.confirmation !== 'string') return null;
+  if (typeof value.ok !== 'boolean' || typeof value.confirmation !== 'string' || !optionalString(value.reason)) return null;
   if (typeof value.needsKind !== 'boolean' || !Array.isArray(value.conflictsWith)) return null;
+  if (!value.conflictsWith.every(other => typeof other === 'string')) return null;
+  // The line is what a confirm writes; an accepted proposal without one cannot be confirmed.
+  if (value.ok && typeof value.line !== 'string') return null;
   return value as unknown as OccasionsProposalResponse;
 }
 
 export function narrowOccasionsWrite(value: unknown): OccasionsWriteResponse | null {
   if (!isRecord(value)) return null;
   if (typeof value.ok !== 'boolean' || typeof value.occasionId !== 'string') return null;
-  if (typeof value.disclosure !== 'string') return null;
+  if (typeof value.disclosure !== 'string' || !optionalString(value.reason) || !optionalNumber(value.droppedRecords)) return null;
   return value as unknown as OccasionsWriteResponse;
 }
 
 export function narrowOccasionsAnswer(value: unknown): OccasionsAnswerResponse | null {
   if (!isRecord(value)) return null;
-  if (typeof value.ok !== 'boolean') return null;
-  if (!('interview' in value)) return null;
+  if (typeof value.ok !== 'boolean' || !optionalString(value.reason)) return null;
+  if (!('interview' in value) || (value.interview !== null && !isInterviewProgress(value.interview))) return null;
   return value as unknown as OccasionsAnswerResponse;
 }
 
 export function narrowOccasionsInterview(value: unknown): OccasionsInterviewResponse | null {
   if (!isRecord(value)) return null;
   if (typeof value.present !== 'boolean') return null;
-  if (!('interview' in value)) return null;
+  if (!('interview' in value) || (value.interview !== null && !isInterviewProgress(value.interview))) return null;
   return value as unknown as OccasionsInterviewResponse;
 }
 
 export function narrowOccasionsGifts(value: unknown): OccasionsGiftsResponse | null {
   if (!isRecord(value)) return null;
   if (typeof value.occasionId !== 'string' || !Array.isArray(value.gifts)) return null;
+  if (!value.gifts.every(gift => isRecord(gift) && typeof gift.occurrence === 'string' && typeof gift.landedOn === 'string'
+    && optionalString(gift.notes))) return null;
   return value as unknown as OccasionsGiftsResponse;
 }
 
@@ -348,7 +383,9 @@ export function narrowOccasionsPlans(value: unknown): OccasionsPlansResponse | n
   if (!isRecord(value)) return null;
   if (typeof value.today !== 'string' || !Array.isArray(value.plans)) return null;
   if (!Array.isArray(value.unparsed)) return null;
-  if (value.awayNow !== null && !isRecord(value.awayNow)) return null;
-  if (!value.plans.every(plan => isRecord(plan) && typeof plan.title === 'string')) return null;
+  if (value.awayNow !== null && !(isRecord(value.awayNow) && typeof value.awayNow.title === 'string')) return null;
+  if (!value.plans.every(plan => isRecord(plan) && typeof plan.title === 'string' && typeof plan.from === 'string'
+    && typeof plan.to === 'string' && optionalBoolean(plan.away) && optionalString(plan.destination))) return null;
+  if (!value.unparsed.every(isUnparsedLine)) return null;
   return value as unknown as OccasionsPlansResponse;
 }

@@ -3,7 +3,7 @@ import type { ArtifactDescriptor } from '@goodvibes-jev/engine/platform/platform
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { agentArtifactEffectGuard, captureAgentArtifactSource } from './agent-artifact-effect.ts';
-import { DEFAULT_LIST_LIMIT, MAX_FRESHNESS_ARTIFACT_SCAN, MAX_LIST_LIMIT, REVIEW_PACKET_PRESET_SCHEMA, auditPresetFreshness, buildPresetRecord, clamp, compactText, defaultPacketSummary, isPresetArtifact, packetFromMetadata, parseMode, parsePresetBody, presetCreateInput, readMetadataString, readNumber, readString, sourceArtifactId, type AgentReviewPacketPresetArtifactStore, type AgentReviewPacketPresetsToolArgs, type LoadedReviewPacketPreset, type ReviewPacketFreshnessAudit, type ReviewPacketPresetPacket, type ReviewPacketPresetRecord } from './agent-review-packet-presets-core.ts';
+import { DEFAULT_LIST_LIMIT, MAX_FRESHNESS_ARTIFACT_SCAN, MAX_LIST_LIMIT, REVIEW_PACKET_PRESET_SCHEMA, auditPresetFreshness, buildPresetRecord, clamp, compactText, defaultPacketSummary, freshnessReferences, isPresetArtifact, packetFromMetadata, parseMode, parsePresetBody, presetCreateInput, readMetadataString, readNumber, readString, sourceArtifactId, type AgentReviewPacketPresetArtifactStore, type AgentReviewPacketPresetsToolArgs, type LoadedReviewPacketPreset, type ReviewPacketFreshnessAudit, type ReviewPacketPresetPacket, type ReviewPacketPresetRecord } from './agent-review-packet-presets-core.ts';
 function formatPacketLines(packet: ReviewPacketPresetPacket): readonly string[] {
   return [
     `  summary ${packet.summary}`,
@@ -184,19 +184,24 @@ function formatList(
   allArtifacts: readonly ArtifactDescriptor[] | null,
   store?: AgentReviewPacketPresetArtifactStore,
   cappedAt: number | null = null,
+  supersededCount = 0,
 ): string {
   // The store is asked for its newest N artifacts; when it filled that window, older presets may exist unseen.
   const windowNote = cappedAt === null ? '' : ` (searched the newest ${cappedAt} artifacts only; older presets were not searched)`;
+  // A preset another preset was refreshed from is replaced by it; it is counted, not listed.
+  const hidden = supersededCount > 0 ? `  hidden ${supersededCount} preset(s) replaced by a refresh; show one with mode:"show" artifactId:"..."` : '';
   if (artifacts.length === 0) {
     return [
       'Saved review packet presets',
       `  none found${windowNote}`,
+      hidden,
       '  save agent_review_packet_presets mode:"save" name:"..."',
-    ].join('\n');
+    ].filter(Boolean).join('\n');
   }
   return [
     'Saved review packet presets',
     `  shown ${artifacts.length}/${total}${windowNote}`,
+    hidden,
     ...artifacts.flatMap((artifact) => {
       const packet = packetFromMetadata(artifact);
       const audit = auditPresetFreshness({ packet, descriptor: artifact, artifacts: allArtifacts, store });
@@ -213,7 +218,7 @@ function formatList(
         `    inspect agent_review_packet_presets mode:"show" artifactId:"${artifact.id}"`,
       ].filter(Boolean);
     }),
-  ].join('\n');
+  ].filter(Boolean).join('\n');
 }
 
 function formatShow(loaded: LoadedReviewPacketPreset, audit: ReviewPacketFreshnessAudit): string {
@@ -269,12 +274,12 @@ export function createAgentReviewPacketPresetsTool(
         properties: {
           mode: {
             type: 'string',
-            enum: ['list', 'show', 'save', 'refresh'],
-            description: 'List, show, save, or refresh one review packet preset.',
+            enum: ['list', 'show', 'save', 'refresh', 'delete'],
+            description: 'List, show, save, refresh or delete one review packet preset.',
           },
           artifactId: {
             type: 'string',
-            description: 'Saved preset artifact id for show or refresh mode.',
+            description: 'Saved preset artifact id for show, refresh or delete mode.',
           },
           name: {
             type: 'string',
@@ -351,7 +356,6 @@ export function createAgentReviewPacketPresetsTool(
     execute: async (rawArgs: Record<string, unknown>, executionOptions) => {
       const args = rawArgs;
       const assertCurrent = agentArtifactEffectGuard(rawArgs, executionOptions);
-      let created: ArtifactDescriptor | undefined;
       try {
         const mode = parseMode(args.mode);
         if (mode === 'list') {
@@ -359,9 +363,11 @@ export function createAgentReviewPacketPresetsTool(
           const limit = clamp(readNumber(args.limit, DEFAULT_LIST_LIMIT), 1, MAX_LIST_LIMIT);
           const window = Math.max(MAX_FRESHNESS_ARTIFACT_SCAN, limit * 4);
           const allArtifacts = artifactStore.list(window);
-          const source = allArtifacts.filter(isPresetArtifact);
+          const presets = allArtifacts.filter(isPresetArtifact);
+          const replaced = new Set(presets.map(preset => readMetadataString(preset.metadata, 'refreshOfArtifactId')).filter(Boolean));
+          const source = presets.filter(preset => !replaced.has(preset.id));
           const ordered = source.sort((left, right) => right.createdAt - left.createdAt || left.id.localeCompare(right.id));
-          return output(formatList(ordered.slice(0, limit), source.length, allArtifacts, artifactStore, allArtifacts.length >= window ? window : null));
+          return output(formatList(ordered.slice(0, limit), source.length, allArtifacts, artifactStore, allArtifacts.length >= window ? window : null, presets.length - source.length));
         }
         if (mode === 'show') {
           const artifactId = readString(args.artifactId);
@@ -378,6 +384,21 @@ export function createAgentReviewPacketPresetsTool(
             store: artifactStore,
           })));
         }
+        if (mode === 'delete') {
+          assertCurrent();
+          const artifactId = readString(args.artifactId);
+          if (!artifactId) return failure('artifactId is required for mode:"delete".');
+          if (!artifactStore?.delete || !artifactStore.get) return failure('Review packet preset delete is unavailable because this runtime cannot remove artifacts.');
+          const preset = artifactStore.get(artifactId);
+          if (!preset || !isPresetArtifact(preset)) return failure(`Nothing was deleted: ${artifactId} is not a saved review packet preset. Use agent_review_packet_presets mode:"list" first.`);
+          assertCurrent();
+          if (!artifactStore.delete(artifactId)) return failure(`Nothing was deleted: preset ${artifactId} was already gone.`);
+          return output([
+            'Deleted review packet preset',
+            `  artifact ${artifactId}`,
+            '  the artifacts it referenced were not touched',
+          ].join('\n'));
+        }
         if (mode === 'refresh') {
           assertCurrent();
           const artifactId = readString(args.artifactId);
@@ -388,11 +409,18 @@ export function createAgentReviewPacketPresetsTool(
           const loaded = await loadPresetArtifact(artifactStore, artifactId);
           if (!loaded) return failure(`Unknown review packet preset artifact ${artifactId}. Use agent_review_packet_presets mode:"list" first.`);
           assertCurrent();
-          const assertSource = captureAgentArtifactSource(artifactStore, loaded.descriptor);
           const allArtifacts = artifactStore.list(MAX_FRESHNESS_ARTIFACT_SCAN);
-          const references = allArtifacts.map(artifact => captureAgentArtifactSource(artifactStore, artifact));
-          const check = () => { assertCurrent(); assertSource(); for (const reference of references) reference(); };
-          check();
+          // A preset that was already refreshed answers with its successor; a second refresh would only duplicate it.
+          const successor = allArtifacts.find(artifact => isPresetArtifact(artifact)
+            && readMetadataString(artifact.metadata, 'refreshOfArtifactId') === loaded.descriptor.id);
+          if (successor) {
+            return output([
+              'Review packet preset was already refreshed',
+              `  preset ${loaded.descriptor.id} was refreshed as ${successor.id}; nothing new was saved`,
+              `  inspect agent_review_packet_presets mode:"show" artifactId:"${successor.id}"`,
+              `  refreshAgain agent_review_packet_presets mode:"refresh" artifactId:"${successor.id}"`,
+            ].join('\n'));
+          }
           const packet = loaded.body?.packet ?? packetFromMetadata(loaded.descriptor);
           const audit = auditPresetFreshness({
             packet,
@@ -412,30 +440,41 @@ export function createAgentReviewPacketPresetsTool(
               'Inspect the preset and repair missing evidence manually before saving a new preset.',
             ].join('\n'));
           }
+          // Guard what the new preset is built from: the preset itself and the artifacts the new packet names.
+          const store = artifactStore;
+          const index = new Map(allArtifacts.map(artifact => [artifact.id, artifact]));
+          const guarded = [loaded.descriptor, ...freshnessReferences(record.packet)
+            .map(reference => index.get(reference.id) ?? store.get?.(reference.id) ?? null)
+            .filter((artifact): artifact is ArtifactDescriptor => artifact !== null)];
+          const references = [...new Map(guarded.map(artifact => [artifact.id, artifact])).values()]
+            .map(artifact => captureAgentArtifactSource(store, artifact));
+          const check = () => { assertCurrent(); for (const reference of references) reference(); };
           check();
           const descriptor = await artifactStore.create(presetCreateInput(record), { signal: executionOptions?.signal, assertCurrent: check });
-          created = descriptor;
-          assertCurrent();
           return output(formatRefreshResult(descriptor, loaded, audit, record));
         }
         assertCurrent();
         if (!artifactStore?.create) return failure('Review packet preset save is unavailable because this runtime did not provide an artifact store.');
         const record = buildPresetRecord(args);
+        // An id the store does not hold is refused before anything is written.
+        const lookup = artifactStore.get?.bind(artifactStore);
+        if (lookup) {
+          const unknown = freshnessReferences(record.packet).filter(reference => !lookup(reference.id));
+          if (unknown.length > 0) {
+            return failure(`Nothing was saved: ${unknown.map(reference => `${reference.label} ${reference.id}`).join(', ')} ${unknown.length === 1 ? 'is' : 'are'} not in the artifact store. Check the ids with agent_artifacts mode:"list" and save again.`);
+          }
+        }
         const descriptor = await artifactStore.create(presetCreateInput(record), { signal: executionOptions?.signal, assertCurrent });
-        created = descriptor;
-        assertCurrent();
-        const audit = auditPresetFreshness({
-          packet: record.packet,
-          descriptor,
-          artifacts: artifactStore.list?.(MAX_FRESHNESS_ARTIFACT_SCAN) ?? null,
-          store: artifactStore,
-        });
+        // Once the store has written, the result is the save; the freshness read below only describes it.
+        let audit: ReviewPacketFreshnessAudit;
+        try {
+          audit = auditPresetFreshness({ packet: record.packet, descriptor, artifacts: artifactStore.list?.(MAX_FRESHNESS_ARTIFACT_SCAN) ?? null, store: artifactStore });
+        } catch {
+          audit = auditPresetFreshness({ packet: record.packet, descriptor, artifacts: null, store: artifactStore });
+        }
         return output(formatSaveResult(descriptor, record, audit));
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        // The preset artifact exists; the failure came from a check after it was written.
-        if (created) return failure(`Review packet preset artifact ${created.id} was saved, but a check after the save failed (${message}). Do not save it again; inspect it with agent_review_packet_presets mode:"show" artifactId:"${created.id}".`);
-        return failure(message);
+        return failure(error instanceof Error ? error.message : String(error));
       }
     },
   };

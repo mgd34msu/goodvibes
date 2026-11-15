@@ -28,6 +28,8 @@ export type {
 
 export { DaemonPurchaseLedger, PaymentPurchaseLedgerError, MAX_PURCHASE_LIST_LIMIT } from './purchase-ledger.js';
 export type { DaemonPurchaseLedgerOptions, PurchaseListQuery, StoredPurchase } from './purchase-ledger.js';
+export { confirmSubmittedPurchase } from './purchase-confirmation.js';
+export type { PurchaseConfirmationDeps } from './purchase-confirmation.js';
 
 export { DurableBudgetLedger } from './budget-store.js';
 

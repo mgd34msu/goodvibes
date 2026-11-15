@@ -34,6 +34,7 @@ import {
   DurablePaymentOperations,
   MAX_PURCHASE_LIST_LIMIT,
   ProtectedPaymentRequests,
+  confirmSubmittedPurchase,
   createNativeCheckoutWindowRestorer,
   channelBackedPaymentNotifier,
   configBackedAddressStore,
@@ -76,15 +77,26 @@ const REPORTED_MAIL_MEMORY = 512;
 /**
  * Reads each message on the owner's mailbox against the purchase ledger and, when
  * it is about one purchase, sends the owner a report of that purchase through the
- * payment notifier: once per kind of mail (confirmed, shipped, delivered). Messages are handled one at a time, each with one reading of
+ * payment notifier: once per kind of mail (confirmed, shipped, delivered). A mail tied to a
+ * purchase recorded as unverified moves it, and its operation, to purchased, and that report
+ * says so. Messages are handled one at a time, each with one reading of
  * which recent purchase it is about. Nothing here can fail the mailbox poll: a
  * refusal (Classic operation has no decision models) or a send failure is logged,
  * and the message is forgotten so the mailbox offering it again tries again.
  */
 export function createOrderMailObserver(deps: {
-  readonly purchases: Pick<DaemonPurchaseLedger, 'list'> & Partial<Pick<DaemonPurchaseLedger, 'recordRefund' | 'reportedMailKinds' | 'recordMailReported'>>;
+  readonly purchases: Pick<DaemonPurchaseLedger, 'list'> & Partial<Pick<DaemonPurchaseLedger, 'recordRefund' | 'reportedMailKinds' | 'recordMailReported' | 'recordConfirmed' | 'get'>>;
   readonly notifier: Pick<PaymentNotifier, 'deliver'>;
+  /** Absent: an unverified purchase stays unverified whatever the shop mails. */
+  readonly operations?: Pick<DurablePaymentOperations, 'get' | 'recover'> | undefined;
 }): OwnerMailHandler {
+  const { recordConfirmed, get } = deps.purchases;
+  const operations = deps.operations;
+  const recordConfirmation = recordConfirmed && get && operations
+    ? (purchaseId: string, orderNumber: string | null) => confirmSubmittedPurchase({
+      purchases: { recordConfirmed: recordConfirmed.bind(deps.purchases), get: get.bind(deps.purchases) }, operations,
+    }, purchaseId, orderNumber)
+    : undefined;
   const seen = new Set<string>();
   let tail: Promise<void> = Promise.resolve();
   return (mail) => {
@@ -105,6 +117,7 @@ export function createOrderMailObserver(deps: {
           if (!deliveries.some(delivery => delivery.delivered)) logger.warn('A purchase confirmation report reached no channel', { channels: deliveries.length });
         },
         ...(deps.purchases.recordRefund ? { recordRefund: deps.purchases.recordRefund.bind(deps.purchases) } : {}),
+        ...(recordConfirmation ? { recordConfirmation } : {}),
         // Each purchase is reported once per kind (confirmed, shipped, delivered), across restarts.
         ...(deps.purchases.reportedMailKinds && deps.purchases.recordMailReported ? { reports: {
           kinds: deps.purchases.reportedMailKinds.bind(deps.purchases),
@@ -235,7 +248,7 @@ export function createPaymentsServices(options: PaymentsCompositionOptions): Pay
         && operation.phase !== null && ['awaiting-window', 'arming-payment', 'submit-pending', 'submitted'].includes(operation.phase)),
   );
   const notifier = liveChannelPaymentNotifier(config, options.channelDeliveryRouter, paymentReplies);
-  const detachOwnerMail = options.ownerMail?.attach(createOrderMailObserver({ purchases, notifier }));
+  const detachOwnerMail = options.ownerMail?.attach(createOrderMailObserver({ purchases, notifier, operations }));
   const checkout: CheckoutComposition = {
     seam: options.checkoutSeam,
     addresses: configBackedAddressStore(config, options.configManager.preparePostalAddress?.bind(options.configManager)),

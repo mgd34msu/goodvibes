@@ -246,6 +246,45 @@ export class DaemonPurchaseLedger implements PurchaseLedger {
     }
   }
 
+  /**
+   * Record that the shop's own mail confirmed a submission whose landing page
+   * did not: a `submitted-unverified` row becomes `purchased`, taking the
+   * mail's order number when the row has none. False when the row is not
+   * unverified, is refunded, or the owner already recorded a finding for it;
+   * the owner's finding stands over a mail.
+   */
+  async recordConfirmed(purchaseId: string, merchantOrderId: string | null): Promise<boolean> {
+    let release: (() => void) | undefined;
+    try {
+      release = await acquireCrossProcessLock(`${this.filePath}.mutation.lock`, { strictOwnership: true, totalTimeoutMs: 10_000 });
+      const previous = this.read();
+      const current = previous.byId.get(purchaseId);
+      if (!current || current.outcome !== 'submitted-unverified' || current.refundedAt !== null) return false;
+      if (readReconciliations(previous.envelope['purchaseReconciliations']).some(row => row.purchaseId === purchaseId)) return false;
+      const updated = capturePurchaseRecord({ ...current, outcome: 'purchased',
+        merchantOrderId: current.merchantOrderId ?? merchantOrderId });
+      if (!updated) throw new PaymentPurchaseLedgerError('invalid-record');
+      const index = previous.rows.lastIndexOf(current);
+      const rows = Object.freeze(previous.rows.map((row, at) => at === index ? updated as StoredPurchase : row));
+      const envelope = { ...previous.envelope, version: PURCHASES_FILE_VERSION, purchases: rows };
+      const contents = `${JSON.stringify(envelope, null, 2)}\n`;
+      atomicWriteFileSync(this.filePath, contents, { mode: 0o600, mkdirp: true,
+        assertCurrent: () => this.assertFileCurrent(previous.observation) });
+      const observation = readFileObservation(this.filePath);
+      if (!observation.bytes.equals(Buffer.from(contents, 'utf8'))) throw new Error();
+      const byId = new Map(previous.byId); byId.set(purchaseId, updated as StoredPurchase);
+      this.cached = { observation, envelope, rows, byId };
+      return true;
+    } catch (error) {
+      if (error instanceof PaymentPurchaseLedgerError) throw error;
+      this.unavailable = true;
+      throw new PaymentPurchaseLedgerError('write-uncertain');
+    } finally {
+      try { release?.(); }
+      catch { this.unavailable = true; throw new PaymentPurchaseLedgerError('write-uncertain'); }
+    }
+  }
+
   /** The kinds of merchant mail already reported to the owner, per purchase: one ledger read. */
   reportedMailKinds(): ReadonlyMap<string, readonly OrderMailKind[]> {
     return readMailReports(this.read().envelope['mailReported']);

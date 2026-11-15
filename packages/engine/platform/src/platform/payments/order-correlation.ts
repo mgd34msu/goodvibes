@@ -52,7 +52,7 @@ import { requireDecisionFeature } from '../runtime/decision-policy.js';
  * ever placed at the shop. Only purchases from the last RECENT_PURCHASE_DAYS
  * days are candidates, newest first, at most MAX_PURCHASE_CANDIDATES of them.
  *
- * ══ Which OUTCOMES are eligible, and why a match never rewrites one ═══════
+ * ══ Which OUTCOMES are eligible, and what a match changes ════════════════
  *
  * A record only correlates when the click was actually issued: `purchased` and
  * `submitted-unverified` both mean the submit reached the driver, and only
@@ -68,12 +68,14 @@ import { requireDecisionFeature } from '../runtime/decision-policy.js';
  * available that it went through, so it is the case where recognition is most
  * worth doing, not least.
  *
- * What a match does NOT do is rewrite the stored record. This module recognises
- * mail; it does not re-verify a purchase after the fact. A `matched` result
- * against a `submitted-unverified` record still carries that record with its
- * `outcome` untouched, `verified` was decided once, at submit time, from what
- * the driver itself saw, and a later email is evidence for the OWNER to read,
- * not evidence this module is positioned to fold back into the audit trail.
+ * This module only recognises mail; it writes nothing. A `matched` result
+ * carries the record as stored. What follows from a match against a
+ * `submitted-unverified` record is the reporter's step
+ * (`confirmation-report.ts`): it moves that one record, and its operation, to
+ * `purchased` with the mail's order number, once, unless the owner has
+ * already recorded a finding of their own. The mail can settle that a
+ * submission went through; it never changes an amount, a card or a merchant
+ * on our record.
  *
  * ══ No card material reaches a reading ════════════════════════════════════
  *

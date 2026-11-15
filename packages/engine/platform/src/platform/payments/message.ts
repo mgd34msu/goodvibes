@@ -396,6 +396,8 @@ export function renderConfirmationReport(input: {
   readonly senderDomain: string;
   /** Absent reads as `confirmed`. */
   readonly kind?: OrderMailKind | undefined;
+  /** This mail moved a purchase recorded as unverified to purchased. */
+  readonly settled?: boolean | undefined;
 }): string {
   const kind = input.kind ?? 'confirmed';
   const lines = [
@@ -409,6 +411,9 @@ export function renderConfirmationReport(input: {
   if (orderNumber !== null) lines.push(`  Order number: ${sanitizeNoticeField(orderNumber, 40)}`);
   if (shipDate !== null && kind !== 'delivered') lines.push(`  Ships: ${sanitizeNoticeField(shipDate, 40)}`);
   if (trackingReference !== null) lines.push(`  Tracking: ${sanitizeNoticeField(trackingReference, 60)}`);
+  if (input.settled === true) {
+    lines.push(``, `The order you approved went through: I could not confirm it when it was submitted, and purchase history now records it as bought.`);
+  }
   lines.push(``, `This is the order you approved. The amount above is the one I calculated, not the one the email states.`);
   return lines.join('\n');
 }

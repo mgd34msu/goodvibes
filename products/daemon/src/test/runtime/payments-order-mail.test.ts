@@ -1,8 +1,10 @@
 import { expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import type { PurchaseRecord } from '@goodvibes-jev/engine/platform/platform/payments';
+import type { DaemonPurchaseLedger, PaymentOperationView, PurchaseRecord } from '@goodvibes-jev/engine/platform/platform/payments';
 import { createOrderMailObserver } from '../../runtime/payments-composition.js';
 import { createOwnerMailRelay } from '../../runtime/owner-mail-relay.js';
+
+type OrderMailKind = Parameters<DaemonPurchaseLedger['recordMailReported']>[1];
 
 const settled = (): Promise<void> => new Promise(resolve => setImmediate(resolve));
 
@@ -104,5 +106,48 @@ test('a store mail about the one purchase made there sends the owner a report', 
     f.observe(mail('m1', 'orders@bestbuy.com'));
     for (let turn = 0; turn < 200 && f.delivered.length === 0; turn++) await settled();
     expect(f.delivered).toHaveLength(1);
+  } finally { installJudgmentPort(previous); }
+});
+
+test('a store mail about an unverified purchase settles it and its operation once, and says so once', async () => {
+  const previous = installJudgmentPort(confirmingPort());
+  try {
+    let row = { ...PURCHASE, item: 'thing', currency: 'USD', totalMinorUnits: 100, cardLast4: '4242', outcome: 'submitted-unverified', merchantOrderId: null } as PurchaseRecord;
+    let operation = { purchaseId: 'p1', operationId: 'op1', state: 'completed', phase: 'submitted', createdAtMs: 1, updatedAtMs: 1,
+      outcome: 'submitted-unverified', totalMinorUnits: 100, currency: 'USD' } as PaymentOperationView;
+    const delivered: string[] = [];
+    let released = 0;
+    const reported: OrderMailKind[] = [];
+    const observe = createOrderMailObserver({
+      purchases: {
+        list: () => ({ purchases: [row], total: 1, reconciliations: [] }),
+        get: () => ({ ...row, merchantDiscovered: false }),
+        recordConfirmed: async (_id, orderId) => {
+          if (row.outcome !== 'submitted-unverified') return false;
+          row = { ...row, outcome: 'purchased', merchantOrderId: row.merchantOrderId ?? orderId };
+          return true;
+        },
+        reportedMailKinds: () => new Map([['p1', reported]]),
+        recordMailReported: async (_id, kind) => { if (reported.includes(kind)) return false; reported.push(kind); return true; },
+      },
+      operations: {
+        get: () => operation,
+        recover: () => ({ purchaseId: 'p1', principalId: null, read: () => operation, reconciliation: () => null,
+          update: (next: PaymentOperationView) => { operation = next; }, beginReconciliation: () => {}, assertCurrent: () => {},
+          release: () => { released++; } }),
+      },
+      notifier: { deliver: async ({ message }) => { delivered.push(message); return []; } },
+    });
+    observe(mail('m1', 'orders@bestbuy.com'));
+    for (let turn = 0; turn < 200 && delivered.length === 0; turn++) await settled();
+    expect(row.outcome).toBe('purchased');
+    expect(operation.outcome).toBe('purchased');
+    expect(released).toBe(1);
+    expect(delivered).toHaveLength(1);
+    // The same kind of mail again: the purchase is settled and that kind reported, so nothing is sent.
+    observe(mail('m2', 'orders@bestbuy.com'));
+    for (let turn = 0; turn < 50; turn++) await settled();
+    expect(delivered).toHaveLength(1);
+    expect(released).toBe(1);
   } finally { installJudgmentPort(previous); }
 });

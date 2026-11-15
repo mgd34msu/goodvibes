@@ -1254,7 +1254,9 @@ original synchronous availability reader is checked again before card entry
 and inside the submit actuator's currentness guard. Other purchases may append
 while a window waits; a healthy newer ledger is allowed. A recorded
 `submitted-unverified` event proves the submission was recorded, not that the
-merchant confirmed the purchase. Recovery preserves that distinction.
+merchant confirmed the purchase. Recovery preserves that distinction; only the
+shop's own confirmation mail tied to that purchase, or the owner's finding,
+settles it.
 
 #### Resolving an uncertain merchant submission
 
@@ -1928,6 +1930,15 @@ the mail text and never fails the mailbox poll. With no purchases recorded the
 mail is not read at all, and with Classic operation selected nothing is
 correlated.
 
+A mail tied to a purchase recorded as `submitted-unverified` settles it: the
+purchase row becomes `'purchased'`, taking the mail's order number when the row
+has none, and the purchase's operation status becomes `purchased` too, so
+`payments.purchase.status` no longer asks for reconciliation. That report tells
+the owner the order went through. It happens once per purchase, and never over
+the owner's own finding: a purchase the owner has reconciled, or is
+reconciling, stays as the owner recorded it. Amounts, card and merchant on the
+record never come from the mail.
+
 Matching runs on **our own record**, never on the mail's claims. The sender's
 registrable domain is compared against the registrable domain computed from
 the validated checkout URL, so `order-update.example.com` matches a purchase
@@ -1951,7 +1962,9 @@ Only `'purchased'` and `'submitted-unverified'` outcomes are eligible, because
 both mean the submit actually reached the driver. `'submitted-unverified'` is
 included deliberately, since a confirmation email that the reading ties to the
 purchase is the strongest available signal that an unverified submission went
-through. A match never rewrites the stored record; it only recognises it.
+through, and the report that follows settles that purchase as described above:
+the match changes its outcome and, when it had none, its order number, never an
+amount, card or merchant.
 A mail the reading says is about two purchases at the same merchant produces an
 `'ambiguous'` result rather than a guess, and the caller reports that ambiguity
 rather than picking one.
@@ -2078,15 +2091,19 @@ to the caller with `step` naming what is blocking in this code's own words,
 never merchant text. No automated attempt is made at solving it: a CAPTCHA is
 not solved, an OTP is not guessed, a 3-D Secure frame is not clicked through.
 
-**What this daemon can and cannot read back.** Order confirmation and challenge
-detection come from an optional `describeSubmission` reading of the page the
-submit lands on. The daemon does not supply one yet, so today every submission
-it makes returns no order id, no challenge and `verified: false`: the record is
-`'submitted-unverified'` and the budget is committed, including when the merchant
-put up a 3-D Secure or CAPTCHA step instead of an order. The pause described
-above is part of the driver and the flow, but this daemon cannot raise it. Treat
-every purchase as unconfirmed until the owner checks the merchant's order
-history and reconciles it.
+**What this daemon can and cannot read back.** After the submit the daemon
+reads the page it landed on, in code and with no model request
+(`platform/payments/checkout-landing.ts`). A confirmation sentence, with the
+order number the shop printed beside it, makes the submission verified: the
+record is `'purchased'` with that `merchantOrderId`. A page that mentions a
+decline, a failure or a retry, a page it cannot read, or a page that says
+nothing it recognises leaves the record `'submitted-unverified'`, and the
+budget is committed either way. It does not recognise a 3-D Secure or CAPTCHA
+step, so the challenge pause described above is part of the driver and the
+flow but this daemon cannot raise it; such a submission is recorded as
+unverified. An unverified purchase moves to `'purchased'` when the shop's
+confirmation mail is tied to it (§9.4.1); otherwise the owner
+checks the merchant's order history and reconciles it.
 
 **When a submit runs its course with no challenge, the outcome is still one
 of two things, not a single "it worked."** If the merchant's own response

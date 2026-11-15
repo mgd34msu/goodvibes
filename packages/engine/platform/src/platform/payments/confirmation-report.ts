@@ -11,6 +11,11 @@
  * A mail about no purchase, or about two, sends nothing: the general inbound
  * path already surfaces the mail itself.
  *
+ * A purchase recorded as `submitted-unverified` (its landing page showed no
+ * confirmation) is moved to `purchased` by the first mail tied to it, taking
+ * the mail's order number when it has none, and that report says the order
+ * went through. The move happens once, so the owner is told once.
+ *
  * Each purchase is reported once per kind of mail (confirmed, shipped,
  * delivered), worded by kind. The kind comes from the subject in code; a
  * purchase whose delivery was reported is no longer a candidate, so later shop
@@ -23,7 +28,14 @@ import type { PurchaseRecord } from './purchase-record.js';
 import { ownerSuppliedText, parseCurrencyCode } from './types.js';
 
 export type ConfirmationReportOutcome =
-  | { readonly kind: 'reported'; readonly purchaseId: string; readonly refund?: boolean | undefined; readonly mailKind?: OrderMailKind | undefined }
+  | {
+    readonly kind: 'reported';
+    readonly purchaseId: string;
+    readonly refund?: boolean | undefined;
+    readonly mailKind?: OrderMailKind | undefined;
+    /** True when this mail moved an unverified purchase to purchased. */
+    readonly settled?: boolean | undefined;
+  }
   | { readonly kind: 'not-reported'; readonly reason: 'unrelated' | 'ambiguous' | 'unreportable' | 'already-reported' };
 
 const DELIVERED_SUBJECT = /\b(?:has been|was|got|been) delivered\b|^\s*delivered\b|\bdelivery (?:complete|confirmation)\b/i;
@@ -64,6 +76,11 @@ export async function reportOrderConfirmation(input: {
    * recorded, which sends nothing again. Absent: refunds are not recognised.
    */
   readonly recordRefund?: ((purchaseId: string, refundedAt: string) => Promise<boolean>) | undefined;
+  /**
+   * Moves an unverified purchase to `purchased` with the mail's order number;
+   * true only on the call that moved it. Absent: records are never upgraded.
+   */
+  readonly recordConfirmation?: ((purchaseId: string, orderNumber: string | null) => Promise<boolean>) | undefined;
   /** Absent: every matching mail is reported (no memory across mails). */
   readonly reports?: OrderMailReports | undefined;
 }): Promise<ConfirmationReportOutcome> {
@@ -87,20 +104,26 @@ export async function reportOrderConfirmation(input: {
     return { kind: 'reported', purchaseId: record.purchaseId, refund: true };
   }
   const reported = reportedKinds?.get(record.purchaseId) ?? [];
+  // An unverified purchase is read even when this kind was reported: the mail
+  // is what settles it, and the move itself happens only once.
+  const recordConfirmation = record.outcome === 'submitted-unverified' ? input.recordConfirmation : undefined;
+  const unverified = recordConfirmation !== undefined;
   const subjectKind = orderMailKind(input.mail.subject);
-  if (reported.includes(subjectKind) && subjectKind !== 'confirmed') return { kind: 'not-reported', reason: 'already-reported' };
-  if (subjectKind === 'confirmed' && reported.includes('confirmed') && reported.includes('shipped')) {
+  if (!unverified && reported.includes(subjectKind) && subjectKind !== 'confirmed') return { kind: 'not-reported', reason: 'already-reported' };
+  if (!unverified && subjectKind === 'confirmed' && reported.includes('confirmed') && reported.includes('shipped')) {
     return { kind: 'not-reported', reason: 'already-reported' };
   }
   const confirmation = await extractConfirmationFacts(input.mail);
   const kind = orderMailKind(input.mail.subject, confirmation.trackingReference);
-  if (reported.includes(kind)) return { kind: 'not-reported', reason: 'already-reported' };
+  const settled = recordConfirmation !== undefined && await recordConfirmation(record.purchaseId, confirmation.orderNumber);
+  if (!settled && reported.includes(kind)) return { kind: 'not-reported', reason: 'already-reported' };
   await input.send(renderConfirmationReport({
     facts,
     confirmation,
     senderDomain,
     kind,
+    settled,
   }));
   if (reports !== undefined) await reports.record(record.purchaseId, kind);
-  return { kind: 'reported', purchaseId: record.purchaseId, mailKind: kind };
+  return { kind: 'reported', purchaseId: record.purchaseId, mailKind: kind, ...(settled ? { settled: true } : {}) };
 }

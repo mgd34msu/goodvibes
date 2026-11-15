@@ -257,3 +257,19 @@ test('unknown recorded event semantics refuse recovery rather than claiming eith
   expect(ledger.list({ limit: 10, dayKey: undefined }).total).toBe(1);
   await expect(ledger.has('pur-1')).rejects.toBeInstanceOf(PaymentPurchaseLedgerError);
 });
+
+test('a shop confirmation moves an unverified purchase to purchased once and keeps an order number already recorded', async () => {
+  const ledger = new DaemonPurchaseLedger({ filePath });
+  await ledger.record(purchase({ purchaseId: 'unverified', outcome: 'submitted-unverified', merchantOrderId: null }));
+  await ledger.record(purchase({ purchaseId: 'numbered', outcome: 'submitted-unverified', merchantOrderId: 'PAGE-1' }));
+  await ledger.record(purchase({ purchaseId: 'verified' }));
+  expect(await ledger.recordConfirmed('unverified', 'MAIL-7')).toBe(true);
+  expect(await ledger.recordConfirmed('unverified', 'MAIL-8')).toBe(false);
+  expect(await ledger.recordConfirmed('numbered', 'MAIL-9')).toBe(true);
+  expect(await ledger.recordConfirmed('verified', 'MAIL-10')).toBe(false);
+  const reopened = new DaemonPurchaseLedger({ filePath });
+  expect(reopened.get('unverified')).toMatchObject({ outcome: 'purchased', merchantOrderId: 'MAIL-7', totalMinorUnits: 5578 });
+  expect(reopened.get('numbered')).toMatchObject({ outcome: 'purchased', merchantOrderId: 'PAGE-1' });
+  expect(reopened.get('verified')).toMatchObject({ outcome: 'purchased', merchantOrderId: 'ORD-9' });
+  expect(reopened.list({ limit: 10, dayKey: undefined }).total).toBe(3);
+});

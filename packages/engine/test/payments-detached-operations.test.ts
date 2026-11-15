@@ -142,7 +142,6 @@ test('an unconfirmed submission stays listed after more than a hundred later pur
   }
   const reopened = new DurablePaymentOperations(path);
   expect(reopened.list().some(entry => entry.purchaseId === 'unconfirmed')).toBe(true);
-  expect(paymentOperationDescription(reopened.get('unconfirmed')!)).toContain('cannot confirm orders');
 });
 
 test('durable acknowledgement survives request abort, uses a root-owned context and drains on stop', async () => {

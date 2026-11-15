@@ -31,6 +31,8 @@ interface AgentWorkspaceLocalOperationHost {
   localEditor: AgentWorkspaceLocalEditor | null;
   hasCommandDispatch(): boolean;
   dispatchWorkspaceCommand(command: string): void;
+  hasPromptDispatch(): boolean;
+  dispatchWorkspacePrompt(prompt: string): void;
 }
 
 interface AgentWorkspaceLocalOperationCallbacks {
@@ -39,6 +41,15 @@ interface AgentWorkspaceLocalOperationCallbacks {
   readonly memoryApi: () => MemoryApi;
   readonly finishLocalOperation: (kind: AgentWorkspaceLocalEditorKind, title: string, detail: string) => void;
   readonly openDeleteEditor: (kind: AgentWorkspaceLocalEditorKind, selected: AgentWorkspaceLocalLibraryItem) => void;
+}
+
+/**
+ * Only a reviewed skill, routine or persona reaches the prompt, so an enable or
+ * use says what happens next from the record's stored review state.
+ */
+function promptUseDetail(selected: AgentWorkspaceLocalLibraryItem, kind: 'persona' | 'skill' | 'routine', live: string): string {
+  if (selected.reviewState === 'reviewed') return `${selected.name} ${live}`;
+  return `${selected.name} is not reviewed yet (${selected.reviewState || 'fresh'}), so it is not used in turns until it is. Use the "Review selected" row to allow it.`;
 }
 
 function setGuidanceEditor(host: AgentWorkspaceLocalOperationHost, editor: AgentWorkspaceLocalEditor, status: string): void {
@@ -153,7 +164,7 @@ export function applyAgentWorkspaceLocalLibraryOperation(
       setGuidanceEditor(host, createPersonaUpdateEditor(persona, registry.snapshot().activePersonaId === persona.id), `Editing persona ${persona.name}.`);
     } else if (operation === 'persona-use') {
       AgentPersonaRegistry.fromShellPaths(shellPaths).setActive(selected.id);
-      callbacks.finishLocalOperation('persona', `Using persona ${selected.name}`, `${selected.name} will shape later main-conversation turns.`);
+      callbacks.finishLocalOperation('persona', `Using persona ${selected.name}`, promptUseDetail(selected, 'persona', 'will shape later main-conversation turns.'));
     } else if (operation === 'persona-review') {
       AgentPersonaRegistry.fromShellPaths(shellPaths).markReviewed(selected.id);
       callbacks.finishLocalOperation('persona', `Reviewed persona ${selected.name}`, `${selected.name} is marked reviewed.`);
@@ -165,7 +176,7 @@ export function applyAgentWorkspaceLocalLibraryOperation(
       setGuidanceEditor(host, createSkillUpdateEditor(skill), `Editing skill ${skill.name}.`);
     } else if (operation === 'skill-enable') {
       AgentSkillRegistry.fromShellPaths(shellPaths).setEnabled(selected.id, true);
-      callbacks.finishLocalOperation('skill', `Enabled skill ${selected.name}`, `${selected.name} can now inform main-conversation turns.`);
+      callbacks.finishLocalOperation('skill', `Enabled skill ${selected.name}`, promptUseDetail(selected, 'skill', 'can now inform main-conversation turns.'));
     } else if (operation === 'skill-disable') {
       AgentSkillRegistry.fromShellPaths(shellPaths).setEnabled(selected.id, false);
       callbacks.finishLocalOperation('skill', `Disabled skill ${selected.name}`, `${selected.name} remains saved but is no longer injected into guidance.`);
@@ -186,17 +197,28 @@ export function applyAgentWorkspaceLocalLibraryOperation(
         host.lastActionResult = {
           kind: 'dispatched',
           title: `Opening routine ${selected.name}`,
-          detail: `${selected.name} will print its workflow steps in the main conversation. No hidden job was created.`,
+          detail: `${selected.name} sends its steps to the main conversation as your next message. No hidden job was created.`,
           command,
           safety: 'safe',
         };
         return;
       }
-      AgentRoutineRegistry.fromShellPaths(shellPaths).markStarted(selected.id);
-      callbacks.finishLocalOperation('routine', `Started routine ${selected.name}`, `${selected.name} was marked started for this main-conversation workflow. No hidden job was created.`);
+      if (!host.hasPromptDispatch()) {
+        host.status = `Routine ${selected.name} was not started.`;
+        host.lastActionResult = {
+          kind: 'guidance',
+          title: `Routine ${selected.name} not started`,
+          detail: 'A routine runs as a message in the main conversation, and this workspace cannot send one. Run /routines start in the Agent composer.',
+          safety: 'safe',
+        };
+        return;
+      }
+      const routine = AgentRoutineRegistry.fromShellPaths(shellPaths).markStarted(selected.id);
+      host.dispatchWorkspacePrompt(`Run Agent routine ${routine.name} (${routine.id}).\n\n${routine.steps}`);
+      callbacks.finishLocalOperation('routine', `Started routine ${selected.name}`, `${selected.name}'s steps were sent to the main conversation as your next message. No hidden job was created.`);
     } else if (operation === 'routine-enable') {
       AgentRoutineRegistry.fromShellPaths(shellPaths).setEnabled(selected.id, true);
-      callbacks.finishLocalOperation('routine', `Enabled routine ${selected.name}`, `${selected.name} can now inform main-conversation turns.`);
+      callbacks.finishLocalOperation('routine', `Enabled routine ${selected.name}`, promptUseDetail(selected, 'routine', 'can now inform main-conversation turns.'));
     } else if (operation === 'routine-disable') {
       AgentRoutineRegistry.fromShellPaths(shellPaths).setEnabled(selected.id, false);
       callbacks.finishLocalOperation('routine', `Disabled routine ${selected.name}`, `${selected.name} remains saved but is no longer injected into guidance.`);

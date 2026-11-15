@@ -422,13 +422,42 @@ export async function runRoutinesRuntimeCommand(args: readonly string[], ctx: Co
         ctx.print(`Usage: /routines ${sub} <id>`);
         return;
       }
-      const routine = routineRegistry.markStarted(id);
-      const readiness = evaluateAgentRoutineReadiness(routine);
+      const found = routineRegistry.get(id);
+      if (!found) {
+        ctx.print(`Unknown Agent routine ${id}. List them with /routines list.`);
+        return;
+      }
+      const readiness = evaluateAgentRoutineReadiness(found);
+      const readinessLine = `  readiness: ${readiness.ready ? 'ready' : `needs setup (${readiness.missing.map(formatAgentSkillRequirement).join(', ')})`}`;
+      // A model running the command reads the printed steps as its tool result,
+      // so the print is the start. The owner's start sends the steps as a message,
+      // since printed text is display-only and never reaches the model.
+      if (ctx.invokedByModel !== true) {
+        if (!ctx.submitInput) {
+          ctx.print([
+            `Not started: Agent routine ${found.id} runs as a message in the conversation, and this surface cannot send one.`,
+            readinessLine,
+            '  next open the Agent and run /routines start there, or send these steps as a message:',
+            '',
+            found.steps,
+          ].join('\n'));
+          return;
+        }
+        const routine = routineRegistry.markStarted(found.id);
+        ctx.print([
+          `Started Agent routine ${routine.id}: its steps were sent as your next message (after the current turn, if one is running).`,
+          `  name ${routine.name}`,
+          readinessLine,
+        ].join('\n'));
+        ctx.submitInput(`Run Agent routine ${routine.name} (${routine.id}).\n\n${routine.steps}`);
+        return;
+      }
+      const routine = routineRegistry.markStarted(found.id);
       ctx.print([
         `Started Agent routine ${routine.id}`,
         `  id ${routine.id}`,
         `  name ${routine.name}`,
-        `  readiness: ${readiness.ready ? 'ready' : `needs setup (${readiness.missing.map(formatAgentSkillRequirement).join(', ')})`}`,
+        readinessLine,
         '  policy same main conversation; no hidden job, runtime mutation, or external side effect was started',
         '',
         routine.steps,

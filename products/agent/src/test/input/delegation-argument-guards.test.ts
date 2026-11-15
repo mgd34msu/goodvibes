@@ -46,11 +46,11 @@ describe('/delegate arguments', () => {
     expect(String(submitted[0]?.body)).toContain('Fix the --verbose flag');
     expect(String(submitted[0]?.body)).toContain('flaky');
   });
-  test('a lone `status` is not delegated as a task, but -- lets a task be that word', async () => {
-    const { printed, submitted, registry, ctx } = rig();
+  test('`status` reads delegations instead of delegating, and -- lets a task be that word', async () => {
+    const { submitted, registry, ctx } = rig();
     await registry.execute('delegate', ['status'], ctx);
+    await registry.execute('delegate', ['status', 'shared-session-1'], ctx);
     expect(submitted).toEqual([]);
-    expect(printed.join('\n')).toContain('`status` is not a delegate subcommand');
     await registry.execute('delegate', ['--', 'status'], ctx);
     expect(submitted).toHaveLength(1);
   });

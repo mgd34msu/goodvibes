@@ -267,21 +267,22 @@ export function buildAgentWorkspaceRuntimeSnapshot(context: CommandContext): Age
     truncated: artifactListSnapshot.truncated,
     resolveArtifact: buildAgentWorkspaceArtifactResolver(context),
   };
+  const reviewPacketDefaults = buildReviewPacketDefaults(
+    documentDrafts,
+    artifactListSnapshot.items,
+  );
   const reviewerBadge = reviewerReadinessBadge(
     documentDrafts,
     artifactListSnapshot.items,
     artifactListSnapshot.available,
     artifactListInfo,
+    reviewPacketDefaults,
   );
   const reviewPacketTimeline = buildReviewPacketTimeline(
     documentDrafts,
     artifactListSnapshot.items,
     artifactListSnapshot.available,
     artifactListInfo,
-  );
-  const reviewPacketDefaults = buildReviewPacketDefaults(
-    documentDrafts,
-    artifactListSnapshot.items,
   );
   const reviewPacketWizard = buildReviewPacketWizard(
     documentDrafts,

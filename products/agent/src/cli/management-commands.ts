@@ -12,38 +12,35 @@ import '@goodvibes-jev/engine/platform/platform/config';
 
 import '@goodvibes-jev/engine/platform/platform/config';
 import '@/runtime/index.ts';
-import { buildCompanionConnectionInfo, encodeConnectionPayload, formatConnectionBlock, stableUrlHostForBindHost } from '@goodvibes-jev/engine/platform/platform/pairing';
-import { generateQrMatrix, renderQrToString } from '@goodvibes-jev/engine/platform/platform/pairing';
-import { resolveRuntimeEndpointBinding } from './endpoints.ts';
+import { mintAgentDevicePairing } from '../agent/device-pairing.ts';
 import type { CliCommandRuntime } from './management.ts';
-import { GOODVIBES_AGENT_PAIRING_SURFACE } from '../config/surface.ts';
-import { connectedHostTokenRequiredMessage, readConnectedHostOperatorToken } from '../runtime/connected-host-auth.ts';
 import { formatAgentRecordSource } from '../agent/record-labels.ts';
 import { appendTemporalLabel } from './temporal-label.ts';
+import { createAgentDaemonVerbCaller } from '../runtime/client/daemon-verbs.ts';
 
+/**
+ * `goodvibes-agent pair`: mint a named device token on the connected host and
+ * print its `#pair=` link and QR. The Agent's own host credential is never printed.
+ */
 export async function renderPairing(runtime: CliCommandRuntime): Promise<{ readonly output: string; readonly exitCode: number }> {
-  const tokenRecord = readConnectedHostOperatorToken(runtime.homeDirectory);
-  if (!tokenRecord.token) {
-    const error = connectedHostTokenRequiredMessage(tokenRecord.path);
+  const args = runtime.cli.commandArgs;
+  const nameIndex = args.indexOf('--name');
+  const name = nameIndex >= 0 ? args[nameIndex + 1] : undefined;
+  const json = runtime.cli.flags.outputFormat === 'json';
+  const outcome = await mintAgentDevicePairing(
+    createAgentDaemonVerbCaller({ configManager: runtime.configManager, homeDirectory: runtime.homeDirectory, invokeTimeoutMs: 15_000 }),
+    { ...(name === undefined ? {} : { name }), qr: !json },
+  );
+  if (!outcome.ok) {
     return {
-      output: runtime.cli.flags.outputFormat === 'json'
-        ? JSON.stringify({ ok: false, kind: 'auth_required', error, tokenPath: tokenRecord.path }, null, 2)
-        : error,
+      output: json ? JSON.stringify({ ok: false, kind: 'pairing_failed', error: outcome.error, next: outcome.next }, null, 2) : `${outcome.error}\n  next ${outcome.next}`,
       exitCode: 1,
     };
   }
-  const binding = resolveRuntimeEndpointBinding(runtime.configManager, 'controlPlane');
-  // Where another device dials: the engine's stable-host rule, never loopback.
-  const connectedHostUrl = `http://${stableUrlHostForBindHost(binding.host).host}:${binding.port}`;
-  const info = buildCompanionConnectionInfo({
-    daemonUrl: connectedHostUrl,
-    token: tokenRecord.token,
-    username: 'admin',
-    surface: GOODVIBES_AGENT_PAIRING_SURFACE,
-  });
-  const payload = encodeConnectionPayload(info);
-  const qr = renderQrToString(generateQrMatrix(payload));
-  return { output: [formatConnectionBlock(info, payload), '', qr].join('\n'), exitCode: 0 };
+  return {
+    output: json ? JSON.stringify({ ok: true, link: outcome.link, tokenName: outcome.tokenName, tokenId: outcome.tokenId }, null, 2) : outcome.text,
+    exitCode: 0,
+  };
 }
 
 /** The refusal `tasks submit` prints: the Agent's task workflow belongs to the connected host. */
@@ -89,7 +86,7 @@ export const { handleSessions, handleTasks } = createCliWorkspaceCommands<CliCom
   inline: false,
   time: (timestamp) => appendTemporalLabel(new Date(timestamp).toISOString(), timestamp),
   allowSubmit: false,
-  emptyTasks: 'GoodVibes tasks\n  No connected-host tasks are currently recorded.',
+  verbs: (runtime) => createAgentDaemonVerbCaller({ configManager: runtime.configManager, homeDirectory: runtime.homeDirectory, invokeTimeoutMs: 15_000 }),
   async submit(_runtime, _rest) {
     return taskSubmitRefusal().text;
   },

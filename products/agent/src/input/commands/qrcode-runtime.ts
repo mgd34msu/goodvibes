@@ -1,97 +1,36 @@
 import type { CommandRegistry } from '../command-registry.ts';
-import {
-  buildCompanionConnectionInfo,
-  type CompanionConnectionInfo,
-  encodeConnectionPayload,
-  formatHttpOrigin,
-  generateQrMatrix,
-  isWildcardBindHost,
-  refreshStableHostInputs,
-  renderQrToString,
-  stableUrlHostForBindHost,
-} from '@goodvibes-jev/engine/platform/platform/pairing';
-import { GOODVIBES_AGENT_PAIRING_SURFACE } from '../../config/surface.ts';
-import { resolveRuntimeEndpointBinding } from '../../cli/endpoints.ts';
-import { connectedHostTokenRequiredMessage, readConnectedHostOperatorToken } from '../../runtime/connected-host-auth.ts';
+import { mintAgentDevicePairing } from '../../agent/device-pairing.ts';
+import { createAgentDaemonVerbCaller } from '../../runtime/client/daemon-verbs.ts';
 import { requirePlatform, requireShellPaths } from './runtime-services.ts';
 
-
-
-function formatTokenLine(token: string, showToken: boolean): string {
-  if (showToken) return `Token:          ${token}`;
-  return 'Token:          present (hidden in text; QR contains pairing payload)';
-}
-
-function formatAgentPairingBlock(info: CompanionConnectionInfo, qr: string, showToken: boolean, alternateUrl: string | undefined): string {
-  return [
-    `GoodVibes Agent companion pairing v${info.version}`,
-    '━━━━━━━━━━━━━━━━━━━━━━━━',
-    `Connected host: ${info.url}`,
-    `Surface:        ${info.surface}`,
-    `User:           ${info.username}`,
-    formatTokenLine(info.token, showToken),
-    '',
-    'Scan to connect:',
-    '',
-    qr,
-    '',
-    ...(alternateUrl ? [`If the device cannot open ${info.url}, use ${alternateUrl} instead.`, ''] : []),
-    showToken
-      ? 'Manual token display was explicitly confirmed for this command.'
-      : 'For manual setup, rerun /pair --show-token --yes to print the token once.',
-    'Agent is waiting for the companion app to connect to the owning GoodVibes host.',
-  ].join('\n');
-}
-
-function shouldShowToken(args: readonly string[]): boolean {
-  return args.includes('--show-token') || args.includes('--manual-token');
-}
-
+/**
+ * `/qrcode` (aliases `/qr`, `/pair`): pair a device with the connected host.
+ * Each run mints a new named device token on the host and shows its `#pair=`
+ * link and QR, the same pairing the TUI does; the device appears in the host's
+ * device list and is revoked there on its own.
+ */
 export function registerQrcodeRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
     name: 'qrcode',
     aliases: ['qr', 'pair'],
-    description: 'Print companion pairing details and a QR code',
+    description: 'Pair a device with the connected host: mints a named device token and shows its link and QR',
     hidden: true,
-    usage: '',
+    usage: '[--name <device name>]',
+    argsHint: '[--name <device name>]',
     async handler(args, ctx) {
-      // The QR payload and the --show-token text both carry the host's admin token.
+      // Minting a device token grants a new device access to the host.
       if (ctx.invokedByModel === true) {
-        ctx.print('Pairing details contain the connected host operator token, so /qrcode is refused when a model runs it. The owner can type /qrcode in the live Agent terminal.');
+        ctx.print('Refused: /pair gives a new device access to the connected host, so it only counts when you type it yourself. Nothing was minted.');
         return;
       }
-      const shellPaths = requireShellPaths(ctx);
-      const configManager = requirePlatform(ctx).configManager;
-      const tokenRecord = readConnectedHostOperatorToken(shellPaths.homeDirectory);
-      if (!tokenRecord.token) {
-        ctx.print(connectedHostTokenRequiredMessage(tokenRecord.path));
-        return;
-      }
-      const binding = resolveRuntimeEndpointBinding(configManager, 'controlPlane');
-      // The full host ladder (Tailscale name, a `.local` name that resolves here) needs
-      // the asynchronous probes; a wildcard bind waits for them once, then they are cached.
-      const hostInputs = isWildcardBindHost(binding.host) ? await refreshStableHostInputs() : undefined;
-      const resolvedHost = stableUrlHostForBindHost(binding.host, hostInputs ? () => hostInputs : undefined);
-      const connectedHostUrl = formatHttpOrigin(resolvedHost.host, binding.port);
-      const alternateUrl = resolvedHost.alternateHost ? formatHttpOrigin(resolvedHost.alternateHost, binding.port) : undefined;
-      const info = buildCompanionConnectionInfo({
-        daemonUrl: connectedHostUrl,
-        token: tokenRecord.token,
-        username: 'admin',
-        surface: GOODVIBES_AGENT_PAIRING_SURFACE,
+      const nameIndex = args.indexOf('--name');
+      const name = nameIndex >= 0 ? args[nameIndex + 1] : undefined;
+      const verbs = createAgentDaemonVerbCaller({
+        configManager: requirePlatform(ctx).configManager,
+        homeDirectory: requireShellPaths(ctx).homeDirectory,
       });
-      const payload = encodeConnectionPayload(info);
-      const qr = renderQrToString(generateQrMatrix(payload));
-      const showToken = shouldShowToken(args);
-      if (showToken && !args.includes('--yes')) {
-        ctx.print([
-          'Manual companion token display requires confirmation.',
-          '  rerun: /pair --show-token --yes',
-          '  QR pairing remains available without printing the raw token.',
-        ].join('\n'));
-        return;
-      }
-      ctx.print(formatAgentPairingBlock(info, qr, showToken, alternateUrl));
+      const outcome = await mintAgentDevicePairing(verbs, name === undefined ? {} : { name });
+      ctx.print(outcome.ok ? outcome.text : `${outcome.error}\n  next ${outcome.next}`);
     },
   });
 }

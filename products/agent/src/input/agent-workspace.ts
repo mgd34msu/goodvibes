@@ -16,7 +16,7 @@ import { AGENT_WORKSPACE_CATEGORIES } from './agent-workspace-categories.ts';
 import { buildAgentWorkspaceCommandEditorSubmission, isAgentWorkspaceCommandEditorKind } from './agent-workspace-command-editor.ts';
 import { createDeleteEditor, editorCategoryId } from './agent-workspace-editors.ts';
 import { submitAgentWorkspaceLocalRegistryEditor } from './agent-workspace-local-editor-submission.ts';
-import { clampAgentWorkspaceLocalLibrarySelection, moveAgentWorkspaceLocalLibraryItemSelection, selectedAgentWorkspaceLocalLibraryItem, type AgentWorkspaceLocalSelectionIndexes } from './agent-workspace-local-selection.ts';
+import { createAgentWorkspaceLocalSelection, moveAgentWorkspaceLocalLibraryItemSelection, resolveAgentWorkspaceLocalLibrarySelection, selectAgentWorkspaceLocalLibraryItem, selectedAgentWorkspaceLocalLibraryItem, type AgentWorkspaceLocalSelection } from './agent-workspace-local-selection.ts';
 import { applyAgentWorkspaceLocalLibraryOperation } from './agent-workspace-local-operations.ts';
 import { deleteAgentWorkspaceMemoryEditor, submitAgentWorkspaceMemoryEditor } from './agent-workspace-memory-editor.ts';
 import { jumpAgentWorkspaceSelection, moveAgentWorkspaceSelection, selectAgentWorkspaceCategory } from './agent-workspace-navigation.ts';
@@ -41,6 +41,8 @@ export type { AgentWorkspaceAction, AgentWorkspaceActionResult, AgentWorkspaceAc
 export { AGENT_WORKSPACE_MODAL_NAME } from './agent-workspace-types.ts';
 export { buildAgentWorkspaceRuntimeSnapshot } from './agent-workspace-snapshot.ts';
 export { handleAgentWorkspaceToken } from './agent-workspace-token.ts';
+
+const LOCAL_LIBRARY_KINDS: readonly AgentWorkspaceLocalEditorKind[] = ['memory', 'note', 'persona', 'skill', 'routine', 'profile'];
 
 export class AgentWorkspace {
   public active = false;
@@ -67,7 +69,8 @@ export class AgentWorkspace {
   public resultScroll = 0;
   public workContextScroll = 0;
   public resultScrollFor: AgentWorkspaceActionResult | null = null;
-  public readonly selectedLibraryItemIndexes: AgentWorkspaceLocalSelectionIndexes = { memory: 0, note: 0, persona: 0, skill: 0, routine: 0, profile: 0 };
+  /** The selected note, memory, skill, routine and persona, held by id. */
+  public readonly localSelection: AgentWorkspaceLocalSelection = createAgentWorkspaceLocalSelection();
   private context: CommandContext | null = null;
   private dispatchCommand: AgentWorkspaceCommandDispatcher | null = null;
   private dispatchPrompt: AgentWorkspacePromptDispatcher | null = null;
@@ -244,7 +247,7 @@ export class AgentWorkspace {
   }
 
   selectedLocalLibraryItem(kind: AgentWorkspaceLocalEditorKind): AgentWorkspaceLocalLibraryItem | null {
-    return selectedAgentWorkspaceLocalLibraryItem(this.runtimeSnapshot, this.selectedLibraryItemIndexes, kind);
+    return selectedAgentWorkspaceLocalLibraryItem(this.runtimeSnapshot, this.localSelection, kind);
   }
 
   settingActionDisplay(action: AgentWorkspaceAction): AgentWorkspaceSettingActionDisplay | null {
@@ -397,12 +400,7 @@ export class AgentWorkspace {
   clampSelection(): void {
     this.selectedCategoryIndex = Math.max(0, Math.min(this.selectedCategoryIndex, this.categories.length - 1));
     this.selectedActionIndex = Math.max(0, Math.min(this.selectedActionIndex, this.actions.length - 1));
-    clampAgentWorkspaceLocalLibrarySelection(this.runtimeSnapshot, this.selectedLibraryItemIndexes, 'memory');
-    clampAgentWorkspaceLocalLibrarySelection(this.runtimeSnapshot, this.selectedLibraryItemIndexes, 'note');
-    clampAgentWorkspaceLocalLibrarySelection(this.runtimeSnapshot, this.selectedLibraryItemIndexes, 'persona');
-    clampAgentWorkspaceLocalLibrarySelection(this.runtimeSnapshot, this.selectedLibraryItemIndexes, 'skill');
-    clampAgentWorkspaceLocalLibrarySelection(this.runtimeSnapshot, this.selectedLibraryItemIndexes, 'routine');
-    clampAgentWorkspaceLocalLibrarySelection(this.runtimeSnapshot, this.selectedLibraryItemIndexes, 'profile');
+    for (const kind of LOCAL_LIBRARY_KINDS) resolveAgentWorkspaceLocalLibrarySelection(this.runtimeSnapshot, this.localSelection, kind);
   }
 
   moveLocalLibraryItemSelection(kind: AgentWorkspaceLocalEditorKind, delta: number): void {
@@ -597,7 +595,7 @@ export class AgentWorkspace {
 
   private finishLocalOperation(kind: AgentWorkspaceLocalEditorKind, title: string, detail: string): void {
     this.runtimeSnapshot = this.context ? buildAgentWorkspaceRuntimeSnapshot(this.context) : this.runtimeSnapshot;
-    clampAgentWorkspaceLocalLibrarySelection(this.runtimeSnapshot, this.selectedLibraryItemIndexes, kind);
+    resolveAgentWorkspaceLocalLibrarySelection(this.runtimeSnapshot, this.localSelection, kind);
     this.status = title;
     this.lastActionResult = {
       kind: 'refreshed',
@@ -703,7 +701,7 @@ export class AgentWorkspace {
       }
       // The editor stays open while the save is awaited, so a second Enter would add a second record.
       if (this.memorySaveInFlight) {
-        this.status = 'Still saving Agent memory; waiting for the first save to finish.';
+        this.status = 'Not saved again: the first save of this memory is still running; its result appears here when it finishes.';
         requestRender?.();
         return;
       }
@@ -851,6 +849,7 @@ export class AgentWorkspace {
       detail: `${record.summary} (${record.id}) was saved to Agent-owned memory only.`,
       safety: 'safe',
     };
+    selectAgentWorkspaceLocalLibraryItem(this.runtimeSnapshot, this.localSelection, 'memory', record.id);
     this.clampSelection();
   }
 
@@ -870,6 +869,7 @@ export class AgentWorkspace {
       detail: `${name} (${id}) was saved to the Agent-local ${categoryId} registry.`,
       safety: 'safe',
     };
+    selectAgentWorkspaceLocalLibraryItem(this.runtimeSnapshot, this.localSelection, kind, id);
     this.clampSelection();
   }
 

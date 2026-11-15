@@ -62,9 +62,10 @@ export function parseAgentLocalLibraryArgs(
  */
 export function resolveCommandFilePath(ctx: CommandContext, raw: string, purpose: 'read' | 'write'): string | null {
   const shellPaths = requireShellPaths(ctx);
-  if (ctx.invokedByModel === true && !shellPaths.isWithinWorkingDirectory(raw)) {
+  const resolved = shellPaths.resolveWorkspacePath(raw);
+  if (ctx.invokedByModel === true && !shellPaths.isWithinWorkingDirectory(resolved)) {
     ctx.print(`Refused: ${raw} is outside the workspace (${shellPaths.workingDirectory}). A command run by the model can ${purpose} only inside the workspace; the owner can type the command with that path.`);
     return null;
   }
-  return shellPaths.resolveWorkspacePath(raw);
+  return resolved;
 }

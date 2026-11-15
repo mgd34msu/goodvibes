@@ -143,9 +143,9 @@ async function setAccount(args: readonly string[], ctx: CommandContext): Promise
  * read the calendar, so it goes to the encrypted store, not to config.
  *
  * It is also subscribed as a read-only feed, because that registry is what
- * `/calendar refresh` and `/calendar upcoming` read. The subscription goes
- * first: it fetches the feed once, so an address that does not work stores
- * nothing and says why.
+ * `/calendar refresh` and `/calendar upcoming` read. The new address is
+ * fetched before anything is replaced, so an address that does not work
+ * leaves the current feed and its stored address as they were.
  */
 async function setCalendarAddress(args: readonly string[], ctx: CommandContext, fetcher?: FeedFetcher): Promise<void> {
   const url = (args[0] ?? '').trim();
@@ -161,17 +161,33 @@ async function setCalendarAddress(args: readonly string[], ctx: CommandContext, 
     ctx.print('Nothing was stored: no secret manager is available, and the feed address is stored only as a secret.');
     return;
   }
-  // Setting the address again replaces the earlier one: the old feed is
-  // dropped (with its stored URL) first, or the subscribe below is refused as a
-  // duplicate name and the new address never lands.
+  const checked = await registry.validate(url, GOOGLE_CALENDAR_SUBSCRIPTION_NAME);
+  if (!checked.ok) {
+    ctx.print([`Nothing was stored or replaced: the calendar address could not be read (${checked.stage}); the current calendar feed, if any, is kept.`, `  ${checked.detail}`].join('\n'));
+    return;
+  }
+  // The address works. A feed under the same name would refuse the subscribe
+  // as a duplicate, so the earlier one is dropped now; its address is held so
+  // a subscribe that fails after all puts it back.
+  const previousUrl = await googleSecretPort(ctx).get(GOOGLE_SECRET_KEYS.calendarIcsUrl).catch(() => null);
   const replaced = await registry.unsubscribeWithReport(GOOGLE_CALENDAR_SUBSCRIPTION_NAME);
   const subscribed = await registry.subscribe(url, GOOGLE_CALENDAR_SUBSCRIPTION_NAME);
   if (!subscribed.ok) {
-    if (replaced.removed) {
-      ctx.print([`The calendar address could not be subscribed (${subscribed.stage}), and the previous '${GOOGLE_CALENDAR_SUBSCRIPTION_NAME}' feed was already removed.`, `  ${subscribed.detail}`].join('\n'));
+    if (!replaced.removed) {
+      ctx.print([`Nothing was stored: the calendar address could not be subscribed (${subscribed.stage}).`, `  ${subscribed.detail}`].join('\n'));
       return;
     }
-    ctx.print([`Nothing was stored: the calendar address could not be subscribed (${subscribed.stage}).`, `  ${subscribed.detail}`].join('\n'));
+    const restored = typeof previousUrl === 'string' && previousUrl.trim().length > 0
+      ? await registry.subscribe(previousUrl, GOOGLE_CALENDAR_SUBSCRIPTION_NAME)
+      : null;
+    ctx.print([
+      restored?.ok
+        ? `The new calendar address could not be subscribed (${subscribed.stage}); the previous '${GOOGLE_CALENDAR_SUBSCRIPTION_NAME}' feed was put back.`
+        : restored === null
+          ? `The new calendar address could not be subscribed (${subscribed.stage}) and the previous '${GOOGLE_CALENDAR_SUBSCRIPTION_NAME}' feed was removed; its address was not stored under the Google setup, so it could not be put back. Run /google calendar-address again.`
+          : `The new calendar address could not be subscribed (${subscribed.stage}) and the previous '${GOOGLE_CALENDAR_SUBSCRIPTION_NAME}' feed could not be put back (${restored.ok ? 'unknown' : restored.stage}); its address is still in the secret store. Run /google calendar-address again.`,
+      `  ${subscribed.detail}`,
+    ].join('\n'));
     return;
   }
   // The setup status reads this key to say a calendar address is present.

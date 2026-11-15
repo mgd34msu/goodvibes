@@ -1,151 +1,78 @@
 import { describe, expect, test } from 'bun:test';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import type { DaemonVerbCaller } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 import { ConfigManager } from '../../config/index.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../../config/surface.ts';
 import { createShellPathService } from '@/runtime/index.ts';
 import { CommandRegistry, type CommandContext } from '../../input/command-registry.ts';
 import { registerQrcodeRuntimeCommands } from '../../input/commands/qrcode-runtime.ts';
+import { mintAgentDevicePairing } from '../../agent/device-pairing.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
-function makeContext(out: string[], root: string): CommandContext {
-  const configManager = new ConfigManager({
-    surfaceRoot: GOODVIBES_AGENT_SURFACE_ROOT,
-    workingDir: root,
-    homeDir: root,
-    configDir: join(root, '.goodvibes', GOODVIBES_AGENT_SURFACE_ROOT),
-  });
+const HOST_TOKEN = 'connected-host-operator-token';
+
+function fakeHost(answer: unknown): { readonly verbs: DaemonVerbCaller; readonly calls: { readonly method: string; readonly input: unknown }[] } {
+  const calls: { method: string; input: unknown }[] = [];
   return {
-    print: (text: string) => { out.push(text); },
-    platform: { configManager },
-    workspace: {
-      shellPaths: createShellPathService({
-        workingDirectory: root,
-        homeDirectory: root,
-      }),
+    calls,
+    verbs: {
+      probe: () => ({ available: true }),
+      invoke: async <T,>(method: string, input?: unknown): Promise<T> => {
+        calls.push({ method, input });
+        return answer as T;
+      },
     },
-  } as unknown as CommandContext;
+  };
 }
 
-describe('qrcode runtime command', () => {
-  test('prints companion pairing details and QR text instead of opening a panel', async () => {
-    const registry = new CommandRegistry();
-    registerQrcodeRuntimeCommands(registry);
-    const command = registry.get('qrcode');
-    expect(command).toEqual(expect.objectContaining({
-      name: 'qrcode',
-      handler: expect.any(Function),
-    }));
-    const root = makeProjectTempDir('goodvibes-agent-qrcode');
-    const tokenDir = join(root, '.goodvibes', 'daemon');
-    mkdirSync(tokenDir, { recursive: true });
-    writeFileSync(join(tokenDir, 'operator-tokens.json'), JSON.stringify({ token: 'existing-connected-host-token' }));
-    const out: string[] = [];
-
-    await command!.handler([], makeContext(out, root));
-
-    const text = out.join('\n');
-    expect(text).toContain('goodvibes-agent');
-    expect(text).toContain('http://127.0.0.1:3421');
-    expect(text).toContain('Token:          present (hidden in text; QR contains pairing payload)');
-    expect(text).toContain('rerun /pair --show-token --yes');
-    expect(text).not.toContain('existing-connected-host-token');
-    expect(text).not.toContain('QR code panel');
+describe('device pairing from the Agent', () => {
+  test('mints a named device token on the host and shows its link, never the host credential', async () => {
+    const { verbs, calls } = fakeHost({
+      token: { id: 'tok-1', name: 'phone', token: 'device-token-1', createdAt: 1 },
+      offers: [{ kind: 'push' }],
+      fragment: '#pair=device-token-1',
+      deepLink: 'https://host.example/#pair=device-token-1',
+    });
+    const outcome = await mintAgentDevicePairing(verbs, { name: 'phone' });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.method).toBe('pairing.handoff.create');
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.link).toBe('https://host.example/#pair=device-token-1');
+    expect(outcome.tokenName).toBe('phone');
+    expect(outcome.text).not.toContain(HOST_TOKEN);
   });
 
-  test('prints manual token only after explicit confirmation', async () => {
-    const registry = new CommandRegistry();
-    registerQrcodeRuntimeCommands(registry);
-    const command = registry.get('pair');
-    expect(command).toEqual(expect.objectContaining({
-      name: 'qrcode',
-      aliases: expect.arrayContaining(['pair']),
-      handler: expect.any(Function),
-    }));
-    const root = makeProjectTempDir('goodvibes-agent-qrcode-manual');
-    const tokenDir = join(root, '.goodvibes', 'daemon');
-    mkdirSync(tokenDir, { recursive: true });
-    writeFileSync(join(tokenDir, 'operator-tokens.json'), JSON.stringify({ token: 'manual-connected-host-token' }));
-
-    const previewOut: string[] = [];
-    await command!.handler(['--show-token'], makeContext(previewOut, root));
-    const preview = previewOut.join('\n');
-    expect(preview).toContain('Manual companion token display requires confirmation.');
-    expect(preview).not.toContain('manual-connected-host-token');
-
-    const confirmedOut: string[] = [];
-    await command!.handler(['--show-token', '--yes'], makeContext(confirmedOut, root));
-    const confirmed = confirmedOut.join('\n');
-    expect(confirmed).toContain('Manual token display was explicitly confirmed');
-    expect(confirmed).toContain('manual-connected-host-token');
-  });
-
-  test('uses an environment connected-host token without exposing it by default', async () => {
-    const registry = new CommandRegistry();
-    registerQrcodeRuntimeCommands(registry);
-    const command = registry.get('pair');
-    expect(command).toEqual(expect.objectContaining({
-      name: 'qrcode',
-      aliases: expect.arrayContaining(['pair']),
-      handler: expect.any(Function),
-    }));
-    const root = makeProjectTempDir('goodvibes-agent-qrcode-env');
-    const previous = process.env.GOODVIBES_CONNECTED_HOST_TOKEN;
-    process.env.GOODVIBES_CONNECTED_HOST_TOKEN = 'env-connected-host-token';
-    const out: string[] = [];
-
-    try {
-      await command!.handler([], makeContext(out, root));
-    } finally {
-      if (previous === undefined) delete process.env.GOODVIBES_CONNECTED_HOST_TOKEN;
-      else process.env.GOODVIBES_CONNECTED_HOST_TOKEN = previous;
-    }
-
-    const text = out.join('\n');
-    expect(text).toContain('goodvibes-agent');
-    expect(text).toContain('Token:          present (hidden in text; QR contains pairing payload)');
-    expect(text).toContain('rerun /pair --show-token --yes');
-    expect(text).not.toContain('env-connected-host-token');
-    expect(text).not.toContain('Connected-host operator token is required.');
-  });
-
-  test('points to confirmed setup token provisioning when pairing token is missing', async () => {
-    const registry = new CommandRegistry();
-    registerQrcodeRuntimeCommands(registry);
-    const command = registry.get('qrcode');
-    expect(command).toEqual(expect.objectContaining({
-      name: 'qrcode',
-      handler: expect.any(Function),
-    }));
-    const root = makeProjectTempDir('goodvibes-agent-qrcode-missing');
-    const out: string[] = [];
-
-    await command!.handler([], makeContext(out, root));
-
-    const text = out.join('\n');
-    expect(text).toContain('Connected-host operator token is required.');
-    expect(text).toContain('provision_connected_host_token');
-    expect(text).toContain('confirm:true');
-    expect(text).not.toContain('existing-connected-host-token');
+  test('an unreachable host mints nothing and says what to do', async () => {
+    const outcome = await mintAgentDevicePairing({
+      probe: () => ({ available: false, reason: 'no connected host is configured' }),
+      invoke: async () => { throw new Error('not reached'); },
+    });
+    expect(outcome.ok).toBe(false);
   });
 });
 
 describe('qrcode runtime command model invocation', () => {
-  test('a model-invoked command prints no token and no pairing block', async () => {
+  test('a model-invoked command mints nothing and prints no credential', async () => {
     const registry = new CommandRegistry();
     registerQrcodeRuntimeCommands(registry);
     const root = makeProjectTempDir('goodvibes-agent-qrcode-model');
     const tokenDir = join(root, '.goodvibes', 'daemon');
     mkdirSync(tokenDir, { recursive: true });
-    writeFileSync(join(tokenDir, 'operator-tokens.json'), JSON.stringify({ token: 'model-visible-host-token' }));
+    writeFileSync(join(tokenDir, 'operator-tokens.json'), JSON.stringify({ token: HOST_TOKEN }));
     const out: string[] = [];
-    const ctx = { ...makeContext(out, root), invokedByModel: true } as CommandContext;
+    const ctx = {
+      print: (text: string) => { out.push(text); },
+      platform: { configManager: new ConfigManager({ surfaceRoot: GOODVIBES_AGENT_SURFACE_ROOT, workingDir: root, homeDir: root }) },
+      workspace: { shellPaths: createShellPathService({ workingDirectory: root, homeDirectory: root }) },
+      invokedByModel: true,
+    } as unknown as CommandContext;
 
-    await registry.get('qrcode')!.handler(['--show-token', '--yes'], ctx);
+    await registry.get('qrcode')!.handler([], ctx);
 
     const text = out.join('\n');
-    expect(text).toContain('refused when a model runs it');
-    expect(text).not.toContain('model-visible-host-token');
-    expect(text).not.toContain('Scan to connect');
+    expect(text).toStartWith('Refused');
+    expect(text).not.toContain(HOST_TOKEN);
   });
 });

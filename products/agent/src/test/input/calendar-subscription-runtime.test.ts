@@ -162,7 +162,7 @@ describe('/calendar import honest report', () => {
 });
 
 describe('/calendar run by the model', () => {
-  test.each(['subscribe', 'unsubscribe', 'refresh', 'connect', 'disconnect'])('%s is refused and starts nothing', async (verb) => {
+  test.each(['unsubscribe', 'connect', 'disconnect'])('%s is refused and starts nothing', async (verb) => {
     const { ctx, output, secretStore } = makeContext(tmpRoot());
     const registry = new CommandRegistry();
     registerCalendarRuntimeCommands(registry);

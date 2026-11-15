@@ -305,8 +305,12 @@ export async function runCalendarRuntimeCommand(args: readonly string[], ctx: Co
   }
 }
 
-/** Verbs that fetch a feed, store a credential or change the connected accounts; a model-run command may not start them. */
-const OWNER_ONLY_CALENDAR_VERBS: ReadonlySet<string> = new Set(['subscribe', 'unsubscribe', 'refresh', 'connect', 'disconnect']);
+/**
+ * Verbs that grant or remove access (an account sign-in, a stored private feed
+ * address) are the owner's to type. Subscribing to a public feed and refreshing
+ * one are outward reads the tool gate already admitted for a model-run command.
+ */
+const OWNER_ONLY_CALENDAR_VERBS: ReadonlySet<string> = new Set(['unsubscribe', 'connect', 'disconnect']);
 
 export function registerCalendarRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
@@ -318,8 +322,8 @@ export function registerCalendarRuntimeCommands(registry: CommandRegistry): void
       const sub = (args[0] ?? 'list').toLowerCase();
       if (ctx.invokedByModel === true && OWNER_ONLY_CALENDAR_VERBS.has(sub)) {
         ctx.print(
-          `Refused: /calendar ${sub} reaches outside this machine or changes which calendars are connected, so it only counts when you type it yourself `
-          + '(in the terminal: /calendar ' + sub + '). Nothing was changed. The model can read with /calendar list, upcoming, subscriptions and accounts.',
+          `Refused: /calendar ${sub} changes which calendars are connected or removes a stored feed address, so it only counts when you type it yourself `
+          + '(in the terminal: /calendar ' + sub + '). Nothing was changed. The model can still use /calendar list, upcoming, subscriptions, accounts, subscribe and refresh.',
         );
         return;
       }

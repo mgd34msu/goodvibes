@@ -9,17 +9,21 @@
  *           --all). A file edit or deletion never changes the store by itself.
  *
  * Reads and writes go through the memory spine, so with a daemon attached they
- * act on the daemon's store. A model-run command may review but not sync or
- * apply: sync writes and commits files, and apply turns file edits into store
- * changes, which is the owner's decision.
+ * act on the daemon's store. A model-run command may sync (it writes only the
+ * projection directory inside the workspace, committed in its own repository,
+ * so every change can be undone) and review, but not apply: apply turns file
+ * contents, which anything that writes the workspace can change, into memory
+ * records, which is the owner's decision.
  */
 import { existsSync } from 'node:fs';
 import type { CommandContext } from '../command-registry.ts';
 import {
   diffProjectionToProposals,
+  findOrphanedProjectionFiles,
   createMemoryProjectionGit,
   projectMemoryToFiles,
   readProjectedMemoryFiles,
+  type MemoryProjectionFile,
   type MemoryProjectionProposal,
 } from '@goodvibes-jev/engine/platform/platform/state';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
@@ -53,12 +57,11 @@ function getMemorySpine(context: CommandContext): ReturnType<typeof findMemorySp
 /** True (after printing why) when the model ran a verb that only the owner may start. */
 function refuseWhenModelRun(verb: string, effect: string, context: CommandContext): boolean {
   if (context.invokedByModel !== true) return false;
-  context.print(`Refused: /memory files ${verb} ${effect}, so it only counts when you type it yourself. Nothing was changed. /memory files review is open to the model.`);
+  context.print(`Refused: /memory files ${verb} ${effect}, so it only counts when you type it yourself. Nothing was changed. /memory files sync and review are open to the model.`);
   return true;
 }
 
 export async function handleRecallFilesSync(args: string[], context: CommandContext): Promise<void> {
-  if (refuseWhenModelRun('sync', 'writes and commits files in the workspace', context)) return;
   const memory = getMemorySpine(context);
   if (!memory) return;
 
@@ -76,9 +79,15 @@ export async function handleRecallFilesSync(args: string[], context: CommandCont
     if (report.kept && report.kept.length > 0) {
       context.print(`[memory] Kept ${report.kept.length} edited or deleted file(s) as they are: ${report.kept.join(', ')}. Run /memory files review to see them, then apply to take them into the store. A changed cls, confidence or reviewState line is read-only and has no proposal: change it back by hand so sync can refresh the file.`);
     }
+    if (report.removed && report.removed.length > 0) {
+      context.print(`[memory] Removed ${report.removed.length} file(s) whose record was deleted from the store: ${report.removed.join(', ')}.`);
+    }
+    if (report.orphaned && report.orphaned.length > 0) {
+      context.print(`[memory] Kept ${report.orphaned.length} file(s) whose record was deleted in the store because you edited them: ${report.orphaned.join(', ')}. Their edits cannot reach the store; delete the files, or add the memory again.`);
+    }
     context.print(report.committed
       ? `  committed in ${report.dir} (the projection's own repository)`
-      : report.kept && report.kept.length > 0 && report.written.length === 0
+      : report.kept && report.kept.length > 0 && report.written.length === 0 && !report.removed
         ? '  nothing to commit (no file was written)'
         : '  not committed (the directory is unchanged or git did not run)');
   } catch (error) {
@@ -86,11 +95,15 @@ export async function handleRecallFilesSync(args: string[], context: CommandCont
   }
 }
 
-/** Compute the current proposals for `dir` against the live store. Returns null (already printed) when the directory doesn't exist yet. */
+/**
+ * Compute the current proposals for `dir` against the live store, and the files
+ * whose record no longer exists. Returns null (already printed) when the
+ * directory doesn't exist yet.
+ */
 async function computeProposals(
   dir: string,
   context: CommandContext,
-): Promise<MemoryProjectionProposal[] | null> {
+): Promise<{ readonly proposals: MemoryProjectionProposal[]; readonly orphans: MemoryProjectionFile[] } | null> {
   const memory = getMemorySpine(context);
   if (!memory) return null;
   if (!existsSync(dir)) {
@@ -100,7 +113,7 @@ async function computeProposals(
   const records = await memory.list({ limit: PROJECTION_LIST_LIMIT });
   warnIfTruncated(context, records.length);
   const files = readProjectedMemoryFiles(dir);
-  return diffProjectionToProposals(records, files);
+  return { proposals: diffProjectionToProposals(records, files), orphans: findOrphanedProjectionFiles(records, files) };
 }
 
 function printProposal(context: CommandContext, proposal: MemoryProjectionProposal): void {
@@ -113,10 +126,17 @@ function printProposal(context: CommandContext, proposal: MemoryProjectionPropos
 export async function handleRecallFilesReview(args: string[], context: CommandContext): Promise<void> {
   const dir = resolveProjectionDir(args, context, 'read');
   if (dir === null) return;
-  const proposals = await computeProposals(dir, context);
-  if (proposals === null) return;
+  const computed = await computeProposals(dir, context);
+  if (computed === null) return;
+  const { proposals, orphans } = computed;
 
+  if (orphans.length > 0) {
+    context.print(`[memory] ${orphans.length} orphan file(s) in ${dir}, record no longer exists:`);
+    for (const orphan of orphans) context.print(`  orphan: ${orphan.id} (${orphan.path})`);
+    context.print('[memory] An edit to an orphan cannot reach the store. Delete the file, or add the memory again.');
+  }
   if (proposals.length === 0) {
+    if (orphans.length > 0) return;
     context.print(`[memory] No changes: ${dir} matches the store.`);
     return;
   }
@@ -144,8 +164,9 @@ export async function handleRecallFilesApply(args: string[], context: CommandCon
 
   const dir = resolveProjectionDir(args, context, 'read');
   if (dir === null) return;
-  const proposals = await computeProposals(dir, context);
-  if (proposals === null) return;
+  const computed = await computeProposals(dir, context);
+  if (computed === null) return;
+  const { proposals } = computed;
 
   const targeted = applyAll ? proposals : proposals.filter((p) => ids.has(p.id));
   if (targeted.length === 0) {

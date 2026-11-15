@@ -74,7 +74,7 @@ describe('/memory files', () => {
     expect(readFileSync(join(dir, readdirSync(dir).find((name) => name.endsWith('.md'))!), 'utf8')).toContain('Edited summary');
   });
 
-  test('a model-run command may review but not sync or apply, and cannot name a directory outside the workspace', async () => {
+  test('a model-run command may sync and review but not apply, and cannot name a directory outside the workspace', async () => {
     const record = makeMemoryRecord({ id: 'mem-a', summary: 'Original summary' });
     const { root, ctx, text, updates, deletes } = rig([record], true);
     const dir = join(root, 'projection');
@@ -82,11 +82,13 @@ describe('/memory files', () => {
     editFirstProjectedFile(dir, 'Original summary', 'Edited summary');
 
     await handleRecallFilesApply(['--all', '--dir', 'projection'], ctx);
-    await handleRecallFilesSync(['--dir', 'synced'], ctx);
-    expect(text().match(/^Refused: \/memory files (apply|sync)/gm)).toHaveLength(2);
+    expect(text().match(/^Refused: \/memory files apply/gm)).toHaveLength(1);
     expect(updates).toEqual([]);
     expect(deletes).toEqual([]);
-    expect(() => readdirSync(join(root, 'synced'))).toThrow();
+    await handleRecallFilesSync(['--dir', 'synced'], ctx);
+    expect(readdirSync(join(root, 'synced')).some((name) => name.endsWith('.md'))).toBe(true);
+    await handleRecallFilesSync(['--dir', '/etc/goodvibes-projection'], ctx);
+    expect(text()).toContain('is outside the workspace');
 
     await handleRecallFilesReview(['--dir', 'projection'], ctx);
     expect(text()).toContain('mem-a [update]');

@@ -14,6 +14,7 @@ import type { OperatorMethodOutput } from '@goodvibes-jev/engine/platform/contra
 function commandHarness(): {
   readonly registry: CommandRegistry;
   readonly out: string[];
+  readonly submitted: string[];
   readonly ctx: CommandContext;
 } {
   const root = makeProjectTempDir('goodvibes-agent-routine-command');
@@ -21,10 +22,12 @@ function commandHarness(): {
   registerRoutinesRuntimeCommands(registry);
   registerScheduleRuntimeCommands(registry);
   const out: string[] = [];
+  const submitted: string[] = [];
   mkdirSync(join(root, '.goodvibes', 'daemon'), { recursive: true });
   writeFileSync(join(root, '.goodvibes', 'daemon', 'operator-tokens.json'), JSON.stringify({ token: 'routine-token' }));
   const ctx = {
     print: (text: string) => out.push(text),
+    submitInput: (text: string) => { submitted.push(text); },
     workspace: {
       shellPaths: createShellPathService({ workingDirectory: root, homeDirectory: root }),
     },
@@ -41,7 +44,7 @@ function commandHarness(): {
       },
     },
   } as unknown as CommandContext;
-  return { registry, out, ctx };
+  return { registry, out, submitted, ctx };
 }
 
 function inputUrl(input: Parameters<typeof fetch>[0]): string {
@@ -190,7 +193,7 @@ function makeRunFixture(overrides: {
 
 describe('/routines command', () => {
   test('creates, lists, enables, starts, shows, and disables a local routine', async () => {
-    const { registry, out, ctx } = commandHarness();
+    const { registry, out, submitted, ctx } = commandHarness();
 
     await registry.execute('routines', [
       'create',
@@ -222,9 +225,10 @@ describe('/routines command', () => {
     expect(text).toContain('needs env:GOODVIBES_AGENT_TEST_MISSING_ROUTINE_TOKEN,command:definitely-missing-goodvibes-agent-routine-bin');
     expect(text).toContain('readiness: needs setup (env:GOODVIBES_AGENT_TEST_MISSING_ROUTINE_TOKEN, command:definitely-missing-goodvibes-agent-routine-bin)');
     expect(text).toContain('missing: env:GOODVIBES_AGENT_TEST_MISSING_ROUTINE_TOKEN, command:definitely-missing-goodvibes-agent-routine-bin');
-    expect(text).toContain('no hidden job');
     expect(text).toContain('Inbox Sweep - Summarize inbound messages');
-    expect(text).toContain('ask before external replies');
+    // The owner's start hands the steps to the model as one message.
+    expect(submitted).toHaveLength(1);
+    expect(submitted[0]).toContain('ask before external replies');
     expect(text).toContain('Disabled Agent routine inbox-sweep');
   });
 

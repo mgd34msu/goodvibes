@@ -56,8 +56,23 @@ describe('/google reauthorize', () => {
     });
     expect(outcome.connected).toBe(false);
     expect(await secrets.get(GOOGLE_SECRET_KEYS.oauthRefreshToken)).toBe('old-refresh-token');
-    expect(outcome.text).toContain('Paused');
-    expect(outcome.text).toContain('previous refresh token was kept');
+  });
+
+  test('the working refresh token stays stored while the consent page is open', async () => {
+    const { context, secrets } = await connectedFixture();
+    let storedDuringConsent: string | null | undefined;
+    await reauthorizeGoogle(context, progress, () => {}, {
+      commands: noCommands,
+      loopback: () => ({
+        redirectUri: 'http://127.0.0.1:1/callback',
+        waitForCode: async () => {
+          storedDuringConsent = await secrets.get(GOOGLE_SECRET_KEYS.oauthRefreshToken);
+          throw new Error('the consent page was closed');
+        },
+        close: () => {},
+      }),
+    });
+    expect(storedDuringConsent).toBe('old-refresh-token');
   });
 
   test('a completed consent replaces the old token with the one Google issued', async () => {
@@ -70,25 +85,6 @@ describe('/google reauthorize', () => {
     });
     expect(outcome.connected).toBe(true);
     expect(await secrets.get(GOOGLE_SECRET_KEYS.oauthRefreshToken)).toBe('new-refresh-token');
-    expect(outcome.text).not.toContain('previous refresh token was kept');
-  });
-
-  test('a refresh token that cannot be deleted stops the re-authorization instead of reporting it already authorized', async () => {
-    const { context, secrets } = await connectedFixture();
-    const realDelete = secrets.delete.bind(secrets);
-    secrets.delete = async (key: string) => {
-      if (key === GOOGLE_SECRET_KEYS.oauthRefreshToken) throw new Error('store is read-only');
-      return realDelete(key);
-    };
-    let consentOpened = false;
-    const outcome = await reauthorizeGoogle(context, progress, () => {}, {
-      commands: noCommands,
-      loopback: () => { consentOpened = true; return loopback({ code: 'auth-code' })(); },
-    });
-    expect(outcome.connected).toBe(false);
-    expect(consentOpened).toBe(false);
-    expect(outcome.text).not.toContain('already authorized');
-    expect(await secrets.get(GOOGLE_SECRET_KEYS.oauthRefreshToken)).toBe('old-refresh-token');
   });
 
   test('with no OAuth client it refuses before touching any credential', async () => {

@@ -100,6 +100,14 @@ describe('/google calendar-address', () => {
     expect(await subscriptionRegistryForRead(ctx).statuses()).toEqual([]);
   });
 
+  test('a new address that cannot be read leaves the working feed and its stored address in place', async () => {
+    const { ctx, secrets } = rig();
+    await runGoogleCommand(['calendar-address', ICAL_URL], ctx, okFeed);
+    await runGoogleCommand(['calendar-address', `${ICAL_URL}-typo`], ctx, failedFeed);
+    expect((await subscriptionRegistryForRead(ctx).statuses()).map((status) => status.name)).toEqual(['Google calendar']);
+    expect(secrets.get(GOOGLE_SECRET_KEYS.calendarIcsUrl)).toBe(ICAL_URL);
+  });
+
   test('an address that is not https is refused before any fetch', async () => {
     const { ctx, out, secrets } = rig();
     let fetched = 0;

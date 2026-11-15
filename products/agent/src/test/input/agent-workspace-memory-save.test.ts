@@ -67,7 +67,6 @@ describe('Agent workspace memory editor', () => {
     feedKey(workspace, 'enter');
     await Promise.resolve();
     expect(adds).toBe(1);
-    expect(workspace.status).toContain('Still saving');
 
     release();
     for (let turn = 0; turn < 20; turn += 1) await Promise.resolve();

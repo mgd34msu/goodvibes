@@ -4696,7 +4696,7 @@ describe('AgentWorkspace live disk-mirror counters', () => {
 
     expect(() => renderAgentWorkspaceLayer(workspace, 160, 40)).not.toThrow();
     expect(workspace.runtimeSnapshot?.localRoutineCount).toBe(0);
-    expect(workspace.selectedLibraryItemIndexes.routine).toBe(0);
+    expect(workspace.localSelection.indexes.routine).toBe(0);
   });
 
   test('a live-read failure keeps the previous counters and labels them honestly as refreshing, instead of asserting a wrong number', () => {

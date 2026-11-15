@@ -35,7 +35,7 @@ High-signal TUI routes:
 | `/channels`, `/notify`, `/qrcode` | Pair companions, inspect channel readiness, review delivery receipts, and send confirmed messages. |
 | `/media`, `/voice`, `/tts` | Inspect media/voice readiness, generate media, and run spoken turns. |
 | `/mcp`, `/secrets`, `/settings`, `/config` | Inspect or update Agent-local configuration. |
-| `/delegate` | Hand explicit build/fix/review work to GoodVibes TUI with a confirmed handoff brief. |
+| `/delegate` | Hand explicit build/fix/review work to GoodVibes TUI with a confirmed handoff brief. Each hand-off is recorded in the Agent home; `/delegate status` lists them and `/delegate status <session-id>` shows the session's input state and latest answer. A hand-off whose task could not be delivered removes the empty session it created. |
 
 An agent or a background process can take over the whole terminal. `Enter` on an agent's lane in the work tree (or on its row in the Activity modal) opens the agent: its work is the spine, its own children branch off it, the header reads `main › researcher` in the agent's color, and the composer steers the agent while main keeps running. `Enter` on a `▶` bead (or a row in the process monitor) opens the process: live output with timestamps, errors in red, follow mode on. The process view takes no input, because the Agent cannot write to a background process's stdin; `/` searches its output and `y` copies it. While more than one session exists, a row of session chips under the header lists them, and `Tab` / `Shift+Tab` switch between them when the composer is empty.
 
@@ -425,7 +425,7 @@ Routine promotion is an explicit scheduling route. Local routines stay local unt
 | `/load` | Load a saved Agent session. |
 | `/mcp` | Manage MCP servers, trust posture, and tool inventory. |
 | `/media` | Inspect media providers or generate media through configured providers. |
-| `/memory` | Add, search, review, stale, or delete Agent-local memory records. `/memory files sync` writes standing records as markdown files and commits them in their own repository; `files review` shows what editing those files would change; `files apply <id>...` applies the proposals you name. A command run by the model may review but not sync or apply. |
+| `/memory` | Add, search, review, stale, or delete Agent-local memory records. `/memory files sync` writes standing records as markdown files and commits them in their own repository; `files review` shows what editing those files would change; `files apply <id>...` applies the proposals you name. A command run by the model may sync and review but not apply. |
 | `/mode` | Manage Agent interaction mode and per-domain verbosity. |
 | `/model` | Select or display the current LLM model. |
 | `/network-scan` | Turn local-network scanning for model servers on or off, or check its status. Model servers on this computer and providers whose API key is in the environment are registered at every start; the network is scanned only after `/network-scan on`, which scans at once and then at each start. |
@@ -441,7 +441,7 @@ Routine promotion is an explicit scheduling route. Local routines stay local unt
 | `/prev-error` | Jump to the previous error message in the conversation. |
 | `/principals` | Manage the connected host's cross-channel principal identity registry; unmapped senders show as "unknown principal" in session attribution. |
 | `/provider` | Switch provider or manage custom providers. |
-| `/qrcode` | Print companion pairing details and a QR code. |
+| `/qrcode` | Pair a device: the connected host mints a named, separately revocable device token and the Agent shows its link and QR. |
 | `/quit` | Exit the application. |
 | `/redo` | Redo the last undone conversation turn. |
 | `/refresh-models` | Refresh model catalog, metadata, and token limits. |

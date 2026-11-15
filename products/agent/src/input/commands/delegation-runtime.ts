@@ -1,6 +1,8 @@
+import { randomUUID } from 'node:crypto';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import type { SharedSessionParticipant } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { AgentDelegationRegistry, type AgentDelegationRecord } from '../../agent/delegation-registry.ts';
 
 interface DelegationCommandInput {
   readonly task: string;
@@ -11,7 +13,7 @@ interface DelegationCommandInput {
   readonly priority: string;
 }
 
-const DELEGATION_USAGE = 'Usage: /delegate [--review] [--reason <why>] [--success <evidence>] [--workspace <hint>] [--priority <priority>] [--] <build/fix/review task>';
+const DELEGATION_USAGE = 'Usage: /delegate [--review] [--reason <why>] [--success <evidence>] [--workspace <hint>] [--priority <priority>] [--] <build/fix/review task>\n       /delegate status [session-id]';
 
 const VALUE_FLAGS: Readonly<Record<string, 'reason' | 'successCriteria' | 'workspaceHint' | 'priority'>> = {
   '--reason': 'reason',
@@ -49,9 +51,6 @@ function parseDelegationArgs(args: readonly string[], defaultReview: boolean): D
     values[target] = value;
     index += 1;
   }
-  if (!optionsEnded && taskValues.length === 1 && taskValues[0] === 'status') {
-    return { error: '`status` is not a delegate subcommand. Nothing was delegated. Put -- before a task that is literally the word status.' };
-  }
   return { task: taskValues.join(' ').trim(), reviewRequested, ...values };
 }
 
@@ -84,8 +83,99 @@ function buildDelegationBody(input: DelegationCommandInput): string {
   ].join('\n');
 }
 
+function delegationRegistry(ctx: CommandContext): AgentDelegationRegistry | null {
+  const shellPaths = ctx.workspace?.shellPaths;
+  return shellPaths ? AgentDelegationRegistry.fromShellPaths(shellPaths) : null;
+}
+
+function excerpt(text: string, max = 400): string {
+  const flat = text.replace(/\s+/g, ' ').trim();
+  return flat.length > max ? `${flat.slice(0, max - 3)}...` : flat;
+}
+
+/** `/delegate status [id]`: the recorded hand-offs, or one hand-off's session, input state and latest answer. */
+function printDelegationStatus(ctx: CommandContext, query: string | undefined): void {
+  const store = delegationRegistry(ctx);
+  if (!store) {
+    ctx.print('Delegation status is unavailable: this runtime has no Agent home to read the delegation list from.');
+    return;
+  }
+  const all = store.list();
+  if (!query) {
+    if (all.length === 0) {
+      ctx.print('No delegations recorded yet. Hand work off with /delegate <task>.');
+      return;
+    }
+    ctx.print([
+      `Delegations (${all.length}, newest first)`,
+      ...all.slice(0, 10).map((entry) => `  ${entry.sessionId}  ${entry.createdAt.slice(0, 16).replace('T', ' ')}  ${excerpt(entry.task, 72)}`),
+      ...(all.length > 10 ? [`  ... and ${all.length - 10} older`] : []),
+      '  /delegate status <session-id> shows one hand-off\'s progress and answer.',
+    ].join('\n'));
+    return;
+  }
+  const entry = store.find(query);
+  if (!entry) {
+    ctx.print(`No recorded delegation has a session id matching ${query}. Run /delegate status to list them; to delegate a task that starts with the word status, put -- before it.`);
+    return;
+  }
+  const sessions = ctx.clients?.operator?.sessions;
+  if (!sessions) {
+    ctx.print(renderDelegationRecord(entry, ['  state unknown: no operator client is attached, so the session cannot be read.']));
+    return;
+  }
+  try {
+    const session = sessions.get(entry.sessionId);
+    if (!session) {
+      ctx.print(renderDelegationRecord(entry, ['  state the session no longer exists on this host (it was deleted).']));
+      return;
+    }
+    const inputs = sessions.inputs(entry.sessionId, 50);
+    const input = (entry.inputId ? inputs.find((candidate) => candidate.id === entry.inputId) : undefined) ?? inputs[inputs.length - 1];
+    const answer = [...sessions.messages(entry.sessionId, 100)].reverse().find((message) => message.role === 'assistant');
+    ctx.print(renderDelegationRecord(entry, [
+      `  session ${session.status}${session.title ? `  ${session.title}` : ''}`,
+      `  input ${input ? `${input.state}${input.error ? ` (${input.error})` : ''}` : 'not found on the session'}`,
+      answer
+        ? `  latest answer ${new Date(answer.createdAt).toISOString().slice(0, 16).replace('T', ' ')}  ${excerpt(answer.body)}`
+        : '  latest answer none yet',
+    ]));
+  } catch (error) {
+    ctx.print(renderDelegationRecord(entry, [`  state could not be read: ${summarizeError(error)}. Retry /delegate status ${entry.sessionId}.`]));
+  }
+}
+
+function renderDelegationRecord(entry: AgentDelegationRecord, lines: readonly string[]): string {
+  return [
+    `Delegation ${entry.sessionId}`,
+    `  task ${excerpt(entry.task)}`,
+    `  delegated ${entry.createdAt}${entry.reviewRequested ? '  (delegated review requested)' : ''}`,
+    ...lines,
+  ].join('\n');
+}
+
+/** Removes a session the hand-off created but could not deliver its task to, so a retry does not leave an empty one behind. */
+async function discardUndeliveredSession(ctx: CommandContext, sessionId: string): Promise<string> {
+  const sessions = ctx.clients?.operator?.sessions;
+  if (!sessions) return `  left behind empty session ${sessionId}`;
+  try {
+    await sessions.close(sessionId);
+    const removed = await sessions.delete(sessionId);
+    return removed === 'deleted' || removed === 'not-found'
+      ? `  removed the empty session ${sessionId} it had created`
+      : `  left behind empty session ${sessionId} (the host reports it ${removed})`;
+  } catch (error) {
+    return `  left behind empty session ${sessionId}: removing it failed (${summarizeError(error)})`;
+  }
+}
+
 export function registerDelegationRuntimeCommands(registry: CommandRegistry): void {
   const makeHandler = () => async (args: string[], ctx: CommandContext): Promise<void> => {
+    // `status` alone or with one id is the status read; a longer line starting with the word is a task.
+    if (args[0] === 'status' && args.length <= 2) {
+      printDelegationStatus(ctx, args[1]);
+      return;
+    }
     const input = parseDelegationArgs(args, false);
     if ('error' in input) {
       ctx.print(`${input.error}\n${DELEGATION_USAGE}`);
@@ -103,6 +193,7 @@ export function registerDelegationRuntimeCommands(registry: CommandRegistry): vo
       ].join('\n'));
       return;
     }
+    let createdSessionId: string | undefined;
     try {
       const participant = {
         surfaceKind: 'service',
@@ -126,8 +217,11 @@ export function registerDelegationRuntimeCommands(registry: CommandRegistry): vo
           priority: input.priority,
         },
       });
-      await operator.sessions.submitMessage({
+      createdSessionId = session.id;
+      const submission = await operator.sessions.submitMessage({
         sessionId: session.id,
+        // A retried hand-off is recorded once by the broker.
+        providerMessageId: `agent-delegation:${randomUUID()}`,
         body: buildDelegationBody(input),
         surfaceKind: participant.surfaceKind,
         surfaceId: participant.surfaceId,
@@ -155,6 +249,25 @@ export function registerDelegationRuntimeCommands(registry: CommandRegistry): vo
           },
         },
       });
+      createdSessionId = undefined;
+      const record: AgentDelegationRecord = {
+        sessionId: session.id,
+        task: input.task,
+        createdAt: new Date().toISOString(),
+        ...(submission?.input?.id ? { inputId: submission.input.id } : {}),
+        reviewRequested: input.reviewRequested,
+      };
+      let recordNote = `  next /delegate status ${session.id} shows its progress and answer.`;
+      const store = delegationRegistry(ctx);
+      if (!store) {
+        recordNote = `  not recorded: this runtime has no Agent home, so /delegate status cannot find it later; keep the session id ${session.id}.`;
+      } else {
+        try {
+          store.record(record);
+        } catch (error) {
+          recordNote = `  not recorded (${summarizeError(error)}); keep the session id ${session.id}.`;
+        }
+      }
       ctx.print([
         'Delegation submitted to GoodVibes TUI/shared-session routes.',
         `  session ${session.id}`,
@@ -162,13 +275,15 @@ export function registerDelegationRuntimeCommands(registry: CommandRegistry): vo
         `  task ${input.task}`,
         ...(input.reason ? [`  reason ${input.reason}`] : []),
         ...(input.successCriteria ? [`  success ${input.successCriteria}`] : []),
-        '  next check GoodVibes TUI shared-session/task status for the result.',
+        recordNote,
       ].join('\n'));
     } catch (error) {
+      const cleanup = createdSessionId ? await discardUndeliveredSession(ctx, createdSessionId) : '';
       ctx.print([
-        'Delegation failed.',
+        'Delegation failed; the task was not handed off.',
         `  error ${summarizeError(error)}`,
-        '  fallback open GoodVibes TUI in the target workspace and paste the original task there.',
+        ...(cleanup ? [cleanup] : []),
+        '  next retry /delegate with the same task, or open GoodVibes TUI in the target workspace and paste it there.',
       ].join('\n'));
     }
   };
@@ -178,8 +293,8 @@ export function registerDelegationRuntimeCommands(registry: CommandRegistry): vo
     aliases: ['build'],
     description: 'Explicitly delegate build/fix/review work to GoodVibes TUI through shared-session routes',
     hidden: true,
-    usage: '[--review] [--reason <why>] [--success <evidence>] [--workspace <hint>] [--priority <priority>] <task>',
-    argsHint: '[--review] [--reason <why>] [--success <evidence>] [--workspace <hint>] [--priority <priority>] <task>',
+    usage: '[--review] [--reason <why>] [--success <evidence>] [--workspace <hint>] [--priority <priority>] <task> | status [session-id]',
+    argsHint: '[--review] [--reason <why>] [--success <evidence>] [--workspace <hint>] [--priority <priority>] <task> | status [session-id]',
     handler: makeHandler(),
   });
 }

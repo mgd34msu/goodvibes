@@ -411,8 +411,10 @@ export async function connectGoogle(
  * client is already there, so nothing about the project or the console is
  * touched. The stored refresh token is replaced by Google issuing a new one on
  * a fresh consent, the person's approval IS the confirmation, which is why
- * this does not additionally prompt. If the consent does not finish, the
- * previous token is put back.
+ * this does not additionally prompt. The stored token is never removed: the
+ * consent step is shown no token, so it asks Google again, and the store is
+ * written only when Google returns a new one. A closed page, a crash or a kill
+ * during the wait leaves the working connection as it was.
  */
 export async function reauthorizeGoogle(
   ctx: CommandContext,
@@ -433,18 +435,24 @@ export async function reauthorizeGoogle(
   }
 
   const plan = await planGoogleConnectionFor(ctx, portOverrides.commands);
-  // Built after the removal below: the setup ports pin the credential and
-  // configuration state they were created against, and the removal changes both.
-  const buildDeps = (): GoogleSetupActionDeps => ({
-    ...googleActionDeps(ctx),
+  const base = googleActionDeps(ctx);
+  // The authorize step skips consent when it sees a stored refresh token. It
+  // is shown none until it stores the token Google returns, so it asks again
+  // while the working token stays in the store the whole time.
+  let replaced = false;
+  const secretsForConsent: GoogleSetupActionDeps['secrets'] = {
+    ...base.secrets,
+    get: async (key) => (key === GOOGLE_SECRET_KEYS.oauthRefreshToken && !replaced ? null : base.secrets.get(key)),
+    set: async (key, value, ownership) => {
+      await base.secrets.set(key, value, ownership);
+      if (key === GOOGLE_SECRET_KEYS.oauthRefreshToken) replaced = true;
+    },
+  };
+  const deps: GoogleSetupActionDeps = {
+    ...base,
+    secrets: secretsForConsent,
     announceConsentUrl,
     ...(plan.intendedAccount === null ? {} : { loginHint: plan.intendedAccount }),
-    // Google returns a new refresh token on a fresh consent, and the authorize
-    // step stores it. Forcing the step to run means clearing the "already
-    // authorized" short-circuit, which is what the removal below is for. The
-    // old token is kept aside and put back unless the consent produced a
-    // replacement, so a closed consent page does not disconnect a working mail
-    // connection.
     proveConnection: async () => {
       const connection = await openConnection(ctx, plan.gcloud?.account ?? null);
       if (connection === null) return { ok: false, detail: 'No usable credential after consent.' };
@@ -454,47 +462,17 @@ export async function reauthorizeGoogle(
         : { ok: false, detail: proof.summary, problem: proof.calendar.problem ?? proof.mail.problem ?? proof.summary };
     },
     ...portOverrides,
-  });
-
-  const previousToken = await secrets.get(GOOGLE_SECRET_KEYS.oauthRefreshToken);
-  const previousReference = config.get(GOOGLE_CONFIG_KEYS.oauthRefreshToken);
-  const removal = await removeGoogleCredentials(
-    { secrets, config },
-    { items: ['refresh-token'], confirmed: true, reason: 'Replacing it with the token this consent produces.' },
-  );
-
-  // A token that is still stored would be taken for a finished authorization
-  // and the consent would never be asked for, so stop here and say what is left.
-  if ('partial' in removal) return { connected: false, text: removal.detail };
-  if ('refused' in removal) return { connected: false, text: removal.prompt };
-
-  const restorePreviousToken = async (): Promise<boolean> => {
-    if (typeof previousToken !== 'string' || previousToken.trim().length === 0) return false;
-    const current = await secrets.get(GOOGLE_SECRET_KEYS.oauthRefreshToken);
-    if (typeof current === 'string' && current.trim().length > 0) return false;
-    await secrets.set(GOOGLE_SECRET_KEYS.oauthRefreshToken, previousToken);
-    if (previousReference !== undefined && previousReference !== null) config.set(GOOGLE_CONFIG_KEYS.oauthRefreshToken, previousReference);
-    return true;
   };
 
-  let report: GoogleSetupReport;
-  try {
-    report = await runGoogleSetupFlow('existing-client', {
-      progress,
-      runners: buildGoogleSetupRunners('existing-client', buildDeps()),
-    });
-  } catch (error) {
-    await restorePreviousToken().catch(() => false);
-    throw error;
-  }
-  const restored = report.ok ? false : await restorePreviousToken();
-
-  const preamble = removal.confirmed && removal.removed.length > 0
-    ? 'Replacing the existing refresh token with a fresh consent covering mail and calendar together.'
-    : 'Asking for a fresh consent covering mail and calendar together.';
-
-  const restoredNote = restored ? ['', 'The consent did not complete, so the previous refresh token was kept and nothing was disconnected.'] : [];
-  return { connected: report.ok, text: [preamble, '', report.summary, ...restoredNote].join('\n') };
+  const report = await runGoogleSetupFlow('existing-client', {
+    progress,
+    runners: buildGoogleSetupRunners('existing-client', deps),
+  });
+  const keptNote = replaced ? [] : ['', 'The consent did not produce a new refresh token, so the stored one was not changed and nothing was disconnected.'];
+  return {
+    connected: report.ok,
+    text: ['Asking for a fresh consent covering mail and calendar together; the current connection stays in use until Google returns a new token.', '', report.summary, ...keptNote].join('\n'),
+  };
 }
 
 export const GOOGLE_CALENDAR_SUBSCRIPTION_NAME = 'Google calendar';

@@ -9,61 +9,95 @@ import type { BoundaryCheck, BoundaryCheckName } from '../gate/boundary.js';
 import type { GateRiskFamily } from '../gate/batteries/risk-family.js';
 import type { GateFactName } from '../gate/reading.js';
 import type { GatePresetName, GateAction } from '../gate/presets.js';
-import type { PermissionCategory, ToolDecision } from '../types/tools.js';
+import { PERMISSION_CATEGORIES, type PermissionCategory, type ToolDecision } from '../types/tools.js';
 
-export type { PermissionCategory } from '../types/tools.js';
+export { PERMISSION_CATEGORIES, type PermissionCategory } from '../types/tools.js';
 
-export type PermissionRiskLevel = 'low' | 'medium' | 'high' | 'critical';
+export const PERMISSION_RISK_LEVELS = ['low', 'medium', 'high', 'critical'] as const;
+export type PermissionRiskLevel = (typeof PERMISSION_RISK_LEVELS)[number];
 
-export type PermissionDecisionSource =
+/**
+ * The layers a gate decision can come from. The runtime store's decision
+ * record and the operator contract's `approvals.list` schema are derived from
+ * this list, so a layer added here is accepted everywhere.
+ */
+export const PERMISSION_DECISION_SOURCES = [
   // The gate's boundary refused the call
-  | 'boundary'
+  'boundary',
   // The active preset decided on Jev's stakes reading
-  | 'stakes_preset'
-  | 'config_policy'
-  | 'managed_policy'
-  | 'safety_check'
-  | 'runtime_mode'
+  'stakes_preset',
+  'config_policy',
+  'managed_policy',
+  'safety_check',
+  'runtime_mode',
   // The exact executing invocation already holds a current private admission
-  | 'invocation_admission'
-  | 'session_override'
+  'invocation_admission',
+  'session_override',
   // A durable user-origin rule written by a remembered approval decision
-  | 'user_rule'
-  | 'user_prompt'
-  | 'jev_decision';
+  'user_rule',
+  'user_prompt',
+  'jev_decision',
+] as const;
+export type PermissionDecisionSource = (typeof PERMISSION_DECISION_SOURCES)[number];
 
-export type PermissionDecisionReasonCode =
+/** The reason codes a gate decision carries; the store and the operator contract are derived from this list. */
+export const PERMISSION_DECISION_REASON_CODES = [
   // Boundary refusals, one per check
-  | 'boundary_judgment_input'
-  | 'boundary_catastrophic'
-  | 'boundary_surface_authority'
-  | 'boundary_card_details'
-  | 'boundary_outward_effect'
+  'boundary_judgment_input',
+  'boundary_catastrophic',
+  'boundary_surface_authority',
+  'boundary_card_details',
+  'boundary_outward_effect',
   // The active preset allowed or denied the call on its stakes
-  | 'preset_allow'
-  | 'preset_deny'
+  'preset_allow',
+  'preset_deny',
   // The owner answered the prompt for a tainted outward call (single use)
-  | 'owner_approved_outward'
-  | 'config_allow'
-  | 'config_deny'
-  | 'managed_policy_allow'
-  | 'managed_policy_deny'
-  | 'safety_guardrail'
-  | 'mode_allow_all'
-  | 'invocation_already_admitted'
-  | 'mode_denied'
+  'owner_approved_outward',
+  'config_allow',
+  'config_deny',
+  'managed_policy_allow',
+  'managed_policy_deny',
+  'safety_guardrail',
+  'mode_allow_all',
+  'invocation_already_admitted',
+  'mode_denied',
   // Mode, plan mode refused a mutating/exec tool (structured plan-mode denial)
-  | 'plan_mode'
-  // Mode, accept-edits mode auto-approved a file write/edit tool
-  | 'mode_accept_edits'
-  | 'session_cached_allow'
-  | 'session_cached_deny'
+  'plan_mode',
+  'session_cached_allow',
+  'session_cached_deny',
   // Durable user rule matched (allow/deny), the persistent form of a remembered decision
-  | 'user_rule_allow'
-  | 'user_rule_deny'
-  | 'user_approved'
-  | 'user_denied'
-  | 'jev_act' | 'jev_revise' | 'jev_defer' | 'jev_reject';
+  'user_rule_allow',
+  'user_rule_deny',
+  'user_approved',
+  'user_denied',
+  'jev_act', 'jev_revise', 'jev_defer', 'jev_reject',
+] as const;
+export type PermissionDecisionReasonCode = (typeof PERMISSION_DECISION_REASON_CODES)[number];
+
+const SOURCE_SET: ReadonlySet<string> = new Set(PERMISSION_DECISION_SOURCES);
+const REASON_SET: ReadonlySet<string> = new Set(PERMISSION_DECISION_REASON_CODES);
+const RISK_SET: ReadonlySet<string> = new Set(PERMISSION_RISK_LEVELS);
+const CATEGORY_SET: ReadonlySet<string> = new Set(PERMISSION_CATEGORIES);
+
+/** True when a wire value is a permission category. */
+export function isPermissionCategory(value: unknown): value is PermissionCategory {
+  return typeof value === 'string' && CATEGORY_SET.has(value);
+}
+
+/** True when a wire value is one of the gate's decision layers. */
+export function isPermissionDecisionSource(value: unknown): value is PermissionDecisionSource {
+  return typeof value === 'string' && SOURCE_SET.has(value);
+}
+
+/** True when a wire value is one of the gate's reason codes. */
+export function isPermissionDecisionReasonCode(value: unknown): value is PermissionDecisionReasonCode {
+  return typeof value === 'string' && REASON_SET.has(value);
+}
+
+/** True when a wire value is a risk level. */
+export function isPermissionRiskLevel(value: unknown): value is PermissionRiskLevel {
+  return typeof value === 'string' && RISK_SET.has(value);
+}
 
 export type PermissionAnalysisTargetKind = 'command' | 'path' | 'url' | 'task' | 'generic';
 export type PermissionAnalysisSurface = 'filesystem' | 'shell' | 'network' | 'orchestration' | 'platform' | 'generic';

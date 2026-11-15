@@ -110,6 +110,20 @@ export type ContractRuntimeEventBridgeOptions = Pick<HostRuntimeEventBridgeOptio
   'runtimeBus' | 'getSystemMessageRouter' | 'queueConversationFollowUp' |
   'requestRender' | 'agentManager' | 'contractRunner'>;
 
+/**
+ * Feed the gate's events into the runtime store: the permissions domain's
+ * last decision, counters and in-flight calls (what `approvals.list` serves)
+ * are set only from here. Every product composition calls it once per store.
+ */
+export function registerGateRuntimeEvents(
+  runtimeBus: RuntimeEventBus,
+  domainDispatch: Pick<ReturnType<typeof createDomainDispatch>, 'dispatchGateEvent'>,
+): () => void {
+  return runtimeBus.onDomain('gate', (env) => {
+    domainDispatch.dispatchGateEvent(env.payload);
+  });
+}
+
 /** Share canonical contract labels, operator lines, follow-ups and cohort handling. */
 export function registerContractRuntimeEvents(options: ContractRuntimeEventBridgeOptions): Array<() => void> {
   const { runtimeBus, getSystemMessageRouter, queueConversationFollowUp, requestRender, agentManager, contractRunner } = options;
@@ -256,6 +270,7 @@ export function registerHostRuntimeEvents(
   unsubs.push(runtimeBus.onDomain('transport', (env) => {
     domainDispatch.dispatchTransportEvent(env.payload);
   }));
+  unsubs.push(registerGateRuntimeEvents(runtimeBus, domainDispatch));
   // The MCP registry and plugin manager publish their lifecycle on the bus; the
   // runtime store (health, read models, recommendations) only learns of it here.
   unsubs.push(runtimeBus.onDomain('mcp', (env) => {

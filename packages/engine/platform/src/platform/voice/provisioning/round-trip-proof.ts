@@ -24,7 +24,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFile } from 'node:child_process';
 import { assertVoiceProofCurrent, beginVoiceProofReading, ownVoiceProofLifetime, readVoiceRoundTrip, type VoiceProofComparison, type VoiceProofLifetime } from './round-trip-reading.js';
-import { awaitPermission } from '../../permissions/cancellation.js';
+import { executePolicyCheck } from '../../gate/execute-policy-check.js';
 import { activateClassicFallback, decisionOrClassic, isClassicOperation, withConfiguredDecisionModelPolicy } from '../../runtime/decision-policy.js';
 
 /**
@@ -165,7 +165,7 @@ async function proveOwnedVoiceRoundTrip(options: VoiceRoundTripProofOptions): Pr
   // Injected Promise-only seams are interruptible; the real runner itself
   // owns termination and does not settle until its child closes.
   const run = (input: Parameters<ProofEngineRunner>[0]) => options.runner
-    ? awaitPermission(() => runner(input), activeSignal) : runner(input);
+    ? executePolicyCheck(() => runner(input), activeSignal) : runner(input);
   const scratch = options.scratchDir ?? mkdtempSync(join(tmpdir(), 'gv-voice-proof-'));
   const wavPath = join(scratch, 'proof.wav');
 

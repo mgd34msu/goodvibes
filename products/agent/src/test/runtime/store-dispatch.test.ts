@@ -166,7 +166,7 @@ describe('createDomainDispatch', () => {
       callId: 'call-2',
       tool: 'exec',
       approved: true,
-      category: 'exec',
+      category: 'execute',
       source: 'user_prompt',
     });
 

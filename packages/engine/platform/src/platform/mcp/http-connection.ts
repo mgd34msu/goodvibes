@@ -1,4 +1,4 @@
-import { awaitPermission } from '../permissions/cancellation.js';
+import { executePolicyCheck } from '../gate/execute-policy-check.js';
 import type { ExternalOperationSource } from '../permissions/external-request.js';
 import { commitMcpElicitation, discardMcpElicitation } from './elicitation-autonomous.js';
 import { snapshotJudgmentInput } from '../gate/judgment-input.js';
@@ -382,7 +382,7 @@ export class McpHttpConnection {
           if (!options.resent) throw RESEND_ON_NEW_SESSION;
           throw new Error(`MCP server '${this.options.serverName}': its session expired again (HTTP 404 for '${method}') right after it was renewed; the request was not run. Check the server, then call again.`);
         }
-        const errorBody = await awaitPermission(() => readBoundedJson(response!, signal), signal).catch(() => { signal.throwIfAborted(); return null; });
+        const errorBody = await executePolicyCheck(() => readBoundedJson(response!, signal), signal).catch(() => { signal.throwIfAborted(); return null; });
         const rpcError = parseJsonRpcError(errorBody);
         if (rpcError) throw new McpRpcError(rpcError.code, rpcError.message, rpcError.data);
         throw new Error(`MCP server '${this.options.serverName}': HTTP ${response.status} for '${method}'`);
@@ -394,7 +394,7 @@ export class McpHttpConnection {
       if (contentType.includes('text/event-stream')) {
         return await this.readSseResponse(response, id, method, options.operation, signal);
       }
-      const parsed: unknown = await awaitPermission(() => readBoundedJson(response!, signal), signal);
+      const parsed: unknown = await executePolicyCheck(() => readBoundedJson(response!, signal), signal);
       return this.resolveJsonRpcResponse(parsed, method);
     } catch (error) {
       if (signal.aborted && !this.lifetime.signal.aborted && options.era === 'legacy' && !options.initialize) {
@@ -424,7 +424,7 @@ export class McpHttpConnection {
       signal.throwIfAborted();
       options.operation?.assertCurrent();
       options.beforeSend?.();
-      return await awaitPermission(() => this.fetchImpl(this.options.url, {
+      return await executePolicyCheck(() => this.fetchImpl(this.options.url, {
         method: 'POST', headers, body: serialized, signal,
       }), signal);
     } finally {
@@ -459,7 +459,7 @@ export class McpHttpConnection {
     const parser = new SseEventParser();
     try {
       while (true) {
-        const { done, value } = await awaitPermission(() => reader.read(), signal);
+        const { done, value } = await executePolicyCheck(() => reader.read(), signal);
         if (done) break;
         for (const payload of parser.push(decoder.decode(value, { stream: true }))) {
           let message: unknown;

@@ -6,8 +6,8 @@ export * from './manager.js';
 export * from './prompt.js';
 export * from './types.js';
 export * from './user-rule-store.js';
+export * from './subject.js';
 export * from './briefs/build.js';
-export * from './briefs/render-hints.js';
 export * from './briefs/types.js';
 
 export { decideAutonomousTool, captureAutonomousSource, captureAutonomousChoices, assertAutonomousData } from './autonomous.js';

@@ -15,8 +15,9 @@
  *
  *     ←→ choose   ⏎ confirm   y allow once   a session   n deny   d details
  *
- * The thing being approved is the whole card: the command itself (in full,
- * wrapped), or the target path(s). Risk shows as one colored chip. Edits show
+ * The thing being approved is the whole card: every command (in full,
+ * wrapped), the target path(s), URLs or task, or for a tool with no known
+ * subject the whole argument object (permissions/subject.ts in the engine). Risk shows as one colored chip. Edits show
  * the actual diff with tinted rows; hunk-selectable edits give every hunk its
  * own checkbox. Every other fact (directory, sandbox, policy judgment, review
  * reasons, the raw arguments) is one key away (d), wrapped in full. Choices are
@@ -29,7 +30,7 @@
  */
 
 import type { PermissionCategory, PermissionPromptRequest, PermissionRequestAnalysis } from '@goodvibes-jev/engine/platform/platform/permissions';
-import { buildPermissionApprovalBrief, buildRememberOptions, getDisplayArg } from '@goodvibes-jev/engine/platform/platform/permissions';
+import { buildPermissionApprovalBrief, buildRememberOptions, execFileOperationLines, fallbackAnalysis } from '@goodvibes-jev/engine/platform/platform/permissions';
 import { activeTokens } from '../renderer/theme.ts';
 import {
   beginModal,
@@ -106,17 +107,6 @@ export function permissionButtons(request: PermissionPromptRequest, state: Pick<
 // Request facts
 // ---------------------------------------------------------------------------
 
-export function fallbackAnalysis(request: PermissionPromptRequest): PermissionRequestAnalysis {
-  return request.analysis ?? {
-    classification: request.category,
-    riskLevel: request.category === 'read' ? 'low' : request.category === 'write' ? 'medium' : 'high',
-    summary: `Review ${request.tool} request`,
-    reasons: ['Inspect the target and intent before approving this action.'],
-    target: getDisplayArg(request.tool, request.args),
-    targetKind: 'generic',
-  };
-}
-
 const MODEL_JUDGMENT_PREFIX = 'model judgment:';
 
 /** The sandbox model-judgment annotation gets its own row so it is never cut from the reasons. */
@@ -131,80 +121,6 @@ function relativize(p: string, cwd?: string): string {
   if (p === cwd) return '.';
   const prefix = cwd.endsWith('/') ? cwd : `${cwd}/`;
   return p.startsWith(prefix) ? p.slice(prefix.length) : p;
-}
-
-function collectField(arr: unknown, field: string): string[] {
-  if (!Array.isArray(arr)) return [];
-  const out: string[] = [];
-  for (const el of arr) {
-    if (typeof el === 'string') out.push(el);
-    else if (el && typeof el === 'object' && typeof (el as Record<string, unknown>)[field] === 'string') out.push((el as Record<string, unknown>)[field] as string);
-  }
-  return out;
-}
-
-const BASE64_TEXT = /^[A-Za-z0-9+/\s]*={0,2}$/;
-
-/**
- * The command text of each `commands` entry as the exec tool will run it:
- * `cmd_base64` decoded when present, else `cmd`. Display only; the tool does its
- * own strict reading and refuses an entry it cannot decode.
- */
-function commandTexts(commands: unknown): string[] {
-  if (!Array.isArray(commands)) return [];
-  const out: string[] = [];
-  for (const el of commands) {
-    if (typeof el === 'string') { out.push(el); continue; }
-    if (!el || typeof el !== 'object') continue;
-    const entry = el as Record<string, unknown>;
-    if (typeof entry.cmd_base64 === 'string' && entry.cmd_base64.length > 0) {
-      out.push(BASE64_TEXT.test(entry.cmd_base64) ? Buffer.from(entry.cmd_base64, 'base64').toString('utf-8') : '(cmd_base64 is not valid base64)');
-    } else if (typeof entry.cmd === 'string') out.push(entry.cmd);
-  }
-  return out;
-}
-
-/** One line per host-side file operation of an exec call (`file_ops`), so the owner can read what will be copied, moved or deleted. */
-function fileOpLines(args: Record<string, unknown>): string[] {
-  if (!Array.isArray(args.file_ops)) return [];
-  return args.file_ops.flatMap((el) => {
-    if (!el || typeof el !== 'object') return [];
-    const op = el as Record<string, unknown>;
-    const source = typeof op.source === 'string' ? op.source : '?';
-    const destination = typeof op.destination === 'string' ? ` -> ${op.destination}` : '';
-    const flags = [op.recursive === true ? 'recursive' : '', op.overwrite === true ? 'overwrite' : ''].filter(Boolean).join(', ');
-    return [`${typeof op.op === 'string' ? op.op : 'file operation'} ${source}${destination}${flags ? ` (${flags})` : ''}`];
-  });
-}
-
-/** The real display target(s) of a tool call (paths, commands, urls), relativised; a fallback when none is recognisable. */
-export function cardTargets(request: PermissionPromptRequest): string[] {
-  const args = request.args ?? {};
-  const pick = (): string[] => {
-    const files = collectField(args.files, 'path');
-    if (files.length) return files;
-    if (typeof args.path === 'string') return [args.path];
-    if (typeof args.file === 'string') return [args.file];
-    const commands = commandTexts(args.commands);
-    if (commands.length) return commands;
-    if (typeof args.command === 'string') return [args.command];
-    if (typeof args.cmd === 'string') return [args.cmd];
-    if (typeof args.pattern === 'string') return [args.pattern];
-    const urls = collectField(args.urls, 'url');
-    if (urls.length) return urls;
-    const queries = collectField(args.queries, 'query');
-    if (queries.length) return queries;
-    if (typeof args.query === 'string') return [args.query];
-    if (typeof args.task === 'string') return [args.task];
-    return [];
-  };
-  const targets = pick().map((t) => relativize(t, request.workingDirectory));
-  return targets.length > 0 ? targets : [getDisplayArg(request.tool, args)];
-}
-
-function commandOf(request: PermissionPromptRequest): string {
-  const args = request.args ?? {};
-  return typeof args.command === 'string' ? args.command : typeof args.cmd === 'string' ? args.cmd : '';
 }
 
 /**
@@ -360,24 +276,22 @@ function subjectRows(request: PermissionPromptRequest, width: number): CardRow[]
     if (typeof attribution.prompt === 'string' && attribution.prompt.length > 0) rows.push(...labelled('Asks', attribution.prompt, width, t.warning));
     return rows;
   }
-  const fileOps = request.category === 'execute' ? fileOpLines(request.args ?? {}) : [];
-  const fileOpRows = fileOps.flatMap((line, i) => labelled(i === 0 ? 'File ops' : '', line, width, t.warning));
-  const command = request.category === 'execute' ? commandOf(request) : '';
-  if (command) {
-    // The FULL command, wrapped, never truncated.
-    return [...command.split('\n').flatMap((para, p) => wrapCode(para, Math.max(4, width - 2)).map((line, i) => ({
-      spans: [{ text: p === 0 && i === 0 ? '$ ' : '  ', fg: t.textFaint }, { text: line, fg: t.text }],
-    }))), ...fileOpRows];
-  }
+  const fileOpRows = execFileOperationLines(request.args).flatMap((line, i) => labelled(i === 0 ? 'File ops' : '', line, width, t.warning));
   const brief = buildPermissionApprovalBrief(request);
-  const targets = cardTargets(request);
-  // Up to three targets are listed in full; more collapse to a summary (the
-  // complete list stays in the details' Args row).
-  if (targets.length > MAX_TARGET_ROWS) {
-    const base = (p: string): string => p.replace(/[/\\]+$/, '').split(/[/\\]/).pop() ?? p;
-    return [...labelled(brief.subjectLabel, `${targets.length} files: ${targets.slice(0, 2).map(base).join(', ')}, +${targets.length - 2} more`, width, t.text), ...fileOpRows];
+  if (brief.subjectKind === 'command') {
+    // Every command, in full, wrapped, never truncated.
+    return [...brief.subjectValues.flatMap((command) => command.split('\n').flatMap((para, p) => wrapCode(para, Math.max(4, width - 2)).map((line, i) => ({
+      spans: [{ text: p === 0 && i === 0 ? '$ ' : '  ', fg: t.textFaint }, { text: line, fg: t.text }],
+    })))), ...fileOpRows];
   }
-  return [...targets.flatMap((target, i) => labelled(i === 0 ? brief.subjectLabel : '', target, width, t.text)), ...fileOpRows];
+  const values = brief.subjectKind === 'path' ? brief.subjectValues.map((p) => relativize(p, request.workingDirectory)) : brief.subjectValues;
+  // Up to three paths are listed in full; more collapse to a summary (the
+  // complete list stays in the details' Args row).
+  if (brief.subjectKind === 'path' && values.length > MAX_TARGET_ROWS) {
+    const base = (p: string): string => p.replace(/[/\\]+$/, '').split(/[/\\]/).pop() ?? p;
+    return [...labelled(brief.subjectLabel, `${values.length} files: ${values.slice(0, 2).map(base).join(', ')}, +${values.length - 2} more`, width, t.text), ...fileOpRows];
+  }
+  return [...values.flatMap((value, i) => labelled(i === 0 ? brief.subjectLabel : '', value, width, t.text)), ...fileOpRows];
 }
 
 function hunkRows(hunkState: HunkSelectionState, width: number): CardRow[] {

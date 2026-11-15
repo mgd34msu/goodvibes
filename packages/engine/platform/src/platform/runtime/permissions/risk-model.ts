@@ -18,7 +18,7 @@ export interface PermissionRiskDescriptor {
   readonly headline: string;
 }
 
-/** The headline each family shows on the approval card. */
+/** The headline that opens the review reasons of a read call (analysis.ts withReading), shown on both approval cards. */
 export const RISK_HEADLINES: Readonly<Record<PermissionRiskFamily, string>> = {
   delegation: 'Agent delegation',
   'shell-read': 'Read-only shell command',

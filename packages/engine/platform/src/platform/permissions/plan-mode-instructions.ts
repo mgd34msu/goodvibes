@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 /**
  * The standing instruction that tells the model it is in plan mode. It is
  * appended to the system prompt while plan mode is active, so it reaches the
@@ -9,6 +7,7 @@
  */
 
 import type { PermissionMode } from '../config/schema.js';
+import { isPlanMode } from '../gate/presets.js';
 
 /** Marker so the block can be recognised in a composed system prompt / tests. */
 export const PLAN_MODE_INSTRUCTION_MARKER = 'goodvibes:plan-mode-instruction';
@@ -28,11 +27,6 @@ export const PLAN_MODE_INSTRUCTION = [
   'approve it or switch out of plan mode. Do not claim work is done that plan',
   'mode prevented you from doing.',
 ].join('\n');
-
-/** True when the given permission mode is plan mode. */
-export function isPlanMode(mode: PermissionMode | undefined): boolean {
-  return mode === 'plan';
-}
 
 /**
  * Append the plan-mode standing instruction to a base system prompt when plan

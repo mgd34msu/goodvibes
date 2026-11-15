@@ -3,54 +3,43 @@
  * and the most recent permission decision with full audit trail.
  */
 
-import type { PermissionCategory } from '../../../permissions/manager.js';
-import type { PermissionRiskLevel } from '../../../permissions/types.js';
+import type {
+  PermissionCategory,
+  PermissionDecisionReasonCode,
+  PermissionDecisionSource,
+  PermissionRiskLevel,
+} from '../../../permissions/types.js';
 import type { GatePresetName } from '../../../gate/presets.js';
 
 /** The effective execution mode shown by every runtime surface. */
 export type PermissionMode = GatePresetName;
 
-/** States for the permission decision machine. */
-export type PermissionDecisionMachineState =
-  | 'check_boundary'
-  | 'collect_rules'
-  | 'normalize_input'
-  | 'evaluate_policy'
-  | 'evaluate_session_override'
-  | 'read_stakes'
-  | 'evaluate_preset'
-  | 'awaiting_owner'
-  | 'decision_emitted';
+/**
+ * Where a call is in the gate, as its gate events report it (see the reducer's
+ * permissionMachineStateForEvent). The operator contract's schema is derived from this list.
+ */
+export const PERMISSION_DECISION_MACHINE_STATES = [
+  'check_boundary',
+  'collect_rules',
+  'normalize_input',
+  'evaluate_policy',
+  'evaluate_session_override',
+  'read_stakes',
+  'evaluate_preset',
+  'awaiting_owner',
+  'decision_emitted',
+] as const;
+export type PermissionDecisionMachineState = (typeof PERMISSION_DECISION_MACHINE_STATES)[number];
 
 /** The outcome of a permission decision. */
-export type PermissionDecisionOutcome = 'approved' | 'denied' | 'deferred';
+export const PERMISSION_DECISION_OUTCOMES = ['approved', 'denied', 'deferred'] as const;
+export type PermissionDecisionOutcome = (typeof PERMISSION_DECISION_OUTCOMES)[number];
 
-/** Source layer that determined the permission outcome. */
-export type PermissionSourceLayer =
-  | 'config_policy'
-  | 'managed_policy'
-  | 'runtime_mode'
-  | 'session_override'
-  | 'safety_check'
-  | 'user_prompt';
+/** Source layer that determined the permission outcome: the gate's own list. */
+export type PermissionSourceLayer = PermissionDecisionSource;
 
-/** Reason codes for a permission decision. */
-export type PermissionDecisionReason =
-  | 'config_allow'
-  | 'config_deny'
-  | 'managed_policy_allow'
-  | 'managed_policy_deny'
-  | 'mode_allow_all'
-  | 'mode_denied'
-  | 'mode_plan_deny'
-  | 'plan_mode'
-  | 'mode_accept_edits'
-  | 'mode_background_restricted'
-  | 'session_cached_approval'
-  | 'session_cached_denial'
-  | 'safety_guardrail'
-  | 'user_approved'
-  | 'user_denied';
+/** Reason codes for a permission decision: the gate's own list. */
+export type PermissionDecisionReason = PermissionDecisionReasonCode;
 
 /** Full record of the most recent permission decision. */
 export interface PermissionDecision {

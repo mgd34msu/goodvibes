@@ -108,7 +108,6 @@ function reasonExplanation(result: PermissionCheckResult, mode: string, autoAppr
     case 'invocation_already_admitted': return 'This exact executing invocation already has a current admission; no new permission decision was needed.';
     case 'mode_denied': return 'The active permission mode denies this tool class.';
     case 'plan_mode': return 'The plan preset refused this call because it changes state or reaches outside the machine.';
-    case 'mode_accept_edits': return 'The accept-edits preset allowed this call.';
     case 'managed_policy_allow': return 'A runtime policy rule allowed this call.';
     case 'managed_policy_deny': return 'A runtime policy rule denied this call.';
     case 'safety_guardrail': return 'A safety guardrail blocked this call.';

@@ -5,9 +5,14 @@ import type {
   PermissionDecisionMachineState,
   PermissionDecision,
 } from '../../domains/permissions.js';
+import {
+  isPermissionCategory,
+  isPermissionDecisionReasonCode,
+  isPermissionDecisionSource,
+  isPermissionRiskLevel,
+} from '../../../../permissions/types.js';
 import type { TaskDomainState, RuntimeTask, TaskLifecycleState } from '../../domains/tasks.js';
 import type { AgentDomainState, RuntimeAgent, AgentLifecycleState } from '../../domains/agents.js';
-import type { PermissionCategory } from '../../../../permissions/manager.js';
 import { now, updateDomainMetadata, isTerminalLifecycleState, computeActiveIds, evictOldestEnded } from './shared.js';
 import { logger } from '../../../../utils/logger.js';
 import { canMirror } from '../../../tasks/lifecycle.js';
@@ -117,24 +122,35 @@ export function updatePermissionState(
         decisionMachineState: permissionMachineStateForEvent(event),
         approvalCount: domain.approvalCount + (event.approved ? 1 : 0),
         denialCount: domain.denialCount + (event.approved ? 0 : 1),
-        lastDecision: {
-          callId: event.callId,
-          toolName: event.tool,
-          // The category the gate settled on, carried on the event (not guessed from the tool name).
-          category: event.category as PermissionCategory,
-          machineState: 'decision_emitted',
-          outcome: event.approved ? 'approved' : 'denied',
-          reason: (event.reasonCode as PermissionDecision['reason']) ?? (event.approved ? 'user_approved' : 'user_denied'),
-          sourceLayer: (event.sourceLayer as PermissionDecision['sourceLayer']) ?? (event.source as PermissionDecision['sourceLayer']) ?? 'config_policy',
-          persisted: event.persisted ?? false,
-          classification: event.classification,
-          riskLevel: event.riskLevel as PermissionDecision['riskLevel'],
-          summary: event.summary,
-          decidedAt: now(),
-        },
+        lastDecision: decisionRecord(event),
       };
     }
   }
+}
+
+/**
+ * The record of a decision event, read through the gate's own lists. An event
+ * whose category, layer or reason this runtime does not know (a newer peer)
+ * clears the last decision rather than reporting it under a wrong name.
+ */
+function decisionRecord(event: Extract<GateEvent, { type: 'DECISION_EMITTED' }>): PermissionDecision | undefined {
+  const reason = event.reasonCode === undefined ? (event.approved ? 'user_approved' : 'user_denied') : event.reasonCode;
+  const sourceLayer = event.sourceLayer ?? event.source;
+  if (!isPermissionCategory(event.category) || !isPermissionDecisionReasonCode(reason) || !isPermissionDecisionSource(sourceLayer)) return undefined;
+  return {
+    callId: event.callId,
+    toolName: event.tool,
+    category: event.category,
+    machineState: 'decision_emitted',
+    outcome: event.approved ? 'approved' : 'denied',
+    reason,
+    sourceLayer,
+    persisted: event.persisted ?? false,
+    ...(event.classification !== undefined ? { classification: event.classification } : {}),
+    ...(isPermissionRiskLevel(event.riskLevel) ? { riskLevel: event.riskLevel } : {}),
+    ...(event.summary !== undefined ? { summary: event.summary } : {}),
+    decidedAt: now(),
+  };
 }
 
 /** The call ids the gate has started on and not yet decided, bounded so a gate that dies mid-decision cannot grow it without end. */

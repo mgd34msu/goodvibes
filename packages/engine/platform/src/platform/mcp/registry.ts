@@ -6,6 +6,7 @@ import { captureExternalRequestEvidence } from '../permissions/external-request-
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { admitExternalRequest, type ExternalPermissionHost } from '../permissions/external-request.js';
 import { awaitPermission } from '../permissions/cancellation.js';
+import { executePolicyCheck } from '../gate/execute-policy-check.js';
 import { snapshotJudgmentInput } from '../gate/judgment-input.js';
 import { currentExternalOperationSource } from '../permissions/external-operation-scope.js';
 /**
@@ -975,7 +976,7 @@ export class McpRegistry {
     this.freshness.registerServer(name);
     try {
       assertHostCurrent();
-      await awaitPermission(() => client.connect(), signal);
+      await executePolicyCheck(() => client.connect(), signal);
       assertHostCurrent(); assertProcessCurrent();
       this.permissions.registerServer(name, 'standard', {
         role: serverConfig.role ?? 'general',

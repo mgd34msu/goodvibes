@@ -19,15 +19,12 @@ import { normalizeCommandWithVerdicts } from '../runtime/permissions/normalizati
 import { extractHostname } from '../tools/fetch/trust-tiers.js';
 import { RISK_HEADLINES } from '../runtime/permissions/risk-model.js';
 import type { GateReading } from '../gate/reading.js';
+import { permissionSubject, type PermissionSubject } from './subject.js';
 import type {
   PermissionBlastRadius,
   PermissionCategory,
   PermissionRequestAnalysis,
 } from './types.js';
-
-function truncatePreview(value: string, limit = 120): string {
-  return value.length <= limit ? value : `${value.slice(0, limit - 3)}...`;
-}
 
 function cleanReasons(values: readonly string[], limit = 4): string[] {
   const deduped = new Set<string>();
@@ -39,80 +36,65 @@ function cleanReasons(values: readonly string[], limit = 4): string[] {
   return Array.from(deduped);
 }
 
-const firstString = (args: Record<string, unknown>, keys: readonly string[]): string => {
-  for (const key of keys) if (typeof args[key] === 'string') return args[key] as string;
-  return '';
-};
-
 /** The risk level before any reading: fixed by category. */
 const unreadRisk = (category: PermissionCategory): PermissionRequestAnalysis['riskLevel'] => (category === 'read' ? 'low' : 'high');
 
-function describeExec(args: Record<string, unknown>, category: PermissionCategory): PermissionRequestAnalysis {
-  const command = firstString(args, ['command', 'cmd']);
-  if (command.length === 0) {
-    return {
-      classification: 'write',
-      riskLevel: unreadRisk(category),
-      summary: 'Execute shell command',
-      reasons: ['Shell execution can mutate files, spawn processes, or access the network.'],
-      target: '',
-      targetKind: 'command',
-      surface: 'shell',
-    };
-  }
-  const verdict = normalizeCommandWithVerdicts(command);
+/** The subject as the analysis carries it: every value, one per line, for a tool with a known subject. */
+const targetOf = (subject: PermissionSubject): string | undefined => (subject.kind === 'generic' ? undefined : subject.values.join('\n'));
+
+function describeExec(subject: PermissionSubject, category: PermissionCategory): PermissionRequestAnalysis {
+  const commands = subject.kind === 'command' ? subject.values : [];
+  const verdicts = commands.map((command) => normalizeCommandWithVerdicts(command));
   return {
-    classification: 'shell',
+    classification: commands.length > 0 ? 'shell' : 'write',
     riskLevel: unreadRisk(category),
-    summary: 'Execute shell command',
-    reasons: cleanReasons([
-      verdict.denialExplanation ?? '',
-      ...verdict.segments.filter((segment) => !segment.allowed).map((segment) => segment.reason),
-    ]),
-    target: truncatePreview(command),
+    summary: commands.length > 1 ? `Execute ${commands.length} shell commands` : 'Execute shell command',
+    reasons: commands.length > 0
+      ? cleanReasons(verdicts.flatMap((verdict) => [
+        verdict.denialExplanation ?? '',
+        ...verdict.segments.filter((segment) => !segment.allowed).map((segment) => segment.reason),
+      ]))
+      : ['Shell execution can mutate files, spawn processes, or access the network.'],
+    target: targetOf(subject) ?? '',
     targetKind: 'command',
     surface: 'shell',
   };
 }
 
-function describeFetch(args: Record<string, unknown>, category: PermissionCategory): PermissionRequestAnalysis {
-  const urls = Array.isArray(args['urls']) ? args['urls'] : [];
-  const first = urls.find((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === 'object');
-  const rawUrl = firstString(first ?? args, ['url', 'endpoint']);
-  const host = rawUrl.length > 0 ? extractHostname(rawUrl) : null;
+function describeFetch(subject: PermissionSubject, category: PermissionCategory): PermissionRequestAnalysis {
+  const urls = subject.kind === 'url' ? subject.values : [];
+  const hosts = [...new Set(urls.flatMap((url) => extractHostname(url) ?? []))];
   return {
     classification: 'network',
     riskLevel: unreadRisk(category),
-    summary: host ? `Fetch remote resource from ${host}` : 'Fetch remote resource',
-    reasons: host ? [`Target host: ${host}`] : [],
-    target: truncatePreview(rawUrl),
+    summary: hosts.length > 0 ? `Fetch remote resource from ${hosts.join(', ')}` : 'Fetch remote resource',
+    reasons: hosts.length > 0 ? [`Target host${hosts.length > 1 ? 's' : ''}: ${hosts.join(', ')}`] : [],
+    target: targetOf(subject) ?? '',
     targetKind: 'url',
     surface: 'network',
-    host: host ?? undefined,
+    host: hosts[0],
   };
 }
 
-function describePathTool(toolName: string, args: Record<string, unknown>, category: PermissionCategory): PermissionRequestAnalysis {
-  const path = firstString(args, ['path', 'file', 'file_path']);
+function describePathTool(toolName: string, subject: PermissionSubject, category: PermissionCategory): PermissionRequestAnalysis {
   return {
     classification: category === 'write' ? 'write' : 'read',
     riskLevel: unreadRisk(category),
     summary: category === 'write' ? `Modify local file or project state via ${toolName}` : `Read local project state via ${toolName}`,
     reasons: [],
-    target: path,
-    targetKind: 'path',
+    target: targetOf(subject),
+    targetKind: subject.kind === 'generic' ? 'path' : subject.kind,
     surface: 'filesystem',
   };
 }
 
-function describeDelegate(toolName: string, args: Record<string, unknown>, category: PermissionCategory): PermissionRequestAnalysis {
-  const task = firstString(args, ['task', 'name', 'prompt']);
+function describeDelegate(toolName: string, subject: PermissionSubject, category: PermissionCategory): PermissionRequestAnalysis {
   return {
     classification: 'escalation',
     riskLevel: unreadRisk(category),
     summary: `Delegate work through ${toolName}`,
     reasons: [],
-    target: truncatePreview(task),
+    target: targetOf(subject),
     targetKind: 'task',
     surface: 'orchestration',
   };
@@ -124,16 +106,18 @@ export function analyzePermissionRequest(
   args: Record<string, unknown>,
   category: PermissionCategory,
 ): PermissionRequestAnalysis {
-  if (toolName === 'exec') return describeExec(args, category);
-  if (toolName === 'fetch') return describeFetch(args, category);
-  if (category === 'write' || category === 'read') return describePathTool(toolName, args, category);
-  if (category === 'delegate') return describeDelegate(toolName, args, category);
+  const subject = permissionSubject(toolName, args);
+  if (toolName === 'exec') return describeExec(subject, category);
+  if (toolName === 'fetch') return describeFetch(subject, category);
+  if (category === 'write' || category === 'read') return describePathTool(toolName, subject, category);
+  if (category === 'delegate') return describeDelegate(toolName, subject, category);
   return {
     classification: category,
     riskLevel: unreadRisk(category),
     summary: `Request permission for ${toolName}`,
     reasons: [],
-    targetKind: 'generic',
+    target: targetOf(subject),
+    targetKind: subject.kind,
     surface: 'shell',
   };
 }

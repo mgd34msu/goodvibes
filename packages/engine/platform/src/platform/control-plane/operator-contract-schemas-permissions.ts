@@ -9,9 +9,17 @@ import {
   enumSchema,
   TOOL_ARGUMENTS_SCHEMA,
 } from './operator-contract-schemas-shared.js';
+import {
+  PERMISSION_CATEGORIES,
+  PERMISSION_DECISION_REASON_CODES,
+  PERMISSION_DECISION_SOURCES,
+  PERMISSION_RISK_LEVELS,
+} from '../permissions/types.js';
+import { PERMISSION_DECISION_MACHINE_STATES, PERMISSION_DECISION_OUTCOMES } from '../runtime/store/domains/permissions.js';
+import { SESSION_GATE_PRESET_NAMES } from '../gate/presets.js';
 
-export const PERMISSION_CATEGORY_SCHEMA = enumSchema(['read', 'write', 'execute', 'delegate']);
-export const PERMISSION_RISK_LEVEL_SCHEMA = enumSchema(['low', 'medium', 'high', 'critical']);
+export const PERMISSION_CATEGORY_SCHEMA = enumSchema(PERMISSION_CATEGORIES);
+export const PERMISSION_RISK_LEVEL_SCHEMA = enumSchema(PERMISSION_RISK_LEVELS);
 export const PERMISSION_ANALYSIS_TARGET_KIND_SCHEMA = enumSchema(['command', 'path', 'url', 'task', 'generic']);
 export const PERMISSION_ANALYSIS_SURFACE_SCHEMA = enumSchema(['filesystem', 'shell', 'network', 'orchestration', 'platform', 'generic']);
 export const PERMISSION_BLAST_RADIUS_SCHEMA = enumSchema(['local', 'project', 'external', 'delegated', 'platform']);
@@ -118,52 +126,14 @@ export const PERMISSION_RULES_DELETE_OUTPUT_SCHEMA = objectSchema({
   deleted: BOOLEAN_SCHEMA,
 }, ['deleted'], { additionalProperties: false });
 
-export const PERMISSION_MODE_SCHEMA = enumSchema([
-  'safe-owner',
-  'safe-jev',
-  'yolo',
-  'default',
-  'plan',
-  'allow-all',
-  'custom',
-  'background-restricted',
-]);
-export const PERMISSION_DECISION_MACHINE_STATE_SCHEMA = enumSchema([
-  'collect_rules',
-  'normalize_input',
-  'evaluate_policy',
-  'evaluate_runtime_mode',
-  'evaluate_session_override',
-  'final_safety_checks',
-  'decision_emitted',
-]);
-export const PERMISSION_DECISION_OUTCOME_SCHEMA = enumSchema(['approved', 'denied', 'deferred']);
-export const PERMISSION_SOURCE_LAYER_SCHEMA = enumSchema([
-  'config_policy',
-  'managed_policy',
-  'runtime_mode',
-  'session_override',
-  'safety_check',
-  'user_rule',
-  'user_prompt',
-]);
-export const PERMISSION_DECISION_REASON_SCHEMA = enumSchema([
-  'config_allow',
-  'config_deny',
-  'managed_policy_allow',
-  'managed_policy_deny',
-  'mode_allow_all',
-  'mode_denied',
-  'mode_plan_deny',
-  'mode_background_restricted',
-  'session_cached_approval',
-  'session_cached_denial',
-  'safety_guardrail',
-  'user_rule_allow',
-  'user_rule_deny',
-  'user_approved',
-  'user_denied',
-]);
+// Derived from the gate's and the runtime store's own lists: a value the
+// gate emits is a value the contract accepts, so `approvals.list` cannot fail
+// response validation on a decision the gate made.
+export const PERMISSION_MODE_SCHEMA = enumSchema(SESSION_GATE_PRESET_NAMES);
+export const PERMISSION_DECISION_MACHINE_STATE_SCHEMA = enumSchema(PERMISSION_DECISION_MACHINE_STATES);
+export const PERMISSION_DECISION_OUTCOME_SCHEMA = enumSchema(PERMISSION_DECISION_OUTCOMES);
+export const PERMISSION_SOURCE_LAYER_SCHEMA = enumSchema(PERMISSION_DECISION_SOURCES);
+export const PERMISSION_DECISION_REASON_SCHEMA = enumSchema(PERMISSION_DECISION_REASON_CODES);
 
 export const PERMISSION_RUNTIME_DECISION_SCHEMA = objectSchema({
   callId: STRING_SCHEMA,

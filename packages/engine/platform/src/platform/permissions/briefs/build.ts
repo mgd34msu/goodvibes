@@ -3,34 +3,25 @@ import { riskDescriptorFor } from '../../runtime/permissions/risk-model.js';
 import { explainPermissionRiskFamily } from '../../runtime/permissions/risk-language.js';
 import type { PermissionApprovalBrief } from './types.js';
 import type { PermissionRequestAnalysis } from '../types.js';
+import { permissionSubject } from '../subject.js';
 
-export function getDisplayArg(_tool: string, args: Record<string, unknown>): string {
-  if (typeof args['path'] === 'string') return args['path'];
-  if (typeof args['command'] === 'string') return args['command'];
-  if (typeof args['pattern'] === 'string') return args['pattern'];
-  const first = Object.values(args)[0];
-  return typeof first === 'string' ? first : JSON.stringify(args).slice(0, 60);
+/** The request's subject as one string, one value per line (see permissionSubject for the parts). */
+export function getDisplayArg(tool: string, args: Record<string, unknown>): string {
+  return permissionSubject(tool, args).values.join('\n');
 }
 
-function fallbackAnalysis(request: PermissionPromptRequest): PermissionRequestAnalysis {
-  return request.analysis ?? {
+/** The request's own analysis, or the one every approval card shows when a request arrives without one. */
+export function fallbackAnalysis(request: PermissionPromptRequest): PermissionRequestAnalysis {
+  if (request.analysis) return request.analysis;
+  const subject = permissionSubject(request.tool, request.args);
+  return {
     classification: request.category,
     riskLevel: request.category === 'read' ? 'low' : request.category === 'write' ? 'medium' : 'high',
     summary: `Review ${request.tool} request`,
     reasons: ['Inspect the target and intent before approving this action.'],
-    target: getDisplayArg(request.tool, request.args),
-    targetKind: 'generic',
+    target: subject.values.join('\n'),
+    targetKind: subject.kind,
   };
-}
-
-function subjectLabel(analysis: PermissionRequestAnalysis): string {
-  switch (analysis.targetKind) {
-    case 'command': return 'Command';
-    case 'path': return 'Path';
-    case 'url': return 'URL';
-    case 'task': return 'Task';
-    default: return 'Target';
-  }
 }
 
 function titleForRisk(decisionModeLabel: string): string {
@@ -74,13 +65,14 @@ function checklistForDecision(family: string, decisionModeLabel: string): string
 }
 
 export function buildPermissionApprovalBrief(request: PermissionPromptRequest): PermissionApprovalBrief {
-  const analysis = fallbackAnalysis(request);
-  const risk = riskDescriptorFor(analysis);
+  const risk = riskDescriptorFor(fallbackAnalysis(request));
   const decisionModeLabel = decisionModeLabelForRisk(risk.family);
+  const subject = permissionSubject(request.tool, request.args);
   return {
     title: titleForRisk(decisionModeLabel),
-    subjectLabel: subjectLabel(analysis),
-    subjectValue: String(analysis.target ?? getDisplayArg(request.tool, request.args)),
+    subjectLabel: subject.label,
+    subjectKind: subject.kind,
+    subjectValues: subject.values,
     decisionModeLabel,
     checklist: checklistForDecision(risk.family, decisionModeLabel),
     risk,

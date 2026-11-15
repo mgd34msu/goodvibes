@@ -22,6 +22,7 @@ import { captureMcpInputRequired, readProtocolRequest } from '../permissions/pro
 import { snapshotJudgmentInput } from '../gate/judgment-input.js';
 import type { ExternalOperationSource, ExternalRequestScope } from '../permissions/external-request.js';
 import { awaitPermission } from '../permissions/cancellation.js';
+import { executePolicyCheck } from '../gate/execute-policy-check.js';
 import { bindMcpElicitationResponse, commitMcpElicitation, discardMcpElicitation, wasHandedBackToAgent } from './elicitation-autonomous.js';
 import type { McpElicitationOutcome } from './elicitation.js';
 import { logger } from '../utils/logger.js';
@@ -411,7 +412,7 @@ export class McpClient {
   }
 
   async #catalogFor(signal?: AbortSignal): Promise<McpToolCatalog> {
-    return signal ? awaitPermission(() => this.#loadCatalog(), signal) : this.#loadCatalog();
+    return signal ? executePolicyCheck(() => this.#loadCatalog(), signal) : this.#loadCatalog();
   }
 
   /** Tool names and descriptions from the connection's catalog. */

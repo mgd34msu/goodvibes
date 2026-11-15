@@ -180,7 +180,7 @@ describe('configured permission modes', () => {
 describe('structured plan-mode denial', () => {
   test('plan_mode reason code surfaces ToolDenial reason "plan-mode" + steering', () => {
     const denial = buildToolDenial({ reasonCode: 'plan_mode', sourceLayer: 'runtime_mode' });
-    expect(denial).toEqual({ denied: true, reason: PLAN_MODE_DENIAL_REASON, scope: 'runtime_mode' });
+    expect(denial).toEqual({ denied: true, reason: PLAN_MODE_DENIAL_REASON, scope: 'runtime_mode', standing: true });
     expect(PLAN_MODE_DENIAL_REASON).toBe('plan-mode');
     const msg = buildDenialErrorMessage('exec', { reasonCode: 'plan_mode', sourceLayer: 'runtime_mode' });
     expect(msg).toContain('plan mode');
@@ -189,7 +189,12 @@ describe('structured plan-mode denial', () => {
 
   test('non-plan denials pass their reason code through unchanged', () => {
     const denial = buildToolDenial({ reasonCode: 'user_denied', sourceLayer: 'user_prompt' });
-    expect(denial).toEqual({ denied: true, reason: 'user_denied', scope: 'user_prompt' });
+    expect(denial).toEqual({ denied: true, reason: 'user_denied', scope: 'user_prompt', standing: false });
+  });
+
+  test('a refusal from settings stands for the session; a declined call does not', () => {
+    expect(buildToolDenial({ reasonCode: 'config_deny', sourceLayer: 'config_policy' }).standing).toBe(true);
+    expect(buildToolDenial({ reasonCode: 'user_denied', sourceLayer: 'user_prompt' }).standing).toBe(false);
   });
 });
 
@@ -211,6 +216,25 @@ describe('permission mode-change event', () => {
     manager.set('permissions.mode', 'safe-jev');
     await Promise.resolve();
     expect(events).toHaveLength(1);
+  });
+
+  test('services composed again over one config manager and bus publish one event per change', async () => {
+    const manager = configFixture();
+    const bus = new RuntimeEventBus();
+    let events = 0;
+    bus.onDomain('gate', envelope => { if (envelope.payload.type === 'PRESET_CHANGED') events++; });
+    const holders = [1, 2, 3].map(() => bindPermissionModeChangeEvent(manager, bus, 'runtime'));
+    manager.set('permissions.mode', 'plan');
+    await Promise.resolve();
+    expect(events).toBe(1);
+    holders[0]!(); holders[1]!();
+    manager.set('permissions.mode', 'safe-jev');
+    await Promise.resolve();
+    expect(events).toBe(2);
+    holders[2]!();
+    manager.set('permissions.mode', 'safe-owner');
+    await Promise.resolve();
+    expect(events).toBe(2);
   });
 
   test('legacy auto-approve alone changes the effective mode and selecting safety clears it', async () => {

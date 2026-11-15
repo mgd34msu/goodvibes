@@ -31,7 +31,7 @@ import { execFile } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { assertPermissionActive, awaitPermission } from '../../permissions/cancellation.js';
+import { executePolicyCheck } from '../../gate/execute-policy-check.js';
 import { assertLocalEngineFailureCurrent, ownLocalEngineFailureLifetime, readLocalEngineFailure, structuredLocalEngineFailure,
   type LocalEngineFailureKind } from './local-failure-reading.js';
 import type {
@@ -188,9 +188,8 @@ export function createLocalVoiceProvider(options: LocalVoiceProviderOptions): Vo
   const beginInvocation = (prefix: 'tts' | 'stt', incarnation: EngineIncarnation, privateInputs: readonly string[], signal?: AbortSignal) => {
     const active = AbortSignal.any([incarnation.controller.signal, ...(signal ? [signal] : [])]);
     const assertCurrent = () => {
-      assertPermissionActive(active);
+      active.throwIfAborted();
       if (observeEngine(prefix) !== incarnation) throw new Error('Local voice engine invocation is no longer current.');
-      assertPermissionActive(active);
     };
     assertCurrent();
     return ownLocalEngineFailureLifetime(incarnation.config!, active, assertCurrent, privateInputs);
@@ -226,7 +225,7 @@ export function createLocalVoiceProvider(options: LocalVoiceProviderOptions): Vo
     try {
       // piper and the kokoro wrapper share the same contract: text on stdin,
       // wav to --output_file.
-      await awaitPermission(() => runner({
+      await executePolicyCheck(() => runner({
         binary: tts.binary,
         args: ['--model', tts.modelPath, '--output_file', outPath],
         stdinText: text,
@@ -267,7 +266,7 @@ export function createLocalVoiceProvider(options: LocalVoiceProviderOptions): Vo
       const args = stt.engine === 'whisper-cpp'
         ? ['-m', stt.modelPath, '-f', wavPath, '--no-timestamps', '--no-prints']
         : [stt.modelPath, wavPath];
-      const { stdout } = await awaitPermission(() => runner({ binary: stt.binary, args, timeoutMs: RUN_TIMEOUT_MS,
+      const { stdout } = await executePolicyCheck(() => runner({ binary: stt.binary, args, timeoutMs: RUN_TIMEOUT_MS,
         signal: lifetime.signal }), lifetime.signal);
       lifetime.assertCurrent();
       return {

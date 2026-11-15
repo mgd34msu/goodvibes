@@ -1,7 +1,7 @@
 import type { GateEvent } from '@goodvibes-jev/engine/platform/events';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { ContractRunner } from '@goodvibes-jev/engine/platform/platform/contract';
-import { checkCohortCompletion, registerContractRuntimeEvents, type HostRuntimeMessageRouter } from '@goodvibes-jev/engine/platform/platform/runtime/bootstrap';
+import { checkCohortCompletion, registerContractRuntimeEvents, registerGateRuntimeEvents, type HostRuntimeMessageRouter } from '@goodvibes-jev/engine/platform/platform/runtime/bootstrap';
 import type { ConversationFollowUpItem } from '@goodvibes-jev/engine/platform/platform/core';
 import type { AgentManager, ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
@@ -151,10 +151,7 @@ export function registerAgentRuntimeEvents(options: AgentRuntimeEventBridgeOptio
   unsubs.push(runtimeBus.onDomain('transport', (env) => {
     domainDispatch.dispatchTransportEvent(env.payload);
   }));
-  // The published client composition produces the canonical gate events.
-  unsubs.push(runtimeBus.onDomain('gate', (env) => {
-    domainDispatch.dispatchGateEvent(env.payload);
-  }));
+  unsubs.push(registerGateRuntimeEvents(runtimeBus, domainDispatch));
   unsubs.push(runtimeBus.on<Extract<GateEvent, { type: 'PRESET_CHANGED' }>>('PRESET_CHANGED', ({ payload }) => {
     withRouter(getSystemMessageRouter, (router) => {
       router.high(`[Permissions] Permission preset changed: ${payload.previousPreset} -> ${payload.preset}.`);

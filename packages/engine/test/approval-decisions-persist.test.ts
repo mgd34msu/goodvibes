@@ -177,10 +177,9 @@ describe('durable approval rules', () => {
     // The exact structured result the model sees on the CONTINUING turn,
     // same shape as the plan-mode prior art, with the user's words on it.
     const denial = buildToolDenial(result);
-    expect(denial).toEqual({ denied: true, reason: 'user_denied', scope: 'user_prompt', detail: 'use bun, not npm' });
+    expect(denial).toEqual({ denied: true, reason: 'user_denied', scope: 'user_prompt', standing: false, detail: 'use bun, not npm' });
     const message = buildDenialErrorMessage('exec', result);
-    expect(message).toContain('The user said: "use bun, not npm"');
-    expect(message).toContain('continue without it');
+    expect(message).toContain('use bun, not npm');
   });
 });
 

@@ -60,7 +60,7 @@ describe('structured tool-call denial', () => {
     );
 
     expect(result.success).toBe(false);
-    expect(result.denial).toEqual({ denied: true, reason: 'user_denied', scope: 'user_prompt' });
+    expect(result.denial).toEqual({ denied: true, reason: 'user_denied', scope: 'user_prompt', standing: false });
     // The error string names the reason and scope so an agent reading only the
     // text can still continue and report honestly.
     expect(result.error).toContain('user_denied');

@@ -35,7 +35,7 @@ import { recordVoiceDiagnostic } from '../voice/diagnostics.js';
 import { assertVoiceProofCurrent, beginVoiceProofReading, ownVoiceProofLifetime, type VoiceProofLifetime } from '../voice/provisioning/round-trip-reading.js';
 import { VOICE_PROOF_PHRASE, type VoiceRoundTripProofOptions } from '../voice/provisioning/round-trip-proof.js';
 import { activateClassicFallback, isClassicOperation, withConfiguredDecisionModelPolicy } from './decision-policy.js';
-import { awaitPermission } from '../permissions/cancellation.js';
+import { executePolicyCheck } from '../gate/execute-policy-check.js';
 import {
   createWakeSetupService,
   captureWakeSetupReadSource,
@@ -288,7 +288,7 @@ export function createVoiceSetupService(deps: VoiceSetupServiceDeps): VoiceSetup
         // wait, but cannot lend new authority to the original installation.
         if (!inFlight) inFlight = runInstall(request).finally(() => { inFlight = undefined; });
         const ownedRun = inFlight;
-        const receipt = await awaitPermission(() => ownedRun, request.signal);
+        const receipt = await executePolicyCheck(() => ownedRun, request.signal);
         assertVoiceProofCurrent(request);
         return receipt;
       });

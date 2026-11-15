@@ -4,8 +4,7 @@ import { activeTokens } from '../renderer/theme.ts';
 import { beginModal, finishModal, wrapLines, type KitHint, type SurfaceLayer } from '../renderer/surface-kit.ts';
 import { button, buttonWidth, type ButtonTone } from '../renderer/surface-kit-parts.ts';
 import { modalHeightFor, modalTextWidth } from '../renderer/surface-kit-extra.ts';
-import type { PermissionRequestAnalysis } from '@goodvibes-jev/engine/platform/platform/permissions';
-import { buildPermissionApprovalBrief, getDisplayArg } from '@goodvibes-jev/engine/platform/platform/permissions';
+import { buildPermissionApprovalBrief, execFileOperationLines, fallbackAnalysis } from '@goodvibes-jev/engine/platform/platform/permissions';
 
 import type {
   PermissionPromptRequest,
@@ -28,19 +27,6 @@ export type { PermissionPromptRequest, PermissionPromptDecision, PermissionReque
  *   Escape -> Deny
  */
 export class PermissionPromptUI extends PermissionPromptFacts {
-  private static fallbackAnalysis(request: PermissionPromptRequest): PermissionRequestAnalysis {
-    return (
-      request.analysis ?? {
-        classification: request.category,
-        riskLevel: request.category === 'read' ? 'low' : request.category === 'write' ? 'medium' : 'high',
-        summary: `Review ${request.tool} request`,
-        reasons: ['Inspect the target and intent before approving this action.'],
-        target: getDisplayArg(request.tool, request.args),
-        targetKind: 'generic',
-      }
-    );
-  }
-
   /**
    * "Who is asking" line for the two attribution kinds (platform 1.6.1) that have
    * no OTHER rendered channel for it. `background-agent` attribution is
@@ -65,14 +51,14 @@ export class PermissionPromptUI extends PermissionPromptFacts {
     return null;
   }
 
-  /** Returns the key argument to display for a given tool invocation. */
-
-  /** Returns the category label and the active-theme color for display. */
-
-  /** The facts of a request as label / value pairs. The dialog shows every one; a subject too long for the screen is cut in the middle with a marker. */
+  /**
+   * The facts of a request as label / value pairs. The dialog shows every one; the subject is every
+   * command, path, URL or task the call carries (or, for a tool with no known subject, its whole
+   * argument object), one per line, and when too long for the screen it is cut in the middle with a marker.
+   */
   static promptFacts(request: PermissionRequest): Array<{ label: string; value: string; fg: string }> {
     const tokens = activeTokens();
-    const analysis = this.fallbackAnalysis(request);
+    const analysis = fallbackAnalysis(request);
     const brief = buildPermissionApprovalBrief(request);
     const { color } = this.getCategoryLabel(request.category);
     const facts: Array<{ label: string; value: string; fg: string }> = [];
@@ -85,7 +71,9 @@ export class PermissionPromptUI extends PermissionPromptFacts {
     // Risk comes before the command or path: that subject can run to many rows, and
     // whatever the screen has to cut must never be the risk.
     add('Risk', `${analysis.riskLevel} (${analysis.classification})`, color);
-    add(brief.subjectLabel, this.getDisplayArg(request.tool, request.args), tokens.text);
+    add(brief.subjectLabel, brief.subjectValues.join('\n'), tokens.text);
+    const fileOps = execFileOperationLines(request.args);
+    if (fileOps.length > 0) add('File ops', fileOps.join('\n'), tokens.warning);
     add('Directory', request.workingDirectory ?? '(unknown)');
     if (analysis.surface || analysis.blastRadius)
       add('Surface', `${analysis.surface ?? 'generic'}${analysis.blastRadius ? `  radius=${analysis.blastRadius}` : ''}`);
@@ -107,7 +95,7 @@ export class PermissionPromptUI extends PermissionPromptFacts {
    */
   static createPromptLayer(screenWidth: number, screenHeight: number, request: PermissionRequest): SurfaceLayer {
     const tokens = activeTokens();
-    const analysis = this.fallbackAnalysis(request);
+    const analysis = fallbackAnalysis(request);
     const brief = buildPermissionApprovalBrief(request);
     const { label, color } = this.getCategoryLabel(request.category);
     const high = analysis.riskLevel === 'high' || analysis.riskLevel === 'critical';

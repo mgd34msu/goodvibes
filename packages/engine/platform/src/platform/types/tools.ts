@@ -1,6 +1,5 @@
 import type { JevDecision } from '@goodvibes-jev/judgment/decisions';
 import type { DecisionModelPolicyState } from '@goodvibes-jev/engine/errors';
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
 
 /** Represents a tool the LLM can invoke. Parameters follow JSON Schema. */
 export type ToolSideEffect =
@@ -15,7 +14,8 @@ export type ToolSideEffect =
 export type ToolConcurrencyMode = 'serial' | 'parallel' | 'singleton';
 
 /** What a call does, as the gate classes it. */
-export type PermissionCategory = 'read' | 'write' | 'execute' | 'delegate';
+export const PERMISSION_CATEGORIES = ['read', 'write', 'execute', 'delegate'] as const;
+export type PermissionCategory = (typeof PERMISSION_CATEGORIES)[number];
 
 /**
  * Where a value sits in a call's arguments: keys joined by dots, `[]` for
@@ -95,6 +95,8 @@ export interface ToolDecision {
   readonly limit?: string | undefined;
   /** What the agent can do instead, most useful first. */
   readonly next?: readonly string[] | undefined;
+  /** On a refusal: true when every later call like this one is refused too for the rest of the session. */
+  readonly standing?: boolean | undefined;
   /** The decision log row, when Jev decided. */
   readonly decisionId?: string | undefined;
 }
@@ -127,6 +129,8 @@ export interface ToolDenial {
   readonly denied: true;
   readonly reason: string;
   readonly scope: string;
+  /** True when every later call like this one is refused too for the rest of the session. */
+  readonly standing?: boolean | undefined;
   /** Optional user free-text (e.g. why a call was declined) for the model to adapt to. */
   readonly detail?: string | undefined;
 }

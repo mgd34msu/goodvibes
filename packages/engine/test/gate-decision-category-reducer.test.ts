@@ -14,6 +14,8 @@ describe('permissions reducer: decision category', () => {
       category: 'execute',
       approved: false,
       source: 'permission-manager',
+      sourceLayer: 'jev_decision',
+      reasonCode: 'jev_reject',
     });
     expect(state.lastDecision?.category).toBe('execute');
     expect(state.lastDecision?.toolName).toBe('notes_sync');
@@ -27,6 +29,8 @@ describe('permissions reducer: decision category', () => {
       category: 'write',
       approved: true,
       source: 'permission-manager',
+      sourceLayer: 'config_policy',
+      reasonCode: 'config_allow',
     });
     expect(state.lastDecision?.category).toBe('write');
   });

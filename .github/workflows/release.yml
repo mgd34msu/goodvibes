@@ -31,10 +31,6 @@ on:
         description: "Full payload commit SHA for candidate mode only; no tag is created"
         required: false
         default: ""
-      dry_run:
-        description: "Legacy dry-run guard (used only for a non-release dispatch)"
-        required: false
-        default: "true"
       ref:
         description: "Git ref to dry-run (ignored in release mode, which uses the dispatched tag ref)"
         required: false
@@ -151,11 +147,6 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           ref: ${{ github.event.inputs.ref || github.ref }}
-      - name: Reject manual non-dry-run release
-        if: github.event.inputs.dry_run != 'true'
-        run: |
-          echo "workflow_dispatch releases are dry-run only; push a verified v* tag to publish." >&2
-          exit 1
       - name: Setup Bun + deps (cached)
         uses: ./.github/actions/setup
       - name: Setup Node
@@ -254,49 +245,6 @@ jobs:
       candidate-source: ${{ github.event.inputs.mode == 'candidate' && needs.verify-tag-version.outputs.sha || '' }}
       publish_existing: false
 
-  prepare-native-assets:
-    if: >-
-      always() &&
-      (github.event_name == 'push' ||
-       (github.event_name == 'workflow_dispatch' && (github.event.inputs.mode == 'release' || github.event.inputs.mode == 'candidate'))) &&
-      needs.verify-tag-version.result == 'success' &&
-      needs.complete-suite-assets.result == 'success'
-    needs: [verify-tag-version, complete-suite-assets]
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    permissions:
-      contents: read
-      actions: read
-    outputs:
-      version: ${{ steps.version.outputs.version }}
-    steps:
-      - name: Checkout released source
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-        with:
-          ref: ${{ needs.verify-tag-version.outputs.sha }}
-      - name: Setup Bun
-        uses: ./.github/actions/bun
-      - name: Select the published engine version
-        id: version
-        env:
-          RELEASE_TAG: ${{ needs.verify-tag-version.outputs.tag }}
-        run: |
-          version=$(bun -e 'console.log(JSON.parse(await Bun.file("packages/engine/package.json").text()).version)')
-          test "v$version" = "$RELEASE_TAG"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-      - name: Download freshly built complete installer assets
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          name: installer-release-assets
-          path: /tmp/native-release-assets
-      - name: Upload native release assets for installation acceptance
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: native-release-assets
-          path: /tmp/native-release-assets/*
-          retention-days: 7
-          if-no-files-found: error
-
   staged-install-acceptance:
     # Skip npm ancestors without skipping native acceptance; every fresh and previous-release staged lane
     # must finish successfully before the first public release is created.
@@ -305,8 +253,8 @@ jobs:
       (github.event_name == 'push' ||
        (github.event_name == 'workflow_dispatch' && (github.event.inputs.mode == 'release' || github.event.inputs.mode == 'candidate'))) &&
       needs.verify-tag-version.result == 'success' &&
-      needs.prepare-native-assets.result == 'success'
-    needs: [verify-tag-version, prepare-native-assets]
+      needs.complete-suite-assets.result == 'success'
+    needs: [verify-tag-version, complete-suite-assets]
     permissions:
       contents: read
       actions: read
@@ -326,17 +274,15 @@ jobs:
        (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'release')) &&
       (needs.publish-npm.result == 'success' ||
        (vars.PUBLISH_NPM != 'true' && needs.publish-npm.result == 'skipped')) &&
-      needs.prepare-native-assets.result == 'success' &&
       needs.staged-install-acceptance.result == 'success'
-    needs: [verify-tag-version, publish-npm, prepare-native-assets, staged-install-acceptance]
+    needs: [verify-tag-version, publish-npm, staged-install-acceptance]
     permissions:
       contents: write
     uses: ./.github/workflows/reusable-gh-release.yml
     with:
       tag: ${{ needs.verify-tag-version.outputs.tag }}
-      artifact-name: staged-release-assets
-      use-existing-checksums: true
+      # The collected payloads and the SHA256SUMS.txt written from their verified digests, exactly as accepted.
+      artifact-name: installer-release-assets
       assets-glob: dist/*
       notes-file: docs/releases/{version}.md
       changelog-path: packages/engine/CHANGELOG.md
-      toolchain-source: workspace

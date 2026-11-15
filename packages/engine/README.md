@@ -178,12 +178,17 @@ bun packages/engine/scripts/test.ts test/lifecycle-machine.test.ts
 # One slice of the engine suite: partition INDEX of COUNT
 bun packages/engine/scripts/test.ts --partition=3/9
 
+# The live-sandbox tests, failing instead of skipping on a host without bubblewrap
+bun packages/engine/scripts/test.ts --live-sandbox
+
 # Another workspace: --cwd is relative to packages/engine
 bun packages/engine/scripts/test.ts --cwd ../../products/agent src/test
 ```
 
 `--partition` selects its own files and cannot be combined with `--cwd` or
-explicit files. Each product's `bun run test` script calls the same runner with
+explicit files. `--live-sandbox` selects every engine test that reads
+`GOODVIBES_TEST_REQUIRE_EXEC_CONTAINMENT` (directly or through the containment
+proof helper), sets it, and accepts `--partition` to run a slice of them. Each product's `bun run test` script calls the same runner with
 its own `--cwd`. TUI and Agent tests create their working directories under
 `<product>/.test-tmp/run-*`, which is ignored by Git.
 
@@ -209,7 +214,7 @@ restore it instead of rebuilding.
 | `agent-tests` | The Agent suite in eight shards |
 | `tui-host-pair-terminal` | TUI host pairing against the compiled binary in a real terminal |
 | `webui-browser` | The WebUI Playwright suite in two shards |
-| `exec-containment-proof` | Live bubblewrap containment fixtures in two lanes |
+| `exec-containment-proof` | The live-sandbox tests (`--live-sandbox`) in two lanes, where a skip fails |
 | `artifact-lane` | Packaged-artifact conformance (`bun run release:artifact-lane`) |
 
 Workflows install the Bun version named by `engines.bun` in the root

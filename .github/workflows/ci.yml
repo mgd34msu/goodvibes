@@ -410,15 +410,13 @@ jobs:
           node products/daemon/scripts/verify-native-execution.mjs "$GITHUB_SHA" "$DAEMON_SOURCE_HEAD"
 
   # The whole Agent suite, split into eight even shards by sorted file index
-  # (every test file is in exactly one shard by construction). The two native
-  # catalog fixtures run in their own runner invocation on shard 0 because they
-  # must stay isolated from unrelated globals. Each file runs in its own bun
-  # process (--jobs=2, each with its own home directory), so files cannot leak state into
-  # one another.
+  # (every test file is in exactly one shard by construction). Each file runs in
+  # its own bun process (--jobs=2, each with its own home directory), so files
+  # cannot leak state into one another.
   agent-tests:
     name: Agent tests (shard ${{ matrix.shard }}/8)
     runs-on: ubuntu-latest
-    # Slowest shard measured at ~9.5 min (shard 0 with the catalog fixtures) on a 12-core workstation.
+    # Slowest shard measured at ~9.5 min on a 12-core workstation.
     timeout-minutes: 35
     needs: [build]
     strategy:
@@ -457,14 +455,10 @@ jobs:
           mapfile -t files < <(cd products/agent && find src/test -type f -regextype posix-extended -regex '.*\.(test|spec)\.[cm]?[jt]sx?' \
             -not -path '*/node_modules/*' -not -path '*/dist/*' -not -path '*/.git/*' \
             | LC_ALL=C sort \
-            | grep -v -e '/agent-harness-tool\.test\.ts$' -e '/agent-harness-semantic-record-catalogs\.test\.ts$' \
             | awk -v shard="$SHARD" 'NR % 8 == shard' | sed 's|^|./|')
           echo "Agent shard $SHARD: ${#files[@]} files"
           test "${#files[@]}" -gt 0
           bun packages/engine/scripts/test.ts --cwd ../../products/agent --jobs=2 --timeout=180000 "${files[@]}"
-      - name: Run the isolated native catalog fixtures
-        if: ${{ !cancelled() && matrix.shard == 0 }}
-        run: bun packages/engine/scripts/test.ts --cwd ../../products/agent --jobs=2 --timeout=180000 ./src/test/tools/agent-harness-tool.test.ts ./src/test/tools/agent-harness-semantic-record-catalogs.test.ts
 
   # Exact TUI source, production migration handlers and real owner-terminal input.
   # The ordinary TUI product runner intentionally excludes E2E files.
@@ -570,14 +564,18 @@ jobs:
 
   # A separate, mandatory live OS-boundary proof. Pin a supported VM runner
   # with unprivileged namespaces; never disable AppArmor, change sysctls, or
-  # run the fixtures as root to make a failing host look supported. Two lanes,
-  # each running its fixture groups one after another.
+  # run the fixtures as root to make a failing host look supported. The runner
+  # selects every engine test that reads the containment requirement (the marker
+  # its skip depends on) and turns each such skip into a failure; two lanes split
+  # that selection in half.
   exec-containment-proof:
     name: Exec containment proof (live bubblewrap, ${{ matrix.lane }})
     strategy:
       fail-fast: false
       matrix:
-        lane: [a, b]
+        include:
+          - { lane: a, part: 1 }
+          - { lane: b, part: 2 }
     runs-on: ubuntu-22.04
     timeout-minutes: 40
     needs: [build]
@@ -596,41 +594,10 @@ jobs:
         uses: ./.github/actions/setup
       - name: Restore workspace package output
         uses: ./.github/actions/restore-build
-      # A live sandbox test that is not named in a lane below runs only in the generic partitions, where it
-      # skips silently on a host without namespaces. Any engine test that probes the host and can skip must be listed here.
-      - name: Every skippable live-sandbox test is on a lane
-        if: matrix.lane == 'a'
-        run: |
-          missing=0
-          while IFS= read -r file; do
-            if ! grep -qF "${file#packages/engine/}" .github/workflows/ci.yml; then
-              echo "::error file=$file::Add this live-sandbox test to a lane of the exec-containment-proof job in ci.yml so it cannot skip unnoticed."
-              missing=1
-            fi
-          done < <(grep -rlE 'probeCapturedExecAvailability|detectSandboxAvailability|probeSandboxHost|detectPtyAvailability|/usr/bin/bwrap' packages/engine/test --include='*.test.ts' | xargs grep -l 'skipIf' | sort)
-          exit "$missing"
       - name: Require actual sandbox fixture execution
         env:
-          GOODVIBES_TEST_REQUIRE_EXEC_CONTAINMENT: "1"
-          LANE: ${{ matrix.lane }}
-        run: |
-          case "$LANE" in
-            a)
-              bun packages/engine/scripts/test.ts test/exec-interactive.test.ts test/exec-interactive-lifecycle.test.ts test/exec-run-hardening.test.ts test/exec-sandbox.test.ts test/exec-sandbox-final-spawn.test.ts test/exec-sandbox-host-sockets.test.ts test/exec-sandbox-runtimes.test.ts test/exec-containment-proof.test.ts test/captured-exec.test.ts test/captured-exec-modes.test.ts test/captured-exec-file-ops.test.ts test/captured-exec-runtime-input.test.ts test/captured-edit-write.test.ts
-              bun packages/engine/scripts/test.ts test/contract/actual-direct-exec-input-authority.test.ts test/captured-direct-exec-compiled.test.ts
-              bun packages/engine/scripts/test.ts --cwd ../../products/agent ./src/test/runtime/exec-cancellation-wrappers.test.ts ./src/test/tools/tool-execution-safety.test.ts
-              bun packages/engine/scripts/test.ts test/captured-auto-heal-real-tools.test.ts
-              ;;
-            b)
-              bun packages/engine/scripts/test.ts test/captured-exec-held-reasons.test.ts test/hosted-autonomous-sandbox-escalation.test.ts test/hosted-autonomous-tool-prompts.test.ts test/hosted-initial-workspace-trust.test.ts
-              bun packages/engine/scripts/test.ts test/captured-repl.test.ts test/captured-repl-compiled.test.ts test/captured-bun-runtime-input.test.ts test/contract/actual-repl-input-authority.test.ts test/contract/actual-repl-run-history.test.ts test/contract/actual-repl-history-cancellation.test.ts
-              # Real dependency capture and validators have test budgets of up to
-              # 420 seconds, declared by the tests themselves.
-              bun packages/engine/scripts/test.ts test/contract/actual-input-authority-graph.test.ts test/contract/actual-edit-write-input-authority.test.ts test/contract/actual-validator-runtime.test.ts test/captured-passive-context-pipeline.test.ts
-              bun packages/engine/scripts/test.ts test/captured-auto-heal-candidate.test.ts test/captured-auto-heal-revision.test.ts test/captured-auto-heal.test.ts test/captured-auto-heal-backend-isolation.test.ts test/captured-auto-heal-rollback.test.ts test/contract/actual-captured-auto-heal.test.ts
-              ;;
-            *) exit 1 ;;
-          esac
+          PART: ${{ matrix.part }}
+        run: bun packages/engine/scripts/test.ts --live-sandbox --partition="$PART/2"
 
   # ---------------------------------------------------------------------------
   # Packaged-artifact coherence gate: pack every workspace package exactly as

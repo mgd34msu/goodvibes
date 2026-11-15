@@ -7,7 +7,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from release_asset_pins import needs_metadata, resume_existing_assets, stage_release_assets, validate_reader_assets
+from release_asset_pins import needs_metadata, release_exists, resume_existing_assets, stage_release_assets, validate_reader_assets
 
 SOURCE = 'a' * 40
 
@@ -212,6 +212,16 @@ class ReleasePinSelection(unittest.TestCase):
             stage = root / 'stage'
             self.assertEqual(stage_release_assets(stage, f'{source} {source}', 'SHA256SUMS.txt'), ['program'])
             self.assertEqual((stage / 'program').read_bytes(), b'original')
+
+
+    def test_only_a_not_found_answer_means_the_release_is_absent(self):
+        def answer(code, body):
+            return lambda *_args, **_kwargs: subprocess.CompletedProcess([], code, json.dumps(body), 'error')
+        self.assertFalse(release_exists('owner/repo', 'v3.1.2', run=answer(1, {'status': '404'})))
+        self.assertTrue(release_exists('owner/repo', 'v3.1.2', run=answer(0, {'tag_name': 'v3.1.2', 'draft': False})))
+        for code, body in [(1, {'status': '500'}), (1, None), (0, {'tag_name': 'v3.1.2', 'draft': True})]:
+            with self.subTest(code=code, body=body), self.assertRaises(AssertionError):
+                release_exists('owner/repo', 'v3.1.2', run=answer(code, body))
 
 
 if __name__ == '__main__':

@@ -13,7 +13,7 @@ on:
         required: true
         type: string
       artifact-run-id:
-        description: Run containing the exact native-release-assets artifact to stage.
+        description: Run containing the exact installer-release-assets artifact (payloads and their SHA256SUMS.txt).
         required: true
         type: string
       previous-tag:
@@ -40,7 +40,7 @@ on:
         required: true
         type: string
       artifact-run-id:
-        description: Run containing the exact native-release-assets artifact to stage.
+        description: Run containing the exact installer-release-assets artifact (payloads and their SHA256SUMS.txt).
         required: true
         type: string
       previous-tag:
@@ -63,55 +63,7 @@ permissions:
   actions: read
 
 jobs:
-  stage-release-assets:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    permissions:
-      contents: read
-      actions: read
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-        with:
-          ref: ${{ inputs.tooling-sha }}
-          fetch-depth: 0
-      - name: Verify immutable staging inputs
-        env:
-          TOOLING_SHA: ${{ inputs.tooling-sha }}
-          SOURCE_SHA: ${{ inputs.source }}
-          ARTIFACT_RUN_ID: ${{ inputs.artifact-run-id }}
-          RELEASE_TAG: ${{ inputs.tag }}
-        run: |
-          set -euo pipefail
-          [[ "$TOOLING_SHA" =~ ^[0-9a-f]{40}$ ]]
-          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
-          [[ "$ARTIFACT_RUN_ID" =~ ^[0-9]+$ ]]
-          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
-          test "$(git rev-parse HEAD)" = "$TOOLING_SHA"
-          git cat-file -e "$SOURCE_SHA^{commit}"
-      - uses: ./.github/actions/bun
-      - name: Download the exact admitted native artifact
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
-        with:
-          name: native-release-assets
-          path: ${{ runner.temp }}/staged-release-assets
-          run-id: ${{ inputs.artifact-run-id }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Stage the single consumer checksum manifest
-        env:
-          ASSETS_DIRECTORY: ${{ runner.temp }}/staged-release-assets
-        run: |
-          set -euo pipefail
-          bun packages/engine/toolchain/src/bin/sha256sums.ts --out "$ASSETS_DIRECTORY/SHA256SUMS.txt" "$ASSETS_DIRECTORY"/*
-      - name: Retain the exact artifact accepted and promoted
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: staged-release-assets
-          path: ${{ runner.temp }}/staged-release-assets/*
-          if-no-files-found: error
-          retention-days: 7
-
   native-install:
-    needs: [stage-release-assets]
     # Only original disposable hosted accounts, never a local/persistent service.
     strategy:
       fail-fast: false
@@ -138,17 +90,28 @@ jobs:
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
         with:
           node-version: '22'
-      - name: Verify the original acceptance tooling
+      - name: Verify the original acceptance tooling and the release identity
         env:
           TOOLING_SHA: ${{ inputs.tooling-sha }}
+          SOURCE_SHA: ${{ inputs.source }}
+          ARTIFACT_RUN_ID: ${{ inputs.artifact-run-id }}
+          RELEASE_TAG: ${{ inputs.tag }}
         run: |
+          set -euo pipefail
+          [[ "$TOOLING_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$ARTIFACT_RUN_ID" =~ ^[0-9]+$ ]]
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
           test "$(git rev-parse HEAD)" = "$TOOLING_SHA"
+          git cat-file -e "$SOURCE_SHA^{commit}"
           test -f scripts/accept-staged-suite.mjs
-      - name: Download the staged artifact from this acceptance run
+      - name: Download the exact collected release assets
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          name: staged-release-assets
+          name: installer-release-assets
           path: ${{ runner.temp }}/staged-release-assets
+          run-id: ${{ inputs.artifact-run-id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Install, serve and uninstall the staged suite
         env:
           GOODVIBES_ACCEPTANCE_METADATA_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -166,7 +129,6 @@ jobs:
           retention-days: 7
 
   previous-release-upgrade:
-    needs: [stage-release-assets]
     # Four original hosted accounts exercise the real previous published suite.
     # A release with no earlier version tag has nothing to upgrade from.
     # Either input alone still runs the job so its identity check refuses a partial pair; only both empty (a first release) skips.
@@ -224,11 +186,13 @@ jobs:
           node-version: '22'
       - name: Setup Bun for the original source lifecycle writer
         uses: ./.github/actions/bun
-      - name: Download the staged artifact from this acceptance run
+      - name: Download the exact collected release assets
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          name: staged-release-assets
+          name: installer-release-assets
           path: ${{ runner.temp }}/staged-release-assets
+          run-id: ${{ inputs.artifact-run-id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Install source lifecycle writer dependencies
         working-directory: candidate-source
         run: bun install --frozen-lockfile

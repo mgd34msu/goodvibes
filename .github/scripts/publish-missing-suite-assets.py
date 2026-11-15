@@ -29,6 +29,23 @@ release = json.loads(subprocess.check_output(['gh', 'api', f'repos/{repo}/releas
 assert not release['draft'] and release['tag_name'] == tag
 assets = {a['name']: a for a in release['assets']}
 assert len(assets) == len(release['assets'])
+
+
+def release_api(method, asset, *fields):
+    subprocess.run(['gh', 'api', '-X', method, f'repos/{repo}/releases/assets/{asset["id"]}', *fields], check=True, stdout=subprocess.DEVNULL)
+
+
+# A new manifest is uploaded under this name and then takes the published name, so the release never
+# lacks a manifest while an upload runs. One left by an interrupted run is stale when the published
+# manifest is still there, and otherwise is the published manifest that missed its rename.
+staged_name = checksum_name + '.next'
+if staged_name in assets:
+    leftover = assets.pop(staged_name)
+    if checksum_name in assets:
+        release_api('DELETE', leftover)
+    else:
+        release_api('PATCH', leftover, '-f', f'name={checksum_name}')
+        assets[checksum_name] = {**leftover, 'name': checksum_name}
 with tempfile.TemporaryDirectory(prefix='goodvibes-release-completion-') as temporary, ExitStack() as ownership:
     temporary = Path(temporary)
     checks = {}
@@ -42,7 +59,10 @@ with tempfile.TemporaryDirectory(prefix='goodvibes-release-completion-') as temp
             checks[match[2]] = match[1]
     incoming, retained = {}, {}
     for path in sorted(directory.iterdir()):
-        assert path.is_file() and not path.is_symlink() and path.name != checksum_name and re.fullmatch(r'[A-Za-z0-9_.-]+', path.name)
+        if path.name == checksum_name:
+            # The collected manifest of a fresh build; the published one is rebuilt from the release below.
+            continue
+        assert path.is_file() and not path.is_symlink() and path.name != staged_name and re.fullmatch(r'[A-Za-z0-9_.-]+', path.name)
         # Existing checksummed payloads are immutable and win outright. Their
         # unused rebuilt candidates need neither a local pin nor an open FD.
         # A checksummed payload the release no longer holds is the exception:
@@ -96,24 +116,21 @@ with tempfile.TemporaryDirectory(prefix='goodvibes-release-completion-') as temp
     for name, digest in checks.items():
         assert final_assets[name]['digest'] == 'sha256:' + digest and final_assets[name]['size'] == selected_pins[name]['size'], f'Uploaded bytes differ from admitted pins: {name}'
     manifest = ''.join(f'{digest}  {name}\n' for name, digest in sorted(checks.items()))
-    if manifest == published_manifest:
-        # Replacing the manifest deletes it first; with nothing to record the published one stays untouched.
-        replaced = False
-    else:
-        # `--clobber` removes the published manifest before the new one lands, so a failed upload is retried and,
-        # if it keeps failing, the operator is told the exact command and given the manifest to re-create.
-        checksum = temporary / checksum_name
-        checksum.write_text(manifest)
-        for attempt in range(1, 4):
-            try:
-                subprocess.run(['gh', 'release', 'upload', tag, '--repo', repo, str(checksum), '--clobber'], check=True)
-                break
-            except subprocess.CalledProcessError:
-                print(f'Checksum manifest upload failed (attempt {attempt} of 3)', file=sys.stderr)
-        else:
+    replaced = manifest != published_manifest
+    if replaced:
+        try:
+            staged = temporary / staged_name
+            staged.write_text(manifest)
+            subprocess.run(['gh', 'release', 'upload', tag, '--repo', repo, str(staged)], check=True)
+            uploaded = {asset['name']: asset for asset in json.loads(subprocess.check_output(['gh', 'api', f'repos/{repo}/releases/tags/{tag}'], text=True))['assets']}
+            assert uploaded[staged_name]['digest'] == 'sha256:' + hashlib.sha256(manifest.encode()).hexdigest(), f'Uploaded {staged_name} differs from the manifest written'
+            # Two metadata calls with no upload between them: the published manifest is replaced, never missing for an upload.
+            if checksum_name in uploaded:
+                release_api('DELETE', uploaded[checksum_name])
+            release_api('PATCH', uploaded[staged_name], '-f', f'name={checksum_name}')
+        except (subprocess.CalledProcessError, AssertionError, KeyError) as error:
             raise SystemExit(
-                f'The release {tag} now holds its payloads but no {checksum_name}: every upload attempt failed after the old one was removed.\n'
-                f'Re-create it by saving the lines below as {checksum_name} and running: gh release upload {tag} --repo {repo} {checksum_name} --clobber\n'
-                + manifest)
-        replaced = True
+                f'The release {tag} holds every payload, but replacing {checksum_name} stopped: {error}. '
+                f'The release still lists the previous manifest or the new one as {staged_name}; '
+                f'run this completion again to finish the replacement.')
     print(json.dumps({'tag': tag, 'added': added, 'resumed': sorted(resumed), 'originalPayloadsPreserved': True, 'checksumEntries': len(checks), 'checksumReplaced': replaced}))

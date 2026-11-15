@@ -105,7 +105,9 @@ jobs:
         with:
           pattern: suite-release-*
           path: ${{ runner.temp }}/suite-archives
-      - name: Admit complete same-source suite
+      # Every member is checked against its packager digest once, here; SHA256SUMS.txt is written from those digests
+      # and travels with the payloads to installation acceptance and the release job.
+      - name: Admit complete same-source suite and write its checksum manifest
         id: admit
         env:
           RELEASE_TAG: ${{ inputs.tag }}

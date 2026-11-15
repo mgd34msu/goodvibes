@@ -7,7 +7,7 @@ import { isolatedTestEnvironment } from '../toolchain/src/test-runner/test-isola
 import { RUN_TMP_PREFIX, sweepStaleTmpDirs, TEST_TMP_ROOT_ENV } from '../toolchain/src/test-runner/temp.ts';
 import { staleDistNote } from './dist-freshness.ts';
 import { defaultTestArgs, discoverTestFiles } from './test-discovery.ts';
-import { selectPartition } from './test-partitions.ts';
+import { partitionTestFiles, selectPartition } from './test-partitions.ts';
 
 const ENGINE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const NETWORK_PRELOAD = join(ENGINE_ROOT, 'toolchain/src/test-runner/test-network-preload.ts');
@@ -63,7 +63,7 @@ export interface BunTestRun {
   readonly jobs?: number;
 }
 
-interface SplitArgs { flags: string[]; filters: string[]; cwd?: string | undefined; partition?: string | undefined; jobs?: string | undefined }
+interface SplitArgs { flags: string[]; filters: string[]; cwd?: string | undefined; partition?: string | undefined; jobs?: string | undefined; liveSandbox?: boolean }
 
 /** Separate runner options, bun flags (with their values) and file filters. */
 function splitArgs(argv: readonly string[]): SplitArgs {
@@ -82,6 +82,7 @@ function splitArgs(argv: readonly string[]): SplitArgs {
     else if (name === '--partition') out.partition = value;
     else if (name === '--jobs') out.jobs = value;
     else if (name === '--manifest') continue; // accepted for old workflow lines, ignored
+    else if (name === '--live-sandbox') out.liveSandbox = true;
     else if (!arg.startsWith('-')) out.filters.push(arg);
     else if (value === undefined) out.flags.push(arg);
     else out.flags.push(...(name.startsWith('--') ? [`${name}=${value}`] : [name, value]));
@@ -294,15 +295,43 @@ export async function runBunTest(run: BunTestRun): Promise<number> {
   }
 }
 
+/** The variable that turns a live-sandbox test's skip on a host without the capability into a failure. */
+const EXEC_CONTAINMENT_REQUIRED_ENV = 'GOODVIBES_TEST_REQUIRE_EXEC_CONTAINMENT';
+
 /**
- * CLI: `bun scripts/test.ts [--cwd DIR] [--partition=I/N] [--jobs=N|auto] [bun test flags] [files]`.
+ * Engine tests that depend on a live sandbox: the ones that read the containment requirement, directly or
+ * through the shared proof helper. That reading is what lets them skip on an unsupported host, so it is also
+ * what selects them; a list kept elsewhere could not follow a new test.
+ */
+export function liveSandboxTestFiles(engineRoot: string): readonly string[] {
+  return defaultTestArgs(engineRoot).filter((file) => {
+    const text = readFileSync(join(engineRoot, file), 'utf8');
+    return text.includes(EXEC_CONTAINMENT_REQUIRED_ENV) || /_helpers\/exec-containment-proof(?:\.ts)?['"]/.test(text);
+  });
+}
+
+/**
+ * CLI: `bun scripts/test.ts [--cwd DIR] [--partition=I/N] [--live-sandbox] [--jobs=N|auto] [bun test flags] [files]`.
  * `--cwd` is relative to the engine package. Files run one per process, cores - 1 at a time (`--jobs=auto`, the
- * default); `--jobs=1` runs the whole selection in one process. `--manifest=` is accepted and ignored.
+ * default); `--jobs=1` runs the whole selection in one process. `--live-sandbox` runs the live-sandbox tests with
+ * their skip turned into a failure (with `--partition`, that part of them). `--manifest=` is accepted and ignored.
  */
 function parseCli(argv: readonly string[]): BunTestRun {
-  const { flags, filters, cwd, partition, jobs } = splitArgs(argv);
+  const { flags, filters, cwd, partition, jobs, liveSandbox } = splitArgs(argv);
   const jobCount = jobs === undefined || jobs === 'auto' ? defaultJobs() : Number(jobs);
   if (!Number.isInteger(jobCount) || jobCount < 1) throw new Error('--jobs expects a positive integer or "auto"');
+  if (liveSandbox) {
+    if (cwd !== undefined || filters.length > 0) throw new Error('--live-sandbox selects engine test files itself; do not combine it with --cwd or test files');
+    let files = liveSandboxTestFiles(ENGINE_ROOT);
+    if (files.length === 0) throw new Error(`No engine test reads ${EXEC_CONTAINMENT_REQUIRED_ENV}`);
+    if (partition !== undefined) {
+      const match = /^([1-9]\d*)\/([1-9]\d*)$/.exec(partition);
+      if (!match || Number(match[1]) > Number(match[2])) throw new Error('Invalid test partition; expected --partition=INDEX/COUNT');
+      files = partitionTestFiles(files, Number(match[2]))[Number(match[1]) - 1]!;
+    }
+    console.log(`[engine-tests] live sandbox: ${files.length} files`);
+    return { args: [...flags, ...files.map((file) => `./${file}`)], jobs: jobCount, env: { ...process.env, [EXEC_CONTAINMENT_REQUIRED_ENV]: '1' } };
+  }
   if (partition !== undefined) {
     if (cwd !== undefined || filters.length > 0) throw new Error('--partition selects engine test files itself; do not combine it with --cwd or test files');
     return { args: [...flags, ...selectPartition(ENGINE_ROOT, partition)], jobs: jobCount };

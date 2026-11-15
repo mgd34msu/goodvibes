@@ -235,7 +235,9 @@ Without a receipt or a checkout, `uninstall.sh` runs the current installer scrip
 ## Explicit developer source installation
 
 `./scripts/install-from-checkout.sh` is the separate developer build path. It
-requires a clean checkout and the build toolchain. Its receipt-owned program/data
+requires a clean checkout and the build toolchain. It builds with the Bun version
+the checkout's `package.json` declares in `engines.bun` (the one CI uses), and
+downloads that version privately when the `bun` on your PATH differs. Its receipt-owned program/data
 layout is distinct from release-binary installations. The curl installer does not
 fall back to building source when a release asset is unavailable.
 

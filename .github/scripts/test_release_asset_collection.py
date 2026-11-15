@@ -84,7 +84,9 @@ class SuiteCollectionOutputs(unittest.TestCase):
             root = Path(temporary)
             output = self.invoke(root)
             self.assertEqual(output.read_text(), 'prior=true\nsource=' + 'a' * 40 + '\n')
-            self.assertEqual(len(list((root / 'assets').iterdir())), 4)
+            self.assertEqual(len(list((root / 'assets').iterdir())), 5)
+            self.assertEqual((root / 'assets' / 'SHA256SUMS.txt').read_text(),
+                             ''.join(f'{ABC}  original-{target}\n' for target in sorted(TARGETS)))
             self.assertFalse(list((root / 'assets').glob('suite-release-source-*')))
             self.assertEqual(self.api_paths, [f'repos/{REPOSITORY}/git/ref/tags/v3.1.2'])
 
@@ -101,8 +103,8 @@ class SuiteCollectionOutputs(unittest.TestCase):
             output = self.invoke(root, candidate='a' * 40)
             self.assertEqual(output.read_text(), 'prior=true\nsource=' + 'a' * 40 + '\n')
             self.assertEqual(self.api_paths, [f'repos/{REPOSITORY}/git/commits/' + 'a' * 40])
-            self.assertEqual({path.name: path.read_bytes() for path in (root / 'assets').iterdir()},
-                             {f'original-{target}': b'abc' for target in ['linux-x64', 'linux-arm64', 'darwin-x64', 'darwin-arm64']})
+            self.assertEqual({path.name: path.read_bytes() for path in (root / 'assets').iterdir() if path.name != 'SHA256SUMS.txt'},
+                             {f'original-{target}': b'abc' for target in TARGETS})
 
     def test_candidate_rejects_mixed_source_or_wrong_version_before_exposing_source(self):
         for changes in [{'wrong_last': True}, {'wrong_tag': True}]:
@@ -192,7 +194,8 @@ class SuiteCollectionOutputs(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             self.invoke(root, tweak=shared)
-            self.assertEqual([path.name for path in (root / 'assets').iterdir()], ['shared'])
+            self.assertEqual(sorted(path.name for path in (root / 'assets').iterdir()), ['SHA256SUMS.txt', 'shared'])
+            self.assertEqual((root / 'assets' / 'SHA256SUMS.txt').read_text(), f'{ABC}  shared\n')
 
     def test_optimized_python_refuses_to_run_without_its_assertions(self):
         script = Path(__file__).with_name('collect-suite-release.py')

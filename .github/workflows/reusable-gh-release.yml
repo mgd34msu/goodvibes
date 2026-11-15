@@ -3,14 +3,14 @@ name: Reusable GitHub release
 # Reusable: GitHub Release (notes-file or changelog excerpt + SHA256SUMS + assets)
 #
 # Consumer contract
-#   Creates a GitHub Release for a tag: resolves the release body (an optional
-#   per-release notes file wins; otherwise the tag's CHANGELOG section is
-#   extracted), generates or verifies a SHA256SUMS manifest over the staged
-#   assets via the toolchain `sha256sums` CLI (a missing asset is fatal), and uploads the
-#   assets with a pinned softprops/action-gh-release. An existing release instead
-#   fills only missing assets after validating metadata against the original
-#   published bytes; reruns never replace an existing program. One copy,
-#   parameterized by the asset manifest.
+#   Creates a GitHub Release for a tag from a CI artifact that holds the payloads
+#   and the SHA256SUMS.txt written when they were collected. The release body is
+#   an optional per-release notes file, otherwise the tag's CHANGELOG section.
+#   Before upload the manifest is verified to list exactly the payloads with
+#   their bytes. An existing release instead fills only missing assets after
+#   validating metadata against the original published bytes; reruns never
+#   replace an existing program. Asset selection and the release lookup are
+#   functions of .github/scripts/release_asset_pins.py, covered by its tests.
 #
 #   Call it from a workflow in THIS repository only. The job checks out the
 #   caller's repository and runs `./.github/actions/bun` and
@@ -21,25 +21,22 @@ name: Reusable GitHub release
 #         uses: ./.github/workflows/reusable-gh-release.yml
 #         with:
 #           tag: ${{ github.ref_name }}
-#           artifact-name: release-assets
-#           assets-glob: "dist/goodvibes-*"
+#           artifact-name: installer-release-assets
+#           assets-glob: "dist/*"
 #           notes-file: "docs/releases/{version}.md"   # optional prose override
 #
 #   The called copy is the one at the caller's own commit, so a release always
 #   runs the scripts that were reviewed with it.
 #
 #   Inputs:  tag (required), artifact-name (a CI artifact to download into
-#            dist/, optional), assets-glob (files to hash + upload), notes-file
-#            (optional release-body override; `{version}` expands to the tag
-#            without its v prefix: when set AND the file exists at the
-#            checked-out ref its content is the body, otherwise the changelog
-#            excerpt is used exactly as before), changelog-path (default
-#            CHANGELOG.md), sha256-name (default SHA256SUMS.txt).
+#            dist/, optional), assets-glob (payload files to upload; the
+#            manifest beside them is excluded), notes-file (optional
+#            release-body override; `{version}` expands to the tag without its
+#            v prefix: when set AND the file exists at the checked-out ref its
+#            content is the body, otherwise the changelog excerpt is used),
+#            changelog-path (default CHANGELOG.md).
 #
-#   assets-glob accepts whitespace-separated globs: spaces or newlines. The
-#   value is normalized to newline-separated form before it reaches the
-#   softprops `files` sink (which splits on newlines only), so both forms
-#   behave identically.
+#   assets-glob accepts whitespace-separated globs: spaces or newlines.
 #   Runs on ubuntu-24.04 so awk changelog extraction stays GNU-stable.
 
 on:
@@ -55,15 +52,10 @@ on:
         default: ""
       assets-glob:
         description: Whitespace-separated globs (spaces or newlines, relative to
-          repo root) of assets to checksum + upload. Normalized to
-          newline-separated form before use, so both separators work.
+          repo root) of the payloads to upload. The SHA256SUMS.txt beside them
+          is verified and uploaded as the manifest, never as a payload.
         required: true
         type: string
-      use-existing-checksums:
-        description: Verify and publish the exact staged checksum manifest and complete payload set without regenerating it.
-        required: false
-        type: boolean
-        default: false
       notes-file:
         description: Optional release-body override. `{version}` expands to the
           tag without its v prefix. When set and the file exists at the
@@ -76,19 +68,6 @@ on:
         required: false
         type: string
         default: CHANGELOG.md
-      sha256-name:
-        required: false
-        type: string
-        default: SHA256SUMS.txt
-      toolchain-spec:
-        required: false
-        type: string
-        default: "@goodvibes-jev/engine"
-      toolchain-source:
-        description: Use the checked-out workspace or a published toolchain for checksums.
-        required: false
-        type: string
-        default: registry
 
 permissions:
   contents: read
@@ -153,121 +132,39 @@ jobs:
             printf '%s\n' "$excerpt" > /tmp/release_notes.md
           fi
           echo "body=/tmp/release_notes.md" >> "$GITHUB_OUTPUT"
-      - name: Normalize asset globs (spaces -> newlines)
-        id: globs
-        env:
-          RAW_GLOBS: ${{ inputs.assets-glob }}
-        run: |
-          set -euo pipefail
-          # softprops/action-gh-release `files` splits on NEWLINES only; accept
-          # space-separated values too by normalizing all whitespace runs.
-          {
-            echo 'paths<<GOODVIBES_GLOBS_EOF'
-            tr -s ' \t' '\n' <<< "$RAW_GLOBS" | sed '/^$/d'
-            echo 'GOODVIBES_GLOBS_EOF'
-          } >> "$GITHUB_OUTPUT"
-      - name: Resolve payload paths excluding the checksum manifest
+      - name: Select the payloads (the manifest beside them is not one)
         id: payloads
         env:
-          NORMALIZED_GLOBS: ${{ steps.globs.outputs.paths }}
-          SHA256_NAME: ${{ inputs.sha256-name }}
-        run: |
-          python3 - <<'PY_PAYLOADS'
-          import glob, os, re
-          from pathlib import Path
-          checksum = os.environ['SHA256_NAME']
-          assert re.fullmatch(r'[A-Za-z0-9_.-]+', checksum), 'Checksum name must be flat'
-          selected = {}
-          for pattern in os.environ['NORMALIZED_GLOBS'].split():
-              matches = glob.glob(pattern)
-              assert matches, f'No asset matched: {pattern}'
-              for value in matches:
-                  path = Path(value)
-                  assert path.is_file() and not path.is_symlink(), f'Invalid release asset: {path}'
-                  if path.name == checksum:
-                      continue
-                  assert re.fullmatch(r'[A-Za-z0-9_.-]+', path.name), f'Invalid release name: {path}'
-                  prior = selected.get(path.name)
-                  assert prior is None or prior.resolve() == path.resolve(), f'Ambiguous release basename: {path.name}'
-                  selected[path.name] = path
-          assert selected, 'No payload assets selected'
-          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
-              output.write('paths<<GOODVIBES_PAYLOADS_EOF\n')
-              output.write(''.join(str(selected[name]) + '\n' for name in sorted(selected)))
-              output.write('GOODVIBES_PAYLOADS_EOF\n')
-          PY_PAYLOADS
+          ASSET_GLOBS: ${{ inputs.assets-glob }}
+        run: python3 .github/scripts/release_asset_pins.py payloads "$ASSET_GLOBS"
       - name: Inspect existing release without treating API failures as absence
         id: publication
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.tag }}
-        run: |
-          python3 - <<'PY_RELEASE'
-          import json, os, re, subprocess
-          tag, repo = os.environ['RELEASE_TAG'], os.environ['GITHUB_REPOSITORY']
-          assert re.fullmatch(r'v\d+\.\d+\.\d+', tag), 'Only stable vN.N.N tags are published'
-          result = subprocess.run(['gh', 'api', f'repos/{repo}/releases/tags/{tag}'], capture_output=True, text=True)
-          value = json.loads(result.stdout)
-          if result.returncode:
-              assert str(value.get('status')) == '404', 'Release lookup failed; refusing to assume a fresh release'
-              exists = False
-          else:
-              assert value['tag_name'] == tag and not value['draft'], 'Unexpected release state'
-              exists = True
-          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
-              output.write('exists=' + str(exists).lower() + '\n')
-          PY_RELEASE
+        run: python3 .github/scripts/release_asset_pins.py release-exists "$RELEASE_TAG"
       - name: Complete an existing release without replacing published payloads
         if: steps.publication.outputs.exists == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.tag }}
-          NORMALIZED_GLOBS: ${{ steps.payloads.outputs.paths }}
-          SHA256_NAME: ${{ inputs.sha256-name }}
+          PAYLOAD_PATHS: ${{ steps.payloads.outputs.paths }}
         run: |
           set -euo pipefail
-          export COMPLETION_DIR="$RUNNER_TEMP/native-release-completion"
-          python3 - <<'PY_STAGE'
-          import os, sys
-          sys.path.insert(0, '.github/scripts')
-          from release_asset_pins import stage_release_assets
-          stage_release_assets(os.environ['COMPLETION_DIR'], os.environ['NORMALIZED_GLOBS'], os.environ['SHA256_NAME'])
-          PY_STAGE
-          python3 .github/scripts/publish-missing-suite-assets.py "$COMPLETION_DIR" "$RELEASE_TAG" "$SHA256_NAME"
-      - name: Generate or verify the consumer checksum manifest
+          completion="$RUNNER_TEMP/native-release-completion"
+          python3 .github/scripts/release_asset_pins.py stage "$completion" "$PAYLOAD_PATHS"
+          python3 .github/scripts/publish-missing-suite-assets.py "$completion" "$RELEASE_TAG"
+      - name: Verify the collected checksum manifest against the payloads
         id: checksums
         if: steps.publication.outputs.exists == 'false'
         env:
           PAYLOAD_PATHS: ${{ steps.payloads.outputs.paths }}
-          TOOLCHAIN_SPEC: ${{ inputs.toolchain-spec }}
-          TOOLCHAIN_SOURCE: ${{ inputs.toolchain-source }}
-          SHA256_NAME: ${{ inputs.sha256-name }}
-          USE_EXISTING_CHECKSUMS: ${{ inputs.use-existing-checksums }}
         run: |
           set -euo pipefail
           mapfile -t assets <<< "$PAYLOAD_PATHS"
-          if [ "$USE_EXISTING_CHECKSUMS" = true ]; then
-            if [ "$TOOLCHAIN_SOURCE" != workspace ]; then
-              echo "Existing checksum verification requires the workspace toolchain" >&2
-              exit 1
-            fi
-            # The acceptance artifact contains this exact manifest beside its
-            # payloads. Verify its pins and that it lists exactly these payloads;
-            # never hash a new publication manifest.
-            CHECKSUM_PATH="dist/$SHA256_NAME"
-            bun packages/engine/toolchain/src/bin/sha256sums.ts --verify "$CHECKSUM_PATH" --exact "${assets[@]}"
-          else
-            CHECKSUM_PATH="$SHA256_NAME"
-            if [ "$TOOLCHAIN_SOURCE" = workspace ]; then
-              bun packages/engine/toolchain/src/bin/sha256sums.ts --out "$CHECKSUM_PATH" "${assets[@]}"
-            elif [ "$TOOLCHAIN_SOURCE" = registry ]; then
-              bunx --package "$TOOLCHAIN_SPEC" goodvibes-sha256sums --out "$CHECKSUM_PATH" "${assets[@]}"
-            else
-              echo "Unknown checksum toolchain source" >&2
-              exit 1
-            fi
-          fi
-          echo "path=$CHECKSUM_PATH" >> "$GITHUB_OUTPUT"
+          # The manifest was written from the digests verified at collection; it must list exactly these payloads.
+          bun packages/engine/toolchain/src/bin/sha256sums.ts --verify dist/SHA256SUMS.txt --exact "${assets[@]}"
+          echo "path=dist/SHA256SUMS.txt" >> "$GITHUB_OUTPUT"
       - name: Create GitHub release
         if: steps.publication.outputs.exists == 'false'
         uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0

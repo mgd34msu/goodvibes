@@ -33,6 +33,7 @@ else:
 assert re.fullmatch(r'[a-f0-9]{40}', source), 'Release source must be one commit ID'
 destination.mkdir(parents=True, exist_ok=False)
 targets = ['linux-x64', 'linux-arm64', 'darwin-x64', 'darwin-arm64']
+digests = {}
 for target in targets:
     found = list(archives.rglob(f'suite-{target}.tgz'))
     assert len(found) == 1, target
@@ -58,7 +59,11 @@ for target in targets:
                 assert target_file.read_bytes() == payload, name
             else:
                 target_file.write_bytes(payload)
+            digests[name] = expected['sha256']
         print(json.dumps({'target': target, 'tag': tag, 'sourceCommit': source, 'admittedFiles': len(metadata['files'])}))
+# The consumer manifest is written from the digests verified above; acceptance and publication read this one file.
+assert digests and 'SHA256SUMS.txt' not in digests
+(destination / 'SHA256SUMS.txt').write_text(''.join(f'{digests[name]}  {name}\n' for name in sorted(digests)))
 # Expose the exact tag commit already used for every admitted target only after
 # the complete collection succeeds. A failed/mixed collection grants no output.
 if output := os.environ.get('GITHUB_OUTPUT'):

@@ -51,8 +51,9 @@ verify() {
 # The Bun and Node checksum lists come from the same hosts as their archives, so
 # they catch a corrupt download, not a compromised host. Both runtimes are only
 # used to build this checkout.
-# This is the compiler version required by the repository, not a Jev model pin.
-bun_version=1.3.14
+# The compiler version is the checkout's own `engines.bun`, the one CI builds and tests with.
+bun_version=$(sed -n 's/.*"bun": *"\([0-9][0-9.]*\)".*/\1/p' "$root/package.json" | head -n 1)
+[[ $bun_version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Cannot read engines.bun from $root/package.json; restore that file from the repository and run again." >&2; exit 1; }
 if command -v bun >/dev/null && [[ $(bun --version) == "$bun_version" ]]; then
   cp -- "$(command -v bun)" "$work/bin/bun"
 else

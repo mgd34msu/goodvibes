@@ -27,7 +27,7 @@ description: Install the Bun version declared by `engines.bun` in the root packa
 #
 # 1.3.13 is NOT far enough: it still wedged 6/12 on the same reproduction.
 # To change the version, change `engines.bun` (and `packageManager`) in the root
-# package.json; every workflow reads it from there.
+# package.json; every workflow and scripts/install-from-checkout.sh read it from there.
 # -----------------------------------------------------------------------------
 runs:
   using: composite

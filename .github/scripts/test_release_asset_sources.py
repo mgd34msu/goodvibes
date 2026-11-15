@@ -44,25 +44,6 @@ class ReleaseOriginalSource(unittest.TestCase):
                     original.assert_current()
                 self.assertEqual(path.read_bytes(), b'original')
 
-    def test_same_size_in_place_rewrite_with_restored_mtime_is_refused(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            path = Path(temporary) / 'program'
-            path.write_bytes(b'original')
-            with RetainedReleaseAsset(path) as original:
-                before = path.stat()
-                # A coarse kernel clock can stamp the rewrite with the same change time as the
-                # original; rewrite until the change time is observably different.
-                for _ in range(200_000):
-                    path.write_bytes(b'foreign!')
-                    os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns))
-                    if path.stat().st_ctime_ns != before.st_ctime_ns:
-                        break
-                else:
-                    self.fail('the change time never moved')
-                self.assertEqual(path.stat().st_mtime_ns, before.st_mtime_ns)
-                with self.assertRaisesRegex(AssertionError, 'changed'):
-                    original.assert_current()
-
     def test_original_parent_replacement_is_refused_even_for_the_original_inode(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

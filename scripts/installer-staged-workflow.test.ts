@@ -1,4 +1,4 @@
-/** Execute the release workflow's staging and expected-checksum consumer ports.
+/** Execute the release workflow's payload selection and checksum verification steps.
  * Native service behavior belongs to the six original hosted runner accounts.
  */
 import { afterEach, expect, test } from 'bun:test';
@@ -13,9 +13,7 @@ type Step = { name?: string; id?: string; if?: string; uses?: string; run?: stri
 type Job = { needs?: string[]; if?: string; 'runs-on'?: string; permissions?: Record<string, string>; steps: Step[]; strategy?: { 'fail-fast'?: boolean; matrix: { include: Array<{ target: string; runner: string }> } } };
 type Workflow = { on: Record<string, { inputs: Record<string, { required: boolean; type: string; default?: unknown }> }>; jobs: Record<string, Job>; permissions: Record<string, string> };
 const load = (name: string) => Bun.YAML.parse(readFileSync(join(repo, '.github/workflows', name), 'utf8')) as Workflow;
-const staged = load('reusable-staged-install-acceptance.yml');
 const release = load('reusable-gh-release.yml');
-const stage = staged.jobs['stage-release-assets']!.steps.find(step => step.name === 'Stage the single consumer checksum manifest')!;
 const payloads = release.jobs['gh-release']!.steps.find(step => step.id === 'payloads')!;
 const checksums = release.jobs['gh-release']!.steps.find(step => step.id === 'checksums')!;
 const roots: string[] = [];
@@ -24,6 +22,7 @@ function fixture(names = Array.from({ length: 7 }, (_, i) => `asset-${String(i).
   const root = mkdtempSync(join(tmpdir(), 'staged-workflow-')); roots.push(root);
   mkdirSync(join(root, 'dist'));
   symlinkSync(join(repo, 'packages'), join(root, 'packages'), 'dir');
+  symlinkSync(join(repo, '.github'), join(root, '.github'), 'dir');
   for (const name of names) writeFileSync(join(root, 'dist', name), `original ${name}\n`);
   return { root, names, manifest: join(root, 'dist/SHA256SUMS.txt') };
 }
@@ -36,49 +35,14 @@ function run(step: Step, root: string, env: Record<string, string> = {}) {
   return { ...result, outputs: readFileSync(output, 'utf8') };
 }
 function existingEnv(names: string[]) {
-  return { PAYLOAD_PATHS: names.map(name => `dist/${name}`).join('\n'), TOOLCHAIN_SOURCE: 'workspace',
-    TOOLCHAIN_SPEC: '@goodvibes-jev/engine', SHA256_NAME: 'SHA256SUMS.txt', USE_EXISTING_CHECKSUMS: 'true' };
+  return { PAYLOAD_PATHS: names.map(name => `dist/${name}`).join('\n') };
 }
-
-test('the actual staging body writes the exact payload manifest and refuses an already staged input', () => {
-  const f = fixture();
-  expect(stage.run).not.toContain('--verify');
-  const first = run(stage, f.root, { ASSETS_DIRECTORY: join(f.root, 'dist') });
-  expect(first.status, first.stderr).toBe(0);
-  expect(readdirSync(join(f.root, 'dist'))).toHaveLength(f.names.length + 1);
-  expect(readFileSync(f.manifest, 'utf8').trimEnd().split('\n')).toHaveLength(f.names.length);
-  const verified = run(checksums, f.root, existingEnv(f.names));
-  expect(verified.status, verified.stderr).toBe(0);
-  const second = run(stage, f.root, { ASSETS_DIRECTORY: join(f.root, 'dist') });
-  expect(second.status).not.toBe(0);
-  expect(second.stderr).toContain('Invalid native release member');
-});
-
-test('staging and checksum consumption accept complete manifests independent of payload count', () => {
-  for (const count of [1, 65]) {
-    const f = fixture(Array.from({ length: count }, (_, index) => `payload-${index}`));
-    const generated = run(stage, f.root, { ASSETS_DIRECTORY: join(f.root, 'dist') });
-    expect(generated.status, generated.stderr).toBe(0);
-    expect(readFileSync(f.manifest, 'utf8').trimEnd().split('\n')).toHaveLength(count);
-    const consumed = run(checksums, f.root, existingEnv(f.names));
-    expect(consumed.status, consumed.stderr).toBe(0);
-  }
-});
-
-test('staging refuses empty, nonregular, nested and unsafe payload entries', () => {
-  for (const kind of ['empty', 'symlink', 'directory', 'unsafe-name'] as const) {
-    const f = fixture([]), directory = join(f.root, 'dist');
-    if (kind === 'symlink') {
-      writeFileSync(join(f.root, 'outside'), 'not a release member');
-      symlinkSync(join(f.root, 'outside'), join(directory, 'alias'));
-    } else if (kind === 'directory') mkdirSync(join(directory, 'nested'));
-    else if (kind === 'unsafe-name') writeFileSync(join(directory, 'unsafe name'), 'invalid');
-    const refused = run(stage, f.root, { ASSETS_DIRECTORY: directory });
-    expect(refused.status, kind).not.toBe(0);
-    expect(refused.stderr).toContain(kind === 'empty' ? 'must contain payloads' : 'Invalid native release member');
-    expect(existsSync(f.manifest)).toBe(false);
-  }
-});
+/** The manifest collection writes beside the payloads. */
+function writeManifest(f: { root: string; names: string[] }) {
+  const result = spawnSync(process.execPath, [join(repo, 'packages/engine/toolchain/src/bin/sha256sums.ts'), '--out', 'dist/SHA256SUMS.txt', ...f.names.map(name => `dist/${name}`)],
+    { cwd: f.root, encoding: 'utf8', timeout: 15_000 });
+  expect(result.status, result.stderr).toBe(0);
+}
 
 test('native reader admission still refuses a required product omitted from a staged manifest', async () => {
   const target = 'linux-x64', source = 'a'.repeat(40);
@@ -86,8 +50,6 @@ test('native reader admission still refuses a required product omitted from a st
   const names = products.flatMap(product => [`${product}-${target}`, `${product}-${target}.reader-ci-artifact.json`]);
   const missing = `goodvibes-agent-${target}.reader-ci-artifact.json`;
   const f = fixture(names.filter(name => name !== missing));
-  const generated = run(stage, f.root, { ASSETS_DIRECTORY: join(f.root, 'dist') });
-  expect(generated.status, generated.stderr).toBe(0);
   const loaded: string[] = [];
   await expect(readPublishedReaders({ target, source, tag: 'v3.1.5', assets: new Set(f.names) }, async name => {
     loaded.push(name);
@@ -100,7 +62,7 @@ test('native reader admission still refuses a required product omitted from a st
 
 test('the actual payload selection excludes the manifest and deduplicates overlapping globs', () => {
   const f = fixture(); writeFileSync(f.manifest, 'original staged manifest');
-  const result = run(payloads, f.root, { NORMALIZED_GLOBS: 'dist/*\ndist/asset-00', SHA256_NAME: 'SHA256SUMS.txt' });
+  const result = run(payloads, f.root, { ASSET_GLOBS: 'dist/*\ndist/asset-00' });
   expect(result.status, result.stderr).toBe(0);
   expect(result.outputs.split('\n').filter(line => line.startsWith('dist/'))).toEqual(f.names.map(name => `dist/${name}`));
   expect(result.outputs).not.toContain('dist/SHA256SUMS.txt');
@@ -109,8 +71,8 @@ test('the actual payload selection excludes the manifest and deduplicates overla
 });
 
 test('publication consumes the original checksum pins and refuses changed bytes or incomplete and ambiguous manifests', () => {
-  const f = fixture(), generated = run(stage, f.root, { ASSETS_DIRECTORY: join(f.root, 'dist') });
-  expect(generated.status, generated.stderr).toBe(0);
+  const f = fixture();
+  writeManifest(f);
   const original = readFileSync(f.manifest, 'utf8'), env = existingEnv(f.names);
   const valid = run(checksums, f.root, env);
   expect(valid.status, valid.stderr).toBe(0); expect(valid.outputs).toBe('path=dist/SHA256SUMS.txt\n');
@@ -120,9 +82,6 @@ test('publication consumes the original checksum pins and refuses changed bytes 
     expect(refused.status).not.toBe(0); expect(refused.outputs).toBe('');
     expect(readFileSync(f.manifest, 'utf8')).toBe(original);
   }
-  const wrongSource = run(checksums, f.root, { ...env, TOOLCHAIN_SOURCE: 'registry' });
-  expect(wrongSource.status).not.toBe(0); expect(wrongSource.stderr).toContain('requires the workspace toolchain');
-  expect(wrongSource.outputs).toBe('');
   writeFileSync(join(f.root, 'dist', f.names[0]!), 'changed after acceptance');
   const changed = run(checksums, f.root, env);
   expect(changed.status).not.toBe(0); expect(changed.stderr).toContain('mismatched');
@@ -138,18 +97,6 @@ test('publication consumes the original checksum pins and refuses changed bytes 
   rmSync(f.manifest);
   expect(run(checksums, f.root, env).status).not.toBe(0);
 });
-
-test('other callers retain default checksum generation through the existing source CLI', () => {
-  expect(release.on.workflow_call!.inputs['use-existing-checksums']).toMatchObject({ type: 'boolean', required: false, default: false });
-  const f = fixture();
-  const result = run(checksums, f.root, { ...existingEnv(f.names), USE_EXISTING_CHECKSUMS: 'false' });
-  expect(result.status, result.stderr).toBe(0); expect(result.outputs).toBe('path=SHA256SUMS.txt\n');
-  expect(readFileSync(join(f.root, 'SHA256SUMS.txt'), 'utf8').trimEnd().split('\n')).toHaveLength(f.names.length);
-  writeFileSync(f.manifest, readFileSync(join(f.root, 'SHA256SUMS.txt')));
-  const verified = run(checksums, f.root, existingEnv(f.names));
-  expect(verified.status, verified.stderr).toBe(0);
-});
-
 
 test.each(['nonzero', 'cancel'] as const)('retained suite packaging handles %s before staging cleanup and never emits source metadata', async scenario => {
   const root = mkdtempSync(join(tmpdir(), 'retained-suite-build-')); roots.push(root);

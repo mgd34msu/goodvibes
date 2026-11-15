@@ -14,9 +14,9 @@ TAG = 'v3.1.2'
 REPO = 'owner/repo'
 COMMIT = 'a' * 40
 
-# A minimal `gh`: the release lives in $FAKE_RELEASE/assets, calls are appended to $FAKE_RELEASE/calls.
-# Uploading the manifest with --clobber removes the old one first, like the real client, and fails
-# the first $FAKE_FAIL_MANIFEST_UPLOADS such uploads.
+# A minimal `gh`: the release lives in $FAKE_RELEASE/assets (an asset's id is its name), calls are appended
+# to $FAKE_RELEASE/calls, and after each call whether the release holds a complete manifest (published, or
+# uploaded and awaiting its rename) is appended to $FAKE_RELEASE/listed. The first $FAKE_FAIL_MANIFEST_UPLOADS uploads of a manifest fail.
 FAKE_GH = r'''#!__PYTHON__
 import hashlib, json, os, pathlib, shutil, sys
 root = pathlib.Path(os.environ['FAKE_RELEASE'])
@@ -27,10 +27,19 @@ with (root / 'calls').open('a') as calls:
 state = json.loads((root / 'state.json').read_text())
 if args[0] == 'api':
     path = args[1]
-    if path.endswith('/git/ref/tags/' + state['tag']):
+    if args[1] == '-X':
+        method, name = args[2], args[3].rsplit('/', 1)[1]
+        if method == 'DELETE':
+            (assets / name).unlink()
+        elif method == 'PATCH':
+            new = args[args.index('-f') + 1].removeprefix('name=')
+            if (assets / new).exists():
+                sys.exit('already_exists')
+            (assets / name).rename(assets / new)
+    elif path.endswith('/git/ref/tags/' + state['tag']):
         print(json.dumps({'object': {'type': state.get('ref_type', 'commit'), 'sha': state['commit']}}))
     elif '/releases/tags/' in path:
-        listing = [{'name': f.name, 'size': f.stat().st_size, 'digest': 'sha256:' + hashlib.sha256(f.read_bytes()).hexdigest()} for f in sorted(assets.iterdir())]
+        listing = [{'id': f.name, 'name': f.name, 'size': f.stat().st_size, 'digest': 'sha256:' + hashlib.sha256(f.read_bytes()).hexdigest()} for f in sorted(assets.iterdir())]
         print(json.dumps({'draft': state.get('draft', False), 'tag_name': state['tag'], 'assets': listing}))
     else:
         sys.exit('unexpected api path ' + path)
@@ -44,7 +53,7 @@ elif args[:2] == ['release', 'upload']:
         if '--clobber' not in args:
             sys.exit('asset already exists')
         (assets / file.name).unlink()
-    if file.name == state['manifest']:
+    if file.name.startswith(state['manifest']):
         failures = root / 'failures'
         done = int(failures.read_text()) if failures.exists() else 0
         failures.write_text(str(done + 1))
@@ -53,6 +62,8 @@ elif args[:2] == ['release', 'upload']:
     shutil.copy(file, assets / file.name)
 else:
     sys.exit('unexpected gh call ' + ' '.join(args))
+with (root / 'listed').open('a') as listed:
+    listed.write('1' if (assets / state['manifest']).exists() or (assets / (state['manifest'] + '.next')).exists() else '0')
 '''
 
 
@@ -165,22 +176,43 @@ class CompletionScript(unittest.TestCase):
         self.assertIn('no candidate has its recorded digest: lost', result.stderr)
         self.assertEqual(self.uploads(), [])
 
-    def test_a_failed_manifest_upload_is_retried(self):
+    def listed(self):
+        return (self.release / 'listed').read_text()
+
+    def test_the_release_holds_a_manifest_at_every_step_of_its_replacement(self):
         self.publish('program', b'kept')
         self.publish('SHA256SUMS.txt', self.manifest({'program': b'kept'}))
         self.candidate('companion', b'new')
-        result = self.run_script(FAKE_FAIL_MANIFEST_UPLOADS='1')
+        result = self.run_script()
         self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn('0', self.listed())
+        self.assertEqual(self.published('SHA256SUMS.txt'), self.manifest({'program': b'kept', 'companion': b'new'}))
+        self.assertEqual(sorted(path.name for path in (self.release / 'assets').iterdir()), ['SHA256SUMS.txt', 'companion', 'program'])
+
+    def test_a_failed_manifest_upload_leaves_the_previous_manifest_and_a_rerun_finishes(self):
+        self.publish('program', b'kept')
+        self.publish('SHA256SUMS.txt', self.manifest({'program': b'kept'}))
+        self.candidate('companion', b'new')
+        failed = self.run_script(FAKE_FAIL_MANIFEST_UPLOADS='1')
+        self.assertNotEqual(failed.returncode, 0)
+        self.assertIn('run this completion again', failed.stderr)
+        self.assertEqual(self.published('SHA256SUMS.txt'), self.manifest({'program': b'kept'}))
+        self.candidate('program', b'rebuilt differently')
+        result = self.run_script()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn('0', self.listed())
         self.assertEqual(self.published('SHA256SUMS.txt'), self.manifest({'program': b'kept', 'companion': b'new'}))
 
-    def test_a_manifest_that_cannot_be_uploaded_names_the_repair(self):
+    def test_a_manifest_that_missed_its_rename_is_published_by_the_next_run(self):
         self.publish('program', b'kept')
-        self.publish('SHA256SUMS.txt', self.manifest({'program': b'kept'}))
+        self.publish('companion', b'new')
+        self.publish('SHA256SUMS.txt.next', self.manifest({'program': b'kept', 'companion': b'new'}))
         self.candidate('companion', b'new')
-        result = self.run_script(FAKE_FAIL_MANIFEST_UPLOADS='99')
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn(f'gh release upload {TAG} --repo {REPO} SHA256SUMS.txt --clobber', result.stderr)
-        self.assertIn(self.manifest({'program': b'kept', 'companion': b'new'}).decode().splitlines()[0], result.stderr)
+        result = self.run_script()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.published('SHA256SUMS.txt'), self.manifest({'program': b'kept', 'companion': b'new'}))
+        self.assertFalse((self.release / 'assets' / 'SHA256SUMS.txt.next').exists())
+        self.assertEqual(self.uploads(), [])
 
     def test_optimized_python_refuses_to_run_without_its_assertions(self):
         result = subprocess.run([sys.executable, '-O', str(SCRIPT), 'directory', TAG], capture_output=True, text=True, cwd=SCRIPT.parent)

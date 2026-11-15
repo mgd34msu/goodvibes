@@ -33,6 +33,5 @@ test('the task, model, provider and tool allowlist are passed through, and an al
   const { calls } = spawnWith({ modelId: 'm', modelProvider: 'p', toolAllowlist: ['read', 'find'] });
   expect(calls[0]?.spec).toEqual({
     mode: 'spawn', task: 'check the build', model: 'm', provider: 'p', tools: ['read', 'find'], restrictTools: true,
-    context: 'automation-manager:visible-agent',
   });
 });

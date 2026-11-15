@@ -2,7 +2,9 @@ import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/conf
 import type { ProviderRegistry, BenchmarkStore } from '@goodvibes-jev/engine/platform/platform/providers';
 import type { RouteBindingManager, SurfaceRegistry } from '@goodvibes-jev/engine/platform/platform/channels';
 import type { WatcherRegistry } from '@goodvibes-jev/engine/platform/platform/watchers';
-import type { AutomationManager, AutomationDeliveryManager } from '@goodvibes-jev/engine/platform/platform/automation';
+import { automationActionBinding, type AutomationManager, type AutomationDeliveryManager, type SpawnAutomationTaskInput } from '@goodvibes-jev/engine/platform/platform/automation';
+import { PACKAGED_COMMANDS, type AgentManager, type ControlToolOptions } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { MemoryRegistry } from '@goodvibes-jev/engine/platform/platform/state';
 import type { DomainDispatch, RuntimeEventBus, RuntimeStore } from '@goodvibes-jev/engine/platform/platform/runtime/state';
 import { resolveRuntimeEndpointBinding } from './cli-endpoints.js';
 export function initializeTerminalCatalog(
@@ -80,5 +82,90 @@ export function attachTerminalRuntimeBindings(
   services.automationManager.attachRuntime({ runtimeBus, runtimeStore, deliveryManager: services.deliveryManager });
   return () => {
     if (heartbeatEnabled) services.watcherRegistry.stopWatcher('runtime-heartbeat');
+  };
+}
+
+/**
+ * How a scheduled or heartbeat automation starts its agent. The automation
+ * manager records the trusted source and cancel signal for the action on the
+ * input it hands over; the agent is spawned with that binding, or it would run
+ * as an ordinary agent that asks the person at the terminal instead of under
+ * the owner the automation recorded.
+ */
+export function createAutomationSpawnTask(agentManager: Pick<AgentManager, 'spawn'>): (input: SpawnAutomationTaskInput) => string {
+  return (input) => {
+    const record = agentManager.spawn({
+      mode: 'spawn',
+      task: input.prompt,
+      ...(input.modelId ? { model: input.modelId } : {}),
+      ...(input.modelProvider ? { provider: input.modelProvider } : {}),
+      ...(input.fallbackModels !== undefined ? { fallbackModels: [...input.fallbackModels] } : {}),
+      ...(input.routing ? { routing: input.routing } : {}),
+      ...(input.executionIntent ? { executionIntent: input.executionIntent } : {}),
+      ...(input.template ? { template: input.template } : {}),
+      ...(input.reasoningEffort ? { reasoningEffort: input.reasoningEffort } : {}),
+      ...(input.toolAllowlist?.length ? { tools: [...input.toolAllowlist], restrictTools: true } : {}),
+      ...(input.context ? { context: input.context } : {}),
+    }, automationActionBinding(input));
+    return record.id;
+  };
+}
+
+/**
+ * Everything the automation manager needs from the agent manager: how a run
+ * starts its agent, how it reads that agent's status to settle the run, and
+ * how it stops the agent to cancel the run or end it at its timeout.
+ */
+export function createAutomationAgentControls(agentManager: Pick<AgentManager, 'spawn' | 'getStatus' | 'cancel'>): {
+  readonly spawnTask: (input: SpawnAutomationTaskInput) => string;
+  readonly agentStatusProvider: Pick<AgentManager, 'getStatus'>;
+  readonly cancelTask: (agentId: string) => void;
+} {
+  return {
+    spawnTask: createAutomationSpawnTask(agentManager),
+    agentStatusProvider: agentManager,
+    cancelTask: (agentId) => { agentManager.cancel(agentId); },
+  };
+}
+
+/**
+ * Local memory consolidation runs only while this process is the memory
+ * store's one writer. When the terminal is attached to a daemon, the daemon
+ * owns the store and runs its own consolidation; the local registry is only the
+ * image loaded at boot, and a local pass over it would write into the daemon's
+ * file as a second writer. So while the memory spine routes through the daemon
+ * the scheduler is shown an empty store; once the spine returns to local access
+ * it reloads the store and consolidation resumes.
+ */
+export function gateConsolidationToLocalWriter(registry: MemoryRegistry, spine: { readonly active: boolean }): MemoryRegistry {
+  return new Proxy(registry, {
+    get(target, property) {
+      if (property === 'getAll') return () => (spine.active ? [] : target.getAll());
+      const value = Reflect.get(target, property, target) as unknown;
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+}
+
+/**
+ * The control tool is registered with the engine's tools, before the shell's
+ * command registry exists. It reads the registry when a model calls it, so it
+ * names only commands this build has; until the registry is bound it names
+ * none. `panels` is what the product calls panels.
+ */
+export function createControlSurfaces<Registry extends { get(name: string): unknown }>(panels: ControlToolOptions['panels']): {
+  readonly bindControlCommands: (services: object, registry: Registry) => void;
+  readonly controlSurfacesFor: (services: object) => ControlToolOptions;
+} {
+  const commandRegistries = new WeakMap<object, Registry>();
+  return {
+    bindControlCommands: (services, registry) => { commandRegistries.set(services, registry); },
+    controlSurfacesFor: (services) => ({
+      commands: () => {
+        const registry = commandRegistries.get(services);
+        return registry ? PACKAGED_COMMANDS.filter((name) => registry.get(name) !== undefined) : [];
+      },
+      panels,
+    }),
   };
 }

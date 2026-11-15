@@ -51,19 +51,19 @@ export function syncVersionSurfaces(root = ROOT): string {
   };
   const version = readRequiredExactSemver(pkg.version, 'package.json version');
 
+  // The product ships src/version.ts, so a missing one means the root is wrong.
   const versionTsPath = join(root, 'src', 'version.ts');
-  if (existsSync(versionTsPath)) {
-    let versionTs = readFileSync(versionTsPath, 'utf8');
-    const versionFallbackPattern = /let _version = '[^']*'/;
-    if (!versionFallbackPattern.test(versionTs)) {
-      throw new Error('src/version.ts is missing the _version fallback literal.');
-    }
-    versionTs = versionTs.replace(versionFallbackPattern, `let _version = '${version}'`);
-    writeFileSync(versionTsPath, versionTs);
-    console.log(`prebuild: src/version.ts fallback -> ${version}`);
-  } else {
-    console.log('prebuild: src/version.ts - not found, skipping');
+  if (!existsSync(versionTsPath)) {
+    throw new Error(`${versionTsPath} does not exist; ${root} is not the TUI product directory.`);
   }
+  let versionTs = readFileSync(versionTsPath, 'utf8');
+  const versionFallbackPattern = /let _version = '[^']*'/;
+  if (!versionFallbackPattern.test(versionTs)) {
+    throw new Error('src/version.ts is missing the _version fallback literal.');
+  }
+  versionTs = versionTs.replace(versionFallbackPattern, `let _version = '${version}'`);
+  writeFileSync(versionTsPath, versionTs);
+  console.log(`prebuild: src/version.ts fallback -> ${version}`);
 
   return version;
 }

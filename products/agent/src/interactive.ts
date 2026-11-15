@@ -336,7 +336,7 @@ async function main() {
     transcript.scrollBy(delta, () => Math.max(0, conversation.history.getLineCount() - getViewportHeight()));
   };
 
-  // Only follow the tail while parked at the bottom (a manual scroll-up stays); submitInput re-locks.
+  // Only follow the tail while parked at the bottom (a manual scroll-up stays); a submission re-locks.
   const scrollToEnd = (vHeight: number) => transcript.followTail(conversation.history.getLineCount(), vHeight);
 
   const unsubs: Array<() => void> = [];
@@ -567,15 +567,25 @@ async function main() {
   };
   commandContext.dispatchNativeIntakeTurn = (state) => dispatchNativeTurn(state);
 
-  const submitInput = (text: string, content?: ContentPart[], options: ProductInputContext = {}) => {
+  // Every submission starts here: a pending setup takeover is let go, the
+  // conversation is offered for rewinds again, and the view returns to the bottom.
+  const prepareSubmission = (): void => {
     setupPairing?.cancelForTakeover();
     // Acting here after another surface took the session over is what moves the conversation back for rewinds.
     if (ctx.services.conversationRewindHost.resumeIfTakenOver()) {
       systemMessageRouter.high('[Rewind] Another surface had taken over this session; this one is offering its conversation for rewinds again.');
     }
-    const original = options.source ?? { text, unsupportedSources: [{ kind: 'context' as const, label: 'derived-input' }] };
     input.clearModalStack();
     transcript.toBottom(); // Re-lock on user input
+  };
+
+  /**
+   * The composer's own grammar, applied only to what was typed into it:
+   * `@model:` at either end switches the model, `!#` pins a memory, `!` runs a
+   * shell command. Everything else is sent through `sendTurn` as typed.
+   */
+  const submitComposerText = (text: string, content?: ContentPart[], options: ProductInputContext = {}) => {
+    prepareSubmission();
     let processedText = applyAtModelSwitches(text, {
       providerRegistry,
       configManager,
@@ -612,6 +622,22 @@ async function main() {
         .finally(() => render());
       return;
     }
+    sendTurn(processedText, content, options, text);
+  };
+
+  /**
+   * Send text as a turn exactly as given. Forms, speech and the commands that
+   * submit a prompt use this, so text a person wrote into a field or said aloud
+   * is never read as composer syntax.
+   */
+  const submitTurn = (text: string, content?: ContentPart[], options: ProductInputContext = {}): void => {
+    prepareSubmission();
+    sendTurn(text, content, options);
+  };
+
+  // `composerText` is what was typed when the composer's grammar changed it.
+  function sendTurn(processedText: string, content: ContentPart[] | undefined, options: ProductInputContext, composerText?: string): void {
+    const original = options.source ?? { text: composerText ?? processedText, unsupportedSources: [{ kind: 'context' as const, label: 'derived-input' }] };
     if (processedText || content) {
       void (async () => {
         const shellContext = shellContextHold.take();
@@ -619,7 +645,7 @@ async function main() {
         try {
           const unsupportedSources = [...original.unsupportedSources];
           if (outgoing !== processedText) unsupportedSources.push({ kind: 'context', label: 'shell-context' });
-          if (processedText !== text) unsupportedSources.push({ kind: 'context', label: 'composer-derived-text' });
+          if (composerText !== undefined && processedText !== composerText) unsupportedSources.push({ kind: 'context', label: 'composer-derived-text' });
           if (content?.some((part) => part.type !== 'text')) unsupportedSources.push({ kind: 'image', label: 'attached-content' });
           const source = { text: original.text, unsupportedSources };
           if (await remoteConversation.routeNativeOrExplain(source, commandContext.nativeConversationIntake, shellContext.restore)) return;
@@ -650,7 +676,7 @@ async function main() {
     } else {
       render();
     }
-  };
+  }
 
   const cancelGeneration = () => {
     spokenTurns.stop('Spoken output stopped.');
@@ -673,10 +699,12 @@ async function main() {
   Object.assign(
     commandContext,
     createShellSubmissionPorts(
-      submitInput,
+      submitComposerText,
       () => spokenTurns.stop(),
       () => input.handlePaste(),
     ),
+    // Spoken input is sent as said; only typed composer text has a grammar.
+    { submitSpokenInput: (text: string, content?: ContentPart[]): void => submitTurn(text, content, { spokenOutput: true, source: captureNativeConversationInput(text, content) }) },
   );
   // Composer line prompts: masked for card material, echoed for addresses (see input/handler-line-prompts.ts).
   commandContext.beginConcealedInput = (request) => input.beginConcealedInput(request);
@@ -766,6 +794,8 @@ async function main() {
       },
     },
   );
+  // Workspace forms send the owner's field text as a turn, never as composer syntax.
+  input.submitTurn = (text) => submitTurn(text);
   setupPairing = new SetupPairingController(
     { configManager, homeDirectory },
     {
@@ -846,7 +876,7 @@ async function main() {
     sessionId: runtime.sessionId,
     unsubs,
     buffer: input,
-    submitInput: (text) => submitInput(text, undefined, { source: captureNativeConversationInput(text) }),
+    submitTurn: (text) => submitTurn(text, undefined, { source: captureNativeConversationInput(text) }),
     notify: (m) => {
       systemMessageRouter.high(m);
       render();

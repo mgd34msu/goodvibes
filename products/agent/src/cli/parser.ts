@@ -1,4 +1,4 @@
-import { parseWithCatalog } from '@goodvibes-jev/engine/terminal-shell';
+import { parseWithCatalog } from '@goodvibes-jev/engine/terminal-shell/cli-parser-engine';
 import { AGENT_CLI_CATALOG, COMMAND_ALIASES, BLOCKED_PRODUCT_COMMAND_HINTS } from './catalog.ts';
 import type { GoodVibesCliCommand, GoodVibesCliParseResult } from './types.ts';
 export function listGoodVibesCliCommandTokens(): readonly string[] {

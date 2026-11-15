@@ -6,7 +6,8 @@ import { join } from 'node:path';
 import 'node:url';
 import { VERSION } from '../version.ts';
 import { describeSelfUpdate, readLastSelfUpdate } from '../runtime/self-update-receipt.ts';
-import { detectInstallKind } from '../runtime/update-check.ts';
+// The install-kind module alone: `--version` must not load the runtime operations.
+import { detectInstallKind } from '@goodvibes-jev/engine/platform/platform/runtime/install-kind';
 
 export const getPackageVersion = (): string => productVersionFromModule(import.meta.url, '@goodvibes-jev/agent', VERSION);
 

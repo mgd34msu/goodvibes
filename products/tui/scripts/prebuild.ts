@@ -6,7 +6,9 @@ import { syncProjectSurfaces } from './project-surfaces.ts';
  * `build` does not run it, because it rewrites tracked files.
  */
 try {
-  syncProjectSurfaces(process.cwd());
+  // The product root comes from the script's own location, so the sync is the
+  // same from any working directory.
+  syncProjectSurfaces();
 } catch (error) {
   console.error('prebuild: failed:', error);
   process.exit(1);

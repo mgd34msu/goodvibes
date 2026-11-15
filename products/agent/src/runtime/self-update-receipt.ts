@@ -24,7 +24,7 @@
  * is the operation that matters, and the receipt is an observation of it.
  */
 import { appendFileSync, readFileSync } from 'node:fs';
-import { normalizeVersion } from './update-check.ts';
+import { normalizeVersion } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
 
 /** What caused the binary to be replaced. */
 export type SelfUpdateTrigger = 'launch' | 'periodic';

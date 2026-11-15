@@ -8,7 +8,7 @@
     "sourceRoots": [
       "src"
     ],
-    "enforceExportsMap": false
+    "enforceExportsMap": true
   },
   "build": {
     "appEntrypoint": "src/main.ts",

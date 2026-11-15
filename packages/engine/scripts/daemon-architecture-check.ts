@@ -1,9 +1,13 @@
-/** The daemon's original four runtime boundaries, adapted to current owners. */
+/**
+ * Runtime import boundaries of the products, run by `bun run architecture:check`:
+ * the daemon's original four boundaries (adapted to current owners) and the
+ * Agent's layer rules plus "the Agent never imports TUI source".
+ */
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
-import { runtimeArchitectureProblems, type RuntimeArchitecture } from './runtime-import-architecture.ts';
+import { runtimeArchitectureProblems, runtimeImportSpecifiers, type RuntimeArchitecture } from './runtime-import-architecture.ts';
 
 function sources(root: string): string[] {
   return readdirSync(root, { withFileTypes: true }).flatMap((entry) => {
@@ -88,10 +92,60 @@ export function clusterPackageImportProblems(root: string): string[] {
   return problems;
 }
 
+/** The Agent's layers are its top-level `src/` directories; files directly in `src/` belong to none. */
+export function agentArchitecture(root: string): RuntimeArchitecture {
+  const product = resolve(root, 'products/agent/src');
+  return {
+    files: sources(product),
+    layer(file) {
+      const local = relative(product, file).split(sep);
+      return local[0] === '..' || local.length < 2 ? undefined : local[0];
+    },
+    rules: [
+      // The renderer draws; argument parsing and entry points are not its concern.
+      { from: 'renderer', forbidden: ['cli'] },
+      // These run headless (config is read everywhere, providers and audio by
+      // the daemon-hosted and headless paths), so they never reach shell UI.
+      { from: 'config', forbidden: ['renderer', 'input', 'cli'] },
+      { from: 'providers', forbidden: ['renderer', 'input', 'cli'] },
+      { from: 'audio', forbidden: ['renderer', 'input', 'cli'] },
+    ],
+  };
+}
+
+/** The Agent shares code with the TUI through the engine's terminal-shell, never by importing TUI source. */
+export function agentTuiSourceImportProblems(root: string): string[] {
+  const tuiRoot = resolve(root, 'products/tui') + sep;
+  const problems: string[] = [];
+  for (const file of agentArchitecture(root).files) {
+    for (const specifier of runtimeImportSpecifiers(readFileSync(file, 'utf8'))) {
+      const reachesTui = specifier.startsWith('.')
+        ? resolve(dirname(file), specifier).startsWith(tuiRoot)
+        : specifier === '@goodvibes-jev/tui' || specifier.startsWith('@goodvibes-jev/tui/');
+      if (reachesTui) problems.push(`agent imports TUI source: ${file} -> ${specifier}; move the shared code to packages/engine/terminal-shell/src`);
+    }
+  }
+  return problems;
+}
+
+/**
+ * The Agent's layer and TUI-source problems. Its runtime import cycles are not
+ * reported yet: two cycles inside `src/tools` (the harness and settings
+ * admission files) are being taken apart, and this gate fails only on what is
+ * already clean.
+ */
+export function agentArchitectureProblems(root: string): string[] {
+  const layerProblems = runtimeArchitectureProblems(agentArchitecture(root)).filter((problem) => !problem.startsWith('runtime import cycle:'));
+  return [...layerProblems, ...agentTuiSourceImportProblems(root)];
+}
+
 if (import.meta.main) {
   const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
   const input = daemonArchitecture(root);
-  const problems = [...runtimeArchitectureProblems(input), ...clusterPackageImportProblems(root)];
+  const problems = [...runtimeArchitectureProblems(input), ...clusterPackageImportProblems(root), ...agentArchitectureProblems(root)];
   if (problems.length) { console.error(problems.join('\n')); process.exitCode = 1; }
-  else console.log(`Daemon architecture: ${input.files.length} runtime files, four non-vacuous boundaries (the cluster one also checked through the package specifier), no relative runtime cycles.`);
+  else {
+    console.log(`Daemon architecture: ${input.files.length} runtime files, four non-vacuous boundaries (the cluster one also checked through the package specifier), no relative runtime cycles.`);
+    console.log(`Agent architecture: ${agentArchitecture(root).files.length} runtime files, four non-vacuous layer boundaries, no TUI source imports.`);
+  }
 }

@@ -45,7 +45,8 @@ export interface VoiceCaptureShellDeps {
   readonly unsubs: Array<() => void>;
   /** The live composer buffer, InputHandler exposes public `prompt`/`cursorPos`. */
   readonly buffer: { prompt: string; cursorPos: number };
-  readonly submitInput: (text: string) => void;
+  /** Sends recognised speech as a turn, as said: speech is never read as composer syntax. */
+  readonly submitTurn: (text: string) => void;
   readonly notify: (message: string) => void;
   readonly render: () => void;
 }
@@ -70,7 +71,7 @@ export function installVoiceCapture(deps: VoiceCaptureShellDeps): () => VoiceCap
     assetDirectory: deps.shellPaths.resolveUserPath(GOODVIBES_AGENT_SURFACE_ROOT, 'onnxruntime'),
     sessionId: deps.sessionId,
     writeDraft: (text) => writeVoiceDraft(deps.buffer, text, deps.render),
-    submitTurn: (text) => deps.submitInput(text),
+    submitTurn: (text) => deps.submitTurn(text),
     notify: deps.notify,
     render: deps.render,
   });

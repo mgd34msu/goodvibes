@@ -1,22 +1,22 @@
 /**
- * at-model-switch.ts, the `@model:<id>` inline switch a person can put in the
- * middle of a message.
+ * at-model-switch.ts, the `@model:<id>` switch a person can type at the start
+ * or the end of a composer message.
  *
- * `send this @model:opus and summarize` switches the model and sends
- * "send this and summarize". The switch is applied immediately and the token is
- * stripped from the text, so the model never receives the instruction that
- * chose it.
+ * `@model:opus summarize this` and `summarize this @model:opus` switch the
+ * model and send "summarize this". Only a whole token at either end counts, so
+ * text that merely contains `@model:` (an `scp user@model:/srv` line, a pasted
+ * config) is sent as written. The composer is the only caller: forms and speech
+ * submit their text unchanged.
  *
- * Extracted from the composer because it is a self-contained rewrite of the
- * submitted text with its own failure mode: an id that names no model reports
- * that and leaves the rest of the message intact, rather than refusing the
- * whole submission over one mistyped token.
+ * An id that names no model is reported and left in the message, so nothing
+ * the person wrote disappears on the way to the model.
  */
 
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
 
-const AT_MODEL_RE = /@model:([^\s]+)/g;
+const LEADING_AT_MODEL_RE = /^@model:(\S+)(?:\s+|$)/;
+const TRAILING_AT_MODEL_RE = /\s+@model:(\S+)$/;
 
 export interface AtModelSwitchOptions {
   readonly providerRegistry: Pick<ProviderRegistry, 'setCurrentModel' | 'getCurrentModel'>;
@@ -27,36 +27,39 @@ export interface AtModelSwitchOptions {
   readonly notify: (message: string) => void;
 }
 
+/** Switch to `modelId`; false when the id names no model (nothing changed). */
+function switchModel(modelId: string, options: AtModelSwitchOptions): boolean {
+  let def: ReturnType<AtModelSwitchOptions['providerRegistry']['getCurrentModel']>;
+  try {
+    options.providerRegistry.setCurrentModel(modelId);
+    def = options.providerRegistry.getCurrentModel();
+  } catch {
+    options.notify(`[Model] Unknown model: ${modelId}. The text was sent as written.`);
+    return false;
+  }
+  // The switch is live from here, so a later failure is not "unknown model".
+  try {
+    options.onModelChanged({ id: def.id, provider: def.provider });
+    options.configManager.set('provider.model', def.registryKey);
+    options.notify(`[Model] Switched to ${def.displayName} (${def.provider}) via @model:`);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    options.notify(`[Model] Switched to ${def.displayName} (${def.provider}) for this session, but saving or showing the change failed: ${reason}`);
+  }
+  return true;
+}
+
 /**
- * Apply every `@model:` token in `text` and return the text with them removed.
+ * Apply a leading and a trailing `@model:` token of typed composer text and
+ * return the text with each token that switched removed.
  *
- * Returns the input unchanged when there are none, which is the common case.
+ * Returns the input unchanged when there is none, which is the common case.
  */
 export function applyAtModelSwitches(text: string, options: AtModelSwitchOptions): string {
-  let processedText = text;
-  let match: RegExpExecArray | null;
-  AT_MODEL_RE.lastIndex = 0;
-  while ((match = AT_MODEL_RE.exec(text)) !== null) {
-    const modelId = match[1];
-    let def: ReturnType<AtModelSwitchOptions['providerRegistry']['getCurrentModel']>;
-    try {
-      options.providerRegistry.setCurrentModel(modelId as string);
-      def = options.providerRegistry.getCurrentModel();
-    } catch {
-      options.notify(`[Model] Unknown model: ${modelId}`);
-      processedText = processedText.replace(match[0], '').trim();
-      continue;
-    }
-    // The switch is live from here, so a later failure is not "unknown model".
-    try {
-      options.onModelChanged({ id: def.id, provider: def.provider });
-      options.configManager.set('provider.model', def.registryKey);
-      options.notify(`[Model] Switched to ${def.displayName} (${def.provider}) via @model:`);
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error);
-      options.notify(`[Model] Switched to ${def.displayName} (${def.provider}) for this session, but saving or showing the change failed: ${reason}`);
-    }
-    processedText = processedText.replace(match[0], '').trim();
-  }
-  return processedText;
+  let processed = text.trim();
+  const leading = LEADING_AT_MODEL_RE.exec(processed);
+  if (leading && switchModel(leading[1]!, options)) processed = processed.slice(leading[0].length);
+  const trailing = TRAILING_AT_MODEL_RE.exec(processed);
+  if (trailing && switchModel(trailing[1]!, options)) processed = processed.slice(0, trailing.index);
+  return processed === text.trim() ? text : processed.trim();
 }

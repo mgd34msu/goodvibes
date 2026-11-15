@@ -21,7 +21,9 @@
  * word (`run --max-turn 3`) is refused instead of being dropped and its value
  * joined into the prompt.
  */
-import { AUTO_REGISTER_CATALOG, BUILTIN_PROVIDER_ENV_KEYS } from '@goodvibes-jev/engine/platform/platform/providers';
+// The credential catalog alone, not the providers module: argument parsing runs
+// on every invocation, `--version` included, and must not load the provider stack.
+import { BUILTIN_PROVIDER_ENV_KEYS } from '@goodvibes-jev/engine/platform/platform/config/provider-credential-catalog';
 import type { CliCatalog, CommandFlagSpec, CommandSpec, EngineParseResult } from './cli-catalog-types.js';
 import type { GoodVibesCliCommand, GoodVibesCliFlags, GoodVibesCliOutputFormat } from './cli-types.js';
 
@@ -69,8 +71,7 @@ function isKnownProviderId(prefix: string): boolean {
   return (
     Object.hasOwn(BUILTIN_PROVIDER_ENV_KEYS, prefix) ||
     LOCAL_PROVIDER_IDS.has(prefix) ||
-    SUBSCRIPTION_PROVIDER_IDS.includes(prefix) ||
-    AUTO_REGISTER_CATALOG.some((entry) => entry.id === prefix)
+    SUBSCRIPTION_PROVIDER_IDS.includes(prefix)
   );
 }
 

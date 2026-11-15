@@ -1042,6 +1042,11 @@
       "types": "./platform/dist/platform/runtime/compiled-native-startup.d.ts",
       "import": "./platform/dist/platform/runtime/compiled-native-startup.js"
     },
+    "./platform/platform/runtime/install-kind": {
+      "bun": "./platform/src/platform/runtime/install-kind.ts",
+      "types": "./platform/dist/platform/runtime/install-kind.d.ts",
+      "import": "./platform/dist/platform/runtime/install-kind.js"
+    },
     "./platform/platform/runtime/self-update": {
       "bun": "./platform/src/platform/runtime/self-update.ts",
       "types": "./platform/dist/platform/runtime/self-update.d.ts",
@@ -1871,6 +1876,11 @@
       "bun": "./platform/src/platform/providers/provider-auth-route-presentation.ts",
       "types": "./platform/dist/platform/providers/provider-auth-route-presentation.d.ts",
       "import": "./platform/dist/platform/providers/provider-auth-route-presentation.js"
+    },
+    "./platform/platform/config/provider-credential-catalog": {
+      "bun": "./platform/src/platform/config/provider-credential-catalog.ts",
+      "types": "./platform/dist/platform/config/provider-credential-catalog.d.ts",
+      "import": "./platform/dist/platform/config/provider-credential-catalog.js"
     },
     "./terminal-shell/clipboard": {
       "bun": "./terminal-shell/src/clipboard.ts",
@@ -3151,6 +3161,21 @@
       "bun": "./terminal-shell/src/cli-entrypoint.ts",
       "types": "./terminal-shell/dist/cli-entrypoint.d.ts",
       "import": "./terminal-shell/dist/cli-entrypoint.js"
+    },
+    "./terminal-shell/cli-parser-engine": {
+      "bun": "./terminal-shell/src/cli-parser-engine.ts",
+      "types": "./terminal-shell/dist/cli-parser-engine.d.ts",
+      "import": "./terminal-shell/dist/cli-parser-engine.js"
+    },
+    "./terminal-shell/cli-command-catalog": {
+      "bun": "./terminal-shell/src/cli-command-catalog.ts",
+      "types": "./terminal-shell/dist/cli-command-catalog.d.ts",
+      "import": "./terminal-shell/dist/cli-command-catalog.js"
+    },
+    "./terminal-shell/native-headless-options": {
+      "bun": "./terminal-shell/src/native/native-headless-options.ts",
+      "types": "./terminal-shell/dist/native/native-headless-options.d.ts",
+      "import": "./terminal-shell/dist/native/native-headless-options.js"
     },
     "./terminal-shell/startup-lifecycle": {
       "bun": "./terminal-shell/src/startup-lifecycle.ts",

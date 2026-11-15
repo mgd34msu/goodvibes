@@ -1,4 +1,5 @@
 /** Shared command argument syntax; callers own allowed flags and mutation authority. */
+import { shellSplit } from '@goodvibes-jev/engine/platform/platform/utils';
 export function readFlag(args: string[], name: string): string | undefined {
   const index = args.indexOf(name);
   return index >= 0 ? args[index + 1] : undefined;
@@ -71,4 +72,28 @@ export function readKnowledgeAskArguments(args: string[], allowKnowledgeSpace: b
     includeLinkedObjects: true,
     ...(allowKnowledgeSpace ? { knowledgeSpaceId: readFlag(args, '--space') ?? readFlag(args, '--knowledge-space') } : {}),
   } as const;
+}
+
+/** `/schedule` arguments. Quoting is command grammar, never schedule meaning: incomplete input is refused. */
+export function scheduleCommandArguments(command: string): string[] | undefined {
+  let quote: '"' | "'" | undefined;
+  let tokenStart: number | undefined;
+  for (let i = 0; i < command.length; i++) {
+    const ch = command[i];
+    if (!quote && /\s/.test(ch!)) {
+      // shellSplit intentionally drops empty words. A positional command must
+      // reject that input before a prompt can shift into the schedule slot.
+      if (tokenStart !== undefined && shellSplit(command.slice(tokenStart, i)).length === 0) return undefined;
+      tokenStart = undefined;
+      continue;
+    }
+    tokenStart ??= i;
+    if (ch === '\\' && quote !== "'") {
+      if (i + 1 === command.length) return undefined;
+      if (!quote || command[i + 1] === '"' || command[i + 1] === '\\') i++;
+    } else if (ch === quote) quote = undefined;
+    else if (!quote && (ch === '"' || ch === "'")) quote = ch;
+  }
+  if (quote || (tokenStart !== undefined && shellSplit(command.slice(tokenStart)).length === 0)) return undefined;
+  return shellSplit(command).slice(1);
 }

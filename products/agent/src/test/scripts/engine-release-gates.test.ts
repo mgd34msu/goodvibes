@@ -1,10 +1,9 @@
 /** Agent adapter contracts: installable engine package, public exports and root lock. */
 import { afterEach, describe, expect, test } from 'bun:test';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import {
-  AGENT_ENGINE_PIN,
-  ENGINE_PACKAGE,
+  agentEnginePin,
   readEnginePin,
   enginePinAgreementIssues,
   engineReleaseGateIssues,
@@ -24,12 +23,15 @@ interface FixtureSpec {
 }
 
 const created: string[] = [];
+const AGENT_ROOT = resolve(import.meta.dir, '../../..');
 
 function makeFixture(spec: FixtureSpec = {}): string {
   const repository = makeProjectTempDir('gv-engine-gate');
   created.push(repository);
   const root = join(repository, 'products', 'agent');
   mkdirSync(root, { recursive: true });
+  // The gate runs with the pin shape the product declares, so the fixture carries the real one.
+  copyFileSync(join(AGENT_ROOT, 'toolchain.config.json'), join(root, 'toolchain.config.json'));
   const pin = spec.pin ?? 'workspace:*';
   writeFileSync(join(repository, 'package.json'), JSON.stringify({ private: true, workspaces: ['products/*', 'packages/*'] }));
   writeFileSync(join(root, 'package.json'), JSON.stringify({
@@ -73,15 +75,13 @@ afterEach(() => {
 });
 
 describe('engine-release-gates', () => {
-  test('the adapter names the installable package and root lock', () => {
-    expect(ENGINE_PACKAGE).toBe('@goodvibes-jev/engine');
-    expect(AGENT_ENGINE_PIN).toMatchObject({ pinSource: 'dependencies', lockfile: '../../bun.lock', enforceExportsMap: true });
+  test('the pin shape is the one toolchain.config.json declares: the installable package, the root lock and the exports map', () => {
+    expect(agentEnginePin(AGENT_ROOT)).toMatchObject({ enginePackage: '@goodvibes-jev/engine', pinSource: 'dependencies', lockfile: '../../bun.lock', enforceExportsMap: true });
   });
 
-  test('the actual Agent workspace passes dependency, root-lock and installed-presence checks', () => {
-    const root = resolve(import.meta.dir, '../../..');
-    expect(readEnginePin(root)).toBe('workspace:*');
-    expect(enginePinAgreementIssues(root)).toEqual([]);
+  test('the actual Agent workspace passes every engine gate', () => {
+    expect(readEnginePin(AGENT_ROOT)).toBe('workspace:*');
+    expect(engineReleaseGateIssues(AGENT_ROOT)).toEqual([]);
   });
 
   test('clean workspace fixture passes presence, root-lock and public-import gates', () => {

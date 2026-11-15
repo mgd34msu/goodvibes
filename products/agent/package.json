@@ -17,7 +17,6 @@
     "!src/test",
     "!src/**/*.test.ts",
     "!src/**/__tests__",
-    "!src/cli/package-verification.ts",
     "!src/verification",
     "tsconfig.json",
     "README.md",

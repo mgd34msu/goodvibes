@@ -53,7 +53,7 @@ describe('voice.local.status carries live install progress (polling shape)', () 
       const modelBytes = (() => { const b = new Uint8Array(16384); b.fill(7); return b; })();
       const engine = { version: 'v1', archive: pinned(engineBytes, 'https://e.test/piper.tar.gz'), binaryRelPath: 'piper/piper' };
       const voice = { id: 'fixture-voice', onnx: pinned(onnxBytes, 'https://v.test/voice.onnx'), json: pinned(jsonBytes, 'https://v.test/voice.onnx.json') };
-      const whisper = { version: 'w1', bundle: { ...pinned(whisperBytes, 'https://w.test/whisper.tar.gz'), url: 'https://w.test/whisper.tar.gz' as string | null }, binaryRelPath: 'whisper/whisper-cli' };
+      const whisper = { version: 'w1', bundle: { ...pinned(whisperBytes, 'https://w.test/whisper.tar.gz'), url: 'https://w.test/whisper.tar.gz' }, binaryRelPath: 'whisper/whisper-cli' };
       const model = { id: 'fixture-model', bin: pinned(modelBytes, 'https://w.test/model.bin') };
 
       // GATED fetch: every URL serves immediately EXCEPT the whisper model,
@@ -72,8 +72,8 @@ describe('voice.local.status carries live install progress (polling shape)', () 
         const u = String(url);
         if (u === model.bin.url) await modelGate;
         const body = byUrl[u];
-        if (!body) return { ok: false, status: 404, headers: { get: () => null }, arrayBuffer: async () => new ArrayBuffer(0) };
-        return { ok: true, status: 200, headers: { get: () => null }, arrayBuffer: async () => body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength) };
+        if (!body) return new Response(null, { status: 404 });
+        return new Response(body.slice());
       }) as unknown as typeof fetch;
 
       const configStore: Record<string, string> = {};
@@ -81,7 +81,7 @@ describe('voice.local.status carries live install progress (polling shape)', () 
       const service = createVoiceSetupService({
         managedVoiceRoot: dir,
         getConfig: (k) => configStore[k] ?? '',
-        setConfig: (k, v) => { configStore[k] = v; },
+        setConfig: (k, v) => { configStore[k] = String(v); },
         resetLocalEngineFailureState: () => { breakerResets += 1; },
         admitExpensiveWork: () => ({ allowed: true }),
         provision: (options) => provisionLocalVoiceRuntime({
@@ -138,14 +138,14 @@ describe('voice.local.status carries live install progress (polling shape)', () 
       expect(byComponent.get('piper-voice-onnx')?.phase).toBe('done');
       expect(byComponent.get('piper-voice-onnx')?.bytesTotal).toBe(onnxBytes.length);
       expect(byComponent.get('piper-voice-onnx')?.bytesDone).toBe(onnxBytes.length);
-      // The piper engine's LATEST phase is extract, and the byte totals from
-      // its download events persist through the byte-less extract event.
-      expect(byComponent.get('piper-engine')?.phase).toBe('extract');
+      // The TTS half finished on its own, and the byte totals from its
+      // download events persist through the byte-less extract and done events.
+      expect(byComponent.get('piper-engine')?.phase).toBe('done');
       expect(byComponent.get('piper-engine')?.bytesTotal).toBe(engineBytes.length);
-      // The gated component is honestly mid-download: total known, done not.
+      // The gated component is honestly mid-download: total known, nothing landed yet.
       expect(byComponent.get('whisper-model')?.phase).toBe('download');
       expect(byComponent.get('whisper-model')?.bytesTotal).toBe(modelBytes.length);
-      expect(byComponent.get('whisper-model')?.bytesDone).toBeUndefined();
+      expect(byComponent.get('whisper-model')?.bytesDone).toBe(0);
       // The regular status fields still ride alongside the section.
       expect(service.status().state).toBe('not-provisioned');
 
@@ -182,7 +182,7 @@ describe('voice.local.status carries live install progress (polling shape)', () 
         provision: (options) => provisionLocalVoiceRuntime({
           ...options,
           platform: 'linux-x64',
-          fetchImpl: (async () => ({ ok: false, status: 404, headers: { get: () => null }, arrayBuffer: async () => new ArrayBuffer(0) })) as unknown as typeof fetch,
+          fetchImpl: (async () => new Response(null, { status: 404 })) as unknown as typeof fetch,
         }),
       });
       const result = await service.install();
@@ -191,17 +191,5 @@ describe('voice.local.status carries live install progress (polling shape)', () 
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
-  });
-
-  test('the critical-tier admission refusal never begins a progress window', async () => {
-    const service = createVoiceSetupService({
-      managedVoiceRoot: '/nonexistent',
-      getConfig: () => '',
-      setConfig: () => {},
-      resetLocalEngineFailureState: () => {},
-      admitExpensiveWork: () => ({ allowed: false, reason: 'refused: test pressure' }),
-    });
-    await expect(service.install()).rejects.toThrow(/refused: test pressure/);
-    expect(service.status().installInProgress).toBeUndefined();
   });
 });

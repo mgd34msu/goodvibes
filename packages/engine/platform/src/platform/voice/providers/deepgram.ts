@@ -6,6 +6,7 @@ import {
   resolveAudioInput,
   signalInit,
   voiceFetch,
+  voiceHttpError,
 } from './shared.js';
 
 
@@ -60,7 +61,7 @@ export function createDeepgramProvider(): VoiceProvider {
         body: Buffer.from(buffer),
       });
       if (!response.ok) {
-        throw new Error(`Deepgram transcription failed: HTTP ${response.status}`);
+        throw await voiceHttpError('Deepgram', 'transcription', response);
       }
       const payload = await response.json() as DeepgramTranscriptionResponse;
       const text = payload.results?.channels?.[0]?.alternatives?.[0]?.transcript?.trim();

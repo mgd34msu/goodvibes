@@ -23,8 +23,6 @@ export { ensureBuiltinVoiceProviders } from './builtin-providers.js';
 export type { BuiltinVoiceProviderOptions } from './builtin-providers.js';
 export { createLocalVoiceProvider } from './providers/local.js';
 export type { LocalVoiceProviderOptions, LocalEngineRunner, LocalVoiceConfigReader, ManagedEngineResolver } from './providers/local.js';
-export { downloadVoiceModel } from './model-download.js';
-export type { VoiceModelDownloadOptions, VoiceModelDownloadResult } from './model-download.js';
 
 // Where captured audio becomes words: the connected host first, this process's
 // own provider as a stated fallback. See ./stt-routing.ts.

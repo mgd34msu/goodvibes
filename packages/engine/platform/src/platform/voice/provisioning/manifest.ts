@@ -96,16 +96,13 @@ export const WHISPER_UNSUPPORTED_REASON =
 /**
  * The goodvibes-built whisper.cpp engine bundle for a platform. whisper.cpp
  * ships no official prebuilt binaries, so goodvibes builds them reproducibly
- * (scripts/build-whisper-bundle.ts, static ggml, stripped) and pins the
- * artifact here. `bundle.url` points at the hosted asset once uploaded to the
- * append-only `voice-runtimes-v1` tag, and is null until then, the byte count
- * and sha256 are ALWAYS pinned, so a sideloaded copy of the same bytes (dropped
- * at the managed archive path) verifies against the same pin and installs
- * identically whether or not a URL is set.
+ * (scripts/build-whisper-bundle.ts, static ggml, stripped), hosts them at the
+ * append-only `voice-runtimes-v1` tag, and pins the artifact here. A platform
+ * appears only once its bundle is hosted.
  */
 export interface WhisperEngineManifest {
   readonly version: string;
-  readonly bundle: { readonly url: string | null; readonly fallbackUrls?: readonly string[] | undefined; readonly bytes: number; readonly sha256: string };
+  readonly bundle: VerifiedDownloadSpec;
   /** Path of the whisper-cli binary inside the extracted archive. */
   readonly binaryRelPath: string;
 }
@@ -130,16 +127,15 @@ export const WHISPER_ENGINES: Partial<Record<VoicePlatform, WhisperEngineManifes
       // which holds the same pinned bytes, is the fallback (see runtime-origins.ts).
       // Hosted at the append-only voice-runtimes-v1 release tag (a .sha256
       // sidecar sits next to the asset). Assets there are never re-uploaded in
-      // place or renamed, so this URL + pin is stable; a sideloaded copy of the
-      // same bytes still verifies and installs identically (see provisioner.ts).
+      // place or renamed, so this URL + pin is stable.
       ...voiceRuntimesAsset('goodvibes-whisper-cpp-1.8.2-linux-x64.tar.gz'),
       bytes: 1121557,
       sha256: '80948cd00eed6b43fc7bc307424713a4b4890bc1aec11bdc560aba9357834ac5',
     },
     binaryRelPath: 'whisper/whisper-cli',
   },
-  // Other platforms stay honestly unstamped (url null / absent) until the build
-  // workflow uploads their verified bundles to the voice-runtimes-v1 tag.
+  // Other platforms report unsupported until the build workflow uploads their
+  // verified bundles to the voice-runtimes-v1 tag.
 };
 
 /**

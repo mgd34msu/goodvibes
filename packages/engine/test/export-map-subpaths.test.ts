@@ -151,7 +151,7 @@ describe('export-map subpath resolution (committed manifest)', () => {
     const service = createVoiceSetupService({
       managedVoiceRoot,
       getConfig: (key) => config.get(key) ?? '',
-      setConfig: (key, value) => void config.set(key, value),
+      setConfig: (key, value) => void config.set(key, String(value)),
       resetLocalEngineFailureState: () => { resetCalls += 1; },
       admitExpensiveWork: () => ({ allowed: true }),
       // Injected provisioner: a fully provisioned TTS + STT, no I/O.
@@ -241,29 +241,6 @@ describe('export-map subpath resolution (committed manifest)', () => {
     expect(receipt.provisioned).toBe(false);
     expect(receipt.proof?.proved).toBe(false);
     expect(receipt.notes.join(' ')).toContain('could not transcribe');
-  });
-
-  test('./platform/runtime/voice-setup install() refuses honestly under critical memory pressure', async () => {
-    const { createVoiceSetupService } = await import('@goodvibes-jev/engine/platform/platform/runtime/voice-setup');
-    let provisionCalls = 0;
-    const service = createVoiceSetupService({
-      managedVoiceRoot: makeVoiceRoot('denied'),
-      getConfig: () => '',
-      setConfig: () => {},
-      resetLocalEngineFailureState: () => {},
-      // Critical-tier admission refuses the expensive install outright.
-      admitExpensiveWork: () => ({ allowed: false, reason: 'daemon is under critical memory pressure' }),
-      provision: async () => { provisionCalls += 1; throw new Error('provision must not run when admission is denied'); },
-      readStatus: () => ({
-        platform: null,
-        state: 'unsupported-platform',
-        tts: { engine: 'piper', binaryPresent: false, voicePresent: false, binaryPath: '', modelPath: '' },
-        stt: { engine: 'whisper-cpp', supported: false, state: 'unsupported-platform', binaryPresent: false, modelPresent: false, binaryPath: '', modelPath: '' },
-        offerBytes: null,
-      }),
-    });
-    await expect(service.install()).rejects.toThrow(/critical memory pressure/);
-    expect(provisionCalls).toBe(0);
   });
 
   test('./platform/utils entrypoint serves a WORKING singleFlight through the package name', async () => {

@@ -8,7 +8,7 @@
  * (a terminal subprocess player, a browser Web Audio sink, or a test fake) and,
  * where they run their own scheduler, injectable clocks/timers.
  */
-export { SpokenTurnController } from './controller.js';
+export { SpokenTurnController, isSpokenTurnOrigin } from './controller.js';
 export type { SpokenTurnControllerOptions } from './controller.js';
 export { TtsTextChunker, normalizeSpeechText } from './text-chunker.js';
 export type { TtsTextChunkerOptions } from './text-chunker.js';

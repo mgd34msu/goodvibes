@@ -1,4 +1,3 @@
-import { isProxy } from 'node:util/types';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { UiRuntimeEvents } from '@goodvibes-jev/engine/platform/platform/runtime/ui';
 import type { VoiceService } from '@goodvibes-jev/engine/platform/platform/voice';
@@ -7,14 +6,6 @@ import { sharedStreamingAudioPlayer } from './player.js';
 import { SpokenTurnController } from '@goodvibes-jev/engine/platform/platform/voice';
 export interface SpokenTurnRuntime {
     readonly unsubs: readonly (() => void)[];
-    submitNextTurn(prompt: string): boolean;
-    /**
-     * Like submitNextTurn, and returns the means to withdraw exactly that arm
-     * (see controller.armNextTurn); null when nothing was armed.
-     */
-    armNextTurn(prompt: string): {
-        readonly disarm: () => boolean;
-    } | null;
     /** Returns whether speech was actually active (see controller.stop). */
     stop(message?: string | undefined): boolean;
     /** Exit-path stop: lets the audio already playing drain, bounded (see controller.stopForExit). */
@@ -22,7 +13,8 @@ export interface SpokenTurnRuntime {
 }
 export interface WireSpokenTurnRuntimeOptions {
     readonly voiceService: Pick<VoiceService, 'synthesizeStream'>;
-    readonly configManager: Pick<ConfigManager, 'get'>;
+    /** `subscribe`, when present, lets a `tts.*` setting change stop the reply being spoken. */
+    readonly configManager: Pick<ConfigManager, 'get'> & Partial<Pick<ConfigManager, 'subscribe'>>;
     readonly events: UiRuntimeEvents;
     readonly notify: (message: string) => void;
     /**
@@ -39,10 +31,10 @@ export interface WireSpokenTurnRuntimeOptions {
  * wireSpokenTurnRuntime, wires the spoken-turn pipeline against the runtime
  * event bus.
  *
- * Always-speak mode: when `ui.voiceEnabled` is true in config, every
- * TURN_SUBMITTED event arms the turn for spoken output automatically, the
- * user does not need to prefix the prompt with /tts. The availability check
- * inside SpokenTurnController still gates gracefully when no player is found.
+ * A turn is spoken when its own origin asks for speech (a /tts prompt or a
+ * spoken prompt), or, in always-speak mode (`ui.voiceEnabled`), every turn.
+ * The availability check inside SpokenTurnController still gates gracefully
+ * when no player is found.
  */
 export function wireSpokenTurnRuntime(options: WireSpokenTurnRuntimeOptions, source: string): SpokenTurnRuntime {
     const player = options.playerFactory ? options.playerFactory() : sharedStreamingAudioPlayer();
@@ -52,8 +44,8 @@ export function wireSpokenTurnRuntime(options: WireSpokenTurnRuntimeOptions, sou
     // attribution `source` are new.
     const controller = new SpokenTurnController({
         voiceService: options.voiceService,
-        rejectFailureObject: isProxy,
         configManager: options.configManager,
+        speakAllTurns: () => Boolean(options.configManager.get('ui.voiceEnabled')),
         sink: player,
         source,
         notify: options.notify,
@@ -62,13 +54,7 @@ export function wireSpokenTurnRuntime(options: WireSpokenTurnRuntimeOptions, sou
     });
     const turns = options.events.turns;
     const unsubs = [
-        turns.on('TURN_SUBMITTED', (event) => {
-            // Always-speak mode: auto-arm when ui.voiceEnabled is set.
-            if (options.configManager.get('ui.voiceEnabled')) {
-                controller.submitNextTurn(event.prompt);
-            }
-            void controller.handleTurnEvent(event);
-        }),
+        turns.on('TURN_SUBMITTED', (event) => { void controller.handleTurnEvent(event); }),
         turns.on('PREFLIGHT_FAIL', (event) => { void controller.handleTurnEvent(event); }),
         turns.on('STREAM_DELTA', (event) => { void controller.handleTurnEvent(event); }),
         turns.on('STREAM_END', (event) => { void controller.handleTurnEvent(event); }),
@@ -78,8 +64,6 @@ export function wireSpokenTurnRuntime(options: WireSpokenTurnRuntimeOptions, sou
     ];
     return {
         unsubs,
-        submitNextTurn: (prompt) => controller.submitNextTurn(prompt),
-        armNextTurn: (prompt) => controller.armNextTurn(prompt),
         stop: (message) => controller.stop(message),
         stopForExit: (drainTimeoutMs) => controller.stopForExit(drainTimeoutMs),
     };

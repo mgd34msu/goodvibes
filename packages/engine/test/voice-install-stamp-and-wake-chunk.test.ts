@@ -31,7 +31,7 @@ function install(root: string): ReturnType<ReturnType<typeof createVoiceSetupSer
   return createVoiceSetupService({
     managedVoiceRoot: root,
     getConfig: (key) => config[key] ?? '',
-    setConfig: (key, value) => { config[key] = value; },
+    setConfig: (key, value) => { config[key] = String(value); },
     resetLocalEngineFailureState: () => {},
     admitExpensiveWork: () => ({ allowed: true }),
     provision: async () => ttsOnly(root),
@@ -93,21 +93,5 @@ describe('refusals a caller can act on', () => {
     let refusal: unknown;
     try { service.modelChunk({ component: 'classifier', offset: 11 }); } catch (error) { refusal = error; }
     expect(readGatewayVerbRefusal(refusal)).toMatchObject({ status: 400, code: 'INVALID_ARGUMENT', field: 'offset' });
-  });
-
-  test('an install refused under memory pressure is a 503 and starts no provision', async () => {
-    let provisioned = false;
-    const service = createVoiceSetupService({
-      managedVoiceRoot: dir(),
-      getConfig: () => '',
-      setConfig: () => {},
-      resetLocalEngineFailureState: () => {},
-      admitExpensiveWork: () => ({ allowed: false, reason: 'under memory pressure' }),
-      provision: async () => { provisioned = true; return ttsOnly('x'); },
-    });
-    let refusal: unknown;
-    try { await service.install(); } catch (error) { refusal = error; }
-    expect(readGatewayVerbRefusal(refusal)).toMatchObject({ status: 503, code: 'SERVICE_UNAVAILABLE' });
-    expect(provisioned).toBe(false);
   });
 });

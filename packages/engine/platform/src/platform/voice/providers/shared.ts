@@ -3,8 +3,11 @@ import type {
   VoiceProvider,
   VoiceProviderStatus,
 } from '../types.js';
+import { HttpStatusError } from '@goodvibes-jev/engine/errors';
 import { fetchWithTimeout, instrumentedFetch } from '../../utils/fetch-with-timeout.js';
 import { isRecord } from '../../utils/record-coerce.js';
+import { redactDiagnosticText } from '../../utils/redaction.js';
+import { parseRetryAfterMs } from '../../providers/rate-limit-headers.js';
 
 export function trimToUndefined(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined;
@@ -79,6 +82,64 @@ export async function voiceStreamFetch(
   }
 }
 
+/** How much of a provider's error body is kept as its stated reason. */
+const PROVIDER_REASON_MAX_CHARS = 500;
+
+/** The reason a provider states in its error body: a JSON `message`/`detail`/`error`, else the text itself. */
+function providerReason(body: string): string | undefined {
+  const text = body.trim();
+  if (!text) return undefined;
+  let reason: unknown = text;
+  try {
+    const parsed: unknown = JSON.parse(text);
+    const pick = (value: unknown): unknown => {
+      if (typeof value === 'string') return value;
+      if (!isRecord(value)) return undefined;
+      return pick(value['message']) ?? pick(value['detail']) ?? pick(value['error']) ?? pick(value['status']);
+    };
+    reason = pick(parsed) ?? text;
+  } catch { /* A plain-text body is the reason as written. */ }
+  const flat = String(reason).replace(/\s+/g, ' ').trim();
+  return flat ? redactDiagnosticText(flat.slice(0, PROVIDER_REASON_MAX_CHARS), { anonymize: false }) : undefined;
+}
+
+/** What to do about a failed voice request, from its status alone. */
+function nextStepFor(provider: string, status: number, retryAfterMs: number | undefined): string {
+  if (status === 401) return `Check the ${provider} API key; it was not accepted.`;
+  if (status === 402) return `Check the ${provider} plan or balance.`;
+  if (status === 403) return `Check that the ${provider} API key is allowed to use this feature.`;
+  if (status === 404) return `Check the ${provider} voice or model id.`;
+  if (status === 408 || status === 429 || status >= 500) {
+    return retryAfterMs !== undefined ? `Retry in ${Math.ceil(retryAfterMs / 1000)} s.` : 'Retry shortly.';
+  }
+  return 'Check the request: the voice, model, format and text length.';
+}
+
+/**
+ * The error for a voice provider's non-2xx response: it carries the status,
+ * the `Retry-After` wait and the provider's stated reason, so a retry is
+ * decided from the status table and the message says what to fix. Reads the
+ * body once, on the failure path only.
+ */
+export async function voiceHttpError(provider: string, operation: string, response: Response): Promise<HttpStatusError> {
+  let body = '';
+  try { body = await response.text(); } catch { /* The status alone still classifies the failure. */ }
+  const reason = providerReason(body);
+  const retryAfterMs = parseRetryAfterMs(response.headers.get('retry-after') ?? undefined, Date.now());
+  const next = nextStepFor(provider, response.status, retryAfterMs);
+  return new HttpStatusError(`${provider} ${operation} failed: HTTP ${response.status}${reason ? `: ${reason}` : ''}. ${next}`, {
+    status: response.status,
+    url: response.url || undefined,
+    provider,
+    operation,
+    source: 'provider',
+    state: `${provider} ${operation} did not complete`,
+    next: [next],
+    ...(retryAfterMs !== undefined ? { retryAfterMs } : {}),
+    ...(reason !== undefined ? { body: reason } : {}),
+  });
+}
+
 /** Only an https audio URL is fetched on the caller's behalf; see {@link resolveAudioInput}. */
 function assertFetchableAudioUri(value: string): URL {
   let url: URL;
@@ -125,7 +186,7 @@ export async function resolveAudioInput(
       // A redirect could lead to the loopback or private address the check above refused.
       redirect: 'error',
     });
-    if (!response.ok) throw new Error(`Failed to load audio URI: HTTP ${response.status}`);
+    if (!response.ok) throw await voiceHttpError('Voice audio uri', 'download', response);
     return {
       buffer: new Uint8Array(await response.arrayBuffer()),
       mimeType: response.headers.get('content-type')?.trim() || audio.mimeType,

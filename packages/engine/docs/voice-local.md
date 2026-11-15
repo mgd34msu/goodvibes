@@ -86,6 +86,20 @@ voice engine. This is a real end to end synthesis measurement."). Larger
 models trade latency for accuracy; GPU hosts should prefer faster-whisper for
 STT per the sources above.
 
+## Managed install
+
+`voice.local.install` installs text-to-speech (piper and a default voice) and
+speech-to-text (whisper.cpp and its model) as two independent halves: a failed
+voice download never stops speech-to-text, which the wake word and dictation
+need, and the receipt reports each half's own state. Every download streams to
+disk with progress in `voice.local.status`, fails only after 60 s with no data,
+and keeps what it received: the next attempt resumes from there. The install
+ends by speaking a test phrase and reading it back; the transcript proves the
+round trip when its words match the phrase, allowing one differing word. A
+local engine that keeps failing is stopped after three failed runs in a row (at
+once for a crash or an incompatible model) until it is reinstalled, the daemon
+restarts or its `voice.local.*` paths change.
+
 ## Managed engine bundles: hosting and stability contract
 
 `voice.local.install` provisions the STT engine (whisper.cpp) from a
@@ -113,9 +127,9 @@ script):
 - **Reproducible.** `scripts/build-whisper-bundle.ts` produces a byte-reproducible
   tarball (`tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner`,
   `gzip -n`), so a clean rebuild of identical inputs matches the pinned `sha256`.
-  A user can therefore build the bundle themselves and sideload it, dropping it
-  at `<managedRoot>/engines/whisper.tar.gz`, and it verifies against the same
-  pin whether or not a hosted URL is set.
+  A user can therefore build the bundle themselves and drop it at
+  `<managedRoot>/engines/whisper.tar.gz`: a file there that matches the pin is
+  used as is, with no download.
 
 To build and publish a new bundle, run `scripts/build-whisper-bundle.ts` (it
 prints the bundle, its `.sha256` sidecar, and the durable hosted URL), or trigger

@@ -800,7 +800,7 @@ describe('the recorder capture stream', () => {
     expect(stops[0]?.message).toContain('exited on its own');
   });
 
-  test('a device error in stderr is classified, not dumped as a generic failure', async () => {
+  test('a device error in stderr is classified from the recorder\'s own wording, with no model request', async () => {
     const requests = recorderAnswer('device-missing');
     const child = fakeProcess();
     let captured: AudioCaptureError | undefined; let stopped!: () => void;
@@ -812,7 +812,7 @@ describe('the recorder capture stream', () => {
     child.emitStderr('stream node 56 error: no target node available');
     child.close(1);
     await done;
-    expect(JSON.stringify(requests[0]?.state)).toContain('stream node 56 error: no target node available');
+    expect(requests).toHaveLength(0);
     expect(captured?.reason).toBe('device-missing');
   });
 
@@ -828,7 +828,7 @@ describe('the recorder capture stream', () => {
     child.emitStderr('open failed: device or resource busy');
     child.close(1);
     await done;
-    expect(JSON.stringify(requests[0]?.state)).toContain('open failed: device or resource busy');
+    expect(requests).toHaveLength(0);
     expect(captured?.reason).toBe('device-unavailable');
   });
 
@@ -841,7 +841,7 @@ describe('the recorder capture stream', () => {
     child.emitStderr('arecord: main:850: audio open error: Permission denied');
     child.close(1);
     await done;
-    expect(JSON.stringify(requests[0]?.state)).toContain('arecord: main:850: audio open error: Permission denied');
+    expect(requests).toHaveLength(0);
     expect(captured?.reason).toBe('permission-denied');
   });
 

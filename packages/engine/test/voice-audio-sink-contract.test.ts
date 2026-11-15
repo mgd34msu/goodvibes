@@ -84,9 +84,7 @@ describe('AudioSink contract: readiness / head survival', () => {
       setInterval: (() => 1) as never,
       clearInterval: (() => {}) as never,
     });
-
-    expect(controller.submitNextTurn('greeting')).toBe(true);
-    controller.handleTurnEvent(turn({ type: 'TURN_SUBMITTED', turnId: 'r1', prompt: 'greeting' }));
+    controller.handleTurnEvent(turn({ type: 'TURN_SUBMITTED', turnId: 'r1', prompt: 'greeting', origin: { source: 'tts' } }));
     controller.handleTurnEvent(turn({ type: 'STREAM_DELTA', turnId: 'r1', content: 'Hello.', accumulated: 'Hello.' }));
     controller.handleTurnEvent(turn({ type: 'TURN_COMPLETED', turnId: 'r1', response: 'Hello.', stopReason: 'completed' }));
     expect(readinessOpened).toBe(false);
@@ -143,9 +141,7 @@ describe('AudioSink contract: abort cuts immediately', () => {
       setInterval: (() => 1) as never,
       clearInterval: (() => {}) as never,
     });
-
-    expect(controller.submitNextTurn('long line')).toBe(true);
-    controller.handleTurnEvent(turn({ type: 'TURN_SUBMITTED', turnId: 'a1', prompt: 'long line' }));
+    controller.handleTurnEvent(turn({ type: 'TURN_SUBMITTED', turnId: 'a1', prompt: 'long line', origin: { source: 'tts' } }));
     controller.handleTurnEvent(turn({ type: 'STREAM_DELTA', turnId: 'a1', content: 'Abcdefgh.', accumulated: 'Abcdefgh.' }));
     controller.handleTurnEvent(turn({ type: 'TURN_COMPLETED', turnId: 'a1', response: 'Abcdefgh.', stopReason: 'completed' }));
     await withTestTimeout(firstByte.promise, 5_000, 'the sink never received the first byte');
@@ -188,9 +184,7 @@ describe('AudioSink contract: bounded waitForDrain on exit', () => {
       setInterval: (() => 1) as never,
       clearInterval: (() => {}) as never,
     });
-
-    expect(controller.submitNextTurn('draining answer')).toBe(true);
-    controller.handleTurnEvent(turn({ type: 'TURN_SUBMITTED', turnId: 'd1', prompt: 'draining answer' }));
+    controller.handleTurnEvent(turn({ type: 'TURN_SUBMITTED', turnId: 'd1', prompt: 'draining answer', origin: { source: 'tts' } }));
     controller.handleTurnEvent(turn({ type: 'STREAM_DELTA', turnId: 'd1', content: 'Tail.', accumulated: 'Tail.' }));
     controller.handleTurnEvent(turn({ type: 'TURN_COMPLETED', turnId: 'd1', response: 'Tail.', stopReason: 'completed' }));
     await withTestTimeout(playing.promise, 5_000, 'the sink never started playing');

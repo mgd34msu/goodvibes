@@ -1,13 +1,11 @@
-import { captureJudgmentPort, httpStatusOf, JudgmentPortMissingError, readFailureTransience, structuredTransience, type FailureReadOptions, type JudgmentPortCapture } from '@goodvibes-jev/engine/errors';
+import { classifyFailure } from '@goodvibes-jev/engine/errors';
 import type { ConfigKey, ConfigManager } from '../../config/index.js';
 import type { TurnEvent } from '../../../events/turn.js';
 import type { VoiceService } from '../service.js';
 import type { VoiceAudioChunk, VoiceSynthesisStreamResult } from '../types.js';
 import { summarizeError } from '../../utils/error-display.js';
-import { captureFailureSnapshot, captureJudgmentFailureInput } from '../../gate/failure-input-snapshot.js';
 import { TtsTextChunker } from './text-chunker.js';
 import type { AudioSink } from './audio-sink.js';
-import { activateClassicFallback, captureDecisionModelPolicyOperation, isClassicOperation, withConfiguredDecisionModelPolicy } from '../../runtime/decision-policy.js';
 
 /**
  * How many synthesis requests may sit in the pipeline at once (synthesizing,
@@ -30,13 +28,17 @@ const SYNTHESIS_PIPELINE_WINDOW = 2;
 const SYNTHESIS_MERGE_MAX_CHARS = 1500;
 
 /**
- * Backoff schedule for transient synthesis failures (429 rate/concurrency
- * limits, transient 5xx, network drops): first retry after 1s, second after
- * 2.5s, then the chunk is skipped honestly and the turn continues. The platform's
- * provider errors are plain Error strings with the HTTP status embedded, no
- * Retry-After header is exposed, so the schedule is fixed, not server-driven.
+ * Backoff for a synthesis failure the failure table calls retryable (429,
+ * transient 5xx, a dropped connection, a timeout): the provider's Retry-After
+ * when it sent one, else 1 s then 2.5 s; then the chunk is skipped honestly and
+ * the turn continues. A Retry-After longer than the cap skips the chunk at
+ * once, because speech that far behind the text is no longer worth waiting for.
  */
 const SYNTHESIS_RETRY_DELAYS_MS = [1000, 2500] as const;
+const SYNTHESIS_RETRY_AFTER_CAP_MS = 10_000;
+
+/** The settings one spoken turn was started with; a change to any of them stops it. */
+const TURN_CONFIG_KEYS = ['tts.provider', 'tts.voice', 'tts.speed'] as const satisfies readonly ConfigKey[];
 
 /**
  * Source label attached to every synthesis request's metadata. Consumers may
@@ -47,7 +49,8 @@ const DEFAULT_SYNTHESIS_SOURCE = 'goodvibes-platform';
 
 export interface SpokenTurnControllerOptions {
   readonly voiceService: Pick<VoiceService, 'synthesizeStream'>;
-  readonly configManager: Pick<ConfigManager, 'get'>;
+  /** `subscribe`, when present, stops the current speech when a `tts.*` setting it was started with changes. */
+  readonly configManager: Pick<ConfigManager, 'get'> & Partial<Pick<ConfigManager, 'subscribe'>>;
   /** The injectable I/O boundary. See {@link AudioSink}. */
   readonly sink: AudioSink;
   readonly notify?: ((message: string) => void) | undefined;
@@ -57,8 +60,8 @@ export interface SpokenTurnControllerOptions {
    * 'goodvibes-platform'.
    */
   readonly source?: string | undefined;
-  /** Optional host hardening (Node hosts reject proxies before descriptor inspection). */
-  readonly rejectFailureObject?: ((value: object) => boolean) | undefined;
+  /** True when every turn is spoken (`ui.voiceEnabled`); otherwise only turns whose origin asks for speech are. */
+  readonly speakAllTurns?: (() => boolean) | undefined;
   readonly now?: (() => number) | undefined;
   readonly setInterval?: typeof setInterval | undefined;
   readonly clearInterval?: typeof clearInterval | undefined;
@@ -67,6 +70,16 @@ export interface SpokenTurnControllerOptions {
   readonly clearTimeout?: typeof clearTimeout | undefined;
 }
 
+/** The origin source a spoken prompt is submitted with. */
+export const SPOKEN_TURN_SOURCE = 'tts';
+
+/** A turn is spoken when its own origin says so; speech and spoken-turn model routing both read this. */
+export function isSpokenTurnOrigin(origin: { readonly source?: string | undefined; readonly metadata?: Readonly<Record<string, unknown>> | undefined } | undefined): boolean {
+  return origin?.source === SPOKEN_TURN_SOURCE || origin?.metadata?.['spokenOutput'] === true;
+}
+
+type TurnConfig = { readonly provider: string | undefined; readonly voice: string | undefined; readonly speed: number | undefined };
+
 /**
  * SpokenTurnController, the shared spoken-output policy engine. It watches a
  * turn's lifecycle events, chunks the streamed answer into speech-sized pieces,
@@ -74,24 +87,23 @@ export interface SpokenTurnControllerOptions {
  * retry/backoff, and drives an injected {@link AudioSink} with honest
  * drain-vs-interrupt semantics. All I/O is the sink's; this class is pure
  * policy and runs unchanged in the terminal, the agent, and the browser.
+ *
+ * What retires a spoken turn is one thing: the abort signal of each of its
+ * chunks, aborted by {@link SpokenTurnController.stop}, by the next spoken
+ * turn, and by a change to the `tts.*` settings the turn started with.
  */
 export class SpokenTurnController {
-  private pendingPrompt: string | null = null;
-  /** Counts arms, so a caller can later withdraw exactly the one it made. */
-  private armSerial = 0;
   private activeTurnId: string | null = null;
   private chunker: TtsTextChunker | null = null;
   private chunkSequence = 0;
-  private turnOwner: JudgmentPortCapture | undefined;
-  private runTurnPolicy: (<T>(operation: () => T) => T) | undefined;
-  private turnCancellation: AbortController | undefined;
-  private turnConfig: { provider: string | undefined; voice: string | undefined; speed: number | undefined } | undefined;
-  private retireListener: (() => void) | undefined;
-  private timerPending = false;
+  private turnConfig: TurnConfig | undefined;
+  private unsubscribeConfig: (() => void) | undefined;
   private exitDrainGeneration: number | null = null;
-  private assertTurnFunctions: (() => void) | undefined;
   private playbackChain: Promise<void> = Promise.resolve();
+  /** Chunks synthesizing or waiting to play; any stop aborts them. */
   private readonly abortControllers = new Set<AbortController>();
+  /** The chunk being heard; only an exit drain lets it finish. */
+  private readonly playingControllers = new Set<AbortController>();
   private timer: ReturnType<typeof setInterval> | null = null;
   /** A skipped chunk is reported once per turn; separate from the playback stop so one never suppresses the other. */
   private skipReportedForTurn = false;
@@ -107,11 +119,11 @@ export class SpokenTurnController {
   /** Set when TURN_COMPLETED arrives; the turn releases once the pipeline drains. */
   private completedTurnId: string | null = null;
   private readonly voiceService: Pick<VoiceService, 'synthesizeStream'>;
-  private readonly configManager: Pick<ConfigManager, 'get'>;
+  private readonly configManager: SpokenTurnControllerOptions['configManager'];
   private readonly sink: AudioSink;
   private readonly notify?: ((message: string) => void) | undefined;
   private readonly source: string;
-  private readonly rejectFailureObject: ((value: object) => boolean) | undefined;
+  private readonly speakAllTurns: () => boolean;
   private readonly now: () => number;
   private readonly setIntervalImpl: typeof setInterval;
   private readonly clearIntervalImpl: typeof clearInterval;
@@ -124,7 +136,7 @@ export class SpokenTurnController {
     this.sink = options.sink;
     this.notify = options.notify;
     this.source = options.source ?? DEFAULT_SYNTHESIS_SOURCE;
-    this.rejectFailureObject = options.rejectFailureObject;
+    this.speakAllTurns = options.speakAllTurns ?? (() => false);
     this.now = options.now ?? (() => Date.now());
     this.setIntervalImpl = options.setInterval ?? setInterval;
     this.clearIntervalImpl = options.clearInterval ?? clearInterval;
@@ -132,64 +144,22 @@ export class SpokenTurnController {
     this.clearTimeoutImpl = options.clearTimeout ?? clearTimeout;
   }
 
-  /**
-   * Where speech is, derived rather than stored: `armed` waits for its turn to
-   * be submitted, `speaking` owns a turn, `draining` lets the last audible
-   * chunk of an exiting session finish.
-   */
-  get phase(): 'idle' | 'armed' | 'speaking' | 'draining' {
+  /** `speaking` owns a turn; `draining` lets the last audible chunk of an exiting session finish. */
+  get phase(): 'idle' | 'speaking' | 'draining' {
     if (this.activeTurnId !== null) return 'speaking';
-    if (this.exitDrainGeneration !== null) return 'draining';
-    return this.pendingPrompt !== null ? 'armed' : 'idle';
-  }
-
-  submitNextTurn(prompt: string): boolean {
-    return this.armNextTurn(prompt) !== null;
-  }
-
-  /**
-   * Arm the next turn for speech, and hand back the means to withdraw exactly
-   * this arm. A caller whose turn never reaches submission (the dispatch was
-   * abandoned, or threw first) withdraws it so the next Esc/Ctrl+C is not
-   * swallowed and a later identical prompt is not spoken. Withdrawing is a
-   * no-op once the turn was submitted, once the arm was replaced by a newer one
-   * (whose own caller owns it now), or once it was stopped.
-   */
-  armNextTurn(prompt: string): { readonly disarm: () => boolean } | null {
-    const normalized = prompt.trim();
-    if (!normalized) return null;
-    this.stop();
-    if (!this.sink.available) {
-      if (!this.noSinkNoticed) {
-        this.noSinkNoticed = true;
-        this.notice('[TTS] Text response will continue, but live audio is unavailable. Install mpv or ffplay.');
-      }
-      return null;
-    }
-    // Reset the no-sink notice if the sink becomes available again.
-    this.noSinkNoticed = false;
-    this.pendingPrompt = normalized;
-    const serial = ++this.armSerial;
-    return {
-      disarm: () => {
-        if (serial !== this.armSerial || this.pendingPrompt === null || this.activeTurnId !== null) return false;
-        this.stop();
-        return true;
-      },
-    };
+    return this.exitDrainGeneration !== null ? 'draining' : 'idle';
   }
 
   /**
    * Returns whether speech was actually ACTIVE when stopped. The notice only
-   * prints in that case, stop() on an idle controller used to notify anyway,
-   * spamming "[TTS] Spoken output stopped." on every Ctrl+C (an earlier replay
-   * fix); callers use the return to decide whether the press "did a
-   * job" (see handleCtrlC's consume-on-speech-stop).
+   * prints in that case, so a Ctrl+C on an idle controller is not reported as
+   * a stop; callers use the return to decide whether the press "did a job"
+   * (see handleCtrlC's consume-on-speech-stop).
    */
   stop(message?: string): boolean {
     this.exitDrainGeneration = null;
-    const wasActive = this.pendingPrompt !== null || this.activeTurnId !== null
-      || this.chunker !== null || this.abortControllers.size > 0;
+    const wasActive = this.activeTurnId !== null || this.chunker !== null
+      || this.abortControllers.size > 0 || this.playingControllers.size > 0;
     this.teardown({});
     this.skipReportedForTurn = false;
     this.playbackStoppedForTurn = false;
@@ -198,52 +168,35 @@ export class SpokenTurnController {
   }
 
   /**
-   * The one teardown every stop goes through. `keepAudible` leaves the owner,
-   * the sink and the playback chain alone so the chunk already being heard can
-   * finish (the exit drain); `keepArm` keeps a prompt armed for the NEXT turn
-   * when only the current one is being torn down.
+   * The one teardown every stop goes through. `keepAudible` leaves the sink,
+   * the chunk being heard and the playback chain alone so that chunk can
+   * finish (the exit drain).
    */
-  private teardown(options: { readonly keepAudible?: boolean; readonly keepArm?: boolean }): void {
-    if (!options.keepAudible) this.releaseOwner();
-    if (!options.keepArm) this.pendingPrompt = null;
-    this.activeTurnId = null;
+  private teardown(options: { readonly keepAudible?: boolean }): void {
+    this.releaseTurn();
     this.chunker?.reset();
     this.chunker = null;
-    this.stopTimer();
     this.resetPipeline();
     for (const controller of this.abortControllers) controller.abort();
     this.abortControllers.clear();
     if (options.keepAudible) return;
+    for (const controller of this.playingControllers) controller.abort();
+    this.playingControllers.clear();
     this.sink.stop();
     this.playbackChain = Promise.resolve();
   }
 
-  /** Stop after a failure, naming a settings change when that is what happened. */
-  private stopAfterFailure(error: unknown): void {
-    const config = this.turnConfig;
-    let changed = false;
-    try {
-      const current = this.readTurnConfig();
-      changed = config !== undefined && (config.provider !== current.provider || config.voice !== current.voice || config.speed !== current.speed);
-    } catch { /* An unreadable config is reported as the failure itself. */ }
-    this.stop(changed
-      ? 'Spoken output stopped: tts.provider, tts.voice or tts.speed changed during this reply. The next reply uses the new settings.'
-      : `Spoken output stopped: ${summarizeError(error)}. The text reply continues.`);
-  }
-
   /**
-   * Exit-path teardown: drops everything not yet audible (pending arm,
-   * buffered text, queued chunks) but lets the audio the user is already
-   * hearing finish naturally, capped at `drainTimeoutMs`, before the hard
-   * stop. Deliberate interrupts (Ctrl+C, /tts stop, turn cancel) keep their
-   * instant path through stop(); this is only for exiting the app while the
-   * final audio of a completed response is still draining.
+   * Exit-path teardown: drops everything not yet audible (buffered text,
+   * queued chunks) but lets the audio the user is already hearing finish
+   * naturally, capped at `drainTimeoutMs`, before the hard stop. Deliberate
+   * interrupts (Ctrl+C, /tts stop, turn cancel) keep their instant path
+   * through stop(); this is only for exiting the app while the final audio of
+   * a completed response is still draining.
    */
   async stopForExit(drainTimeoutMs = 2000): Promise<void> {
     const generation = this.pipelineGeneration;
     this.exitDrainGeneration = generation;
-    // Cancels chunks that have not started playing; the chunk currently in the
-    // sink is not in the abort set (its controller is released before playback).
     this.teardown({ keepAudible: true });
     await this.sink.waitForDrain(drainTimeoutMs);
     // A replacement turn must not be stopped by an older drain completion.
@@ -252,36 +205,24 @@ export class SpokenTurnController {
 
   async handleTurnEvent(event: TurnEvent): Promise<void> {
     try {
-      if (event.type === 'TURN_SUBMITTED' && this.pendingPrompt && event.prompt.trim() === this.pendingPrompt) {
-        this.runTurnPolicy = captureDecisionModelPolicyOperation(state => {
-          if (state.operation === 'classic') this.notice(state.reason === 'unavailable'
-            ? '[TTS] Decision models unavailable; continuing spoken output in Classic mode.'
-            : '[TTS] Spoken output is using Classic mode.');
-        });
-      }
-      await (this.runTurnPolicy ?? withConfiguredDecisionModelPolicy)(() => this.handleOwnedTurnEvent(event));
-    } catch {
-      try { this.stop(); } catch { /* Preserve the text conversation if speech teardown fails. */ }
-    }
-  }
-
-  private async handleOwnedTurnEvent(event: TurnEvent): Promise<void> {
-    try {
       if (event.type === 'TURN_SUBMITTED') {
-        this.maybeStartTurn(event.turnId, event.prompt);
+        if (isSpokenTurnOrigin(event.origin) || this.speakAllTurns()) this.startTurn(event.turnId);
         return;
       }
       if (!this.activeTurnId || event.turnId !== this.activeTurnId) return;
 
       if (event.type === 'STREAM_DELTA') {
-        await this.acceptChunks(this.chunker?.push(event.content), event.turnId);
-        return;
-      }
-      if (event.type === 'STREAM_END') {
+        let chunks: string[];
+        try { chunks = this.chunker?.push(event.content) ?? []; }
+        catch (error) {
+          this.stop(`Spoken output stopped: ${summarizeError(error)}. The text reply continues.`);
+          return;
+        }
+        this.queueTexts(chunks);
         return;
       }
       if (event.type === 'TURN_COMPLETED') {
-        await this.finishTurn(event.turnId);
+        this.finishTurn(event.turnId);
         return;
       }
       if (event.type === 'TURN_CANCEL' || event.type === 'TURN_ERROR' || event.type === 'PREFLIGHT_FAIL') {
@@ -294,55 +235,40 @@ export class SpokenTurnController {
     }
   }
 
-  private maybeStartTurn(turnId: string, prompt: string): void {
-    if (!this.pendingPrompt) return;
-    if (prompt.trim() !== this.pendingPrompt) return;
-    this.pendingPrompt = null;
+  private startTurn(turnId: string): void {
+    // A new spoken turn replaces whatever was being said.
+    this.stop();
+    if (!this.sink.available) {
+      if (!this.noSinkNoticed) {
+        this.noSinkNoticed = true;
+        this.notice('[TTS] Text response will continue, but live audio is unavailable. Install mpv or ffplay.');
+      }
+      return;
+    }
+    this.noSinkNoticed = false;
     this.activeTurnId = turnId;
     this.chunkSequence = 0;
-    this.skipReportedForTurn = false;
-    this.playbackStoppedForTurn = false;
-    this.playbackChain = Promise.resolve();
-    this.resetPipeline();
-    const generation = this.pipelineGeneration;
-    const synthesize = this.voiceService.synthesizeStream, play = this.sink.play, get = this.configManager.get;
-    this.assertTurnFunctions = () => {
-      if (this.voiceService.synthesizeStream !== synthesize || this.sink.play !== play || this.configManager.get !== get) {
-        throw new Error('Spoken turn caller changed');
-      }
-    };
     this.turnConfig = this.readTurnConfig();
-    const config = this.turnConfig;
-    const assertCurrent = () => {
-      this.assertTurnFunctions?.();
-      const current = this.readTurnConfig();
-      if ((this.exitDrainGeneration !== generation && (this.activeTurnId !== turnId || this.pipelineGeneration !== generation))
-        || current.provider !== config.provider || current.voice !== config.voice || current.speed !== config.speed) {
-        throw new Error('Spoken turn source or configuration changed');
-      }
-    };
-    this.turnCancellation = new AbortController();
-    try { if (!isClassicOperation()) this.turnOwner = captureJudgmentPort('voice.spoken-turn.chunking', { signal: this.turnCancellation.signal, assertCurrent }); }
-    catch (error) {
-      if (!activateClassicFallback(error) && !(error instanceof JudgmentPortMissingError)) {
-        this.stop(`Spoken output for this reply could not start: ${summarizeError(error)}. The text reply continues.`);
-        return;
-      }
+    const subscribe = this.configManager.subscribe?.bind(this.configManager);
+    if (subscribe) {
+      const unsubscribes = TURN_CONFIG_KEYS.map(key => subscribe(key, () => this.onTurnConfigChanged(turnId)));
+      this.unsubscribeConfig = () => { for (const unsubscribe of unsubscribes) unsubscribe(); };
     }
-    this.chunker = new TtsTextChunker({ now: this.now, owner: this.turnOwner, assertCurrent });
-    const owner = this.turnOwner;
-    if (owner) {
-      const retire = () => { if (this.turnOwner === owner) this.stop(); };
-      owner.signal.addEventListener('abort', retire, { once: true });
-      this.retireListener = () => owner.signal.removeEventListener('abort', retire);
-    }
+    this.chunker = new TtsTextChunker({ now: this.now });
     this.startTimer();
     this.notice(`[TTS] Live playback queued through ${this.sink.label}.`);
   }
 
-  private async finishTurn(turnId: string): Promise<void> {
-    if (turnId !== this.activeTurnId) return;
-    await this.acceptChunks(this.chunker?.flushAll(), turnId);
+  private onTurnConfigChanged(turnId: string): void {
+    if (this.activeTurnId !== turnId || !this.turnConfig) return;
+    const current = this.readTurnConfig();
+    const started = this.turnConfig;
+    if (current.provider === started.provider && current.voice === started.voice && current.speed === started.speed) return;
+    this.stop('Spoken output stopped: tts.provider, tts.voice or tts.speed changed during this reply. The next reply uses the new settings.');
+  }
+
+  private finishTurn(turnId: string): void {
+    this.queueTexts(this.chunker?.flushAll() ?? []);
     if (turnId !== this.activeTurnId) return;
     this.stopTimer();
     this.completedTurnId = turnId;
@@ -351,42 +277,19 @@ export class SpokenTurnController {
     this.maybeReleaseTurn();
   }
 
-  private readTurnConfig() {
+  private readTurnConfig(): TurnConfig {
     return { provider: readOptionalConfigString(this.configManager, 'tts.provider'),
       voice: readOptionalConfigString(this.configManager, 'tts.voice'),
       speed: readOptionalConfigNumber(this.configManager, 'tts.speed') };
   }
 
-  private releaseOwner(): void {
-    this.retireListener?.(); this.retireListener = undefined;
-    this.turnCancellation?.abort(); this.turnCancellation = undefined;
-    this.turnOwner = undefined; this.turnConfig = undefined; this.assertTurnFunctions = undefined;
-    this.runTurnPolicy = undefined;
-  }
-
-  private assertSpeechCurrent(): void {
-    this.chunker?.assertCurrent();
-    this.assertTurnFunctions?.();
-    const config = this.turnConfig;
-    const current = this.readTurnConfig();
-    if (!config || config.provider !== current.provider || config.voice !== current.voice || config.speed !== current.speed) {
-      throw new Error('Spoken turn configuration changed');
-    }
-    if (!isClassicOperation()) this.turnOwner?.assertCurrent();
-  }
-
-  private async acceptChunks(work: Promise<string[]> | undefined, turnId: string): Promise<void> {
-    const generation = this.pipelineGeneration;
-    try {
-      const chunks = await work ?? [];
-      if (turnId !== this.activeTurnId || generation !== this.pipelineGeneration) return;
-      this.assertSpeechCurrent();
-      this.queueTexts(chunks);
-    } catch (error) {
-      if (turnId === this.activeTurnId && generation === this.pipelineGeneration) {
-        try { this.stopAfterFailure(error); } catch { /* Host teardown is best effort. */ }
-      }
-    }
+  /** Ends the turn's ownership: the active id, the timer and the settings subscription. */
+  private releaseTurn(): void {
+    this.activeTurnId = null;
+    this.completedTurnId = null;
+    this.stopTimer();
+    this.unsubscribeConfig?.(); this.unsubscribeConfig = undefined;
+    this.turnConfig = undefined;
   }
 
   private resetPipeline(): void {
@@ -399,9 +302,8 @@ export class SpokenTurnController {
   private startTimer(): void {
     this.stopTimer();
     this.timer = this.setIntervalImpl(() => {
-      if (!this.activeTurnId || !this.chunker || this.timerPending) return;
-      this.timerPending = true;
-      void this.acceptChunks(this.chunker.flushDue(), this.activeTurnId).finally(() => { this.timerPending = false; });
+      if (!this.activeTurnId || !this.chunker) return;
+      try { this.queueTexts(this.chunker.flushDue()); } catch { /* The next tick or turn end flushes it. */ }
     }, 250);
     // The flush loop must not keep the process alive after the host has shut down.
     this.timer?.unref?.();
@@ -421,6 +323,7 @@ export class SpokenTurnController {
    * arrives before the first pump tick is exactly one request.
    */
   private queueTexts(chunks: readonly string[]): void {
+    if (chunks.length === 0) return;
     // Bounded backlog. A slow sink must not retain an unlimited response.
     if (this.pendingTexts.reduce((total, text) => total + text.length, 0)
       + chunks.reduce((total, text) => total + text.length, 0) > 65_536) {
@@ -448,9 +351,6 @@ export class SpokenTurnController {
   }
 
   private pump(): void {
-    if (this.activeTurnId) {
-      try { this.assertSpeechCurrent(); } catch (error) { this.stopAfterFailure(error); return; }
-    }
     while (this.activeTurnId && this.pendingTexts.length > 0 && this.pipelineDepth < SYNTHESIS_PIPELINE_WINDOW) {
       this.dispatchChunk(this.takeMergedText());
     }
@@ -478,60 +378,26 @@ export class SpokenTurnController {
 
   private dispatchChunk(text: string): void {
     const turnId = this.activeTurnId;
-    if (!turnId || !text.trim()) return;
+    const config = this.turnConfig;
+    if (!turnId || !config || !text.trim()) return;
     const sequence = ++this.chunkSequence;
     const generation = this.pipelineGeneration;
     this.pipelineDepth++;
     const abortController = new AbortController();
+    const signal = abortController.signal;
     this.abortControllers.add(abortController);
-    // Snapshot the canonical composition before synthesis can yield. A retry
-    // must never borrow a replacement owner's authority. Missing readers do
-    // not block structured facts, but stay unavailable for this chunk.
-    const owner = this.turnOwner;
-    const readingUnavailable = new JudgmentPortMissingError('voice.spoken-turn.synthesis');
-    const assertTurnCurrent = () => {
-      abortController.signal.throwIfAborted();
-      if (this.activeTurnId !== turnId || this.pipelineGeneration !== generation) {
-        throw new Error('Spoken synthesis turn is no longer current');
-      }
-      this.assertSpeechCurrent();
-    };
-    const assertCurrent = () => {
-      assertTurnCurrent();
-      if (!owner && !(readingUnavailable instanceof JudgmentPortMissingError)) throw readingUnavailable;
-      if (!isClassicOperation()) owner?.assertCurrent();
-    };
-    const isCurrent = () => {
-      try { assertCurrent(); return true; } catch { return false; }
-    };
-    const reading: FailureReadOptions = {
-      get port() {
-        assertCurrent();
-        if (!owner) throw readingUnavailable;
-        return owner.port;
-      },
-      signal: abortController.signal,
-      beforeAttempt: assertCurrent,
-    };
-    const retrySignal = () => owner
-      ? AbortSignal.any([owner.signal, abortController.signal]) : abortController.signal;
-    const resultPromise = this.synthesizeWithRetry(text, turnId, sequence, abortController.signal, reading, assertCurrent, retrySignal)
+    const resultPromise = this.synthesizeWithRetry(text, config, turnId, sequence, signal)
       .then((result) => ({ ok: true as const, result }))
       .catch((error: unknown) => ({ ok: false as const, error }));
 
     this.playbackChain = this.playbackChain.then(async () => {
       try {
-        if (!isCurrent()) {
-          this.abortControllers.delete(abortController);
-          return;
-        }
+        if (signal.aborted) return;
         const result = await resultPromise;
-        this.abortControllers.delete(abortController);
-        // Re-check after the await: an abort that landed while synthesis was
-        // in flight (deliberate stop or exit) makes the rejection expected,
-        // it must not be reported, and it must not hard-stop a sink that may
-        // still be draining the previous chunk.
-        if (!isCurrent()) return;
+        // An abort that landed while synthesis was in flight (a stop or an
+        // exit) makes the rejection expected: it is not reported, and it must
+        // not hard-stop a sink that may still be draining the previous chunk.
+        if (signal.aborted) return;
         if (!result.ok) {
           // Retries are exhausted (or the failure was not transient). Skip
           // just this chunk and keep speaking the rest of the turn, a gap in
@@ -539,20 +405,17 @@ export class SpokenTurnController {
           this.reportSkippedChunk(result.error);
           return;
         }
-        const assertPlaybackCurrent = () => {
-          abortController.signal.throwIfAborted();
-          if (this.exitDrainGeneration !== generation) assertTurnCurrent();
-          else this.assertSpeechCurrent();
-          owner?.assertCurrent();
-        };
-        await this.sink.play(guardAudio(result.result.chunks, assertPlaybackCurrent), {
+        this.abortControllers.delete(abortController);
+        this.playingControllers.add(abortController);
+        await this.sink.play(guardAudio(result.result.chunks, signal), {
           format: String(result.result.format ?? 'mp3'),
-          signal: abortController.signal,
+          signal,
         });
       } catch (error) {
-        this.abortControllers.delete(abortController);
-        if (isCurrent()) this.reportError(error);
+        if (!signal.aborted) this.reportError(error);
       } finally {
+        this.abortControllers.delete(abortController);
+        this.playingControllers.delete(abortController);
         this.releasePipelineSlot(generation);
       }
     });
@@ -571,40 +434,33 @@ export class SpokenTurnController {
   private maybeReleaseTurn(): void {
     if (!this.completedTurnId || this.completedTurnId !== this.activeTurnId) return;
     if (this.pendingTexts.length > 0 || this.pipelineDepth > 0 || this.pumpScheduled) return;
-    this.releaseOwner();
-    this.activeTurnId = null;
-    this.completedTurnId = null;
+    this.releaseTurn();
     this.chunker = null;
     this.abortControllers.clear();
   }
 
   private async synthesizeWithRetry(
-    text: string, turnId: string, sequence: number, signal: AbortSignal,
-    reading: FailureReadOptions, assertCurrent: () => void, retrySignal: () => AbortSignal,
+    text: string, config: TurnConfig, turnId: string, sequence: number, signal: AbortSignal,
   ): Promise<VoiceSynthesisStreamResult> {
     for (let attempt = 0; ; attempt++) {
-      assertCurrent();
+      signal.throwIfAborted();
       try {
-        const result = await this.synthesize(text, turnId, sequence, signal);
-        assertCurrent();
-        return result;
-      } catch (error) {
-        assertCurrent();
-        const captured = captureFailureSnapshot(error, this.rejectFailureObject);
-        const structured = structuredTransience(captured);
-        // Canonical structure can decide locally. Wording (including provider
-        // 429 billing) must pass complete-source privacy admission BEFORE the
-        // canonical reader's complete evidence view. Never interpret just a prefix.
-        const needsWording = !structured || (structured.basis === 'status' && httpStatusOf(captured) === 429);
-        const admitted = needsWording ? captureJudgmentFailureInput(captured, this.rejectFailureObject) : captured;
-        if (attempt >= SYNTHESIS_RETRY_DELAYS_MS.length) throw admitted;
-        const transience = await readFailureTransience(admitted, 'voice.spoken-turn.synthesis', {
-          fromProvider: true, reading,
+        return await this.voiceService.synthesizeStream(config.provider, {
+          text,
+          voiceId: config.voice,
+          format: 'mp3',
+          speed: config.speed,
+          signal,
+          metadata: { source: this.source, feature: 'live-tts', turnId, sequence },
         });
-        assertCurrent();
-        if (transience.failureClass !== 'retryable') throw admitted;
-        await this.delay(SYNTHESIS_RETRY_DELAYS_MS[attempt]!, retrySignal());
-        assertCurrent();
+      } catch (error) {
+        signal.throwIfAborted();
+        // The failure table decides from status, Retry-After, errno and error
+        // class; a failure with none of them is not retried.
+        const failure = classifyFailure(error);
+        if (attempt >= SYNTHESIS_RETRY_DELAYS_MS.length || !failure?.retryable) throw error;
+        if (failure.retryAfterMs !== undefined && failure.retryAfterMs > SYNTHESIS_RETRY_AFTER_CAP_MS) throw error;
+        await this.delay(failure.retryAfterMs ?? SYNTHESIS_RETRY_DELAYS_MS[attempt]!, signal);
       }
     }
   }
@@ -628,32 +484,14 @@ export class SpokenTurnController {
     });
   }
 
-  private synthesize(text: string, turnId: string, sequence: number, signal: AbortSignal): Promise<VoiceSynthesisStreamResult> {
-    this.assertSpeechCurrent();
-    const config = this.turnConfig!;
-    return this.voiceService.synthesizeStream(config.provider, {
-      text,
-      voiceId: config.voice,
-      format: 'mp3',
-      speed: config.speed,
-      signal,
-      metadata: {
-        source: this.source,
-        feature: 'live-tts',
-        turnId,
-        sequence,
-      },
-    });
+  private notice(message: string): void {
+    try { this.notify?.(message); } catch { /* A broken notifier cannot reject background speech work. */ }
   }
 
   /**
    * One synthesis request failed after its retries. Report once per turn and
    * keep going, the rest of the response still plays.
    */
-  private notice(message: string): void {
-    try { this.notify?.(message); } catch { /* A broken notifier cannot reject background speech work. */ }
-  }
-
   private reportSkippedChunk(error: unknown): void {
     if (this.skipReportedForTurn) return;
     this.skipReportedForTurn = true;
@@ -663,8 +501,7 @@ export class SpokenTurnController {
   private reportError(error: unknown): void {
     if (this.playbackStoppedForTurn) return;
     this.playbackStoppedForTurn = true;
-    // A prompt armed for the next turn survives this turn's failure.
-    this.teardown({ keepArm: true });
+    this.teardown({});
     this.notice(`[TTS] Live playback stopped: ${summarizeError(error)}`);
   }
 }
@@ -692,13 +529,10 @@ function readOptionalConfigNumber(configManager: Pick<ConfigManager, 'get'>, key
   return isFinite(value) && value > 0 ? value : undefined;
 }
 
-/** Fence every awaited provider chunk, including after logical turn completion. */
-async function* guardAudio(chunks: AsyncIterable<VoiceAudioChunk>, assertCurrent: () => void): AsyncIterable<VoiceAudioChunk> {
-  assertCurrent();
+/** One boolean read per audio chunk: the chunk's own abort signal. */
+async function* guardAudio(chunks: AsyncIterable<VoiceAudioChunk>, signal: AbortSignal): AsyncIterable<VoiceAudioChunk> {
   for await (const chunk of chunks) {
-    assertCurrent();
+    signal.throwIfAborted();
     yield chunk;
-    assertCurrent();
   }
-  assertCurrent();
 }

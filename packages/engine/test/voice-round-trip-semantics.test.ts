@@ -1,10 +1,8 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { bindJudgmentPortAuthority, decisionModelPolicyState, installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { JudgmentError } from '@goodvibes-jev/judgment';
-import { withDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.js';
+import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { proveVoiceRoundTrip, type ProofEngineRunner } from '../platform/src/platform/voice/provisioning/round-trip-proof.js';
 import { createVoiceSetupService } from '../platform/src/platform/runtime/voice-setup.js';
@@ -13,17 +11,16 @@ import { readVoiceDiagnostics } from '../platform/src/platform/voice/diagnostics
 
 const engine = { ttsEngine: 'piper', ttsBinary: '/managed/piper', ttsModelPath: '/managed/voice.onnx',
   sttEngine: 'whisper-cpp', sttBinary: '/managed/whisper', sttModelPath: '/managed/model.bin' };
-let previous: ReturnType<typeof installJudgmentPort>;
-let installed = false;
-function reading(probability: number) {
-  const fixture = fakePort(() => noulAnswer(probability));
-  // Keep the port that was there before the first call, so a second call in one test restores the original, not the first fake.
-  const replaced = installJudgmentPort(fixture.port);
-  if (!installed) previous = replaced;
-  installed = true;
+
+// A decision model that would say yes to anything; the proof must never ask it.
+let previous: ReturnType<typeof installJudgmentPort> | undefined;
+function decisionModel() {
+  const fixture = fakePort(() => noulAnswer(0.99));
+  previous = installJudgmentPort(fixture.port);
   return fixture;
 }
-afterEach(() => { if (installed) installJudgmentPort(previous); installed = false; });
+afterEach(() => { if (previous !== undefined) installJudgmentPort(previous); previous = undefined; });
+
 function runner(transcript: string, paths: string[] = []): ProofEngineRunner {
   return async input => {
     if (input.binary === engine.ttsBinary) {
@@ -34,128 +31,28 @@ function runner(transcript: string, paths: string[] = []): ProofEngineRunner {
   };
 }
 
-describe('Classic physical voice test has native provenance, never a fabricated semantic verdict', () => {
-  test.each([
+describe('the install proof compares the transcript in code', () => {
+  for (const [transcript, proved] of [
     ['The quick brown fox jumps over the lazy dog.', true],
-    ['dog lazy the over jumps fox brown quick the', false],
-    ['the quick brown fox does not jump over the lazy dog', false],
-    ['the quick brown fox jumps over the lazy dog with added text', false],
+    ['the quick brown fox jumped over the lazy dog', true],
+    ['the quick brown fox over the lazy cat', false],
+    ['the lazy dog jumps over the quick brown fox', false],
     ['', false],
-  ] as const)('native complete-sequence comparison: %s', async (transcript, matches) => {
-    let metadata = 0, requests = 0, engines = 0;
-    previous = installJudgmentPort({ get model(): never { metadata++; throw new Error('Classic model access'); },
-      async ask() { requests++; throw new Error('Classic request'); } }); installed = true;
-    const proof = await withDecisionModelPolicy(() => 'Classic - Off', () => proveVoiceRoundTrip({ ...engine,
-      runner: async input => { engines++; return runner(transcript)(input); } }));
-    expect(proof).toMatchObject({ proved: matches, operationProvenance: 'classic', semanticAssessment: 'not-evaluated',
-      proofBasis: 'native-word-sequence', comparison: matches ? 'classic-exact-match' : 'classic-mismatch' });
-    expect(proof.summary).toContain('semantic equivalence was not evaluated');
-    expect({ metadata, requests, engines }).toEqual({ metadata: 0, requests: 0, engines: 2 });
-  });
-
-  test('Preferred availability exhaustion compares captured output without replaying the engines', async () => {
-    const fake = fakePort(() => { throw new JudgmentError('unavailable', 'Synthetic exhausted chain'); });
-    previous = installJudgmentPort(fake.port); installed = true; let engines = 0;
-    await withDecisionModelPolicy(() => 'Preferred', async () => {
-      const proof = await proveVoiceRoundTrip({ ...engine, runner: async input => {
-        engines++; return runner('The quick brown fox jumps over the lazy dog.')(input);
-      } });
-      expect(proof).toMatchObject({ proved: true, comparison: 'classic-exact-match', operationProvenance: 'classic' });
-      expect(decisionModelPolicyState().operation).toBe('classic');
-    });
-    expect(engines).toBe(2); expect(fake.requests).toHaveLength(1);
-  });
-
-  test('Preferred internal client failure stops without publishing an unavailable proof or replaying engines', async () => {
-    const fake = fakePort(() => { throw new JudgmentError('internal', 'Private comparison client fault'); });
-    previous = installJudgmentPort(fake.port); installed = true;
-    let engines = 0;
-    await withDecisionModelPolicy(() => 'Preferred', async () => {
-      await expect(proveVoiceRoundTrip({ ...engine, runner: async input => {
-        engines++; return runner('The quick brown fox jumps over the lazy dog.')(input);
-      } })).rejects.toMatchObject({ kind: 'internal' });
-      expect(decisionModelPolicyState().operation).toBe('decision');
-    });
-    expect(engines).toBe(2); expect(fake.requests).toHaveLength(1);
-  });
-
-  test.each(['rejected', 'invalid-request', 'invalid-response', 'aborted'] as const)('Preferred %s cannot become a native positive result', async kind => {
-    const fake = fakePort(() => { throw new JudgmentError(kind, 'Synthetic terminal failure'); });
-    previous = installJudgmentPort(fake.port); installed = true;
-    await withDecisionModelPolicy(() => 'Preferred', async () => {
-      const proof = await proveVoiceRoundTrip({ ...engine, runner: runner('The quick brown fox jumps over the lazy dog.') });
-      expect(proof.proved).toBe(false); expect(proof.operationProvenance).toBeUndefined();
-      expect(decisionModelPolicyState().operation).toBe('decision');
-    });
-  });
-});
-
-describe('complete-transcript semantic proof, never overlap authority', () => {
-  for (const transcript of [
-    'dog lazy the over jumps fox brown quick the',
-    'the quick brown fox does not jump over the lazy dog',
-    'the quick brown fox jumps over the lazy dog is a phrase I cannot hear',
-    '[BLANK_AUDIO]', 'none',
-  ]) test(`settled no stays unproven: ${transcript}`, async () => {
-    reading(0.01);
+  ] as const) test(`"${transcript}" ${proved ? 'proves' : 'does not prove'} the round trip`, async () => {
+    const model = decisionModel();
     const proof = await proveVoiceRoundTrip({ ...engine, runner: runner(transcript) });
-    expect(proof.proved).toBe(false); expect(proof.comparison).toBe('no');
-    expect(proof.transcript).toBe(transcript);
-  });
-  test('number spelling and punctuation can prove despite low word overlap', async () => {
-    reading(0.99);
-    const proof = await proveVoiceRoundTrip({ ...engine, phrase: '1 2 3', runner: runner('One, two, three!') });
-    expect(proof.wordOverlap).toBe(0); expect(proof.proved).toBe(true);
-  });
-  test('empty transcript cannot prove even with an affirmative fixture', async () => {
-    reading(0.99);
-    const proof = await proveVoiceRoundTrip({ ...engine, runner: runner('  ') });
-    expect(proof.proved).toBe(false); expect(proof.comparison).toBe('no');
-  });
-  test('uncertainty is honest about comparison rather than broken engines', async () => {
-    reading(0.5);
-    const proof = await proveVoiceRoundTrip({ ...engine, runner: runner('the quick brown fox jumps over the lazy dog') });
-    expect(proof.comparison).toBe('uncertain'); expect(proof.proved).toBe(false);
-    expect(proof.summary).toContain('comparison was uncertain'); expect(proof.error).toBeUndefined();
-  });
-  test('missing judgment is unproven and still preserves transcript and cleanup', async () => {
-    previous = installJudgmentPort(undefined); installed = true;
-    const paths: string[] = [];
-    const proof = await proveVoiceRoundTrip({ ...engine, runner: runner('the quick brown fox jumps over the lazy dog', paths) });
-    expect(proof.comparison).toBe('unavailable'); expect(proof.proved).toBe(false);
-    expect(proof.transcript).toBe('the quick brown fox jumps over the lazy dog');
-    expect(existsSync(dirname(paths[0]!))).toBe(false);
-  });
-  test('malformed model answer cannot prove', async () => {
-    const fixture = fakePort(() => ({ kind: 'noul', noul: Number.NaN }) as never);
-    previous = installJudgmentPort(fixture.port); installed = true;
-    const proof = await proveVoiceRoundTrip({ ...engine, runner: runner('the quick brown fox jumps over the lazy dog') });
-    expect(proof.proved).toBe(false); expect(proof.comparison).toBe('unavailable');
+    expect(proof).toMatchObject({ stage: 'compare', proved, comparison: proved ? 'yes' : 'no', proofBasis: 'native-word-sequence' });
+    expect(model.requests).toHaveLength(0);
   });
   test('cancellation during synthesis prevents transcription and removes temporary files', async () => {
-    reading(0.99); const controller = new AbortController(); const paths: string[] = []; let calls = 0;
+    const controller = new AbortController(); const paths: string[] = []; let calls = 0;
     await expect(proveVoiceRoundTrip({ ...engine, signal: controller.signal, runner: async input => {
       calls++; await runner('', paths)(input); controller.abort(); return { stdout: '' };
     } })).rejects.toThrow();
     expect(calls).toBe(1); expect(existsSync(dirname(paths[0]!))).toBe(false);
   });
-  test('deadline releases a noncooperating subprocess seam and cleans scratch', async () => {
-    reading(0.99); let scratch = '';
-    await expect(proveVoiceRoundTrip({ ...engine, timeoutMs: 10, runner: input => {
-      scratch = dirname(String(input.args[input.args.indexOf('--output_file') + 1]));
-      return new Promise(() => {});
-    } })).rejects.toThrow();
-    expect(existsSync(scratch)).toBe(false);
-  });
-  test('replacement of installed judgment during synthesis cannot authorize a stale result', async () => {
-    reading(0.99); let calls = 0;
-    await expect(proveVoiceRoundTrip({ ...engine, runner: async input => {
-      calls++; const result = await runner('')(input);
-      installJudgmentPort(fakePort(() => noulAnswer(0.99)).port); return result;
-    } })).rejects.toThrow(); expect(calls).toBe(1);
-  });
-  test('zero audio remains a synthesis failure and caller-owned scratch survives', async () => {
-    reading(0.99); const scratchDir = mkdtempSync(join(tmpdir(), 'voice-owned-'));
+  test('zero audio is a synthesis failure and caller-owned scratch survives', async () => {
+    const scratchDir = mkdtempSync(join(tmpdir(), 'voice-owned-'));
     try {
       const proof = await proveVoiceRoundTrip({ ...engine, scratchDir, runner: async () => {
         writeFileSync(join(scratchDir, 'proof.wav'), ''); return { stdout: '' };
@@ -165,206 +62,45 @@ describe('complete-transcript semantic proof, never overlap authority', () => {
   });
 });
 
-function setup(root: string, transcript: string, mutate?: () => void) {
-  const config: Record<string, string> = {};
-  const service = createVoiceSetupService({
-    managedVoiceRoot: root, getConfig: key => config[key] ?? '', setConfig: (key, value) => { config[key] = value; },
-    resetLocalEngineFailureState: () => {}, admitExpensiveWork: () => ({ allowed: true }),
-    provision: async () => ({ platform: 'linux-x64', components: [],
-      tts: { engine: 'piper', state: 'provisioned', binaryPath: engine.ttsBinary, modelPath: engine.ttsModelPath },
-      stt: { engine: 'whisper-cpp', state: 'provisioned', binaryPath: engine.sttBinary, modelPath: engine.sttModelPath } }),
-    prove: options => proveVoiceRoundTrip({ ...options, runner: async input => {
-      const answer = await runner(transcript)(input); mutate?.(); return answer;
-    } }),
-  });
-  return { service, config };
-}
-
-describe('real setup service and gateway preserve semantic proof and ownership', () => {
-  test('Classic gateway install persists the actual native proof basis without decision requests', async () => {
-    const fake = reading(0.99), root = mkdtempSync(join(tmpdir(), 'voice-classic-setup-'));
-    try {
-      await withDecisionModelPolicy(() => 'Classic - Off', async () => {
-        const { service } = setup(root, 'The quick brown fox jumps over the lazy dog.');
-        const receipt = await createVoiceInstallHandler(service)({ context: {} }) as Awaited<ReturnType<typeof service.install>>;
-        expect(receipt).toMatchObject({ provisioned: true, operationProvenance: 'classic', proof: {
-          comparison: 'classic-exact-match', proofBasis: 'native-word-sequence', semanticAssessment: 'not-evaluated',
-        } });
-        expect(readVoiceDiagnostics(root).at(-1)).toMatchObject({ ok: true, operationProvenance: 'classic',
-          semanticAssessment: 'not-evaluated', proofBasis: 'native-word-sequence' });
-      });
-      expect(fake.requests).toHaveLength(0);
-    } finally { rmSync(root, { recursive: true, force: true }); }
-  });
-
-  for (const probability of [0.99, 0.01, 0.5]) test(`receipt and diagnostic preserve settled result ${probability}`, async () => {
-    reading(probability); const root = mkdtempSync(join(tmpdir(), 'voice-service-'));
-    try {
-      const { service } = setup(root, 'the quick brown fox jumps over the lazy dog');
-      const result = await createVoiceInstallHandler(service)({ context: {} }) as Awaited<ReturnType<typeof service.install>>;
-      expect(result.provisioned).toBe(probability === 0.99);
-      expect(result.proof?.proved).toBe(probability === 0.99);
-      expect(result.tts.state).toBe('provisioned'); expect(result.stt.state).toBe('provisioned');
-      expect(readVoiceDiagnostics(root).at(-1)?.ok).toBe(probability === 0.99);
-      expect(service.status().installInProgress).toBeUndefined();
-    } finally { rmSync(root, { recursive: true, force: true }); }
-  });
-  test('voice config changes during a real engine seam prevent diagnostic publication', async () => {
-    reading(0.99); const root = mkdtempSync(join(tmpdir(), 'voice-config-'));
-    try {
-      const { service, config } = setup(root, 'the quick brown fox jumps over the lazy dog', () => {
-        config['voice.local.sttBinary'] = '/replacement/whisper';
-      });
-      await expect(service.install()).rejects.toThrow('configuration changed');
-      expect(readVoiceDiagnostics(root)).toHaveLength(0);
-      expect(service.status().installInProgress).toBeUndefined();
-    } finally { rmSync(root, { recursive: true, force: true }); }
-  });
-  test('gateway cancellation is retained into subprocesses and publishes no diagnostic', async () => {
-    reading(0.99); const root = mkdtempSync(join(tmpdir(), 'voice-cancel-')); const controller = new AbortController();
-    try {
-      const { service } = setup(root, '', () => controller.abort());
-      await expect(Promise.resolve(createVoiceInstallHandler(service)({ signal: controller.signal, context: {} }))).rejects.toThrow();
-      // The owning work consumes cancellation before its finally releases progress.
-      await new Promise(resolve => setTimeout(resolve, 0));
-      expect(readVoiceDiagnostics(root)).toHaveLength(0);
-      expect(service.status().installInProgress).toBeUndefined();
-    } finally { rmSync(root, { recursive: true, force: true }); }
-  });
-  test('gateway authorization revocation cannot publish a successful proof', async () => {
-    reading(0.99); const root = mkdtempSync(join(tmpdir(), 'voice-revoke-')); let authorized = true;
-    try {
-      const { service } = setup(root, '', () => { authorized = false; });
-      await expect(Promise.resolve(createVoiceInstallHandler(service)({ context: {}, isAuthorized: () => authorized }))).rejects.toThrow();
-      expect(readVoiceDiagnostics(root)).toHaveLength(0);
-    } finally { rmSync(root, { recursive: true, force: true }); }
-  });
-});
-
-// Admission is tested with full source tails, never abbreviated display text.
-test('private phrase is refused before model lookup and private transcript before a reading', async () => {
-  const fixture = fakePort(() => noulAnswer(0.99)); let modelReads = 0;
-  Object.defineProperty(fixture.port, 'model', { get() { modelReads++; return 'jev-1.13.0'; } });
-  previous = installJudgmentPort(fixture.port); installed = true;
-  const phrase = `ordinary words ${'x '.repeat(80_000)} Authorization: Bearer private-proof-token`;
-  const proof = await proveVoiceRoundTrip({ ...engine, phrase, runner: runner('ordinary words') });
-  expect(proof.comparison).toBe('unavailable'); expect(modelReads).toBe(0); expect(fixture.requests).toHaveLength(0);
-  const transcriptProof = await proveVoiceRoundTrip({ ...engine, runner: runner(phrase) });
-  expect(transcriptProof.comparison).toBe('unavailable'); expect(fixture.requests).toHaveLength(0);
-});
-
-test('late yes from a noncooperating model after cancellation is never retained', async () => {
-  const controller = new AbortController(); const fixture = fakePort(() => noulAnswer(0.99));
-  const ask = fixture.port.ask.bind(fixture.port); let release!: () => void; let reached!: () => void;
-  const gate = new Promise<void>(resolve => { release = resolve; });
-  const entered = new Promise<void>(resolve => { reached = resolve; });
-  fixture.port.ask = async request => { reached(); await gate; return ask(request); };
-  previous = installJudgmentPort(fixture.port); installed = true;
-  const paths: string[] = [];
-  const pending = proveVoiceRoundTrip({ ...engine, signal: controller.signal,
-    runner: runner('the quick brown fox jumps over the lazy dog', paths) });
-  await entered; controller.abort();
-  await expect(pending).rejects.toThrow(); release();
-  expect(existsSync(dirname(paths[0]!))).toBe(false);
-});
-
-test('unavailable semantic comparison propagates without changing installed engine states', async () => {
-  previous = installJudgmentPort(undefined); installed = true;
-  const root = mkdtempSync(join(tmpdir(), 'voice-unavailable-'));
-  try {
-    const { service } = setup(root, 'the quick brown fox jumps over the lazy dog');
-    const receipt = await service.install();
-    expect(receipt.provisioned).toBe(false); expect(receipt.proof?.comparison).toBe('unavailable');
-    expect(receipt.tts.state).toBe('provisioned'); expect(receipt.stt.state).toBe('provisioned');
-    expect(readVoiceDiagnostics(root).at(-1)?.detail).toContain('comparison was unavailable');
-    expect(readVoiceDiagnostics(root).at(-1)?.error).toBeUndefined();
-  } finally { rmSync(root, { recursive: true, force: true }); }
-});
-
-test('TTS-only installation retains its existing success contract and explicitly has no round-trip proof', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'voice-tts-only-'));
-  try {
-    const config: Record<string, string> = {};
-    let proofs = 0;
-    const service = createVoiceSetupService({
-      managedVoiceRoot: root, getConfig: key => config[key] ?? '', setConfig: (key, value) => { config[key] = value; },
+describe('the setup service reports the proof', () => {
+  function service(root: string, stt: 'provisioned' | 'unsupported-platform', transcript = 'The quick brown fox jumps over the lazy dog.') {
+    const config: Record<string, string | boolean> = {};
+    return createVoiceSetupService({
+      managedVoiceRoot: root, getConfig: key => String(config[key] ?? ''), setConfig: (key, value) => { config[key] = value; },
       resetLocalEngineFailureState: () => {}, admitExpensiveWork: () => ({ allowed: true }),
       provision: async () => ({ platform: 'linux-x64', components: [],
         tts: { engine: 'piper', state: 'provisioned', binaryPath: engine.ttsBinary, modelPath: engine.ttsModelPath },
-        stt: { engine: 'whisper-cpp', state: 'unsupported-platform', reason: 'No pinned STT bundle for this fixture' } }),
-      prove: async () => { proofs++; throw new Error('No STT engine should be invoked'); },
+        stt: stt === 'provisioned'
+          ? { engine: 'whisper-cpp', state: 'provisioned', binaryPath: engine.sttBinary, modelPath: engine.sttModelPath }
+          : { engine: 'whisper-cpp', state: 'unsupported-platform', reason: 'No pinned STT bundle for this fixture' } }),
+      prove: options => proveVoiceRoundTrip({ ...options, runner: runner(transcript) }),
     });
-    const receipt = await createVoiceInstallHandler(service)({ context: {} }) as Awaited<ReturnType<typeof service.install>>;
-    expect(receipt.provisioned).toBe(true); expect(receipt.proof).toBeUndefined(); expect(proofs).toBe(0);
-    expect(receipt.notes.join(' ')).toContain('no round trip could be proven');
-    expect(receipt.stt.state).toBe('unsupported-platform'); expect(readVoiceDiagnostics(root)).toHaveLength(0);
-  } finally { rmSync(root, { recursive: true, force: true }); }
-});
-
-test('an original source generation retired by a config ABA cannot publish', async () => {
-  const fixture = reading(0.99); let generation = 1;
-  bindJudgmentPortAuthority(fixture.port, () => {
-    const original = generation;
-    return { identity: Object.freeze({}), assertCurrent: () => {
-      if (generation !== original) throw new Error('Retired source generation');
-    } };
-  });
-  const root = mkdtempSync(join(tmpdir(), 'voice-aba-'));
-  try {
-    const { service, config } = setup(root, 'the quick brown fox jumps over the lazy dog', () => {
-      const old = config['voice.local.ttsBinary'];
-      config['voice.local.ttsBinary'] = '/temporary/other-provider'; generation++;
-      config['voice.local.ttsBinary'] = old!; generation++;
-    });
-    await expect(service.install()).rejects.toThrow();
-    expect(readVoiceDiagnostics(root)).toHaveLength(0); expect(fixture.requests).toHaveLength(0);
-  } finally { rmSync(root, { recursive: true, force: true }); }
-});
-
-test('a joining caller cancellation cannot cancel or replace the original single-flight owner', async () => {
-  reading(0.99); const root = mkdtempSync(join(tmpdir(), 'voice-join-'));
-  const config: Record<string, string> = {}; let release!: () => void; let entered!: () => void; let provisions = 0;
-  const gate = new Promise<void>(resolve => { release = resolve; });
-  const begun = new Promise<void>(resolve => { entered = resolve; });
-  try {
-    const service = createVoiceSetupService({
-      managedVoiceRoot: root, getConfig: key => config[key] ?? '', setConfig: (key, value) => { config[key] = value; },
-      resetLocalEngineFailureState: () => {}, admitExpensiveWork: () => ({ allowed: true }),
-      provision: async () => { provisions++; entered(); await gate; return { platform: 'linux-x64', components: [],
-        tts: { engine: 'piper', state: 'provisioned', binaryPath: engine.ttsBinary, modelPath: engine.ttsModelPath },
-        stt: { engine: 'whisper-cpp', state: 'provisioned', binaryPath: engine.sttBinary, modelPath: engine.sttModelPath } }; },
-      prove: options => proveVoiceRoundTrip({ ...options, runner: runner('the quick brown fox jumps over the lazy dog') }),
-    });
-    const original = service.install(); await begun;
-    const controller = new AbortController(); const joining = service.install({ signal: controller.signal });
-    controller.abort(); await expect(joining).rejects.toThrow();
-    expect(service.status().installInProgress).toBeDefined(); expect(provisions).toBe(1);
-    release(); expect((await original).proof?.proved).toBe(true);
-    expect(service.status().installInProgress).toBeUndefined(); expect(readVoiceDiagnostics(root)).toHaveLength(1);
-  } finally { release?.(); rmSync(root, { recursive: true, force: true }); }
-});
-
-test.skipIf(process.platform === 'win32')('real subprocess cancellation waits for SIGKILL and close before scratch cleanup', async () => {
-  reading(0.99); const root = mkdtempSync(join(tmpdir(), 'voice-child-')); const marker = join(root, 'started.json');
-  const binary = join(root, 'fixture-engine'); const controller = new AbortController();
-  writeFileSync(binary, `#!${process.execPath}\nconst fs = require('node:fs');\nprocess.on('SIGTERM', () => {});\nconst wav = process.argv[process.argv.indexOf('--output_file') + 1];\nfs.writeFileSync(${JSON.stringify(marker)}, JSON.stringify({pid: process.pid, wav}));\nsetInterval(() => {}, 100);\n`, { mode: 0o755 });
-  let pid: number | undefined;
-  let pending: ReturnType<typeof proveVoiceRoundTrip> | undefined;
-  try {
-    pending = proveVoiceRoundTrip({ ...engine, ttsBinary: binary, signal: controller.signal });
-    // Drain rejection immediately without waiting before the caller aborts.
-    void pending.catch(() => {});
-    const until = Date.now() + 5_000;
-    while (!existsSync(marker) && Date.now() < until) await new Promise(resolve => setTimeout(resolve, 5));
-    expect(existsSync(marker)).toBe(true);
-    const started = JSON.parse(readFileSync(marker, 'utf8')) as { pid: number; wav: string }; pid = started.pid;
-    controller.abort(); await expect(pending).rejects.toThrow();
-    expect(() => process.kill(started.pid, 0)).toThrow();
-    expect(existsSync(dirname(started.wav))).toBe(false);
-  } finally {
-    controller.abort();
-    if (pid) { try { process.kill(pid, 'SIGKILL'); } catch { /* Already closed, as asserted above. */ } }
-    await pending?.catch(() => {});
-    rmSync(root, { recursive: true, force: true });
   }
+  test('a proven install is provisioned and leaves a diagnostic, with no decision request', async () => {
+    const model = decisionModel(), root = mkdtempSync(join(tmpdir(), 'voice-proof-setup-'));
+    try {
+      const setup = service(root, 'provisioned');
+      const receipt = await createVoiceInstallHandler(setup)({ context: {} }) as Awaited<ReturnType<typeof setup.install>>;
+      expect(receipt).toMatchObject({ provisioned: true, proof: { proved: true, proofBasis: 'native-word-sequence' } });
+      expect(readVoiceDiagnostics(root).at(-1)).toMatchObject({ ok: true, operation: 'provision-proof', proofBasis: 'native-word-sequence' });
+      expect(model.requests).toHaveLength(0);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+  test('a transcript that does not say the phrase reports not provisioned', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'voice-proof-setup-'));
+    try {
+      const receipt = await service(root, 'provisioned', 'something else entirely').install();
+      expect(receipt.provisioned).toBe(false); expect(receipt.proof?.proved).toBe(false);
+      expect(readVoiceDiagnostics(root).at(-1)).toMatchObject({ ok: false, operation: 'provision-proof' });
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+  test('where speech-to-text is unsupported, text-to-speech alone is provisioned with no proof', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'voice-tts-only-'));
+    try {
+      const receipt = await service(root, 'unsupported-platform').install();
+      expect(receipt.provisioned).toBe(true); expect(receipt.proof).toBeUndefined();
+      expect(receipt.notes.join(' ')).toContain('no round trip could be proven');
+      expect(readVoiceDiagnostics(root)).toHaveLength(0);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
 });

@@ -1,12 +1,13 @@
 /**
  * voice/provisioning, platform-owned managed provisioning of the local voice runtime
- * (piper TTS + a default voice), atomic + checksum-verified, resumable, with
- * honest states. Nothing downloads without the user asking.
+ * (piper TTS + a default voice, whisper STT + its model), atomic + checksum-verified,
+ * resumable, with honest states. Nothing downloads without the user asking.
  */
 export {
   downloadVerifiedFile,
   fileMatches,
   fileMatchesCached,
+  partialDownloadPath,
   type VerifiedDownloadSpec,
   type VerifiedDownloadOptions,
   type VerifiedDownloadResult,
@@ -85,13 +86,15 @@ export {
 // Provisioning's last act: speak a phrase with the managed TTS and read it back
 // with the managed STT, so "provisioned" is a proven claim.
 export {
-  VOICE_PROOF_MIN_WORD_OVERLAP,
+  VOICE_PROOF_MAX_WORD_EDITS,
   VOICE_PROOF_PHRASE,
+  assertVoiceProofCurrent,
   proveVoiceRoundTrip,
   transcriptWordOverlap,
   type ProofEngineRunner,
   type VoiceRoundTripProof,
   type VoiceRoundTripProofOptions,
+  type VoiceProofLifetime,
 } from './round-trip-proof.js';
 
 export {

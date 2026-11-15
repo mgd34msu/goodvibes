@@ -366,9 +366,9 @@ describe('diagnostics written by two processes', () => {
 });
 
 describe('spoken text screening', () => {
-  test('a credential declaration split across deltas is still refused', async () => {
+  test('a credential declaration split across deltas is still refused', () => {
     const chunker = new TtsTextChunker();
-    await chunker.push('The setting is api_');
-    await expect(chunker.push('key=sk-live-abcdefghijklmnop12345')).rejects.toMatchObject({ problem: 'credential-material' });
+    chunker.push('The setting is api_');
+    expect(() => chunker.push('key=sk-live-abcdefghijklmnop12345')).toThrow(expect.objectContaining({ problem: 'credential-material' }));
   });
 });

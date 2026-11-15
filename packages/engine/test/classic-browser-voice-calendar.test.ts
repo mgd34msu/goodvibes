@@ -6,8 +6,6 @@ import { withDecisionModelPolicy } from '../platform/src/platform/runtime/decisi
 import { BrowserControlIdentityWork } from '../platform/src/platform/browser/browser-control-identity.js';
 import { readBrowserLaunchCause } from '../platform/src/platform/browser/launch-reading.js';
 import { missingLibrary, networkBlocked, programNotInstalled } from '../platform/src/platform/browser/browser-failure-reading.js';
-import { ownRecorderFailure, readRecorderFailure } from '../platform/src/platform/voice/capture/recorder-failure-reading.js';
-import { ownLocalEngineFailureLifetime, readLocalEngineFailure, structuredLocalEngineFailure } from '../platform/src/platform/voice/providers/local-failure-reading.js';
 import { errorFromResponse } from '../platform/src/platform/calendar/calendar-api-shared.js';
 
 let restore: (() => void) | undefined;
@@ -45,21 +43,6 @@ test.each(['Classic - Off', 'Preferred'] as const)('%s browser launch diagnostic
     expect(await programNotInstalled('browser', { ...outcome, spawnError: 'Executable missing', spawnCode: 'ENOENT' })).toBe(true);
     expect(requests).toHaveLength(attempted);
   });
-});
-
-test('Classic voice diagnostics retain process facts without claiming an inferred microphone or model cause', async () => {
-  const requests = outage();
-  await withDecisionModelPolicy(() => 'Classic - Off', async () => {
-    const controller = new AbortController();
-    const owner = ownRecorderFailure({ device: 'synthetic-device' }, controller.signal);
-    expect(await readRecorderFailure({ stderr: 'An unclassified recorder failure.' }, owner)).toBe('unavailable');
-    const lifetime = ownLocalEngineFailureLifetime({ engine: 'synthetic-engine', binary: '/synthetic/engine', modelPath: '/synthetic/model' }, controller.signal, () => controller.signal.throwIfAborted());
-    expect(await readLocalEngineFailure(new Error('Unclassified engine failure.'), 'synthetic-engine', 'TTS', lifetime)).toBeUndefined();
-    expect(structuredLocalEngineFailure({ signal: 'SIGSEGV' })).toEqual({ kind: 'fatal-crash', signal: 'SIGSEGV' });
-    controller.abort();
-    await expect(readLocalEngineFailure(new Error('Late failure.'), 'synthetic-engine', 'TTS', lifetime)).rejects.toThrow();
-  });
-  expect(requests).toHaveLength(0);
 });
 
 test('a calendar 403 is read from the response alone, with no decision request', async () => {

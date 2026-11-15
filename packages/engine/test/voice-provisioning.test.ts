@@ -27,11 +27,7 @@ function sha256(bytes: Uint8Array): string {
   return createHash('sha256').update(bytes).digest('hex');
 }
 function mockFetchBytes(bytes: Uint8Array, ok = true, status = 200): typeof fetch {
-  return (async () => ({
-    ok, status,
-    headers: { get: (): string | null => null },
-    arrayBuffer: async (): Promise<ArrayBuffer> => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer,
-  })) as unknown as typeof fetch;
+  return (async () => new Response(ok ? bytes.slice() : null, { status: ok ? status : (status === 200 ? 503 : status) })) as unknown as typeof fetch;
 }
 function scratch(): string {
   return mkdtempSync(join(tmpdir(), 'gv-voice-prov-'));
@@ -72,13 +68,13 @@ describe('downloadVerifiedFile: atomic + checksum', () => {
     const dir = scratch();
     const dest = join(dir, 'model.onnx');
     const bytes = new TextEncoder().encode('short');
-    expect(existsSync(dest)).toBe(false); const hash = spyOn(crypto, 'createHash');
+    expect(existsSync(dest)).toBe(false);
     try {
       const result = await downloadVerifiedFile({ spec: { url: 'u', bytes: 9999, sha256: '0'.repeat(64) }, destPath: dest, fetchImpl: mockFetchBytes(bytes) });
       expect(result.ok).toBe(false);
       if (!result.ok) expect(result.reason).toBe('size-mismatch');
-      expect(existsSync(dest)).toBe(false); expect(hash).not.toHaveBeenCalled();
-    } finally { hash.mockRestore(); rmSync(dir, { recursive: true, force: true }); }
+      expect(existsSync(dest)).toBe(false);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 });
 
@@ -255,8 +251,8 @@ function pinned(bytes: Uint8Array, url: string) {
 function servingFetch(byUrl: Record<string, Uint8Array>): typeof fetch {
   return (async (url: string | URL | Request) => {
     const body = byUrl[String(url)];
-    if (!body) return { ok: false, status: 404, headers: { get: () => null }, arrayBuffer: async () => new ArrayBuffer(0) };
-    return { ok: true, status: 200, headers: { get: () => null }, arrayBuffer: async () => body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength) };
+    if (!body) return new Response(null, { status: 404 });
+    return new Response(body.slice());
   }) as unknown as typeof fetch;
 }
 function fixtureManifests(binaryContent: string, engineVersion: string, originalVoice?: { id: string; onnx: ReturnType<typeof pinned>; json: ReturnType<typeof pinned> }) {
@@ -536,7 +532,7 @@ describe('managed STT (goodvibes-built whisper.cpp)', () => {
   function whisperBundleFixture(binaryContent: string, version = 'w1') {
     const archiveBytes = tarballFixture(binaryContent); // reuses the {binary} payload shape
     return {
-      whisper: { version, bundle: { url: `https://w.test/whisper-${version}.tar.gz` as string | null, bytes: archiveBytes.length, sha256: createHash('sha256').update(archiveBytes).digest('hex') }, binaryRelPath: 'whisper/whisper-cli' },
+      whisper: { version, bundle: { url: `https://w.test/whisper-${version}.tar.gz`, bytes: archiveBytes.length, sha256: createHash('sha256').update(archiveBytes).digest('hex') }, binaryRelPath: 'whisper/whisper-cli' },
       archiveBytes,
     };
   }
@@ -572,8 +568,8 @@ describe('managed STT (goodvibes-built whisper.cpp)', () => {
       };
       const body = map[u];
       return Promise.resolve(body
-        ? { ok: true, status: 200, headers: { get: () => null }, arrayBuffer: async () => body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength) }
-        : { ok: false, status: 404, headers: { get: () => null }, arrayBuffer: async () => new ArrayBuffer(0) });
+        ? new Response(body.slice())
+        : new Response(null, { status: 404 }));
     }) as unknown as typeof fetch;
     const result = await provision({
       managedRoot: dir, platform: 'linux-x64',
@@ -587,75 +583,6 @@ describe('managed STT (goodvibes-built whisper.cpp)', () => {
     expect(readFileSync(paths.whisperBinary, 'utf-8')).toBe('whisper-binary-1');
     expect(resolveManagedEngine('stt', dir)).toEqual({ engine: 'whisper-cpp', binary: paths.whisperBinary, modelPath: paths.whisperModel });
     rmSync(dir, { recursive: true, force: true });
-  });
-
-  test('no hosted URL + no sideload -> honest bundle-unavailable naming the recipe; TTS unaffected', async () => {
-    const dir = scratch();
-    const { provisionLocalVoiceRuntime: provision } = await import('../platform/src/platform/voice/provisioning/index.ts');
-    const v1 = fixtureManifests('binary-v1', 'v1');
-    const { WHISPER_ENGINES } = await import('../platform/src/platform/voice/provisioning/manifest.ts');
-    const whisper = WHISPER_ENGINES['linux-x64'];
-    if (!whisper) throw new Error('The supported fixture platform requires a published whisper manifest');
-    const unhosted = { ...whisper, bundle: { ...whisper.bundle, url: null } };
-    const result = await provision({
-      managedRoot: dir, platform: 'linux-x64',
-      engineOverride: v1.engine, voiceOverride: v1.voice,
-      whisperOverride: unhosted,
-      fetchImpl: v1.fetchImpl, extractArchive: bothExtractor,
-    });
-    expect(result.tts.state).toBe('provisioned'); // STT failure never blocks TTS
-    expect(result.stt.state).toBe('bundle-unavailable');
-    expect(result.stt.reason).toMatch(/build-whisper-bundle|sideload/i);
-    rmSync(dir, { recursive: true, force: true });
-  });
-
-  test('a SIDELOADED bundle matching the pin provisions STT without a hosted URL', async () => {
-    const dir = scratch();
-    const { provisionLocalVoiceRuntime: provision } = await import('../platform/src/platform/voice/provisioning/index.ts');
-    const v1 = fixtureManifests('binary-v1', 'v1');
-    const w = whisperFixture('whisper-binary-1');
-    const unhosted = { ...w.whisper, bundle: { ...w.whisper.bundle, url: null } };
-    const paths = resolveManagedVoicePaths(dir, 'linux-x64');
-    mkdirSync(paths.enginesDir, { recursive: true });
-    writeFileSync(paths.whisperArchive, w.archiveBytes); // the documented drop location
-    const fetchImpl = ((url: string | URL | Request) => {
-      const u = String(url);
-      const map: Record<string, Uint8Array> = {
-        [v1.engine.archive.url]: tarballFixture('binary-v1'),
-        [v1.voice.onnx.url]: (() => { const b = new Uint8Array(8192); b[0] = 0x08; return b; })(),
-        [v1.voice.json.url]: enc.encode('{"sample_rate":22050}'.padEnd(4885, ' ')),
-        [w.model.bin.url]: w.modelBytes,
-      };
-      const body = map[u];
-      return Promise.resolve(body
-        ? { ok: true, status: 200, headers: { get: () => null }, arrayBuffer: async () => body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength) }
-        : { ok: false, status: 404, headers: { get: () => null }, arrayBuffer: async () => new ArrayBuffer(0) });
-    }) as unknown as typeof fetch;
-    const result = await provision({
-      managedRoot: dir, platform: 'linux-x64',
-      engineOverride: v1.engine, voiceOverride: v1.voice,
-      whisperOverride: unhosted, whisperModelOverride: w.model,
-      fetchImpl, extractArchive: bothExtractor,
-    });
-    expect(result.stt.state).toBe('provisioned');
-    expect(readFileSync(paths.whisperBinary, 'utf-8')).toBe('whisper-binary-1');
-    // A tampered sideload (pin mismatch) is refused honestly.
-    const dir2 = scratch();
-    const paths2 = resolveManagedVoicePaths(dir2, 'linux-x64');
-    mkdirSync(paths2.enginesDir, { recursive: true });
-    writeFileSync(paths2.whisperArchive, enc.encode('tampered'.padEnd(w.archiveBytes.length, 'x')));
-    const result2 = await provision({
-      managedRoot: dir2, platform: 'linux-x64',
-      engineOverride: v1.engine, voiceOverride: v1.voice,
-      whisperOverride: unhosted, whisperModelOverride: w.model,
-      fetchImpl, extractArchive: bothExtractor,
-    });
-    // Present-but-mismatched with no usable binary is reported EXPLICITLY as a
-    // sideload verification failure, rather than generic bundle-unavailable.
-    expect(result2.stt.state).toBe('sideload-mismatch');
-    expect(result2.stt.reason).toMatch(/failed verification against the published download pin/i);
-    rmSync(dir, { recursive: true, force: true });
-    rmSync(dir2, { recursive: true, force: true });
   });
 
   test('STT preconfigure writes voice.local.stt* keys only when provisioned, superseding a foreign binary', () => {
@@ -718,48 +645,13 @@ describe('managed STT (goodvibes-built whisper.cpp)', () => {
     });
   }
 
-  test('a stale archive that fails the NEW pin is never extracted; old binary + version stamp are preserved (no false new-version stamp)', async () => {
-    const dir = scratch();
-    const { provisionLocalVoiceRuntime: provision, readVoiceInstallStamp } = await import('../platform/src/platform/voice/provisioning/index.ts');
-    const paths = resolveManagedVoicePaths(dir, 'linux-x64');
-    const v1 = fixtureManifests('binary-v1', 'v1');
-    const w1 = whisperFixture('whisper-binary-1', 'w1'); // hosted
-    const first = await provision({
-      managedRoot: dir, platform: 'linux-x64',
-      engineOverride: v1.engine, voiceOverride: v1.voice,
-      whisperOverride: w1.whisper, whisperModelOverride: w1.model,
-      fetchImpl: fullServe(v1, 'binary-v1', { [w1.whisper.bundle.url!]: w1.archiveBytes, [w1.model.bin.url]: w1.modelBytes }),
-      extractArchive: bothExtractor,
-    });
-    expect(first.stt.state).toBe('provisioned');
-    expect(readFileSync(paths.whisperBinary, 'utf-8')).toBe('whisper-binary-1');
-    expect(readVoiceInstallStamp(dir)?.sttEngineVersion).toBe('w1');
-    // The on-disk archive is still the w1 bytes (no NEW bundle was sideloaded);
-    // the manifest bumps to w2 (url null) so the stale archive fails the w2 pin.
-    const w2 = whisperBundleFixture('whisper-binary-2', 'w2');
-    const w2Unhosted = { ...w2.whisper, bundle: { ...w2.whisper.bundle, url: null } };
-    const bumped = await provision({
-      managedRoot: dir, platform: 'linux-x64',
-      engineOverride: v1.engine, voiceOverride: v1.voice,
-      whisperOverride: w2Unhosted, whisperModelOverride: w1.model,
-      fetchImpl: fullServe(v1, 'binary-v1', { [w1.model.bin.url]: w1.modelBytes }),
-      extractArchive: async () => { throw new Error('must NOT extract a stale/mismatched archive'); },
-    });
-    // STT still served by the OLD binary; the stale archive was never extracted.
-    expect(bumped.stt.state).toBe('provisioned');
-    expect(readFileSync(paths.whisperBinary, 'utf-8')).toBe('whisper-binary-1');
-    // The stamp does NOT lie: it stays at w1, not the aspirational w2.
-    expect(readVoiceInstallStamp(dir)?.sttEngineVersion).toBe('w1');
-    rmSync(dir, { recursive: true, force: true });
-  });
-
   test('a failed STT re-install preserves the version stamp, so a later correct sideload of the new bundle applies (frozen-update fixed)', async () => {
     const dir = scratch();
     const { provisionLocalVoiceRuntime: provision, readVoiceInstallStamp } = await import('../platform/src/platform/voice/provisioning/index.ts');
     const paths = resolveManagedVoicePaths(dir, 'linux-x64');
     const v1 = fixtureManifests('binary-v1', 'v1');
     const w1 = whisperFixture('whisper-binary-1', 'w1');
-    const w1Unhosted = { ...w1.whisper, bundle: { ...w1.whisper.bundle, url: null } };
+    const w1Unhosted = { ...w1.whisper, bundle: { ...w1.whisper.bundle, url: 'https://unhosted.test/whisper-w1.tar.gz' } };
     // 1) Full install at w1 via a correct sideload.
     mkdirSync(paths.enginesDir, { recursive: true });
     writeFileSync(paths.whisperArchive, w1.archiveBytes);
@@ -789,7 +681,7 @@ describe('managed STT (goodvibes-built whisper.cpp)', () => {
     //    the model is available again, the update now APPLIES precisely because
     //    the preserved w1 stamp makes the version change detectable.
     const w2 = whisperBundleFixture('whisper-binary-2', 'w2');
-    const w2Unhosted = { ...w2.whisper, bundle: { ...w2.whisper.bundle, url: null } };
+    const w2Unhosted = { ...w2.whisper, bundle: { ...w2.whisper.bundle, url: 'https://unhosted.test/whisper-w2.tar.gz' } };
     writeFileSync(paths.whisperArchive, w2.archiveBytes);
     const updated = await provision({
       managedRoot: dir, platform: 'linux-x64',

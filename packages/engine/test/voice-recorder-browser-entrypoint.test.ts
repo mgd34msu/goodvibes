@@ -21,7 +21,6 @@ describe('browser-safe recorder semantic capture', () => {
       const paths = Object.keys(graph.inputs).map(path => path.replaceAll('\\', '/'));
       const edges = Object.values(graph.inputs).flatMap(input => input.imports.map(item => item.path));
       expect(paths.some(path => path.endsWith('/voice/capture/recorder-failure-reading.ts'))).toBe(true);
-      expect(paths.some(path => path.endsWith('/gate/failure-input-snapshot.ts'))).toBe(true);
       expect([...paths, ...edges].filter(path => /(?:^|\/)(?:node:|bun:)|\/gate\/failure-input\.(?:ts|js)|judgment\/(?:src|dist)\/(?:index\.|log\/|port\/(?:client|transport|failover))/.test(path))).toEqual([]);
     } finally { rmSync(dir, { recursive: true, force: true }); }
   }, 30_000);

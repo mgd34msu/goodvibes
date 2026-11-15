@@ -510,7 +510,6 @@ async function main() {
     retryCtx = { count: conversation.getMessageCount(), text: state.result.text, opts: inputOptions };
     streamResult.clearFailoverVisited();
     await runNativeTurnDispatch({
-      armSpeech: () => (spokenOutput ? spokenTurns.armNextTurn(state.result.text) : null),
       prepare: () => refreshMemoryRecallSnapshot(ctx.services),
       current,
       begin: () => {
@@ -564,7 +563,6 @@ async function main() {
       const epoch = ++inputEpoch;
       submissionStatus = null;
       const inputOptions = options.spokenOutput ? createSpokenTurnInputOptions() : undefined;
-      const spokenArm = options.spokenOutput ? spokenTurns.armNextTurn(processedText) : null;
       retryCtx = { count: conversation.getMessageCount(), text: processedText, content, opts: inputOptions };
       // Chat accepts the user's message directly. Native admission belongs to
       // explicit work submission, never to deciding whether a model may see it.
@@ -573,9 +571,6 @@ async function main() {
       void orchestrator
         .handleUserInput(processedText, content, inputOptions)
         .catch((error) => {
-          // A prompt that failed before its turn was submitted leaves its arm
-          // behind; withdrawn by identity, so a newer prompt's arm stays.
-          spokenArm?.disarm();
           if (epoch === inputEpoch) submissionStatus = `Prompt failed: ${summarizeError(error)}`;
         })
         .finally(render);

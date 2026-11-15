@@ -17,6 +17,7 @@ import {
   trimToUndefined,
   signalInit,
   voiceFetch,
+  voiceHttpError,
 } from './shared.js';
 
 
@@ -200,7 +201,7 @@ export function createOpenAIProvider(): VoiceProvider {
         }),
       });
       if (!response.ok) {
-        throw new Error(`OpenAI synthesis failed: HTTP ${response.status}`);
+        throw await voiceHttpError('OpenAI', 'synthesis', response);
       }
       const buffer = Buffer.from(await response.arrayBuffer());
       return {
@@ -247,7 +248,7 @@ export function createOpenAIProvider(): VoiceProvider {
         body: form,
       });
       if (!response.ok) {
-        throw new Error(`OpenAI transcription failed: HTTP ${response.status}`);
+        throw await voiceHttpError('OpenAI', 'transcription', response);
       }
       const payload = await response.json() as OpenAITranscriptionVerboseResponse;
       const text = payload.text?.trim();
@@ -330,7 +331,7 @@ export function createOpenAIProvider(): VoiceProvider {
         }),
       });
       if (!response.ok) {
-        throw new Error(`OpenAI realtime session failed: HTTP ${response.status}`);
+        throw await voiceHttpError('OpenAI', 'realtime session', response);
       }
       const payload = await response.json() as OpenAIRealtimeClientSecretResponse & Record<string, unknown>;
       const clientSecret = payload.client_secret?.value?.trim();

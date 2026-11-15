@@ -80,7 +80,9 @@ import { buildCommandArgsHint } from './input/command-args-hint.ts';
 import './config/surface.ts';
 import { createAutonomySurfacing, buildCalendarEventsLister, buildSkillDraftProposer } from './shell/autonomy-surfacing.ts';
 import { bindApprovals } from './shell/approvals-binding.ts';
-import { buildListAutomationRunsSince } from './agent/automation-runs-source.ts';
+import { listAutomationRunsSince } from './agent/automation-runs-source.ts';
+import { listUpcomingSchedules } from './agent/automation-schedules-source.ts';
+import { createConnectedHost } from './agent/connected-host-client.ts';
 import './core/hardware-profile.ts';
 import { readApprovalPostureFromConfig } from './permissions/approval-posture.ts';
 import { cancelConversationGeneration, installRemoteConversationRouting } from './shell/remote-conversation-wiring.ts';
@@ -257,11 +259,13 @@ async function main() {
 
   const shellPassthrough = new ShellPassthrough();
 
-  // Ambient autonomy surfacing: away digest at launch + the Activity modal's Coming up.
+  // Ambient autonomy surfacing: away digest at launch + the Activity modal's Coming up,
+  // both read from the connected host where schedules live and run.
+  const automationHost = createConnectedHost({ configManager, homeDirectory });
   const autonomy = createAutonomySurfacing({
     shellPaths: ctx.services.shellPaths,
-    listAutomationJobs: () => ctx.services.automationManager.listJobs(),
-    listAutomationRunsSince: buildListAutomationRunsSince(configManager, homeDirectory),
+    listUpcomingSchedules: (now, signal) => listUpcomingSchedules(automationHost, now, { signal }),
+    listAutomationRunsSince: (since, signal) => listAutomationRunsSince(automationHost, since, { signal }),
     listApprovals: approvalsBinding.listApprovals,
     describeApprovalsUnavailable: approvalsBinding.describeApprovalsUnavailable,
     getTasksSnapshot: () => uiServices.readModels.tasks.getSnapshot().tasks,
@@ -272,6 +276,7 @@ async function main() {
     render: () => render(),
     listCalendarEvents: buildCalendarEventsLister(ctx.services.shellPaths),
     onAwayDigest: buildSkillDraftProposer(toolRegistry, ctx),
+    isIdle: () => !mainTurnBusy() && pendingPermission === null,
   });
 
   // The Activity modal's view (Ctrl+O, /activity), read live on every paint of it:
@@ -546,13 +551,9 @@ async function main() {
     }
     if (!isNativeConversationTurnReady(state)) return;
     const inputOptions = nativeConversationTurnInputOptions(state, spokenOutput ? createSpokenTurnInputOptions() : undefined);
-    const spokenArm = spokenOutput ? spokenTurns.armNextTurn(state.result.text) : null;
     try {
       await dispatchNativeConversationTurn(state, orchestrator, inputOptions);
     } catch (error) {
-      // No turn was submitted, so nothing will consume the arm; left in place it
-      // would swallow the next stop key and speak a later identical prompt.
-      spokenArm?.disarm();
       // A turn that provably never started gives its claim back so /work intake-retry can run it.
       systemMessageRouter.userAction(
         await describeFailedNativeDispatch(

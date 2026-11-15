@@ -1,37 +1,16 @@
-import { isProxy } from 'node:util/types';
 import { bundleBrowserEntrypoint } from './_helpers/browser-bundle.ts';
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'bun:test';
 import type { TurnEvent } from '../platform/src/events/turn.js';
 import type { VoiceAudioChunk, VoiceSynthesisRequest, VoiceSynthesisStreamResult } from '../platform/src/platform/voice/types.js';
 import { SpokenTurnController } from '../platform/src/platform/voice/spoken-turn/controller.js';
 import type { AudioSink } from '../platform/src/platform/voice/spoken-turn/audio-sink.js';
 
-import { bindJudgmentPortAuthority, installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { JudgmentError, type JudgmentPort } from '@goodvibes-jev/judgment';
-import { configureDecisionModelPolicy, type DecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.js';
-import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-
-function failurePort(category = 'rate_limit', yes: readonly string[] = []) {
-  const fake = fakePort((name, question) => {
-    if (name.startsWith('seam_')) return noulAnswer(0.99);
-    if (name === 'category') return choiceAnswer(question, category, 0.99);
-    if (name === 'connection_failure') return choiceAnswer(question, 'none', 0.99);
-    if (['billing', 'rate_limited', 'context_exceeded', 'transient_network', 'provider_unusable', 'before_response'].includes(name)) {
-      return noulAnswer(yes.includes(name) ? 0.99 : 0.01);
-    }
-    throw new Error(`Unexpected speech or failure question: ${name}`);
-  });
-  return { ...fake, get failureRequests() {
-    return fake.requests.filter(request => request.context?.battery === 'engine.failure-reading');
-  } };
-}
-let previousPort: JudgmentPort | undefined;
-beforeEach(() => { previousPort = installJudgmentPort(failurePort().port); });
-afterEach(() => { installJudgmentPort(previousPort); });
-
 function turn(event: TurnEvent): TurnEvent {
   return event;
 }
+
+/** The origin a /tts or spoken prompt is submitted with. */
+const SPOKEN = { source: 'tts', metadata: { spokenOutput: true } } as const;
 
 async function* audioChunks(text: string): AsyncIterable<VoiceAudioChunk> {
   yield {
@@ -77,7 +56,6 @@ function makeHarness() {
   };
   const controller = new SpokenTurnController({
     voiceService,
-    rejectFailureObject: isProxy,
     configManager: configManager as never,
     sink,
     notify: (message) => messages.push(message),
@@ -86,53 +64,6 @@ function makeHarness() {
   });
   return { controller, synthesized, played, messages };
 }
-
-test.each(['Classic - Off', 'Preferred'] as const)('%s spoken turns preserve native playback across separately delivered events', async policy => {
-  const fake = fakePort(() => { throw new JudgmentError('unavailable', 'Synthetic exhausted decision chain'); });
-  let metadata = 0;
-  installJudgmentPort(policy === 'Classic - Off' ? {
-    get model(): never { metadata++; throw new Error('Classic must not read model metadata'); },
-    async ask() { throw new Error('Classic must not ask a decision model'); },
-  } : fake.port);
-  const retirePolicy = configureDecisionModelPolicy(() => policy);
-  const h = makeHarness();
-  try {
-    h.controller.submitNextTurn('speak this answer');
-    await h.controller.handleTurnEvent(turn({ type: 'TURN_SUBMITTED', turnId: 'classic-speech', prompt: 'speak this answer' }));
-    await h.controller.handleTurnEvent(turn({ type: 'STREAM_DELTA', turnId: 'classic-speech',
-      content: 'The first spoken sentence should remain available. ', accumulated: '' }));
-    // Speech seams admit four candidates concurrently. Those already in flight
-    // may fail together; fallback must prevent every subsequent batch.
-    const requestsAtFallback = fake.requests.length;
-    expect(requestsAtFallback).toBe(policy === 'Classic - Off' ? 0 : 4);
-    await h.controller.handleTurnEvent(turn({ type: 'STREAM_DELTA', turnId: 'classic-speech',
-      content: 'The second spoken sentence should remain available.', accumulated: '' }));
-    await h.controller.handleTurnEvent(turn({ type: 'TURN_COMPLETED', turnId: 'classic-speech', response: '', stopReason: 'completed' }));
-    await drain();
-    const spoken = h.played.join(' ');
-    expect(spoken.match(/The first spoken sentence/g)).toHaveLength(1);
-    expect(spoken.match(/The second spoken sentence/g)).toHaveLength(1);
-    expect(metadata).toBe(0);
-    expect(fake.requests.length).toBe(requestsAtFallback);
-  } finally { h.controller.stop(); retirePolicy(); }
-});
-
-test('changing the decision policy retires an existing spoken turn instead of borrowing a new model', async () => {
-  let policy: DecisionModelPolicy = 'Classic - Off', requests = 0, metadata = 0;
-  installJudgmentPort({ get model(): never { metadata++; throw new Error('Retired turn borrowed a model'); },
-    async ask() { requests++; throw new Error('Retired turn asked a model'); } });
-  const retirePolicy = configureDecisionModelPolicy(() => policy), h = makeHarness();
-  try {
-    h.controller.submitNextTurn('policy change');
-    await h.controller.handleTurnEvent(turn({ type: 'TURN_SUBMITTED', turnId: 'policy-change', prompt: 'policy change' }));
-    policy = 'Default - On';
-    await h.controller.handleTurnEvent(turn({ type: 'STREAM_DELTA', turnId: 'policy-change',
-      content: 'This stale output must never be synthesized.', accumulated: '' }));
-    await drain();
-    expect(h.synthesized).toHaveLength(0);
-    expect({ requests, metadata }).toEqual({ requests: 0, metadata: 0 });
-  } finally { h.controller.stop(); retirePolicy(); }
-});
 
 async function drain(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 0));
@@ -195,7 +126,6 @@ function makeDrainHarness(options: { rejectOnStop?: boolean } = {}) {
   };
   const controller = new SpokenTurnController({
     voiceService,
-    rejectFailureObject: isProxy,
     configManager: { get: () => '' } as never,
     sink,
     notify: (message) => messages.push(message),
@@ -245,7 +175,7 @@ function makePipelineHarness(behavior: {
           await new Promise<void>((resolve) => pendingSynth.push(resolve));
         }
         if (behavior.failWhen?.(request.text, attempt)) {
-          throw behavior.error ?? new Error('ElevenLabs streaming synthesis failed: HTTP 429: {"detail":{"status":"too_many_concurrent_requests","message":"maximum of 3 concurrent requests"}}');
+          throw behavior.error ?? Object.assign(new Error('ElevenLabs streaming synthesis failed: HTTP 429: maximum of 3 concurrent requests'), { status: 429 });
         }
         synthesized.push(request.text);
         return {
@@ -273,7 +203,6 @@ function makePipelineHarness(behavior: {
   };
   const controller = new SpokenTurnController({
     voiceService,
-    rejectFailureObject: isProxy,
     configManager: { get: () => '' } as never,
     sink,
     notify: (message) => messages.push(message),
@@ -297,9 +226,7 @@ function makePipelineHarness(behavior: {
 describe('SpokenTurnController request pipeline', () => {
   test('a turn that completes before first audio becomes exactly one synthesis request', async () => {
     const h = makePipelineHarness();
-
-    expect(h.controller.submitNextTurn('quick weather answer')).toBe(true);
-    h.controller.handleTurnEvent(turn({ type: 'TURN_SUBMITTED', turnId: 't-one', prompt: 'quick weather answer' }));
+    h.controller.handleTurnEvent(turn({ type: 'TURN_SUBMITTED', turnId: 't-one', prompt: 'quick weather answer', origin: SPOKEN }));
     // Three sentence-boundary deltas plus completion, all in one synchronous
     // burst, the whole answer arrived before the first request could fire,
     // so everything merges into ONE request (not one per sentence).
@@ -321,9 +248,7 @@ describe('SpokenTurnController request pipeline', () => {
     const p2 = 'Here is the second paragraph with more detail. ';
     const p3 = 'The third paragraph continues the explanation. ';
     const p4 = 'And the fourth paragraph wraps everything up.';
-
-    expect(h.controller.submitNextTurn('long explanation')).toBe(true);
-    h.controller.handleTurnEvent(turn({ type: 'TURN_SUBMITTED', turnId: 't-many', prompt: 'long explanation' }));
+    h.controller.handleTurnEvent(turn({ type: 'TURN_SUBMITTED', turnId: 't-many', prompt: 'long explanation', origin: SPOKEN }));
     h.controller.handleTurnEvent(turn({ type: 'STREAM_DELTA', turnId: 't-many', content: p1, accumulated: '' }));
     await drain();
     h.controller.handleTurnEvent(turn({ type: 'STREAM_DELTA', turnId: 't-many', content: p2, accumulated: '' }));
@@ -365,9 +290,7 @@ describe('SpokenTurnController request pipeline', () => {
       }) as unknown as typeof setTimeout,
       clearTimeout: (() => {}) as unknown as typeof clearTimeout,
     });
-
-    expect(h.controller.submitNextTurn('retry me')).toBe(true);
-    h.controller.handleTurnEvent(turn({ type: 'TURN_SUBMITTED', turnId: 't-retry', prompt: 'retry me' }));
+    h.controller.handleTurnEvent(turn({ type: 'TURN_SUBMITTED', turnId: 't-retry', prompt: 'retry me', origin: SPOKEN }));
     h.controller.handleTurnEvent(turn({ type: 'STREAM_DELTA', turnId: 't-retry', content: 'The weather stays clear tonight. ', accumulated: '' }));
     h.controller.handleTurnEvent(turn({ type: 'TURN_COMPLETED', turnId: 't-retry', response: '', stopReason: 'completed' }));
     await drain();
@@ -393,9 +316,7 @@ describe('SpokenTurnController request pipeline', () => {
     });
     const failing = 'First segment of the response that keeps failing. ';
     const fine = 'Second segment plays fine after the failure.';
-
-    expect(h.controller.submitNextTurn('gap not silence')).toBe(true);
-    h.controller.handleTurnEvent(turn({ type: 'TURN_SUBMITTED', turnId: 't-skip', prompt: 'gap not silence' }));
+    h.controller.handleTurnEvent(turn({ type: 'TURN_SUBMITTED', turnId: 't-skip', prompt: 'gap not silence', origin: SPOKEN }));
     h.controller.handleTurnEvent(turn({ type: 'STREAM_DELTA', turnId: 't-skip', content: failing, accumulated: '' }));
     await drain();
     h.controller.handleTurnEvent(turn({ type: 'STREAM_DELTA', turnId: 't-skip', content: fine, accumulated: '' }));
@@ -427,9 +348,7 @@ describe('SpokenTurnController request pipeline', () => {
         timers.delete(id);
       }) as unknown as typeof clearTimeout,
     });
-
-    expect(h.controller.submitNextTurn('abort mid-backoff')).toBe(true);
-    h.controller.handleTurnEvent(turn({ type: 'TURN_SUBMITTED', turnId: 't-abort', prompt: 'abort mid-backoff' }));
+    h.controller.handleTurnEvent(turn({ type: 'TURN_SUBMITTED', turnId: 't-abort', prompt: 'abort mid-backoff', origin: SPOKEN }));
     h.controller.handleTurnEvent(turn({ type: 'STREAM_DELTA', turnId: 't-abort', content: 'This request is going to fail hard. ', accumulated: '' }));
     await drain();
 
@@ -452,11 +371,9 @@ describe('SpokenTurnController request pipeline', () => {
 describe('SpokenTurnController', () => {
   test('speaks only assistant deltas from the marked turn', async () => {
     const { controller, synthesized, played } = makeHarness();
-
-    expect(controller.submitNextTurn('say hello')).toBe(true);
     controller.handleTurnEvent(turn({ type: 'TURN_SUBMITTED', turnId: 'ignored', prompt: 'different' }));
     controller.handleTurnEvent(turn({ type: 'STREAM_DELTA', turnId: 'ignored', content: 'Wrong.', accumulated: 'Wrong.' }));
-    controller.handleTurnEvent(turn({ type: 'TURN_SUBMITTED', turnId: 'turn-1', prompt: 'say hello' }));
+    controller.handleTurnEvent(turn({ type: 'TURN_SUBMITTED', turnId: 'turn-1', prompt: 'say hello', origin: SPOKEN }));
     controller.handleTurnEvent(turn({ type: 'STREAM_DELTA', turnId: 'turn-1', content: 'Hello there. ', accumulated: 'Hello there. ' }));
     controller.handleTurnEvent(turn({ type: 'TURN_COMPLETED', turnId: 'turn-1', response: 'Hello there.', stopReason: 'completed' }));
     await drain();
@@ -467,9 +384,7 @@ describe('SpokenTurnController', () => {
 
   test('does not treat provider STREAM_END as the logical spoken-turn end', async () => {
     const { controller, synthesized, played } = makeHarness();
-
-    expect(controller.submitNextTurn('check the weather')).toBe(true);
-    controller.handleTurnEvent(turn({ type: 'TURN_SUBMITTED', turnId: 'turn-tool', prompt: 'check the weather' }));
+    controller.handleTurnEvent(turn({ type: 'TURN_SUBMITTED', turnId: 'turn-tool', prompt: 'check the weather', origin: SPOKEN }));
     controller.handleTurnEvent(turn({ type: 'STREAM_DELTA', turnId: 'turn-tool', content: 'Checking. ', accumulated: 'Checking. ' }));
     controller.handleTurnEvent(turn({ type: 'STREAM_END', turnId: 'turn-tool', scope: 'provider', terminal: false }));
     controller.handleTurnEvent(turn({ type: 'STREAM_DELTA', turnId: 'turn-tool', content: 'Tonight will be cool.', accumulated: 'Checking. Tonight will be cool.' }));
@@ -495,15 +410,14 @@ describe('SpokenTurnController', () => {
       notify: (message) => messages.push(message),
     });
 
-    expect(controller.submitNextTurn('still submit text')).toBe(false);
+    void controller.handleTurnEvent(turn({ type: 'TURN_SUBMITTED', turnId: 'no-sink', prompt: 'still submit text', origin: SPOKEN }));
+    expect(controller.phase).toBe('idle');
     expect(messages.join('\n')).toContain('Text response will continue');
   });
 
   test('speaks the final unpunctuated tail flushed at turn completion', async () => {
     const { controller, synthesized, played } = makeHarness();
-
-    expect(controller.submitNextTurn('tell me the number')).toBe(true);
-    controller.handleTurnEvent(turn({ type: 'TURN_SUBMITTED', turnId: 'turn-tail', prompt: 'tell me the number' }));
+    controller.handleTurnEvent(turn({ type: 'TURN_SUBMITTED', turnId: 'turn-tail', prompt: 'tell me the number', origin: SPOKEN }));
     // The response never ends on sentence punctuation, so the tail only ever
     // leaves the chunker via flushAll() on TURN_COMPLETED. If completion released
     // before draining that flush, this tail would be truncated (the bug).
@@ -517,16 +431,14 @@ describe('SpokenTurnController', () => {
 
   test('exit lets the audio already playing drain, drops queued chunks, then tears down', async () => {
     const h = makeDrainHarness();
-
-    expect(h.controller.submitNextTurn('long answer')).toBe(true);
-    h.controller.handleTurnEvent(turn({ type: 'TURN_SUBMITTED', turnId: 'turn-exit', prompt: 'long answer' }));
+    h.controller.handleTurnEvent(turn({ type: 'TURN_SUBMITTED', turnId: 'turn-exit', prompt: 'long answer', origin: SPOKEN }));
     h.controller.handleTurnEvent(turn({ type: 'STREAM_DELTA', turnId: 'turn-exit', content: 'First part of the answer. ', accumulated: 'First part of the answer. ' }));
     await drain();
     // Chunk 1 is now in the sink (its playback is pending); chunk 2 is queued behind it.
     h.controller.handleTurnEvent(turn({ type: 'STREAM_DELTA', turnId: 'turn-exit', content: 'Second part of the answer. ', accumulated: 'First part of the answer. Second part of the answer. ' }));
     await drain();
     expect(h.playing()).toBe(true);
-    // Discard the housekeeping stop() from the arming submitNextTurn call;
+    // Discard the housekeeping stop() from the turn start;
     // from here on, only exit-path teardown may touch the sink.
     h.stopCalls.length = 0;
 
@@ -551,26 +463,22 @@ describe('SpokenTurnController', () => {
 
   test('a new spoken turn preempts the previous one instantly, without a drain wait', async () => {
     const h = makeDrainHarness();
-
-    expect(h.controller.submitNextTurn('first prompt')).toBe(true);
-    h.controller.handleTurnEvent(turn({ type: 'TURN_SUBMITTED', turnId: 'turn-a', prompt: 'first prompt' }));
+    h.controller.handleTurnEvent(turn({ type: 'TURN_SUBMITTED', turnId: 'turn-a', prompt: 'first prompt', origin: SPOKEN }));
     h.controller.handleTurnEvent(turn({ type: 'STREAM_DELTA', turnId: 'turn-a', content: 'Still speaking this response. ', accumulated: 'Still speaking this response. ' }));
     await drain();
     expect(h.playing()).toBe(true);
-    // Discard the housekeeping stop() from the first arming call; the next
+    // Discard the housekeeping stop() from the first turn start; the next
     // one below is the preemption cut under test.
     h.stopCalls.length = 0;
 
     // Preemption is an intentional cut: the hard stop lands synchronously.
-    expect(h.controller.submitNextTurn('next prompt')).toBe(true);
+    void h.controller.handleTurnEvent(turn({ type: 'TURN_SUBMITTED', turnId: 'turn-b', prompt: 'next prompt', origin: SPOKEN }));
     expect(h.stopCalls.length).toBe(1);
   });
 
   test('stops playback without throwing on turn cancellation', async () => {
     const { controller, messages } = makeHarness();
-
-    controller.submitNextTurn('cancel this');
-    controller.handleTurnEvent(turn({ type: 'TURN_SUBMITTED', turnId: 'turn-2', prompt: 'cancel this' }));
+    controller.handleTurnEvent(turn({ type: 'TURN_SUBMITTED', turnId: 'turn-2', prompt: 'cancel this', origin: SPOKEN }));
     controller.handleTurnEvent(turn({ type: 'TURN_CANCEL', turnId: 'turn-2', stopReason: 'cancelled', reason: 'operator cancel' }));
     await drain();
 
@@ -592,9 +500,7 @@ describe('SpokenTurnController', () => {
       setInterval: (() => 1) as never,
       clearInterval: (() => {}) as never,
     });
-
-    expect(controller.submitNextTurn('who are you')).toBe(true);
-    controller.handleTurnEvent(turn({ type: 'TURN_SUBMITTED', turnId: 'src', prompt: 'who are you' }));
+    controller.handleTurnEvent(turn({ type: 'TURN_SUBMITTED', turnId: 'src', prompt: 'who are you', origin: SPOKEN }));
     controller.handleTurnEvent(turn({ type: 'STREAM_DELTA', turnId: 'src', content: 'A short answer.', accumulated: 'A short answer.' }));
     controller.handleTurnEvent(turn({ type: 'TURN_COMPLETED', turnId: 'src', response: 'A short answer.', stopReason: 'completed' }));
     await drain();
@@ -604,164 +510,12 @@ describe('SpokenTurnController', () => {
 });
 
 function speak(controller: SpokenTurnController, id = 'semantic', content = 'An audible answer.') {
-  controller.submitNextTurn(id);
-  controller.handleTurnEvent(turn({ type: 'TURN_SUBMITTED', turnId: id, prompt: id }));
+  controller.handleTurnEvent(turn({ type: 'TURN_SUBMITTED', turnId: id, prompt: id, origin: SPOKEN }));
   controller.handleTurnEvent(turn({ type: 'STREAM_DELTA', turnId: id, content, accumulated: content }));
   controller.handleTurnEvent(turn({ type: 'TURN_COMPLETED', turnId: id, response: content, stopReason: 'completed' }));
 }
 
-function retryClock() {
-  const delays: number[] = [];
-  const timers = new Map<number, () => void>();
-  let id = 0;
-  return {
-    delays, timers,
-    setTimeout: ((callback: () => void, ms: number) => {
-      delays.push(ms); timers.set(++id, callback); return id;
-    }) as unknown as typeof setTimeout,
-    clearTimeout: ((handle: number) => { timers.delete(handle); }) as unknown as typeof clearTimeout,
-    fire() { const pending = [...timers.values()]; timers.clear(); for (const callback of pending) callback(); },
-  };
-}
-
-describe('SpokenTurnController canonical failure reading', () => {
-  test.each([
-    [Object.assign(new Error('invalid credentials'), { status: 503 }), true],
-    [Object.assign(new Error('network timeout'), { statusCode: 401 }), false],
-    [Object.assign(new Error('invalid credentials'), { code: 'ECONNRESET' }), true],
-    [new Error('invalid credentials', { cause: { code: 'ETIMEDOUT' } }), true],
-  ] as const)('structured status and errno decide without a reader %#', async (error, retry) => {
-    installJudgmentPort(undefined);
-    const clock = retryClock();
-    const h = makePipelineHarness({ error, failWhen: (_text, attempt) => attempt === 1, ...clock });
-    speak(h.controller); await drain();
-    expect(clock.delays).toEqual(retry ? [1000] : []);
-    clock.fire(); await drain();
-    expect(h.requests()).toBe(retry ? 2 : 1);
-    expect(h.played).toHaveLength(retry ? 1 : 0);
-  });
-
-  test.each([
-    ['billing', ['billing'], false],
-    ['rate_limit', ['rate_limited'], true],
-  ] as const)('provider 429 is read as %s before retry', async (category, yes, retry) => {
-    const fake = failurePort(category, yes); installJudgmentPort(fake.port);
-    const clock = retryClock();
-    const h = makePipelineHarness({ error: Object.assign(new Error('429 concurrent request quota'), { status: 429 }), failWhen: (_text, attempt) => attempt === 1, ...clock });
-    speak(h.controller); await drain();
-    expect(fake.failureRequests).toHaveLength(1);
-    expect(fake.failureRequests[0]?.state).toContain('HTTP status: 429');
-    expect(fake.failureRequests[0]?.signal).toBeDefined();
-    expect(fake.failureRequests[0]?.beforeAttempt).toBeDefined();
-    expect(clock.delays).toEqual(retry ? [1000] : []);
-    clock.fire(); await drain();
-    expect(h.requests()).toBe(retry ? 2 : 1);
-    expect(h.played).toHaveLength(retry ? 1 : 0);
-  });
-
-  test.each([
-    ['authentication', 'network timeout socket rate_limit 429 concurrent', false],
-    ['service', 'The blue lantern is resting.', true],
-    ['unknown', 'The blue lantern is resting.', true],
-  ] as const)('semantic %s defeats keyword guesses', async (category, message, retry) => {
-    const fake = failurePort(category); installJudgmentPort(fake.port);
-    const clock = retryClock();
-    const h = makePipelineHarness({ error: new Error(message), failWhen: (_text, attempt) => attempt === 1, ...clock });
-    speak(h.controller); await drain();
-    expect(fake.failureRequests).toHaveLength(1);
-    expect(clock.delays).toEqual(retry ? [1000] : []);
-    clock.fire(); await drain();
-    expect(h.requests()).toBe(retry ? 2 : 1);
-  });
-
-  test.each(['missing', 'unavailable'] as const)('%s reader causes one honest failure, no heuristic retry', async (kind) => {
-    installJudgmentPort(kind === 'missing' ? undefined : { model: 'fake', ask: async () => { throw new Error('reader unavailable'); } });
-    const clock = retryClock();
-    const h = makePipelineHarness({ failWhen: () => true, ...clock });
-    speak(h.controller); await drain();
-    expect(h.requests()).toBe(1); expect(clock.delays).toEqual([]); expect(h.played).toEqual([]);
-    expect(h.messages.filter((message) => message.includes('Skipping'))).toHaveLength(1);
-  });
-
-  test.each(['stop', 'cancel', 'replacement', 'owner'] as const)('%s during classification fences late readings and effects', async (mode) => {
-    const fake = failurePort();
-    let release = () => {};
-    let requestSignal: AbortSignal | undefined;
-    installJudgmentPort({ ...fake.port, async ask(request) {
-      requestSignal = request.signal;
-      await new Promise<void>((resolve) => { release = resolve; });
-      return fake.port.ask(request);
-    } });
-    const clock = retryClock();
-    const h = makePipelineHarness({ failWhen: (text) => text === 'Old answer.', ...clock });
-    speak(h.controller, 'old', 'Old answer.'); await drain();
-    expect(requestSignal).toBeDefined();
-    if (mode === 'stop') h.controller.stop();
-    if (mode === 'cancel') h.controller.handleTurnEvent(turn({ type: 'TURN_CANCEL', turnId: 'old', reason: 'user', stopReason: 'cancelled' }));
-    if (mode === 'replacement') speak(h.controller, 'new', 'New answer.');
-    if (mode === 'owner') installJudgmentPort(failurePort().port);
-    expect(requestSignal?.aborted).toBe(true);
-    await drain(); release(); await drain(); clock.fire(); await drain();
-    expect(h.requests()).toBe(mode === 'replacement' ? 2 : 1);
-    expect(h.played).toEqual(mode === 'replacement' ? ['New answer.'] : []);
-    expect(clock.delays).toEqual([]);
-    expect(h.messages.filter((message) => message.includes('Skipping') || message.includes('Live playback stopped'))).toEqual([]);
-  });
-
-  test.each(['stop', 'replacement', 'owner'] as const)('%s during backoff clears retry and cannot replay', async (mode) => {
-    const clock = retryClock();
-    const h = makePipelineHarness({ failWhen: (text) => text === 'Old answer.', ...clock });
-    speak(h.controller, 'old', 'Old answer.'); await drain();
-    expect(clock.timers.size).toBe(1);
-    const lateTimer = [...clock.timers.values()][0]!;
-    if (mode === 'stop') h.controller.stop();
-    if (mode === 'replacement') speak(h.controller, 'new', 'New answer.');
-    if (mode === 'owner') installJudgmentPort(failurePort().port);
-    expect(clock.timers.size).toBe(0);
-    lateTimer(); await drain();
-    expect(h.requests()).toBe(mode === 'replacement' ? 2 : 1);
-    expect(h.played).toEqual(mode === 'replacement' ? ['New answer.'] : []);
-    expect(h.messages.filter((message) => message.includes('Skipping'))).toEqual([]);
-  });
-
-  test('unknown semantic failures consume exactly two retries, and no reading after budget exhaustion', async () => {
-    const fake = failurePort('unknown'); installJudgmentPort(fake.port);
-    const clock = retryClock();
-    const h = makePipelineHarness({ error: new Error('An unsettled answer.'), failWhen: () => true, ...clock });
-    speak(h.controller); await drain(); clock.fire(); await drain(); clock.fire(); await drain();
-    expect(h.requests()).toBe(3); expect(fake.failureRequests).toHaveLength(2);
-    expect(clock.delays).toEqual([1000, 2500]); expect(clock.timers.size).toBe(0);
-    expect(h.played).toEqual([]);
-    expect(h.messages.filter((message) => message.includes('Skipping'))).toHaveLength(1);
-  });
-});
-
-describe('SpokenTurnController original authority and late synthesis', () => {
-  test('replacement owner during synthesis cannot supply its reading or play old audio', async () => {
-    const original = failurePort(); installJudgmentPort(original.port);
-    const clock = retryClock();
-    const h = makePipelineHarness({ deferred: true, failWhen: () => true, ...clock });
-    speak(h.controller); await drain();
-    const replacement = failurePort(); installJudgmentPort(replacement.port);
-    h.releaseSynth(); await drain();
-    expect(original.requests).toHaveLength(0); expect(replacement.requests).toHaveLength(0);
-    expect(h.requests()).toBe(1); expect(h.played).toEqual([]); expect(clock.delays).toEqual([]);
-    expect(h.messages.filter((message) => message.includes('Skipping'))).toEqual([]);
-  });
-
-  test('a missing original reader is not repaired by borrowing a later installation', async () => {
-    installJudgmentPort(undefined);
-    const clock = retryClock();
-    const h = makePipelineHarness({ deferred: true, failWhen: () => true, ...clock });
-    speak(h.controller); await drain();
-    const replacement = failurePort(); installJudgmentPort(replacement.port);
-    h.releaseSynth(); await drain();
-    expect(replacement.failureRequests).toHaveLength(0); expect(h.requests()).toBe(1);
-    expect(replacement.requests).toHaveLength(0);
-    expect(clock.delays).toEqual([]); expect(h.played).toEqual([]);
-    expect(h.messages.filter((message) => message.includes('Skipping'))).toHaveLength(1);
-  });
-
+describe('SpokenTurnController late synthesis', () => {
   test('new turn rejects late successful synthesis and keeps its own playback', async () => {
     const h = makePipelineHarness({ deferred: true });
     speak(h.controller, 'old', 'Old answer.'); await drain();
@@ -772,30 +526,17 @@ describe('SpokenTurnController original authority and late synthesis', () => {
   });
 });
 
-describe('SpokenTurnController retired authority and queued playback', () => {
-  test('retired composition at dispatch never synthesizes, retries, plays, or reports stale failure', async () => {
-    const fake = failurePort();
-    bindJudgmentPortAuthority(fake.port, () => ({ identity: {}, assertCurrent() { throw new Error('retired'); } }));
-    installJudgmentPort(fake.port);
-    const clock = retryClock();
-    const h = makePipelineHarness({ failWhen: () => true, ...clock });
-    speak(h.controller); await drain();
-    expect(h.requests()).toBe(0); expect(fake.requests).toHaveLength(0);
-    expect(clock.delays).toEqual([]); expect(h.played).toEqual([]);
-    expect(h.messages.filter((message) => message.includes('Skipping') || message.includes('Live playback stopped'))).toEqual([]);
-  });
-
-  test('successful second chunk queued behind a draining sink cannot play after owner replacement', async () => {
+describe('SpokenTurnController queued playback', () => {
+  test('a chunk queued behind a draining sink does not play after the turn is stopped', async () => {
     const h = makeDrainHarness();
-    h.controller.submitNextTurn('queued');
-    h.controller.handleTurnEvent(turn({ type: 'TURN_SUBMITTED', turnId: 'queued', prompt: 'queued' }));
+    h.controller.handleTurnEvent(turn({ type: 'TURN_SUBMITTED', turnId: 'queued', prompt: 'queued', origin: SPOKEN }));
     h.controller.handleTurnEvent(turn({ type: 'STREAM_DELTA', turnId: 'queued', content: 'The first sentence is already playing. ', accumulated: '' }));
     await drain();
     h.controller.handleTurnEvent(turn({ type: 'STREAM_DELTA', turnId: 'queued', content: 'The second sentence must remain silent. ', accumulated: '' }));
     h.controller.handleTurnEvent(turn({ type: 'TURN_COMPLETED', turnId: 'queued', response: '', stopReason: 'completed' }));
     await drain();
     expect(h.played).toEqual(['The first sentence is already playing.']);
-    installJudgmentPort(failurePort().port);
+    h.controller.stop();
     h.finishActivePlay(); await drain();
     expect(h.played).toEqual(['The first sentence is already playing.']);
     expect(h.messages.filter((message) => message.includes('Skipping') || message.includes('Live playback stopped'))).toEqual([]);
@@ -813,68 +554,59 @@ describe('SpokenTurnController retired authority and queued playback', () => {
   });
 });
 
-describe('SpokenTurnController complete failure admission', () => {
-  test.each([
-    new Error('Authorization: Bearer synthetic-private-value'),
-    new Error(`${'ordinary '.repeat(300)} Authorization: Bearer synthetic-private-value`),
-    new Error('ordinary', { cause: new Error('api_key=synthetic-private-value') }),
-    { message: 'ordinary', details: { password: 'synthetic-private-value' } },
-    new Error('cardNumber=4111111111111111'),
-  ])('screens complete raw failure before semantic transmission %#', async (error) => {
-    const fake = failurePort(); installJudgmentPort(fake.port);
-    const clock = retryClock();
-    const h = makePipelineHarness({ error, failWhen: () => true, ...clock });
-    speak(h.controller); await drain();
-    expect(fake.failureRequests).toHaveLength(0); expect(h.requests()).toBe(1);
-    expect(JSON.stringify(fake.requests)).not.toContain('synthetic-private-value');
-    expect(JSON.stringify(fake.requests)).not.toContain('4111111111111111');
-    expect(clock.delays).toEqual([]); expect(h.played).toEqual([]);
-    expect(h.messages.filter((message) => message.includes('Skipping'))).toHaveLength(1);
-    expect(h.messages.join(' ')).not.toContain('synthetic-private-value');
-    expect(h.messages.join(' ')).not.toContain('4111111111111111');
+describe('what makes a turn spoken, and what stops it', () => {
+  test('a turn is spoken by its own origin, whatever its text became after expansion', async () => {
+    const { controller, played } = makeHarness();
+    void controller.handleTurnEvent(turn({ type: 'TURN_SUBMITTED', turnId: 'expanded', prompt: 'hello\n[attachment: notes.txt]', origin: SPOKEN }));
+    expect(controller.phase).toBe('speaking');
+    void controller.handleTurnEvent(turn({ type: 'STREAM_DELTA', turnId: 'expanded', content: 'Hi.', accumulated: 'Hi.' }));
+    void controller.handleTurnEvent(turn({ type: 'TURN_COMPLETED', turnId: 'expanded', response: 'Hi.', stopReason: 'completed' }));
+    await drain();
+    expect(played).toEqual(['Hi.']);
+    // A later turn with no spoken origin is not spoken, even with the same text.
+    void controller.handleTurnEvent(turn({ type: 'TURN_SUBMITTED', turnId: 'typed', prompt: 'hello\n[attachment: notes.txt]' }));
+    expect(controller.phase).toBe('idle');
   });
 
-  test.each([
-    new Error(`${'Rate limit. '.repeat(15000)} Correction: credentials are permanently invalid.`),
-    Object.assign(new Error(`${'Rate limit. '.repeat(15000)} Correction: the account cannot pay.`), { status: 429 }),
-    new Error('Rate limit.', { cause: new Error(`${'ordinary '.repeat(20000)} Permanently invalid.`) }),
-  ])('reads complete long evidence including its final correction %#', async (error) => {
-    const billing = 'status' in error && error.status === 429;
-    const fake = failurePort(billing ? 'billing' : 'authentication', billing ? ['billing'] : []); installJudgmentPort(fake.port);
-    const clock = retryClock();
-    const h = makePipelineHarness({ error, failWhen: () => true, ...clock });
-    speak(h.controller); await drain();
-    expect(fake.failureRequests).toHaveLength(1);
-    const transmitted = JSON.stringify(fake.failureRequests[0]!.state);
-    expect(transmitted).toContain(error.message);
-    if (error.cause instanceof Error) expect(transmitted).toContain(error.cause.message); expect(h.requests()).toBe(1);
-    expect(clock.delays).toEqual([]); expect(h.played).toEqual([]);
-    expect(h.messages.filter((message) => message.includes('Skipping'))).toHaveLength(1);
-  });
-
-  test.each([
-    { status: 503 }, { code: 'ECONNRESET' },
-  ])('local structured facts survive unrelated secret/over-limit wording %#', async (facts) => {
-    installJudgmentPort(undefined);
-    const clock = retryClock();
-    const error = Object.assign(new Error(`${'ordinary '.repeat(300)} Authorization: Bearer synthetic-private-value`), facts);
-    const h = makePipelineHarness({ error, failWhen: (_text, attempt) => attempt === 1, ...clock });
-    speak(h.controller); await drain(); expect(clock.delays).toEqual([1000]);
-    clock.fire(); await drain(); expect(h.requests()).toBe(2); expect(h.played).toEqual(['An audible answer.']);
-  });
-
-  test('hostile message/status getters and proxies never execute or authorize a retry', async () => {
-    const fake = failurePort(); installJudgmentPort(fake.port);
+  test('a change to a tts setting the turn started with stops the speech through one subscription', async () => {
+    const values: Record<string, string> = { 'tts.provider': 'fake', 'tts.voice': 'one' };
+    const listeners = new Map<string, () => void>();
     let reads = 0;
-    const hostile = Object.defineProperty(new Error('network'), 'status', { get() { reads++; return 503; } });
-    const message = Object.defineProperty(new Error('network'), 'message', { get() { reads++; return 'network'; } });
-    const proxy = new Proxy(new Error('network'), { get() { reads++; return 'network'; } });
-    for (const error of [hostile, message, proxy]) {
-      const clock = retryClock(); const h = makePipelineHarness({ error, failWhen: () => true, ...clock });
-      speak(h.controller); await drain();
-      expect(h.requests()).toBe(1); expect(clock.delays).toEqual([]); expect(h.played).toEqual([]);
-    }
-    expect(reads).toBe(0); expect(fake.failureRequests).toHaveLength(0);
+    const messages: string[] = [];
+    const controller = new SpokenTurnController({
+      voiceService: { synthesizeStream: async () => { throw new Error('not reached'); } },
+      configManager: {
+        get: ((key: string) => { reads++; return values[key] ?? ''; }) as never,
+        subscribe: ((key: string, callback: () => void) => { listeners.set(key, callback); return () => listeners.delete(key); }) as never,
+      },
+      sink: { label: 'fake', available: true, play: async () => {}, stop: () => {}, waitForDrain: async () => {} },
+      notify: (message) => messages.push(message),
+      setInterval: (() => 1) as never,
+      clearInterval: (() => {}) as never,
+    });
+    void controller.handleTurnEvent(turn({ type: 'TURN_SUBMITTED', turnId: 'cfg', prompt: 'x', origin: SPOKEN }));
+    expect([...listeners.keys()].sort()).toEqual(['tts.provider', 'tts.speed', 'tts.voice']);
+    const readsAtStart = reads;
+    for (let i = 0; i < 50; i++) void controller.handleTurnEvent(turn({ type: 'STREAM_DELTA', turnId: 'cfg', content: 'word ', accumulated: '' }));
+    expect(reads).toBe(readsAtStart);
+    values['tts.voice'] = 'two';
+    listeners.get('tts.voice')!();
+    expect(controller.phase).toBe('idle');
+    expect(listeners.size).toBe(0);
+    expect(messages.join('\n')).toContain('tts.provider, tts.voice or tts.speed changed');
+  });
+
+  test('a retry waits the Retry-After the provider sent', async () => {
+    const delays: number[] = [];
+    const h = makePipelineHarness({
+      failWhen: (_text, attempt) => attempt === 1,
+      error: Object.assign(new Error('HTTP 429'), { status: 429, retryAfterMs: 1500 }),
+      setTimeout: ((cb: () => void, ms: number) => { delays.push(ms); queueMicrotask(cb); return 0; }) as unknown as typeof setTimeout,
+      clearTimeout: (() => {}) as unknown as typeof clearTimeout,
+    });
+    speak(h.controller, 'ra', 'Waited for the provider.'); await drain();
+    expect(delays).toEqual([1500]);
+    expect(h.played).toEqual(['Waited for the provider.']);
   });
 });
 

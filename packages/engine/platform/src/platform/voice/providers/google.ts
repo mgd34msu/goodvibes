@@ -9,6 +9,7 @@ import {
   trimToUndefined,
   signalInit,
   voiceFetch,
+  voiceHttpError,
 } from './shared.js';
 
 
@@ -92,7 +93,7 @@ async function uploadGoogleFile(
     }),
   });
   if (!startResponse.ok) {
-    throw new Error(`Google file upload start failed: HTTP ${startResponse.status}`);
+    throw await voiceHttpError('Google', 'file upload start', startResponse);
   }
   const uploadUrl = trimToUndefined(startResponse.headers.get('x-goog-upload-url'));
   if (!uploadUrl) {
@@ -110,7 +111,7 @@ async function uploadGoogleFile(
     body: Buffer.from(buffer),
   });
   if (!uploadResponse.ok) {
-    throw new Error(`Google file upload finalize failed: HTTP ${uploadResponse.status}`);
+    throw await voiceHttpError('Google', 'file upload finalize', uploadResponse);
   }
   return parseGoogleFileRecord(await uploadResponse.json() as GoogleFileUploadResponse);
 }
@@ -207,7 +208,7 @@ export function createGoogleProvider(): VoiceProvider {
           }),
         });
         if (!response.ok) {
-          throw new Error(`Google transcription failed: HTTP ${response.status}`);
+          throw await voiceHttpError('Google', 'transcription', response);
         }
         const payload = await response.json() as GoogleGenerateContentResponse;
         return {

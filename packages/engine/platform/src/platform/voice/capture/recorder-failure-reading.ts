@@ -1,7 +1,10 @@
-import { defineBattery, estimateTokens, LIMITS, oneOf, STAKES_BANDS, toJson, type EntryType } from '@goodvibes-jev/judgment/decisions';
-import { captureJudgmentPort, decisionModelPolicyState, tryClassicDecisionFallback, type JudgmentPortCapture } from '@goodvibes-jev/engine/errors';
-import { captureJudgmentFailureInput } from '../../gate/failure-input-snapshot.js';
+import { defineBattery, oneOf, STAKES_BANDS } from '@goodvibes-jev/judgment/decisions';
 
+/**
+ * Still registered with the judgment registry for calibration; no capture path
+ * asks it. A recorder's failure is read from its own diagnostics by
+ * {@link classifyRecorderFailure}.
+ */
 export const recorderFailureReading = defineBattery({
   name: 'engine.voice.recorder-failure', version: 1, accuracyFloor: 0.95,
   description: 'Read the complete recorder diagnostic to distinguish microphone access and device failures.',
@@ -23,38 +26,27 @@ export const recorderFailureReading = defineBattery({
 });
 
 export type RecorderFailureCause = 'permission-denied' | 'device-missing' | 'device-unavailable' | 'none';
-export interface RecorderFailureOwner {
-  readonly capture?: JudgmentPortCapture | undefined;
-}
-/** Capture the original installation at stream creation, never at a delayed close.
- * Browser safe: this boundary must not import Node's failure-input adapter. */
-export function ownRecorderFailure(config: unknown, signal: AbortSignal): RecorderFailureOwner {
-  if (decisionModelPolicyState().operation === 'classic') return Object.freeze({});
-  try {
-    captureJudgmentFailureInput(config);
-    return Object.freeze({ capture: captureJudgmentPort('voice.recorder-failure', { signal }) });
-  } catch (error) { tryClassicDecisionFallback(error); return Object.freeze({}); }
-}
-export async function readRecorderFailure(evidence: unknown, owner: RecorderFailureOwner): Promise<RecorderFailureCause | 'unavailable'> {
-  if (decisionModelPolicyState().operation === 'classic') return 'unavailable';
-  try {
-    // Complete immutable input is admitted before sizing or consulting the port.
-    const state = captureJudgmentFailureInput(evidence) as Readonly<Record<string, unknown>>;
-    if (estimateTokens(state) > LIMITS.maxStateWithQuestionTokens - 1500 || !owner.capture) return 'unavailable';
-    const capture = owner.capture;
-    capture.assertCurrent();
-    const run = await recorderFailureReading.run(capture.port, toJson(state) as EntryType, {
-      signal: capture.signal, beforeAttempt: capture.assertCurrent,
-    });
-    capture.assertCurrent();
-    const reading = run.readings.cause;
-    const labels = ['permission-denied', 'device-missing', 'device-unavailable', 'none'] as const;
-    if (reading.outcome !== 'act' || !labels.includes(reading.choice)
-      || Object.keys(reading.probabilities).length !== labels.length
-      || !labels.every(label => Object.hasOwn(reading.probabilities, label)
-        && Number.isFinite(reading.probabilities[label]) && reading.probabilities[label]! >= 0 && reading.probabilities[label]! <= 1)) return 'unavailable';
-    run.recordAction(`recorder failure classified ${reading.choice}`);
-    capture.assertCurrent();
-    return reading.choice as RecorderFailureCause;
-  } catch (error) { tryClassicDecisionFallback(error); return 'unavailable'; }
+
+/**
+ * The diagnostics the five supported recorders (pw-record, parecord, arecord,
+ * ffmpeg, sox) print when the device itself is the problem, in the order they
+ * are checked. Permission comes first because a refused device is often also
+ * reported as unopenable; a missing device before a busy one for the same reason.
+ */
+const RECORDER_DIAGNOSTICS: readonly (readonly [Exclude<RecorderFailureCause, 'none'>, RegExp])[] = [
+  ['permission-denied', /permission denied|operation not permitted|\bEACCES\b|\bEPERM\b|access (?:is |was )?denied|not authori[sz]ed to (?:access|use|capture)/i],
+  ['device-missing', /no target node available|no such device|no such file or directory|no such entity|unknown pcm|cannot find card|invalid card|no capture devices? found|\bENODEV\b|\bENOENT\b|device not found|no default (?:input|source)/i],
+  ['device-unavailable', /device or resource busy|resource busy|\bEBUSY\b|resource temporarily unavailable|connection refused|connection failure|audio open error|can't open (?:input|audio)|failed to open (?:audio )?device/i],
+];
+
+/**
+ * Why a recorder that exited on its own stopped, read from its diagnostics with
+ * a fixed table. Nothing is asked of a model: the recorders are known programs
+ * with known wording, and an unrecognised diagnostic is `none`, reported with
+ * its exit code and signal.
+ */
+export function classifyRecorderFailure(stderr: string): RecorderFailureCause {
+  if (stderr.length === 0) return 'none';
+  for (const [cause, pattern] of RECORDER_DIAGNOSTICS) if (pattern.test(stderr)) return cause;
+  return 'none';
 }

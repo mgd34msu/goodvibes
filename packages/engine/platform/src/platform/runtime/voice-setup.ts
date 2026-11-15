@@ -9,9 +9,13 @@
  * `status()` carries LIVE INSTALL PROGRESS: the install verb is plain
  * request/response, so during a ~209MB provision a surface would otherwise only
  * render busy→receipt. While an install runs, the provisioner's onProgress
- * stream is folded into a poll-able snapshot and status() returns it as
- * `installInProgress` (absent otherwise), surfaces poll status during install;
- * no streaming infrastructure involved.
+ * stream (bytes as they land) is folded into a poll-able snapshot and status()
+ * returns it as `installInProgress` (absent otherwise), surfaces poll status
+ * during install; no streaming infrastructure involved.
+ *
+ * `setup()` is the one entry point for "set up voice" and "turn on the wake
+ * word": it plans from what the host already has (voice/setup-chain.ts), does
+ * what the plan says to do, and returns the plan with what happened.
  */
 import {
   createVoiceInstallProgressTracker,
@@ -32,9 +36,9 @@ import {
 } from '../voice/provisioning/index.js';
 import { DEFAULT_PIPER_VOICE, PIPER_ENGINES } from '../voice/provisioning/manifest.js';
 import { recordVoiceDiagnostic } from '../voice/diagnostics.js';
-import { assertVoiceProofCurrent, beginVoiceProofReading, ownVoiceProofLifetime, type VoiceProofLifetime } from '../voice/provisioning/round-trip-reading.js';
-import { VOICE_PROOF_PHRASE, type VoiceRoundTripProofOptions } from '../voice/provisioning/round-trip-proof.js';
-import { activateClassicFallback, isClassicOperation, withConfiguredDecisionModelPolicy } from './decision-policy.js';
+import { assertVoiceProofCurrent, type VoiceProofLifetime, type VoiceRoundTripProofOptions } from '../voice/provisioning/round-trip-proof.js';
+import { planVoiceSetupChain, renderVoiceSetupChain, type VoiceSetupChain, type VoiceSetupIntent, type VoiceSetupStep } from '../voice/setup-chain.js';
+import { wakeSurfaceKey, type WakeSurface } from '../voice/wake/settings.js';
 import { executePolicyCheck } from '../gate/execute-policy-check.js';
 import {
   createWakeSetupService,
@@ -47,10 +51,9 @@ import { assertSecurityReadSource, captureSecurityReadBindings } from '../securi
 import { GatewayVerbError } from '../control-plane/routes/gateway-verb-error.js';
 import type { WakeInstallProvisionOutcome } from '../voice/wake/install-provision.js';
 
+
 /** What voice.local.install resolves with (the wire receipt). */
 export interface VoiceInstallReceipt {
-  readonly operationProvenance?: 'classic';
-  readonly semanticAssessment?: 'not-evaluated';
   /**
    * True only when the runtime was installed AND proved working by a live
    * round trip. Bytes on disk are not the claim anyone cares about, see
@@ -77,13 +80,37 @@ export interface VoiceInstallReceipt {
   readonly notes: readonly string[];
 }
 
+/** A request to set voice up, from a terminal product, the daemon or an agent. */
+export interface VoiceSetupRequest extends VoiceProofLifetime {
+  readonly intent: VoiceSetupIntent;
+  /** The surface that asked; it is the one that must end up listening. */
+  readonly surface: WakeSurface;
+  /** Cloud voice providers whose credential this host holds; the local-or-cloud question is asked only when there are some. */
+  readonly cloudVoiceProviders?: readonly string[] | undefined;
+  /** Yes to the plan's proposals (install speech-to-text for a wake word). */
+  readonly acceptProposals?: boolean | undefined;
+  /** The answer to the text-to-speech question: `local` or one of {@link cloudVoiceProviders}. */
+  readonly ttsChoice?: string | undefined;
+}
+
+/** What {@link VoiceSetupService.setup} did: the plan as carried out, and the install receipt when one ran. */
+export interface VoiceSetupOutcome {
+  /** Each step: `do` steps were done (or say why not), `propose` and `ask` steps still wait for an answer. */
+  readonly plan: VoiceSetupChain;
+  /** The plan as one reply a surface prints as-is. */
+  readonly rendered: string;
+  /** True when nothing is left to answer and every step that ran succeeded. */
+  readonly complete: boolean;
+  readonly install?: VoiceInstallReceipt | undefined;
+}
+
 export interface VoiceSetupServiceDeps {
   readonly managedVoiceRoot: string;
   readonly getConfig: (key: string) => string;
-  readonly setConfig: (key: string, value: string) => void;
+  readonly setConfig: (key: string, value: string | boolean) => void;
   /** Clear the local engine's tripped circuit breaker after a successful (re-)install. */
   readonly resetLocalEngineFailureState: () => void;
-  /** Critical-tier admission gate (MemoryGovernor). */
+  /** Critical-tier admission gate (MemoryGovernor), for the wake provision that buffers its artifacts. */
   readonly admitExpensiveWork: (label: string) => { allowed: boolean; reason?: string | undefined };
   /** Provisioner seam (tests inject fetch/extractor via a wrapper). */
   readonly provision?: ((options: VoiceProvisionOptions) => Promise<VoiceProvisionResult>) | undefined;
@@ -99,6 +126,8 @@ export interface VoiceSetupServiceDeps {
 export interface VoiceSetupService {
   status(): VoiceRuntimeStatus;
   install(options?: VoiceProofLifetime): Promise<VoiceInstallReceipt>;
+  /** Plan voice setup from the host's facts, do what the plan says, and return the plan with what happened. */
+  setup(request: VoiceSetupRequest): Promise<VoiceSetupOutcome>;
   /** Wake-word artifact state, verified by content. See runtime/wake-setup.ts. */
   wakeStatus(): ReturnType<WakeSetupService['status']>;
   wakeProvision(): ReturnType<WakeSetupService['provision']>;
@@ -152,9 +181,10 @@ export function createVoiceSetupService(deps: VoiceSetupServiceDeps): VoiceSetup
       const notes: string[] = [];
       let proof: VoiceRoundTripProof | undefined;
       let proofLifetime: VoiceProofLifetime = request;
+      const ttsProvisioned = result.tts.state === 'provisioned' && !!result.tts.binaryPath && !!result.tts.modelPath;
       const sttProvisioned = result.stt.state === 'provisioned' && !!result.stt.binaryPath && !!result.stt.modelPath;
 
-      if (result.tts.state === 'provisioned' && result.tts.binaryPath && result.tts.modelPath) {
+      if (ttsProvisioned) {
         // Ownership-aware preconfigure: values THIS installer previously wrote
         // (recorded in the install stamp) update to the new managed paths; a
         // path naming a DIFFERENT install is superseded by this managed one and
@@ -166,8 +196,8 @@ export function createVoiceSetupService(deps: VoiceSetupServiceDeps): VoiceSetup
           setConfig: deps.setConfig,
           managedRoot: deps.managedVoiceRoot,
           ttsEngine: result.tts.engine,
-          ttsBinary: result.tts.binaryPath,
-          ttsModelPath: result.tts.modelPath,
+          ttsBinary: result.tts.binaryPath!,
+          ttsModelPath: result.tts.modelPath!,
           ...(sttProvisioned
             ? { sttEngine: result.stt.engine, sttBinary: result.stt.binaryPath, sttModelPath: result.stt.modelPath }
             : {}),
@@ -198,63 +228,70 @@ export function createVoiceSetupService(deps: VoiceSetupServiceDeps): VoiceSetup
         // A successful (re-)install is the recovery act: clear any tripped
         // local-engine circuit breaker so the next call retries the fresh engine.
         deps.resetLocalEngineFailureState();
+      } else if (sttProvisioned) {
+        // Speech-to-text needs no config keys: the local provider falls back to
+        // the managed install for any key left unset.
+        deps.resetLocalEngineFailureState();
+      }
 
-        // THE LAST ACT IS PROOF. Speak a phrase with the engine just installed,
-        // read it back with the recogniser just installed, and report what came
-        // back. Without this, "provisioned" only ever meant "the bytes are
-        // there", which is exactly what was true on a machine where voice did
-        // not work.
-        if (sttProvisioned) {
-          const configKeys = ['voice.local.ttsEngine', 'voice.local.ttsBinary', 'voice.local.ttsModelPath',
-            'voice.local.sttEngine', 'voice.local.sttBinary', 'voice.local.sttModelPath'];
-          const config = configKeys.map(key => deps.getConfig(key));
-          proofLifetime = ownVoiceProofLifetime({
-            signal: AbortSignal.any([AbortSignal.timeout(120_000), ...(request.signal ? [request.signal] : [])]),
-            assertCurrent: () => {
-              assertVoiceProofCurrent(request);
-              if (configKeys.some((key, index) => deps.getConfig(key) !== config[index])) {
-                throw new Error('Voice setup configuration changed during the proof. Retry the original request.');
-              }
-            },
-          });
-          try { if (!isClassicOperation()) beginVoiceProofReading(VOICE_PROOF_PHRASE, proofLifetime); }
-          catch (error) { assertVoiceProofCurrent(proofLifetime); activateClassicFallback(error); }
-          proof = await (deps.prove ?? proveVoiceRoundTrip)({
-            ...proofLifetime,
-            ttsEngine: result.tts.engine,
-            ttsBinary: result.tts.binaryPath,
-            ttsModelPath: result.tts.modelPath,
-            sttEngine: result.stt.engine,
-            sttBinary: result.stt.binaryPath ?? '',
-            sttModelPath: result.stt.modelPath ?? '',
-          });
-          assertVoiceProofCurrent(proofLifetime);
-          notes.push(proof.summary);
-          recordVoiceDiagnostic(deps.managedVoiceRoot, {
-            ...(proof.operationProvenance === 'classic' ? { operationProvenance: 'classic' as const,
-              semanticAssessment: 'not-evaluated' as const, proofBasis: proof.proofBasis } : {}),
-            at: new Date().toISOString(),
-            operation: 'provision-proof',
-            route: 'in-process',
-            ok: proof.proved,
-            provider: `${result.tts.engine} + ${result.stt.engine}`,
-            configSource: 'the managed voice runtime just installed',
-            ...(proof.error !== undefined ? { error: proof.error } : {}),
-            detail: proof.summary,
-          });
-        } else {
-          notes.push(
-            'Text-to-speech is installed, but speech-to-text is not, so there was nothing to read the test phrase '
-            + 'back with and no round trip could be proven.',
-          );
-        }
+      // THE LAST ACT IS PROOF. Speak a phrase with the engine just installed,
+      // read it back with the recogniser just installed, and report what came
+      // back. Without this, "provisioned" only ever meant "the bytes are
+      // there", which is exactly what was true on a machine where voice did
+      // not work.
+      if (ttsProvisioned && sttProvisioned) {
+        const configKeys = ['voice.local.ttsEngine', 'voice.local.ttsBinary', 'voice.local.ttsModelPath',
+          'voice.local.sttEngine', 'voice.local.sttBinary', 'voice.local.sttModelPath'];
+        const config = configKeys.map(key => deps.getConfig(key));
+        proofLifetime = {
+          signal: AbortSignal.any([AbortSignal.timeout(120_000), ...(request.signal ? [request.signal] : [])]),
+          assertCurrent: () => {
+            assertVoiceProofCurrent(request);
+            if (configKeys.some((key, index) => deps.getConfig(key) !== config[index])) {
+              throw new Error('Voice setup configuration changed during the proof. Retry the original request.');
+            }
+          },
+        };
+        proof = await (deps.prove ?? proveVoiceRoundTrip)({
+          ...proofLifetime,
+          ttsEngine: result.tts.engine,
+          ttsBinary: result.tts.binaryPath!,
+          ttsModelPath: result.tts.modelPath!,
+          sttEngine: result.stt.engine,
+          sttBinary: result.stt.binaryPath!,
+          sttModelPath: result.stt.modelPath!,
+        });
+        assertVoiceProofCurrent(proofLifetime);
+        notes.push(proof.summary);
+        recordVoiceDiagnostic(deps.managedVoiceRoot, {
+          ...(proof.proofBasis !== undefined ? { proofBasis: proof.proofBasis } : {}),
+          at: new Date().toISOString(),
+          operation: 'provision-proof',
+          route: 'in-process',
+          ok: proof.proved,
+          provider: `${result.tts.engine} + ${result.stt.engine}`,
+          configSource: 'the managed voice runtime just installed',
+          ...(proof.error !== undefined ? { error: proof.error } : {}),
+          detail: proof.summary,
+        });
+      } else if (ttsProvisioned) {
+        notes.push(
+          `Text-to-speech is installed, but speech-to-text is not (${result.stt.reason ?? result.stt.state}), so there was nothing to read the test phrase `
+          + 'back with and no round trip could be proven.',
+        );
+      } else if (sttProvisioned) {
+        notes.push(
+          `Speech-to-text is installed, but text-to-speech is not (${result.tts.reason ?? result.tts.state}), so there was no voice to speak the test phrase `
+          + 'and no round trip could be proven. Dictation and the wake word can use speech-to-text now.',
+        );
       }
       assertVoiceProofCurrent(proofLifetime);
       return {
-        ...(isClassicOperation() ? { operationProvenance: 'classic' as const, semanticAssessment: 'not-evaluated' as const } : {}),
-        // Installed AND proven. A failed proof reports NOT provisioned, because
-        // a false "ready" costs a session and an honest failure costs a retry.
-        provisioned: result.tts.state === 'provisioned' && (proof === undefined ? !sttProvisioned : proof.proved),
+        // Installed AND proven. A failed proof, or a speech-to-text half that
+        // failed where it is supported, reports NOT provisioned, because a false
+        // "ready" costs a session and an honest failure costs a retry; each
+        // half's own state is in `tts` and `stt`.
+        provisioned: ttsProvisioned && (sttProvisioned ? proof?.proved === true : result.stt.state === 'unsupported-platform'),
         platform: result.platform,
         tts: result.tts,
         stt: result.stt,
@@ -268,6 +305,77 @@ export function createVoiceSetupService(deps: VoiceSetupServiceDeps): VoiceSetup
     }
   };
 
+  const runSetup = async (request: VoiceSetupRequest): Promise<VoiceSetupOutcome> => {
+    assertVoiceProofCurrent(request);
+    const runtime = readStatus({ managedRoot: deps.managedVoiceRoot });
+    const surfaceRow = wakeSurfaceKey(request.surface);
+    const cloud = request.cloudVoiceProviders ?? [];
+    // Everything the plan needs is a fact this host already holds.
+    const chain = planVoiceSetupChain(request.intent, {
+      surface: request.surface,
+      wakeEnabled: deps.getConfig('voice.wake.enabled') === 'true',
+      surfaceEnabled: deps.getConfig(surfaceRow) === 'true',
+      wakeProvisioned: wake.status().ready,
+      sttReady: runtime.stt.state === 'provisioned',
+      ttsReady: runtime.state === 'provisioned' || (deps.getConfig('tts.provider') !== '' && deps.getConfig('tts.provider') !== 'local'),
+      inputDevice: deps.getConfig('voice.wake.inputDevice'),
+      cloudVoiceProviders: cloud,
+    });
+    let install: VoiceInstallReceipt | undefined;
+    let installFailure: string | undefined;
+    const ensureInstalled = async (): Promise<void> => {
+      if (install || installFailure) return;
+      try { install = await service.install(request); }
+      catch (error) { assertVoiceProofCurrent(request); installFailure = error instanceof Error ? error.message : String(error); }
+    };
+    const halfFailure = (half: 'stt' | 'tts'): string | undefined => {
+      if (installFailure) return installFailure;
+      const state = install?.[half];
+      return state && state.state !== 'provisioned' ? state.reason ?? state.state : undefined;
+    };
+    const steps: VoiceSetupStep[] = [];
+    let complete = true;
+    for (const step of chain.steps) {
+      const answered = step.kind === 'propose' ? request.acceptProposals === true
+        : step.kind === 'ask' ? request.ttsChoice !== undefined && (request.ttsChoice === 'local' || cloud.includes(request.ttsChoice))
+        : true;
+      if (!answered) { steps.push(step); complete = false; continue; }
+      let failure: string | undefined;
+      let message = step.message;
+      if (step.subject === 'wake') {
+        if (deps.getConfig('voice.wake.enabled') !== 'true') deps.setConfig('voice.wake.enabled', true);
+        if (deps.getConfig(surfaceRow) !== 'true') deps.setConfig(surfaceRow, true);
+      } else if (step.subject === 'wake-models') {
+        const outcome = await wake.ensureProvisioned();
+        if (!outcome.ready) failure = outcome.message;
+      } else if (step.subject === 'stt' && runtime.stt.state !== 'provisioned') {
+        await ensureInstalled();
+        failure = halfFailure('stt');
+        if (step.kind === 'propose' && !failure) message = 'The local speech-to-text runtime is installed and pointed at, so what you say after the wake word becomes text.';
+      } else if (step.subject === 'tts' && runtime.state !== 'provisioned') {
+        await ensureInstalled();
+        failure = halfFailure('tts');
+      } else if (step.subject === 'tts-provider') {
+        if (request.ttsChoice === 'local') {
+          await ensureInstalled();
+          failure = halfFailure('tts');
+          if (!failure) message = 'The local text-to-speech engine is installed and pointed at.';
+        } else {
+          deps.setConfig('tts.provider', request.ttsChoice!);
+          message = `Text-to-speech uses your ${request.ttsChoice} account.`;
+        }
+      }
+      assertVoiceProofCurrent(request);
+      if (failure !== undefined) {
+        complete = false;
+        message = `${step.subject === 'wake-models' ? 'The wake models' : step.subject.startsWith('tts') ? 'Text-to-speech' : 'Speech-to-text'} could not be set up: ${failure}`;
+      }
+      steps.push({ ...step, kind: 'do', message });
+    }
+    const plan: VoiceSetupChain = { ...chain, steps };
+    return { plan, rendered: renderVoiceSetupChain(plan), complete, ...(install ? { install } : {}) };
+  };
+
   const service: VoiceSetupService = {
     status(): VoiceRuntimeStatus {
       const status = readStatus({ managedRoot: deps.managedVoiceRoot });
@@ -275,24 +383,19 @@ export function createVoiceSetupService(deps: VoiceSetupServiceDeps): VoiceSetup
       return installInProgress ? { ...status, installInProgress } : status;
     },
     async install(options: VoiceProofLifetime = {}): Promise<VoiceInstallReceipt> {
-      return withConfiguredDecisionModelPolicy(async () => {
-        const request = Object.freeze({ ...options });
-        assertVoiceProofCurrent(request);
-        // Critical-tier admission: a provision run allocates archive + model
-        // buffers, refuse honestly instead of piling onto memory pressure.
-        const admission = deps.admitExpensiveWork('voice runtime install');
-        if (!admission.allowed) {
-          throw new GatewayVerbError(admission.reason ?? 'voice runtime install refused: daemon is under critical memory pressure. Retry when memory pressure eases.', 'SERVICE_UNAVAILABLE', 503);
-        }
-        // The first request owns the shared work. Joining callers may cancel their
-        // wait, but cannot lend new authority to the original installation.
-        if (!inFlight) inFlight = runInstall(request).finally(() => { inFlight = undefined; });
-        const ownedRun = inFlight;
-        const receipt = await executePolicyCheck(() => ownedRun, request.signal);
-        assertVoiceProofCurrent(request);
-        return receipt;
-      });
+      const request = Object.freeze({ ...options });
+      assertVoiceProofCurrent(request);
+      // Downloads stream to disk a network chunk at a time, so an install
+      // holds no file in memory and needs no memory-pressure admission.
+      // The first request owns the shared work. Joining callers may cancel their
+      // wait, but cannot lend new authority to the original installation.
+      if (!inFlight) inFlight = runInstall(request).finally(() => { inFlight = undefined; });
+      const ownedRun = inFlight;
+      const receipt = await executePolicyCheck(() => ownedRun, request.signal);
+      assertVoiceProofCurrent(request);
+      return receipt;
     },
+    setup: (request) => runSetup(request),
     wakeStatus: () => wake.status(),
     async wakeProvision() {
       // Same admission gate as the local runtime install: this one is 6.1 MB
@@ -309,7 +412,7 @@ export function createVoiceSetupService(deps: VoiceSetupServiceDeps): VoiceSetup
   };
   setVoiceWakeReadSource(service, () => {
     const source = captureSecurityReadBindings(deps, ['managedVoiceRoot', 'getConfig', 'setConfig', 'resetLocalEngineFailureState', 'admitExpensiveWork', 'provision', 'prove', 'readStatus']);
-    const methods = captureSecurityReadBindings(service, ['status', 'install', 'wakeStatus', 'wakeProvision', 'wakeEnsureProvisioned', 'wakeModelChunk']);
+    const methods = captureSecurityReadBindings(service, ['status', 'install', 'setup', 'wakeStatus', 'wakeProvision', 'wakeEnsureProvisioned', 'wakeModelChunk']);
     source(); methods(); const wakeCurrent = captureWakeSetupReadSource(wake); source(); methods();
     return () => { source(); methods(); wakeCurrent(); source(); methods(); };
   });

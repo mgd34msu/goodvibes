@@ -7,8 +7,6 @@
  * player without spawning any real subprocess.
  */
 import { describe, expect, test } from 'bun:test';
-import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import type { VoiceAudioChunk, VoiceSynthesisRequest, VoiceSynthesisStreamResult } from '@goodvibes-jev/engine/platform/platform/voice';
 import type { StreamingAudioPlayer } from '../../audio/player.ts';
 import { wireSpokenTurnRuntime } from '../../audio/spoken-turn-wiring.ts';
@@ -134,10 +132,8 @@ describe('wireSpokenTurnRuntime integration seam', () => {
       playerFactory: () => player,
     });
 
-    // Arm the turn manually (always-speak is off; simulate /tts <prompt>)
-    expect(runtime.submitNextTurn('hello world')).toBe(true);
-
-    events.emit('TURN_SUBMITTED', { type: 'TURN_SUBMITTED', turnId: 'turn-wiring-1', prompt: 'hello world' });
+    // Always-speak is off; the turn's own origin asks for speech, as a /tts prompt does.
+    events.emit('TURN_SUBMITTED', { type: 'TURN_SUBMITTED', turnId: 'turn-wiring-1', prompt: 'hello world', origin: { source: 'tts' } });
     events.emit('STREAM_DELTA', { type: 'STREAM_DELTA', turnId: 'turn-wiring-1', content: 'Hello, world.', accumulated: 'Hello, world.' });
     events.emit('TURN_COMPLETED', { type: 'TURN_COMPLETED', turnId: 'turn-wiring-1', response: 'Hello, world.', stopReason: 'completed' });
 
@@ -171,7 +167,7 @@ describe('wireSpokenTurnRuntime integration seam', () => {
       playerFactory: () => player,
     });
 
-    // No manual submitNextTurn call, always-speak mode handles it
+    // No spoken origin on the turn: always-speak mode is what makes it spoken
     events.emit('TURN_SUBMITTED', { type: 'TURN_SUBMITTED', turnId: 'turn-auto', prompt: 'auto spoken' });
     events.emit('STREAM_DELTA', { type: 'STREAM_DELTA', turnId: 'turn-auto', content: 'Auto response.', accumulated: 'Auto response.' });
     events.emit('TURN_COMPLETED', { type: 'TURN_COMPLETED', turnId: 'turn-auto', response: 'Auto response.', stopReason: 'completed' });
@@ -202,7 +198,7 @@ describe('wireSpokenTurnRuntime integration seam', () => {
       playerFactory: () => player,
     });
 
-    // No submitNextTurn, always-speak is off, nothing should synthesize
+    // No spoken origin and always-speak off: nothing should synthesize
     events.emit('TURN_SUBMITTED', { type: 'TURN_SUBMITTED', turnId: 'turn-silent', prompt: 'silent' });
     events.emit('STREAM_DELTA', { type: 'STREAM_DELTA', turnId: 'turn-silent', content: 'Silent.', accumulated: 'Silent.' });
     events.emit('TURN_COMPLETED', { type: 'TURN_COMPLETED', turnId: 'turn-silent', response: 'Silent.', stopReason: 'completed' });
@@ -235,31 +231,6 @@ describe('wireSpokenTurnRuntime integration seam', () => {
   });
 });
 
-function semanticFailurePort(category: string, billing = false, errorText?: string) {
-  return fakePort((name, question, state) => {
-    if (name === 'category') return choiceAnswer(question, category, 0.99);
-    if (name === 'connection_failure') return choiceAnswer(question, 'none', 0.99);
-    if (question.type !== 'noul') throw new Error(`Unexpected spoken failure question: ${name}`);
-    switch (name) {
-      case 'billing': return noulAnswer(billing ? 0.99 : 0.01);
-      case 'rate_limited':
-      case 'context_exceeded':
-      case 'transient_network':
-      case 'provider_unusable':
-      case 'before_response': return noulAnswer(0.01);
-      case 'lineHasCredential':
-      case 'spanIsCredential': {
-        if (errorText === undefined || !state || typeof state !== 'object' || Array.isArray(state)
-          || state.phase !== 'source' || state.target !== 'whole-line' || !Array.isArray(state.parts) || state.parts.length !== 1) throw new Error('Unexpected spoken diagnostic projection');
-        const part = state.parts[0];
-        if (!part || typeof part !== 'object' || Array.isArray(part) || part.kind !== 'text' || part.text !== errorText) throw new Error('Spoken diagnostic lost its complete authored error');
-        return noulAnswer(0.01);
-      }
-      default: throw new Error(`Unexpected spoken failure question: ${name}`);
-    }
-  });
-}
-
 function failingRuntime(error: unknown) {
   const timers = manualTimers();
   const requests: VoiceSynthesisRequest[] = [];
@@ -287,17 +258,14 @@ function failingRuntime(error: unknown) {
   };
 }
 
-describe('actual spoken wiring canonical retry semantics', () => {
+describe('actual spoken wiring retry decided by the failure table', () => {
   test.each([
-    ['status', Object.assign(new Error('credentials'), { status: 503 }), 'authentication', false, true, []],
-    ['errno', Object.assign(new Error('credentials'), { code: 'ECONNRESET' }), 'authentication', false, true, []],
-    ['billing 429', Object.assign(new Error('rate limit concurrent 429'), { status: 429 }), 'billing', true, false, ['engine.failure-reading']],
-    ['rate limit 429', Object.assign(new Error('account details'), { status: 429 }), 'rate_limit', false, true, ['engine.failure-reading']],
-    ['contrary terminal wording', new Error('network timeout socket 429 concurrent'), 'authentication', false, false, ['engine.failure-reading']],
-    ['contrary retryable wording', new Error('The blue lantern is resting.'), 'service', false, true, ['engine.failure-reading']],
-  ] as const)('%s follows the shared controller through actual wiring', async (_label, error, category, billing, retry, batteries) => {
-    const fake = semanticFailurePort(category, billing, error.message);
-    const previous = installJudgmentPort(fake.port);
+    ['503', Object.assign(new Error('credentials'), { status: 503 }), true],
+    ['errno', Object.assign(new Error('credentials'), { code: 'ECONNRESET' }), true],
+    ['429', Object.assign(new Error('account details'), { status: 429 }), true],
+    ['401', Object.assign(new Error('network timeout'), { status: 401 }), false],
+    ['no structure', new Error('network timeout socket 429 concurrent'), false],
+  ] as const)('%s follows the shared controller through actual wiring', async (_label, error, retry) => {
     const h = failingRuntime(error);
     try {
       h.speak(); await drain();
@@ -305,7 +273,6 @@ describe('actual spoken wiring canonical retry semantics', () => {
       expect(h.timers.pendingDelays()).toHaveLength(retry ? 1 : 0);
       h.timers.fireAll();
       await drain();
-      expect(fake.requests.map(request => request.context?.battery)).toEqual([...batteries]);
       expect(h.requests).toHaveLength(retry ? 2 : 1);
       expect(h.played).toEqual(retry ? ['old answer.'] : []);
       expect(h.messages.filter((message) => message.includes('Skipping'))).toHaveLength(retry ? 0 : 1);
@@ -313,47 +280,13 @@ describe('actual spoken wiring canonical retry semantics', () => {
         expect(h.requests[1]?.signal).toBe(h.requests[0]?.signal);
         expect(h.requests[1]?.metadata).toEqual(h.requests[0]?.metadata);
       }
-    } finally { h.close(); installJudgmentPort(previous); }
+    } finally { h.close(); }
   });
 
-  test('unavailable reading reports once without a keyword retry', async () => {
-    const previous = installJudgmentPort({ model: 'fake', ask: async () => { throw new Error('unavailable'); } });
-    const h = failingRuntime(new Error('429 network timeout concurrent'));
+  test('stop during backoff prevents a late retry', async () => {
+    const h = failingRuntime(Object.assign(new Error('unavailable'), { status: 503 }));
     try {
       h.speak(); await drain();
-      expect(h.requests).toHaveLength(1); expect(h.played).toEqual([]);
-      expect(h.messages.filter((message) => message.includes('Skipping'))).toHaveLength(1);
-    } finally { h.close(); installJudgmentPort(previous); }
-  });
-
-  test.each(['cancel', 'replacement'] as const)('%s while classifying blocks late audio and synthesis', async (mode) => {
-    const fake = semanticFailurePort('service');
-    let release = () => {};
-    let signal: AbortSignal | undefined;
-    const previous = installJudgmentPort({ ...fake.port, async ask(request) {
-      signal = request.signal;
-      await new Promise<void>((resolve) => { release = resolve; });
-      return fake.port.ask(request);
-    } });
-    const h = failingRuntime(new Error('network'));
-    try {
-      h.speak(); await drain(); expect(signal).toBeDefined();
-      if (mode === 'cancel') h.events.emit('TURN_CANCEL', { type: 'TURN_CANCEL', turnId: 'old', stopReason: 'cancelled' });
-      else h.speak('new');
-      expect(signal?.aborted).toBe(true);
-      await drain(); release(); await drain();
-      expect(h.requests).toHaveLength(mode === 'replacement' ? 2 : 1);
-      expect(h.played).toEqual(mode === 'replacement' ? ['new answer.'] : []);
-      expect(h.messages.filter((message) => message.includes('Skipping'))).toEqual([]);
-    } finally { release(); h.close(); installJudgmentPort(previous); }
-  });
-
-  test('stop during semantic backoff prevents a late retry', async () => {
-    const fake = semanticFailurePort('service');
-    const previous = installJudgmentPort(fake.port);
-    const h = failingRuntime(new Error('The blue lantern is resting.'));
-    try {
-      h.speak(); await drain(); expect(fake.requests).toHaveLength(1);
       expect(h.timers.pendingDelays()).toHaveLength(1);
       h.runtime.stop();
       // Stopping cancels the backoff timer itself, so nothing is left to fire a retry.
@@ -361,36 +294,29 @@ describe('actual spoken wiring canonical retry semantics', () => {
       h.timers.fireAll(); await drain();
       expect(h.requests).toHaveLength(1); expect(h.played).toEqual([]);
       expect(h.messages.filter((message) => message.includes('Skipping'))).toEqual([]);
-    } finally { h.close(); installJudgmentPort(previous); }
+    } finally { h.close(); }
   });
 });
 
 
-test('live consumer awaits canonical speech seams before synthesis and honors cancellation', async () => {
+test('live consumer cuts speech at sentence ends locally and honors cancellation', async () => {
   const source = 'Dr. Rivera paid 3.14 dollars. Next fragment';
-  const fake = fakePort((name, _question, raw) => {
-    const state = raw as { paragraph: string; candidates: number[] };
-    return noulAnswer(state.paragraph.slice(0, state.candidates[Number(name.slice(5))]) === 'Dr. Rivera paid 3.14 dollars.' ? 0.99 : 0.01);
-  });
-  const previous = installJudgmentPort(fake.port);
   const events = makeFakeEvents();
   const { voiceService, synthesized } = makeFakeVoiceService();
   const { player, played } = makeFakePlayer();
   const runtime = wireSpokenTurnRuntime({ voiceService: voiceService as never, configManager: { get: () => false } as never,
     events: { turns: events.turns } as never, notify() {}, playerFactory: () => player });
   try {
-    runtime.submitNextTurn('prompt');
-    events.emit('TURN_SUBMITTED', { type: 'TURN_SUBMITTED', turnId: 'seams', prompt: 'prompt' });
+    events.emit('TURN_SUBMITTED', { type: 'TURN_SUBMITTED', turnId: 'seams', prompt: 'prompt', origin: { source: 'tts' } });
     events.emit('STREAM_DELTA', { type: 'STREAM_DELTA', turnId: 'seams', content: source, accumulated: source });
     await drain();
-    expect(fake.requests.length).toBeGreaterThan(0);
     expect(synthesized).toEqual(['Dr. Rivera paid 3.14 dollars.']);
     expect(played).toEqual(['Dr. Rivera paid 3.14 dollars.']);
     events.emit('TURN_CANCEL', { type: 'TURN_CANCEL', turnId: 'seams', stopReason: 'cancelled' });
     events.emit('TURN_COMPLETED', { type: 'TURN_COMPLETED', turnId: 'seams', response: source, stopReason: 'completed' });
     await drain();
     expect(synthesized).toHaveLength(1);
-  } finally { runtime.stop(); runtime.unsubs.forEach(unsub => unsub()); installJudgmentPort(previous); }
+  } finally { runtime.stop(); runtime.unsubs.forEach(unsub => unsub()); }
 });
 
 
@@ -404,8 +330,7 @@ test.each(['startup', 'notification'] as const)('consumer contains throwing %s c
     } } as never, events: { turns: events.turns } as never,
     notify() { throw new Error('host notify failed'); }, playerFactory: () => player });
   try {
-    runtime.submitNextTurn('prompt');
-    expect(() => events.emit('TURN_SUBMITTED', { type: 'TURN_SUBMITTED', turnId: 'throws', prompt: 'prompt' })).not.toThrow();
+    expect(() => events.emit('TURN_SUBMITTED', { type: 'TURN_SUBMITTED', turnId: 'throws', prompt: 'prompt', origin: { source: 'tts' } })).not.toThrow();
     await drain();
     expect(() => events.emit('TURN_CANCEL', { type: 'TURN_CANCEL', turnId: 'throws', stopReason: 'cancelled' })).not.toThrow();
     await drain();

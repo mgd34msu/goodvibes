@@ -19,6 +19,7 @@ import {
   signalInit,
   voiceFetch,
   voiceStreamFetch,
+  voiceHttpError,
 } from './shared.js';
 
 import { summarizeError } from '../../utils/error-display.js';
@@ -231,12 +232,13 @@ export function createElevenLabsProvider(): VoiceProvider {
     },
     async listVoices(): Promise<readonly VoiceDescriptor[]> {
       const apiKey = readFirstEnv(envVars);
-      if (!apiKey) return [];
+      // An empty list would read as "this account has no voices".
+      if (!apiKey) throw new Error('ElevenLabs API key missing');
       const baseUrl = normalizeBaseUrl(readFirstEnv(baseUrlEnvVars), 'https://api.elevenlabs.io');
       const response = await voiceFetch(`${baseUrl}/v1/voices`, {
         headers: { 'xi-api-key': apiKey },
       });
-      if (!response.ok) throw new Error(`ElevenLabs voices failed: HTTP ${response.status}`);
+      if (!response.ok) throw await voiceHttpError('ElevenLabs', 'voice list', response);
       const payload = await response.json() as {
         voices?: Array<{ voice_id?: string; name?: string; category?: string; description?: string }> | undefined;
       };
@@ -276,7 +278,7 @@ export function createElevenLabsProvider(): VoiceProvider {
           },
         }),
       });
-      if (!response.ok) throw new Error(`ElevenLabs synthesis failed: HTTP ${response.status}`);
+      if (!response.ok) throw await voiceHttpError('ElevenLabs', 'synthesis', response);
       const mimeType = response.headers.get('content-type')?.trim() || 'audio/mpeg';
       const dataBase64 = Buffer.from(await response.arrayBuffer()).toString('base64');
       return {
@@ -327,10 +329,7 @@ export function createElevenLabsProvider(): VoiceProvider {
         },
         body: JSON.stringify(body),
       }, request.signal);
-      if (!response.ok) {
-        const errorText = await response.text().catch(() => '');
-        throw new Error(`ElevenLabs streaming synthesis failed: HTTP ${response.status}${errorText ? `: ${errorText}` : ''}`);
-      }
+      if (!response.ok) throw await voiceHttpError('ElevenLabs', 'streaming synthesis', response);
       const resultMetadata = {
         baseUrl,
         voiceId,
@@ -446,7 +445,7 @@ export function createElevenLabsProvider(): VoiceProvider {
         },
         body: form,
       });
-      if (!response.ok) throw new Error(`ElevenLabs transcription failed: HTTP ${response.status}`);
+      if (!response.ok) throw await voiceHttpError('ElevenLabs', 'transcription', response);
       const payload = await response.json() as ElevenLabsTranscriptionResponse;
       const parsed = parseElevenLabsTranscript(payload);
       return {
@@ -532,7 +531,7 @@ export function createElevenLabsProvider(): VoiceProvider {
         },
       });
       if (!tokenResponse.ok) {
-        throw new Error(`ElevenLabs realtime token failed: HTTP ${tokenResponse.status}`);
+        throw await voiceHttpError('ElevenLabs', 'realtime token', tokenResponse);
       }
       const tokenPayload = await tokenResponse.json() as ElevenLabsSingleUseTokenResponse;
       const token = trimToUndefined(tokenPayload.token);

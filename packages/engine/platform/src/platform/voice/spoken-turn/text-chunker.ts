@@ -1,28 +1,27 @@
-import { captureJudgmentPort, JudgmentPortMissingError, type JudgmentPortCapture } from '@goodvibes-jev/engine/errors';
 import { snapshotJudgmentInput } from '../../gate/judgment-input.js';
-import { speechCandidates, snapshotSpeechSeams } from '../../judgment-browser/speech-source.js';
-import { speechSeamsBattery } from '../../judgment-browser/batteries/speech-seams.js';
 import { StreamingCodeFenceFilter, stripMarkdownForSpeech } from './speech-markdown.js';
-import { activateClassicFallback, isClassicOperation } from '../../runtime/decision-policy.js';
 import { classicSpeechEndOffsets } from '../../../browser-decision-policy.js';
 
-/** Streaming speech policy. Meaning comes from the canonical seam battery;
- * length, whitespace, latency and end-of-turn flushing remain mechanical. */
+/**
+ * Streaming speech policy: a reply is cut at its sentence ends, found by the
+ * local punctuation splitter. A chunk is also released at the size cap (at a
+ * word boundary) and when text has waited `maxLatencyMs`, so first audio never
+ * waits on anything but the text itself. A wrong cut costs an odd pause;
+ * nothing is authorised on it.
+ */
 export interface TtsTextChunkerOptions {
   readonly minBoundaryChars?: number | undefined;
   readonly maxChunkChars?: number | undefined;
   readonly maxLatencyMs?: number | undefined;
   readonly now?: (() => number) | undefined;
-  readonly owner?: JudgmentPortCapture | undefined;
-  readonly assertCurrent?: (() => void) | undefined;
 }
 
-/** How much already-admitted reply text is screened again together with each new delta. */
+/** How much already-received reply text is screened again together with each new delta. */
 const RAW_SCREEN_WINDOW_CHARS = 4096;
 
 export class TtsTextChunker {
   private buffer = '';
-  // Tail of the received source (see RAW_SCREEN_WINDOW_CHARS), before markdown filtering or candidate selection.
+  // Tail of the received source (see RAW_SCREEN_WINDOW_CHARS), before markdown filtering.
   private raw = '';
   private firstBufferedAt: number | null = null;
   private readonly fenceFilter = new StreamingCodeFenceFilter();
@@ -30,178 +29,78 @@ export class TtsTextChunker {
   private readonly maxChunkChars: number;
   private readonly maxLatencyMs: number;
   private readonly now: () => number;
-  private readonly owner: JudgmentPortCapture | undefined;
-  private readonly assertCaller: () => void;
-  private readonly cancellation = new AbortController();
-  private chain: Promise<unknown> = Promise.resolve();
-  private failure: unknown;
-  private ending = false;
-  private queuedOperations = 0;
-  private pendingReader: AbortController | undefined;
-  private submittedOperations = 0;
-  private activeOperation = 0;
-  private skipMeaningThrough = 0;
-  private queuedInputChars = 0;
 
   constructor(options: TtsTextChunkerOptions = {}) {
     this.minBoundaryChars = options.minBoundaryChars ?? 24;
     this.maxChunkChars = options.maxChunkChars ?? 320;
     this.maxLatencyMs = options.maxLatencyMs ?? 1_000;
     this.now = options.now ?? (() => Date.now());
-    this.assertCaller = options.assertCurrent ?? (() => {});
-    let owner = options.owner;
-    if (!owner && !isClassicOperation()) {
-      try { owner = captureJudgmentPort('voice.spoken-turn.chunking', { signal: this.cancellation.signal, assertCurrent: this.assertCaller }); }
-      catch (error) { if (!(error instanceof JudgmentPortMissingError)) this.failure = error; }
+  }
+
+  /**
+   * Add streamed text; returns the chunks that are now ready to speak. Throws
+   * when the reply carries credential material, so a secret is never spoken
+   * or sent to a voice provider. Only a bounded tail is re-screened: the
+   * declarations the screen reads (KEY=value, URL userinfo, card digits, key
+   * headers) show their sensitive part within a short span.
+   */
+  push(delta: string): string[] {
+    if (!delta) return [];
+    this.raw = this.raw.slice(-RAW_SCREEN_WINDOW_CHARS) + delta;
+    snapshotJudgmentInput({ text: this.raw });
+    const filtered = this.fenceFilter.push(delta);
+    if (!filtered) return [];
+    if (this.firstBufferedAt === null) this.firstBufferedAt = this.now();
+    this.buffer += filtered;
+    return this.drainReady(false);
+  }
+
+  /** Release text that has waited past the latency limit. */
+  flushDue(): string[] {
+    if (!this.buffer.trim() || this.firstBufferedAt === null || this.now() - this.firstBufferedAt < this.maxLatencyMs) return [];
+    return this.drainReady(true);
+  }
+
+  /** End of turn: everything left, in chunks no larger than the cap. */
+  flushAll(): string[] {
+    this.buffer += this.fenceFilter.flush();
+    const chunks: string[] = [];
+    while (this.buffer.trim()) {
+      const end = this.buffer.length > this.maxChunkChars
+        ? this.findWordBoundaryBefore(this.maxChunkChars) || this.maxChunkChars : this.buffer.length;
+      const chunk = this.takeChunk(end);
+      if (chunk) chunks.push(chunk);
     }
-    this.owner = owner;
-  }
-
-  push(delta: string): Promise<string[]> {
-    // Admission is synchronous: even a queued private tail invalidates pending
-    // readings before they can publish. Never screen only filtered speech.
-    try {
-      this.assertCurrent();
-      // Only a bounded tail is re-screened: the declarations the screen reads
-      // (KEY=value, URL userinfo, card digits, key headers) show their sensitive
-      // part within a short span, and rescanning the whole reply per delta made
-      // a long reply quadratic.
-      this.raw = this.raw.slice(-RAW_SCREEN_WINDOW_CHARS) + delta;
-      snapshotJudgmentInput({ text: this.raw });
-      this.queuedInputChars += delta.length;
-      if (this.buffer.length + this.queuedInputChars >= this.maxChunkChars) this.requestMechanicalProgress();
-    } catch (error) { this.failure = error; this.cancellation.abort(); }
-    return this.serialize(async () => {
-      this.queuedInputChars -= delta.length;
-      if (!delta) return [];
-      const filtered = this.fenceFilter.push(delta);
-      if (!filtered) return [];
-      if (this.firstBufferedAt === null) this.firstBufferedAt = this.now();
-      this.buffer += filtered;
-      return this.drainReady(false);
-    });
-  }
-
-  flushDue(): Promise<string[]> {
-    if (this.firstBufferedAt !== null && this.now() - this.firstBufferedAt >= this.maxLatencyMs) this.requestMechanicalProgress();
-    return this.serialize(async () => {
-      if (!this.buffer.trim() || this.firstBufferedAt === null || this.now() - this.firstBufferedAt < this.maxLatencyMs) return [];
-      return this.drainReady(true);
-    });
-  }
-
-  flushAll(): Promise<string[]> {
-    this.ending = true;
-    this.pendingReader?.abort();
-    return this.serialize(async () => {
-      this.buffer += this.fenceFilter.flush();
-      const chunks: string[] = [];
-      while (this.buffer.trim()) {
-        const end = this.buffer.length > this.maxChunkChars
-          ? this.findWordBoundaryBefore(this.maxChunkChars) || this.maxChunkChars : this.buffer.length;
-        const chunk = this.takeChunk(end);
-        if (chunk) chunks.push(chunk);
-      }
-      this.buffer = ''; this.firstBufferedAt = null;
-      return chunks;
-    });
+    this.buffer = ''; this.firstBufferedAt = null;
+    return chunks;
   }
 
   reset(): void {
-    this.cancellation.abort();
     this.buffer = ''; this.raw = ''; this.firstBufferedAt = null;
     this.fenceFilter.reset();
   }
 
-  /** Also fences already queued speech after raw-source admission fails. */
-  assertCurrent(): void {
-    if (this.failure) throw this.failure;
-    this.cancellation.signal.throwIfAborted();
-    this.assertCaller();
-    this.owner?.signal.throwIfAborted();
-    if (!isClassicOperation()) this.owner?.assertCurrent();
-  }
-
-  private requestMechanicalProgress(): void {
-    // Cover the triggering operation AND every already queued delta ahead of
-    // it. Aborting only the current read would let an intervening delta start
-    // another read before the clock/cap operation can make progress.
-    this.skipMeaningThrough = this.submittedOperations + 1;
-    this.pendingReader?.abort();
-  }
-
-  private serialize(work: () => Promise<string[]>): Promise<string[]> {
-    if (this.queuedOperations >= 256) {
-      this.failure = new Error('Spoken text backlog exceeded');
-      this.cancellation.abort();
-      return Promise.reject(this.failure);
-    }
-    this.queuedOperations++;
-    const operation = ++this.submittedOperations;
-    const result = this.chain.then(async () => {
-      this.assertCurrent();
-      this.activeOperation = operation;
-      const chunks = await work();
-      this.assertCurrent();
-      return chunks;
-    }).finally(() => { this.queuedOperations--; });
-    this.chain = result.catch(() => {});
-    return result;
-  }
-
-  private async drainReady(forceLatencyFlush: boolean): Promise<string[]> {
-    if (this.ending) return [];
+  private drainReady(forceLatencyFlush: boolean): string[] {
     const chunks: string[] = [];
     while (this.buffer.trim()) {
-      // The owner clock and hard cap do not wait for semantic availability.
       if (this.firstBufferedAt !== null && this.now() - this.firstBufferedAt >= this.maxLatencyMs) forceLatencyFlush = true;
-      const mechanical = forceLatencyFlush || this.buffer.length >= this.maxChunkChars
-        || this.activeOperation <= this.skipMeaningThrough;
-      const latestSentence = mechanical ? -1 : await this.findLatestSentenceBoundary();
-      this.assertCurrent();
-      const boundary = latestSentence >= this.minBoundaryChars ? latestSentence
+      const sentence = this.findLatestSentenceBoundary();
+      const boundary = sentence > 0 ? sentence
         : this.buffer.length >= this.maxChunkChars ? this.findWordBoundaryBefore(this.maxChunkChars) || this.maxChunkChars
         : forceLatencyFlush ? this.buffer.length : -1;
       if (boundary <= 0) break;
       const chunk = this.takeChunk(boundary);
       if (chunk) chunks.push(chunk);
       forceLatencyFlush = false;
-      // Publish this ready prefix now. A remaining sub-cap fragment must not
-      // hold already released text behind a second optional semantic request.
-      if (this.buffer.length < this.maxChunkChars) break;
     }
     return chunks;
   }
 
-  private async findLatestSentenceBoundary(): Promise<number> {
-    if (isClassicOperation()) return classicSpeechEndOffsets(this.buffer)
+  /** The last sentence end inside the size window that leaves a chunk worth a request. */
+  private findLatestSentenceBoundary(): number {
+    if (this.buffer.length < this.minBoundaryChars) return -1;
+    return classicSpeechEndOffsets(this.buffer)
       .filter(end => end < this.buffer.length && end >= this.minBoundaryChars && end <= this.maxChunkChars).at(-1) ?? -1;
-    if (this.ending || !this.owner || this.buffer.length < this.minBoundaryChars || this.buffer.length > 32768) return -1;
-    // Whitespace candidates supply no meaning. Keep the complete buffer as
-    // evidence; a bounded candidate set is not a truncated source excerpt.
-    const candidates = speechCandidates(this.buffer).filter(end => end >= this.minBoundaryChars && end <= this.maxChunkChars).slice(-64);
-    if (!candidates.length) return -1;
-    const state = snapshotSpeechSeams({ paragraph: this.buffer, candidates, nextCursor: null });
-    const reader = new AbortController();
-    this.pendingReader = reader;
-    try {
-      const run = await speechSeamsBattery.run(this.owner.port, { paragraph: state.paragraph, candidates: [...state.candidates] }, {
-        signal: AbortSignal.any([this.cancellation.signal, this.owner.signal, reader.signal]),
-        only: candidates.map((_, i) => `seam_${i}`), site: 'voice.spoken-turn.chunking', pattern: 'structure.stitch',
-      });
-      this.assertCurrent();
-      reader.signal.throwIfAborted();
-      const readings = candidates.map((_, i) => run.readings[`seam_${i}`]);
-      if (readings.some(reading => !reading || reading.outcome !== 'act')) { run.recordAction('unsettled'); return -1; }
-      run.recordAction('ready');
-      return candidates.filter((_, i) => readings[i]!.verdict === 'yes').at(-1) ?? -1;
-    } catch (error) {
-      if (!this.cancellation.signal.aborted && !reader.signal.aborted) activateClassicFallback(error);
-      this.assertCurrent();
-      // Unavailable meaning never revives punctuation. Only the independent
-      // size/latency/end-of-turn rules may release the buffered text.
-      return -1;
-    } finally { if (this.pendingReader === reader) this.pendingReader = undefined; }
   }
 
   private findWordBoundaryBefore(index: number): number {

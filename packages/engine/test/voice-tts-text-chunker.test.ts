@@ -1,20 +1,7 @@
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'bun:test';
 import { TtsTextChunker } from '../platform/src/platform/voice/spoken-turn/text-chunker.js';
 import { StreamingCodeFenceFilter, stripMarkdownForSpeech } from '../platform/src/platform/voice/spoken-turn/speech-markdown.js';
 
-import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import type { JudgmentPort } from '@goodvibes-jev/judgment/decisions';
-import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-let previous: JudgmentPort | undefined;
-beforeEach(() => {
-  previous = installJudgmentPort(fakePort((name, _question, raw) => {
-    const state = raw as { paragraph: string; candidates: number[] };
-    const offset = state.candidates[Number(name.slice(5))]!;
-    // Explicit fixture answers, never production boundary logic.
-    return noulAnswer(['Hello there.', 'This is **bold** and _italic_ text.', 'Before.', 'After.'].some(text => state.paragraph.slice(0, offset).trim() === text) ? 0.99 : 0.01);
-  }).port);
-});
-afterEach(() => { installJudgmentPort(previous); });
 
 describe('TtsTextChunker', () => {
   test('flushes complete sentences before retaining the next fragment', async () => {
@@ -51,7 +38,7 @@ describe('TtsTextChunker', () => {
   test('strips markdown formatting from a flushed chunk', async () => {
     const chunker = new TtsTextChunker({ minBoundaryChars: 8 });
 
-    expect(await chunker.push('This is **bold** and _italic_ text.')).toEqual(['This is bold and italic text.']);
+    expect(await chunker.push('This is **bold** and _italic_ text. More')).toEqual(['This is bold and italic text.']);
   });
 
   test('a fenced code block split across many deltas produces one placeholder and no code text', async () => {

@@ -2,8 +2,7 @@ import type { ConfigManager } from '../config/index.js';
 import type { ModelDefinition, ProviderRegistry } from '../providers/index.js';
 import type { ContentPart } from '../providers/index.js';
 import type { Orchestrator, OrchestratorUserInputOptions } from '../core/index.js';
-
-const SPOKEN_TURN_SOURCE = 'tts';
+import { isSpokenTurnOrigin, SPOKEN_TURN_SOURCE } from './spoken-turn/controller.js';
 
 type RunTurn = (
   text: string,
@@ -53,7 +52,7 @@ export function attachSpokenTurnModelRouting(options: SpokenTurnModelRoutingOpti
   let attached = true;
   const routedRunTurn = async (...args: Parameters<RunTurn>): Promise<void> => {
     const inputOptions = args[2];
-    if (!attached || !isSpokenTurn(inputOptions)) {
+    if (!attached || !isSpokenTurnOrigin(inputOptions?.origin)) {
       await originalRunTurn(...args);
       return;
     }
@@ -115,11 +114,6 @@ export function resolveSpokenTurnModelOverride(options: {
   }
   if ((model.registryKey ?? model.id) === (current.registryKey ?? current.id)) return null;
   return model;
-}
-
-function isSpokenTurn(options: OrchestratorUserInputOptions | undefined): boolean {
-  return options?.origin?.source === SPOKEN_TURN_SOURCE
-    || options?.origin?.metadata?.['spokenOutput'] === true;
 }
 
 function createRoutedProviderRegistry(providerRegistry: ProviderRegistry, model: ModelDefinition): ProviderRegistry {

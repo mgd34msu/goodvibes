@@ -31,9 +31,7 @@ import { execFile } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { executePolicyCheck } from '../../gate/execute-policy-check.js';
-import { assertLocalEngineFailureCurrent, ownLocalEngineFailureLifetime, readLocalEngineFailure, structuredLocalEngineFailure,
-  type LocalEngineFailureKind } from './local-failure-reading.js';
+import { structuredLocalEngineFailure, type LocalEngineFailure } from './local-failure-reading.js';
 import type {
   VoiceProvider,
   VoiceProviderStatus,
@@ -61,25 +59,71 @@ export type LocalEngineRunner = (input: {
   readonly signal?: AbortSignal | undefined;
 }) => Promise<{ stdout: string }>;
 
-const defaultRunner: LocalEngineRunner = (input) =>
+/**
+ * Run one engine binary to completion. The one runner for local speech: the
+ * provider and the install proof both use it, so the proof runs the engines
+ * the way the product does.
+ *
+ * Settles only when the child has closed, so a caller's scratch cleanup cannot
+ * race a child that ignored SIGTERM and is still writing its output file. A
+ * failure carries the exit `code`, `signal` and `stderr`; a deadline or abort
+ * rejects with a `TimeoutError` or `AbortError`.
+ */
+export const runLocalEngine: LocalEngineRunner = (input) =>
   new Promise((resolve, reject) => {
-    const child = execFile(
-      input.binary,
-      [...input.args],
-      { timeout: input.timeoutMs, maxBuffer: 64 * 1024 * 1024, signal: input.signal },
-      (error, stdout) => {
-        if (error) reject(error);
-        else resolve({ stdout });
-      },
-    );
+    if (input.signal?.aborted) {
+      reject(input.signal.reason ?? new DOMException('The local engine run was cancelled.', 'AbortError'));
+      return;
+    }
+    let failure: unknown;
+    let output = '';
+    let escalation: ReturnType<typeof setTimeout> | undefined;
+    let closing = false;
+    const child = execFile(input.binary, [...input.args], { maxBuffer: 64 * 1024 * 1024 }, (error, stdout, stderr) => {
+      output = stdout;
+      if (error) { failure ??= Object.assign(error, { stderr }); terminate(); }
+    });
+    const terminate = () => {
+      if (closing || child.exitCode !== null || child.signalCode !== null) return;
+      child.kill('SIGTERM');
+      escalation ??= setTimeout(() => { if (!closing) child.kill('SIGKILL'); }, 250);
+    };
+    const abort = () => {
+      failure ??= input.signal?.reason ?? new DOMException('The local engine run was cancelled.', 'AbortError');
+      terminate();
+    };
+    const timeout = setTimeout(() => {
+      failure ??= new DOMException(`${input.binary} did not finish within ${input.timeoutMs} ms.`, 'TimeoutError');
+      terminate();
+    }, input.timeoutMs);
+    input.signal?.addEventListener('abort', abort, { once: true });
+    child.once('close', () => {
+      closing = true;
+      clearTimeout(timeout);
+      if (escalation) clearTimeout(escalation);
+      input.signal?.removeEventListener('abort', abort);
+      if (failure !== undefined) reject(failure);
+      else resolve({ stdout: output });
+    });
     if (input.stdinText !== undefined && child.stdin) {
       // A binary that exits before reading all of stdin breaks the pipe; the
       // process-exit callback above already reports that failure.
       child.stdin.on('error', () => {});
-      child.stdin.write(input.stdinText);
-      child.stdin.end();
+      child.stdin.end(input.stdinText);
     }
   });
+
+/** The piper/kokoro invocation: text on stdin, wav to `--output_file`. */
+export function localTtsArgs(modelPath: string, outPath: string): readonly string[] {
+  return ['--model', modelPath, '--output_file', outPath];
+}
+
+/** The whisper-cpp or faster-whisper invocation over one wav file; transcript on stdout. */
+export function localSttArgs(engine: string, modelPath: string, wavPath: string): readonly string[] {
+  return engine === 'whisper-cpp'
+    ? ['-m', modelPath, '-f', wavPath, '--no-timestamps', '--no-prints']
+    : [modelPath, wavPath];
+}
 
 interface LocalEngineConfig {
   readonly engine: string;
@@ -119,12 +163,16 @@ function readEngine(
 
 const RUN_TIMEOUT_MS = 120_000;
 
+/** Failed runs in a row, whatever the wording, after which an engine is not spawned again. */
+const CONSECUTIVE_FAILURE_LIMIT = 3;
+
 /** Breakers belong to an engine incarnation, not a reusable config string. */
 interface EngineIncarnation {
   readonly config: LocalEngineConfig | null;
   readonly configIncarnation: number | undefined;
   readonly controller: AbortController;
   unavailable: string | null;
+  consecutiveFailures: number;
 }
 
 function sameEngine(left: LocalEngineConfig | null, right: LocalEngineConfig | null): boolean {
@@ -132,13 +180,14 @@ function sameEngine(left: LocalEngineConfig | null, right: LocalEngineConfig | n
     && left.binary === right.binary && left.modelPath === right.modelPath);
 }
 function newIncarnation(config: LocalEngineConfig | null, configIncarnation?: number): EngineIncarnation {
-  return { config: config ? Object.freeze({ ...config }) : null, configIncarnation, controller: new AbortController(), unavailable: null };
+  return { config: config ? Object.freeze({ ...config }) : null, configIncarnation, controller: new AbortController(), unavailable: null, consecutiveFailures: 0 };
 }
-function unavailableMessage(cfg: LocalEngineConfig, operation: 'TTS' | 'STT', kind: Exclude<LocalEngineFailureKind, 'not-fatal'>,
-  signal = ''): string {
-  const cause = kind === 'model-load-incompatible'
+function unavailableMessage(cfg: LocalEngineConfig, operation: 'TTS' | 'STT', failure: LocalEngineFailure, failures: number): string {
+  const cause = failure.kind === 'model-load-incompatible'
     ? `${cfg.engine} could not load an incompatible model. Update the engine/runtime (including onnxruntime where applicable), or use a compatible model.`
-    : `${cfg.engine} crashed (${signal || 'fatal abort'}) while running ${cfg.binary}. Confirm the binary and model are compatible with this host, including the onnxruntime/model IR versions where applicable (see docs/voice-local.md).`;
+    : failure.kind === 'fatal-crash'
+      ? `${cfg.engine} crashed (${failure.signal || 'fatal abort'}) while running ${cfg.binary}. Confirm the binary and model are compatible with this host, including the onnxruntime/model IR versions where applicable (see docs/voice-local.md).`
+      : `${cfg.engine} failed ${failures} times in a row (last ${failure.code !== undefined ? `exit ${failure.code}` : failure.signal ? `signal ${failure.signal}` : 'run'}) while running ${cfg.binary}. Confirm the binary and model are present and compatible with this host (see docs/voice-local.md).`;
   const prefix = operation === 'TTS' ? 'tts' : 'stt';
   return `Local ${operation} engine '${cfg.engine}' is unavailable on this host, ${cause} Reinstalling the managed voice `
     + 'runtime updates the engine and clears this state, as does a daemon restart or a change to the '
@@ -164,20 +213,19 @@ export interface LocalVoiceProviderOptions {
 export function createLocalVoiceProvider(options: LocalVoiceProviderOptions): VoiceProvider {
   const read = options.readConfig;
   const readConfigIncarnation = options.readConfigIncarnation;
-  const runner = options.runner ?? defaultRunner;
+  const runner = options.runner ?? runLocalEngine;
   const exists = options.fileExists ?? existsSync;
   const resolveManaged = options.resolveManaged;
   const engines: Record<'tts' | 'stt', EngineIncarnation> = {
     tts: newIncarnation(null), stt: newIncarnation(null),
   };
-  // Observing a transition (including configured -> absent -> configured) or
-  // explicitly resetting permanently retires every old request. The optional
-  // monotonic config revision also detects unobserved ABA mutations. A later ABA
-  // config value cannot revive its incarnation or its pending failure reading.
+  // A transition (including configured -> absent -> configured), an explicit
+  // reset, or a newer configuration revision starts a new incarnation; a late
+  // failure from an older one cannot trip the newer one's breaker. The engine
+  // settings are read once per call.
   const observeEngine = (prefix: 'tts' | 'stt'): EngineIncarnation => {
     const configIncarnation = readConfigIncarnation?.();
     const config = readEngine(read, prefix, resolveManaged);
-    if (configIncarnation !== readConfigIncarnation?.()) throw new Error('Local voice configuration changed while it was being read.');
     const previous = engines[prefix];
     if (!sameEngine(previous.config, config) || previous.configIncarnation !== configIncarnation) {
       engines[prefix] = newIncarnation(config, configIncarnation);
@@ -185,26 +233,21 @@ export function createLocalVoiceProvider(options: LocalVoiceProviderOptions): Vo
     }
     return engines[prefix];
   };
-  const beginInvocation = (prefix: 'tts' | 'stt', incarnation: EngineIncarnation, privateInputs: readonly string[], signal?: AbortSignal) => {
-    const active = AbortSignal.any([incarnation.controller.signal, ...(signal ? [signal] : [])]);
-    const assertCurrent = () => {
-      active.throwIfAborted();
-      if (observeEngine(prefix) !== incarnation) throw new Error('Local voice engine invocation is no longer current.');
-    };
-    assertCurrent();
-    return ownLocalEngineFailureLifetime(incarnation.config!, active, assertCurrent, privateInputs);
-  };
-  const classifyFailure = async (error: unknown, incarnation: EngineIncarnation, operation: 'TTS' | 'STT',
-    lifetime: ReturnType<typeof beginInvocation>): Promise<string | null> => {
-    lifetime.assertCurrent();
-    const structured = structuredLocalEngineFailure(error);
-    const kind = structured?.kind ?? await readLocalEngineFailure(error, incarnation.config!.engine, operation, lifetime);
-    lifetime.assertCurrent();
-    if (kind === undefined || kind === 'not-fatal') return null;
-    assertLocalEngineFailureCurrent(lifetime);
-    // First current failure wins; concurrent callers cannot overwrite it, and
-    // a reset/config transition cannot be poisoned by any late old failure.
-    return incarnation.unavailable ??= unavailableMessage(incarnation.config!, operation, kind, structured?.signal);
+  const runEngine = async <T>(incarnation: EngineIncarnation, operation: 'TTS' | 'STT', signal: AbortSignal | undefined,
+    run: (signal: AbortSignal) => Promise<T>): Promise<T> => {
+    const active = signal ? AbortSignal.any([incarnation.controller.signal, signal]) : incarnation.controller.signal;
+    try {
+      const result = await run(active);
+      incarnation.consecutiveFailures = 0;
+      return result;
+    } catch (error) {
+      const failure = structuredLocalEngineFailure(error);
+      if (failure.kind === 'cancelled' || active.aborted) throw error;
+      const failures = ++incarnation.consecutiveFailures;
+      if (failure.kind === 'failed' && failures < CONSECUTIVE_FAILURE_LIMIT) throw error;
+      // First trip wins; a concurrent failure cannot overwrite its message.
+      throw new Error(incarnation.unavailable ??= unavailableMessage(incarnation.config!, operation, failure, failures));
+    }
   };
 
   const synthesizeWav = async (request: VoiceSynthesisRequest): Promise<{ wav: Buffer; engine: LocalEngineConfig }> => {
@@ -218,26 +261,16 @@ export function createLocalVoiceProvider(options: LocalVoiceProviderOptions): Vo
       );
     }
     if (incarnation.unavailable) throw new Error(incarnation.unavailable);
-    const text = request.text;
-    const lifetime = beginInvocation('tts', incarnation, [text], request.signal);
     const scratch = mkdtempSync(join(tmpdir(), 'gv-local-tts-'));
     const outPath = join(scratch, 'out.wav');
     try {
-      // piper and the kokoro wrapper share the same contract: text on stdin,
-      // wav to --output_file.
-      await executePolicyCheck(() => runner({
-        binary: tts.binary,
-        args: ['--model', tts.modelPath, '--output_file', outPath],
-        stdinText: text,
-        timeoutMs: RUN_TIMEOUT_MS,
-        signal: lifetime.signal,
-      }), lifetime.signal);
-      lifetime.assertCurrent();
-      return { wav: readFileSync(outPath), engine: tts };
-    } catch (error) {
-      const failure = await classifyFailure(error, incarnation, 'TTS', lifetime);
-      if (failure) throw new Error(failure);
-      throw error;
+      return await runEngine(incarnation, 'TTS', request.signal, async (signal) => {
+        await runner({ binary: tts.binary, args: localTtsArgs(tts.modelPath, outPath), stdinText: request.text, timeoutMs: RUN_TIMEOUT_MS, signal });
+        // An engine can exit 0 and write nothing; reading the file is that check.
+        const wav = readFileSync(outPath);
+        if (wav.byteLength === 0) throw new Error(`${tts.engine} exited without writing any audio`);
+        return { wav, engine: tts };
+      });
     } finally {
       rmSync(scratch, { recursive: true, force: true });
     }
@@ -257,27 +290,17 @@ export function createLocalVoiceProvider(options: LocalVoiceProviderOptions): Vo
       throw new Error('local STT needs inline audio (dataBase64)');
     }
     if (incarnation.unavailable) throw new Error(incarnation.unavailable);
-    const dataBase64 = request.audio.dataBase64;
-    const lifetime = beginInvocation('stt', incarnation, [dataBase64, request.prompt ?? ''], request.signal);
     const scratch = mkdtempSync(join(tmpdir(), 'gv-local-stt-'));
     const wavPath = join(scratch, 'in.wav');
     try {
-      writeFileSync(wavPath, Buffer.from(dataBase64, 'base64'));
-      const args = stt.engine === 'whisper-cpp'
-        ? ['-m', stt.modelPath, '-f', wavPath, '--no-timestamps', '--no-prints']
-        : [stt.modelPath, wavPath];
-      const { stdout } = await executePolicyCheck(() => runner({ binary: stt.binary, args, timeoutMs: RUN_TIMEOUT_MS,
-        signal: lifetime.signal }), lifetime.signal);
-      lifetime.assertCurrent();
+      writeFileSync(wavPath, Buffer.from(request.audio.dataBase64, 'base64'));
+      const { stdout } = await runEngine(incarnation, 'STT', request.signal, (signal) =>
+        runner({ binary: stt.binary, args: localSttArgs(stt.engine, stt.modelPath, wavPath), timeoutMs: RUN_TIMEOUT_MS, signal }));
       return {
         providerId: 'local',
         text: stdout.trim(),
         metadata: { engine: stt.engine, modelPath: stt.modelPath, billing: 'none' },
       };
-    } catch (error) {
-      const failure = await classifyFailure(error, incarnation, 'STT', lifetime);
-      if (failure) throw new Error(failure);
-      throw error;
     } finally {
       rmSync(scratch, { recursive: true, force: true });
     }

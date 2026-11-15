@@ -5,6 +5,7 @@ import {
   readFirstEnv,
   signalInit,
   voiceFetch,
+  voiceHttpError,
 } from './shared.js';
 
 
@@ -54,7 +55,7 @@ export function createVydraProvider(): VoiceProvider {
           voice_id: request.voiceId?.trim() || '21m00Tcm4TlvDq8ikWAM',
         }),
       });
-      if (!response.ok) throw new Error(`Vydra synthesis failed: HTTP ${response.status}`);
+      if (!response.ok) throw await voiceHttpError('Vydra', 'synthesis', response);
       const payload = await response.json() as Record<string, unknown>;
       const urls = [
         typeof payload['audio_url'] === 'string' ? payload['audio_url'] : null,
@@ -70,7 +71,7 @@ export function createVydraProvider(): VoiceProvider {
       const audioUrl = urls[0]!;
       if (!audioUrl) throw new Error('Vydra speech synthesis response missing audio URL');
       const audioResponse = await voiceFetch(audioUrl, signalInit(request.signal));
-      if (!audioResponse.ok) throw new Error(`Vydra audio download failed: HTTP ${audioResponse.status}`);
+      if (!audioResponse.ok) throw await voiceHttpError('Vydra', 'audio download', audioResponse);
       const mimeType = audioResponse.headers.get('content-type')?.trim() || 'audio/mpeg';
       return {
         providerId: 'vydra',

@@ -20,7 +20,7 @@ export interface VoiceInstallComponentProgress {
   readonly message?: string | undefined;
   /** The component's pinned size in bytes, where the manifest knows it. */
   readonly bytesTotal?: number | undefined;
-  /** Bytes landed on disk, where known (completion boundaries, downloads verify whole-file). */
+  /** Bytes on disk for this component, updated as the download streams. */
   readonly bytesDone?: number | undefined;
 }
 

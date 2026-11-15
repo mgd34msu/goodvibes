@@ -19,13 +19,10 @@
  * proof that ran the binaries differently would prove something the product
  * does not do.
  */
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { execFile } from 'node:child_process';
-import { assertVoiceProofCurrent, beginVoiceProofReading, ownVoiceProofLifetime, readVoiceRoundTrip, type VoiceProofComparison, type VoiceProofLifetime } from './round-trip-reading.js';
-import { executePolicyCheck } from '../../gate/execute-policy-check.js';
-import { activateClassicFallback, decisionOrClassic, isClassicOperation, withConfiguredDecisionModelPolicy } from '../../runtime/decision-policy.js';
+import { localSttArgs, localTtsArgs, runLocalEngine, type LocalEngineRunner } from '../providers/local.js';
 
 /**
  * The phrase the proof speaks. Deliberately plain, common words: the point is
@@ -34,54 +31,26 @@ import { activateClassicFallback, decisionOrClassic, isClassicOperation, withCon
  */
 export const VOICE_PROOF_PHRASE = 'the quick brown fox jumps over the lazy dog';
 
-/** @deprecated Compatibility measurement only; never authorizes proof. */
-export const VOICE_PROOF_MIN_WORD_OVERLAP = 0.5;
+/**
+ * Word substitutions, insertions or deletions the transcript may differ by and
+ * still prove the round trip. One: a small model writing "jumped" for "jumps"
+ * still heard the phrase, and both engines plainly ran.
+ */
+export const VOICE_PROOF_MAX_WORD_EDITS = 1;
 
-/** Injectable process seam, matching providers/local.ts. */
-export type ProofEngineRunner = (input: {
-  readonly binary: string;
-  readonly args: readonly string[];
-  readonly stdinText?: string | undefined;
-  readonly timeoutMs: number;
+/** The engine runner the proof uses: the local provider's own, unless a test injects one. */
+export type ProofEngineRunner = LocalEngineRunner;
+
+/** Who may still want the proof: the caller's abort signal and its own currency check. */
+export interface VoiceProofLifetime {
   readonly signal?: AbortSignal | undefined;
-}) => Promise<{ stdout: string }>;
+  readonly assertCurrent?: (() => void) | undefined;
+}
 
-const defaultRunner: ProofEngineRunner = (input) =>
-  new Promise((resolve, reject) => {
-    input.signal?.throwIfAborted();
-    let failure: Error | undefined;
-    let output = '';
-    let escalation: ReturnType<typeof setTimeout> | undefined;
-    let closing = false;
-    const child = execFile(input.binary, [...input.args], { maxBuffer: 64 * 1024 * 1024 }, (error, stdout) => {
-      output = stdout;
-      if (error) { failure ??= error; terminate(); }
-    });
-    // execFile's abort callback can precede process close. Settlement owns the
-    // actual close event, so scratch cleanup and a new install cannot race a
-    // child that ignored SIGTERM and is still writing its output file.
-    const terminate = () => {
-      if (closing || child.exitCode !== null || child.signalCode !== null) return;
-      child.kill('SIGTERM');
-      escalation ??= setTimeout(() => { if (!closing) child.kill('SIGKILL'); }, 250);
-    };
-    const abort = () => { failure ??= new Error('The voice proof subprocess was cancelled.'); terminate(); };
-    const timeout = setTimeout(() => { failure ??= new Error('The voice proof subprocess deadline expired.'); terminate(); }, input.timeoutMs);
-    input.signal?.addEventListener('abort', abort, { once: true });
-    if (input.signal?.aborted) abort();
-    child.once('close', () => {
-      closing = true;
-      clearTimeout(timeout);
-      if (escalation) clearTimeout(escalation);
-      input.signal?.removeEventListener('abort', abort);
-      if (failure) reject(failure);
-      else resolve({ stdout: output });
-    });
-    if (input.stdinText !== undefined && child.stdin) {
-      child.stdin.on('error', () => { /* Process completion reports broken pipes. */ });
-      child.stdin.end(input.stdinText);
-    }
-  });
+export function assertVoiceProofCurrent(lifetime: VoiceProofLifetime): void {
+  lifetime.signal?.throwIfAborted();
+  lifetime.assertCurrent?.();
+}
 
 export interface VoiceRoundTripProofOptions extends VoiceProofLifetime {
   readonly ttsEngine: string;
@@ -99,12 +68,11 @@ export interface VoiceRoundTripProofOptions extends VoiceProofLifetime {
 
 /** What the proof did, in enough detail to report it honestly either way. */
 export interface VoiceRoundTripProof {
-  readonly operationProvenance?: 'classic';
-  readonly semanticAssessment?: 'not-evaluated';
+  /** How the transcript was compared: its ordered words, in code. */
   readonly proofBasis?: 'native-word-sequence';
   readonly proved: boolean;
-  /** Semantic verdict or an explicitly native comparison; absent if an engine stage failed. */
-  readonly comparison?: VoiceProofComparison | 'classic-exact-match' | 'classic-mismatch' | undefined;
+  /** Whether the transcript says the phrase; absent if an engine stage failed. */
+  readonly comparison?: 'yes' | 'no' | undefined;
   /** Which stage ran last: `synthesize`, `transcribe`, or `compare`. */
   readonly stage: 'synthesize' | 'transcribe' | 'compare';
   readonly phrase: string;
@@ -118,77 +86,64 @@ export interface VoiceRoundTripProof {
   readonly summary: string;
 }
 
-function normalizeWords(text: string): string[] {
-  return text
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, ' ')
-    .split(/\s+/)
-    .filter((word) => word.length > 0);
+/** Lower-cased Unicode word tokens, punctuation dropped. */
+function words(text: string): string[] {
+  return text.toLowerCase().match(/[\p{L}\p{M}\p{N}]+/gu) ?? [];
 }
 
 /** Fraction of `expected`'s distinct words that appear in `actual`. */
 export function transcriptWordOverlap(expected: string, actual: string): number {
-  const wanted = new Set(normalizeWords(expected));
+  const wanted = new Set(words(expected));
   if (wanted.size === 0) return 0;
-  const got = new Set(normalizeWords(actual));
+  const got = new Set(words(actual));
   let hits = 0;
   for (const word of wanted) if (got.has(word)) hits += 1;
   return hits / wanted.size;
 }
 
+/** Word-level edit distance between two token lists. */
+function wordEdits(expected: readonly string[], actual: readonly string[]): number {
+  let previous = Array.from({ length: actual.length + 1 }, (_, index) => index);
+  for (let i = 1; i <= expected.length; i++) {
+    const row = [i];
+    for (let j = 1; j <= actual.length; j++) {
+      row[j] = Math.min(previous[j]! + 1, row[j - 1]! + 1, previous[j - 1]! + (expected[i - 1] === actual[j - 1] ? 0 : 1));
+    }
+    previous = row;
+  }
+  return previous[actual.length]!;
+}
+
 /**
  * Speak a phrase with the managed TTS and read it back with the managed STT.
  *
- * Engine failures are reported by stage. Cancellation, deadline and retired
- * ownership reject instead of publishing a stale success or engine diagnosis.
+ * Engine failures are reported by stage. Cancellation and the deadline reject
+ * instead of publishing a stale result. The comparison is code: the ordered
+ * words, allowing {@link VOICE_PROOF_MAX_WORD_EDITS}.
  */
 export async function proveVoiceRoundTrip(options: VoiceRoundTripProofOptions): Promise<VoiceRoundTripProof> {
-  return withConfiguredDecisionModelPolicy(() => proveOwnedVoiceRoundTrip(options));
-}
-
-async function proveOwnedVoiceRoundTrip(options: VoiceRoundTripProofOptions): Promise<VoiceRoundTripProof> {
-  options = Object.freeze({ ...options });
   const phrase = options.phrase ?? VOICE_PROOF_PHRASE;
-  const runner = options.runner ?? defaultRunner;
+  const runner = options.runner ?? runLocalEngine;
   const timeoutMs = options.timeoutMs ?? 120_000;
   const deadline = AbortSignal.timeout(Math.max(1, Math.min(2_147_483_647, Math.floor(timeoutMs))));
-  const lifetime = ownVoiceProofLifetime({ signal: AbortSignal.any([deadline, ...(options.signal ? [options.signal] : [])]), assertCurrent: options.assertCurrent });
+  const signal = options.signal ? AbortSignal.any([deadline, options.signal]) : deadline;
+  const lifetime: VoiceProofLifetime = { signal, assertCurrent: options.assertCurrent };
   const check = () => assertVoiceProofCurrent(lifetime);
   check();
-  // Capture before either subprocess; absence is an unproven comparison, not a broken engine.
-  let owner: ReturnType<typeof beginVoiceProofReading> | undefined;
-  if (!isClassicOperation()) {
-    try { owner = beginVoiceProofReading(phrase, lifetime); }
-    catch (error) { check(); activateClassicFallback(error); }
-  }
-  const activeSignal = AbortSignal.any([...(owner ? [owner.signal] : []), ...(lifetime.signal ? [lifetime.signal] : [])]);
-  // Injected Promise-only seams are interruptible; the real runner itself
-  // owns termination and does not settle until its child closes.
-  const run = (input: Parameters<ProofEngineRunner>[0]) => options.runner
-    ? executePolicyCheck(() => runner(input), activeSignal) : runner(input);
   const scratch = options.scratchDir ?? mkdtempSync(join(tmpdir(), 'gv-voice-proof-'));
   const wavPath = join(scratch, 'proof.wav');
 
   try {
     try {
-      check();
-      await run({
-        binary: options.ttsBinary,
-        args: ['--model', options.ttsModelPath, '--output_file', wavPath],
-        stdinText: phrase,
-        timeoutMs, signal: activeSignal,
-      });
+      await runner({ binary: options.ttsBinary, args: localTtsArgs(options.ttsModelPath, wavPath), stdinText: phrase, timeoutMs, signal });
       check();
       // The engine may exit 0 and still have written nothing; reading it is the
       // check that the audio exists at all.
-      const wav = readFileSync(wavPath);
-      if (wav.byteLength === 0) throw new Error('the synthesized audio file is empty');
-      writeFileSync(wavPath, wav);
+      if (readFileSync(wavPath).byteLength === 0) throw new Error('the synthesized audio file is empty');
     } catch (error) {
       check();
       const detail = error instanceof Error ? error.message : String(error);
       return {
-        ...(isClassicOperation() ? { operationProvenance: 'classic' as const, semanticAssessment: 'not-evaluated' as const } : {}),
         proved: false,
         stage: 'synthesize',
         phrase,
@@ -198,21 +153,14 @@ async function proveOwnedVoiceRoundTrip(options: VoiceRoundTripProofOptions): Pr
     }
 
     let transcript: string;
-    let rawTranscript: string;
     try {
-      const args = options.sttEngine === 'whisper-cpp'
-        ? ['-m', options.sttModelPath, '-f', wavPath, '--no-timestamps', '--no-prints']
-        : [options.sttModelPath, wavPath];
+      const { stdout } = await runner({ binary: options.sttBinary, args: localSttArgs(options.sttEngine, options.sttModelPath, wavPath), timeoutMs, signal });
       check();
-      const { stdout } = await run({ binary: options.sttBinary, args, timeoutMs, signal: activeSignal });
-      check();
-      rawTranscript = stdout;
       transcript = stdout.trim();
     } catch (error) {
       check();
       const detail = error instanceof Error ? error.message : String(error);
       return {
-        ...(isClassicOperation() ? { operationProvenance: 'classic' as const, semanticAssessment: 'not-evaluated' as const } : {}),
         proved: false,
         stage: 'transcribe',
         phrase,
@@ -221,34 +169,19 @@ async function proveOwnedVoiceRoundTrip(options: VoiceRoundTripProofOptions): Pr
       };
     }
 
-    const wordOverlap = transcriptWordOverlap(phrase, transcript);
-    const comparison = await decisionOrClassic<NonNullable<VoiceRoundTripProof['comparison']>>(
-      () => readVoiceRoundTrip(phrase, rawTranscript, lifetime, owner),
-      () => {
-        check();
-        // Exact ordered Unicode word tokens. No synonym, number-word or
-        // paraphrase interpretation, and no overlap threshold is authority.
-        const words = (text: string) => text.toLowerCase().match(/[\p{L}\p{M}\p{N}]+/gu) ?? [];
-        const expected = words(phrase), actual = words(rawTranscript);
-        const same = expected.length > 0 && expected.length === actual.length && expected.every((word, index) => word === actual[index]);
-        check(); return same ? 'classic-exact-match' : 'classic-mismatch';
-      }, () => { check(); return true; });
-    check();
-    const proved = comparison === 'yes' || comparison === 'classic-exact-match';
-    const nativeComparison = comparison === 'classic-exact-match' || comparison === 'classic-mismatch';
+    const expected = words(phrase);
+    const proved = expected.length > 0 && wordEdits(expected, words(transcript)) <= VOICE_PROOF_MAX_WORD_EDITS;
     return {
-      ...(nativeComparison ? { operationProvenance: 'classic' as const, semanticAssessment: 'not-evaluated' as const, proofBasis: 'native-word-sequence' as const } : {}),
+      proofBasis: 'native-word-sequence',
       proved,
-      comparison,
+      comparison: proved ? 'yes' : 'no',
       stage: 'compare',
       phrase,
       transcript,
-      wordOverlap,
-      summary: nativeComparison
-        ? `Classic voice test: spoke "${phrase}" with ${options.ttsEngine} and ${options.sttEngine} returned "${transcript}". The native ordered word sequence ${proved ? 'matched' : 'did not match'}; semantic equivalence was not evaluated.`
-        : proved
+      wordOverlap: transcriptWordOverlap(phrase, transcript),
+      summary: proved
         ? `Spoke "${phrase}" with ${options.ttsEngine} and heard it back through ${options.sttEngine} as "${transcript}".`
-        : `Spoke "${phrase}" with ${options.ttsEngine} and ${options.sttEngine} returned "${transcript}". The round trip remains unproven: ${comparison === 'no' ? 'the transcript does not say the complete test phrase' : comparison === 'uncertain' ? 'the comparison was uncertain' : 'the comparison was unavailable'}.`,
+        : `Spoke "${phrase}" with ${options.ttsEngine} and ${options.sttEngine} returned "${transcript}", which does not say the test phrase. Both engines ran; check that the speech-to-text model is the managed one, then reinstall.`,
     };
   } finally {
     if (options.scratchDir === undefined) rmSync(scratch, { recursive: true, force: true });

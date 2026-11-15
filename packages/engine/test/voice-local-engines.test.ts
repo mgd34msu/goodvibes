@@ -129,8 +129,7 @@ describe('a spoken conversation with no cloud voice dependency (scripted engines
       setInterval: (() => 1) as never,
       clearInterval: (() => {}) as never,
     });
-    expect(controller.submitNextTurn(heard.text)).toBe(true);
-    controller.handleTurnEvent({ type: 'TURN_SUBMITTED', turnId: 'turn-1', prompt: heard.text } as never);
+    controller.handleTurnEvent({ type: 'TURN_SUBMITTED', turnId: 'turn-1', prompt: heard.text, origin: { source: 'tts' } } as never);
     controller.handleTurnEvent({ type: 'STREAM_DELTA', turnId: 'turn-1', content: 'The plan is simple: ship the local voice engines. ', accumulated: '' } as never);
     controller.handleTurnEvent({ type: 'TURN_COMPLETED', turnId: 'turn-1', response: '', stopReason: 'completed' } as never);
     // Give the pipeline a few macrotasks to synthesize + play.

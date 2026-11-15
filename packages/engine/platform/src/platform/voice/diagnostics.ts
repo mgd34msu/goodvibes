@@ -20,20 +20,19 @@
  */
 import { readJsonFileOrQuarantine, writeJsonFileAtomic } from '../utils/atomic-json-store.js';
 import { join } from 'node:path';
-import { tryAcquireCrossProcessLock } from '../workspace/checkpoint/cross-process-lock.js';
+import { ProcessLockBusyError, ProcessLockUnavailableError, withProcessLockSync } from '../utils/process-lock.js';
 
 /** File name of the voice diagnostics log within a surface's managed voice root. */
 export const VOICE_DIAGNOSTICS_FILE = 'voice-diagnostics.json';
 
-/** Lock file serializing writers of the diagnostics file. */
-const VOICE_DIAGNOSTICS_LOCK_FILE = 'voice-diagnostics.lock';
+/** Kernel lock serializing writers of the diagnostics file; a dead holder releases it with its process. */
+const VOICE_DIAGNOSTICS_LOCK_FILE = 'voice-diagnostics.json.writer.sqlite';
 
 /** Newest entries kept. Older ones are dropped on the next write. */
 export const VOICE_DIAGNOSTICS_MAX_ENTRIES = 50;
 
-/** Attempts, and the pause between them, to take the cross-process lock around one read-modify-write. */
-const DIAGNOSTICS_LOCK_ATTEMPTS = 20;
-const DIAGNOSTICS_LOCK_PAUSE_MS = 5;
+/** How long a writer waits for another process's write to finish. */
+const DIAGNOSTICS_LOCK_WAIT_MS = 100;
 
 /**
  * Hold the diagnostics lock for `work`. The daemon and a terminal product both
@@ -43,19 +42,11 @@ const DIAGNOSTICS_LOCK_PAUSE_MS = 5;
  * costs at worst the race it was meant to close.
  */
 function withDiagnosticsLock(managedRoot: string, work: () => void): void {
-  let release: (() => void) | null = null;
   try {
-    for (let attempt = 0; attempt < DIAGNOSTICS_LOCK_ATTEMPTS && release === null; attempt++) {
-      release = tryAcquireCrossProcessLock(join(managedRoot, VOICE_DIAGNOSTICS_LOCK_FILE));
-      if (release === null) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, DIAGNOSTICS_LOCK_PAUSE_MS);
-    }
-  } catch {
-    release = null;
-  }
-  try {
+    withProcessLockSync(join(managedRoot, VOICE_DIAGNOSTICS_LOCK_FILE), work, { waitMs: DIAGNOSTICS_LOCK_WAIT_MS });
+  } catch (error) {
+    if (!(error instanceof ProcessLockBusyError || error instanceof ProcessLockUnavailableError)) return;
     work();
-  } finally {
-    try { release?.(); } catch { /* A lock that cannot be released is reclaimed once this process is gone. */ }
   }
 }
 

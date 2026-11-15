@@ -1,114 +1,15 @@
 /**
  * voice-download-and-breaker.test.ts
  *
- * Local voice model downloads are atomic + verified, a truncated .onnx
- * (Content-Length short, too small, HTML error page, or bad magic) is rejected
- * and never left at the final path.
- *
  * When the local TTS engine hard-fails (the piper SIGABRT / onnxruntime
  * "Unsupported model IR version" abort on this host), the provider trips a
  * circuit breaker, one honest engine-unavailable state, no per-chunk crash
  * storm, and a transient timeout does NOT trip it.
  */
-import { afterEach, describe, expect, test } from 'bun:test';
-import { existsSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
-import { basename, join } from 'node:path';
-import { downloadVoiceModel } from '../platform/src/platform/voice/model-download.ts';
+import { describe, expect, test } from 'bun:test';
+import { writeFileSync } from 'node:fs';
 import { createLocalVoiceProvider } from '../platform/src/platform/voice/providers/local.ts';
 import type { VoiceSynthesisRequest } from '../platform/src/platform/voice/types.ts';
-import { makeProjectTempDir } from './_helpers/project-temp.ts';
-
-function onnxBytes(n = 8192): Uint8Array {
-  const b = new Uint8Array(n);
-  b[0] = 0x08; // ONNX ModelProto ir_version field tag
-  return b;
-}
-
-function mockResponse(body: Uint8Array, opts: { ok?: boolean; status?: number; contentLength?: number | null } = {}): Response {
-  const cl = opts.contentLength === undefined ? body.length : opts.contentLength;
-  return {
-    ok: opts.ok ?? true,
-    status: opts.status ?? 200,
-    headers: { get: (k: string): string | null => (k.toLowerCase() === 'content-length' && cl !== null ? String(cl) : null) },
-    arrayBuffer: async (): Promise<ArrayBuffer> => body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength) as ArrayBuffer,
-  } as unknown as Response;
-}
-function mockFetch(resp: Response): typeof fetch {
-  return (async () => resp) as unknown as typeof fetch;
-}
-
-const dirs: string[] = [];
-function tempDir(): string {
-  const dir = makeProjectTempDir('gv-voice-dl');
-  dirs.push(dir);
-  return dir;
-}
-afterEach(() => {
-  for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
-});
-
-describe('atomic voice model download', () => {
-  test('a complete, verified model lands atomically at the final path', async () => {
-    const dir = tempDir();
-    const dest = join(dir, 'en_US-glados-high.onnx');
-    const bytes = onnxBytes(8192);
-    const result = await downloadVoiceModel({ url: 'https://models.test/x.onnx', destPath: dest, fetchImpl: mockFetch(mockResponse(bytes)) });
-    expect(result.ok).toBe(true);
-    expect(existsSync(dest)).toBe(true);
-    // Only the final file remains: no temp or partial file beside it.
-    expect(readdirSync(dir)).toEqual([basename(dest)]);
-  });
-
-  test('a Content-Length-short (truncated) download is rejected; no partial at the final path', async () => {
-    const dir = tempDir();
-    const dest = join(dir, 'voice.onnx');
-    const bytes = onnxBytes(100); // server promised more
-    const result = await downloadVoiceModel({ url: 'u', destPath: dest, fetchImpl: mockFetch(mockResponse(bytes, { contentLength: 8192 })) });
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error).toMatch(/truncated/i);
-    expect(existsSync(dest)).toBe(false);
-    expect(readdirSync(dir)).toEqual([]);
-  });
-
-  test('a too-small download (no Content-Length) is rejected', async () => {
-    const dir = tempDir();
-    const dest = join(dir, 'voice.onnx');
-    const result = await downloadVoiceModel({ url: 'u', destPath: dest, fetchImpl: mockFetch(mockResponse(onnxBytes(100), { contentLength: null })) });
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error).toMatch(/too small/i);
-    expect(existsSync(dest)).toBe(false);
-  });
-
-  test('an HTML error page served with 200 is rejected', async () => {
-    const dir = tempDir();
-    const dest = join(dir, 'voice.onnx');
-    const html = new TextEncoder().encode('<!DOCTYPE html><html><body>rate limited</body></html>'.padEnd(5000, ' '));
-    const result = await downloadVoiceModel({ url: 'u', destPath: dest, fetchImpl: mockFetch(mockResponse(html)) });
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error).toMatch(/HTML/i);
-    expect(existsSync(dest)).toBe(false);
-  });
-
-  test('bad ONNX magic is rejected', async () => {
-    const dir = tempDir();
-    const dest = join(dir, 'voice.onnx');
-    const bytes = new Uint8Array(8192); // first byte 0x00, not 0x08
-    const result = await downloadVoiceModel({ url: 'u', destPath: dest, fetchImpl: mockFetch(mockResponse(bytes)) });
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error).toMatch(/not a valid ONNX/i);
-    expect(existsSync(dest)).toBe(false);
-    expect(readdirSync(dir)).toEqual([]);
-  });
-
-  test('a .json config (magic check off) downloads when non-trivial', async () => {
-    const dir = tempDir();
-    const dest = join(dir, 'voice.onnx.json');
-    const json = new TextEncoder().encode(JSON.stringify({ audio: { sample_rate: 22050 } }).padEnd(5000, ' '));
-    const result = await downloadVoiceModel({ url: 'u', destPath: dest, fetchImpl: mockFetch(mockResponse(json)) });
-    expect(result.ok).toBe(true);
-    expect(existsSync(dest)).toBe(true);
-  });
-});
 
 function ttsConfig(): (key: string) => string {
   const values: Record<string, string> = {
@@ -150,6 +51,21 @@ describe('local TTS hard-failure circuit breaker', () => {
     const status = await provider.status!();
     expect(status.state).toBe('degraded');
     expect(status.detail).toMatch(/unavailable on this host/i);
+  });
+
+  test('an engine that keeps failing with wording nothing recognises stops being spawned after three runs', async () => {
+    let calls = 0;
+    const provider = createLocalVoiceProvider({
+      readConfig: ttsConfig(),
+      fileExists: () => true,
+      runner: async () => {
+        calls += 1;
+        throw Object.assign(new Error('Command failed'), { code: 1, stderr: 'something nobody has seen before' });
+      },
+    });
+    for (let chunk = 0; chunk < 10; chunk++) await provider.synthesize!(req).catch(() => {});
+    expect(calls).toBe(3);
+    await expect(provider.synthesize!(req)).rejects.toThrow(/failed 3 times in a row/);
   });
 
   test('a transient timeout does NOT trip the breaker', async () => {

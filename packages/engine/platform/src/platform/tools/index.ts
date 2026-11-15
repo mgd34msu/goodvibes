@@ -504,11 +504,14 @@ export function registerAllTools(
   // parser, the workspace's language files, and one set of language servers
   // (started by find references, then also asked for type errors after an
   // edit). Without a home directory the language files cannot be resolved, so
-  // it parses with the built-in table and has no language servers.
+  // it parses with the built-in table and has no language servers. The facade
+  // is the workspace's shared one, so /intelligence and worker agents in the
+  // same directory ask the same warm servers.
   const intelligenceHome = deps.configManager.getHomeDirectory();
-  const codeIntelligence = new CodeIntelligence(intelligenceHome
-    ? { shellPaths: createShellPathService({ workingDirectory, homeDirectory: intelligenceHome }) }
-    : {});
+  const intelligenceHold = intelligenceHome
+    ? CodeIntelligence.holdForWorkspace(createShellPathService({ workingDirectory, homeDirectory: intelligenceHome }))
+    : undefined;
+  const codeIntelligence = intelligenceHold?.intelligence ?? new CodeIntelligence({});
   registerTool(new ReadTool(projectIndex, fileCache, codeIntelligence, deps.capturedReadAccess, allowOutsideProject, () => readConfigManager.get('tools.defaultTokenBudget')),
     deps.readAdmissionPolicy === 'agent-main-conversation'
       ? { inputProjection: createAgentReadInputProjector(projectIndex, allowOutsideProject) } : undefined);
@@ -646,7 +649,7 @@ export function registerAllTools(
   // Every state-tool write is on disk when the call returns, so no exit hook is needed to flush it.
   const kvState = kvBinding.state;
   const dispose = async (): Promise<void> => {
-    await codeIntelligence.dispose();
+    await (intelligenceHold ? intelligenceHold.release() : codeIntelligence.dispose());
     await kvBinding.dispose();
   };
   // Only the host's real dispatcher is ever handed over (a private one would accept hooks nothing fires).

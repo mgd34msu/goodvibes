@@ -18,7 +18,6 @@ import { ArchetypeLoader } from '@goodvibes-jev/engine/platform/platform/agents'
 import { AgentMessageBus } from '@goodvibes-jev/engine/platform/platform/agents';
 import { AgentOrchestrator } from '@goodvibes-jev/engine/platform/platform/agents';
 import { AutomationManager } from '@goodvibes-jev/engine/platform/platform/automation';
-import { ChannelPolicyManager } from '@goodvibes-jev/engine/platform/platform/channels';
 import { RouteBindingManager } from '@goodvibes-jev/engine/platform/platform/channels';
 import { ToolLLM } from '@goodvibes-jev/engine/platform/platform/config';
 import { ApprovalBroker } from '@goodvibes-jev/engine/platform/platform/control-plane';
@@ -313,10 +312,6 @@ export async function getTestApprovalBroker(): Promise<ApprovalBroker> {
 
 export async function getTestAutomationManager(): Promise<AutomationManager> {
   return (await getTestRuntimeServices()).automationManager;
-}
-
-export async function getTestChannelPolicyManager(): Promise<ChannelPolicyManager> {
-  return (await getTestRuntimeServices()).channelPolicy;
 }
 
 export async function getTestFileUndoManager(): Promise<FileUndoManager> {

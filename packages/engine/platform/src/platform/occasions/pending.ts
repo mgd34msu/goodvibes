@@ -70,8 +70,6 @@ export interface PendingInput {
   readonly plans: readonly Plan[];
   readonly openItems: readonly OpenItem[];
   readonly acknowledgements: readonly OccasionAcknowledgement[];
-  /** Whether the agent is a configured push destination. */
-  readonly agentIsPushed: boolean;
 }
 
 type PreparedPending = Omit<PendingResult, 'nudge'> & { readonly nudge: Omit<OccasionNudge, 'id' | 'raisedAt'> | null };
@@ -79,12 +77,9 @@ type PreparedPending = Omit<PendingResult, 'nudge'> & { readonly nudge: Omit<Occ
 /**
  * Compose the pull. Pure: same inputs, same answer.
  *
- * The agent de-duplication is scoped TO THE DAY the push landed, and that
- * narrowing is load-bearing. It used to be permanent, an item the agent had
- * ever been pushed carried a stamp and never appeared here again, which was
- * survivable when a push repeated every few days and is not survivable now that
- * there are only two. Same day: do not say it twice in one conversation. Any
- * other day: of course it is listed.
+ * Every open item is listed until it is answered: the Agent is never pushed at,
+ * so this read is the only way it hears a reminder and there is nothing to
+ * de-duplicate against.
  */
 export function preparePending(input: PendingInput): PreparedPending {
   const byId = new Map(input.occasions.map((entry) => [entry.id, entry]));
@@ -114,7 +109,6 @@ export function preparePending(input: PendingInput): PreparedPending {
     // is still an open question. Only an acknowledgement changes which list it
     // lands in.
     const isAcknowledged = ackByKey.get(`${item.occasionId}@${item.occurrence}`)?.answer === 'acknowledged';
-    if (!isAcknowledged && input.agentIsPushed && item.agentPushedOn === input.today) continue;
     place(occasion, item.occurrence, isAcknowledged);
   }
 

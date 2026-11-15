@@ -33,11 +33,7 @@ import {
   alreadyAnsweredReply,
   type AcknowledgeOutcome,
 } from './acknowledge.js';
-import {
-  NUDGE_AGENT_SURFACE,
-  nudgeDestinationSurface,
-  resolveNudgeDestinations,
-} from './destinations.js';
+import { resolveNudgeDestinations } from './destinations.js';
 import { composeConflictMessage, composeInterviewResumeMessage, prepareNudge, subjectFor } from './nudge.js';
 import { pushNudge, type OccasionNudgeDeliverer } from './push.js';
 import { storedGiftEvidence } from './stored-reading-evidence.js';
@@ -730,14 +726,7 @@ export class OccasionsService {
         // fact about the past, and recording it whatever changed during the send
         // is what stops the same reminder being pushed again next pass.
         if (landed.length > 0) {
-          // Only a push that ACTUALLY landed on the agent stamps the items. A stamp
-          // written on an attempt would silence the pull for a nudge that never
-          // arrived anywhere, which is the one outcome this feature cannot have.
-          const onAgent = landed.some((entry) => nudgeDestinationSurface(entry.channel) === NUDGE_AGENT_SURFACE);
-          await this.deps.state.putOpenItems(
-            awaitingNudge.map((item) => (onAgent ? { ...item, agentPushedOn: today } : item)),
-            op.record, () => {},
-          );
+          await this.deps.state.putOpenItems(awaitingNudge, op.record, () => {});
         } else {
           // Nothing accepted it. An item already stored keeps its unspent
           // boundary as it is; a new one is opened unspent so the pull lists it
@@ -891,9 +880,6 @@ export class OccasionsService {
         plans,
         openItems: await this.deps.state.openItems(),
         acknowledgements: await this.deps.state.acknowledgements(),
-        agentIsPushed: resolveNudgeDestinations(policy.nudgeChannel).some(
-          (destination) => nudgeDestinationSurface(destination) === NUDGE_AGENT_SURFACE,
-        ),
       });
       const interviews = (await this.interviewsInFlight()).map(progressOf);
       op.admitted();

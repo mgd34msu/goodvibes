@@ -55,6 +55,18 @@ export type DeliveryEvent =
       retryable: boolean;
     }
   | {
+      /**
+       * Something is waiting for a surface that collects its own messages. The
+       * Agent reads occasion reminders through `occasions.pending`; this tells a
+       * connected Agent to read now instead of at its next turn or idle check.
+       * It carries no text: the reminder stays on the host until it is answered.
+       */
+      type: 'DELIVERY_WAITING';
+      jobId: string;
+      runId: string;
+      surface: 'agent';
+    }
+  | {
       type: 'DELIVERY_DEAD_LETTERED';
       deliveryId: string;
       jobId: string;

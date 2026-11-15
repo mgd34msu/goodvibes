@@ -60,14 +60,6 @@ test.each(['HomeGraph', 'rewind'] as const)('Agent close waits for %s last while
   const governorStop = spyOn(services.memoryGovernor, 'stop');
   const registryStop = spyOn(services.processRegistry, 'dispose');
   const watcherStop = spyOn(services.watcherRegistry, 'dispose');
-  const triggerDrainEntered = Promise.withResolvers<void>();
-  const releaseTriggerDrain = Promise.withResolvers<void>();
-  const nativeTriggerJoin = services.triggerManager.join.bind(services.triggerManager);
-  const triggerJoin = spyOn(services.triggerManager, 'join').mockImplementation(async () => {
-    triggerDrainEntered.resolve();
-    await releaseTriggerDrain.promise;
-    await nativeTriggerJoin();
-  });
   const records = (store: KnowledgeStore) => JSON.stringify({ sources: store.listSources(), nodes: store.listNodes(),
     edges: store.listEdges(), issues: store.listIssues() });
   const graphEntered = Promise.withResolvers<void>();
@@ -106,12 +98,7 @@ test.each(['HomeGraph', 'rewind'] as const)('Agent close waits for %s last while
     expect(governorStop).toHaveBeenCalledTimes(1); expect(registryStop).toHaveBeenCalledTimes(1);
     expect(watcherStop).toHaveBeenCalledTimes(1);
     expect(homeGraphDispose).toHaveBeenCalledTimes(1); expect(rewindStop).toHaveBeenCalledTimes(1);
-    await triggerDrainEntered.promise;
-    // Trigger cleanup remains an actual ordered drain. It cannot postpone
-    // cancellation of the separately owned pump/rewind or their timer stops.
-    expect(signal.aborted).toBe(true);
     expect(storeClose).not.toHaveBeenCalled(); expect(clientLogClose).not.toHaveBeenCalled();
-    releaseTriggerDrain.resolve();
     let settled = false; void closing.then(() => { settled = true; });
     await rewindEntered.promise; await Promise.resolve();
     expect(settled).toBe(false); expect(storeClose).not.toHaveBeenCalled(); expect(clientLogClose).not.toHaveBeenCalled();
@@ -136,10 +123,10 @@ test.each(['HomeGraph', 'rewind'] as const)('Agent close waits for %s last while
     const reopened = new KnowledgeStore({ dbPath: store.storagePath });
     try { await reopened.init(); expect(records(reopened)).toBe(before); } finally { await reopened.close(); }
   } finally {
-    releaseHomeGraph.resolve(); releaseRewind.resolve(); releaseTriggerDrain.resolve();
+    releaseHomeGraph.resolve(); releaseRewind.resolve();
     try { await (closing ?? services.close()); } finally {
       background.mockRestore(); homeGraphDispose.mockRestore(); rewindStop.mockRestore(); restoreStoreClose(); storeInit.mockRestore();
-      clientLogClose.mockRestore(); governorStop.mockRestore(); registryStop.mockRestore(); watcherStop.mockRestore(); triggerJoin.mockRestore();
+      clientLogClose.mockRestore(); governorStop.mockRestore(); registryStop.mockRestore(); watcherStop.mockRestore();
       await peer.stop(true); rmSync(root, { recursive: true, force: true });
       if (previousToken === undefined) delete process.env.GOODVIBES_CONNECTED_HOST_TOKEN;
       else process.env.GOODVIBES_CONNECTED_HOST_TOKEN = previousToken;

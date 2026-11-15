@@ -2,9 +2,7 @@ import {
   onboardingAccessSignals,
   hasOnboardingWebhookIngress,
   onboardingIntegrationSignalCount,
-  deriveOnboardingState,
 } from '@goodvibes-jev/engine/terminal-shell/onboarding-signals';
-import { deriveReopenEditAcknowledgementState as deriveAcknowledgements } from '@goodvibes-jev/engine/terminal-shell/onboarding-signals';
 import {
   countPermissionToolOverrides,
   hasCustomizedProviderRouting,
@@ -17,12 +15,9 @@ import '@goodvibes-jev/engine/terminal-shell/onboarding-values';
 import { DEFAULT_CONFIG } from '../../config/index.ts';
 import '../../config/provider-model.ts';
 import type {
-  OnboardingNetworkMode,
-  OnboardingReopenEditAcknowledgementState,
   OnboardingSnapshotState,
   OnboardingStep1CapabilityFlags,
   OnboardingStep1CapabilityItem,
-  OnboardingStepDerivationState,
 } from './types.ts';
 
 function hasWebhookOrEventIngress(snapshot: OnboardingSnapshotState): boolean {
@@ -168,25 +163,4 @@ export function deriveStep1CapabilityFlags(snapshot: OnboardingSnapshotState): O
     automationReview: hasAutomationReviewSignals(snapshot),
     tuiDelegation: true,
   };
-}
-
-export function deriveStep1_5NetworkMode(): OnboardingNetworkMode {
-  return 'local-network-default';
-}
-
-export function deriveReopenEditAcknowledgementState(snapshot: OnboardingSnapshotState): OnboardingReopenEditAcknowledgementState {
-  return deriveAcknowledgements(snapshot, {
-    bootstrap: 'A connected-host bootstrap credential signal is still visible to Agent.',
-    sessions: (count) => `${count} connected-host auth session signal(s) are currently visible.`,
-    users: (count) => `${count} connected-host auth user signal(s) are already visible.`,
-    empty: 'No connected-host auth signal needs confirmation.',
-  });
-}
-
-export function deriveOnboardingStepState(snapshot: OnboardingSnapshotState): OnboardingStepDerivationState {
-  return deriveOnboardingState(snapshot, {
-    capabilities: deriveStep1Capabilities,
-    network: deriveStep1_5NetworkMode,
-    acknowledgements: deriveReopenEditAcknowledgementState,
-  });
 }

@@ -503,8 +503,10 @@ describe('the doctrine the fix must not have broken', () => {
     await h.service.sweep();
     const channels = new Set(h.pushes.map((push) => push.channel));
     expect(channels.has('telegram')).toBe(true);
-    expect(channels.has('agent')).toBe(true);
     expect(channels.has('tui')).toBe(false);
+    // The agent reads it rather than being pushed at.
+    expect(channels.has('agent')).toBe(false);
+    expect((await h.service.pending()).nudge).not.toBeNull();
   });
 
   test('the ten-day lead is unchanged', async () => {

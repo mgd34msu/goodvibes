@@ -4,8 +4,6 @@ import { getProviderIdFromModel } from '../../../config/provider-model.ts';
 import { EMPTY_AGENT_BEHAVIOR_DISCOVERY_SNAPSHOT } from '../../../agent/behavior-discovery-summary.ts';
 import type { OnboardingSnapshotState } from '../../../runtime/onboarding/index.ts';
 import {
-  deriveReopenEditAcknowledgementState,
-  deriveStep1_5NetworkMode,
   deriveStep1Capabilities,
   deriveStep1CapabilityFlags,
 } from '../../../runtime/onboarding/index.ts';
@@ -260,10 +258,6 @@ describe('onboarding derivation helpers', () => {
     expect(deriveStep1CapabilityFlags(snapshot).localBehavior).toBe(true);
   });
 
-  test('keeps copied bind targets out of Agent setup network-mode derivation', () => {
-    expect(deriveStep1_5NetworkMode()).toBe('local-network-default');
-  });
-
   test('keeps host posture out of first-run Agent capabilities', () => {
     const snapshot = buildBaseSnapshot();
     const capabilities = deriveStep1Capabilities(snapshot);
@@ -416,92 +410,5 @@ describe('onboarding derivation helpers', () => {
         selected: true,
       },
     ]);
-  });
-
-  test('derives reopen acknowledgement state for provider, subscription, and auth posture', () => {
-    let snapshot = buildBaseSnapshot();
-    snapshot = {
-      ...snapshot,
-      providerRouting: {
-        ...snapshot.providerRouting,
-        helperEnabled: true,
-      },
-      subscriptions: {
-        active: [],
-        pending: [
-          {
-            provider: 'openai',
-            state: 'pending',
-            verifier: 'verifier',
-            redirectUri: 'http://127.0.0.1/callback',
-            createdAt: 1,
-          },
-        ],
-        activeProviderIds: [],
-        pendingProviderIds: ['openai'],
-      },
-      auth: {
-        snapshot: {
-          ...snapshot.auth.snapshot,
-          bootstrapCredentialPresent: true,
-        },
-      },
-    };
-
-    const acknowledgement = deriveReopenEditAcknowledgementState(snapshot);
-
-    expect(acknowledgement.providers).toEqual({
-      required: true,
-      accepted: false,
-      reason: 'configured-routing',
-      detail: '1 provider auth path(s) are already configured.',
-    });
-    expect(acknowledgement.subscriptions).toEqual({
-      required: true,
-      accepted: false,
-      reason: 'pending-login',
-      detail: '1 subscription login(s) are pending completion.',
-    });
-    expect(acknowledgement.auth).toEqual({
-      required: true,
-      accepted: false,
-      reason: 'bootstrap-credential',
-      detail: 'A connected-host bootstrap credential signal is still visible to Agent.',
-    });
-  });
-
-  test('requires provider acknowledgement when API-key-backed provider state exists without provider accounts', () => {
-    const acknowledgement = deriveReopenEditAcknowledgementState({
-      ...buildBaseSnapshot(),
-      providerRouting: {
-        ...buildBaseSnapshot().providerRouting,
-        primaryProviderId: 'openai',
-        primaryModelId: 'gpt-5.4',
-      },
-      secrets: {
-        ...buildBaseSnapshot().secrets,
-        review: {
-          ...buildBaseSnapshot().secrets.review,
-          storedKeys: 1,
-          envBackedKeys: 1,
-        },
-        records: [
-          {
-            key: 'OPENAI_API_KEY',
-            source: 'env',
-            scope: 'env',
-            secure: false,
-            overriddenByEnv: false,
-          },
-        ],
-      },
-    });
-
-    expect(acknowledgement.providers).toEqual({
-      required: true,
-      accepted: false,
-      reason: 'configured-routing',
-      detail: '1 provider auth path(s) are already configured.',
-    });
   });
 });

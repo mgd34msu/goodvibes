@@ -9,25 +9,13 @@
  * the rest of the list, so this file is not free to reach the owner by pushing
  * at the terminal surface, and it does not try to.
  *
- * ## This is the PULL half. The push half is a peer, not a replacement
+ * ## The pull is the one path
  *
- * The agent is both a push destination (runtime/agent-conversation-sender.ts,
- * registered on the router at bootstrap) and the surface that pulls. Both exist,
- * and the pull is not made redundant by the push: an item no push has ever landed
- * here is exactly what this path is for.
- *
- * The two cannot say the same thing twice, and the guard is not in this file. It
- * is in the daemon, over the ONE open item both paths read: a push that LANDS on
- * the agent stamps the item with the day it landed, and while the agent is a
- * configured push destination `occasions.pending` leaves stamped items out. The
- * condition is the push that landed, not the one that was configured, so `agent`
- * configured with no sender registered, and a send that failed, both leave the
- * item unstamped and still raised here. Neither may cost him the nudge.
- *
- * Nothing here coordinates with the sender, and there is deliberately no local
- * record of what was pushed: a second ledger would be a second answer to "has he
- * already been told", and the two would disagree the first time one missed a
- * write.
+ * The daemon does not push into this conversation: it is another process. It
+ * keeps each reminder as an open item and, when its sweep raises one, tells a
+ * connected Agent to read now (runtime/occasions-boot.ts). Every way a reminder
+ * arrives here is this read, so there is one answer to "has he been told": the
+ * daemon's open item, closed when he answers.
  *
  * ## How the pull works
  *

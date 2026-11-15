@@ -9,6 +9,7 @@ import {
   projectOrchestratorCoreServices,
 } from '@goodvibes-jev/engine/terminal-shell/bootstrap-orchestrator';
 import { buildPluginStartupContext } from '@goodvibes-jev/engine/terminal-shell/plugin-startup';
+import { ownerInputFor } from './owner-input.ts';
 import { createPluginStartupTask } from '@goodvibes-jev/engine/terminal-shell/plugin-startup';
 import { readTierPromptSupplement } from '@goodvibes-jev/engine/platform/platform/providers';
 import { factsFor } from '@goodvibes-jev/engine/platform/platform/routing';
@@ -62,6 +63,7 @@ import { AgentPromptContextReceiptStore, composeRuntimePromptWithReceipt } from 
 import { bindRestoreTurnAnchorsToSurface, recordCompletedTurnAnchor, startAnchorDurabilityHousekeeping } from './rewind-anchor-wiring.ts';
 import { createMemoryUsageTracker } from './memory-usage-wiring.ts';
 import { installOccasionsNudging } from './occasions-boot.ts';
+import { watchOccasionAnnouncements } from './client/occasion-announcements.ts';
 import '../tools/agent-audit-tool.ts';
 import { createRuntimeShutdown } from './bootstrap-shutdown.ts';
 import { recordComposedPromptUsage } from './prompt-usage-record.ts';
@@ -238,19 +240,21 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
   // update on the memory records. Consolidation's decay reads those counters
   // from the store, so every product sharing the store orders decay the same way.
   const memoryUsageTracker = createMemoryUsageTracker(services.memoryRegistry);
-  // Both halves of the owner ruling that occasion nudges go to Telegram AND the
-  // agent (docs/occasions.md §4.2): this product is a PUSH destination the daemon
-  // addresses, and the surface that PULLS what is outstanding. Neither replaces
-  // the other and they cannot double-speak, see runtime/occasions-boot.ts for
-  // why, and for the guard that makes it true.
+  // Occasion reminders reach this conversation by the pull: at the end of each
+  // turn, when the host announces one while no turn runs, and once per sweep
+  // interval while idle (runtime/occasions-boot.ts).
   const occasionsNudgeSurface = installOccasionsNudging({
-    router: services.channelDeliveryRouter,
     gatewayMethods: services.gatewayMethods,
     configManager,
     homeDirectory: services.shellPaths.homeDirectory,
     conversation,
     requestRender,
     disposals: bootstrapUnsubs,
+    isIdle: () => activePromptTurnId === null,
+    watchAnnouncements: async (handlers) => {
+      const host = services.resolveConnectedHost();
+      return 'reason' in host ? null : await watchOccasionAnnouncements({ baseUrl: host.baseUrl, token: host.token, ...handlers });
+    },
   });
   runtimeUnsubs.push(
     runtimeBus.on<Extract<TurnEvent, { type: 'TURN_SUBMITTED' }>>('TURN_SUBMITTED', (event) => {
@@ -401,10 +405,17 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
   // structurally satisfy SessionLiveTurnControls, no adapter needed. Until this
   // bind call the gateway verbs refuse honestly (LIVE_TURN_CONTROLS_UNAVAILABLE).
   services.sessionLiveTurnControls.bind(orchestrator);
-  // Wire orchestratorHandleUserInputRef so COMPANION_MESSAGE_RECEIVED fires a real LLM turn.
-  orchestratorHandleUserInputRef.value = terminalCompanionInputHandler(orchestrator, (err) => {
+  // A companion message is the owner speaking from another device: once the shell
+  // has bound the owner-input route it takes the composer's path (intake, routing,
+  // turn-finished signal); before that (boot, headless) it runs a local turn.
+  const localCompanionInput = terminalCompanionInputHandler(orchestrator, (err) => {
     logger.debug('companion handleUserInput safety catch', { error: String(err) });
   });
+  orchestratorHandleUserInputRef.value = (text, inputOptions) => {
+    const route = ownerInputFor(orchestrator);
+    if (route) route(text, inputOptions);
+    else localCompanionInput(text, inputOptions);
+  };
   orchestrator.setCoreServices({
     ...projectOrchestratorCoreServices({ configManager, providerRegistry, services }),
     cacheHitTracker: services.cacheHitTracker,
@@ -695,12 +706,6 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
       currentSessionId: () => runtimeSessionIdRef.value,
     }),
   );
-  if (configManager.get('automation.enabled')) {
-    logger.warn('Local automation startup is disabled in GoodVibes Agent; use connected-host observability instead.');
-    systemMessageRouter.low(
-      '[Startup] Local automation execution is disabled in GoodVibes Agent; use read-only automation observability or explicit connected-host actions.',
-    );
-  }
 
   // ── Phase 12: Session:start lifecycle hook ─────────────────────────────
 
@@ -765,9 +770,6 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
       shutdownOptions: { surface: services.surface },
     }),
   };
-
-  // Operator recovery always addresses this runtime's actual surface supervisor.
-  ctx.commandContext.ops.triggerSupervisor = services.triggerManager;
 
   // Wire exit from options if provided; otherwise main.ts binds the operator route.
   if (options?.exit) {

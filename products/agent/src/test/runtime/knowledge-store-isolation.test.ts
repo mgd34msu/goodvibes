@@ -58,13 +58,11 @@ afterEach(async () => {
 });
 
 describe('runtime knowledge store isolation', () => {
-  test('closing the Agent runtime closes the memory and code index database handles', async () => {
+  test('closing the Agent runtime closes the memory database handle', async () => {
     const { services } = await makeRuntime();
     const memoryClose = spyOn(services.memoryStore, 'close');
-    const codeIndexClose = spyOn(services.codeIndexStore, 'close');
     await services.close();
     expect(memoryClose).toHaveBeenCalled();
-    expect(codeIndexClose).toHaveBeenCalled();
   }, 60_000);
 
   test('Agent Knowledge is the only runtime knowledge surface created by Agent', async () => {

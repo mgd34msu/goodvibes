@@ -108,16 +108,16 @@ The TUI is a get-work-done interface; an occasion nudge belongs on the channels
 that reach the owner away from work.
 
 **And** rather than **or**: `occasions.nudgeChannel` is a comma-separated list,
-and `telegram,agent` is the shipped default. Each destination is pushed on its
-own and a failure on one is recorded rather than thrown, so an expired
-Telegram token cannot stop the agent hearing about an approaching occasion.
+so `telegram,agent` names both. Telegram is pushed to; a failure there is
+recorded rather than thrown, so an expired Telegram token cannot stop the agent
+hearing about an approaching occasion.
 
-Telegram is a transport the daemon can reach by itself, a bot token and an HTTP
-call. The agent is not, because landing a message in an agent conversation means taking a
-turn inside the agent product. So the platform owns the destination and the contract
-(`channels/delivery/strategies-agent.ts`) and the agent product registers the
-callable that does the landing. Until it does, a push addressed to the agent
-fails saying exactly that, rather than looking like an unknown surface.
+The agent is not pushed to: it is another process. It reads what is outstanding
+through `occasions.pending`, at the end of each turn and once per sweep interval
+while idle. When a sweep raises something and the list names `agent`, the daemon
+publishes `DELIVERY_WAITING` (job `occasions`, surface `agent`) on the
+`deliveries` event domain, and a connected Agent with no turn running reads at
+once. The event carries no text.
 
 **This generalises beyond this feature.** The TUI is a work interface;
 life-admin and proactive personal nudges belong on Telegram and the agent.
@@ -126,25 +126,10 @@ not choosing one, and a list that names the TUI alongside real destinations
 loses the TUI entry and keeps the rest.
 
 #### One thing said once
-The agent is both a push destination and the surface that PULLS through
-`occasions.pending`, so it is the one place where the same nudge could be spoken
-twice. It cannot be, because both read the **same open item**. A push that lands
-on the agent stamps the item with the day it landed, and while the agent is a
-configured push destination the pull leaves stamped items out.
-
-The condition is the push that LANDED, not the one that was configured. An item
-no push has ever landed on the agent carries no stamp, so it still comes back
-through the pull, that covers `agent` configured with no sender registered, and
-a send that failed, neither of which may cost the owner the nudge.
-
-The stamp is scoped to the **day** it landed, not to the life of the item. Under
-the two-touch ceiling a permanent stamp would have made an occasion invisible to
-"anything coming up?" for however long remained until its next boundary, which
-defeats the purpose of the pull, since it exists precisely for the stretch between the
-two pushes. So the pull leaves an item out only on the day a push actually
-landed it there; the day after, the stamp no longer matches today and the item
-is listed again, the same as if it had never been pushed. An answer resolves the
-item from either side, exactly as before.
+Every way the agent hears a reminder is the same read of the **same open item**,
+which stays open until the owner answers it, from either side. There is no
+second record of "already told" to disagree with it, and an Agent that was not
+running when the sweep raised the item reads it when it next starts.
 
 ### 4.3 A nudge names the occasion but **never the date**
 The ruling is that a nudge may name the occasion, but the date itself is disclosed
@@ -292,11 +277,11 @@ mirror of the profile, never the other way around.
   the People section, which is prose-only by design.
 - Nudge cadence as in §4.6.
 - Nudges push to Telegram by default (`occasions.nudgeChannel = telegram`), the
-  owner's ruling. The key takes a **list**, so `telegram,agent` pushes to both,
-  the ruling in §4.2, and each entry may carry an address
-  (`telegram:12345,agent`). Setting the key to empty makes the feature
-  **pull-only** instead: nothing is pushed, and `occasions.pending` is how a
-  surface sees what is outstanding.
+  owner's ruling. The key takes a **list**, so `telegram,agent` reaches both,
+  the ruling in §4.2 (Telegram by a push, the agent by its read), and each
+  entry may carry an address (`telegram:12345,agent`). Setting the key to empty
+  makes the feature **pull-only** instead: nothing is pushed or announced, and
+  `occasions.pending` is how a surface sees what is outstanding.
 - The list is not restricted to those two. Any channel surface the delivery
   router can reach is a valid entry, because where the owner wants to hear about
   this is the owner's call and not a shortlist. What is fixed is the exclusion:
@@ -323,7 +308,7 @@ carries the date.
 | `occasions.interview.answer` | `write:occasions` | Record one answer, return the next question. |
 | `occasions.interview.record` | `write:occasions` | Close with what the owner landed on; writes gift history. |
 | `occasions.gifts` | `read:occasions` | What the owner landed on in previous years. |
-| `occasions.pending` | `read:occasions` | Everything outstanding, delivered to nobody. Lists a date inside its window even before any sweep has run. Leaves out a nudge a push has already landed on the agent, while the agent is a push destination (§4.2). |
+| `occasions.pending` | `read:occasions` | Everything outstanding, delivered to nobody. Lists a date inside its window even before any sweep has run. Lists every open item until it is answered; this is how the agent hears a reminder (§4.2). |
 | `occasions.sweep` | `write:occasions` | Run one pass now. |
 | `occasions.conflict.resolve` | `write:occasions` | Apply the owner's answer: `keep` names the right date and the other lines are removed (§4.12). Without `keep`, returns the recorded dates and changes nothing. |
 | `occasions.plans.list` | `read:occasions` | Plans, and whether one has the owner away today. |

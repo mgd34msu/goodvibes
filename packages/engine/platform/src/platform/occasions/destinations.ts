@@ -22,7 +22,7 @@ export function nudgeDestinationSurface(destination: string): string {
 }
 
 /**
- * The channels a nudge may go to. Empty means pull-only.
+ * The channels a nudge is pushed to. Empty means nothing is pushed.
  *
  * The setting is a comma-separated list, the same shape `payments.notifyChannels`
  * and the trigger backoff ladder use, because the owner's ruling was Telegram
@@ -31,6 +31,11 @@ export function nudgeDestinationSurface(destination: string): string {
  * the channel delivery router's own form, so `telegram:12345,agent` is a valid
  * pair. Duplicates collapse: a list that names one destination twice must not
  * push the same nudge to it twice.
+ *
+ * `agent` is not pushed to. The Agent is another process: it reads what is
+ * outstanding through `occasions.pending`, and the sweep tells a connected Agent
+ * to read now (see {@link nudgeAnnouncesToAgent}). The item stays open until it
+ * is answered, so an Agent that was not running reads it when it next starts.
  *
  * The TUI is refused HERE rather than left unconfigured, because "nobody set it
  * to the TUI" is not the same guarantee as "it cannot be the TUI", and the
@@ -44,13 +49,18 @@ export function resolveNudgeDestinations(channel: string): readonly string[] {
   for (const entry of channel.split(',')) {
     const trimmed = entry.trim();
     if (trimmed.length === 0) continue;
-    if (NUDGE_FORBIDDEN_SURFACES.includes(nudgeDestinationSurface(trimmed))) continue;
+    const surface = nudgeDestinationSurface(trimmed);
+    if (NUDGE_FORBIDDEN_SURFACES.includes(surface) || surface === NUDGE_AGENT_SURFACE) continue;
     if (destinations.includes(trimmed)) continue;
     destinations.push(trimmed);
   }
   return destinations;
 }
 
+/** Whether the setting names the Agent, which is told to read when the sweep raises something. */
+export function nudgeAnnouncesToAgent(channel: string): boolean {
+  return channel.split(',').some((entry) => nudgeDestinationSurface(entry) === NUDGE_AGENT_SURFACE);
+}
 
 /** The title and body a nudge takes on ONE destination. */
 export interface NudgeDeliveryText {

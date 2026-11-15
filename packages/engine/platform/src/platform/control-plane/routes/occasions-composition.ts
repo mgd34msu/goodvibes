@@ -16,11 +16,14 @@
  *
  * The nudge goes out over the channel delivery router, the same substrate the
  * proactive check-in uses, with the target parsed by the router's own parser.
- * That includes the `agent` destination: the router carries a strategy for it,
- * and the agent product registers the sender that lands the message in its
- * conversation (`channels/delivery/strategies-agent.ts`). Nothing about this
- * file has to know which of the configured destinations is a transport and which
- * is another product.
+ *
+ * The Agent is not one of those destinations: it is another process and reads
+ * what is outstanding through `occasions.pending`. When a sweep raises
+ * something and `occasions.nudgeChannel` names `agent`, this publishes one
+ * `DELIVERY_WAITING` event on the `deliveries` domain, which a connected Agent
+ * takes as "read now". The event carries no text; the item stays open on this
+ * host until it is answered, so an Agent that was not connected reads it at its
+ * next turn or idle check.
  *
  * When no router is wired the service still runs and still records what is
  * outstanding; `occasions.pending` is then the only way a nudge is seen.
@@ -56,6 +59,9 @@ import { startOccasionSweepTicker } from '../../occasions/ticker.js';
 import { logger } from '../../utils/logger.js';
 import { summarizeError } from '../../utils/error-display.js';
 import { registerOccasionsGatewayMethods } from './occasions.js';
+import type { RuntimeEventBus } from '../../runtime/events/index.js';
+import { emitDeliveryWaiting } from '../../runtime/emitters/deliveries.js';
+import { nudgeAnnouncesToAgent } from '../../occasions/destinations.js';
 import { controlPlaneStorePath } from '../control-plane-store-paths.js';
 import type { NativeMutationHost } from '../native-mutation.js';
 import { captureMutationDescriptors } from '../../utils/file-mutation.js';
@@ -63,8 +69,8 @@ import { projectOccasionProfileMutation } from '../../occasions/capture.js';
 
 /**
  * How long after start an overdue sweep runs: long enough for the delivery
- * router's destinations (the Agent's sender among them) to register, short
- * enough that a machine that is only on for a while still gets its reminders.
+ * router's destinations to register, short enough that a machine that is only
+ * on for a while still gets its reminders.
  */
 const STARTUP_SWEEP_DELAY_MS = 15_000;
 
@@ -81,6 +87,8 @@ export interface OccasionsCompositionDeps {
   readonly channelDeliveryRouter?: Pick<ChannelDeliveryRouter, 'deliver'> | undefined;
   /** Where `occasions.calendarMirror` writes. Absent, the setting has no effect and the sweep mirrors nothing. */
   readonly calendar?: OccasionCalendarMirror | undefined;
+  /** Where a connected Agent hears that a reminder is waiting. Absent, it reads at its next turn or idle check. */
+  readonly runtimeBus?: Pick<RuntimeEventBus, 'emit'> | undefined;
 }
 
 /**
@@ -202,6 +210,14 @@ export function composeOccasions(
   const ticker = startOccasionSweepTicker({
     sweep: async () => {
       const outcome = await service.sweep();
+      const raised = outcome.nudge !== null || outcome.conflictMessages.length > 0 || outcome.resumedInterviews.length > 0;
+      if (raised && deps.runtimeBus !== undefined && nudgeAnnouncesToAgent(String(deps.configManager.get('occasions.nudgeChannel' as ConfigKey) ?? ''))) {
+        emitDeliveryWaiting(deps.runtimeBus, { sessionId: 'system', traceId: `occasions:${outcome.ranAt}`, source: 'occasions' }, {
+          jobId: 'occasions',
+          runId: outcome.nudge?.id ?? `occasions-${outcome.ranAt}`,
+          surface: 'agent',
+        });
+      }
       // Counts and a hold reason only. A date, a person and a message never
       // reach a log at any level: this file's whole subject is closed tier.
       logger.debug('occasions: swept', {
@@ -267,6 +283,8 @@ export interface OccasionsInstallDeps {
   readonly channelDeliveryRouter?: Pick<ChannelDeliveryRouter, 'deliver'> | undefined;
   /** The connected calendar, when there is one to mirror into. */
   readonly calendarGateway?: Pick<CalendarGatewayService, 'createEvent'> | undefined;
+  /** Carries the "a reminder is waiting" event to connected Agents. */
+  readonly runtimeBus?: Pick<RuntimeEventBus, 'emit'> | undefined;
   readonly disposal?: { add(label: string, dispose: () => void | Promise<void>): void } | undefined;
 }
 
@@ -276,7 +294,7 @@ export interface OccasionsInstallDeps {
  * Called wherever the owner profile is composed, because the profile store is
  * the one thing it cannot do without. Everything else is optional: with no
  * delivery router it still reads, still answers and still records what is
- * outstanding, which is how the agent surface receives a nudge in any case.
+ * outstanding, which is how the Agent receives a nudge in any case.
  */
 export function installOccasions(
   catalog: GatewayMethodCatalog,
@@ -294,6 +312,7 @@ export function installOccasions(
     ...(deps.calendarGateway === undefined
       ? {}
       : { calendar: createOccasionCalendarMirror(deps.calendarGateway) }),
+    ...(deps.runtimeBus === undefined ? {} : { runtimeBus: deps.runtimeBus }),
   });
   deps.disposal?.add('occasions', () => composition.dispose());
   return composition;

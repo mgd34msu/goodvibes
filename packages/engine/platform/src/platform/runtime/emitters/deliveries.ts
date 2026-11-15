@@ -56,6 +56,14 @@ export function emitDeliveryFailed(
   bus.emit('deliveries', deliveryEvent('DELIVERY_FAILED', data, ctx));
 }
 
+export function emitDeliveryWaiting(
+  bus: Pick<RuntimeEventBus, 'emit'>,
+  ctx: EmitterContext,
+  data: { jobId: string; runId: string; surface: 'agent' },
+): void {
+  bus.emit('deliveries', deliveryEvent('DELIVERY_WAITING', data, ctx));
+}
+
 export function emitDeliveryDeadLettered(
   bus: RuntimeEventBus,
   ctx: EmitterContext,

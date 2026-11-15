@@ -1,4 +1,3 @@
-import { registerTriggerSupervisorGatewayMethods } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import { registerTerminalKnowledgeCleanup } from '@goodvibes-jev/engine/terminal-shell/bootstrap-lifecycle';
 import { createTerminalMemoryAdmission } from '@goodvibes-jev/engine/terminal-shell/bootstrap-lifecycle';
 import { join } from 'node:path';
@@ -159,14 +158,8 @@ import { createAutomationSpawnTask } from './automation-spawn.ts';
 import { gateConsolidationToLocalWriter } from './memory-consolidation-gate.ts';
 import { StoreSnapshotScheduler } from '@goodvibes-jev/engine/platform/platform/state/store-snapshots';
 import { AgentDaemonReceiptFeed, createDaemonReceiptConsumption } from './daemon-receipts.ts';
-import { WorkspaceCheckpointManager, type CheckpointSessionResolver } from '@goodvibes-jev/engine/platform/platform/workspace';
+import { WorkspaceCheckpointManager, checkpointEligibilityRefusal, type CheckpointSessionResolver } from '@goodvibes-jev/engine/platform/platform/workspace';
 import { ProcessManager } from '@goodvibes-jev/engine/platform/platform/tools';
-import { TriggerManager } from '@goodvibes-jev/engine/platform/platform/triggers';
-import {
-  createBunStreamHost,
-  createProcessManagerTriggerHost,
-  createTriggerActionExecutor,
-} from '@goodvibes-jev/engine/platform/platform/triggers';
 import { ModeManager } from '@goodvibes-jev/engine/platform/platform/state';
 import { FileUndoManager } from '@goodvibes-jev/engine/platform/platform/state';
 import { MemoryRegistry } from '@goodvibes-jev/engine/platform/platform/state';
@@ -418,11 +411,18 @@ export interface RuntimeServicesOptions {
  *   per-device token is the work of a process that listens, and this one does
  *   not; a phone reaches this Agent's device tools through `devicesClient`,
  *   over the daemon's verbs.
+ * - `triggerManager`, `channelPolicy`, `codeIndexStore` and
+ *   `codeIndexReindexScheduler` are absent too: triggers are supervised by the
+ *   host (`/triggers` reads the host's supervisor), channel ingress policy is
+ *   the daemon's, and the repo code index is a TUI and daemon feature. Platform
+ *   code typed to the daemon shape gets them from `asDaemonGradeView()`, built
+ *   only if it reads them.
  *
  * Everything else the daemon-grade shape declares is built here, because this
  * product legitimately carries more than the client floor.
  */
-export interface RuntimeServices extends Omit<PlatformRuntimeServices, 'sessionBroker' | 'userPermissionRuleStore' | 'pairingTokens'> {
+export interface RuntimeServices extends Omit<PlatformRuntimeServices,
+  'sessionBroker' | 'userPermissionRuleStore' | 'pairingTokens' | 'triggerManager' | 'channelPolicy' | 'codeIndexStore' | 'codeIndexReindexScheduler'> {
   readonly workingDirectory: string;
   readonly homeDirectory: string;
   /** This product's storage root, every per-product path derives from it. */
@@ -447,13 +447,6 @@ export interface RuntimeServices extends Omit<PlatformRuntimeServices, 'sessionB
   readonly channelPlugins: ChannelPluginRegistry;
   readonly channelDeliveryRouter: ChannelDeliveryRouter;
   readonly watcherRegistry: WatcherRegistry;
-  /**
-   * Trigger family supervisor (stream watchers, model-free condition checks,
-   * on-exit process triggers). Constructed unconditionally so
-   * `watchers.triggers.enabled` is a real runtime toggle; it does no work
-   * while that flag is false. The platform daemon facade start()/shutdown()s it.
-   */
-  readonly triggerManager: TriggerManager;
   readonly approvalBroker: ApprovalBroker;
   /**
    * What a surface SHOWS when it shows approvals: the daemon's record over
@@ -696,7 +689,6 @@ export interface RuntimeServices extends Omit<PlatformRuntimeServices, 'sessionB
   readonly mediaProviders: MediaProviderRegistry;
   readonly multimodalService: MultimodalService;
   readonly memoryEmbeddingRegistry: MemoryEmbeddingProviderRegistry;
-  readonly channelPolicy: ChannelPolicyManager;
   readonly mcpRegistry: McpRegistry;
   readonly tokenAuditor: ApiTokenAuditor;
   readonly componentHealthMonitor: ComponentHealthMonitor;
@@ -751,14 +743,6 @@ export interface RuntimeServices extends Omit<PlatformRuntimeServices, 'sessionB
   /** Wait for owned background work and storage to finish shutting down. */
   close(): Promise<void>;
   readonly integrationHelpers: IntegrationHelperService;
-  /**
-   * Re-root workspace-bound stores to a new working directory.
-   * Agent memory is home/profile-owned and intentionally does not move on workspace swap.
-   * Called by WorkspaceSwapManager after the new directory has been verified.
-   * Stores that require a process restart are named in a warn-level log; they continue serving
-   * the old path until the externally owned GoodVibes host restarts with the new --working-dir.
-   */
-  rerootStores(newWorkingDir: string): Promise<void>;
 }
 
 /**
@@ -897,7 +881,9 @@ function composeRuntimeServices(options: RuntimeServicesOptions, disposalScope: 
     // which surface handed each one over. No process id: a restarted process
     // must derive the same conversation identity to find its hosted session.
     clientId: HOSTED_HANDOFF_CLIENT_ID,
-    store: createHostedHandoffFileStore(join(workingDirectory, '.goodvibes', GOODVIBES_AGENT_SURFACE_ROOT, 'hosted-handoff.json')),
+    // Home-scoped: one Agent runs per home, so the conversation-to-hosted-session
+    // map is the same whichever directory the owner launched from.
+    store: createHostedHandoffFileStore(shellPaths.resolveUserPath(GOODVIBES_AGENT_SURFACE_ROOT, 'hosted-handoff.json')),
     log: logger,
   });
 
@@ -1089,7 +1075,8 @@ function composeRuntimeServices(options: RuntimeServicesOptions, disposalScope: 
   // difference is only that turning it OFF now turns it off. The TUI has
   // always threaded it the same way.
   const watcherRegistry = new WatcherRegistry({
-    storePath: shellPaths.resolveProjectPath(GOODVIBES_AGENT_SURFACE_ROOT, 'watchers.json'),
+    // Home-scoped, like the single-writer claim that admits one Agent per home.
+    storePath: shellPaths.resolveUserPath(GOODVIBES_AGENT_SURFACE_ROOT, 'watchers.json'),
     featureFlags,
   });
   watcherRegistry.attachRuntime({
@@ -1116,7 +1103,7 @@ function composeRuntimeServices(options: RuntimeServicesOptions, disposalScope: 
   // (`approvalsView` below), and a phone answering over the daemon's verbs wins
   // the race just as a keystroke here does.
   const approvalBroker = new ApprovalBroker({
-    storePath: shellPaths.resolveProjectPath(GOODVIBES_AGENT_SURFACE_ROOT, 'control-plane', 'approvals.json'),
+    storePath: shellPaths.resolveUserPath(GOODVIBES_AGENT_SURFACE_ROOT, 'control-plane', 'approvals.json'),
   });
   // The approvals list's source. The broker above holds only what the distributed-runtime
   // bridge still hands this process in-process; the asks THIS surface raises are
@@ -1171,6 +1158,34 @@ function composeRuntimeServices(options: RuntimeServicesOptions, disposalScope: 
       shellPaths.resolveProjectPath(GOODVIBES_AGENT_SURFACE_ROOT, 'control-plane', 'pairing-tokens.json'),
       { nativeDataWriter: configManager.getNativeDataWriter() },
     ));
+  // The same rule for three more members the daemon runs and this process does
+  // not: channel ingress policy, the repo code index and its reindex scheduler.
+  // The foundation clients read `codeIndexStore` (an object with no open file
+  // until something asks it to build); nothing reads the other two.
+  let daemonGradeChannelPolicy: ChannelPolicyManager | null = null;
+  let daemonGradeCodeIndex: CodeIndexStore | null = null;
+  let daemonGradeReindexScheduler: CodeIndexReindexScheduler | null = null;
+  const codeIndexForDaemonGradeView = (): CodeIndexStore =>
+    (daemonGradeCodeIndex ??= new CodeIndexStore(
+      workingDirectory,
+      join(workingDirectory, '.goodvibes', GOODVIBES_AGENT_SURFACE_ROOT, 'code-index.sqlite'),
+      memoryEmbeddingRegistry,
+    ));
+  const daemonGradeOnly = {
+    channelPolicy: (): ChannelPolicyManager => (daemonGradeChannelPolicy ??= new ChannelPolicyManager({
+      storePath: shellPaths.resolveUserPath(GOODVIBES_AGENT_SURFACE_ROOT, 'channels', 'policies.json'),
+    })),
+    codeIndexStore: codeIndexForDaemonGradeView,
+    codeIndexReindexScheduler: (): CodeIndexReindexScheduler => (daemonGradeReindexScheduler ??= new CodeIndexReindexScheduler({
+      target: codeIndexForDaemonGradeView(),
+      workingDirectory,
+      isEnabled: () => false,
+    })),
+  };
+  disposalScope.registry.add('daemon-grade code index', () => {
+    daemonGradeReindexScheduler?.dispose();
+    daemonGradeCodeIndex?.close();
+  });
   // AGENT-LOCAL DUTY: the register this product's automation runs its jobs on.
   //
   // `AutomationManager` takes a concrete `SharedSessionBroker` and drives seven
@@ -1498,9 +1513,6 @@ function composeRuntimeServices(options: RuntimeServicesOptions, disposalScope: 
   const mediaProviders = new MediaProviderRegistry();
   ensureBuiltinMediaProviders(mediaProviders, artifactStore, providerRegistry);
   const multimodalService = new MultimodalService(artifactStore, mediaProviders, voiceService, agentKnowledgeService);
-  const channelPolicy = new ChannelPolicyManager({
-    storePath: shellPaths.resolveProjectPath(GOODVIBES_AGENT_SURFACE_ROOT, 'channels', 'policies.json'),
-  });
   const distributedRuntime = new DistributedRuntimeManager(
     shellPaths.resolveProjectPath(GOODVIBES_AGENT_SURFACE_ROOT, 'remote', 'distributed-runtime.json'),
   );
@@ -1652,13 +1664,6 @@ function composeRuntimeServices(options: RuntimeServicesOptions, disposalScope: 
 
   // The public client runtime owns the contract runner and each contract engine.
   // The remaining Agent-local services retain their existing lifetime:
-  //   • codeIndexStore      , constructed but neither schema-initialized nor
-  //                            auto-built; the Agent runs no repo source-tree
-  //                            code index (inert unless explicitly invoked).
-  //   • codeIndexReindexScheduler, real-but-inert twin of the above: isEnabled
-  //                            is a permanent `() => false`, so tool-driven
-  //                            reindex scheduling (Stage B, TUI-only feature)
-  //                            never fires for the Agent.
   //   • processRegistry     , fleet observability over the managers the Agent
   //                            already owns (agents, contracts, processes, watchers).
   //   • workspaceCheckpointManager, a runtimeBus (hence automatic turn/agent-
@@ -1677,26 +1682,17 @@ function composeRuntimeServices(options: RuntimeServicesOptions, disposalScope: 
   const priceUsage = (model: string | undefined, usage: { inputTokens: number; outputTokens: number }): number | null =>
     model ? computeUsageCostUsd(providerRegistry.resolveModelPricing(model), usage) : null;
 
-  const codeIndexStore = new CodeIndexStore(
-    workingDirectory,
-    join(workingDirectory, '.goodvibes', GOODVIBES_AGENT_SURFACE_ROOT, 'code-index.sqlite'),
-    memoryEmbeddingRegistry,
-  );
-  disposalScope.registry.add('code index store', () => codeIndexStore.close());
   // Data safety with no discipline: a daily snapshot of every SQLite store
   // this runtime writes, bounded retention, unref'd timers, the platform's own
   // StoreSnapshotScheduler (public since this platform round; the former agent-local
   // mirror and its local pruning engine existed only because the class and
   // RetentionPolicy/SnapshotPruner had no public export path). The canonical
   // memory db is shared with the daemon/TUI; the shared snapshot layout means
-  // whichever process sweeps first writes that day's copy. The agent's code
-  // index is deliberately inert (see the block comment above), its entry is a
-  // no-op until a file actually exists.
+  // whichever process sweeps first writes that day's copy.
   const storeSnapshotScheduler = new StoreSnapshotScheduler({
     stores: [
       { name: 'memory store', dbPath: memoryDbPath },
       { name: 'memory vector index', dbPath: resolveMemoryVectorDbPath(memoryDbPath) },
-      { name: 'code index store', dbPath: join(workingDirectory, '.goodvibes', GOODVIBES_AGENT_SURFACE_ROOT, 'code-index.sqlite') },
     ],
   });
   storeSnapshotScheduler.start();
@@ -1756,64 +1752,16 @@ function composeRuntimeServices(options: RuntimeServicesOptions, disposalScope: 
   const stopConfigWatch = (): void => {
     configManager.stopWatchingConfigFiles();
   };
-  const codeIndexReindexScheduler = new CodeIndexReindexScheduler({
-    target: codeIndexStore,
-    workingDirectory,
-    isEnabled: () => false,
-  });
   // Archive-aware: finished agent/swarm subtrees can be moved out of the
   // live fleet view into a session-scoped archive (platform fleet/archive.ts).
   // createArchivableFleetRegistry is the shared terminal-shell wrapper over the
   // platform's withFleetArchive(createProcessRegistry(...)), one named seam both
   // daemon front-ends build the registry through so it cannot drift.
-  // Trigger family. Mirrors the platform factory's own composition: config is a
-  // CLOSURE over configManager (so the flag toggles at runtime rather than only
-  // at restart) and the process host is ProcessManager-backed, so a supervised
-  // on-exit child inherits the same credential-env scrub, live output
-  // collection and SIGTERM/SIGKILL watchdog as any other background command.
-  const triggerManager = new TriggerManager({
-    nativeDataWriter: configManager.getNativeDataWriter(),
-    storePath: shellPaths.resolveProjectPath(GOODVIBES_AGENT_SURFACE_ROOT, 'triggers-v2.json'),
-    previousStorePath: shellPaths.resolveProjectPath(GOODVIBES_AGENT_SURFACE_ROOT, 'triggers.json'),
-    config: () => ({
-      enabled: configManager.get('watchers.triggers.enabled'),
-      backoffLadderMs: configManager.get('watchers.triggers.backoffLadderMs'),
-      breakerStrikes: configManager.get('watchers.triggers.breakerStrikes'),
-      defaultCheckIntervalMs: configManager.get('watchers.triggers.defaultCheckIntervalMs'),
-      probeTimeoutMs: configManager.get('watchers.triggers.probeTimeoutMs'),
-      maxConcurrentChecks: configManager.get('watchers.triggers.maxConcurrentChecks'),
-      observationRingSize: configManager.get('watchers.triggers.observationRingSize'),
-      runHistoryLimit: configManager.get('watchers.triggers.runHistoryLimit'),
-      runHistoryTtlHours: configManager.get('watchers.triggers.runHistoryTtlHours'),
-      eventLogLimit: configManager.get('watchers.triggers.eventLogLimit'),
-      eventLogTtlHours: configManager.get('watchers.triggers.eventLogTtlHours'),
-      sweepIntervalMs: configManager.get('watchers.triggers.sweepIntervalMs'),
-      supervisionTickMs: configManager.get('watchers.triggers.supervisionTickMs'),
-      streamQueueLimit: configManager.get('watchers.triggers.streamQueueLimit'),
-      streamBatchLines: configManager.get('watchers.triggers.streamBatchLines'),
-      streamBatchIntervalMs: configManager.get('watchers.triggers.streamBatchIntervalMs'),
-      onExitMaxDurationMs: configManager.get('watchers.triggers.onExitMaxDurationMs'),
-      onExitStdin: configManager.get('watchers.triggers.onExitStdin'),
-      outputTailBytes: configManager.get('watchers.triggers.outputTailBytes'),
-    }),
-    actions: createTriggerActionExecutor({ agents: agentManager, processManager }),
-    processHost: createProcessManagerTriggerHost(processManager),
-    streamHost: createBunStreamHost(processManager),
-    // Answered from the sessions THIS process is running, not from the daemon's
-    // register. A trigger scoped to a session this agent is not hosting is not
-    // this agent's to fire.
-    sessionIsLive: (sessionId: string) => hostedSessions.hosts(sessionId),
-  });
-
-  registerTriggerSupervisorGatewayMethods(gatewayMethods, triggerManager);
-
   const processRegistry = createArchivableFleetRegistry({
     agentManager,
     contractRunner,
-    codeIndexService: codeIndexStore,
     processManager,
     watcherRegistry,
-    triggerSupervisor: triggerManager,
     workflow,
     approvalBroker,
     sessionBroker: automationSessionRegister,
@@ -1862,10 +1810,9 @@ function composeRuntimeServices(options: RuntimeServicesOptions, disposalScope: 
   // default "off"). Coverage flows down a registered root's subtree AND
   // through the git worktree→main-repo link, so an orchestration-spawned
   // worktree of a registered repo checkpoints automatically without being
-  // registered itself. A workspace SWAP at runtime is still not tracked here
-  // (WorkspaceSwapManager's rerootStores does not re-root this manager; a swap
-  // needs a restart to pick up a new root's registration), only the
-  // registration STATE of this fixed workingDirectory is now live.
+  // registered itself. The working directory is fixed for the life of the
+  // process (a change applies at the next start); only the registration STATE
+  // of this fixed workingDirectory is live.
   const registrationMigration = migrateLegacyWorkspaceRegistryIfNeeded(shellPaths);
   if (registrationMigration) {
     logger.info('Migrated the local workspace registry into the shared registration store', { ...registrationMigration });
@@ -1881,9 +1828,12 @@ function composeRuntimeServices(options: RuntimeServicesOptions, disposalScope: 
   if (eligibilityBackfill && eligibilityBackfill.recordsStamped > 0) {
     logger.info("Marked the agent's explicitly-registered workspaces checkpoint-eligible", { ...eligibilityBackfill });
   }
-  const checkpointsRegistrationStatus = createWorkspaceRegistrationLiveChecker(shellPaths, workingDirectory);
-  const checkpointsCurrentlyAllowed = (): boolean =>
-    checkpointsRegistrationStatus() === 'covered' || readCheckpointRegistrationSetting(configManager) === 'guarded';
+  const checkpointsRegistration = createWorkspaceRegistrationLiveChecker(shellPaths, workingDirectory);
+  const checkpointsGuarded = (): boolean => readCheckpointRegistrationSetting(configManager) === 'guarded';
+  const checkpointsCurrentlyAllowed = (): boolean => {
+    const eligibility = checkpointsRegistration();
+    return (eligibility.state === 'readable' && eligibility.resolution.status === 'covered') || checkpointsGuarded();
+  };
   const workspaceCheckpointManager = new WorkspaceCheckpointManager({
     workspaceRoot: workingDirectory,
     ...readCheckpointGuardSettings(configManager),
@@ -1950,12 +1900,12 @@ function composeRuntimeServices(options: RuntimeServicesOptions, disposalScope: 
       // `goodvibes-agent workspaces register` takes effect for the NEXT
       // explicit create call (same as it always has), and, as of the live
       // gate above, for automatic snapshots too, without a restart either way.
-      if (!checkpointsCurrentlyAllowed()) {
-        throw new Error(
-          `Checkpoints are off for this workspace: ${workingDirectory} is not registered. ` +
-            'Register it first, then retry: goodvibes-agent workspaces register --yes ' +
-            '(or set checkpoints.unregisteredWorkspaces to "guarded" to opt this workspace out of the registration gate).',
-        );
+      const eligibility = checkpointsRegistration();
+      if (!(eligibility.state === 'readable' && eligibility.resolution.status === 'covered') && !checkpointsGuarded()) {
+        // Names the real state: not registered, declined, or a register that cannot be read.
+        throw new Error(eligibility.state === 'unreadable'
+          ? checkpointEligibilityRefusal(eligibility, workingDirectory)
+          : `${checkpointEligibilityRefusal(eligibility, workingDirectory)} To register: goodvibes-agent workspaces register --yes`);
       }
       // Default the session stamp from the live resolver when the caller omits it
       // (the resolveSessionId hook only auto-stamps AUTOMATIC snapshots, not
@@ -2051,10 +2001,11 @@ function composeRuntimeServices(options: RuntimeServicesOptions, disposalScope: 
     notify: pushKeepAwakeNotice,
   });
   forwardKeepAwakeOnAttach = () => keepAwakeForwarder.attached();
-  configManager.subscribe('power.keepAwake', (newValue, oldValue) => {
+  const unsubscribeKeepAwakeForward = configManager.subscribe('power.keepAwake', (newValue, oldValue) => {
     if (newValue === oldValue) return;
     void keepAwakeForwarder.set(newValue === true);
   });
+  disposalScope.registry.add('keep-awake forward subscription', unsubscribeKeepAwakeForward);
 
   // Memory governance: construct + START the MemoryGovernor (default ON, it
   // is a safety feature) with REAL cache adapters, exactly as the platform's own
@@ -2119,7 +2070,8 @@ function composeRuntimeServices(options: RuntimeServicesOptions, disposalScope: 
   // released at shutdown (see bootstrap.ts).
   const conversationRewindHost = createConversationRewindHost({
     verbs: daemonVerbs,
-    port: createSessionConversationRewindPort(),
+    // Undo snapshots beside the sessions, so a rewind can still be undone after a restart.
+    port: createSessionConversationRewindPort({ undoDir: join(surface.sessionsDir, 'rewind-undo') }),
     hosts: (sessionId) => hostedSessions.hosts(sessionId),
     label: 'GoodVibes Agent',
     surface,
@@ -2163,7 +2115,7 @@ function composeRuntimeServices(options: RuntimeServicesOptions, disposalScope: 
     storeSnapshotScheduler,
     appendOnlyRetentionScheduler,
     memoryConsolidationScheduler,
-    codeIndexReindexScheduler,
+    codeIndexReindexScheduler: { dispose: () => daemonGradeReindexScheduler?.dispose() },
     sessionOrchestration,
     // This fork has no separate regular knowledge store: the `knowledgeService`
     // compatibility alias points at isolated Agent Knowledge (pinned by
@@ -2175,7 +2127,6 @@ function composeRuntimeServices(options: RuntimeServicesOptions, disposalScope: 
     contractRunner,
     processRegistry,
     memoryGovernor: { stop: stopRequests.memoryGovernor },
-    triggerManager,
     // Named here rather than registered separately below: RuntimePollerOwners
     // is all-required precisely so a poller cannot be forgotten, and this fork
     // had been registering the home-graph service by hand where the contract
@@ -2227,6 +2178,15 @@ function composeRuntimeServices(options: RuntimeServicesOptions, disposalScope: 
       get pairingTokens(): PairingTokenManager {
         return pairingTokensForDaemonGradeView();
       },
+      get channelPolicy(): ChannelPolicyManager {
+        return daemonGradeOnly.channelPolicy();
+      },
+      get codeIndexStore(): CodeIndexStore {
+        return daemonGradeOnly.codeIndexStore();
+      },
+      get codeIndexReindexScheduler(): CodeIndexReindexScheduler {
+        return daemonGradeOnly.codeIndexReindexScheduler();
+      },
     }),
     // The REAL platform memory-governance instances composed above (governor
     // constructed + started by wireDaemonMemoryGovernance). The platform's
@@ -2245,8 +2205,6 @@ function composeRuntimeServices(options: RuntimeServicesOptions, disposalScope: 
     configManager,
     featureFlags,
     contextAccountingHolder,
-    codeIndexStore,
-    codeIndexReindexScheduler,
     storeSnapshotScheduler,
     appendOnlyRetentionScheduler,
     userPermissionRuleStore,
@@ -2264,7 +2222,6 @@ function composeRuntimeServices(options: RuntimeServicesOptions, disposalScope: 
     channelPlugins,
     channelDeliveryRouter,
     watcherRegistry,
-    triggerManager,
     approvalBroker,
     approvalsView,
     localhostFetchApproval,
@@ -2336,7 +2293,6 @@ function composeRuntimeServices(options: RuntimeServicesOptions, disposalScope: 
     mediaProviders,
     multimodalService,
     memoryEmbeddingRegistry,
-    channelPolicy,
     mcpRegistry: lazyMcp.registry,
     tokenAuditor,
     componentHealthMonitor,
@@ -2392,14 +2348,6 @@ function composeRuntimeServices(options: RuntimeServicesOptions, disposalScope: 
       return disposalScope.close();
     },
     integrationHelpers,
-    async rerootStores(newWorkingDir: string): Promise<void> {
-      await projectIndex.reroot(newWorkingDir);
-      logger.warn('workspace re-rooted; these stores keep serving the previous working directory until this agent restarts', {
-        newWorkingDir,
-        previousWorkingDir: workingDirectory,
-        stores: ['fileUndoManager', 'planManager', 'replayEngine', 'contractIntake', 'workPlanStore', 'workspaceCheckpointManager', 'hostedHandoff'],
-      });
-    },
   };
   return graph;
 }

@@ -184,10 +184,6 @@ function validOpenItem(value: unknown): OpenItem | null {
         typeof entry === 'string' && isRaiseBoundary(entry)),
     ),
   ];
-  // A stamp that is not a date is dropped rather than believed: it governs
-  // whether the pull stays quiet about this item, and a bad value would either
-  // silence a nudge or repeat one.
-  const agentPushedOn = str(value['agentPushedOn']);
   return {
     id,
     kind: kind as OpenItemKind,
@@ -199,7 +195,6 @@ function validOpenItem(value: unknown): OpenItem | null {
     servedBoundaries,
     dueOn,
     ...(expiresAfter !== null && isIsoDate(expiresAfter) ? { expiresAfter } : {}),
-    ...(agentPushedOn !== null && isIsoDate(agentPushedOn) ? { agentPushedOn } : {}),
   };
 }
 

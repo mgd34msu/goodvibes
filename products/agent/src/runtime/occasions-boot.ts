@@ -4,30 +4,26 @@
  * ## How a reminder reaches this conversation
  *
  * By the pull: the surface asks `occasions.pending` what is outstanding and
- * raises it. It runs at the end of every turn, and while the shell sits idle it
- * runs again once per occasions sweep interval (`occasions.sweepIntervalMinutes`,
- * read live), so a reminder the daemon raised while the owner was away from the
- * keyboard shows up without him typing first. Cost: one small read per sweep
- * interval while idle and enabled; nothing while a turn runs.
+ * raises it. It runs
  *
- * The daemon's sweep cannot land a message here itself: it runs in another
- * process, and a delivery it addresses to `agent` reaches no sender there. The
- * pull is what carries the reminder; the item stays open on the daemon until it
- * is answered, so the pull also covers a reminder raised while this process was
- * not running.
+ * - at the end of every turn;
+ * - when the host announces that a reminder is waiting (the sweep publishes
+ *   `DELIVERY_WAITING` when it raises something and `occasions.nudgeChannel`
+ *   names `agent`), if no turn is running; a running turn's own end pulls it;
+ * - while the shell sits idle, once per occasions sweep interval
+ *   (`occasions.sweepIntervalMinutes`, read live), which covers a host that
+ *   cannot be reached for announcements and reopens the announcement stream.
  *
- * The in-process sender stays registered on this process's own router, for the
- * agent's own `agent` channel sends.
+ * The item stays open on the host until it is answered, so the pull also covers
+ * a reminder raised while this process was not running. Cost: one small read per
+ * announcement and one per sweep interval while idle and enabled; nothing while a
+ * turn runs.
  */
 
 import type { ConfigManager } from '../config/index.ts';
 import type { ConversationManager } from '../core/conversation.ts';
 import type { GatewayMethodCatalog } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import { createOccasionsGatewayInvoke } from '../agent/occasions-gateway.ts';
-import {
-  installAgentConversationSender,
-  type AgentDeliveryHost,
-} from './agent-conversation-sender.ts';
 import {
   createOccasionsNudgeSurface,
   type OccasionsNudgeSurface,
@@ -36,29 +32,41 @@ import {
 /** Minutes between idle pulls when the setting says nothing (the sweep's default). */
 const DEFAULT_IDLE_PULL_MINUTES = 60;
 
+/** An open announcement subscription. */
+export interface OccasionAnnouncementSubscription {
+  close(): void;
+}
+
 export interface OccasionsBootDeps {
-  /** Owns the `agent` delivery destination the push half registers on. */
-  readonly router: AgentDeliveryHost;
   /** This process's own verb catalog, when it carries the occasions handlers. */
   readonly gatewayMethods: GatewayMethodCatalog;
   readonly configManager: ConfigManager;
   readonly homeDirectory: string;
-  /** The live transcript both halves land in. */
+  /** The live transcript a pulled reminder lands in. */
   readonly conversation: ConversationManager;
   readonly requestRender: () => void;
-  /** Where the push registration's undo and the idle timer's stop are filed, for shutdown. */
+  /** Where the idle timer's stop and the announcement stream's close are filed, for shutdown. */
   readonly disposals: { push(undo: () => void): void };
   /**
    * True while no turn is running, so a pulled line cannot land inside a
-   * streaming reply. Without it there is no idle pull, only the turn-end one.
+   * streaming reply. Without it there is no idle or announced pull, only the
+   * turn-end one.
    */
   readonly isIdle?: (() => boolean) | undefined;
+  /**
+   * Opens the host's "a reminder is waiting" stream. Resolves to null when it
+   * cannot be opened; `onEnded` fires once when an opened stream ends for good.
+   */
+  readonly watchAnnouncements?: ((handlers: {
+    readonly onWaiting: () => void;
+    readonly onEnded: () => void;
+  }) => Promise<OccasionAnnouncementSubscription | null>) | undefined;
   /** Injectable timer for tests. */
   readonly setTimer?: ((fn: () => void, ms: number) => ReturnType<typeof setTimeout>) | undefined;
 }
 
 /**
- * Register the in-process sender, build the pull surface and start its idle pull.
+ * Build the pull surface and start its announced and idle pulls.
  *
  * Returns the pull surface because bootstrap also fires it on the turn's
  * completion, which is a decision about the transcript rather than about
@@ -66,16 +74,6 @@ export interface OccasionsBootDeps {
  * the start).
  */
 export function installOccasionsNudging(deps: OccasionsBootDeps): OccasionsNudgeSurface {
-  // This process's own `agent` destination, for sends made in this process.
-  installAgentConversationSender({
-    router: deps.router,
-    disposals: deps.disposals,
-    // Read per call, not captured: this runs before the session id is final, and
-    // a captured reference would pin the conversation the process started with.
-    primaryConversation: () => deps.conversation,
-    requestRender: deps.requestRender,
-  });
-
   const surface = createOccasionsNudgeSurface({
     invoke: createOccasionsGatewayInvoke({
       gatewayMethods: deps.gatewayMethods,
@@ -90,27 +88,53 @@ export function installOccasionsNudging(deps: OccasionsBootDeps): OccasionsNudge
     isEnabled: () => deps.configManager.get('occasions.enabled'),
   });
 
+  const isIdle = deps.isIdle;
+  if (isIdle === undefined) return surface;
+  let stopped = false;
+
+  // The announced pull. Skipped (not queued) while a turn runs: that turn's
+  // completion pulls the same still-open items.
+  let subscription: OccasionAnnouncementSubscription | null = null;
+  let opening = false;
+  const openAnnouncements = (): void => {
+    const watch = deps.watchAnnouncements;
+    if (watch === undefined || stopped || subscription !== null || opening) return;
+    opening = true;
+    void watch({
+      onWaiting: () => { if (!stopped && isIdle()) void surface.raiseNow(); },
+      onEnded: () => { subscription = null; },
+    }).then((opened) => {
+      opening = false;
+      if (stopped) opened?.close();
+      else subscription = opened;
+    }, () => { opening = false; });
+  };
+  openAnnouncements();
+
   // The idle pull: re-armed after each pass so a changed interval takes effect
   // at the next one. Skipped (not queued) while a turn runs; the turn's own
-  // completion pulls.
+  // completion pulls. Each pass also reopens a stream that ended.
   const setTimer = deps.setTimer ?? ((fn: () => void, ms: number) => setTimeout(fn, ms));
   let timer: ReturnType<typeof setTimeout> | undefined;
-  let stopped = false;
   const intervalMs = (): number => {
     const minutes = Number(deps.configManager.get('occasions.sweepIntervalMinutes'));
     return (Number.isFinite(minutes) && minutes > 0 ? minutes : DEFAULT_IDLE_PULL_MINUTES) * 60_000;
   };
-  const isIdle = deps.isIdle;
-  if (isIdle === undefined) return surface;
   const arm = (): void => {
     if (stopped) return;
     timer = setTimer(() => {
+      openAnnouncements();
       if (isIdle()) void surface.raiseNow().finally(arm);
       else arm();
     }, intervalMs());
     (timer as { unref?: () => void }).unref?.();
   };
   arm();
-  deps.disposals.push(() => { stopped = true; if (timer !== undefined) clearTimeout(timer); });
+  deps.disposals.push(() => {
+    stopped = true;
+    if (timer !== undefined) clearTimeout(timer);
+    subscription?.close();
+    subscription = null;
+  });
   return surface;
 }

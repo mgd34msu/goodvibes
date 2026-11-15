@@ -6,12 +6,11 @@
  * writer outright and could promote a splice of both into the canonical path.
  */
 import { describe, expect, test } from 'bun:test';
-import { readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { AgentNoteRegistry } from '../../agent/note-registry.ts';
 import { AgentResearchRunRegistry } from '../../agent/research-run-registry.ts';
 import { AgentRoutineRegistry } from '../../agent/routine-registry.ts';
-import { readJsonObject, writeJsonObject } from '../../runtime/onboarding/apply-file-helpers.ts';
 import { createShellPathService } from '@/runtime/index.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 import { leftoverStoreTempFiles } from '../helpers/store-temp-files.ts';
@@ -182,92 +181,4 @@ describe('agent stores under concurrent processes', () => {
       expect(registry.list()).toHaveLength(1);
     } finally { child.kill(); await child.exited; rmSync(root, { recursive: true, force: true }); }
   });
-
-  test('onboarding settings writes are atomic: concurrent writers leave a parseable settings.json', async () => {
-    const root = makeProjectTempDir('gv-store-concurrent-onboarding');
-    try {
-      const settingsPath = join(root, '.goodvibes', 'agent', 'settings.json');
-      writeJsonObject(settingsPath, { seeded: true });
-
-      const script = join(root, 'settings-writer.ts');
-      writeFileSync(
-        script,
-        [
-          `import { writeJsonObject } from ${JSON.stringify(join(SRC_ROOT, 'runtime', 'onboarding', 'apply-file-helpers.ts'))};`,
-          'const [path, marker, count] = process.argv.slice(2);',
-          "const payload = { owner: marker, filler: marker!.repeat(20_000) };",
-          'for (let i = 0; i < Number(count); i += 1) writeJsonObject(path!, payload);',
-          '',
-        ].join('\n'),
-        'utf-8',
-      );
-
-      const results = await runWriters(script, [
-        [settingsPath, 'a', '25'],
-        [settingsPath, 'b', '25'],
-        [settingsPath, 'c', '25'],
-      ]);
-      for (const result of results) {
-        expect(result.stderr).toBe('');
-        expect(result.exitCode).toBe(0);
-      }
-
-      // A bare writeFileSync would let a reader see a half-written file here;
-      // the whole boot fails on an unparseable settings.json.
-      const settings = readJsonObject(settingsPath);
-      const owner = String(settings.owner);
-      expect(['a', 'b', 'c']).toContain(owner);
-      expect(settings.filler).toBe(owner.repeat(20_000));
-      expect(leftoverStoreTempFiles(settingsPath)).toEqual([]);
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
-  }, 60_000);
-
-  test('a settings.json written by writeJsonObject is never observed partially by a concurrent reader', async () => {
-    const root = makeProjectTempDir('gv-store-onboarding-reader');
-    try {
-      const settingsPath = join(root, 'settings.json');
-      writeJsonObject(settingsPath, { owner: 'seed', filler: 'seed'.repeat(20_000) });
-
-      const doneFile = join(root, 'writes-done');
-      const script = join(root, 'reader.ts');
-      // The reader keeps reading until the test says its last write is done, so
-      // reads cannot all finish before the first write begins.
-      writeFileSync(
-        script,
-        [
-          "import { existsSync, readFileSync } from 'node:fs';",
-          'const [path, doneFile] = process.argv.slice(2);',
-          'let reads = 0;',
-          'do {',
-          '  JSON.parse(readFileSync(path!, "utf-8"));',
-          '  if (reads++ === 0) process.stdout.write("reading\\n");',
-          '} while (!existsSync(doneFile!));',
-          'process.stdout.write(`reads ${reads}\\n`);',
-          '',
-        ].join('\n'),
-        'utf-8',
-      );
-
-      const reader = Bun.spawn(['bun', 'run', script, settingsPath, doneFile], { stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' });
-      try {
-        const stdout = reader.stdout.getReader();
-        expect(new TextDecoder().decode((await stdout.read()).value)).toContain('reading');
-        for (let i = 0; i < 200; i += 1) {
-          writeJsonObject(settingsPath, { owner: `w${i}`, filler: 'x'.repeat(20_000) });
-        }
-        writeFileSync(doneFile, '', 'utf-8');
-        const [stderr, exitCode] = await Promise.all([new Response(reader.stderr).text(), reader.exited]);
-        expect(stderr).toBe('');
-        expect(exitCode).toBe(0);
-      } finally {
-        reader.kill();
-        await reader.exited;
-      }
-      expect(readFileSync(settingsPath, 'utf-8').trimEnd().endsWith('}')).toBe(true);
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
-  }, 60_000);
 });

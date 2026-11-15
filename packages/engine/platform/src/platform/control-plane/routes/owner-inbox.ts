@@ -15,7 +15,7 @@ import {
   type OwnerItemKind,
 } from '../owner-inbox.js';
 import { GatewayVerbError } from './gateway-verb-error.js';
-import { readInvocationParams } from './invocation-params.js';
+import { readInvocationParams, requireStringValue } from './invocation-params.js';
 
 export type OwnerInboxGatewayService = Pick<OwnerInbox, 'listNow' | 'get' | 'answer' | 'postNow' | 'withdraw' | 'postedBy' | 'revision' | 'subscribe'>;
 
@@ -27,13 +27,6 @@ const WIRE_POSTABLE = new Set<string>(['question', 'queued-action']);
 function optionalString(value: unknown, field: string): string | undefined {
   if (value === undefined) return undefined;
   if (typeof value !== 'string') throw new GatewayVerbError(`Invalid ${field}: expected text`, 'INVALID_ARGUMENT', 400, field);
-  return value;
-}
-
-function requireString(value: unknown, field: string): string {
-  if (typeof value !== 'string' || value.length === 0) {
-    throw new GatewayVerbError(`Invalid ${field}: expected a non-empty string`, 'INVALID_ARGUMENT', 400, field);
-  }
   return value;
 }
 
@@ -96,7 +89,7 @@ export function createOwnerInboxListHandler(inbox: OwnerInboxGatewayService): Ga
 export function createOwnerInboxAnswerHandler(inbox: OwnerInboxGatewayService): GatewayMethodHandler {
   return async (invocation) => {
     const params = readInvocationParams(invocation);
-    const itemId = requireString(params['itemId'], 'itemId');
+    const itemId = requireStringValue(params['itemId'], 'itemId');
     const option = optionalString(params['option'], 'option');
     const text = optionalString(params['text'], 'text');
     const outcome = await inbox.answer(itemId, {
@@ -110,7 +103,7 @@ export function createOwnerInboxAnswerHandler(inbox: OwnerInboxGatewayService): 
 export function createOwnerInboxPostHandler(inbox: OwnerInboxGatewayService): GatewayMethodHandler {
   return async (invocation) => {
     const params = readInvocationParams(invocation);
-    const kind = requireString(params['kind'], 'kind');
+    const kind = requireStringValue(params['kind'], 'kind');
     if (!WIRE_POSTABLE.has(kind)) {
       throw new GatewayVerbError('Invalid kind: a surface may post question or queued-action', 'INVALID_ARGUMENT', 400, 'kind');
     }
@@ -132,7 +125,7 @@ export function createOwnerInboxPostHandler(inbox: OwnerInboxGatewayService): Ga
     const key = optionalString(params['key'], 'key');
     const input: NewOwnerItem = {
       kind: kind as NewOwnerItem['kind'],
-      title: requireString(params['title'], 'title'),
+      title: requireStringValue(params['title'], 'title'),
       ...(detail !== undefined ? { detail } : {}),
       ...(options !== undefined ? { options: options as string[] } : {}),
       ...(sessionId !== undefined ? { sessionId } : {}),
@@ -152,7 +145,7 @@ export function createOwnerInboxPostHandler(inbox: OwnerInboxGatewayService): Ga
 export function createOwnerInboxWithdrawHandler(inbox: OwnerInboxGatewayService): GatewayMethodHandler {
   return async (invocation) => {
     const params = readInvocationParams(invocation);
-    const itemId = requireString(params['itemId'], 'itemId');
+    const itemId = requireStringValue(params['itemId'], 'itemId');
     const reason = optionalString(params['reason'], 'reason') ?? '';
     if (!inbox.get(itemId)) throw new GatewayVerbError(`No inbox item has the id ${itemId}.`, 'NOT_FOUND', 404);
     const poster = inbox.postedBy(itemId);

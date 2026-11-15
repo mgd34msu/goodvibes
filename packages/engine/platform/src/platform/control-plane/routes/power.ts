@@ -7,6 +7,7 @@ import type { GatewayMethodHandler } from '../method-catalog-shared.js';
 import { keepAwakeCondition, type PowerManager, type PowerState } from '../../power/index.js';
 import { GatewayVerbError } from './gateway-verb-error.js';
 import { readInvocationParams } from './invocation-params.js';
+import { attachHandler } from './attach-handler.js';
 
 /** The narrow PowerManager slice the verbs need. */
 export type PowerGatewayService = Pick<PowerManager, 'getState' | 'setKeepAwake'>;
@@ -32,10 +33,7 @@ export function createPowerKeepAwakeSetHandler(service: PowerGatewayService): Ga
 
 /** Attach the power handlers to their registered descriptors (missing = no-op). */
 export function registerPowerGatewayMethods(catalog: GatewayMethodCatalog, service: PowerGatewayService): void {
-  const attach = (id: string, handler: GatewayMethodHandler): void => {
-    const descriptor = catalog.get(id);
-    if (descriptor) catalog.register(descriptor, handler, { replace: true });
-  };
+  const attach = (id: string, handler: GatewayMethodHandler): void => { attachHandler(catalog, id, handler); };
   attach('power.status.get', createPowerStatusHandler(service));
   attach('power.keepAwake.set', createPowerKeepAwakeSetHandler(service));
 }

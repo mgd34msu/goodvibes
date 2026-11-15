@@ -10,6 +10,7 @@
 import type { GatewayMethodCatalog } from '../method-catalog.js';
 import type { GatewayMethodHandler } from '../method-catalog-shared.js';
 import type { DaemonUpdateCheckStatus, DaemonUpdateStatus } from '../../daemon/update-status.js';
+import { attachHandler } from './attach-handler.js';
 
 /** The lifecycle surface these verbs need, declared rather than imported whole. */
 export interface DaemonUpdateStatusService {
@@ -36,10 +37,7 @@ export function registerUpdateGatewayMethods(
   catalog: GatewayMethodCatalog,
   service: DaemonUpdateStatusService,
 ): void {
-  const attach = (id: string, handler: GatewayMethodHandler): void => {
-    const descriptor = catalog.get(id);
-    if (descriptor) catalog.register(descriptor, handler, { replace: true });
-  };
+  const attach = (id: string, handler: GatewayMethodHandler): void => { attachHandler(catalog, id, handler); };
   attach('update.status', createUpdateStatusHandler(service));
   attach('update.check', createUpdateCheckHandler(service));
 }

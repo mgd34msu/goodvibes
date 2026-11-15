@@ -18,8 +18,7 @@ import type { GatewayMethodCatalog } from '../method-catalog.js';
 import type { GatewayMethodHandler } from '../method-catalog-shared.js';
 import type { ChannelDeliveryRouter } from '../../channels/delivery-router.js';
 import type { ChannelDeliveryTarget } from '../../channels/delivery/types.js';
-import { GatewayVerbError } from './gateway-verb-error.js';
-import { readInvocationParams } from './invocation-params.js';
+import { readInvocationParams, requireStringValue } from './invocation-params.js';
 
 /** The delivery surface `channels.test.send` needs, just `deliver`. */
 export type ChannelTestDeliveryRouter = Pick<ChannelDeliveryRouter, 'deliver'>;
@@ -28,13 +27,6 @@ const DEFAULT_TEST_TITLE = 'GoodVibes channel test';
 const DEFAULT_TEST_BODY =
   'This is a GoodVibes test message confirming this channel can deliver. If you can read it, delivery works.';
 
-function requiredString(value: unknown, field: string): string {
-  if (typeof value !== 'string' || value.length === 0) {
-    throw new GatewayVerbError(`Missing required field: ${field}`, 'INVALID_ARGUMENT', 400, field);
-  }
-  return value;
-}
-
 function optionalString(value: unknown): string | undefined {
   return typeof value === 'string' && value.length > 0 ? value : undefined;
 }
@@ -42,7 +34,7 @@ function optionalString(value: unknown): string | undefined {
 export function createChannelTestSendHandler(router: ChannelTestDeliveryRouter): GatewayMethodHandler {
   return async (invocation) => {
     const params = readInvocationParams(invocation);
-    const surface = requiredString(params.surface, 'surface');
+    const surface = requireStringValue(params.surface, 'surface');
     const address = optionalString(params.address);
     const body = optionalString(params.body) ?? DEFAULT_TEST_BODY;
 

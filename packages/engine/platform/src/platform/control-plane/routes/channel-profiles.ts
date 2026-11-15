@@ -9,8 +9,9 @@
 import type { GatewayMethodCatalog } from '../method-catalog.js';
 import type { GatewayMethodHandler } from '../method-catalog-shared.js';
 import { GatewayVerbError } from './gateway-verb-error.js';
-import { readInvocationParams } from './invocation-params.js';
+import { readInvocationParams, requireStringValue } from './invocation-params.js';
 import { parseChannelPermissionMode } from '../../channel-profiles/registry.js';
+import { attachHandler } from './attach-handler.js';
 import {
   ChannelProfileError,
   ChannelProfileRegistry,
@@ -33,13 +34,6 @@ function rethrowAsVerbError(error: unknown): never {
   throw error;
 }
 
-function requireString(value: unknown, field: string): string {
-  if (typeof value !== 'string' || value.trim().length === 0) {
-    throw new GatewayVerbError(`${field} is required`, 'INVALID_ARGUMENT', 400, field);
-  }
-  return value;
-}
-
 function optionalString(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim().length > 0 ? value : undefined;
 }
@@ -59,7 +53,7 @@ function createListHandler(service: ChannelProfilesGatewayService): GatewayMetho
 function createGetHandler(service: ChannelProfilesGatewayService): GatewayMethodHandler {
   return async (invocation) => {
     const params = readInvocationParams(invocation);
-    const surfaceKind = requireString(params.surfaceKind, 'surfaceKind');
+    const surfaceKind = requireStringValue(params.surfaceKind, 'surfaceKind');
     try {
       return { binding: await service.get(surfaceKind, optionalString(params.channelId)) };
     } catch (error) {
@@ -73,7 +67,7 @@ function createSetHandler(service: ChannelProfilesGatewayService): GatewayMethod
     const params = readInvocationParams(invocation);
     try {
       const binding = await service.set({
-        surfaceKind: requireString(params.surfaceKind, 'surfaceKind'),
+        surfaceKind: requireStringValue(params.surfaceKind, 'surfaceKind'),
         channelId: optionalString(params.channelId),
         model: optionalString(params.model),
         provider: optionalString(params.provider),
@@ -90,7 +84,7 @@ function createSetHandler(service: ChannelProfilesGatewayService): GatewayMethod
 function createDeleteHandler(service: ChannelProfilesGatewayService): GatewayMethodHandler {
   return async (invocation) => {
     const params = readInvocationParams(invocation);
-    const surfaceKind = requireString(params.surfaceKind, 'surfaceKind');
+    const surfaceKind = requireStringValue(params.surfaceKind, 'surfaceKind');
     const channelId = optionalString(params.channelId);
     try {
       const deleted = await service.delete(surfaceKind, channelId);
@@ -105,10 +99,7 @@ export function registerChannelProfilesGatewayMethods(
   catalog: GatewayMethodCatalog,
   service: ChannelProfilesGatewayService,
 ): void {
-  const attach = (id: string, handler: GatewayMethodHandler): void => {
-    const descriptor = catalog.get(id);
-    if (descriptor) catalog.register(descriptor, handler, { replace: true });
-  };
+  const attach = (id: string, handler: GatewayMethodHandler): void => { attachHandler(catalog, id, handler); };
   attach('channels.profiles.list', createListHandler(service));
   attach('channels.profiles.get', createGetHandler(service));
   attach('channels.profiles.set', createSetHandler(service));

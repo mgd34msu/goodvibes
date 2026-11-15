@@ -40,6 +40,7 @@ import type { ContextWindowOrigin, ContextWindowProvenance } from '../../provide
 import type { ProviderRegistry } from '../../providers/registry.js';
 import { GatewayVerbError } from './gateway-verb-error.js';
 import { readInvocationParams } from './invocation-params.js';
+import { attachHandler } from './attach-handler.js';
 
 /**
  * The shared execution modes and the separate read-only planning posture.
@@ -453,10 +454,7 @@ export function registerSessionRuntimeGatewayMethods(
   catalog: GatewayMethodCatalog,
   controls: SessionRuntimeControls,
 ): void {
-  const attach = (id: string, handler: GatewayMethodHandler): void => {
-    const descriptor = catalog.get(id);
-    if (descriptor) catalog.register(descriptor, handler, { replace: true });
-  };
+  const attach = (id: string, handler: GatewayMethodHandler): void => { attachHandler(catalog, id, handler); };
   attach('sessions.permissionMode.get', createSessionPermissionModeGetHandler(controls));
   attach('sessions.permissionMode.set', createSessionPermissionModeSetHandler(controls));
   attach('sessions.contextUsage.get', createSessionContextUsageGetHandler(controls));

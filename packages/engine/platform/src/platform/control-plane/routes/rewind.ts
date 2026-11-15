@@ -13,20 +13,13 @@ import type { GatewayMethodHandler } from '../method-catalog-shared.js';
 import type { RewindAnchor, RewindScope } from '../../rewind/index.js';
 import { RewindTokenError, type UnifiedRewindService } from '../../rewind/index.js';
 import { GatewayVerbError } from './gateway-verb-error.js';
-import { readInvocationParams } from './invocation-params.js';
+import { readInvocationParams, requireStringValue } from './invocation-params.js';
 
 const REWIND_SCOPES: readonly RewindScope[] = ['files', 'conversation', 'both'];
 
-function requireString(value: unknown, field: string): string {
-  if (typeof value !== 'string' || value.length === 0) {
-    throw new GatewayVerbError(`Missing required field: ${field}`, 'INVALID_ARGUMENT', 400, field);
-  }
-  return value;
-}
-
 function optionalString(value: unknown, field: string): string | undefined {
   if (value === undefined || value === null) return undefined;
-  return requireString(value, field);
+  return requireStringValue(value, field);
 }
 
 function requireScope(value: unknown): RewindScope {
@@ -50,7 +43,7 @@ function optionalBoolean(value: unknown, field: string): boolean | undefined {
 }
 
 function readAnchor(params: Record<string, unknown>): { anchor: RewindAnchor; scope: RewindScope } {
-  const sessionId = requireString(params.sessionId, 'sessionId');
+  const sessionId = requireStringValue(params.sessionId, 'sessionId');
   const turnId = optionalString(params.turnId, 'turnId');
   const scope = requireScope(params.scope);
   return { anchor: turnId !== undefined ? { sessionId, turnId } : { sessionId }, scope };
@@ -122,8 +115,8 @@ export function createRewindUndoHandler(
   const local = isUndoPort(deps.local) ? deps.local : null;
   return async (invocation): Promise<RewindUndoResult> => {
     const params = readInvocationParams(invocation);
-    const sessionId = requireString(params.sessionId, 'sessionId');
-    const undoSnapshotId = requireString(params.undoSnapshotId, 'undoSnapshotId');
+    const sessionId = requireStringValue(params.sessionId, 'sessionId');
+    const undoSnapshotId = requireStringValue(params.undoSnapshotId, 'undoSnapshotId');
     const refused = (code: string, state: string, reason: string, next: readonly string[]): RewindUndoResult =>
       ({ undone: false, sessionId, undoSnapshotId, refusal: { code, state, reason, next } });
 

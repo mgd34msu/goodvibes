@@ -10,6 +10,7 @@ import type { GatewayMethodHandler } from '../method-catalog-shared.js';
 import { GatewayVerbError } from './gateway-verb-error.js';
 import { readInvocationParams } from './invocation-params.js';
 import type { CheckinService } from '../../checkin/index.js';
+import { attachHandler } from './attach-handler.js';
 
 export type CheckinGatewayService = Pick<CheckinService, 'getConfig' | 'setConfig' | 'listReceipts' | 'evaluate' | 'scheduleStatus'>;
 
@@ -63,10 +64,7 @@ function createRunHandler(service: CheckinGatewayService): GatewayMethodHandler 
 }
 
 export function registerCheckinGatewayMethods(catalog: GatewayMethodCatalog, service: CheckinGatewayService): void {
-  const attach = (id: string, handler: GatewayMethodHandler): void => {
-    const descriptor = catalog.get(id);
-    if (descriptor) catalog.register(descriptor, handler, { replace: true });
-  };
+  const attach = (id: string, handler: GatewayMethodHandler): void => { attachHandler(catalog, id, handler); };
   attach('checkin.config.get', createConfigGetHandler(service));
   attach('checkin.config.set', createConfigSetHandler(service));
   attach('checkin.receipts.list', createReceiptsListHandler(service));

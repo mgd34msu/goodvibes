@@ -31,7 +31,7 @@ import type { CheckpointKind, RetentionClass } from '../../workspace/checkpoint/
 import { applyHunkRevert, HunkRevertConflictError, previewHunkRevert } from '../../workspace/hunk-revert.js';
 import type { WorkspaceEvent } from '../../../events/workspace.js';
 import { GatewayVerbError } from './gateway-verb-error.js';
-import { readInvocationParams } from './invocation-params.js';
+import { readInvocationParams, requireStringValue } from './invocation-params.js';
 import { RestoreTokenStore } from './checkpoint-restore-tokens.js';
 
 /** Sink for the checkpoints.revertHunk receipt event (adapted onto the RuntimeEventBus by the registrar). */
@@ -87,13 +87,6 @@ async function callOrHonestNotFound<T>(fn: () => Promise<T>): Promise<T> {
 
 function optionalString(value: unknown): string | undefined {
   return typeof value === 'string' && value.length > 0 ? value : undefined;
-}
-
-function requiredString(value: unknown, field: string): string {
-  if (typeof value !== 'string' || value.length === 0) {
-    throw new GatewayVerbError(`Missing required field: ${field}`, 'INVALID_ARGUMENT', 400, field);
-  }
-  return value;
 }
 
 function optionalNumber(value: unknown, field: string): number | undefined {
@@ -226,7 +219,7 @@ export function createCheckpointsListHandler(manager: CheckpointsGatewayManager)
 export function createSessionChangesHandler(manager: CheckpointsGatewayManager): GatewayMethodHandler {
   return async (invocation) => {
     const params = readInvocationParams(invocation);
-    const sessionId = requiredString(params.sessionId, 'sessionId');
+    const sessionId = requireStringValue(params.sessionId, 'sessionId');
     const changes = await managerFor(manager, sessionId).sessionChanges(sessionId);
     return changes;
   };
@@ -256,7 +249,7 @@ export function createCheckpointsCreateHandler(manager: CheckpointsGatewayManage
 export function createCheckpointsDiffHandler(manager: CheckpointsGatewayManager): GatewayMethodHandler {
   return async (invocation) => {
     const params = readInvocationParams(invocation);
-    const a = requiredString(params.a, 'a');
+    const a = requireStringValue(params.a, 'a');
     const b = optionalString(params.b);
     const holder = await managerHolding(manager, a);
     const diff = await callOrHonestNotFound(() => holder.diff(a, b));
@@ -276,7 +269,7 @@ export function createCheckpointsRestorePreviewHandler(
 ): GatewayMethodHandler {
   return async (invocation) => {
     const body = readInvocationParams(invocation);
-    const id = requiredString(body.id, 'id');
+    const id = requireStringValue(body.id, 'id');
     // `diff(id)` (second arg omitted) diffs the checkpoint against the live
     // working tree and routes through requireCheckpoint, so an unknown id is a
     // 404 here before any token is minted.
@@ -305,7 +298,7 @@ export function createCheckpointsRestoreHandler(
 ): GatewayMethodHandler {
   return async (invocation) => {
     const body = readInvocationParams(invocation);
-    const id = requiredString(body.id, 'id');
+    const id = requireStringValue(body.id, 'id');
     const confirm = optionalBoolean(body.confirm, 'confirm');
     const confirmToken = optionalString(body.confirmToken);
     // Checked before the token is spent so a rejected scope costs no re-preview.
@@ -371,8 +364,8 @@ export function createCheckpointsRevertHunkPreviewHandler(
 ): GatewayMethodHandler {
   return async (invocation) => {
     const params = readInvocationParams(invocation);
-    const path = requiredString(params.path, 'path');
-    const hunk = requiredString(params.hunk, 'hunk');
+    const path = requireStringValue(params.path, 'path');
+    const hunk = requireStringValue(params.hunk, 'hunk', { verbatim: true });
     // Diff paths are relative to the root the manager resolved at init (the
     // enclosing repository's top level when started in a subdirectory), in the
     // workspace of the session the diff came from.
@@ -400,8 +393,8 @@ export function createCheckpointsRevertHunkHandler(
 ): GatewayMethodHandler {
   return async (invocation) => {
     const params = readInvocationParams(invocation);
-    const path = requiredString(params.path, 'path');
-    const hunk = requiredString(params.hunk, 'hunk');
+    const path = requireStringValue(params.path, 'path');
+    const hunk = requireStringValue(params.hunk, 'hunk', { verbatim: true });
     const sessionId = optionalString(params.sessionId);
     const confirm = optionalBoolean(params.confirm, 'confirm');
     const confirmToken = optionalString(params.confirmToken);

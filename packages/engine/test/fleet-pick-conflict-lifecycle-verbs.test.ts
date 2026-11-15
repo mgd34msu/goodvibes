@@ -267,7 +267,7 @@ describe('worktrees.discard: discard performs its meaning', () => {
       });
 
       await expect(catalog.invoke('worktrees.discard', { ...ctx, body: { path: root } })).rejects.toThrow(/not a linked worktree/);
-      await expect(catalog.invoke('worktrees.discard', { ...ctx, body: {} })).rejects.toThrow(/Missing required field: path/);
+      await expect(catalog.invoke('worktrees.discard', { ...ctx, body: {} })).rejects.toThrow(/path is required/);
       expect(runGit(root, ['rev-list', '--count', 'HEAD'])).toBe(before);
       expect(runGit(root, ['status', '--porcelain'])).toContain('?? dirty.txt');
 

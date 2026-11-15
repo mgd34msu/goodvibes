@@ -15,7 +15,7 @@ import type {
 } from '../../runtime/cost/attribution.js';
 import type { QuotaWindowTracker } from '../../runtime/cost/quota-window.js';
 import { GatewayVerbError } from './gateway-verb-error.js';
-import { readInvocationParams } from './invocation-params.js';
+import { readInvocationParams, requireStringValue } from './invocation-params.js';
 
 const COST_WINDOWS: readonly CostWindow[] = ['24h', '7d'];
 const COST_DIMENSIONS: readonly CostDimension[] = ['agent', 'tool', 'hook', 'mcp', 'model', 'provider', 'session'];
@@ -25,13 +25,6 @@ function requireEnum<T extends string>(value: unknown, allowed: readonly T[], fi
     throw new GatewayVerbError(`Invalid ${field}: ${String(value)} (expected one of ${allowed.join(', ')})`, 'INVALID_ARGUMENT', 400, field);
   }
   return value as T;
-}
-
-function requireString(value: unknown, field: string): string {
-  if (typeof value !== 'string' || value.length === 0) {
-    throw new GatewayVerbError(`Missing required field: ${field}`, 'INVALID_ARGUMENT', 400, field);
-  }
-  return value;
 }
 
 function requirePositiveInt(value: unknown, field: string): number {
@@ -59,7 +52,7 @@ export function createCostAttributionGetHandler(service: Pick<CostAttributionSer
 export function createQuotaFanoutGetHandler(tracker: Pick<QuotaWindowTracker, 'assessFanout'>): GatewayMethodHandler {
   return async (invocation) => {
     const params = readInvocationParams(invocation);
-    const provider = requireString(params.provider, 'provider');
+    const provider = requireStringValue(params.provider, 'provider');
     const agentCount = requirePositiveInt(params.agentCount, 'agentCount');
     const callsPerAgent = optionalPositiveInt(params.callsPerAgent, 'callsPerAgent');
     return tracker.assessFanout({ provider, agentCount, callsPerAgent });
@@ -69,7 +62,7 @@ export function createQuotaFanoutGetHandler(tracker: Pick<QuotaWindowTracker, 'a
 export function createQuotaSnapshotGetHandler(tracker: Pick<QuotaWindowTracker, 'snapshot'>): GatewayMethodHandler {
   return async (invocation) => {
     const params = readInvocationParams(invocation);
-    const provider = requireString(params.provider, 'provider');
+    const provider = requireStringValue(params.provider, 'provider');
     return tracker.snapshot(provider);
   };
 }

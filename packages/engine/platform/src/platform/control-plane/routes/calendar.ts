@@ -33,7 +33,8 @@ import type { GatewayMethodCatalog } from '../method-catalog.js';
 import type { GatewayMethodHandler } from '../method-catalog-shared.js';
 import { GatewayVerbError } from './gateway-verb-error.js';
 import { refuseNonUserRequest } from './explicit-user-request.js';
-import { readInvocationParams } from './invocation-params.js';
+import { readInvocationParams, requireStringValue } from './invocation-params.js';
+import { attachHandler } from './attach-handler.js';
 
 /** One event, in the shape `calendar.events.list` advertises. */
 export interface CalendarGatewayEventSummary {
@@ -168,14 +169,6 @@ function readOptionalString(value: unknown): string | undefined {
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
-function readRequiredString(value: unknown, field: string): string {
-  const read = readOptionalString(value);
-  if (read === undefined) {
-    throw new GatewayVerbError(`${field} (non-empty string) is required`, 'INVALID_ARGUMENT', 400, field);
-  }
-  return read;
-}
-
 function readOptionalNumber(value: unknown): number | undefined {
   const parsed = typeof value === 'string' ? Number(value) : value;
   if (typeof parsed !== 'number' || !Number.isFinite(parsed)) return undefined;
@@ -222,7 +215,7 @@ export function createCalendarEventsListHandler(service: CalendarGatewayService)
 export function createCalendarEventsGetHandler(service: CalendarGatewayService): GatewayMethodHandler {
   return async (invocation) => {
     const params = readInvocationParams(invocation);
-    const eventId = readRequiredString(params.eventId, 'eventId');
+    const eventId = requireStringValue(params.eventId, 'eventId');
     return service.getEvent(eventId, readOptionalString(params.calendarId));
   };
 }
@@ -233,9 +226,9 @@ export function createCalendarEventsCreateHandler(service: CalendarGatewayServic
     requireConfirmation(params, 'calendar.events.create');
     refuseNonUserRequest(invocation, 'calendar.events.create');
     return service.createEvent({
-      title: readRequiredString(params.title, 'title'),
-      start: readRequiredString(params.start, 'start'),
-      end: readRequiredString(params.end, 'end'),
+      title: requireStringValue(params.title, 'title'),
+      start: requireStringValue(params.start, 'start'),
+      end: requireStringValue(params.end, 'end'),
       description: readOptionalString(params.description),
       location: readOptionalString(params.location),
       attendees: readOptionalStringList(params.attendees),
@@ -255,7 +248,7 @@ function unsupportedWrite(action: string): GatewayVerbError {
 export function createCalendarEventsUpdateHandler(service: CalendarGatewayService): GatewayMethodHandler {
   return async (invocation) => {
     const params = readInvocationParams(invocation);
-    const eventId = readRequiredString(params.eventId, 'eventId');
+    const eventId = requireStringValue(params.eventId, 'eventId');
     requireConfirmation(params, 'calendar.events.update');
     refuseNonUserRequest(invocation, 'calendar.events.update');
     const changes: CalendarGatewayUpdateInput = {
@@ -281,7 +274,7 @@ export function createCalendarEventsUpdateHandler(service: CalendarGatewayServic
 export function createCalendarEventsDeleteHandler(service: CalendarGatewayService): GatewayMethodHandler {
   return async (invocation) => {
     const params = readInvocationParams(invocation);
-    const eventId = readRequiredString(params.eventId, 'eventId');
+    const eventId = requireStringValue(params.eventId, 'eventId');
     requireConfirmation(params, 'calendar.events.delete');
     refuseNonUserRequest(invocation, 'calendar.events.delete');
     if (service.deleteEvent === undefined) throw unsupportedWrite('delete');
@@ -312,7 +305,7 @@ export function createCalendarIcsImportHandler(service: CalendarGatewayService):
     requireConfirmation(params, 'calendar.ics.import');
     refuseNonUserRequest(invocation, 'calendar.ics.import');
     return service.importIcs(
-      readRequiredString(params.icsContent, 'icsContent'),
+      requireStringValue(params.icsContent, 'icsContent'),
       readOptionalString(params.calendarId),
       { replace: params.replace === true },
     );
@@ -324,10 +317,7 @@ export function registerCalendarGatewayMethods(
   catalog: GatewayMethodCatalog,
   service: CalendarGatewayService,
 ): void {
-  const attach = (id: string, handler: GatewayMethodHandler): void => {
-    const descriptor = catalog.get(id);
-    if (descriptor) catalog.register(descriptor, handler, { replace: true });
-  };
+  const attach = (id: string, handler: GatewayMethodHandler): void => { attachHandler(catalog, id, handler); };
   attach('calendar.events.list', createCalendarEventsListHandler(service));
   attach('calendar.events.get', createCalendarEventsGetHandler(service));
   attach('calendar.events.create', createCalendarEventsCreateHandler(service));

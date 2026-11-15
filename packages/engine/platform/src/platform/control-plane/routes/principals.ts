@@ -14,7 +14,8 @@
 import type { GatewayMethodCatalog } from '../method-catalog.js';
 import type { GatewayMethodHandler } from '../method-catalog-shared.js';
 import { GatewayVerbError } from './gateway-verb-error.js';
-import { readInvocationParams } from './invocation-params.js';
+import { readInvocationParams, requireStringValue } from './invocation-params.js';
+import { attachHandler } from './attach-handler.js';
 import {
   PrincipalRegistry,
   PrincipalRegistryError,
@@ -39,13 +40,6 @@ function rethrowAsVerbError(error: unknown): never {
     throw new GatewayVerbError(error.message, error.code, ERROR_STATUS[error.code] ?? 400);
   }
   throw error;
-}
-
-function requireString(value: unknown, field: string): string {
-  if (typeof value !== 'string' || value.trim().length === 0) {
-    throw new GatewayVerbError(`${field} is required`, 'INVALID_ARGUMENT', 400, field);
-  }
-  return value;
 }
 
 /** Coerce the wire `identities` array into typed identity pairs (strings only). */
@@ -82,7 +76,7 @@ function createListHandler(service: PrincipalsGatewayService): GatewayMethodHand
 function createGetHandler(service: PrincipalsGatewayService): GatewayMethodHandler {
   return async (invocation) => {
     const params = readInvocationParams(invocation);
-    const principalId = requireString(params.principalId, 'principalId');
+    const principalId = requireStringValue(params.principalId, 'principalId');
     try {
       return { principal: await service.get(principalId) };
     } catch (error) {
@@ -96,8 +90,8 @@ function createCreateHandler(service: PrincipalsGatewayService): GatewayMethodHa
     const params = readInvocationParams(invocation);
     try {
       const principal = await service.create({
-        name: requireString(params.name, 'name'),
-        kind: requireString(params.kind, 'kind') as PrincipalKind,
+        name: requireStringValue(params.name, 'name'),
+        kind: requireStringValue(params.kind, 'kind') as PrincipalKind,
         identities: readIdentities(params.identities),
         metadata: readMetadata(params.metadata),
       });
@@ -111,7 +105,7 @@ function createCreateHandler(service: PrincipalsGatewayService): GatewayMethodHa
 function createUpdateHandler(service: PrincipalsGatewayService): GatewayMethodHandler {
   return async (invocation) => {
     const params = readInvocationParams(invocation);
-    const principalId = requireString(params.principalId, 'principalId');
+    const principalId = requireStringValue(params.principalId, 'principalId');
     try {
       const principal = await service.update(principalId, {
         name: typeof params.name === 'string' ? params.name : undefined,
@@ -129,7 +123,7 @@ function createUpdateHandler(service: PrincipalsGatewayService): GatewayMethodHa
 function createDeleteHandler(service: PrincipalsGatewayService): GatewayMethodHandler {
   return async (invocation) => {
     const params = readInvocationParams(invocation);
-    const principalId = requireString(params.principalId, 'principalId');
+    const principalId = requireStringValue(params.principalId, 'principalId');
     try {
       return { principalId, deleted: await service.delete(principalId) };
     } catch (error) {
@@ -141,8 +135,8 @@ function createDeleteHandler(service: PrincipalsGatewayService): GatewayMethodHa
 function createResolveHandler(service: PrincipalsGatewayService): GatewayMethodHandler {
   return async (invocation) => {
     const params = readInvocationParams(invocation);
-    const channel = requireString(params.channel, 'channel');
-    const value = requireString(params.value, 'value');
+    const channel = requireStringValue(params.channel, 'channel');
+    const value = requireStringValue(params.value, 'value', { verbatim: true });
     try {
       return await service.resolveByIdentity({ channel, value });
     } catch (error) {
@@ -155,10 +149,7 @@ export function registerPrincipalsGatewayMethods(
   catalog: GatewayMethodCatalog,
   service: PrincipalsGatewayService,
 ): void {
-  const attach = (id: string, handler: GatewayMethodHandler): void => {
-    const descriptor = catalog.get(id);
-    if (descriptor) catalog.register(descriptor, handler, { replace: true });
-  };
+  const attach = (id: string, handler: GatewayMethodHandler): void => { attachHandler(catalog, id, handler); };
   attach('principals.list', createListHandler(service));
   attach('principals.get', createGetHandler(service));
   attach('principals.create', createCreateHandler(service));

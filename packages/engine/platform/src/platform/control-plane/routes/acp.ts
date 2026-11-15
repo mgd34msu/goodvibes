@@ -10,7 +10,7 @@ import type { GatewayMethodCatalog } from '../method-catalog.js';
 import type { GatewayMethodHandler, GatewayMethodInvocation } from '../method-catalog-shared.js';
 import type { AcpHostService, DiscoveredAcpAgent } from '../../acp/host.js';
 import { GatewayVerbError } from './gateway-verb-error.js';
-import { readInvocationParams } from './invocation-params.js';
+import { readInvocationParams, requireStringValue } from './invocation-params.js';
 
 export interface AcpGatewayDeps {
   readonly host: Pick<AcpHostService, 'spawnAgent' | 'list'>;
@@ -24,13 +24,6 @@ function requirePrincipal(invocation: GatewayMethodInvocation): void {
   }
 }
 
-function requireString(value: unknown, field: string): string {
-  if (typeof value !== 'string' || value.trim().length === 0) {
-    throw new GatewayVerbError(`Missing or invalid ${field}`, 'INVALID_ARGUMENT', 400, field);
-  }
-  return value;
-}
-
 function createAgentsListHandler(deps: AcpGatewayDeps): GatewayMethodHandler {
   return async (invocation) => {
     requirePrincipal(invocation);
@@ -42,8 +35,8 @@ function createSessionsCreateHandler(deps: AcpGatewayDeps): GatewayMethodHandler
   return async (invocation) => {
     requirePrincipal(invocation);
     const params = readInvocationParams(invocation);
-    const agentId = requireString(params.agentId, 'agentId');
-    const cwd = requireString(params.cwd, 'cwd');
+    const agentId = requireStringValue(params.agentId, 'agentId');
+    const cwd = requireStringValue(params.cwd, 'cwd');
     if (!existsSync(cwd) || !statSync(cwd).isDirectory()) {
       throw new GatewayVerbError(`cwd is not an existing directory: ${cwd}`, 'INVALID_ARGUMENT', 400, 'cwd');
     }

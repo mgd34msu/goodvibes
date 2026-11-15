@@ -47,7 +47,8 @@ import { GatewayVerbError } from './gateway-verb-error.js';
 import { evaluateOutwardEffect } from '../../security/untrusted-content.js';
 import { isSendToOwnerOnly } from '../../security/owner-identity.js';
 import { refuseNonUserRequest } from './explicit-user-request.js';
-import { readInvocationParams } from './invocation-params.js';
+import { readInvocationParams, requireStringValue } from './invocation-params.js';
+import { attachHandler } from './attach-handler.js';
 
 /** One inbox message, in the shape `email.inbox.list` advertises. */
 export interface EmailGatewayMessageSummary {
@@ -215,14 +216,6 @@ function readOptionalString(value: unknown): string | undefined {
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
-function readRequiredString(value: unknown, field: string): string {
-  const read = readOptionalString(value);
-  if (read === undefined) {
-    throw new GatewayVerbError(`${field} (non-empty string) is required`, 'INVALID_ARGUMENT', 400, field);
-  }
-  return read;
-}
-
 /**
  * A uid is an IMAP UID: a positive integer. A caller that sends `"12"` gets
  * the same answer as one that sends `12`, but `"latest"` is refused rather
@@ -334,9 +327,9 @@ export function createEmailDraftCreateHandler(service: EmailGatewayService): Gat
   return async (invocation) => {
     const params = readInvocationParams(invocation);
     return service.createDraft({
-      to: readRequiredString(params.to, 'to'),
-      subject: readRequiredString(params.subject, 'subject'),
-      body: readRequiredString(params.body, 'body'),
+      to: requireStringValue(params.to, 'to'),
+      subject: requireStringValue(params.subject, 'subject'),
+      body: requireStringValue(params.body, 'body'),
       inReplyTo: readOptionalString(params.inReplyTo),
       references: readOptionalString(params.references),
     });
@@ -470,9 +463,9 @@ export function createEmailSendHandler(
       );
     }
     refuseNonUserRequest(invocation, 'email.send');
-    const to = readRequiredString(params.to, 'to');
-    const subject = readRequiredString(params.subject, 'subject');
-    const body = readRequiredString(params.body, 'body');
+    const to = requireStringValue(params.to, 'to');
+    const subject = requireStringValue(params.subject, 'subject');
+    const body = requireStringValue(params.body, 'body');
     const inReplyTo = readOptionalString(params.inReplyTo);
     const clientSendId = readClientSendId(params.clientSendId);
     if (clientSendId !== undefined) {
@@ -546,10 +539,7 @@ export function registerEmailGatewayMethods(
   /** See createEmailSendHandler. Empty means the exemption cannot fire. */
   ownerAddresses: OwnerAddressSource = new Set(),
 ): void {
-  const attach = (id: string, handler: GatewayMethodHandler): void => {
-    const descriptor = catalog.get(id);
-    if (descriptor) catalog.register(descriptor, handler, { replace: true });
-  };
+  const attach = (id: string, handler: GatewayMethodHandler): void => { attachHandler(catalog, id, handler); };
   attach('email.inbox.list', createEmailInboxListHandler(service));
   attach('email.inbox.read', createEmailInboxReadHandler(service));
   attach('email.inbox.update', createEmailInboxUpdateHandler(service));

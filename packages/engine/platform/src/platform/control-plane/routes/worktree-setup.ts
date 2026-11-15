@@ -15,7 +15,7 @@ import type { GatewayMethodHandler } from '../method-catalog-shared.js';
 import type { WorktreeRegistry } from '../../runtime/worktree/registry.js';
 import { runWorktreeSetup, type WorktreeSetupConfig } from '../../runtime/worktree/setup.js';
 import { GatewayVerbError } from './gateway-verb-error.js';
-import { readInvocationParams } from './invocation-params.js';
+import { readInvocationParams, requireStringValue } from './invocation-params.js';
 
 /** The deps the worktree lifecycle verbs need, the registry to act on, the source root to carry from, and the current setup config. */
 export interface WorktreeSetupGatewayDeps {
@@ -23,13 +23,6 @@ export interface WorktreeSetupGatewayDeps {
   readonly sourceRoot: string;
   /** Resolves the current per-project setup config (read fresh each run so a config change takes effect without a restart). */
   readonly resolveConfig: () => WorktreeSetupConfig;
-}
-
-function requiredString(value: unknown, field: string): string {
-  if (typeof value !== 'string' || value.length === 0) {
-    throw new GatewayVerbError(`Missing required field: ${field}`, 'INVALID_ARGUMENT', 400, field);
-  }
-  return value;
 }
 
 /**
@@ -60,7 +53,7 @@ async function resolveLinkedWorktree(deps: WorktreeSetupGatewayDeps, rawPath: st
 export function createWorktreeSetupRunHandler(deps: WorktreeSetupGatewayDeps): GatewayMethodHandler {
   return async (invocation) => {
     const params = readInvocationParams(invocation);
-    const path = requiredString(params.path, 'path');
+    const path = requireStringValue(params.path, 'path');
     const worktreePath = await resolveLinkedWorktree(deps, path);
     const setup = await runWorktreeSetup(worktreePath, deps.sourceRoot, deps.resolveConfig());
     deps.registry.recordSetup(worktreePath, setup);
@@ -76,7 +69,7 @@ export function createWorktreeSetupRunHandler(deps: WorktreeSetupGatewayDeps): G
 export function createWorktreeDiscardHandler(deps: WorktreeSetupGatewayDeps): GatewayMethodHandler {
   return async (invocation) => {
     const params = readInvocationParams(invocation);
-    const path = requiredString(params.path, 'path');
+    const path = requireStringValue(params.path, 'path');
     return await deps.registry.discard(await resolveLinkedWorktree(deps, path));
   };
 }

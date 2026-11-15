@@ -40,7 +40,7 @@
 import type { GatewayMethodCatalog } from '../method-catalog.js';
 import type { GatewayMethodHandler, GatewayMethodInvocation } from '../method-catalog-shared.js';
 import { GatewayVerbError } from './gateway-verb-error.js';
-import { readInvocationParams } from './invocation-params.js';
+import { readInvocationParams, requireStringValue } from './invocation-params.js';
 
 /** Which session and page a page-scoped verb acts on. Both default to the open one. */
 export interface BrowserGatewayTarget {
@@ -152,14 +152,6 @@ function readOptionalString(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : undefined;
-}
-
-function readRequiredString(value: unknown, field: string): string {
-  const read = readOptionalString(value);
-  if (read === undefined) {
-    throw new GatewayVerbError(`${field} (non-empty string) is required`, 'INVALID_ARGUMENT', 400, field);
-  }
-  return read;
 }
 
 function readOptionalNumber(value: unknown): number | undefined {
@@ -305,16 +297,16 @@ export function createBrowserGatewayHandlers(
     ['browser.sessions.list', handler(async () => service.listSessions())],
     ['browser.sessions.launch', handler(async (params, invocation) => service.launch({ ...readLaunchArgs(params), ...provisionLifetime(invocation) }))],
     ['browser.sessions.attach', handler(async (params) => {
-      const cdpEndpoint = readRequiredString(params.cdpEndpoint, 'cdpEndpoint');
+      const cdpEndpoint = requireStringValue(params.cdpEndpoint, 'cdpEndpoint');
       assertLoopbackCdpEndpoint(cdpEndpoint);
       return service.attach({ cdpEndpoint });
     })],
-    ['browser.sessions.release', handler(async (params) => service.release(readRequiredString(params.sessionId, 'sessionId')))],
-    ['browser.sessions.close', handler(async (params) => service.close(readRequiredString(params.sessionId, 'sessionId')))],
+    ['browser.sessions.release', handler(async (params) => service.release(requireStringValue(params.sessionId, 'sessionId')))],
+    ['browser.sessions.close', handler(async (params) => service.close(requireStringValue(params.sessionId, 'sessionId')))],
     ['browser.navigate', handler(async (params, invocation) => {
       const waitUntil = readOptionalString(params.waitUntil);
       return service.navigate(readTarget(params), {
-        url: readRequiredString(params.url, 'url'),
+        url: requireStringValue(params.url, 'url'),
         launch: { ...readLaunchArgs(params), ...provisionLifetime(invocation) },
         ...(waitUntil !== undefined && WAIT_UNTIL_STATES.has(waitUntil)
           ? { waitUntil: waitUntil as 'load' | 'domcontentloaded' | 'networkidle' }
@@ -328,14 +320,14 @@ export function createBrowserGatewayHandlers(
     ['browser.click', handler(async (params) => {
       const button = readOptionalString(params.button);
       return service.click(readTarget(params), {
-        ref: readRequiredString(params.ref, 'ref'),
+        ref: requireStringValue(params.ref, 'ref'),
         ...(button !== undefined && MOUSE_BUTTONS.has(button) ? { button: button as 'left' | 'right' | 'middle' } : {}),
         clickCount: readOptionalNumber(params.clickCount),
         timeoutMs: readOptionalNumber(params.timeoutMs),
       });
     })],
     ['browser.type', handler(async (params) => service.type(readTarget(params), {
-      ref: readRequiredString(params.ref, 'ref'),
+      ref: requireStringValue(params.ref, 'ref'),
       // An empty string is a legitimate value here: clearing a field is
       // `text: ""` with the default replace behaviour, so this one is read
       // without the non-empty requirement the other strings carry.
@@ -350,14 +342,14 @@ export function createBrowserGatewayHandlers(
         throw new GatewayVerbError('values (a non-empty list of option values) is required', 'INVALID_ARGUMENT', 400, 'values');
       }
       return service.select(readTarget(params), {
-        ref: readRequiredString(params.ref, 'ref'),
+        ref: requireStringValue(params.ref, 'ref'),
         values,
         timeoutMs: readOptionalNumber(params.timeoutMs),
       });
     })],
     ['browser.press', handler(async (params) => service.press(readTarget(params), {
-      ref: readRequiredString(params.ref, 'ref'),
-      key: readRequiredString(params.key, 'key'),
+      ref: requireStringValue(params.ref, 'ref'),
+      key: requireStringValue(params.key, 'key'),
       timeoutMs: readOptionalNumber(params.timeoutMs),
     }))],
     ['browser.scroll', handler(async (params) => {
@@ -396,10 +388,10 @@ export function createBrowserGatewayHandlers(
       launch: { ...readLaunchArgs(params), ...provisionLifetime(invocation) },
     }))],
     ['browser.tabs.switch', handler(async (params) => service.switchTab(readTarget(params), {
-      pageId: readRequiredString(params.pageId, 'pageId'),
+      pageId: requireStringValue(params.pageId, 'pageId'),
     }))],
     ['browser.tabs.close', handler(async (params) => service.closeTab(readTarget(params), {
-      pageId: readRequiredString(params.pageId, 'pageId'),
+      pageId: requireStringValue(params.pageId, 'pageId'),
     }))],
     ['browser.history.back', handler(async (params) => service.goBack(readTarget(params)))],
     ['browser.history.forward', handler(async (params) => service.goForward(readTarget(params)))],

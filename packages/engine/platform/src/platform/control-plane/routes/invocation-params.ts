@@ -31,15 +31,24 @@ export function readInvocationParams(invocation: GatewayMethodInvocation): Recor
   return { ...asRecord(invocation.query), ...asRecord(invocation.body) };
 }
 
+export interface RequireStringOptions {
+  /** Return the value as sent, for content (a reply, a secret, a patch) where spacing is part of it. Whitespace-only is still refused. */
+  readonly verbatim?: boolean;
+}
+
 /**
- * A required string parameter, trimmed. Absent, not a string, or only
- * whitespace is one refusal for every verb, naming the field.
+ * A required string, trimmed unless `verbatim`. Absent, not a string, or only
+ * whitespace is one refusal for every verb, naming the field (a dotted path
+ * such as `keys.auth` for a nested value).
  */
-export function requireString(params: Record<string, unknown>, field: string): string {
-  const value = params[field];
-  const text = typeof value === 'string' ? value.trim() : '';
-  if (!text) {
+export function requireStringValue(value: unknown, field: string, options?: RequireStringOptions): string {
+  if (typeof value !== 'string' || value.trim().length === 0) {
     throw new GatewayVerbError(`${field} is required: a non-empty string`, 'INVALID_ARGUMENT', 400, field);
   }
-  return text;
+  return options?.verbatim ? value : value.trim();
+}
+
+/** The required string parameter `field` of `params`; see `requireStringValue`. */
+export function requireString(params: Record<string, unknown>, field: string, options?: RequireStringOptions): string {
+  return requireStringValue(params[field], field, options);
 }

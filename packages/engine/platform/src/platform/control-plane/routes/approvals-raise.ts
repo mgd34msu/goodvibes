@@ -44,7 +44,7 @@ import type { PermissionPromptRequest } from '../../permissions/prompt.js';
 import type { RequestSharedApprovalInput, SharedApprovalRecord } from '../approval-broker.js';
 import type { RaisedApproval } from '../approval-broker-raise.js';
 import { GatewayVerbError } from './gateway-verb-error.js';
-import { readInvocationParams } from './invocation-params.js';
+import { readInvocationParams, requireStringValue } from './invocation-params.js';
 
 /** The broker surface this verb needs, nothing but raising and reading back. */
 export interface ApprovalRaiseService {
@@ -77,13 +77,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
-function requireString(value: unknown, field: string): string {
-  if (typeof value !== 'string' || value.trim().length === 0) {
-    throw invalid(`Invalid ${field}: expected a non-empty string`, field);
-  }
-  return value;
-}
-
 function optionalString(value: unknown, field: string): string | undefined {
   if (value === undefined || value === null) return undefined;
   if (typeof value !== 'string') throw invalid(`Invalid ${field}: expected a string`, field);
@@ -110,8 +103,8 @@ function clampedMs(value: unknown, field: string, max: number): number | undefin
  */
 export function readApprovalRaiseRequest(raw: unknown): PermissionPromptRequest {
   if (!isRecord(raw)) throw invalid('Invalid request: expected the permission ask object', 'request');
-  const callId = requireString(raw['callId'], 'request.callId');
-  const tool = requireString(raw['tool'], 'request.tool');
+  const callId = requireStringValue(raw['callId'], 'request.callId');
+  const tool = requireStringValue(raw['tool'], 'request.tool');
   const args = raw['args'];
   if (!isRecord(args)) throw invalid('Invalid request.args: expected an object of tool arguments', 'request.args');
   const category = raw['category'];
@@ -130,8 +123,8 @@ export function readApprovalRaiseRequest(raw: unknown): PermissionPromptRequest 
   if (!Array.isArray(reasons) || !reasons.every((entry) => typeof entry === 'string')) {
     throw invalid('Invalid request.analysis.reasons: expected an array of strings', 'request.analysis.reasons');
   }
-  requireString(analysis['classification'], 'request.analysis.classification');
-  requireString(analysis['summary'], 'request.analysis.summary');
+  requireStringValue(analysis['classification'], 'request.analysis.classification');
+  requireStringValue(analysis['summary'], 'request.analysis.summary');
   const workingDirectory = optionalString(raw['workingDirectory'], 'request.workingDirectory');
   const attribution = raw['attribution'];
   const rememberOptions = raw['rememberOptions'];

@@ -16,20 +16,14 @@ import {
   type WorkspaceRegistrationStore,
 } from '../../workspace/registration/index.js';
 import { GatewayVerbError } from './gateway-verb-error.js';
-import { readInvocationParams } from './invocation-params.js';
+import { readInvocationParams, requireStringValue } from './invocation-params.js';
+import { attachHandler } from './attach-handler.js';
 
 /** The subset of the store the verb handlers need. */
 export type WorkspacesGatewayService = Pick<
   WorkspaceRegistrationStore,
   'snapshot' | 'add' | 'remove' | 'resolve'
 >;
-
-function requireString(value: unknown, field: string): string {
-  if (typeof value !== 'string' || value.trim().length === 0) {
-    throw new GatewayVerbError(`${field} is required`, 'INVALID_ARGUMENT', 400, field);
-  }
-  return value;
-}
 
 function optionalString(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim().length > 0 ? value : undefined;
@@ -52,7 +46,7 @@ function createListHandler(service: WorkspacesGatewayService): GatewayMethodHand
 function createAddHandler(service: WorkspacesGatewayService): GatewayMethodHandler {
   return async (invocation) => {
     const params = readInvocationParams(invocation);
-    const root = requireString(params.root, 'root');
+    const root = requireStringValue(params.root, 'root');
     const label = optionalString(params.label);
     // Provenance: which surface/flow wrote the record, and whether this root
     // is in scope for the automatic checkpoint boundary (absent = false, so
@@ -76,7 +70,7 @@ function createAddHandler(service: WorkspacesGatewayService): GatewayMethodHandl
 function createRemoveHandler(service: WorkspacesGatewayService): GatewayMethodHandler {
   return async (invocation) => {
     const params = readInvocationParams(invocation);
-    const root = requireString(params.root, 'root');
+    const root = requireStringValue(params.root, 'root');
     try {
       return await service.remove(root);
     } catch (error) {
@@ -88,7 +82,7 @@ function createRemoveHandler(service: WorkspacesGatewayService): GatewayMethodHa
 function createResolveHandler(service: WorkspacesGatewayService): GatewayMethodHandler {
   return async (invocation) => {
     const params = readInvocationParams(invocation);
-    const path = requireString(params.path, 'path');
+    const path = requireStringValue(params.path, 'path');
     const mainWorktreeRoot = optionalString(params.mainWorktreeRoot);
     const git: WorkspaceGitMetadata | undefined =
       mainWorktreeRoot !== undefined ? { mainWorktreeRoot } : undefined;
@@ -110,10 +104,7 @@ export function registerWorkspacesGatewayMethods(
   catalog: GatewayMethodCatalog,
   service: WorkspacesGatewayService,
 ): void {
-  const attach = (id: string, handler: GatewayMethodHandler): void => {
-    const descriptor = catalog.get(id);
-    if (descriptor) catalog.register(descriptor, handler, { replace: true });
-  };
+  const attach = (id: string, handler: GatewayMethodHandler): void => { attachHandler(catalog, id, handler); };
   attach('workspaces.registrations.list', createListHandler(service));
   attach('workspaces.registrations.add', createAddHandler(service));
   attach('workspaces.registrations.remove', createRemoveHandler(service));

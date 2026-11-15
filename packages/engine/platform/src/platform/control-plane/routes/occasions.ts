@@ -28,7 +28,8 @@
 import type { GatewayMethodCatalog } from '../method-catalog.js';
 import type { GatewayMethodHandler, GatewayMethodInvocation } from '../method-catalog-shared.js';
 import { GatewayVerbError } from './gateway-verb-error.js';
-import { readInvocationParams } from './invocation-params.js';
+import { readInvocationParams, requireStringValue } from './invocation-params.js';
+import { attachHandler } from './attach-handler.js';
 import { refuseNonUserRequest } from './explicit-user-request.js';
 import type { AuthoritySurface } from '../../security/untrusted-content.js';
 import { isProfileSurface, type ProfileSurface } from '../../owner-profile/index.js';
@@ -78,13 +79,6 @@ const AUTHORITY_SURFACES: readonly AuthoritySurface[] = [
   'document',
 ];
 
-function requireString(value: unknown, field: string): string {
-  if (typeof value !== 'string' || value.trim().length === 0) {
-    throw new GatewayVerbError(`${field} is required`, 'INVALID_ARGUMENT', 400, field);
-  }
-  return value;
-}
-
 function optionalString(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined;
 }
@@ -133,11 +127,11 @@ function readAuthority(value: unknown, invocation: GatewayMethodInvocation): Aut
 
 function readSaid(value: unknown, authority: unknown, invocation: GatewayMethodInvocation): string {
   if (authority === 'autonomous' && profileDelegationForInvocation(invocation)) return '';
-  return requireString(value, 'said');
+  return requireStringValue(value, 'said', { verbatim: true });
 }
 
 function readSurface(value: unknown): ProfileSurface {
-  const surface = requireString(value, 'surface');
+  const surface = requireStringValue(value, 'surface');
   if (!isProfileSurface(surface)) {
     throw new GatewayVerbError(
       'surface must be one of tui, agent, webui, voice, hand-edit',
@@ -178,7 +172,7 @@ function readAckSource(value: unknown): OccasionAckSource {
  * as a refusal would silence an occasion the owner never declined.
  */
 function readAnswer(value: unknown): OccasionAnswer {
-  const answer = requireString(value, 'answer');
+  const answer = requireStringValue(value, 'answer');
   if (!isOccasionAnswer(answer)) {
     throw new GatewayVerbError(
       `answer must be one of ${OCCASION_ANSWERS.join(', ')}`,
@@ -204,9 +198,7 @@ export function registerOccasionsGatewayMethods(
   const nativeMethods = [...profileMethods, 'occasions.answer', 'occasions.acknowledge', 'occasions.interview.answer',
     'occasions.interview.record', 'occasions.sweep'];
   const attach = (id: string, handler: GatewayMethodHandler): void => {
-    const descriptor = catalog.get(id);
-    if (descriptor) catalog.register(descriptor, nativeMethods.includes(id)
-      ? nativeProfileMutation(catalog, id, handler, native?.host, native?.target, profileMethods.includes(id)) : handler, { replace: true });
+    attachHandler(catalog, id, nativeMethods.includes(id) ? nativeProfileMutation(catalog, id, handler, native?.host, native?.target, profileMethods.includes(id)) : handler);
   };
   if (native) registerNativeProfileTargets(catalog, [...nativeMethods, 'occasions.list', 'occasions.plans.list', 'occasions.state',
     'occasions.pending', 'occasions.interview.get', 'occasions.gifts'], native.target);
@@ -220,8 +212,8 @@ export function registerOccasionsGatewayMethods(
   attach('occasions.propose', (invocation: GatewayMethodInvocation) => {
     const params = readInvocationParams(invocation);
     return service.proposeOccasion({
-      title: requireString(params.title, 'title'),
-      date: requireString(params.date, 'date'),
+      title: requireStringValue(params.title, 'title'),
+      date: requireStringValue(params.date, 'date'),
       ...(optionalString(params.kind) === undefined ? {} : { kind: optionalString(params.kind) }),
       ...(optionalString(params.person) === undefined ? {} : { person: optionalString(params.person) }),
       ...(optionalString(params.recurrence) === undefined ? {} : { recurrence: optionalString(params.recurrence) }),
@@ -234,9 +226,9 @@ export function registerOccasionsGatewayMethods(
     if (!profileDelegationForInvocation(invocation)) refuseNonUserRequest(invocation, 'occasions.confirm');
     const params = readInvocationParams(invocation);
     return service.confirmOccasion({
-      title: requireString(params.title, 'title'),
-      date: requireString(params.date, 'date'),
-      kind: requireString(params.kind, 'kind'),
+      title: requireStringValue(params.title, 'title'),
+      date: requireStringValue(params.date, 'date'),
+      kind: requireStringValue(params.kind, 'kind'),
       ...(optionalString(params.person) === undefined ? {} : { person: optionalString(params.person) }),
       ...(optionalString(params.recurrence) === undefined ? {} : { recurrence: optionalString(params.recurrence) }),
       ...(optionalNumber(params.leadDays) === undefined ? {} : { leadDays: optionalNumber(params.leadDays) }),
@@ -251,7 +243,7 @@ export function registerOccasionsGatewayMethods(
     if (!profileDelegationForInvocation(invocation)) refuseNonUserRequest(invocation, 'occasions.remove');
     const params = readInvocationParams(invocation);
     return service.removeOccasion({
-      occasionId: requireString(params.occasionId, 'occasionId'),
+      occasionId: requireStringValue(params.occasionId, 'occasionId'),
       confirmed: params.confirmed === true,
       authority: readAuthority(params.authority, invocation),
     }, readingOptions(invocation, catalog.get('occasions.remove')?.scopes));
@@ -261,7 +253,7 @@ export function registerOccasionsGatewayMethods(
     if (!profileDelegationForInvocation(invocation)) refuseNonUserRequest(invocation, 'occasions.update');
     const params = readInvocationParams(invocation);
     return service.updateOccasion({
-      occasionId: requireString(params.occasionId, 'occasionId'),
+      occasionId: requireStringValue(params.occasionId, 'occasionId'),
       title: optionalString(params.title),
       date: optionalString(params.date),
       kind: optionalString(params.kind),
@@ -279,7 +271,7 @@ export function registerOccasionsGatewayMethods(
   attach('occasions.answer', (invocation: GatewayMethodInvocation) => {
     const params = readInvocationParams(invocation);
     return service.answer({
-      occasionId: requireString(params.occasionId, 'occasionId'),
+      occasionId: requireStringValue(params.occasionId, 'occasionId'),
       answer: readAnswer(params.answer),
       ...(optionalString(params.occurrence) === undefined
         ? {}
@@ -290,7 +282,7 @@ export function registerOccasionsGatewayMethods(
   attach('occasions.acknowledge', (invocation: GatewayMethodInvocation) => {
     const params = readInvocationParams(invocation);
     return service.acknowledge({
-      occasionId: requireString(params.occasionId, 'occasionId'),
+      occasionId: requireStringValue(params.occasionId, 'occasionId'),
       // A verb call is a surface offering the action, unless it says otherwise.
       source: readAckSource(params.source),
       ...(optionalString(params.occurrence) === undefined
@@ -301,35 +293,35 @@ export function registerOccasionsGatewayMethods(
 
   attach('occasions.interview.get', async (invocation: GatewayMethodInvocation) => {
     const params = readInvocationParams(invocation);
-    return interviewAnswer(await service.interview(requireString(params.interviewId, 'interviewId'), readingOptions(invocation, catalog.get('occasions.interview.get')?.scopes)));
+    return interviewAnswer(await service.interview(requireStringValue(params.interviewId, 'interviewId'), readingOptions(invocation, catalog.get('occasions.interview.get')?.scopes)));
   });
 
   attach('occasions.interview.answer', async (invocation: GatewayMethodInvocation) => {
     const params = readInvocationParams(invocation);
     return interviewAnswer(await service.answerInterview({
-      interviewId: requireString(params.interviewId, 'interviewId'),
-      stepId: requireString(params.stepId, 'stepId'),
-      text: requireString(params.text, 'text'),
+      interviewId: requireStringValue(params.interviewId, 'interviewId'),
+      stepId: requireStringValue(params.stepId, 'stepId'),
+      text: requireStringValue(params.text, 'text', { verbatim: true }),
     }, readingOptions(invocation, catalog.get('occasions.interview.answer')?.scopes)));
   });
 
   attach('occasions.interview.record', async (invocation: GatewayMethodInvocation) => {
     const params = readInvocationParams(invocation);
     return interviewAnswer(await service.recordGiftOutcome({
-      interviewId: requireString(params.interviewId, 'interviewId'),
-      landedOn: requireString(params.landedOn, 'landedOn'),
+      interviewId: requireStringValue(params.interviewId, 'interviewId'),
+      landedOn: requireStringValue(params.landedOn, 'landedOn'),
     }, readingOptions(invocation, catalog.get('occasions.interview.record')?.scopes)));
   });
 
   attach('occasions.gifts', async (invocation: GatewayMethodInvocation) => {
     const params = readInvocationParams(invocation);
-    const occasionId = requireString(params.occasionId, 'occasionId');
+    const occasionId = requireStringValue(params.occasionId, 'occasionId');
     return { occasionId, gifts: await service.giftHistory(occasionId, readingOptions(invocation, catalog.get('occasions.gifts')?.scopes)) };
   });
 
   attach('occasions.conflict.resolve', async (invocation: GatewayMethodInvocation) => {
     const params = readInvocationParams(invocation);
-    const occasionId = requireString(params.occasionId, 'occasionId');
+    const occasionId = requireStringValue(params.occasionId, 'occasionId');
     const keep = optionalString(params.keep);
     // Naming a date removes the other lines from the owner's profile, so it is
     // a profile write with the same admission as a removal. Without one, the
@@ -344,9 +336,9 @@ export function registerOccasionsGatewayMethods(
   attach('occasions.plans.propose', (invocation: GatewayMethodInvocation) => {
     const params = readInvocationParams(invocation);
     return service.proposePlan({
-      title: requireString(params.title, 'title'),
-      from: requireString(params.from, 'from'),
-      to: requireString(params.to, 'to'),
+      title: requireStringValue(params.title, 'title'),
+      from: requireStringValue(params.from, 'from'),
+      to: requireStringValue(params.to, 'to'),
       ...(params.away === undefined ? {} : { away: params.away === true }),
       ...(optionalString(params.destination) === undefined
         ? {}
@@ -359,9 +351,9 @@ export function registerOccasionsGatewayMethods(
     if (!profileDelegationForInvocation(invocation)) refuseNonUserRequest(invocation, 'occasions.plans.confirm');
     const params = readInvocationParams(invocation);
     return service.confirmPlan({
-      title: requireString(params.title, 'title'),
-      from: requireString(params.from, 'from'),
-      to: requireString(params.to, 'to'),
+      title: requireStringValue(params.title, 'title'),
+      from: requireStringValue(params.from, 'from'),
+      to: requireStringValue(params.to, 'to'),
       ...(params.away === undefined ? {} : { away: params.away === true }),
       ...(optionalString(params.destination) === undefined
         ? {}
@@ -377,7 +369,7 @@ export function registerOccasionsGatewayMethods(
     if (!profileDelegationForInvocation(invocation)) refuseNonUserRequest(invocation, 'occasions.plans.update');
     const params = readInvocationParams(invocation);
     return service.updatePlan({
-      planId: requireString(params.planId, 'planId'),
+      planId: requireStringValue(params.planId, 'planId'),
       planFrom: optionalString(params.planFrom),
       title: optionalString(params.title),
       from: optionalString(params.from),
@@ -396,7 +388,7 @@ export function registerOccasionsGatewayMethods(
     if (!profileDelegationForInvocation(invocation)) refuseNonUserRequest(invocation, 'occasions.plans.remove');
     const params = readInvocationParams(invocation);
     return service.removePlan({
-      planId: requireString(params.planId, 'planId'),
+      planId: requireStringValue(params.planId, 'planId'),
       planFrom: optionalString(params.planFrom),
       confirmed: params.confirmed === true,
       authority: readAuthority(params.authority, invocation),

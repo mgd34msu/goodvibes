@@ -53,7 +53,8 @@ import { captureOwnedJson, snapshotJudgmentInput } from '../../gate/judgment-inp
 import type { GatewayMethodCatalog } from '../method-catalog.js';
 import type { GatewayMethodHandler, GatewayMethodInvocation } from '../method-catalog-shared.js';
 import { GatewayVerbError } from './gateway-verb-error.js';
-import { readInvocationParams } from './invocation-params.js';
+import { readInvocationParams, requireStringValue } from './invocation-params.js';
+import { attachHandler } from './attach-handler.js';
 import { refuseNonUserRequest } from './explicit-user-request.js';
 import type { AuthoritySurface } from '../../security/untrusted-content.js';
 import {
@@ -89,16 +90,9 @@ const AUTHORITY_SURFACES: readonly AuthoritySurface[] = [
   'document',
 ];
 
-function requireString(value: unknown, field: string): string {
-  if (typeof value !== 'string' || value.trim().length === 0) {
-    throw new GatewayVerbError(`${field} is required`, 'INVALID_ARGUMENT', 400, field);
-  }
-  return value;
-}
-
 /** A known field id, or an honest 400 naming what was asked for. */
 function requireFieldId(value: unknown): string {
-  const fieldId = requireString(value, 'fieldId');
+  const fieldId = requireStringValue(value, 'fieldId');
   if (profileFieldById(fieldId) === undefined) {
     throw new GatewayVerbError(
       unknownProfileFieldMessage(fieldId),
@@ -158,12 +152,12 @@ function readAuthority(value: unknown, invocation: GatewayMethodInvocation): Aut
 
 function readSaid(value: unknown, authority: unknown, invocation: GatewayMethodInvocation): string {
   if (authority === 'autonomous' && profileDelegationForInvocation(invocation)) return '';
-  return requireString(value, 'said');
+  return requireStringValue(value, 'said', { verbatim: true });
 }
 
 /** Which surface is recording the line. Named in the provenance suffix. */
 function readSurface(value: unknown): ProfileSurface {
-  const surface = requireString(value, 'surface');
+  const surface = requireStringValue(value, 'surface');
   if (!isProfileSurface(surface)) {
     throw new GatewayVerbError(
       `surface must be one of tui, agent, webui, voice, hand-edit`,
@@ -270,7 +264,7 @@ function createPersonHandler(
       signal?.throwIfAborted();
     };
     assertCurrent();
-    const name = requireString(readInvocationParams(invocation).name, 'name');
+    const name = requireStringValue(readInvocationParams(invocation).name, 'name');
     const lines = await person.call(service, name, { signal, assertCurrent, retain: check => { retained.push(check); } });
     assertCurrent();
     for (const check of retained) check();
@@ -301,7 +295,7 @@ function createSetHandler(service: OwnerProfileGatewayService): GatewayMethodHan
     const params = readInvocationParams(invocation);
     return service.set({
       fieldId: requireFieldId(params.fieldId),
-      value: requireString(params.value, 'value'),
+      value: requireStringValue(params.value, 'value', { verbatim: true }),
       surface: readSurface(params.surface),
       said: readSaid(params.said, params.authority, invocation),
       authority: readAuthority(params.authority, invocation),
@@ -314,8 +308,8 @@ function createAppendHandler(service: OwnerProfileGatewayService): GatewayMethod
     if (!profileDelegationForInvocation(invocation)) refuseNonUserRequest(invocation, 'profile.append');
     const params = readInvocationParams(invocation);
     return service.append({
-      section: requireString(params.section, 'section'),
-      text: requireString(params.text, 'text'),
+      section: requireStringValue(params.section, 'section'),
+      text: requireStringValue(params.text, 'text', { verbatim: true }),
       surface: readSurface(params.surface),
       said: readSaid(params.said, params.authority, invocation),
       authority: readAuthority(params.authority, invocation),
@@ -396,9 +390,7 @@ export function registerOwnerProfileGatewayMethods(
   const governed = applyOwnerProfilePolicy(service, policy);
   const nativeMethods = ['profile.set', 'profile.append', 'profile.forget', 'profile.undo'];
   const attach = (id: string, handler: GatewayMethodHandler): void => {
-    const descriptor = catalog.get(id);
-    if (descriptor) catalog.register(descriptor, nativeMethods.includes(id)
-      ? nativeProfileMutation(catalog, id, handler, native?.host, native?.target) : handler, { replace: true });
+    attachHandler(catalog, id, nativeMethods.includes(id) ? nativeProfileMutation(catalog, id, handler, native?.host, native?.target) : handler);
   };
   if (native) registerNativeProfileTargets(catalog, nativeMethods, native.target);
   attach('profile.read', createReadHandler(governed));

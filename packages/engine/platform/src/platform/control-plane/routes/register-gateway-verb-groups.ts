@@ -23,8 +23,9 @@ import { registerPairingHandoffGatewayMethods } from './pairing-handoff.js';
 import { registerTailscaleGatewayMethods } from './tailscale.js';
 import { registerAcpGatewayMethods } from './acp.js';
 import { discoverAcpAgents, type AcpHostService } from '../../acp/host.js';
-import { createFleetConflictsListHandler, createFleetConflictsResolveHandler, type FleetConflictsDeps } from './fleet.js';
-import { createResolutionRunTracker, startConflictResolutionSession } from './seeded-sessions.js';
+import { createFleetConflictsListHandler, createFleetConflictsResolveHandler, createFleetConflictsRetryHandler, type FleetConflictsDeps } from './fleet.js';
+import { CONFLICT_RESOLUTION_SESSION_PREFIX, startConflictResolutionSession } from './seeded-sessions.js';
+import { attachHandler } from './attach-handler.js';
 // Compatibility re-export: consumers/tests import startCiFixSession from here.
 export { startCiFixSession, startConflictResolutionSession } from './seeded-sessions.js';
 import { defaultTailscaleRunner, TailscaleServeReceiptStore, type TailscaleCommandRunner } from '../../remote-access/tailscale.js';
@@ -376,54 +377,58 @@ export function registerGatewayVerbGroups(catalog: GatewayMethodCatalog, deps: G
   registerFleetCheckpointsSearchGatewayMethods(catalog, deps);
   if (deps.triggerSupervisor) registerTriggerSupervisorGatewayMethods(catalog, deps.triggerSupervisor);
 
-  // fleet.conflicts.*, a conflict row's one action: spawn a seeded resolution
-  // session inside the kept tree (the CI fix-session machinery) and reclaim
-  // the tree once the resolution lands (re-merge on run success). Registered
-  // only when the engine's conflict surface AND the automation manager exist.
+  // fleet.conflicts.*: a conflict row's actions are a seeded resolution session
+  // inside the kept tree (the CI fix-session machinery) and a retry of the
+  // merge. Registered only when the engine's conflict surface AND the
+  // automation manager exist.
   const attemptsEngine = deps.attemptsController;
   if (attemptsEngine?.listWorkstreams && attemptsEngine.stampConflictSession && attemptsEngine.retryItemIntegration && deps.automationManager) {
     const automation = deps.automationManager;
     const engine = attemptsEngine;
-    /** Resolution sessions awaiting run completion. */
-    const resolutionRuns = createResolutionRunTracker();
+    const listWorkstreams = engine.listWorkstreams!.bind(engine);
+    const retryIntegration = engine.retryItemIntegration!.bind(engine);
+    // Resolution sessions running in this process, session id -> item id. Only
+    // for "is it still running" and a run that ends before its id is stamped;
+    // which item a finished session resolved is read from the item's stored
+    // session id, so a restart loses nothing.
+    const liveResolutions = new Map<string, string>();
     const conflictsDeps: FleetConflictsDeps = {
       // A second resolve is refused while the first session still works in the kept tree.
-      isSessionLive: resolutionRuns.isSessionLive,
-      listWorkstreams: () => engine.listWorkstreams!(),
+      isSessionLive: (sessionId) => liveResolutions.has(sessionId),
+      listWorkstreams,
       stampConflictSession: (itemId, sessionId) => engine.stampConflictSession!(itemId, sessionId),
+      retryIntegration,
       startResolutionSession: async (seed) => {
-        // Tracked from job creation: a run can finish before runNow returns.
-        const trackedJobIds: string[] = [];
-        const started = await startConflictResolutionSession(automation, seed, (jobId) => {
-          trackedJobIds.push(jobId);
-          resolutionRuns.begin(jobId, seed.itemId);
+        let chosen: string | undefined;
+        const started = await startConflictResolutionSession(automation, seed, (_jobId, sessionId) => {
+          chosen = sessionId;
+          liveResolutions.set(sessionId, seed.itemId);
         });
         if ('error' in started) {
-          for (const jobId of trackedJobIds) resolutionRuns.abandon(jobId);
+          if (chosen) liveResolutions.delete(chosen);
           return started;
         }
-        resolutionRuns.started(started.jobId, started.sessionId);
         return { sessionId: started.sessionId };
       },
     };
-    const attachConflict = (id: string, handler: ReturnType<typeof createFleetConflictsListHandler>): void => {
-      const descriptor = catalog.get(id);
-      if (descriptor) catalog.register(descriptor, handler, { replace: true });
-    };
-    attachConflict('fleet.conflicts.list', createFleetConflictsListHandler(conflictsDeps));
-    attachConflict('fleet.conflicts.resolve', createFleetConflictsResolveHandler(conflictsDeps));
-    // The resolution run ending, whatever its outcome (AUTOMATION_RUN_COMPLETED
-    // is the one terminal event), releases the item so it can be resolved
-    // again. On success the merge is re-attempted through the same integration
-    // lane: a clean merge removes the kept tree; a re-conflict stays flagged.
+    attachHandler(catalog, 'fleet.conflicts.list', createFleetConflictsListHandler(conflictsDeps));
+    attachHandler(catalog, 'fleet.conflicts.resolve', createFleetConflictsResolveHandler(conflictsDeps));
+    attachHandler(catalog, 'fleet.conflicts.retry', createFleetConflictsRetryHandler({ ...conflictsDeps, retryIntegration }));
+    // A resolution session ending, whatever its outcome (AUTOMATION_RUN_COMPLETED
+    // is the one terminal event), is no longer live. On success the merge is
+    // re-attempted through the same integration lane: a clean merge removes the
+    // kept tree; a re-conflict stays flagged and fleet.conflicts.retry can try again.
     if (deps.runtimeBus) {
       const offAutomation = deps.runtimeBus.onDomain('automation', (envelope) => {
-        const payload = envelope.payload as { type?: string; jobId?: string; outcome?: string };
-        if (payload.type !== 'AUTOMATION_RUN_COMPLETED' || !payload.jobId) return;
-        const itemId = resolutionRuns.complete(payload.jobId);
-        if (!itemId) return;
-        if (payload.outcome !== 'success') return;
-        void engine.retryItemIntegration!(itemId).catch((error) => {
+        const payload = envelope.payload as { type?: string; outcome?: string };
+        const sessionId = envelope.sessionId;
+        if (payload.type !== 'AUTOMATION_RUN_COMPLETED' || sessionId === undefined || !sessionId.startsWith(CONFLICT_RESOLUTION_SESSION_PREFIX)) return;
+        const itemId = liveResolutions.get(sessionId) ?? findConflictBySession(listWorkstreams(), sessionId);
+        liveResolutions.delete(sessionId);
+        if (!itemId || payload.outcome !== 'success') return;
+        void retryIntegration(itemId).then((outcome) => {
+          logger.info('fleet.conflicts: post-resolution re-merge', { itemId, outcome });
+        }, (error: unknown) => {
           logger.warn('fleet.conflicts: post-resolution re-merge failed', { itemId, error: summarizeError(error) });
         });
       });
@@ -802,3 +807,15 @@ export function registerGatewayVerbGroups(catalog: GatewayMethodCatalog, deps: G
   }
 }
 
+/** The conflicted item whose stored resolution session is `sessionId`, if any. */
+function findConflictBySession(
+  workstreams: ReturnType<NonNullable<FleetConflictsDeps['listWorkstreams']>>,
+  sessionId: string,
+): string | undefined {
+  for (const workstream of workstreams) {
+    for (const item of workstream.items) {
+      if (item.mergeState === 'conflict' && item.conflictSessionId === sessionId) return item.id;
+    }
+  }
+  return undefined;
+}

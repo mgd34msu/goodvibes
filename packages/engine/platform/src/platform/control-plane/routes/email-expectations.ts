@@ -39,6 +39,7 @@ import { readInvocationParams } from './invocation-params.js';
 import { ExpectationMailboxUnreadableError } from '../../email/inbound/expectation-registry.js';
 import { ExpectationAuthorityError, ExpectationRefusalError } from '../../google/verification-expectations.js';
 import type { GatewayMethodCatalog, GatewayMethodHandler } from '../method-catalog.js';
+import { attachHandler } from './attach-handler.js';
 import type {
   DisclosedExpectation,
   InboundExpectationRegistry,
@@ -209,10 +210,7 @@ export function registerEmailExpectationGatewayMethods(
   service: EmailExpectationService,
   watchState?: () => EmailExpectationWatchState,
 ): void {
-  const attach = (id: string, handler: GatewayMethodHandler): void => {
-    const descriptor = catalog.get(id);
-    if (descriptor) catalog.register(descriptor, handler, { replace: true });
-  };
+  const attach = (id: string, handler: GatewayMethodHandler): void => { attachHandler(catalog, id, handler); };
   attach('email.expectation.open', createEmailExpectationOpenHandler(service, watchState));
   attach('email.expectation.list', createEmailExpectationListHandler(service));
   attach('email.expectation.cancel', createEmailExpectationCancelHandler(service));

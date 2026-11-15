@@ -16,6 +16,7 @@ import { GatewayVerbError } from './gateway-verb-error.js';
 import { readInvocationParams } from './invocation-params.js';
 import type { VoiceKeySupersede } from '../../voice/provisioning/config-preconfigure.js';
 import type { VoiceRoundTripProof } from '../../voice/provisioning/round-trip-proof.js';
+import { attachHandler } from './attach-handler.js';
 
 /** One-act install outcome served by voice.local.install. */
 export interface VoiceLocalInstallResult {
@@ -157,10 +158,7 @@ export function createWakeModelHandler(service: VoiceSetupGatewayService): Gatew
 
 /** Attach the voice-setup handlers to their registered descriptors (missing = no-op). */
 export function registerVoiceSetupGatewayMethods(catalog: GatewayMethodCatalog, service: VoiceSetupGatewayService): void {
-  const attach = (id: string, handler: GatewayMethodHandler): void => {
-    const descriptor = catalog.get(id);
-    if (descriptor) catalog.register(descriptor, handler, { replace: true });
-  };
+  const attach = (id: string, handler: GatewayMethodHandler): void => { attachHandler(catalog, id, handler); };
   attach('voice.local.status', createVoiceStatusHandler(service));
   attach('voice.local.install', createVoiceInstallHandler(service));
   attach('voice.wake.status', createWakeStatusHandler(service));

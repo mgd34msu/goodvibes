@@ -10,7 +10,8 @@
 import type { GatewayMethodCatalog } from '../method-catalog.js';
 import type { GatewayMethodHandler } from '../method-catalog-shared.js';
 import { GatewayVerbError } from './gateway-verb-error.js';
-import { readInvocationParams } from './invocation-params.js';
+import { readInvocationParams, requireString } from './invocation-params.js';
+import { attachHandler } from './attach-handler.js';
 import {
   StepUpChallengeLimitError,
   StepUpValidationError,
@@ -19,14 +20,6 @@ import {
 } from '../../relay/step-up-service.js';
 
 export type StepUpGatewayService = Pick<StepUpService, 'registerCredential' | 'mintChallenge' | 'listCredentials' | 'removeCredential'>;
-
-function requireString(params: Record<string, unknown>, key: string): string {
-  const value = params[key];
-  if (typeof value !== 'string' || value.trim().length === 0) {
-    throw new GatewayVerbError(`${key} is required`, 'INVALID_ARGUMENT', 400, key);
-  }
-  return value;
-}
 
 function optionalUserVerification(value: unknown): UserVerificationRequirement | undefined {
   if (value === undefined) return undefined;
@@ -105,10 +98,7 @@ function createRemoveHandler(service: StepUpGatewayService): GatewayMethodHandle
 }
 
 export function registerStepUpGatewayMethods(catalog: GatewayMethodCatalog, service: StepUpGatewayService): void {
-  const attach = (id: string, handler: GatewayMethodHandler): void => {
-    const descriptor = catalog.get(id);
-    if (descriptor) catalog.register(descriptor, handler, { replace: true });
-  };
+  const attach = (id: string, handler: GatewayMethodHandler): void => { attachHandler(catalog, id, handler); };
   attach('stepup.credentials.register', createRegisterHandler(service));
   attach('stepup.credentials.list', createListHandler(service));
   attach('stepup.credentials.remove', createRemoveHandler(service));

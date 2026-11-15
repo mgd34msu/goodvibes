@@ -15,7 +15,7 @@
 import type { GatewayMethodCatalog } from '../method-catalog.js';
 import type { GatewayMethodHandler } from '../method-catalog-shared.js';
 import { GatewayVerbError } from './gateway-verb-error.js';
-import { readInvocationParams } from './invocation-params.js';
+import { readInvocationParams, requireString } from './invocation-params.js';
 import {
   HostedSessionArgumentError,
   HostedSessionClientOwnerError,
@@ -46,14 +46,6 @@ export interface HostedSessionVerbService {
   detach(sessionId: string, clientId: string, principalId?: string): Promise<HostedSessionRecord>;
   kill(sessionId: string): Promise<HostedSessionRecord>;
   list(options?: { readonly includeTerminated?: boolean | undefined }): readonly HostedSessionRecord[];
-}
-
-function requireString(params: Record<string, unknown>, field: string): string {
-  const value = params[field];
-  if (typeof value !== 'string' || value.trim().length === 0) {
-    throw new GatewayVerbError(`${field} is required`, 'INVALID_ARGUMENT', 400, field);
-  }
-  return value.trim();
 }
 
 function optionalString(params: Record<string, unknown>, field: string): string | undefined {

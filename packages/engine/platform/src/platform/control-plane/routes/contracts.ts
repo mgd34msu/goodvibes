@@ -11,22 +11,15 @@ import type { GatewayMethodCatalog } from '../method-catalog.js';
 import type { GatewayMethodHandler } from '../method-catalog-shared.js';
 import { formatRefusal, RefusalError } from '@goodvibes-jev/engine/errors';
 import { GatewayVerbError } from './gateway-verb-error.js';
-import { readInvocationParams } from './invocation-params.js';
+import { readInvocationParams, requireString } from './invocation-params.js';
 import { ContractOperatorError, projectContractOperatorView, type ContractOperatorService } from '../../contract/operator-service.js';
+import { attachHandler } from './attach-handler.js';
 
 /** The reason a cancel over the operator surface records when the caller gives none. */
 export const OPERATOR_CANCEL_REASON = 'cancelled by an operator';
 
 /** The longest retry key a caller may send (the Idempotency-Key header or `idempotencyKey`). */
 const MAX_IDEMPOTENCY_KEY_LENGTH = 255;
-
-function requireString(params: Record<string, unknown>, field: string): string {
-  const value = params[field];
-  if (typeof value !== 'string' || value.trim().length === 0) {
-    throw new GatewayVerbError(`${field} is required`, 'INVALID_ARGUMENT', 400, field);
-  }
-  return value.trim();
-}
 
 function optionalString(params: Record<string, unknown>, field: string): string | undefined {
   const value = params[field];
@@ -199,10 +192,7 @@ export const CONTRACT_METHOD_IDS: readonly string[] = [
  * other route group.
  */
 export function registerContractGatewayMethods(catalog: GatewayMethodCatalog, service: ContractOperatorService): void {
-  const attach = (id: string, handler: GatewayMethodHandler): void => {
-    const descriptor = catalog.get(id);
-    if (descriptor) catalog.register(descriptor, handler, { replace: true });
-  };
+  const attach = (id: string, handler: GatewayMethodHandler): void => { attachHandler(catalog, id, handler); };
   attach('contracts.list', createContractsListHandler(service));
   attach('contracts.get', createContractsGetHandler(service));
   attach('contracts.start', createContractsStartHandler(service));

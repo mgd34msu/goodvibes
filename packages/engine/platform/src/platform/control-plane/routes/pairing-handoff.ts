@@ -37,7 +37,7 @@ import {
   describeP256dhProblem,
 } from '../../push/index.js';
 import { GatewayVerbError } from './gateway-verb-error.js';
-import { readInvocationParams } from './invocation-params.js';
+import { readInvocationParams, requireStringValue } from './invocation-params.js';
 
 /** What the hand-off verbs need from the surrounding composition. */
 export interface PairingHandoffDeps {
@@ -60,13 +60,6 @@ function requirePrincipal(invocation: GatewayMethodInvocation): string {
   return principalId;
 }
 
-function requireString(value: unknown, field: string): string {
-  if (typeof value !== 'string' || value.trim().length === 0) {
-    throw new GatewayVerbError(`Missing or invalid ${field}`, 'INVALID_ARGUMENT', 400, field);
-  }
-  return value;
-}
-
 function requestedOffers(value: unknown): readonly PairingHandoffOfferKind[] {
   if (value === undefined) return PAIRING_HANDOFF_OFFER_KINDS;
   if (!Array.isArray(value)) {
@@ -87,7 +80,7 @@ function createHandoffCreateHandler(deps: PairingHandoffDeps): GatewayMethodHand
   return async (invocation) => {
     requirePrincipal(invocation);
     const params = readInvocationParams(invocation);
-    const name = requireString(params.name, 'name');
+    const name = requireStringValue(params.name, 'name');
     const available = availableOffers(deps);
     const offers = requestedOffers(params.offers).filter((kind) => available.has(kind));
 
@@ -165,8 +158,8 @@ function readKeys(value: unknown): { p256dh: string; auth: string } {
     throw new GatewayVerbError('notifications.keys is required', 'INVALID_ARGUMENT', 400, 'notifications.keys');
   }
   const keys = value as Record<string, unknown>;
-  const p256dh = requireString(keys.p256dh, 'notifications.keys.p256dh');
-  const auth = requireString(keys.auth, 'notifications.keys.auth');
+  const p256dh = requireStringValue(keys.p256dh, 'notifications.keys.p256dh');
+  const auth = requireStringValue(keys.auth, 'notifications.keys.auth');
   const p256dhProblem = describeP256dhProblem(p256dh);
   if (p256dhProblem) throw new GatewayVerbError(p256dhProblem, 'INVALID_ARGUMENT', 400, 'notifications.keys.p256dh');
   const authProblem = describeAuthSecretProblem(auth);
@@ -176,7 +169,7 @@ function readKeys(value: unknown): { p256dh: string; auth: string } {
 
 /** The endpoint must be a bounded http(s) URL, same rule as push.subscriptions.create. */
 function readEndpoint(value: unknown): string {
-  const endpoint = requireString(value, 'notifications.endpoint');
+  const endpoint = requireStringValue(value, 'notifications.endpoint');
   const problem = describeEndpointProblem(endpoint);
   if (problem) throw new GatewayVerbError(problem, 'INVALID_ARGUMENT', 400, 'notifications.endpoint');
   return endpoint;
@@ -212,10 +205,10 @@ function createHandoffCompleteHandler(deps: PairingHandoffDeps): GatewayMethodHa
         } else if (kind === 'passkey' && deps.stepUp) {
           const offer = offered as Record<string, unknown>;
           await deps.stepUp.registerCredential({
-            rpId: requireString(offer.rpId, 'passkey.rpId'),
-            origin: requireString(offer.origin, 'passkey.origin'),
-            credentialId: requireString(offer.credentialId, 'passkey.credentialId'),
-            publicKeyCose: requireString(offer.publicKeyCose, 'passkey.publicKeyCose'),
+            rpId: requireStringValue(offer.rpId, 'passkey.rpId'),
+            origin: requireStringValue(offer.origin, 'passkey.origin'),
+            credentialId: requireStringValue(offer.credentialId, 'passkey.credentialId'),
+            publicKeyCose: requireStringValue(offer.publicKeyCose, 'passkey.publicKeyCose'),
           });
           results.push({ kind, status: 'completed' });
         } else if (kind === 'relay') {

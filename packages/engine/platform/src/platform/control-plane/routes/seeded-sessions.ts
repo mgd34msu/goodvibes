@@ -80,12 +80,16 @@ export async function startCiFixSession(
   }
 }
 
+/** Every conflict-resolution session id starts with this, so a completion can be recognised without a lookup. */
+export const CONFLICT_RESOLUTION_SESSION_PREFIX = 'conflict-fix-';
+
 /**
  * Start a merge-conflict resolution session INSIDE the kept worktree, the
  * same seeded-session machinery as startCiFixSession, seeded with the tree
  * path, item branch, and the STRUCTURED conflict list. Returns the REAL
- * session id plus the job id (the run-completion hook keys on it to
- * re-attempt the merge and reclaim the tree), or an honest error.
+ * session id plus the job id, or an honest error. The run-completion hook
+ * finds the item by that session id (stamped on the item) to re-attempt the
+ * merge and reclaim the tree.
  */
 export async function startConflictResolutionSession(
   automation: SeededSessionAutomation,
@@ -97,8 +101,8 @@ export async function startConflictResolutionSession(
     readonly branch: string | undefined;
     readonly files: readonly string[];
   },
-  /** Called with the job id before it runs, so a completion that arrives during `runNow` is not missed. */
-  onJobCreated?: (jobId: string) => void,
+  /** Called with the job id and its session id before it runs, so a completion that arrives during `runNow` is not missed. */
+  onJobCreated?: (jobId: string, sessionId: string) => void,
 ): Promise<{ sessionId: string; jobId: string } | { error: string }> {
   const prompt = [
     `Merge conflict: "${seed.title}" could not merge into the base branch.`,
@@ -110,6 +114,7 @@ export async function startConflictResolutionSession(
     `Work INSIDE the kept worktree at ${seed.worktreePath}. Resolve the conflicts against the base branch, keep both sides' intent, and commit the resolution onto the item branch. Do not delete the branch or the worktree, once your resolution lands, the merge is re-attempted and the tree is reclaimed automatically.`,
   ].join('\n');
   let createdJobId: string | undefined;
+  const sessionId = `${CONFLICT_RESOLUTION_SESSION_PREFIX}${randomUUID().slice(0, 10)}`;
   try {
     const job = await automation.createJob({
       name: `Resolve merge conflict: ${seed.title}`,
@@ -117,7 +122,7 @@ export async function startConflictResolutionSession(
       schedule: { kind: 'at', at: Date.now() },
       target: {
         kind: 'main',
-        sessionId: `conflict-fix-${randomUUID().slice(0, 10)}`,
+        sessionId,
         surfaceKind: 'service',
         createIfMissing: true,
       },
@@ -125,7 +130,7 @@ export async function startConflictResolutionSession(
       deleteAfterRun: true,
     });
     createdJobId = job.id;
-    onJobCreated?.(job.id);
+    onJobCreated?.(job.id, sessionId);
     const run = await automation.runNow(job.id);
     if (run.sessionId) return { sessionId: run.sessionId, jobId: job.id };
     return { error: `the resolution run started without an attachable session (run ${run.id}, status ${run.status})` };
@@ -133,37 +138,4 @@ export async function startConflictResolutionSession(
     if (createdJobId) await discardUnstartedJob(automation, createdJobId);
     return { error: summarizeError(error) };
   }
-}
-
-/**
- * The resolution runs still in flight: which item each job resolves and which
- * session it works in. A run that finishes during `runNow` completes before its
- * session is known, so a late `started` for an already completed job is not
- * recorded as live.
- */
-export function createResolutionRunTracker(): {
-  readonly begin: (jobId: string, itemId: string) => void;
-  readonly abandon: (jobId: string) => void;
-  readonly started: (jobId: string, sessionId: string) => void;
-  /** The item a completed job was resolving, or undefined for a job this tracker does not know. */
-  readonly complete: (jobId: string) => string | undefined;
-  readonly isSessionLive: (sessionId: string) => boolean;
-} {
-  const items = new Map<string, string>();
-  const sessions = new Map<string, string>();
-  return {
-    begin: (jobId, itemId) => { items.set(jobId, itemId); },
-    abandon: (jobId) => { items.delete(jobId); sessions.delete(jobId); },
-    started: (jobId, sessionId) => { if (items.has(jobId)) sessions.set(jobId, sessionId); },
-    complete: (jobId) => {
-      const itemId = items.get(jobId);
-      items.delete(jobId);
-      sessions.delete(jobId);
-      return itemId;
-    },
-    isSessionLive: (sessionId) => {
-      for (const live of sessions.values()) if (live === sessionId) return true;
-      return false;
-    },
-  };
 }

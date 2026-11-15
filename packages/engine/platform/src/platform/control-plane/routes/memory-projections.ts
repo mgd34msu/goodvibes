@@ -16,18 +16,11 @@ import type { GatewayMethodHandler } from '../method-catalog-shared.js';
 import type { MemoryRecord } from '../../state/memory-store.js';
 import { listMemoryProjections, getMemoryProjection } from '../../state/memory-file-projection.js';
 import { GatewayVerbError } from './gateway-verb-error.js';
-import { readInvocationParams } from './invocation-params.js';
+import { readInvocationParams, requireStringValue } from './invocation-params.js';
 
 /** The read surface memory projection needs: every standing/session record in the store. */
 export interface MemoryProjectionSource {
   getAll(): readonly MemoryRecord[];
-}
-
-function requireString(value: unknown, field: string): string {
-  if (typeof value !== 'string' || value.length === 0) {
-    throw new GatewayVerbError(`Missing required field: ${field}`, 'INVALID_ARGUMENT', 400, field);
-  }
-  return value;
 }
 
 export function createMemoryProjectionsListHandler(source: MemoryProjectionSource): GatewayMethodHandler {
@@ -37,7 +30,7 @@ export function createMemoryProjectionsListHandler(source: MemoryProjectionSourc
 export function createMemoryProjectionsGetHandler(source: MemoryProjectionSource): GatewayMethodHandler {
   return async (invocation) => {
     const params = readInvocationParams(invocation);
-    const id = requireString(params.id, 'id');
+    const id = requireStringValue(params.id, 'id');
     const projection = getMemoryProjection(source.getAll(), id);
     if (!projection) {
       throw new GatewayVerbError(`No standing memory projection with id: ${id}`, 'NOT_FOUND', 404);

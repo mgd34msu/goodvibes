@@ -57,7 +57,7 @@
 import type { GatewayMethodCatalog } from '../method-catalog.js';
 import type { GatewayMethodHandler, GatewayMethodInvocation } from '../method-catalog-shared.js';
 import { GatewayVerbError } from './gateway-verb-error.js';
-import { readInvocationParams } from './invocation-params.js';
+import { readInvocationParams, requireStringValue } from './invocation-params.js';
 import { daemonSecretKeyFor } from '../../config/daemon-secret-keys.js';
 import { configKeyScope, describeConfigOwnership } from '../../config/config-ownership.js';
 import {
@@ -125,13 +125,6 @@ function invalid(message: string, field: string): GatewayVerbError {
   return new GatewayVerbError(message, 'INVALID_ARGUMENT', 400, field);
 }
 
-function requireString(value: unknown, field: string): string {
-  if (typeof value !== 'string' || value.trim().length === 0) {
-    throw invalid(`Invalid ${field}: expected a non-empty string`, field);
-  }
-  return value;
-}
-
 /**
  * Refuse a key whose value is not credential material.
  *
@@ -186,8 +179,8 @@ export function createCredentialSetHandler(deps: CredentialWriteDeps): GatewayMe
   const additional = deps.additionalSecretKeys ?? [];
   return async (invocation) => {
     const params = readInvocationParams(invocation);
-    const key = requireString(params['key'], 'key');
-    const value = requireString(params['value'], 'value');
+    const key = requireStringValue(params['key'], 'key');
+    const value = requireStringValue(params['value'], 'value', { verbatim: true });
     await requireSecretBearingKey(key, additional);
     if (isSecretReferenceValue(value)) {
       throw invalid(
@@ -328,7 +321,7 @@ export function createCredentialDeleteHandler(deps: CredentialWriteDeps): Gatewa
   const additional = deps.additionalSecretKeys ?? [];
   return async (invocation) => {
     const params = readInvocationParams(invocation);
-    const key = requireString(params['key'], 'key');
+    const key = requireStringValue(params['key'], 'key');
     await requireSecretBearingKey(key, additional);
 
     const secretKey = daemonSecretKeyFor(key);

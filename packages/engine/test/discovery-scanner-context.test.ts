@@ -1,6 +1,6 @@
 import { describe, test, expect, beforeEach, afterEach, mock } from 'bun:test';
 import { fetchModelContextWindows } from '@goodvibes-jev/engine/platform/platform/discovery';
-import { scanHosts } from '../platform/src/platform/discovery/scanner.js';
+import { fetchModelLimits, scanHosts } from '../platform/src/platform/discovery/scanner.js';
 
 // ---------------------------------------------------------------------------
 // fetch mock helpers
@@ -406,5 +406,22 @@ describe('fetchModelContextWindows - generic (unknown/lm-studio/etc)', () => {
     const result = await fetchModelContextWindows('192.168.0.85', 8001, 'unknown', ['my-model']);
     expect(result['my-model']).toBe(16384);
     expect(propsCalled).toBe(false);
+  });
+});
+
+describe('fetchModelLimits', () => {
+  test('one metadata request per Ollama model yields both the context window and the output limit', async () => {
+    let requests = 0;
+    globalThis.fetch = (async () => {
+      requests++;
+      return { ok: true, json: async () => ({ model_info: { 'llama.context_length': 32768 }, parameters: 'num_predict 2048' }) } as unknown as Response;
+    }) as unknown as typeof globalThis.fetch;
+    const models = Array.from({ length: 10 }, (_, index) => `model-${index}`);
+    const limits = await fetchModelLimits('127.0.0.1', 11434, 'ollama', models);
+    expect(requests).toBe(10);
+    for (const model of models) {
+      expect(limits.contextWindows[model]).toBe(32768);
+      expect(limits.outputLimits[model]).toBe(2048);
+    }
   });
 });

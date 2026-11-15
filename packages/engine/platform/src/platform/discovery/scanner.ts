@@ -70,8 +70,8 @@ export function loadPersistedProviders(roots: DiscoveryRoots): DiscoveredServer[
 }
 
 /**
- * How long a provider stays in the cache without being seen again. The LAN scan
- * probes every host on the local /24, so without an age limit every address ever
+ * How long a provider stays in the cache without being seen again. The network
+ * sweep probes the private networks the machine is on, so without an age limit every address ever
  * answered on every network the machine has visited would be kept forever.
  */
 const PERSISTED_PROVIDER_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
@@ -212,31 +212,68 @@ async function asyncPool<T>(
 // ---------------------------------------------------------------------------
 
 /**
- * Returns all host IPs to scan from local network interfaces.
- * Each non-internal, non-link-local IPv4 address yields its /24 subnet
- * (192.168.1.1 ... 192.168.1.254).
+ * The widest network a sweep covers. A /16 docker bridge or a /8 corporate
+ * network is swept only in the /24 around this computer's own address.
  */
-function getLocalSubnets(): string[] {
-  const ips: string[] = [];
-  const ifaces = networkInterfaces();
+const WIDEST_SWEEP_PREFIX = 24;
 
-  for (const iface of Object.values(ifaces)) {
+function parseIPv4(address: string): number | null {
+  const parts = address.split('.');
+  if (parts.length !== 4) return null;
+  let value = 0;
+  for (const part of parts) {
+    if (!/^\d{1,3}$/.test(part)) return null;
+    const octet = Number(part);
+    if (octet > 255) return null;
+    value = value * 256 + octet;
+  }
+  return value;
+}
+
+function formatIPv4(value: number): string {
+  return [value >>> 24, (value >>> 16) & 255, (value >>> 8) & 255, value & 255].join('.');
+}
+
+/** RFC 1918 ranges: 10/8, 172.16/12, 192.168/16. */
+function isPrivateIPv4(value: number): boolean {
+  return (value >>> 24) === 10
+    || (value >>> 20) === ((172 << 4) | 1)
+    || (value >>> 16) === ((192 << 8) | 168);
+}
+
+/** Prefix length of a contiguous dotted netmask; null when it is not one. */
+function netmaskPrefix(netmask: string): number | null {
+  const mask = parseIPv4(netmask);
+  if (mask === null) return null;
+  const prefix = 32 - Math.log2(2 ** 32 - mask);
+  return Number.isInteger(prefix) ? prefix : null;
+}
+
+/**
+ * The other hosts of the private networks this computer is attached to, for
+ * the network sweep. Only RFC 1918 addresses count (a public, link-local,
+ * carrier-grade or VPN-point address yields nothing), the interface's netmask
+ * bounds the range, and no network is swept wider than a /24.
+ */
+export function networkSweepHosts(interfaces: ReturnType<typeof networkInterfaces> = networkInterfaces()): string[] {
+  const hosts = new Set<string>();
+  for (const iface of Object.values(interfaces)) {
     if (!iface) continue;
     for (const addr of iface) {
       if (addr.family !== 'IPv4' || addr.internal) continue;
-      // Skip link-local
-      if (addr.address.startsWith('169.254.')) continue;
-
-      const parts = addr.address.split('.');
-      const prefix = parts.slice(0, 3).join('.');
-      for (let i = 1; i <= 254; i++) {
-        ips.push(`${prefix}.${i}`);
+      const address = parseIPv4(addr.address);
+      if (address === null || !isPrivateIPv4(address)) continue;
+      const prefix = Math.max(netmaskPrefix(addr.netmask) ?? WIDEST_SWEEP_PREFIX, WIDEST_SWEEP_PREFIX);
+      // A /31 or /32 has no other host to find.
+      if (prefix > 30) continue;
+      const size = 2 ** (32 - prefix);
+      const network = address - (address % size);
+      for (let offset = 1; offset < size - 1; offset++) {
+        hosts.add(formatIPv4(network + offset));
       }
     }
   }
-
-  // Deduplicate (multiple interfaces on same subnet)
-  return [...new Set(ips)];
+  return [...hosts];
 }
 
 // ---------------------------------------------------------------------------
@@ -315,7 +352,7 @@ function extractV1Models(body: unknown): string[] | null {
  * Which server software answered: the well-known default ports decide on
  * their own (a fixed table); any other port is read from the probe's headers
  * and model ids by routing.local-server-identity. 'unknown' must be a settled
- * choice; an unsettled identity holds discovery.
+ * choice; an unsettled identity leaves that one server out of the scan.
  */
 async function identifyServer(
   port: number,
@@ -335,8 +372,188 @@ async function identifyServer(
 }
 
 // ---------------------------------------------------------------------------
-// Context Window Detection
+// Model Limits
 // ---------------------------------------------------------------------------
+
+export interface ModelLimits {
+  /** modelId -> context window tokens. A missing entry means the server did not report one. */
+  readonly contextWindows: Record<string, number>;
+  /** modelId -> max output tokens. A missing entry means the server did not report one. */
+  readonly outputLimits: Record<string, number>;
+}
+
+/**
+ * Per-model metadata requests in flight against one server. Unbounded, a server
+ * holding dozens of models answered the late ones after the timeout and their
+ * limits were silently missing.
+ */
+const METADATA_CONCURRENCY = 4;
+
+type JsonObject = Record<string, unknown>;
+
+/** Which response fields carry each limit, most specific first. */
+interface LimitFields {
+  readonly context: readonly string[];
+  readonly output: readonly string[];
+}
+
+const VLLM_FIELDS: LimitFields = { context: ['max_model_len'], output: ['max_completion_tokens'] };
+const GENERIC_FIELDS: LimitFields = {
+  context: ['max_model_len', 'context_length', 'context_window', 'max_context_length'],
+  output: ['max_completion_tokens', 'max_output_tokens'],
+};
+
+function positiveNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null;
+}
+
+function firstPositive(data: JsonObject, fields: readonly string[]): number | null {
+  for (const field of fields) {
+    const value = positiveNumber(data[field]);
+    if (value !== null) return value;
+  }
+  return null;
+}
+
+/** Ollama reports a limit in `model_info` ("<arch>.<field>") on newer builds, or in the Modelfile parameters. */
+function ollamaLimit(data: JsonObject, infoSuffix: string, parameter: string): number | null {
+  const modelInfo = data.model_info;
+  if (typeof modelInfo === 'object' && modelInfo !== null) {
+    for (const [key, value] of Object.entries(modelInfo)) {
+      if (!key.endsWith(infoSuffix)) continue;
+      const found = positiveNumber(value);
+      if (found !== null) return found;
+    }
+  }
+  if (typeof data.parameters === 'string') {
+    const match = new RegExp(`${parameter}\\s+(\\d+)`).exec(data.parameters);
+    if (match) return positiveNumber(Number.parseInt(match[1]!, 10));
+  }
+  return null;
+}
+
+/** One metadata request. A refusal, a timeout or a body that is not a JSON object reads as "not reported". */
+async function fetchJsonObject(url: string, signal: AbortSignal | undefined, init: RequestInit = {}): Promise<JsonObject | null> {
+  try {
+    const res = await instrumentedFetch(url, { ...init, signal: requestSignal(METADATA_TIMEOUT_MS, signal) });
+    if (!res.ok) return null;
+    const data: unknown = await res.json();
+    return typeof data === 'object' && data !== null && !Array.isArray(data) ? data as JsonObject : null;
+  } catch (err) {
+    logger.debug('[Scan] metadata request failed', { url, error: summarizeError(err) });
+    return null;
+  }
+}
+
+/** llama.cpp-style server-wide settings: `default_generation_settings.n_ctx` and `n_predict`. */
+async function fetchServerProps(origin: string, signal: AbortSignal | undefined): Promise<{ context: number | null; output: number | null }> {
+  const data = await fetchJsonObject(`${origin}/props`, signal);
+  const settings = data?.default_generation_settings;
+  if (typeof settings !== 'object' || settings === null) return { context: null, output: null };
+  const values = settings as JsonObject;
+  return { context: positiveNumber(values.n_ctx), output: positiveNumber(values.n_predict) };
+}
+
+/**
+ * Reads the context window and output limit of each model with each metadata
+ * request made once; `wantOutput: false` skips requests that could only supply
+ * output limits.
+ */
+async function readModelLimits(
+  host: string,
+  port: number,
+  serverType: ServerType,
+  models: string[],
+  wantOutput: boolean,
+  signal?: AbortSignal,
+): Promise<ModelLimits> {
+  signal?.throwIfAborted();
+  const origin = `http://${host}:${port}`;
+  const contextWindows: Record<string, number> = {};
+  const outputLimits: Record<string, number> = {};
+  const record = (model: string, context: number | null, output: number | null, via = ''): void => {
+    if (context !== null) contextWindows[model] = context;
+    if (output !== null && wantOutput) outputLimits[model] = output;
+    const parts: string[] = [];
+    if (context !== null) parts.push(`context ${context} tokens`);
+    if (output !== null && wantOutput) parts.push(`output limit ${output} tokens`);
+    if (parts.length > 0) logger.info(`[Scan] ${model}: ${parts.join(', ')}${via}`);
+  };
+  const eachModel = (read: (model: string) => Promise<void>): Promise<void> =>
+    asyncPool(METADATA_CONCURRENCY, models, read, signal);
+
+  switch (serverType) {
+    case 'ollama': {
+      await eachModel(async (model) => {
+        const data = await fetchJsonObject(`${origin}/api/show`, signal, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: model }),
+        });
+        if (data) record(model, ollamaLimit(data, 'context_length', 'num_ctx'), ollamaLimit(data, 'num_predict', 'num_predict'));
+      });
+      break;
+    }
+
+    case 'llamacpp': {
+      // llama.cpp typically serves one model; its server-wide settings apply to all.
+      const props = await fetchServerProps(origin, signal);
+      for (const model of models) record(model, props.context, props.output);
+      break;
+    }
+
+    default: {
+      let haveContext = false;
+      if (serverType === 'lm-studio') {
+        // LM Studio's rich endpoint (/api/v1/models) carries max_context_length per model;
+        // the generic per-model reading below is the fallback for context and the source of output limits.
+        const discovered = await discoverContextWindows(`${origin}/v1`, undefined, signal);
+        for (const [modelId, ctx] of discovered) {
+          if (models.includes(modelId) || models.length === 0) record(modelId, ctx, null, ' (via discoverContextWindows)');
+        }
+        haveContext = Object.keys(contextWindows).length > 0;
+        if (haveContext && !wantOutput) break;
+        signal?.throwIfAborted();
+      }
+
+      const fields = serverType === 'vllm' ? VLLM_FIELDS : GENERIC_FIELDS;
+      await eachModel(async (model) => {
+        const data = await fetchJsonObject(`${origin}/v1/models/${encodeURIComponent(model)}`, signal);
+        if (data) record(model, haveContext ? null : firstPositive(data, fields.context), firstPositive(data, fields.output));
+      });
+      if (serverType === 'vllm') break;
+
+      // A llama.cpp-style server behind another port answers /props for whatever the per-model reading missed.
+      const needContext = Object.keys(contextWindows).length === 0;
+      const needOutput = wantOutput && Object.keys(outputLimits).length === 0;
+      if (models.length > 0 && (needContext || needOutput)) {
+        signal?.throwIfAborted();
+        const props = await fetchServerProps(origin, signal);
+        for (const model of models) {
+          record(model, needContext ? props.context : null, needOutput ? props.output : null, ' (via /props fallback)');
+        }
+      }
+      break;
+    }
+  }
+
+  signal?.throwIfAborted();
+  return { contextWindows, outputLimits };
+}
+
+/**
+ * Queries a discovered server for the context window and output limit of each
+ * of its models, making each metadata request once.
+ */
+export function fetchModelLimits(
+  host: string,
+  port: number,
+  serverType: ServerType,
+  models: string[],
+  signal?: AbortSignal,
+): Promise<ModelLimits> {
+  return readModelLimits(host, port, serverType, models, true, signal);
+}
 
 /**
  * Queries a discovered server for actual context window sizes of its models.
@@ -350,347 +567,7 @@ export async function fetchModelContextWindows(
   models: string[],
   signal?: AbortSignal,
 ): Promise<Record<string, number>> {
-  signal?.throwIfAborted();
-  const result: Record<string, number> = {};
-
-  switch (serverType) {
-    case 'ollama': {
-      // Ollama: POST /api/show for each model, parallel to avoid blocking pool slot
-      await Promise.allSettled(
-        models.map(async (model) => {
-          try {
-            const res = await instrumentedFetch(`http://${host}:${port}/api/show`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ name: model }),
-              signal: requestSignal(METADATA_TIMEOUT_MS, signal),
-            });
-            if (!res.ok) return;
-            const data = await res.json() as Record<string, unknown>;
-
-            // Check model_info.context_length (newer Ollama)
-            const modelInfo = data.model_info as Record<string, unknown> | undefined;
-            if (modelInfo) {
-              // Keys vary: could be "<arch>.context_length" or just "context_length"
-              for (const [key, value] of Object.entries(modelInfo)) {
-                if (key.endsWith('context_length') && typeof value === 'number' && value > 0) {
-                  result[model] = value;
-                  logger.info(`[Scan] ${model}: context ${value} tokens`);
-                  break;
-                }
-              }
-            }
-
-            // Also check the parameters string for num_ctx.
-            if (!result[model] && typeof data.parameters === 'string') {
-              const match = (data.parameters as string).match(/num_ctx\s+(\d+)/);
-              if (match) {
-                const ctxLen = parseInt(match[1]!, 10);
-                result[model] = ctxLen;
-                logger.info(`[Scan] ${model}: context ${ctxLen} tokens`);
-              }
-            }
-          } catch (err) {
-            logger.debug(`[Scan] Failed to fetch context window for ${model}: ${err}`);
-          }
-        })
-      );
-      break;
-    }
-
-    case 'vllm': {
-      // vLLM: GET /v1/models/{id} returns max_model_len, parallel to avoid blocking pool slot
-      await Promise.allSettled(
-        models.map(async (model) => {
-          try {
-            const res = await instrumentedFetch(`http://${host}:${port}/v1/models/${encodeURIComponent(model)}`, {
-              signal: requestSignal(METADATA_TIMEOUT_MS, signal),
-            });
-            if (!res.ok) return;
-            const data = await res.json() as Record<string, unknown>;
-            if (typeof data.max_model_len === 'number' && data.max_model_len > 0) {
-              result[model] = data.max_model_len;
-              logger.info(`[Scan] ${model}: context ${data.max_model_len} tokens`);
-            }
-          } catch (err) {
-            logger.debug(`[Scan] Failed to fetch context window for ${model}: ${err}`);
-          }
-        })
-      );
-      break;
-    }
-
-    case 'llamacpp': {
-      // llama.cpp: GET /props returns default_generation_settings.n_ctx (server-wide)
-      try {
-        const res = await instrumentedFetch(`http://${host}:${port}/props`, {
-          signal: requestSignal(METADATA_TIMEOUT_MS, signal),
-        });
-        if (res.ok) {
-          const data = await res.json() as Record<string, unknown>;
-          const settings = data.default_generation_settings as Record<string, unknown> | undefined;
-          if (settings && typeof settings.n_ctx === 'number' && settings.n_ctx > 0) {
-            const ctxLen = settings.n_ctx as number;
-            // llama.cpp typically serves one model, apply to all
-            for (const model of models) {
-              result[model] = ctxLen;
-              logger.info(`[Scan] ${model}: context ${ctxLen} tokens`);
-            }
-          }
-        }
-      } catch (err) {
-        logger.debug(`[Scan] Failed to fetch llama.cpp props from ${host}:${port}: ${err}`);
-      }
-      break;
-    }
-
-    case 'lm-studio': {
-      // LM Studio: use discoverContextWindows which probes /api/v1/models first (rich endpoint
-      // with max_context_length per model), falling back through the verbose-first probe chain.
-      const baseURL = `http://${host}:${port}/v1`;
-      const discovered = await discoverContextWindows(baseURL, undefined, signal);
-      for (const [modelId, ctx] of discovered) {
-        if (models.includes(modelId) || models.length === 0) {
-          result[modelId] = ctx;
-          logger.info(`[Scan] ${modelId}: context ${ctx} tokens (via discoverContextWindows)`);
-        }
-      }
-      // If no results from rich endpoint, fall through to generic probe
-      if (Object.keys(result).length > 0) break;
-    }
-    // falls through to generic probe when LM Studio rich endpoint yields nothing
-    case 'localai':
-    case 'jan':
-    case 'gpt4all':
-    case 'koboldcpp':
-    case 'aphrodite':
-    case 'tgi':
-    case 'unknown':
-    default: {
-      // Generic: try /v1/models/{id} for each model, look for common context length fields, parallel
-      await Promise.allSettled(
-        models.map(async (model) => {
-          try {
-            const res = await instrumentedFetch(`http://${host}:${port}/v1/models/${encodeURIComponent(model)}`, {
-              signal: requestSignal(METADATA_TIMEOUT_MS, signal),
-            });
-            if (!res.ok) return;
-            const data = await res.json() as Record<string, unknown>;
-
-            const contextLength =
-              (typeof data.max_model_len === 'number' && data.max_model_len > 0 ? data.max_model_len : null) ??
-              (typeof data.context_length === 'number' && data.context_length > 0 ? data.context_length : null) ??
-              (typeof data.context_window === 'number' && data.context_window > 0 ? data.context_window : null) ??
-              (typeof data.max_context_length === 'number' && data.max_context_length > 0 ? data.max_context_length : null);
-
-            if (contextLength !== null) {
-              result[model] = contextLength;
-              logger.info(`[Scan] ${model}: context ${contextLength} tokens`);
-            }
-          } catch (err) {
-            logger.debug(`[Scan] Failed to fetch context window for ${model}: ${err}`);
-          }
-        })
-      );
-
-      // Try /props (llama.cpp-style) if no context windows were found.
-      if (Object.keys(result).length === 0 && models.length > 0) {
-        try {
-          const res = await instrumentedFetch(`http://${host}:${port}/props`, {
-            signal: requestSignal(METADATA_TIMEOUT_MS, signal),
-          });
-          if (res.ok) {
-            const data = await res.json() as Record<string, unknown>;
-            const settings = data.default_generation_settings as Record<string, unknown> | undefined;
-            if (settings && typeof settings.n_ctx === 'number' && settings.n_ctx > 0) {
-              const ctxLen = settings.n_ctx as number;
-              for (const model of models) {
-                result[model] = ctxLen;
-                logger.info(`[Scan] ${model}: context ${ctxLen} tokens (via /props fallback)`);
-              }
-            }
-          }
-        } catch (err) {
-          logger.debug(`[Scan] /props fallback failed for ${host}:${port}: ${err}`);
-        }
-      }
-
-      break;
-    }
-  }
-
-  signal?.throwIfAborted();
-  return result;
-}
-
-// ---------------------------------------------------------------------------
-// Output Token Limit Detection
-// ---------------------------------------------------------------------------
-
-/**
- * Queries a discovered server for output token limits of its models.
- * Returns a map of modelId -> maxOutputTokens. Missing entries mean the server
- * didn't report an output limit for that model.
- */
-async function fetchModelOutputLimits(
-  host: string,
-  port: number,
-  serverType: ServerType,
-  models: string[],
-  signal?: AbortSignal,
-): Promise<Record<string, number>> {
-  signal?.throwIfAborted();
-  const result: Record<string, number> = {};
-
-  switch (serverType) {
-    case 'ollama': {
-      // Ollama: POST /api/show for each model, look for num_predict in model_info or parameters
-      await Promise.allSettled(
-        models.map(async (model) => {
-          try {
-            const res = await instrumentedFetch(`http://${host}:${port}/api/show`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ name: model }),
-              signal: requestSignal(METADATA_TIMEOUT_MS, signal),
-            });
-            if (!res.ok) return;
-            const data = await res.json() as Record<string, unknown>;
-
-            // Check model_info for num_predict (newer Ollama)
-            const modelInfo = data.model_info as Record<string, unknown> | undefined;
-            if (modelInfo) {
-              for (const [key, value] of Object.entries(modelInfo)) {
-                if (key.endsWith('num_predict') && typeof value === 'number' && value > 0) {
-                  result[model] = value;
-                  logger.info(`[Scan] ${model}: output limit ${value} tokens`);
-                  break;
-                }
-              }
-            }
-
-            // Also check the parameters string for num_predict.
-            if (!result[model] && typeof data.parameters === 'string') {
-              const match = (data.parameters as string).match(/num_predict\s+(\d+)/);
-              if (match) {
-                const limit = parseInt(match[1]!, 10);
-                result[model] = limit;
-                logger.info(`[Scan] ${model}: output limit ${limit} tokens (from parameters)`);
-              }
-            }
-          } catch (err) {
-            logger.debug(`[Scan] Failed to fetch output limit for ${model}: ${err}`);
-          }
-        })
-      );
-      break;
-    }
-
-    case 'vllm': {
-      // vLLM: GET /v1/models/{id}, look for max_completion_tokens
-      await Promise.allSettled(
-        models.map(async (model) => {
-          try {
-            const res = await instrumentedFetch(`http://${host}:${port}/v1/models/${encodeURIComponent(model)}`, {
-              signal: requestSignal(METADATA_TIMEOUT_MS, signal),
-            });
-            if (!res.ok) return;
-            const data = await res.json() as Record<string, unknown>;
-            if (typeof data.max_completion_tokens === 'number' && data.max_completion_tokens > 0) {
-              result[model] = data.max_completion_tokens;
-              logger.info(`[Scan] ${model}: output limit ${data.max_completion_tokens} tokens`);
-            }
-          } catch (err) {
-            logger.debug(`[Scan] Failed to fetch output limit for ${model}: ${err}`);
-          }
-        })
-      );
-      break;
-    }
-
-    case 'llamacpp': {
-      // llama.cpp: GET /props, look for default_generation_settings.n_predict
-      try {
-        const res = await instrumentedFetch(`http://${host}:${port}/props`, {
-          signal: requestSignal(METADATA_TIMEOUT_MS, signal),
-        });
-        if (res.ok) {
-          const data = await res.json() as Record<string, unknown>;
-          const settings = data.default_generation_settings as Record<string, unknown> | undefined;
-          if (settings && typeof settings.n_predict === 'number' && settings.n_predict > 0) {
-            const limit = settings.n_predict as number;
-            for (const model of models) {
-              result[model] = limit;
-              logger.info(`[Scan] ${model}: output limit ${limit} tokens`);
-            }
-          }
-        }
-      } catch (err) {
-        logger.debug(`[Scan] Failed to fetch llama.cpp output limits from ${host}:${port}: ${err}`);
-      }
-      break;
-    }
-
-    case 'lm-studio':
-    case 'localai':
-    case 'jan':
-    case 'gpt4all':
-    case 'koboldcpp':
-    case 'aphrodite':
-    case 'tgi':
-    case 'unknown':
-    default: {
-      // Generic: try /v1/models/{id} for each model, look for common output limit fields
-      await Promise.allSettled(
-        models.map(async (model) => {
-          try {
-            const res = await instrumentedFetch(`http://${host}:${port}/v1/models/${encodeURIComponent(model)}`, {
-              signal: requestSignal(METADATA_TIMEOUT_MS, signal),
-            });
-            if (!res.ok) return;
-            const data = await res.json() as Record<string, unknown>;
-
-            const outputLimit =
-              (typeof data.max_completion_tokens === 'number' && data.max_completion_tokens > 0 ? data.max_completion_tokens : null) ??
-              (typeof data.max_output_tokens === 'number' && data.max_output_tokens > 0 ? data.max_output_tokens : null);
-
-            if (outputLimit !== null) {
-              result[model] = outputLimit;
-              logger.info(`[Scan] ${model}: output limit ${outputLimit} tokens`);
-            }
-          } catch (err) {
-            logger.debug(`[Scan] Failed to fetch output limit for ${model}: ${err}`);
-          }
-        })
-      );
-
-      // Try /props (llama.cpp-style) for n_predict if no output limits were found.
-      if (Object.keys(result).length === 0 && models.length > 0) {
-        try {
-          const res = await instrumentedFetch(`http://${host}:${port}/props`, {
-            signal: requestSignal(METADATA_TIMEOUT_MS, signal),
-          });
-          if (res.ok) {
-            const data = await res.json() as Record<string, unknown>;
-            const settings = data.default_generation_settings as Record<string, unknown> | undefined;
-            if (settings && typeof settings.n_predict === 'number' && settings.n_predict > 0) {
-              const limit = settings.n_predict as number;
-              for (const model of models) {
-                result[model] = limit;
-                logger.info(`[Scan] ${model}: output limit ${limit} tokens (via /props fallback)`);
-              }
-            }
-          }
-        } catch (err) {
-          logger.debug(`[Scan] /props output limit fallback failed for ${host}:${port}: ${err}`);
-        }
-      }
-      break;
-    }
-  }
-
-  signal?.throwIfAborted();
-  return result;
+  return (await readModelLimits(host, port, serverType, models, false, signal)).contextWindows;
 }
 
 // ---------------------------------------------------------------------------
@@ -757,21 +634,23 @@ export async function scanHosts(
 
     if (result === null) return;
 
-    const serverType = await identifyServer(port, result.headers, result.responseBody, signal);
-    const name = buildServerName(serverType, host, port);
-    const baseURL = `http://${host}:${port}/v1`;
-    // Fetch context windows and output limits in parallel (independent queries to the same server)
-    const [context, output] = await Promise.allSettled([
-      fetchModelContextWindows(host, port, serverType, result.models, signal),
-      fetchModelOutputLimits(host, port, serverType, result.models, signal),
-    ]);
-    if (context.status === 'rejected') throw context.reason;
-    if (output.status === 'rejected') throw output.reason;
-    const modelContextWindows = context.value, modelOutputLimits = output.value;
-
-    signal?.throwIfAborted();
-    servers.push({ name, host, port, baseURL, models: result.models, serverType, modelContextWindows, modelOutputLimits });
-    logger.info(`[Scan] Found ${name} at ${host}:${port} (${result.models.length} models)`);
+    // One server that cannot be identified or read drops out alone; the others
+    // (above all the ones on this computer) are still found. Only cancellation ends the scan.
+    try {
+      const serverType = await identifyServer(port, result.headers, result.responseBody, signal);
+      const name = buildServerName(serverType, host, port);
+      const baseURL = `http://${host}:${port}/v1`;
+      const limits = await fetchModelLimits(host, port, serverType, result.models, signal);
+      signal?.throwIfAborted();
+      servers.push({
+        name, host, port, baseURL, models: result.models, serverType,
+        modelContextWindows: limits.contextWindows, modelOutputLimits: limits.outputLimits,
+      });
+      logger.info(`[Scan] Found ${name} at ${host}:${port} (${result.models.length} models)`);
+    } catch (error) {
+      signal?.throwIfAborted();
+      logger.info(`[Scan] ${host}:${port} answered but was left out of this scan`, { error: summarizeError(error) });
+    }
   }, signal);
 
   return servers;
@@ -796,7 +675,9 @@ export async function scanLocalhost(signal?: AbortSignal): Promise<ScanResult> {
 }
 
 /**
- * Full scan: localhost first, then all /24 subnet IPs.
+ * Network sweep: localhost first, then the other hosts of the private networks
+ * this computer is attached to (see `networkSweepHosts`). Run it only when the
+ * person asked for the network; `scanLocalhost` covers this computer alone.
  * Returns merged, deduplicated results.
  */
 export async function scan(
@@ -804,20 +685,17 @@ export async function scan(
   signal?: AbortSignal,
 ): Promise<ScanResult> {
   const start = Date.now();
-  // Scan localhost first
   const localhostServers = await scanHosts(['127.0.0.1'], undefined, signal);
 
-  // Collect subnet IPs, excluding loopback
-  const subnetIPs = getLocalSubnets().filter((ip) => ip !== '127.0.0.1');
-
-  const subnetServers = subnetIPs.length > 0
-    ? await scanHosts(subnetIPs, onProgress, signal)
+  const networkHosts = networkSweepHosts();
+  const networkServers = networkHosts.length > 0
+    ? await scanHosts(networkHosts, onProgress, signal)
     : [];
 
   // Merge and deduplicate by host:port
   const seen = new Set<string>();
   const allServers: DiscoveredServer[] = [];
-  for (const server of [...localhostServers, ...subnetServers]) {
+  for (const server of [...localhostServers, ...networkServers]) {
     const key = `${server.host}:${server.port}`;
     if (!seen.has(key)) {
       seen.add(key);
@@ -825,10 +703,9 @@ export async function scan(
     }
   }
 
-  const scannedHosts = 1 + subnetIPs.length;
   return {
     servers: allServers,
-    scannedHosts,
+    scannedHosts: 1 + networkHosts.length,
     scannedPorts: KNOWN_PORTS.length,
     durationMs: Date.now() - start,
   };

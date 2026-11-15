@@ -2,7 +2,7 @@ import type { ConfigManager } from '../config/manager.js';
 import { logger } from '../utils/logger.js';
 import type { ProviderRegistry } from '../providers/registry.js';
 import { autoRegisterProviders } from '../providers/auto-register.js';
-import { scan, loadPersistedProviders, persistProviders, scanMcpServers } from '../discovery/index.js';
+import { scan, scanLocalhost, loadPersistedProviders, persistProviders, scanMcpServers } from '../discovery/index.js';
 import type { McpRegistry } from '../mcp/registry.js';
 import type { ShellPathService } from './shell-paths.js';
 import { summarizeError } from '../utils/error-display.js';
@@ -28,12 +28,13 @@ export interface BackgroundProviderDiscoveryOptions {
   shellPaths: Pick<ShellPathService, 'workingDirectory' | 'homeDirectory'>;
   surfaceRoot: string;
   /**
-   * Register servers found on other machines of the network as providers. Off by default: any host that
-   * answers on a well-known port would otherwise become a provider that prompts can be sent to.
-   * Servers on this computer are always registered.
+   * Sweep the private networks this computer is attached to and register the servers found on other
+   * machines as providers. Off by default: only this computer is probed, since any host that answers on
+   * a well-known port would otherwise become a provider that prompts can be sent to. Turn it on only
+   * after the person asked for the network scan. Servers on this computer are always registered.
    */
   registerNetworkServers?: boolean | undefined;
-  /** The network scan; replaceable so a host or a test supplies its own. */
+  /** The scan; replaceable so a host or a test supplies its own. */
   scan?: typeof scan | undefined;
 }
 
@@ -54,26 +55,27 @@ const describeModels = (server: { readonly models: readonly unknown[] }): string
   `${server.models.length} model${server.models.length !== 1 ? 's' : ''}`;
 
 /**
- * Starts one asynchronous provider discovery pass and returns a handle that
- * prevents late scan results from mutating runtime state after the host stops.
- *
- * The underlying scanner does not currently expose cancellable I/O, so `stop()`
- * is intentionally a state guard rather than a hard abort.
+ * Starts one asynchronous provider discovery pass and returns a handle whose
+ * `stop()` cancels the scan's requests and keeps late results from changing
+ * runtime state after the host stops.
  */
 export function startBackgroundProviderDiscovery(
   options: BackgroundProviderDiscoveryOptions,
 ): BackgroundRuntimeTaskHandle {
   const { configManager, providerRegistry, runtime, requestRender, restoreRuntimeModel, systemMessageRouter, shellPaths, surfaceRoot } = options;
-  const runScan = options.scan ?? scan;
+  const runScan: typeof scan = options.scan
+    ?? (options.registerNetworkServers === true ? scan : (_onProgress, signal) => scanLocalhost(signal));
   const trusted = (server: { readonly host: string }): boolean => options.registerNetworkServers === true || isLoopbackHost(server.host);
   autoRegisterProviders(providerRegistry);
   let stopped = false;
+  const lifetime = new AbortController();
   const handle: BackgroundRuntimeTaskHandle = {
     get stopped() {
       return stopped;
     },
     stop() {
       stopped = true;
+      lifetime.abort();
     },
   };
 
@@ -102,7 +104,7 @@ export function startBackgroundProviderDiscovery(
     }
   }
 
-  runScan().then((result) => {
+  runScan(undefined, lifetime.signal).then((result) => {
     if (stopped) return;
     const local = result.servers.filter(trusted);
     const network = result.servers.filter((server) => !trusted(server));

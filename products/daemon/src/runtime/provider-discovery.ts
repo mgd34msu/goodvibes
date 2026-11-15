@@ -1,11 +1,13 @@
-import { persistProviders, scan, type DiscoveredServer, type ScanResult } from '@goodvibes-jev/engine/platform/platform/discovery';
+import { persistProviders, scanLocalhost, type DiscoveredServer, type ScanResult } from '@goodvibes-jev/engine/platform/platform/discovery';
 import { isLoopbackHost } from '@goodvibes-jev/engine/platform/platform/pairing';
 import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 
 /**
  * A daemon registers and remembers only servers on its own computer: whatever
  * answers on a well-known port of another machine must not become a provider
- * that prompts (and their contents) are sent to.
+ * that prompts (and their contents) are sent to. The daemon's own scan probes
+ * only this computer; this filter is for the shared discovery cache, which the
+ * terminal app's explicit network scan also writes.
  */
 export function onlyLoopbackServers(servers: readonly DiscoveredServer[]): DiscoveredServer[] {
   return servers.filter((server) => isLoopbackHost(server.host));
@@ -17,7 +19,7 @@ export interface DaemonProviderDiscoveryDependencies {
   readonly persist?: (roots: Parameters<typeof persistProviders>[0], servers: DiscoveredServer[]) => void | Promise<void>;
 }
 
-/** One owned startup scan, without TUI model selection or cache-removal policy. */
+/** One owned startup scan of this computer's servers, without TUI model selection or cache-removal policy. */
 export function createDaemonProviderDiscovery(
   roots: Parameters<typeof persistProviders>[0],
   register: (servers: DiscoveredServer[]) => void,
@@ -30,11 +32,8 @@ export function createDaemonProviderDiscovery(
     if (closed || work) return;
     work = Promise.resolve().then(async () => {
       if (closed) return;
-      const result = await (dependencies.scan ? dependencies.scan(lifetime.signal) : scan(undefined, lifetime.signal));
+      const { servers } = await (dependencies.scan ?? scanLocalhost)(lifetime.signal);
       if (closed) return;
-      const servers = onlyLoopbackServers(result.servers);
-      const skipped = result.servers.length - servers.length;
-      if (skipped > 0) logger.info(`Daemon provider discovery found ${skipped} model server(s) on the network and did not register them`);
       if (servers.length === 0) return;
       register(servers);
       // A synchronous callback can reenter host.close(). Fence persistence too.

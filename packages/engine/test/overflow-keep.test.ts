@@ -1,7 +1,8 @@
 /**
- * What an oversized tool output shows inline: the blocks
- * engine.tools.output-keep ranks highest against the call that produced the
- * output, as many as fit the budget, in their original order.
+ * What an oversized tool output shows inline: by default its start, its end
+ * and the lines that report an error, with no request; on request, the blocks
+ * engine.tools.output-keep ranks highest against the call that produced it,
+ * as many as fit the budget, in their original order.
  */
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { describe, expect, test } from 'bun:test';
@@ -57,12 +58,20 @@ describe('OverflowHandler.handle', () => {
     expect(readings.requests).toHaveLength(0);
   });
 
-  test('oversized content is spilled and shows the kept blocks with the reference', async () => {
+  test('oversized content is spilled and shows head, tail and error lines with the reference, with no decision request', async () => {
     const content = `${'progress line\n'.repeat(300)}FAILURE_SUMMARY: 2 failed\n${'progress line\n'.repeat(300)}`;
     const result = await handler().handle(content, { maxChars: 800, label: 'stdout', call: 'bun test' });
     expect(result.content).toContain('FAILURE_SUMMARY: 2 failed');
     expect(result.content).toMatch(/truncated\. Full output: \.goodvibes\/\.overflow\/\d+-[a-f0-9-]+-stdout\.txt/);
     expect(result.overflowRef).toMatch(/^file:/);
+    expect(readings.requests).toHaveLength(0);
+  });
+
+  test('ranked keeping is asked for, not the default', async () => {
+    const content = `${'progress line\n'.repeat(300)}FAILURE_SUMMARY: 2 failed\n${'progress line\n'.repeat(300)}`;
+    const result = await handler().ranked().handle(content, { maxChars: 800, label: 'stdout', call: 'bun test' });
+    expect(result.content).toContain('FAILURE_SUMMARY: 2 failed');
+    expect(readings.requests.length).toBeGreaterThan(0);
   });
 });
 

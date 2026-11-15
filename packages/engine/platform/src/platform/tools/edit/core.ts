@@ -2,8 +2,9 @@ import { assertCurrentToolInvocation } from '../registry.js';
 import { captureFileEffectRevision } from '../shared/file-effect-revision.js';
 import type { CapturedWriteRevision } from '../shared/captured-write-revision.js';
 import { readFileSync, writeFileSync } from 'node:fs';
+import { relative } from 'node:path';
 import { writeFile } from 'node:fs/promises';
-import type { Tool, ToolDefinition, ToolExecuteOptions } from '../../types/tools.js';
+import type { Tool, ToolDefinition, ToolExecuteOptions, ToolHostEvidence } from '../../types/tools.js';
 import { logger } from '../../utils/logger.js';
 import type { SessionChangeTracker } from '../../sessions/change-tracker.js';
 import { FileUndoManager } from '../../state/file-undo.js';
@@ -19,16 +20,17 @@ import {
   formatDiagnosticsBlock,
   type DiagnosticsProvider,
 } from '../shared/post-edit-diagnostics.js';
-import { ImportGraph } from '../../intelligence/index.js';
-import { noteProjectFilesChanged } from '../../intelligence/project-files-epoch.js';
+import { isImportGraphSource, latestProjectImportGraph } from '../../intelligence/import-graph.js';
+import { announceWrites, recordPublishedEdit, verboseContent } from './publish.js';
 import {
   buildFailedEditResult,
-  classifyEditFailure,
   computeAstEdit,
   computeAstPatternEdit,
   computeSingleEdit,
+  type EditFailure,
+  type EditFailureStatus,
 } from './match.js';
-import type { EditInput, EditItem, EditResult, EditResultStatus, ValidatorName } from './types.js';
+import type { EditInput, EditItem, EditResult, ValidatorName } from './types.js';
 import { executeNotebookEdit, occConflictMessage } from './notebook.js';
 import { summarizeError } from '../../utils/error-display.js';
 import { describeUnexpectedToolError } from '../input-projection.js';
@@ -42,8 +44,21 @@ import {
 
 const DIFF_TRUNCATE_THRESHOLD = 5000;
 const DIFF_PREVIEW_LENGTH = 500;
-/** How long the post-edit dependents scan may run before it stops and says so. */
-const IMPORT_GRAPH_MAX_MS = 10_000;
+/** Dependents named in the note after an edit; the rest are counted. */
+const DEPENDENTS_NAMED = 5;
+
+/** The edit tool's result; a failed call carries the matcher's status as host evidence for telemetry. */
+export interface EditToolResult {
+  success: boolean;
+  output?: string;
+  error?: string;
+  hostEvidence?: ToolHostEvidence;
+}
+
+function failed(error: string, status: EditFailureStatus, output?: string): EditToolResult {
+  return { success: false, error, ...(output !== undefined ? { output } : {}), hostEvidence: { editStatus: status } };
+}
+
 
 async function runValidators(validators: ValidatorName[], cwd: string, runner?: ValidatorRunner, assertCurrent?: () => void, signal?: AbortSignal): Promise<ValidatorResult | null> {
   const failures = await runSharedValidators(validators, cwd, runner, assertCurrent, signal);
@@ -78,7 +93,7 @@ interface ResolvedTextEditInput {
   fileContents: Map<string, string>;
   /** Why a path was refused (non-atomic modes only); such a path is never read. */
   pathErrors: Map<string, string>;
-  fileReadErrors: Map<string, string>;
+  fileReadErrors: Map<string, EditFailure>;
   workingContents: Map<string, string>;
 }
 
@@ -92,7 +107,7 @@ async function prepareTextEditInput(
   input: EditInput,
   env: EditExecutionContext,
   transactionMode: 'atomic' | 'partial' | 'none',
-): Promise<ResolvedTextEditInput | { error: string }> {
+): Promise<ResolvedTextEditInput | EditFailure> {
   const resolvedPaths: Map<string, string> = new Map();
   const pathErrors: Map<string, string> = new Map();
   for (const item of input.edits!) {
@@ -102,7 +117,7 @@ async function prepareTextEditInput(
     } catch (err) {
       const msg = `Path error for '${item.path}': ${summarizeError(err)}`;
       if (transactionMode === 'atomic') {
-        return { error: msg };
+        return { error: msg, status: 'failed' };
       }
       pathErrors.set(item.path, msg);
     }
@@ -111,7 +126,7 @@ async function prepareTextEditInput(
   // Only validated paths are read; a refused one is reported per edit and never touched.
   const uniquePaths = new Set(resolvedPaths.values());
   const fileContents: Map<string, string> = new Map();
-  const fileReadErrors: Map<string, string> = new Map();
+  const fileReadErrors: Map<string, EditFailure> = new Map();
 
   for (const resolvedPath of uniquePaths) {
     await assertCapturedToolReadAccess(resolvedPath);
@@ -121,9 +136,9 @@ async function prepareTextEditInput(
     } catch {
       const msg = `File not found or unreadable: '${resolvedPath}'`;
       if (transactionMode === 'atomic') {
-        return { error: msg };
+        return { error: msg, status: 'not_found' };
       }
-      fileReadErrors.set(resolvedPath, msg);
+      fileReadErrors.set(resolvedPath, { error: msg, status: 'not_found' });
       continue;
     }
     // The stale-file check compares the bytes this edit will change, read once.
@@ -131,9 +146,9 @@ async function prepareTextEditInput(
     if (env.fileCache.compare(resolvedPath, content) === 'modified') {
       const msg = occConflictMessage(resolvedPath);
       if (transactionMode === 'atomic') {
-        return { error: msg };
+        return { error: msg, status: 'conflict' };
       }
-      fileReadErrors.set(resolvedPath, msg);
+      fileReadErrors.set(resolvedPath, { error: msg, status: 'conflict' });
       continue;
     }
     try {
@@ -145,9 +160,9 @@ async function prepareTextEditInput(
       fileContents.delete(resolvedPath);
       const msg = `Cannot edit '${resolvedPath}': ${summarizeError(err)}. Nothing was changed; edit the link target or a plain UTF-8 file instead.`;
       if (transactionMode === 'atomic') {
-        return { error: msg };
+        return { error: msg, status: 'failed' };
       }
-      fileReadErrors.set(resolvedPath, msg);
+      fileReadErrors.set(resolvedPath, { error: msg, status: 'failed' });
     }
   }
 
@@ -210,69 +225,73 @@ async function writeSuccessfulTextEdits(
 }
 
 /**
- * Names the files that import what this call wrote. It never compiles or runs
- * anything: a compiler picked up from the project would run outside the exec
- * tool's approval path, and checking a few files without the project's
- * tsconfig reports errors the project does not have.
+ * Names the files that import what this call wrote, nearest first, from the
+ * one import graph per project root that find and repo-map share (patched for
+ * this write, so no file is read here). Only source files have dependents; on
+ * the first edit under a root the caller waits for that root's one build. It
+ * never compiles or runs anything: a compiler picked up from the project would
+ * run outside the exec tool's approval path.
  */
-export async function buildImportGraphWarning(
+export async function describeEditDependents(
   cwd: string,
-  writtenPaths: Set<string>,
-  assertCurrent: () => void,
+  writtenPaths: ReadonlySet<string>,
   signal?: AbortSignal,
-  limits: { maxMs?: number; now?: () => number } = {},
 ): Promise<string | undefined> {
-  const maxMs = limits.maxMs ?? IMPORT_GRAPH_MAX_MS;
-  const now = limits.now ?? Date.now;
+  const sources = [...writtenPaths].filter(isImportGraphSource);
+  if (sources.length === 0 || signal?.aborted) return undefined;
   try {
-    const graph = new ImportGraph();
-    graph.markDirty();
-    // build() takes no signal or limit, so the read-access filter, which it calls
-    // before reading each file, stops the scan: past the time limit or after a
-    // cancel it refuses every remaining file and the scan finishes without reading them.
-    const startedAt = now();
-    let stopped = false;
-    await graph.build(cwd, async (path) => {
-      if (stopped || signal?.aborted || now() - startedAt > maxMs) {
-        stopped = true;
-        return false;
-      }
+    const pending = latestProjectImportGraph(cwd);
+    const graph = signal
+      ? await new Promise<Awaited<typeof pending> | undefined>((resolve, reject) => {
+          const onAbort = () => resolve(undefined);
+          signal.addEventListener('abort', onAbort, { once: true });
+          pending.then(resolve, reject).finally(() => signal.removeEventListener('abort', onAbort));
+        })
+      : await pending;
+    if (!graph) return undefined;
+
+    const written = new Set(sources);
+    const direct = new Set<string>();
+    for (const source of sources) for (const dependent of graph.findDependents(source)) if (!written.has(dependent)) direct.add(dependent);
+    const transitive = new Set<string>();
+    for (const source of sources) for (const dependent of graph.findTransitiveDependents(source)) if (!written.has(dependent)) transitive.add(dependent);
+    if (transitive.size === 0) return undefined;
+
+    // Name what the caller may read; a refused file is counted, never named.
+    const named: string[] = [];
+    for (const dependent of [...direct, ...[...transitive].filter((path) => !direct.has(path))]) {
+      if (named.length >= DEPENDENTS_NAMED) break;
       try {
-        await assertCapturedToolReadAccess(path);
-        return true;
+        await assertCapturedToolReadAccess(dependent);
+        named.push(relative(cwd, dependent) || dependent);
       } catch {
-        return false;
-      }
-    });
-    assertCurrent();
-    if (signal?.aborted) return undefined;
-    if (stopped) {
-      return `\nImport graph: scan stopped after ${Math.round(maxMs / 1000)}s, so dependents of this edit were not computed; run the project's type check to verify.`;
-    }
-
-    const editedAbsPaths = [...writtenPaths];
-    const affectedSet = new Set<string>();
-    for (const edited of editedAbsPaths) {
-      for (const dep of graph.findTransitiveDependents(edited)) {
-        affectedSet.add(dep);
+        // Not readable by this call: left out of the names.
       }
     }
-    for (const edited of editedAbsPaths) {
-      affectedSet.delete(edited);
-    }
-
-    if (affectedSet.size === 0) return undefined;
-    if (hasCapturedToolInvocation())
-      return `\nImport graph: ${affectedSet.size} transitive dependent(s) affected. Automatic dependency diagnostics are unavailable for captured edits; use the contained exec build/test workflow to verify the change.`;
-    return `\nImport graph: ${affectedSet.size} transitive dependent(s) affected; dependents were not type-checked. Verify with the project's type check or build through the exec tool.`;
+    const more = transitive.size - named.length;
+    const names = named.length > 0 ? `: ${named.join(', ')}${more > 0 ? ` and ${more} more` : ''}` : '';
+    const verify = hasCapturedToolInvocation()
+      ? 'Automatic dependency diagnostics are unavailable for captured edits; use the contained exec build/test workflow to verify the change.'
+      : 'They were not type-checked; verify with the project\'s type check or build through the exec tool.';
+    return `\nDependents: ${direct.size} file(s) import what this edit changed, ${transitive.size} in all${names}. ${verify}`;
   } catch (err) {
-    logger.warn('[import-graph] Import graph tracing failed', { error: summarizeError(err) });
+    logger.warn('[import-graph] Dependents lookup failed', { error: summarizeError(err) });
     return undefined;
   }
 }
 
 async function restoreOriginalContents(fileContents: Map<string, string>, env: EditExecutionContext): Promise<string[]> {
   const failures: string[] = [];
+  const restored = new Set<string>();
+  try {
+    await restoreEach(fileContents, env, failures, restored);
+  } finally {
+    if (restored.size > 0) announceWrites(restored, fileContents);
+  }
+  return failures;
+}
+
+async function restoreEach(fileContents: Map<string, string>, env: EditExecutionContext, failures: string[], restored: Set<string>): Promise<void> {
   for (const [resolvedPath, originalContent] of fileContents) {
     try {
       if (env.authenticated && !env.ownedRevisions.has(resolvedPath)) continue;
@@ -293,11 +312,11 @@ async function restoreOriginalContents(fileContents: Map<string, string>, env: E
       env.ownedRevisions.delete(resolvedPath);
       env.written.delete(resolvedPath);
       env.fileCache.update(resolvedPath, originalContent);
+      restored.add(resolvedPath);
     } catch (error) {
       failures.push(`Rollback held for '${resolvedPath}': ${summarizeError(error)}`);
     }
   }
-  return failures;
 }
 
 async function repairAfterValidationFailure(
@@ -336,6 +355,7 @@ async function repairAfterValidationFailure(
           env.capturedRevisions.set(resolvedPath, captureCapturedToolWriteRevision(resolvedPath, Buffer.from(healResult.content)));
         }
         env.fileCache.update(resolvedPath, healResult.content);
+        announceWrites([resolvedPath], workingContents);
         healed = true;
         healedPaths.add(resolvedPath);
       } catch {
@@ -402,14 +422,7 @@ function finalizeUncapturedBookkeeping(
   for (const path of env.written) {
     const afterContent = workingContents.get(path);
     if (afterContent === undefined) continue;
-    if (env.fileUndoManager) {
-      try {
-        env.fileUndoManager.snapshot({ path, beforeContent: fileContents.get(path) ?? null, afterContent, tool: 'edit', call: env.undoCall });
-      } catch {
-        // Undo snapshot failure should not fail the edit.
-      }
-    }
-    env.changeTracker?.recordChange(path);
+    recordPublishedEdit(env, path, fileContents.get(path) ?? null, afterContent);
   }
 }
 
@@ -418,6 +431,7 @@ function formatOutput(
   format: 'count_only' | 'minimal' | 'with_diff' | 'verbose',
   dryRun: boolean,
   notes: readonly string[] = [],
+  contents: readonly { readonly path: string; readonly before: string; readonly after: string }[] = [],
 ): string {
   const totalApplied = results.filter((r) => r.success).length;
   const totalFailed = results.filter((r) => !r.success).length;
@@ -485,18 +499,24 @@ function formatOutput(
       }
     }
   }
+  if (format === 'verbose') {
+    for (const file of contents) {
+      lines.push(`\n=== ${file.path} before ===`, verboseContent(file.before), `=== ${file.path} after${dryRun ? ' (dry run, not written)' : ''} ===`, verboseContent(file.after));
+    }
+  }
   return lines.join('\n');
 }
 
 async function executeTextEdits(
   input: EditInput,
   env: EditExecutionContext,
-): Promise<{ success: boolean; output?: string; error?: string }> {
+): Promise<EditToolResult> {
   const matchMode = input.match?.mode ?? 'exact';
   const caseSensitive = input.match?.case_sensitive ?? true;
   const whitespaceSensitive = input.match?.whitespace_sensitive ?? true;
   const multiline = input.match?.multiline ?? false;
-  const transactionMode = input.transaction?.mode ?? 'atomic';
+  // `none` is the older name of `partial`: both apply what succeeds and keep it.
+  const transactionMode = input.transaction?.mode === 'none' ? 'partial' : (input.transaction?.mode ?? 'atomic');
   const outputFormat = input.output?.format ?? 'minimal';
   const diffContext = input.output?.diff_context ?? 3;
   const dryRun = input.dry_run ?? false;
@@ -504,22 +524,27 @@ async function executeTextEdits(
   const validateAfter = input.validate?.after ?? [];
   const cwd = env.cwd;
 
+  if ((validateBefore.length > 0 || validateAfter.length > 0) && !env.validatorRunner) {
+    return failed(`validate is not available in this session: it has no exec path to run validators through. Nothing was changed; resend without validate and run the check with the exec tool.`, 'failed');
+  }
+
   if (!dryRun && validateBefore.length > 0) {
     const failure = await runValidators(validateBefore, cwd, env.validatorRunner, env.assertCurrent, env.signal);
     if (failure) {
-      return { success: false, error: `Pre-edit validation failed. ${formatValidatorFailure(failure)}` };
+      return failed(`Pre-edit validation failed. ${formatValidatorFailure(failure)}`, 'failed');
     }
   }
 
   const prepResult = await prepareTextEditInput(input, env, transactionMode);
   if ('error' in prepResult) {
-    return { success: false, error: prepResult.error };
+    return failed(prepResult.error, prepResult.status);
   }
 
   const { resolvedPaths, pathErrors, fileContents, fileReadErrors, workingContents } = prepResult;
   const results: EditResult[] = [];
   let atomicFailed = false;
   let atomicFailError = '';
+  let atomicFailStatus: EditFailureStatus = 'failed';
 
   for (const item of input.edits!) {
     const resolvedPath = resolvedPaths.get(item.path);
@@ -530,17 +555,19 @@ async function executeTextEdits(
       if (transactionMode === 'atomic') {
         atomicFailed = true;
         atomicFailError = pathMsg;
+        atomicFailStatus = 'failed';
         break;
       }
       continue;
     }
 
-    if (fileReadErrors.has(resolvedPath)) {
-      const readErrMsg = fileReadErrors.get(resolvedPath)!;
-      results.push(buildFailedEditResult(item, readErrMsg, classifyEditFailure(readErrMsg)));
+    const readError = fileReadErrors.get(resolvedPath);
+    if (readError) {
+      results.push(buildFailedEditResult(item, readError.error, readError.status));
       if (transactionMode === 'atomic') {
         atomicFailed = true;
-        atomicFailError = readErrMsg;
+        atomicFailError = readError.error;
+        atomicFailStatus = readError.status;
         break;
       }
       continue;
@@ -552,6 +579,7 @@ async function executeTextEdits(
       if (transactionMode === 'atomic') {
         atomicFailed = true;
         atomicFailError = `No content available for '${resolvedPath}'`;
+        atomicFailStatus = 'failed';
         break;
       }
       continue;
@@ -559,7 +587,7 @@ async function executeTextEdits(
 
     let editResult:
       | { newContent: string; occurrencesReplaced: number; warning?: string | undefined }
-      | { error: string; hint?: string | undefined };
+      | EditFailure;
     if (matchMode === 'ast_pattern') {
       editResult = await computeAstPatternEdit(currentContent, item, resolvedPath);
     } else if (matchMode === 'ast') {
@@ -579,12 +607,13 @@ async function executeTextEdits(
     if ('error' in editResult) {
       const errMsg = editResult.error;
       results.push({
-        ...buildFailedEditResult(item, errMsg, classifyEditFailure(errMsg)),
-        hint: 'hint' in editResult ? editResult.hint : undefined,
+        ...buildFailedEditResult(item, errMsg, editResult.status),
+        hint: editResult.hint,
       });
       if (transactionMode === 'atomic') {
         atomicFailed = true;
         atomicFailError = errMsg;
+        atomicFailStatus = editResult.status;
         break;
       }
       continue;
@@ -598,7 +627,8 @@ async function executeTextEdits(
     let diffPreview: string | undefined;
     if (outputFormat === 'with_diff' || outputFormat === 'verbose' || dryRun) {
       const rawDiff = unifiedDiff(oldContent, editResult.newContent, resolvedPath, diffContext);
-      if (rawDiff.length > DIFF_TRUNCATE_THRESHOLD) {
+      // Verbose promises full detail, so its diff is never cut.
+      if (outputFormat !== 'verbose' && rawDiff.length > DIFF_TRUNCATE_THRESHOLD) {
         diffTruncated = true;
         diffPreview = rawDiff.slice(0, DIFF_PREVIEW_LENGTH);
         diff = diffPreview;
@@ -631,11 +661,7 @@ async function executeTextEdits(
         error: r?.success ? 'Rolled back due to atomic transaction failure' : (r?.error ?? atomicFailError),
       };
     });
-    return {
-      success: false,
-      error: `Atomic transaction failed: ${atomicFailError}`,
-      output: formatOutput(atomicResults, outputFormat, dryRun),
-    };
+    return failed(`Atomic transaction failed: ${atomicFailError}`, atomicFailStatus, formatOutput(atomicResults, outputFormat, dryRun));
   }
 
   const writtenPaths = new Set<string>();
@@ -644,11 +670,11 @@ async function executeTextEdits(
       try {
         await writeSuccessfulTextEdits(results, resolvedPaths, workingContents, env, writtenPaths);
       } finally {
-        noteProjectFilesChanged();
+        announceWrites(writtenPaths, workingContents);
       }
       if (transactionMode === 'atomic' && results.some((result) => !result.success)) {
         const rollbackFailures = await restoreOriginalContents(fileContents, env);
-        return { success: false, error: `Atomic edit publication failed${rollbackFailures.length ? ', rollback incomplete' : ', edits rolled back'}. ${results.filter((result) => !result.success).map((result) => result.error).join('; ')}${rollbackFailures.length ? `\n${rollbackFailures.join('\n')}` : ''}` };
+        return failed(`Atomic edit publication failed${rollbackFailures.length ? ', rollback incomplete' : ', edits rolled back'}. ${results.filter((result) => !result.success).map((result) => result.error).join('; ')}${rollbackFailures.length ? `\n${rollbackFailures.join('\n')}` : ''}`, 'failed');
       }
     }
 
@@ -656,7 +682,7 @@ async function executeTextEdits(
 
     let importGraphWarning: string | undefined;
     if (!dryRun && anySuccess) {
-      importGraphWarning = await buildImportGraphWarning(cwd, writtenPaths, env.assertCurrent, env.signal);
+      importGraphWarning = await describeEditDependents(cwd, writtenPaths, env.signal);
     }
 
     let repairWarnings: string[] = [];
@@ -677,7 +703,7 @@ async function executeTextEdits(
           result.warning = [result.warning, 'Auto-heal applied; diff reflects the final repaired content.'].filter(Boolean).join(' ');
           if (outputFormat === 'with_diff' || outputFormat === 'verbose') {
             const diff = unifiedDiff(fileContents.get(path) ?? '', workingContents.get(path) ?? '', path, diffContext);
-            result.diff_truncated = diff.length > DIFF_TRUNCATE_THRESHOLD;
+            result.diff_truncated = outputFormat !== 'verbose' && diff.length > DIFF_TRUNCATE_THRESHOLD;
             result.diff = result.diff_truncated ? diff.slice(0, DIFF_PREVIEW_LENGTH) : diff;
             result.diff_preview = result.diff_truncated ? result.diff : undefined;
           }
@@ -691,11 +717,11 @@ async function executeTextEdits(
         }
       }
       if (validationResult.error) {
-        return {
-          success: false,
-          error: validationResult.error + (repairWarnings.length ? `\n${repairWarnings.join('\n')}` : ''),
-          ...(transactionMode === 'atomic' ? {} : { output: formatOutput(results, outputFormat, dryRun) }),
-        };
+        return failed(
+          validationResult.error + (repairWarnings.length ? `\n${repairWarnings.join('\n')}` : ''),
+          'failed',
+          transactionMode === 'atomic' ? undefined : formatOutput(results, outputFormat, dryRun),
+        );
       }
     }
 
@@ -717,15 +743,18 @@ async function executeTextEdits(
     }
 
     const failures = results.filter((r) => !r.success);
-    return {
-      success: anySuccess,
-      output: outputFormat === 'count_only'
-        ? formatOutput(results, outputFormat, dryRun, [importGraphWarning ?? '', ...repairWarnings, diagnosticsBlock])
-        : formatOutput(results, outputFormat, dryRun) + (importGraphWarning ?? '') + (repairWarnings.length ? `\n${repairWarnings.join('\n')}` : '') + diagnosticsBlock,
-      ...(!anySuccess && failures.length > 0
-        ? { error: `No edits applied (${failures.length} failed). First failure: ${failures[0]!.path}: ${failures[0]!.error ?? 'failed'}` }
-        : {}),
-    };
+    const contents = outputFormat === 'verbose'
+      ? [...new Set(results.filter((r) => r.success).map((r) => resolvedPaths.get(r.path)).filter((path): path is string => path !== undefined))]
+        .map((path) => ({ path, before: fileContents.get(path) ?? '', after: workingContents.get(path) ?? '' }))
+      : [];
+    const output = outputFormat === 'count_only'
+      ? formatOutput(results, outputFormat, dryRun, [importGraphWarning ?? '', ...repairWarnings, diagnosticsBlock])
+      : formatOutput(results, outputFormat, dryRun, [], contents) + (importGraphWarning ?? '') + (repairWarnings.length ? `\n${repairWarnings.join('\n')}` : '') + diagnosticsBlock;
+    if (!anySuccess && failures.length > 0) {
+      const first = failures[0]!;
+      return failed(`No edits applied (${failures.length} failed). First failure: ${first.path}: ${first.error ?? 'failed'}`, first.status === 'applied' || first.status === undefined ? 'failed' : first.status, output);
+    }
+    return { success: anySuccess, output };
   } finally {
     if (!dryRun && !hasCapturedToolInvocation()) finalizeUncapturedBookkeeping(fileContents, workingContents, env);
     // Captured writes still held after any rollback are the final changes.
@@ -799,7 +828,8 @@ export function createEditTool(fileCache: FileStateCache, options?: EditToolOpti
     parameters: toRecord(editSchema),
     sideEffects: ['write_fs'],
     subjects: { paths: ['edits[].path', 'notebook_operations.path'] },
-    ...(options?.fileUndoManager ? { recoverable: {} } : {}),
+    // A call that runs validators runs commands, which undo cannot take back: the gate does not wave it through as a recoverable write.
+    ...(options?.fileUndoManager ? { recoverable: { unless: ['validate.before[]', 'validate.after[]'] } } : {}),
     concurrency: 'serial',
     supportsProgress: true,
   };
@@ -807,7 +837,7 @@ export function createEditTool(fileCache: FileStateCache, options?: EditToolOpti
   async function execute(
     args: Record<string, unknown>,
     executeOptions?: ToolExecuteOptions,
-  ): Promise<{ success: boolean; output?: string; error?: string }> {
+  ): Promise<EditToolResult> {
     try {
       const authenticated = assertCurrentToolInvocation(args, executeOptions);
       const assertCurrent = () => { assertCurrentToolInvocation(args, executeOptions); };

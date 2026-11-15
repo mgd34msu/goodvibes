@@ -7,14 +7,14 @@ import { resetMetrics, snapshotMetrics } from '../platform/src/platform/runtime/
 import { toolFormatTelemetry } from '../platform/src/platform/runtime/telemetry/tool-format-telemetry.js';
 
 describe('classifyToolFormatOutcome', () => {
-  test('edit no-match, ambiguous, conflict, and generic failures', () => {
-    expect(classifyToolFormatOutcome('edit', { success: false, error: 'No match found for X' }))
+  test('edit failures are classed by the status the edit tool returned, never by its message', () => {
+    expect(classifyToolFormatOutcome('edit', { success: false, error: 'x', hostEvidence: { editStatus: 'not_found' } }))
       .toEqual(['edit_not_found']);
-    expect(classifyToolFormatOutcome('edit', { success: false, error: 'Ambiguous match: appears 3 times' }))
+    expect(classifyToolFormatOutcome('edit', { success: false, error: 'x', hostEvidence: { editStatus: 'ambiguous' } }))
       .toEqual(['edit_ambiguous']);
-    expect(classifyToolFormatOutcome('edit', { success: false, error: 'OCC conflict: modified externally' }))
+    expect(classifyToolFormatOutcome('edit', { success: false, error: 'x', hostEvidence: { editStatus: 'conflict' } }))
       .toEqual(['edit_conflict']);
-    expect(classifyToolFormatOutcome('edit', { success: false, error: 'something else' }))
+    expect(classifyToolFormatOutcome('edit', { success: false, error: 'No match found for X' }))
       .toEqual(['edit_failed']);
   });
 
@@ -59,14 +59,14 @@ describe('ToolFormatTelemetry recorder', () => {
       'anthropic:claude',
       [{ id: 'c1', name: 'edit' }, { id: 'c2', name: 'exec' }],
       [
-        { callId: 'c1', success: false, error: 'No match found for X' },
+        { callId: 'c1', success: false, error: 'No match found for X', hostEvidence: { editStatus: 'not_found' } },
         { callId: 'c2', success: false, output: JSON.stringify({ expectation_error: 'exit_code: expected 0, got 2' }) },
       ],
     );
     t.observeToolResults(
       'anthropic:claude',
       [{ id: 'c3', name: 'edit' }],
-      [{ callId: 'c3', success: false, error: 'No match found for another value' }],
+      [{ callId: 'c3', success: false, error: 'No match found for another value', hostEvidence: { editStatus: 'not_found' } }],
     );
     const snap = t.snapshot();
     expect(snap.byModel['anthropic:claude']).toEqual({

@@ -7,7 +7,7 @@
  *   - honest PTY availability detection (pure, never faked)
  *   - PTY argv construction and its composition INSIDE the sandbox argv
  *     (the boundary stays the outermost layer under the PTY)
- *   - the prompt readings (will a command prompt; is a quiet line a question)
+ *   - the prompt reading (is a quiet line a question) and the code rule for when the PTY engages
  *   - the live answer path: a scripted child that prompts on /dev/tty (a
  *     prompt a pipe could never answer) completes through the brokered answer
  *   - a never-answered prompt times out with the prompt text on the result
@@ -25,6 +25,7 @@ import {
   buildPtyArgv,
   pendingPromptLine,
   readPendingPrompt,
+  shouldRerunUnderPty,
   shouldRunInteractive,
   runInteractiveCommand,
   type ExecInteractionRuntime,
@@ -44,15 +45,14 @@ import { OverflowHandler } from '../platform/src/platform/tools/shared/overflow.
 import { useToolReadings } from './_helpers/tool-readings.ts';
 import { createExecContainmentProof, execContainmentRequired, skipExecContainment, EXEC_CONTAINMENT_REQUIRED_ENV } from './_helpers/exec-containment-proof.ts';
 
-// Jev reads whether a command will prompt and whether a quiet last line is a
-// question; these fakes stand in for it. Anything unlisted reads as no.
+// Jev reads whether a quiet last line is a question; these fakes stand in for
+// it. Anything unlisted reads as no.
 const readings = useToolReadings([
   ['"lastLine":"Continue? [y/n]:"', { awaitingInput: true }],
   ['"lastLine":"First name:"', { awaitingInput: true }],
   ['"lastLine":"Last name:"', { awaitingInput: true }],
   ['"lastLine":"Password:"', { awaitingInput: true }],
   ['"lastLine":"Overwrite? [y/N]"', { awaitingInput: true }],
-  ['{"command":"ssh h"}', { willPrompt: true }],
 ]);
 
 const LIVE_PTY = detectPtyAvailability(probePtyHost());
@@ -192,29 +192,32 @@ describe('readPendingPrompt', () => {
 });
 
 describe('shouldRunInteractive', () => {
-  test('explicit interactive:true engages; interactive:false vetoes; otherwise the will_prompt reading decides', async () => {
-    const avail: ExecInteractionRuntime = {
-      availability: { available: true, backend: 'script', scriptPath: '/usr/bin/script', flavor: 'util-linux', reason: 't' },
-    };
-    expect(await shouldRunInteractive(avail, { cmd: 'ls', interactive: true }, 'ls')).toBe(true);
-    expect(await shouldRunInteractive(avail, { cmd: 'ssh h', interactive: false }, 'ssh h')).toBe(false);
+  const avail: ExecInteractionRuntime = {
+    availability: { available: true, backend: 'script', scriptPath: '/usr/bin/script', flavor: 'util-linux', reason: 't' },
+  };
+
+  test('only interactive:true engages the PTY up front, decided with no reading', () => {
+    expect(shouldRunInteractive(avail, { cmd: 'ls', interactive: true })).toBe(true);
+    expect(shouldRunInteractive(avail, { cmd: 'ssh h', interactive: false })).toBe(false);
+    expect(shouldRunInteractive(avail, { cmd: 'ssh h' })).toBe(false);
     expect(readings.requests).toHaveLength(0);
-    expect(await shouldRunInteractive(avail, { cmd: 'ssh h' }, 'ssh h')).toBe(true);
-    expect(await shouldRunInteractive(avail, { cmd: 'ls' }, 'ls')).toBe(false);
-    expect(readings.requests).toHaveLength(2);
   });
 
-  test('never engages or reads without an available PTY backend, and never for background/until', async () => {
+  test('never engages without an available PTY backend, and never for background/until', () => {
     const unavailable: ExecInteractionRuntime = {
       availability: { available: false, backend: 'none', reason: 'no script' },
     };
-    expect(await shouldRunInteractive(unavailable, { cmd: 'ssh h', interactive: true }, 'ssh h')).toBe(false);
-    expect(await shouldRunInteractive(null, { cmd: 'ssh h' }, 'ssh h')).toBe(false);
-    const avail: ExecInteractionRuntime = {
-      availability: { available: true, backend: 'script', scriptPath: '/usr/bin/script', flavor: 'util-linux', reason: 't' },
-    };
-    expect(await shouldRunInteractive(avail, { cmd: 'ssh h', background: true }, 'ssh h')).toBe(false);
-    expect(await shouldRunInteractive(avail, { cmd: 'ssh h', until: { pattern: 'x' } }, 'ssh h')).toBe(false);
+    expect(shouldRunInteractive(unavailable, { cmd: 'ssh h', interactive: true })).toBe(false);
+    expect(shouldRunInteractive(null, { cmd: 'ssh h', interactive: true })).toBe(false);
+    expect(shouldRunInteractive(avail, { cmd: 'ssh h', interactive: true, background: true })).toBe(false);
+    expect(shouldRunInteractive(avail, { cmd: 'ssh h', interactive: true, until: { pattern: 'x' } })).toBe(false);
+  });
+
+  test('a piped run that failed for want of a terminal is rerun under the PTY, unless the caller forced the pipe', () => {
+    const needsTty = { cmd: 'sudo true', exit_code: 1, stdout: '', stderr: 'sudo: a terminal is required to read the password', success: false };
+    expect(shouldRerunUnderPty(avail, { cmd: 'sudo true' }, needsTty)).toBe(true);
+    expect(shouldRerunUnderPty(avail, { cmd: 'sudo true', interactive: false }, needsTty)).toBe(false);
+    expect(shouldRerunUnderPty(avail, { cmd: 'false' }, { ...needsTty, stderr: 'plain failure' })).toBe(false);
     expect(readings.requests).toHaveLength(0);
   });
 });

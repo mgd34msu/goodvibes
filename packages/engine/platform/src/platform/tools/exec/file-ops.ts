@@ -1,9 +1,15 @@
-import { copyFileSync, realpathSync, renameSync, unlinkSync, rmSync, cpSync, writeFileSync, existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { copyFileSync, realpathSync, renameSync, unlinkSync, rmSync, cpSync, existsSync, lstatSync, readdirSync, statSync } from 'node:fs';
+import { readFile, writeFile } from 'node:fs/promises';
 import { resolve, join, relative, dirname, basename, extname, sep } from 'node:path';
 import { logger } from '../../utils/logger.js';
 import { resolveAndValidatePath, resolveWritablePath } from '../../utils/path-safety.js';
 import type { ExecFileOp } from './schema.js';
 import { summarizeError } from '../../utils/error-display.js';
+import { walkDir } from '../../utils/walk-dir.js';
+
+function lexists(path: string): boolean {
+  try { lstatSync(path); return true; } catch { return false; }
+}
 
 export interface FileOpResult {
   op: string;
@@ -65,106 +71,115 @@ function relativeSpecifier(fromDir: string, target: string): string {
   return rel.startsWith('.') ? rel : `./${rel}`;
 }
 
+/** Directories an import rewrite never descends into, besides the walker's own skips (hidden entries, dependencies, product worktrees). */
+const IMPORT_SCAN_SKIP_DIRS = new Set(['build', 'out', 'coverage']);
+
+/** Where each moved source file went, keyed three ways an importer can name it. */
+interface MoveMap {
+  /** Old path without its TS/JS extension -> new path, and which move did it. */
+  readonly byBare: Map<string, { readonly to: string; readonly move: number }>;
+  /** Old directory whose index file moved -> the new index file. */
+  readonly byIndexDir: Map<string, { readonly to: string; readonly move: number }>;
+  /** New path of each moved file -> its old path and move. */
+  readonly byNew: Map<string, { readonly from: string; readonly move: number }>;
+}
+
+async function sourceFilesUnder(path: string): Promise<string[]> {
+  const st = statSync(path);
+  if (!st.isDirectory()) return TS_EXTS.has(extname(path)) ? [path] : [];
+  const files: string[] = [];
+  for await (const file of walkDir(path, {
+    selectFile: (candidate) => TS_EXTS.has(extname(candidate)),
+    selectDirectory: (candidate) => (IMPORT_SCAN_SKIP_DIRS.has(basename(candidate)) ? false : undefined),
+  })) files.push(file);
+  return files;
+}
+
+/** Every moved source file, old path to new, for files moved alone and files under a moved directory. */
+async function buildMoveMap(moves: readonly { readonly src: string; readonly dst: string }[]): Promise<MoveMap> {
+  const map: MoveMap = { byBare: new Map(), byIndexDir: new Map(), byNew: new Map() };
+  for (const [move, { src, dst }] of moves.entries()) {
+    for (const to of await sourceFilesUnder(dst)) {
+      const from = to === dst ? src : join(src, relative(dst, to));
+      map.byBare.set(withoutExt(from), { to, move });
+      if (basename(withoutExt(from)) === 'index') map.byIndexDir.set(dirname(from), { to, move });
+      map.byNew.set(to, { from, move });
+    }
+  }
+  return map;
+}
+
 /**
- * The specifier an importer should use after `oldSrc` moved to `newDst`, or null
- * when `specifier` (resolved from `importerDir`) does not name `oldSrc`. The
- * spelling the importer used is kept: an explicit extension (./x.js, the NodeNext
- * convention), no extension, or a directory index.
+ * Where a specifier that resolved (from the old layout) to `target` points now,
+ * spelled the way the importer spelled it: an explicit extension (./x.js, the
+ * NodeNext convention), no extension, or a directory index. Null when `target`
+ * names no moved file.
  */
-function rewrittenSpecifier(specifier: string, importerDir: string, oldSrc: string, newDst: string): string | null {
-  const target = resolve(importerDir, specifier);
-  const oldBare = withoutExt(oldSrc);
-  if (target === oldSrc || withoutExt(target) === oldBare) {
-    const ext = TS_EXTS.has(extname(specifier)) ? extname(specifier) : '';
-    return relativeSpecifier(importerDir, withoutExt(newDst)) + ext;
-  }
-  if (target === dirname(oldSrc) && basename(oldBare) === 'index') {
-    return relativeSpecifier(importerDir, basename(withoutExt(newDst)) === 'index' ? dirname(newDst) : withoutExt(newDst));
-  }
+function movedTarget(target: string, specifier: string, map: MoveMap): { readonly path: string; readonly move: number } | null {
+  const file = map.byBare.get(withoutExt(target));
+  if (file) return { path: withoutExt(file.to) + (TS_EXTS.has(extname(specifier)) ? extname(specifier) : ''), move: file.move };
+  const index = map.byIndexDir.get(target);
+  if (index) return { path: basename(withoutExt(index.to)) === 'index' ? dirname(index.to) : withoutExt(index.to), move: index.move };
   return null;
 }
 
-async function updateImportsAfterMove(
-  oldSrc: string,
-  newDst: string,
+/**
+ * Rewrite the imports a batch of moves broke, in one pass over the project:
+ * every relative specifier that named a moved file now names its new place, and
+ * every moved file's own relative imports are re-based on its new directory.
+ * Files are read asynchronously; each changed file is written once.
+ */
+async function updateImportsAfterMoves(
+  moves: readonly { readonly src: string; readonly dst: string }[],
   projectRoot: string,
-): Promise<{ updated: string[]; warnings: string[] }> {
-  const SKIP_DIRS = new Set(['.git', 'node_modules', 'dist', '.next', '.nuxt', '.cache', '__pycache__']);
-  const allFiles: string[] = [];
+): Promise<{ updated: Map<number, string[]>; warnings: string[]; sourcesMoved: Map<number, number> }> {
+  const map = await buildMoveMap(moves);
+  const updated = new Map<number, string[]>();
   const warnings: string[] = [];
+  const sourcesMoved = new Map<number, number>();
+  for (const { move } of map.byNew.values()) sourcesMoved.set(move, (sourcesMoved.get(move) ?? 0) + 1);
+  const files = new Set<string>();
+  for await (const file of walkDir(projectRoot, {
+    selectFile: (candidate) => TS_EXTS.has(extname(candidate)),
+    selectDirectory: (candidate) => (IMPORT_SCAN_SKIP_DIRS.has(basename(candidate)) ? false : undefined),
+  })) files.add(file);
+  for (const moved of map.byNew.keys()) files.add(moved);
 
-  function walkDir(dir: string): void {
-    let entries: string[];
-    try {
-      entries = readdirSync(dir);
-    } catch (error) {
-      warnings.push(`Import update could not read directory '${dir}': ${summarizeError(error)}`);
-      logger.warn('file move import update: failed to read directory', {
-        dir,
-        error: summarizeError(error),
-      });
-      return;
-    }
-    for (const entry of entries) {
-      if (SKIP_DIRS.has(entry)) continue;
-      const full = join(dir, entry);
-      try {
-        const st = statSync(full);
-        if (st.isDirectory()) { walkDir(full); continue; }
-        if (TS_EXTS.has(extname(full))) allFiles.push(full);
-      } catch (error) {
-        warnings.push(`Import update could not stat '${full}': ${summarizeError(error)}`);
-        logger.warn('file move import update: failed to stat path', {
-          path: full,
-          error: summarizeError(error),
-        });
-      }
-    }
-  }
-  walkDir(projectRoot);
-  if (!allFiles.includes(newDst) && TS_EXTS.has(extname(newDst))) allFiles.push(newDst);
-
-  const updated: string[] = [];
-  for (const file of allFiles) {
+  for (const file of files) {
     let content: string;
     try {
-      content = readFileSync(file, 'utf-8');
+      content = await readFile(file, 'utf-8');
     } catch (error) {
       warnings.push(`Import update could not read '${file}': ${summarizeError(error)}`);
-      logger.warn('file move import update: failed to read file', {
-        file,
-        error: summarizeError(error),
-      });
       continue;
     }
-
-    const isMovedFile = file === newDst;
+    const self = map.byNew.get(file);
+    // A moved file's specifiers were written for its old directory.
+    const resolvedFrom = dirname(self?.from ?? file);
+    const touched = new Set<number>();
     const newContent = content.replace(SPECIFIER_RE, (match, lead: string, quote: string, specifier: string) => {
-      // The moved file's own relative imports were written for its old directory.
-      const next = isMovedFile
-        ? (dirname(oldSrc) === dirname(newDst) ? null : relativeSpecifier(dirname(newDst), resolve(dirname(oldSrc), specifier)))
-        : rewrittenSpecifier(specifier, dirname(file), oldSrc, newDst);
+      const target = resolve(resolvedFrom, specifier);
+      const moved = movedTarget(target, specifier, map);
+      let next: string | null = null;
+      if (moved) {
+        next = relativeSpecifier(dirname(file), moved.path);
+        touched.add(moved.move);
+      } else if (self && resolvedFrom !== dirname(file)) {
+        next = relativeSpecifier(dirname(file), target);
+        touched.add(self.move);
+      }
       return next === null || next === specifier ? match : `${lead}${quote}${next}${quote}`;
     });
-
-    if (newContent !== content) {
-      try {
-        writeFileSync(file, newContent, 'utf-8');
-        updated.push(file);
-      } catch (err) {
-        warnings.push(`Import update could not write '${file}': ${summarizeError(err)}`);
-        logger.warn('exec file_ops update_imports: write failed', {
-          file,
-          error: summarizeError(err),
-        });
-      }
+    if (newContent === content) continue;
+    try {
+      await writeFile(file, newContent, 'utf-8');
+      for (const move of touched) updated.set(move, [...(updated.get(move) ?? []), file]);
+    } catch (error) {
+      warnings.push(`Import update could not write '${file}': ${summarizeError(error)}`);
+      logger.warn('exec file_ops update_imports: write failed', { file, error: summarizeError(error) });
     }
   }
-
-  if (updated.length === 0 && warnings.length === 0 && TS_EXTS.has(extname(oldSrc))) {
-    warnings.push(`update_imports changed nothing after moving '${oldSrc}': no importer or relative import of the moved file needed a new path. If imports are written another way (aliases, non-relative paths), update them yourself.`);
-  }
-  return { updated, warnings };
+  return { updated, warnings, sourcesMoved };
 }
 
 export function executeFileOp(op: ExecFileOp, projectRoot: string): FileOpResult {
@@ -183,6 +198,8 @@ export function executeFileOp(op: ExecFileOp, projectRoot: string): FileOpResult
       }
       return result;
     }
+    // A path that is not there is a mistyped path, not a deletion.
+    if (!lexists(src)) throw new Error(`file_ops delete: nothing at '${op.source}'. Nothing was deleted; check the path.`);
     if (op.recursive) {
       rmSync(src, { recursive: true, force: true });
     } else {
@@ -271,30 +288,31 @@ export async function executeFileOperations(
     }
   }
 
-  for (const { src, dst } of pendingImportUpdates) {
+  if (pendingImportUpdates.length > 0) {
     if (access) await access.beforeImportUpdates();
     assertCurrent?.();
-    const matchingResult = fileOpResults.find((r) => r.source === src && r.destination === dst);
+    const moveResults = pendingImportUpdates.map(({ src, dst }) => fileOpResults.find((r) => r.source === src && r.destination === dst));
     try {
-      const updateResult = await updateImportsAfterMove(src, dst, projectRoot);
-      if (matchingResult) {
-        matchingResult.updated_imports = updateResult.updated;
-        for (const warning of updateResult.warnings) {
-          appendFileOpWarning(matchingResult, warning);
+      const updateResult = await updateImportsAfterMoves(pendingImportUpdates, projectRoot);
+      for (const [move, { src }] of pendingImportUpdates.entries()) {
+        const matchingResult = moveResults[move];
+        const updated = updateResult.updated.get(move) ?? [];
+        if (matchingResult) matchingResult.updated_imports = updated;
+        if (updated.length === 0 && updateResult.warnings.length === 0 && (updateResult.sourcesMoved.get(move) ?? 0) > 0) {
+          const warning = `update_imports changed nothing after moving '${src}': no relative import of a moved file, and no relative import inside it, needed a new path. If imports are written another way (aliases, non-relative paths), update them yourself.`;
+          if (matchingResult) appendFileOpWarning(matchingResult, warning);
+          fileOpWarnings.push(warning);
         }
+      }
+      for (const warning of updateResult.warnings) {
+        for (const matchingResult of moveResults) if (matchingResult) appendFileOpWarning(matchingResult, warning);
       }
       fileOpWarnings.push(...updateResult.warnings);
     } catch (err) {
-      const warning = `file_ops update_imports failed after moving '${src}' to '${dst}': ${summarizeError(err)}`;
-      if (matchingResult) {
-        appendFileOpWarning(matchingResult, warning);
-      }
+      const warning = `file_ops update_imports failed after moving ${pendingImportUpdates.map(({ src, dst }) => `'${src}' to '${dst}'`).join(', ')}: ${summarizeError(err)}`;
+      for (const matchingResult of moveResults) if (matchingResult) appendFileOpWarning(matchingResult, warning);
       fileOpWarnings.push(warning);
-      logger.warn('exec file_ops: update_imports failed', {
-        src,
-        dst,
-        error: summarizeError(err),
-      });
+      logger.warn('exec file_ops: update_imports failed', { error: summarizeError(err) });
     }
   }
 

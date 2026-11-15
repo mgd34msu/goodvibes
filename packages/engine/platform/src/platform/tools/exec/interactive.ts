@@ -12,8 +12,8 @@ import { decisionOrClassic } from '../../runtime/decision-policy.js';
  * controlling terminal (`/dev/tty`), so even piping stdin would not reach them
  *, the child needs a real PTY.
  *
- * APPROACH. Commands Jev reads as likely to prompt (and any command with
- * `interactive: true`) run under a PTY allocated by the host's `script(1)`
+ * APPROACH. A command with `interactive: true`, and a piped command that
+ * failed because it needed a terminal (rerun once, see runtime.ts), run under a PTY allocated by the host's `script(1)`
  * binary (util-linux on Linux, the BSD variant on macOS). The PTY wrapper is
  * nested INSIDE the sandbox argv, `[...sandboxArgv, script, ...]`, so when the
  * per-command bwrap boundary is active it stays the outermost layer and holds
@@ -26,10 +26,11 @@ import { decisionOrClassic } from '../../runtime/decision-policy.js';
  * the full exchange (prompt, echoed answer, subsequent output) lands in the
  * tool result transcript.
  *
- * READINGS. Both decisions are `engine.tools.exec-prompt` readings
- * (tools/batteries/exec-prompt.ts): `will_prompt` decides whether a command
- * takes the PTY path when the caller did not say, and `awaiting_input`
- * decides whether a quiet, unterminated last line is a question. Code only
+ * READINGS. No reading decides whether a command takes the PTY path: that is
+ * the caller's `interactive` flag or the failed run's own terminal-required
+ * error, so a command starts with no model request. The one reading is
+ * `engine.tools.exec-prompt` `awaiting_input` (tools/batteries/exec-prompt.ts):
+ * whether a quiet, unterminated last line is a question. Code only
  * supplies the structure: a PTY backend exists, the process is alive, output
  * has been quiet for the window, and the last line has no newline after it.
  * Each quiet tail is read once. A no-echo password read that printed nothing
@@ -145,7 +146,6 @@ export function terminalRequiredNote(stderr: string): string | undefined {
 
 // ── Prompt readings (tools/batteries/exec-prompt.ts) ─────────────────────────
 
-const WILL_PROMPT_SITE = 'tools.exec.will-prompt';
 const AWAITING_INPUT_SITE = 'tools.exec.awaiting-input';
 
 /**
@@ -189,26 +189,6 @@ async function readDecisionPendingPrompt(command: string, transcript: string, si
   if (run.readings.awaiting_input.outcome === 'act') run.recordAction(awaiting ? 'surfaced pending prompt' : 'not a prompt');
   owner.assertCurrent();
   return awaiting ? line : null;
-}
-
-/**
- * Whether a command will most likely stop to ask for terminal input, read by
- * Jev. Only a yes that acts sends the command down the PTY path.
- */
-export async function readWillPrompt(command: string, signal?: AbortSignal): Promise<boolean> {
-  return decisionOrClassic(() => readDecisionWillPrompt(command, signal), () => { signal?.throwIfAborted(); return false; });
-}
-
-async function readDecisionWillPrompt(command: string, signal?: AbortSignal): Promise<boolean> {
-  snapshotJudgmentInput({ command });
-  const owner = captureJudgmentPort(WILL_PROMPT_SITE, { signal, prepareResultCapture: prepareJudgmentResult });
-  const run = await executePolicyCheck(() => execPrompt.run(owner.port, { command }, { site: WILL_PROMPT_SITE, only: ['will_prompt'], signal: owner.signal, beforeAttempt: owner.assertCurrent }), signal);
-  owner.assertCurrent();
-  const reading = run.readings.will_prompt;
-  const willPrompt = reading.verdict === 'yes' && reading.outcome === 'act';
-  run.recordAction(willPrompt ? 'PTY prompt prediction settled yes' : 'No acting prompt prediction; use the native pipe default');
-  owner.assertCurrent();
-  return willPrompt;
 }
 
 // ── The interaction runtime (seam wired at the composition root) ─────────────
@@ -264,22 +244,25 @@ const DEFAULT_UNANSWERED_PROMPT_LIMIT_MS = 300_000;
 const QUIET_POLL_INTERVAL_MS = 150;
 
 /**
- * Whether this command should take the PTY path: explicit `interactive: true`,
- * or, when the caller did not say, a `will_prompt` reading that acts; in both
- * cases only when the host actually has a PTY backend (never faked;
- * unavailable means the unchanged pipe path, and nothing is read).
+ * Whether this command takes the PTY path from the start: only on an explicit
+ * `interactive: true`, and only when the host actually has a PTY backend
+ * (never faked). Decided in code; no request.
  */
-export async function shouldRunInteractive(
-  interaction: ExecInteractionRuntime | null,
-  cmdInput: ExecCommandInput,
-  cmdStr: string,
-  signal?: AbortSignal,
-): Promise<boolean> {
+export function shouldRunInteractive(interaction: ExecInteractionRuntime | null, cmdInput: ExecCommandInput): boolean {
   if (!interaction?.availability.available) return false;
   if (cmdInput.background || cmdInput.until) return false;
-  if (cmdInput.interactive === true) return true;
-  if (cmdInput.interactive === false) return false;
-  return readWillPrompt(cmdStr, signal);
+  return cmdInput.interactive === true;
+}
+
+/**
+ * Whether a piped run that just failed should be run again, once, under the
+ * PTY: it failed with the terminal-required signature, the caller did not
+ * force the pipe, and the host has a PTY backend.
+ */
+export function shouldRerunUnderPty(interaction: ExecInteractionRuntime | null, cmdInput: ExecCommandInput, result: ExecCommandResult): boolean {
+  if (!interaction?.availability.available || cmdInput.interactive === false) return false;
+  if (cmdInput.background || cmdInput.until || result.success || result.pty || result.denied || result.cancelled) return false;
+  return terminalRequiredNote(result.stderr) !== undefined;
 }
 
 // ── The interactive runner ────────────────────────────────────────────────────

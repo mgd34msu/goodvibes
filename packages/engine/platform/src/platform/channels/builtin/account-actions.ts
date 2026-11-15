@@ -21,6 +21,9 @@ import {
 } from './surfaces.js';
 import { clearSurfaceSecret, storeSurfaceSecret } from './surface-secrets.js';
 
+// What each action does to credentials is CHANNEL_ACCOUNT_ACTION_EFFECTS in account-action-effects.ts,
+// beside this switch: a new action, or a new name for one, needs its entry there before it compiles.
+
 interface BuiltinAccountActionContext {
   readonly deps: BuiltinChannelRuntimeDeps;
   /**

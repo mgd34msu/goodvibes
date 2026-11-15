@@ -198,7 +198,7 @@ describe('channel tool refuses what only the owner may run', () => {
     expect(calls.operatorActions).toEqual(['inspect']);
   });
 
-  test.each(['setup', 'login', 'logout'])('account_action %s is refused with its credentials never reaching the plugin', async (accountAction) => {
+  test.each(['setup', 'connect', 'login', 'wait_login', 'disconnect', 'logout'])('account_action %s is refused with its credentials never reaching the plugin', async (accountAction) => {
     const { calls, tool } = recordingRegistry();
     const result = await tool.execute({ mode: 'account_action', surface: 'webhook', accountAction, accountId: 'acct-1', input: { token: 'raw-secret-token' } });
     expect(result.success).toBe(false);

@@ -1,4 +1,5 @@
 import { useToolReadings } from './_helpers/tool-readings.js';
+import { VALIDATORS_UNAVAILABLE } from '../platform/src/platform/tools/shared/validators.ts';
 useToolReadings([], [["'bun' 'run' 'build'", { needsNetwork: true }]]);
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import * as childProcess from 'node:child_process';
@@ -319,8 +320,8 @@ test('captured validator command names cannot select arbitrary commands or fall 
     expect(JSON.parse(result.output!).validation_passed).toBeUndefined();
     expect(readFileSync(join(f.root, 'source.txt'), 'utf8')).toBe('new');
     const held = await unbound.execute({ files: [{ path: 'source.txt', content: 'newer', mode: 'overwrite' }], validate: { after: ['build'] } });
-    expect(held.success).toBe(true); expect(JSON.parse(held.output!).validation_error).toBe('Captured validators require a construction-owned contained runner');
-    expect(JSON.parse(held.output!).validation_passed).toBeUndefined();
+    expect(held.success).toBe(true);
+    expect((JSON.parse(held.output!) as { validation_failures?: Array<{ stderr: string }> }).validation_failures?.[0]?.stderr).toBe(VALIDATORS_UNAVAILABLE);
     expect(readFileSync(join(f.root, 'source.txt'), 'utf8')).toBe('newer');
     expect(readFileSync(join(f.owner, 'source.txt'), 'utf8')).toBe('original source');
     expect(nativeSpawn).not.toHaveBeenCalled(); expect(hostSpawn).not.toHaveBeenCalled();

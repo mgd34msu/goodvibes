@@ -1,6 +1,6 @@
 /**
- * Resources a tool starts do not outlive their purpose: validator processes are
- * killed on timeout or cancellation, spilled output is pruned and private,
+ * Resources a tool starts do not outlive their purpose: a validator runner gets
+ * the call's cancel signal, spilled output is pruned and private,
  * background output spill files are capped and removed on shutdown, and a
  * cancelled web search stops being waited for.
  */
@@ -8,7 +8,7 @@ import { afterEach, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { runValidatorCommand, runValidators } from '../platform/src/platform/tools/shared/validators.ts';
+import { runValidators } from '../platform/src/platform/tools/shared/validators.ts';
 import { FileBackend, OverflowHandler } from '../platform/src/platform/tools/shared/overflow.ts';
 import { ProcessManager, readProcessStream } from '../platform/src/platform/tools/shared/process-manager.ts';
 import { createWebSearchTool } from '../platform/src/platform/tools/web-search/index.ts';
@@ -18,38 +18,6 @@ const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 const tempRoot = (): string => { const root = mkdtempSync(join(tmpdir(), 'gv-hygiene-')); roots.push(root); return root; };
 
-test('a validator that never finishes is killed at its timeout and reported as failed', async () => {
-  const result = await runValidatorCommand('test', ['sleep', '30'], tempRoot(), { assertCurrent: () => {}, timeoutMs: 50 });
-  expect(result.passed).toBe(false);
-  expect(result.stderr).toContain('timed out');
-  expect(result.exitCode).not.toBe(0);
-});
-
-test('a cancelled turn kills the validator process', async () => {
-  const controller = new AbortController();
-  const running = runValidatorCommand('test', ['sleep', '30'], tempRoot(), { assertCurrent: () => {}, signal: controller.signal, timeoutMs: 600_000 });
-  controller.abort();
-  const result = await running;
-  expect(result.passed).toBe(false);
-  expect(result.stderr).toContain('cancelled');
-});
-
-test('a timed-out validator is killed together with the processes it started', async () => {
-  // Without a group kill the background sleep keeps the output pipes open and the run outlasts the test's own limit.
-  const result = await runValidatorCommand('build', ['sh', '-c', 'sleep 30 & wait'], tempRoot(), { assertCurrent: () => {}, timeoutMs: 100 });
-  expect(result.passed).toBe(false);
-  expect(result.stderr).toContain('timed out');
-});
-
-test('a cancelled turn kills the validator together with the processes it started', async () => {
-  const controller = new AbortController();
-  const running = runValidatorCommand('build', ['sh', '-c', 'sleep 30 & wait'], tempRoot(), { assertCurrent: () => {}, signal: controller.signal, timeoutMs: 600_000 });
-  controller.abort();
-  const result = await running;
-  expect(result.passed).toBe(false);
-  expect(result.stderr).toContain('cancelled');
-});
-
 test('runValidators hands the cancel signal to the runner', async () => {
   const controller = new AbortController();
   let seen: AbortSignal | undefined;
@@ -58,13 +26,6 @@ test('runValidators hands the cancel signal to the runner', async () => {
     return { validator: name, passed: true, stdout: '', stderr: '', exitCode: 0 };
   }, () => {}, controller.signal);
   expect(seen).toBe(controller.signal);
-});
-
-test('a validator that finishes normally keeps its exit status and output', async () => {
-  const result = await runValidatorCommand('lint', ['sh', '-c', 'echo fine; exit 3'], tempRoot(), { assertCurrent: () => {} });
-  expect(result).toMatchObject({ passed: false, exitCode: 3 });
-  expect(result.stdout).toContain('fine');
-  expect(result.stderr).not.toContain('killed');
 });
 
 test('starting the runtime prunes spilled outputs older than the retention, and keeps recent ones', () => {

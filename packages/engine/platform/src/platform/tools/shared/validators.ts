@@ -1,8 +1,11 @@
-import { hasCapturedToolInvocation } from './captured-input-tools.js';
-
 /**
- * Shared validator infrastructure for write and edit tools.
- * Runs typecheck / lint / test / build and returns structured results.
+ * Shared validator infrastructure for write and edit tools: the fixed command
+ * table and the sequence runner. A validator runs only through a runner the
+ * composition supplies, which is the exec tool's own path (exec/runtime.ts
+ * createExecValidatorRunner, or the captured runner for a contract view), so
+ * the sandbox plan, the containment decision, the credential scrub and the
+ * working-directory check apply to it as to any command. There is no runner
+ * that spawns on the host by itself.
  */
 
 export type ValidatorName = 'typecheck' | 'lint' | 'test' | 'build';
@@ -31,8 +34,6 @@ export interface ValidatorExecution {
 
 /** Long enough for a cold `bun run build` or `tsc` on a large project; a hung process is killed after this. */
 export const DEFAULT_VALIDATOR_TIMEOUT_MS = 120_000;
-/** After a kill, how long to wait for the output pipes to close before reporting without the rest of the output. */
-const STOP_GRACE_MS = 2_000;
 export type ValidatorRunner = (name: ValidatorName, cwd: string, execution?: ValidatorExecution) => Promise<ValidatorResult>;
 
 export interface ValidatorResult {
@@ -43,82 +44,21 @@ export interface ValidatorResult {
   exitCode: number;
 }
 
-/**
- * Run a single validator via Bun.spawn and collect its complete result. The
- * process is killed when the timeout passes or the execution signal aborts, and
- * the result then reports the validator as failed with the reason.
- */
-export async function runValidator(name: ValidatorName, cwd: string, execution?: ValidatorExecution): Promise<ValidatorResult> {
-  if (hasCapturedToolInvocation()) throw new Error('Captured validators require a construction-owned contained runner');
-  return runValidatorCommand(name, validatorCommand(name), cwd, execution);
-}
-
-export async function runValidatorCommand(
-  name: ValidatorName,
-  command: readonly string[],
-  cwd: string,
-  execution?: ValidatorExecution,
-): Promise<ValidatorResult> {
-  execution?.assertCurrent();
-  const timeoutMs = execution?.timeoutMs ?? DEFAULT_VALIDATOR_TIMEOUT_MS;
-  const proc = Bun.spawn([...command], {
-    cwd,
-    stdout: 'pipe',
-    stderr: 'pipe',
-    // Its own process group, so a kill reaches what `npx` or `bun run` started and not only the direct child.
-    detached: true,
-  });
-  let stopReason: string | undefined;
-  let stopped: (value: undefined) => void = () => {};
-  const stopSignal = new Promise<undefined>((resolveStop) => { stopped = resolveStop; });
-  const stop = (reason: string): void => {
-    if (stopReason !== undefined) return;
-    stopReason = reason;
-    try { process.kill(-proc.pid, 'SIGKILL'); }
-    catch { proc.kill('SIGKILL'); }
-    stopped(undefined);
-  };
-  let graceTimer: ReturnType<typeof setTimeout> | undefined;
-  const timer = setTimeout(() => stop(`Validator '${name}' timed out after ${timeoutMs}ms and was killed`), timeoutMs);
-  const onAbort = (): void => stop(`Validator '${name}' was cancelled and killed`);
-  if (execution?.signal?.aborted) onAbort();
-  else execution?.signal?.addEventListener('abort', onAbort, { once: true });
-
-  try {
-    const collected = Promise.all([
-      proc.exited,
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ]);
-    collected.catch(() => {});
-    // A descendant that left the process group can keep the pipes open after the kill; do not wait for it.
-    const gaveUp = stopSignal.then(() => new Promise<null>((resolveGrace) => { graceTimer = setTimeout(() => resolveGrace(null), STOP_GRACE_MS); }));
-    const settled = await Promise.race([collected, gaveUp]);
-    const [exitCode, stdoutBuf, stderrBuf] = settled ?? [proc.exitCode ?? -1, '', ''];
-    return {
-      validator: name,
-      passed: stopReason === undefined && exitCode === 0,
-      stdout: stdoutBuf,
-      stderr: stopReason === undefined ? stderrBuf : `${stopReason}\n${stderrBuf}`.trimEnd(),
-      exitCode,
-    };
-  } finally {
-    clearTimeout(timer);
-    clearTimeout(graceTimer);
-    execution?.signal?.removeEventListener('abort', onAbort);
-  }
-}
+/** Why a validator did not run in a composition that wired no runner. */
+export const VALIDATORS_UNAVAILABLE = 'Validators are not available in this session (it has no exec path to run them through). Nothing ran; run the check with the exec tool instead.';
 
 /**
  * Run all validators in sequence. Returns array of all failures (or empty array if all pass).
+ * Without a runner nothing is spawned: each validator is reported failed with {@link VALIDATORS_UNAVAILABLE}.
  */
 export async function runValidators(
   validators: ValidatorName[],
   cwd: string,
-  runner: ValidatorRunner = runValidator,
+  runner: ValidatorRunner | undefined,
   assertCurrent?: () => void,
   signal?: AbortSignal,
 ): Promise<ValidatorResult[]> {
+  if (!runner) return validators.map((validator) => ({ validator, passed: false, stdout: '', stderr: VALIDATORS_UNAVAILABLE, exitCode: -1 }));
   const failures: ValidatorResult[] = [];
   for (const name of validators) {
     assertCurrent?.();

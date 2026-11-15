@@ -7,7 +7,7 @@ import { FileStateCache } from '@goodvibes-jev/engine/platform/platform/state';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { computeAstPatternEdit, computeSingleEdit, findAllPositions } from '../platform/src/platform/tools/edit/match.ts';
-import { buildImportGraphWarning } from '../platform/src/platform/tools/edit/core.ts';
+import { describeEditDependents } from '../platform/src/platform/tools/edit/core.ts';
 
 let root: string;
 let previous: ReturnType<typeof installJudgmentPort>;
@@ -227,7 +227,7 @@ describe('batch results', () => {
     const result = await tool().execute({ edits: [{ path: 'lib.ts', find: 'x = 1', replace: 'x = 2' }], output: { format: 'count_only' } });
     const summary = JSON.parse(result.output!) as { applied: number; notes: string[] };
     expect(summary.applied).toBe(1);
-    expect(summary.notes.join(' ')).toContain('1 transitive dependent(s) affected');
+    expect(summary.notes.join(' ')).toContain('use.ts');
   });
 
   test('count_only stays minimal when nothing failed', async () => {
@@ -301,22 +301,12 @@ describe('notebook operations', () => {
   });
 });
 
-describe('dependents scan', () => {
-  test('stops past its time limit and says the dependents were not computed', async () => {
+describe('dependents', () => {
+  test('names the files that import what was edited, without compiling anything', async () => {
     const lib = write('lib.ts', 'export const x = 1;\n');
     write('use.ts', "import { x } from './lib';\nexport const y = x;\n");
-    write('other.ts', 'export const z = 1;\n');
-    // A clock that moves one second per file: the third file is past the 2.5 second limit.
-    let clock = 0;
-    const warning = await buildImportGraphWarning(root, new Set([lib]), () => {}, undefined, { maxMs: 2500, now: () => (clock += 1000) });
-    expect(warning).toContain('scan stopped after 3s');
-  });
-
-  test('reports dependents without compiling anything when the scan completes', async () => {
-    const lib = write('lib.ts', 'export const x = 1;\n');
-    write('use.ts', "import { x } from './lib';\nexport const y = x;\n");
-    const warning = await buildImportGraphWarning(root, new Set([lib]), () => {});
-    expect(warning).toContain('1 transitive dependent(s) affected');
+    const warning = await describeEditDependents(root, new Set([lib]));
+    expect(warning).toContain('use.ts');
     expect(warning).toContain('not type-checked');
   });
 
@@ -338,6 +328,6 @@ describe('dependents scan', () => {
     write('use.ts', "import { x } from './lib';\n");
     const controller = new AbortController();
     controller.abort();
-    expect(await buildImportGraphWarning(root, new Set([lib]), () => {}, controller.signal)).toBeUndefined();
+    expect(await describeEditDependents(root, new Set([lib]), controller.signal)).toBeUndefined();
   });
 });

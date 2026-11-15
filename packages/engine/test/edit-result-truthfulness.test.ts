@@ -132,18 +132,21 @@ describe('edit dependent type check', () => {
   });
 });
 
-describe('edit and the cached import graph', () => {
-  test('a successful edit makes a graph built before it stale', async () => {
+describe('edit and the shared import graph', () => {
+  test('an edit patches the graph it shares with find instead of rebuilding it', async () => {
     const root = tempRoot();
     const file = join(root, 'a.ts');
     writeFileSync(file, 'const a = 1;\n');
+    writeFileSync(join(root, 'b.ts'), 'export const b = 1;\n');
     const cache = new FileStateCache();
     cache.update(file, 'const a = 1;\n');
     const service = new FindRuntimeService();
     const before = await service.getImportGraph(root);
-    expect(await service.getImportGraph(root)).toBe(before);
-    const result = await createEditTool(cache, { cwd: root }).execute({ edits: [{ path: 'a.ts', find: 'const a = 1;', replace: 'const a = 2;' }] });
+    expect(before.findImports(file)).toEqual([]);
+    const result = await createEditTool(cache, { cwd: root }).execute({ edits: [{ path: 'a.ts', find: 'const a = 1;', replace: "import { b } from './b';\nconst a = b;" }] });
     expect(result.success).toBe(true);
-    expect(await service.getImportGraph(root)).not.toBe(before);
+    const after = await service.getImportGraph(root);
+    expect(after).toBe(before);
+    expect(after.findImports(file)).toEqual([join(root, 'b.ts')]);
   });
 });

@@ -1,18 +1,22 @@
 import type { Tool } from '../../types/tools.js';
 import type { ChannelPluginRegistry } from '../../channels/index.js';
-import type { ChannelAccountLifecycleAction, ChannelConversationKind } from '../../channels/index.js';
+import type { ChannelConversationKind } from '../../channels/index.js';
+import { CHANNEL_ACCOUNT_ACTION_EFFECTS, readAccountLifecycleAction } from '../../channels/builtin/account-action-effects.js';
 
 function formatJson(value: unknown): string {
   return JSON.stringify(value, null, 2);
 }
 
 /**
- * Account actions that write or remove credentials, and operator actions that
- * change who may talk to the agent. Their arguments carry secrets or widen
- * access, so the owner runs them from the operator surface; a call made by the
- * model is refused whatever approval the generic tool prompt gave it.
+ * Account actions that write or remove credentials (read from the effect table
+ * beside the actions, whatever name an action is called by), and operator
+ * actions that change who may talk to the agent. Their arguments carry secrets
+ * or widen access, so the owner runs them from the operator surface; a call
+ * made by the model is refused whatever approval the generic tool prompt gave it.
  */
-const OWNER_ONLY_ACCOUNT_ACTIONS: ReadonlySet<string> = new Set(['setup', 'login', 'logout']);
+const CREDENTIAL_ACCOUNT_ACTIONS: readonly string[] = Object.entries(CHANNEL_ACCOUNT_ACTION_EFFECTS)
+  .filter(([, effect]) => effect.changesCredentials)
+  .map(([action]) => action);
 const OWNER_ONLY_OPERATOR_ACTIONS: ReadonlySet<string> = new Set(['edit-allowlist']);
 
 function ownerOnly(what: string, surface: string): { success: false; error: string } {
@@ -30,7 +34,8 @@ export function createChannelTool(registry: ChannelPluginRegistry | null): Tool 
       description:
         'Inspect and operate channel surfaces. '
         + 'Modes: accounts, account_action, directory, resolve_target, capabilities, tools, agent_tools, run_tool, actions, run_action, authorize. '
-        + 'run_action refuses actions marked dangerous and edit-allowlist, and account_action refuses setup, login and logout; the owner runs those. '
+        + 'run_action refuses actions marked dangerous and edit-allowlist, and account_action refuses the actions that write or remove credentials ('
+        + `${CREDENTIAL_ACCOUNT_ACTIONS.join(', ')}); the owner runs those. `
         + 'authorize checks that the account is enabled and the action is available; actorId is the value you pass, not an identity, and is evaluated against an allowlist only when result.metadata.actorEvaluated is true.',
       parameters: {
         type: 'object',
@@ -99,9 +104,9 @@ export function createChannelTool(registry: ChannelPluginRegistry | null): Tool 
         }
         case 'account_action': {
           if (!surface) return invalid('account_action mode requires "surface".');
-          const action = readLifecycleAction(args.accountAction ?? args.actionId);
-          if (!action) return invalid('account_action mode requires a valid "accountAction".');
-          if (OWNER_ONLY_ACCOUNT_ACTIONS.has(action)) return ownerOnly(`Account action '${action}'`, surface);
+          const action = readAccountLifecycleAction(args.accountAction ?? args.actionId);
+          if (!action) return invalid(`account_action mode requires a valid "accountAction", one of: ${Object.keys(CHANNEL_ACCOUNT_ACTION_EFFECTS).join(', ')}.`);
+          if (CHANNEL_ACCOUNT_ACTION_EFFECTS[action].changesCredentials) return ownerOnly(`Account action '${action}'`, surface);
           const result = await registry.runAccountAction(
             surface as never,
             action,
@@ -263,25 +268,6 @@ export function createChannelTool(registry: ChannelPluginRegistry | null): Tool 
       }
     },
   };
-}
-
-function readLifecycleAction(value: unknown): ChannelAccountLifecycleAction | null {
-  if (typeof value !== 'string') return null;
-  switch (value) {
-    case 'inspect':
-    case 'setup':
-    case 'retest':
-    case 'connect':
-    case 'disconnect':
-    case 'start':
-    case 'stop':
-    case 'login':
-    case 'logout':
-    case 'wait_login':
-      return value;
-    default:
-      return null;
-  }
 }
 
 function readConversationKind(value: unknown): ChannelConversationKind | null {

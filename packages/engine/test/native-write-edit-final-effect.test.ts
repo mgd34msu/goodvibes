@@ -17,7 +17,6 @@ import { FileStateCache } from '../platform/src/platform/state/file-cache.ts';
 import { ToolRegistry } from '../platform/src/platform/tools/registry.ts';
 import { createWriteTool } from '../platform/src/platform/tools/write/index.ts';
 import { createEditTool } from '../platform/src/platform/tools/edit/core.ts';
-import { runValidators } from '../platform/src/platform/tools/shared/validators.ts';
 import type { Tool } from '../platform/src/platform/types/tools.ts';
 import { toolReadingsPort } from './_helpers/tool-readings.ts';
 import { forgetGateReadings } from './_helpers/gate-readings.ts';
@@ -113,14 +112,6 @@ test('subsequent validators cannot start after an awaited validator revokes the 
   await run(tool, { ...editArgs(), validate: { before: ['test', 'build'] } });
   expect(calls).toBe(1); expect(readFileSync(join(root, 'owned.txt'), 'utf8')).toBe('before');
 });
-test('native validator invokes its final synchronous guard before spawn', async () => {
-  let spawns = 0; const original = Bun.spawn;
-  const spy = spyOn(Bun, 'spawn').mockImplementation(((...args: Parameters<typeof Bun.spawn>) => { spawns++; return original(...args); }) as typeof Bun.spawn);
-  let guards = 0;
-  try { await expect(runValidators(['test'], root, undefined, () => { if (++guards === 2) throw new Error('revoked at final boundary'); })).rejects.toThrow('revoked'); expect(spawns).toBe(0); }
-  finally { spy.mockRestore(); }
-});
-
 for (const existing of [false, true]) for (const external of [false, true]) test(`atomic Write repair revocation compensates only its owned revision (existing=${existing}, external=${external})`, async () => {
   if (existing) writeFileSync(join(root, 'repair.ts'), 'export const before = 1;\n');
   const which = spyOn(Bun, 'which').mockReturnValue(null); let chats = 0; let pendingTrust: Promise<void> | undefined;

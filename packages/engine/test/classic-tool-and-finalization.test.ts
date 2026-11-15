@@ -4,7 +4,7 @@ import { JudgmentError } from '@goodvibes-jev/judgment';
 import { fakePort } from '@goodvibes-jev/judgment/testing';
 import { withDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.js';
 import { computeSingleEdit } from '../platform/src/platform/tools/edit/match.js';
-import { readPendingPrompt, readWillPrompt } from '../platform/src/platform/tools/exec/interactive.js';
+import { readPendingPrompt } from '../platform/src/platform/tools/exec/interactive.js';
 import { keepForCall } from '../platform/src/platform/tools/shared/overflow.js';
 import { ConversationManager } from '../platform/src/platform/core/conversation.js';
 import { ResponseCompletionGuard } from '../platform/src/platform/core/response-completion.js';
@@ -31,7 +31,6 @@ test('Classic edit, command preparation, output delivery and finalization use no
     expect(edit).toEqual({ newContent: 'const value = 2;\n', occurrencesReplaced: 1, warning: undefined });
     expect(await computeSingleEdit('const value = 1;\n', { path: 'example.ts', find: 'wrong target', replace: 'value = 2' }, 'exact', true, true, false, { signal }))
       .toMatchObject({ error: 'Find string not found in file' });
-    expect(await readWillPrompt('printf done', signal)).toBe(false);
     expect(await readPendingPrompt('interactive-command', 'Continue? ', signal)).toBe('Continue?');
     expect(await keepForCall('first\n' + 'middle'.repeat(50) + '\nlast', 20, 'exec')).toContain('omitted');
     expect(await prepareSystemMessagePresentation('Command exited with code 1.', signal)).toEqual({ provenance: 'classic' });
@@ -59,7 +58,7 @@ test('Preferred exhaustion changes only the decision phase and preserves the exi
     conversation.addUserMessage('Continue the existing work.');
     conversation.addAssistantMessage('Completed the first edit.');
     const original = conversation.getMessageSnapshot();
-    expect(await readWillPrompt('printf done', new AbortController().signal)).toBe(false);
+    expect(await readPendingPrompt('interactive-command', 'Continue? ', new AbortController().signal)).toBe('Continue?');
     expect(decisionRequests).toBe(1);
     expect(decisionModelPolicyState()).toMatchObject({ policy: 'Preferred', operation: 'classic', reason: 'unavailable' });
     const response = 'The existing edit is preserved.';
@@ -75,7 +74,7 @@ test('Preferred exhaustion changes only the decision phase and preserves the exi
 
 test('Default - On reports exhaustion without selecting Classic', async () => {
   await withDecisionModelPolicy(() => 'Default - On', async () => {
-    await expect(readWillPrompt('printf done', new AbortController().signal)).rejects.toMatchObject({ kind: 'unavailable' });
+    await expect(readPendingPrompt('interactive-command', 'Continue? ', new AbortController().signal)).rejects.toMatchObject({ kind: 'unavailable' });
     expect(decisionModelPolicyState().operation).toBe('decision');
   });
 });

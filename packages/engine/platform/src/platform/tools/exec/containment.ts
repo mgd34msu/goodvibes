@@ -35,7 +35,9 @@
  * is granted `host-allowed` explicitly, per spawn, by the product composing
  * that spawn. There is no path by which a conversational turn acquires it: the
  * posture arrives from the composition, never from the model, the wire, or a
- * tool argument.
+ * tool argument. The edit and write tools' validators (`validate.before/after`)
+ * run through the same exec path (exec/runtime.ts createExecValidatorRunner),
+ * so they are held to the same posture: there is no second spawn site.
  *
  * This layer NEVER turns a refusal into an allow. It can only refuse a command
  * the sandbox layer was willing to run uncontained. The frozen catastrophic

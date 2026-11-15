@@ -3,7 +3,7 @@ import type { ProviderRegistry, BenchmarkStore } from '@goodvibes-jev/engine/pla
 import type { RouteBindingManager, SurfaceRegistry } from '@goodvibes-jev/engine/platform/platform/channels';
 import type { WatcherRegistry } from '@goodvibes-jev/engine/platform/platform/watchers';
 import { automationActionBinding, type AutomationManager, type AutomationDeliveryManager, type SpawnAutomationTaskInput } from '@goodvibes-jev/engine/platform/platform/automation';
-import { PACKAGED_COMMANDS, type AgentManager, type ControlToolOptions } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { AgentManager, ControlSurfaceEntry, ControlToolOptions } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { MemoryRegistry } from '@goodvibes-jev/engine/platform/platform/state';
 import type { DomainDispatch, RuntimeEventBus, RuntimeStore } from '@goodvibes-jev/engine/platform/platform/runtime/state';
 import { resolveRuntimeEndpointBinding } from './cli-endpoints.js';
@@ -149,11 +149,15 @@ export function gateConsolidationToLocalWriter(registry: MemoryRegistry, spine: 
 
 /**
  * The control tool is registered with the engine's tools, before the shell's
- * command registry exists. It reads the registry when a model calls it, so it
- * names only commands this build has; until the registry is bound it names
- * none. `panels` is what the product calls panels.
+ * command registry exists. It reads the registry when a model calls it: every
+ * non-hidden command with its one-line description, so a command a product
+ * adds is listed with no engine change. Until the registry is bound it names
+ * none. `panels` is the product's view registry; a product without one passes
+ * nothing and the tool says it has no panels.
  */
-export function createControlSurfaces<Registry extends { get(name: string): unknown }>(panels: ControlToolOptions['panels']): {
+export function createControlSurfaces<Registry extends { getVisible(): readonly { readonly name: string; readonly description: string }[] }>(
+  panels?: () => readonly ControlSurfaceEntry[],
+): {
   readonly bindControlCommands: (services: object, registry: Registry) => void;
   readonly controlSurfacesFor: (services: object) => ControlToolOptions;
 } {
@@ -161,11 +165,9 @@ export function createControlSurfaces<Registry extends { get(name: string): unkn
   return {
     bindControlCommands: (services, registry) => { commandRegistries.set(services, registry); },
     controlSurfacesFor: (services) => ({
-      commands: () => {
-        const registry = commandRegistries.get(services);
-        return registry ? PACKAGED_COMMANDS.filter((name) => registry.get(name) !== undefined) : [];
-      },
-      panels,
+      commands: () => (commandRegistries.get(services)?.getVisible() ?? [])
+        .map((command) => ({ name: command.name, description: command.description })),
+      ...(panels ? { panels } : {}),
     }),
   };
 }

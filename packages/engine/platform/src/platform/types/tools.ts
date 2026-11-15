@@ -150,6 +150,8 @@ export interface ToolHostEvidence {
     readonly resolvedPath?: string | undefined;
     readonly readObservation?: Readonly<Record<string, unknown>> | undefined;
   }[] | undefined;
+  /** A failed `edit` call's outcome as the matcher that refused it decided it. */
+  readonly editStatus?: 'not_found' | 'ambiguous' | 'conflict' | 'failed' | undefined;
 }
 
 /** The outcome of executing a tool. */

@@ -11,12 +11,21 @@ import { judge } from '../../runtime/judge.js';
 import { resolveEditText } from './edit-text.js';
 
 type AstGrepModule = typeof import('@ast-grep/napi');
+/** Why an edit was not applied, decided by the matcher that refused it. */
+export type EditFailureStatus = Exclude<EditResultStatus, 'applied'>;
+/** A refused edit: the message, the matcher's own status, and what to do next. */
+export interface EditFailure { readonly error: string; readonly status: EditFailureStatus; readonly hint?: string | undefined }
 type EditComputationResult =
   | { newContent: string; occurrencesReplaced: number; warning?: string | undefined }
-  | { error: string };
+  | EditFailure;
+
+/** An input error from resolveEditText, which has no status of its own. */
+function inputFailure(text: { error: string }): EditFailure {
+  return { error: text.error, status: 'failed' };
+}
 
 function withExactFallbackWarning(
-  result: { newContent: string; occurrencesReplaced: number } | { error: string },
+  result: { newContent: string; occurrencesReplaced: number } | EditFailure,
   warning: string,
 ): EditComputationResult {
   return 'error' in result ? result : { ...result, warning };
@@ -221,10 +230,11 @@ function filterByScope(
 export function selectOccurrences(
   positions: { start: number; end: number }[],
   occurrence: OccurrenceSpec | undefined,
-): { selected: { start: number; end: number }[] } | { error: string; hint?: string } {
+): { selected: { start: number; end: number }[] } | EditFailure {
   if (positions.length === 0) {
     return {
       error: 'Find string not found in file',
+      status: 'not_found',
       hint: 'Check that the find string matches the file content exactly, including whitespace and line endings.',
     };
   }
@@ -233,6 +243,7 @@ export function selectOccurrences(
     if (positions.length > 1) {
       return {
         error: `Ambiguous match: find string appears ${positions.length} times. Specify occurrence: 'first', 'last', 'all', or a number.`,
+        status: 'ambiguous',
         hint: `Pattern matched ${positions.length} times, use occurrence: 'first', 'last', 'all', or a number (1-${positions.length}) to disambiguate.`,
       };
     }
@@ -244,7 +255,7 @@ export function selectOccurrences(
   if (occurrence === 'all') return { selected: positions };
   const n = occurrence as number;
   if (n < 1 || n > positions.length) {
-    return { error: `Occurrence ${n} out of range: file has ${positions.length} match(es)` };
+    return { error: `Occurrence ${n} out of range: file has ${positions.length} match(es)`, status: 'not_found' };
   }
   return { selected: [positions[n - 1]!] };
 }
@@ -360,20 +371,20 @@ function getAstGrepLang(astGrep: AstGrepModule, filePath: string): AstGrepParser
 export function computeExactEdit(
   fileContent: string,
   item: EditItem,
-): { newContent: string; occurrencesReplaced: number } | { error: string } {
+): { newContent: string; occurrencesReplaced: number } | EditFailure {
   const text = resolveEditText(item);
-  if ('error' in text) return text;
+  if ('error' in text) return inputFailure(text);
   const { find: findStr, replace: replaceStr } = text;
 
   let positions = findAllPositions(fileContent, findStr, 'exact', true, true);
   if (positions.length === 0) {
-    return { error: `No match found for '${findStr}'` };
+    return { error: `No match found for '${findStr}'`, status: 'not_found' };
   }
 
   if (item.hints) {
     const scoped = applyHints(fileContent, positions, item.hints, item.hints.near_line);
     if (scoped.positions.length === 0) {
-      return { error: `Find string not found within the requested hints (${positions.length} match(es) lie outside them). ${scoped.warning ?? 'Loosen or remove the hints (in_function, in_class, after, before), or read the file to choose the right scope.'}` };
+      return { error: `Find string not found within the requested hints (${positions.length} match(es) lie outside them). ${scoped.warning ?? 'Loosen or remove the hints (in_function, in_class, after, before), or read the file to choose the right scope.'}`, status: 'not_found' };
     }
     positions = scoped.positions;
   }
@@ -387,7 +398,7 @@ export function computeExactEdit(
 
 export function computeAstEdit(fileContent: string, item: EditItem, filePath: string): Promise<EditComputationResult> {
   const text = resolveEditText(item);
-  if ('error' in text) return Promise.resolve(text);
+  if ('error' in text) return Promise.resolve(inputFailure(text));
   const { find: findStr, replace: replaceStr } = text;
   let intel: CodeIntelligence;
   try {
@@ -440,7 +451,7 @@ export function computeAstEdit(fileContent: string, item: EditItem, filePath: st
       if (item.hints) {
         const scoped = applyHints(fileContent, positions, item.hints, item.hints.near_line);
         if (scoped.positions.length === 0) {
-          return { error: `Find string not found within the requested hints (${positions.length} match(es) lie outside them). ${scoped.warning ?? 'Loosen or remove the hints (in_function, in_class, after, before), or read the file to choose the right scope.'}` };
+          return { error: `Find string not found within the requested hints (${positions.length} match(es) lie outside them). ${scoped.warning ?? 'Loosen or remove the hints (in_function, in_class, after, before), or read the file to choose the right scope.'}`, status: 'not_found' };
         }
         positions.splice(0, positions.length, ...scoped.positions);
       }
@@ -465,7 +476,7 @@ export async function computeAstPatternEdit(
   filePath: string,
 ): Promise<EditComputationResult> {
   const text = resolveEditText(item);
-  if ('error' in text) return text;
+  if ('error' in text) return inputFailure(text);
   const { find: findStr, replace: replaceStr } = text;
 
   let astGrep: AstGrepModule;
@@ -501,11 +512,11 @@ export async function computeAstPatternEdit(
   try {
     matches = root.root().findAll(findStr);
   } catch (err) {
-    return { error: `ast_pattern: invalid pattern '${findStr}': ${summarizeError(err)}` };
+    return { error: `ast_pattern: invalid pattern '${findStr}': ${summarizeError(err)}`, status: 'failed' };
   }
 
   if (matches.length === 0) {
-    return { error: `ast_pattern: no matches found for pattern '${findStr}'` };
+    return { error: `ast_pattern: no matches found for pattern '${findStr}'`, status: 'not_found' };
   }
 
   let positions = matches.map((m) => ({
@@ -519,7 +530,7 @@ export async function computeAstPatternEdit(
     const kept = new Set(scoped.positions);
     const inside = positions.filter((pos) => kept.has(pos));
     if (inside.length === 0) {
-      return { error: `ast_pattern: no match lies within the requested hints (${positions.length} match(es) lie outside them). ${scoped.warning ?? 'Loosen or remove the hints (in_function, in_class, after, before), or read the file to choose the right scope.'}` };
+      return { error: `ast_pattern: no match lies within the requested hints (${positions.length} match(es) lie outside them). ${scoped.warning ?? 'Loosen or remove the hints (in_function, in_class, after, before), or read the file to choose the right scope.'}`, status: 'not_found' };
     }
     positions = inside;
   }
@@ -529,6 +540,7 @@ export async function computeAstPatternEdit(
     if (positions.length > 1) {
       return {
         error: `ast_pattern: ${positions.length} matches found, set occurrence to 'first', 'last', 'all', or N to disambiguate`,
+        status: 'ambiguous',
       };
     }
     selected = positions;
@@ -540,7 +552,7 @@ export async function computeAstPatternEdit(
     selected = positions.slice(-1);
   } else if (typeof occSpec === 'number') {
     if (occSpec < 1 || occSpec > positions.length) {
-      return { error: `ast_pattern: occurrence ${occSpec} out of range (found ${positions.length} matches)` };
+      return { error: `ast_pattern: occurrence ${occSpec} out of range (found ${positions.length} matches)`, status: 'not_found' };
     }
     selected = [positions[occSpec - 1]!];
   } else {
@@ -573,14 +585,6 @@ export async function computeAstPatternEdit(
     occurrencesReplaced: outermost.length,
     ...(collapsed > 0 ? { warning: `${collapsed} match(es) nested inside another selected match were replaced as part of it.` } : {}),
   };
-}
-
-/** Decode only this edit module’s emitted diagnostic prefixes; foreign prose stays failed. */
-export function classifyEditFailure(message: string): EditResultStatus {
-  if (message.startsWith('File not found or unreadable:') || message.startsWith('Find string not found') || message.startsWith('No match found for ')) return 'not_found';
-  if (message.startsWith('Ambiguous') || message.startsWith('ambiguous')) return 'ambiguous';
-  if (message.startsWith('OCC conflict:')) return 'conflict';
-  return 'failed';
 }
 
 /**
@@ -676,9 +680,10 @@ function describeNearWindows(windows: readonly NearWindow[]): string {
     .join('\n');
 }
 
-function notFoundAnswer(windows: readonly NearWindow[], hintsWarning: string | undefined): { error: string; hint: string } {
+function notFoundAnswer(windows: readonly NearWindow[], hintsWarning: string | undefined): EditFailure {
   const nearest = windows.filter((window) => window.score >= NEAR_WINDOW_SHOW_SCORE);
   return {
+    status: 'not_found',
     error: nearest.length > 0
       ? `Find string not found in file. Closest text:\n${describeNearWindows(nearest)}`
       : 'Find string not found in file',
@@ -695,7 +700,8 @@ function notFoundAnswer(windows: readonly NearWindow[], hintsWarning: string | u
  */
 async function confirmNearWindow(find: string, windows: readonly NearWindow[], options: JudgmentReadingOptions): Promise<NearWindow | null> {
   const [best, second] = windows;
-  if (!best || best.score === 0 || (second !== undefined && second.score >= best.score)) return null;
+  // A window not close enough to show is not close enough to ask about: the edit fails at once with the hint.
+  if (!best || best.score < NEAR_WINDOW_SHOW_SCORE || (second !== undefined && second.score >= best.score)) return null;
   let state: ReturnType<typeof editTargetView>;
   try { state = editTargetView(find, best.lines); } catch { return null; }
   const { value } = await judge({
@@ -720,24 +726,21 @@ export async function computeSingleEdit(
   options: JudgmentReadingOptions = {},
 ): Promise<
   | { newContent: string; occurrencesReplaced: number; warning?: string | undefined }
-  | { error: string; hint?: string | undefined }
+  | EditFailure
 > {
-  const before = JSON.stringify(item);
-  const current = () => {
-    options.signal?.throwIfAborted(); options.assertCurrent?.();
-    if (JSON.stringify(item) !== before) throw new Error('Edit regex request changed');
-  };
+  // The item is this call's own argument; the signal and the caller's check say whether the call is still wanted.
+  const current = () => { options.signal?.throwIfAborted(); options.assertCurrent?.(); };
   current();
   const readingOptions = { ...options, assertCurrent: current };
   const text = resolveEditText(item);
-  if ('error' in text) return text;
+  if ('error' in text) return inputFailure(text);
   const { find: findStr, replace: replaceStr } = text;
 
   let positions: { start: number; end: number }[];
   try {
     positions = await findAllPositionsAsync(fileContent, findStr, mode, caseSensitive, whitespaceSensitive, multiline, readingOptions);
   } catch (err) {
-    return { error: `Invalid find pattern: ${summarizeError(err)}` };
+    return { error: `Invalid find pattern: ${summarizeError(err)}`, status: 'failed' };
   }
 
   const matchesBeforeHints = positions.length;
@@ -754,6 +757,7 @@ export async function computeSingleEdit(
   if (positions.length === 0 && matchesBeforeHints > 0) {
     return {
       error: `Find string not found within the requested hints (${matchesBeforeHints} match(es) lie outside them)`,
+      status: 'not_found',
       hint: hintsWarning ?? 'Loosen or remove the hints (in_function, in_class, after, before), or read the file to choose the right scope.',
     };
   }
@@ -783,8 +787,8 @@ export async function computeSingleEdit(
     }
     if (fallback.length === 0) {
       return item.hints && usedFallback
-        ? { error: 'Find string not found within the requested hints', hint: hintsWarning ?? 'The closest match lies outside the hints; loosen them or read the file.' }
-        : { error: 'Find string not found in file', hint: hintsWarning ?? 'Read the file and provide the exact replacement target.' };
+        ? { error: 'Find string not found within the requested hints', status: 'not_found', hint: hintsWarning ?? 'The closest match lies outside the hints; loosen them or read the file.' }
+        : { error: 'Find string not found in file', status: 'not_found', hint: hintsWarning ?? 'Read the file and provide the exact replacement target.' };
     }
     positions = fallback;
   }
@@ -796,7 +800,7 @@ export async function computeSingleEdit(
   try {
     newContent = await applyReplacementsAsync(fileContent, selResult.selected, findStr, replaceStr, mode, caseSensitive, multiline, readingOptions);
   } catch (err) {
-    if (err instanceof RegexRecaptureError) return { error: err.message };
+    if (err instanceof RegexRecaptureError) return { error: err.message, status: 'failed' };
     throw err;
   }
 

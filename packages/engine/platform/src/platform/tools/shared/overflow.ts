@@ -88,8 +88,14 @@ export interface OverflowResult {
 export interface OverflowOptions {
   maxChars?: number | undefined;
   label?: string | undefined;
-  /** The tool call that produced the content (for example the command line); the parts shown are chosen against it. */
+  /** The tool call that produced the content (for example the command line); ranked keeping chooses parts against it. */
   call: string;
+  /**
+   * What of an overflowing output is shown: `head-tail` (default) keeps the
+   * start, the end and the lines that report an error, by arithmetic with no
+   * request; `ranked` asks the decision model which parts matter for `call`.
+   */
+  keep?: 'head-tail' | 'ranked' | undefined;
 }
 
 // ─── File Backend ────────────────────────────────────────────────────────────
@@ -417,19 +423,45 @@ export function outputBlocks(content: string, blockChars: number): Array<{ start
   return blocks;
 }
 
+/** A line that reports a failure, kept from the middle of an overflowing output. */
+const ERROR_LINE = /\b(?:error|errors|failed|failure|fatal|exception|panic|traceback|assert(?:ion)?)\b/iu;
+/** Share of the budget the error lines from the middle may take; head and tail split the rest. */
+const ERROR_LINES_SHARE = 0.25;
+
 /**
- * The parts of `content` to show within `budget` characters. The blocks are
- * ranked by `engine.tools.output-keep` against `call` (the tool call that
- * produced the output); the best that fit the budget are kept and shown in
+ * The start and the end of `content`, and between them the lines that report
+ * an error, within `budget` characters, decided by arithmetic (no request).
+ * The parts are shown in their original order with a marker where text was
+ * left out.
+ */
+export function keepHeadAndTail(content: string, budget: number): string {
+  if (content.length <= budget) return content;
+  const count = Math.max(0, Math.floor(budget));
+  const errorBudget = Math.floor(count * ERROR_LINES_SHARE);
+  const head = Math.ceil((count - errorBudget) / 2);
+  const tail = count - errorBudget - head;
+  const middle = content.slice(head, content.length - tail);
+  const errors: string[] = [];
+  let used = 0;
+  for (const line of middle.split('\n')) {
+    if (!ERROR_LINE.test(line)) continue;
+    if (used + line.length + 1 > errorBudget) break;
+    errors.push(line);
+    used += line.length + 1;
+  }
+  const kept = errors.length > 0 ? `\n[... middle omitted; lines reporting errors: ...]\n${errors.join('\n')}\n[...]\n` : '\n[... middle omitted ...]\n';
+  return content.slice(0, head) + kept + (tail ? content.slice(-tail) : '');
+}
+
+/**
+ * The parts of `content` to show within `budget` characters, ranked by
+ * `engine.tools.output-keep` against `call` (the tool call that produced the
+ * output). Only when the caller asked for ranked keeping; with decision models
+ * off it is head and tail. The best blocks that fit are kept and shown in
  * their original order, with a marker where blocks were left out.
  */
 export async function keepForCall(content: string, budget: number, call: string): Promise<string> {
-  return decisionOrClassic(() => keepDecisionPartsForCall(content, budget, call), () => {
-    if (content.length <= budget) return content;
-    const count = Math.max(0, Math.floor(budget));
-    const head = Math.ceil(count / 2), tail = count - head;
-    return content.slice(0, head) + '\n[... middle omitted ...]\n' + (tail ? content.slice(-tail) : '');
-  });
+  return decisionOrClassic(() => keepDecisionPartsForCall(content, budget, call), () => keepHeadAndTail(content, budget));
 }
 
 async function keepDecisionPartsForCall(content: string, budget: number, call: string): Promise<string> {
@@ -517,10 +549,22 @@ export class OverflowHandler {
   }
 
   /**
+   * This handler with ranked keeping for every output it handles: the view a
+   * caller passes on when its own caller asked for `ranked` (one decision
+   * request per overflowing output instead of head and tail).
+   */
+  ranked(): OverflowHandler {
+    const view = Object.create(this) as OverflowHandler;
+    view.handle = (content, options) => this.handle(content, { ...options, keep: 'ranked' });
+    return view;
+  }
+
+  /**
    * Handle potentially large content.
    * Returns unchanged content if within limit.
-   * On overflow: delegates to active backend, shows the parts keepForCall
-   * chooses for `options.call`, and returns a typed ref to the full output.
+   * On overflow: delegates to active backend, shows the start, the end and the
+   * error lines (or, on request, the parts keepForCall ranks for
+   * `options.call`), and returns a typed ref to the full output.
    */
   async handle(content: string, options: OverflowOptions): Promise<OverflowResult> {
     const maxChars = options.maxChars ?? DEFAULT_MAX_CHARS;
@@ -542,13 +586,15 @@ export class OverflowHandler {
     }
 
     let kept: string;
-    try { kept = await keepForCall(content, maxChars, options.call); }
-    catch (error) {
-      // Ranking is an aid to display, never a prerequisite for delivering a
-      // completed tool result. Full output has already been retained above.
-      logger.debug('[overflow] Output ranking unavailable', { error: summarizeError(error) });
-      const head = Math.floor(maxChars / 2);
-      kept = content.slice(0, head) + '\n[... middle omitted ...]\n' + content.slice(-(maxChars - head));
+    if (options.keep !== 'ranked') kept = keepHeadAndTail(content, maxChars);
+    else {
+      try { kept = await keepForCall(content, maxChars, options.call); }
+      catch (error) {
+        // Ranking is an aid to display, never a prerequisite for delivering a
+        // completed tool result. Full output has already been retained above.
+        logger.debug('[overflow] Output ranking unavailable', { error: summarizeError(error) });
+        kept = keepHeadAndTail(content, maxChars);
+      }
     }
 
     if (!entry) {

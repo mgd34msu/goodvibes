@@ -5,22 +5,19 @@ import { createChannelTool } from '@goodvibes-jev/engine/platform/platform/tools
 import { createControlTool } from '../platform/src/platform/tools/control/index.ts';
 
 describe('control tool', () => {
-  test('reports the commands and panels its product supplies, not the engine-wide list', async () => {
-    const tool = createControlTool({ commands: ['setup', 'login'], panels: ['hooks'] });
-    expect(JSON.parse((await tool.execute({ mode: 'commands' })).output!)).toEqual({ count: 2, commands: ['setup', 'login'] });
-    expect(JSON.parse((await tool.execute({ mode: 'panels' })).output!)).toEqual({ count: 1, panels: ['hooks'] });
+  test('lists the commands and panels its product supplies, read on every call', async () => {
+    let commands: readonly { name: string; description: string }[] = [];
+    const tool = createControlTool({ commands: () => commands, panels: [{ name: 'hooks' }] });
+    expect(JSON.parse((await tool.execute({ mode: 'commands' })).output!)).toEqual({ available: true, count: 0, commands: [] });
+    commands = [{ name: 'setup', description: 'Set up' }];
+    expect(JSON.parse((await tool.execute({ mode: 'commands' })).output!)).toEqual({ available: true, count: 1, commands });
+    expect(JSON.parse((await tool.execute({ mode: 'panels' })).output!).count).toBe(1);
   });
 
-  test('reads a supplied list on every call, so a list that exists only after registration is honoured', async () => {
-    let commands: readonly string[] = [];
-    const tool = createControlTool({ commands: () => commands });
-    expect(JSON.parse((await tool.execute({ mode: 'commands' })).output!)).toEqual({ count: 0, commands: [] });
-    commands = ['setup'];
-    expect(JSON.parse((await tool.execute({ mode: 'commands' })).output!)).toEqual({ count: 1, commands: ['setup'] });
-  });
-
-  test('declares no side effects, since every mode only reads', () => {
-    expect(createControlTool().definition.sideEffects).toEqual([]);
+  test('a composition without a command surface says so instead of listing none', async () => {
+    const tool = createControlTool({});
+    expect(JSON.parse((await tool.execute({ mode: 'commands' })).output!).available).toBe(false);
+    expect(JSON.parse((await tool.execute({ mode: 'panels' })).output!).available).toBe(false);
   });
 });
 

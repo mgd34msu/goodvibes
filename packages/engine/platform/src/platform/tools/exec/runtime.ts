@@ -16,6 +16,7 @@ import { execCommandText, type ExecInput, type ExecCommandInput, type ExecComman
 import { ProcessManager } from '../shared/process-manager.js';
 import { guardExecCommand, formatDenialResponse } from './ast-guard.js';
 import { executeFileOperations } from './file-ops.js';
+import { DEFAULT_VALIDATOR_TIMEOUT_MS, validatorCommand, type ValidatorRunner } from '../shared/validators.js';
 import { formatResult } from './result-format.js';
 import type { FeatureFlagManager } from '../../runtime/feature-flags/index.js';
 import { mapWithConcurrency, sleep } from '../../utils/concurrency.js';
@@ -34,6 +35,7 @@ import {
   type ExecSandboxPlan,
 } from './sandbox.js';
 import {
+  shouldRerunUnderPty,
   shouldRunInteractive,
   runInteractiveCommand,
   terminalRequiredNote,
@@ -323,12 +325,8 @@ async function runCommand(
   policy: ExecRunPolicy,
   signal?: AbortSignal,
 ): Promise<ExecCommandResult> {
-  const inputRevision = JSON.stringify(cmdInput);
-  const policyRevision = JSON.stringify(policy.sandbox);
-  const assertCurrent = () => {
-    signal?.throwIfAborted(); policy.assertCurrent?.();
-    if (inputRevision !== JSON.stringify(cmdInput) || policyRevision !== JSON.stringify(policy.sandbox)) throw new Error('Exec command or sandbox policy changed');
-  };
+  // The command and policy are this call's own values; the signal and the invocation check say whether it is still wanted.
+  const assertCurrent = () => { signal?.throwIfAborted(); policy.assertCurrent?.(); };
   const cwd = resolveCwd(cmdInput.cwd, workingDirectory);
   const resolved = await resolveRuntimeSandboxPlan(policy.sandbox, cmdStr, workingDirectory, cwd, { signal, assertCurrent });
   const plan = resolved && !policy.capturedInput ? withSandboxRuntimes(resolved, workingDirectory) : resolved;
@@ -354,7 +352,12 @@ async function runCommand(
   };
   const executionSignal = admission ? AbortSignal.any([admission.signal, ...(signal ? [signal] : [])]) : signal;
   try {
-    return await runAdmittedCommand(processManager, overflowHandler, featureFlags, cmdStr, cmdInput, workingDirectory, globalTimeout, scrub, policy, plan, beforeSpawn, executionSignal, assertCurrent);
+    const result = await runAdmittedCommand(processManager, overflowHandler, featureFlags, cmdStr, cmdInput, workingDirectory, globalTimeout, scrub, policy, plan, beforeSpawn, executionSignal, assertCurrent);
+    // A piped run that failed only because it needed a terminal runs once more under the PTY, where its
+    // prompt reaches the owner. Not after an escalation: that approval covered one run.
+    if (policy.capturedInput || admission || !shouldRerunUnderPty(policy.interaction, cmdInput, result)) return result;
+    const rerun = await runAdmittedCommand(processManager, overflowHandler, featureFlags, cmdStr, { ...cmdInput, interactive: true }, workingDirectory, globalTimeout, scrub, policy, plan, assertCurrent, executionSignal, assertCurrent);
+    return { ...rerun, warnings: [...(rerun.warnings ?? []), 'The piped run failed because the command needed a terminal, so it was run again under one.'] };
   } finally { admission?.close(); }
 }
 
@@ -381,7 +384,7 @@ async function runAdmittedCommand(
     signal?.throwIfAborted();
     const withheld = scrubbed.withheld.filter((name) => !(cmdInput.env && name in cmdInput.env));
     const network = !plan || plan.network === 'enabled' ? 'enabled' : 'disabled';
-    const interactive = await shouldRunInteractive(policy.interaction, cmdInput, cmdStr, signal);
+    const interactive = shouldRunInteractive(policy.interaction, cmdInput);
     const result = cmdInput.background || (cmdInput.until && !cmdInput.until.kill_after)
       ? await startCapturedBackground(processManager, policy.capturedInput, cmdStr, cmdInput, workingDirectory, cmdInput.timeout_ms ?? globalTimeout, signal, network, scrubbed.env, beforeSpawn, policy.assertWorkspaceCurrent)
       : await runCapturedCommand(policy.capturedInput, cmdStr, cmdInput, workingDirectory, cmdInput.timeout_ms ?? globalTimeout, signal, network, scrubbed.env, { beforeSpawn, beforePublish: policy.assertCurrent, ...(interactive && policy.interaction ? { interaction: policy.interaction } : {}) });
@@ -419,7 +422,7 @@ async function runAdmittedCommand(
   // run under a PTY nested INSIDE the sandbox argv (the boundary, when active,
   // wraps the PTY allocation). Detected prompts ride the approval machinery
   // via the interaction seam; the runner + detection live in interactive.ts.
-  if (await shouldRunInteractive(interaction, cmdInput, cmdStr, signal)) {
+  if (shouldRunInteractive(interaction, cmdInput)) {
     return attachWithheld(await runInteractiveCommand({
       cmdStr, cwd, env: mergedEnv, timeoutMs, startTime, sandboxArgv,
       interaction: interaction!, signal, beforeSpawn,
@@ -704,13 +707,9 @@ async function runUntil(
   assertOwnerCurrent?: () => void,
 ): Promise<ExecCommandResult> {
   const until = cmdInput.until!;
-  const inputRevision = JSON.stringify(cmdInput);
   const deadline = new AbortController();
   const active = signal ? AbortSignal.any([signal, deadline.signal]) : deadline.signal;
-  const current = () => {
-    active.throwIfAborted(); assertOwnerCurrent?.();
-    if (JSON.stringify(cmdInput) !== inputRevision) throw new Error('Exec until request changed');
-  };
+  const current = () => { active.throwIfAborted(); assertOwnerCurrent?.(); };
   let proc: ReturnType<typeof Bun.spawn> | undefined;
   const readers = new Set<ReadableStreamDefaultReader<Uint8Array>>();
   // A stop reaches the command's whole group; the closing cleanup after a
@@ -1062,65 +1061,110 @@ export function isCapturedExecTool(tool: Tool, authority: CapturedExecAuthority[
   return capturedExecTools.get(tool) === authority;
 }
 
-export function createExecTool(
-  processManager: ProcessManager,
-  options: {
-    readonly capturedInput?: CapturedExecAuthority | undefined;
-    readonly featureFlags?: Pick<FeatureFlagManager, 'isEnabled'> | null | undefined;
-    readonly overflowHandler?: OverflowHandler | undefined;
-    /**
-     * Default working directory used when a call omits the top-level
-     * working_dir (and no single command supplies one to promote). Callers
-     * register this tool with the session/project working directory they
-     * already have in hand (see tools/index.ts registerAllTools) so the
-     * parameter stays genuinely optional for the model instead of a
-     * mandatory-in-practice field that fails a call after the user has
-     * already approved it.
-     */
-    readonly defaultWorkingDirectory?: string | undefined;
-    /**
-     * Credential-bearing env-var scrub applied to every spawned command's
-     * environment. Enabled by default (see resolveCredentialEnvScrub). Consumers
-     * wire their `permissions.exec.*` config through here; the withheld names are
-     * reported on each ExecCommandResult (`withheld_env`) by name only.
-     */
-    readonly credentialEnvScrub?: CredentialEnvScrubConfig | undefined;
-    /**
-     * Per-command exec sandbox wiring. When present AND active (gate on,
-     * config enabled, host provides a boundary), each foreground command runs
-     * inside a bwrap boundary and its result carries sandbox metadata. Omitted or
-     * inactive → every command runs the unchanged non-sandboxed path.
-     */
-    readonly sandbox?: ExecSandboxRuntime | null | undefined;
-    /**
-     * PTY prompt-answer wiring. When present AND the host has a PTY backend,
-     * prompt-prone / explicitly-interactive commands run under a PTY and
-     * detected prompts ride the approval machinery through its seam. Omitted
-     * or unavailable → every command runs the unchanged pipe-based path.
-     */
-    readonly interaction?: ExecInteractionRuntime | null | undefined;
-    /**
-     * Whether this composition REQUIRES the exec boundary (containment.ts).
-     * Omitted ⇒ `host-allowed`: no boundary means the command runs on the host
-     * with the self-labelling note, exactly as before. A hosted conversational
-     * turn passes `required`, so an absent boundary refuses instead.
-     */
-    readonly containment?: ExecContainmentRequirement | null | undefined;
-  } = {},
-): Tool {
+/** What a composition states about its exec tool. */
+export interface ExecToolOptions {
+  readonly capturedInput?: CapturedExecAuthority | undefined;
+  readonly featureFlags?: Pick<FeatureFlagManager, 'isEnabled'> | null | undefined;
+  readonly overflowHandler?: OverflowHandler | undefined;
+  /**
+   * Default working directory used when a call omits the top-level
+   * working_dir (and no single command supplies one to promote). Callers
+   * register this tool with the session/project working directory they
+   * already have in hand (see tools/index.ts registerAllTools) so the
+   * parameter stays genuinely optional for the model instead of a
+   * mandatory-in-practice field that fails a call after the user has
+   * already approved it.
+   */
+  readonly defaultWorkingDirectory?: string | undefined;
+  /**
+   * Credential-bearing env-var scrub applied to every spawned command's
+   * environment. Enabled by default (see resolveCredentialEnvScrub). Consumers
+   * wire their `permissions.exec.*` config through here; the withheld names are
+   * reported on each ExecCommandResult (`withheld_env`) by name only.
+   */
+  readonly credentialEnvScrub?: CredentialEnvScrubConfig | undefined;
+  /**
+   * Per-command exec sandbox wiring. When present AND active (gate on,
+   * config enabled, host provides a boundary), each foreground command runs
+   * inside a bwrap boundary and its result carries sandbox metadata. Omitted or
+   * inactive → every command runs the unchanged non-sandboxed path.
+   */
+  readonly sandbox?: ExecSandboxRuntime | null | undefined;
+  /**
+   * PTY prompt-answer wiring. When present AND the host has a PTY backend,
+   * prompt-prone / explicitly-interactive commands run under a PTY and
+   * detected prompts ride the approval machinery through its seam. Omitted
+   * or unavailable → every command runs the unchanged pipe-based path.
+   */
+  readonly interaction?: ExecInteractionRuntime | null | undefined;
+  /**
+   * Whether this composition REQUIRES the exec boundary (containment.ts).
+   * Omitted ⇒ `host-allowed`: no boundary means the command runs on the host
+   * with the self-labelling note, exactly as before. A hosted conversational
+   * turn passes `required`, so an absent boundary refuses instead.
+   */
+  readonly containment?: ExecContainmentRequirement | null | undefined;
+}
+
+function prepareExecRun(options: ExecToolOptions): {
+  readonly overflowHandler: OverflowHandler;
+  readonly featureFlags: Pick<FeatureFlagManager, 'isEnabled'> | null;
+  readonly credentialEnvScrub: ResolvedCredentialEnvScrub;
+  readonly policy: ExecRunPolicy;
+} {
   if (!options.overflowHandler) {
     throw new Error('createExecTool requires an explicit overflowHandler');
   }
-  const overflowHandler = options.overflowHandler;
-  const featureFlags = options.featureFlags ?? null;
-  const credentialEnvScrub = resolveCredentialEnvScrub(options.credentialEnvScrub);
-  const policy: ExecRunPolicy = {
-    capturedInput: options.capturedInput ? Object.freeze({ ...options.capturedInput, dependencyInputs: options.capturedInput.dependencyInputs ? Object.freeze([...options.capturedInput.dependencyInputs]) : undefined }) : undefined,
-    sandbox: options.sandbox ?? null,
-    interaction: options.interaction ?? null,
-    containment: options.containment ?? null,
-    workspaceRoot: options.defaultWorkingDirectory?.trim() || undefined,
+  return {
+    overflowHandler: options.overflowHandler,
+    featureFlags: options.featureFlags ?? null,
+    credentialEnvScrub: resolveCredentialEnvScrub(options.credentialEnvScrub),
+    policy: {
+      capturedInput: options.capturedInput ? Object.freeze({ ...options.capturedInput, dependencyInputs: options.capturedInput.dependencyInputs ? Object.freeze([...options.capturedInput.dependencyInputs]) : undefined }) : undefined,
+      sandbox: options.sandbox ?? null,
+      interaction: options.interaction ?? null,
+      containment: options.containment ?? null,
+      workspaceRoot: options.defaultWorkingDirectory?.trim() || undefined,
+    },
   };
+}
+
+const shellWord = (part: string): string => `'${part.replace(/'/g, `'\\''`)}'`;
+
+/**
+ * The validator runner of a composition whose exec tool runs on this process:
+ * each validator's fixed command (shared/validators.ts) goes through the same
+ * path as an exec command, so the sandbox plan, the containment decision, the
+ * credential scrub and the working-directory check apply unchanged. A session
+ * that requires the boundary and has none gets the containment refusal as the
+ * validator's failure; nothing runs on the host.
+ */
+export function createExecValidatorRunner(processManager: ProcessManager, options: ExecToolOptions): ValidatorRunner {
+  const { overflowHandler, featureFlags, credentialEnvScrub, policy } = prepareExecRun(options);
+  return async (name, cwd, execution) => {
+    execution?.assertCurrent();
+    const command = validatorCommand(name).map(shellWord).join(' ');
+    const timeoutMs = execution?.timeoutMs ?? DEFAULT_VALIDATOR_TIMEOUT_MS;
+    const result = await executeResolvedCommand(processManager, overflowHandler, featureFlags, command,
+      { cmd: command, timeout_ms: timeoutMs, progress: false, interactive: false }, cwd, timeoutMs, credentialEnvScrub,
+      { ...policy, ...(execution ? { assertCurrent: execution.assertCurrent } : {}) }, execution?.signal);
+    const stopped = result.timed_out ? `Validator '${name}' timed out after ${timeoutMs}ms and was killed`
+      : result.cancelled ? `Validator '${name}' was cancelled and killed` : undefined;
+    return {
+      validator: name,
+      passed: result.success,
+      exitCode: result.exit_code ?? -1,
+      stdout: result.stdout,
+      stderr: stopped ? `${stopped}\n${result.stderr}`.trimEnd() : result.stderr,
+    };
+  };
+}
+
+export function createExecTool(
+  processManager: ProcessManager,
+  options: ExecToolOptions = {},
+): Tool {
+  const { overflowHandler, featureFlags, credentialEnvScrub, policy } = prepareExecRun(options);
 
   const tool: Tool = {
     definition: {
@@ -1226,7 +1270,7 @@ export function createExecTool(
 
         const results = await executeResolvedCommands(
           processManager,
-          overflowHandler,
+          input.output_keep === 'ranked' ? overflowHandler.ranked() : overflowHandler,
           featureFlags,
           resolvedCmds,
           input.parallel === true,

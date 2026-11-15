@@ -6,21 +6,23 @@ import { assertJudgmentInput, JudgmentInputError } from '../../gate/judgment-inp
  * Read by Jev in place of the fixed 0.7 line-similarity cutoff match.ts used
  * to accept a fuzzy line match.
  *
- * Code still slides a window of the find text's line count over the file and
- * keeps the window with the most exactly matching normalized lines (the
- * shortlist, arithmetic); this one yes/no decides whether that window is
- * edited.
+ * Code ranks every window of the find text's line count by line similarity
+ * (edit/match.ts `nearestWindows`, arithmetic, no request). Only in fuzzy mode,
+ * and only when one window is best and close enough to show as the closest
+ * text, this one yes/no decides whether that window is edited: at most one
+ * request per failed edit. Exact mode never asks; it answers not found at once
+ * with the closest lines.
  *
  * Band: medium stakes. A wrong yes rewrites the wrong lines of a file (the
  * edit is reported with a verify warning and can be reverted); a wrong no
  * only sends the caller back to correct the find text. Only a yes that acts
- * is applied; a yes that would need confirming is returned as a
- * "Did you mean this?" hint so the caller confirms by resending the text.
+ * is applied; anything else (unsure, late, unavailable) applies nothing and
+ * the edit fails with the closest lines as its hint.
  */
 import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes-jev/judgment';
 
-/** Most characters of the find text or the window one request carries; larger inputs are rejected without clipping. */
-export const MAX_JUDGED_EDIT_CHARS = Number.POSITIVE_INFINITY;
+/** Most characters of the find text or the window one request carries; a larger edit is answered not found without a request. */
+export const MAX_JUDGED_EDIT_CHARS = 20_000;
 
 function clip(text: string): string {
   assertJudgmentInput(text);

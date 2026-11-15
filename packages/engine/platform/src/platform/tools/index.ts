@@ -27,6 +27,7 @@ import { CodeIntelligence } from '../intelligence/index.js';
 import { withProjectFilesEpoch } from '../intelligence/project-files-epoch.js';
 import { createShellPathService } from '../runtime/shell-paths.js';
 import { createExecTool } from './exec/index.js';
+import { createExecValidatorRunner, type ExecToolOptions } from './exec/runtime.js';
 import type { CredentialEnvScrubConfig } from './exec/credential-env.js';
 import { detectSandboxAvailability, probeSandboxHost, type ExecSandboxRuntime } from './exec/sandbox.js';
 import { createSandboxRuntimeConfig } from './exec/sandbox-config-lists.js';
@@ -196,8 +197,8 @@ export { createAgentTool } from './agent/index.js';
 export { cancelAllAgentRuns, type CancellableAgentRuns } from './agent/index.js';
 export { createChannelTool } from './channel/index.js';
 export { registerChannelAgentTools } from './channel/agent-tools.js';
-export { controlTool, createControlTool, PACKAGED_COMMANDS } from './control/index.js';
-export type { ControlToolOptions } from './control/index.js';
+export { createControlTool } from './control/index.js';
+export type { ControlSurfaceEntry, ControlToolOptions } from './control/index.js';
 export { readCredentialHeader } from './credential-header-reading.js';
 export { createConfiguredFetchDeps, createFetchTool } from './fetch/index.js';
 export type { ConfiguredFetchDepsOptions } from './fetch/index.js';
@@ -392,7 +393,7 @@ export function registerAllTools(
      * wire, or a tool argument. See exec/containment.ts.
      */
     execContainment?: ExecContainmentRequirement | undefined;
-    /** The commands and panels this product really has, for the `control` tool; omitted lists the engine's full set. */
+    /** The product's own commands and panels, for the `control` tool; omitted means this composition has no command surface. */
     controlSurfaces?: ControlToolOptions | undefined;
     /** The host's real hook dispatcher; supplying it offers `state mode=hooks`. */
     hookDispatcher?: import('../hooks/index.js').HookDispatcher | undefined;
@@ -541,8 +542,30 @@ export function registerAllTools(
           ...(deps.onSandboxedRun ? { onSandboxedRun: deps.onSandboxedRun } : {}),
         }
       : null;
+  // PTY prompt-answer path: only probe the host (a `command -v script` spawn)
+  // when the composition root wired a prompt-answer handler, so the default
+  // path stays zero-cost and byte-for-byte unchanged.
+  const execInteraction: ExecInteractionRuntime | null = deps.execPromptAnswerHandler
+    ? {
+        availability: detectPtyAvailability(probePtyHost()),
+        requestPromptAnswer: deps.execPromptAnswerHandler,
+      }
+    : null;
+  const execOptions: ExecToolOptions = {
+    ...(deps.capturedExec ? { capturedInput: deps.capturedExec } : {}),
+    featureFlags: deps.featureFlags,
+    overflowHandler: deps.overflowHandler,
+    defaultWorkingDirectory: workingDirectory,
+    ...(deps.credentialEnvScrub ? { credentialEnvScrub: deps.credentialEnvScrub } : {}),
+    ...(execSandbox ? { sandbox: execSandbox } : {}),
+    ...(execInteraction ? { interaction: execInteraction } : {}),
+    ...(deps.execContainment ? { containment: deps.execContainment } : {}),
+  };
   const capturedAutoHeal = deps.capturedExec ? createCapturedAutoHealBackend(deps.capturedExec) : undefined;
-  const validatorRunner = deps.capturedExec ? createCapturedValidatorRunner(deps.capturedExec, { sandbox: execSandbox, credentialEnvScrub: deps.credentialEnvScrub }) : undefined;
+  // Validators run only through exec's own path (sandbox plan, containment, credential scrub), never a separate spawn.
+  const validatorRunner = deps.capturedExec
+    ? createCapturedValidatorRunner(deps.capturedExec, { sandbox: execSandbox, credentialEnvScrub: deps.credentialEnvScrub })
+    : createExecValidatorRunner(processManager, execOptions);
   registerTool(
     createWriteTool({
       projectRoot: workingDirectory,
@@ -582,28 +605,10 @@ export function registerAllTools(
   );
   registerTool(createContextAccountingTool(deps.contextAccountingHolder ?? new ContextAccountingHolder()));
   if (deps.contractRunner) registerTool(createContractSelfCheckTool(deps.contractRunner));
-  // PTY prompt-answer path: only probe the host (a `command -v script` spawn)
-  // when the composition root wired a prompt-answer handler, so the default
-  // path stays zero-cost and byte-for-byte unchanged.
-  const execInteraction: ExecInteractionRuntime | null = deps.execPromptAnswerHandler
-    ? {
-        availability: detectPtyAvailability(probePtyHost()),
-        requestPromptAnswer: deps.execPromptAnswerHandler,
-      }
-    : null;
   // A command or file operation can change any project file, so each exec
   // call ends by marking cached project-file facts (the import graph) stale.
   registerTool(
-    withProjectFilesEpoch(createExecTool(processManager, {
-      ...(deps.capturedExec ? { capturedInput: deps.capturedExec } : {}),
-      featureFlags: deps.featureFlags,
-      overflowHandler: deps.overflowHandler,
-      defaultWorkingDirectory: workingDirectory,
-      ...(deps.credentialEnvScrub ? { credentialEnvScrub: deps.credentialEnvScrub } : {}),
-      ...(execSandbox ? { sandbox: execSandbox } : {}),
-      ...(execInteraction ? { interaction: execInteraction } : {}),
-      ...(deps.execContainment ? { containment: deps.execContainment } : {}),
-    })),
+    withProjectFilesEpoch(createExecTool(processManager, execOptions)),
   );
   registerTool(createAnalyzeTool(deps.toolLLM, deps.featureFlags, workingDirectory));
   registerTool(new InspectTool(deps.featureFlags, workingDirectory, allowOutsideProject));
@@ -723,8 +728,8 @@ export function registerAllTools(
           workingDirectory,
         }),
   );
-  // A caller that supplies no lists has no commands or panels to name; the full engine list would describe ones it lacks.
-  registerTool(createControlTool(deps.controlSurfaces ?? { commands: [], panels: [] }));
+  // A composition that supplies no lists (hosted, daemon) has no command surface; the tool says so instead of an empty list.
+  registerTool(createControlTool(deps.controlSurfaces ?? {}));
   registerTool(createChannelTool(channelRegistry));
   return { fileCache, projectIndex, dispose };
 }

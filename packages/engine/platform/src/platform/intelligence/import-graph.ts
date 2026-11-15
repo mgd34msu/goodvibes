@@ -14,9 +14,10 @@ import type { ReadAccessFilter } from '../tools/shared/read-access.js';
  */
 
 import { existsSync, readdirSync, readFileSync, statSync, type Dirent } from 'node:fs';
-import { dirname, extname, join, relative, resolve } from 'node:path';
+import { dirname, extname, join, relative, resolve, sep } from 'node:path';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
+import { currentProjectFilesEpoch, noteProjectFilesChanged } from './project-files-epoch.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -33,7 +34,12 @@ interface ImportGraphDiagnostics {
 }
 
 const SUPPORTED_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs']);
-const SKIP_DIRS = new Set(['.git', 'node_modules', 'dist', '.next', '.nuxt', '.cache', '__pycache__']);
+const SKIP_DIRS = new Set(['.git', '.goodvibes', 'node_modules', 'dist', 'build', 'out', 'coverage', '.next', '.nuxt', '.cache', '__pycache__']);
+
+/** Whether `filePath` is a file the import graph holds (a TS/JS source file). */
+export function isImportGraphSource(filePath: string): boolean {
+  return SUPPORTED_EXTENSIONS.has(extname(filePath));
+}
 const MAX_WARNINGS = 20;
 
 function addImportGraphWarning(diagnostics: ImportGraphDiagnostics, warning: string): void {
@@ -343,6 +349,36 @@ export class ImportGraph {
   }
 
   /**
+   * Patch the graph for one file this process just wrote: its old forward
+   * edges go, the imports in `content` are resolved against the files the
+   * graph already knows (no file system access) and added. A non-source path
+   * is ignored. Files that import a newly created file are found by the next
+   * full build.
+   */
+  updateFile(filePath: string, content: string | null): void {
+    if (!isImportGraphSource(filePath)) return;
+    for (const target of this.imports.get(filePath) ?? []) this.dependents.get(target)?.delete(filePath);
+    if (content === null) {
+      this.imports.delete(filePath);
+      return;
+    }
+    const forward = new Set<string>();
+    this.imports.set(filePath, forward);
+    if (!this.dependents.has(filePath)) this.dependents.set(filePath, new Set());
+    for (const spec of extractRelativeSpecifiers(content)) {
+      const resolved = resolveSpecifierFromKnownFiles(filePath, spec, (candidate) => this.imports.has(candidate));
+      if (!resolved) continue;
+      forward.add(resolved);
+      let reverse = this.dependents.get(resolved);
+      if (!reverse) {
+        reverse = new Set();
+        this.dependents.set(resolved, reverse);
+      }
+      reverse.add(filePath);
+    }
+  }
+
+  /**
    * Return all files that directly import `filePath`.
    * Returns an empty array if the graph hasn't been built or the file isn't known.
    */
@@ -409,3 +445,98 @@ export class ImportGraph {
     return result;
   }
 }
+
+// ---------------------------------------------------------------------------
+// One graph per project root, shared by edit, find and repo-map
+// ---------------------------------------------------------------------------
+
+/** How long a graph serves relationship queries before files changed outside this process are picked up. */
+const SHARED_GRAPH_MAX_AGE_MS = 30_000;
+/** Roots kept at once; the oldest is dropped first. */
+const SHARED_GRAPH_ROOTS_MAX = 8;
+
+interface SharedGraph {
+  readonly graph: ImportGraph;
+  /** The project-files epoch the graph reflects (built at it, or patched up to it). */
+  epoch: number;
+  readonly builtAt: number;
+}
+
+const sharedGraphs = new Map<string, SharedGraph>();
+const sharedBuilds = new Map<string, { readonly build: Promise<ImportGraph>; readonly epoch: number }>();
+
+function startSharedBuild(projectRoot: string): Promise<ImportGraph> {
+  const epoch = currentProjectFilesEpoch();
+  const inFlight = sharedBuilds.get(projectRoot);
+  if (inFlight && inFlight.epoch === epoch) return inFlight.build;
+  const graph = new ImportGraph();
+  const build = graph.build(projectRoot).then(() => {
+    const held = sharedGraphs.get(projectRoot);
+    // A graph patched past this build's epoch while it ran is newer; keep it.
+    if (!held || held.epoch <= epoch) {
+      sharedGraphs.delete(projectRoot);
+      if (sharedGraphs.size >= SHARED_GRAPH_ROOTS_MAX) {
+        const oldest = sharedGraphs.keys().next().value;
+        if (oldest !== undefined) sharedGraphs.delete(oldest);
+      }
+      sharedGraphs.set(projectRoot, { graph, epoch, builtAt: Date.now() });
+    }
+    return graph;
+  }).finally(() => {
+    if (sharedBuilds.get(projectRoot)?.build === build) sharedBuilds.delete(projectRoot);
+  });
+  sharedBuilds.set(projectRoot, { build, epoch });
+  return build;
+}
+
+/**
+ * The import graph of `projectRoot`, current with every write this process
+ * made and at most {@link SHARED_GRAPH_MAX_AGE_MS} old. Built once for
+ * concurrent callers; after a command or move that may have changed files
+ * (the project-files epoch moved without a patch) it is built again.
+ */
+export function projectImportGraph(projectRoot: string): Promise<ImportGraph> {
+  const held = sharedGraphs.get(projectRoot);
+  if (held && held.epoch === currentProjectFilesEpoch() && Date.now() - held.builtAt <= SHARED_GRAPH_MAX_AGE_MS) {
+    return Promise.resolve(held.graph);
+  }
+  return startSharedBuild(projectRoot);
+}
+
+/**
+ * The newest graph of `projectRoot` without waiting for a rebuild: a graph a
+ * command may have made stale is returned as it is (it is patched for this
+ * process's own writes) and a rebuild starts behind it. Only when the root
+ * has no graph yet does the caller wait for the first build.
+ */
+export function latestProjectImportGraph(projectRoot: string): Promise<ImportGraph> {
+  const held = sharedGraphs.get(projectRoot);
+  if (!held) return startSharedBuild(projectRoot);
+  if (held.epoch !== currentProjectFilesEpoch() || Date.now() - held.builtAt > SHARED_GRAPH_MAX_AGE_MS) {
+    startSharedBuild(projectRoot).catch((error: unknown) => {
+      logger.warn('[import-graph] Background rebuild failed', { projectRoot, error: summarizeError(error) });
+    });
+  }
+  return Promise.resolve(held.graph);
+}
+
+/**
+ * Announce files this process just wrote, with the content written (null for
+ * a removed file). Bumps the project-files epoch as
+ * {@link noteProjectFilesChanged} does, and patches every held graph whose
+ * root contains a written file, so the graph stays current without a rescan.
+ * A graph that was already stale is patched but stays stale.
+ */
+export function noteSourceFilesWritten(written: ReadonlyMap<string, string | null>): void {
+  const before = currentProjectFilesEpoch();
+  noteProjectFilesChanged();
+  const after = currentProjectFilesEpoch();
+  for (const [root, held] of sharedGraphs) {
+    const prefix = root.endsWith(sep) ? root : `${root}${sep}`;
+    for (const [path, content] of written) {
+      if (path.startsWith(prefix)) held.graph.updateFile(path, content);
+    }
+    if (held.epoch === before) held.epoch = after;
+  }
+}
+

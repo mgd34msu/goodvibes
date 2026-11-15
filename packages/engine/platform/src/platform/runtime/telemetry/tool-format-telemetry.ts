@@ -12,7 +12,7 @@
 // GET /api/runtime/metrics, or directly by platform consumers importing
 // `snapshotMetrics`/`RuntimeMetricsSnapshot` from
 // `@goodvibes-jev/engine/platform/platform/runtime/observability`.
-import { classifyEditFailure, classifyEditFallbackWarning } from '../../tools/edit/match.js';
+import { classifyEditFallbackWarning } from '../../tools/edit/match.js';
 
 /** The failure classes tracked, keyed per model. */
 export type ToolFormatFailureClass =
@@ -33,6 +33,8 @@ export interface ToolFormatResultLike {
   readonly output?: string | undefined;
   readonly error?: string | undefined;
   readonly warnings?: readonly string[] | undefined;
+  /** A failed edit's status, as the edit tool's matcher decided it. */
+  readonly hostEvidence?: { readonly editStatus?: string | undefined; readonly reads?: unknown } | undefined;
 }
 
 /** A tool call, in the shape both tool-execution loops already hold. */
@@ -63,8 +65,9 @@ function readExpectationError(result: ToolFormatResultLike): string | null {
 }
 
 /**
- * Classify a single tool outcome into zero or more failure classes. Edit
- * failures map through the sanctioned `classifyEditFailure`; a successful edit
+ * Classify a single tool outcome into zero or more failure classes. An edit
+ * failure maps from the status the edit tool's matcher returned (carried on the
+ * result's host evidence, never read back out of its message); a successful edit
  * that used a lenient fallback is classified from its warning. Exec is recorded
  * ONLY for declared-expectation misses (an ordinary non-zero exit is not a
  * format regression), one class per violated expectation.
@@ -75,7 +78,7 @@ export function classifyToolFormatOutcome(
 ): ToolFormatFailureClass[] {
   if (toolName === 'edit') {
     if (!result.success) {
-      return [EDIT_STATUS_TO_CLASS[classifyEditFailure(result.error ?? '')] ?? 'edit_failed'];
+      return [EDIT_STATUS_TO_CLASS[result.hostEvidence?.editStatus ?? 'failed'] ?? 'edit_failed'];
     }
     const classes: ToolFormatFailureClass[] = [];
     for (const warning of result.warnings ?? []) {

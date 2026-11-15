@@ -7,7 +7,6 @@ import { walkDir, DirectoryWalk, WALK_SKIP_DIRS, type WalkDirOptions } from '../
 import { summarizeError } from '../../utils/error-display.js';
 import { logger } from '../../utils/logger.js';
 import { resolveAndValidatePath } from '../../utils/path-safety.js';
-import { currentProjectFilesEpoch } from '../../intelligence/project-files-epoch.js';
 import type { JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
 import { accessRestrictedNote, partitionByReadAccess, type ReadAccessFilter } from '../shared/read-access.js';
 
@@ -564,10 +563,8 @@ export async function withholdRestrictedFiles(
 }
 
 const SEARCH_CACHE_MAX = 50;
-const IMPORT_GRAPH_TTL = 30_000;
 /** Upper bound on the file text one service keeps for cached content searches. */
 const SEARCH_CACHE_MAX_CHARS = 64 * 1024 * 1024;
-const IMPORT_GRAPH_ROOTS_MAX = 8;
 
 function makeSearchCacheKey(key: CacheKey): string {
   return JSON.stringify([key.pattern, key.glob, key.path, key.flags]);
@@ -581,9 +578,6 @@ export interface ImportGraphLike {
 
 export class FindRuntimeService {
   private readonly searchCache = new Map<string, { value: CacheValue; accessedAt: number; chars: number }>();
-  /** One graph per root: a graph built for one directory says nothing about another. */
-  private readonly importGraphs = new Map<string, { graph: ImportGraphLike; builtAt: number; epoch: number }>();
-  private readonly importGraphBuilds = new Map<string, { build: Promise<ImportGraphLike>; epoch: number }>();
 
   searchCacheGet(key: CacheKey): CacheValue | null {
     const cacheKey = makeSearchCacheKey(key);
@@ -629,44 +623,19 @@ export class FindRuntimeService {
   }
 
   /**
-   * The import graph for `projectRoot`, built once for concurrent callers and reused for a short
-   * time. A write by the edit or write tool since the graph was built makes it stale at once.
+   * The import graph for `projectRoot`: the one graph per root that edit and
+   * repo-map read too (intelligence/import-graph.ts), patched for every edit
+   * this process makes and rebuilt after a command may have changed files.
    */
   async getImportGraph(projectRoot: string): Promise<ImportGraphLike> {
-    const epoch = currentProjectFilesEpoch();
-    const cached = this.importGraphs.get(projectRoot);
-    if (cached && cached.epoch === epoch && Date.now() - cached.builtAt <= IMPORT_GRAPH_TTL) return cached.graph;
-    const inFlight = this.importGraphBuilds.get(projectRoot);
-    if (inFlight && inFlight.epoch === epoch) return inFlight.build;
-    const build = this.buildImportGraph(projectRoot, epoch).finally(() => {
-      if (this.importGraphBuilds.get(projectRoot)?.build === build) this.importGraphBuilds.delete(projectRoot);
-    });
-    this.importGraphBuilds.set(projectRoot, { build, epoch });
-    return build;
-  }
-
-  private async buildImportGraph(projectRoot: string, epoch: number): Promise<ImportGraphLike> {
-    const { ImportGraph } = await import('../../intelligence/import-graph.js');
-    const graph = new ImportGraph() as ImportGraphLike & {
-      build(projectRoot: string): Promise<void>;
-    };
+    const { projectImportGraph } = await import('../../intelligence/import-graph.js');
     try {
-      await graph.build(projectRoot);
+      return await projectImportGraph(projectRoot);
     } catch (err) {
       const warning = `Import graph build failed; relationship results may be incomplete: ${summarizeError(err)}`;
       logger.warn('[find] Import graph build failed', { projectRoot, error: summarizeError(err) });
-      // A degraded graph answers this call only; the next call builds again.
-      return {
-        findImports: (file: string) => graph.findImports(file),
-        findDependents: (file: string) => graph.findDependents(file),
-        getWarnings: () => [warning, ...(graph.getWarnings?.() ?? [])],
-      } satisfies ImportGraphLike;
+      // Nothing is held for a failed build; the next call builds again.
+      return { findImports: () => [], findDependents: () => [], getWarnings: () => [warning] };
     }
-    if (this.importGraphs.size >= IMPORT_GRAPH_ROOTS_MAX && !this.importGraphs.has(projectRoot)) {
-      const oldest = this.importGraphs.keys().next().value;
-      if (oldest !== undefined) this.importGraphs.delete(oldest);
-    }
-    this.importGraphs.set(projectRoot, { graph, builtAt: Date.now(), epoch });
-    return graph;
   }
 }

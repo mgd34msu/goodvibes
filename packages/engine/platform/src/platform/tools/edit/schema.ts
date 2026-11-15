@@ -128,8 +128,8 @@ export const editSchema = {
           enum: ['atomic', 'partial', 'none'],
           description:
             'atomic: all edits succeed or all fail (default). ' +
-            'partial: apply succeeding edits, skip failures. ' +
-            'none: apply each edit independently with no rollback.',
+            'partial: apply succeeding edits, report failures, roll nothing back. ' +
+            'none: older name for partial.',
           default: 'atomic',
         },
       },
@@ -145,8 +145,8 @@ export const editSchema = {
             'count_only: only total edits applied. ' +
             'minimal: per-edit success/failure summary (default). ' +
             'with_diff: include unified diff per edit. ' +
-            'verbose: full detail including pre/post content. ' +
-            'Results include status field: applied | not_found | ambiguous | conflict | failed. ' +
+            'verbose: untruncated diffs plus each changed file\'s content before and after (20,000 characters each, longer content says how much was left out). ' +
+            'Results include status field: applied | not_found | ambiguous | conflict | failed, decided by the matcher that refused the edit. ' +
             'Failed results include hint field with actionable suggestions (count_only lists failed edits by path and status).',
           default: 'minimal',
         },
@@ -168,7 +168,7 @@ export const editSchema = {
     },
     validate: {
       type: 'object',
-      description: 'Run validators before and/or after applying edits.',
+      description: 'Run validators (fixed project commands) before and/or after applying edits. They run through the exec tool\'s path, under the same sandbox, containment and credential rules as an exec command; a session without one refuses validate.',
       properties: {
         before: {
           type: 'array',
@@ -206,7 +206,7 @@ export const editSchema = {
               op: {
                 type: 'string',
                 enum: ['replace', 'insert', 'delete'],
-                description: 'Cell operation: replace existing cell content, insert a new cell, or delete a cell',
+                description: 'Cell operation: replace existing cell content, insert a new cell, or delete a cell. Any other op is refused by name and nothing is written.',
               },
               cell: {
                 type: 'integer',

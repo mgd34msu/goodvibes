@@ -1,25 +1,18 @@
 /**
- * `engine.tools.exec-prompt`: the two readings behind the exec tool's PTY
- * prompt-answer path (tools/exec/interactive.ts). Each site asks only its own
- * question (`only`):
+ * `engine.tools.exec-prompt`: the reading behind the exec tool's PTY
+ * prompt-answer path (tools/exec/interactive.ts).
  *
- * - `will_prompt` (state: the command): before a command runs, will it stop
- *   to ask for input at the terminal? A yes runs it under a PTY so the prompt
- *   can be answered. It replaces the fixed base-command set (ssh, scp, sftp,
- *   sudo, su, passwd), which missed prompting commands (gh auth login, npm
- *   init, git over ssh) and caught non-prompting ones (ssh -o BatchMode=yes,
- *   sudo -n). Asked only when the caller did not set `interactive` and the
- *   host has a PTY. Low stakes: a wrong yes merges stderr into stdout for one
- *   run; a wrong no leaves a prompt to wait out the timeout, reported as the
- *   pipe path always did.
- * - `awaiting_input` (state: the command, its unterminated last output line
- *   and recent output): after output has gone quiet with the process alive,
- *   is that line a question waiting for an answer? A yes surfaces it through
- *   the approval broker. It replaces the three tail regexes (ends with : or ?,
- *   a short [..] bracket, a (yes/no) choice) and the 500-character cutoff.
- *   Medium stakes: a wrong yes puts a non-question in front of the owner (a
- *   decline stops the run); a wrong no leaves a real prompt unanswered until
- *   the timeout.
+ * `awaiting_input` (state: the command, its unterminated last output line and
+ * recent output): after output has gone quiet with the process alive, is that
+ * line a question waiting for an answer? A yes surfaces it through the
+ * approval broker. It replaces the three tail regexes (ends with : or ?, a
+ * short [..] bracket, a (yes/no) choice) and the 500-character cutoff. Medium
+ * stakes: a wrong yes puts a non-question in front of the owner (a decline
+ * stops the run); a wrong no leaves a real prompt unanswered until the timeout.
+ *
+ * Whether a command runs under a PTY at all is not read: the caller's
+ * `interactive` flag or the piped run's own terminal-required error decides
+ * it, so a command starts with no request.
  */
 import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes-jev/judgment';
 
@@ -41,31 +34,16 @@ const pending = (command: string, line: string, recent = '') => pendingPromptVie
 
 export const execPrompt = defineBattery({
   name: 'engine.tools.exec-prompt',
-  version: 1,
-  description: 'Whether a shell command will stop to ask for terminal input, and whether a quiet, unterminated output line is a question waiting for an answer.',
+  version: 2,
+  description: 'Whether a quiet, unterminated output line of a running shell command is a question waiting for an answer.',
   accuracyFloor: 0.85,
   items: {
-    will_prompt: yesNo(
-      '`command` is a shell command an AI agent is about to run with no one watching the terminal. As written, will it most likely stop and wait for someone to type at the terminal: a password or passphrase, a host-key or fingerprint confirmation, a yes/no confirmation, a login or setup questionnaire? Commands whose flags turn prompts off (batch mode, non-interactive, -y, --yes, -n for sudo) or that only print output do not.',
-      STAKES_BANDS.low.yesNo,
-    ),
     awaiting_input: yesNo(
       '`command` is running, its output has stopped, and it is still alive. `lastLine` is the last line it printed, with no newline after it; `recentOutput` is what it printed before. Is `lastLine` a question or prompt waiting for someone to type an answer (a password, a yes/no confirmation, a choice, a value to enter)? Progress bars, status or log lines, partial output of a slow step, and a program simply thinking are not waiting for input.',
       STAKES_BANDS.medium.yesNo,
     ),
   },
   fixtures: [
-    { name: 'ssh to a host', state: { command: 'ssh deploy@build-01.internal uptime' }, expect: { will_prompt: 'yes' } },
-    { name: 'sudo install', state: { command: 'sudo apt-get install ripgrep' }, expect: { will_prompt: 'yes' } },
-    { name: 'gh login', state: { command: 'gh auth login' }, expect: { will_prompt: 'yes' } },
-    { name: 'npm init', state: { command: 'npm init' }, expect: { will_prompt: 'yes' } },
-    { name: 'passwd', state: { command: 'passwd' }, expect: { will_prompt: 'yes' } },
-    { name: 'ssh in batch mode', state: { command: 'ssh -o BatchMode=yes deploy@build-01.internal uptime' }, expect: { will_prompt: 'no' } },
-    { name: 'sudo non-interactive', state: { command: 'sudo -n systemctl status nginx' }, expect: { will_prompt: 'no' } },
-    { name: 'npm init with yes', state: { command: 'npm init -y' }, expect: { will_prompt: 'no' } },
-    { name: 'git status', state: { command: 'git status --short' }, expect: { will_prompt: 'no' } },
-    { name: 'run tests', state: { command: 'bun test test/cart.test.ts' }, expect: { will_prompt: 'no' } },
-    { name: 'list files', state: { command: 'ls -la src' }, expect: { will_prompt: 'no' } },
     { name: 'sudo password', state: pending('sudo apt-get install ripgrep', '[sudo] password for dev:'), expect: { awaiting_input: 'yes' } },
     {
       name: 'ssh host key',

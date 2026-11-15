@@ -3,7 +3,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { isNotebookFile } from '../../utils/notebook.js';
 import { unifiedDiff, FileStateCache } from '../../state/file-cache.js';
-import { FileUndoManager } from '../../state/file-undo.js';
+import { announceWrites, recordPublishedEdit, verboseContent, type EditPublishEnv } from './publish.js';
 import { logger } from '../../utils/logger.js';
 import { resolveWritablePath } from '../../utils/path-safety.js';
 import type { EditInput, JupyterNotebook, NotebookCell, NotebookOperation, NotebookOperationsInput, EditResult } from './types.js';
@@ -214,6 +214,9 @@ export function applyNotebookOperations(
       notebook.cells.splice(idx, 1);
       summaryLines.push(`  OK: delete cell[${idx}]`);
       applied++;
+    } else {
+      const named = (op as { op?: unknown }).op;
+      return { success: false, applied, summary: summaryLines.join('\n'), error: `unknown op ${JSON.stringify(named)}: use replace, insert or delete. Nothing was changed.` };
     }
   }
 
@@ -236,12 +239,14 @@ export function formatNotebookOutput(
     return `Notebook operations applied: ${opsResult.applied}, failed: 0${dryRun ? ' (dry run)' : ''}\n${opsResult.summary}`;
   }
   const diff = unifiedDiff(rawContent, newContent, resolvedPath, diffContext);
-  return `Notebook operations applied: ${opsResult.applied}, failed: 0${dryRun ? ' (dry run)' : ''}\n${opsResult.summary}\n${diff}`;
+  const head = `Notebook operations applied: ${opsResult.applied}, failed: 0${dryRun ? ' (dry run)' : ''}\n${opsResult.summary}\n${diff}`;
+  if (outputFormat !== 'verbose') return head;
+  return `${head}\n=== ${resolvedPath} before ===\n${verboseContent(rawContent)}\n=== ${resolvedPath} after${dryRun ? ' (dry run, not written)' : ''} ===\n${verboseContent(newContent)}`;
 }
 
 export async function executeNotebookEdit(
   input: EditInput,
-  env: { fileCache: FileStateCache; cwd: string; fileUndoManager?: FileUndoManager | undefined; undoCall?: number | undefined; authenticated?: boolean; assertCurrent?: () => void },
+  env: EditPublishEnv & { fileCache: FileStateCache; cwd: string; authenticated?: boolean; assertCurrent?: () => void },
 ): Promise<{ success: boolean; output?: string; error?: string }> {
   const nbOps = input.notebook_operations!;
   const outputFormat = input.output?.format ?? 'minimal';
@@ -295,20 +300,10 @@ export async function executeNotebookEdit(
     return Promise.resolve({ success: false, error: `Write failed for '${resolvedPath}': ${summarizeError(err)}` });
   }
 
+  // The same publish step as a text edit: files epoch and import graph, undo, changed-files list.
   env.fileCache.update(resolvedPath, newContent);
-  if (env.fileUndoManager) {
-    try {
-      env.fileUndoManager.snapshot({
-        path: resolvedPath,
-        beforeContent: rawContent,
-        afterContent: newContent,
-        tool: 'edit',
-        call: env.undoCall,
-      });
-    } catch {
-      // Undo snapshot failure should not fail the edit.
-    }
-  }
+  announceWrites([resolvedPath], new Map([[resolvedPath, newContent]]));
+  recordPublishedEdit(env, resolvedPath, rawContent, newContent);
 
   return Promise.resolve({
     success: true,

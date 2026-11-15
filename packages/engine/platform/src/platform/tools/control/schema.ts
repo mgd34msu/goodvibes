@@ -2,7 +2,7 @@ import type { ToolDefinition } from '../../types/tools.js';
 
 export const CONTROL_TOOL_SCHEMA: ToolDefinition = {
   name: 'control',
-  description: 'Inspect packaged product-control surfaces such as commands, panels, subscriptions, and sandbox presets.',
+  description: 'List this product\'s own slash commands (name and one-line description) and panels, the built-in subscription providers, and the sandbox presets. A session without a command surface answers available: false.',
   parameters: {
     type: 'object',
     properties: {

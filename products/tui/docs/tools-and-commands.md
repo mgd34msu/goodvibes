@@ -95,10 +95,13 @@ Write files with atomic operations, backup modes, and auto-heal.
 
 Structural code editing with AST matching, scope hints, and transactional rollback.
 
-- Match modes: `exact`, `fuzzy` (whitespace-insensitive), `regex` (with capture groups), `ast` (tree-sitter structural), `ast_pattern` (ast-grep with metavariables like `$VAR` and `$$$ARGS`)
+- Match modes: `exact`, `fuzzy` (whitespace-insensitive; when nothing matches, the one closest run of lines is applied after a single decision-model check), `regex` (with capture groups), `ast` (tree-sitter structural), `ast_pattern` (ast-grep with metavariables like `$VAR` and `$$$ARGS`). In `exact` mode, text that is not in the file fails at once with the closest lines to copy
 - Scope hints: `in_function`, `in_class`, `near_line`, to disambiguate matches without adding more context
 - Occurrence selection: `first`, `last`, `all`, or a specific Nth occurrence, with an ambiguity guard by default
-- Atomic transactions: all edits succeed or all roll back; also supports `partial` and `none` modes
+- Atomic transactions: all edits succeed or all roll back; `partial` applies what succeeds and reports the rest (`none` is an older name for `partial`)
+- Every result has a `status` (`applied`, `not_found`, `ambiguous`, `conflict`, `failed`) set by the matcher that refused the edit; `output.format: "verbose"` adds untruncated diffs and each changed file's content before and after
+- After an edit of a source file, the result names the files that import it (nearest first), read from one import graph per project shared with `find` and `repo_map` and updated for each edit instead of rescanned
+- Notebook (`.ipynb`) cell operations `replace`, `insert`, `delete`; any other operation is refused by name. Notebook edits appear in the changed-files list and can be undone like text edits
 - Pre/post validation: run `typecheck`, `lint`, `test`, or `build` before and after edits, with auto-rollback on failure
 - Auto-heal on validation failure (same pipeline as `write`)
 
@@ -226,7 +229,7 @@ Product-control tools that expose runtime breadth directly. See [MCP integration
 
 - `mcp`: inspect MCP servers, tools, schema freshness, security posture, auth posture, and quarantine controls
 - `remote`: inspect and manage distributed peers, node-host contracts, work queues, artifacts, and review flows
-- `control`: inspect packaged command families, view and control-room families, built-in subscription providers, and sandbox presets
+- `control`: list this app's own slash commands (every visible one, with its description) and views, built-in subscription providers, and sandbox presets; a session with no command surface answers `available: false`
 
 ### channel
 

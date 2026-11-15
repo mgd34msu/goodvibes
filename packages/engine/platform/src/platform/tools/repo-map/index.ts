@@ -9,7 +9,7 @@ import { readFile } from 'node:fs/promises';
 import { dirname, isAbsolute, sep, relative, resolve } from 'node:path';
 import type { Tool, ToolDefinition, ToolResult } from '../../types/tools.js';
 import { ImportGraph } from '../../intelligence/index.js';
-import { discoverProjectSourceFiles } from '../../intelligence/import-graph.js';
+import { discoverProjectSourceFiles, projectImportGraph } from '../../intelligence/import-graph.js';
 import { estimateTokens } from '../../core/compaction-types.js';
 import { summarizeError } from '../../utils/error-display.js';
 import { accessRestrictedNote, partitionByReadAccess, type ReadAccessFilter } from '../shared/read-access.js';
@@ -195,8 +195,15 @@ export function createRepoMapTool(options: {
         assertCapturedInputPathContext(root);
         return { success: true, output: formatRepositoryStructure(root, discovered.files, discovered.warnings) };
       }
-      const graph = new ImportGraph();
-      await graph.build(root, options.capturedReadAccess);
+      // A captured view builds its own graph through its read access; every other caller reads the one
+      // graph per root that edit and find share.
+      let graph: ImportGraph;
+      if (options.capturedReadAccess) {
+        graph = new ImportGraph();
+        await graph.build(root, options.capturedReadAccess);
+      } else {
+        graph = await projectImportGraph(root);
+      }
       assertModeCurrent();
       const relGraph = graph.toRelativeGraph(root);
       const stats = graph.stats();

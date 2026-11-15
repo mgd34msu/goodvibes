@@ -127,9 +127,9 @@ export const EXEC_TOOL_SCHEMA = {
             type: 'boolean',
             description:
               'Run under a PTY so terminal prompts (host-key confirmations, credential asks) can be'
-              + ' detected and answered instead of hanging. Auto-engages for prompt-prone commands'
-              + ' (ssh/scp/sftp/sudo/su/passwd) when a PTY backend is available; set false to force the'
-              + ' plain pipe path. PTY output merges stderr into stdout (result notes pty: true).',
+              + ' detected and answered instead of hanging. Without it a command runs with piped output; if that'
+              + ' run fails because the command needed a terminal, it is run once more under a PTY (when the host has one)'
+              + ' and the result says so. Set false to keep the plain pipe path. PTY output merges stderr into stdout (result notes pty: true).',
           },
         },
         // cmd or cmd_base64 required, validated at runtime
@@ -161,6 +161,14 @@ export const EXEC_TOOL_SCHEMA = {
         + ' standard: full stdout/stderr + exit code (default);'
         + ' verbose: everything + timing, env, cwd.',
     },
+    output_keep: {
+      type: 'string',
+      enum: ['head_tail', 'ranked'],
+      description:
+        'What an output longer than the display limit shows (the full output is always saved and its path given).'
+        + ' head_tail (default): the start, the end and the lines that report an error.'
+        + ' ranked: the parts the decision model ranks most relevant to the command, one extra request per long output.',
+    },
     stop_on_error: {
       type: 'boolean',
       description:
@@ -191,7 +199,7 @@ export const EXEC_TOOL_SCHEMA = {
           },
           recursive: {
             type: 'boolean',
-            description: 'Copy/delete directories recursively.',
+            description: 'Copy/delete directories recursively. Deleting a path that does not exist fails and names the path.',
           },
           overwrite: {
             type: 'boolean',
@@ -210,9 +218,10 @@ export const EXEC_TOOL_SCHEMA = {
           update_imports: {
             type: 'boolean',
             description:
-              'After a move, rewrite the relative imports of the moved TypeScript/JavaScript file (imports written with or without'
-              + ' an extension, or as a directory index) in every file that imports it, and rewrite the moved file\'s own relative imports'
-              + ' for its new directory. Non-relative imports (aliases, packages) are not touched. A warning says when nothing changed. Default: false.',
+              'After a move of a TypeScript/JavaScript file or of a directory, rewrite every relative import of a moved file (written with or without'
+              + ' an extension, or as a directory index) in the files that import it, and re-base each moved file\'s own relative imports'
+              + ' for its new directory. All moves of one call share one pass over the project. Non-relative imports (aliases, packages) are not touched.'
+              + ' A warning says when nothing changed. Default: false.',
             default: false,
           },
         },
@@ -278,7 +287,8 @@ export interface ExecCommandInput {
   /**
    * Run under a PTY with the prompt-answer path (see exec/interactive.ts).
    * true forces it (when the host has a PTY backend), false forces the plain
-   * pipe path, undefined auto-engages for prompt-prone base commands only.
+   * pipe path, undefined runs piped and reruns once under the PTY when the
+   * piped run failed for want of a terminal.
    */
   interactive?: boolean | undefined;
 }
@@ -289,6 +299,8 @@ export interface ExecInput {
   working_dir?: string | undefined;
   timeout_ms?: number | undefined;
   verbosity?: ExecVerbosity | undefined;
+  /** What an overflowing output shows: head and tail by arithmetic (default) or ranked by the decision model. */
+  output_keep?: 'head_tail' | 'ranked' | undefined;
   file_ops?: ExecFileOp[] | undefined;
   /**
    * Stop sequential execution on first failed command.

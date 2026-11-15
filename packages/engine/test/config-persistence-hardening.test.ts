@@ -23,7 +23,7 @@ import { persistCategoryPatch } from '../platform/src/platform/config/manager-ca
 import { reloadAndNotifyChanges, watchConfigFiles } from '../platform/src/platform/config/config-file-watcher.js';
 import { ensureSharedConfig } from '../platform/src/platform/config/manager-bootstrap.js';
 import { FeatureAnnouncementStore } from '../platform/src/platform/runtime/feature-announcements.js';
-import { UnknownSettingFormsQueue, ingestManagerSettings } from '../platform/src/platform/config/manager-ingestion.js';
+import { ingestManagerSettings } from '../platform/src/platform/config/manager-ingestion.js';
 
 const roots: string[] = [];
 function home(): string {
@@ -291,12 +291,4 @@ describe('settings ingestion notices', () => {
     expect(store.peekPending()).toHaveLength(1);
   });
 
-  test('unknown keys kept before a composition starts are bounded and deduplicated by file', () => {
-    const queue = new UnknownSettingFormsQueue();
-    const sink = { record() {}, receipt() {}, unknown() {} };
-    for (let i = 0; i < 1000; i++) queue.keep('/same/settings.json', [], sink);
-    for (let i = 0; i < UnknownSettingFormsQueue.MAX_PENDING * 3; i++) queue.keep(`/file-${i}/settings.json`, [], sink);
-    const pending = (queue as unknown as { pending: unknown[] }).pending;
-    expect(pending.length).toBe(UnknownSettingFormsQueue.MAX_PENDING);
-  });
 });

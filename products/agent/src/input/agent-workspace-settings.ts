@@ -1,4 +1,4 @@
-import { postalConfigKey, readConfigSettingForDisplay, observeImportFile, assertImportFileCurrent, isSecretBearingConfigKey, type SubscriptionImportEntry } from '@goodvibes-jev/engine/platform/platform/config';
+import { observeImportFile, assertImportFileCurrent, isSecretBearingConfigKey, type SubscriptionImportEntry } from '@goodvibes-jev/engine/platform/platform/config';
 import { captureStrictJudgmentJson, judgmentInputCardProblem, snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { containsIssuerCredential } from '@goodvibes-jev/engine/platform/platform/utils';
@@ -400,8 +400,7 @@ export function buildAgentWorkspaceSettingActionEffect(
     return { kind: 'apply', setting, value: action.settingValueHint };
   }
 
-  const currentDisplay = readConfigSettingForDisplay(() => readAgentSettingValue(configManager, setting));
-  const currentValue = currentDisplay.held && postalConfigKey(setting.key) ? configManager.getStored(setting.key as never) : currentDisplay.value;
+  const currentValue = readAgentSettingValue(configManager, setting);
   // The theme cycles through the selectable themes ('system', then the
   // bundled catalog), not the raw schema enum, which also carries the legacy
   // 'vaporwave' alias of goodvibes-neon.
@@ -441,8 +440,7 @@ export function buildAgentWorkspaceSettingActionDisplay(
 
   const setting = agentWorkspaceSettingSchema(context, settingKey);
   if (!setting) return null;
-  const currentDisplay = readConfigSettingForDisplay(() => readAgentSettingValue(configManager, setting));
-  const currentValue = currentDisplay.held ?? currentDisplay.value;
+  const currentValue = readAgentSettingValue(configManager, setting);
 
   return {
     setting: action.label || settingKey,
@@ -630,7 +628,7 @@ function buildTuiSettingsImportPlan(context: CommandContext | null): TuiSettings
     const known = agentWorkspaceSettingSchema(context, key);
     const current = known === null ? undefined
       : known.kind === 'host' ? readAgentSettingValue(configManager, known)
-        : postalConfigKey(known.key) ? configManager.getStored(known.key) : configManager.get(known.key);
+        : configManager.getStored(known.key);
     return {
       key,
       source: entry.source,
@@ -647,7 +645,7 @@ function buildTuiSettingsImportPlan(context: CommandContext | null): TuiSettings
       settings.push(skippedEntry(key, entry, 'Not an Agent-owned setting, so it is not imported.'));
       continue;
     }
-    const current = postalConfigKey(setting.key) ? configManager.getStored(setting.key) : configManager.get(setting.key);
+    const current = configManager.getStored(setting.key);
     const status: TuiImportStatus = valuesMatch(current, entry.value) ? 'unchanged' : 'would_import';
     settings.push({
       key: setting.key,
@@ -904,7 +902,7 @@ export async function importAgentWorkspaceTuiSettings(context: CommandContext | 
     }
     const setting = agentWorkspaceSettingSchema(context, entry.key);
     if (!setting || setting.kind === 'host') continue;
-    if (entry.status === 'unchanged' || valuesMatch(postalConfigKey(setting.key) ? configManager.getStored(setting.key) : configManager.get(setting.key), entry.value)) {
+    if (entry.status === 'unchanged' || valuesMatch(configManager.getStored(setting.key), entry.value)) {
       unchanged.push(setting.key);
       continue;
     }

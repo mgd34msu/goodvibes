@@ -1,4 +1,4 @@
-import { beginOpenAICodexLogin, exchangeOpenAICodexCode, getSubscriptionProviderConfig } from '@goodvibes-jev/engine/platform/platform/config';
+import { getSubscriptionProviderConfig } from '@goodvibes-jev/engine/platform/platform/config';
 import type { OAuthProviderConfig, ProviderSubscription } from '@goodvibes-jev/engine/platform/platform/config';
 import { readAuthorizationInput } from '@goodvibes-jev/engine/terminal-shell/settings-subscriptions';
 import { openExternalUrl } from '@goodvibes-jev/engine/platform/platform/utils';
@@ -75,22 +75,7 @@ export async function submitAgentWorkspaceSubscriptionLoginStartEditor(
       throw new Error(`OAuth is not configured for ${provider}. Add an OAuth provider service or choose a built-in subscription provider.`);
     }
 
-    const started = provider === 'openai' && resolved.source === 'builtin'
-      ? await beginOpenAICodexLogin()
-      : null;
-    const authorizationUrl = started
-      ? started.authorizationUrl
-      : (await manager.beginOAuthLogin(provider, resolveManualLoginConfig(resolved.oauth))).authorizationUrl;
-
-    if (started) {
-      manager.savePending({
-        provider,
-        state: started.state,
-        verifier: started.verifier,
-        redirectUri: started.redirectUri,
-        createdAt: Date.now(),
-      });
-    }
+    const { authorizationUrl } = await manager.beginOAuthLogin(provider, resolveManualLoginConfig(resolved.oauth));
 
     const browserOpened = openBrowser ? await openExternalUrl(authorizationUrl) : false;
     if (isFormStillOpen(host, editor)) host.localEditor = null;
@@ -140,33 +125,7 @@ export async function submitAgentWorkspaceSubscriptionLoginFinishEditor(
       throw new Error(`OAuth is not configured for ${provider}. Start with a configured or built-in subscription provider.`);
     }
 
-    const record = provider === 'openai' && resolved.source === 'builtin'
-      ? (() => {
-        const pending = manager.getPending(provider);
-        if (!pending) throw new Error(`No pending OAuth login for ${provider}. Start subscription login first.`);
-        return exchangeOpenAICodexCode(code, pending.verifier).then((token) => {
-          const now = Date.now();
-          return manager.saveSubscription({
-            provider,
-            accessToken: token.accessToken,
-            tokenType: token.tokenType,
-            ...(typeof token.refreshToken === 'string' && token.refreshToken.length > 0
-              ? { refreshToken: token.refreshToken }
-              : {}),
-            ...(typeof token.expiresAt === 'number' && Number.isFinite(token.expiresAt)
-              ? { expiresAt: token.expiresAt }
-              : {}),
-            ...(token.scopes ? { scopes: token.scopes } : {}),
-            authMode: 'oauth',
-            overrideAmbientApiKeys: false,
-            createdAt: manager.get(provider)?.createdAt ?? now,
-            updatedAt: now,
-          });
-        });
-      })()
-      : manager.completeOAuthLogin(provider, resolveManualLoginConfig(resolved.oauth), code);
-
-    saved = await record;
+    saved = await manager.completeOAuthLogin(provider, resolveManualLoginConfig(resolved.oauth), code);
     if (isFormStillOpen(host, editor)) host.localEditor = null;
     host.runtimeSnapshot = context ? buildAgentWorkspaceRuntimeSnapshot(context) : host.runtimeSnapshot;
     host.status = `Subscription session saved for ${provider}.`;

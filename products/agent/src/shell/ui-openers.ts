@@ -17,7 +17,6 @@ import type { ModelDefinition, ProviderRegistry } from '@goodvibes-jev/engine/pl
 import {
   describeServingEffort,
   effortPresentationForModel,
-  publishActiveEffortOptions,
   requestedEffortLevel,
   servingEffortForLevel,
   toEffortModel,
@@ -161,7 +160,6 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
     // Only this model's real levels, a fallback-sourced guess does not get an
     // automatic picker step, since the platform's OpenAI/Gemini adapters drop the
     // level entirely for a model nothing recognises.
-    publishActiveEffortOptions(model, runtime.sessionId);
     const presentation = effortPresentationForModel(model);
     if (!presentation.configurable) {
       return { opened: false, model: currentModel.displayName, levels: [], reason: 'unsupported' };

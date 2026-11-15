@@ -230,10 +230,9 @@ describe('the ingestion screen does not warn about a key the migration handles',
 
   test('the screen IS live in this section: without the migration the retired key would be read', () => {
     // The control, and the reason it is shaped this way. The screen keeps every
-    // key it does not know in a section it does, and a reading
-    // (config.setting-form) decides which one to announce as a newer form of a
-    // known setting. Without the migration, `finalStretchDays` would reach that
-    // reading like any other unknown key; the migration is here to STRIP A DEAD
+    // key it does not know in a section it does and announces each one.
+    // Without the migration, `finalStretchDays` would be announced like any
+    // other unknown key; the migration is here to STRIP A DEAD
     // KEY FROM HIS FILE before it gets that far, which the owner-path test below
     // pins after a real load.
     const result = ingestSettingsFile(

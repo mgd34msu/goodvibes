@@ -1,15 +1,12 @@
 /**
- * worktree-setup-config.ts, TUI-local synthetic settings entries for
+ * worktree-setup-config.ts, the settings-screen list editor for
  * worktree.setup.commands / worktree.setup.carryOverGlobs.
  *
- * Neither key is in the platform's ConfigKey union: the platform's cold-start worktree
- * setup (platform/runtime/worktree/setup.ts, resolveWorktreeSetupConfig)
- * reads them off a generic `get(key: string)` rather than the typed
- * CONFIG_SCHEMA, so without this file they are invisible to /config and the
- * settings modal even though they fully control what runs when a fresh
- * isolated worktree is provisioned (setup commands, then untracked-file
- * carry-over). Same rationale as the other synthetic settings in
- * settings-modal-data.ts (behavior.notifyAfterSeconds, storage.codeIndexEnabled, etc).
+ * Both are rows of the platform's settings schema (schema-domain-lists.ts).
+ * They control what runs when a fresh isolated worktree is provisioned (setup
+ * commands, then untracked-file carry-over), and this screen gives them a list
+ * editor rather than the JSON editor other object rows get. The keys are not
+ * yet arms of the platform's ConfigKey union, hence the two casts below.
  *
  * Both keys hold a JSON array of strings on disk. The settings modal's
  * inline editor is a single-line text field, so, matching the platform's own

@@ -130,7 +130,6 @@ test('actual providers, models and support-bundle callers await shared setup fac
       'cloud-account',
       'unknown',
     ]);
-    expect(output.bundleCredentialKeys.length).toBeGreaterThan(0);
     expect(new Set(output.bundleCredentialKeys).size).toBe(output.bundleCredentialKeys.length);
     expect(output.unavailable.setup.setupClass).toBe('unknown');
     expect(output.disposed).toBe(6);

@@ -2,8 +2,6 @@ import { readFileSync } from 'node:fs';
 import {
   atomicWriteFileSync,
   createOAuthLocalListener,
-  beginOpenAICodexLogin,
-  exchangeOpenAICodexCode,
   getSubscriptionProviderConfig,
   listAvailableSubscriptionProviders,
   type OAuthProviderConfig,
@@ -229,101 +227,6 @@ export function createSubscriptionRuntimeCommands<Context extends SubscriptionCo
             const flags = new Set(args.slice(3));
             const openBrowser = !flags.has('--no-browser');
             const useManualMode = policy.manualOnly || flags.has('--manual');
-            if (provider === 'openai' && resolved.source === 'builtin') {
-              const started = await beginOpenAICodexLogin();
-              manager.savePending({
-                provider,
-                state: started.state,
-                verifier: started.verifier,
-                redirectUri: started.redirectUri,
-                createdAt: Date.now(),
-              });
-              let listener: Awaited<ReturnType<typeof createOAuthLocalListener>> | null = null;
-              let listenerNote: string | undefined;
-              if (!useManualMode) {
-                listener = await createOAuthLocalListener({
-                  expectedState: started.state,
-                  host: '127.0.0.1',
-                  port: 1455,
-                  path: '/auth/callback',
-                }).catch((error: unknown) => {
-                  // Optional: without it the user finishes by pasting the code, but the reason is shown.
-                  listenerNote = `automatic completion unavailable (${summarizeError(error)})`;
-                  return null;
-                });
-              }
-              try {
-                const browserOpened = openBrowser ? await openExternalUrl(started.authorizationUrl) : false;
-                if (listener && browserOpened) {
-                  try {
-                    const callback = await listener.waitForCode();
-                    const token = await exchangeOpenAICodexCode(callback.code, started.verifier);
-                    const now = Date.now();
-                    const record = manager.saveSubscription({
-                      provider,
-                      accessToken: token.accessToken,
-                      refreshToken: token.refreshToken,
-                      tokenType: token.tokenType,
-                      expiresAt: token.expiresAt,
-                      ...(token.scopes ? { scopes: token.scopes } : {}),
-                      authMode: 'oauth',
-                      overrideAmbientApiKeys: false,
-                      createdAt: manager.get(provider)?.createdAt ?? now,
-                      updatedAt: now,
-                    });
-                    print(
-                      [
-                        `Subscription OAuth Start: ${provider}`,
-                        `  source: ${policy.formatSource(resolved.source)}`,
-                        `  state: ${started.state}`,
-                        `  redirectUri: ${started.redirectUri}`,
-                        `  browser: ${openBrowser ? (browserOpened ? 'opened' : 'open failed') : 'skipped'}`,
-                        '  authorizationUrl:',
-                        `  ${started.authorizationUrl}`,
-                        `Subscription OAuth Complete: ${provider}`,
-                        `  tokenType: ${record.tokenType}`,
-                        `  expiresAt: ${record.expiresAt ? new Date(record.expiresAt).toISOString() : 'n/a'}`,
-                        describePrecedence(record),
-                      ].join('\n'),
-                    );
-                    return;
-                  } catch (error) {
-                    listener.close();
-                    print(
-                      [
-                        `Subscription OAuth Start: ${provider}`,
-                        `  source: ${policy.formatSource(resolved.source)}`,
-                        `  state: ${started.state}`,
-                        `  redirectUri: ${started.redirectUri}`,
-                        `  browser: ${openBrowser ? (browserOpened ? 'opened' : 'open failed') : 'skipped'}`,
-                        `  next: /subscription login ${provider} finish <code-or-url>`,
-                        `  listener: ${summarizeError(error)}`,
-                        '  authorizationUrl:',
-                        `  ${started.authorizationUrl}`,
-                      ].join('\n'),
-                    );
-                    return;
-                  }
-                }
-                listener?.close();
-                print(
-                  [
-                    `Subscription OAuth Start: ${provider}`,
-                    `  source: ${policy.formatSource(resolved.source)}`,
-                    `  state: ${started.state}`,
-                    `  redirectUri: ${started.redirectUri}`,
-                    `  browser: ${openBrowser ? (browserOpened ? 'opened' : 'open failed') : 'skipped'}`,
-                    `  next: /subscription login ${provider} finish <code-or-url>`,
-                    ...(listenerNote ? [`  listener: ${listenerNote}`] : []),
-                    '  authorizationUrl:',
-                    `  ${started.authorizationUrl}`,
-                  ].join('\n'),
-                );
-                return;
-              } finally {
-                listener?.close();
-              }
-            }
             const useLocalCallback = Boolean(resolved.oauth.localCallback) && !useManualMode;
             let activeConfig = resolveLoginConfig(resolved.oauth, useLocalCallback);
             let listener: Awaited<ReturnType<typeof createOAuthLocalListener>> | null = null;
@@ -420,43 +323,6 @@ export function createSubscriptionRuntimeCommands<Context extends SubscriptionCo
               return;
             }
             const code = authorization.code;
-            if (provider === 'openai' && resolved.source === 'builtin') {
-              const pending = pendingLogin;
-              if (!pending) {
-                print(`No pending OAuth login for ${provider}. Start with /subscription login ${provider} start.`);
-                return;
-              }
-              let token;
-              try {
-                token = await exchangeOpenAICodexCode(code, pending.verifier);
-              } catch (error) {
-                if (!policy.catchErrors) throw error;
-                print(`Could not exchange authorization code for ${provider}: ${policy.error(error)}`);
-                return;
-              }
-              const now = Date.now();
-              const record = manager.saveSubscription({
-                provider,
-                accessToken: token.accessToken,
-                refreshToken: token.refreshToken,
-                tokenType: token.tokenType,
-                expiresAt: token.expiresAt,
-                ...(token.scopes ? { scopes: token.scopes } : {}),
-                authMode: 'oauth',
-                overrideAmbientApiKeys: false,
-                createdAt: manager.get(provider)?.createdAt ?? now,
-                updatedAt: now,
-              });
-              print(
-                [
-                  `Stored subscription session for ${provider}.`,
-                  `  tokenType: ${record.tokenType}`,
-                  `  expiresAt: ${record.expiresAt ? new Date(record.expiresAt).toISOString() : 'n/a'}`,
-                  describePrecedence(record),
-                ].join('\n'),
-              );
-              return;
-            }
             const activeConfig = resolveLoginConfig(resolved.oauth, false);
             let record;
             try {

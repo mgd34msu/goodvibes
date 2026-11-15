@@ -1,5 +1,5 @@
 import { createOAuthLocalListener, resolveDaemonEnabled } from '@goodvibes-jev/engine/platform/platform/config';
-import { beginOpenAICodexLogin, exchangeOpenAICodexCode } from '@goodvibes-jev/engine/platform/platform/config';
+import { getBuiltinSubscriptionProvider, type OAuthProviderConfig } from '@goodvibes-jev/engine/platform/platform/config';
 import { summarizeError, openExternalUrl } from '@goodvibes-jev/engine/platform/platform/utils';
 import { getProviderIdFromModel } from '@goodvibes-jev/engine/platform/platform/providers';
 import { collectOnboardingSnapshotForHandler } from './handler-interactions.ts';
@@ -391,25 +391,34 @@ export async function refreshOnboardingHydrationForHandler(handler: InputHandler
     }
   }
 
+/** The built-in OpenAI subscription provider's sign-in parameters; the one definition. */
+function openAiSubscriptionOAuth(): OAuthProviderConfig {
+  const provider = getBuiltinSubscriptionProvider('openai');
+  if (!provider) throw new Error('This build has no built-in OpenAI subscription provider.');
+  return provider.oauth;
+}
+
+function printSignInCompleted(handler: InputHandler, record: { readonly tokenType: string; readonly expiresAt?: number | undefined }): void {
+  handler.commandContext?.print?.([
+    'OpenAI subscription sign-in completed from onboarding.',
+    `  tokenType: ${record.tokenType}`,
+    `  expiresAt: ${record.expiresAt ? new Date(record.expiresAt).toISOString() : 'n/a'}`,
+  ].join('\n'));
+}
+
 export async function handleOpenAiSubscriptionStartForHandler(handler: InputHandler): Promise<void> {
     if (handler.onboardingApplyPending) return;
     handler.onboardingApplyPending = true;
     let listener: Awaited<ReturnType<typeof createOAuthLocalListener>> | null = null;
     try {
-      const started = await beginOpenAICodexLogin();
-      handler.uiServices.platform.subscriptionManager.savePending({
-        provider: 'openai',
-        state: started.state,
-        verifier: started.verifier,
-        redirectUri: started.redirectUri,
-        createdAt: Date.now(),
-      });
-      listener = await createOAuthLocalListener({
-        expectedState: started.state,
-        host: '127.0.0.1',
-        port: 1455,
-        path: '/auth/callback',
-      }).catch(() => null);
+      const oauth = openAiSubscriptionOAuth();
+      const callback = oauth.localCallback;
+      listener = callback
+        ? await createOAuthLocalListener({ expectedState: '', host: callback.host, port: callback.port, path: callback.path }).catch(() => null)
+        : null;
+      const manager = handler.uiServices.platform.subscriptionManager;
+      const started = await manager.beginOAuthLogin('openai', listener ? { ...oauth, redirectUri: listener.redirectUri } : oauth);
+      listener?.setExpectedState(started.pending.state);
       const browserOpened = await openExternalUrl(started.authorizationUrl);
       await handler.refreshOnboardingHydration({ preserveValues: true, targetStepId: 'provider-access' });
       handler.onboardingWizard.setFieldValue('providers.openai-authorization-url', started.authorizationUrl);
@@ -417,15 +426,15 @@ export async function handleOpenAiSubscriptionStartForHandler(handler: InputHand
       if (providerIndex >= 0) handler.onboardingWizard.setStep(providerIndex);
       handler.requestRender();
 
-      if (listener && browserOpened) {
+      if (listener && callback && browserOpened) {
         const serial = ++handler.onboardingOpenAiListenerSerial;
         handler.commandContext?.print?.([
           'OpenAI subscription sign-in started from onboarding.',
-          '  callback listener: waiting on 127.0.0.1:1455',
+          `  callback listener: waiting on ${callback.host}:${callback.port}`,
           '  authorizationUrl: shown in the wizard provider step',
           'You can also paste the callback code or URL into the OpenAI callback field.',
         ].join('\n'));
-        void handler.completeOpenAiSubscriptionFromListener(listener, started.verifier, serial);
+        void handler.completeOpenAiSubscriptionFromListener(listener, started.pending.verifier, serial);
         listener = null;
         handler.requestRender();
         return;
@@ -460,30 +469,12 @@ export async function completeOpenAiSubscriptionFromListenerForHandler(
   ): Promise<void> {
     try {
       const callback = await listener.waitForCode();
-      const pending = handler.uiServices.platform.subscriptionManager.getPending('openai');
+      const manager = handler.uiServices.platform.subscriptionManager;
+      const pending = manager.getPending('openai');
       if (!pending || pending.verifier !== verifier || serial !== handler.onboardingOpenAiListenerSerial) return;
-      const token = await exchangeOpenAICodexCode(callback.code, verifier);
-      const now = Date.now();
-      const existing = handler.uiServices.platform.subscriptionManager.get('openai');
-      handler.uiServices.platform.subscriptionManager.saveSubscription({
-        provider: 'openai',
-        accessToken: token.accessToken,
-        refreshToken: token.refreshToken,
-        tokenType: token.tokenType,
-        expiresAt: token.expiresAt,
-        ...(token.scopes ? { scopes: token.scopes } : {}),
-        authMode: 'oauth',
-        overrideAmbientApiKeys: false,
-        createdAt: existing?.createdAt ?? now,
-        updatedAt: now,
-      });
-      handler.uiServices.platform.subscriptionManager.clearPending('openai');
+      const record = await manager.completeOAuthLogin('openai', openAiSubscriptionOAuth(), callback.code);
       handler.onboardingOpenAiListenerSerial += 1;
-      handler.commandContext?.print?.([
-        'OpenAI subscription sign-in completed from onboarding.',
-        `  tokenType: ${token.tokenType}`,
-        `  expiresAt: ${token.expiresAt ? new Date(token.expiresAt).toISOString() : 'n/a'}`,
-      ].join('\n'));
+      printSignInCompleted(handler, record);
       await handler.refreshOnboardingHydration({ preserveValues: true, targetStepId: 'provider-access' });
     } catch (error) {
       handler.commandContext?.print?.([
@@ -508,34 +499,14 @@ export async function handleOpenAiSubscriptionFinishForHandler(handler: InputHan
 
     handler.onboardingApplyPending = true;
     try {
-      const pending = handler.uiServices.platform.subscriptionManager.getPending('openai');
-      if (!pending) {
+      const manager = handler.uiServices.platform.subscriptionManager;
+      if (!manager.getPending('openai')) {
         handler.commandContext?.print?.('No pending OpenAI subscription sign-in exists in onboarding.');
         handler.requestRender();
         return;
       }
-
-      const token = await exchangeOpenAICodexCode(code, pending.verifier);
-      const now = Date.now();
-      const existing = handler.uiServices.platform.subscriptionManager.get('openai');
-      handler.uiServices.platform.subscriptionManager.saveSubscription({
-        provider: 'openai',
-        accessToken: token.accessToken,
-        refreshToken: token.refreshToken,
-        tokenType: token.tokenType,
-        expiresAt: token.expiresAt,
-        ...(token.scopes ? { scopes: token.scopes } : {}),
-        authMode: 'oauth',
-        overrideAmbientApiKeys: false,
-        createdAt: existing?.createdAt ?? now,
-        updatedAt: now,
-      });
-      handler.uiServices.platform.subscriptionManager.clearPending('openai');
-      handler.commandContext?.print?.([
-        'OpenAI subscription sign-in completed from onboarding.',
-        `  tokenType: ${token.tokenType}`,
-        `  expiresAt: ${token.expiresAt ? new Date(token.expiresAt).toISOString() : 'n/a'}`,
-      ].join('\n'));
+      const record = await manager.completeOAuthLogin('openai', openAiSubscriptionOAuth(), code);
+      printSignInCompleted(handler, record);
       await handler.refreshOnboardingHydration({ preserveValues: true, targetStepId: 'provider-access' });
     } catch (error) {
       handler.commandContext?.print?.([

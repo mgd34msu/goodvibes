@@ -2,7 +2,6 @@ import { readExecutionMode, setExecutionMode } from '../permissions/execution-mo
 import { captureModelReadingInput } from '../tools/agent-harness-model-reading-source.ts';
 import { types as nodeTypes } from 'node:util';
 import type { Ranked } from '@goodvibes-jev/judgment';
-import { PostalAddressHeldError, postalConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
 import type { ConfigManager, ConfigSetting } from '@goodvibes-jev/engine/platform/platform/config';
 import { isAgentHostSettingKey } from '../config/host-settings.ts';
 import { getAgentSettingsSchema, type AgentConfigSetting, type AgentHostReader, type AgentSettingsCatalog } from '../config/settings-catalog.ts';
@@ -289,8 +288,7 @@ function resolveSettingValue(
     }
   }
   if (!view) {
-    try { return { value: configManager.get(setting.key), unavailable: false }; }
-    catch (error) { if (!(error instanceof PostalAddressHeldError)) throw error; return { value: undefined, unavailable: true, metadataUnavailable: error.message }; }
+    return { value: configManager.get(setting.key), unavailable: false };
   }
   const entry = view.describe(setting.key);
   if (entry.status === 'unavailable') {
@@ -781,7 +779,7 @@ export async function setHarnessSetting(
     await setExecutionMode(configManager, mode);
     return { key: setting.key, action: 'set', previous, current: readExecutionMode(configManager) };
   }
-  const previous = postalConfigKey(setting.key) ? configManager.getStored(setting.key) : configManager.get(setting.key);
+  const previous = configManager.getStored(setting.key);
   const coerced = coerceHarnessSettingValue(setting, value);
   if (setting.type === 'string' && isSecretConfigKey(setting.key)) {
     const secretValue = String(coerced);
@@ -863,7 +861,7 @@ export async function resetHarnessSetting(
     handle.reset();
     return { key: setting.key, action: 'reset', previous, current: handle.get() };
   }
-  const previous = postalConfigKey(setting.key) ? configManager.getStored(setting.key) : configManager.get(setting.key);
+  const previous = configManager.getStored(setting.key);
   if (isSecretConfigKey(setting.key)) {
     if (typeof previous === 'string' && isSecretReferenceValue(previous) && !secretsManager?.delete) {
       throw new Error(`Cannot reset ${setting.key}: secrets manager is unavailable to delete the stored secret.`);
@@ -898,7 +896,7 @@ export async function resetHarnessSetting(
     key: setting.key,
     action: 'reset',
     previous: redactHarnessSettingValue(setting.key, previous),
-    current: redactHarnessSettingValue(setting.key, postalConfigKey(setting.key) ? configManager.getStored(setting.key) : configManager.get(setting.key)),
+    current: redactHarnessSettingValue(setting.key, configManager.getStored(setting.key)),
   };
 }
 

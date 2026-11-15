@@ -39,9 +39,13 @@ test('private import capture exposes only exact value-safe facts and one validat
   await expect(applyRemoteSettingsImportPrecondition(handle)).rejects.toThrow();
   expect(fixture.counts()).toEqual({ captures: 1, applies: 1 });
 });
-test.each(['extra-field', 'raw-value', 'wrong-key', 'wrong-scope', 'missing-tail'] as const)('import facts reject %s before an apply wire', async corruption => {
+test('import facts from a newer daemon carry extra fields that are dropped, not refused', async () => {
+  const fixture = transport({ changeFacts: original => ({ ...original, unknown: 'private-synthetic' }) });
+  const handle = await captureRemoteSettingsImportPrecondition(endpoint, request, fixture);
+  expect(JSON.stringify(inspectRemoteSettingsImportPrecondition(handle))).not.toContain('private-synthetic');
+});
+test.each(['raw-value', 'wrong-key', 'wrong-scope', 'missing-tail'] as const)('import facts reject %s before an apply wire', async corruption => {
   const fixture = transport({ changeFacts: original => {
-    if (corruption === 'extra-field') return { ...original, unknown: 'private-synthetic' };
     if (corruption === 'raw-value') original.effects[1]!.value = 'private-synthetic-import-token';
     if (corruption === 'wrong-key') original.effects[0]!.key = 'controlPlane.host';
     if (corruption === 'wrong-scope') original.credential.items[0]!.scope = 'user';

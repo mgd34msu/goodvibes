@@ -152,6 +152,27 @@ function isSubscriptionExpired(expiresAt?: number, bufferMs = 60_000): boolean {
   return Date.now() + bufferMs >= expiresAt;
 }
 
+/** What a stored subscription is worth now, for every surface that shows one. */
+export type SubscriptionState = 'active' | 'expiring' | 'expired' | 'revoked';
+
+/** Within this long of `expiresAt`, a session that cannot refresh itself is shown as expiring. */
+export const SUBSCRIPTION_EXPIRING_SOON_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * The one statement of a subscription's state. `revoked`: the provider refused
+ * the grant, so the session is over whatever `expiresAt` says. A session with a
+ * refresh token renews itself on its next use, so its access token's expiry
+ * is not shown. Without one: `expired` once `expiresAt` has passed, `expiring`
+ * within {@link SUBSCRIPTION_EXPIRING_SOON_MS} of it. `revoked` and `expired`
+ * need a new sign-in.
+ */
+export function subscriptionState(record: Pick<ProviderSubscription, 'expiresAt' | 'refreshToken' | 'revokedAt'>, now = Date.now()): SubscriptionState {
+  if (record.revokedAt !== undefined) return 'revoked';
+  if (record.refreshToken || typeof record.expiresAt !== 'number' || !Number.isFinite(record.expiresAt)) return 'active';
+  if (record.expiresAt <= now) return 'expired';
+  return record.expiresAt - now <= SUBSCRIPTION_EXPIRING_SOON_MS ? 'expiring' : 'active';
+}
+
 /**
  * SubscriptionManager, OAuth flows for **provider subscriptions**.
  *

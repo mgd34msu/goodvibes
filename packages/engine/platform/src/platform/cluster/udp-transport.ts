@@ -153,7 +153,7 @@ export class UdpClusterTransport implements ClusterTransport {
         failures,
         action: this.peers.length > 0
           ? 'falling back to the configured cluster.peers list'
-          : 'set cluster.peers to a static list of hosts to coordinate without multicast',
+          : 'set cluster.peers to a static list of hosts to coordinate without multicast, for example: goodvibes-daemon config set cluster.peers \'["10.0.0.2"]\'',
       });
     } else {
       this.options.logger.debug('cluster: joined the coordination group', {

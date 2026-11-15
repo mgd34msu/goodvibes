@@ -482,8 +482,8 @@ export function applyContractSettingsMigrationPass(
 }
 
 /**
- * The retired QEMU sandbox settings are dropped, and `sandbox.vmBackend: "qemu"`
- * becomes `"local"`, with one receipt naming what changed.
+ * The retired QEMU sandbox settings, `sandbox.vmBackend` and
+ * `sandbox.replIsolation` are dropped, with one receipt naming what changed.
  *
  * Surface files only: the `sandbox.` keys were never daemon-owned or shared, so
  * the daemon tier and the shared tier never hold them.
@@ -498,14 +498,12 @@ export function applySandboxQemuMigrationPass(
   if (!result.migrated) return parsed;
   if (!ownership.ownsFile || ownership.beforeWrite?.() === false) return result.config;
   if (!persistMigratedFile(sourcePath, result.config, 'QEMU sandbox settings removal')) return result.config;
-  const changes: string[] = [];
-  if (result.removedKeys.length > 0) changes.push(`${result.removedKeys.join(', ')} removed`);
-  if (result.rewroteVmBackend) changes.push('sandbox.vmBackend changed from "qemu" to "local"');
   const receiptText =
-    `Settings removed: the QEMU sandbox backend is gone, so its settings are gone from ${sourcePath} `
-    + `(${changes.join('; ')}). The only sandbox backend is now local host execution, which does not `
-    + 'isolate what it runs, so REPL eval refuses instead of running code on the host. Your other sandbox '
-    + 'settings are unchanged.';
+    `Settings removed: the QEMU sandbox backend is gone, so its settings and the settings that chose a VM `
+    + `are gone from ${sourcePath} (${result.removedKeys.join(', ')} removed). `
+    + (result.removedQemuBackend ? 'You had chosen the QEMU backend; no VM backend replaces it. ' : '')
+    + 'Commands run as local host processes, and REPL evaluation runs only where a contained workspace is available. '
+    + 'Your other sandbox settings are unchanged.';
   logger.info(receiptText);
   try {
     receipt(`settings-migration-sandbox-qemu:${sourcePath}`, receiptText);

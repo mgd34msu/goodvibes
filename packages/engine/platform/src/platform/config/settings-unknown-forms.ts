@@ -1,65 +1,85 @@
 /**
- * settings-unknown-forms.ts: which unknown settings keys are a newer form of a
- * setting this build knows, read through the `config.setting-form` selector.
+ * settings-unknown-forms.ts: the notice for a settings key this build does not
+ * know, in a section it does.
  *
- * The synchronous screen (settings-ingestion.ts) collects every key this build
- * does not know in a section it does, exactly, and leaves it in the file. This
- * reads each one against the known settings of its section and returns a
- * skipped-key notice for those that are a newer, renamed or extended form of
- * one: "ignored in silence" is how a migrated setting became a daemon that
- * looked configured and behaved as if it were not. A key that is a form of
- * none stays unremarked, since an app-layer section may carry keys the engine
- * has never heard of.
+ * The synchronous screen (settings-ingestion.ts) collects every such key
+ * exactly and leaves it in the file. Each one is announced at load, in every
+ * mode: "ignored in silence" is how a migrated setting became a daemon that
+ * looked configured and behaved as if it were not. The notice names the
+ * nearest known setting of the section when one is close (a typo, a plural, a
+ * longer or shorter form of the same name), and otherwise lists the section's
+ * known names. Both are decided here by comparing names; no model is asked.
  */
-import type { Candidate } from '@goodvibes-jev/judgment';
-import { judgmentPort } from '@goodvibes-jev/engine/errors';
-import { settingForm } from './batteries/setting-form.js';
-import { configKeyDescription } from './credential-key-reading.js';
 import { knownSettingNamesBySection, type SettingsIngestionNotice, type UnknownSettingKey } from './settings-ingestion.js';
-import { decisionOrClassic, isClassicOperation } from '../runtime/decision-policy.js';
 
-const SITE = 'config.settings.unknown-form';
+/** At most this many known names are listed when no single one is close. */
+const LISTED_NAMES = 12;
 
-/** The known settings of a section, as selector candidates with their schema descriptions. */
-function candidatesFor(section: string): Candidate[] {
-  const names = [...(knownSettingNamesBySection().get(section) ?? [])].sort();
-  return names.map((name) => {
-    const description = configKeyDescription(section ? `${section}.${name}` : name);
-    return { id: name, content: description.length > 0 ? description : null };
+/**
+ * Edit distance between two names, case-insensitive, counting a swap of two
+ * neighbouring letters as one edit (`prot` is one edit from `port`); stops
+ * counting past `limit`.
+ */
+function editDistance(a: string, b: string, limit: number): number {
+  const left = a.toLowerCase();
+  const right = b.toLowerCase();
+  if (Math.abs(left.length - right.length) > limit) return limit + 1;
+  let before: number[] = [];
+  let previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+  for (let i = 1; i <= left.length; i++) {
+    const current = [i];
+    let rowMin = i;
+    for (let j = 1; j <= right.length; j++) {
+      const cost = left[i - 1] === right[j - 1] ? 0 : 1;
+      let value = Math.min(previous[j]! + 1, current[j - 1]! + 1, previous[j - 1]! + cost);
+      if (i > 1 && j > 1 && left[i - 1] === right[j - 2] && left[i - 2] === right[j - 1]) value = Math.min(value, before[j - 2]! + 1);
+      current.push(value);
+      if (value < rowMin) rowMin = value;
+    }
+    if (rowMin > limit) return limit + 1;
+    before = previous;
+    previous = current;
+  }
+  return previous[right.length]!;
+}
+
+/**
+ * The known name of `section` that `name` is closest to, or undefined when none
+ * is close. Close means a small edit distance for the name's length, or one
+ * name extending the other (`clientSecretRef` beside `clientSecret`).
+ */
+export function nearestKnownSettingName(name: string, known: readonly string[]): string | undefined {
+  const limit = Math.max(1, Math.floor(name.length / 3));
+  let best: { name: string; distance: number } | undefined;
+  for (const candidate of known) {
+    const distance = editDistance(name, candidate, limit);
+    if (distance <= limit && (best === undefined || distance < best.distance)) best = { name: candidate, distance };
+  }
+  if (best) return best.name;
+  const lower = name.toLowerCase();
+  const extended = known
+    .filter(candidate => candidate.length >= 3 && (lower.startsWith(candidate.toLowerCase()) || candidate.toLowerCase().startsWith(lower)))
+    .sort((a, b) => Math.abs(a.length - name.length) - Math.abs(b.length - name.length));
+  return extended[0];
+}
+
+/** One skipped-key notice per unknown key: the nearest known setting, or the section's known names. */
+export function unknownSettingNotices(file: string, unknownKeys: readonly UnknownSettingKey[]): SettingsIngestionNotice[] {
+  const sections = knownSettingNamesBySection();
+  return unknownKeys.map((unknown) => {
+    const known = [...(sections.get(unknown.section) ?? [])].sort();
+    const nearest = nearestKnownSettingName(unknown.name, known);
+    const qualify = (name: string) => unknown.section ? `${unknown.section}.${name}` : name;
+    const listed = known.slice(0, LISTED_NAMES).join(', ');
+    const more = known.length > LISTED_NAMES ? ` and ${known.length - LISTED_NAMES} more` : '';
+    return {
+      file,
+      key: unknown.key,
+      action: 'skipped' as const,
+      reason: nearest !== undefined
+        ? `is not a setting this build knows; did you mean ${qualify(nearest)}`
+        : `is not a setting this build knows${known.length > 0 ? `; ${unknown.section || 'this section'} has ${listed}${more}` : ''}`,
+      remedy: 'fix the name, or update this component if the key comes from a newer version; the value was left in the file untouched',
+    };
   });
-}
-
-/** The known setting `unknown` is a newer form of, as a dot path, or undefined. Throws when no reading can be made. */
-export async function readUnknownSettingForm(unknown: UnknownSettingKey): Promise<string | undefined> {
-  return decisionOrClassic(() => readDecisionUnknownSettingForm(unknown), () => undefined);
-}
-async function readDecisionUnknownSettingForm(unknown: UnknownSettingKey): Promise<string | undefined> {
-  const candidates = candidatesFor(unknown.section);
-  if (candidates.length === 0) return undefined;
-  const selection = await settingForm.select(judgmentPort(SITE), { section: unknown.section, name: unknown.name }, candidates, { site: SITE });
-  if (selection.chosen === undefined || selection.outcome !== 'act') return undefined;
-  return unknown.section ? `${unknown.section}.${selection.chosen}` : selection.chosen;
-}
-
-/** A skipped-key notice for every unknown key that reads as a newer form of a known setting. */
-export async function readUnknownSettingForms(file: string, unknownKeys: readonly UnknownSettingKey[]): Promise<SettingsIngestionNotice[]> {
-  return decisionOrClassic(() => readDecisionUnknownSettingForms(file, unknownKeys), () => classicUnknownSettingNotices(file, unknownKeys));
-}
-function classicUnknownSettingNotices(file: string, unknownKeys: readonly UnknownSettingKey[]): SettingsIngestionNotice[] {
-  return unknownKeys.map(unknown => ({
-    file, key: unknown.key, action: 'skipped' as const,
-    reason: 'is not a setting this build knows; Classic does not infer renamed settings',
-    remedy: 'check the setting name against this version; the value was left in the file untouched',
-  }));
-}
-async function readDecisionUnknownSettingForms(file: string, unknownKeys: readonly UnknownSettingKey[]): Promise<SettingsIngestionNotice[]> {
-  const readings = await Promise.all(unknownKeys.map(async (unknown) => ({ unknown, form: await readUnknownSettingForm(unknown) })));
-  if (isClassicOperation()) return classicUnknownSettingNotices(file, unknownKeys);
-  return readings.flatMap(({ unknown, form }) => form === undefined ? [] : [{
-    file,
-    key: unknown.key,
-    reason: `is not a setting this build knows; it looks like a newer form of ${form}`,
-    remedy: 'update this component, or remove the key if it is a typo; the value was left in the file untouched',
-    action: 'skipped' as const,
-  }]);
 }

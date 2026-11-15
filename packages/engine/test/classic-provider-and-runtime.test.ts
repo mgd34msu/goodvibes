@@ -10,7 +10,7 @@ import { ProviderSetupReadings } from '../platform/src/platform/providers/provid
 import { prepareReasoningEffort } from '../platform/src/platform/providers/reasoning-effort-families.js';
 import { extractOpenAIStreamTextDelta, readStreamDeltaLabels } from '../platform/src/platform/providers/openai-stream-delta.js';
 import { holdsCredential } from '../platform/src/platform/config/credential-key-reading.js';
-import { readUnknownSettingForms } from '../platform/src/platform/config/settings-unknown-forms.js';
+import { unknownSettingNotices } from '../platform/src/platform/config/settings-unknown-forms.js';
 import { readConfigEventCarriesValue } from '../platform/src/platform/runtime/config/emit-bridge.js';
 import { readBundleRisk } from '../platform/src/platform/runtime/settings/control-plane-store.js';
 import { readCommandNeeds, decideSandboxedExec } from '../platform/src/platform/runtime/permissions/sandbox-policy.js';
@@ -90,7 +90,7 @@ test('Classic settings preserve unknown keys, mask undeclared fields and report 
   await withDecisionModelPolicy(() => 'Classic - Off', async () => {
     expect(await holdsCredential('custom.unclassified', '', 'test.classic.credential')).toBe(true);
     expect(await readConfigEventCarriesValue('custom.unclassified')).toBe(false);
-    expect(await readUnknownSettingForms('synthetic-settings.json', [{ section: 'provider', name: 'futureModel', key: 'provider.futureModel' }]))
+    expect(unknownSettingNotices('synthetic-settings.json', [{ section: 'provider', name: 'futureModel', key: 'provider.futureModel' }]))
       .toMatchObject([{ key: 'provider.futureModel', action: 'skipped' }]);
     expect(await readBundleRisk([{
       key: 'provider.model', previousValue: 'old', nextValue: 'new', changed: true,

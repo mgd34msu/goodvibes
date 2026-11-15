@@ -8,10 +8,7 @@ import { ProviderSetupReadings, describeProviderSetup, type ProviderSetupClassif
 import type { FailoverTurnState } from './active-model-identity.ts';
 import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { ProviderRuntimeMetadata, ReasoningEffortSpec } from '@goodvibes-jev/engine/platform/platform/providers';
-import {
-  publishActiveEffortOptions,
-  remapEffortForServingModel,
-} from '../providers/reasoning-effort-surface.ts';
+import { remapEffortForServingModel } from '../providers/reasoning-effort-surface.ts';
 
 // Preserve the existing wiring API while shared-state consumers use the leaf.
 export { createStreamMetrics, type StreamMetrics } from './stream-metrics.ts';
@@ -450,7 +447,6 @@ export function wireStreamEventMetrics(
       ...(serving.displayName ? { displayName: serving.displayName } : {}),
       ...(serving.reasoningEffort ? { reasoningEffort: serving.reasoningEffort } : {}),
     };
-    publishActiveEffortOptions(model);
     // getConfiguredReasoningEffort reads config `provider.reasoningEffort`,
     // the REQUESTED level. It must never be re-seeded from a previously snapped
     // effective value, or a single failover onto a capped model would ratchet

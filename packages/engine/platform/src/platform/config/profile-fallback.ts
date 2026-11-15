@@ -11,7 +11,7 @@
  * ## Where the fallback applies, and where it must not
  *
  * `ConfigManager.get()` ONLY. Never `getAll()`, never a category read, never a
- * settings dump or export. `get()` is one keyed read by a consumer that needs
+ * settings dump or export, never a settings row: those read `getStored()`. `get()` is one keyed read by a consumer that needs
  * that value to do its job. A dump is a different act: it hands the whole
  * settings surface to a caller, and a fallback applied there would put
  * `commerce.shippingAddress` in front of something that never asked for it and
@@ -75,6 +75,11 @@ export function resolveWithProfileFallback(
   reader: ConfigProfileFallbackReader | null,
 ): unknown {
   if (reader === null || !isUnsetConfigValue(stored)) return stored;
-  const fromProfile = reader(key);
+  let fromProfile: unknown;
+  // A keyed read never throws: a profile value that needs an asynchronous,
+  // verified reading (a postal address part) is not a synchronous answer, so
+  // the stored value stands and the address is read through
+  // `ConfigManager.preparePostalAddress`.
+  try { fromProfile = reader(key); } catch { return stored; }
   return fromProfile === undefined ? stored : fromProfile;
 }

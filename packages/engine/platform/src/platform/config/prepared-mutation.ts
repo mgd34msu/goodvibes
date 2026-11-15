@@ -2,7 +2,7 @@
 import { ConfigError } from '../types/errors.js';
 import { defineLifecycle } from '../utils/lifecycle-machine.js';
 import type { ConfigKey, ConfigSetting } from './schema.js';
-import { coerceSchemaValue } from './manager-bootstrap.js';
+import { admitSettingValue, type SettingAdmissionContext } from './write-admission.js';
 import type { PreparedSettingsTarget } from './prepared-target.js';
 
 declare const mutationBrand: unique symbol;
@@ -99,21 +99,17 @@ export function preparedSchemaSignature(schema: Omit<ConfigSetting, 'key'>): str
     enumValues: schema.enumValues, validationHint: schema.validationHint, unit: schema.unit });
 }
 
-/** Validate against the captured schema, without ever giving a callback our stored value. */
-export function normalizePreparedValue(key: ConfigKey, schema: Omit<ConfigSetting, 'key'>, value: unknown): unknown {
-  try {
-    const coerced = structuredClone(coerceSchemaValue(key, schema, value));
-    const serialized = JSON.stringify(coerced);
-    if (serialized === undefined) throw new Error('Value is not JSON');
-    const next: unknown = JSON.parse(serialized);
-    const validType = schema.type === 'enum' ? typeof next === 'string' && schema.enumValues?.includes(next)
-      : schema.type === 'object' ? next !== null && typeof next === 'object'
-        : typeof next === schema.type && (schema.type !== 'number' || (typeof next === 'number' && Number.isFinite(next)));
-    if (!validType) throw new Error('Invalid setting type');
-    if (schema.validate && !schema.validate(freezePreparedData(structuredClone(next)))) throw new Error('Invalid setting value');
-    return freezePreparedData(next);
-  } catch {
-    // Never include the proposed value or borrowed validator error in a refusal.
-    throw new ConfigError(`Invalid prepared value for setting ${key}.`);
-  }
+/**
+ * Admit a prepared value through the one settings admission (write-admission.ts),
+ * without ever giving a callback our stored value. With `context.config` the
+ * rules across settings and the stricter-project-value hold apply too, so a
+ * prepared change is refused for exactly what a direct set is refused for.
+ */
+export function normalizePreparedValue(key: ConfigKey, schema: Omit<ConfigSetting, 'key'>, value: unknown, context: SettingAdmissionContext = {}): unknown {
+  let admission: ReturnType<typeof admitSettingValue>;
+  try { admission = admitSettingValue(key, schema, value, context); }
+  catch { admission = { ok: false, reason: 'rejected by its schema' }; }
+  // Never include the proposed value or a borrowed validator error in a refusal.
+  if (!admission.ok) throw new ConfigError(`Invalid prepared value for setting ${key}.`);
+  return freezePreparedData(admission.value);
 }

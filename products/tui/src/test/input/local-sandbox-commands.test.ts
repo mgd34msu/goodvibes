@@ -78,22 +78,16 @@ describe('local sandbox and setup commands', () => {
     const set = spyOn(config, 'setDynamic');
     try {
       expect(await run('sandbox', ['apply-preset', 'secure-isolated'])).toContain('Applied sandbox preset');
-      expect(set.mock.calls.map(([key]) => key)).toEqual([
-        'sandbox.replIsolation', 'sandbox.mcpIsolation', 'sandbox.windowsMode', 'sandbox.vmBackend',
-      ]);
-      expect(config.get('sandbox.vmBackend')).toBe('local');
+      expect(set.mock.calls.map(([key]) => key)).toEqual(['sandbox.mcpIsolation', 'sandbox.windowsMode']);
       expect(config.get('sandbox.mcpIsolation')).toBe('per-server-vm');
       set.mockClear();
-      for (const args of [['apply-preset', 'unknown'], ['set-backend', 'qemu'], ['set-repl', 'invalid'], ['set-mcp', 'invalid'], ['set-windows', 'invalid']]) {
+      for (const args of [['apply-preset', 'unknown'], ['set-backend', 'local'], ['set-repl', 'shared-vm'], ['set-mcp', 'invalid'], ['set-windows', 'invalid']]) {
         expect(await run('sandbox', args)).toContain('Usage:');
       }
       expect(set).not.toHaveBeenCalled();
       await run('sandbox', ['set-mcp', 'disabled']);
-      await run('sandbox', ['set-repl', 'shared-vm']);
       await run('sandbox', ['set-windows', 'native-basic']);
-      await run('sandbox', ['set-backend', 'local']);
       expect(config.get('sandbox.mcpIsolation')).toBe('disabled');
-      expect(config.get('sandbox.replIsolation')).toBe('shared-vm');
       expect(config.get('sandbox.windowsMode')).toBe('native-basic');
     } finally {
       set.mockRestore();

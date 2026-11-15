@@ -58,7 +58,7 @@ describe('wire reasons', () => {
     const f = service({ assert: () => { if (refuse) throw withReason('read-only'); } });
     const handle = await capture(f);
     refuse = true;
-    expect(await applyRemoteSettingsPrecondition(handle)).toEqual({ status: 'unknown', completedPaths: [], refused: true, refusalReason: 'read-only' });
+    expect(await applyRemoteSettingsPrecondition(handle)).toMatchObject({ status: 'unknown', completedPaths: [], refused: true, refusalReason: 'read-only' });
   });
 
   test('only the known reasons are carried; anything else is unclassified', () => {

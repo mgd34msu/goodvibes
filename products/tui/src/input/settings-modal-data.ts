@@ -1,5 +1,5 @@
 export {buildMcpEntries} from '@goodvibes-jev/engine/terminal-shell/settings-mcp-entries';
-import { isValidConfigKey, readConfigSettingForDisplay } from '@goodvibes-jev/engine/platform/platform/config';
+import { isValidConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
 /**
  * settings-modal-data, pure data-assembly helpers for SettingsModal.
  *
@@ -189,10 +189,12 @@ export function buildSettingGroups(
   // Keep that recovery out of this read pass when pure host metadata is
   // unavailable; otherwise opening settings could erase the policy failure.
   for (const setting of configManager.getSchema()) {
+    // These lists keep their own one-entry-per-line editor rows, added below.
+    if (isSandboxExecListConfigKey(setting.key) || isWorktreeSetupListConfigKey(setting.key)) continue;
     const rawCat = setting.key.split('.')[0] as string;
     const cat = rawCat as SettingsCategory;
-    const display = readConfigSettingForDisplay(() => configManager.get(setting.key as ConfigKey));
-    const currentValue = display.value;
+    // A settings row shows the stored setting; an owner-profile value is a consumer's fact, not this row's.
+    const currentValue = configManager.getStored(setting.key as ConfigKey);
     const resolved = hostMetadataUnavailable ? undefined : getResolvedSettingLookup(configManager, setting.key)?.entry;
     const entry: SettingEntry = {
       setting,
@@ -204,7 +206,6 @@ export function buildSettingGroups(
       sourceLabel: resolved?.sourceLabel,
       lockReason: resolved?.lockReason,
       metadataUnavailable: hostMetadataUnavailable ? POLICY_METADATA_UNAVAILABLE : undefined,
-      valueUnavailable: display.held,
     };
     if (groups.has(cat)) groups.get(cat)!.push(entry);
     if ((rawCat === 'controlPlane' || rawCat === 'httpListener' || rawCat === 'web') && groups.has('network')) {
@@ -311,8 +312,8 @@ export function buildSettingGroups(
   // Inject the worktree.setup.commands / worktree.setup.carryOverGlobs
   // synthetic entries into the orchestration category (worktree isolation is
   // an orchestration-engine concern, see WorkstreamIsolation 'worktree').
-  // Neither key is in the platform ConfigKey union (see worktree-setup-config.ts),
-  // same rationale as the other synthetic settings above.
+  // They are settings rows of the platform schema; this screen gives them a
+  // one-entry-per-line list editor instead of the JSON editor of other object rows.
   const orchestrationEntries = groups.get('orchestration');
   if (orchestrationEntries) {
     if (!orchestrationEntries.some((e) => e.setting.key === WORKTREE_SETUP_COMMANDS_CONFIG_KEY)) {
@@ -323,10 +324,9 @@ export function buildSettingGroups(
     }
   }
 
-  // Inject the sandbox.egressAllowlist / sandbox.workspaceWritable and
-  // permissions.execEnvScrubAllowlist synthetic entries, see
-  // sandbox-exec-config.ts / exec-env-scrub-config.ts for why they are not in
-  // CONFIG_SCHEMA, same rationale as the other synthetic settings above.
+  // Inject the sandbox.egressAllowlist / sandbox.workspaceWritable list editors
+  // (schema rows given a list editor, as above) and the
+  // permissions.execEnvScrubAllowlist synthetic entry (see exec-env-scrub-config.ts).
   injectSandboxExecSyntheticEntries(groups, configManager);
   injectExecEnvScrubSyntheticEntry(groups, configManager);
 
@@ -729,9 +729,7 @@ function refreshBuiltinSettingValue(entry: BuiltinSettingEntry, configManager: C
     entry.isDefault = refreshedLocal.isDefault;
     return;
   }
-  const display = readConfigSettingForDisplay(() => configManager.get(entry.setting.key));
-  entry.valueUnavailable = display.held;
-  entry.currentValue = display.value;
+  entry.currentValue = configManager.getStored(entry.setting.key);
   entry.isDefault = deepEqual(entry.currentValue, entry.setting.default);
 }
 

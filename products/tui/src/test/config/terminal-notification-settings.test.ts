@@ -28,7 +28,6 @@ test('persisted TUI turn-end opt-in is known without an unknown-setting judgment
   const previous = installJudgmentPort(fake.port);
   try {
     const { config, options } = fixture({ terminalNotifyTurnEnd: true });
-    await config.announceUnknownSettingForms();
     expect(fake.requests).toHaveLength(0);
     expect(readTuiConfigValue(config, KEY)).toBe(true);
     expect(config.getHostSettingsSchema().filter(row => row.key === KEY)).toHaveLength(1);

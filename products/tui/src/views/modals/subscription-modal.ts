@@ -1,7 +1,7 @@
 import type { ConfigModalActionContext, ConfigModalSurface, ConfigModalView } from '../../input/config-modal-types.ts';
 import type { ServiceInspectionQuery, SubscriptionAccessQuery } from '@/runtime/index.ts';
 import type { ProviderSubscription, PendingSubscriptionLogin } from '@goodvibes-jev/engine/platform/platform/config';
-import { listBuiltinSubscriptionProviders } from '@goodvibes-jev/engine/platform/platform/config';
+import { listBuiltinSubscriptionProviders, subscriptionState } from '@goodvibes-jev/engine/platform/platform/config';
 import { formatElapsed } from '../../utils/format-elapsed.ts';
 import { toneStyle, statusGlyph, pad, postureLine, kv, runModalCommand, type Tone } from './modal-surface-helpers.ts';
 
@@ -12,29 +12,28 @@ interface Row {
   readonly pending: PendingSubscriptionLogin | null;
 }
 
-type Status = 'active' | 'pending' | 'available' | 'unconfigured';
+type Status = 'active' | 'expiring' | 'expired' | 'revoked' | 'pending' | 'available' | 'unconfigured';
 
 function statusOf(row: Row): Status {
-  if (row.subscription) return 'active';
+  if (row.subscription) return subscriptionState(row.subscription);
   if (row.pending) return 'pending';
   return row.hasOAuthConfig ? 'available' : 'unconfigured';
+}
+
+/** A signed-in session the provider no longer honours; Enter signs in again. */
+function needsSignIn(status: Status): boolean {
+  return status === 'expired' || status === 'revoked';
 }
 
 function statusTone(status: Status): Tone {
   switch (status) {
     case 'active': return 'good';
+    case 'expiring': return 'warn';
+    case 'expired': case 'revoked': return 'bad';
     case 'pending': return 'warn';
     case 'available': return 'info';
     case 'unconfigured': return 'dim';
   }
-}
-
-const EXPIRING_SOON_MS = 24 * 60 * 60 * 1000;
-
-function isExpiringSoon(sub: ProviderSubscription | null): boolean {
-  if (!sub?.expiresAt) return false;
-  const remaining = sub.expiresAt - Date.now();
-  return remaining > 0 && remaining <= EXPIRING_SOON_MS;
 }
 
 /**
@@ -44,7 +43,8 @@ function isExpiringSoon(sub: ProviderSubscription | null): boolean {
  * externally-completed browser OAuth handshake visible without a keypress, the
  * same cadence the earlier view used. Enter signs out (surface-managed confirm,
  * matching the earlier view's ConfirmState) on an active row, or starts login via the
- * existing `/subscription login <p> start` command on an available row.
+ * existing `/subscription login <p> start` command on an available, expired or
+ * revoked row.
  */
 class SubscriptionModalSurface implements ConfigModalSurface {
   readonly name = 'subscription-modal';
@@ -99,12 +99,14 @@ class SubscriptionModalSurface implements ConfigModalSurface {
 
   buildView(): ConfigModalView {
     const rows = this.buildRows();
-    const active = rows.filter((r) => r.subscription).length;
+    const active = rows.filter((r) => r.subscription && !needsSignIn(statusOf(r))).length;
+    const signInAgain = rows.filter((r) => needsSignIn(statusOf(r))).length;
     const pending = rows.filter((r) => r.pending).length;
     const configured = rows.filter((r) => r.hasOAuthConfig).length;
     const header = [postureLine([
       kv('configured', configured),
       kv('active', active),
+      ...(signInAgain > 0 ? [kv('sign in again', signInAgain)] : []),
       kv('pending', pending),
       kv('providers', rows.length),
     ])];
@@ -117,12 +119,12 @@ class SubscriptionModalSurface implements ConfigModalSurface {
         header,
         rows: rows.map((row) => {
           const status = statusOf(row);
-          const expiring = isExpiringSoon(row.subscription);
-          const marker = expiring ? ' expiring soon' : '';
+          const usable = row.subscription !== null && !needsSignIn(status);
+          const marker = needsSignIn(status) ? '  sign in again' : '';
           return {
             id: `sub:${row.provider}`,
-            label: `${statusGlyph(statusTone(status))} ${pad(row.provider, 16)} ${pad(status.toUpperCase(), 12)} oauth=${row.hasOAuthConfig ? 'yes' : 'no'}  override=${row.subscription ? 'active' : 'off'}${marker}`,
-            style: toneStyle(expiring ? 'warn' : statusTone(status)),
+            label: `${statusGlyph(statusTone(status))} ${pad(row.provider, 16)} ${pad(status.toUpperCase(), 12)} oauth=${row.hasOAuthConfig ? 'yes' : 'no'}  override=${usable && row.subscription?.overrideAmbientApiKeys ? 'active' : 'off'}${marker}`,
+            style: toneStyle(statusTone(status)),
           };
         }),
         emptyText: 'No provider subscriptions yet. Try /subscription login openai start.',
@@ -140,7 +142,7 @@ class SubscriptionModalSurface implements ConfigModalSurface {
     const row = rows.find((r) => r.provider === provider);
     if (!row) return;
     const status = statusOf(row);
-    if (status === 'active') {
+    if (status === 'active' || status === 'expiring') {
       // Surface-managed confirm, guarded by provider match so a stale confirm
       // can never sign out the wrong row.
       if (this.pendingLogout === provider) {
@@ -151,7 +153,7 @@ class SubscriptionModalSurface implements ConfigModalSurface {
         this.pendingLogout = provider;
         ctx.setStatus(`Sign out ${provider}? Press Enter again to confirm.`);
       }
-    } else if (status === 'available') {
+    } else if (status === 'available' || needsSignIn(status)) {
       this.pendingLogout = null;
       runModalCommand(ctx, 'subscription', ['login', provider, 'start'], `/subscription login ${provider} start`, { pending: `Starting login for ${provider}…` });
     } else if (status === 'pending' && row.pending) {

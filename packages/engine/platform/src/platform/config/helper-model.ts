@@ -51,6 +51,8 @@ export interface HelperChatOptions {
   helperOnly?: boolean | undefined;
   /** Give up on a provider that does not answer. Defaults to two minutes; 0 disables the bound. */
   timeoutMs?: number | undefined;
+  /** The caller's cancel: aborts the provider request and frees the caller at once. */
+  signal?: AbortSignal | undefined;
 }
 
 const DEFAULT_HELPER_TIMEOUT_MS = 120_000;
@@ -219,6 +221,7 @@ export class HelperModel {
 
       // The signal asks the provider to stop; the race frees the caller even when a provider ignores it.
       const timeoutMs = options.timeoutMs ?? DEFAULT_HELPER_TIMEOUT_MS;
+      options.signal?.throwIfAborted();
       const controller = new AbortController();
       const request = resolved.provider.chat({
         model: resolved.modelId,
@@ -229,23 +232,31 @@ export class HelperModel {
       });
       // Armed only after chat() returned, so a synchronous throw leaves no timer behind.
       let timer: ReturnType<typeof setTimeout> | undefined;
-      const timedOut = timeoutMs > 0
-        ? new Promise<never>((_, reject) => {
-            timer = setTimeout(() => {
-              const error = new Error(`Helper model request for ${task} timed out after ${timeoutMs} ms`);
-              controller.abort(error);
-              reject(error);
-            }, timeoutMs);
-            timer.unref?.();
-          })
-        : undefined;
+      let onCallerAbort: (() => void) | undefined;
+      const stopped = new Promise<never>((_, reject) => {
+        if (timeoutMs > 0) {
+          timer = setTimeout(() => {
+            const error = new Error(`Helper model request for ${task} timed out after ${timeoutMs} ms`);
+            controller.abort(error);
+            reject(error);
+          }, timeoutMs);
+          timer.unref?.();
+        }
+        if (options.signal) {
+          const callerSignal = options.signal;
+          onCallerAbort = () => { controller.abort(callerSignal.reason); reject(callerSignal.reason); };
+          callerSignal.addEventListener('abort', onCallerAbort, { once: true });
+        }
+      });
       let response: Awaited<typeof request>;
       try {
-        response = await (timedOut ? Promise.race([request, timedOut]) : request);
+        response = await (timeoutMs > 0 || options.signal ? Promise.race([request, stopped]) : request);
       } finally {
         clearTimeout(timer);
-        // A late rejection of the abandoned request must not become an unhandled rejection.
+        if (onCallerAbort) options.signal?.removeEventListener('abort', onCallerAbort);
+        // A late rejection of the abandoned request, or of the race it lost, must not become an unhandled rejection.
         request.catch(() => undefined);
+        stopped.catch(() => undefined);
       }
 
       // Track usage

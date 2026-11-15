@@ -137,8 +137,6 @@ test('preadmission route discovery defers record reaping and pins the responding
 test.each([
   { status: 'committed', completedPaths: [], verifiedInOwningStore: true },
   { status: 'committed', completedPaths: ['/synthetic/settings.json'], uncertainPath: '/synthetic/settings.json', verifiedInOwningStore: true },
-  { status: 'committed', completedPaths: ['/synthetic/settings.json'] },
-  { status: 'committed', completedPaths: ['/synthetic/settings.json'], verifiedInOwningStore: 'true' },
   { status: 'partial', completedPaths: [], uncertainPath: '/synthetic/settings.json' },
   { status: 'partial', completedPaths: ['/synthetic/settings.json'], uncertainPath: '/synthetic/settings.json' },
   { status: 'unknown', completedPaths: ['/synthetic/settings.json'] },
@@ -151,8 +149,24 @@ test.each([
       const body = await response.json(); body.settingsPrecondition.receipt = receipt; return Response.json(body);
     }) as typeof fetch,
   });
-  expect(await applyRemoteSettingsPrecondition(handle)).toEqual({ status: 'unknown', completedPaths: [] });
+  // The daemon answered "applied", so the change may have taken effect: unknown, and marked as an unreadable receipt.
+  expect(await applyRemoteSettingsPrecondition(handle)).toMatchObject({ status: 'unknown', completedPaths: [], receiptUnreadable: true,
+    failure: { code: 'DAEMON_VERSION_MISMATCH' } });
   await expect(applyRemoteSettingsPrecondition(handle)).rejects.toThrow(); expect(f.effects()).toBe(1); expect(calls).toBe(2);
+});
+test.each([
+  [{ status: 'committed', completedPaths: ['/synthetic/settings.json'] }, false],
+  [{ status: 'committed', completedPaths: ['/synthetic/settings.json'], verifiedInOwningStore: true, addedByANewerDaemon: 1 }, true],
+] as const)('a committed receipt is read for the fields this build needs (%o)', async (receipt, verified) => {
+  const f = fixture(); let calls = 0;
+  const handle = await captureRemoteSettingsPrecondition({ baseUrl: 'http://synthetic.invalid', source: 'test' }, { operation: 'set', key: 'controlPlane.port', value: 42 }, {
+    fetchImpl: (async (_url, init) => {
+      calls++; const response = await f.post(JSON.parse(String(init?.body)));
+      if (calls === 1) return response;
+      const body = await response.json(); body.settingsPrecondition.receipt = receipt; return Response.json(body);
+    }) as typeof fetch,
+  });
+  expect(await applyRemoteSettingsPrecondition(handle)).toEqual({ status: 'committed', completedPaths: ['/synthetic/settings.json'], verifiedInOwningStore: verified });
 });
 test('remote reset-default cannot be reinterpreted as remove-override destinations', async () => {
   const f = fixture();
@@ -171,7 +185,8 @@ test('malformed endpoint errors never include private URL material', async () =>
   try { await captureRemoteSettingsPrecondition({ baseUrl: `invalid url ${marker}`, token: marker, source: 'test' },
     { operation: 'set', key: 'controlPlane.port', value: 42 }, { fetchImpl }); } catch (error) { failure = error; }
   expect(failure).toBeInstanceOf(Error);
-  expect((failure as Error).message).toBe('Settings owner precondition unavailable; fresh capture and admission required.');
+  expect((failure as { refusal?: { code?: string } }).refusal?.code).toBe('SETTINGS_OWNER_ENDPOINT_INVALID');
+  expect((failure as Error).message).not.toContain(marker);
   expect(JSON.stringify(failure)).not.toContain(marker); expect(calls).toBe(0);
 });
 test('an owner refusal before any effect is reported as refused, a lost answer as unknown', async () => {
@@ -180,11 +195,25 @@ test('an owner refusal before any effect is reported as refused, a lost answer a
   const endpoint = { baseUrl: 'http://synthetic.invalid', source: 'test' };
   const stale = await captureRemoteSettingsPrecondition(endpoint, { operation: 'set', key: 'controlPlane.port', value: 42 }, { fetchImpl });
   f.mutate();
-  expect(await applyRemoteSettingsPrecondition(stale)).toEqual({ status: 'unknown', completedPaths: [], refused: true });
+  expect(await applyRemoteSettingsPrecondition(stale)).toMatchObject({ status: 'unknown', completedPaths: [], refused: true });
   expect(f.effects()).toBe(0);
   let calls = 0;
   const lost = await captureRemoteSettingsPrecondition(endpoint, { operation: 'set', key: 'controlPlane.port', value: 42 }, {
     fetchImpl: (async (url: unknown, init?: RequestInit) => ++calls === 1 ? fetchImpl(url as string, init) : new Response('', { status: 503 })) as typeof fetch,
   });
-  expect(await applyRemoteSettingsPrecondition(lost)).toEqual({ status: 'unknown', completedPaths: [] });
+  const lostReceipt = await applyRemoteSettingsPrecondition(lost);
+  expect(lostReceipt).toMatchObject({ status: 'unknown', completedPaths: [], failure: { status: 503 } });
+  expect(lostReceipt.refused).toBeUndefined();
+});
+test('a capture names why the daemon could not take it: not reachable, not authorised, or a different version', async () => {
+  const endpoint = { baseUrl: 'http://synthetic.invalid', source: 'test' };
+  const request = { operation: 'set', key: 'controlPlane.port', value: 42 } as const;
+  const codeOf = async (fetchImpl: typeof fetch) => {
+    try { await captureRemoteSettingsPrecondition(endpoint, request, { fetchImpl }); return 'captured'; }
+    catch (error) { return (error as { refusal?: { code?: string } }).refusal?.code; }
+  };
+  const refused = Object.assign(new Error('connect failed'), { code: 'ECONNREFUSED' });
+  expect(await codeOf((async () => { throw refused; }) as unknown as typeof fetch)).toBe('DAEMON_UNREACHABLE');
+  expect(await codeOf((async () => new Response('{}', { status: 401 })) as unknown as typeof fetch)).toBe('DAEMON_NOT_AUTHORIZED');
+  expect(await codeOf((async () => new Response('{}', { status: 404 })) as unknown as typeof fetch)).toBe('DAEMON_VERSION_MISMATCH');
 });

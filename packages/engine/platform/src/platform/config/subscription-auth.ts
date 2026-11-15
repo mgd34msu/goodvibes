@@ -1,7 +1,6 @@
 import { getBuiltinSubscriptionProvider } from './subscription-providers.js';
 import type { SubscriptionManager } from './subscriptions.js';
-import { refreshOpenAICodexToken } from './openai-codex-auth.js';
-import { OAuthTokenExchangeError } from '../runtime/auth/oauth-core.js';
+import { OAuthTokenExchangeError, refreshOAuthAccessToken } from '../runtime/auth/oauth-core.js';
 import { logger } from '../utils/logger.js';
 
 /**
@@ -41,8 +40,8 @@ export type SubscriptionRefreshOutcome =
   | { readonly kind: 'unavailable'; readonly error: unknown };
 
 /**
- * OpenAI's refresh tokens rotate (the exchange must return a new one, see
- * openai-codex-auth.ts), so a spent refresh token is gone. When a token is
+ * OpenAI's refresh tokens rotate (the exchange returns a new one), so a spent
+ * refresh token is gone. When a token is
  * revoked, every in-flight call 401s at once, and N concurrent recoveries
  * would each present the same refresh token: one wins, the rest fail and
  * would falsely report a session the winner just healed as dead. One shared
@@ -119,7 +118,9 @@ function runSharedOpenAIRefresh(
   const attempt = (async (): Promise<SubscriptionRefreshOutcome> => {
     let refreshed;
     try {
-      refreshed = await refreshOpenAICodexToken(existing.refreshToken!);
+      const openai = getBuiltinSubscriptionProvider('openai');
+      if (!openai) return { kind: 'session-dead' };
+      refreshed = await refreshOAuthAccessToken(openai.oauth, existing.refreshToken!);
     } catch (error) {
       // Only an answered 4xx is the authorization server refusing the grant.
       // Anything else (transport, 5xx, malformed 200) leaves the session's
@@ -160,9 +161,11 @@ function runSharedOpenAIRefresh(
       manager.saveSubscription({
         ...rest,
         accessToken: refreshed.accessToken,
-        refreshToken: refreshed.refreshToken,
-        tokenType: refreshed.tokenType,
-        expiresAt: refreshed.expiresAt,
+        // An answer without a new refresh token or expiry keeps the stored ones, as every other provider's refresh does.
+        refreshToken: refreshed.refreshToken || existing.refreshToken,
+        tokenType: refreshed.tokenType || existing.tokenType,
+        ...(typeof refreshed.expiresAt === 'number' && Number.isFinite(refreshed.expiresAt)
+          ? { expiresAt: refreshed.expiresAt } : typeof existing.expiresAt === 'number' ? { expiresAt: existing.expiresAt } : {}),
         ...(refreshed.scopes ? { scopes: refreshed.scopes } : existing.scopes ? { scopes: existing.scopes } : {}),
         updatedAt: Date.now(),
       });

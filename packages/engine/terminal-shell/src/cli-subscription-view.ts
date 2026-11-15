@@ -2,8 +2,6 @@ import { yesNo, formatJsonOrText } from './cli-output.js';
 import {
   getSubscriptionProviderConfig,
   listAvailableSubscriptionProviders,
-  beginOpenAICodexLogin,
-  exchangeOpenAICodexCode,
   type SubscriptionManager,
   type ServiceRegistry,
   type SecretsManager,
@@ -130,28 +128,6 @@ export function createCliSubscriptionView<Runtime extends SubscriptionRuntime, S
         if (!provider || mode !== 'start') return `Usage: ${policy.binary(runtime)} subscription login <provider> start [--open]`;
         const resolved = getSubscriptionProviderConfig(provider, services.serviceRegistry.get(provider));
         if (!resolved) return `No subscription provider found${separator}${provider}`;
-        if (provider === 'openai' && resolved.source === 'builtin') {
-          const started = await beginOpenAICodexLogin();
-          services.subscriptionManager.savePending({
-            provider,
-            state: started.state,
-            verifier: started.verifier,
-            redirectUri: started.redirectUri,
-            createdAt: Date.now(),
-          });
-          const openResult = runtime.cli.flags.open || hasCommandFlag(rest, '--open') ? openBrowser(started.authorizationUrl) : null;
-          return [
-            `Subscription OAuth started${separator}${provider}`,
-            field('source', policy.source(resolved.source)),
-            field('state', String(started.state)),
-            field('redirectUri', String(started.redirectUri)),
-            ...(openResult ? [field('open', String(openResult))] : []),
-            ...(policy.manualOnly ? ['  completion paste the callback code or redirect URL into the finish command'] : []),
-            `  next${separator}${policy.binary(runtime)} subscription login ${provider} finish <code-or-url>`,
-            policy.inline ? '  authorizationUrl:' : '  authorization URL',
-            `  ${started.authorizationUrl}`,
-          ].join('\n');
-        }
         const started = await services.subscriptionManager.beginOAuthLogin(provider, oauthForSurface(resolved.oauth));
         const openResult = runtime.cli.flags.open || hasCommandFlag(rest, '--open') ? openBrowser(started.authorizationUrl) : null;
         return [
@@ -175,25 +151,6 @@ export function createCliSubscriptionView<Runtime extends SubscriptionRuntime, S
         const authorization = readAuthorizationInput(codeInput, services.subscriptionManager.getPending(provider)?.state);
         if (!authorization.ok) return authorization.reason;
         const code = authorization.code;
-        if (provider === 'openai' && resolved.source === 'builtin') {
-          const pendingLogin = services.subscriptionManager.getPending(provider);
-          if (!pendingLogin) return `No pending OAuth login for ${provider}.`;
-          const token = await exchangeOpenAICodexCode(code, pendingLogin.verifier);
-          const now = Date.now();
-          const record = services.subscriptionManager.saveSubscription({
-            provider,
-            accessToken: token.accessToken,
-            refreshToken: token.refreshToken,
-            tokenType: token.tokenType,
-            expiresAt: token.expiresAt,
-            ...(token.scopes ? { scopes: token.scopes } : {}),
-            authMode: 'oauth',
-            overrideAmbientApiKeys: false,
-            createdAt: services.subscriptionManager.get(provider)?.createdAt ?? now,
-            updatedAt: now,
-          });
-          return storedReceipt(provider, record);
-        }
         const record = await services.subscriptionManager.completeOAuthLogin(provider, oauthForSurface(resolved.oauth), code);
         return storedReceipt(provider, record);
       }

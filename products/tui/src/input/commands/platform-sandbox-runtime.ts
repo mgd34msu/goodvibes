@@ -18,7 +18,7 @@ import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { renderSandboxDoctor } from '../../runtime/sandbox-public-gaps.ts';
 import { handleSandboxSessionCommand } from './platform-sandbox-session.ts';
 
-const SANDBOX_USAGE = '[open|review|recommend|profiles|presets|preset <id>|apply-preset <id>|probe|doctor|session ...|bundle <export|inspect> <path>|set-mcp <mode>|set-repl <mode>|set-windows <mode>|set-backend local]';
+const SANDBOX_USAGE = '[open|review|recommend|profiles|presets|preset <id>|apply-preset <id>|probe|doctor|session ...|bundle <export|inspect> <path>|set-mcp <mode>|set-windows <mode>]';
 const PRESET_IDS = 'secure-balanced|secure-isolated|shared-performance|windows-basic';
 
 function applySandboxPreset(
@@ -27,10 +27,8 @@ function applySandboxPreset(
 ): boolean {
   const preset = getSandboxPreset(presetId);
   if (!preset) return false;
-  configManager.setDynamic('sandbox.replIsolation', preset.config.replIsolation);
   configManager.setDynamic('sandbox.mcpIsolation', preset.config.mcpIsolation);
   configManager.setDynamic('sandbox.windowsMode', preset.config.windowsMode);
-  configManager.setDynamic('sandbox.vmBackend', preset.config.vmBackend);
   return true;
 }
 
@@ -41,10 +39,8 @@ function renderSandboxPresetDetail(presetId: string): string | null {
     `Sandbox Preset ${preset.id}`,
     `  label: ${preset.label}`,
     `  summary: ${preset.summary}`,
-    `  repl isolation: ${preset.config.replIsolation}`,
     `  mcp isolation: ${preset.config.mcpIsolation}`,
     `  windows mode: ${preset.config.windowsMode}`,
-    `  backend: ${preset.config.vmBackend}`,
     '  execution: host-local processes; no VM guest',
     ...preset.notes.map((note) => `  note: ${note}`),
   ].join('\n');
@@ -163,16 +159,6 @@ export function registerPlatformSandboxRuntimeCommands(registry: CommandRegistry
         ctx.print(`Sandbox MCP isolation set to ${mode}.`);
         return;
       }
-      if (sub === 'set-repl') {
-        const mode = args[1];
-        if (!mode || !['shared-vm', 'per-runtime-vm'].includes(mode)) {
-          ctx.print('Usage: /sandbox set-repl <shared-vm|per-runtime-vm>');
-          return;
-        }
-        ctx.platform.configManager.setDynamic('sandbox.replIsolation', mode);
-        ctx.print(`Sandbox REPL isolation set to ${mode}.`);
-        return;
-      }
       if (sub === 'set-windows') {
         const mode = args[1];
         if (!mode || !['native-basic', 'require-wsl'].includes(mode)) {
@@ -181,15 +167,6 @@ export function registerPlatformSandboxRuntimeCommands(registry: CommandRegistry
         }
         ctx.platform.configManager.setDynamic('sandbox.windowsMode', mode);
         ctx.print(`Sandbox Windows mode set to ${mode}.`);
-        return;
-      }
-      if (sub === 'set-backend') {
-        if (args[1] !== 'local') {
-          ctx.print('Usage: /sandbox set-backend local (QEMU has been retired)');
-          return;
-        }
-        ctx.platform.configManager.setDynamic('sandbox.vmBackend', 'local');
-        ctx.print('Sandbox backend set to local.');
         return;
       }
       ctx.print(`Usage: /sandbox ${SANDBOX_USAGE}`);

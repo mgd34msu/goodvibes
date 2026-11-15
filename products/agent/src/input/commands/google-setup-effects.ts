@@ -1,4 +1,5 @@
 import { SecretWriteCommittedError } from '@goodvibes-jev/engine/platform/platform/config';
+import { formatRefusal } from '@goodvibes-jev/engine/errors';
 /** Exact setup writes consume an observation once and retain independent request authority. */
 import type { ConfigManager, SecretsManager, ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
 import { GoogleSetupWriteCommittedError, type GoogleConfigPort, type GoogleSecretPort } from '@goodvibes-jev/engine/platform/platform/google';
@@ -6,9 +7,7 @@ import { GoogleSetupWriteCommittedError, type GoogleConfigPort, type GoogleSecre
 export function googleSetupWritePorts(config: ConfigManager, secrets: SecretsManager,
   configPort: GoogleConfigPort, secretPort: GoogleSecretPort, assertRequest: () => void,
 ): { readonly config: GoogleConfigPort; readonly secrets: GoogleSecretPort; readonly assertCurrent: () => void } {
-  const configMethods = { get: config.get, setDynamic: config.setDynamic, prepareSettingMutation: config.prepareSettingMutation,
-    inspectPreparedMutation: config.inspectPreparedMutation, beginPreparedMutation: config.beginPreparedMutation,
-    assertPreparedMutationTransition: config.assertPreparedMutationTransition, finishPreparedMutation: config.finishPreparedMutation,
+  const configMethods = { get: config.get, setDynamic: config.setDynamic, setMany: config.setMany,
     getConfigurationIncarnation: config.getConfigurationIncarnation };
   const secretMethods = { set: secrets.set, get: secrets.get, assertWriteTransition: secrets.assertWriteTransition,
     inspectWriteTransition: secrets.inspectWriteTransition, getCredentialMutationState: secrets.getCredentialMutationState };
@@ -19,7 +18,7 @@ export function googleSetupWritePorts(config: ConfigManager, secrets: SecretsMan
   const settings = settingKeys.map(key => JSON.stringify(config.get(key)));
   const envKeys = ['TYPESAFE_BASE_URL', 'TYPESAFE_DEFAULT_MODEL', 'TYPESAFE_API_KEY'] as const;
   const environment = envKeys.map(key => process.env[key]);
-  let configTransition: (() => void) | undefined, secretTransition: (() => void) | undefined;
+  let secretTransition: (() => void) | undefined;
   let stopped = false;
   function current() {
     assertRequest();
@@ -27,8 +26,7 @@ export function googleSetupWritePorts(config: ConfigManager, secrets: SecretsMan
     for (const key of Object.keys(secretMethods) as (keyof typeof secretMethods)[]) if (secrets[key] !== secretMethods[key]) throw new Error('The setup credential port changed.');
     if (stopped || settingKeys.some((key, index) => JSON.stringify(config.get(key)) !== settings[index])
       || envKeys.some((key, index) => process.env[key] !== environment[index])) throw new Error('The Google setup write owner changed.');
-    if (configTransition) configTransition();
-    else if (configRevision?.() !== expectedConfig) throw new Error('The Google setup configuration changed.');
+    if (configRevision?.() !== expectedConfig) throw new Error('The Google setup configuration changed.');
     if (secretTransition) secretTransition();
     else {
       const state = secretRevision?.();
@@ -40,20 +38,17 @@ export function googleSetupWritePorts(config: ConfigManager, secrets: SecretsMan
       set: (key, value, ownership) => {
         current();
         if (!ownership) { configPort.set(key, value); return; }
-        const handle = config.prepareSettingMutation({ operation: 'set', key: key as ConfigKey, value });
-        const facts = config.inspectPreparedMutation(handle);
-        ownership.assertCurrent(); current(); ownership.consumeObservation();
-        let committed = false;
-        try {
-          const transition = config.beginPreparedMutation(handle);
-          configTransition = () => config.assertPreparedMutationTransition(handle, transition);
-          current(); ownership.assertCurrent();
-          const receipt = config.finishPreparedMutation(handle, transition, () => { current(); ownership.assertCurrent(); });
-          committed = receipt.status === 'committed';
-          if (!committed) throw new Error('The exact setup configuration write did not fully commit.');
-          configTransition = undefined; expectedConfig = facts.incarnation + 1;
-          current(); ownership.committed();
-        } catch (error) { stopped = true; if (committed || error instanceof SecretWriteCommittedError) throw new GoogleSetupWriteCommittedError(); throw error; }
+        ownership.assertCurrent(); ownership.consumeObservation();
+        // One admission and one write: the same checks a direct settings change gets, including
+        // the rules across settings and a stricter project value.
+        const result = config.setMany([{ key: key as ConfigKey, value }], { kind: 'owner', surface: 'agent' });
+        if (!result.ok) {
+          stopped = true;
+          if (result.saved.length > 0) throw new GoogleSetupWriteCommittedError();
+          throw new Error(formatRefusal(result.refusal));
+        }
+        expectedConfig = result.revision;
+        current(); ownership.committed();
       },
     },
     secrets: { get: async key => { current(); const value = await secretPort.get(key); current(); return value; },

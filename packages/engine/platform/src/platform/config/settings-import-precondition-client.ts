@@ -1,6 +1,11 @@
 import type { SettingsImportPreconditionRequest, SettingsImportPreconditionFacts, SettingsImportPreconditionReceipt } from '@goodvibes-jev/engine/daemon-api';
 import { types as nodeTypes } from 'node:util';
-import { SettingsRefusalError, refusalReasonOf, refusalText } from './settings-refusal.js';
+import type { Refusal } from '@goodvibes-jev/engine/errors';
+import { SettingsRefusalError, refusalText } from './settings-refusal.js';
+import {
+  hasFields, isRecord as record, pickFields, settingsApplyFailure, settingsCaptureRefusal, settingsOwnerBase, settingsOwnerHeaders,
+  settingsOwnerRefusal, settingsOwnerSignal, settingsOwnerTransportFailure, settingsOwnerVersionMismatch,
+} from './settings-owner-wire.js';
 import { captureStrictJudgmentJson } from '../gate/judgment-result.js';
 import { snapshotJudgmentInput } from '../gate/judgment-input.js';
 import { daemonSecretKeyFor } from './daemon-secret-keys.js';
@@ -10,6 +15,8 @@ import { isSecretRefInput } from './secret-refs.js';
 import type { DaemonConfigEndpoint, DaemonConfigRouterDeps } from './daemon-config-route.js';
 
 export type { SettingsImportPreconditionRequest, SettingsImportPreconditionReceipt };
+/** What an import apply reports; `failure` and `receiptUnreadable` as for one change (settings-precondition-client.ts). */
+export type RemoteSettingsImportReceipt = SettingsImportPreconditionReceipt & { readonly failure?: Refusal; readonly receiptUnreadable?: true };
 declare const remoteImportBrand: unique symbol;
 export interface RemoteSettingsImportPrecondition { readonly [remoteImportBrand]: true; }
 export interface RemoteSettingsImportPreconditionFacts extends SettingsImportPreconditionFacts {
@@ -29,178 +36,187 @@ interface Entry {
   phase: 'ready' | 'pending' | 'completed';
   receipt?: SettingsImportPreconditionReceipt;
 }
+const SUBJECT = 'Settings import';
 const entries = new WeakMap<RemoteSettingsImportPrecondition, Entry>();
-function unavailable(): Error { return new Error('Settings import owner unavailable; fresh capture and admission required.'); }
-const PAIRING_STORE_FAULTED_TEXT = 'Settings import refused: the daemon\'s pairing token store is faulted, so paired and shared-token settings authority is held. Nothing was applied. Retrying will not help until the store is readable again; a failed revoke, rename or grant write holds until the daemon restarts.';
-/** A capture refusal that names a cause the caller can act on; anything else stays the generic refusal. */
-async function captureRefusal(response: Response): Promise<Error> {
-  if (response.redirected || response.status !== 409) return unavailable();
-  try {
-    const body: unknown = await response.json();
-    if (!record(body)) return unavailable();
-    if (body.code === 'PAIRING_STORE_FAULTED') return new SettingsRefusalError('pairing-store-faulted', PAIRING_STORE_FAULTED_TEXT);
-    const reason = refusalReasonOf(body);
-    return reason ? new SettingsRefusalError(reason, refusalText('Settings import', reason)) : unavailable();
-  } catch { return unavailable(); }
+function stale(): SettingsRefusalError { return new SettingsRefusalError('stale', refusalText(SUBJECT, 'stale')); }
+function invalidRequest(detail: string): Error {
+  return settingsOwnerRefusal({ code: 'SETTINGS_REQUEST_INVALID', state: 'settings import not sent; nothing was applied',
+    reason: `The settings import is not one this client sends: ${detail}`, next: ['Import a list of distinct daemon-owned settings, each with a key and a value'], retryable: false });
 }
 function assertSynchronous(check: (() => void) | undefined): void {
   if (!check) return;
   const result: unknown = Reflect.apply(check, undefined, []);
   if (result === undefined) return;
   if (nodeTypes.isPromise(result)) Reflect.apply(Promise.prototype.then, result, [undefined, () => {}]);
-  throw unavailable();
+  throw stale();
 }
-function record(value: unknown): value is Record<string, unknown> { return value !== null && typeof value === 'object' && !Array.isArray(value); }
-function exact(value: Record<string, unknown>, keys: readonly string[]): boolean {
-  const fields = Object.keys(value); return fields.length === keys.length && fields.every(key => keys.includes(key));
-}
-function endpointUrl(endpoint: DaemonConfigEndpoint): string {
-  const url = new URL(endpoint.baseUrl);
-  if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) throw unavailable();
-  return url.href.replace(/\/+$/, '');
-}
-function destination(value: unknown): boolean {
-  return record(value) && exact(value, ['path', 'operation', 'tier']) && typeof value.path === 'string' && value.path.length > 0
+const DESTINATION_FIELDS = ['path', 'operation', 'tier'] as const;
+function destination(value: unknown): value is Record<string, unknown> {
+  return record(value) && hasFields(value, DESTINATION_FIELDS) && typeof value.path === 'string' && value.path.length > 0
     && ['set', 'remove'].includes(String(value.operation)) && typeof value.tier === 'string' && value.tier.length > 0;
 }
 function expectedSetting(key: string, value: unknown): { value: unknown; credential?: { key: string; scope: 'daemon'; configured: boolean } } {
   if (!isSecretBearingConfigKey(key)) return { value };
-  if (typeof value !== 'string') throw unavailable();
+  if (typeof value !== 'string') throw invalidRequest(`${key} holds a credential and takes a string`);
   const trimmed = value.trim(), secretKey = daemonSecretKeyFor(key);
   if (trimmed.startsWith('goodvibes://secrets/') && isSecretRefInput(trimmed)) return { value: trimmed };
-  if (trimmed.startsWith('goodvibes://')) throw unavailable();
+  if (trimmed.startsWith('goodvibes://')) throw invalidRequest(`${key} holds a goodvibes:// address that is not a secret reference`);
   return { value: trimmed ? `goodvibes://secrets/goodvibes/${encodeURIComponent(secretKey)}` : '',
     credential: { key: secretKey, scope: 'daemon', configured: !!trimmed } };
 }
-function validateFacts(value: unknown, request: SettingsImportPreconditionRequest): SettingsImportPreconditionFacts {
-  if (!record(value) || !exact(value, ['operation', 'effects', 'incarnation', 'destinations', ...(Object.hasOwn(value, 'credential') ? ['credential'] : [])])
+/** The facts this build reads, with fields a newer daemon adds dropped; undefined when they do not describe `request`. */
+function readFacts(value: unknown, request: SettingsImportPreconditionRequest): SettingsImportPreconditionFacts | undefined {
+  if (!record(value) || !hasFields(value, ['operation', 'effects', 'incarnation', 'destinations'])
     || value.operation !== 'import' || !Number.isSafeInteger(value.incarnation) || Number(value.incarnation) < 0
     || !Array.isArray(value.effects) || value.effects.length !== request.settings.length || !Array.isArray(value.destinations)
-    || !value.destinations.length || !value.destinations.every(destination)) throw unavailable();
+    || !value.destinations.length || !value.destinations.every(destination)) return undefined;
   const expectedCredentials: { key: string; scope: 'daemon'; configured: boolean }[] = [];
-  const effectDestinations: unknown[] = [];
+  const effects: Record<string, unknown>[] = [];
+  const effectDestinations: Record<string, unknown>[] = [];
   for (const [index, setting] of request.settings.entries()) {
-    const effect = value.effects[index], expected = expectedSetting(setting.key, setting.value);
-    if (!record(effect) || !exact(effect, ['operation', 'key', 'value', 'destinations']) || effect.operation !== 'set' || effect.key !== setting.key
+    const effect: unknown = value.effects[index], expected = expectedSetting(setting.key, setting.value);
+    if (!record(effect) || !hasFields(effect, ['operation', 'key', 'value', 'destinations']) || effect.operation !== 'set' || effect.key !== setting.key
       || JSON.stringify(effect.value) !== JSON.stringify(expected.value) || !Array.isArray(effect.destinations) || !effect.destinations.length
-      || !effect.destinations.every(item => destination(item) && record(item) && item.operation === 'set'
-        && ['global', 'project', 'daemon', 'shared'].includes(String(item.tier)))) throw unavailable();
-    effectDestinations.push(...effect.destinations);
+      || !effect.destinations.every(item => destination(item) && item.operation === 'set'
+        && ['global', 'project', 'daemon', 'shared'].includes(String(item.tier)))) return undefined;
+    const destinations = (effect.destinations as Record<string, unknown>[]).map(item => pickFields(item, DESTINATION_FIELDS));
+    effects.push({ operation: 'set', key: effect.key, value: effect.value, destinations });
+    effectDestinations.push(...destinations);
     if (expected.credential) expectedCredentials.push(expected.credential);
   }
-  let credentialDestinations: unknown[] = [];
+  let credential: Record<string, unknown> | undefined;
+  let credentialDestinations: Record<string, unknown>[] = [];
   if (expectedCredentials.length) {
-    const credential = value.credential;
-    if (!record(credential) || !exact(credential, ['items', 'destinations']) || !Array.isArray(credential.items)
-      || credential.items.length !== expectedCredentials.length || !credential.items.every((item, index) => record(item)
-        && exact(item, ['key', 'scope', 'configured']) && item.key === expectedCredentials[index]!.key
+    const raw = value.credential;
+    if (!record(raw) || !hasFields(raw, ['items', 'destinations']) || !Array.isArray(raw.items)
+      || raw.items.length !== expectedCredentials.length || !raw.items.every((item, index) => record(item)
+        && hasFields(item, ['key', 'scope', 'configured']) && item.key === expectedCredentials[index]!.key
         && item.scope === 'daemon' && item.configured === expectedCredentials[index]!.configured)
-      || !Array.isArray(credential.destinations) || !credential.destinations.every(item => destination(item) && record(item)
-        && item.operation === 'set' && ['daemon', 'keyfile'].includes(String(item.tier)))) throw unavailable();
-    credentialDestinations = credential.destinations;
-  } else if (Object.hasOwn(value, 'credential')) throw unavailable();
-  if (JSON.stringify(value.destinations) !== JSON.stringify([...credentialDestinations, ...effectDestinations])) throw unavailable();
+      || !Array.isArray(raw.destinations) || !raw.destinations.every(item => destination(item)
+        && item.operation === 'set' && ['daemon', 'keyfile'].includes(String(item.tier)))) return undefined;
+    credentialDestinations = (raw.destinations as Record<string, unknown>[]).map(item => pickFields(item, DESTINATION_FIELDS));
+    credential = { items: expectedCredentials.map(item => ({ ...item })), destinations: credentialDestinations };
+  } else if (value.credential !== undefined) return undefined;
+  const destinations = (value.destinations as Record<string, unknown>[]).map(item => pickFields(item, DESTINATION_FIELDS));
+  if (JSON.stringify(destinations) !== JSON.stringify([...credentialDestinations, ...effectDestinations])) return undefined;
   // Original complete value-safe facts pass the protected-input boundary before any hosted judgment.
-  return snapshotJudgmentInput(value, 'goodvibes_settings') as unknown as SettingsImportPreconditionFacts;
+  return snapshotJudgmentInput({ operation: 'import', effects, incarnation: Number(value.incarnation), destinations,
+    ...(credential ? { credential } : {}) }, 'goodvibes_settings') as unknown as SettingsImportPreconditionFacts;
 }
 function assertSource(entry: Entry): void {
   entry.restriction.signal?.throwIfAborted(); assertSynchronous(entry.restriction.assertCurrent);
-  if (entry.expiresAt <= Date.now()) throw unavailable();
-}
-function wireSignal(timeoutMs: number, signal?: AbortSignal): AbortSignal {
-  const timeout = AbortSignal.timeout(timeoutMs); return signal ? AbortSignal.any([timeout, signal]) : timeout;
+  if (entry.expiresAt <= Date.now()) throw stale();
 }
 /** Private authenticated capture: raw imported values never enter a judgment request. */
 export async function captureRemoteSettingsImportPrecondition(endpoint: DaemonConfigEndpoint, request: SettingsImportPreconditionRequest,
   deps: Pick<DaemonConfigRouterDeps, 'fetchImpl' | 'timeoutMs'> & RemoteSettingsImportRestriction = {}): Promise<RemoteSettingsImportPrecondition> {
+  deps.signal?.throwIfAborted(); assertSynchronous(deps.assertCurrent);
+  const input = captureStrictJudgmentJson(request, () => invalidRequest('the settings are not plain JSON'));
+  if (!record(input) || !Array.isArray(input.settings) || !input.settings.length) throw invalidRequest('there are no settings to import');
+  const settings = input.settings as unknown[];
+  if (!settings.every(setting => record(setting) && hasFields(setting, ['key', 'value']) && typeof setting.key === 'string')) throw invalidRequest('every setting needs a key and a value');
+  const typed = settings as { key: string; value: unknown }[];
+  const notDaemon = typed.find(setting => !isDaemonOwnedConfigKey(setting.key));
+  if (notDaemon) throw invalidRequest(`${notDaemon.key} is not a daemon-owned setting`);
+  if (new Set(typed.map(setting => setting.key)).size !== typed.length) throw invalidRequest('a setting is listed twice');
+  const captured: SettingsImportPreconditionRequest = { settings: typed.map(setting => ({ key: setting.key, value: setting.value })) };
+  for (const setting of captured.settings) expectedSetting(setting.key, setting.value);
+  const base = settingsOwnerBase(SUBJECT, endpoint), fetchImpl = deps.fetchImpl ?? globalThis.fetch, timeoutMs = deps.timeoutMs ?? 10_000;
+  const headers = settingsOwnerHeaders(endpoint);
+  const localExpiresAt = Date.now() + 300_000;
+  deps.signal?.throwIfAborted(); assertSynchronous(deps.assertCurrent);
+  let response: Response;
   try {
-    deps.signal?.throwIfAborted(); assertSynchronous(deps.assertCurrent);
-    const input = captureStrictJudgmentJson(request, unavailable);
-    if (!record(input) || !exact(input, ['settings']) || !Array.isArray(input.settings) || !input.settings.length
-      || !input.settings.every(setting => record(setting) && exact(setting, ['key', 'value']) && typeof setting.key === 'string'
-        && isDaemonOwnedConfigKey(setting.key)) || new Set(input.settings.map(setting => setting.key)).size !== input.settings.length) throw unavailable();
-    for (const setting of input.settings) expectedSetting(setting.key, setting.value);
-    const base = endpointUrl(endpoint), fetchImpl = deps.fetchImpl ?? globalThis.fetch, timeoutMs = deps.timeoutMs ?? 10_000;
-    const headers = Object.freeze({ 'content-type': 'application/json', ...(endpoint.token ? { authorization: `Bearer ${endpoint.token}` } : {}) });
-    const localExpiresAt = Date.now() + 300_000;
-    deps.signal?.throwIfAborted(); assertSynchronous(deps.assertCurrent);
-    const response = await fetchImpl(`${base}/config`, { method: 'POST', headers, redirect: 'error',
-      body: JSON.stringify({ settingsImportPrecondition: { version: 1, action: 'capture', settings: input.settings } }), signal: wireSignal(timeoutMs, deps.signal) });
-    if (!response.ok || response.redirected) throw await captureRefusal(response);
-    const payload: unknown = await response.json();
-    if (!record(payload) || !exact(payload, ['settingsImportPrecondition']) || !record(payload.settingsImportPrecondition)) throw unavailable();
-    const arm = payload.settingsImportPrecondition;
-    if (!exact(arm, ['version', 'action', 'reference', 'expiresAt', 'facts']) || arm.version !== 1 || arm.action !== 'captured'
-      || typeof arm.reference !== 'string' || !arm.reference || arm.reference.length > 128 || !Number.isSafeInteger(arm.expiresAt)
-      || Number(arm.expiresAt) <= Date.now()) throw unavailable();
-    const facts = captureStrictJudgmentJson({ ...validateFacts(arm.facts, input), endpoint: base, expiresAt: Number(arm.expiresAt) }, unavailable);
-    const entry: Entry = { facts, reference: arm.reference, url: `${base}/config`, headers, fetchImpl, timeoutMs,
-      expiresAt: Math.min(localExpiresAt, Number(arm.expiresAt)), restriction: Object.freeze({ ...(deps.signal ? { signal: deps.signal } : {}),
-        ...(deps.assertCurrent ? { assertCurrent: deps.assertCurrent } : {}) }), phase: 'ready' };
-    assertSource(entry);
-    const handle = Object.freeze({}) as RemoteSettingsImportPrecondition; entries.set(handle, entry); return handle;
-  } catch (error) { throw error instanceof SettingsRefusalError ? error : unavailable(); }
+    response = await fetchImpl(`${base}/config`, { method: 'POST', headers, redirect: 'error',
+      body: JSON.stringify({ settingsImportPrecondition: { version: 1, action: 'capture', settings: captured.settings } }), signal: settingsOwnerSignal(timeoutMs, deps.signal) });
+  } catch (error) { throw settingsOwnerTransportFailure(SUBJECT, error, { signal: deps.signal, url: base, applying: false }).error; }
+  if (!response.ok || response.redirected) throw await settingsCaptureRefusal(SUBJECT, response);
+  let payload: unknown;
+  try { payload = await response.json(); } catch { throw settingsOwnerVersionMismatch(SUBJECT, 'the capture answer is not JSON', false); }
+  const arm = record(payload) && record(payload.settingsImportPrecondition) ? payload.settingsImportPrecondition : undefined;
+  if (!arm || !hasFields(arm, ['version', 'action', 'reference', 'expiresAt', 'facts']) || arm.version !== 1 || arm.action !== 'captured'
+    || typeof arm.reference !== 'string' || !arm.reference || arm.reference.length > 128 || !Number.isSafeInteger(arm.expiresAt)) {
+    throw settingsOwnerVersionMismatch(SUBJECT, 'the capture answer lacks the version 1 fields', false);
+  }
+  if (Number(arm.expiresAt) <= Date.now()) throw stale();
+  const read = readFacts(arm.facts, captured);
+  if (!read) throw settingsOwnerVersionMismatch(SUBJECT, 'the captured facts do not describe this import', false);
+  const facts = captureStrictJudgmentJson({ ...read, endpoint: base, expiresAt: Number(arm.expiresAt) }, stale) as RemoteSettingsImportPreconditionFacts;
+  const entry: Entry = { facts, reference: arm.reference, url: `${base}/config`, headers, fetchImpl, timeoutMs,
+    expiresAt: Math.min(localExpiresAt, Number(arm.expiresAt)), restriction: Object.freeze({ ...(deps.signal ? { signal: deps.signal } : {}),
+      ...(deps.assertCurrent ? { assertCurrent: deps.assertCurrent } : {}) }), phase: 'ready' };
+  assertSource(entry);
+  const handle = Object.freeze({}) as RemoteSettingsImportPrecondition; entries.set(handle, entry); return handle;
 }
 export function inspectRemoteSettingsImportPrecondition(handle: RemoteSettingsImportPrecondition): RemoteSettingsImportPreconditionFacts {
-  const entry = entries.get(handle); if (!entry) throw unavailable(); return entry.facts;
+  const entry = entries.get(handle); if (!entry) throw stale(); return entry.facts;
 }
 export function assertRemoteSettingsImportPrecondition(handle: RemoteSettingsImportPrecondition): void {
-  const entry = entries.get(handle); if (!entry || entry.phase !== 'ready') throw unavailable(); assertSource(entry);
+  const entry = entries.get(handle); if (!entry) throw stale();
+  if (entry.phase !== 'ready') throw new SettingsRefusalError('spent', refusalText(SUBJECT, 'spent'));
+  assertSource(entry);
 }
-function validateReceipt(value: unknown, facts: RemoteSettingsImportPreconditionFacts): SettingsImportPreconditionReceipt {
-  if (!record(value) || !exact(value, ['status', 'completedPaths', ...(Object.hasOwn(value, 'uncertainPath') ? ['uncertainPath'] : []),
-    ...(Object.hasOwn(value, 'verifiedInOwningStore') ? ['verifiedInOwningStore'] : [])]) || !['committed', 'partial', 'unknown'].includes(String(value.status))
-    || !Array.isArray(value.completedPaths)) throw unavailable();
-  const paths = facts.destinations.map(item => item.path), completed = value.completedPaths;
-  if (completed.length > paths.length || !completed.every((path, index) => path === paths[index])) throw unavailable();
+/** The receipt fields this build reads, with fields a newer daemon adds dropped; undefined when it cannot be read. */
+function readReceipt(value: unknown, facts: RemoteSettingsImportPreconditionFacts): SettingsImportPreconditionReceipt | undefined {
+  if (!record(value) || !['committed', 'partial', 'unknown'].includes(String(value.status)) || !Array.isArray(value.completedPaths)) return undefined;
+  const paths = facts.destinations.map(item => item.path), completed = value.completedPaths as unknown[];
+  if (completed.length > paths.length || !completed.every((path, index) => path === paths[index])) return undefined;
+  const completedPaths = Object.freeze([...completed as string[]]);
   if (value.status === 'committed') {
-    if (completed.length !== paths.length || value.uncertainPath !== undefined || typeof value.verifiedInOwningStore !== 'boolean') throw unavailable();
-  } else {
-    if (Object.hasOwn(value, 'verifiedInOwningStore') || value.status === 'partial' && (!completed.length || completed.length >= paths.length
-      || value.uncertainPath !== paths[completed.length]) || value.status === 'unknown' && (completed.length
-      || value.uncertainPath !== undefined && value.uncertainPath !== paths[0])) throw unavailable();
+    if (completedPaths.length !== paths.length || value.uncertainPath !== undefined) return undefined;
+    return Object.freeze({ status: 'committed', completedPaths, verifiedInOwningStore: value.verifiedInOwningStore === true });
   }
-  return captureStrictJudgmentJson(value, unavailable) as unknown as SettingsImportPreconditionReceipt;
+  if (value.status === 'partial' && (!completedPaths.length || completedPaths.length >= paths.length)) return undefined;
+  if (value.status === 'unknown' && completedPaths.length) return undefined;
+  const uncertainPath = typeof value.uncertainPath === 'string' ? value.uncertainPath : undefined;
+  return Object.freeze({ status: value.status as 'partial' | 'unknown', completedPaths, ...(uncertainPath === undefined ? {} : { uncertainPath }) });
 }
 /** The daemon's import precondition refusals all precede any effect; only they mean "nothing was applied". */
 const REFUSAL_CODES: readonly string[] = ['SETTINGS_IMPORT_PRECONDITION_STALE', 'SETTINGS_IMPORT_PRECONDITION_UNAVAILABLE', 'SETTINGS_IMPORT_PRECONDITION_INVALID', 'PAIRING_STORE_FAULTED'];
-/** Not null when the daemon refused before any effect; `reason` is set when it said why. */
-async function refusedBeforeEffect(response: Response): Promise<{ readonly reason?: ReturnType<typeof refusalReasonOf> } | null> {
-  if (response.redirected || (response.status !== 409 && response.status !== 400)) return null;
-  try {
-    const body: unknown = await response.json();
-    if (!record(body) || !exact(body, Object.hasOwn(body, 'reason') ? ['error', 'code', 'reason'] : ['error', 'code']) || !REFUSAL_CODES.includes(String(body.code))) return null;
-    const reason = refusalReasonOf(body);
-    return reason ? { reason } : {};
-  } catch { return null; }
-}
 export async function applyRemoteSettingsImportPrecondition(handle: RemoteSettingsImportPrecondition,
-  restriction: RemoteSettingsImportRestriction = {}): Promise<SettingsImportPreconditionReceipt> {
+  restriction: RemoteSettingsImportRestriction = {}): Promise<RemoteSettingsImportReceipt> {
   assertRemoteSettingsImportPrecondition(handle); restriction.signal?.throwIfAborted(); assertSynchronous(restriction.assertCurrent);
   const entry = entries.get(handle)!;
   entry.phase = 'pending';
-  const unknown: SettingsImportPreconditionReceipt = Object.freeze({ status: 'unknown', completedPaths: Object.freeze([]) });
+  const none = Object.freeze([]) as readonly string[];
+  const signal = restriction.signal ? (entry.restriction.signal ? AbortSignal.any([restriction.signal, entry.restriction.signal]) : restriction.signal) : entry.restriction.signal;
+  let response: Response;
   try {
     assertSource(entry); restriction.signal?.throwIfAborted(); assertSynchronous(restriction.assertCurrent);
-    const response = await entry.fetchImpl(entry.url, { method: 'POST', headers: entry.headers, redirect: 'error',
+    response = await entry.fetchImpl(entry.url, { method: 'POST', headers: entry.headers, redirect: 'error',
       body: JSON.stringify({ settingsImportPrecondition: { version: 1, action: 'apply', reference: entry.reference } }),
-      signal: wireSignal(entry.timeoutMs, restriction.signal ? (entry.restriction.signal ? AbortSignal.any([restriction.signal, entry.restriction.signal]) : restriction.signal) : entry.restriction.signal) });
-    if (!response.ok || response.redirected) {
-      const refused = await refusedBeforeEffect(response);
-      return refused ? Object.freeze({ ...unknown, refused: true as const, ...(refused.reason ? { refusalReason: refused.reason } : {}) }) : unknown;
+      signal: settingsOwnerSignal(entry.timeoutMs, signal) });
+  } catch (error) {
+    if (error instanceof SettingsRefusalError || signal?.aborted) {
+      return Object.freeze({ status: 'unknown', completedPaths: none, refused: true as const, failure: settingsOwnerRefusal({
+        code: 'SETTINGS_IMPORT_CANCELLED', state: 'settings import not sent; nothing was applied', reason: 'The import was cancelled or went stale before it was sent', next: ['Capture the import again'] }).refusal });
     }
-    const payload: unknown = await response.json();
-    if (!record(payload) || !exact(payload, ['settingsImportPrecondition']) || !record(payload.settingsImportPrecondition)) return unknown;
-    const arm = payload.settingsImportPrecondition;
-    if (!exact(arm, ['version', 'action', 'reference', 'receipt']) || arm.version !== 1 || arm.action !== 'applied' || arm.reference !== entry.reference) return unknown;
-    // Preserve the actual validated receipt even if cancellation or source retirement follows the write.
-    entry.receipt = validateReceipt(arm.receipt, entry.facts); entry.phase = 'completed';
-    try { assertSource(entry); restriction.signal?.throwIfAborted(); assertSynchronous(restriction.assertCurrent); } catch { /* Completed assertion stops the tail. */ }
-    return entry.receipt;
-  } catch { return entry.receipt ?? unknown; }
+    const failure = settingsOwnerTransportFailure(SUBJECT, error, { url: entry.facts.endpoint, applying: true });
+    return Object.freeze({ status: 'unknown', completedPaths: none, ...(failure.notSent ? { refused: true as const } : {}), failure: failure.error.refusal });
+  }
+  if (!response.ok || response.redirected) {
+    const failure = await settingsApplyFailure(SUBJECT, response, REFUSAL_CODES);
+    return Object.freeze({ status: 'unknown', completedPaths: none, ...(failure.refusedBeforeEffect ? { refused: true as const } : {}),
+      ...(failure.reason ? { refusalReason: failure.reason } : {}), failure: failure.refusal });
+  }
+  const unreadable = (detail: string): RemoteSettingsImportReceipt => Object.freeze({ status: 'unknown', completedPaths: none, receiptUnreadable: true,
+    failure: settingsOwnerVersionMismatch(SUBJECT, detail, true).refusal });
+  let payload: unknown;
+  try { payload = await response.json(); } catch { return unreadable('the apply answer is not JSON'); }
+  const arm = record(payload) && record(payload.settingsImportPrecondition) ? payload.settingsImportPrecondition : undefined;
+  if (!arm || arm.version !== 1 || arm.action !== 'applied' || arm.reference !== entry.reference) return unreadable('the apply answer lacks the version 1 fields');
+  const receipt = readReceipt(arm.receipt, entry.facts);
+  if (!receipt) return unreadable('the receipt does not match the captured destinations');
+  // Preserve the actual receipt even if cancellation or source retirement follows the write.
+  entry.receipt = receipt; entry.phase = 'completed';
+  return receipt;
 }
 export function assertCompletedRemoteSettingsImportPrecondition(handle: RemoteSettingsImportPrecondition): void {
   const entry = entries.get(handle);
-  if (!entry || entry.phase !== 'completed' || entry.receipt?.status !== 'committed' || entry.receipt.verifiedInOwningStore !== true) throw unavailable();
+  if (!entry || entry.phase !== 'completed' || entry.receipt?.status !== 'committed' || entry.receipt.verifiedInOwningStore !== true) {
+    throw settingsOwnerRefusal({ code: 'SETTINGS_IMPORT_UNCONFIRMED', state: 'the settings import is not confirmed in the daemon\'s settings',
+      reason: entry?.receipt ? `The daemon reported the import as ${entry.receipt.status}${entry.receipt.status === 'committed' ? ' but could not read it back' : ''}` : 'The import has not completed',
+      next: ['Read the imported settings to see which values took effect'], retryable: false });
+  }
   assertSource(entry);
 }

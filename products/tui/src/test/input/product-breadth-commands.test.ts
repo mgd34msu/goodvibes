@@ -2252,10 +2252,6 @@ describe('product breadth commands', () => {
     out.length = 0;
     await sandbox!.handler(['set-mcp', 'per-server-vm'], ctx);
     expect(out.join('\n')).toContain('Sandbox MCP isolation set to per-server-vm');
-
-    out.length = 0;
-    await sandbox!.handler(['set-repl', 'shared-vm'], ctx);
-    expect(out.join('\n')).toContain('Sandbox REPL isolation set to shared-vm');
   });
 
   test('storage and deeplink commands expose platform-service breadth', async () => {

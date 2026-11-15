@@ -1,6 +1,7 @@
 import type { ConfigModalActionContext, ConfigModalSurface, ConfigModalView } from '../../input/config-modal-types.ts';
 import type { ServiceInspectionQuery, SubscriptionAccessQuery } from '@/runtime/index.ts';
 import type { ServiceConfig, ServiceInspection, ServiceConnectionTestResult } from '@goodvibes-jev/engine/platform/platform/config';
+import { subscriptionState } from '@goodvibes-jev/engine/platform/platform/config';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { toneStyle, statusGlyph, pad, postureLine, kv, type Tone } from './modal-surface-helpers.ts';
 
@@ -41,7 +42,12 @@ function authSummary(config: ServiceConfig, manager: SubscriptionAccessQuery): s
     case 'bearer': return hasOverride ? 'bearer+subscription' : 'bearer';
     case 'basic': return 'basic';
     case 'api-key': return hasOverride ? 'oauth-override' : config.apiKeyHeader ? `api-key:${config.apiKeyHeader}` : 'api-key';
-    case 'oauth': return manager.get(provider) != null ? 'oauth(active)' : 'oauth';
+    case 'oauth': {
+      const subscription = manager.get(provider);
+      if (!subscription) return 'oauth';
+      const state = subscriptionState(subscription);
+      return state === 'expired' || state === 'revoked' ? `oauth(${state}, sign in again)` : `oauth(${state})`;
+    }
   }
 }
 

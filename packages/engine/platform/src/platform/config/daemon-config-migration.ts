@@ -30,7 +30,7 @@
  * data. Every file write is temp-file + rename, so no reader sees a half file.
  */
 
-import { existsSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import { DurablePolicyEpochOwner } from './durable-policy-epoch.js';
 import { readDotPath } from './shared-config-tier.js';
 import { deleteRawDotPath } from './settings-io.js';
@@ -89,7 +89,7 @@ interface SurfaceFile {
   readonly surface: string;
   readonly path: string;
   readonly raw: Record<string, unknown>;
-  /** The file as read, so a write can prove nothing else changed it meanwhile. */
+  /** The file's identity when it was read, so a write can tell another process changed it meanwhile. */
   readonly readAs: string;
   stripped: boolean;
 }
@@ -118,16 +118,17 @@ export function migrateDaemonOwnedConfig(
   const surfaces = options.surfaces ?? discoverSurfaceSettingsFiles(options.homeDir);
   const now = options.now ?? (() => new Date());
 
+  const storeReadAs = fileIdentity(storePath);
   const store = readSettingsFileStrict(storePath);
-  const storeReadAs = JSON.stringify(store);
   // One unreadable surface file must not strand every other surface's values:
   // it is left untouched and disclosed in the marker.
   const surfaceFiles: SurfaceFile[] = [];
   const skipped: SkippedSurfaceFile[] = [];
   for (const entry of surfaces) {
     try {
+      const readAs = fileIdentity(entry.path);
       const raw = readSettingsFileStrict(entry.path);
-      surfaceFiles.push({ surface: entry.surface, path: entry.path, raw, readAs: JSON.stringify(raw), stripped: false });
+      surfaceFiles.push({ surface: entry.surface, path: entry.path, raw, readAs, stripped: false });
     } catch (error) {
       skipped.push({ path: entry.path, reason: summarizeError(error) });
     }
@@ -159,15 +160,24 @@ export function migrateDaemonOwnedConfig(
   // Observe existing continuation history only; a migration never activates it.
   // Persist all revocation intents before the plan or any settings effects.
   const writesStore = plan.storeChanged || !existsSync(storePath);
+  // A surface file that stays unreadable makes every start re-plan. When that
+  // re-plan finds nothing to move and the same files still unreadable, the
+  // record on disk already says so: write nothing.
+  const unchanged = skipped.length > 0 && !writesStore && !surfaceFiles.some(entry => entry.stripped)
+    && done !== null && done.moved.length === moved.length && done.discarded.length === discarded.length
+    && JSON.stringify(done.skipped ?? []) === JSON.stringify(skipped);
+  if (unchanged && done) return { migrated: false, marker: done, markerPath };
   const policyOwners = new Map([...new Set([
     ...(writesStore ? [storePath] : []), ...surfaceFiles.filter(entry => entry.stripped).map(entry => entry.path),
   ])].map(path => [path, new DurablePolicyEpochOwner([path], true)]));
   for (const owner of policyOwners.values()) owner.advance();
-  const writeSettings = (path: string, value: Record<string, unknown>, readAs: string | null) => {
+  const writeSettings = (path: string, value: Record<string, unknown>, readAs: string) => {
     // The files were read once, before the plan. Another process saving a
     // setting since then would be overwritten by this write; refuse instead and
     // leave the marker in-progress so the next start plans from what is there.
-    if (readAs !== null && existsSync(path) && JSON.stringify(readSettingsFileStrict(path)) !== readAs) {
+    // One stat: every settings writer replaces the file by rename or rewrites it,
+    // so its inode, size or modification time moves.
+    if (fileIdentity(path) !== readAs) {
       throw new Error(`Settings file changed while the daemon-owned config migration was running; it will be retried on the next start: ${path}`);
     }
     writeJsonAtomic(path, value);
@@ -270,6 +280,17 @@ function pickWinner(candidates: readonly Candidate[], primarySurface: string): C
   // `candidates` already follows the alphabetical surface order the discovery
   // helper guarantees, so "first" is deterministic rather than listing order.
   return candidates[0]!;
+}
+
+/** Device, inode, size and modification time of a file, or `absent`. */
+function fileIdentity(path: string): string {
+  try {
+    const stat = statSync(path, { bigint: true });
+    return `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeNs}`;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 'absent';
+    throw error;
+  }
 }
 
 function writeInto(root: Record<string, unknown>, key: string, value: unknown): void {

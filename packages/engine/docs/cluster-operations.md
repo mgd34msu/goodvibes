@@ -18,7 +18,13 @@ Group envelopes use a shared group key. These checks restrict the claimed sender
 
 ## Networks without multicast
 
-Machines find each other over multicast by default. On a network that drops multicast, list the other machines by hand under `cluster.peers` in the settings file (a JSON array; it has no settings-screen row, so edit the file):
+Machines find each other over multicast by default. On a network that drops multicast, list the other machines under `cluster.peers`, a list setting like any other:
+
+```sh
+goodvibes-daemon config set cluster.peers '["10.0.0.2", "10.0.0.3:61860"]'
+```
+
+or in the daemon's settings file:
 
 ```json
 {
@@ -31,7 +37,7 @@ Machines find each other over multicast by default. On a network that drops mult
 
 Each entry is a host or `host:port`; a host with no port uses `cluster.port`. List every other machine on every machine. The coordination log line "set cluster.peers" refers to this key.
 
-The same applies to `conversationGate.gatedSurfaces`: an array of surface names (for example `["telegram", "slack"]`) whose inbound messages go through the conversation gate. It has no settings-screen row either, and an empty or missing list uses the shipped list of channel surfaces.
+The same applies to `conversationGate.gatedSurfaces`: a list of surface names (for example `["telegram", "slack"]`) whose inbound messages go through the conversation gate, set with `goodvibes-daemon config set conversationGate.gatedSurfaces '["telegram"]'`. An empty or missing list uses the shipped list of channel surfaces.
 
 ## Local configuration and credentials
 

@@ -70,6 +70,7 @@ import { updateConfigDefaults, updateConfigSettings } from './schema-domain-upda
 import { pricingConfigDefaults, pricingConfigSettings } from './schema-domain-pricing.js';
 import { paymentsConfigDefaults, paymentsConfigSettings } from './schema-domain-payments.js';
 import { daemonLocationConfigSettings } from './schema-domain-daemon-location.js';
+import { listConfigSettings } from './schema-domain-lists.js';
 import type { ConfigKey, ConfigSetting, GoodVibesConfig, SurfacesConfig } from './schema-types.js';
 
 export * from './schema-types.js';
@@ -165,6 +166,8 @@ export const CONFIG_SCHEMA: ConfigSetting[] = [
   ...featureControlSettings,
   ...pricingConfigSettings,
   ...connectorConfigSettings,
+  // ListConfigKey is not yet an arm of the ConfigKey union, so these rows are widened here.
+  ...(listConfigSettings as readonly unknown[] as readonly ConfigSetting[]),
 ] as ConfigSetting[];
 
 /** Set of all valid config keys for runtime validation. */

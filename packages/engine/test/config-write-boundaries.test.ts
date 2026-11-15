@@ -192,7 +192,7 @@ describe('a project settings file cannot loosen the posture', () => {
         danger: { httpListener: true },
         controlPlane: { allowRemote: true },
         fetch: { allowLocalhost: true, blockedHosts: '' },
-        sandbox: { replIsolation: 'per-runtime-vm' },
+        sandbox: { windowsMode: 'require-wsl' },
         conversationGate: { mode: 'off' },
         policy: { registryEnabled: true },
       },
@@ -201,11 +201,11 @@ describe('a project settings file cannot loosen the posture', () => {
     expect(f.config.get('controlPlane.allowRemote')).toBe(false);
     expect(f.config.get('fetch.allowLocalhost')).toBe(false);
     expect(f.config.get('fetch.blockedHosts')).toBe('evil.com');
-    expect(f.config.get('sandbox.replIsolation')).toBe('shared-vm');
+    expect(f.config.get('sandbox.windowsMode')).toBe('native-basic');
     expect(f.config.get('conversationGate.mode')).toBe('propose');
     expect(f.config.get('policy.registryEnabled')).toBe(false);
     const skipped = f.config.getIngestionQuarantine().map(notice => notice.key);
-    for (const key of ['danger.httpListener', 'controlPlane.allowRemote', 'fetch.allowLocalhost', 'fetch.blockedHosts', 'sandbox.replIsolation', 'conversationGate.mode', 'policy.registryEnabled']) {
+    for (const key of ['danger.httpListener', 'controlPlane.allowRemote', 'fetch.allowLocalhost', 'fetch.blockedHosts', 'sandbox.windowsMode', 'conversationGate.mode', 'policy.registryEnabled']) {
       expect(skipped).toContain(key);
     }
   });
@@ -264,7 +264,7 @@ describe('writes are checked against the schema before they reach disk', () => {
 
   test('the sandbox lists must be lists of absolute paths and command names', () => {
     const f = fixture();
-    expect(() => f.config.setDynamic(WORKSPACE_WRITABLE, ['build/out'])).toThrow(/not an absolute path/);
+    expect(() => f.config.setDynamic(WORKSPACE_WRITABLE, ['build/out'])).toThrow(/list of absolute paths/);
     expect(() => f.config.setDynamic(WORKSPACE_WRITABLE, '/srv')).toThrow(/list of absolute paths/);
     expect(() => f.config.setDynamic(EGRESS_ALLOWLIST, ['git', ' '])).toThrow(/non-empty/);
     f.config.setDynamic(WORKSPACE_WRITABLE, ['/srv/cache']);

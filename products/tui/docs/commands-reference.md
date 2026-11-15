@@ -395,7 +395,7 @@ GoodVibes ships **163** built-in slash commands across **75** categories. Every 
 
 | Command | Aliases | Usage | Description |
 | --- | --- | --- | --- |
-| `/sandbox` | None | `[open\|review\|recommend\|profiles\|presets\|preset <id>\|apply-preset <id>\|probe\|doctor\|session ...\|bundle <export\|inspect> <path>\|set-mcp <mode>\|set-repl <mode>\|set-windows <mode>\|set-backend local]` | Review and configure local sandbox policy for MCP and evaluation runtimes |
+| `/sandbox` | None | `[open\|review\|recommend\|profiles\|presets\|preset <id>\|apply-preset <id>\|probe\|doctor\|session ...\|bundle <export\|inspect> <path>\|set-mcp <mode>\|set-windows <mode>]` | Review and configure local sandbox policy for MCP and evaluation runtimes |
 
 ## Platform Access
 

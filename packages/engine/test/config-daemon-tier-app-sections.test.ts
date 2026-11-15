@@ -209,10 +209,10 @@ describe('settings ingestion: a value the reader rejects', () => {
   });
 });
 
-describe('settings ingestion: a key form from a newer component', () => {
-  const readings = useConfigReadings({ forms: { 'clientSecretRef@v2': 'clientSecretRef' } });
+describe('settings ingestion: a key this build does not know', () => {
+  const readings = useConfigReadings({});
 
-  test('terminal launch update settings load without unknown-setting judgments', async () => {
+  test('terminal launch update settings load without a notice', () => {
     const root = makeTempRoot('gv-launch-update-settings-');
     try {
       const configDir = join(root, 'config');
@@ -221,42 +221,36 @@ describe('settings ingestion: a key form from a newer component', () => {
       const manager = new ConfigManager({ homeDir: root, configDir, surfaceRoot: 'tui' });
       expect(manager.get('update.autoUpdateAtLaunch')).toBe(false);
       expect(manager.get('update.launchCheckTimeoutMs')).toBe(4000);
-      await manager.announceUnknownSettingForms();
       expect(readings.requests).toHaveLength(0);
       expect(manager.getIngestionQuarantine()).toHaveLength(0);
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 
-  test('an unknown key read as a newer form of a known key is announced once the port can read it, and the file is left alone', async () => {
+  test('is announced at load with the nearest known name, with no model request, and the file is left alone', () => {
     const { manager, path } = managerOverDaemonTier({
+      controlPlane: { prot: 3999 },
       calendar: { google: { 'clientSecretRef@v2': { ref: 'goodvibes://secrets/goodvibes/x' } } },
     });
-    // Loading only kept the key: config loads before a composition's port exists.
-    expect(manager.getIngestionQuarantine()).toHaveLength(0);
-    expect(readings.requests).toHaveLength(0);
-
-    await manager.announceUnknownSettingForms();
-    const [entry] = manager.getIngestionQuarantine();
-    expect(entry?.key).toBe('calendar.google.clientSecretRef@v2');
-    expect(entry?.action).toBe('skipped');
-    expect(entry?.reason).toContain('newer form of calendar.google.clientSecretRef');
-    expect(readings.requests.map(request => request.state)).toEqual([
-      expect.objectContaining({ context: { section: 'calendar.google', name: 'clientSecretRef@v2' },
-        selectionFitInstructions: 'Is `name` in `context` a newer, renamed or extended form of this known setting, holding the same setting?' }),
+    const notices = manager.getIngestionQuarantine();
+    expect(notices.map(entry => [entry.key, entry.action])).toEqual([
+      ['controlPlane.prot', 'skipped'],
+      ['calendar.google.clientSecretRef@v2', 'skipped'],
     ]);
+    expect(notices[0]?.reason).toContain('did you mean controlPlane.port');
+    expect(notices[1]?.reason).toContain('did you mean calendar.google.clientSecretRef');
+    expect(readings.requests).toHaveLength(0);
     // Never deleted: the file is shared, and a component that understands the
     // newer form must still find it there.
     const onDisk = JSON.parse(readFileSync(path, 'utf-8')) as Record<string, unknown>;
     expect(JSON.stringify(onDisk)).toContain('clientSecretRef@v2');
   });
 
-  test('a genuinely unrelated app-layer key reads as a form of none and is left unremarked', async () => {
-    // App-layer sections legitimately carry keys the platform has never heard of.
-    // Flagging those would be noise, not a signal.
+  test('a key close to no known name lists the section instead', () => {
     const { manager } = managerOverDaemonTier({ email: { imapHost: 'imap.example.com', someProductKey: 1 } });
-    await manager.announceUnknownSettingForms();
-    expect(manager.getIngestionQuarantine()).toHaveLength(0);
-    expect(readings.requests).toHaveLength(1);
+    const [entry] = manager.getIngestionQuarantine();
+    expect(entry?.key).toBe('email.someProductKey');
+    expect(entry?.reason).toContain('email has ');
+    expect(readings.requests).toHaveLength(0);
   });
 });
 

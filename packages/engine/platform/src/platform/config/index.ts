@@ -295,16 +295,6 @@ export type {
   HelperUsage,
   ResolvedHelper,
 } from './helper-model.js';
-export {
-  beginOpenAICodexLogin,
-  exchangeOpenAICodexCode,
-  refreshOpenAICodexToken,
-  OPENAI_CODEX_AUTHORIZE_URL,
-  OPENAI_CODEX_CLIENT_ID,
-  OPENAI_CODEX_REDIRECT_URI,
-  OPENAI_CODEX_TOKEN_URL,
-} from './openai-codex-auth.js';
-export type { OpenAICodexLoginStart, OpenAICodexTokenResult } from './openai-codex-auth.js';
 export * from './secret-refs.js';
 export {
   GOODVIBES_URI_PREFIX,
@@ -405,7 +395,7 @@ export type {
 } from './secrets.js';
 export { ServiceRegistry, captureServiceReadSource } from './service-registry.js';
 export type * from './service-registry.js';
-export { SubscriptionManager, captureSubscriptionReadSource, sharedSubscriptionsPath } from './subscriptions.js';
+export { SubscriptionManager, captureSubscriptionReadSource, sharedSubscriptionsPath, subscriptionState, SUBSCRIPTION_EXPIRING_SOON_MS } from './subscriptions.js';
 export type {
   PreparedSubscriptionImport,
   PreparedSubscriptionImportTransition,
@@ -416,6 +406,7 @@ export type {
   ProviderSubscription,
   SubscriptionManagerOptions,
   SubscriptionShellPaths,
+  SubscriptionState,
 } from './subscriptions.js';
 export { observeImportFile, assertImportFileCurrent } from './prepared-import.js';
 export type { ImportFileObservation, PreparedImportTransitionFacts } from './prepared-import.js';

@@ -19,4 +19,4 @@ Review the current state with `/sandbox review` and the live session with `/sand
 
 ## REPL and MCP isolation
 
-`sandbox.vmBackend` has one value, `local`: REPL and MCP work runs on the host and is not isolated. `sandbox.replIsolation`, `sandbox.mcpIsolation` and `sandbox.windowsMode` record the preferred posture for a virtualized backend, but no backend that provides isolation ships today. The QEMU backend was retired; a settings file that still says `qemu` loads as `local` with a receipt, its `sandbox.qemu*` keys are removed, and the `/sandbox qemu` family answers that it has been retired.
+MCP work runs as local host processes and is not isolated. `sandbox.mcpIsolation` and `sandbox.windowsMode` record the preferred posture for a virtualized backend, but no backend that provides isolation ships today. The QEMU backend was retired, and with it the settings that chose a VM: on load, `sandbox.qemu*`, `sandbox.vmBackend` and `sandbox.replIsolation` are removed from a settings file with one receipt, and the `/sandbox qemu` family answers that it has been retired.

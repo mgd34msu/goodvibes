@@ -11,8 +11,7 @@
 
 import { ConfigError } from '../types/errors.js';
 import { summarizeError } from '../utils/error-display.js';
-import { logger } from '../utils/logger.js';
-import { readUnknownSettingForms } from './settings-unknown-forms.js';
+import { unknownSettingNotices } from './settings-unknown-forms.js';
 import { CONFIG_SCHEMA } from './schema.js';
 import {
   SettingsIngestionRefusal,
@@ -39,8 +38,11 @@ export interface IngestionNoticeSink {
   receipt(id: string, text: string): void;
   /** Withdraws announce-once receipts the predicate selects, so a setting fixed and then broken again is announced again. */
   forgetReceipts?(selects: (id: string) => boolean): void;
-  /** Keeps unknown keys until a judgment port can read them; see {@link UnknownSettingFormsQueue}. */
-  unknown(file: string, keys: readonly UnknownSettingKey[]): void;
+  /**
+   * Unused: unknown keys are announced at load by {@link ingestManagerSettings}.
+   * @deprecated Kept only until ConfigManager stops passing it.
+   */
+  unknown?(file: string, keys: readonly UnknownSettingKey[]): void;
 }
 
 /**
@@ -60,7 +62,10 @@ export function ingestManagerSettings(
   const unknownKeys = knownHostKeys ? result.unknownKeys.filter((entry) => !knownHostKeys.has(entry.key)) : result.unknownKeys;
   for (const entry of unknownKeys) noticedKeys.add(entry.key);
   forgetFixedKeyReceipts(sink, file, noticedKeys);
-  if (unknownKeys.length > 0) sink.unknown(file, unknownKeys);
+  for (const entry of unknownSettingNotices(file, unknownKeys)) {
+    announceIngestionNotice(entry);
+    noticeTo(sink, entry);
+  }
   return result.config;
 }
 
@@ -94,54 +99,14 @@ function noticeTo(sink: IngestionNoticeSink, entry: SettingsIngestionNotice): vo
   }
 }
 
-type PendingUnknownKeys = { readonly file: string; readonly keys: readonly UnknownSettingKey[] };
-
 /**
- * Unknown settings keys waiting to be read for whether they are a newer form
- * of a known setting (settings-unknown-forms.ts). Config loads before a
- * composition's judgment port exists (the port is built from the judgment
- * settings), so keys are kept until {@link start}, which the composition calls
- * once its port is installed; keys from a later reload are read as they come.
- * The keys stay in their files whatever the reading says; a reading that
- * cannot be made is logged with the keys it was about.
+ * Unknown keys are announced at load by {@link ingestManagerSettings}; nothing
+ * waits for a judgment port any more.
+ * @deprecated Kept only until ConfigManager stops constructing it.
  */
 export class UnknownSettingFormsQueue {
-  private pending: PendingUnknownKeys[] = [];
-  private started = false;
-
-  /** Pending entries kept before start(); a composition that never starts drops the oldest. */
-  static readonly MAX_PENDING = 64;
-
-  keep(file: string, keys: readonly UnknownSettingKey[], sink: IngestionNoticeSink): void {
-    // A watcher reload re-reports the same file each time it is edited; only the
-    // latest reading of a file is worth keeping while nothing is draining.
-    this.pending = this.pending.filter((entry) => entry.file !== file);
-    this.pending.push({ file, keys });
-    if (this.pending.length > UnknownSettingFormsQueue.MAX_PENDING) this.pending.shift();
-    if (this.started) void this.drain(sink);
-  }
-
-  start(sink: IngestionNoticeSink): Promise<void> {
-    this.started = true;
-    return this.drain(sink);
-  }
-
-  private async drain(sink: IngestionNoticeSink): Promise<void> {
-    for (const { file, keys } of this.pending.splice(0)) {
-      try {
-        for (const entry of await readUnknownSettingForms(file, keys)) {
-          announceIngestionNotice(entry);
-          noticeTo(sink, entry);
-        }
-      } catch (error) {
-        logger.warn('goodvibes settings: whether unknown keys are newer forms of known settings could not be read', {
-          file,
-          keys: keys.map((unknown) => unknown.key),
-          error: summarizeError(error),
-        });
-      }
-    }
-  }
+  keep(_file: string, _keys: readonly UnknownSettingKey[], _sink: IngestionNoticeSink): void { /* announced at load */ }
+  start(_sink: IngestionNoticeSink): Promise<void> { return Promise.resolve(); }
 }
 
 /**

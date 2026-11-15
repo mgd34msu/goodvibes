@@ -1,5 +1,5 @@
 import { composeJudgmentVolumeMonitor, type JudgmentVolumeMonitorHandle } from './judgment-volume-monitor.js';
-import { activateClassicFallback, configureDecisionModelPolicy, isClassicOperation } from './decision-policy.js';
+import { activateClassicFallback, configureDecisionModelPolicy } from './decision-policy.js';
 import { assertDecisionModelsEnabled } from '@goodvibes-jev/engine/errors';
 import { bindJudgmentPortAuthority, installJudgmentPort, restoreJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { createJudgmentSourceLifetime } from './judgment-source-lifetime.js';
@@ -234,11 +234,6 @@ export interface JudgmentServices {
 }
 
 export interface JudgmentServicesInput extends JudgmentSettingsSource {
-  /**
-   * The composition's config, when it can read what waited for a port: the
-   * unknown settings keys its load kept (ConfigManager.announceUnknownSettingForms).
-   */
-  readonly config: JudgmentSettingsSource['config'] & { announceUnknownSettingForms?(): Promise<void> };
   /** The composition's state root; the decision log opens here. */
   readonly stateRoot: string;
   /** Cancels owned calls, drains their records, then closes the log on disposal. */
@@ -351,8 +346,6 @@ export function composeJudgment(input: JudgmentServicesInput): JudgmentServices 
   bindJudgmentPortAuthority(port, sourceLifetime.capture);
   bindJudgmentPortAuthority(browserPort, sourceLifetime.capture);
   const previous = installJudgmentPort(port);
-  // Config loaded before this port existed; what its load kept for a reading is read now.
-  if (!isClassicOperation()) void input.config.announceUnknownSettingForms?.();
   input.disposal.add('judgment port and decision log', () => {
     retired.add(port);
     closing = true;

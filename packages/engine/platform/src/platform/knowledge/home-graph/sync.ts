@@ -3,7 +3,7 @@ import { createHomeGraphNodeIdentityPlanner, prepareHomeGraphNodeIdentity, type 
 import { homeGraphIdentitySpace } from '../store-homegraph-node-selector.js';
 import { captureSnapshotGroups, currentSnapshotMembership, storedSnapshotGroups, snapshotGroups, type CapturedSnapshotGroups } from './snapshot-groups.js';
 import { isClassicOperation, withConfiguredDecisionModelPolicy } from '../../runtime/decision-policy.js';
-import { knowledgeClockIso, knowledgeRawRepresentation, retainKnowledgeRepresentation } from '../store-record-representation.js';
+import { knowledgeClockIso, knowledgeRawRepresentation, knowledgeRecordVersion, retainKnowledgeRepresentation } from '../store-record-representation.js';
 import { captureGeneratedKnowledgeSourceUpdate, registerGeneratedKnowledgeSourceReferences } from '../source-structural-references.js';
 import { upsertObservedKnowledgeNode } from '../store-node-observation.js';
 import { snapshotNodeInput } from '../activation/projection.js';
@@ -70,7 +70,15 @@ export async function runHomeGraphSnapshotSync(input: {
       return undefined;
     });
     const capturedAt = snapshot.capturedAt ?? Date.now();
-    const sourceIdentity = createHomeGraphSourceIdentityPlanner(store).prepare({ spaceId, role: 'snapshot', ...(snapshot.capturedAt === undefined ? {} : { capturedAt: snapshot.capturedAt }) });
+    const sourcePlanner = createHomeGraphSourceIdentityPlanner(store);
+    // One snapshot source per installation, updated in place: a resent snapshot keeps
+    // every node's sourceId, so an unchanged object is skipped and adds no revision.
+    // A capture the store already holds under its own time keeps that row.
+    const replay = snapshot.capturedAt === undefined ? undefined : sourcePlanner.lookup({ spaceId, role: 'snapshot', capturedAt: snapshot.capturedAt });
+    const installationSource = replay ?? currentInstallationSnapshotSource(store, spaceId, installationId);
+    const sourceIdentity = installationSource
+      ? reusedSnapshotIdentity(store, installationSource, spaceId)
+      : sourcePlanner.prepare({ spaceId, role: 'snapshot', ...(snapshot.capturedAt === undefined ? {} : { capturedAt: snapshot.capturedAt }) });
     const { id: sourceId, canonicalUri } = sourceIdentity;
     const captured = await store.batch(async () => {
       const sourceInput = {
@@ -103,13 +111,14 @@ export async function runHomeGraphSnapshotSync(input: {
       await retireMissingSnapshotRecords(store, spaceId, installationId, source.id, activeSnapshotNodeIds, snapshotMembership);
       return { source, home, beforeNodeIds, beforeEdgeIds, groups: counts };
     });
-    // batch() is a deferred save, not a rollback transaction. Finish the raw
-    // snapshot write phase before semantic readers inspect committed SQL rows.
-    // A later enrichment hold preserves this captured prefix but cannot publish
-    // an unvalidated link or generated page. Imports retain their own atomic seam.
+    // batch() is a deferred save, not a rollback transaction, so it covers only
+    // the synchronous snapshot writes above. The quality report and generated
+    // pages wait on model readings; a write anyone makes meanwhile (this sync's
+    // own pages, a note, a review) must be on disk when it returns, so no batch
+    // is held open across them.
     const { source, home, beforeNodeIds, beforeEdgeIds, groups } = captured;
     const autoLink = await autoLinkExistingSources(store, spaceId, installationId, input.signal);
-    return await store.batch(async () => {
+    return await (async () => {
       let issueCount = 0;
       let quality: NonNullable<HomeGraphSyncResult['quality']>;
       if (isClassicOperation()) quality = { status: 'held', reason: 'decision-model-disabled' };
@@ -155,7 +164,7 @@ export async function runHomeGraphSnapshotSync(input: {
         autoLink: autoLink.counts,
       };
       return result;
-    });
+    })();
   });
 }
 
@@ -250,7 +259,17 @@ async function upsertSnapshotObjects(
         : [...(captured.members.get(nodeKindForHomeGraphObject(kind))?.get(homeGraphObjectId(nodeKindForHomeGraphObject(kind), object)) ?? [])];
       const nodeInput = { ...baseInput, metadata: buildHomeGraphMetadata(spaceId, installationId, { ...baseInput.metadata,
         homeAssistant: { ...readRecord(baseInput.metadata.homeAssistant), snapshotGroups: membership } }) };
-      const node = await upsertObservedKnowledgeNode(store, { ...nodeInput, sourceId, status: 'active', confidence: 90 },
+      // The same object from the same snapshot source was written last time: its node,
+      // its source_for edge, its reference links and documentation candidates are as
+      // they were, so nothing is written. One hash per object decides it.
+      const inputHash = knowledgeRecordVersion({ nodeInput, sourceId, kind });
+      if (previous && previous.status === 'active' && previous.sourceId === sourceId && previous.metadata.homeGraphInputHash === inputHash) {
+        activeNodeIds.add(previous.id);
+        count += 1;
+        await yieldEvery(count, 16);
+        continue;
+      }
+      const node = await upsertObservedKnowledgeNode(store, { ...nodeInput, metadata: { ...nodeInput.metadata, homeGraphInputHash: inputHash }, sourceId, status: 'active', confidence: 90 },
         'home-assistant-snapshot', store.getSource(sourceId), () => { identity.assertCurrent(); return store.getSource(sourceId); });
       activeNodeIds.add(node.id);
       await store.upsertEdge({
@@ -448,6 +467,31 @@ function isSnapshotOwnedNode(
   if (!SNAPSHOT_NODE_KINDS.has(node.kind)) return false;
   const homeAssistant = readRecord(node.metadata.homeAssistant);
   return homeAssistant.installationId === installationId && storedSnapshotGroups(node).length > 0;
+}
+
+/** The installation's snapshot source to update in place: the live one, else the most recent. */
+function currentInstallationSnapshotSource(store: KnowledgeStore, spaceId: string, installationId: string): KnowledgeSourceRecord | undefined {
+  let best: KnowledgeSourceRecord | undefined;
+  for (const source of store.listSourcesInSpace(spaceId)) {
+    if (source.connectorId !== HOME_GRAPH_CONNECTOR_ID || source.metadata.homeGraphSourceKind !== 'snapshot'
+      || readRecord(source.metadata.homeAssistant).installationId !== installationId) continue;
+    if (!['pending','indexed','failed','stale'].includes(source.status)) continue;
+    const live = source.status !== 'stale', bestLive = best !== undefined && best.status !== 'stale';
+    if (!best || (live && !bestLive) || (live === bestLive && source.updatedAt > best.updatedAt)) best = source;
+  }
+  return best;
+}
+
+function reusedSnapshotIdentity(store: KnowledgeStore, source: KnowledgeSourceRecord, spaceId: string) {
+  const canonicalUri = source.canonicalUri ?? `homegraph://source/${source.id}`;
+  return Object.freeze({
+    id: source.id,
+    canonicalUri,
+    metadata: Object.freeze({ homeGraphSourceIdentityVersion: 1, homeGraphIdentitySpace: homeGraphIdentitySpace(spaceId) }),
+    assertCurrent(): void {
+      if (!store.getSource(source.id)) throw new Error(`Home Graph snapshot source ${source.id} was removed during the sync; run the sync again.`);
+    },
+  });
 }
 
 function isPreviousSnapshotSource(

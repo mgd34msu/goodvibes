@@ -37,7 +37,7 @@ export interface NodeMutationDraft {
   readonly observation?: ReturnType<typeof resolveKnowledgeNodeObservation>;
 }
 interface PreparedNode extends NodeMutationDraft { readonly preserveObservation: boolean; readonly nativeActivationState: ReturnType<KnowledgeStore['getNodeActivationState']>; readonly references: readonly (object | undefined)[]; readonly observationEvidence?: ObservedEvidence | undefined; readonly evidence: readonly ActivationEvidence[]; readonly activationCache?: { readonly reference: string; readonly observation: string | null } | undefined; readonly subjects: readonly ActivationSubject[]; readonly observed: ReturnType<typeof getKnowledgeNodeObservation>; }
-interface PreparedPass { readonly store: KnowledgeStore; readonly scope: object; readonly nodes: readonly PreparedNode[]; readonly written: Set<number>; readonly committed: Map<string, KnowledgeNodeRecord>; readonly port: JudgmentPort | undefined; readonly model: string | undefined; readonly assertCurrent?: (() => void) | undefined; readonly signal?: AbortSignal | undefined; readonly expires: number; readonly readset: KnowledgeActivationReadset; readonly stage?: KnowledgeNodeActivationStage | undefined; }
+interface PreparedPass { readonly store: KnowledgeStore; readonly scope: object; readonly nodes: readonly PreparedNode[]; readonly written: Set<number>; readonly committed: Map<string, KnowledgeNodeRecord>; readonly port: JudgmentPort | undefined; readonly model: string | undefined; readonly assertCurrent?: (() => void) | undefined; readonly signal?: AbortSignal | undefined; readonly readset: KnowledgeActivationReadset; readonly stage?: KnowledgeNodeActivationStage | undefined; }
 const retainedWrites = new WeakMap<KnowledgeNodeRecord, { readonly store: KnowledgeStore; readonly scope: object; readonly check: () => void }>();
 /** Only an exact locally committed object can authorize compensation, never a serialized receipt. */
 export function knowledgeNodeRestorationGuard(store: KnowledgeStore, record: KnowledgeNodeRecord, scope: object): (() => void) | undefined {
@@ -229,7 +229,7 @@ async function prepareOwnedNodeActivationPass(store: KnowledgeStore, drafts: rea
     });
     const token = Object.freeze({ count: resolved.length });
     prepared.set(token, { store, scope, nodes: resolved, written: new Set(), committed: new Map(), port: semantic ? port : undefined, model: semantic ? model : undefined,
-      signal, assertCurrent: assertNative, expires: Date.now() + 30_000, readset, stage });
+      signal, assertCurrent: assertNative, readset, stage });
     assertPreparedNodeWrites(store, token, scope);
     return token;
   }
@@ -239,7 +239,6 @@ export function assertPreparedNodeWrites(store: KnowledgeStore, token: Knowledge
   const pass = prepared.get(token);
   if (!pass || pass.scope !== scope) throw new Held('malformed');
   if (pass.signal?.aborted) throw new Held('aborted');
-  if (Date.now() > pass.expires) throw new Held('stale');
   if (pass.port && (pass.port.model !== pass.model || !isClassicOperation() && currentPort() !== pass.port)) throw new Held('stale');
   pass.assertCurrent?.();
   pass.stage?.assertCurrent();

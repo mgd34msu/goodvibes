@@ -19,6 +19,24 @@ function unknownKnowledgeJob(id: string): GoodVibesError {
   });
 }
 
+/** The refusal for a cancel that cannot stop the run; the daemon answers it 409. */
+function runNotCancellable(run: KnowledgeJobRunRecord, reason: string, next: string): GoodVibesError {
+  return new GoodVibesError(`Knowledge job run ${run.id} (${run.jobId}) is ${run.status}: ${reason}. ${next}`, {
+    category: 'bad_request', code: 'KNOWLEDGE_JOB_RUN_NOT_CANCELLABLE', status: 409, source: 'runtime', recoverable: false,
+  });
+}
+
+function unknownKnowledgeJobRun(id: string): GoodVibesError {
+  return new GoodVibesError(`Unknown knowledge job run: ${id}`, {
+    category: 'not_found', code: 'KNOWLEDGE_JOB_RUN_NOT_FOUND', status: 404, source: 'runtime', recoverable: false,
+  });
+}
+
+/** A deleted default schedule is kept as this marker so start-up does not create it again. */
+function isRemovedSchedule(record: KnowledgeScheduleRecord): boolean {
+  return typeof record.metadata.removedAt === 'number';
+}
+
 /** How long a job run with no live recorded owner must have been outstanding before it is treated as abandoned. */
 const INTERRUPTED_RUN_MIN_AGE_MS = 6 * 60 * 60 * 1000;
 
@@ -52,6 +70,7 @@ export interface KnowledgeSchedulingContext {
   readonly runJobByKind: (
     kind: KnowledgeJobRecord['kind'],
     input: { readonly sourceIds?: readonly string[] | undefined; readonly limit?: number | undefined },
+    signal: AbortSignal,
   ) => Promise<Record<string, unknown>>;
 }
 
@@ -89,6 +108,10 @@ export class KnowledgeScheduleService {
     readonly queued: Promise<KnowledgeJobRunRecord>;
     readonly finished: Promise<void>;
   }>();
+  /** One controller per run this process queued and has not settled; cancel and dispose abort it. */
+  private readonly runControllers = new Map<string, AbortController>();
+  /** Resolves when the run this process queued has settled, by run id. */
+  private readonly runSettled = new Map<string, Promise<void>>();
 
   constructor(private readonly context: KnowledgeSchedulingContext) {
     this.jobs = [
@@ -147,49 +170,100 @@ export class KnowledgeScheduleService {
         category: 'bad_request', code: 'INVALID_SCHEDULE', status: 400, source: 'contract', recoverable: false,
       });
     }
-    const nextRunAt = (input.enabled ?? true)
-      ? getNextAutomationOccurrence(schedule, Date.now())
-      : undefined;
+    const wanted = input.enabled ?? true;
+    const nextRunAt = wanted ? getNextAutomationOccurrence(schedule, Date.now()) : undefined;
     const record = await this.context.store.upsertSchedule({
       id: input.id,
       jobId: input.jobId,
       label: input.label?.trim() || job.title,
-      enabled: input.enabled ?? true,
+      // A one-time schedule whose time has passed has nothing left to run.
+      enabled: wanted && nextRunAt !== undefined,
       schedule,
-      nextRunAt,
+      nextRunAt: nextRunAt ?? null,
       metadata: {
         ...(input.metadata ?? {}),
+        // Saving over a deleted default brings it back.
+        ...(previous && isRemovedSchedule(previous) ? { removedAt: undefined } : {}),
       },
     });
     await this.reconcileSchedules();
     return record;
   }
 
+  /** Schedules a person or agent can see; a deleted default is kept only as a marker. */
+  listSchedules(limit = 100): readonly KnowledgeScheduleRecord[] {
+    return this.context.store.listSchedules(limit + 8).filter((record) => !isRemovedSchedule(record)).slice(0, limit);
+  }
+
+  getSchedule(id: string): KnowledgeScheduleRecord | null {
+    const record = this.context.store.getSchedule(id);
+    return record && !isRemovedSchedule(record) ? record : null;
+  }
+
   async deleteSchedule(id: string): Promise<boolean> {
     await this.readyForMutation();
-    const deleted = await this.context.store.deleteSchedule(id);
+    const schedule = this.getSchedule(id);
+    if (!schedule) return false;
     this.clearScheduleTimer(id);
-    return deleted;
+    if (schedule.metadata.bootstrap === true) {
+      // Start-up creates a missing default schedule; keeping a disabled marker is
+      // what makes the owner's delete stick across restarts.
+      await this.context.store.upsertSchedule({
+        id: schedule.id,
+        jobId: schedule.jobId,
+        label: schedule.label,
+        enabled: false,
+        schedule: schedule.schedule,
+        lastRunAt: schedule.lastRunAt,
+        nextRunAt: null,
+        metadata: { ...schedule.metadata, removedAt: Date.now() },
+      });
+      return true;
+    }
+    return this.context.store.deleteSchedule(id);
   }
 
   async setScheduleEnabled(id: string, enabled: boolean): Promise<KnowledgeScheduleRecord | null> {
     await this.readyForMutation();
-    const schedule = this.context.store.getSchedule(id);
+    const schedule = this.getSchedule(id);
     if (!schedule) return null;
     const job = this.getJob(schedule.jobId);
     if (enabled && job) assertJobPolicy(job);
+    const nextRunAt = enabled ? getNextAutomationOccurrence(schedule.schedule, Date.now()) : undefined;
     const updated = await this.context.store.upsertSchedule({
       id: schedule.id,
       jobId: schedule.jobId,
       label: schedule.label,
-      enabled,
+      enabled: enabled && nextRunAt !== undefined,
       schedule: schedule.schedule,
       lastRunAt: schedule.lastRunAt,
-      nextRunAt: enabled ? getNextAutomationOccurrence(schedule.schedule, Date.now()) : undefined,
+      nextRunAt: nextRunAt ?? null,
       metadata: schedule.metadata,
     });
     await this.reconcileSchedules();
     return updated;
+  }
+
+  /**
+   * Stops a queued or running job this process started: its signal is aborted
+   * and the run is settled `failed` with the cancel reason at once. A run another
+   * process owns, or one that already settled, is refused with what to do instead.
+   */
+  async cancelJobRun(runId: string): Promise<KnowledgeJobRunRecord> {
+    const run = this.context.store.getJobRun(runId);
+    if (!run) throw unknownKnowledgeJobRun(runId);
+    if (run.status !== 'queued' && run.status !== 'running') {
+      throw runNotCancellable(run, 'it has already finished', 'Nothing was changed.');
+    }
+    const controller = this.runControllers.get(runId);
+    if (!controller) {
+      const owner = readRunOwner(run);
+      throw runNotCancellable(run, owner ? `it belongs to process ${owner.pid}` : 'no running process owns it',
+        owner ? 'Cancel it from the daemon or terminal that started it.' : 'It is settled as interrupted when the knowledge store next starts.');
+    }
+    controller.abort(new Error('cancelled: the job run was cancelled by request'));
+    await this.runSettled.get(runId);
+    return this.context.store.getJobRun(runId) ?? run;
   }
 
   listJobRuns(limit = 100, jobId?: string): readonly KnowledgeJobRunRecord[] {
@@ -240,6 +314,8 @@ export class KnowledgeScheduleService {
       release();
       throw error;
     }
+    this.runSettled.set(run.id, finished.promise);
+    void finished.promise.then(() => this.runSettled.delete(run.id));
     if (mode === 'inline') {
       try {
         return await this.executeJobRun(job, run.id, input);
@@ -277,10 +353,12 @@ export class KnowledgeScheduleService {
       },
     });
     this.inFlightRunIds.add(run.id);
+    this.runControllers.set(run.id, new AbortController());
     if (this.disposed) {
       // dispose() settled only the runs it saw; this one was written after.
       await this.settleRun(run.id, 'failed', 'interrupted: the process shut down before this job started');
       this.inFlightRunIds.delete(run.id);
+      this.runControllers.delete(run.id);
       throw new Error('Knowledge scheduler is closed');
     }
     this.context.emitIfReady((bus, ctx) => emitKnowledgeJobQueued(bus, ctx, {
@@ -312,6 +390,10 @@ export class KnowledgeScheduleService {
     if (!first) return Promise.resolve();
     this.releaseScheduleOwnership();
     const interrupted = [...this.inFlightRunIds];
+    // The jobs stop calling the model and writing; their runs settle as interrupted below.
+    for (const controller of this.runControllers.values()) {
+      controller.abort(new Error('interrupted: the process shut down before this job finished'));
+    }
     return (async () => {
       for (const runId of interrupted) await this.settleRun(runId, 'failed', 'interrupted: the process shut down before this job finished');
     })();
@@ -544,10 +626,10 @@ export class KnowledgeScheduleService {
     const schedule = this.context.store.getSchedule(scheduleId);
     if (!schedule?.enabled || this.disposed) return;
     const now = Date.now();
-    const following = getNextAutomationOccurrence(schedule.schedule, now);
     if (!this.ownsSchedules()) {
       // Stay armed so this process can take over when the owner exits, but
       // never run or rewrite another owner's schedule.
+      const following = getNextAutomationOccurrence(schedule.schedule, now);
       if (following !== undefined) this.armScheduleTimer(schedule, following);
       return;
     }
@@ -567,15 +649,26 @@ export class KnowledgeScheduleService {
       // A run of this job still going (queued background runs return at once)
       // is not repeated, and the schedule is not marked as having run.
       const dispatched = !this.hasActiveRun(schedule.jobId) && (!isClassicOperation() || Boolean(job && classicJob(job.kind)));
-      if (dispatched) await this.runJob(schedule.jobId, { mode: 'background' });
+      let completed = false;
+      if (dispatched) {
+        const run = await this.runJob(schedule.jobId, { mode: 'background' });
+        // The schedule moves on when its run settles, not when it is queued: a run
+        // cut short by shutdown leaves the schedule due for the next process.
+        await this.runSettled.get(run.id);
+        if (this.disposed) return;
+        completed = this.context.store.getJobRun(run.id)?.status === 'completed';
+      }
+      const settledAt = Date.now();
+      const following = getNextAutomationOccurrence(schedule.schedule, settledAt);
       await this.context.store.upsertSchedule({
         id: schedule.id,
         jobId: schedule.jobId,
         label: schedule.label,
-        enabled: schedule.enabled,
+        // A one-time schedule has no next occurrence: it ran, so it is finished.
+        enabled: following !== undefined,
         schedule: schedule.schedule,
-        lastRunAt: dispatched ? now : schedule.lastRunAt,
-        nextRunAt: following,
+        lastRunAt: completed ? settledAt : schedule.lastRunAt,
+        nextRunAt: following ?? null,
         metadata: schedule.metadata,
       });
       recorded = true;
@@ -585,7 +678,10 @@ export class KnowledgeScheduleService {
       // fire again at once.
       this.runningSchedules.delete(schedule.id);
       if (recorded) await this.reconcileSchedules();
-      else if (following !== undefined && !this.disposed) this.armScheduleTimer(schedule, following);
+      else if (!this.disposed) {
+        const following = getNextAutomationOccurrence(schedule.schedule, Date.now());
+        if (following !== undefined) this.armScheduleTimer(schedule, following);
+      }
     }
   }
 
@@ -598,6 +694,7 @@ export class KnowledgeScheduleService {
       return await this.executeSettledJobRun(job, runId, input);
     } finally {
       this.inFlightRunIds.delete(runId);
+      this.runControllers.delete(runId);
     }
   }
 
@@ -607,6 +704,13 @@ export class KnowledgeScheduleService {
     input: { readonly sourceIds?: readonly string[] | undefined; readonly limit?: number | undefined; readonly mode?: KnowledgeJobMode | undefined },
   ): Promise<KnowledgeJobRunRecord> {
     const startedAt = Date.now();
+    const signal = (this.runControllers.get(runId) ?? new AbortController()).signal;
+    if (signal.aborted) {
+      // Cancelled while queued: it never starts.
+      const settled = await this.settleRun(runId, 'failed', abortReason(signal)) ?? this.context.store.getJobRun(runId);
+      if (!settled) throw unknownKnowledgeJobRun(runId);
+      return settled;
+    }
     let run: KnowledgeJobRunRecord;
     try {
       run = await this.context.store.upsertJobRun({
@@ -628,7 +732,7 @@ export class KnowledgeScheduleService {
     }));
     try {
       assertJobPolicy(job);
-      const result = await this.context.runJobByKind(job.kind, input);
+      const result = await untilAborted(this.context.runJobByKind(job.kind, input, signal), signal);
       const completedAt = Date.now();
       const current = this.context.store.getJobRun(run.id);
       const move = current ? knowledgeJobRunLifecycle.check(current.status, 'completed') : null;
@@ -669,7 +773,7 @@ export class KnowledgeScheduleService {
         requestedAt: run.requestedAt,
         startedAt,
         completedAt,
-        error: summarizeError(error),
+        error: signal.aborted ? abortReason(signal) : summarizeError(error),
       });
       this.context.emitIfReady((bus, ctx) => emitKnowledgeJobFailed(bus, ctx, {
         jobId: job.id,
@@ -680,4 +784,24 @@ export class KnowledgeScheduleService {
       return run;
     }
   }
+}
+
+function abortReason(signal: AbortSignal): string {
+  return signal.reason instanceof Error ? signal.reason.message : 'cancelled: the job run was cancelled';
+}
+
+/**
+ * The job's result, or a rejection as soon as the signal aborts. Jobs that read
+ * the signal stop at their next step; this settles the run at once either way.
+ */
+function untilAborted<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) {
+    void work.catch(() => undefined);
+    return Promise.reject(signal.reason);
+  }
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = (): void => reject(signal.reason);
+    signal.addEventListener('abort', onAbort, { once: true });
+    work.then(resolve, reject).finally(() => signal.removeEventListener('abort', onAbort));
+  });
 }

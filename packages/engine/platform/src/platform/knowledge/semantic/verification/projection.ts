@@ -20,11 +20,11 @@ export function freezeSupport<T>(value: T): T {
 }
 /** Structural inspection before any property reads, JSON conversion or privacy scan. */
 function assertPlainSnapshot(value: unknown): void {
-  let nodes = 0, chars = 0;
+  // Shape only: the declared verification limits (types.ts) are the size bounds.
   const ancestors = new Set<object>();
   function visit(entry: unknown, depth: number): void {
-    if (++nodes > 20_000 || depth > 64) throw new JudgmentInputError('unsupported-input');
-    if (typeof entry === 'string') { chars += entry.length; if (chars > 1_000_000) throw new JudgmentInputError('unsupported-input'); return; }
+    if (depth > 64) throw new JudgmentInputError('unsupported-input');
+    if (typeof entry === 'string') return;
     if (entry === undefined || entry === null || typeof entry === 'boolean') return;
     if (typeof entry === 'number' && Number.isFinite(entry)) return;
     if (typeof entry !== 'object' || nodeTypes.isProxy(entry) || ancestors.has(entry)) throw new JudgmentInputError('unsupported-input');

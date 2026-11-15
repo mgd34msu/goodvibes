@@ -1386,6 +1386,9 @@ export class SQLitePublishedButFencedError extends Error {
   }
 }
 
+/** One SELECT statement, optionally ending in a semicolon: nothing it runs can write. */
+const READ_ONLY_STATEMENT = /^\s*select\b[^;]*;?\s*$/i;
+
 export class SQLiteStore {
   #activationPublication: Readonly<{ physical: string | undefined }> = nativeFreeze({ physical: undefined });
   #activationPublicationFailures = 0;
@@ -1553,7 +1556,8 @@ export class SQLiteStore {
   }
 
   exec(sql: string, params?: (string | number)[]): Array<{ columns: string[]; values: unknown[][] }> {
-    this.observationEpoch += 1;
+    // A single SELECT changes nothing, so it does not retire an observation.
+    if (!READ_ONLY_STATEMENT.test(sql)) this.observationEpoch += 1;
     return this.getDb().exec(sql, params);
   }
 
@@ -1991,10 +1995,6 @@ export class SQLiteStore {
   /** Closed edge-table read; endpoint bounds remain local knowledge identities. */
   readPersistedEdgeRows(): ReturnType<SqlDatabase['exec']> {
     return this.readPrivatePersistedRows('SELECT * FROM knowledge_edges', []);
-  }
-
-  readPersistedEdgeChanges(): ReturnType<SqlDatabase['exec']> {
-    return this.readPrivatePersistedRows('SELECT CAST(sequence AS TEXT),from_kind,from_id,to_kind,to_id FROM knowledge_edge_changes', []);
   }
 
   readPersistedEdgeWindowGeneration(keys: readonly string[], incidentKeys?: readonly string[], includeUnselectedEndpoints = false): ReturnType<SqlDatabase['exec']> {

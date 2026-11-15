@@ -158,6 +158,29 @@ export interface KnowledgeServiceStatus extends KnowledgeStatus {
   readonly note: string;
 }
 
+/** A position in a newest-first listing: records strictly after it come next. */
+export interface KnowledgeListingKey {
+  readonly updatedAt: number;
+  readonly id: string;
+}
+
+/**
+ * One keyset page of a newest-first listing (updatedAt descending, id descending on
+ * ties): a record changed mid-walk moves to the front and a deleted one leaves no
+ * gap, so the walk neither repeats nor stops early, at any store size.
+ */
+function pageAfterKey<T extends { readonly id: string; readonly updatedAt: number }>(
+  records: readonly T[],
+  after: KnowledgeListingKey | null,
+  limit: number,
+): { items: T[]; hasMore: boolean } {
+  const newerFirst = (a: T, b: T): number => (b.updatedAt - a.updatedAt) || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0);
+  const remaining = (after
+    ? records.filter((record) => record.updatedAt < after.updatedAt || (record.updatedAt === after.updatedAt && record.id < after.id))
+    : [...records]).sort(newerFirst);
+  return { items: remaining.slice(0, limit), hasMore: remaining.length > limit };
+}
+
 export class KnowledgeService {
   private readonly projectionService: KnowledgeProjectionService;
   private readonly scheduleService: KnowledgeScheduleService;
@@ -188,6 +211,9 @@ export class KnowledgeService {
     this.ownsSemanticService = semanticService === undefined;
     this.semanticService = semanticService ?? new KnowledgeSemanticService(this.store);
     this.unsubscribeMemory = options.memoryRegistry.subscribe?.(() => this.queueMemoryMirror());
+    // The mirror follows memory changes; one diffing pass at start catches changes
+    // made while no process was mirroring (it writes nothing when they agree).
+    void this.store.init().then(() => this.queueMemoryMirror(), () => undefined);
     this.scheduleService = new KnowledgeScheduleService({
       store: this.store,
       emitIfReady: this.emitIfReady.bind(this),
@@ -310,11 +336,11 @@ export class KnowledgeService {
   }
 
   listSchedules(limit = 100): readonly KnowledgeScheduleRecord[] {
-    return this.store.listSchedules(limit);
+    return this.scheduleService.listSchedules(limit);
   }
 
   getSchedule(id: string): KnowledgeScheduleRecord | null {
-    return this.store.getSchedule(id);
+    return this.scheduleService.getSchedule(id);
   }
 
   async listSources(limit = 100, options: KnowledgeScopeSelectionOptions = {}): Promise<KnowledgeSourceRecord[]> {
@@ -331,7 +357,9 @@ export class KnowledgeService {
     readonly sourceType?: string | undefined;
     readonly tag?: string | undefined;
     readonly query?: string | undefined;
-  } = {}, options: KnowledgeScopeSelectionOptions = {}): Promise<{ total: number; items: KnowledgeSourceRecord[] }> {
+    /** Present (null for the first page): newest first, the `limit` records after this key, with `hasMore`. */
+    readonly after?: KnowledgeListingKey | null | undefined;
+  } = {}, options: KnowledgeScopeSelectionOptions = {}): Promise<{ total: number; items: KnowledgeSourceRecord[]; hasMore?: boolean }> {
     const request = snapshotNodeInput(input);
     const selection = await prepareKnowledgeScopeSelection(this.store, input, options);
     const limit = Math.max(1, request.limit ?? 100);
@@ -360,6 +388,7 @@ export class KnowledgeService {
       return queryTokens.every((token) => haystack.includes(token));
     });
     selection.assertCurrent();
+    if (request.after !== undefined) return { total: items.length, ...pageAfterKey(items, request.after, limit) };
     return {
       total: items.length,
       items: items.slice(offset, offset + limit),
@@ -401,27 +430,49 @@ export class KnowledgeService {
     return reviewKnowledgeNodeRecord(this.store, input);
   }
 
-  async queryNodes(input: KnowledgeNodeQueryInput = {}, options: KnowledgeScopeSelectionOptions = {}): Promise<{ total: number; items: KnowledgeNodeRecord[] }> {
+  async queryNodes(
+    input: KnowledgeNodeQueryInput & { readonly after?: KnowledgeListingKey | null | undefined } = {},
+    options: KnowledgeScopeSelectionOptions = {},
+  ): Promise<{ total: number; items: KnowledgeNodeRecord[]; hasMore?: boolean }> {
     const request = snapshotNodeInput(input);
     const selection = await prepareKnowledgeScopeSelection(this.store, input, options);
-    return queryKnowledgeNodes(selection, request);
+    if (request.after === undefined) return queryKnowledgeNodes(selection, request);
+    const all = queryKnowledgeNodes(selection, { ...request, limit: Number.MAX_SAFE_INTEGER, offset: 0 });
+    return { total: all.total, ...pageAfterKey(all.items, request.after, Math.max(1, request.limit ?? 100)) };
   }
 
   async listIssues(limit = 100, options: KnowledgeScopeSelectionOptions = {}): Promise<KnowledgeIssueRecord[]> {
     return (await this.queryIssues({ limit }, options)).items;
   }
 
-  async queryIssues(input: KnowledgeIssueQueryInput = {}, options: KnowledgeScopeSelectionOptions = {}): Promise<{ total: number; items: KnowledgeIssueRecord[] }> {
+  async queryIssues(
+    input: KnowledgeIssueQueryInput & { readonly after?: KnowledgeListingKey | null | undefined } = {},
+    options: KnowledgeScopeSelectionOptions = {},
+  ): Promise<{ total: number; items: KnowledgeIssueRecord[]; hasMore?: boolean }> {
     const request = snapshotNodeInput(input);
     const selection = await prepareKnowledgeScopeSelection(this.store, input, options);
-    return queryKnowledgeIssues(selection, request);
+    if (request.after === undefined) return queryKnowledgeIssues(selection, request);
+    const all = queryKnowledgeIssues(selection, { ...request, limit: Number.MAX_SAFE_INTEGER, offset: 0 });
+    return { total: all.total, ...pageAfterKey(all.items, request.after, Math.max(1, request.limit ?? 100)) };
   }
 
   async reviewIssue(input: KnowledgeIssueReviewInput): Promise<KnowledgeIssueReviewResult> {
     return reviewKnowledgeIssue(this.store, input);
   }
 
-  async listExtractions(limit = 100, sourceId?: string, scope: KnowledgeSpaceScopeInput = {}, options: KnowledgeScopeSelectionOptions = {}): Promise<KnowledgeExtractionRecord[]> {
+  /**
+   * Extractions in a scope, newest first. `scope.extractionId` reads that one
+   * extraction (an empty list when it is unknown or outside the scope), at the
+   * cost of one lookup and its source's membership, not a listing of the space.
+   */
+  async listExtractions(limit = 100, sourceId?: string, scope: KnowledgeSpaceScopeInput & { readonly extractionId?: string | undefined } = {}, options: KnowledgeScopeSelectionOptions = {}): Promise<KnowledgeExtractionRecord[]> {
+    if (typeof scope.extractionId === 'string') {
+      const extraction = this.store.getExtraction(scope.extractionId);
+      if (!extraction || (sourceId !== undefined && extraction.sourceId !== sourceId)) return [];
+      const spaceScope: KnowledgeSpaceScopeInput = { knowledgeSpaceId: scope.knowledgeSpaceId, includeAllSpaces: scope.includeAllSpaces };
+      const bySource = await this.listExtractions(1, extraction.sourceId, spaceScope, options);
+      return bySource.filter((entry) => entry.id === extraction.id);
+    }
     // A single-source lookup only needs that source judged, not every record in the space.
     const bounded: KnowledgeScopeSelectionOptions = sourceId
       ? { ...options, kinds: ['source'], sourceIds: options.sourceIds ? options.sourceIds.filter((id) => id === sourceId) : [sourceId] }
@@ -837,11 +888,12 @@ export class KnowledgeService {
     return this.reindexAdmitted();
   }
 
-  private async reindexAdmitted(): Promise<KnowledgeReindexResult> {
+  private async reindexAdmitted(signal?: AbortSignal): Promise<KnowledgeReindexResult> {
     return withConfiguredDecisionModelPolicy(async () => {
       await this.store.init();
       const recompileFailures: { sourceId: string; error: string }[] = [];
       for (const listed of this.store.listSources(Number.MAX_SAFE_INTEGER)) {
+        signal?.throwIfAborted();
         if (isGeneratedKnowledgeSource(listed)) continue;
         // Another writer may have removed it since the list was taken.
         const source = this.store.getSource(listed.id);
@@ -857,7 +909,8 @@ export class KnowledgeService {
           recompileFailures.push({ sourceId: source.id, error: reason });
         }
       }
-      if (!isClassicOperation()) await this.semanticService.reindex({ force: false });
+      if (!isClassicOperation()) await this.semanticService.reindex({ force: false, ...(signal ? { signal } : {}) });
+      signal?.throwIfAborted();
       await this.syncReviewedMemory();
       const issues = await lintKnowledgeStore({ store: this.store, emitIfReady: this.emitIfReady.bind(this) });
       return { status: this.store.status(), issues,
@@ -889,13 +942,12 @@ export class KnowledgeService {
     readonly includeSources?: boolean | undefined;
     readonly includeConfidence?: boolean | undefined;
     readonly includeLinkedObjects?: boolean | undefined;
-  }, options: Pick<KnowledgeScopeSelectionOptions, 'signal' | 'assertCurrent'> = {}) {
-    options.assertCurrent?.();
+  }, options: Pick<KnowledgeScopeSelectionOptions, 'signal'> = {}) {
+    // The caller decides whether the answer is still wanted and still theirs
+    // to see (the daemon route checks before and after); the signal stops the
+    // answer itself when the request ends.
     await this.store.refreshIfChanged();
-    options.assertCurrent?.();
-    const answer = await this.semanticService.answer(options.signal ? { ...input, signal: options.signal } : input);
-    options.assertCurrent?.();
-    return answer;
+    return await this.semanticService.answer(options.signal ? { ...input, signal: options.signal } : input);
   }
 
   async buildPacket(
@@ -1050,13 +1102,19 @@ export class KnowledgeService {
     return this.scheduleService.runJob(id, input);
   }
 
+  /** Stops a queued or running job run this process started; see KnowledgeScheduleService.cancelJobRun. */
+  async cancelJobRun(runId: string): Promise<KnowledgeJobRunRecord> {
+    return this.scheduleService.cancelJobRun(runId);
+  }
+
   private async runJobByKind(
     kind: KnowledgeJobRecord['kind'],
     input: { readonly sourceIds?: readonly string[] | undefined; readonly limit?: number | undefined },
+    signal: AbortSignal,
   ): Promise<Record<string, unknown>> {
-    return runKnowledgeServiceJobByKind(kind, input, {
+    return runKnowledgeServiceJobByKind(kind, { ...input, signal }, {
       lint: () => lintKnowledgeStore({ store: this.store, emitIfReady: this.emitIfReady.bind(this) }),
-      reindex: () => this.reindexAdmitted(),
+      reindex: () => this.reindexAdmitted(signal),
       refreshSources: async (refreshKind, sourceIds, limit) =>
         refreshKnowledgeSources(
           this.getIngestContext(),
@@ -1144,8 +1202,9 @@ export class KnowledgeService {
     return this.closing;
   }
 
-  async lint(): Promise<readonly KnowledgeIssueRecord[]> {
-    return lintKnowledgeStore({ store: this.store, emitIfReady: this.emitIfReady.bind(this) });
+  /** Lints the given sources only, or the whole store when none are given. */
+  async lint(sourceIds?: readonly string[]): Promise<readonly KnowledgeIssueRecord[]> {
+    return lintKnowledgeStore({ store: this.store, emitIfReady: this.emitIfReady.bind(this) }, sourceIds);
   }
 
   private emitIfReady(

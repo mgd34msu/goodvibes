@@ -4,7 +4,7 @@ import type {
   KnowledgeNodeRecord,
   KnowledgeSourceRecord,
 } from '../types.js';
-import { getKnowledgeSpaceId, knowledgeSpaceMetadata, normalizeKnowledgeSpaceId } from '../spaces.js';
+import { getKnowledgeSpaceId, isKnowledgeIssueFamilyName, knowledgeSpaceMetadata, normalizeKnowledgeSpaceId } from '../spaces.js';
 
 export const MAX_SEMANTIC_SOURCE_CHARS = 28_000;
 export const MAX_ANSWER_EVIDENCE_CHARS = 24_000;
@@ -151,8 +151,12 @@ export function semanticMetadata(
   spaceId: string,
   metadata: Record<string, unknown> = {},
 ): Record<string, unknown> {
+  // Stamping the space rewrites `namespace`; an issue family carried there moves to
+  // its own key first, so the producer still finds the issue after a restamp.
+  const legacyFamily = typeof metadata.namespace === 'string' && isKnowledgeIssueFamilyName(metadata.namespace) ? metadata.namespace : undefined;
   return knowledgeSpaceMetadata(spaceId, {
     ...metadata,
+    ...(metadata.issueFamily === undefined && legacyFamily ? { issueFamily: legacyFamily } : {}),
     semantic: true,
   });
 }

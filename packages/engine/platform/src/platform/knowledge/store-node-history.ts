@@ -183,7 +183,8 @@ function sameStringSet(a: readonly string[], b: readonly string[]): boolean {
 // stamp (its decidedAt changes on every write); a provenance-only restamp must not
 // count as a content change.
 function stableMetadataForDiff(metadata: Record<string, unknown>): string {
-  const { reviewProvenance: _reviewProvenance, ...rest } = metadata;
+  // The Home Graph input hash is bookkeeping derived from the content, not content.
+  const { reviewProvenance: _reviewProvenance, homeGraphInputHash: _homeGraphInputHash, ...rest } = metadata;
   return stableStringify(rest);
 }
 

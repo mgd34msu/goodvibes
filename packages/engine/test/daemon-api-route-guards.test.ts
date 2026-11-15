@@ -146,45 +146,28 @@ describe('a gateway verb reached by its REST path', () => {
     });
   }
 
-  test('a repeated contract dispatch with the same Idempotency-Key gets the first contract and starts no second one', async () => {
+  test('a contract start carries its Idempotency-Key to the verb on both paths, and a replayed start says so in a header', async () => {
     const { context, invoked } = controlContext();
-    let started = 0;
+    let calls = 0;
     (context as unknown as { invokeGatewayMethodCall: (input: Json) => Promise<unknown> }).invokeGatewayMethodCall = async (input) => {
       invoked.push(input);
-      started += 1;
-      return { status: 201, ok: true, body: { contractId: `contract-${started}` } };
-    };
-    const handlers = createDaemonControlRouteHandlers(context);
-    const first = await handlers.invokeGatewayRestVerb({ methodId: 'contracts.start', req: startRequest('k1', { goal: 'a' }), params: {} }) as Response;
-    const replay = await handlers.invokeGatewayRestVerb({ methodId: 'contracts.start', req: startRequest('k1', { goal: 'a' }), params: {} }) as Response;
-    expect(await first.json()).toEqual({ contractId: 'contract-1' });
-    expect(await replay.json()).toEqual({ contractId: 'contract-1' });
-    expect(replay.headers.get('idempotent-replayed')).toBe('true');
-    expect(started).toBe(1);
-  });
-
-  test('the same Idempotency-Key on a different contract request is refused, and without a key every dispatch starts a contract', async () => {
-    const { context, invoked } = controlContext();
-    const handlers = createDaemonControlRouteHandlers(context);
-    await handlers.invokeGatewayRestVerb({ methodId: 'contracts.start', req: startRequest('k2', { goal: 'a' }), params: {} });
-    const reused = await handlers.invokeGatewayRestVerb({ methodId: 'contracts.start', req: startRequest('k2', { goal: 'b' }), params: {} }) as Response;
-    expect(reused.status).toBe(409);
-    expect(invoked.length).toBe(1);
-    await handlers.invokeGatewayRestVerb({ methodId: 'contracts.start', req: startRequest(null, { goal: 'a' }), params: {} });
-    await handlers.invokeGatewayRestVerb({ methodId: 'contracts.start', req: startRequest(null, { goal: 'a' }), params: {} });
-    expect(invoked.length).toBe(3);
-  });
-
-  test('a refused dispatch is not remembered, so the same key can be retried', async () => {
-    const { context } = controlContext();
-    let calls = 0;
-    (context as unknown as { invokeGatewayMethodCall: (input: Json) => Promise<unknown> }).invokeGatewayMethodCall = async () => {
       calls += 1;
-      return calls === 1 ? { status: 503, ok: false, body: { error: 'busy' } } : { status: 201, ok: true, body: { contractId: 'c' } };
+      return { status: 200, ok: true, body: { contract: { id: 'c' }, ownerAgentId: 'o', ...(calls > 1 ? { replayed: true } : {}) } };
     };
     const handlers = createDaemonControlRouteHandlers(context);
-    expect((await handlers.invokeGatewayRestVerb({ methodId: 'contracts.start', req: startRequest('k3', { goal: 'a' }), params: {} }) as Response).status).toBe(503);
-    expect((await handlers.invokeGatewayRestVerb({ methodId: 'contracts.start', req: startRequest('k3', { goal: 'a' }), params: {} }) as Response).status).toBe(201);
+    const first = await handlers.invokeGatewayRestVerb({ methodId: 'contracts.start', req: startRequest('k1', { ask: 'a' }), params: {} }) as Response;
+    expect((invoked[0]!.body as Json).idempotencyKey).toBe('k1');
+    expect(first.headers.get('idempotent-replayed')).toBeNull();
+    const envelope = new Request('http://daemon.test/api/control/gateway-methods/contracts.start/invoke', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'idempotency-key': 'k1' },
+      body: JSON.stringify({ body: { ask: 'a' } }),
+    });
+    const replay = await handlers.invokeGatewayMethod('contracts.start', envelope) as Response;
+    expect((invoked[1]!.body as Json).idempotencyKey).toBe('k1');
+    expect(replay.headers.get('idempotent-replayed')).toBe('true');
+    await handlers.invokeGatewayRestVerb({ methodId: 'contracts.start', req: startRequest(null, { ask: 'a' }), params: {} });
+    expect((invoked[2]!.body as Json).idempotencyKey).toBeUndefined();
   });
 
   test('the explicit-request claim is passed on as the caller\'s own assertion', async () => {
@@ -277,22 +260,18 @@ describe('knowledge routes', () => {
 
   const request = (url: string, init?: RequestInit) => new Request(`http://daemon.test${url}`, init);
 
-  test('a paged sources listing that could not load every record says so', async () => {
-    const items = Array.from({ length: 3 }, (_, index) => ({ id: `s${index}`, updatedAt: 100 - index }));
-    const { context } = knowledgeContext({ querySources: async () => ({ total: 7000, items }) });
-    const response = await createDaemonKnowledgeRouteHandlers(context).getKnowledgeSources(new URL('http://daemon.test/api/knowledge/sources?limit=2'), request('/api/knowledge/sources?limit=2')) as Response;
-    const body = await response.json() as Json;
-    expect(body.truncated).toBe(true);
-    expect(body.total).toBe(7000);
-    expect(body.loaded).toBe(3);
-    expect(body.hasMore).toBe(true);
-  });
-
-  test('a complete paged listing carries no truncation marker', async () => {
-    const items = [{ id: 's1', updatedAt: 2 }];
-    const { context } = knowledgeContext({ querySources: async () => ({ total: 1, items }) });
-    const response = await createDaemonKnowledgeRouteHandlers(context).getKnowledgeSources(new URL('http://daemon.test/api/knowledge/sources?limit=2'), request('/api/knowledge/sources?limit=2')) as Response;
-    expect((await response.json() as Json).truncated).toBeUndefined();
+  test('a paged sources listing asks the service for the page after the cursor and passes on whether more follow', async () => {
+    const seen: Json[] = [];
+    const items = [{ id: 's9', updatedAt: 90 }, { id: 's8', updatedAt: 80 }];
+    const { context } = knowledgeContext({ querySources: async (input: Json) => { seen.push(input); return { total: 7000, items, hasMore: true }; } });
+    const handlers = createDaemonKnowledgeRouteHandlers(context);
+    const first = await (await handlers.getKnowledgeSources(new URL('http://daemon.test/api/knowledge/sources?limit=2'), request('/api/knowledge/sources?limit=2')) as Response).json() as Json;
+    expect(seen[0]).toMatchObject({ limit: 2, after: null });
+    expect(first.hasMore).toBe(true);
+    expect(first.truncated).toBeUndefined();
+    const cursor = String(first.nextCursor);
+    await handlers.getKnowledgeSources(new URL(`http://daemon.test/api/knowledge/sources?limit=2&cursor=${cursor}`), request(`/api/knowledge/sources?limit=2&cursor=${cursor}`));
+    expect(seen[1]).toMatchObject({ limit: 2, after: { updatedAt: 80, id: 's8' } });
   });
 
   test('a filter value that is not one of the accepted values is a 400 naming them', async () => {

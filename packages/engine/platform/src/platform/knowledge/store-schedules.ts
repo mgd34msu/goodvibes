@@ -21,7 +21,8 @@ export async function upsertKnowledgeSchedule(
     enabled: input.enabled ?? existing?.enabled ?? true,
     schedule: ensureAutomationCronPhase(input.schedule, existing?.schedule),
     ...(typeof input.lastRunAt === 'number' ? { lastRunAt: input.lastRunAt } : existing?.lastRunAt ? { lastRunAt: existing.lastRunAt } : {}),
-    ...(typeof input.nextRunAt === 'number' ? { nextRunAt: input.nextRunAt } : existing?.nextRunAt ? { nextRunAt: existing.nextRunAt } : {}),
+    ...(typeof input.nextRunAt === 'number' ? { nextRunAt: input.nextRunAt }
+      : input.nextRunAt === undefined && existing?.nextRunAt ? { nextRunAt: existing.nextRunAt } : {}),
     metadata: { ...(existing?.metadata ?? {}), ...(input.metadata ?? {}) },
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,

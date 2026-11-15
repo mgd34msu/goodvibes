@@ -1,26 +1,19 @@
 import { isGeneratedProjectionViewEdge } from './store-generated-projection-selector.js';
-import { retainStoredGeneratedProjectionReferences } from './generated-projection-legacy-references.js';
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
-import {
-  captureJudgmentPort,
-  JudgmentAuthorityRetiredError,
-  JudgmentPortMissingError,
-  type JudgmentPortCapture,
-} from '@goodvibes-jev/engine/errors';
+import { captureJudgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
 import { mapLimit, toJson } from '@goodvibes-jev/judgment';
-import { assertJudgmentInput, JudgmentInputError } from '../gate/judgment-input.js';
-import { retainStrictJudgmentJson } from '../gate/judgment-result.js';
+import { assertJudgmentInput } from '../gate/judgment-input.js';
 import { knowledgeScopeSelection } from './batteries/scope-selection.js';
 import { knowledgeSourceJudgmentUris } from './source-structural-references.js';
 import { DEFAULT_KNOWLEDGE_SPACE_ID, getKnowledgeSpaceId, getExplicitKnowledgeSpaceId, resolveKnowledgeSpaceScope, type KnowledgeSpaceScopeInput } from './spaces.js';
 import { knowledgeIssueMatchesScope, knowledgeNodeMatchesScope, knowledgeSourceMatchesScope } from './scope-records.js';
-import { knowledgeRawRepresentation, knowledgeRecordVersion, sameKnowledgeRecord } from './store-record-representation.js';
-import { KnowledgeRecordAdmissionHeldError } from './store-record-snapshot.js';
+import { knowledgeRecordVersion } from './store-record-representation.js';
 import type { KnowledgeStore } from './store.js';
+import type { KnowledgeScopeVerdict } from './store-scope-verdicts.js';
 import type { KnowledgeEdgeRecord, KnowledgeExtractionRecord, KnowledgeIssueRecord, KnowledgeNodeRecord, KnowledgeSourceRecord } from './types.js';
-import { KnowledgeWebGapRepairHeldError } from './semantic/web-gap-repair/types.js';
-import { captureStrictRepairJson, prepareRepairJudgmentResult } from './semantic/web-gap-repair/admission.js';
-import { decisionOrClassic, isClassicOperation, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
+import { prepareRepairJudgmentResult } from './semantic/web-gap-repair/admission.js';
+import { isClassicOperation, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
+import { summarizeError } from '../utils/error-display.js';
+import { logger } from '../utils/logger.js';
 
 export class KnowledgeScopeSelectionHeldError extends Error {
   override readonly name = 'KnowledgeScopeSelectionHeldError';
@@ -29,26 +22,8 @@ export class KnowledgeScopeSelectionHeldError extends Error {
   }
 }
 
-/**
- * Most scope readings one pass may issue. A larger pass reads this many and
- * remembers each verdict; records past the cap are selected on the classic
- * (ordinary view) path and the selection is labelled classic, so no pass spends
- * readings and then discards them. A later pass in the same process reads only
- * what is still unread, so a big store converges. Verdicts are kept in memory,
- * so a short-lived process repeats the first batch rather than holding.
- */
-const MAX_SCOPE_READINGS_PER_PASS = 2_000;
-
-interface ScopeVerdict { readonly version: string; readonly included: boolean }
-/** Verdicts by store, then by judgment authority identity, then record key; a changed record or reader never matches. */
-const scopeVerdicts = new WeakMap<KnowledgeStore, WeakMap<object, Map<string, ScopeVerdict>>>();
-function scopeVerdictsFor(store: KnowledgeStore, identity: object): Map<string, ScopeVerdict> {
-  let byIdentity = scopeVerdicts.get(store);
-  if (!byIdentity) { byIdentity = new WeakMap(); scopeVerdicts.set(store, byIdentity); }
-  let verdicts = byIdentity.get(identity);
-  if (!verdicts) { verdicts = new Map(); byIdentity.set(identity, verdicts); }
-  return verdicts;
-}
+/** Readings one background pass takes before it stores them and yields. */
+const SCOPE_READINGS_PER_PASS = 64;
 
 export interface KnowledgeScopeSelectionOptions {
   readonly signal?: AbortSignal | undefined;
@@ -59,11 +34,17 @@ export interface KnowledgeScopeSelectionOptions {
   readonly sourceIds?: readonly string[] | undefined;
   readonly nodeIds?: readonly string[] | undefined;
   readonly issueIds?: readonly string[] | undefined;
-  /** Lowers the per-pass reading cap; defaults to the built-in cap. */
-  readonly maxReadingsPerPass?: number | undefined;
 }
 
+/**
+ * The records a knowledge view shows. Built in one pass over the stored rows:
+ * namespace membership comes from the records themselves, and whether a
+ * default-space record belongs in the ordinary view is the reading stored with
+ * it. A record with no current reading is shown. Building a selection never asks
+ * a model and never waits on one.
+ */
 export interface KnowledgeScopeSelection {
+  /** Present when some shown record has no current ordinary-view reading. */
   readonly provenance?: 'classic';
   readonly sources: readonly KnowledgeSourceRecord[];
   readonly nodes: readonly KnowledgeNodeRecord[];
@@ -72,6 +53,7 @@ export interface KnowledgeScopeSelection {
   readonly source: (record: KnowledgeSourceRecord) => boolean;
   readonly node: (record: KnowledgeNodeRecord) => boolean;
   readonly issue: (record: KnowledgeIssueRecord) => boolean;
+  /** A listing tolerates a concurrent write, so this only follows the caller's signal and guard. */
   readonly retainEdges: (records: readonly KnowledgeEdgeRecord[], window?: KnowledgeScopeEdgeWindow) => () => void;
   readonly assertCurrent: () => void;
 }
@@ -112,6 +94,33 @@ function content(value: ScopeRecord) {
   }
 }
 
+/** What the reading sees of a record: its content, and for a source its extraction. */
+function project(store: KnowledgeStore, value: ScopeRecord) {
+  const projected = content(value);
+  if (value.kind !== 'source') return projected;
+  const extraction = store.getExtractionBySourceId(value.record.id);
+  if (!extraction) return projected;
+  const fields = [...CONTENT_FIELDS, 'sections', 'summary', 'title', 'excerpt'];
+  const structure = Object.fromEntries(fields.filter(key => extraction.structure[key] !== undefined).map(key => [key, extraction.structure[key]]));
+  return { kind: projected.kind, content: { ...projected.content, extraction: { format: extraction.format, title: extraction.title,
+    summary: extraction.summary, excerpt: extraction.excerpt, sections: extraction.sections, structure } } };
+}
+
+/**
+ * The content version a stored reading is keyed to. Records and extractions are
+ * replaced, never mutated, on write, so the version is computed once per record
+ * object and a changed record (or a source's new extraction) gets a new one.
+ */
+const contentVersions = new WeakMap<object, { readonly extraction: KnowledgeExtractionRecord | null; readonly version: string }>();
+function contentVersion(store: KnowledgeStore, value: ScopeRecord): string {
+  const extraction = value.kind === 'source' ? store.getExtractionBySourceId(value.record.id) : null;
+  const cached = contentVersions.get(value.record);
+  if (cached && cached.extraction === extraction) return cached.version;
+  const version = knowledgeRecordVersion(project(store, value));
+  contentVersions.set(value.record, { extraction, version });
+  return version;
+}
+
 function references(record: ScopeRecord): readonly { readonly kind: 'source' | 'node'; readonly id: string }[] {
   const metadata = record.record.metadata;
   const strings = (value: unknown): string[] => typeof value === 'string' ? [value]
@@ -127,510 +136,190 @@ function references(record: ScopeRecord): readonly { readonly kind: 'source' | '
     ...[...new Set(nodes)].map(id => ({ kind: 'node' as const, id }))];
 }
 
-/** One complete operation keeps observations live through its final consumption.
- * IDs enforce membership locally; semantic negatives never become a new namespace.
- */
+const keyFor = (value: ScopeRecord): string => `${value.kind}:${value.record.id}`;
+
+function indexEdges(edges: readonly KnowledgeEdgeRecord[]): Map<string, KnowledgeEdgeRecord[]> {
+  const index = new Map<string, KnowledgeEdgeRecord[]>();
+  for (const edge of edges) for (const key of new Set([`${edge.fromKind}:${edge.fromId}`, `${edge.toKind}:${edge.toId}`])) {
+    const related = index.get(key) ?? []; related.push(edge); index.set(key, related);
+  }
+  return index;
+}
+
+/** Structural membership: the record's own space and the spaces of what it is attached to. */
+function membership(store: KnowledgeStore, edgeIndex: ReadonlyMap<string, readonly KnowledgeEdgeRecord[]>,
+  value: ScopeRecord, scope: KnowledgeSpaceScopeInput): boolean {
+  const relevant = [keyFor(value), ...(value.kind === 'issue' ? references(value).filter(ref => ref.kind === 'node').map(ref => `${ref.kind}:${ref.id}`) : [])];
+  const edges = [...new Map(relevant.flatMap(key => edgeIndex.get(key) ?? []).map(edge => [edge.id, edge])).values()];
+  const lookup = { getSource: (id: string) => store.getSource(id), getNode: (id: string) => store.getNode(id), edges };
+  switch (value.kind) {
+    case 'source': return knowledgeSourceMatchesScope(value.record, scope);
+    case 'node': return knowledgeNodeMatchesScope(value.record, scope, lookup);
+    case 'issue': return knowledgeIssueMatchesScope(value.record, scope, lookup);
+  }
+}
+
+/** Only default-space records are read for the ordinary view; an explicit space is the owner's own boundary. */
+function needsReading(store: KnowledgeStore, edgeIndex: ReadonlyMap<string, readonly KnowledgeEdgeRecord[]>, value: ScopeRecord): boolean {
+  return getKnowledgeSpaceId(value.record) === DEFAULT_KNOWLEDGE_SPACE_ID
+    && (value.kind !== 'node' || getExplicitKnowledgeSpaceId(value.record) !== null || membership(store, edgeIndex, value, {}));
+}
+
+/** A stored reading that still matches the record's content, or undefined. */
+function currentVerdict(store: KnowledgeStore, value: ScopeRecord): KnowledgeScopeVerdict | undefined {
+  const stored = store.getScopeVerdict(keyFor(value));
+  return stored && stored.version === contentVersion(store, value) ? stored : undefined;
+}
+
 export async function prepareKnowledgeScopeSelection(
   store: KnowledgeStore,
   scope: KnowledgeSpaceScopeInput = {},
   options: KnowledgeScopeSelectionOptions = {},
 ): Promise<KnowledgeScopeSelection> {
-  return withConfiguredDecisionModelPolicy(() => prepareKnowledgeScopeUnderPolicy(store, scope, options));
-}
-async function prepareKnowledgeScopeUnderPolicy(store: KnowledgeStore, scope: KnowledgeSpaceScopeInput, options: KnowledgeScopeSelectionOptions): Promise<KnowledgeScopeSelection> {
-  const signal = options.signal, callerCurrent = options.assertCurrent, preparedCurrent = options.assertPreparedInputCurrent, shouldStop = options.shouldStop;
-  const bounds = () => captureStrictRepairJson({ kinds: options.kinds, sourceIds: options.sourceIds, nodeIds: options.nodeIds, issueIds: options.issueIds });
-  const boundSnapshot = bounds(), boundsVersion = knowledgeRecordVersion(boundSnapshot);
-  const controller = new AbortController();
-  const operationSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
-  const scopeSnapshot = captureStrictRepairJson(scope);
-  const scopeVersion = knowledgeRecordVersion(scopeSnapshot);
-  let authority: JudgmentPortCapture | undefined;
-  let classicSelection = isClassicOperation();
-  const observed: (() => void)[] = [];
-  const fail = (error: unknown): never => {
-    if (error instanceof JudgmentInputError || error instanceof KnowledgeScopeSelectionHeldError) throw error;
-    if (signal?.aborted || shouldStop?.()) throw new KnowledgeScopeSelectionHeldError('aborted');
-    throw new KnowledgeScopeSelectionHeldError(error instanceof JudgmentPortMissingError ? 'unavailable'
-      : error instanceof JudgmentAuthorityRetiredError || error instanceof KnowledgeRecordAdmissionHeldError ? 'stale'
-        : error instanceof KnowledgeWebGapRepairHeldError ? error.reason === 'stale' ? 'stale' : 'malformed' : 'unavailable');
-  };
-  let withLookup = (body: () => undefined) => body();
-  let withRecordGenerations = (_checks: Iterable<() => void>, body: () => undefined) => body();
-  const assertSynchronousCurrent = (check: (() => void) | undefined) => {
-    try {
-      const current: unknown = check?.();
-      if (current !== undefined) {
-        drainOwned(current);
-        throw new KnowledgeScopeSelectionHeldError('stale');
-      }
-    } catch (error) {
-      if (error instanceof JudgmentInputError || error instanceof KnowledgeScopeSelectionHeldError) throw error;
-      throw new KnowledgeScopeSelectionHeldError('stale');
-    }
-  };
-  const assertOriginalIdentity = () => {
-    if (operationSignal.aborted || shouldStop?.()) throw new KnowledgeScopeSelectionHeldError('aborted');
-    if (knowledgeRecordVersion(bounds()) !== boundsVersion || options.signal !== signal || options.assertCurrent !== callerCurrent
-      || options.assertPreparedInputCurrent !== preparedCurrent || options.shouldStop !== shouldStop
-      || knowledgeRecordVersion(captureStrictRepairJson(scope)) !== scopeVersion) throw new KnowledgeScopeSelectionHeldError('stale');
-  };
-  const assertInputIdentity = () => {
-    assertOriginalIdentity();
-    assertSynchronousCurrent(callerCurrent);
-    assertOriginalIdentity();
-  };
-  const assertAuthorityCurrent = () => {
-    if (authority && !classicSelection && !isClassicOperation()) authority.assertCurrent(); else assertInputIdentity();
-  };
-  const assertInputCurrent = () => {
-    store.assertRecordSnapshotFrame(() => {
-      assertAuthorityCurrent(); withLookup(() => { withRecordGenerations(observed, () => { for (const check of observed) check(); }); });
-    });
-  };
-  const assertCurrent = () => {
-    try { assertInputCurrent(); }
-    catch (error) { fail(error); }
+  const assertCurrent = (): void => {
+    if (options.signal?.aborted || options.shouldStop?.()) throw new KnowledgeScopeSelectionHeldError('aborted');
+    options.assertCurrent?.();
   };
   assertCurrent();
   await store.init();
   assertCurrent();
+  options.assertPreparedInputCurrent?.();
   const sources = store.listSources(Number.MAX_SAFE_INTEGER);
   const nodes = store.listNodes(Number.MAX_SAFE_INTEGER);
   const issues = store.listIssues(Number.MAX_SAFE_INTEGER);
   const edges = store.listEdges();
-  const sourceMap = new Map(sources.map(record => [record.id, record]));
-  const nodeMap = new Map(nodes.map(record => [record.id, record]));
-  const indexEdges = (edges: readonly KnowledgeEdgeRecord[]) => {
-    const index = new Map<string, KnowledgeEdgeRecord[]>();
-    for (const edge of edges) for (const key of new Set([`${edge.fromKind}:${edge.fromId}`, `${edge.toKind}:${edge.toId}`])) {
-      const related = index.get(key) ?? []; related.push(edge); index.set(key, related);
-    }
-    return index;
-  };
-  const lookup = { sources: sourceMap, nodes: nodeMap, edges, edgeIndex: indexEdges(edges) };
-  let frameLookup = lookup;
-  withLookup = body => {
-    const previous = frameLookup;
-    const currentEdges = store.listEdges();
-    frameLookup = { sources: new Map(store.listSources(Number.MAX_SAFE_INTEGER).map(record => [record.id, record])),
-      nodes: new Map(store.listNodes(Number.MAX_SAFE_INTEGER).map(record => [record.id, record])),
-      edges: currentEdges, edgeIndex: indexEdges(currentEdges) };
-    try { return body(); } finally { frameLookup = previous; }
+  const edgeIndex = indexEdges(edges);
+  const inBounds = (value: ScopeRecord): boolean => {
+    if (options.kinds && !options.kinds.includes(value.kind)) return false;
+    const ids = value.kind === 'source' ? options.sourceIds : value.kind === 'node' ? options.nodeIds : options.issueIds;
+    return !ids || ids.includes(value.record.id);
   };
   const records: ScopeRecord[] = [...sources.map(record => ({ kind: 'source' as const, record })),
     ...nodes.map(record => ({ kind: 'node' as const, record })), ...issues.map(record => ({ kind: 'issue' as const, record }))];
-  const keyFor = (value: ScopeRecord): string => `${value.kind}:${value.record.id}`;
-  const project = (value: ScopeRecord, inspectExtraction?: (extraction: KnowledgeExtractionRecord | null) => void) => {
-    const projected = content(value);
-    if (value.kind !== 'source') return projected;
-    const extraction = store.getExtractionBySourceId(value.record.id);
-    if (inspectExtraction) inspectExtraction(extraction);
-    if (!extraction) return projected;
-    if (!inspectExtraction) captureStrictRepairJson(extraction);
-    const fields = [...CONTENT_FIELDS, 'sections', 'summary', 'title', 'excerpt'];
-    const structure = Object.fromEntries(fields.filter(key => extraction.structure[key] !== undefined).map(key => [key, extraction.structure[key]]));
-    return { kind: projected.kind, content: { ...projected.content, extraction: { format: extraction.format, title: extraction.title,
-      summary: extraction.summary, excerpt: extraction.excerpt, sections: extraction.sections, structure } } };
-  };
-  const signatureInput = (value: ScopeRecord, inspectExtraction?: (extraction: KnowledgeExtractionRecord | null) => void) => ({
-    kind: value.kind, id: value.record.id, status: value.record.status, space: getKnowledgeSpaceId(value.record),
-    references: references(value), content: project(value, inspectExtraction),
-  });
-  const slotsMatch = (slots: { readonly assertCurrent: () => void }) => {
-    try { slots.assertCurrent(); return true; } catch { return false; }
-  };
-  const retainSignature = (value: ScopeRecord) => {
-    const recordSlots = retainStrictJudgmentJson(value.record, problem => new KnowledgeWebGapRepairHeldError(problem));
-    let originalExtraction: KnowledgeExtractionRecord | null = null;
-    let extractionSlots = retainStrictJudgmentJson<KnowledgeExtractionRecord | null>(originalExtraction, problem => new KnowledgeWebGapRepairHeldError(problem));
-    captureStrictRepairJson(value.record);
-    const originalInput = signatureInput(value, extraction => {
-      originalExtraction = extraction;
-      extractionSlots = retainStrictJudgmentJson(extraction, problem => new KnowledgeWebGapRepairHeldError(problem));
-    });
-    const version = knowledgeRecordVersion(captureStrictRepairJson(originalInput));
-    const originalContent = originalInput.content.content;
-    const originalUris = 'canonicalUri' in originalContent ? {
-      url: originalContent.url, sourceUri: originalContent.sourceUri, canonicalUri: originalContent.canonicalUri,
-    } : undefined;
-    return (current: ScopeRecord) => {
-      let unchanged = current.kind === value.kind && current.record === value.record && slotsMatch(recordSlots);
-      if (!unchanged) captureStrictRepairJson(current.record);
-      let observedExtraction: KnowledgeExtractionRecord | null = null;
-      // Always execute the original projection, including its owning source
-      // lookup and second extraction lookup, before considering the fast path.
-      const input = signatureInput(current, extraction => {
-        observedExtraction = extraction;
-        const extractionUnchanged = extraction === originalExtraction && slotsMatch(extractionSlots);
-        if (!extractionUnchanged) captureStrictRepairJson(extraction);
-        unchanged = unchanged && extractionUnchanged;
-      });
-      const projectedContent = input.content.content;
-      const urisUnchanged = originalUris === undefined || ('canonicalUri' in projectedContent
-        && projectedContent.url === originalUris.url && projectedContent.sourceUri === originalUris.sourceUri
-        && projectedContent.canonicalUri === originalUris.canonicalUri);
-      if (unchanged && urisUnchanged && slotsMatch(recordSlots) && slotsMatch(extractionSlots)) return true;
-      // Equal replacements and reordered object slots retain the original
-      // value comparison. A fallback never becomes a new retained baseline.
-      captureStrictRepairJson(current.record);
-      captureStrictRepairJson(observedExtraction);
-      return knowledgeRecordVersion(captureStrictRepairJson(input)) === version;
-    };
-  };
-  const snapshots = new Map<string, ReturnType<typeof retainSignature>>();
-  const readRecord = (value: ScopeRecord): ScopeRecord | undefined => {
-    switch (value.kind) {
-      case 'source': { const record = store.getSource(value.record.id); return record ? { kind: value.kind, record } : undefined; }
-      case 'node': { const record = store.getNode(value.record.id); return record ? { kind: value.kind, record } : undefined; }
-      case 'issue': { const record = store.getIssue(value.record.id); return record ? { kind: value.kind, record } : undefined; }
-    }
-  };
-  const scopedChecks = new Map<string, Set<() => void>>();
-  const addCheck = (key: string, check: () => void) => {
-    observed.push(check); const checks = scopedChecks.get(key) ?? new Set(); checks.add(check); scopedChecks.set(key, checks);
-    return check;
-  };
-  const retained = new Map<string, () => void>();
-  type RecordSelector = Parameters<KnowledgeStore['getRecordGenerations']>[0][number];
-  type ExpectedReadset = Parameters<KnowledgeStore['matchesExpectedRecordReadsets']>[0][number];
-  const generationReadsets = new Map<() => void, ExpectedReadset>();
-  const pendingReadsets: { readonly check: () => void; readonly selectors: readonly RecordSelector[];
-    readonly expectedGenerations: readonly (string | null | undefined)[] }[] = [];
-  let currentReadsetMatches: ReadonlyMap<() => void, boolean> | undefined;
-  const currentGeneration = (selector: RecordSelector) => selector.kind === 'source'
-    ? store.getSourceGeneration(selector.id) : store.getRecordGeneration(selector.kind, selector.id);
-  withRecordGenerations = (checks, body) => {
-    const retainedChecks = [...checks].flatMap(check => {
-      const readset = generationReadsets.get(check);
-      return readset ? [{ check, readset }] : [];
-    });
-    const matches = retainedChecks.length ? store.matchesExpectedRecordReadsets(retainedChecks.map(value => value.readset)) : [];
-    const previous = currentReadsetMatches;
-    currentReadsetMatches = new Map(retainedChecks.map((value, index) => [value.check, matches[index] === true]));
-    try { return body(); } finally { currentReadsetMatches = previous; }
-  };
-  const retain = (value: ScopeRecord) => {
-    const key = keyFor(value);
-    const previous = retained.get(key);
-    if (previous) return previous;
-    captureStrictRepairJson(value.record);
-    const initialSource = value.kind === 'source' ? store.getSourceSnapshot({ id: value.record.id }) : undefined;
-    if (initialSource && value.kind === 'source') {
-      if (!sameKnowledgeRecord(value.record, initialSource.source)) {
-        assertJudgmentInput(knowledgeRawRepresentation(value.record));
-        throw new KnowledgeScopeSelectionHeldError('stale');
-      }
-      retainStoredGeneratedProjectionReferences(store, value.record, initialSource);
-    }
-    const matchesSignature = retainSignature(value);
-    snapshots.set(key, matchesSignature);
-    const original = readRecord(value)?.record;
-    const generation = (adopt = false) => {
-      if (value.kind === 'issue') return undefined;
-      if (!adopt) return currentGeneration({ kind: value.kind, id: value.record.id });
-      const snapshot = value.kind === 'source' ? (() => { const source = initialSource; if (!source) throw new KnowledgeScopeSelectionHeldError('stale');
-        return { record: source.source, generation: source.generation }; })() : store.getRecordSnapshot('node', value.record.id);
-      if (value.kind !== 'source' && !sameKnowledgeRecord(value.record, snapshot.record)) {
-        assertJudgmentInput(knowledgeRawRepresentation(value.record));
-        throw new KnowledgeScopeSelectionHeldError('stale');
-      }
-      return snapshot.generation;
-    };
-    const originalGeneration = generation(true);
-    const extractionGeneration = (adopt = false) => value.kind === 'source' ? (() => {
-      const extraction = store.getExtractionBySourceId(value.record.id);
-      if (!extraction) return null;
-      if (!adopt) return currentGeneration({ kind: 'extraction', id: extraction.id });
-      const snapshot = store.getRecordSnapshot('extraction', extraction.id);
-      if (adopt && !sameKnowledgeRecord(extraction, snapshot.record)) {
-        assertJudgmentInput(knowledgeRawRepresentation(extraction));
-        throw new KnowledgeScopeSelectionHeldError('stale');
-      }
-      return snapshot.generation;
-    })() : undefined;
-    const originalExtractionGeneration = extractionGeneration(true);
-    const extraction = value.kind === 'source' ? store.getExtractionBySourceId(value.record.id) : null;
-    const selectors: RecordSelector[] = [...(value.kind === 'issue' ? [] : [{ kind: value.kind, id: value.record.id }]),
-      ...(extraction ? [{ kind: 'extraction' as const, id: extraction.id }] : [])];
-    const expectedGenerations = [...(value.kind === 'issue' ? [] : [originalGeneration]),
-      ...(extraction ? [originalExtractionGeneration] : [])];
-    const check = addCheck(key, () => {
-      const current = readRecord(value);
-      if (!current || current.record !== original) throw new KnowledgeScopeSelectionHeldError('stale');
-      const physicalMatch = currentReadsetMatches?.get(check);
-      if (physicalMatch === false || (physicalMatch !== true && generation() !== originalGeneration)) throw new KnowledgeScopeSelectionHeldError('stale');
-      // The original owning extraction lookup still runs on every check. A
-      // different current ID requires a fresh physical read, never an old hash.
-      const currentExtraction = value.kind === 'source' ? store.getExtractionBySourceId(value.record.id) : null;
-      const extractionMatch = value.kind !== 'source' || (currentExtraction === null ? originalExtractionGeneration === null
-        : physicalMatch === true && currentExtraction.id === extraction?.id
-          || currentGeneration({ kind: 'extraction', id: currentExtraction.id }) === originalExtractionGeneration);
-      if (!extractionMatch || !matchesSignature(current)) throw new KnowledgeScopeSelectionHeldError('stale');
-    });
-    if (selectors.length) pendingReadsets.push({ check, selectors, expectedGenerations });
-    retained.set(key, check); return check;
-  };
-  const membership = (value: ScopeRecord, scope: KnowledgeSpaceScopeInput, currentLookup = frameLookup) => {
-    const relevant = [keyFor(value), ...(value.kind === 'issue' ? references(value).filter(ref => ref.kind === 'node').map(ref => `${ref.kind}:${ref.id}`) : [])];
-    const relevantEdges = [...new Map(relevant.flatMap(key => currentLookup.edgeIndex.get(key) ?? []).map(edge => [edge.id, edge])).values()];
-    const localLookup = { sources: currentLookup.sources, nodes: currentLookup.nodes, edges: relevantEdges };
-    switch (value.kind) {
-      case 'source': return knowledgeSourceMatchesScope(value.record, scope);
-      case 'node': return knowledgeNodeMatchesScope(value.record, scope, localLookup);
-      case 'issue': return knowledgeIssueMatchesScope(value.record, scope, localLookup);
-    }
-  };
-  const boundedRecords = records.filter(value => {
-    if (boundSnapshot.kinds && !boundSnapshot.kinds.includes(value.kind)) return false;
-    const ids = value.kind === 'source' ? boundSnapshot.sourceIds : value.kind === 'node' ? boundSnapshot.nodeIds : boundSnapshot.issueIds;
-    return !ids || ids.includes(value.record.id);
-  });
-  for (const value of boundedRecords) captureStrictRepairJson(value.record);
+  const view = resolveKnowledgeSpaceScope(scope);
   const accepted = new Set<string>();
-  const declined = new Set<string>();
-  const candidates = boundedRecords.filter(value => membership(value, scopeSnapshot));
-  const candidateKeys = new Set(candidates.map(keyFor));
-  type EdgeEndpoints = { readonly fromKind: string; readonly fromId: string; readonly toKind: string; readonly toId: string };
-  const edgeInWindow = (edge: EdgeEndpoints, keys: ReadonlySet<string>) => keys.has(`${edge.fromKind}:${edge.fromId}`) && keys.has(`${edge.toKind}:${edge.toId}`);
-  const potentialEdges = edges.filter(edge => edgeInWindow(edge, candidateKeys));
-  const edgeVersion = (values: readonly KnowledgeEdgeRecord[]) => {
-    const captured = captureStrictRepairJson(values);
-    const extras = Object.fromEntries(Object.entries(captured).filter(([key]) => {
-      const index = Number(key);
-      return !Number.isInteger(index) || index < 0 || String(index) !== key || index >= captured.length;
-    }));
-    return knowledgeRecordVersion({ records: [...captured].sort((left, right) => left.id.localeCompare(right.id)), extras });
-  };
-  const potentialEdgeVersion = edgeVersion(potentialEdges);
-  const originalEdgeGenerations = new Map<string, string | null>();
-  let originalEdgeChanges: ReturnType<KnowledgeStore['getEdgeChangeSnapshots']> = [];
-  store.assertRecordSnapshotFrame(() => {
-    assertSynchronousCurrent(preparedCurrent);
-    originalEdgeChanges = store.getEdgeChangeSnapshots();
-    const physical = store.getEdgeSnapshots().filter(snapshot => snapshot.record && edgeInWindow(snapshot.record, candidateKeys));
-    if (edgeVersion(physical.flatMap(snapshot => snapshot.record ? [snapshot.record] : [])) !== potentialEdgeVersion) throw new KnowledgeScopeSelectionHeldError('stale');
-    for (const snapshot of physical) if (snapshot.record) originalEdgeGenerations.set(snapshot.record.id, snapshot.generation);
-  });
-  const relatedInputs = (value: ScopeRecord, currentLookup = frameLookup) => {
-    const related = new Map<string, ScopeRecord>(), outside = new Map<string, string>();
-    const refs = [...references(value), ...(value.kind === 'source' ? [] : (currentLookup.edgeIndex.get(keyFor(value)) ?? []).filter(edge => !isGeneratedProjectionViewEdge(
-      edge.fromKind === 'source' ? currentLookup.sources.get(edge.fromId) : undefined, edge))).flatMap(edge => [
-      ...(edge.fromKind === 'source' || edge.fromKind === 'node' ? [{ kind: edge.fromKind, id: edge.fromId }] : []),
-      ...(edge.toKind === 'source' || edge.toKind === 'node' ? [{ kind: edge.toKind, id: edge.toId }] : []),
-    ])];
-    for (const ref of refs) {
-      const key = `${ref.kind}:${ref.id}`;
-      const source = ref.kind === 'source' ? currentLookup.sources.get(ref.id) : undefined;
-      const node = ref.kind === 'node' ? currentLookup.nodes.get(ref.id) : undefined;
-      const other: ScopeRecord | undefined = source ? { kind: 'source', record: source } : node ? { kind: 'node', record: node } : undefined;
-      if (!other || key === keyFor(value)) continue;
-      // A new descendant claim is an output, rather than a subject's context.
-      if (value.kind === 'node' && value.record.kind !== 'fact' && other.kind === 'node' && other.record.kind === 'fact'
-        && !references(value).some(ref => ref.kind === other.kind && ref.id === other.record.id)) continue;
-      if (membership(other, scopeSnapshot, currentLookup)) related.set(key, other);
-      else outside.set(key, getKnowledgeSpaceId(other.record));
+  const unread: ScopeRecord[] = [];
+  for (const value of records) {
+    if (!inBounds(value) || !membership(store, edgeIndex, value, scope)) continue;
+    if (needsReading(store, edgeIndex, value)) {
+      const verdict = currentVerdict(store, value);
+      if (!verdict) unread.push(value);
+      // Explicit all-space browsing shows every record; other views leave out what was read as not belonging.
+      if (view !== null && verdict?.included === false) continue;
     }
-    return { related, outside, version: knowledgeRecordVersion({ related: [...related.keys()].sort(), outside: [...outside].sort(([left], [right]) => left.localeCompare(right)) }) };
-  };
-  const prepareJobs = () => {
-    for (const value of boundedRecords) {
-      if (candidates.includes(value)) retain(value);
-      const expected = membership(value, scopeSnapshot), ordinary = membership(value, {});
-      addCheck(keyFor(value), () => {
-        const current = readRecord(value);
-        if (!current || membership(current, scopeSnapshot) !== expected
-          || membership(current, {}) !== ordinary) throw new KnowledgeScopeSelectionHeldError('stale');
-      });
-    }
-    const needsReading = (value: ScopeRecord) => getKnowledgeSpaceId(value.record) === DEFAULT_KNOWLEDGE_SPACE_ID
-      && (value.kind !== 'node' || getExplicitKnowledgeSpaceId(value.record) !== null || membership(value, {}));
-    const jobs = candidates.filter(needsReading).map(value => {
-      const context = relatedInputs(value, lookup), related = context.related;
-      const outsideRequestedScope = context.outside.size > 0;
-      addCheck(keyFor(value), () => {
-        const current = readRecord(value);
-        if (!current || relatedInputs(current).version !== context.version) throw new KnowledgeScopeSelectionHeldError('stale');
-      });
-      for (const other of related.values()) {
-        const check = retain(other); scopedChecks.get(keyFor(value))?.add(check);
-      }
-      const view = resolveKnowledgeSpaceScope(scopeSnapshot) === null ? 'all'
-        : resolveKnowledgeSpaceScope(scopeSnapshot) === DEFAULT_KNOWLEDGE_SPACE_ID ? 'ordinary' : 'explicit';
-      const candidateContent = project(value), relatedContent = [...related.values()].map(other => project(other));
-      assertJudgmentInput({ view, candidate: candidateContent, related: relatedContent, associations: { outsideRequestedScope } });
-      const state = { view, candidate: toJson(candidateContent), related: relatedContent.map(other => toJson(other)),
-        associations: { outsideRequestedScope } };
-      assertJudgmentInput(state);
-      const captured = captureStrictRepairJson(state);
-      return { key: `${value.kind}:${value.record.id}`, state: captured, version: knowledgeRecordVersion(captured) };
-    });
-    // Original source/node/extraction snapshots and every projection above
-    // remain in their old order. Mint the complete retained readsets together
-    // in this same synchronous frame, then compare every original baseline
-    // before any job or retained capability can escape.
-    if (pendingReadsets.length) {
-      const compiled = store.captureExpectedRecordReadsets(pendingReadsets.map(input => input.selectors));
-      if (compiled.length !== pendingReadsets.length) throw new KnowledgeScopeSelectionHeldError('stale');
-      for (let index = 0; index < pendingReadsets.length; index++) {
-        const input = pendingReadsets[index], value = compiled[index];
-        if (!input || !value || value.originalGenerations.length !== input.expectedGenerations.length
-          || value.originalGenerations.some((generation, slot) => generation !== input.expectedGenerations[slot])) {
-          throw new KnowledgeScopeSelectionHeldError('stale');
-        }
-        generationReadsets.set(input.check, { expected: value.expected, selectors: input.selectors });
-      }
-    }
-    for (const value of candidates) if (!needsReading(value)) accepted.add(`${value.kind}:${value.record.id}`);
-    return jobs;
-  };
-  let jobs: ReturnType<typeof prepareJobs> = [];
-  store.assertRecordSnapshotFrame(() => { withLookup(() => { jobs = prepareJobs(); }); });
-  const assertRecordCurrent = (key: string) => {
-    store.assertRecordSnapshotFrame(() => {
-      assertAuthorityCurrent();
-      withLookup(() => {
-        const checks = scopedChecks.get(key) ?? [];
-        withRecordGenerations(checks, () => { for (const check of checks) check(); });
-      });
-    });
-  };
-  try {
-    assertCurrent();
-    if (jobs.length) {
-      await decisionOrClassic(async () => {
-        authority = captureJudgmentPort(knowledgeScopeSelection.name, { signal: operationSignal, assertCurrent: assertInputIdentity, prepareResultCapture: prepareRepairJudgmentResult });
-        let resultModel: string | undefined;
-        const verdicts = scopeVerdictsFor(store, authority.identity);
-        const unread = jobs.filter(job => verdicts.get(job.key)?.version !== job.version);
-        const deferred = new Set(unread.slice(Math.max(0, options.maxReadingsPerPass ?? MAX_SCOPE_READINGS_PER_PASS)).map(job => job.key));
-        await mapLimit(jobs.filter(job => !deferred.has(job.key)), 4, job => decisionOrClassic(async () => {
-          const known = verdicts.get(job.key);
-          if (known?.version === job.version) {
-            assertRecordCurrent(job.key);
-            (known.included ? accepted : declined).add(job.key);
-            return;
-          }
-          let captured: ReturnType<typeof captureJudgmentPort> | undefined;
-          store.assertRecordSnapshotFrame(() => {
-            captured = captureJudgmentPort(knowledgeScopeSelection.name, { signal: operationSignal,
-              assertCurrent: () => { assertRecordCurrent(job.key); },
-              prepareResultCapture: prepareRepairJudgmentResult });
-          });
-          if (!captured) throw new KnowledgeScopeSelectionHeldError('stale');
-          if (captured.identity !== authority?.identity) throw new KnowledgeScopeSelectionHeldError('stale');
-          const run = await knowledgeScopeSelection.run(captured.port, job.state, { signal: captured.signal, site: knowledgeScopeSelection.name });
-          captured.assertCurrent();
-          if (resultModel !== undefined && resultModel !== run.result.model) throw new KnowledgeScopeSelectionHeldError('stale');
-          resultModel = run.result.model;
-          if (run.readings.included.outcome !== 'act' || run.readings.included.verdict === 'uncertain') throw new KnowledgeScopeSelectionHeldError('uncertain');
-          const included = run.readings.included.verdict === 'yes';
-          (included ? accepted : declined).add(job.key);
-          verdicts.set(job.key, { version: job.version, included });
-          run.recordAction(`scope content ${run.readings.included.verdict}; explicit namespace and effect authority unchanged`);
-          captured.assertCurrent();
-        }, () => {
-          classicSelection = true;
-          assertRecordCurrent(job.key);
-          if (!declined.has(job.key)) accepted.add(job.key);
-        }));
-        for (const key of deferred) {
-          classicSelection = true;
-          assertRecordCurrent(key);
-          if (!declined.has(key)) accepted.add(key);
-        }
-      }, () => {
-        classicSelection = true;
-        assertCurrent();
-        for (const job of jobs) {
-          assertRecordCurrent(job.key);
-          if (!declined.has(job.key)) accepted.add(job.key);
-        }
-      });
-    }
-    assertCurrent();
-  } catch (error) {
-    try { fail(error); } finally { controller.abort(); }
+    accepted.add(keyFor(value));
   }
-  const matches = (value: ScopeRecord) => {
-    const { kind, record } = value;
-    try {
-      assertRecordCurrent(keyFor(value));
-    } catch (error) { fail(error); }
-    const key = `${kind}:${record.id}`, snapshot = snapshots.get(key);
-    if (!snapshot) return false;
-    if (!snapshot(value)) throw new KnowledgeScopeSelectionHeldError('stale');
-    return accepted.has(key);
-  };
-  const selectedEdges = potentialEdges.filter(edge => edgeInWindow(edge, accepted));
-  const retainEdges = (records: readonly KnowledgeEdgeRecord[], window: KnowledgeScopeEdgeWindow = {}) => {
-    const inputVersion = edgeVersion(records), windowSnapshot = captureStrictRepairJson(window), windowVersion = knowledgeRecordVersion(windowSnapshot);
-    const retainedRecords = retainStrictJudgmentJson(records, problem => new KnowledgeWebGapRepairHeldError(problem));
-    const retainedWindow = retainStrictJudgmentJson(window, problem => new KnowledgeWebGapRepairHeldError(problem));
-    const originalSlotsMatch = (retained: { readonly assertCurrent: () => void }) => {
-      try { retained.assertCurrent(); return true; } catch { return false; }
-    };
-    const keys = new Set([...accepted].filter(key => key.startsWith('source:')
-      ? !windowSnapshot.sourceIds || windowSnapshot.sourceIds.includes(key.slice('source:'.length))
-      : key.startsWith('node:') && (!windowSnapshot.nodeIds || windowSnapshot.nodeIds.includes(key.slice('node:'.length)))));
-    const incident = windowSnapshot.incidentTo ? new Set(windowSnapshot.incidentTo.map(reference => `${reference.kind}:${reference.id}`)) : undefined;
-    if (incident && [...incident].some(key => !keys.has(key))) throw new KnowledgeScopeSelectionHeldError('stale');
-    const openIncident = windowSnapshot.includeUnselectedEndpoints === true;
-    if (openIncident && !incident?.size) throw new KnowledgeScopeSelectionHeldError('stale');
-    const touchesIncident = (from: string, to: string) => !!incident && (incident.has(from) || incident.has(to));
-    const includes = (edge: EdgeEndpoints) => edgeInWindow(edge, keys)
-      && (!incident || incident.has(`${edge.fromKind}:${edge.fromId}`) || incident.has(`${edge.toKind}:${edge.toId}`));
-    const topologyVersion = (values: readonly KnowledgeEdgeRecord[]) => knowledgeRecordVersion(values
-      .filter(edge => touchesIncident(`${edge.fromKind}:${edge.fromId}`, `${edge.toKind}:${edge.toId}`))
-      .map(edge => ({ id: edge.id, fromKind: edge.fromKind, fromId: edge.fromId, toKind: edge.toKind, toId: edge.toId }))
-      .sort((left, right) => left.id.localeCompare(right.id)));
-    const originalTopologyVersion = openIncident ? topologyVersion(edges) : undefined;
-    const byId = new Map(selectedEdges.map(edge => [edge.id, edge]));
-    for (const record of records) if (!includes(record) || !sameKnowledgeRecord(record, byId.get(record.id))) throw new KnowledgeScopeSelectionHeldError('stale');
-    const original = potentialEdges.filter(includes), version = edgeVersion(original);
-    const retainedEdges = retainStrictJudgmentJson(original, problem => new KnowledgeWebGapRepairHeldError(problem));
-    const originalEdges = new Set(original);
-    const cachedWindowMatches = () => {
-      const current = store.listEdges().filter(includes);
-      const currentEdges = new Set(current);
-      if (originalSlotsMatch(retainedEdges) && originalEdges.size === original.length
-        && current.length === original.length && currentEdges.size === originalEdges.size
-        && original.every(edge => currentEdges.has(edge))) return true;
-      return edgeVersion(current) === version;
-    };
-    const originalWindowGeneration = originalEdgeChanges.reduce((latest, change) => {
-      const from = `${change.fromKind}:${change.fromId}`, to = `${change.toKind}:${change.toId}`;
-      return (openIncident ? touchesIncident(from, to) : keys.has(from) && keys.has(to) && (!incident || touchesIncident(from, to)))
-        && BigInt(change.generation) > BigInt(latest) ? change.generation : latest;
-    }, '0');
-    const current = () => {
-      try {
-        store.assertRecordSnapshotFrame(() => {
-          assertAuthorityCurrent();
-          if ((!originalSlotsMatch(retainedRecords) && edgeVersion(records) !== inputVersion)
-            || (!originalSlotsMatch(retainedWindow) && knowledgeRecordVersion(captureStrictRepairJson(window)) !== windowVersion)
-            || !cachedWindowMatches()
-            || (openIncident && topologyVersion(store.listEdges()) !== originalTopologyVersion)
-            || store.getEdgeWindowGeneration([...keys], incident ? [...incident] : undefined, openIncident) !== originalWindowGeneration) throw new KnowledgeScopeSelectionHeldError('stale');
-          const physical = store.getEdgeGenerationSnapshots().filter(includes);
-          const expectedIds = original.map(edge => edge.id).sort();
-          if (knowledgeRecordVersion(physical.map(edge => edge.id).sort()) !== knowledgeRecordVersion(expectedIds)
-            || physical.some(snapshot => originalEdgeGenerations.get(snapshot.id) !== snapshot.generation)) throw new KnowledgeScopeSelectionHeldError('stale');
-        });
-      } catch (error) { fail(error); }
-    };
-    current(); return current;
-  };
+  if (unread.length > 0) queueScopeReadings(store);
+  const selectedEdges = edges.filter(edge => accepted.has(`${edge.fromKind}:${edge.fromId}`) && accepted.has(`${edge.toKind}:${edge.toId}`));
   return Object.freeze({
-    ...(classicSelection ? { provenance: 'classic' as const } : {}),
+    ...(unread.length > 0 || isClassicOperation() ? { provenance: 'classic' as const } : {}),
     sources: Object.freeze(sources.filter(record => accepted.has(`source:${record.id}`))),
     nodes: Object.freeze(nodes.filter(record => accepted.has(`node:${record.id}`))),
     issues: Object.freeze(issues.filter(record => accepted.has(`issue:${record.id}`))),
     edges: Object.freeze(selectedEdges),
-    source: (record: KnowledgeSourceRecord) => matches({ kind: 'source', record }),
-    node: (record: KnowledgeNodeRecord) => matches({ kind: 'node', record }),
-    issue: (record: KnowledgeIssueRecord) => matches({ kind: 'issue', record }),
-    retainEdges,
+    source: (record: KnowledgeSourceRecord) => accepted.has(`source:${record.id}`),
+    node: (record: KnowledgeNodeRecord) => accepted.has(`node:${record.id}`),
+    issue: (record: KnowledgeIssueRecord) => accepted.has(`issue:${record.id}`),
+    retainEdges: () => { assertCurrent(); return assertCurrent; },
     assertCurrent,
   });
+}
+
+/** One background reading pass per store at a time; a request while one runs asks for one more pass. */
+const scopeReadingPasses = new WeakMap<KnowledgeStore, { again: boolean }>();
+
+/**
+ * Reads the ordinary-view eligibility of default-space records that have no
+ * current reading, a bounded batch per pass, and stores each verdict with the
+ * content version it was read from. Runs after the view was answered; nothing
+ * waits on it. With no decision model (or Classic - Off) nothing is read and the
+ * records stay shown.
+ */
+function queueScopeReadings(store: KnowledgeStore): void {
+  if (isClassicOperation()) return;
+  const running = scopeReadingPasses.get(store);
+  if (running) { running.again = true; return; }
+  const pass = { again: false };
+  scopeReadingPasses.set(store, pass);
+  const timer = setTimeout(() => {
+    void withConfiguredDecisionModelPolicy(() => runScopeReadingPass(store))
+      .catch((error: unknown) => {
+        logger.debug('Knowledge scope readings stopped; records stay shown until read', { error: summarizeError(error) });
+        return false;
+      })
+      .then((more) => {
+        scopeReadingPasses.delete(store);
+        if ((more || pass.again) && store.isReady) queueScopeReadings(store);
+      });
+  }, 0);
+  timer.unref?.();
+}
+
+/** Returns true when records are still waiting for a reading after this pass. */
+async function runScopeReadingPass(store: KnowledgeStore): Promise<boolean> {
+  if (!store.isReady || isClassicOperation()) return false;
+  const edgeIndex = indexEdges(store.listEdges());
+  const waiting: ScopeRecord[] = [];
+  const all: ScopeRecord[] = [
+    ...store.listSources(Number.MAX_SAFE_INTEGER).map(record => ({ kind: 'source' as const, record })),
+    ...store.listNodes(Number.MAX_SAFE_INTEGER).map(record => ({ kind: 'node' as const, record })),
+    ...store.listIssues(Number.MAX_SAFE_INTEGER).map(record => ({ kind: 'issue' as const, record })),
+  ];
+  for (const value of all) {
+    if (needsReading(store, edgeIndex, value) && !currentVerdict(store, value)) waiting.push(value);
+  }
+  if (waiting.length === 0) return false;
+  const batch = waiting.slice(0, SCOPE_READINGS_PER_PASS);
+  const verdicts: KnowledgeScopeVerdict[] = [];
+  let unavailable = false;
+  await mapLimit(batch, 4, async (value) => {
+    if (unavailable) return;
+    const version = contentVersion(store, value);
+    let included: boolean | null = null;
+    try {
+      const state = scopeReadingState(store, edgeIndex, value);
+      const captured = captureJudgmentPort(knowledgeScopeSelection.name, { prepareResultCapture: prepareRepairJudgmentResult });
+      const run = await knowledgeScopeSelection.run(captured.port, state, { signal: captured.signal, site: knowledgeScopeSelection.name });
+      const reading = run.readings.included;
+      included = reading.outcome === 'act' && reading.verdict !== 'uncertain' ? reading.verdict === 'yes' : null;
+      run.recordAction(`ordinary-view reading ${reading.verdict}; stored with the record's content version`);
+    } catch (error) {
+      if (error instanceof JudgmentPortMissingError) { unavailable = true; return; }
+      // A record whose reading failed is stored as unsettled and stays shown until its content changes.
+      logger.debug('Knowledge scope reading did not settle', { record: keyFor(value), error: summarizeError(error) });
+    }
+    verdicts.push({ key: keyFor(value), version, included, decidedAt: Date.now() });
+  });
+  if (verdicts.length > 0 && store.isReady) await store.recordScopeVerdicts(verdicts);
+  return !unavailable && waiting.length > batch.length;
+}
+
+/** The reading's input: the record, the records it is attached to in its space, and whether it reaches outside. */
+function scopeReadingState(store: KnowledgeStore, edgeIndex: ReadonlyMap<string, readonly KnowledgeEdgeRecord[]>, value: ScopeRecord) {
+  const related = new Map<string, ScopeRecord>();
+  let outsideRequestedScope = false;
+  const ordinary: KnowledgeSpaceScopeInput = {};
+  const refs = [...references(value), ...(value.kind === 'source' ? [] : (edgeIndex.get(keyFor(value)) ?? []).filter(edge => !isGeneratedProjectionViewEdge(
+    edge.fromKind === 'source' ? store.getSource(edge.fromId) : undefined, edge))).flatMap(edge => [
+    ...(edge.fromKind === 'source' || edge.fromKind === 'node' ? [{ kind: edge.fromKind, id: edge.fromId }] : []),
+    ...(edge.toKind === 'source' || edge.toKind === 'node' ? [{ kind: edge.toKind, id: edge.toId }] : []),
+  ])];
+  for (const ref of refs) {
+    const key = `${ref.kind}:${ref.id}`;
+    const source = ref.kind === 'source' ? store.getSource(ref.id) : null;
+    const node = ref.kind === 'node' ? store.getNode(ref.id) : null;
+    const other: ScopeRecord | undefined = source ? { kind: 'source', record: source } : node ? { kind: 'node', record: node } : undefined;
+    if (!other || key === keyFor(value)) continue;
+    // A new descendant claim is an output, rather than a subject's context.
+    if (value.kind === 'node' && value.record.kind !== 'fact' && other.kind === 'node' && other.record.kind === 'fact'
+      && !references(value).some(entry => entry.kind === other.kind && entry.id === other.record.id)) continue;
+    if (membership(store, edgeIndex, other, ordinary)) related.set(key, other);
+    else outsideRequestedScope = true;
+  }
+  const candidate = project(store, value);
+  const relatedContent = [...related.values()].map(other => project(store, other));
+  const state = { view: 'ordinary', candidate: toJson(candidate), related: relatedContent.map(other => toJson(other)),
+    associations: { outsideRequestedScope } };
+  assertJudgmentInput(state);
+  return state;
 }

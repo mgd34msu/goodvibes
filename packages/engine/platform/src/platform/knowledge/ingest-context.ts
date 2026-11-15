@@ -14,7 +14,8 @@ export interface KnowledgeIngestContext {
   ) => void;
   readonly syncReviewedMemory: () => Promise<void>;
   readonly semanticEnrichSource?: ((sourceId: string, knowledgeSpaceId?: string) => void | Promise<void>) | undefined;
-  readonly lint: () => Promise<readonly KnowledgeIssueRecord[]>;
+  /** Lints the given sources only, or the whole store when none are given. */
+  readonly lint: (sourceIds?: readonly string[]) => Promise<readonly KnowledgeIssueRecord[]>;
   readonly listConnectors: () => readonly KnowledgeConnector[];
 }
 

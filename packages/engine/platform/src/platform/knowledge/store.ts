@@ -27,10 +27,18 @@ import { cleanupKnowledgeArtifact, retireKnowledgeArtifactCleanup, type Artifact
 import type { KnowledgeArtifactReferenceOwner } from './artifact-reference-owner.js';
 import { KnowledgeSourcePublicationHeldError, knowledgeSourceSnapshotFromRows, planningSourceSnapshotFromRows, readPlanningSourceSnapshot, readKnowledgeSourceSnapshot, type KnowledgeSourceSnapshot, type KnowledgeSourceWriteResult } from './store-source-generation.js';
 import type { PlanningSourceIdentity } from './store-planning-source-selector.js';
-import { applyKnowledgeImport, type KnowledgeImportInput, type KnowledgeImportReceipt, type PrepareKnowledgeImportGraph } from './store-import.js';
+import { applyKnowledgeImport, assertKnowledgeImportRecordSizes, type KnowledgeImportInput, type KnowledgeImportReceipt, type PrepareKnowledgeImportGraph } from './store-import.js';
 import { prepareKnowledgeEdgeRecord, writeKnowledgeEdgeRow, findKnowledgeEdge } from './store-edge-writes.js';
 import { IndexedRecordMap, edgeEndpointKey, extractionSourceKey, nodeSlugKey, sourceUriKey } from './store-indexed-map.js';
-import { createKnowledgeEdgeChanges, validateKnowledgeEdgeChanges, knowledgeEdgeChangesFromRows, type KnowledgeEdgeChangeSnapshot, type KnowledgeEdgeGenerationSnapshot } from './store-edge-generations.js';
+import { createKnowledgeEdgeChanges, validateKnowledgeEdgeChanges, trimKnowledgeEdgeChanges, type KnowledgeEdgeGenerationSnapshot } from './store-edge-generations.js';
+import {
+  ensureKnowledgeScopeVerdictTable,
+  loadKnowledgeScopeVerdicts,
+  pruneOrphanScopeVerdicts,
+  splitScopeVerdictKey,
+  writeKnowledgeScopeVerdict,
+  type KnowledgeScopeVerdict,
+} from './store-scope-verdicts.js';
 import { snapshotNodeInput } from './activation/projection.js';
 import { KnowledgeNodeActivationHeldError, type KnowledgeNodeActivationOptions } from './activation/types.js';
 import { prepareHomeGraphSnapshotGroupAcknowledgment, resolveKnowledgeNodeObservation, retainKnowledgeNodeObservation } from './store-node-observation.js';
@@ -165,6 +173,7 @@ import {
   ensureKnowledgeSpaceMetadata,
   getExplicitKnowledgeSpaceId,
   getKnowledgeSpaceId,
+  knowledgeIssueFamily,
 } from './spaces.js';
 
 /**
@@ -258,6 +267,18 @@ export function knowledgeNodePublicationGeneration(store: KnowledgeStore, record
   return snapshot?.raw && snapshot.record && sameKnowledgeRecord(record, snapshot.record) ? snapshot.generation : null;
 }
 
+/** The stored issue already says what the input says (clocks and space stamps aside). */
+function issueSays(existing: KnowledgeIssueRecord, input: KnowledgeIssueUpsertInput): boolean {
+  if (existing.severity !== input.severity || existing.code !== input.code || existing.message !== input.message.trim()
+    || existing.status !== (input.status ?? existing.status)
+    || (existing.sourceId ?? undefined) !== (input.sourceId?.trim() || undefined)
+    || (existing.nodeId ?? undefined) !== (input.nodeId?.trim() || undefined)) return false;
+  for (const [key, value] of Object.entries(input.metadata ?? {})) {
+    if (JSON.stringify(existing.metadata[key]) !== JSON.stringify(value)) return false;
+  }
+  return true;
+}
+
 export class KnowledgeStore {
   private readonly sqlite: SQLiteStore;
   readonly #revisionSource = revisionSource('knowledge store', () => this.sqlite.contentRevision());
@@ -298,6 +319,8 @@ export class KnowledgeStore {
   private readonly schedules = new Map<string, KnowledgeScheduleRecord>();
   private readonly nodeRevisions = new Map<string, KnowledgeNodeRevisionRecord[]>();
   private readonly semanticEnrichmentStates = new Map<string, KnowledgeSemanticEnrichmentStateRecord>();
+  /** Stored ordinary-view readings by `kind:id`; see getScopeVerdict. */
+  private readonly scopeVerdicts = new Map<string, KnowledgeScopeVerdict>();
 
   /**
    * The construction every production site uses: the family is required here, so
@@ -900,7 +923,7 @@ export class KnowledgeStore {
         if (!result) throw new SemanticIdentityHeldError('stale');
         const saved = mapIssueRow(result.columns, values), original = this.issues.get(saved.id);
         if (!original || !sameKnowledgeRecord(original, saved)) throw new SemanticIdentityHeldError('stale');
-        if (getKnowledgeSpaceId(original) === selector.spaceId && original.metadata.namespace === selector.namespace) candidates.push(original);
+        if (getKnowledgeSpaceId(original) === selector.spaceId && knowledgeIssueFamily(original) === selector.namespace) candidates.push(original);
       }
       return undefined;
     });
@@ -967,10 +990,6 @@ export class KnowledgeStore {
       }) : [];
     });
     return snapshots;
-  }
-
-  getEdgeChangeSnapshots(): readonly KnowledgeEdgeChangeSnapshot[] {
-    return knowledgeEdgeChangesFromRows(this.sqlite.readPersistedEdgeChanges());
   }
 
   /** All physical endpoints and complete raw generations, without semantic views. */
@@ -1276,6 +1295,7 @@ export class KnowledgeStore {
   }
 
   private async applyImportOwned(input: KnowledgeImportInput, options: KnowledgeNodeActivationOptions = {}): Promise<void> {
+    assertKnowledgeImportRecordSizes(input);
     input = captureKnowledgeStoreInput(input);
     await this.init();
     await applyKnowledgeImport(this, { sqlite: this.sqlite, sources: this.sources, extractions: this.extractions, nodes: this.nodes,
@@ -1494,11 +1514,36 @@ export class KnowledgeStore {
     return record;
   }
 
+  /**
+   * The stored ordinary-view reading for a record (`source:<id>`, `node:<id>`,
+   * `issue:<id>`), or undefined when none was stored. It is current only while
+   * its `version` equals the record's content version; see scope-verdicts.ts.
+   */
+  getScopeVerdict(key: string): KnowledgeScopeVerdict | undefined {
+    return this.scopeVerdicts.get(key);
+  }
+
+  /** Stores ordinary-view readings in one save; a reading of a record that is gone is dropped. */
+  async recordScopeVerdicts(verdicts: readonly KnowledgeScopeVerdict[]): Promise<void> {
+    await this.init();
+    const live = verdicts.filter((verdict) => {
+      const [kind, id] = splitScopeVerdictKey(verdict.key);
+      return kind === 'source' ? this.sources.has(id) : kind === 'node' ? this.nodes.has(id) : kind === 'issue' ? this.issues.has(id) : false;
+    });
+    if (live.length === 0) return;
+    for (const verdict of live) writeKnowledgeScopeVerdict(this.sqlite, verdict);
+    for (const verdict of live) this.scopeVerdicts.set(verdict.key, verdict);
+    await this.save();
+  }
+
   async upsertEdge(input: KnowledgeEdgeUpsertInput, assertCurrent?: () => void): Promise<KnowledgeEdgeRecord> {
     assertKnowledgeWriteCurrent(assertCurrent);
     await this.init();
     assertKnowledgeWriteCurrent(assertCurrent);
-    const record = prepareKnowledgeEdgeRecord(input, findKnowledgeEdge(this.edges, input));
+    const existing = findKnowledgeEdge(this.edges, input);
+    const record = prepareKnowledgeEdgeRecord(input, existing);
+    // An edge that already says this writes nothing: no row, no change-journal entry, no save.
+    if (existing && existing.weight === record.weight && JSON.stringify(existing.metadata) === JSON.stringify(record.metadata)) return existing;
     assertKnowledgeWriteCurrent(assertCurrent);
     writeKnowledgeEdgeRow(this.sqlite, record);
     this.edges.set(record.id, record);
@@ -1540,25 +1585,46 @@ export class KnowledgeStore {
     await this.save();
   }
 
-  async replaceIssues(inputs: readonly KnowledgeIssueUpsertInput[], namespace?: string): Promise<KnowledgeIssueRecord[]> {
-    await this.init();
-    const created: KnowledgeIssueRecord[] = [];
-    const activeIds = new Set<string>();
-    for (const input of inputs) {
-      const record = await this.upsertIssue(input);
-      activeIds.add(record.id);
-      created.push(record);
-    }
-    if (namespace) {
-      for (const issue of [...this.issues.values()]) {
-        if (issue.metadata.namespace !== namespace) continue;
-        if (activeIds.has(issue.id) || issue.status === 'resolved' || operatorReviewed(issue)) continue;
-        this.sqlite.run('DELETE FROM knowledge_issues WHERE id = ?', [issue.id]);
-        this.issues.delete(issue.id);
+  /**
+   * Replaces one producer family's issues with `inputs`. An issue whose content is
+   * what the input says is not rewritten, and the family's other issues are removed
+   * (only those about `scope.sourceIds` when given, so a pass over one source leaves
+   * the rest alone). Resolved and operator-reviewed issues stay. All of it is one
+   * save, and none when nothing changed.
+   */
+  async replaceIssues(
+    inputs: readonly KnowledgeIssueUpsertInput[],
+    family?: string,
+    scope?: { readonly sourceIds: ReadonlySet<string> },
+  ): Promise<KnowledgeIssueRecord[]> {
+    return this.batch(async () => {
+      const current: KnowledgeIssueRecord[] = [];
+      const activeIds = new Set<string>();
+      for (const input of inputs) {
+        const existing = input.id ? this.issues.get(input.id) : undefined;
+        if (existing && issueSays(existing, input)) {
+          activeIds.add(existing.id);
+          current.push(existing);
+          continue;
+        }
+        const record = await this.upsertIssue(input);
+        activeIds.add(record.id);
+        current.push(record);
       }
-    }
-    await this.save();
-    return created;
+      if (family) {
+        let removed = false;
+        for (const issue of [...this.issues.values()]) {
+          if (knowledgeIssueFamily(issue) !== family) continue;
+          if (scope && !(issue.sourceId !== undefined && scope.sourceIds.has(issue.sourceId))) continue;
+          if (activeIds.has(issue.id) || issue.status === 'resolved' || operatorReviewed(issue)) continue;
+          this.sqlite.run('DELETE FROM knowledge_issues WHERE id = ?', [issue.id]);
+          this.issues.delete(issue.id);
+          removed = true;
+        }
+        if (removed) await this.save();
+      }
+      return current;
+    });
   }
 
   /** Whole-pass ordinary replacement; preserves terminal and operator-reviewed issues. */
@@ -2002,11 +2068,13 @@ export class KnowledgeStore {
       ],
     });
     try {
+      const verdictTableCreated = ensureKnowledgeScopeVerdictTable(this.sqlite);
       this.refreshSnapshot();
       // Retention is an initialization mutation, never a side effect of adopting
       // another writer's current image during a guarded source action. Publish
       // it through the same baseline check before admitting caller mutations.
-      if (this.pruneJobRuns(MAX_RETAINED_JOB_RUNS) > 0) {
+      const pruned = this.pruneJobRuns(MAX_RETAINED_JOB_RUNS) + trimKnowledgeEdgeChanges(this.sqlite) + pruneOrphanScopeVerdicts(this.sqlite, this.scopeVerdicts);
+      if (pruned > 0 || verdictTableCreated) {
         await this.sqlite.save();
         this.imageIdentity = savedImageIdentity(this.dbPath);
       }
@@ -2052,6 +2120,7 @@ export class KnowledgeStore {
     }
     this.semanticEnrichmentStates.clear();
     for (const record of snapshot.semanticEnrichmentStates) this.semanticEnrichmentStates.set(record.sourceId, record);
+    loadKnowledgeScopeVerdicts(this.sqlite, this.scopeVerdicts);
   }
 }
 

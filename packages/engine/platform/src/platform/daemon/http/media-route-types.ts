@@ -14,17 +14,3 @@ export type {
   WebSearchTimeRange,
   WebSearchVerbosity,
 } from '@goodvibes-jev/engine/daemon-api';
-
-export interface ConfigManagerLike {
-  get(key: string): unknown;
-}
-
-export interface ArtifactStoreLike {
-  list(): readonly unknown[];
-  create(input: Record<string, unknown>): Promise<unknown>;
-  get(artifactId: string): unknown | null;
-  readContent(artifactId: string): Promise<{
-    readonly record: { readonly mimeType: string; readonly filename?: string };
-    readonly buffer: ArrayBuffer | Uint8Array;
-  }>;
-}

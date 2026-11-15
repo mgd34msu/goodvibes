@@ -122,21 +122,21 @@ export function retainKnowledgePreparedRecord<T>(record: T): T {
 }
 /** Lossless successor to the import path's old snapshotNodeInput clone. Keep its
  * nonfinite-number preservation for downstream existing checks, but visit every
- * own array field rather than dropping caller extras with Array.map. */
+ * own array field rather than dropping caller extras with Array.map. It checks
+ * shape only (plain data, no accessors or cycles, bounded depth); how large one
+ * imported record may be is KNOWLEDGE_IMPORT_RECORD_MAX_CHARS, checked per record. */
 export function captureKnowledgeStoreInput<T>(input: T): T {
-  let nodes = 0, chars = 0;
   const ancestors = new Set<object>();
   const fail = (): never => { throw new JudgmentInputError('unsupported-input'); };
   const visit = (value: unknown, depth: number): unknown => {
-    if (++nodes > 20_000 || depth > 64) return fail();
-    if (typeof value === 'string') { chars += value.length; return chars > 1_000_000 ? fail() : value; }
+    if (depth > 64) return fail();
+    if (typeof value === 'string') return value;
     if (value === null || value === undefined || typeof value === 'boolean' || typeof value === 'number') return value;
     if (typeof value !== 'object' || ancestors.has(value)) return fail();
     const array = Array.isArray(value), prototype = Object.getPrototypeOf(value), descriptors = Object.getOwnPropertyDescriptors(value);
     if ((array ? prototype !== Array.prototype : prototype !== Object.prototype && prototype !== null)
       || Object.getOwnPropertySymbols(descriptors).length || Object.values(descriptors).some(item => !('value' in item))) return fail();
     const length = array ? descriptors.length!.value as number : 0;
-    if (length > 20_000) return fail();
     if (array) for (let index = 0; index < length; index++) if (!Object.hasOwn(descriptors, String(index))) return fail();
     const output: object = array ? new Array(length) : {};
     ancestors.add(value);

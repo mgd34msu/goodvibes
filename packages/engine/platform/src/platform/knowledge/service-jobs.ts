@@ -41,9 +41,16 @@ function firstError(errors: readonly (string | { readonly error?: unknown })[]):
 
 export async function runKnowledgeServiceJobByKind(
   kind: KnowledgeJobRecord['kind'],
-  input: { readonly mode?: KnowledgeJobMode | undefined; readonly sourceIds?: readonly string[] | undefined; readonly limit?: number | undefined },
+  input: {
+    readonly mode?: KnowledgeJobMode | undefined;
+    readonly sourceIds?: readonly string[] | undefined;
+    readonly limit?: number | undefined;
+    /** Aborted when the run is cancelled or the process shuts down; the model-calling jobs stop at their next step. */
+    readonly signal?: AbortSignal | undefined;
+  },
   context: KnowledgeServiceJobRunnerContext,
 ): Promise<Record<string, unknown>> {
+  input.signal?.throwIfAborted();
   switch (kind) {
     case 'lint': {
       const issues = await context.lint();
@@ -97,6 +104,7 @@ export async function runKnowledgeServiceJobByKind(
       const result = await context.semanticService.reindex({
         sourceIds: input.sourceIds,
         limit: input.limit,
+        signal: input.signal,
       });
       // Some sources failing is a labelled partial result (`failed`, `errors`);
       // every attempted source failing is a failed run, not a green one.
@@ -110,6 +118,7 @@ export async function runKnowledgeServiceJobByKind(
         sourceIds: input.sourceIds,
         limit: input.limit,
         reason: 'scheduled',
+        signal: input.signal,
       });
       // A refused run (nothing processed, a reason given) or one in which every
       // processed gap errored did nothing; a coalesced or truncated run is expected.

@@ -15,14 +15,11 @@ import {
 } from './spaces.js';
 import {
   prepareKnowledgeScopeSelection,
-  KnowledgeScopeSelectionHeldError,
   type KnowledgeScopeSelection,
   type KnowledgeScopeSelectionOptions,
   type KnowledgeScopeEdgeWindow,
 } from './scope-selection.js';
 import { snapshotNodeInput } from './activation/projection.js';
-import { captureStrictRepairJson } from './semantic/web-gap-repair/admission.js';
-import { knowledgeRecordVersion } from './store-record-representation.js';
 import {
   buildBulletList,
   dedupe,
@@ -106,27 +103,16 @@ export class KnowledgeProjectionService {
     return this.renderSelected(request, this.prepareProjectionScope(request, selection));
   }
 
+  /** A rendered page is a listing: it reads each extraction once and tolerates a concurrent write. */
   private prepareProjectionScope(input: KnowledgeSpaceScopeInput, selection: KnowledgeScopeSelection): PreparedProjectionScope {
-    const extractions = new Map<string, { readonly record: KnowledgeExtractionRecord | null; readonly version: string }>();
-    const edgeGuards: (() => void)[] = [];
-    const assertCurrent = () => {
-      selection.assertCurrent();
-      for (const guard of edgeGuards) guard();
-      for (const [sourceId, observed] of extractions) {
-        if (knowledgeRecordVersion(captureStrictRepairJson(this.store.getExtractionBySourceId(sourceId))) !== observed.version) {
-          throw new KnowledgeScopeSelectionHeldError('stale');
-        }
-      }
-    };
+    const extractions = new Map<string, KnowledgeExtractionRecord | null>();
     return {
-      ...projectionScope(input), selection, assertCurrent,
-      retainEdges: (records, window) => { edgeGuards.push(selection.retainEdges(records, window)); },
+      ...projectionScope(input), selection, assertCurrent: selection.assertCurrent,
+      retainEdges: () => { selection.assertCurrent(); },
       extraction: (sourceId) => {
-        assertCurrent();
-        const retained = extractions.get(sourceId);
-        if (retained) return retained.record;
+        if (extractions.has(sourceId)) return extractions.get(sourceId) ?? null;
         const record = this.store.getExtractionBySourceId(sourceId);
-        extractions.set(sourceId, { record, version: knowledgeRecordVersion(captureStrictRepairJson(record)) });
+        extractions.set(sourceId, record);
         return record;
       },
     };

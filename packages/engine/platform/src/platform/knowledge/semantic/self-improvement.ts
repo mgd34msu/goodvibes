@@ -27,7 +27,7 @@ import { KnowledgeNodeActivationHeldError } from '../activation/types.js';
 import { DecisionModelsDisabledError, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
 import { isKnowledgeSourceQualityFailure } from '../source-quality.js';
 import { isTerminalRefinementState } from '../store-lifecycle-authority.js';
-import { updateRefinementTask, upsertRefinementTaskForGap } from './self-improvement-tasks.js';
+import { storedRefinementTaskForGap, updateRefinementTask, upsertRefinementTaskForGap } from './self-improvement-tasks.js';
 import { promoteRepairSources } from './self-improvement-promotion.js';
 import { discoverIntrinsicGaps } from './self-improvement-intrinsic-gaps.js';
 import {
@@ -154,6 +154,25 @@ export async function runKnowledgeSemanticSelfImprovement(
     if (Date.now() - plan.startedAt >= plan.maxRunMs) {
       markRunBudgetExhausted(state);
       break;
+    }
+    if (input.force !== true) {
+      // Decided from what is stored, before any reading: a gap waiting out its retry
+      // window, or one whose task is final, costs no model request and no task write.
+      const nextAttemptAt = gap.metadata.nextRepairAttemptAt;
+      if (readString(gap.metadata.repairStatus) !== 'repaired' && typeof nextAttemptAt === 'number' && nextAttemptAt > Date.now()) {
+        state.skippedGaps += 1;
+        continue;
+      }
+      const stored = storedRefinementTaskForGap(context.store, spaceId, gap.id);
+      if (stored && isTerminalRefinementState(stored.state)) {
+        // A suppress decision writes its task first; a run stopped between the two
+        // writes left the gap active under a final task, so finish the gap.
+        if (stored.state === 'suppressed') {
+          await suppressGap(context.store, gap, stored.trace.findLast((entry) => entry.state === 'suppressed')?.message ?? 'Gap was classified as not applicable.', spaceId);
+          state.suppressedGaps += 1;
+        } else state.skippedGaps += 1;
+        continue;
+      }
     }
     state.processedGaps += 1;
     try {

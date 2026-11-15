@@ -566,7 +566,8 @@ export interface KnowledgeScheduleUpsertInput {
   readonly enabled?: boolean | undefined;
   readonly schedule: AutomationScheduleDefinition;
   readonly lastRunAt?: number | undefined;
-  readonly nextRunAt?: number | undefined;
+  /** Undefined keeps the stored due time; null clears it (a schedule with no next occurrence). */
+  readonly nextRunAt?: number | null | undefined;
   readonly metadata?: Record<string, unknown> | undefined;
 }
 

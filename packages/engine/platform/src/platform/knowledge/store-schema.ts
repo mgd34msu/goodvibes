@@ -29,6 +29,7 @@ import type {
   KnowledgeScheduleRecord,
   KnowledgeSourceRecord,
   KnowledgeSourceStatus,
+  KnowledgeSourceType,
   KnowledgeNodeStatus,
   KnowledgeExtractionFormat,
   KnowledgeIssueSeverity,
@@ -47,6 +48,24 @@ import type {
   KnowledgeReferenceKind,
   KnowledgeUsageRecord,
 } from './types.js';
+
+import type {
+  KNOWLEDGE_CANDIDATE_STATUSES,
+  KNOWLEDGE_SOURCE_TYPES,
+  KNOWLEDGE_USAGE_KINDS,
+} from '@goodvibes-jev/engine/daemon-api/knowledge-route-types';
+
+type SameValues<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
+/**
+ * The daemon's routes refuse values outside its lists, so each list must name exactly
+ * the store's values: a value added to one side and not the other fails to compile here.
+ */
+const KNOWLEDGE_ROUTE_VALUES_MATCH_STORE: readonly [
+  SameValues<KnowledgeUsageKind, typeof KNOWLEDGE_USAGE_KINDS[number]>,
+  SameValues<KnowledgeConsolidationStatus, typeof KNOWLEDGE_CANDIDATE_STATUSES[number]>,
+  SameValues<KnowledgeSourceType, typeof KNOWLEDGE_SOURCE_TYPES[number]>,
+] = [true, true, true];
+void KNOWLEDGE_ROUTE_VALUES_MATCH_STORE;
 
 export const DEFAULT_KNOWLEDGE_DB_FILE = 'knowledge-wiki.sqlite';
 // Versioned writer barriers preserve old saved identities while new writers

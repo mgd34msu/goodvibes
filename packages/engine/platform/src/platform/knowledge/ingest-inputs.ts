@@ -181,8 +181,7 @@ export async function ingestKnowledgeUrl(
         sessionId: pending.sessionId,
         ...failedIngestOutcome(context, pending),
       });
-      await context.syncReviewedMemory();
-      const issues = await context.lint();
+      const issues = await context.lint([failed.id]);
       context.emitIfReady((bus, ctx) => emitKnowledgeIngestFailed(bus, ctx, {
         sourceId: failed.id,
         error: failed.crawlError ?? 'Knowledge ingest failed.',
@@ -348,8 +347,7 @@ export async function ingestKnowledgeArtifact(
         sessionId: pending.sessionId,
         ...failedIngestOutcome(context, pending),
       });
-      await context.syncReviewedMemory();
-      const issues = await context.lint();
+      const issues = await context.lint([failed.id]);
       context.emitIfReady((bus, ctx) => emitKnowledgeIngestFailed(bus, ctx, {
         sourceId: failed.id,
         error: failed.crawlError ?? 'Artifact ingest failed.',
@@ -547,7 +545,7 @@ function failedIngestOutcome(context: KnowledgeIngestContext, pending: Knowledge
  * reach the failure path that stamps a crawl error on committed content.
  */
 async function lintCommittedIngest(context: KnowledgeIngestContext, sourceId: string): Promise<readonly KnowledgeIssueRecord[]> {
-  try { return await context.lint(); }
+  try { return await context.lint([sourceId]); }
   catch (error) {
     logger.warn('Knowledge source committed; the post-ingest lint failed.', { sourceId, error: summarizeError(error) });
     return [];
@@ -555,24 +553,27 @@ async function lintCommittedIngest(context: KnowledgeIngestContext, sourceId: st
 }
 
 /**
- * A batch ingests many sources: whole-store lint and memory sync run once after
- * the loop instead of once per source. `flush` returns one error line per step
- * that failed.
+ * A batch ingests many sources: the lint of the sources it touched runs once
+ * after the loop instead of once per source. `flush` returns one error line per
+ * step that failed.
  */
 function deferPostIngestWork(context: KnowledgeIngestContext): { readonly context: KnowledgeIngestContext; readonly flush: () => Promise<string[]> } {
-  let pending = false;
+  const touched = new Set<string>();
+  let wholeStore = false;
   const deferred: KnowledgeIngestContext = {
     ...context,
-    syncReviewedMemory: async () => { pending = true; },
-    lint: async () => { pending = true; return []; },
+    lint: async (sourceIds) => {
+      if (sourceIds) for (const id of sourceIds) touched.add(id);
+      else wholeStore = true;
+      return [];
+    },
   };
   return {
     context: deferred,
     flush: async () => {
       const errors: string[] = [];
-      if (!pending) return errors;
-      try { await context.syncReviewedMemory(); } catch (error) { errors.push(`memory sync: ${summarizeError(error)}`); }
-      try { await context.lint(); } catch (error) { errors.push(`lint: ${summarizeError(error)}`); }
+      if (!wholeStore && touched.size === 0) return errors;
+      try { await context.lint(wholeStore ? undefined : [...touched]); } catch (error) { errors.push(`lint: ${summarizeError(error)}`); }
       return errors;
     },
   };

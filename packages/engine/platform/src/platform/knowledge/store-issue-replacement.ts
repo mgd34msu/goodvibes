@@ -1,7 +1,7 @@
 import type { SQLiteStore } from '../state/sqlite-store.js';
 import type { KnowledgeIssueRecord, KnowledgeIssueUpsertInput, KnowledgeNodeRecord, KnowledgeSourceRecord } from './types.js';
 import { prepareKnowledgeIssueRecord, writeKnowledgeIssueRow } from './store-node-issue-writes.js';
-import { getKnowledgeSpaceId } from './spaces.js';
+import { getKnowledgeSpaceId, knowledgeIssueFamily } from './spaces.js';
 import { createHash } from 'node:crypto';
 export class KnowledgeIssueReplacementHeldError extends Error {
   override readonly name = 'KnowledgeIssueReplacementHeldError';
@@ -54,18 +54,18 @@ export function commitGuardedKnowledgeIssueReplacement(view: IssueReplacementVie
       || !isLegacyHomeGraphQualityIssue(current, spaceId)) throw new KnowledgeIssueReplacementHeldError('stale');
     legacyIds.add(current.id);
   }
-  const previous = [...view.issues.values()].filter((issue) => issue.metadata.namespace === namespace || legacyIds.has(issue.id));
+  const previous = [...view.issues.values()].filter((issue) => knowledgeIssueFamily(issue) === namespace || legacyIds.has(issue.id));
   if (!namespace.trim() || inputs.length > 2_000 || previous.length > 2_000
     || new Set(inputs.map((input) => input.id)).size !== inputs.length) throw new KnowledgeIssueReplacementHeldError('budget');
   for (const input of inputs) {
     const existing = input.id ? view.issues.get(input.id) : undefined;
     const node = input.nodeId ? view.nodes.get(input.nodeId) : undefined;
     const source = input.sourceId ? view.sources.get(input.sourceId) : undefined;
-    if (!input.id?.trim() || input.metadata?.namespace !== namespace || (!node && !source)
+    if (!input.id?.trim() || knowledgeIssueFamily(input) !== namespace || (!node && !source)
       || (input.nodeId && !node) || (input.sourceId && !source)
       || (node && getKnowledgeSpaceId({ metadata: input.metadata ?? {} }) !== getKnowledgeSpaceId(node))
       || (source && getKnowledgeSpaceId({ metadata: input.metadata ?? {} }) !== getKnowledgeSpaceId(source))
-      || (existing && ((existing.metadata.namespace !== namespace && !legacyIds.has(existing.id)) || existing.code !== input.code
+      || (existing && ((knowledgeIssueFamily(existing) !== namespace && !legacyIds.has(existing.id)) || existing.code !== input.code
         || existing.nodeId !== input.nodeId || existing.sourceId !== input.sourceId))) {
       throw new KnowledgeIssueReplacementHeldError('malformed');
     }

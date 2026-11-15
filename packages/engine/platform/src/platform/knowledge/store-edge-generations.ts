@@ -34,12 +34,20 @@ export function validateKnowledgeEdgeChanges(db: Pick<SqlDatabase, 'exec'>): voi
   }
 }
 
-export interface KnowledgeEdgeChangeSnapshot {
-  readonly generation: string;
-  readonly fromKind: string;
-  readonly fromId: string;
-  readonly toKind: string;
-  readonly toId: string;
+/**
+ * Drops every journal row except the latest one per endpoint tuple. "Changed
+ * since" is answered by the largest sequence over a set of endpoint tuples, and
+ * that maximum is the same before and after, so a removed edge is still seen.
+ * Returns the number of rows removed; the caller saves.
+ */
+export function trimKnowledgeEdgeChanges(db: Pick<SqlDatabase, 'run' | 'exec'>): number {
+  const counts = db.exec(`SELECT COUNT(*), (SELECT COUNT(*) FROM (SELECT 1 FROM knowledge_edge_changes
+    GROUP BY from_kind,from_id,to_kind,to_id)) FROM knowledge_edge_changes`)[0]?.values[0];
+  const total = Number(counts?.[0] ?? 0), kept = Number(counts?.[1] ?? 0);
+  if (!(total > kept)) return 0;
+  db.run(`DELETE FROM knowledge_edge_changes WHERE sequence NOT IN (SELECT MAX(sequence) FROM knowledge_edge_changes
+    GROUP BY from_kind,from_id,to_kind,to_id)`);
+  return total - kept;
 }
 
 export interface KnowledgeEdgeGenerationSnapshot {
@@ -49,15 +57,4 @@ export interface KnowledgeEdgeGenerationSnapshot {
   readonly toKind: string;
   readonly toId: string;
   readonly generation: string;
-}
-
-export function knowledgeEdgeChangesFromRows(rows: ReturnType<SqlDatabase['exec']>): readonly KnowledgeEdgeChangeSnapshot[] {
-  return (rows[0]?.values ?? []).map(values => {
-    const [generation, fromKind, fromId, toKind, toId] = values;
-    if (typeof generation !== 'string' || !/^[1-9][0-9]*$/.test(generation)
-      || typeof fromKind !== 'string' || typeof fromId !== 'string' || typeof toKind !== 'string' || typeof toId !== 'string') {
-      throw new Error('Invalid knowledge edge change row');
-    }
-    return { generation, fromKind, fromId, toKind, toId };
-  });
 }

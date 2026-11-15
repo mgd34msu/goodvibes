@@ -513,7 +513,7 @@ async function persistSemanticExtraction(
       metadata: semanticMetadata(spaceId, {
         reason: gap.reason,
         subject: gap.subject,
-        namespace: `knowledge:${spaceId}:semantic`,
+        issueFamily: `knowledge:${spaceId}:semantic`,
       }),
     }], assertCurrent() { assertQualityCurrent(); issueIdentity.assertCurrent(); } }));
   }

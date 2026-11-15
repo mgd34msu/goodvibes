@@ -31,6 +31,9 @@ export async function upsertRefinementTaskForGap(
   const identity = prepareSemanticRefinementTaskIdentity(store, spaceId, context.gap.id);
   const id = identity.id, existing = identity.original;
   if (existing && isTerminalRefinementState(existing.state)) return existing;
+  // A gap that already has a task is already being tracked: writing `detected` again
+  // would move the task back and push its real reason out of the trace.
+  if (existing && state === 'detected') return existing;
   const attemptCount = existing?.attemptCount ?? 0;
   return store.upsertRefinementTask(guardKnowledgeRefinementTaskInput({
     id,
@@ -73,6 +76,10 @@ export async function updateRefinementTask(
   assertCurrent?.();
   const latest = store.getRefinementTask(task.id);
   if (latest && isTerminalRefinementState(latest.state)) return latest;
+  // Nothing to record: same state, same reason, no new data. Another write would only
+  // append the same trace entry and save the store.
+  if (latest && latest.state === state && state !== 'searching' && Object.keys(data).length === 0
+    && ((state !== 'blocked' && state !== 'failed') || latest.blockedReason === message)) return latest;
   // Build on the stored task, not the caller's copy: another writer's metadata,
   // attempts and retry time since that copy was read must not be overwritten.
   const base = latest ?? task;
@@ -186,4 +193,9 @@ function readSourceAssessments(value: unknown): NonNullable<KnowledgeRefinementT
       && typeof record.confidence === 'number'
       && Array.isArray(record.reasons);
   });
+}
+
+/** The stored refinement task of a gap, read without writing anything. */
+export function storedRefinementTaskForGap(store: KnowledgeStore, spaceId: string, gapId: string): KnowledgeRefinementTaskRecord | undefined {
+  return prepareSemanticRefinementTaskIdentity(store, spaceId, gapId).original ?? undefined;
 }

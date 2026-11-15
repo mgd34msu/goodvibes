@@ -4,6 +4,14 @@ import type { KnowledgeStore } from '../store.js';
 import { buildHomeGraphMetadata } from './helpers.js';
 import { readHomeGraphState } from './state.js';
 import type { HomeGraphExport } from './types.js';
+import { assertKnowledgeImportRecordSizes } from '../store-import.js';
+
+/** Records per import publication. */
+const IMPORT_BATCH_SIZE = 200;
+
+function* batches<T>(records: readonly T[]): Generator<T[]> {
+  for (let start = 0; start < records.length; start += IMPORT_BATCH_SIZE) yield records.slice(start, start + IMPORT_BATCH_SIZE);
+}
 
 export function exportHomeGraphSpace(
   store: KnowledgeStore,
@@ -51,7 +59,21 @@ export async function importHomeGraphSpace(
   }
   const edgeInputs = (input.data.edges ?? []).map((edge) => ({ ...edge, metadata: buildHomeGraphMetadata(input.spaceId, input.installationId, edge.metadata) }));
   const issueInputs = (input.data.issues ?? []).map((issue) => ({ ...issue, metadata: buildHomeGraphMetadata(input.spaceId, input.installationId, issue.metadata) }));
-  await store.applyImport({ sources: sourceInputs, extractions: extractionInputs, nodes: nodeInputs, edges: edgeInputs, issues: issueInputs }, options);
+  const empty = { sources: [], extractions: [], nodes: [], edges: [], issues: [] };
+  // Every record is checked before the first batch is written.
+  assertKnowledgeImportRecordSizes({ sources: sourceInputs, extractions: extractionInputs, nodes: nodeInputs, edges: edgeInputs, issues: issueInputs });
+  // A home of any size imports in bounded batches, each one publication: sources with
+  // their extractions first, then nodes, then the edges and issues that refer to them.
+  for (const sources of batches(sourceInputs)) {
+    const ids = new Set(sources.map((source) => source.id));
+    await store.applyImport({ ...empty, sources, extractions: extractionInputs.filter((extraction) => ids.has(extraction.sourceId)) }, options);
+  }
+  const importedSourceIds = new Set(sourceInputs.map((source) => source.id));
+  const orphanExtractions = extractionInputs.filter((extraction) => !importedSourceIds.has(extraction.sourceId));
+  for (const extractions of batches(orphanExtractions)) await store.applyImport({ ...empty, extractions }, options);
+  for (const nodes of batches(nodeInputs)) await store.applyImport({ ...empty, nodes }, options);
+  for (const edges of batches(edgeInputs)) await store.applyImport({ ...empty, edges }, options);
+  for (const issues of batches(issueInputs)) await store.applyImport({ ...empty, issues }, options);
   return { ok: true, spaceId: input.spaceId, imported: {
     sources: sourceInputs.length, nodes: nodeInputs.length, edges: edgeInputs.length, issues: issueInputs.length, extractions: extractionInputs.length,
   } };

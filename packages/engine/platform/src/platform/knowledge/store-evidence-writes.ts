@@ -113,14 +113,20 @@ export function writeKnowledgeSourceRow(sqlite: Pick<SQLiteStore, 'run' | 'exec'
     ]);
 }
 
+/**
+ * An extraction describes the document as it is now, so every document-derived
+ * field (title, summary, excerpt, sections, links, structure, artifact, extractor
+ * metadata) comes from the new extraction as a whole: a page that lost its content
+ * stops carrying the old text. Only the row's id, its creation time and its
+ * knowledge space carry over from the stored extraction.
+ */
 export function prepareKnowledgeExtractionRecord(input: KnowledgeExtractionUpsertInput, existing: KnowledgeExtractionRecord | null | undefined, source: KnowledgeSourceRecord | undefined): KnowledgeExtractionRecord {
     const now = nowMs();
     const _artifactId = stableText(input.artifactId);
     const _title = stableText(input.title);
     const _summary = stableText(input.summary);
     const _excerpt = stableText(input.excerpt);
-    const mergedExtractionMetadata = {
-      ...(existing?.metadata ?? {}),
+    const inputMetadata = {
       ...(input.metadata ?? {}),
       // A freshly written extraction is produced by the current extractor
       // generation, so it carries the current version (an explicit input version
@@ -131,26 +137,22 @@ export function prepareKnowledgeExtractionRecord(input: KnowledgeExtractionUpser
         ? input.metadata.extractorVersion
         : KNOWLEDGE_EXTRACTOR_VERSION,
     };
-    const extractionSource = source;
-    const extractionMetadata = getExplicitKnowledgeSpaceId({ metadata: mergedExtractionMetadata }) || !extractionSource
-      ? mergedExtractionMetadata
-      : ensureKnowledgeSpaceMetadata(mergedExtractionMetadata, getKnowledgeSpaceId(extractionSource));
+    const spaceId = getExplicitKnowledgeSpaceId({ metadata: inputMetadata })
+      ?? (source ? getKnowledgeSpaceId(source) : getExplicitKnowledgeSpaceId(existing));
+    const extractionMetadata = ensureKnowledgeSpaceMetadata(inputMetadata, spaceId ?? undefined);
     const record: KnowledgeExtractionRecord = {
       id: existing?.id ?? input.id ?? `extract-${opaqueUuid()}`,
       sourceId: input.sourceId,
-      ...(_artifactId !== null ? { artifactId: _artifactId } : existing?.artifactId ? { artifactId: existing.artifactId } : {}),
+      ...(_artifactId !== null ? { artifactId: _artifactId } : {}),
       extractorId: input.extractorId,
       format: input.format,
-      ...(_title !== null ? { title: _title } : existing?.title ? { title: existing.title } : {}),
-      ...(_summary !== null ? { summary: _summary } : existing?.summary ? { summary: existing.summary } : {}),
-      ...(_excerpt !== null ? { excerpt: _excerpt } : existing?.excerpt ? { excerpt: existing.excerpt } : {}),
-      sections: uniq(input.sections ?? existing?.sections),
-      links: uniq(input.links ?? existing?.links),
-      estimatedTokens: Math.max(0, Number(input.estimatedTokens ?? existing?.estimatedTokens ?? 0)),
-      structure: {
-        ...(existing?.structure ?? {}),
-        ...(input.structure ?? {}),
-      },
+      ...(_title !== null ? { title: _title } : {}),
+      ...(_summary !== null ? { summary: _summary } : {}),
+      ...(_excerpt !== null ? { excerpt: _excerpt } : {}),
+      sections: uniq(input.sections),
+      links: uniq(input.links),
+      estimatedTokens: Math.max(0, Number(input.estimatedTokens ?? 0)),
+      structure: { ...(input.structure ?? {}) },
       metadata: extractionMetadata,
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,

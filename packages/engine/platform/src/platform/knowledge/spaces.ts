@@ -97,11 +97,33 @@ export function getKnowledgeSpaceId(input: KnowledgeSpaceBackedRecord | Record<s
 
 export function getExplicitKnowledgeSpaceId(input: KnowledgeSpaceBackedRecord | Record<string, unknown> | undefined | null): KnowledgeSpaceId | null {
   const metadata = readMetadata(input);
+  const namespace = readString(metadata.namespace);
   const value =
     readString(metadata.knowledgeSpaceId)
       ?? readString(metadata.spaceId)
-      ?? readString(metadata.namespace);
+      // Older issues kept their producer's family in `namespace`; a family is never a space.
+      ?? (namespace && !isKnowledgeIssueFamilyName(namespace) ? namespace : undefined);
   return value ? normalizeKnowledgeSpaceId(value) : null;
+}
+
+/**
+ * The producer families of knowledge issues: lint, semantic gaps, answer gaps and
+ * Home Graph quality. A family names who owns an issue, not which space it is in.
+ */
+const ISSUE_FAMILY_NAME = /^(?:knowledge-lint|(?:knowledge|homegraph):.+:(?:semantic|answers|quality))$/;
+
+export function isKnowledgeIssueFamilyName(value: string): boolean {
+  return ISSUE_FAMILY_NAME.test(value);
+}
+
+/**
+ * Which producer owns an issue: `issueFamily`, or for an issue written before that
+ * key existed, a family name in `namespace`. A producer finds and replaces its own
+ * issues by this, whatever space they are in.
+ */
+export function knowledgeIssueFamily(input: { readonly metadata?: Record<string, unknown> | undefined } | undefined | null): string | undefined {
+  const metadata = readMetadata(input);
+  return readString(metadata.issueFamily) ?? readString(metadata.namespace);
 }
 
 export function isInKnowledgeSpace(input: KnowledgeSpaceBackedRecord | undefined | null, spaceId: string): boolean {

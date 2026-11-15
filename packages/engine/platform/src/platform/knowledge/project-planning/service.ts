@@ -11,7 +11,7 @@ import { retainConfiguredWorkspace, type ConfigManager } from '../../config/mana
 import { dirname, resolve } from 'node:path';
 import { types as nativeTypes } from 'node:util';
 import { SQLiteObservationRetiredError } from '../../state/sqlite-store.js';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { knowledgeSpaceMetadata, normalizeProjectId } from '../spaces.js';
 import type { KnowledgeSourceRecord, KnowledgeSourceUpsertInput } from '../types.js';
 import { KnowledgeSourcePublicationHeldError, type KnowledgeSourceSnapshot } from '../store-source-generation.js';
@@ -37,7 +37,7 @@ import {
   stablePlanningId,
   withStoredContractId,
 } from './helpers.js';
-import { composeReadiness, planningSemanticFacts, readPlanningSemanticFacts, type PreparedPlanningReadiness } from './readiness.js';
+import { composeReadiness, planningSemanticFacts, readPlanningSemanticFacts, type PlanningSemanticReadiness, type PreparedPlanningReadiness } from './readiness.js';
 import type {
   ProjectPlanningAnswerInput,
   ProjectPlanningAnswerResult,
@@ -344,7 +344,7 @@ export class ProjectPlanningService {
     await this.initialize();
     options.signal?.throwIfAborted(); options.assertCurrent?.();
     const space = this.resolveSpace({ projectId: captured.projectId, knowledgeSpaceId: captured.knowledgeSpaceId });
-    const observation = this.store.captureSourcePublication();
+    const observation = planningRowsObservation();
     const snapshot = this.getArtifactSnapshot(space.knowledgeSpaceId, 'state', normalizePlanningId(captured.planningId));
     const current = snapshot.source ? readState(snapshot.source) : null;
     const revision = this.planningRevision(snapshot);
@@ -433,7 +433,7 @@ export class ProjectPlanningService {
     options.signal?.throwIfAborted(); options.assertCurrent?.();
     const space = this.resolveSpace(captured);
     const state = normalizeState(captured.state, space.projectId, space.knowledgeSpaceId);
-    const observation = this.store.captureSourcePublication();
+    const observation = planningRowsObservation();
     const previous = this.getArtifactSnapshot(space.knowledgeSpaceId, 'state', state.id);
     const committed = await this.publishPlanningReadiness(space, state, previous, options, observation);
     committed.assertCurrent();
@@ -451,7 +451,7 @@ export class ProjectPlanningService {
     const check = () => { signal?.throwIfAborted(); callerCurrent?.(); };
     check(); await this.initialize(); check();
     const space = this.resolveSpace(captured);
-    const observed = this.store.captureSourcePublication();
+    const observed = planningRowsObservation();
     const current = () => { this.#assertNativeDefaultCurrent(); check(); observed(); this.#assertNativeDefaultCurrent(); };
     let state: ProjectPlanningState;
     if (captured.state) state = normalizeState(captured.state, space.projectId, space.knowledgeSpaceId);
@@ -486,7 +486,7 @@ export class ProjectPlanningService {
       action: { kind: 'answer', questionId: input.questionId, questionIndex: input.questionIndex, answer: input.answer },
     }, options);
     const state = result.state;
-    const observed = result.applied ? (nativeApply(nativeWeakGet, this.readinessOwners, [result.evaluation]) as () => void) : this.store.captureSourcePublication();
+    const observed = result.applied ? (nativeApply(nativeWeakGet, this.readinessOwners, [result.evaluation]) as () => void) : planningRowsObservation();
     const capturedSignal = options.signal, capturedCheck = options.assertCurrent;
     const current = result.applied ? observed
       : () => { capturedSignal?.throwIfAborted(); capturedCheck?.(); observed(); };
@@ -529,7 +529,7 @@ export class ProjectPlanningService {
     input = snapshotJudgmentInput(input) as ProjectPlanningDecisionRecordInput;
     await this.initialize();
     const space = this.resolveSpace(input);
-    const observation = this.store.captureSourcePublication();
+    const observation = planningRowsObservation();
     const title = input.decision.title.trim();
     const matching = input.decision.id === undefined ? this.sourcesForSpace(space.knowledgeSpaceId)
       .filter(source => artifactKind(source) === 'decision').map(readDecision)
@@ -584,7 +584,7 @@ export class ProjectPlanningService {
       await this.initialize();
       const space = this.resolveSpace(input);
       const now = Date.now();
-      const observation = this.store.captureSourcePublication();
+      const observation = planningRowsObservation();
       const existing = await this.getLanguage(space);
       const language: ProjectPlanningLanguageArtifact = {
         projectId: space.projectId,
@@ -942,7 +942,7 @@ export class ProjectPlanningService {
   ) {
     const signal = options.signal, callerCurrent = options.assertCurrent;
     const busEpoch = this.runtimeBusEpoch;
-    let observation = initialObservation;
+    const observation = initialObservation;
     const current = () => {
       this.#assertNativeDefaultCurrent();
       signal?.throwIfAborted(); callerCurrent?.(); observation();
@@ -1056,7 +1056,7 @@ export class ProjectPlanningService {
       }
     };
     try {
-      written = await this.store.upsertOwnedCanonicalSources(writes, reading.assertCurrent, (_sources, successor) => { observation = successor; durable = true; });
+      written = await this.store.upsertOwnedCanonicalSources(writes, reading.assertCurrent, () => { durable = true; });
     } catch (error) {
       // An effect already committed must never be reported as a no-write hold, and its events must still go out.
       if (durable) {
@@ -1080,15 +1080,16 @@ export class ProjectPlanningService {
     kind: ProjectPlanningArtifactKind,
     id: string,
     value: ProjectPlanningState | ProjectPlanningDecision | ProjectPlanningLanguageArtifact | ProjectWorkPlanArtifact,
-    observation = this.store.captureSourcePublication(),
+    observation = planningRowsObservation(),
   ): Promise<KnowledgeSourceRecord> {
     observation();
     const previous = this.getArtifactSnapshot(space.knowledgeSpaceId, kind, id);
-    let current = observation, durable = false;
+    const current = observation;
+    let durable = false;
     try {
       const written = await this.store.upsertOwnedCanonicalSources([{
         input: this.artifactSourceInput(space, kind, id, value, previous.source?.id), generation: previous.generation,
-      }], () => current(), (_sources, successor) => { current = successor; durable = true; });
+      }], () => current(), () => { durable = true; });
       return written[0]!.source!;
     } catch (error) {
       // A committed write must not look like a refused one: a retry would apply it twice.
@@ -1526,6 +1527,25 @@ function admitPlanningSource(snapshot: KnowledgeSourceSnapshot): void {
   }
 }
 
+/**
+ * Planning writes are compare-and-write on the rows they read: every publication
+ * carries the state (and work-plan) row generation it was computed from, and the
+ * store refuses it when that row moved. Another knowledge write (an ingest, a
+ * usage record, a job run) does not touch those rows, so it must not cancel an
+ * owner's action; the observation a planning step holds is therefore the row
+ * generation check alone, and this placeholder never retires.
+ */
+function planningRowsObservation(): () => void {
+  return () => undefined;
+}
+
+/** Goal-clarity readings by the semantic facts they were read from (approve and dismiss leave those unchanged). */
+const PLANNING_READING_CACHE_LIMIT = 64;
+const planningReadings = new Map<string, Exclude<PlanningSemanticReadiness, 'unavailable' | 'not-evaluated'>>();
+function planningFactsKey(state: ProjectPlanningState): string {
+  return createHash('sha256').update(JSON.stringify(planningSemanticFacts(state))).digest('hex');
+}
+
 /** Module-private: inputs originate only in raw-admitted calls or admitted stored
  * originals. The canonical candidate is itself fully admitted before deriving the
  * numeric compatibility view. No caller or row-shaped object can select this flow. */
@@ -1536,8 +1556,18 @@ async function prepareOwnedPlanningReadiness(input: ProjectPlanningState, option
   const canonical = snapshotJudgmentInput(planningClockRepresentation(input, 'state', 'encode'));
   const state = planningClockRepresentation(canonical, 'state', 'decode') as ProjectPlanningState;
   if (!state.goal.trim()) return { evaluation: composeReadiness(state, isClassicOperation() ? 'not-evaluated' : 'unavailable'), assertCurrent: check };
+  // The same facts were already read: an approve, dismiss or re-save that leaves them
+  // unchanged answers at once instead of waiting on the model again.
+  const key = planningFactsKey(state);
+  const known = isClassicOperation() ? undefined : planningReadings.get(key);
+  if (known) return { evaluation: composeReadiness(state, known), assertCurrent: check };
   const reading = await readPlanningSemanticFacts(planningSemanticFacts(state), { signal, assertCurrent: check });
   reading.assertCurrent();
+  if (reading.semantic === 'specified' || reading.semantic === 'ambiguous') {
+    planningReadings.delete(key);
+    planningReadings.set(key, reading.semantic);
+    if (planningReadings.size > PLANNING_READING_CACHE_LIMIT) planningReadings.delete(planningReadings.keys().next().value!);
+  }
   return { evaluation: composeReadiness(state, reading.semantic), assertCurrent: reading.assertCurrent };
 }
 

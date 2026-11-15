@@ -155,7 +155,6 @@ export async function finalizeKnowledgeIngestedSource(
         error: summarizeError(error),
       });
     });
-    await context.syncReviewedMemory();
     return { source, artifactId: input.artifactId, extraction };
   } catch (error) {
     if (published && committed) {

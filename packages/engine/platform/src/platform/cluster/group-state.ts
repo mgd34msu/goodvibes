@@ -45,6 +45,13 @@ export interface GroupTombstone {
   readonly at: number;
   /** Short plain-language reason, shown in `cluster nodes`. Never a hostname. */
   readonly reason: string;
+  /**
+   * Fingerprint of the join key the group used when the machine was removed,
+   * which the removed machine still holds. A join proved with that key never
+   * puts it back (see `decideAdmission`), on any member, whether or not that
+   * member has adopted the replacement join key yet. Absent on older records.
+   */
+  readonly removedUnder?: string;
 }
 
 /** The whole replicated document. */
@@ -146,11 +153,13 @@ function readTombstone(value: unknown): GroupTombstone | null {
   const candidate = value as Record<string, unknown>;
   if (!isNonEmptyString(candidate['nodeId'], 128)) return null;
   if (!isFiniteNumber(candidate['gen']) || !isFiniteNumber(candidate['at'])) return null;
+  const removedUnder = candidate['removedUnder'];
   return {
     nodeId: candidate['nodeId'],
     gen: Math.max(0, Math.trunc(candidate['gen'])),
     at: Math.trunc(candidate['at']),
     reason: normalizeDisplayName(candidate['reason'], 'removed'),
+    ...(typeof removedUnder === 'string' && /^[a-f0-9]{32}$/.test(removedUnder) ? { removedUnder } : {}),
   };
 }
 
@@ -437,13 +446,14 @@ export function removeMember(
   nodeId: string,
   reason: string,
   now: number,
+  removedUnder?: string,
 ): GroupStateDocument {
   const gen = nextMembershipGeneration(state, nodeId);
   return normalizeGroupState({
     ...state,
     tombstones: [
       ...state.tombstones.filter((entry) => entry.nodeId !== nodeId),
-      { nodeId, gen, at: Math.trunc(now), reason: normalizeDisplayName(reason, 'removed') },
+      { nodeId, gen, at: Math.trunc(now), reason: normalizeDisplayName(reason, 'removed'), ...(removedUnder ? { removedUnder } : {}) },
     ],
   });
 }

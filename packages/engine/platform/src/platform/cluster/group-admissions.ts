@@ -20,6 +20,7 @@ import {
   encodeIdentityClassMessage,
   encodeJoinClassMessage,
   GROUP_MESSAGE_TYPES,
+  joinKeyFingerprint,
   openGrant,
   parseJoinRequestBody,
   parseRejoinRequestBody,
@@ -43,6 +44,12 @@ import type { ClusterClock, ClusterLogger } from './types.js';
 /** Refusals one member will send in a window; past it, further ones are dropped. */
 const MAX_REFUSALS_PER_WINDOW = 16;
 const REFUSAL_WINDOW_MS = 10_000;
+/**
+ * How long a join keeps waiting after a reply it cannot verify (the sign of a
+ * wrong join key) for a grant that would prove otherwise, before saying so.
+ */
+const MISMATCH_SETTLE_MS = 2_000;
+const JOIN_KEY_MISMATCH = 'a machine in that group answered and the join key did not match';
 
 /**
  * A digest of the whole datagram. The sig field alone can be copied from a
@@ -65,6 +72,12 @@ export interface AdmissionHost {
   commitState(state: GroupStateDocument, gossip: boolean): Promise<void>;
   send(raw: string): Promise<void>;
   nextSeq(): number;
+  /**
+   * True when this member is the one that answers a JOIN from `joiner`. Every
+   * member reaches the same answer from the roster, so a join gets one reply,
+   * one roster write and one grant however many members hear it.
+   */
+  answersJoinFrom(joiner: string): boolean;
 }
 
 /**
@@ -102,7 +115,7 @@ interface PendingAdmission {
   readonly groupId: string;
   joinVerifier: string | null;
   readonly node: NodeKeyMaterial;
-  readonly deadline: number;
+  deadline: number;
   readonly settle: (result: AdmissionOutcome) => void;
   cancelDeadline?: () => void;
   /**
@@ -211,7 +224,7 @@ export class GroupAdmissionService {
     if (!material || !state) return;
     const checked = checkJoinClassMessage(raw, material.joinVerifier);
     if (!checked || checked.envelope.groupId !== material.groupId || checked.envelope.type !== GROUP_MESSAGE_TYPES.join) return;
-    if (checked.envelope.nodeId === this.host.nodeId) return;
+    if (checked.envelope.nodeId === this.host.nodeId || !this.host.answersJoinFrom(checked.envelope.nodeId)) return;
     const body = parseJoinRequestBody(checked.envelope.body);
     if (!body) return;
     const requestSig = requestSignature(raw);
@@ -223,19 +236,27 @@ export class GroupAdmissionService {
         ts: checked.envelope.ts,
         now: this.host.clock.now(),
         provedCurrentJoinKey: checked.joinKeyProved,
+        joinKeyId: joinKeyFingerprint(material.joinVerifier),
         provedHistoricalKey: false,
       },
       MAX_GROUP_MEMBERS,
     );
     if (!decision.admit) {
       // `identity-did-not-match` on this path means the join-key signature did
-      // not verify, say THAT, because a mistyped key is the likely cause and
-      // the operator needs to be pointed at it rather than at a generic refusal.
+      // not verify, say THAT, because a mistyped key is the likely cause. The
+      // asker cannot verify this reply, but counts it (see `onJoinReply`).
       await this.refuse(
         checked.envelope.nodeId,
         decision.reason === 'identity-did-not-match' ? 'join-key-did-not-match' : decision.reason,
         requestSig,
       );
+      return;
+    }
+    // A repeat from a machine already on the roster with the same keys (a
+    // resend, or a copy from a second interface) is answered with the grant
+    // again; the roster does not change.
+    if (sameMember(state, checked.envelope.nodeId, body)) {
+      await this.grant(checked.envelope.nodeId, body.agreementKey, 'join', state, material, revision);
       return;
     }
     // A machine that was previously REMOVED and is now presenting the current
@@ -317,6 +338,13 @@ export class GroupAdmissionService {
     // from the datagram, accepting a new one there would let anybody rewrite
     // the credential they are about to be checked against.
     const agreementKey = body?.agreementKey ?? member.agreementKey;
+    // Nothing about the member changed: re-key it without a roster write, so a
+    // copy of the request does not move its membership generation.
+    if (agreementKey === member.agreementKey && (!body?.displayName || body.displayName === member.displayName)) {
+      if (!await this.grant(member.nodeId, agreementKey, 'rejoin', state, material, revision)) return;
+      this.host.logger.info('cluster: a machine already on the roster came back and was re-keyed to the current group key', { nodeId: member.nodeId });
+      return;
+    }
     const refreshed = admitMember(state, {
       nodeId: member.nodeId,
       displayName: body?.displayName || member.displayName,
@@ -408,7 +436,10 @@ export class GroupAdmissionService {
     material: GroupKeyMaterial,
     revision: number,
   ): Promise<boolean> {
-    if (!this.grantOwnerCurrent(material, state, revision)) return false;
+    // The roster is read again after the commit's wait: a heartbeat may have
+    // replaced the document meanwhile, which changes nothing about membership.
+    const current = this.grantRoster(nodeId, agreementKey, state, material, revision);
+    if (!current) return false;
     const sealed = sealGrant(
       {
         joinKey: material.joinKey,
@@ -416,7 +447,7 @@ export class GroupAdmissionService {
         joinVerifier: material.joinVerifier,
         keys: material.keys,
         currentGeneration: material.currentGeneration,
-        state,
+        state: current,
         groupSigning: material.groupSigning,
       },
       agreementKey,
@@ -430,7 +461,6 @@ export class GroupAdmissionService {
       ts: this.host.clock.now(),
       body: { forNodeId: nodeId, sealed },
     };
-    if (!this.grantOwnerCurrent(material, state, revision)) return false;
     await this.host.send(path === 'join'
       ? encodeJoinClassMessage(draft, material.groupId, material.joinVerifier)
       // Signed as the GROUP, not as this machine: the returning member's roster
@@ -439,11 +469,18 @@ export class GroupAdmissionService {
     return true;
   }
 
-  private grantOwnerCurrent(material: GroupKeyMaterial, state: GroupStateDocument, revision: number): boolean {
-    if (!this.active || this.revision !== revision) return false;
-    const currentMaterial = this.host.material();
-    const currentState = this.host.state();
-    return currentMaterial === material && currentState === state && state.groupId === material.groupId;
+  /**
+   * The current roster, when a grant decided against `admitted` still holds:
+   * same keys, same group, and the machine still on the roster with the
+   * membership generation and agreement key it was admitted with.
+   */
+  private grantRoster(nodeId: string, agreementKey: string, admitted: GroupStateDocument, material: GroupKeyMaterial, revision: number): GroupStateDocument | null {
+    if (!this.active || this.revision !== revision || this.host.material() !== material) return null;
+    const current = this.host.state();
+    if (!current || current.groupId !== material.groupId || admitted.groupId !== material.groupId) return null;
+    const expected = admitted.members.find((entry) => entry.nodeId === nodeId);
+    const member = current.members.find((entry) => entry.nodeId === nodeId);
+    return expected && member && member.gen === expected.gen && member.agreementKey === agreementKey ? current : null;
   }
 
   // ── getting in ────────────────────────────────────────────────────────────
@@ -523,8 +560,19 @@ export class GroupAdmissionService {
     const pending = this.pending;
     if (!pending || pending.kind !== 'join' || pending.joinVerifier === null) return;
     const checked = checkJoinClassMessage(raw, pending.joinVerifier);
-    if (!checked || !checked.joinKeyProved || checked.envelope.groupId !== pending.groupId || checked.envelope.type !== type) return;
+    if (!checked || checked.envelope.groupId !== pending.groupId || checked.envelope.type !== type) return;
     if (checked.envelope.body['forNodeId'] !== this.host.nodeId) return;
+    if (!checked.joinKeyProved) {
+      // A refusal of this exact request that this machine cannot verify: a
+      // member heard it and the key it was signed with is not the group's.
+      // Not obeyed (anything on the network can send one), but it is reported
+      // after a short wait for a grant instead of the full timeout's silence.
+      if (type === GROUP_MESSAGE_TYPES.joinRefuse && pending.requestSig && checked.envelope.body['forRequest'] === pending.requestSig) {
+        pending.unauthenticatedReplies += 1;
+        this.settleSoon(pending, MISMATCH_SETTLE_MS);
+      }
+      return;
+    }
 
     if (type === GROUP_MESSAGE_TYPES.joinRefuse) {
       // A refusal to some other request in this machine's name is not the
@@ -667,22 +715,7 @@ export class GroupAdmissionService {
       this.pending = pending;
       // Identity-scoped so a timer left over from an earlier attempt cannot
       // settle a later one with a deadline that never applied to it.
-      pending.cancelDeadline = this.host.clock.setTimer(() => {
-        this.settle(
-          pending.joinVerifier === null
-            ? { ok: false, failure: 'not-sent', reason: 'the admission deadline elapsed while preparing the join proof' }
-            : pending.unauthenticatedReplies > 0
-            ? {
-              ok: false,
-              failure: 'unverifiable-replies',
-              reason: 'replies arrived and none of them could be authenticated:'
-                + ' either this machine was away across a removal and no longer recognises any current member,'
-                + ' or something on this network is answering that is not in the group',
-            }
-            : { ok: false, failure: 'unanswered', reason: 'no machine in that group answered in time' },
-          pending,
-        );
-      }, timeoutMs);
+      pending.cancelDeadline = this.host.clock.setTimer(() => this.settle(this.timeoutOutcome(pending), pending), timeoutMs);
       if (this.pending !== pending) { pending.cancelDeadline(); return; }
       this.own(Promise.resolve().then(async () => {
         if (this.pending !== pending || !this.active) return;
@@ -695,6 +728,28 @@ export class GroupAdmissionService {
     });
   }
 
+  private timeoutOutcome(pending: PendingAdmission): AdmissionOutcome {
+    if (pending.joinVerifier === null) return { ok: false, failure: 'not-sent', reason: 'the admission deadline elapsed while preparing the join proof' };
+    if (pending.unauthenticatedReplies === 0) return { ok: false, failure: 'unanswered', reason: 'no machine in that group answered in time' };
+    return {
+      ok: false,
+      failure: 'unverifiable-replies',
+      reason: pending.kind === 'join'
+        ? JOIN_KEY_MISMATCH
+        : 'replies arrived and none of them could be authenticated:'
+          + ' either this machine was away across a removal and no longer recognises any current member,'
+          + ' or something on this network is answering that is not in the group',
+    };
+  }
+
+  /** Bring a pending request's deadline forward to `delayMs` from now. */
+  private settleSoon(pending: PendingAdmission, delayMs: number): void {
+    if (this.pending !== pending || pending.deadline <= this.host.clock.now() + delayMs) return;
+    pending.deadline = this.host.clock.now() + delayMs;
+    pending.cancelDeadline?.();
+    pending.cancelDeadline = this.host.clock.setTimer(() => this.settle(this.timeoutOutcome(pending), pending), delayMs);
+  }
+
   private settle(result: AdmissionOutcome, only?: PendingAdmission): void {
     const pending = this.pending;
     if (!pending || (only && pending !== only)) return;
@@ -702,4 +757,11 @@ export class GroupAdmissionService {
     pending.cancelDeadline?.();
     pending.settle(result);
   }
+}
+
+/** True when `nodeId` is on the roster with exactly these keys and name. */
+function sameMember(state: GroupStateDocument, nodeId: string, body: { readonly displayName: string; readonly identityKey: string; readonly agreementKey: string }): boolean {
+  const member = state.members.find((entry) => entry.nodeId === nodeId);
+  return !!member && member.identityKey === body.identityKey && member.agreementKey === body.agreementKey
+    && (body.displayName === '' || body.displayName === member.displayName);
 }

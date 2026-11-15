@@ -10,6 +10,8 @@ A saved configuration replica is used only with its own group ID. Changing group
 
 The public group ID and join key remain compatible with released peers. Before their first authenticated JOIN, both peers derive the same 16-byte scrypt salt using the existing fixed public `goodvibes-join-salt-v1` HMAC representation. This label is public, contributes no secret entropy and does not provide anonymity. Normal membership, key rotation and live guards reuse stored material without repeating this salt derivation.
 
+One member answers a join, so a join writes the roster once and sends one grant; a repeated join from a machine already on the roster is answered with the grant again. A join with a mistyped key is reported about two seconds after a member answers, as "a machine in that group answered and the join key did not match", instead of after the full wait. `cluster forget` records which join key the removed machine held; no member admits a join made with that key, so the removed machine cannot come back with it even before every member has the replacement join key.
+
 Configuration transfers remain bound to the original live group and member generation across storage waits. Removing and re-adding a member, retiring the authenticated key generation, changing the group, or stopping the daemon prevents later writes or secret transmissions from that request. Ordinary heartbeat and display-name updates do not interrupt it. A write already entered before authority changes remains owned through completion; it is not blindly undone.
 
 Group envelopes use a shared group key. These checks restrict the claimed sender against the current roster; they do not turn that shared key into an independent signature for each machine.
@@ -37,12 +39,24 @@ The daemon subscribes to successful configuration and credential-store changes.
 Only paths declared group-scoped by the platform policy are eligible; local
 ports, transport identity, user preferences and unrelated provider credentials
 stay on their original machine. A local configuration reset publishes its
-resolved default; an explicit group deletion publishes a tombstone. Standby
-edits and credential deletions are proposed to the master, which issues the
-revision. Explicitly setting a deleted setting again clears that deletion.
+resolved default; an explicit group deletion publishes a tombstone. Every
+machine issues the revision for the changes made on it and sends them to the
+group; no machine has to be in charge, so replication works whichever machines
+hold surfaces. Explicitly setting a deleted setting again clears that deletion.
 
-On first master ownership in a membership incarnation, existing eligible
-credentials are seeded once. Absent values do not become deletion requests, and
+Every roster gossip carries a digest of the sender's shared settings. A machine
+whose digest differs sends its own settings and asks the sender for its, so a
+missed message or a healed network split ends with the same settings on both
+sides; `cluster status` says "settings are being exchanged" until it does. A
+machine that has just joined (or restarted) holds changes made on it until it
+has the group's settings, then sends them, so it never overwrites the group with
+what it had before. A local value that differs from a setting another machine
+changed last is replaced with the group's value and logged; set it again to
+change it for the whole group. One member, the same one on every machine,
+answers a request for the full settings and a join.
+
+Once a machine holds the group's settings, credentials stored on it that the
+group has no record of are seeded once. Absent values do not become deletion requests, and
 ordinary housekeeping does not repeatedly read every credential. Later changes
 are event-driven. Failed changes retain only bounded path metadata for retry
 under their original membership; a departed or revoked owner cannot transfer

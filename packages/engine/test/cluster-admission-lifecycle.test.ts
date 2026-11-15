@@ -9,7 +9,7 @@ function fixture(send?: (service: GroupAdmissionService) => Promise<void>) {
     nodeId: 'fixture-node', nodeDisplayName: 'fixture', version: '1.0.0', clock,
     logger: { debug() {}, info() {}, warn() {}, error() {} },
     material: () => material, state: () => null, async commitState() {},
-    send: (): Promise<void> => send?.(service) ?? Promise.resolve(), nextSeq: () => 1,
+    send: (): Promise<void> => send?.(service) ?? Promise.resolve(), nextSeq: () => 1, answersJoinFrom: () => true,
   });
   return { service, clock };
 }

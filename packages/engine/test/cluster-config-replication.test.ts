@@ -285,10 +285,10 @@ describe('replicating across a live group', () => {
   }> {
     const created = createGroupWorld();
     world = created;
-    const master = await addGroupNode(created, 'node-a', { isMaster: true });
+    const master = await addGroupNode(created, 'node-a');
     const group = await createGroup(master.context, { displayName: 'the workshop' });
     if (!group.ok) throw new Error(group.error);
-    const standby = await addGroupNode(created, 'node-b', { isMaster: false });
+    const standby = await addGroupNode(created, 'node-b');
     const joined = await joinGroup(standby.context, { groupId: group.data.groupId, joinKey: group.data.joinKey });
     if (!joined.ok) throw new Error(joined.error);
     await settle();
@@ -307,7 +307,7 @@ describe('replicating across a live group', () => {
     expect(standby.config.get('controlPlane.port')).toBe(standby.localPort);
   });
 
-  test('an edit on the standby is forwarded and comes back as a group change', async () => {
+  test('an edit on the second machine is issued there and reaches the first', async () => {
     const { world: w, master, standby } = await twoNodeGroup();
     await advanceStepped(w, 40_000, 30_000);
 
@@ -442,10 +442,10 @@ describe('a daemon-owned credential after a handover', () => {
     const masterSecrets = secretsFor(created, 'node-a');
     const standbySecrets = secretsFor(created, 'node-b');
 
-    const master = await addGroupNode(created, 'node-a', { isMaster: true, secrets: masterSecrets.manager });
+    const master = await addGroupNode(created, 'node-a', { secrets: masterSecrets.manager });
     const group = await createGroup(master.context, { displayName: 'the workshop' });
     if (!group.ok) throw new Error(group.error);
-    const standby = await addGroupNode(created, 'node-b', { isMaster: false, secrets: standbySecrets.manager });
+    const standby = await addGroupNode(created, 'node-b', { secrets: standbySecrets.manager });
     const joined = await joinGroup(standby.context, { groupId: group.data.groupId, joinKey: group.data.joinKey });
     if (!joined.ok) throw new Error(joined.error);
     await settle();
@@ -487,10 +487,10 @@ describe('a daemon-owned credential after a handover', () => {
     const masterSecrets = secretsFor(created, 'node-a');
     const standbySecrets = secretsFor(created, 'node-b');
 
-    const master = await addGroupNode(created, 'node-a', { isMaster: true, secrets: masterSecrets.manager });
+    const master = await addGroupNode(created, 'node-a', { secrets: masterSecrets.manager });
     const group = await createGroup(master.context, { displayName: 'the workshop' });
     if (!group.ok) throw new Error(group.error);
-    const standby = await addGroupNode(created, 'node-b', { isMaster: false, secrets: standbySecrets.manager });
+    const standby = await addGroupNode(created, 'node-b', { secrets: standbySecrets.manager });
     const joined = await joinGroup(standby.context, { groupId: group.data.groupId, joinKey: group.data.joinKey });
     if (!joined.ok) throw new Error(joined.error);
     await settle();
@@ -533,10 +533,10 @@ describe('a daemon-owned credential after a handover', () => {
     const masterSecrets = secretsFor(created, 'node-a');
     const standbySecrets = secretsFor(created, 'node-b');
 
-    const master = await addGroupNode(created, 'node-a', { isMaster: true, secrets: masterSecrets.manager });
+    const master = await addGroupNode(created, 'node-a', { secrets: masterSecrets.manager });
     const group = await createGroup(master.context, { displayName: 'the workshop' });
     if (!group.ok) throw new Error(group.error);
-    const standby = await addGroupNode(created, 'node-b', { isMaster: false, secrets: standbySecrets.manager });
+    const standby = await addGroupNode(created, 'node-b', { secrets: standbySecrets.manager });
     const joined = await joinGroup(standby.context, { groupId: group.data.groupId, joinKey: group.data.joinKey });
     if (!joined.ok) throw new Error(joined.error);
     await settle();
@@ -568,7 +568,7 @@ describe('a daemon-owned credential after a handover', () => {
     world = created;
     const masterSecrets = secretsFor(created, 'node-a');
 
-    const master = await addGroupNode(created, 'node-a', { isMaster: true, secrets: masterSecrets.manager });
+    const master = await addGroupNode(created, 'node-a', { secrets: masterSecrets.manager });
     const group = await createGroup(master.context, { displayName: 'the workshop' });
     if (!group.ok) throw new Error(group.error);
 
@@ -589,7 +589,7 @@ describe('a daemon-owned credential after a handover', () => {
     // The second machine only now joins, so everything it gets arrives in the
     // snapshot the master sends a newcomer.
     const standbySecrets = secretsFor(created, 'node-b');
-    const standby = await addGroupNode(created, 'node-b', { isMaster: false, secrets: standbySecrets.manager });
+    const standby = await addGroupNode(created, 'node-b', { secrets: standbySecrets.manager });
     const joined = await joinGroup(standby.context, { groupId: group.data.groupId, joinKey: group.data.joinKey });
     if (!joined.ok) throw new Error(joined.error);
     await advanceStepped(created, 60_000, 30_000);

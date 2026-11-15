@@ -38,6 +38,7 @@ function machine(nodeId: string, clock: FakeClusterClock): Machine {
       async commitState(state) { built.state = state; },
       async send(raw) { sent.push(raw); },
       nextSeq: () => ++seq,
+      answersJoinFrom: () => true,
     }),
   };
   return built;

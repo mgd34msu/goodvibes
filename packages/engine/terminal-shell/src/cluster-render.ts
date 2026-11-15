@@ -107,8 +107,17 @@ export function renderStatus(report: GroupStatusReport, now: number): string[] {
           + (replication.lastAppliedAt ? ` ${describeAge(replication.lastAppliedAt, now)}` : ''),
       );
     }
-    if (replication.pendingProposals > 0) {
-      lines.push(`                 ${replication.pendingProposals} change(s) waiting for the responsible machine`);
+    if (replication.awaitingSync) {
+      lines.push('                 differs from another machine or is still catching up; settings are being exchanged');
+    }
+    if (replication.credentialsMissing > 0) {
+      lines.push(`                 ${replication.credentialsMissing} credential(s) known to the group have not arrived here yet; asked for again every minute`);
+    }
+    if (replication.changesNotApplied > 0) {
+      lines.push(`                 ${replication.changesNotApplied} change(s) from the group not applied here yet; retried every 30 seconds`);
+    }
+    if (replication.localChangesHeld > 0) {
+      lines.push(`                 ${replication.localChangesHeld} change(s) made here are held until this machine has the group's settings, then sent`);
     }
   }
   if (report.wire) {

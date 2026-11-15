@@ -45,13 +45,14 @@ import {
   findTombstone,
   fitStateToBytes,
   mergeGroupState,
+  readGroupStateDocument,
   readmitMember,
   removeMember,
   MAX_GROUP_MEMBERS,
   MAX_GROUP_TOMBSTONES,
   type GroupStateDocument,
 } from '../platform/src/platform/cluster/group-state.js';
-import { decideAdmission, GRANT_STATE_MAX_BYTES, openGrant, sealGrant } from '../platform/src/platform/cluster/group-membership.js';
+import { decideAdmission, GRANT_STATE_MAX_BYTES, joinKeyFingerprint, openGrant, sealGrant } from '../platform/src/platform/cluster/group-membership.js';
 import { ClusterMembershipOperationError } from '../platform/src/platform/cluster/membership-operation.js';
 import { MAX_ENVELOPE_BYTES, encodeEnvelope, type ClusterKeyring } from '../platform/src/platform/cluster/protocol-envelope.js';
 import { GroupWireRouter } from '../platform/src/platform/cluster/group-transport.js';
@@ -103,9 +104,10 @@ describe('removal takes the join key away from the removed machine', () => {
     expect(current.ok && current.data.joinKey).not.toBe(joinKey);
 
     const acceptedBefore = datagramsOfType(w, 'JOIN_ACCEPT').length;
+    // Small clock steps: the deadline must not pass while the join proof is still being derived.
     const attempt = await resolveWithClock(w, removed.runtime.requestJoin({
       groupId, joinKey, joinSalt: deriveJoinSalt(groupId), timeoutMs: 30_000,
-    }));
+    }), 100);
     expect(attempt.ok).toBe(false);
     // The group heard the request and said no; it was not merely silent.
     expect(datagramsOfType(w, 'JOIN_REFUSE').length).toBeGreaterThan(0);
@@ -262,14 +264,35 @@ describe('a machine that does not know its roster', () => {
   });
 });
 
+describe('one member answers a join', () => {
+  test('a join is granted once, and a mistyped key is reported as a mismatch rather than silence', async () => {
+    const { world: w, groupId } = await makeGroup({ nodes: ['node-b', 'node-c'] });
+    const acceptedBefore = datagramsOfType(w, 'JOIN_ACCEPT').length;
+    const real = joinKeyForGroup(w.nodes[0]!.context);
+    if (!real.ok) throw new Error(real.error);
+    const joiner = await addGroupNode(w, 'node-d');
+    const joined = await resolveWithClock(w, joinGroup(joiner.context, { groupId, joinKey: real.data.joinKey }), 100);
+    expect(joined.ok).toBe(true);
+    expect(datagramsOfType(w, 'JOIN_ACCEPT').length - acceptedBefore).toBe(1);
+
+    const refusedBefore = datagramsOfType(w, 'JOIN_REFUSE').length;
+    const typo = await addGroupNode(w, 'node-e');
+    const failed = await resolveWithClock(w, joinGroup(typo.context, { groupId, joinKey: `${real.data.joinKey}x` }), 100);
+    expect(failed.ok).toBe(false);
+    if (!failed.ok) expect(failed.error).toContain('the join key did not match');
+    expect(datagramsOfType(w, 'JOIN_REFUSE').length - refusedBefore).toBe(1);
+  });
+});
+
 describe('a rotation prepared while another is adopted', () => {
-  test('is abandoned instead of overwriting the adopted material', async () => {
+  test('builds on the adopted material instead of overwriting it', async () => {
     const { first } = await makeGroup();
     const rotating = first.runtime.rotate('revocation', 'test');
-    const interleaved = { ...first.runtime.keyMaterial!, previousAcceptedUntil: 123 };
+    const interleaved = { ...first.runtime.keyMaterial!, keys: [...first.runtime.keyMaterial!.keys] };
     await first.runtime.commitMaterial(interleaved);
-    await expect(rotating).rejects.toBeInstanceOf(ClusterMembershipOperationError);
-    expect(first.runtime.keyMaterial).toBe(interleaved);
+    const rotated = await rotating;
+    expect(rotated.currentGeneration).toBe(interleaved.currentGeneration + 1);
+    expect(first.runtime.keyMaterial).toBe(rotated);
   });
 });
 
@@ -374,6 +397,17 @@ describe('a removal and a return are not undone by an older copy of the roster',
     expect(findTombstone(merged, 'machine-x')).toBeNull();
     expect(decideAdmission(merged, { nodeId: 'machine-x', ts: 5_000, now: 5_000, provedCurrentJoinKey: false, provedHistoricalKey: true }, MAX_GROUP_MEMBERS))
       .toEqual({ admit: true, path: 'rejoin' });
+  });
+
+  test('the join key the machine was removed under never puts it back, on a member that still holds that key', () => {
+    const empty = createGroupStateDocument('gTESTTESTTESTTEST', 'group');
+    const oldKey = joinKeyFingerprint('old-verifier'), newKey = joinKeyFingerprint('new-verifier');
+    const removed = removeMember(admitMember(empty, input).state, 'machine-x', 'gone', 2_000, oldKey);
+    // The record survives the wire and a merge with a copy that has not heard of it.
+    const gossiped = mergeGroupState(admitMember(empty, input).state, readGroupStateDocument(JSON.parse(JSON.stringify(removed)))!);
+    const request = { nodeId: 'machine-x', ts: 5_000, now: 5_000, provedCurrentJoinKey: true, provedHistoricalKey: false };
+    expect(decideAdmission(gossiped, { ...request, joinKeyId: oldKey }, MAX_GROUP_MEMBERS)).toEqual({ admit: false, reason: 'removed-from-the-group' });
+    expect(decideAdmission(gossiped, { ...request, joinKeyId: newKey }, MAX_GROUP_MEMBERS)).toEqual({ admit: true, path: 'join' });
   });
 
   test('a removal at the same generation as the machine still wins', () => {

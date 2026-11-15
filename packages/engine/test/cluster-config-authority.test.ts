@@ -34,7 +34,7 @@ for (const change of ['remove', 'readmit', 'rotate', 'heartbeat'] as const) {
   test(`a delayed snapshot secret read stays bound to its original requester across ${change}`, async () => {
     const world = createGroupWorld(), secrets = new PausedSecrets(), entered = barrier(), release = barrier();
     try {
-      const master = await addGroupNode(world, 'authority-master', { secrets, isMaster: true });
+      const master = await addGroupNode(world, 'authority-master', { secrets });
       const created = await createGroup(master.context, {}); if (!created.ok) throw new Error(created.error);
       const peer = await addGroupNode(world, 'authority-peer');
       const joined = await joinGroup(peer.context, { groupId: created.data.groupId, joinKey: created.data.joinKey }); if (!joined.ok) throw new Error(joined.error);
@@ -61,21 +61,21 @@ for (const change of ['remove', 'readmit', 'rotate', 'heartbeat'] as const) {
   });
 }
 
-test('revoking a proposal sender during an entered secret set prevents later publication without undoing the entered write', async () => {
+test('revoking the sender of a credential during an entered secret set prevents later publication without undoing the entered write', async () => {
   const world = createGroupWorld(), secrets = new PausedSecrets(), entered = barrier(), release = barrier();
   try {
-    const master = await addGroupNode(world, 'proposal-master', { secrets, isMaster: true });
+    const master = await addGroupNode(world, 'sender-receiver', { secrets });
     const created = await createGroup(master.context, {}); if (!created.ok) throw new Error(created.error);
-    const peer = await addGroupNode(world, 'proposal-peer');
+    const peer = await addGroupNode(world, 'sender-peer');
     const joined = await joinGroup(peer.context, { groupId: created.data.groupId, joinKey: created.data.joinKey }); if (!joined.ok) throw new Error(joined.error);
     await settle();
     const path = secretPath(), key = replicatedSecretKeyFor(path);
-    await peer.secrets.set(key, 'synthetic-proposed-secret');
+    await peer.secrets.set(key, 'synthetic-sent-secret');
     secrets.writeWait = async written => { if (written === key) { entered.resolve(); await release.promise; } };
     const start = world.wire.length, announced = peer.runtime.announceSecretChange(path); await entered.promise;
     await master.runtime.commitState(removeMember(master.runtime.groupState!, peer.id, 'fixture revoked', world.clock.now()), false);
     release.resolve(); await announced; await settle();
-    expect(await secrets.get(key)).toBe('synthetic-proposed-secret');
+    expect(await secrets.get(key)).toBe('synthetic-sent-secret');
     expect(findReplicaEntry(master.runtime.replicaDocument()!, path)).toBeNull();
     expect(sealedMessages(world.wire.slice(start), master.id)).toHaveLength(0);
   } finally { release.resolve(); await stopGroupWorld(world); destroyGroupWorld(world); }
@@ -84,7 +84,7 @@ test('revoking a proposal sender during an entered secret set prevents later pub
 test('a revoked document sender cannot start a second secret deletion after the first storage await', async () => {
   const world = createGroupWorld(), secrets = new PausedSecrets(), entered = barrier(), release = barrier();
   try {
-    const master = await addGroupNode(world, 'deletion-master', { isMaster: true });
+    const master = await addGroupNode(world, 'deletion-master');
     const created = await createGroup(master.context, {}); if (!created.ok) throw new Error(created.error);
     const peer = await addGroupNode(world, 'deletion-peer', { secrets });
     const joined = await joinGroup(peer.context, { groupId: created.data.groupId, joinKey: created.data.joinKey }); if (!joined.ok) throw new Error(joined.error);

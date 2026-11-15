@@ -482,7 +482,7 @@ describe('rendering', () => {
         droppedOldGeneration: 0, droppedNoGroup: 0 },
       replication: {
         revision: 12, entries: 4, secrets: 1, tombstones: 0,
-        lastAppliedFrom: 'node-a', lastAppliedAt: 999_000, pendingProposals: 0,
+        lastAppliedFrom: 'node-a', lastAppliedAt: 999_000, awaitingSync: false, credentialsMissing: 0, changesNotApplied: 0, localChangesHeld: 0,
       },
       advice: null,
     }, 1_000_000).join('\n');

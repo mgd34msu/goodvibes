@@ -17,7 +17,7 @@ function fixture() {
   const persisted: ConfigReplicaDocument[] = [];
   const values = new Map<string, unknown>();
   const host: ConfigReplicationHost = { nodeId: 'receiver', logger: { debug() {}, info() {}, warn() {}, error() {} },
-    now: () => now, isMaster: () => true, groupState: () => null, nodeKeys: () => null, secrets: () => null,
+    now: () => now, answersFor: () => true, groupState: () => null, nodeKeys: () => null, secrets: () => null,
     config: () => ({ get: key => values.get(key), set: (key, value) => { values.set(key, value); } }),
     captureAuthority: () => { const original = generation; return () => { if (generation !== original) throw Error('Original authenticated membership retired'); }; },
     async send(type, body) { sent.push({ type, body: structuredClone(body) }); }, persist(document) { persisted.push(document); } };

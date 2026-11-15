@@ -10,15 +10,18 @@
  * fastest clock win every conflict permanently, including winning against a
  * deletion made afterwards on a correct clock.
  *
- * Ordering is a REVISION: a counter the master increments. Higher revision
- * wins. At an equal revision, which only a partition with two masters can
- * produce, a deletion beats a write, and two writes are settled by origin node
- * id so both sides of a heal land on the same answer without negotiating.
+ * Ordering is a REVISION: every member issues the next revision above the
+ * highest it has seen, for the changes made on it. Higher revision wins. At an
+ * equal revision, which two members writing at once produce, a deletion beats
+ * a write, and two writes are settled by origin node id so every copy lands on
+ * the same answer without negotiating.
  *
  * `at` is recorded because an operator reading `cluster status` wants to know
  * when something changed. It is never consulted to decide what wins, and it
  * must not start being.
  */
+
+import { createHash } from 'node:crypto';
 
 /** One replicated setting. */
 export interface ConfigReplicaEntry {
@@ -185,12 +188,16 @@ function normalize(document: ConfigReplicaDocument): ConfigReplicaDocument {
       || (tombstone.revision === existing.revision && tombstone.origin < existing.origin)) tombstones.set(tombstone.path, tombstone);
   }
   // A deletion at or above an entry's revision removes it. Equal resolves to
-  // DELETED, see the header: only a two-master partition produces a tie, and
+  // DELETED, see the header: only two members writing at once produce a tie, and
   // resolving toward the deletion is the only direction that cannot resurrect
   // something the operator removed.
+  // A deletion BELOW an entry's revision is history: the setting was written
+  // again after it, and keeping the record would make the path look deleted.
   for (const [path, tombstone] of tombstones) {
     const entry = entries.get(path);
-    if (entry && tombstone.revision >= entry.revision) entries.delete(path);
+    if (!entry) continue;
+    if (tombstone.revision >= entry.revision) entries.delete(path);
+    else tombstones.delete(path);
   }
   const bounded = [...entries.values()].sort(byPath).slice(0, MAX_REPLICATED_ENTRIES);
   return {
@@ -320,4 +327,18 @@ export function findReplicaEntry(
   path: string,
 ): ConfigReplicaEntry | null {
   return document.entries.find((entry) => entry.path === path) ?? null;
+}
+
+/**
+ * A short fingerprint of what a copy holds: every entry and deletion by path,
+ * revision and origin. Two copies with equal fingerprints hold the same
+ * settings, which the revision number alone cannot show (two members can each
+ * issue the same revision for different changes). A value is not part of it:
+ * one origin issues one revision once, so path, revision and origin name it.
+ */
+export function replicaDigest(document: ConfigReplicaDocument): string {
+  const hash = createHash('sha256');
+  for (const entry of document.entries) hash.update(`e\0${entry.path}\0${entry.revision}\0${entry.origin}\0${entry.secret ? 1 : 0}\n`);
+  for (const entry of document.tombstones) hash.update(`t\0${entry.path}\0${entry.revision}\0${entry.origin}\0${entry.secret ? 1 : 0}\n`);
+  return hash.digest('hex').slice(0, 32);
 }

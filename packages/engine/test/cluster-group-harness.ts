@@ -167,8 +167,6 @@ export interface AddNodeOptions {
    * needing a fresh bus label, because the stopped transport is still attached.
    */
   readonly nodeId?: string | undefined;
-  /** Whether this node issues config revisions. */
-  readonly isMaster?: boolean | undefined;
   /** A logger to capture lines from; silent by default. */
   readonly logger?: ClusterLogger | undefined;
   /**
@@ -209,7 +207,6 @@ export async function addGroupNode(
     version,
     clock: world.clock,
     logger: options.logger ?? SILENT_LOGGER,
-    isMaster: () => options.isMaster === true,
     config,
     ...(options.surfaceHoldings ? { surfaceHoldings: options.surfaceHoldings } : {}),
     ...(options.onKeyGenerationLost ? { onKeyGenerationLost: options.onKeyGenerationLost } : {}),

@@ -15,7 +15,7 @@ test('excess authenticated requests never become deferred handlers; stop drains 
   }
   const secrets = new PausedSecrets();
   try {
-    const master = await addGroupNode(world, 'bounded-master', { secrets, isMaster: true });
+    const master = await addGroupNode(world, 'bounded-master', { secrets });
     const created = await createGroup(master.context, {}); if (!created.ok) throw Error(created.error);
     const peer = await addGroupNode(world, 'bounded-peer'); const joined = await joinGroup(peer.context, { groupId: created.data.groupId, joinKey: created.data.joinKey }); if (!joined.ok) throw Error(joined.error);
     await secrets.set(key, 'synthetic-held-secret'); await master.runtime.announceSecretChange(path); await settle(); secrets.pause = true;

@@ -34,7 +34,7 @@ import {
   sealForMember,
 } from './group-crypto.js';
 import { summarizeError } from '../utils/error-display.js';
-import { GROUP_MESSAGE_TYPES } from './group-membership.js';
+import { GROUP_MESSAGE_TYPES, joinKeyFingerprint } from './group-membership.js';
 import {
   keyRotationGraceMs,
   keyRotationMs,
@@ -42,6 +42,7 @@ import {
 } from './group-settings.js';
 import {
   DEFAULT_GROUP_DISPLAY_NAME,
+  findTombstone,
   fitStateToBytes,
   mergeGroupState,
   isCurrentMember,
@@ -141,15 +142,6 @@ export interface ClusterGroupRuntimeOptions {
    * than reporting an empty list as though the node held nothing.
    */
   readonly surfaceHoldings?: (() => readonly SurfaceHolding[]) | undefined;
-  /**
-   * Which machine issues config revisions.
-   *
-   * Supplied by the composition root as the leader election's own answer, so
-   * there is one notion of "master" in the process rather than two that can
-   * disagree. Absent means this machine never issues one, which is the safe
-   * reading for an embedder with no election.
-   */
-  readonly isMaster?: (() => boolean) | undefined;
   /** The config this machine reads and writes. Absent disables replication. */
   readonly config?: ReplicatedConfigStore | undefined;
   /**
@@ -158,6 +150,16 @@ export interface ClusterGroupRuntimeOptions {
    * must rate-limit: a datagram that triggers this is not authenticated.
    */
   readonly onKeyGenerationLost?: (() => void) | undefined;
+}
+
+/**
+ * A removal's replacement join key, minted before the removal is recorded, and
+ * the fingerprint of the join key the removed machine still holds.
+ */
+export interface RevocationPlan {
+  readonly join: { readonly joinKey: string; readonly joinVerifier: string };
+  /** Recorded on the removal record: a join with this key never re-admits the removed machine. */
+  readonly removedUnder: string;
 }
 
 /** Membership as `cluster status` reports it. */
@@ -190,6 +192,8 @@ export class ClusterGroupRuntime {
   private replication: ConfigReplicationService | null = null;
   private readonly configChanges: GroupConfigChanges;
   private readonly incoming: ClusterIngressWork;
+  /** Key generations whose announcement is being adopted, so a second copy does not derive and write again. */
+  private readonly adoptingRekeys = new Set<number>();
 
   constructor(private readonly options: ClusterGroupRuntimeOptions) {
     this.incoming = new ClusterIngressWork(options.logger, () => options.clock.monotonicNow());
@@ -225,7 +229,8 @@ export class ClusterGroupRuntime {
         const member = this.state?.members.find(candidate => candidate.nodeId === options.nodeId);
         if (!this.networkStarted || this.runtimeStopping || this.membershipTransition || !this.membershipOperations.available
           || !this.material || !this.state || !member || !isCurrentMember(this.state, options.nodeId)) return null;
-        return { revision: this.membershipRevision, generation: member.gen, master: options.isMaster?.() ?? false };
+        // Seeding this machine's credentials waits until its copy holds the group's settings.
+        return { revision: this.membershipRevision, generation: member.gen, master: this.replication?.inStep ?? false };
       },
       capture: () => this.captureConfigAuthority(),
       retireLocal: path => this.replication?.observeLocalChange(path),
@@ -238,8 +243,8 @@ export class ClusterGroupRuntime {
       nodeId: options.nodeId,
       logger: options.logger,
       now: () => options.clock.now(),
-      isMaster: () => options.isMaster?.() ?? false,
       groupState: () => this.state,
+      answersFor: asker => this.designatedMember(options.clock.now(), asker) === options.nodeId,
       captureAuthority: envelope => this.captureConfigAuthority(envelope),
       nodeKeys: () => this.material?.node ?? null,
       config: () => observedConfig ?? null,
@@ -258,6 +263,7 @@ export class ClusterGroupRuntime {
       commitState: (state, gossip) => this.commitState(state, gossip),
       send: (raw) => this.router.sendRaw(raw),
       nextSeq: () => this.router.nextSeq(),
+      answersJoinFrom: joiner => this.designatedMember(options.clock.now(), joiner) === options.nodeId,
     });
     this.admissions.stop('the group runtime has not started');
   }
@@ -626,6 +632,8 @@ export class ClusterGroupRuntime {
    * group-key envelope authenticates the group, not an independent per-node
    * signature; roster identity checks restrict the claimed sender accordingly.
    * Heartbeats/names are not membership generations and never invalidate it.
+   * The check compares captured values only; the state files are checked by
+   * their owner when they are written.
    */
   private captureConfigAuthority(envelope?: ClusterEnvelope): () => void {
     this.configChanges.assertStoresCurrent(this.options.config, this.options.secrets);
@@ -633,7 +641,6 @@ export class ClusterGroupRuntime {
     if (!material || !state || state.groupId !== material.groupId) throw new ClusterMembershipOperationError('abandoned');
     const groupId = material.groupId, node = material.node;
     const secrets = this.options.secrets, config = this.options.config;
-    const master = this.options.isMaster?.() ?? false;
     const sender = envelope?.nodeId ?? this.options.nodeId, generation = envelope?.keyGen;
     const selectedKey = generation === undefined ? null : this.keyring().keyForGeneration(generation);
     const originalMembers = [...new Set([this.options.nodeId, sender])].map(nodeId => {
@@ -646,7 +653,7 @@ export class ClusterGroupRuntime {
       this.configChanges.assertStoresCurrent(this.options.config, this.options.secrets);
       if (this.runtimeStopping || this.membershipTransition || !this.membershipOperations.available
         || this.membershipRevision !== revision || this.material?.groupId !== groupId || this.material.node !== node
-        || this.options.secrets !== secrets || this.options.config !== config || (this.options.isMaster?.() ?? false) !== master
+        || this.options.secrets !== secrets || this.options.config !== config
         || this.state?.groupId !== groupId || (envelope && envelope.groupId !== groupId)) throw new ClusterMembershipOperationError('abandoned');
       if (generation !== undefined && (selectedKey === null || !this.keyring().acceptedGenerations().includes(generation)
         || this.keyring().keyForGeneration(generation) !== selectedKey)) throw new ClusterMembershipOperationError('abandoned');
@@ -658,7 +665,6 @@ export class ClusterGroupRuntime {
           || member.agreementKey !== original.agreementKey
           || current.tombstones.some(tombstone => tombstone.nodeId === original.nodeId && tombstone.gen >= original.gen)) throw new ClusterMembershipOperationError('abandoned');
       }
-      this.stateOwner.assertCurrent();
     };
     assertCurrent(); return assertCurrent;
   }
@@ -767,11 +773,12 @@ export class ClusterGroupRuntime {
         left_out: fitted.droppedTombstones,
       });
     }
-    // The replica revision rides along so a machine that missed a settings
-    // change while it was unreachable notices it is behind and asks.
+    // The replica's revision and digest ride along so a member whose settings
+    // differ (a missed change, a healed split) notices and exchanges them.
     await this.sendGroupMessage(GROUP_MESSAGE_TYPES.roster, {
       state: fitted.state,
       configRevision: this.replication?.replica.revision ?? 0,
+      ...(this.replication ? { configDigest: this.replication.digest } : {}),
     });
   }
 
@@ -817,15 +824,17 @@ export class ClusterGroupRuntime {
     await this.replication?.retryPendingEffects();
     this.replication?.sweep(now);
     await this.replication?.reconcileLocalConfig();
-    // A machine that has joined but holds nothing yet keeps asking until the
-    // master answers. Stops the instant anything arrives.
+    // A machine that has joined but holds nothing yet keeps asking until a
+    // member answers. Stops the instant anything arrives.
     if (this.replication?.needsSnapshot) await this.replication.requestSnapshot();
   }
 
   // ── rotation ──────────────────────────────────────────────────────────────
 
   /**
-   * Which member mints the next rotation.
+   * The member that acts for the group when one member should: it mints the
+   * next rotation, answers a join, answers a settings request that names no
+   * machine. `excluding` is the machine asking, which never answers itself.
    *
    * The smallest node id among members heard from recently. A pure function of
    * replicated state, so every member reaches the same answer without any
@@ -834,19 +843,19 @@ export class ClusterGroupRuntime {
    * If two of them mint at once, which a partition can cause, the tie is
    * broken by `preferredKeyRecord`, not by whoever shouted first.
    */
-  private isRotationMinter(now: number): boolean {
+  private designatedMember(now: number, excluding?: string): string | null {
     const state = this.state;
     // A machine whose roster is empty or does not list it (the roster file was
     // lost and no peer has gossiped yet) knows nothing about who is alive, and
     // would otherwise take itself for the minter and rotate the group's key
     // into a generation nobody else holds.
-    if (!state || !state.members.some((member) => member.nodeId === this.options.nodeId)) return false;
+    if (!state || !state.members.some((member) => member.nodeId === this.options.nodeId)) return null;
     const aliveCutoff = now - Math.max(3 * this.options.settings.beaconSeconds * 1_000, 60_000);
     const candidates = state.members
-      .filter((member) => member.lastSeenAt >= aliveCutoff || member.nodeId === this.options.nodeId)
+      .filter((member) => member.nodeId !== excluding && (member.lastSeenAt >= aliveCutoff || member.nodeId === this.options.nodeId))
       .map((member) => member.nodeId)
       .sort();
-    return candidates[0] === this.options.nodeId;
+    return candidates[0] ?? null;
   }
 
   private async rotateIfDue(now: number): Promise<void> {
@@ -855,7 +864,7 @@ export class ClusterGroupRuntime {
     const current = material.keys.find((entry) => entry.generation === material.currentGeneration);
     if (!current) return;
     if (now - current.createdAt < keyRotationMs(this.options.settings)) return;
-    if (!this.isRotationMinter(now)) return;
+    if (this.designatedMember(now) !== this.options.nodeId) return;
     await this.rotate('scheduled', 'the group key reached its rotation interval');
   }
 
@@ -879,18 +888,19 @@ export class ClusterGroupRuntime {
    * the removed machine holds that too, and a join key that never changes would
    * let it walk back in. The new join key travels sealed to each remaining
    * member inside the announcement and is never sent to the removed one.
+   *
+   * A removal passes the `plan` it minted before recording the removal and the
+   * roster it committed (`removal`); no machine that roster records as removed
+   * is sealed the new keys, whatever the roster says by the time they are built.
    */
-  async rotate(cause: 'scheduled' | 'revocation', reason: string): Promise<GroupKeyMaterial> {
+  async rotate(cause: 'scheduled' | 'revocation', reason: string, plan?: RevocationPlan, removal?: GroupStateDocument): Promise<GroupKeyMaterial> {
+    const join = cause === 'revocation' ? (plan ?? await this.prepareRevocation()).join : undefined;
+    // Read after the derivation, so a rotation adopted meanwhile is built on.
     const material = this.requireMaterial();
     const keyring = this.keyringInstance;
     if (!keyring) throw new ClusterMembershipOperationError('abandoned');
     const now = this.options.clock.now();
     const graceMs = cause === 'scheduled' ? keyRotationGraceMs(this.options.settings) : 0;
-    let join: { readonly joinKey: string; readonly joinVerifier: string } | undefined;
-    if (cause === 'revocation') {
-      const joinKey = generateJoinKey();
-      join = { joinKey, joinVerifier: await deriveJoinVerifier(joinKey, material.joinSalt) };
-    }
     const rotated = rotateGroupKeyMaterial(material, cause, this.options.nodeId, now, graceMs, join);
     const record = rotated.keys.find((entry) => entry.generation === rotated.currentGeneration);
     if (!record) throw new Error('cluster: the rotation produced no key');
@@ -898,6 +908,8 @@ export class ClusterGroupRuntime {
     const wraps: Record<string, unknown> = {};
     for (const member of this.state?.members ?? []) {
       if (member.nodeId === this.options.nodeId) continue;
+      // Never seal the replacement keys to the machine this removal took out.
+      if (removal && findTombstone(removal, member.nodeId)) continue;
       wraps[member.nodeId] = sealForMember(
         member.agreementKey,
         JSON.stringify({ key: record.key, ...(join ?? {}) }),
@@ -944,6 +956,18 @@ export class ClusterGroupRuntime {
       members: this.state?.members.length ?? 0,
     });
     return rotated;
+  }
+
+  /**
+   * Mint a removal's replacement join key. Done BEFORE the removal is
+   * recorded, so the derivation's wait does not sit between telling the group
+   * a machine is gone and taking its join key away.
+   */
+  async prepareRevocation(): Promise<RevocationPlan> {
+    const material = this.requireMaterial();
+    const joinKey = generateJoinKey();
+    const joinVerifier = await deriveJoinVerifier(joinKey, material.joinSalt);
+    return { join: { joinKey, joinVerifier }, removedUnder: joinKeyFingerprint(material.joinVerifier) };
   }
 
   private async sendRekeyDatagram(raw: string): Promise<void> {
@@ -999,7 +1023,6 @@ export class ClusterGroupRuntime {
       case CONFIG_MESSAGE_TYPES.snapshotPart:
       case CONFIG_MESSAGE_TYPES.snapshot:
       case CONFIG_MESSAGE_TYPES.delta:
-      case CONFIG_MESSAGE_TYPES.propose:
       case CONFIG_MESSAGE_TYPES.request:
         await this.replication?.handle(envelope);
         return;
@@ -1022,8 +1045,7 @@ export class ClusterGroupRuntime {
       this.options.logger.debug('cluster: a roster message did not parse and was ignored');
       return;
     }
-    const peerRevision = envelope.body['configRevision'];
-    if (typeof peerRevision === 'number') await this.replication?.notePeerRevision(peerRevision);
+    await this.replication?.notePeerReplica(envelope.nodeId, envelope.body['configRevision'], envelope.body['configDigest']);
     const merged = touchMember(mergeGroupState(local, remote), envelope.nodeId, this.options.clock.now());
     if (JSON.stringify(merged) === JSON.stringify(local)) return;
     await this.commitState(merged, false);
@@ -1099,6 +1121,15 @@ export class ClusterGroupRuntime {
     // A repeat of an announcement already adopted (see resendRekey).
     if (material.currentGeneration >= record.generation
       && material.keys.some((entry) => entry.generation === record.generation && entry.key === record.key)) return;
+    // Another copy of this announcement (one per interface, or a resend) is
+    // already being adopted; it derives and writes once.
+    if (this.adoptingRekeys.has(record.generation)) return;
+    this.adoptingRekeys.add(record.generation);
+    try { await this.adoptRekey(envelope, material, sealed, record); }
+    finally { this.adoptingRekeys.delete(record.generation); }
+  }
+
+  private async adoptRekey(envelope: ClusterEnvelope, material: GroupKeyMaterial, sealed: Record<string, unknown>, record: GroupKeyRecord): Promise<void> {
     const cause = envelope.body['cause'] === 'revocation' ? 'revocation' : 'scheduled';
     const graceMs = cause === 'scheduled' ? keyRotationGraceMs(this.options.settings) : 0;
 
@@ -1115,6 +1146,7 @@ export class ClusterGroupRuntime {
     // Read again after the derivation above, so a change adopted meanwhile is built on.
     const current = this.material;
     if (!current || current.groupId !== material.groupId) return;
+    if (current.keys.some((entry) => entry.generation === record.generation && entry.key === record.key)) return;
     const adopted = adoptGroupKeys(
       current,
       [record],

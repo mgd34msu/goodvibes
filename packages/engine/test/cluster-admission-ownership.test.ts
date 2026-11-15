@@ -20,7 +20,7 @@ async function fixture() {
   let afterCommit: (() => Promise<void>) | undefined;
   const sent: string[] = [], nextSend = deferred<string>();
   const host: AdmissionHost = { nodeId: 'owner', nodeDisplayName: 'fixture', version: '3.1.2', clock, logger,
-    material: () => currentMaterial, state: () => currentState, nextSeq: () => sent.length + 1,
+    material: () => currentMaterial, state: () => currentState, nextSeq: () => sent.length + 1, answersJoinFrom: () => true,
     async commitState(next) { currentState = next; await afterCommit?.(); },
     async send(raw) { sent.push(raw); nextSend.resolve(raw); },
   };

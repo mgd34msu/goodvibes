@@ -144,13 +144,13 @@ test('replacing the original state parent during an entered secret set preserves
 test('restart ignores an intact previous-group replica without deleting the saved file', async () => {
   const world = createGroupWorld();
   try {
-    const node = await addGroupNode(world, 'replica-membership', { isMaster: true });
+    const node = await addGroupNode(world, 'replica-membership');
     const first = await createGroup(node.context, {}); if (!first.ok) throw Error(first.error);
     const path = listReplicatedConfigPaths()[0]!; node.config.set(path, 'fixture group value'); await node.runtime.announceConfigChange(path);
     const replicaPath = join(node.stateDirectory, GROUP_REPLICA_FILENAME), oldBytes = readFileSync(replicaPath, 'utf8');
     expect((JSON.parse(oldBytes) as { groupId: string }).groupId).toBe(first.data.groupId);
     expect((await leaveGroup(node.context)).ok).toBe(true); const next = await createGroup(node.context, {}); if (!next.ok) throw Error(next.error);
-    await node.runtime.stop(); const restarted = await addGroupNode(world, 'replica-restarted', { reuse: node, isMaster: true });
+    await node.runtime.stop(); const restarted = await addGroupNode(world, 'replica-restarted', { reuse: node });
     expect(restarted.runtime.replicaDocument()?.groupId).toBe(next.data.groupId); expect(restarted.runtime.replicaDocument()?.entries).toEqual([]);
     expect(readFileSync(replicaPath, 'utf8')).toBe(oldBytes);
   } finally { await stopGroupWorld(world); destroyGroupWorld(world); }
@@ -159,7 +159,7 @@ test('restart ignores an intact previous-group replica without deleting the save
 test('stop drains an actual authenticated inbound secret write before the runtime releases its store lifetime', async () => {
   const world = createGroupWorld(), secrets = new ControlledSecrets(), entered = deferred<void>(), release = deferred<void>();
   try {
-    const owner = await addGroupNode(world, 'replication-owner', { isMaster: true }), created = await createGroup(owner.context, {}); if (!created.ok) throw Error(created.error);
+    const owner = await addGroupNode(world, 'replication-owner'), created = await createGroup(owner.context, {}); if (!created.ok) throw Error(created.error);
     const node = await addGroupNode(world, 'replication-target', { secrets }); expect((await joinGroup(node.context, { groupId: created.data.groupId, joinKey: created.data.joinKey })).ok).toBe(true);
     const path = listReplicatedConfigPaths().find(value => value.startsWith('surfaces.'))!; expect(path).toBeDefined();
     const key = replicatedSecretKeyFor(path); await owner.secrets.set(key, 'fixture peer credential');

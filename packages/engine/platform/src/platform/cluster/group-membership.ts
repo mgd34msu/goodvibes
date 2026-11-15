@@ -15,7 +15,7 @@
  * Read the comment on `decideAdmission` before changing anything here. The rule
  * looks like it could be collapsed into one branch and it cannot.
  */
-import { createHmac } from 'node:crypto';
+import { createHash, createHmac } from 'node:crypto';
 import {
   isWrappedKeyEnvelope,
   openSealedEnvelope,
@@ -102,6 +102,15 @@ export const ADMISSION_FRESHNESS_MS = 5 * 60 * 1_000;
 const SEAL_CONTEXT_JOIN = 'goodvibes-cluster-join-v1';
 const SEAL_CONTEXT_REJOIN = 'goodvibes-cluster-rekey-v1';
 
+/**
+ * A short public fingerprint of a join verifier, recorded on a removal so a
+ * join proved with the key the removed machine still holds can be recognised.
+ * It reveals nothing usable: the verifier is itself a slow derivation of the key.
+ */
+export function joinKeyFingerprint(joinVerifier: string): string {
+  return createHash('sha256').update('goodvibes-cluster-removed-under-v1\0').update(joinVerifier).digest('hex').slice(0, 32);
+}
+
 /** HMAC-SHA256, hex, over an already-canonicalized envelope. */
 function authenticateWithSharedKey(canonical: string, key: string): string {
   return createHmac('sha256', key).update(canonical).digest('hex');
@@ -127,6 +136,8 @@ export interface AdmissionRequest {
   readonly now: number;
   /** True when the request carried a valid proof of the CURRENT join key. */
   readonly provedCurrentJoinKey: boolean;
+  /** `joinKeyFingerprint` of the join key that proof was checked against. */
+  readonly joinKeyId?: string | undefined;
   /**
    * True when the request carried a valid proof of a HISTORICAL key, the
    * node's own long-lived identity key, or a group key from an earlier
@@ -176,9 +187,11 @@ export interface AdmissionRequest {
  *     untouched: a stale add still loses, because a stale add is not a join.
  *
  *     What makes this safe is that a removal REPLACES the join key (see
- *     `ClusterGroupRuntime.rotate`). The removed machine holds only the old
- *     one, which no member accepts any more, so it cannot use this path on its
- *     own; the operator has to hand it the new key.
+ *     `ClusterGroupRuntime.rotate`) and the removal record names the key it
+ *     replaced (`removedUnder`). A join proved with that key is refused, on
+ *     every member, including one that has not adopted the replacement yet,
+ *     so the removed machine cannot use this path on its own; the operator
+ *     has to hand it the new key.
  *
  *  Do not merge cases 1 and 2 into "any valid proof admits". That single change
  *  would turn every retired disk in the house into a permanent group
@@ -193,6 +206,10 @@ export function decideAdmission(
     return { admit: false, reason: 'request-is-stale' };
   }
   if (request.provedCurrentJoinKey) {
+    const removal = findTombstone(state, request.nodeId);
+    if (removal?.removedUnder !== undefined && removal.removedUnder === request.joinKeyId) {
+      return { admit: false, reason: 'removed-from-the-group' };
+    }
     if (!isCurrentMember(state, request.nodeId) && state.members.length >= maxMembers) {
       return { admit: false, reason: 'group-is-full' };
     }
@@ -360,9 +377,9 @@ export interface OutOfBandCheck {
  *
  * Returns null when the datagram is not a join-class message at all. A
  * join-class datagram whose signature does not match comes back with
- * `joinKeyProved: false`, and the caller refuses it out loud rather than
- * silently, a mistyped join key is the single most likely thing to go wrong
- * here, and silence would leave the operator with no idea why nothing happened.
+ * `joinKeyProved: false`. A member refuses such a JOIN out loud; the asker
+ * cannot verify that refusal (it does not hold the key it is signed with) but
+ * counts it as a sign that the group heard it and the key did not match.
  */
 export function checkJoinClassMessage(raw: string, joinVerifier: string): OutOfBandCheck | null {
   const read = readUnverifiedEnvelope(raw);

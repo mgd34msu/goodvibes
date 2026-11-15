@@ -13,8 +13,10 @@ import {
   CONFIG_TOMBSTONE_MAX_AGE_MS,
   MAX_REVISION_ADVANCE,
   createConfigReplicaDocument,
+  findReplicaEntry,
   mergeConfigReplica,
   readConfigReplicaDocument,
+  replicaDigest,
   sweepConfigReplica,
   type ConfigReplicaDocument,
 } from '../platform/src/platform/cluster/config-replica.js';
@@ -37,17 +39,21 @@ interface Fixture {
   readonly secretValues: Map<string, string>;
   readonly logs: { info: string[]; warn: string[] };
   readonly keys: ReturnType<typeof generateNodeKeyMaterial>;
-  setMaster(value: boolean): void;
+  readonly nodeId: string;
   advance(ms: number): void;
+  /** Adopt a document and mark this copy as holding the group's settings (a peer gossiped the same digest). */
+  adoptInStep(document: ConfigReplicaDocument): Promise<void>;
 }
 
+const PEER_KEYS = generateNodeKeyMaterial();
+
 function fixture(options: {
-  readonly master?: boolean;
+  readonly nodeId?: string;
   readonly reset?: boolean;
   readonly members?: readonly { nodeId: string; agreementKey: string }[];
   readonly failSecretGet?: ReadonlySet<string>;
 } = {}): Fixture {
-  let master = options.master === true;
+  const nodeId = options.nodeId ?? 'self';
   let now = 1_000_000;
   const sent: Array<{ type: string; body: Record<string, unknown> }> = [];
   const values = new Map<string, unknown>();
@@ -67,15 +73,14 @@ function fixture(options: {
     async set(key, value) { secretValues.set(key, value); },
     async delete(key) { secretValues.delete(key); },
   };
-  const group = options.members
-    ? ({ members: options.members.map((member) => ({ ...member, displayName: member.nodeId, identityKey: 'k', admittedAt: 0, lastSeenAt: 0, gen: 1 })) } as unknown as GroupStateDocument)
-    : null;
+  const members = [{ nodeId, agreementKey: keys.agreement.publicKey }, ...(options.members ?? [{ nodeId: 'master', agreementKey: PEER_KEYS.agreement.publicKey }])];
+  const group = { members: members.map((member) => ({ ...member, displayName: member.nodeId, identityKey: 'k', admittedAt: 0, lastSeenAt: 0, gen: 1 })) } as unknown as GroupStateDocument;
   const host: ConfigReplicationHost = {
-    nodeId: 'self',
+    nodeId,
     logger: { debug() {}, info: (message) => { logs.info.push(message); }, warn: (message) => { logs.warn.push(message); }, error() {} },
     now: () => now,
-    isMaster: () => master,
     groupState: () => group,
+    answersFor: () => true,
     captureAuthority: () => () => {},
     nodeKeys: () => keys,
     config: () => config,
@@ -83,10 +88,11 @@ function fixture(options: {
     async send(type, body) { sent.push({ type, body: structuredClone(body) }); },
     persist() {},
   };
+  const service = new ConfigReplicationService(host, GROUP);
   return {
-    service: new ConfigReplicationService(host, GROUP), sent, values, secretValues, logs, keys,
-    setMaster(value) { master = value; },
+    service, sent, values, secretValues, logs, keys, nodeId,
     advance(ms) { now += ms; },
+    async adoptInStep(document) { service.adopt(document); await service.notePeerReplica('master', document.revision, service.digest); },
   };
 }
 
@@ -107,22 +113,24 @@ const delta = (entries: ReadonlyArray<{ path: string; value: unknown; revision: 
 describe('a replica that missed a change', () => {
   test('a delta that skips a revision is noticed even though the revisions then match, and a snapshot closes it', async () => {
     const f = fixture();
-    f.service.adopt(documentAt(10, [{ path: PATH_A, value: 'a', revision: 10 }]));
+    await f.adoptInStep(documentAt(10, [{ path: PATH_A, value: 'a', revision: 10 }]));
     // Revision 11 was lost; 12 arrives.
     await f.service.handle(envelope(CONFIG_MESSAGE_TYPES.delta, delta([{ path: PATH_B, value: 'b', revision: 12 }])));
     expect(f.service.replica.revision).toBe(12);
     expect(f.service.status().awaitingSync).toBe(true);
     expect(f.service.needsSnapshot).toBe(true);
-    expect(f.sent.filter((message) => message.type === CONFIG_MESSAGE_TYPES.request)).toHaveLength(1);
-    // The peer's gossip now says revision 12, which equals ours; that alone would have ended the matter.
-    await f.service.notePeerRevision(12);
-    expect(f.sent.filter((message) => message.type === CONFIG_MESSAGE_TYPES.request)).toHaveLength(1);
+    const requests = () => f.sent.filter((message) => message.type === CONFIG_MESSAGE_TYPES.request);
+    // Asked of the member that sent the change, which saw what was missed.
+    expect(requests().map((message) => message.body)).toEqual([{ to: 'master' }]);
 
     const full = documentAt(12, [
       { path: PATH_A, value: 'a', revision: 10 },
       { path: PATH_C, value: 'the one that was lost', revision: 11 },
       { path: PATH_B, value: 'b', revision: 12 },
     ]);
+    // The peer's gossip says revision 12, which equals ours; its digest still shows the difference.
+    await f.service.notePeerReplica('master', 12, replicaDigest(full));
+    expect(requests()).toHaveLength(2);
     await f.service.handle(envelope(CONFIG_MESSAGE_TYPES.snapshot, { document: full }));
     expect(f.service.status().awaitingSync).toBe(false);
     expect(f.service.needsSnapshot).toBe(false);
@@ -139,7 +147,7 @@ describe('a replica that missed a change', () => {
 
   test('consecutive deltas never ask for a snapshot', async () => {
     const f = fixture();
-    f.service.adopt(documentAt(10, [{ path: PATH_A, value: 'a', revision: 10 }]));
+    await f.adoptInStep(documentAt(10, [{ path: PATH_A, value: 'a', revision: 10 }]));
     await f.service.handle(envelope(CONFIG_MESSAGE_TYPES.delta, delta([{ path: PATH_B, value: 'b', revision: 11 }])));
     await f.service.handle(envelope(CONFIG_MESSAGE_TYPES.delta, delta([{ path: PATH_C, value: 'c', revision: 12 }]), 'master', 2));
     expect(f.service.status().awaitingSync).toBe(false);
@@ -190,7 +198,6 @@ describe('credentials that travel separately from their markers', () => {
   test('a credential that cannot be sent does not stop the ones after it', async () => {
     const asker = generateNodeKeyMaterial();
     const f = fixture({
-      master: true,
       members: [{ nodeId: 'asker', agreementKey: asker.agreement.publicKey }],
       failSecretGet: new Set([replicatedSecretKeyFor(SECRET_A)]),
     });
@@ -207,7 +214,7 @@ describe('credentials that travel separately from their markers', () => {
 
   test('a marker without its credential is reported, asked for again at a bounded rate, and cleared when the value arrives', async () => {
     const f = fixture();
-    f.service.adopt(documentAt(8, [{ path: SECRET_A, value: { secretRevision: 8 }, revision: 8, secret: true }]));
+    await f.adoptInStep(documentAt(8, [{ path: SECRET_A, value: { secretRevision: 8 }, revision: 8, secret: true }]));
     await f.service.retryPendingEffects();
     expect(f.service.status().secrets).toBe(1);
     expect(f.service.status().credentialsMissing).toBe(1);
@@ -227,44 +234,54 @@ describe('credentials that travel separately from their markers', () => {
   });
 });
 
-describe('an edit made on a machine that is not the master', () => {
-  test('it is resent until the group confirms it, and an unrelated change does not count as confirmation', async () => {
+describe('an edit made on any machine', () => {
+  test('is issued by that machine at the next revision and sent to the group', async () => {
     const f = fixture();
-    f.service.adopt(documentAt(10, [{ path: PATH_A, value: 'a', revision: 10 }]));
+    await f.adoptInStep(documentAt(10, [{ path: PATH_A, value: 'a', revision: 10 }]));
     f.values.set(PATH_B, 'edited-here');
     await f.service.announceLocalChange(PATH_B);
-    expect(f.sent.filter((message) => message.type === CONFIG_MESSAGE_TYPES.propose)).toHaveLength(1);
-    expect(f.service.status().pendingProposals).toBe(1);
-
-    // Too soon to resend.
-    await f.service.retryPendingEffects();
-    expect(f.sent.filter((message) => message.type === CONFIG_MESSAGE_TYPES.propose)).toHaveLength(1);
-
-    f.advance(11_000);
-    await f.service.retryPendingEffects();
-    expect(f.sent.filter((message) => message.type === CONFIG_MESSAGE_TYPES.propose)).toHaveLength(2);
-
-    // Some other setting changes: still unconfirmed.
-    await f.service.handle(envelope(CONFIG_MESSAGE_TYPES.delta, delta([{ path: PATH_C, value: 'other', revision: 11 }])));
-    expect(f.service.status().pendingProposals).toBe(1);
-
-    // The master issues our value back.
-    await f.service.handle(envelope(CONFIG_MESSAGE_TYPES.delta, delta([{ path: PATH_B, value: 'edited-here', revision: 12 }]), 'master', 2));
-    expect(f.service.status().pendingProposals).toBe(0);
-    f.advance(60_000);
-    await f.service.retryPendingEffects();
-    expect(f.sent.filter((message) => message.type === CONFIG_MESSAGE_TYPES.propose)).toHaveLength(2);
+    const deltas = f.sent.filter((message) => message.type === CONFIG_MESSAGE_TYPES.delta);
+    expect(deltas).toHaveLength(1);
+    expect(deltas[0]!.body['entries']).toMatchObject([{ path: PATH_B, value: 'edited-here', revision: 11, origin: 'self' }]);
   });
 
-  test('a proposal the group never confirms is reported and stops being resent', async () => {
+  test('made before this machine holds the group\'s settings, it is held, not lost, and sent above them once it does', async () => {
     const f = fixture();
-    f.service.adopt(documentAt(10, [{ path: PATH_A, value: 'a', revision: 10 }]));
+    f.service.adopt(createConfigReplicaDocument(GROUP));
     f.values.set(PATH_B, 'edited-here');
     await f.service.announceLocalChange(PATH_B);
-    for (let attempt = 0; attempt < 8; attempt++) { f.advance(11_000); await f.service.retryPendingEffects(); }
-    expect(f.sent.filter((message) => message.type === CONFIG_MESSAGE_TYPES.propose)).toHaveLength(6);
-    expect(f.service.status().pendingProposals).toBe(0);
-    expect(f.logs.warn).toContain('cluster: the group never confirmed a setting changed on this machine; it stays local only');
+    expect(f.sent.filter((message) => message.type === CONFIG_MESSAGE_TYPES.delta)).toHaveLength(0);
+    expect(f.service.status().localChangesHeld).toBe(1);
+
+    await f.service.handle(envelope(CONFIG_MESSAGE_TYPES.snapshot, { document: documentAt(12, [{ path: PATH_B, value: 'group', revision: 12 }]) }));
+    expect(f.service.status().localChangesHeld).toBe(0);
+    expect(f.values.get(PATH_B)).toBe('edited-here');
+    expect(findReplicaEntry(f.service.replica, PATH_B)).toMatchObject({ value: 'edited-here', revision: 13, origin: 'self' });
+  });
+
+  test('two copies at the same revision holding different changes exchange them and end equal', async () => {
+    const a = fixture({ nodeId: 'node-a', members: [{ nodeId: 'node-b', agreementKey: PEER_KEYS.agreement.publicKey }] });
+    const b = fixture({ nodeId: 'node-b', members: [{ nodeId: 'node-a', agreementKey: PEER_KEYS.agreement.publicKey }] });
+    await a.adoptInStep(createConfigReplicaDocument(GROUP));
+    await b.adoptInStep(createConfigReplicaDocument(GROUP));
+    a.values.set(PATH_A, 'from-a'); await a.service.announceLocalChange(PATH_A);
+    b.values.set(PATH_B, 'from-b'); await b.service.announceLocalChange(PATH_B);
+    // Both deltas were lost; both copies report revision 1.
+    a.sent.length = 0; b.sent.length = 0;
+    expect(a.service.replica.revision).toBe(b.service.replica.revision);
+
+    const deliver = async (from: Fixture, to: Fixture) => {
+      const messages = from.sent.splice(0);
+      for (const [index, message] of messages.entries()) await to.service.handle(envelope(message.type, message.body, from.nodeId, index + 1));
+    };
+    await b.service.notePeerReplica('node-a', a.service.replica.revision, a.service.digest);
+    await deliver(b, a);
+    await deliver(a, b);
+    expect(a.service.digest).toBe(b.service.digest);
+    expect(a.values.get(PATH_B)).toBe('from-b');
+    expect(b.values.get(PATH_A)).toBe('from-a');
+    expect(a.service.status().awaitingSync).toBe(false);
+    expect(b.service.status().awaitingSync).toBe(false);
   });
 });
 

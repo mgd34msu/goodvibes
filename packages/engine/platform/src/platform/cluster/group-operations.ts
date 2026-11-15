@@ -20,6 +20,7 @@ import {
   normalizeJoinKey,
 } from './group-crypto.js';
 import type { ClusterGroupRuntime, DiscoveredGroup, SurfaceHolding } from './group-runtime.js';
+import type { ConfigReplicationStatus } from './config-replication.js';
 import {
   admitMember,
   createGroupStateDocument,
@@ -131,15 +132,7 @@ export interface GroupStatusReport {
   readonly removedNodeCount: number;
   readonly rotationHours: number;
   /** Replicated settings: counts and provenance only, never a value. */
-  readonly replication: {
-    readonly revision: number;
-    readonly entries: number;
-    readonly secrets: number;
-    readonly tombstones: number;
-    readonly lastAppliedFrom: string | null;
-    readonly lastAppliedAt: number | null;
-    readonly pendingProposals: number;
-  } | null;
+  readonly replication: ConfigReplicationStatus | null;
   readonly wire: {
     readonly sent: number;
     readonly received: number;
@@ -520,14 +513,14 @@ async function forgetNodeOwned(
   nodeId: string,
   owner: ClusterMembershipOperation,
 ): Promise<GroupOperationResult<ForgetNodeResult>> {
-  const state = context.runtime.groupState;
   if (!context.settings.enabled) {
     return failed(
       'sharing inbound work with your other machines is switched off on this machine, so a removal would not reach the group',
       'turn it on first: `config set cluster.enabled true`, then restart the daemon',
     );
   }
-  if (!state) {
+  const state = context.runtime.groupState;
+  if (!state || !context.runtime.keyMaterial) {
     return failed(
       'this machine is not in a group',
       'create a group with `cluster create`, or join one with `cluster join`',
@@ -559,12 +552,23 @@ async function forgetNodeOwned(
       'run `cluster leave` on this machine instead, or `cluster forget` from another machine in the group',
     );
   }
-  const removed = removeMember(state, member.nodeId, 'removed by the operator', context.now());
+  // The replacement join key is minted before the removal is recorded, so
+  // nothing waits between telling the group the machine is gone and taking its
+  // join key away; the removal record names the key it replaces.
+  const plan = await context.runtime.prepareRevocation();
   context.runtime.assertMembershipOperation(owner);
+  const current = context.runtime.groupState;
+  if (!current || !isCurrentMember(current, member.nodeId)) {
+    return failed(
+      `'${member.displayName}' is no longer on this machine's roster`,
+      'run `cluster nodes` to see the member list',
+    );
+  }
+  const removed = removeMember(current, member.nodeId, 'removed by the operator', context.now(), plan.removedUnder);
   await context.runtime.commitState(removed, true);
   let rotated: GroupKeyMaterial;
   try {
-    rotated = await context.runtime.rotate('revocation', `${member.nodeId} was removed from the group`);
+    rotated = await context.runtime.rotate('revocation', `${member.nodeId} was removed from the group`, plan, removed);
   } catch (error) {
     // The roster already says the machine is gone and has been gossiped, so a
     // retry would answer "no machine called ..."; say what state it is in.

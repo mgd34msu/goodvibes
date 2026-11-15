@@ -9,7 +9,7 @@ import { findReplicaEntry } from '../platform/src/platform/cluster/config-replic
 import { addGroupNode, createGroupWorld, destroyGroupWorld, settle, stopGroupWorld, MemorySecretStore } from './cluster-group-harness.ts';
 const path = 'surfaces.telegram.botToken', key = replicatedSecretKeyFor(path), context = 'goodvibes-cluster-config-secret-v1';
 async function paired(secrets?: MemorySecretStore) {
-  const world = createGroupWorld(); const master = await addGroupNode(world, 'revision-master', { isMaster: true });
+  const world = createGroupWorld(); const master = await addGroupNode(world, 'revision-master');
   const created = await createGroup(master.context, {}); if (!created.ok) throw Error(created.error);
   const peer = await addGroupNode(world, 'revision-peer', secrets ? { secrets } : {}); const joined = await joinGroup(peer.context, { groupId: created.data.groupId, joinKey: created.data.joinKey }); if (!joined.ok) throw Error(joined.error);
   await settle(); let sequence = 100000;

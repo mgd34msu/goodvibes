@@ -393,12 +393,43 @@ describe('cross-session task graph housekeeping', () => {
     }
   });
 
-  test('a newer graph stays at its original path and refuses construction before mutation or shutdown', () => {
+  test('a newer graph stays at its original path and every change is refused', () => {
     const root = scratch('graph-future-'), path = join(root, 'task-graph.json');
     const bytes = JSON.stringify({ ...graphSnapshot({ refs: { 'live:t1': ref('live', 't1') } }), version: 99 });
     writeFileSync(path, bytes, 'utf-8');
-    expect(() => makeRegistry(path)).toThrow(CrossSessionGraphUnavailableError);
-    expect(readFileSync(path, 'utf-8')).toBe(bytes); expect(existsSync(`${path}.unrecognized`)).toBe(false);
+    const registry = makeRegistry(path);
+    try {
+      expect(() => registry.linkTask(ref('live', 't2'))).toThrow(CrossSessionGraphUnavailableError);
+      expect(readFileSync(path, 'utf-8')).toBe(bytes); expect(existsSync(`${path}.unrecognized`)).toBe(false);
+    } finally {
+      registry.dispose();
+    }
+  });
+
+  test('a handoff that expires unaccepted releases its task to the status it had before', () => {
+    const root = scratch('graph-handoff-expiry-');
+    const path = join(root, 'task-graph.json');
+    writeGraph(path, graphSnapshot({
+      refs: { 'live:t1': { ...ref('live', 't1'), status: 'blocked' } },
+      handoffs: [{
+        handoffId: 'h-expired',
+        taskRef: { sessionId: 'live', taskId: 't1' },
+        fromSessionId: 'live',
+        toSessionId: 'elsewhere',
+        initiatedAt: NOW - 31 * DAY_MS,
+        acknowledged: false,
+        previousStatus: 'running',
+      }],
+    }));
+
+    const registry = makeRegistry(path, { sessionExists: () => true });
+    try {
+      expect(registry.getHandoffs()).toEqual([]);
+      expect(registry.getRef('live', 't1')?.status).toBe('running');
+      expect(JSON.parse(readFileSync(path, 'utf-8')).refs['live:t1'].status).toBe('running');
+    } finally {
+      registry.dispose();
+    }
   });
 
   test('an OLDER envelope version still hydrates (version equality no longer discards everything)', () => {

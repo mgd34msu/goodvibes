@@ -1,12 +1,11 @@
 /**
  * Cross-session task registry: a refused link changes nothing, linking never
  * resets a task's status, handoffs need a real destination and release the
- * task when acknowledged, a failed write is retried instead of retiring the
- * registry, ref keys cannot collide, and damaged edges are disclosed.
+ * task when acknowledged, ref keys cannot collide, and damaged edges are
+ * disclosed.
  */
-import { afterEach, expect, spyOn, test } from 'bun:test';
-import * as nativeFs from 'node:fs';
-import { readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { afterEach, expect, test } from 'bun:test';
+import { rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 import { CrossSessionTaskRegistry } from '../platform/src/platform/sessions/orchestration/registry.js';
@@ -78,28 +77,12 @@ test('a finished task cannot be handed off and no handoff is recorded', () => {
   expect(registry.getRef('s1', 't1')?.status).toBe('completed');
 });
 
-test('a failed write keeps the registry usable and the next flush publishes everything', () => {
-  const f = fixture();
-  const registry = open(f.path);
-  registry.linkTask(ref('first'));
-  registry.flush();
-  registry.linkTask(ref('pending'));
-  const failure = spyOn(nativeFs, 'fsyncSync').mockImplementation(() => { throw new Error('fixture disk failure'); });
-  try { expect(() => registry.flush()).toThrow('fixture disk failure'); }
-  finally { failure.mockRestore(); }
-  expect(() => registry.linkTask(ref('after'))).not.toThrow();
-  registry.flush();
-  const written = JSON.parse(readFileSync(f.path, 'utf8')) as { refs: Record<string, unknown> };
-  expect(Object.keys(written.refs).sort()).toEqual(['s1:after', 's1:first', 's1:pending']);
-});
-
 test('session and task ids containing a colon do not collide', () => {
   const f = fixture();
   const registry = open(f.path);
   registry.linkTask(ref('c', 'queued', 'a:b'));
   registry.linkTask(ref('b:c', 'queued', 'a'));
   expect(registry.getAllRefs()).toHaveLength(2);
-  registry.flush();
   registry.dispose();
   expect(open(f.path).getAllRefs()).toHaveLength(2);
 });

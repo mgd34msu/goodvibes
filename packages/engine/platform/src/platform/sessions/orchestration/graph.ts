@@ -344,6 +344,17 @@ export class SessionTaskGraph {
   }
 
   /**
+   * Remove a handoff record (its source withdrew it).
+   *
+   * @returns The removed record, or `undefined` when there was none.
+   */
+  public removeHandoff(handoffId: string): TaskHandoffRecord | undefined {
+    const record = this._handoffs.get(handoffId);
+    if (record) this._handoffs.delete(handoffId);
+    return record;
+  }
+
+  /**
    * Returns all handoff records.
    */
   public getHandoffs(): TaskHandoffRecord[] {
@@ -479,7 +490,11 @@ export class SessionTaskGraph {
     }
 
     for (const edge of snap.edges) {
-      this.addEdge(edge.fromRef, edge.toRef, edge.reason);
+      const before = this._edgeList.length;
+      // A stored edge keeps the time it was linked; addEdge would stamp it now.
+      if (this.addEdge(edge.fromRef, edge.toRef, edge.reason).ok && this._edgeList.length > before) {
+        this._edgeList[before] = { ...this._edgeList[before]!, linkedAt: edge.linkedAt };
+      }
     }
 
     for (const handoff of snap.handoffs) {

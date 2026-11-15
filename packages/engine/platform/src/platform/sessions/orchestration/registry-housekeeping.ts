@@ -351,15 +351,22 @@ interface GraphReapOptions {
   readonly now: number;
 }
 
+/** The status a task returns to when the handoff holding it ends without being accepted. */
+export function releasedStatus(handoff: TaskHandoffRecord): TaskLifecycleState {
+  return handoff.previousStatus ?? 'running';
+}
+
 /**
  * Pure reap over a snapshot. Idempotent by construction: every survivor
  * satisfies every predicate, so a second pass over the returned snapshot
- * reclaims nothing.
+ * reclaims nothing. `tasksReleased` counts tasks a removed, unaccepted
+ * handoff no longer holds blocked; they are already counted in the summary as
+ * the handoffs that were removed.
  */
 export function reapGraphSnapshot(
   snapshot: SessionTaskGraphSnapshot,
   options: GraphReapOptions,
-): { snapshot: SessionTaskGraphSnapshot; summary: CrossSessionGraphReapSummary } {
+): { snapshot: SessionTaskGraphSnapshot; summary: CrossSessionGraphReapSummary; tasksReleased: number } {
   const { now, sessionExists } = options;
 
   /**
@@ -468,11 +475,30 @@ export function reapGraphSnapshot(
     handoffsOverCap = survivingHandoffs.length - handoffs.length;
   }
 
+  // A handoff holds its task 'blocked' only while it waits to be accepted. One
+  // that leaves unaccepted (expired, destination gone, over the cap) releases
+  // the task to the status it had before, unless another handoff still waits.
+  const kept = new Set(handoffs.map((handoff) => handoff.handoffId));
+  const stillWaiting = new Set(handoffs.filter((handoff) => !handoff.acknowledged)
+    .map((handoff) => makeRefKey(handoff.taskRef.sessionId, handoff.taskRef.taskId)));
+  let tasksReleased = 0;
+  for (const handoff of snapshot.handoffs) {
+    if (handoff.acknowledged || kept.has(handoff.handoffId)) continue;
+    const key = makeRefKey(handoff.taskRef.sessionId, handoff.taskRef.taskId);
+    const held = refs[key];
+    const before = releasedStatus(handoff);
+    if (!held || held.status !== 'blocked' || before === 'blocked' || stillWaiting.has(key)) continue;
+    refs[key] = { ...held, status: before, updatedAt: now };
+    stillWaiting.add(key);
+    tasksReleased += 1;
+  }
+
   const total =
     refsMissingSession + refsExpired + refsLegacyNamespaceExpired + refsOverCap
     + edgesDangling + handoffsOrphaned + handoffsRetired + handoffsOverCap;
 
   return {
+    tasksReleased,
     snapshot: { version: 1, snapshotAt: now, refs, edges, handoffs },
     summary: {
       refsMissingSession,

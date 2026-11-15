@@ -14,4 +14,5 @@ export type {
 
 export { makeRefKey, VALID_SCOPES } from './types.js';
 export { SessionTaskGraph } from './graph.js';
-export { CrossSessionTaskRegistry, CrossSessionGraphUnavailableError } from './registry.js';
+export { CrossSessionTaskRegistry, CrossSessionGraphUnavailableError, describeAwaitingHandoffs } from './registry.js';
+export type { HandoffWithdrawal } from './registry.js';

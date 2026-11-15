@@ -3,7 +3,7 @@ export const TASK_TOOL_SCHEMA = {
   properties: {
     mode: {
       type: 'string',
-      enum: ['create', 'list', 'show', 'status', 'depend', 'cancel', 'handoff', 'handoffs', 'acknowledge'],
+      enum: ['create', 'list', 'show', 'status', 'depend', 'cancel', 'handoff', 'handoffs', 'acknowledge', 'withdraw'],
     },
     view: { type: 'string', enum: ['summary', 'full'] },
     sessionId: {
@@ -11,7 +11,7 @@ export const TASK_TOOL_SCHEMA = {
       description:
         'READ-ONLY selector, used by list and show to view another session\'s task refs. Defaults to the current session. '
         + 'It does NOT set ownership: refs created or modified by this tool are always owned by the current session, and '
-        + 'this field is ignored by create, status, depend, cancel and handoff.',
+        + 'this field is ignored by create, status, depend, cancel, handoff, acknowledge and withdraw.',
     },
     taskId: { type: 'string' },
     title: { type: 'string' },
@@ -26,7 +26,7 @@ export const TASK_TOOL_SCHEMA = {
     toSessionId: { type: 'string' },
     handoffId: {
       type: 'string',
-      description: 'acknowledge: the handoff (from mode=handoffs) this session, its destination, accepts.',
+      description: 'acknowledge: the handoff (from mode=handoffs) this session, its destination, accepts. withdraw: the handoff this session, its source, takes back.',
     },
     scope: {
       type: 'string',
@@ -38,7 +38,7 @@ export const TASK_TOOL_SCHEMA = {
 } as const;
 
 export type TaskToolInput = {
-  mode: 'create' | 'list' | 'show' | 'status' | 'depend' | 'cancel' | 'handoff' | 'handoffs' | 'acknowledge';
+  mode: 'create' | 'list' | 'show' | 'status' | 'depend' | 'cancel' | 'handoff' | 'handoffs' | 'acknowledge' | 'withdraw';
   view?: 'summary' | 'full' | undefined;
   sessionId?: string | undefined;
   taskId?: string | undefined;

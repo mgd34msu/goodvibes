@@ -252,26 +252,10 @@ jobs:
               exit 1
             fi
             # The acceptance artifact contains this exact manifest beside its
-            # payloads. Validate its complete name set before the source CLI
-            # consumes its expected pins; never hash a new publication manifest.
+            # payloads. Verify its pins and that it lists exactly these payloads;
+            # never hash a new publication manifest.
             CHECKSUM_PATH="dist/$SHA256_NAME"
-            export CHECKSUM_PATH
-            python3 - <<'PY_CHECKSUMS'
-          import os, re
-          from pathlib import Path
-          paths = [Path(value) for value in os.environ['PAYLOAD_PATHS'].splitlines()]
-          manifest = Path(os.environ['CHECKSUM_PATH'])
-          assert manifest.is_file() and not manifest.is_symlink(), 'Staged checksum manifest is missing'
-          assert paths and all(path.parent == manifest.parent for path in paths), 'Expected staged payloads beside the manifest'
-          assert len({path.name for path in paths}) == len(paths), 'Staged payload names must be unique'
-          names = []
-          for line in manifest.read_text().splitlines():
-              match = re.fullmatch(r'([0-9a-f]{64})  ([A-Za-z0-9_.-]+)', line)
-              assert match and match[2] != manifest.name, 'Invalid staged checksum entry'
-              names.append(match[2])
-          assert names and len(set(names)) == len(names) and set(names) == {path.name for path in paths}, 'Staged checksum names must uniquely and exactly cover all payloads'
-          PY_CHECKSUMS
-            bun packages/engine/toolchain/src/bin/sha256sums.ts --verify "$CHECKSUM_PATH"
+            bun packages/engine/toolchain/src/bin/sha256sums.ts --verify "$CHECKSUM_PATH" --exact "${assets[@]}"
           else
             CHECKSUM_PATH="$SHA256_NAME"
             if [ "$TOOLCHAIN_SOURCE" = workspace ]; then

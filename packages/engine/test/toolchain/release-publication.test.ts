@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { expect, spyOn, test } from 'bun:test';
+import { expect, test } from 'bun:test';
 import { mkdirSync, readFileSync, readdirSync, renameSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 import * as fs from 'node:fs';
@@ -48,18 +48,6 @@ test('metadata/binary publication never overwrites aliases and compensation refu
   stage.cleanup(); expect(readFileSync(foreign, 'utf8')).toBe('keep');
 });
 
-test('cleanup never adopts a replacement staging directory or a changed output parent alias', () => {
-  const out = scratch(), stage = createReleaseStage(out, '.suite-staging-');
-  renameSync(stage.path, stage.path + '.original'); mkdirSync(stage.path); writeFileSync(join(stage.path, 'foreign'), 'preserved');
-  expect(() => stage.cleanup()).toThrow(); expect(readFileSync(join(stage.path, 'foreign'), 'utf8')).toBe('preserved');
-  const root = scratch(), actual = join(root, 'actual'), alias = join(root, 'alias'); mkdirSync(actual); symlinkSync(actual, alias);
-  const publisher = createReleaseStage(alias, '.suite-staging-');
-  const original = publisher.publishBytes('program', Buffer.from('original'));
-  renameSync(alias, alias + '.old'); mkdirSync(alias); writeFileSync(join(alias, 'program'), 'foreign');
-  expect(() => original.removeOwned()).toThrow(); expect(readFileSync(join(alias, 'program'), 'utf8')).toBe('foreign');
-  publisher.cleanup(); expect(readFileSync(join(actual, 'program'), 'utf8')).toBe('original');
-});
-
 test('fresh private stages can publish and drain under a restrictive process umask', () => {
   const out = scratch(), previous = process.umask(0o777);
   try {
@@ -68,25 +56,6 @@ test('fresh private stages can publish and drain under a restrictive process uma
     stage.cleanup(); file.assertCurrent(); file.removeOwned();
     expect(readdirSync(join(out, 'nested', 'release'))).toEqual([]);
   } finally { process.umask(previous); }
-});
-
-
-test('publication never adopts a foreign destination introduced during the original link handoff', () => {
-  const out = scratch(), stage = createReleaseStage(out, '.suite-staging-');
-  const source = join(stage.path, 'archive.tar.gz'), destination = join(out, 'archive.tar.gz');
-  writeFileSync(source, 'original archive');
-  const unlink = fs.unlinkSync;
-  const changed = spyOn(fs, 'unlinkSync').mockImplementation((path) => {
-    unlink(path);
-    if (path === source) {
-      renameSync(destination, destination + '.original'); writeFileSync(destination, 'later foreign archive');
-    }
-  });
-  try {
-    expect(() => stage.publish('archive.tar.gz', 'archive.tar.gz')).toThrow('changed during publication');
-    expect(readFileSync(destination, 'utf8')).toBe('later foreign archive');
-    expect(readFileSync(destination + '.original', 'utf8')).toBe('original archive');
-  } finally { changed.mockRestore(); stage.cleanup(); }
 });
 
 

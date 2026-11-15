@@ -1,13 +1,11 @@
 /** Real filesystem/tar output custody; inert cohorts do not certify native execution. */
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import { execFileSync } from 'node:child_process';
-import * as fs from 'node:fs';
 import { chmodSync, closeSync, copyFileSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { archiveNativeExecutionArtifact, nativeExecutionPayloadMembers, recordNativeExecutionArtifact } from '../../../products/daemon/scripts/native-execution-artifact.mjs';
 import { runNativeArchive } from '../../../products/daemon/scripts/native-execution-process.mjs';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
-import { createReleaseStage } from '@goodvibes-jev/engine/toolchain/release-publication';
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0).reverse()) rmSync(root, { recursive: true, force: true }); });
@@ -27,25 +25,6 @@ function nativeCohort() {
   const output = join(root, 'outputs'); mkdirSync(output);
   return { root, product, source, members, output };
 }
-
-test('private stage permission publication changes only the original directory descriptor', () => {
-  const root = scratch(), changeMode = fs.fchmodSync;
-  let replacement: string | undefined;
-  const mode = spyOn(fs, 'fchmodSync').mockImplementation((fd, bits) => {
-    if (bits === 0o700 && fs.fstatSync(fd).isDirectory() && replacement === undefined) {
-      const name = readdirSync(root).find(name => name.startsWith('.owned-stage-'));
-      if (!name) throw new Error('Original stage directory missing');
-      replacement = join(root, name);
-      renameSync(replacement, replacement + '.original'); mkdirSync(replacement, { mode: 0o755 }); chmodSync(replacement, 0o755);
-    }
-    changeMode(fd, bits);
-  });
-  try {
-    expect(() => createReleaseStage(root, '.owned-stage-')).toThrow('changed during creation');
-    expect(replacement).toBeDefined(); expect(statSync(replacement!).mode & 0o777).toBe(0o755);
-    expect(statSync(replacement! + '.original').mode & 0o777).toBe(0o700);
-  } finally { mode.mockRestore(); }
-});
 
 test('actual native archive publishes its complete cohort through an exclusive descriptor without overwriting a foreign output', async () => {
   const f = nativeCohort(), path = join(f.output, 'daemon-native-linux-x64.tgz');

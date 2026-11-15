@@ -1,29 +1,25 @@
-/** Release-builder-local publication. Final names are never replaced implicitly. */
-import { closeSync, constants, fchmodSync, fstatSync, linkSync, lstatSync, mkdtempSync, openSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
-import type { BigIntStats } from 'node:fs';
+/**
+ * Release-builder-local publication. A file is written into a private staging
+ * directory beside its destination and then moved to its final name with
+ * `link` + `unlink`, so a final name is never replaced implicitly (`link`
+ * refuses an existing name, symlinks included) and never holds a partial file.
+ * The build host owns its output directory; nothing here re-proves that.
+ */
+import { chmodSync, closeSync, constants, fchmodSync, linkSync, lstatSync, mkdtempSync, openSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { captureExistingDirectory, prepareAtomicPublicationDirectory, fileObservationIdentity } from '@goodvibes-jev/engine/platform/platform/utils';
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 
 export interface PublishedReleaseFile {
   readonly path: string;
+  /** One `lstat`: throws when the published file was edited or replaced since publication. */
   assertCurrent(): void;
+  /** Removes the published file only when it is still the one this stage published. */
   removeOwned(): void;
 }
 
 function filename(name: string): void {
   if (!name || name === '.' || name === '..' || name.length > 240 || !/^[A-Za-z0-9._+-]+$/.test(name)) throw new Error('Release output requires one bounded filename.');
 }
-
-// A link/unlink transfer changes nlink/ctime itself; all other original file
-// facts must remain the same while the retained native descriptor is open.
-function sameTransferSource(left: BigIntStats, right: BigIntStats): boolean {
-  return right.isFile() && !right.isSymbolicLink() && left.dev === right.dev && left.ino === right.ino
-    && left.mode === right.mode && left.uid === right.uid && left.gid === right.gid && left.size === right.size
-    && left.mtimeNs === right.mtimeNs && left.birthtimeNs === right.birthtimeNs;
-}
-const stamp = (value: BigIntStats): string => [value.dev, value.ino, value.mode, value.uid, value.gid, value.nlink,
-  value.size, value.mtimeNs, value.ctimeNs, value.birthtimeNs].join(':');
 
 /** Resolve a not-yet-created release destination without filesystem effects. */
 export function planReleaseDirectory(path: string): string {
@@ -37,115 +33,57 @@ export function planReleaseDirectory(path: string): string {
 
 export function createReleaseStage(outDir: string, prefix: string) {
   filename(prefix);
-  const parent = prepareAtomicPublicationDirectory(outDir);
-  parent.assertCurrent();
-  const mask = process.umask(), adjustMask = (mask & 0o700) !== 0;
-  let path: string;
-  // A mode000 directory cannot be opened for descriptor-based permission
-  // publication. Clear only owner masking for this one private native create;
-  // restore before any owner callback, producer, or asynchronous work.
-  if (adjustMask) process.umask(mask & ~0o700);
-  try { path = mkdtempSync(join(parent.canonical, prefix)); }
-  finally { if (adjustMask) process.umask(mask); }
-  const created = lstatSync(path, { bigint: true });
-  const fd = openSync(path, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
-  try {
-    const opened = fstatSync(fd, { bigint: true });
-    if (!opened.isDirectory() || created.dev !== opened.dev || created.ino !== opened.ino || created.birthtimeNs !== opened.birthtimeNs)
-      throw new Error('Release staging directory changed during creation.');
-    parent.assertCurrent(); fchmodSync(fd, 0o700);
-    const ready = lstatSync(path, { bigint: true });
-    if (!ready.isDirectory() || ready.isSymbolicLink() || created.dev !== ready.dev || created.ino !== ready.ino || created.birthtimeNs !== ready.birthtimeNs)
-      throw new Error('Release staging directory changed during creation.');
-    parent.assertCurrent();
-  } finally { closeSync(fd); }
-  const original = captureExistingDirectory(path);
+  const parent = prepareAtomicPublicationDirectory(outDir).canonical;
+  const path = mkdtempSync(join(parent, prefix));
+  // mkdtemp honours the process umask; a restrictive one would leave the stage
+  // unwritable to its own builder.
+  chmodSync(path, 0o700);
   let cleaned = false;
-  const assertCurrent = (): void => { parent.assertCurrent(); original.assertCurrent(); if (cleaned) throw new Error('Release staging has closed.'); };
+  const assertCurrent = (): void => { if (cleaned) throw new Error('Release staging has closed.'); };
   const cleanup = (): void => {
     if (cleaned) return;
-    // Compensation may use only the original canonical tree, never a replaced
-    // configured alias or a directory that now occupies our temporary name.
-    original.assertPhysicalCurrent(); rmSync(path, { recursive: true }); cleaned = true;
+    rmSync(path, { recursive: true, force: true }); cleaned = true;
   };
-  const publish = (member: string, name: string, writtenSource?: string): PublishedReleaseFile => {
+  const publish = (member: string, name: string): PublishedReleaseFile => {
     filename(member); filename(name); assertCurrent();
-    const source = join(path, member), selected = join(parent.canonical, name);
-    const selectedSource = fileObservationIdentity(source);
-    if (writtenSource !== undefined && selectedSource !== writtenSource) throw new Error('Release stage member changed after writing.');
-    const fd = openSync(source, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
-    let linked: string | undefined;
+    const source = join(path, member), selected = join(parent, name);
+    linkSync(source, selected); // EEXIST is a refusal, including symlinks.
+    let identity: string;
     try {
-      const before = fstatSync(fd, { bigint: true });
-      if (stamp(before) !== selectedSource) throw new Error('Release stage member changed before publication.');
-      assertCurrent();
-      linkSync(source, selected); // EEXIST is a refusal, including symlinks.
-      const after = fstatSync(fd, { bigint: true });
-      // The final name now exists. Record it before any check can refuse, so the
-      // compensation below removes exactly this link and a retry is not blocked.
-      linked = stamp(after);
-      if (!sameTransferSource(before, after) || after.nlink !== 2n) throw new Error('Release stage member changed during publication.');
-      if (stamp(lstatSync(source, { bigint: true })) !== linked
-        || stamp(lstatSync(selected, { bigint: true })) !== linked) throw new Error('Release stage member changed during publication.');
-      assertCurrent(); unlinkSync(source);
-      const transferred = fstatSync(fd, { bigint: true });
-      if (!sameTransferSource(before, transferred) || transferred.nlink !== 1n) throw new Error('Release stage member changed during publication.');
-      linked = stamp(transferred);
-      if (fileObservationIdentity(selected) !== linked) throw new Error('Release output changed during publication.');
-      parent.assertCurrent();
-      let removed = false;
-      const check = (): void => {
-        parent.assertCurrent();
-        if (removed || fileObservationIdentity(selected) !== linked) throw new Error('Published release file changed.');
-        parent.assertCurrent();
-      };
-      return Object.freeze({ path: selected, assertCurrent: check, removeOwned() { if (removed) return; check(); unlinkSync(selected); removed = true; } });
+      unlinkSync(source);
+      identity = fileObservationIdentity(selected);
     } catch (error) {
-      // Only the exact original link we just created can be compensated. If
-      // another publisher replaced/edited it, leave that file untouched.
-      try { parent.assertPhysicalCurrent(); if (linked && stamp(lstatSync(selected, { bigint: true })) === linked) unlinkSync(selected); } catch { /* preserve primary failure and foreign output */ }
+      // The final name is ours until this point; leave no half-published name behind.
+      try { unlinkSync(selected); } catch { /* the primary failure stands */ }
       throw error;
-    } finally { closeSync(fd); }
+    }
+    let removed = false;
+    const check = (): void => {
+      if (removed || fileObservationIdentity(selected) !== identity) throw new Error(`Published release file ${name} changed after publication.`);
+    };
+    return Object.freeze({ path: selected, assertCurrent: check, removeOwned() { if (removed) return; check(); unlinkSync(selected); removed = true; } });
   };
   const publishBytes = (name: string, bytes: Uint8Array, mode = 0o644): PublishedReleaseFile => {
     filename(name); assertCurrent();
-    const selected = join(path, name), fd = openSync(selected, 'wx', mode);
-    let written: string;
-    try {
-      fchmodSync(fd, mode); writeFileSync(fd, bytes);
-      written = stamp(fstatSync(fd, { bigint: true }));
-      if (written !== stamp(lstatSync(selected, { bigint: true }))) throw new Error('Release stage member changed while writing.');
-    } finally { closeSync(fd); }
-    return publish(name, name, written);
+    const fd = openSync(join(path, name), 'wx', mode);
+    try { fchmodSync(fd, mode); writeFileSync(fd, bytes); } finally { closeSync(fd); }
+    return publish(name, name);
   };
+  /**
+   * Publish what `producer` writes into an exclusive staging descriptor. The
+   * producer returns only after every writer has drained; `beforePublish` is a
+   * synchronous last check the caller owns (for example its own inputs).
+   */
   const publishFile = async (member: string, name: string, producer: (fd: number) => Promise<void>, mode = 0o644,
     beforePublish?: () => void): Promise<PublishedReleaseFile> => {
     filename(member); filename(name); assertCurrent();
-    const selected = join(path, member);
-    const fd = openSync(selected, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, mode);
+    const fd = openSync(join(path, member), constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, mode);
     try {
       fchmodSync(fd, mode);
-      const original = fstatSync(fd, { bigint: true });
-      // The producer owns its subprocess lifetime and returns only after all
-      // writers have drained. Keep this original descriptor open throughout.
       await producer(fd);
-      assertCurrent();
-      const written = fstatSync(fd, { bigint: true });
-      if (!written.isFile() || written.dev !== original.dev || written.ino !== original.ino
-        || written.uid !== original.uid || written.gid !== original.gid || written.mode !== original.mode
-        || written.birthtimeNs !== original.birthtimeNs || written.nlink !== 1n
-        || stamp(lstatSync(selected, { bigint: true })) !== stamp(written)) {
-        throw new Error('Release stage member changed while its producer was writing.');
-      }
-      // An optional source fence can only restrict this actual native output.
-      // Do not await it or let returned/thrown work escape unhandled, and let
-      // publish independently recheck the original file after this callback.
-      try {
-        const restricted: unknown = beforePublish?.();
-        if (restricted !== undefined) { drainOwned(restricted); throw new Error('Release publication guard must be synchronous and return no value.'); }
-      } catch (error) { drainOwned(error); throw new Error('Release publication source is unavailable.'); }
-      return publish(member, name, stamp(written));
     } finally { closeSync(fd); }
+    beforePublish?.();
+    return publish(member, name);
   };
-  return Object.freeze({ path, assertCurrent, cleanup, publish: (member: string, name: string) => publish(member, name), publishBytes, publishFile });
+  return Object.freeze({ path, assertCurrent, cleanup, publish, publishBytes, publishFile });
 }

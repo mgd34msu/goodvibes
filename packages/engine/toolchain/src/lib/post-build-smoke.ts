@@ -1,10 +1,10 @@
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 /**
  * post-build-smoke, proves a freshly compiled binary boots.
  *
- * Runs `<binary> --version` and checks the documented version protocol.
- * Additional diagnostics require a current Jev load-failure observation of
- * both complete, privacy-screened output streams.
+ * Runs `<binary> --version` once and checks the documented version protocol:
+ * exit 0, the configured banner with a semver version, and nothing else on
+ * stdout or stderr. Any other output fails the smoke and is printed, since a
+ * load or module-resolution failure shows up there.
  *
  * Also scans the artifact itself for top-level eager namespace-object reads
  * (`var X = exports_Y.Z;` at column 0 of the embedded bundle). Bun's bundler
@@ -18,13 +18,7 @@ import { drainOwned } from '@goodvibes-jev/judgment/decisions';
  * dominance is proven; direct aliases keep the conservative original policy.
  */
 
-import { lstatSync, readFileSync, statSync } from 'node:fs';
-import { matchesJudgmentModel } from '@goodvibes-jev/judgment';
-import { captureJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { snapshotJudgmentInput, prepareJudgmentResult } from '@goodvibes-jev/engine/platform/platform/gate';
-import { activateClassicFallback, isClassicOperation, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime';
-import type { ProtectedSourceOwner } from '@goodvibes-jev/engine/platform/platform/security';
-import { smokeLoadFailure } from '../batteries/smoke-load-failure.js';
+import { readFileSync } from 'node:fs';
 import type { Exec, ExecResult, Logger } from './effects.js';
 import { realExec, consoleLogger } from './effects.js';
 import type { SmokeConfig } from '../config.js';
@@ -215,58 +209,35 @@ export function scanArtifactForEagerNamespaceReads(artifactText: string, limit =
 }
 
 export interface SmokeResult {
-  readonly operationProvenance?: 'classic';
-  readonly semanticAssessment?: 'not-evaluated';
-  readonly qualificationBasis?: 'native-version-and-artifact';
   readonly ok: boolean;
   readonly detail: string;
 }
 
-const observationBrand = Symbol('smoke-output-observation');
-/** A process-local observation of one complete captured output, never execution permission. */
-export interface SmokeOutputObservation { readonly [observationBrand]: true; }
-const observations = new WeakMap<SmokeOutputObservation, {
-  readonly output: ExecResult;
-  readonly admitted: boolean;
-  readonly assertCurrent: () => void;
-}>();
+/** Longest stretch of unexpected output repeated in a failure. */
+const OUTPUT_EXCERPT = 2_000;
 
-function capturedOutput(result: ExecResult): ExecResult {
-  const fields = Object.getOwnPropertyDescriptors(result);
-  if (Reflect.ownKeys(fields).some(key => key !== 'status' && key !== 'stdout' && key !== 'stderr')
-    || Object.values(fields).some(field => !('value' in field))) throw new Error('Invalid smoke output.');
-  const status: unknown = fields.status?.value, stdout: unknown = fields.stdout?.value, stderr: unknown = fields.stderr?.value;
-  if (typeof status !== 'number' || !Number.isInteger(status) || typeof stdout !== 'string' || typeof stderr !== 'string') throw new Error('Invalid smoke output.');
-  return Object.freeze({ status, stdout, stderr });
+function excerpt(text: string): string {
+  const trimmed = text.trim();
+  return trimmed.length > OUTPUT_EXCERPT ? `${trimmed.slice(0, OUTPUT_EXCERPT)}...` : trimmed;
 }
-function sameOutput(left: ExecResult, right: ExecResult): boolean {
-  return left.status === right.status && left.stdout === right.stdout && left.stderr === right.stderr;
-}
-function versionProtocol(output: ExecResult, bannerPrefix: string): 'clean' | 'diagnostic' | 'invalid' {
+
+/** Deterministic protocol check of one `--version` run. Pure. */
+export function evaluateSmokeOutput(output: ExecResult, config: Pick<SmokeConfig, 'bannerPrefix'>): SmokeResult {
+  if (output.status !== 0) {
+    const said = excerpt(`${output.stderr}\n${output.stdout}`);
+    return { ok: false, detail: `binary exited ${output.status}${said ? `: ${said}` : ''}` };
+  }
   const lineEnd = output.stdout.indexOf('\n');
   const firstLine = (lineEnd < 0 ? output.stdout : output.stdout.slice(0, lineEnd)).replace(/\r$/, '');
-  if (!firstLine.startsWith(bannerPrefix)) return 'invalid';
-  const version = firstLine.slice(bannerPrefix.length);
-  if (!/^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(version)) return 'invalid';
-  return output.stderr === '' && (lineEnd < 0 || lineEnd === output.stdout.length - 1) ? 'clean' : 'diagnostic';
-}
-
-/** Deterministic protocol checks; diagnostics pass only with their current complete observation. */
-export function evaluateSmokeOutput(result: ExecResult, config: Pick<SmokeConfig, 'bannerPrefix'>, observation?: SmokeOutputObservation): SmokeResult {
-  let output: ExecResult;
-  try { output = capturedOutput(result); } catch { return { ok: false, detail: 'invalid captured smoke output' }; }
-  if (output.status !== 0) {
-    return { ok: false, detail: `binary exited ${output.status}` };
+  const version = firstLine.startsWith(config.bannerPrefix) ? firstLine.slice(config.bannerPrefix.length) : undefined;
+  if (version === undefined || !/^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(version)) {
+    return { ok: false, detail: `version banner does not match the configured version protocol (expected "${config.bannerPrefix}<semver>", got "${excerpt(firstLine)}")` };
   }
-  const protocol = versionProtocol(output, config.bannerPrefix);
-  if (protocol === 'invalid') return { ok: false, detail: 'version banner does not match the configured version protocol' };
-  if (protocol === 'diagnostic') {
-    const owned = observation && observations.get(observation);
-    if (!owned || !sameOutput(output, owned.output)) return { ok: false, detail: 'additional smoke output requires a current load-failure reading' };
-    try { owned.assertCurrent(); } catch { return { ok: false, detail: 'smoke output observation is no longer current' }; }
-    if (!owned.admitted) return { ok: false, detail: 'smoke load-failure reading refused or held qualification' };
+  const extraStdout = lineEnd < 0 ? '' : output.stdout.slice(lineEnd + 1);
+  if (output.stderr !== '' || extraStdout !== '') {
+    return { ok: false, detail: `--version printed more than its banner, which is how a load failure shows: ${excerpt(`${output.stderr}\n${extraStdout}`)}` };
   }
-  return { ok: true, detail: 'version protocol and module-load evidence accepted' };
+  return { ok: true, detail: 'version protocol accepted' };
 }
 
 export interface RunSmokeOptions {
@@ -274,132 +245,31 @@ export interface RunSmokeOptions {
   readonly config: SmokeConfig;
   readonly exec?: Exec;
   readonly logger?: Logger;
-  /** Custom readers must supply source incarnation protection through assertCurrent. */
+  /** Reads the artifact for the eager-read scan; defaults to the file itself. */
   readonly readArtifact?: (path: string) => string;
-  /** Trusted composition only. Without a protected source owner, diagnostics are withheld offline. */
-  readonly diagnosticSourceOwner?: ProtectedSourceOwner;
-  readonly signal?: AbortSignal;
-  /** Synchronous ownership fence for the selected artifact and invocation. */
-  readonly assertCurrent?: () => void;
 }
 
-/** Run the version smoke against a binary path. */
+/** Run the version smoke against a binary path: one read, one process, one scan. */
 export async function runPostBuildSmoke(options: RunSmokeOptions): Promise<SmokeResult> {
-  return withConfiguredDecisionModelPolicy(() => runOwnedPostBuildSmoke(options));
-}
-
-async function runOwnedPostBuildSmoke(options: RunSmokeOptions): Promise<SmokeResult> {
   const exec = options.exec ?? realExec;
   const logger = options.logger ?? consoleLogger;
   const readArtifact = options.readArtifact ?? ((path: string) => readFileSync(path, 'latin1'));
-  const { binary, config, signal, assertCurrent, diagnosticSourceOwner: sourceOwner } = options;
-  const sourceMethods = sourceOwner && { capture: sourceOwner.capture, screen: sourceOwner.screen, project: sourceOwner.project, release: sourceOwner.release };
-  const bannerPrefix = config.bannerPrefix;
-  const current = () => {
-    signal?.throwIfAborted();
-    const checked: unknown = assertCurrent?.();
-    if (checked !== undefined) { drainOwned(checked); throw new Error('Smoke source owner must be synchronous.'); }
-    if (options.binary !== binary || options.config !== config || config.bannerPrefix !== bannerPrefix
-      || options.signal !== signal || options.assertCurrent !== assertCurrent || options.diagnosticSourceOwner !== sourceOwner) throw new Error('Smoke source owner changed.');
-    if (sourceOwner && sourceMethods && (sourceOwner.capture !== sourceMethods.capture || sourceOwner.screen !== sourceMethods.screen
-      || sourceOwner.project !== sourceMethods.project || sourceOwner.release !== sourceMethods.release)) throw new Error('Smoke diagnostic source owner changed.');
-    signal?.throwIfAborted();
-  };
+  const { binary, config } = options;
   const failed = (detail: string): SmokeResult => {
-    const result = { ok: false, detail, ...(isClassicOperation()
-      ? { operationProvenance: 'classic' as const, semanticAssessment: 'not-evaluated' as const } : {}) };
-    logger.error(`[post-build-smoke] ${detail}`); return result;
-  };
-  const fileIdentity = () => [lstatSync(binary, { bigint: true }), statSync(binary, { bigint: true })]
-    .flatMap(stat => [stat.dev, stat.ino, stat.ctimeNs, stat.mtimeNs, stat.size]);
-  let originalFile: readonly bigint[] | undefined;
-  const fileCurrent = () => {
-    if (!originalFile) return;
-    const present = fileIdentity();
-    if (present.length !== originalFile.length || present.some((value, index) => value !== originalFile?.[index])) throw new Error('Smoke artifact incarnation changed.');
+    logger.error(`[post-build-smoke] ${detail}`);
+    return { ok: false, detail };
   };
   let artifact: string;
-  try { current(); originalFile = options.readArtifact ? undefined : fileIdentity(); artifact = readArtifact(binary); fileCurrent(); current(); }
-  catch { return failed('artifact scan could not read a current binary'); }
-  const artifactCurrent = () => {
-    current();
-    fileCurrent();
-    if (readArtifact(binary) !== artifact) throw new Error('Smoke artifact changed.');
-    fileCurrent();
-    current();
-  };
-  let result: ExecResult;
-  try {
-    artifactCurrent(); logger.info(`[post-build-smoke] ${binary} --version`);
-    result = capturedOutput(exec(binary, ['--version'], { timeoutMs: 30_000 })); artifactCurrent();
-  } catch { return failed('smoke process or its artifact ownership failed'); }
-  const finish = (evaluated: SmokeResult, readingCurrent: () => void = current): SmokeResult => {
-    if (!evaluated.ok) return failed(evaluated.detail);
-    let eagerReads: string[];
-    try {
-      readingCurrent(); artifactCurrent(); eagerReads = scanArtifactForEagerNamespaceReads(artifact); artifactCurrent(); readingCurrent();
-    } catch { return failed('artifact or smoke observation is no longer current'); }
-    if (eagerReads.length > 0) return failed(`artifact contains ${eagerReads.length}${eagerReads.length >= 8 ? '+' : ''} top-level eager namespace read(s), a build-order lottery that can die at load on the next rebuild: ${eagerReads.slice(0, 3).join('; ')}`);
-    logger.info(`[post-build-smoke] ${evaluated.detail}`);
-    try { readingCurrent(); artifactCurrent(); } catch { return failed('artifact or smoke observation is no longer current'); }
-    return { ...evaluated, ...(isClassicOperation() ? { operationProvenance: 'classic' as const,
-      semanticAssessment: 'not-evaluated' as const, qualificationBasis: 'native-version-and-artifact' as const } : {}) };
-  };
-  let evaluated = evaluateSmokeOutput(result, { bannerPrefix });
-  if (!evaluated.ok && result.status === 0 && versionProtocol(result, bannerPrefix) === 'diagnostic' && isClassicOperation()) {
-    return failed('Classic smoke qualification cannot assess additional diagnostic output; use a clean version protocol or enable decision models for semantic load-failure assessment');
-  }
-  if (!evaluated.ok && result.status === 0 && versionProtocol(result, bannerPrefix) === 'diagnostic' && sourceOwner) {
-    let source: ReturnType<ProtectedSourceOwner['capture']> | undefined;
-    const cancelSource = () => { if (source && sourceMethods) void sourceMethods.release.call(sourceOwner, source).catch(() => {}); };
-    signal?.addEventListener('abort', cancelSource, { once: true });
-    try {
-      artifactCurrent(); source = sourceOwner.capture([result.stdout, result.stderr]);
-      const screened = await sourceOwner.screen(source); artifactCurrent();
-      if (screened.status !== 'settled') return failed('smoke diagnostic privacy screening held qualification');
-      const parts = sourceOwner.project(screened.receipt);
-      const stdout = parts[0], stderr = parts[1];
-      if (parts.length !== 2 || typeof stdout !== 'string' || typeof stderr !== 'string') return failed('smoke diagnostic projection is incomplete');
-      const evidence = Object.freeze({ stdout, stderr });
-      snapshotJudgmentInput(evidence);
-      const screenedCurrent = () => {
-        artifactCurrent();
-        const projected = sourceOwner.project(screened.receipt);
-        if (projected.length !== 2 || projected[0] !== stdout || projected[1] !== stderr) throw new Error('Smoke diagnostic projection changed.');
-        artifactCurrent();
-      };
-      const authority = captureJudgmentPort(smokeLoadFailure.name, { signal, assertCurrent: screenedCurrent, prepareResultCapture: questions => {
-        const prepared = prepareJudgmentResult(questions);
-        return { ...prepared, capture(original) {
-          const admitted = prepared.capture(original);
-          if (admitted.requestedModel !== smokeLoadFailure.model || !matchesJudgmentModel(smokeLoadFailure.model!, admitted.model)) throw new Error('Smoke judgment model did not match the requested alias.');
-          return admitted;
-        } };
-      } });
-      const run = await smokeLoadFailure.run(authority.port, evidence, { site: smokeLoadFailure.name, signal: authority.signal });
-      authority.assertCurrent();
-      const reading = run.readings.load_failure;
-      const admitted = reading.outcome === 'act' && reading.verdict === 'no';
-      run.recordAction(admitted ? 'accept-smoke-load-evidence' : 'hold-smoke-load-evidence'); authority.assertCurrent();
-      const observation = Object.freeze({ [observationBrand]: true } satisfies SmokeOutputObservation);
-      observations.set(observation, { output: result, admitted, assertCurrent: authority.assertCurrent });
-      evaluated = evaluateSmokeOutput(result, { bannerPrefix }, observation);
-      authority.assertCurrent();
-      const finished = finish(evaluated, authority.assertCurrent);
-      const restriction = authority.consumeObservation();
-      await sourceOwner.release(source); source = undefined;
-      restriction.assertCurrent(); artifactCurrent();
-      return finished;
-    } catch (error) {
-      try { artifactCurrent(); } catch { return failed('smoke artifact or source owner is no longer current'); }
-      if (activateClassicFallback(error)) return failed('Classic smoke qualification cannot assess additional diagnostic output; semantic load-failure assessment was not evaluated');
-      return failed('smoke diagnostic reading unavailable, malformed, or no longer current');
-    }
-    finally {
-      signal?.removeEventListener('abort', cancelSource);
-      // A failing release must not replace the result this call is already returning.
-      if (source && sourceMethods) { try { await sourceMethods.release.call(sourceOwner, source); } catch { /* the returned result stands */ } }
-    }
-  }
-  return finish(evaluated);
+  try { artifact = readArtifact(binary); }
+  catch (error) { return failed(`cannot read ${binary}: ${error instanceof Error ? error.message : String(error)}`); }
+  logger.info(`[post-build-smoke] ${binary} --version`);
+  let output: ExecResult;
+  try { output = exec(binary, ['--version'], { timeoutMs: 30_000 }); }
+  catch (error) { return failed(`could not run ${binary}: ${error instanceof Error ? error.message : String(error)}`); }
+  const evaluated = evaluateSmokeOutput(output, config);
+  if (!evaluated.ok) return failed(evaluated.detail);
+  const eagerReads = scanArtifactForEagerNamespaceReads(artifact);
+  if (eagerReads.length > 0) return failed(`artifact contains ${eagerReads.length}${eagerReads.length >= 8 ? '+' : ''} top-level eager namespace read(s), a build-order lottery that can die at load on the next rebuild: ${eagerReads.slice(0, 3).join('; ')}`);
+  logger.info(`[post-build-smoke] ${evaluated.detail}`);
+  return evaluated;
 }

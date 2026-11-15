@@ -5,8 +5,7 @@ import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createSystemOnePort, judgmentConfigFromEnv } from '@goodvibes-jev/judgment';
-import { readNativeAddonEvidence, proveNativeMemoryRoundTrip } from './boot-smoke-reading.mjs';
+import { proveNativeMemoryRoundTrip } from './boot-smoke-reading.mjs';
 import { syntheticSystemOneAnswers } from './hosted-session-protocol.mjs';
 import { runHostedSessionProof } from './hosted-session-proof.mjs';
 import { runPostBuildSmoke } from '@goodvibes-jev/engine/toolchain';
@@ -178,8 +177,8 @@ try {
   // The real installed entrypoint now admits genuinely unconfigured inbox
   // providers. A separate selected home prevents the send fixture's settings
   // or identity from leaking into this host proof.
-  // Recorded protocol transport for compiled memory reranking and diagnostic
-  // reading. This is deliberately identified as synthetic, never live Jev.
+  // Recorded protocol transport for the compiled daemon's own boot and memory
+  // readings. This is deliberately identified as synthetic, never live Jev.
   const smokeJudgmentRequests = []; let smokeJudgmentError;
   smokeJudgment = createServer((request, response) => {
     void (async () => {
@@ -191,7 +190,7 @@ try {
       assert(smokeJudgmentRequests.length < 5_000, 'Unexpected boot SystemOne request loop'); smokeJudgmentRequests.push(body);
       const answers = syntheticSystemOneAnswers(body.questions);
       for (const [name, question] of Object.entries(body.questions)) {
-        if (question.type === 'noul') answers[name] = { type: 'noul', noul: name === 'native_addon_failure' ? 0.01 : 0.99 };
+        if (question.type === 'noul') answers[name] = { type: 'noul', noul: 0.99 };
       }
       response.writeHead(200, { 'Content-Type': 'application/json' });
       response.end(JSON.stringify({ model: body.model, answers, usage: { input_tokens: 1, output_tokens: 1 } }));
@@ -199,7 +198,6 @@ try {
   });
   await new Promise((yes, no) => { smokeJudgment.once('error', no); smokeJudgment.listen(0, '127.0.0.1', yes); });
   const smokeJudgmentEnv = { TYPESAFE_BASE_URL: `http://127.0.0.1:${smokeJudgment.address().port}`, TYPESAFE_API_KEY: 'synthetic-boot-reading-key', TYPESAFE_DEFAULT_MODEL: 'jev-latest' };
-  const smokePort = createSystemOnePort(judgmentConfigFromEnv(smokeJudgmentEnv));
   const serveRoot = join(root, 'serving'); const serveHome = join(serveRoot, 'home');
   const serveTree = join(serveRoot, 'tree'); const serveDaemon = join(serveRoot, 'daemon');
   const serveWork = join(serveRoot, 'work');
@@ -266,12 +264,9 @@ try {
     // native extension failure. Check structured native availability as well as
     // the original add/search exercise, so lexical fallback cannot pass as vec0.
     const { vector } = await proveNativeMemoryRoundTrip(smokeInvoke);
-    console.log('[boot-smoke] reading compiled addon diagnostics');
-    const diagnostic = await readNativeAddonEvidence(smokePort, { stderr: errors }, AbortSignal.timeout(10_000));
     assert.ifError(smokeJudgmentError);
-    assert(smokeJudgmentRequests.some(request => 'native_addon_failure' in request.questions));
     console.log(JSON.stringify({ proof: 'compiled-daemon-boot-smoke', semanticQualification: 'synthetic-only', status: 'running', malformedSettingsExit: malformed.code,
-      binding: { host: '127.0.0.1', port: servePort }, nativeVectorAvailable: vector.vector.available, diagnostic }));
+      binding: { host: '127.0.0.1', port: servePort }, nativeVectorAvailable: vector.vector.available }));
     const response = await fetch(`http://127.0.0.1:${servePort}/api/channels/inbox`, {
       headers: { Authorization: 'Bearer synthetic-native-inbox-token' }, signal: AbortSignal.timeout(5_000),
     });

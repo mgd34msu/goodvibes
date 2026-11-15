@@ -5,8 +5,7 @@ import { createConnection } from 'node:net';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createSystemOnePort, judgmentConfigFromEnv } from '@goodvibes-jev/judgment';
-import { readNativeAddonEvidence, proveNativeMemoryRoundTrip } from './boot-smoke-reading.mjs';
+import { proveNativeMemoryRoundTrip } from './boot-smoke-reading.mjs';
 import { syntheticSystemOneAnswers } from './hosted-session-protocol.mjs';
 import { nativeExecutionSource, retainNativeExecutionFiles, verifyNativeExecutionArtifact } from './native-execution-artifact.mjs';
 import { assertNativeProcessGroupDrained, boundedNativeProcessClose, drainNativeProcessGroup, signalNativeProcessGroup, spawnNativeProcessGroup } from './native-execution-process.mjs';
@@ -162,7 +161,7 @@ try {
       requestShapes[nativeRequestShape(body)]++;
       const answers = syntheticSystemOneAnswers(body.questions);
       for (const [name, question] of Object.entries(body.questions)) {
-        if (question.type === 'noul') answers[name] = { type: 'noul', noul: name === 'native_addon_failure' ? 0.01 : 0.99 };
+        if (question.type === 'noul') answers[name] = { type: 'noul', noul: 0.99 };
       }
       response.writeHead(200, { 'Content-Type': 'application/json' });
       response.end(JSON.stringify({ model: body.model, answers, usage: { input_tokens: 1, output_tokens: 1 } }));
@@ -170,7 +169,6 @@ try {
   });
   await new Promise((yes, no) => { judgment.once('error', no); judgment.listen(0, '127.0.0.1', yes); });
   const judgmentEnv = { TYPESAFE_BASE_URL: `http://127.0.0.1:${judgment.address().port}`, TYPESAFE_API_KEY: 'synthetic-native-reading-key', TYPESAFE_DEFAULT_MODEL: 'jev-latest' };
-  const readingPort = createSystemOnePort(judgmentConfigFromEnv(judgmentEnv));
   mkdirSync(daemon); writeJson(join(daemon, 'settings.json'), { cluster: { enabled: false }, relay: { enabled: false } });
   const lease = createServer(); await new Promise((yes, no) => { lease.once('error', no); lease.listen(0, '127.0.0.1', yes); });
   const port = lease.address().port; await closeServer(lease);
@@ -232,9 +230,8 @@ try {
   };
   // Same production controls as Linux: structured extension/index availability
   // and finite distance for the exact added record, with no initialization retry.
-  const { added, searched, vector } = await proveNativeMemoryRoundTrip(invoke);
-  const diagnostic = await readNativeAddonEvidence(readingPort, { stderr: errors }, AbortSignal.timeout(10_000));
-  assert.ifError(judgmentError); assert(requests.some(request => 'native_addon_failure' in request.questions));
+  const { vector } = await proveNativeMemoryRoundTrip(invoke);
+  assert.ifError(judgmentError);
   assert(!hostExited, 'Native host exited before owned shutdown'); original.retained.assertCurrent(); relocated.assertCurrent();
   host.kill('SIGTERM');
   let timer;
@@ -248,7 +245,7 @@ try {
     runId: source.runId, runAttempt: source.runAttempt, producerRunAttempt: original.artifact.runAttempt,
     semanticQualification: 'synthetic-only', modelAcquisition: 'disabled',
     status: 'running', startupElapsedMs, bootSemanticRequests: 0,
-    malformedSettingsExit: malformed.code, nativeVectorAvailable: vector.vector.available, cleanShutdown: true, diagnostic }));
+    malformedSettingsExit: malformed.code, nativeVectorAvailable: vector.vector.available, cleanShutdown: true }));
 } finally {
   try {
     try { if (host && hostStopped) await drainNativeProcessGroup(host, hostStopped); }

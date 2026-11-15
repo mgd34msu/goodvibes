@@ -37,23 +37,15 @@ const readBytes = (p: string): Uint8Array | null => files[p] ?? null;
 const fakeHash = (b: Uint8Array): string => `${b.length}`.padStart(64, '0');
 
 describe('sha256sums', () => {
-  test('actual CLI refuses an already missing later asset before hashing earlier payloads or replacing a manifest', () => {
+  test('a missing asset refuses the write and leaves an existing manifest untouched', () => {
     const dir = staging({ 'original-program': 'actual bytes', 'SHA256SUMS.txt': 'Original manifest must survive failure' });
-    const marker = join(dir, 'hash-called'), observer = join(dir, 'observe.mjs');
-    writeFileSync(observer, `import * as crypto from 'node:crypto';import {mock} from 'bun:test';import {appendFileSync} from 'node:fs';
-      const original=crypto.createHash;mock.module('node:crypto',()=>({...crypto,createHash:(...args)=>{if(args[0]==='sha256')appendFileSync(${JSON.stringify(marker)},'sha256\\n');return original(...args)}}));`);
-    const refused = runBin(dir, ['--out', 'SHA256SUMS.txt', 'original-program', 'missing-program'], observer);
-    expect(refused.status).toBe(1); expect(refused.output).toContain('missing asset(s): missing-program');
-    expect(() => readFileSync(marker)).toThrow();
+    const refused = runBin(dir, ['--out', 'SHA256SUMS.txt', 'original-program', 'missing-program']);
+    expect(refused.status).toBe(1); expect(refused.output).toContain('missing-program');
     expect(readFileSync(join(dir, 'SHA256SUMS.txt'), 'utf8')).toBe('Original manifest must survive failure');
-    // Prove this observer reaches the real command's SHA producer on the
-    // admitted path; absence above cannot be an inert interception seam.
-    expect(runBin(dir, ['--out', 'SHA256SUMS.txt', 'original-program'], observer).status).toBe(0);
-    expect(readFileSync(marker, 'utf8')).toBe('sha256\n');
   });
   test('empty, malformed, mixed and duplicate manifests cannot report successful verification', () => {
     const valid = `${fakeHash(files['goodvibes-linux-x64']!)}  goodvibes-linux-x64\n`;
-    for (const manifest of ['', '  \n', 'damaged', `${valid}damaged\n`, valid + valid]) {
+    for (const manifest of ['', '  \n', 'damaged', `${valid}damaged\n`, valid + valid, `${'A'.repeat(64)}  goodvibes-linux-x64\n`, valid.replace('  ', ' *'), `${valid.trim()}../escape\n`]) {
       expect(() => verifySha256Sums(manifest, readBytes, fakeHash)).toThrow();
     }
   });
@@ -146,6 +138,28 @@ describe('sha256sums CLI round-trip', () => {
     const dir = staging({ 'a/goodvibes-linux-x64': 'from-a', 'b/goodvibes-linux-x64': 'from-b' });
     const generated = runBin(dir, ['--out', 'SHA256SUMS.txt', 'a/goodvibes-linux-x64', 'b/goodvibes-linux-x64']);
     expect(generated.status).toBe(1);
-    expect(generated.output).toContain('share a basename');
+    expect(generated.output).toContain('share the name goodvibes-linux-x64');
+  });
+
+  test('a flag it does not know, or nothing to do, is a usage error and writes nothing', () => {
+    const dir = staging({ 'goodvibes-linux-x64': 'binary-a' });
+    const typo = runBin(dir, ['--verfy', 'SHA256SUMS.txt']);
+    expect(typo.status).toBe(2); expect(typo.output).toContain('unknown option --verfy');
+    expect(runBin(dir, ['--out', 'SHA256SUMS.txt']).status).toBe(2);
+    expect(() => readFileSync(join(dir, 'SHA256SUMS.txt'))).toThrow();
+  });
+
+  test('exact verification fails on a payload the manifest does not list, and names it', () => {
+    const dir = staging({ a: 'alpha', b: 'beta' });
+    expect(runBin(dir, ['--out', 'SHA256SUMS.txt', 'a', 'b']).status).toBe(0);
+    expect(runBin(dir, ['--verify', 'SHA256SUMS.txt', '--exact', 'a', 'b']).status).toBe(0);
+    expect(runBin(dir, ['--verify', 'SHA256SUMS.txt', '--exact-dir']).status).toBe(0);
+    writeFileSync(join(dir, 'c'), 'gamma');
+    for (const args of [['--exact', 'a', 'b', 'c'], ['--exact-dir']]) {
+      const verified = runBin(dir, ['--verify', 'SHA256SUMS.txt', ...args]);
+      expect(verified.status).toBe(1); expect(verified.output).toContain('not listed in the manifest c');
+    }
+    const fewer = runBin(dir, ['--verify', 'SHA256SUMS.txt', '--exact', 'a']);
+    expect(fewer.status).toBe(1); expect(fewer.output).toContain('listed but not a payload b');
   });
 });

@@ -3,11 +3,20 @@ import { join, resolve } from 'node:path';
 import { createRequire } from 'node:module';
 import { loadToolchainConfig } from '../lib/load-config.js';
 import { realFsReader, consoleLogger } from '../lib/effects.js';
+import { parseArgs, UsageError, withUsage } from '../lib/cli-args.js';
 import { resolveTargets, runBuildBinaries } from '../lib/build-binaries.js';
 import { readDependencyManifest, type DependencyManifest } from '../lib/optional-externals.js';
 import { DEFAULT_ENGINE_PACKAGE, type BuildConfig } from '../config.js';
 
 import { provideNativeAddon, resolveOwnedPackageManifest } from '../lib/binary-dependency-resolution.js';
+
+const USAGE = 'build-binaries [--all | --target <platform-arch> | --target daemon-<platform-arch>] [--daemon-only]';
+const argv = process.argv.slice(2);
+withUsage('build-binaries', USAGE, () => {
+  const parsed = parseArgs(argv, { '--all': 'switch', '--target': 'value', '--daemon-only': 'switch' });
+  if (parsed.positional.length > 0) throw new UsageError(`unexpected argument ${parsed.positional[0]}`);
+  if (parsed.switches.has('--all') && parsed.values.has('--target')) throw new UsageError('use --all or --target, not both');
+});
 
 const root = process.cwd();
 const config = loadToolchainConfig(root);
@@ -63,7 +72,11 @@ function isPackageInstalled(packageName: string): boolean {
 }
 
 try {
-  const selection = resolveTargets(process.argv.slice(2), build, nativeKey);
+  const selection = resolveTargets(argv, build, nativeKey);
+  if (selection.targets.length === 0) {
+    consoleLogger.error('build-binaries: the selection names no targets; add targets to `build.targets` in toolchain.config.json');
+    process.exit(2);
+  }
   const outcomes = runBuildBinaries({
     cwd: root, config: build, selection, nativeKey, provideAddon: (target, sameHost) => provideNativeAddon({ root, enginePackage: config.enginePin?.enginePackage ?? DEFAULT_ENGINE_PACKAGE, addonOutDir: build.addonOutDir, target, sameHost }), logger: consoleLogger,
     dependencyManifests: manifests,

@@ -19,7 +19,8 @@
 // The bundle is served BY THE CONTROL-PLANE LISTENER, same origin as the API
 // (that is the whole point, a same-origin bundle makes the browser's
 // same-origin policy a non-issue and needs no CORS allowlist). So the URL that
-// opens the web UI is the control-plane origin: `http://<host>:<controlPlane.port>`,
+// opens the web UI is the control-plane origin: `<scheme>://<host>:<controlPlane.port>`,
+// https when the listener holds TLS itself (`controlPlane.tls.mode` direct),
 // not `web.port`. `web.port` is the surface's DECLARED endpoint, used for links
 // and for `tailscale serve`; nothing binds it. This command therefore reports,
 // and, when it is still sitting on the shipped placeholder, writes,
@@ -41,7 +42,7 @@ import type { ConfigManager, DaemonConfigPatch } from '@goodvibes-jev/engine/pla
 import { resolveRuntimeEndpointBinding } from '@goodvibes-jev/engine/terminal-shell';
 import { SHIPPED_PUBLIC_BASE_URL } from '../config/webui-bundle.js';
 import { WEBUI_BINDING_RESULT } from '../cli/machine-contracts.js';
-import { describeOriginPosture, formatHttpOrigin, probeStableHostInputs, stableUrlHostForBindHost, type StableHostInputs } from '@goodvibes-jev/engine/platform/platform/pairing';
+import { isLoopbackHost, probeStableHostInputs, resolveControlPlaneOrigin, type StableHostInputs } from '@goodvibes-jev/engine/platform/platform/pairing';
 
 
 export interface WebuiCommandResult {
@@ -157,23 +158,23 @@ function readString(config: Pick<ConfigManager, 'get'>, key: 'controlPlane.webui
 }
 
 /**
- * The origin a browser opens to reach the web UI: the CONTROL-PLANE binding,
- * because that is the listener serving the bundle. A wildcard bind resolves
- * through the engine's stable-host rule (tailscale name, then a `<host>.local`
- * that resolves here, then the routed address) so the printed URL survives a
- * DHCP lease change where it can; a name comes with the routable address as
+ * The origin a browser opens to reach the web UI: the CONTROL-PLANE origin,
+ * because that is the listener serving the bundle, from the engine's one owner
+ * of it (bind host through the stable-name ladder, port, and the scheme the
+ * listener really speaks). A name comes with the routable address as
  * `alternate`.
  */
 function servingOrigin(
   config: Pick<ConfigManager, 'get'>,
   probe: () => StableHostInputs,
 ): { readonly origin: string; readonly alternate?: string | undefined; readonly loopback: boolean; readonly recognized: boolean } {
-  const binding = resolveRuntimeEndpointBinding(config, 'controlPlane');
-  const resolved = stableUrlHostForBindHost(binding.host, probe);
-  const origin = formatHttpOrigin(resolved.host, binding.port);
-  const loopback = describeOriginPosture(origin).secureContext;
-  const alternate = resolved.alternateHost ? formatHttpOrigin(resolved.alternateHost, binding.port) : undefined;
-  return { origin, alternate, loopback, recognized: binding.recognized };
+  const served = resolveControlPlaneOrigin(config, probe);
+  return {
+    origin: served.origin,
+    alternate: served.alternateOrigin,
+    loopback: isLoopbackHost(served.resolvedHost.host),
+    recognized: served.recognized,
+  };
 }
 
 /** A bundle directory is usable only when it exists and holds the app shell. */

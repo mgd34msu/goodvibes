@@ -16,16 +16,12 @@
  * stop/restart and a `suggestedCommands` hint list. This module now rewires the
  * three CLI subcommands onto that manager instead of the deleted shim.
  *
- * Two real behavioral differences from the old shim, called out honestly:
- *   - `install()` only WRITES the unit/plist/task; it does not enable/start it.
- *     So `install-service` here calls `install()` then `start()` to preserve the
- *     old "install implies enabled + running" behavior.
- *   - `uninstall()` only REMOVES the unit file; there is no manager-level
- *     `disable` verb (only start/stop/restart exist). So `uninstall-service`
- *     requires a successful stop with no observed running service before
- *     `uninstall()`, and honestly tells the caller that a
- *     stray "enabled" symlink may remain until `systemctl --user daemon-reload`
- *     (offered back as a suggested follow-up) or the next login cleans it up.
+ * `install()` only WRITES the unit/plist/task; it does not enable or start it,
+ * so `install-service` calls `install()` then `start()` and exits 3 (installed,
+ * not running) when the start did not leave the daemon running. `uninstall()`
+ * stops, unregisters (`systemctl --user disable --now`, `launchctl unload`,
+ * `schtasks /End` + `/Delete`), removes the file and reloads, so
+ * `uninstall-service` calls it once.
  *
  * A fourth subcommand, `migrate-service`, closes the earlier "detect and
  * disclose only" inheritance (W3 Finding 4, below) with a GUIDED, CONSENTED
@@ -153,15 +149,6 @@ export interface DaemonServiceCliInput {
   readonly unitHomeDir: string;
   readonly host: string;
   readonly port: number;
-  /**
-   * Whether the invoking CLI line carried an explicit `--hostname`/`--port`
-   * flag (not merely whether `host`/`port` above are set, those are always
-   * set, resolved from config either way). `install-service`/`migrate-service`
-   * refuse when either is true, see `validateServiceEndpointFlags`. Defaults
-   * to false (no flag), matching every subcommand these two don't apply to.
-   */
-  readonly hostnameFlagProvided?: boolean | undefined;
-  readonly portFlagProvided?: boolean | undefined;
   /** Defaults to `homeDir`, overridable so tests can scope both to one tempdir. */
   readonly workingDirectory?: string | undefined;
   /** Injected in tests; a real `ConfigManager` rooted at `homeDir` otherwise. */
@@ -376,13 +363,7 @@ function ok(action: 'install' | 'uninstall' | 'status', status: ManagedServiceSt
   if (action === 'install') {
     lines.push(...buildInstallResultLines(status));
   } else if (action === 'uninstall') {
-    lines.push(`removed the ${status.platform} service at ${status.path}`);
-    if (status.platform === 'systemd') {
-      lines.push(
-        "note: this removes the unit file but does not run `disable`; run " +
-          "`systemctl --user daemon-reload` to clear any stale enablement symlink.",
-      );
-    }
+    lines.push(`stopped and removed the ${status.platform} service ${status.serviceName} (${status.path})`);
   } else {
     lines.push(...statusLines(status));
   }
@@ -397,38 +378,6 @@ function failed(action: 'install' | 'uninstall' | 'status', status: ManagedServi
     lines: [`service ${action} failed: ${status.actionError ?? 'unknown error'}`],
     status,
   };
-}
-
-/**
- * `install-service` and `migrate-service` refuse an explicit
- * `--hostname`/`--port` flag rather than silently accepting it. Both flags are
- * RUNTIME-ONLY overrides applied to this one invocation's in-memory config
- * (`applyRuntimeEndpointFlagOverrides` in `src/daemon/cli.ts`), but the unit
- * this subcommand writes carries no endpoint flags at all (see
- * `buildManagedDaemonServiceManager`'s ExecStart doc): the daemon always
- * re-resolves `controlPlane.host`/`port`/`hostMode` from PERSISTED settings at
- * boot. A flag accepted here would print/probe a binding the installed unit
- * will never actually have, an honest gap, not a cosmetic one, since the
- * printed value is exactly what an operator would expect the running service
- * to bind to. Refusing with a pointer to the persistent config path is
- * strictly better than silently doing nothing with the flag.
- */
-export function validateServiceEndpointFlags(
-  subcommand: DaemonServiceSubcommand,
-  flags: { readonly hostnameProvided: boolean; readonly portProvided: boolean },
-): readonly string[] {
-  if (subcommand !== 'install-service' && subcommand !== 'migrate-service') return [];
-  if (!flags.hostnameProvided && !flags.portProvided) return [];
-  const flagNames = [flags.hostnameProvided ? '--hostname' : null, flags.portProvided ? '--port' : null]
-    .filter((name): name is string => name !== null)
-    .join('/');
-  return [
-    `${subcommand} refused: ${flagNames} only override this process's runtime config; the installed unit carries ` +
-      'no endpoint flags and re-resolves controlPlane.host/port/hostMode from persisted settings at boot, so the ' +
-      'override would never take effect there.',
-    `Set the persistent binding instead: goodvibes-daemon config set controlPlane.host / controlPlane.port (or ` +
-      `controlPlane.hostMode), then re-run ${subcommand} without ${flagNames}.`,
-  ];
 }
 
 /**
@@ -464,13 +413,6 @@ function runMigrateService(
 export async function runDaemonServiceCli(input: DaemonServiceCliInput): Promise<DaemonServiceCliResult> {
   input.assertCurrent?.();
   const manager = buildManager(input);
-  const flagErrors = validateServiceEndpointFlags(input.subcommand, {
-    hostnameProvided: input.hostnameFlagProvided ?? false,
-    portProvided: input.portFlagProvided ?? false,
-  });
-  if (flagErrors.length > 0) {
-    return { ok: false, exitCode: 1, lines: [...flagErrors], status: manager.status() };
-  }
   const legacy = detectLegacyUnit(input);
   switch (input.subcommand) {
     case 'migrate-service':
@@ -499,41 +441,39 @@ export async function runDaemonServiceCli(input: DaemonServiceCliInput): Promise
       const installed = manager.install();
       if (installed.actionError) return failed('install', installed);
       const started = manager.start();
-      // start()'s actionError (e.g. a platform this manager can't dispatch
-      // actions for) doesn't undo the write, report install as ok, but surface
-      // the follow-up problem honestly instead of claiming it is running.
-      return started.actionError
+      // A failed start does not undo the write. The unit is installed, but a
+      // script must not treat a daemon that is down as installed and started:
+      // exit 3 is the same "installed, not running" answer service-status gives.
+      const result = started.actionError
         ? ok('install', { ...started, running: false }, [`could not start it automatically: ${started.actionError}`])
         : ok('install', started);
+      return result.status.running ? result : { ...result, ok: false, exitCode: SERVICE_STATUS_EXIT_INSTALLED_NOT_RUNNING };
     }
     case 'uninstall-service': {
       const before = manager.status();
-      let stopped: ManagedServiceStatus;
-      try {
-        stopped = manager.stop();
-      } catch {
-        return failed('uninstall', {
-          ...before,
-          actionError: 'stopping could not be confirmed; the service definition was not removed',
-        });
+      if (before.actionError) return failed('uninstall', before);
+      if (!before.installed) {
+        return {
+          ok: false,
+          exitCode: SERVICE_STATUS_EXIT_NOT_INSTALLED,
+          lines: [
+            `no ${before.platform} service is installed at ${before.path}, so there is nothing to uninstall.`,
+            ...(legacy.present ? [legacyUnitNote(legacy, resolveManagedUnitName(before))] : []),
+          ],
+          status: before,
+        };
       }
-      if (stopped.actionError !== undefined || stopped.running) {
-        return failed('uninstall', {
-          ...stopped,
-          actionError: 'stopping could not be confirmed; the service definition was not removed' +
-            (stopped.actionError ? `: ${stopped.actionError}` : ''),
-        });
-      }
+      // uninstall() stops and unregisters the service before it removes the file.
       let uninstalled: ManagedServiceStatus;
       try {
         uninstalled = manager.uninstall();
       } catch {
         return {
-          ...failed('uninstall', stopped),
+          ...failed('uninstall', before),
           lines: [
-            'service uninstall incomplete: removal or final status could not be confirmed; removal may already have happened. Verify before retrying.',
+            'service uninstall incomplete: removal or final status could not be confirmed; removal may already have happened. Run goodvibes-daemon service-status before retrying.',
             'last confirmed state before removal:',
-            ...statusLines(stopped),
+            ...statusLines(before),
           ],
         };
       }

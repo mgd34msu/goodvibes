@@ -24,6 +24,7 @@ import {
 } from './stdio-server.js';
 
 export {
+  AGENT_MCP_TOOL_CATEGORIES,
   buildOperatorMcpTools,
   operatorMethodIdToToolName,
   isFirstClassSessionTool,

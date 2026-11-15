@@ -38,6 +38,12 @@ export interface DaemonCliFlags {
   readonly host: string | undefined;
   /** Remote commands only: the operator token to authenticate with. */
   readonly token: string | undefined;
+  /** `mcp serve --categories`: operator families to serve; `all` serves every one. */
+  readonly categories: readonly string[];
+  /** `mcp serve --allow-write`: serve methods that change state. */
+  readonly allowWrite: boolean;
+  /** `mcp serve --allow-destructive`: serve methods the contract marks dangerous. */
+  readonly allowDestructive: boolean;
   readonly configOverrides: readonly string[];
   readonly enableFeatures: readonly string[];
   readonly disableFeatures: readonly string[];

@@ -20,19 +20,17 @@
  * unavailable rather than guessed at. See `describeLocalDaemonState`.
  *
  * The platform owns the writers (`platform/daemon/lifecycle-marker.ts`,
- * `platform/daemon/receipts.ts`) and its readers are not exported from the
- * published package this repository pins, so the readers below are this
- * repository's own, bounded and content-validated the same way, and no more
- * trusting of the file than the platform is. The shared-piece lane can re-point them
- * at the platform's own readers once those are exported.
+ * `platform/daemon/receipts.ts`). The marker is read with the platform's own
+ * `readLifecycleMarker`, given a read-only io so a marker it cannot parse is
+ * reported as absent rather than moved aside from under the daemon. The
+ * receipts reader stays here: the platform's receipt store is a writer whose
+ * constructor sets an unreadable file aside and rewrites the file, which a
+ * status command must never do.
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { readLifecycleMarker } from '@goodvibes-jev/engine/platform/platform/daemon';
 
-/** Mirrors the platform's own clamp: a hand-edited counter is bounded, not trusted. */
-const MAX_TRACKED_FAILED_STARTS = 32;
-/** Mirrors the platform's own clamp on a persisted version string. */
-const MAX_TRACKED_VERSION_LENGTH = 64;
 /** Enough receipts to explain a restart; a status page is not a log viewer. */
 const MAX_REPORTED_RECEIPTS = 10;
 
@@ -82,10 +80,6 @@ export const realLocalStateIo: LocalStateIo = {
   },
 };
 
-function boundedString(value: unknown, max: number): string | undefined {
-  return typeof value === 'string' && value.length > 0 && value.length <= max ? value : undefined;
-}
-
 function finiteNumber(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
@@ -95,29 +89,19 @@ export function readDaemonLifecycleMarker(
   markerPath: string,
   io: LocalStateIo = realLocalStateIo,
 ): DaemonLifecycleMarker | null {
-  const raw = io.read(markerPath);
-  if (raw === null) return null;
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    return null;
-  }
-  if (!parsed || typeof parsed !== 'object') return null;
-  const record = parsed as Record<string, unknown>;
-  const state = record['state'];
-  if (state !== 'running' && state !== 'clean-shutdown') return null;
-  const at = finiteNumber(record['at']);
-  if (at === undefined) return null;
-  const failedStarts = finiteNumber(record['failedStarts']) ?? 0;
+  const marker = readLifecycleMarker(markerPath, {
+    read: (path) => io.read(path),
+    write: () => { throw new Error('the lifecycle marker is read-only here'); },
+  });
+  if (marker === null) return null;
   return {
-    state,
-    at,
-    pid: finiteNumber(record['pid']),
-    failedStarts: Math.max(0, Math.min(MAX_TRACKED_FAILED_STARTS, Math.trunc(failedStarts))),
-    version: boundedString(record['version'], MAX_TRACKED_VERSION_LENGTH),
-    rejectedVersion: boundedString(record['rejectedVersion'], MAX_TRACKED_VERSION_LENGTH),
-    autoRollbackAt: finiteNumber(record['autoRollbackAt']),
+    state: marker.state,
+    at: marker.at,
+    pid: marker.pid,
+    failedStarts: marker.failedStarts,
+    version: marker.version,
+    rejectedVersion: marker.rejectedVersion,
+    autoRollbackAt: marker.autoRollbackAt,
   };
 }
 

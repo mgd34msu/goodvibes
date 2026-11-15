@@ -13,6 +13,7 @@
  * ping), and keeping it in-tree preserves the repo's dependency and audit
  * discipline.
  */
+import { formatRefusal, readRefusal } from '@goodvibes-jev/engine/errors';
 import type { McpToolDefinition, OperatorMcpToolSet } from './tool-definitions.js';
 
 /** The default MCP protocol version this server advertises when the client sends none. */
@@ -21,10 +22,14 @@ export const DEFAULT_MCP_PROTOCOL_VERSION = '2025-06-18';
 /** Handshake-era revisions whose tools/list and tools/call shapes this server implements. */
 const SERVED_PROTOCOL_VERSIONS: ReadonlySet<string> = new Set(['2024-11-05', '2025-03-26', '2025-06-18']);
 
-/** Invokes an operator method by id with a params object, returning its result. */
+/**
+ * Invokes an operator method by id with a params object, returning its result.
+ * `signal` aborts when the client cancels the call.
+ */
 export type OperatorMcpInvoker = (
   methodId: string,
   input: Record<string, unknown>,
+  options: { readonly signal: AbortSignal },
 ) => unknown | Promise<unknown>;
 
 export interface OperatorMcpServerInfo {
@@ -73,6 +78,9 @@ function wireTool(tool: McpToolDefinition): Record<string, unknown> {
 }
 
 function errorText(error: unknown): string {
+  // A daemon refusal carries what to do next; the caller is an agent that can act on it.
+  const refused = readRefusal(error);
+  if (refused) return formatRefusal(refused);
   if (error instanceof Error) return error.message;
   return typeof error === 'string' ? error : JSON.stringify(error);
 }
@@ -87,6 +95,8 @@ export class OperatorMcpServer {
   private readonly invoke: OperatorMcpInvoker;
   private readonly serverInfo: OperatorMcpServerInfo;
   private readonly instructions: string | undefined;
+  /** Calls in flight by request id, so `notifications/cancelled` can stop one. */
+  private readonly running = new Map<string | number, AbortController>();
 
   constructor(options: OperatorMcpServerOptions) {
     this.toolSet = options.toolSet;
@@ -101,7 +111,7 @@ export class OperatorMcpServer {
   }
 
   /** Dispatch a tools/call: resolve the tool to its operator method and invoke it. */
-  async callTool(name: unknown, args: unknown): Promise<Record<string, unknown>> {
+  async callTool(name: unknown, args: unknown, signal: AbortSignal = new AbortController().signal): Promise<Record<string, unknown>> {
     if (typeof name !== 'string') {
       return this.toolError('tool name must be a string');
     }
@@ -113,7 +123,7 @@ export class OperatorMcpServer {
       ? (args as Record<string, unknown>)
       : {};
     try {
-      const result = await this.invoke(methodId, input);
+      const result = await this.invoke(methodId, input, { signal });
       return {
         content: [{ type: 'text', text: JSON.stringify(result ?? null) }],
       };
@@ -147,17 +157,28 @@ export class OperatorMcpServer {
       case 'initialize':
         return isNotification ? null : { jsonrpc: '2.0', id, result: this.initializeResult(request.params) };
       case 'notifications/initialized':
-      case 'notifications/cancelled':
         return null;
+      case 'notifications/cancelled': {
+        const requestId = request.params?.requestId;
+        if (typeof requestId === 'string' || typeof requestId === 'number') this.running.get(requestId)?.abort();
+        return null;
+      }
       case 'ping':
         return isNotification ? null : { jsonrpc: '2.0', id, result: {} };
       case 'tools/list':
         return isNotification ? null : { jsonrpc: '2.0', id, result: { tools: this.listTools() } };
       case 'tools/call': {
-        if (isNotification) return null;
+        if (id === null) return null;
         const params = request.params ?? {};
-        const result = await this.callTool(params.name, params.arguments);
-        return { jsonrpc: '2.0', id, result };
+        const call = new AbortController();
+        this.running.set(id, call);
+        try {
+          const result = await this.callTool(params.name, params.arguments, call.signal);
+          // A cancelled request gets no response; the client has stopped waiting for one.
+          return call.signal.aborted ? null : { jsonrpc: '2.0', id, result };
+        } finally {
+          if (this.running.get(id) === call) this.running.delete(id);
+        }
       }
       default:
         if (isNotification) return null;

@@ -65,8 +65,7 @@ describe('service lifecycle verbs (systemd path, real PlatformServiceManager, st
   const unitPath = (): string => join(dir, '.config', 'systemd', 'user', 'goodvibes.service');
 
   async function install(runner: ManagedServiceActionRunner): Promise<void> {
-    const result = await runDaemonServiceCli(baseInput({ subcommand: 'install-service', actionRunner: runner }));
-    expect(result.ok).toBe(true);
+    await runDaemonServiceCli(baseInput({ subcommand: 'install-service', actionRunner: runner }));
     expect(existsSync(unitPath())).toBe(true);
   }
 

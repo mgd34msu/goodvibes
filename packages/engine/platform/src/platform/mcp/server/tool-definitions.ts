@@ -50,6 +50,13 @@ export interface OperatorMcpToolSet {
   readonly methodIdByToolName: ReadonlyMap<string, string>;
 }
 
+/**
+ * The operator families an agent driving GoodVibes needs: its sessions, tasks,
+ * contracts and approvals. The same families the published agent API index
+ * covers, so a client sees a few dozen tools instead of every method.
+ */
+export const AGENT_MCP_TOOL_CATEGORIES: readonly string[] = ['sessions', 'tasks', 'contracts', 'approvals'];
+
 /** Options controlling which operator methods are exposed as MCP tools. */
 export interface BuildOperatorMcpToolsOptions {
   /** Only include methods in these categories (default: all). */
@@ -60,6 +67,11 @@ export interface BuildOperatorMcpToolsOptions {
   readonly includeAccess?: readonly OperatorMethodContract['access'][] | undefined;
   /** Include methods marked dangerous (default: true). */
   readonly includeDangerous?: boolean | undefined;
+  /**
+   * Only include methods that read, plus the session lifecycle methods that
+   * create a session, send it a message and steer it (default: false).
+   */
+  readonly readOnly?: boolean | undefined;
   /** Keep the session lifecycle tools at the front of the list (default: true). */
   readonly prioritizeSessionLifecycle?: boolean | undefined;
 }
@@ -110,6 +122,7 @@ function buildDescription(method: OperatorMethodContract): string {
 function includeMethod(method: OperatorMethodContract, options: BuildOperatorMcpToolsOptions): boolean {
   if (method.invokable === false) return false;
   if (options.includeDangerous === false && method.dangerous) return false;
+  if (options.readOnly === true && !isReadOnly(method) && !isSessionLifecycleMethodId(method.id)) return false;
   if (options.includeCategories && !options.includeCategories.includes(method.category)) return false;
   if (options.excludeCategories?.includes(method.category)) return false;
   if (options.includeAccess && !options.includeAccess.includes(method.access)) return false;

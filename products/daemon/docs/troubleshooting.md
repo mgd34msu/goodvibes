@@ -42,9 +42,9 @@ a service's working directory equals your shell cwd. Inspect stderr/journal firs
 The CLI reads local `daemon-lifecycle.json` and `daemon-receipts.json` under
 `<home>/.goodvibes/tui/control-plane/`, derived from its selected config directory.
 Remote status/update reports this local-only history as unavailable. Reads do not
-consume receipts. Historical receipts or an inherited `update.auto` default do
-not show that this product's updater is armed. `update --check` is read-only;
-release/feed/activation policy remains unresolved.
+consume receipts. Whether the updater is armed, and why not, comes from the daemon:
+`goodvibes-daemon update` shows it and `update --check` runs one check now. When the
+daemon does not answer, `update` prints these local files instead.
 
 ## Status and authentication
 
@@ -136,8 +136,8 @@ with rollback if the replacement fails; an unowned process is reported, not kill
 Migration requires explicit `-y` and a qualified installed executable. A migration
 that started the new unit but did not finish retiring the old one is resumed by
 running `goodvibes-daemon migrate-service -y` again. Uninstall
-removes the managed definition; systemd enablement symlinks may need the stated
-`systemctl --user daemon-reload` follow-up. See [service command details](commands-reference.md#install-service).
+stops, unregisters and removes the managed definition, also for a service that is
+already stopped. See [service command details](commands-reference.md#install-service).
 
 ## Hosted work stalls, ends or refuses a tool
 

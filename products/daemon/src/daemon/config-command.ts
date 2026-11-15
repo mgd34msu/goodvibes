@@ -136,20 +136,6 @@ function writeFailure(key: string, error: unknown, deps: ConfigCommandDeps): Con
   return failure(`could not write ${key}.`, deps);
 }
 
-/** Finish classification before mutation; a value that cannot be shown safely leaves settings alone. */
-type PreparedWrite =
-  | { readonly kind: 'ready' }
-  | { readonly kind: 'refused'; readonly result: ConfigCommandResult };
-
-async function prepareWrite(deps: ConfigCommandDeps, key: string, value: unknown): Promise<PreparedWrite> {
-  try {
-    await redactConfig({ [key]: value });
-    return { kind: 'ready' };
-  } catch {
-    return { kind: 'refused', result: failure(`could not prepare safe output for ${key}; settings were not changed.`, deps) };
-  }
-}
-
 /** A transformed stored value must never turn a completed write into a rejection. */
 async function writtenValue(deps: ConfigCommandDeps, key: string): Promise<unknown> {
   try {
@@ -243,8 +229,6 @@ async function setResult(deps: ConfigCommandDeps, key: string, rawValue: string)
     return failure(`not a settings key. Run \`${deps.binary ?? 'goodvibes-daemon'} config list\` to see them.`, deps);
   }
   const value = parseConfigValueText(rawValue);
-  const preparation = await prepareWrite(deps, key, value);
-  if (preparation.kind === 'refused') return preparation.result;
   const credentialText = typeof value === 'string' && isDeclaredSecretBearingConfigKey(key) && !isSecretRefInput(value.trim()) ? value : undefined;
   const storedInSecretStore = credentialText !== undefined && isSecretConfigKey(key) && deps.openSecretStore !== undefined;
   // A cleared credential holds no secret, so clearing stays an ordinary write.
@@ -278,27 +262,21 @@ async function setResult(deps: ConfigCommandDeps, key: string, rawValue: string)
   };
 }
 
-/** The reference goes to settings and the value to the secret store. */
+/**
+ * The value goes to the secret store and the reference to settings, in that
+ * order, inside the engine writer, so a failed store leaves settings untouched.
+ */
 async function writeCredential(deps: ConfigCommandDeps, key: ConfigKey, value: string): Promise<void> {
-  const previous = deps.configManager.get(key);
-  try {
-    await persistSecretBackedConfigValue(
-      { get: (k) => deps.configManager.get(k), setDynamic: (k, v) => { deps.configManager.set(k, v as never); } },
-      deps.openSecretStore!(), key, value,
-    );
-  } catch (error) {
-    // The reference may already be written; leave no pointer to a secret that was never stored.
-    try { deps.configManager.set(key, previous as never); } catch { /* the original error is the one to report */ }
-    throw error;
-  }
+  await persistSecretBackedConfigValue(
+    { get: (k) => deps.configManager.get(k), setDynamic: (k, v) => { deps.configManager.set(k, v as never); } },
+    deps.openSecretStore!(), key, value,
+  );
 }
 
 async function unsetResult(deps: ConfigCommandDeps, key: string): Promise<ConfigCommandResult> {
   if (!isKnownConfigKey(key, deps.configManager.getSchema())) {
     return failure(`not a settings key. Run \`${deps.binary ?? 'goodvibes-daemon'} config list\` to see them.`, deps);
   }
-  const preparation = await prepareWrite(deps, key, schemaFor(deps, key)?.default);
-  if (preparation.kind === 'refused') return preparation.result;
   try {
     deps.configManager.reset(key);
   } catch {

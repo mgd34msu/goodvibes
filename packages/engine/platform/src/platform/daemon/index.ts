@@ -11,6 +11,8 @@ export { reportFatalBootFailure, writeExitingStdoutLine, writeFatalLine } from '
 // failure (e.g. EADDRINUSE), which still propagates to the caller.
 export { createHostRequestFailureResponse, createSafeHostServeFactory } from './safe-serve.js';
 export type { DaemonUpdateArtifact } from './facade-lifecycle.js';
+export { readLifecycleMarker } from './lifecycle-marker.js';
+export type { LifecycleMarker } from './lifecycle-marker.js';
 export { HttpListener } from './http-listener.js';
 // Hosted sessions: the composition a product wires, and the option shape it
 // states its trust posture through. The engine itself is

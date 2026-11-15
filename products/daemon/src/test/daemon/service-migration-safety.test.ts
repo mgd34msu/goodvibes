@@ -42,13 +42,12 @@ function files(root: string): Record<string, string> {
   return result;
 }
 
-for (const mode of ['dry-run', 'status', 'refused-flags'] as const) {
+for (const mode of ['dry-run', 'status'] as const) {
   test(`${mode} preserves genuinely unmigrated configuration byte-for-byte`, async () => {
     const { root, calls, input } = fixture();
     const before = files(root);
     const result = await runDaemonServiceCli({ ...input,
       ...(mode === 'status' ? { subcommand: 'service-status' as const } : {}),
-      ...(mode === 'refused-flags' ? { confirmMigration: true, portFlagProvided: true } : {}),
     });
     expect(files(root)).toEqual(before);
     expect(calls.every((call) => call.includes('is-active') || call.includes('show'))).toBe(true);

@@ -1,7 +1,7 @@
 /** Original startup maintenance, scoped to the admitted CLI owner. */
 import { homedir } from 'node:os';
 import { ConfigManager, daemonConfigPathForHome } from '@goodvibes-jev/engine/platform/platform/config';
-import { ensurePublicBaseUrl, pruneStaleOperatorTokens } from '@goodvibes-jev/engine/platform/platform/pairing';
+import { controlPlaneScheme, ensurePublicBaseUrl, pruneStaleOperatorTokens } from '@goodvibes-jev/engine/platform/platform/pairing';
 import { WorktreeRegistry } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 import { workspaceOperatorTokenCandidates } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { resolveRuntimeEndpointBinding } from '@goodvibes-jev/engine/terminal-shell';
@@ -52,7 +52,7 @@ export function persistDaemonStartupPublicUrl(
   if (originKeys.some((key) => ['runtime', 'runtime-default'].includes(config.describeConfigKeySource(key).effectiveOrigin ?? ''))) return;
   const declared = resolveRuntimeEndpointBinding(config, 'controlPlane');
   if (!declared.recognized || declared.host !== bound.host || declared.port !== bound.port
-    || (config.get('controlPlane.tls.mode') === 'direct' ? 'https' : 'http') !== bound.scheme) return;
+    || controlPlaneScheme(config) !== bound.scheme) return;
   if (!hasReadableWebuiBundle(config)) return;
   ensurePublicBaseUrl(config, undefined, bound);
 }

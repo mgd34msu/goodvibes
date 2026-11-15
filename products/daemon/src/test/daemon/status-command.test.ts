@@ -360,62 +360,76 @@ describe('status talks to a running daemon over the remote-target convention', (
   });
 });
 
-describe('update reports what the daemon knows about its own updates', () => {
-  test('names the version and the rollback state', async () => {
+describe('update asks the daemon about its own updates', () => {
+  const UPDATE_STATUS = {
+    armed: true, offReason: '', currentVersion: '1.28.0', releasesUrl: 'https://example.invalid/releases',
+    checkIntervalMs: 3_600_000, firstCheckDelayMs: 60_000, failedCheckCount: 2, lastCheckFailure: 'release index unreachable',
+    pendingVersion: null, rejectedVersion: '1.27.9',
+  };
+
+  test('reads update.status from the daemon and the receipts from this machine', async () => {
     const { fetchImpl } = fakeFetch({ '/status': { status: 'running', version: '1.28.0' } });
+    const { factory, methodIds } = fakeSocketFactory({ ok: true, body: UPDATE_STATUS });
 
     const result = await runUpdateCommand({
       ...baseDeps({
         localStateIo: io({
-          [PATHS.markerPath]: JSON.stringify({
-            state: 'running', at: 400_000, failedStarts: 0, rejectedVersion: '1.27.9', autoRollbackAt: 1,
-          }),
+          [PATHS.markerPath]: JSON.stringify({ state: 'running', at: 400_000, failedStarts: 0, autoRollbackAt: 1 }),
           [PATHS.receiptsPath]: JSON.stringify([{ id: 'r', text: 'swapped in 1.28.0', at: 2 }]),
         }),
       }),
       fetchImpl,
+      socketFactory: factory,
       flags: { host: undefined, port: undefined, token: undefined, json: false, check: false },
     });
 
     expect(result.exitCode).toBe(0);
+    expect(methodIds).toEqual(['update.status']);
     const text = result.lines.join('\n');
-    expect(text).toContain('1.28.0');
+    expect(text).toContain('updates:  on, checking every 1h 0m');
+    expect(text).toContain('2 checks in a row failed: release index unreachable');
     expect(text).toContain('rejected: 1.27.9');
+    expect(text).toContain('rollback: an automatic rollback is in force');
     expect(text).toContain('swapped in 1.28.0');
   });
 
-  test('--check states the gap honestly instead of calling a verb that does not exist', async () => {
-    const { fetchImpl, calls } = fakeFetch({ '/status': { status: 'running', version: '1.28.0' } });
-
-    const result = await runUpdateCommand({
-      ...baseDeps(),
-      fetchImpl,
-      flags: { host: undefined, port: undefined, token: undefined, json: false, check: true },
-    });
-
-    expect(result.exitCode).toBe(0);
-    const text = result.lines.join('\n');
-    expect(text).toContain('publishes no verb to trigger an update check early');
-    expect(text).toContain('only reads status');
-    expect(text).toContain('require a configured update artifact and host policy');
-    expect(text).not.toContain('restart-service');
-    expect(text).not.toContain('checks once an hour');
-    // Nothing was invented: only the identity call was made.
-    expect(calls).toEqual(['/status']);
-  });
-
-  test('--json says plainly that no check verb is available', async () => {
+  test('--check runs update.check and reports what the check did', async () => {
     const { fetchImpl } = fakeFetch({ '/status': { status: 'running', version: '1.28.0' } });
+    const { factory, methodIds } = fakeSocketFactory({ ok: true, body: { ...UPDATE_STATUS, check: 'ran' } });
 
     const result = await runUpdateCommand({
       ...baseDeps(),
       fetchImpl,
+      socketFactory: factory,
       flags: { host: undefined, port: undefined, token: undefined, json: true, check: true },
     });
 
+    expect(result.exitCode).toBe(0);
+    expect(methodIds).toEqual(['update.check']);
     const parsed = JSON.parse(result.lines[0] as string) as { data: Record<string, unknown> };
-    expect(parsed.data['checkRequested']).toBe(true);
-    expect(parsed.data['checkVerbAvailable']).toBe(false);
+    expect(parsed.data['check']).toBe('ran');
+  });
+
+  test('a daemon on this machine that does not answer still shows what its files say', async () => {
+    const fetchImpl: DaemonFetch = async () => {
+      throw new Error('ECONNREFUSED');
+    };
+    const { factory } = fakeSocketFactory({ ok: false, status: 503 });
+    const result = await runUpdateCommand({
+      ...baseDeps({
+        localStateIo: io({
+          [PATHS.markerPath]: JSON.stringify({ state: 'running', at: 400_000, failedStarts: 3, rejectedVersion: '1.27.9' }),
+          [PATHS.receiptsPath]: JSON.stringify([{ id: 'r', text: 'rolled back from 1.27.9', at: 2 }]),
+        }),
+      }),
+      fetchImpl,
+      socketFactory: factory,
+      flags: { host: undefined, port: undefined, token: undefined, json: false, check: false },
+    });
+    expect(result.exitCode).toBe(1);
+    const text = result.lines.join('\n');
+    expect(text).toContain('rejected: 1.27.9');
+    expect(text).toContain('rolled back from 1.27.9');
   });
 
   test('an unreachable daemon fails with the reason', async () => {
@@ -425,6 +439,7 @@ describe('update reports what the daemon knows about its own updates', () => {
     const result = await runUpdateCommand({
       ...baseDeps(),
       fetchImpl,
+      socketFactory: fakeSocketFactory({ ok: false, status: 503 }).factory,
       flags: { host: undefined, port: undefined, token: undefined, json: false, check: false },
     });
     expect(result.exitCode).toBe(1);

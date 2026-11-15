@@ -54,6 +54,8 @@ The tarball is built from the owned workspace, not an unrequested registry relea
 Service and strict wake-provisioning state receipts stay on stdout even with a
 nonzero status. `service-status --json` remains consumable at exit 3 (installed
 but stopped) and exit 4 (not installed), rather than being moved to stderr.
+`install-service` exits 3 when the unit was written but the daemon is not running,
+and `uninstall-service` exits 4 when nothing was installed.
 
 ## Status, sessions and config
 
@@ -86,8 +88,8 @@ existing `RemoteCommandDeps` seam for status/update. It uses the canonical
 `createNetworkFetch` and the command's selected `ConfigManager`. Existing
 bundled/custom trust modes, relative CA resolution, token/target selection,
 HTTP documents, exit statuses and local update receipts are unchanged.
-`update --check` still reports that there is no early-update verb; it does not
-perform an update or invent a new operation.
+`update` reads the daemon's `update.status` verb and `update --check` runs its
+`update.check` verb; neither installs anything.
 
 The relative CA root remains `ConfigManager.getControlPlaneConfigDir()`, rather
 than the working directory or selected daemon identity directory. No new flag,

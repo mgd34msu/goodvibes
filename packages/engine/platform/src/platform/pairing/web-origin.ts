@@ -38,8 +38,63 @@ function trimTrailingSlash(value: string): string {
 
 /** Format a bind host and port as HTTP authority, retaining IPv6 brackets. */
 export function formatHttpOrigin(host: string, port: number): string {
+  return formatOrigin('http', host, port);
+}
+
+function formatOrigin(scheme: 'http' | 'https', host: string, port: number): string {
   const authorityHost = host.includes(':') && !host.startsWith('[') ? `[${host}]` : host;
-  return `http://${authorityHost}:${port}`;
+  return `${scheme}://${authorityHost}:${port}`;
+}
+
+/**
+ * The scheme the control-plane listener speaks. Only direct mode hands TLS
+ * material to the listener; proxy mode's external HTTPS endpoint is supplied
+ * as an explicit public URL.
+ */
+export function controlPlaneScheme(config: Pick<ConfigManager, 'get'>): 'http' | 'https' {
+  return config.get('controlPlane.tls.mode') === 'direct' ? 'https' : 'http';
+}
+
+function declaredControlPlaneBinding(config: Pick<ConfigManager, 'get'>) {
+  return resolveHostBinding(
+    String(config.get('controlPlane.hostMode') ?? 'local'),
+    String(config.get('controlPlane.host') ?? '127.0.0.1'),
+    Number(config.get('controlPlane.port')), 'controlPlane',
+  );
+}
+
+export interface ControlPlaneOrigin {
+  /** The origin a browser opens to reach the control plane, and the bundle it serves. */
+  readonly origin: string;
+  /** The same origin on the routable address, when `origin` uses a name. */
+  readonly alternateOrigin?: string | undefined;
+  readonly resolvedHost: ResolvedStableHost;
+  /** False when `controlPlane.hostMode` is not a mode the daemon can bind. */
+  readonly recognized: boolean;
+}
+
+/**
+ * The origin the control plane answers on: its bind host through the
+ * stable-name ladder, its port, and the scheme its listener really speaks.
+ * `bound` is a settled listener observation; without one the binding is
+ * resolved from settings the way the daemon binds.
+ */
+export function resolveControlPlaneOrigin(
+  config: Pick<ConfigManager, 'get'>,
+  probe?: () => StableHostInputs,
+  bound?: BoundListener,
+): ControlPlaneOrigin {
+  const declared = bound === undefined ? declaredControlPlaneBinding(config) : undefined;
+  const binding = bound ?? declared!;
+  const recognized = declared?.recognized ?? true;
+  const scheme = bound?.scheme ?? controlPlaneScheme(config);
+  const resolvedHost = stableUrlHostForBindHost(binding.host, probe);
+  return {
+    origin: formatOrigin(scheme, resolvedHost.host, binding.port),
+    ...(resolvedHost.alternateHost ? { alternateOrigin: formatOrigin(scheme, resolvedHost.alternateHost, binding.port) } : {}),
+    resolvedHost,
+    recognized,
+  };
 }
 
 /** http:// on anything other than loopback is served in the clear on the LAN. */
@@ -78,16 +133,9 @@ function explicitPublicBaseUrl(configManager: Pick<ConfigManager, 'get'>): strin
   return publicBaseUrl === SHIPPED_PUBLIC_BASE_URL ? '' : publicBaseUrl;
 }
 
-/** The listener the pairing origin points at: the control plane when it serves the bundle, else the web endpoint. */
-function pairingBinding(configManager: Pick<ConfigManager, 'get'>, boundControlPlane?: BoundListener): BoundListener {
-  if (configManager.get('controlPlane.webui.serve') !== true) {
-    return { host: webBindHost(configManager), port: resolveWebPort(configManager.get('web.port')) };
-  }
-  return boundControlPlane ?? resolveHostBinding(
-    String(configManager.get('controlPlane.hostMode') ?? 'local'),
-    String(configManager.get('controlPlane.host') ?? '127.0.0.1'),
-    Number(configManager.get('controlPlane.port')), 'controlPlane',
-  );
+/** The web endpoint's bind host and port, for a web surface the control plane does not serve. */
+function webBinding(configManager: Pick<ConfigManager, 'get'>): BoundListener {
+  return { host: webBindHost(configManager), port: resolveWebPort(configManager.get('web.port')) };
 }
 
 /**
@@ -96,7 +144,11 @@ function pairingBinding(configManager: Pick<ConfigManager, 'get'>, boundControlP
  * the host probes before it shows a link.
  */
 export function pairingOriginUsesStableHost(configManager: Pick<ConfigManager, 'get'>): boolean {
-  return !explicitPublicBaseUrl(configManager) && isWildcardBindHost(pairingBinding(configManager).host);
+  if (explicitPublicBaseUrl(configManager)) return false;
+  const host = configManager.get('controlPlane.webui.serve') === true
+    ? declaredControlPlaneBinding(configManager).host
+    : webBinding(configManager).host;
+  return isWildcardBindHost(host);
 }
 
 export function resolvePairingWebOrigin(
@@ -114,23 +166,25 @@ export function resolvePairingWebOrigin(
       fromPublicBaseUrl: true,
     };
   }
-  const bundled = configManager.get('controlPlane.webui.serve') === true;
-  const binding = pairingBinding(configManager, boundControlPlane);
+  if (configManager.get('controlPlane.webui.serve') === true) {
+    const served = resolveControlPlaneOrigin(configManager, probe, boundControlPlane);
+    return {
+      origin: served.origin,
+      resolvedHost: served.resolvedHost,
+      httpOnLan: isHttpOnLan(served.origin),
+      fromPublicBaseUrl: false,
+      ...(served.alternateOrigin ? { alternateOrigin: served.alternateOrigin } : {}),
+    };
+  }
+  const binding = webBinding(configManager);
   const resolvedHost = stableUrlHostForBindHost(binding.host, probe);
-  // Only direct mode passes TLS material to the bound listener. Proxy mode's
-  // external HTTPS endpoint must be supplied as an explicit public URL.
-  const scheme = boundControlPlane?.scheme ?? (configManager.get('controlPlane.tls.mode') === 'direct' ? 'https' : 'http');
-  const originFor = (host: string): string => {
-    const httpOrigin = formatHttpOrigin(host, binding.port);
-    return bundled && scheme === 'https' ? httpOrigin.replace('http://', 'https://') : httpOrigin;
-  };
-  const origin = originFor(resolvedHost.host);
+  const origin = formatHttpOrigin(resolvedHost.host, binding.port);
   return {
     origin,
     resolvedHost,
     httpOnLan: isHttpOnLan(origin),
     fromPublicBaseUrl: false,
-    ...(resolvedHost.alternateHost ? { alternateOrigin: originFor(resolvedHost.alternateHost) } : {}),
+    ...(resolvedHost.alternateHost ? { alternateOrigin: formatHttpOrigin(resolvedHost.alternateHost, binding.port) } : {}),
   };
 }
 

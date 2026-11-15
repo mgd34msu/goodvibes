@@ -185,6 +185,20 @@ describe('webui enable', () => {
     }
   });
 
+  test('a listener that holds TLS itself is advertised as https', () => {
+    const dir = bundleDir('webui-publicurl-tls');
+    try {
+      const config = fakeConfig({ 'controlPlane.tls.mode': 'direct' });
+      runWebuiCommand(['enable', '--bundle-dir', dir], {
+        configManager: config.manager,
+        probeStableHost: loopbackProbe,
+      });
+      expect(config.values['web.publicBaseUrl']).toBe('https://127.0.0.1:3421');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test('an operator-chosen publicBaseUrl is left alone and the difference is stated', () => {
     const dir = bundleDir('webui-publicurl-kept');
     try {

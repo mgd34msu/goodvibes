@@ -1,6 +1,7 @@
 /** Credential-bearing local pairing output, separate from startup diagnostics. */
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { availablePairingOffers, resolvePairingWebOrigin } from '@goodvibes-jev/engine/platform/platform/pairing';
+import { resolveRuntimeEndpointBinding } from '@goodvibes-jev/engine/terminal-shell';
 import { renderPairingBanner } from '../core/pairing-banner.js';
 import { SHIPPED_PUBLIC_BASE_URL, hasReadableWebuiBundle } from '../config/webui-bundle.js';
 
@@ -29,7 +30,11 @@ export function renderDaemonStartupPairing(
   } catch {
     return 'Device pairing link unavailable: the configured WebUI URL is not a usable HTTP(S) origin.';
   }
+  // `pair` asks the running daemon for its token and address, but finds it on
+  // the settings port; a daemon bound elsewhere is named by its port.
+  const declaredPort = resolveRuntimeEndpointBinding(config, 'controlPlane').port;
+  const reprint = bound.port === declaredPort ? 'goodvibes-daemon pair' : `goodvibes-daemon pair --port ${bound.port}`;
   return [...renderPairingBanner({ version, origin, token,
     offers: availablePairingOffers({ relayEnabled: config.get('relay.enabled') === true, stepUpAvailable: true }),
-  }).lines, '(configured reprint: goodvibes-daemon pair; reuse the daemon-token override and nonzero --port)'].join('\n');
+  }).lines, `(print this again: ${reprint})`].join('\n');
 }

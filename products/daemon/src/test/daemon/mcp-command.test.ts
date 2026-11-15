@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
-import { runMcpCommand, type RunMcpCommandInput } from '../../daemon/mcp-command.js';
+import { MCP_USAGE, runMcpCommand, type RunMcpCommandInput } from '../../daemon/mcp-command.js';
 import { runDaemonCli } from '../../cli/run.js';
 import { makeOwnedTempDir } from '../helpers/owned-temp.js';
 
@@ -68,14 +68,68 @@ describe('goodvibes-daemon mcp serve', () => {
     expect(replies.map((reply) => reply['id'])).toEqual([1, 2]);
     expect(replies.every((reply) => reply['jsonrpc'] === '2.0')).toBe(true);
     const tools = (replies[1]!['result'] as { tools: { name: string }[] }).tools;
-    expect(tools.some((tool) => tool.name === 'skills_list')).toBe(true);
-    expect(stderr).toEqual([]);
+    expect(tools.some((tool) => tool.name === 'skills_list')).toBe(false);
+    expect(stderr).toHaveLength(1);
+    expect(stderr[0]).toContain(`serving ${tools.length} tools`);
     // The daemon was checked with the operator token before the first frame.
     expect(requests[0]).toEqual({ url: 'http://127.0.0.1:3421/status', authorization: 'Bearer operator-token-fixture' });
   });
 
+  test('by default it serves the agent slice: reads and the session lifecycle, nothing destructive', async () => {
+    const { input, written } = setup();
+    expect(await runMcpCommand(input)).toBe(0);
+    const names = (frames(written)[1]!['result'] as { tools: { name: string }[] }).tools.map((tool) => tool.name);
+    expect(names.slice(0, 3)).toEqual(['sessions_create', 'sessions_get', 'sessions_messages_create']);
+    expect(names).toContain('tasks_list');
+    expect(names).not.toContain('sessions_delete');
+    expect(names.length).toBeLessThan(40);
+  });
+
+  test('--allow-write, --categories and --allow-destructive widen what is served', async () => {
+    const narrow = setup({ flags: { host: undefined, port: undefined, token: undefined, categories: ['sessions'], allowWrite: true } });
+    expect(await runMcpCommand(narrow.input)).toBe(0);
+    const sessionNames = (frames(narrow.written)[1]!['result'] as { tools: { name: string }[] }).tools.map((tool) => tool.name);
+    expect(sessionNames).toContain('sessions_delete');
+    expect(sessionNames.every((name) => name.startsWith('sessions_'))).toBe(true);
+
+    const every = setup({ flags: { host: undefined, port: undefined, token: undefined, categories: ['all'], allowWrite: true, allowDestructive: true } });
+    expect(await runMcpCommand(every.input)).toBe(0);
+    const everyCount = (frames(every.written)[1]!['result'] as { tools: unknown[] }).tools.length;
+    expect(everyCount).toBeGreaterThan(sessionNames.length);
+  });
+
+  test('an unknown family is refused before any frame', async () => {
+    const { input, written, stderr } = setup({ flags: { host: undefined, port: undefined, token: undefined, categories: ['no-such-family'] } });
+    expect(await runMcpCommand(input)).toBe(1);
+    expect(written).toEqual([]);
+    expect(stderr[0]).toContain('no-such-family');
+  });
+
+  test('a client cancel aborts the call to the daemon and gets no response', async () => {
+    let aborted = false;
+    const { input, written } = setup({
+      input: inputOf(
+        initialize,
+        { jsonrpc: '2.0', id: 7, method: 'tools/call', params: { name: 'tasks_list', arguments: {} } },
+        { jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: 7 } },
+      ),
+      fetchImpl: async (request, init) => {
+        if (!String(request).endsWith('/api/tasks')) return Response.json({ version: '0.0.0-test' });
+        return await new Promise<Response>((_resolve, reject) => {
+          const stop = (): void => { aborted = true; reject(init?.signal?.reason); };
+          if (init?.signal?.aborted) stop();
+          else init?.signal?.addEventListener('abort', stop);
+        });
+      },
+    });
+    expect(await runMcpCommand(input)).toBe(0);
+    expect(aborted).toBe(true);
+    expect(frames(written).map((frame) => frame['id'])).toEqual([1]);
+  });
+
   test('a tool call reaches the daemon with the operator token', async () => {
     const { input, written, requests } = setup({
+      flags: { host: undefined, port: undefined, token: undefined, categories: ['skills'] },
       input: inputOf(initialize, { jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'skills_list', arguments: {} } }),
     });
     expect(await runMcpCommand(input)).toBe(0);
@@ -91,6 +145,7 @@ describe('goodvibes-daemon mcp serve', () => {
   test('a method published for the WebSocket only is invoked through the invoke-by-id endpoint', async () => {
     const posted: { url: string; body: unknown }[] = [];
     const { input, written } = setup({
+      flags: { host: undefined, port: undefined, token: undefined, categories: ['checkpoints'] },
       input: inputOf(initialize, { jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'checkpoints_list', arguments: {} } }),
       fetchImpl: async (request, init) => {
         const url = String(request);
@@ -142,7 +197,7 @@ describe('goodvibes-daemon mcp serve', () => {
     expect(await runMcpCommand(input)).toBe(2);
     expect(written).toEqual([]);
     expect(requests).toEqual([]);
-    expect(stderr).toEqual(['Usage: goodvibes-daemon mcp serve [--host <http(s)://name>] [--port <n>] [--token <t>]']);
+    expect(stderr).toEqual([MCP_USAGE]);
   });
 });
 
@@ -163,7 +218,7 @@ describe('goodvibes-daemon mcp serve through the CLI dispatcher', () => {
       const out = sinkOf();
       const stderr: string[] = [];
       const code = await runDaemonCli(
-        ['mcp', 'serve', '--port', String(daemon.port), '--token', 'cli-token-fixture', '--daemon-home', join(root, 'daemon')],
+        ['mcp', 'serve', '--categories', 'skills', '--port', String(daemon.port), '--token', 'cli-token-fixture', '--daemon-home', join(root, 'daemon')],
         {
           env: { HOME: root, GOODVIBES_HOME: join(root, 'home') },
           cwd: root,
@@ -176,7 +231,8 @@ describe('goodvibes-daemon mcp serve through the CLI dispatcher', () => {
         },
       );
       expect(code).toBe(0);
-      expect(stderr).toEqual([]);
+      expect(stderr).toHaveLength(1);
+      expect(stderr[0]).toContain('serving');
       const replies = frames(out.written);
       expect(replies.map((frame) => frame['id'])).toEqual([1, 2, 3]);
       expect((replies[2]!['result'] as { isError?: boolean }).isError).toBeUndefined();

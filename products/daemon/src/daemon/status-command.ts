@@ -16,10 +16,15 @@
  * are a ws-only verb family, so they go through `callDaemonWsVerb`, same
  * target, same token, different transport.
  *
- * Everything about the daemon's own HISTORY, uptime, the receipts it wrote,
- * the version an automatic rollback rejected, comes from files on the daemon's
- * host, because no verb reports them. That makes those lines local-only, and
- * they say so for a remote target instead of being guessed at.
+ * Whether the daemon is keeping itself current comes from the daemon's own
+ * `update.status` verb, and `update --check` runs its `update.check` verb, so
+ * both work for a remote daemon too.
+ *
+ * Everything about the daemon's own HISTORY, uptime and the receipts it wrote,
+ * comes from files on the daemon's host, because no verb reports them. That
+ * makes those lines local-only, and they say so for a remote target instead of
+ * being guessed at. When the daemon on this machine does not answer, `update`
+ * still prints what those files say, since that is the moment they matter.
  *
  * NOTHING HERE DECIDES WHAT AN ANSWER MEANS. A sub-question that fails is one
  * line saying it failed; only an unreachable daemon is a failed command.
@@ -130,6 +135,26 @@ interface ClusterStatusPayload {
   readonly nodeName?: string;
   readonly memberCount?: number;
   readonly advice?: string;
+}
+
+/** `update.status`, and `update.check` with what the check did. */
+interface UpdateStatusPayload {
+  readonly armed?: boolean;
+  readonly offReason?: string;
+  readonly currentVersion?: string | null;
+  readonly checkIntervalMs?: number | null;
+  readonly failedCheckCount?: number;
+  readonly lastCheckFailure?: string | null;
+  readonly pendingVersion?: string | null;
+  readonly rejectedVersion?: string | null;
+  readonly recoveryRequired?: boolean;
+  readonly transactionRecovery?: {
+    readonly operation?: string;
+    readonly phase?: string;
+    readonly recoveryPaths?: readonly string[];
+    readonly recoveryErrors?: readonly string[];
+  } | null;
+  readonly check?: 'ran' | 'already-in-flight' | 'loop-off';
 }
 
 interface HostedSessionsPayload {
@@ -424,17 +449,65 @@ export interface RunUpdateCommandInput extends RemoteCommandDeps {
   readonly flags: RemoteCommandFlags & { readonly check: boolean };
 }
 
+/** What the daemon says about keeping itself current. */
+function updateStatusLines(update: UpdateStatusPayload): string[] {
+  const lines: string[] = [];
+  if (update.armed === true) {
+    const every = typeof update.checkIntervalMs === 'number' ? `, checking every ${formatDuration(update.checkIntervalMs)}` : '';
+    lines.push(`  updates:  on${every}`);
+  } else {
+    lines.push(`  updates:  off${update.offReason ? `: ${update.offReason}` : ''}`);
+  }
+  const failed = update.failedCheckCount ?? 0;
+  if (failed > 0) {
+    lines.push(`  failing:  ${failed} check${failed === 1 ? '' : 's'} in a row failed${update.lastCheckFailure ? `: ${update.lastCheckFailure}` : ''}`);
+  }
+  if (update.pendingVersion) {
+    lines.push(`  pending:  ${update.pendingVersion} is downloaded and verified; it installs when no work is in flight`);
+  }
+  if (update.rejectedVersion) {
+    lines.push(`  rejected: ${update.rejectedVersion} crash looped and was rolled back; the update loop will not install that version again`);
+  }
+  const recovery = update.transactionRecovery;
+  if (update.recoveryRequired === true || recovery) {
+    lines.push(`  recovery: an interrupted ${recovery?.operation ?? 'update'} stopped the update loop; it stays off until the kept files are dealt with`);
+    for (const path of recovery?.recoveryPaths ?? []) lines.push(`            kept: ${path}`);
+    for (const error of recovery?.recoveryErrors ?? []) lines.push(`            error: ${error}`);
+  }
+  return lines;
+}
+
+function checkLine(check: UpdateStatusPayload['check'], offReason: string | undefined): string[] {
+  if (check === 'ran') return ['  check:    ran now; the lines above are its result'];
+  if (check === 'already-in-flight') return ['  check:    another check was already running, so none was started; the lines above are as of now'];
+  if (check === 'loop-off') return [`  check:    not run, the update loop is off${offReason ? `: ${offReason}` : ''}`];
+  return [];
+}
+
+/** The receipts block alone; the daemon's own answer covers the rest of the history. */
+function receiptLines(state: LocalDaemonState): string[] {
+  if (!state.available) return [`  receipts: ${state.unavailableReason}`];
+  if (state.receipts.length === 0) return ['  receipts: none written'];
+  return ['  receipts:', ...state.receipts.map((receipt) => `    ${new Date(receipt.at).toISOString()}  ${receipt.text}`)];
+}
+
+function localJson(local: LocalDaemonState): Record<string, unknown> {
+  return local.available
+    ? { marker: local.marker, receipts: local.receipts, rejectedVersion: local.marker?.rejectedVersion, rolledBack: local.rolledBack }
+    : { available: false, reason: local.unavailableReason };
+}
+
 /**
  * `goodvibes-daemon update [--check]`.
  *
- * What the daemon knows about its own updates: the running version, the
- * receipts it wrote about swaps and restarts, the version an automatic rollback
- * rejected, and whether a rollback is in force.
+ * Asks the daemon itself: `update.status`, or with --check `update.check`,
+ * which runs the same tick the schedule runs and returns the status after it.
+ * A check never forces an install; a verified release waits until no work is
+ * in flight, which the pending line reports.
  *
- * --check reads status only: the control plane exposes no early-check verb.
- * Receipts do not establish that the host has configured an update artifact or
- * release policy, so neither an hourly schedule nor restart-triggered updates
- * may be inferred from this response.
+ * Exit 0 when the daemon answered. When it did not, exit 1; for this machine
+ * the lifecycle marker and receipts are printed with the failure, because a
+ * daemon that did not come back after an update is when they explain most.
  */
 export async function runUpdateCommand(input: RunUpdateCommandInput): Promise<DaemonCommandResult> {
   const { flags } = input;
@@ -442,12 +515,14 @@ export async function runUpdateCommand(input: RunUpdateCommandInput): Promise<Da
   if (!resolved.ok) return resolved.result;
   const target = resolved.target;
   const fetchImpl = input.fetchImpl ?? fetch;
+  const method = flags.check ? 'update.check' : 'update.status';
 
-  const identity = await callDaemonRoute<ControlStatusPayload>(
-    target, '/status', { method: 'GET', envelope: 'raw' }, fetchImpl,
-  );
-  if (!identity.ok) return failure(identity.error, identity.fix, flags.json);
-
+  const [identity, update] = await Promise.all([
+    callDaemonRoute<ControlStatusPayload>(target, '/status', { method: 'GET', envelope: 'raw' }, fetchImpl),
+    callDaemonWsVerb<UpdateStatusPayload>(target, method, {
+      ...(input.socketFactory ? { socketFactory: input.socketFactory } : {}),
+    }),
+  ]);
   const local = describeLocalDaemonState({
     isLocal: target.isLocal,
     controlPlaneConfigDir: input.controlPlaneConfigDir,
@@ -455,15 +530,18 @@ export async function runUpdateCommand(input: RunUpdateCommandInput): Promise<Da
     ...(input.localStateIo ? { io: input.localStateIo } : {}),
   });
 
-  const checkNote = flags.check
-    ? [
-      '',
-      'update --check: this daemon publishes no verb to trigger an update check early.',
-      '  This command only reads status; it does not request an update check.',
-      '  Automatic checks require a configured update artifact and host policy.',
-      '  These receipts do not establish an hourly or restart-triggered schedule.',
-    ]
-    : [];
+  const fail = (error: string, fix: string, daemonDown: boolean): DaemonCommandResult => ({
+    exitCode: 1,
+    lines: flags.json
+      ? [JSON.stringify({ ok: false, error, fix, ...(target.isLocal ? { local: localJson(local) } : {}) }, null, 2)]
+      : [
+        error,
+        `  ${fix}`,
+        ...(target.isLocal && daemonDown ? ['', 'what this machine\'s files say about the daemon:', ...localStateLines(local)] : []),
+      ],
+  });
+  if (!identity.ok) return fail(identity.error, identity.fix, true);
+  if (!update.ok) return fail(`the daemon answered, but ${method} failed: ${update.error}`, update.fix, false);
 
   if (flags.json) {
     return {
@@ -474,16 +552,9 @@ export async function runUpdateCommand(input: RunUpdateCommandInput): Promise<Da
           target: target.baseUrl,
           isLocal: target.isLocal,
           version: identity.data.version,
-          checkRequested: flags.check,
-          checkVerbAvailable: false,
-          local: local.available
-            ? {
-              marker: local.marker,
-              receipts: local.receipts,
-              rejectedVersion: local.marker?.rejectedVersion,
-              rolledBack: local.rolledBack,
-            }
-            : { available: false, reason: local.unavailableReason },
+          update: update.data,
+          ...(flags.check ? { check: update.data.check } : {}),
+          local: localJson(local),
         },
       }, null, 2)],
     };
@@ -495,8 +566,10 @@ export async function runUpdateCommand(input: RunUpdateCommandInput): Promise<Da
     lines: [
       `goodvibes daemon updates on ${where}`,
       ...versionLines(identity.data),
-      ...localStateLines(local),
-      ...checkNote,
+      ...updateStatusLines(update.data),
+      ...(flags.check ? checkLine(update.data.check, update.data.offReason) : []),
+      ...(local.available && local.rolledBack ? ['  rollback: an automatic rollback is in force; no fully-started boot has cleared it yet'] : []),
+      ...receiptLines(local),
     ],
   };
 }

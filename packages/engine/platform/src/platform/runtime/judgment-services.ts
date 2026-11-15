@@ -269,6 +269,9 @@ function browserBoundaryOptions(source: JudgmentSettingsSource): WebuiAnswerBoun
  * cancels its outstanding calls before closing the log after their records
  * settle. Awaitable scopes wait for this drain; synchronous scopes start it.
  * When still installed, the port it replaced is restored unless retired too.
+ * It is installed alongside other compositions of the process (embedded
+ * daemons for separate workspaces): a later one never ends this one's
+ * readings, and retiring one hands the process to the newest still running.
  */
 export function composeJudgment(input: JudgmentServicesInput): JudgmentServices {
   const restorePolicy = configureDecisionModelPolicy(() => input.config.get('judgment.policy'));
@@ -345,7 +348,7 @@ export function composeJudgment(input: JudgmentServicesInput): JudgmentServices 
   const sourceLifetime = createJudgmentSourceLifetime(input);
   bindJudgmentPortAuthority(port, sourceLifetime.capture);
   bindJudgmentPortAuthority(browserPort, sourceLifetime.capture);
-  const previous = installJudgmentPort(port);
+  const previous = installJudgmentPort(port, { alongside: true });
   input.disposal.add('judgment port and decision log', () => {
     retired.add(port);
     closing = true;

@@ -8,6 +8,12 @@ interface Installation {
   readonly identities: WeakMap<object, object>;
 }
 let installed: Installation | undefined;
+/**
+ * Runtimes that share this process (embedded daemons for separate workspaces),
+ * oldest first. Each keeps its readings until it retires itself; the newest is
+ * the one new readings use.
+ */
+const alongside: Installation[] = [];
 
 export class JudgmentPortMissingError extends Error {
   constructor(site: string) {
@@ -16,21 +22,63 @@ export class JudgmentPortMissingError extends Error {
   }
 }
 
-/** Installs the port; returns the one it replaced, preserving the public contract. */
-export function installJudgmentPort(port: JudgmentPort | undefined): JudgmentPort | undefined {
+const installationFor = (port: JudgmentPort): Installation => ({ port, controller: new AbortController(), identities: new WeakMap() });
+
+/**
+ * Make `next` current. The replaced installation's readers end, except when a
+ * runtime joins alongside another runtime that is still running.
+ */
+function publish(next: Installation | undefined, joining: boolean): void {
   const previous = installed;
-  if (previous?.port === port) return port;
-  installed = port === undefined ? undefined : {
-    port, controller: new AbortController(), identities: new WeakMap(),
-  };
+  installed = next;
   // Publish the replacement before reentrant cancellation listeners run.
-  previous?.controller.abort();
+  if (previous !== undefined && previous !== next && !(joining && alongside.includes(previous))) previous.controller.abort();
+}
+
+/**
+ * Installs the port; returns the one it replaced, preserving the public contract.
+ * `alongside`: the port belongs to a runtime that may share the process with
+ * another runtime (two embedded daemons). It becomes current, but the readings
+ * the other runtime already holds keep running; they end when that runtime
+ * retires its own port with {@link restoreJudgmentPort}.
+ */
+export function installJudgmentPort(port: JudgmentPort | undefined, options: { readonly alongside?: boolean | undefined } = {}): JudgmentPort | undefined {
+  const previous = installed;
+  if (previous?.port === port) {
+    if (options.alongside && previous !== undefined && !alongside.includes(previous)) alongside.push(previous);
+    return port;
+  }
+  const next = port === undefined ? undefined : installationFor(port);
+  const joining = next !== undefined && options.alongside === true;
+  if (joining) alongside.push(next);
+  publish(next, joining);
   return previous?.port;
 }
 
-/** Retiring an older runtime must never temporarily replace the live runtime. */
+/**
+ * Retiring an older runtime must never temporarily replace the live runtime.
+ * A runtime installed alongside others hands the process to the newest one
+ * still running, and only to `previous` when it was the last.
+ */
 export function restoreJudgmentPort(owner: JudgmentPort, previous: JudgmentPort | undefined): void {
-  if (installed?.port === owner) installJudgmentPort(previous);
+  const index = alongside.findIndex(entry => entry.port === owner);
+  if (index < 0) {
+    if (installed?.port === owner) installJudgmentPort(previous);
+    return;
+  }
+  const [retiring] = alongside.splice(index, 1);
+  if (installed?.port === owner) {
+    let next = alongside.at(-1);
+    // A port installed by hand once displaced that runtime and ended its readers; it starts a fresh lifetime.
+    if (next !== undefined && next.controller.signal.aborted) {
+      const fresh = installationFor(next.port);
+      alongside[alongside.length - 1] = fresh;
+      next = fresh;
+    }
+    if (next !== undefined) publish(next, false);
+    else installJudgmentPort(previous);
+  }
+  retiring?.controller.abort();
 }
 
 /** The installed port; throws when none is installed. */

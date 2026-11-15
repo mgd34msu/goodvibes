@@ -37,21 +37,25 @@ const { connection, dispose } = await serveAcpAgent({ homeDirectory: process.env
 ## What it maps
 
 The base is the platform embedding API (`@goodvibes-jev/engine/platform/embed`).
-The ACP sessions of one working directory (with the same declared MCP servers)
-share one embedded GoodVibes daemon; each ACP session is one shared session in
-it. The adapter is a protocol mapping over that surface:
+Each ACP session is one embedded session with one shared session in it, and
+the embedded sessions of one home directory run on one GoodVibes daemon: the
+first `session/new` boots it, later ones join it, so a new thread starts without
+a boot and cannot fail a decision in another thread. A thread whose cwd lies
+outside the daemon's working directory, or that declares a different MCP server
+under a name another thread's server already uses, gets a daemon of its own.
+The adapter is a protocol mapping over that surface:
 
 | ACP                           | GoodVibes                                              |
 | ----------------------------- | ------------------------------------------------------ |
 | `initialize` / `authenticate` | capability report; no auth (process-local daemon)      |
-| `session/new` (cwd)           | the cwd's embedded daemon (booted on first use) and a new shared session in it |
+| `session/new` (cwd)           | an embedded session in the cwd (on the home's running daemon, or booting one) and a new shared session in it |
 | `session/prompt` (text)       | `session.submit({ body, sessionId })`; the submission's `completion` follows the agent that took the input |
 | `agent_message_chunk`         | the agent's streamed text                              |
 | `tool_call` / `tool_call_update` | the agent's tool calls starting and settling        |
 | stop reason                   | how the agent's run ended (see mapping below)          |
 | `session/request_permission`  | the platform permission callback (allow once / always / reject) |
 | `session/cancel`              | aborts the agents the session started, then resolves the prompt `cancelled` |
-| `session/close`               | cancels the session's work, closes its shared session, and stops the daemon when no other session uses it |
+| `session/close`               | cancels the session's work, closes its shared session and its embedded session; the daemon stops when no session uses it |
 
 Stop-reason mapping: a completed run is `end_turn`, a cancelled one `cancelled`;
 a failed run, or an input no agent took (queued behind other work), is `refusal`

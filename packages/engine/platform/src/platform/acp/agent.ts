@@ -6,14 +6,15 @@
  * lifecycle → streamed content + tool-call updates → permission requests
  * mapped onto the platform permission callback.
  *
- * The substrate is the platform Embedding API (`createEmbeddedSession`): the
- * ACP sessions of one working directory share one embedded GoodVibes daemon,
- * each holding its own shared session in it. A prompt is one submitted input;
- * the submission's completion handle (the agent that took the input: its
- * streamed text, tool calls and terminal event) becomes ACP `session/update`
- * notifications and the prompt's stop reason. No new engine, the adapter is a
- * protocol mapping over the embed surface. `session/close` ends a session and
- * stops its daemon when no other session uses it.
+ * The substrate is the platform Embedding API (`createEmbeddedSession`): each
+ * ACP session is one embedded session, holding its own shared session, on the
+ * one embedded GoodVibes daemon of the process and home directory (the embed
+ * layer decides which sessions share a daemon). A prompt is one submitted
+ * input; the submission's completion handle (the agent that took the input:
+ * its streamed text, tool calls and terminal event) becomes ACP
+ * `session/update` notifications and the prompt's stop reason. No new engine,
+ * the adapter is a protocol mapping over the embed surface. `session/close`
+ * ends a session; the daemon stops when no session uses it.
  *
  * Honest capability surface (see `initialize`): anything the platform does not
  * support is reported `false`, never stubbed,
@@ -139,15 +140,6 @@ export interface AcpAgentOptions {
 interface CloseSessionRequest { readonly sessionId: string }
 type CloseSessionResponse = Record<string, never>;
 
-/** One embedded daemon shared by the ACP sessions of one working directory. */
-interface AcpDaemon {
-  readonly key: string;
-  readonly cwd: string;
-  embedded: Promise<EmbeddedSession>;
-  /** ACP session ids using this daemon. */
-  readonly sessions: Set<string>;
-}
-
 interface ActivePrompt {
   /** True while `submit` is still resolving: there is nothing to abort yet. */
   submitting: boolean;
@@ -157,11 +149,12 @@ interface ActivePrompt {
 }
 
 interface AcpSessionState {
-  readonly daemon: AcpDaemon;
+  readonly cwd: string;
+  /** This session's embedded session; its permission asks come back tagged with this ACP session. */
   readonly embedded: EmbeddedSession;
   /** The shared session inside the daemon that holds this editor thread. */
   readonly sharedSessionId: string;
-  /** Agents this session's prompts started; cancel and permission routing use them. */
+  /** Agents this session's prompts started; cancel uses them. */
   readonly agentIds: Set<string>;
   /** The prompt in flight, from the moment it is accepted until it resolves. At most one per session. */
   activePrompt: ActivePrompt | null;
@@ -229,13 +222,12 @@ export function mapPermissionOutcome(
 
 /**
  * The ACP `Agent` implementation backed by embedded GoodVibes sessions.
- * One instance serves one connection. Sessions in the same working directory
- * (with the same declared MCP servers) share one embedded daemon; each ACP
- * session is one shared session inside it.
+ * One instance serves one connection. Each ACP session is one embedded
+ * session with one shared session in it; the embedded sessions of one home
+ * directory run on one daemon.
  */
 export class GoodVibesAcpAgent implements Agent {
   private readonly sessions = new Map<string, AcpSessionState>();
-  private readonly daemons = new Map<string, AcpDaemon>();
 
   constructor(
     private readonly conn: Pick<AgentSideConnection, 'sessionUpdate' | 'requestPermission'>,
@@ -276,32 +268,7 @@ export class GoodVibesAcpAgent implements Agent {
         `This agent supports stdio MCP servers only (it advertises mcpCapabilities.http=false, sse=false).`,
       );
     }
-    const daemon = this.daemonFor(resolve(params.cwd), mcpServers);
-    daemon.sessions.add(acpSessionId);
-    try {
-      const embedded = await daemon.embedded;
-      const shared = await embedded.sessions.createSession({ project: daemon.cwd, title: `ACP session ${acpSessionId}` });
-      this.sessions.set(acpSessionId, {
-        daemon,
-        embedded,
-        sharedSessionId: shared.id,
-        agentIds: new Set(),
-        activePrompt: null,
-        cancelled: false,
-      });
-    } catch (error) {
-      daemon.sessions.delete(acpSessionId);
-      await this.releaseIfUnused(daemon);
-      throw error;
-    }
-    return { sessionId: acpSessionId };
-  }
-
-  /** One embedded daemon per working directory and declared MCP server set, booted on first use. */
-  private daemonFor(cwd: string, mcpServers: readonly McpServerConfig[]): AcpDaemon {
-    const key = JSON.stringify([cwd, mcpServers]);
-    const existing = this.daemons.get(key);
-    if (existing) return existing;
+    const cwd = resolve(params.cwd);
     const factory: EmbeddedSessionFactory =
       this.options.sessionFactory ??
       (async ({ workspace, requestPermission, mcpServers: servers }) =>
@@ -311,25 +278,31 @@ export class GoodVibesAcpAgent implements Agent {
           requestPermission,
           ...(servers && servers.length > 0 ? { mcpServers: servers } : {}),
         }));
-    const daemon: AcpDaemon = { key, cwd, sessions: new Set(), embedded: undefined as unknown as Promise<EmbeddedSession> };
-    daemon.embedded = factory({
+    const embedded = await factory({
       workspace: cwd,
-      requestPermission: (request) => this.bridgePermission(daemon, request),
+      requestPermission: (request) => this.bridgePermission(acpSessionId, request),
       ...(mcpServers.length > 0 ? { mcpServers } : {}),
     });
-    // A boot that failed is forgotten so the next session/new boots again.
-    daemon.embedded.catch(() => { if (this.daemons.get(key) === daemon) this.daemons.delete(key); });
-    this.daemons.set(key, daemon);
-    return daemon;
+    try {
+      const shared = await embedded.sessions.createSession({ project: cwd, title: `ACP session ${acpSessionId}` });
+      this.sessions.set(acpSessionId, {
+        cwd,
+        embedded,
+        sharedSessionId: shared.id,
+        agentIds: new Set(),
+        activePrompt: null,
+        cancelled: false,
+      });
+    } catch (error) {
+      await this.stopEmbedded(cwd, embedded);
+      throw error;
+    }
+    return { sessionId: acpSessionId };
   }
 
-  /** Stop a daemon no ACP session uses any more. */
-  private async releaseIfUnused(daemon: AcpDaemon): Promise<void> {
-    if (daemon.sessions.size > 0 || this.daemons.get(daemon.key) !== daemon) return;
-    this.daemons.delete(daemon.key);
-    const embedded = await daemon.embedded.catch(() => null);
-    await embedded?.stop().catch((error: unknown) => {
-      logger.warn('ACP embedded daemon did not stop cleanly', { cwd: daemon.cwd, error: summarizeError(error) });
+  private async stopEmbedded(cwd: string, embedded: EmbeddedSession): Promise<void> {
+    await embedded.stop().catch((error: unknown) => {
+      logger.warn('ACP embedded session did not stop cleanly', { cwd, error: summarizeError(error) });
     });
   }
 
@@ -413,17 +386,16 @@ export class GoodVibesAcpAgent implements Agent {
     active.resolve('cancelled');
   }
 
-  /** `session/close`: end the session's work and release its daemon when no other session uses it. */
+  /** `session/close`: end the session's work and its embedded session; the daemon stops when no session uses it. */
   async closeSession(params: CloseSessionRequest): Promise<CloseSessionResponse> {
     const state = this.sessions.get(params.sessionId);
     if (!state) return {};
     await this.cancel({ sessionId: params.sessionId });
     this.sessions.delete(params.sessionId);
-    state.daemon.sessions.delete(params.sessionId);
     await state.embedded.sessions.closeSession(state.sharedSessionId).catch((error: unknown) => {
       logger.warn('ACP shared session could not be closed', { sessionId: params.sessionId, error: summarizeError(error) });
     });
-    await this.releaseIfUnused(state.daemon);
+    await this.stopEmbedded(state.cwd, state.embedded);
     return {};
   }
 
@@ -452,26 +424,19 @@ export class GoodVibesAcpAgent implements Agent {
     }
   }
 
-  /** Tear down every embedded daemon (used by serveAcpAgent on stream end). */
+  /** Tear down every embedded session (used by serveAcpAgent on stream end); the daemon stops with the last. */
   async dispose(): Promise<void> {
-    const daemons = [...this.daemons.values()];
-    this.daemons.clear();
+    const states = [...this.sessions.values()];
     this.sessions.clear();
-    await Promise.allSettled(daemons.map(async (daemon) => (await daemon.embedded).stop()));
+    await Promise.allSettled(states.map((state) => state.embedded.stop()));
   }
 
   /**
-   * Route a permission ask from a shared daemon to the ACP session it belongs
-   * to: the session whose agent asked, else the one session with a prompt
-   * running, else the daemon's only session. An ask no session can be named
-   * for is refused rather than shown in the wrong editor thread.
+   * Show a permission ask in the editor thread of the ACP session it belongs
+   * to. The embed layer hands each ask to the session whose agent asked (and
+   * refuses one no session can be named for), so it arrives already routed.
    */
-  private async bridgePermission(daemon: AcpDaemon, request: PermissionPromptRequest): Promise<PermissionPromptDecision> {
-    const acpSessionId = this.sessionForAsk(daemon, request);
-    if (!acpSessionId) {
-      logger.warn('ACP permission ask refused: more than one editor session could have asked it', { tool: request.tool, cwd: daemon.cwd });
-      return { approved: false };
-    }
+  private async bridgePermission(acpSessionId: string, request: PermissionPromptRequest): Promise<PermissionPromptDecision> {
     const response = await this.conn.requestPermission({
       sessionId: acpSessionId,
       toolCall: {
@@ -483,18 +448,6 @@ export class GoodVibesAcpAgent implements Agent {
       options: PERMISSION_OPTIONS,
     });
     return mapPermissionOutcome(response.outcome as Parameters<typeof mapPermissionOutcome>[0]);
-  }
-
-  private sessionForAsk(daemon: AcpDaemon, request: PermissionPromptRequest): string | undefined {
-    const candidates = [...daemon.sessions].filter((id) => this.sessions.has(id));
-    const agentId = request.attribution?.kind === 'background-agent' ? request.attribution.agentId : undefined;
-    if (agentId) {
-      const owner = candidates.find((id) => this.sessions.get(id)!.agentIds.has(agentId));
-      if (owner) return owner;
-    }
-    const prompting = candidates.filter((id) => this.sessions.get(id)!.activePrompt !== null);
-    if (prompting.length === 1) return prompting[0];
-    return candidates.length === 1 ? candidates[0] : undefined;
   }
 
   private forwardRunEvent(acpSessionId: string, event: EmbeddedRunEvent): void {

@@ -229,7 +229,7 @@ Editor launch line (Zed `agent_servers` entry, or any ACP client that takes a co
 { "agent_servers": { "GoodVibes": { "command": "goodvibes", "args": ["acp"] } } }
 ```
 
-Unsupported capabilities are reported as such in `initialize`: `loadSession` is `false` (no session restore over ACP) and prompt input is text only. Editor threads in one working directory share one embedded daemon; `session/close` ends a thread and stops the daemon once no thread uses it.
+Unsupported capabilities are reported as such in `initialize`: `loadSession` is `false` (no session restore over ACP) and prompt input is text only. Editor threads share the one embedded daemon of the home directory (a thread whose working directory lies outside the daemon's gets its own); `session/close` ends a thread and the daemon stops once no thread uses it.
 
 `/remote dispatch` and the `delegate` tool start this same command as their subagent. `ACP_AGENT_CMD` replaces it; give it as a JSON array of program and arguments (`["/path/to/agent","acp"]`) so a path with a space survives. `/remote env` prints that form.
 

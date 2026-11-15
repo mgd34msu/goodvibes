@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { bindJudgmentPortAuthority, captureJudgmentPort, installJudgmentPort, readFailure } from '@goodvibes-jev/engine/errors';
+import { bindJudgmentPortAuthority, captureJudgmentPort, installJudgmentPort, readFailure, restoreJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { SqliteDecisionLog, withDecisionLog, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { ConfigManager } from '../platform/src/platform/config/manager.ts';
@@ -145,6 +145,21 @@ describe('installation and consumer lifetimes', () => {
       if (settlement === 'reject') f.release.reject(new Error('synthetic-private-late-error')); else f.resume();
       await turn(); expect(f.log.query()).toHaveLength(0); expect(f.started()).toBe(1);
     } finally { f.resume(); await pending; await turn(); }
+  });
+
+  test('a second runtime installed alongside leaves the first one\'s reading running; retiring it hands the process back', async () => {
+    const f = fixture(); installJudgmentPort(f.port, { alongside: true }); f.hold();
+    const pending = readMessage('pending');
+    await f.entered.promise;
+    const second = fakePort((name, question) => question.type === 'choice' ? choiceAnswer(question, name === 'category' ? 'network' : 'none', 0.99) : noulAnswer(0.01));
+    installJudgmentPort(second.port, { alongside: true });
+    try {
+      expect((await readMessage('second')).category).toBe('network');
+      f.resume();
+      expect((await promptly(pending)).category).toBe('billing');
+      restoreJudgmentPort(second.port, undefined);
+      expect((await readMessage('after')).category).toBe('billing');
+    } finally { f.resume(); restoreJudgmentPort(second.port, undefined); restoreJudgmentPort(f.port, undefined); }
   });
 
   test('one consumer cancellation leaves another shared failure consumer alive', async () => {

@@ -4,11 +4,11 @@
  * Exercises the platform Embedding API 1.0 facade (`createEmbeddedSession`) against a
  * real in-process daemon: the exposed seams (runtime bus, session broker,
  * approval broker), the injected permission-callback bridge, a spawn-mode submit
- * starting a contract through the daemon's contracts surface, and idempotent
- * shutdown. LLM-free, it drives the brokers directly rather than a full turn.
+ * starting a contract through the daemon's contracts surface, a second session
+ * of the same home joining the running daemon, and idempotent shutdown. LLM-free, it drives the brokers directly rather than a full turn.
  */
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createEmbeddedSession, type EmbeddedSession } from '../platform/src/embed.ts';
@@ -141,6 +141,24 @@ describe('createEmbeddedSession', () => {
     expect(['completed', 'failed', 'cancelled']).toContain(outcome.outcome);
     if (outcome.outcome !== 'not-started') expect(outcome.agentId).toBe(submission.activeAgentId);
   }, 20_000);
+
+  test('a second session of the same home joins the running daemon and stopping it leaves the first running', async () => {
+    const nested = join(work, 'package');
+    mkdirSync(nested, { recursive: true });
+    const second = await createEmbeddedSession({
+      workspace: nested,
+      homeDirectory: home,
+      token: 'embed-test-token',
+      boot: { daemonHomeDir: join(home, 'daemon'), port: 0, host: '127.0.0.1' },
+    });
+    // One daemon: one listener, one broker, one judgment composition (no second boot).
+    expect(second.url).toBe(session.url);
+    expect(second.sessions).toBe(session.sessions);
+    expect(second.workspace).toBe(nested);
+    await second.stop();
+    const record = await session.sessions.createSession({ project: work, title: 'still running' });
+    expect(record.id.length).toBeGreaterThan(0);
+  });
 
   test('stop is idempotent', async () => {
     await session.stop();

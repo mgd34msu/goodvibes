@@ -2,11 +2,12 @@
  * acp-agent-adapter.test.ts
  *
  * The agent-side ACP adapter (GoodVibesAcpAgent) over an injected embedded
- * session: honest capabilities, one daemon per working directory shared by its
- * sessions, a prompt driven by the submission's completion handle (streamed
- * text, tool calls, the run's outcome), cancellation, permission routing and
- * session close. The handle itself is built from the agents' real events in
- * embed-session.test.ts; here it is driven directly.
+ * session: honest capabilities, one embedded session per ACP session, a prompt
+ * driven by the submission's completion handle (streamed text, tool calls, the
+ * run's outcome), cancellation, permission asks shown in the asking thread and
+ * session close. The handle and the daemon the embedded sessions of one home
+ * share are exercised for real in embed-session.test.ts; here they are driven
+ * directly.
  */
 import { describe, expect, test } from 'bun:test';
 import {
@@ -272,49 +273,39 @@ describe('a prompt follows the run its input started', () => {
   });
 });
 
-describe('one daemon per working directory', () => {
-  test('sessions in one cwd share one daemon; the last session close stops it', async () => {
+describe('one embedded session per ACP session', () => {
+  test('each session holds its own embedded session in its cwd; closing it stops that one', async () => {
     const sub = makeSubstrate();
     const agent = new GoodVibesAcpAgent(makeConn().conn, { sessionFactory: sub.factory });
     const a = await agent.newSession({ cwd: '/work/one', mcpServers: [] });
     const b = await agent.newSession({ cwd: '/work/one', mcpServers: [] });
-    const c = await agent.newSession({ cwd: '/work/one', mcpServers: [] });
     await agent.newSession({ cwd: '/work/two', mcpServers: [] });
-    expect(sub.boots.map((boot) => boot.workspace)).toEqual(['/work/one', '/work/two']);
+    expect(sub.boots.map((boot) => boot.workspace)).toEqual(['/work/one', '/work/one', '/work/two']);
 
     await agent.closeSession({ sessionId: a.sessionId });
-    await agent.closeSession({ sessionId: b.sessionId });
-    expect(sub.stops()).toBe(0);
-    await agent.closeSession({ sessionId: c.sessionId });
     expect(sub.stops()).toBe(1);
-    expect(sub.closedSessions).toEqual(['shared-1', 'shared-2', 'shared-3']);
+    await agent.closeSession({ sessionId: b.sessionId });
+    expect(sub.stops()).toBe(2);
+    expect(sub.closedSessions).toEqual(['shared-1', 'shared-2']);
     await expect(agent.prompt(prompt(a.sessionId))).rejects.toThrow('Unknown ACP session');
   });
 
-  test('a permission ask goes to the session whose agent asked', async () => {
+  test('a permission ask is shown in the thread of the session it came from', async () => {
     const sub = makeSubstrate();
     const { conn, permissionRequests } = makeConn({ permissionOptionId: 'allow-always' });
     const agent = new GoodVibesAcpAgent(conn, { sessionFactory: sub.factory });
     const first = await agent.newSession({ cwd: '/w', mcpServers: [] });
     const second = await agent.newSession({ cwd: '/w', mcpServers: [] });
-    const pending = agent.prompt(prompt(second.sessionId));
-    await waitFor(() => sub.runs.length > 0);
-    await new Promise((resolve) => setImmediate(resolve));
 
-    const decision = await sub.permissionHandlers[0]!(permissionRequest('call-9', 'agent-1'));
+    const decision = await sub.permissionHandlers[1]!(permissionRequest('call-9', 'agent-1'));
     expect(decision).toEqual({ approved: true, remember: true });
     expect(permissionRequests[0]!.sessionId).toBe(second.sessionId);
     expect((permissionRequests[0]!.options as { kind: string }[]).map((o) => o.kind)).toEqual(['allow_once', 'allow_always', 'reject_once']);
-
-    sub.runs[0]!.end({ outcome: 'completed', agentId: 'agent-1', output: '' });
-    await pending;
-    // With two idle sessions and an agent neither started, nobody can be named: refused, not misrouted.
-    expect(await sub.permissionHandlers[0]!(permissionRequest('call-10', 'agent-x'))).toEqual({ approved: false });
-    expect(permissionRequests).toHaveLength(1);
-    expect(first.sessionId).not.toBe(second.sessionId);
+    await sub.permissionHandlers[0]!(permissionRequest('call-10'));
+    expect(permissionRequests[1]!.sessionId).toBe(first.sessionId);
   });
 
-  test('dispose stops every daemon', async () => {
+  test('dispose stops every embedded session', async () => {
     const sub = makeSubstrate();
     const agent = new GoodVibesAcpAgent(makeConn().conn, { sessionFactory: sub.factory });
     await agent.newSession({ cwd: '/work/p4', mcpServers: [] });

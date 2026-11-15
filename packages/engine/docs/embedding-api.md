@@ -31,37 +31,48 @@ See `examples/embed-session-quickstart.ts` (compile-checked in CI).
 
 ## The contract
 
-`createEmbeddedSession(options)` boots an in-process daemon for the workspace and
-returns an `EmbeddedSession`:
+`createEmbeddedSession(options)` returns an `EmbeddedSession` on the one
+in-process daemon of the home directory. The first session of a home boots it;
+a later session joins it when its workspace is the daemon's working directory or
+inside it and it gives the same `token` and `boot` settings, so it starts
+without a boot and cannot disturb the first session's work. A session that does
+not fit (a workspace elsewhere, other daemon settings, or a different MCP server
+under a name a live session already declared) gets a daemon of its own. The
+daemon stops when its last session stops.
 
 | member                  | purpose                                                        |
 | ------------------------ | ------------------------------------------------------------- |
 | `workspace`               | the project root the session operates against                 |
-| `url`                     | base URL of the daemon's HTTP surface                          |
-| `events`                  | the `RuntimeEventBus`: `.on(type, cb)` or `.onDomain(dom, cb)` |
+| `url`                     | base URL of the daemon's HTTP surface (the same for every session of the daemon) |
+| `events`                  | the daemon's `RuntimeEventBus`: `.on(type, cb)` or `.onDomain(dom, cb)`; it carries every session of the daemon |
 | `approvals`               | the `ApprovalBroker` permission asks flow through             |
 | `sessions`                | the `SharedSessionBroker` backing the session                 |
-| `submit(in)`              | send input; resolves with the broker's submission record. When the broker answers in spawn mode, the text starts a contract through the daemon's `contracts` surface and `activeAgentId` is the contract's owner agent, bound to the session |
-| `cancelActive(agentIds)`  | cancel one or more in-flight agent turns by the agent id a submission reported as `activeAgentId`; returns the number actually cancelled |
-| `stop()`                  | tear down and release the port (idempotent)                   |
+| `submit(in)`              | send input; resolves with the broker's submission record and a `completion` handle on the run it started. When the broker answers in spawn mode, the text starts a contract in the session's workspace through the daemon's `contracts` surface and `activeAgentId` is the contract's owner agent, bound to the session |
+| `cancelActive(agentIds)`  | cancel one or more in-flight agent turns this session started, by the agent id a submission reported as `activeAgentId`; returns the number actually cancelled |
+| `stop()`                  | end the session (its runs end as cancelled, its agents are cancelled); the daemon stops and releases its port when no other session uses it. Idempotent |
 
-**Permission callback injection.** When `requestPermission` is provided, every
-pending approval on the session's broker is routed to it and resolved with its
-decision. An embedder answers permission asks with a callback instead of driving
-the HTTP approvals routes.
+**Permission callback injection.** When `requestPermission` is provided, the
+session's pending approvals are routed to it and resolved with its decision: an
+ask from an agent the session's submissions started, else (when the agent is
+not known) the ask of the one session with a run in flight, or of the daemon's
+only session. An ask no session can be named for is refused with that reason
+when every session answers by callback, and left to the other approval routes
+otherwise. An embedder answers permission asks with a callback instead of
+driving the HTTP approvals routes.
 
 **Cancelling in-flight work.** `cancelActive` is a real cancellation, not a
 courtesy flag: it aborts the agent's in-flight provider call so the turn stops
 mid-flight and emits its cancelled outcome, rather than only cancelling a
-still-queued input. Unknown agent ids are ignored.
+still-queued input. Agent ids this session did not start are ignored.
 
 **Connecting MCP servers.** `EmbedSessionOptions.mcpServers` lets an embedder
 declare MCP servers (for example, the servers an ACP client passes in
-`session/new`) to connect into the session's live tool surface at boot; their
-tools join the session namespaced as `mcp:<name>:<tool>`. Only the stdio
+`session/new`) to connect into the daemon's live tool surface; their tools join
+it namespaced as `mcp:<name>:<tool>`. A server several sessions declare is
+connected once and stays connected for the daemon's life. Only the stdio
 transport is supported; the registry spawns a process for each server. A
-server that fails to connect is logged and skipped; it never aborts session
-creation.
+server that fails to connect is logged and skipped (the next session that
+declares it tries again); it never aborts session creation.
 
 **Receiving events.** Subscribe to the typed `RuntimeEventBus`. Each envelope
 carries `type`, `payload` (the typed event), and correlation ids

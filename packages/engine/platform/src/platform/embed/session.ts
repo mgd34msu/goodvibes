@@ -8,15 +8,26 @@
  * onto the broker so an embedder can answer permission asks with a callback
  * instead of driving the HTTP approvals routes.
  *
+ * One daemon per process and home directory: the sessions of one home share
+ * the daemon booted for the first of them, so a second session starts without
+ * a boot and cannot disturb the first one's work (its judgment readings, its
+ * stores, its background services). A session whose workspace lies outside
+ * that daemon's directory, or that asks for different daemon settings or a
+ * different MCP server under a name already in use, gets a daemon of its own.
+ * The daemon stops with the last session that uses it.
+ *
  * This is the substrate the ACP adapter (`../acp/agent`) drives: create a
  * session against a workspace, submit input, subscribe to typed events, answer
  * permission asks, and shut down.
  */
 
 import { randomUUID } from 'node:crypto';
-import { bootDaemon, type BootDaemonOptions } from '../daemon/boot.js';
+import { realpathSync } from 'node:fs';
+import { isAbsolute, relative, resolve } from 'node:path';
+import { bootDaemon, type BootDaemonOptions, type BootedDaemon } from '../daemon/boot.js';
 import type { RuntimeEventBus } from '../runtime/events/index.js';
 import type { ApprovalBroker, SharedSessionBroker } from '../control-plane/index.js';
+import type { SharedApprovalRecord } from '../control-plane/approval-broker.js';
 import type { SharedSessionSubmission } from '../control-plane/session-types.js';
 import type { AutomationSurfaceKind } from '../automation/types.js';
 import type { PermissionRequestHandler } from '../permissions/prompt.js';
@@ -29,14 +40,15 @@ import { logger } from '../utils/logger.js';
 export interface EmbedSessionOptions {
   /** The workspace / project root the session operates against. */
   readonly workspace: string;
-  /** Injected home directory, the daemon stays entirely inside it. */
+  /** Injected home directory, the daemon stays entirely inside it. Sessions of one home share one daemon. */
   readonly homeDirectory: string;
-  /** Bearer token required by the HTTP surface. Omit for session-based auth. */
+  /** Bearer token required by the HTTP surface. Omit for session-based auth. Part of the daemon's settings. */
   readonly token?: string | undefined;
   /**
-   * A callback that answers permission asks. When provided, every pending
-   * approval on the session's broker is routed to it and resolved with its
-   * decision. Omit to resolve approvals another way (HTTP routes, direct broker).
+   * A callback that answers this session's permission asks: those raised by the
+   * agents its submissions started, and on a daemon no other session can have
+   * asked through, every pending approval. Omit to resolve approvals another way
+   * (HTTP routes, direct broker).
    */
   readonly requestPermission?: PermissionRequestHandler | undefined;
   /** Transport surface kind attributed to submitted input. Default `webhook`. */
@@ -44,14 +56,15 @@ export interface EmbedSessionOptions {
   /** Stable surface id for this embedder. Default a generated `embed-<uuid>`. */
   readonly surfaceId?: string | undefined;
   /**
-   * MCP servers to connect into the session's tool surface at boot (e.g. the
-   * servers an ACP client declares in `session/new`). Each is connected through
-   * the daemon's live MCP registry (tools namespaced `mcp:<name>:<tool>`). stdio
-   * transport only, the registry spawns a process. A server that fails to
-   * connect is logged and skipped; it never aborts session creation.
+   * MCP servers to connect into the daemon's tool surface (e.g. the servers an
+   * ACP client declares in `session/new`). Each is connected through the
+   * daemon's live MCP registry (tools namespaced `mcp:<name>:<tool>`), once per
+   * daemon however many sessions declare it. stdio transport only, the registry
+   * spawns a process. A server that fails to connect is logged and skipped; it
+   * never aborts session creation.
    */
   readonly mcpServers?: readonly McpServerConfig[] | undefined;
-  /** Escape hatch for the remaining boot options (port, host, serveFactory…). */
+  /** Escape hatch for the remaining boot options (port, host, serveFactory…). Part of the daemon's settings. */
   readonly boot?: Partial<Omit<BootDaemonOptions, 'workingDir' | 'homeDirectory' | 'token'>> | undefined;
 }
 
@@ -98,9 +111,9 @@ export type EmbeddedSubmission = SharedSessionSubmission & { readonly completion
 export interface EmbeddedSession {
   /** The workspace this session operates against. */
   readonly workspace: string;
-  /** Base URL of the underlying daemon's HTTP surface. */
+  /** Base URL of the underlying daemon's HTTP surface (shared by the sessions of one daemon). */
   readonly url: string;
-  /** The runtime event bus, subscribe with `.on(type, cb)` / `.onDomain(domain, cb)`. */
+  /** The daemon's runtime event bus, subscribe with `.on(type, cb)` / `.onDomain(domain, cb)`. It carries every session of the daemon; a submission's `completion` is scoped to its own run. */
   readonly events: RuntimeEventBus;
   /** The approval broker, the seam permission asks flow through. */
   readonly approvals: ApprovalBroker;
@@ -110,124 +123,166 @@ export interface EmbeddedSession {
    * Submit input to the session. Returns the broker's submission record and a
    * `completion` handle on the work it started. When the broker answers in
    * spawn mode (nothing is running for the input), the text starts a contract
-   * and the record's `activeAgentId` is the contract's owner agent, bound to
-   * the session; the handle follows that agent's stream and terminal event.
+   * in this session's workspace and the record's `activeAgentId` is the
+   * contract's owner agent, bound to the session; the handle follows that
+   * agent's stream and terminal event.
    */
   submit(input: string | EmbeddedSessionInput): Promise<EmbeddedSubmission>;
   /**
-   * Cancel the in-flight work for one or more running agents (the agent ids a
-   * submission reported as `activeAgentId`). This is a REAL cancellation: it
-   * aborts the agent's in-flight provider call so the turn stops mid-flight and
-   * emits its cancelled outcome, rather than only cancelling a still-queued
-   * input. Unknown ids are ignored. Returns the number of agents actually
-   * cancelled.
+   * Cancel the in-flight work for one or more running agents this session's
+   * submissions started (the ids a submission reported as `activeAgentId`).
+   * This is a REAL cancellation: it aborts the agent's in-flight provider call
+   * so the turn stops mid-flight and emits its cancelled outcome, rather than
+   * only cancelling a still-queued input. Other ids, including another
+   * session's agents on the same daemon, are ignored. Returns the number of
+   * agents actually cancelled.
    */
   cancelActive(agentIds: Iterable<string>): number;
-  /** Tear down the session and release the port. Idempotent. */
+  /**
+   * End the session: its followed runs end as cancelled and its running agents
+   * are cancelled. The daemon stops, and its port is released, when no other
+   * session uses it. Idempotent.
+   */
   stop(): Promise<void>;
 }
 
+/** One session's share of a daemon. */
+interface Member {
+  readonly workspace: string;
+  readonly requestPermission: PermissionRequestHandler | undefined;
+  /** Agents this session's submissions started or reached. */
+  readonly agentIds: Set<string>;
+  /** Runs still being followed; stopping the session ends each as cancelled. */
+  readonly liveRuns: Set<RunWatch>;
+}
+
+/** The daemon of one home directory, shared by the sessions that fit it. */
+interface SharedDaemon {
+  readonly home: string;
+  /** The daemon's working directory, links followed. */
+  readonly workingDir: string;
+  readonly token: string | undefined;
+  readonly boot: EmbedSessionOptions['boot'];
+  readonly booted: Promise<BootedDaemon>;
+  readonly members: Set<Member>;
+  /** Declared MCP servers by name: the config, how many live sessions declared it, and its connection. */
+  readonly mcp: Map<string, DeclaredMcpServer>;
+}
+
+interface DeclaredMcpServer {
+  readonly config: string;
+  users: number;
+  /** Settles true once connected; null until a session connects it or after a failed attempt. */
+  connection: Promise<boolean> | null;
+}
+
+/** Live embedded daemons of this process, by home directory. */
+const embeddedDaemons = new Map<string, SharedDaemon[]>();
+
+function realOrResolved(path: string): string {
+  try { return realpathSync(path); } catch { return resolve(path); }
+}
+
+function isWithin(root: string, candidate: string): boolean {
+  const from = relative(root, candidate);
+  return from === '' || (!from.startsWith('..') && !isAbsolute(from));
+}
+
+/** Two option bags name the same daemon settings when every value is the same value. */
+function sameBootOptions(a: EmbedSessionOptions['boot'], b: EmbedSessionOptions['boot']): boolean {
+  const left: Record<string, unknown> = a ?? {};
+  const right: Record<string, unknown> = b ?? {};
+  const keys = new Set([...Object.keys(left), ...Object.keys(right)]);
+  for (const key of keys) if (!Object.is(left[key], right[key])) return false;
+  return true;
+}
+
+/** Whether a session with these options can run on `daemon`: same settings, workspace inside it, no clashing MCP server. */
+function fits(daemon: SharedDaemon, options: EmbedSessionOptions, workspace: string): boolean {
+  if (daemon.token !== options.token || !sameBootOptions(daemon.boot, options.boot)) return false;
+  if (!isWithin(daemon.workingDir, workspace)) return false;
+  return (options.mcpServers ?? []).every((server) => {
+    const entry = daemon.mcp.get(server.name);
+    return entry === undefined || entry.users === 0 || entry.config === JSON.stringify(server);
+  });
+}
+
 /**
- * Create an embedded GoodVibes session bound to a workspace. Boots an in-process
- * daemon, exposes its runtime bus / session broker / approval broker, and, when
- * a `requestPermission` callback is given, bridges pending approvals to it.
+ * Create an embedded GoodVibes session bound to a workspace. The first session
+ * of a home directory boots an in-process daemon; later sessions whose
+ * workspace lies inside its directory join it. Exposes the daemon's runtime bus
+ * / session broker / approval broker, and, when a `requestPermission` callback
+ * is given, answers this session's pending approvals with it.
  */
 export async function createEmbeddedSession(options: EmbedSessionOptions): Promise<EmbeddedSession> {
-  const daemon = await bootDaemon({
-    workingDir: options.workspace,
-    homeDirectory: options.homeDirectory,
-    ...(options.token !== undefined ? { token: options.token } : {}),
-    ...(options.boot ?? {}),
-  });
-  const server = daemon.server;
-  const events = server.eventBus;
+  const home = resolve(options.homeDirectory);
+  const workspace = realOrResolved(options.workspace);
+  const running = embeddedDaemons.get(home) ?? [];
+  const daemon = running.find((candidate) => fits(candidate, options, workspace)) ?? startDaemon(home, workspace, options);
+  const member: Member = { workspace, requestPermission: options.requestPermission, agentIds: new Set(), liveRuns: new Set() };
+  daemon.members.add(member);
+
+  // Claim each declared MCP server before the first await, so a session
+  // created meanwhile with another server under the same name gets its own daemon.
+  const declared: { readonly server: McpServerConfig; readonly entry: DeclaredMcpServer }[] = [];
+  for (const mcpServer of options.mcpServers ?? []) {
+    const config = JSON.stringify(mcpServer);
+    let entry = daemon.mcp.get(mcpServer.name);
+    if (entry === undefined || entry.config !== config) {
+      entry = { config, users: 0, connection: null };
+      daemon.mcp.set(mcpServer.name, entry);
+    }
+    entry.users += 1;
+    declared.push({ server: mcpServer, entry });
+  }
+  const releaseDeclared = (): void => {
+    // A connected server stays connected for the daemon's life; a later session may declare it again.
+    for (const { entry } of declared) entry.users = Math.max(0, entry.users - 1);
+  };
+
+  let booted: BootedDaemon;
+  try {
+    booted = await daemon.booted;
+  } catch (error) {
+    releaseDeclared();
+    daemon.members.delete(member);
+    throw error;
+  }
+  const server = booted.server;
   const sessions = server.sessions;
-  const approvals = daemon.approvals;
   const surfaceKind: AutomationSurfaceKind = options.surfaceKind ?? 'webhook';
   const surfaceId = options.surfaceId ?? `embed-${randomUUID()}`;
 
-  // Connect any embedder-declared MCP servers (e.g. an ACP client's session/new
-  // servers) into the live MCP registry so their tools join the session surface.
-  // A single server's failure is logged and skipped, it never aborts the session.
-  for (const mcpServer of options.mcpServers ?? []) {
-    try {
-      await server.registerMcpServer(mcpServer);
-    } catch (error) {
+  // Connect the declared MCP servers this daemon does not have yet into its
+  // live MCP registry so their tools join the tool surface; one declared by an
+  // earlier session is connected once. A single server's failure is logged and
+  // skipped (the next session that declares it tries again), it never aborts the session.
+  for (const { server: mcpServer, entry } of declared) {
+    entry.connection ??= server.registerMcpServer(mcpServer).then(() => true, (error: unknown) => {
       logger.warn('createEmbeddedSession: failed to connect declared MCP server', {
         server: mcpServer.name,
         error: error instanceof Error ? error.message : String(error),
       });
-    }
-  }
-
-  // Bridge an injected permission callback onto the broker: each pending
-  // approval is answered by the callback and resolved with its decision.
-  let unsubscribe: (() => void) | undefined;
-  if (options.requestPermission) {
-    const handler = options.requestPermission;
-    const handled = new Set<string>();
-    const deny = (approvalId: string, reason: string): Promise<unknown> =>
-      approvals.resolveApproval(approvalId, { approved: false, reason, actor: 'embed', actorSurface: 'embed' })
-        .catch((error: unknown) => {
-          logger.warn('createEmbeddedSession: could not record a denial for an approval', {
-            approvalId,
-            error: error instanceof Error ? error.message : String(error),
-          });
-        });
-    unsubscribe = approvals.subscribe((approval) => {
-      if (approval.status !== 'pending' || handled.has(approval.id)) return;
-      handled.add(approval.id);
-      // An ask that needs the owner's own decision can only be approved through the
-      // host's private owner route, never by an embedder callback. Say so and deny
-      // instead of prompting for an answer that could not be honoured.
-      if (approval.requiresOwnerDecision) {
-        logger.warn('createEmbeddedSession: denied an approval that requires the owner decision; an embedded permission callback cannot approve it', {
-          approvalId: approval.id,
-          tool: approval.request.tool,
-        });
-        void deny(approval.id, 'This approval needs the owner decision and cannot be approved from an embedded client.')
-          .finally(() => handled.delete(approval.id));
-        return;
-      }
-      void handler(approval.request)
-        .then(async (decision) => {
-          try {
-            await approvals.resolveApproval(approval.id, {
-              approved: decision.approved,
-              actor: 'embed',
-              actorSurface: 'embed',
-              ...(decision.remember !== undefined ? { remember: decision.remember } : {}),
-              ...(decision.modifiedArgs !== undefined ? { modifiedArgs: decision.modifiedArgs } : {}),
-            });
-          } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            logger.warn('createEmbeddedSession: the embedder\'s decision was refused; denying the approval', { approvalId: approval.id, error: message });
-            await deny(approval.id, `The embedder's decision could not be applied: ${message}`);
-          }
-        }, async (error: unknown) => {
-          const message = error instanceof Error ? error.message : String(error);
-          logger.warn('createEmbeddedSession: the permission callback failed; denying the approval', { approvalId: approval.id, error: message });
-          await deny(approval.id, 'The embedder\'s permission callback failed.');
-        })
-        .finally(() => handled.delete(approval.id));
+      entry.connection = null;
+      return false;
     });
+    await entry.connection;
   }
 
-  // Runs still being followed; stopping the session ends each as cancelled.
-  const liveRuns = new Set<RunWatch>();
-
+  let stopped: Promise<void> | null = null;
   return {
     workspace: options.workspace,
-    url: daemon.url,
-    events,
-    approvals,
+    url: booted.url,
+    events: server.eventBus,
+    approvals: booted.approvals,
     sessions,
     submit: async (input) => {
+      if (stopped) throw new Error('This embedded session has stopped; create a new one to submit input.');
       const body = typeof input === 'string' ? input : input.body;
       const structured = typeof input === 'string' ? undefined : input;
       // Subscribed before the submit: a run that fails at once can end before
       // the broker answers with the agent id, and its events are held until then.
-      const watch = watchRun(events, liveRuns);
+      const watch = watchRun(server.eventBus, member.liveRuns);
       try {
         const submission = await sessions.submitMessage({
           surfaceKind,
@@ -241,24 +296,30 @@ export async function createEmbeddedSession(options: EmbedSessionOptions): Promi
           // Only a live agent that was handed this input is working on it; a
           // queued or refused input has nothing to follow yet.
           const agentId = submission.mode === 'continued-live' ? submission.activeAgentId : undefined;
+          if (agentId) member.agentIds.add(agentId);
           return { ...submission, completion: agentId
             ? watch.follow(agentId)
             : watch.notStarted(submission.state, notStartedReason(submission.mode)) };
         }
         // Spawn mode: nothing is running for this input yet. The submitted text
         // is the ask of a new contract (contract runner design 10.2), started
-        // through the daemon's contracts operator surface in the daemon's
-        // working directory (this workspace), and its owner agent is bound to the
-        // session as the agent working on it.
+        // through the daemon's contracts operator surface in this session's
+        // workspace, and its owner agent is bound to the session as the agent
+        // working on it.
         let started: Awaited<ReturnType<typeof server.contracts.start>>;
         try {
-          started = await server.contracts.start({ ask: body, sessionId: submission.session.id });
+          started = await server.contracts.start({
+            ask: body,
+            sessionId: submission.session.id,
+            ...(workspace === daemon.workingDir ? {} : { workspaceRoot: workspace }),
+          });
         } catch (error) {
           // The input was recorded before the contract was refused. Fail it so no
           // queued input is left that nothing will run and a retry does not double up.
           await sessions.failInput(submission.session.id, submission.input.id, error instanceof Error ? error.message : String(error)).catch(() => null);
           throw error;
         }
+        member.agentIds.add(started.ownerAgentId);
         const bound = await sessions.bindAgent(submission.session.id, started.ownerAgentId, submission.input.id);
         return { ...submission, session: bound ?? submission.session, activeAgentId: started.ownerAgentId,
           completion: watch.follow(started.ownerAgentId) };
@@ -270,16 +331,150 @@ export async function createEmbeddedSession(options: EmbedSessionOptions): Promi
     cancelActive: (agentIds) => {
       let cancelled = 0;
       for (const agentId of agentIds) {
-        if (server.cancelAgent(agentId)) cancelled += 1;
+        if (member.agentIds.has(agentId) && server.cancelAgent(agentId)) cancelled += 1;
       }
       return cancelled;
     },
-    stop: async () => {
-      unsubscribe?.();
-      for (const run of [...liveRuns]) run.end({ outcome: 'cancelled', reason: 'The embedded session stopped.' });
-      await daemon.stop();
+    stop: () => {
+      stopped ??= (async () => {
+        for (const run of [...member.liveRuns]) run.end({ outcome: 'cancelled', reason: 'The embedded session stopped.' });
+        for (const agentId of member.agentIds) server.cancelAgent(agentId);
+        releaseDeclared();
+        daemon.members.delete(member);
+        await releaseIfUnused(daemon);
+      })();
+      return stopped;
     },
   };
+}
+
+/** Boot the daemon for a session no running daemon fits, and register it for the sessions that follow. */
+function startDaemon(home: string, workspace: string, options: EmbedSessionOptions): SharedDaemon {
+  const daemon: SharedDaemon = {
+    home,
+    workingDir: workspace,
+    token: options.token,
+    boot: options.boot,
+    members: new Set(),
+    mcp: new Map(),
+    booted: bootDaemon({
+      workingDir: options.workspace,
+      homeDirectory: options.homeDirectory,
+      ...(options.token !== undefined ? { token: options.token } : {}),
+      ...(options.boot ?? {}),
+    }).then((booted) => {
+      bridgeApprovals(daemon, booted.approvals);
+      return booted;
+    }),
+  };
+  // A boot that failed is forgotten so the next session boots again.
+  daemon.booted.catch(() => forget(daemon));
+  embeddedDaemons.set(home, [...(embeddedDaemons.get(home) ?? []), daemon]);
+  return daemon;
+}
+
+function forget(daemon: SharedDaemon): void {
+  const remaining = (embeddedDaemons.get(daemon.home) ?? []).filter((candidate) => candidate !== daemon);
+  if (remaining.length > 0) embeddedDaemons.set(daemon.home, remaining);
+  else embeddedDaemons.delete(daemon.home);
+}
+
+/** Stop a daemon no session uses any more. */
+async function releaseIfUnused(daemon: SharedDaemon): Promise<void> {
+  if (daemon.members.size > 0) return;
+  // Unregistered before the await: a session created while this one stops boots a new daemon.
+  forget(daemon);
+  const booted = await daemon.booted.catch(() => null);
+  await booted?.stop();
+}
+
+/**
+ * The session a pending approval belongs to: the one whose submission started
+ * the agent that asked, else the one session with a run in flight, else the
+ * daemon's only session. `undefined` when none can be named.
+ */
+function memberForApproval(daemon: SharedDaemon, approval: SharedApprovalRecord): Member | undefined {
+  const members = [...daemon.members];
+  const attribution = approval.request.attribution;
+  const agentId = attribution?.kind === 'background-agent' ? attribution.agentId : undefined;
+  if (agentId !== undefined) {
+    const owner = members.find((member) => member.agentIds.has(agentId));
+    if (owner) return owner;
+  }
+  const running = members.filter((member) => member.liveRuns.size > 0);
+  if (running.length === 1) return running[0];
+  return members.length === 1 ? members[0] : undefined;
+}
+
+/**
+ * Answer each pending approval with the permission callback of the session it
+ * belongs to. An ask whose session has no callback is left to the other
+ * approval routes. An ask no session can be named for is refused when every
+ * session answers by callback (nobody else would), and left pending otherwise.
+ */
+function bridgeApprovals(daemon: SharedDaemon, approvals: ApprovalBroker): void {
+  const handled = new Set<string>();
+  const deny = (approvalId: string, reason: string): Promise<unknown> =>
+    approvals.resolveApproval(approvalId, { approved: false, reason, actor: 'embed', actorSurface: 'embed' })
+      .catch((error: unknown) => {
+        logger.warn('createEmbeddedSession: could not record a denial for an approval', {
+          approvalId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
+  approvals.subscribe((approval) => {
+    if (approval.status !== 'pending' || handled.has(approval.id)) return;
+    const member = memberForApproval(daemon, approval);
+    if (member === undefined) {
+      const members = [...daemon.members];
+      if (members.length === 0 || members.some((candidate) => candidate.requestPermission === undefined)) return;
+      handled.add(approval.id);
+      logger.warn('createEmbeddedSession: denied an approval no embedded session could be named for', {
+        approvalId: approval.id,
+        tool: approval.request.tool,
+        sessions: members.length,
+      });
+      void deny(approval.id, `${members.length} embedded sessions share this daemon and none of them started the agent that asked, so the ask was not shown to any of them.`)
+        .finally(() => handled.delete(approval.id));
+      return;
+    }
+    const handler = member.requestPermission;
+    if (handler === undefined) return;
+    handled.add(approval.id);
+    // An ask that needs the owner's own decision can only be approved through the
+    // host's private owner route, never by an embedder callback. Say so and deny
+    // instead of prompting for an answer that could not be honoured.
+    if (approval.requiresOwnerDecision) {
+      logger.warn('createEmbeddedSession: denied an approval that requires the owner decision; an embedded permission callback cannot approve it', {
+        approvalId: approval.id,
+        tool: approval.request.tool,
+      });
+      void deny(approval.id, 'This approval needs the owner decision and cannot be approved from an embedded client.')
+        .finally(() => handled.delete(approval.id));
+      return;
+    }
+    void handler(approval.request)
+      .then(async (decision) => {
+        try {
+          await approvals.resolveApproval(approval.id, {
+            approved: decision.approved,
+            actor: 'embed',
+            actorSurface: 'embed',
+            ...(decision.remember !== undefined ? { remember: decision.remember } : {}),
+            ...(decision.modifiedArgs !== undefined ? { modifiedArgs: decision.modifiedArgs } : {}),
+          });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          logger.warn('createEmbeddedSession: the embedder\'s decision was refused; denying the approval', { approvalId: approval.id, error: message });
+          await deny(approval.id, `The embedder's decision could not be applied: ${message}`);
+        }
+      }, async (error: unknown) => {
+        const message = error instanceof Error ? error.message : String(error);
+        logger.warn('createEmbeddedSession: the permission callback failed; denying the approval', { approvalId: approval.id, error: message });
+        await deny(approval.id, 'The embedder\'s permission callback failed.');
+      })
+      .finally(() => handled.delete(approval.id));
+  });
 }
 
 function notStartedReason(mode: SharedSessionSubmission['mode']): string {

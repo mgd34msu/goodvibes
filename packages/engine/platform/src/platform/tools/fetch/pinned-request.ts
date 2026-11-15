@@ -14,13 +14,13 @@ import { assertDeliveryCurrent, runDeliveryPublication, type DeliveryLifetime } 
  * answer is tried, as the system would across a name's answers.
  *
  * Loopback answers are allowed only for a hop whose written host is itself a
- * plain loopback target (localhost, 127.x, ::1) that the project approved; a
- * name that merely resolves to loopback is refused. A host that does not
- * resolve is refused, since nothing was checked.
+ * plain loopback target (localhost, 127.x, ::1) that was approved; a name that
+ * merely resolves to loopback is refused. A host that does not resolve is
+ * refused, since nothing was checked. The check runs in every mode: YOLO and an
+ * admitted call skip a prompt, never this.
  */
 import { lookup } from 'node:dns/promises';
-import { currentExecutionMode, isYoloExecution } from '../../gate/execution-context.js';
-import { isAdmittedFetchSocket } from './invocation.js';
+import { currentExecutionMode } from '../../gate/execution-context.js';
 import { isIP } from 'node:net';
 import { checkServerIdentity } from 'node:tls';
 import { instrumentedFetch } from '../../utils/fetch-with-timeout.js';
@@ -96,7 +96,6 @@ export async function resolveCheckedAddresses(
     const trust = classifyHostTrustTier(answer.address, options.trustTierConfig);
     if (trust.tier === 'blocked' && !trust.isSsrf) throw new Error(`Request blocked: ${trust.reason}`);
   }
-  if (isYoloExecution() || isAdmittedFetchSocket(url)) return answers;
   for (const answer of answers) {
     const range = classifyResolvedAddress(answer.address);
     if (range === null) continue;

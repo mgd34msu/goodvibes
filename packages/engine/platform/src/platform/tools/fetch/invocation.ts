@@ -15,7 +15,6 @@ interface FetchRequest {
 }
 const invocations = new AsyncLocalStorage<FetchInvocation>();
 const requests = new AsyncLocalStorage<FetchRequest>();
-const sockets = new AsyncLocalStorage<FetchRequest>();
 
 /** Only the exact registry-admitted fetch body may reuse its initial request decision. */
 export async function runFetchInvocation<T>(args: Record<string, unknown>, options: ToolExecuteOptions | undefined,
@@ -38,7 +37,7 @@ export function hasDifferentFetchInvocation(input: FetchInput): boolean {
 
 /** A raw nested service call cannot inherit another fetch's native request authority. */
 export function withoutFetchInvocation<T>(run: () => T): T {
-  return invocations.exit(() => requests.exit(() => sockets.exit(run)));
+  return invocations.exit(() => requests.exit(run));
 }
 
 export function runFetchRequest<T>(input: FetchInput, request: FetchUrlInput, url: string, run: () => T): T {
@@ -48,23 +47,8 @@ export function runFetchRequest<T>(input: FetchInput, request: FetchUrlInput, ur
   return requests.run({ invocation, url: new URL(url).href }, run);
 }
 
-/** Redirect hops acquire their own checks instead of inheriting the initial URL's decision. */
-export function runFetchSocketHop<T>(url: string, redirectCount: number, run: () => T): T {
-  const request = requests.getStore();
-  if (!request || redirectCount !== 0 || request.url !== new URL(url).href) return sockets.exit(run);
-  request.invocation.assertCurrent();
-  return sockets.run(request, run);
-}
-
 export function isAdmittedFetchRequest(url: string): boolean {
   const request = requests.getStore();
-  if (!request || request.url !== new URL(url).href) return false;
-  request.invocation.assertCurrent();
-  return true;
-}
-
-export function isAdmittedFetchSocket(url: string): boolean {
-  const request = sockets.getStore();
   if (!request || request.url !== new URL(url).href) return false;
   request.invocation.assertCurrent();
   return true;

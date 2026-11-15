@@ -347,8 +347,10 @@ export interface ExecCommandResult {
   stderr_truncated?: boolean | undefined;
   /** Number of retry attempts used. */
   retries?: number | undefined;
-  /** Set when this command was not executed due to fail_fast/stop_on_error. */
+  /** Set when this command was not executed due to fail_fast/stop_on_error or a cancel. */
   skipped?: boolean | undefined;
+  /** Why a skipped command did not run: `earlier command failed: <cmd>` or `cancelled`. */
+  skipped_reason?: string | undefined;
   /**
    * Set when the guard refused the command before execution. Nothing ran, so
    * the reason is the whole result and reporting must not be shortened by

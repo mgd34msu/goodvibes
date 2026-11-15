@@ -63,13 +63,13 @@ export const FETCH_TOOL_SCHEMA = {
             description:
               'Extraction mode for this URL. Overrides the global extract.'
               + ' raw: raw response body; text: plain text, strips HTML tags;'
-              + ' json: ask for JSON (Accept: application/json unless headers set Accept), parse and format it; markdown: convert HTML to markdown;'
+              + ' json: ask for JSON (Accept: application/json unless headers set Accept), parse and format it (a body that is not JSON comes back as written, with json_parse_error); markdown: convert HTML to markdown;'
               + ' readable: extract main content, strip nav/sidebar/footer;'
               + ' code_blocks: extract <pre>/<code> blocks;'
               + ' links: extract all URLs; metadata: extract title/og-tags;'
               + ' structured: extract text of elements matching simple selectors: tag, #id, .class, tag.class (requires selectors field);'
               + ' tables: parse <table> elements into JSON arrays;'
-              + ' pdf: extract text from PDF responses;'
+              + ' pdf: extract the text of a PDF response, page by page (no OCR; pdf_error says why when nothing could be read);'
               + ' summary: extractive summary (the paragraph that says what the page is about + headings).',
           },
           selectors: {
@@ -124,7 +124,7 @@ export const FETCH_TOOL_SCHEMA = {
     },
     parallel: {
       type: 'boolean',
-      description: 'Fetch URLs in parallel using Promise.all. Default true.',
+      description: 'Fetch URLs in parallel. Default true. Setting rate_limit_ms runs them one after another instead.',
     },
     verbosity: {
       type: 'string',
@@ -141,7 +141,7 @@ export const FETCH_TOOL_SCHEMA = {
     rate_limit_ms: {
       type: 'integer',
       minimum: 0,
-      description: 'Minimum delay in milliseconds between sequential requests. 0 disables rate limiting (default). Has no effect in parallel mode.',
+      description: 'Minimum delay in milliseconds between requests. Any value above 0 runs the URLs one after another with this pacing, whatever parallel says. 0 disables rate limiting (default).',
     },
     max_content_length: {
       type: 'integer',
@@ -157,11 +157,6 @@ export const FETCH_TOOL_SCHEMA = {
         + ' safe-text: strips script/style blocks, control characters and invisible Unicode (default);'
         + ' strict: strips all HTML and every non-ASCII character (untrusted hosts).'
         + ' Both modes alter the content, so structured data can change; a result whose content was altered carries sanitized: true.',
-    },
-    trusted_hosts: {
-      type: 'array',
-      items: { type: 'string' },
-      description: 'Ignored. Which hosts are trusted (and may use sanitize_mode: none) is set in configuration (fetch.trustedHosts), not per call.',
     },
     blocked_hosts: {
       type: 'array',
@@ -258,7 +253,11 @@ export interface FetchInput {
    * Defaults to `'safe-text'` when omitted (rollback-safe default for fetch sanitization).
    */
   sanitize_mode?: FetchSanitizeMode | undefined;
-  /** Ignored: trusted hosts come from configuration (fetch.trustedHosts), never from a call. */
+  /**
+   * Not offered to the model and never read: trusted hosts come from
+   * configuration (fetch.trustedHosts), never from a call. Kept so an internal
+   * caller that still passes it compiles.
+   */
   trusted_hosts?: string[] | undefined;
   /** Hostnames or glob patterns explicitly blocked. Denied pre-request regardless of other config. */
   blocked_hosts?: string[] | undefined;

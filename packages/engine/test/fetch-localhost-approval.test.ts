@@ -201,6 +201,15 @@ describe('trust-tier classification of loopback vs private targets', () => {
     }
   });
 
+  test('a trailing dot or capitals do not evade a blocklist pattern, and a name is never read as an address', () => {
+    for (const host of ['a.example.com.', 'A.EXAMPLE.COM']) {
+      expect(classifyHostTrustTier(host, { blockedHosts: ['*.example.com'] }).tier).toBe('blocked');
+    }
+    for (const host of ['10.example.com', '127.example.org', '007.example.com']) {
+      expect(classifyHostTrustTier(host).tier).toBe('unknown');
+    }
+  });
+
   test('an explicit blocklist entry beats the localhost tier', () => {
     const result = classifyHostTrustTier('localhost', { blockedHosts: ['localhost'] });
     expect(result.tier).toBe('blocked');

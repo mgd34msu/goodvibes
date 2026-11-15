@@ -22,6 +22,16 @@ export interface FetchUrlResult {
   sanitized?: boolean | undefined;
   sanitization_tier?: FetchSanitizeMode | 'skipped' | undefined;
   host_trust_tier?: string | undefined;
+  /** `extract: 'json'` and the body is not JSON: why it did not parse (the body is returned as written). */
+  json_parse_error?: string | undefined;
+  /** `extract: 'pdf'` and no text could be read: why. */
+  pdf_error?: string | undefined;
+  /**
+   * Caller-set request headers not sent on after a redirect to another origin
+   * (credentials, or names read as credentials), so the caller knows what to
+   * send to the final origin itself.
+   */
+  redirect_dropped_headers?: string[] | undefined;
   metadata?: {
     headers: Record<string, string>;
     redirected: boolean;

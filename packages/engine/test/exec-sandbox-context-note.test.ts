@@ -23,7 +23,6 @@ import {
   type ExecSandboxPlan,
   type SandboxAvailability,
 } from '../platform/src/platform/tools/exec/sandbox.js';
-import { isValidConfigKey } from '../platform/src/platform/config/schema.js';
 import { formatResult } from '../platform/src/platform/tools/exec/result-format.js';
 import type { ExecCommandResult } from '../platform/src/platform/tools/exec/schema.js';
 
@@ -94,14 +93,6 @@ describe('buildSandboxNote: names the isolation that actually applies', () => {
 
     expect(note).toContain('127.0.0.1:8443');
     expect(note).not.toContain('3421');
-  });
-
-  test('the remedy it names is one the settings tool cannot perform, so it routes the agent to the owner', () => {
-    // If the settings tool ever accepts this key, the note should say so instead.
-    expect(isValidConfigKey('sandbox.egressAllowlist')).toBe(false);
-    const note = buildSandboxNote(isolatedPlan());
-    expect(note).toContain('only the owner edits');
-    expect(note).toContain('goodvibes_settings cannot change it');
   });
 
   test('it names the built-in tools that answer daemon and settings questions', () => {

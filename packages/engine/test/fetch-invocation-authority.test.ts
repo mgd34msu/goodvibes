@@ -66,7 +66,7 @@ test.each(['safe-owner', 'safe-jev'] as const)('%s inspect admission cannot auth
   expect(f.prompts()).toBe(0);
 });
 
-test('an exact admitted fetch reuses its initial decision, while a redirected private target gets no inherited grant', async () => {
+test('an admitted fetch of a name that resolves to loopback is refused, and so is a redirect into loopback', async () => {
   let initialHits = 0, targetHits = 0, localPrompts = 0;
   const target = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => { targetHits++; return new Response('target'); } }); servers.push(target);
   const initial = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: req => {
@@ -78,10 +78,10 @@ test('an exact admitted fetch reuses its initial decision, while a redirected pr
     const f = fixture('safe-owner');
     f.registry.register(createFetchTool({ resolveHost: async () => [{ address: '127.0.0.1', family: 4 }], approveLocalhostFetch: async () => { localPrompts++; return false; } }));
     const [result] = await f.run('fetch', { urls: [{ url: `http://initial.example.invalid:${initial.port}/${redirect ? 'redirect' : ''}` }], extract: 'raw', sanitize_mode: 'none' });
-    expect(JSON.parse(result?.output ?? '{}')).toMatchObject({ summary: { succeeded: redirect ? 0 : 1, failed: redirect ? 1 : 0 } });
+    expect(JSON.parse(result?.output ?? '{}')).toMatchObject({ summary: { succeeded: 0, failed: 1 }, results: [{ error: expect.stringContaining('loopback address') }] });
     expect(f.prompts()).toBe(0);
   }
-  expect(initialHits).toBe(2);
+  expect(initialHits).toBe(0);
   expect(targetHits).toBe(0);
   expect(localPrompts).toBe(0);
 });
@@ -93,12 +93,13 @@ test.each(['safe-owner', 'safe-jev', 'yolo'] as const)('%s exact fetch admission
     headers: { location: `http://blocked.example.invalid:${blocked.port}/` } }); } }); servers.push(redirect);
   const cases = [
     { url: `http://blocked.example.invalid:${blocked.port}/`, expectedRedirectHits: 0 },
-    { url: `http://start.example.invalid:${redirect.port}/`, expectedRedirectHits: 1 },
+    { url: `http://127.0.0.1:${redirect.port}/`, expectedRedirectHits: 1 },
   ];
   for (const { url, expectedRedirectHits } of cases) {
     redirectHits = 0;
     const f = fixture(mode);
-    f.registry.register(createFetchTool({ defaultBlockedHosts: ['blocked.example.invalid'], resolveHost: async () => [{ address: '127.0.0.1', family: 4 }] }));
+    f.registry.register(createFetchTool({ defaultBlockedHosts: ['blocked.example.invalid'], isLocalhostAllowed: () => true,
+      resolveHost: async () => [{ address: '127.0.0.1', family: 4 }] }));
     const [result] = await f.run('fetch', { urls: [{ url }], extract: 'raw', sanitize_mode: 'none' });
     expect(JSON.parse(result?.output ?? '{}')).toMatchObject({ summary: { succeeded: 0, failed: 1 }, results: [{ error: expect.stringContaining('blocked.example.invalid') }] });
     // The initial hop reaches the redirect server only when the first URL is not itself blocked; the blocked host is never contacted.
@@ -127,15 +128,11 @@ test.each([false, true])('a claimed YOLO call loses its bypass after mode replac
   expect(f.prompts()).toBe(0);
 });
 
-test('mode revocation during a failed address prevents every later address retry', async () => {
+test('a YOLO call to a name that resolves to loopback addresses connects to none of them', async () => {
   let firstConnections = 0, targetHits = 0;
   const target = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => { targetHits++; return new Response('unexpected'); } }); servers.push(target);
   const f = fixture('yolo');
-  const first = createServer(socket => {
-    firstConnections++;
-    f.config.set('permissions.mode', 'safe-owner');
-    socket.destroy();
-  });
+  const first = createServer(socket => { firstConnections++; socket.destroy(); });
   await new Promise<void>((resolve, reject) => { first.once('error', reject); first.listen(target.port, '127.0.0.2', resolve); });
   try {
     const nested = createFetchTool({ resolveHost: async () => [{ address: '127.0.0.2', family: 4 }, { address: '127.0.0.1', family: 4 }] });
@@ -143,7 +140,7 @@ test('mode revocation during a failed address prevents every later address retry
       parameters: { type: 'object', properties: { marker: { type: 'string' } }, required: ['marker'] } },
     execute: () => nested.execute({ urls: [{ url: `http://review.invalid:${target.port}/` }], extract: 'raw', sanitize_mode: 'none' }) });
     const [result] = await f.run('inspect', { marker: 'ordinary' });
-    expect(firstConnections).toBeGreaterThan(0);
+    expect(firstConnections).toBe(0);
     expect(targetHits).toBe(0);
     expect(JSON.parse(result?.output ?? '{}')).toMatchObject({ summary: { failed: 1, succeeded: 0 } });
   } finally { await new Promise<void>(resolve => first.close(() => resolve())); }

@@ -62,6 +62,11 @@ export interface ExecSandboxConfig {
    * isolation note so it matches the refused connection. Absent → the default port.
    */
   readonly daemonPort?: number | undefined;
+  /**
+   * Hand-edited list entries the settings rule rejected and the sandbox left out,
+   * each with the reason, so the result says why a listed command has no network.
+   */
+  readonly ignoredEntries?: readonly string[] | undefined;
 }
 
 /** The honest, host-probed availability of the exec sandbox backend. */
@@ -240,6 +245,8 @@ export interface ExecSandboxPlan {
   readonly daemonPort?: number | undefined;
   /** Present when the sandbox was requested but the host cannot provide it. */
   readonly unavailableReason?: string | undefined;
+  /** Sandbox list entries ignored for this run, each with the reason (see ExecSandboxConfig.ignoredEntries). */
+  readonly ignoredSettings?: readonly string[] | undefined;
 }
 
 /** Inputs to {@link resolveExecSandboxPlan}. */
@@ -328,9 +335,11 @@ export function resolveExecSandboxPlan(input: ResolveSandboxPlanInput): ExecSand
   const boundary =
     `bubblewrap: workspace ${input.workspaceDir} writable, system read-only, /tmp isolated, ${networkSummary}`;
 
+  const ignoredSettings = input.config.ignoredEntries ?? [];
   return {
     sandboxed: true, argvPrefix, boundary, network, escalationsGranted, homeMasked: input.homeDir !== undefined,
     ...(input.config.daemonPort === undefined ? {} : { daemonPort: input.config.daemonPort }),
+    ...(ignoredSettings.length > 0 ? { ignoredSettings } : {}),
   };
 }
 
@@ -509,7 +518,7 @@ export function buildSandboxNote(plan: ExecSandboxPlan): string {
     );
   } else {
     parts.push(
-      `separate network namespace, so host localhost services are unreachable from here, the goodvibes daemon on 127.0.0.1:${plan.daemonPort ?? DEFAULT_CONTROL_PLANE_PORT} refuses connections inside the boundary even while it is running on the host, so read daemon and settings state with the built-in goodvibes_context tool (mode "summary" for runtime and daemon state, "config_get" for a setting) and change settings with the built-in goodvibes_settings tool, both of which run outside this boundary, rather than retrying curl or systemctl in here (a command that needs the host network has to be on sandbox.egressAllowlist, a list only the owner edits, and goodvibes_settings cannot change it, so tell the owner which command needs it instead of trying to add it yourself)`,
+      `separate network namespace, so host localhost services are unreachable from here, the goodvibes daemon on 127.0.0.1:${plan.daemonPort ?? DEFAULT_CONTROL_PLANE_PORT} refuses connections inside the boundary even while it is running on the host, so read daemon and settings state with the built-in goodvibes_context tool (mode "summary" for runtime and daemon state, "config_get" for a setting) and change settings with the built-in goodvibes_settings tool, both of which run outside this boundary, rather than retrying curl or systemctl in here (a command that needs the host network has to be on sandbox.egressAllowlist, and widening that list is the owner's decision, so tell the owner which command needs it)`,
     );
   }
   parts.push(
@@ -518,6 +527,7 @@ export function buildSandboxNote(plan: ExecSandboxPlan): string {
   parts.push(
     'absence observed here is not absence on the host, re-check on the host before concluding something is missing',
   );
+  if (plan.ignoredSettings?.length) parts.push(`settings file entries not applied: ${plan.ignoredSettings.join('; ')}`);
   return `${parts.join('; ')}.`;
 }
 

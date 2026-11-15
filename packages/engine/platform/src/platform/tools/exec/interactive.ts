@@ -432,8 +432,11 @@ export async function runInteractiveCommand(input: InteractiveRunInput): Promise
     while (!exited && !timedOut && !cancelled) {
       await sleep(QUIET_POLL_INTERVAL_MS);
       if (exited || timedOut || cancelled || promptDeclined) continue;
-      // With no timeout_ms nothing else ends a prompt nobody answers.
       if (pendingPrompt !== undefined && transcript.length !== pendingPromptAtLength) pendingPrompt = undefined;
+      // While the owner is being asked, his answer is what ends the wait; stopping
+      // the run then would throw the answer away.
+      if (askInFlight) continue;
+      // With no timeout_ms nothing else ends a prompt nobody answers.
       if (timeoutMs === 0 && pendingPrompt !== undefined
         && Date.now() - lastDataAt >= (interaction.unansweredPromptLimitMs ?? DEFAULT_UNANSWERED_PROMPT_LIMIT_MS)) {
         stoppedForUnansweredPrompt = true;
@@ -441,7 +444,6 @@ export async function runInteractiveCommand(input: InteractiveRunInput): Promise
         void kill();
         continue;
       }
-      if (askInFlight) continue;
       if (Date.now() - lastDataAt < quietWindowMs) continue;
       if (transcript.length === readAtLength || pendingPromptLine(transcript) === null) continue;
       const readLength = transcript.length;

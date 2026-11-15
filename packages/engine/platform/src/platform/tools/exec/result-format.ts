@@ -120,12 +120,15 @@ function noticeFields(result: ExecCommandResult): Record<string, unknown> {
     ...(result.warnings && { warnings: result.warnings }),
     ...(result.pending_prompt && { pending_prompt: result.pending_prompt }),
     ...(result.prompt_declined && { prompt_declined: true }),
+    // A command that failed because the scrub withheld its token must say so at
+    // every verbosity, count_only included.
+    ...(result.withheld_env && result.withheld_env.length > 0 && { withheld_env: result.withheld_env }),
   };
 }
 
 export function formatResult(result: ExecCommandResult, verbosity: ExecVerbosity): Record<string, unknown> {
   if (result.skipped) {
-    return { cmd: result.cmd, success: false, skipped: true };
+    return { cmd: result.cmd, success: false, skipped: true, ...(result.skipped_reason && { skipped_reason: result.skipped_reason }) };
   }
 
   // A denial is not command output, so verbosity must not shorten it: nothing
@@ -187,7 +190,6 @@ export function formatResult(result: ExecCommandResult, verbosity: ExecVerbosity
         // see regardless of how quiet it asked the output to be.
         ...(result.stdout_truncated && { stdout_truncated: true }),
         ...(result.stderr_truncated && { stderr_truncated: true }),
-        ...(result.withheld_env && result.withheld_env.length > 0 && { withheld_env: result.withheld_env }),
         ...sandboxFields(result),
         ...noticeFields(result),
       };
@@ -207,7 +209,6 @@ export function formatResult(result: ExecCommandResult, verbosity: ExecVerbosity
         stderr: stderr.text,
         ...(result.stdout_truncated && { stdout_truncated: true }),
         ...(result.stderr_truncated && { stderr_truncated: true }),
-        ...(result.withheld_env && result.withheld_env.length > 0 && { withheld_env: result.withheld_env }),
         ...(result.pty && { pty: true }),
         ...(result.prompts_answered !== undefined && { prompts_answered: result.prompts_answered }),
         ...sandboxFields(result),

@@ -1015,11 +1015,11 @@ async function executeResolvedCommands(
   policy: ExecRunPolicy,
   signal?: AbortSignal,
 ): Promise<ExecCommandResult[]> {
-  const skipped = (cmdStr: string): ExecCommandResult => ({ cmd: cmdStr, exit_code: null, stdout: '', stderr: '', success: false, skipped: true });
+  const skipped = (cmdStr: string, reason: string): ExecCommandResult => ({ cmd: cmdStr, exit_code: null, stdout: '', stderr: '', success: false, skipped: true, skipped_reason: reason });
   // A cancel settles the command it interrupts as cancelled and leaves every
   // finished command's result in place; nothing already done is dropped.
   const runOne = async (cmdStr: string, cmdInput: ExecCommandInput): Promise<ExecCommandResult> => {
-    if (signal?.aborted) return skipped(cmdStr);
+    if (signal?.aborted) return skipped(cmdStr, 'cancelled');
     const startedAt = Date.now();
     try {
       return await executeResolvedCommand(processManager, overflowHandler, featureFlags, cmdStr, cmdInput, workingDirectory, globalTimeout, scrub, policy, signal);
@@ -1037,17 +1037,21 @@ async function executeResolvedCommands(
   }
 
   const results: ExecCommandResult[] = [];
-  let stopped = false;
+  let stoppedBy: string | undefined;
   for (const { cmdStr, cmdInput } of resolvedCmds) {
-    if (stopped || signal?.aborted) {
-      results.push(skipped(cmdStr));
+    if (signal?.aborted) {
+      results.push(skipped(cmdStr, 'cancelled'));
+      continue;
+    }
+    if (stoppedBy !== undefined) {
+      results.push(skipped(cmdStr, `earlier command failed: ${stoppedBy}`));
       continue;
     }
 
     const result = await runOne(cmdStr, cmdInput);
     results.push(result);
     if (failFast && !result.success) {
-      stopped = true;
+      stoppedBy = cmdStr;
     }
   }
 

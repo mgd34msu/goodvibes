@@ -103,6 +103,10 @@ describe('network scope rules', () => {
     expect(evaluateNetworkScopeRule(deny(['host.example'], [443]), 'fetch', { url: 'https://host.example/' }).matched).toBe(true);
   });
 
+  test('a trailing dot does not hide a denied host', () => {
+    expect(evaluateNetworkScopeRule(deny(['*.evil.com']), 'fetch', { url: 'https://a.evil.com./x' }).matched).toBe(true);
+  });
+
   test('a deny rule sees a second URL field', () => {
     expect(evaluateNetworkScopeRule(deny(['evil.com']), 'fetch', { url: 'https://ok.example/', endpoint: 'https://evil.com/' }).matched).toBe(true);
   });

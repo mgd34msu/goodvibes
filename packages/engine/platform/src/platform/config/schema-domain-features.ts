@@ -20,7 +20,7 @@ import { intRange, numRange } from './schema-shared.js';
 export interface FetchConfig {
   /** Default sanitize mode applied when a fetch call omits sanitize_mode. */
   sanitizeMode: 'none' | 'safe-text' | 'strict';
-  /** Comma-separated default trusted hosts (sanitize relaxed); per-call trusted_hosts still adds. */
+  /** Comma-separated trusted hosts (sanitize relaxed); the only source of trust, a call cannot add to it. */
   trustedHosts: string;
   /** Comma-separated default blocked hosts (always refused); per-call blocked_hosts still adds. */
   blockedHosts: string;
@@ -171,14 +171,14 @@ export const featureConfigSettings: ConfigSetting[] = [
     type: 'string',
     default: '',
     description:
-      'Comma-separated default trusted hosts for fetch sanitization/trust-tier classification (e.g. docs.example.com, api.internal). Trusted hosts relax sanitization. Per-call trusted_hosts are added on top of this default; empty means no host is trusted by default.',
+      'Comma-separated trusted hosts for fetch sanitization/trust-tier classification (e.g. docs.example.com, *.internal.example.com). Trusted hosts relax sanitization. This list is the only source of trust: a fetch call cannot add to it. Empty means no host is trusted. In a pattern * matches one name label and ** matches across dots; an entry that is only * or ** matches every host. Hosts are compared lower-case, without a trailing dot, in their ASCII (punycode) form.',
   },
   {
     key: 'fetch.blockedHosts',
     type: 'string',
     default: '',
     description:
-      'Comma-separated default blocked hosts for fetch trust-tier classification. Blocked hosts are always refused regardless of sanitize mode. Per-call blocked_hosts are added on top of this default. The built-in SSRF-risk block (private IPs, metadata endpoints, localhost variants) applies independently of this list.',
+      'Comma-separated default blocked hosts for fetch trust-tier classification. Blocked hosts are always refused regardless of sanitize mode or permission mode. Per-call blocked_hosts are added on top of this default. Patterns match as in fetch.trustedHosts (* one label, ** across dots, * or ** alone every host), and a.example.com. is the same host as a.example.com. The built-in SSRF-risk block (private, link-local, metadata and other non-public addresses, and encoded IP forms) applies independently of this list, in every mode.',
   },
   {
     key: 'security.tokenAudit.enabled',

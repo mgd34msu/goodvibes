@@ -15,6 +15,7 @@ import { NO_SUMMARY_NOTE } from '../platform/src/platform/tools/fetch/page-readi
 import { applyExtract } from '../platform/src/platform/tools/fetch/extract.ts';
 import { headersForOtherOrigin } from '../platform/src/platform/tools/fetch/redirect-headers.ts';
 import { executeFetchInput } from '../platform/src/platform/tools/fetch/index.ts';
+import { applySanitizer } from '../platform/src/platform/tools/fetch/sanitizer.ts';
 
 const PAGE = `<!doctype html><html><head><title>Lemon Pasta &amp; More</title><style>p{}</style></head>
 <body>
@@ -97,6 +98,20 @@ describe('the page carving (HTML grammar, code)', () => {
   });
 });
 
+describe('a hostile page cannot stall the reader', () => {
+  test('many openers with no tag end or closer are read in one pass', () => {
+    expect(pageUnits('a<b '.repeat(250_000)).length).toBeGreaterThan(0);
+    expect(applySanitizer('<script '.repeat(600_000), 'safe-text').content.length).toBeGreaterThan(0);
+    expect(applySanitizer('<script '.repeat(600_000), 'strict').content.length).toBeGreaterThan(0);
+  });
+
+  test('inline tags add nothing, and a heading keeps its level inside a region', () => {
+    expect(pageUnits('<p>un<b>believ</b>able, <a>link</a>.</p>')[0]?.text).toBe('unbelievable, link.');
+    expect(pageUnits('<h1><div>T</div></h1>')[0]?.headingLevel).toBe(1);
+    expect(pageUnits('<p>a</p><noscript>n</noscript><template>t</template><textarea>x</textarea>').map((unit) => unit.text)).toEqual(['a']);
+  });
+});
+
 describe('readable: blocks read as not main content are dropped', () => {
   test('a no that acts drops the block; a yes or an unsure reading keeps it; the article header stays', async () => {
     const readable = await applyExtract(PAGE, 'text/html', 'readable');
@@ -157,20 +172,22 @@ describe('headers at a redirect to another origin', () => {
       { Authorization: 'Bearer a', cookie: 'sid=1', 'Proxy-Authorization': 'Basic b', 'X-Service-Key': 'k' },
       new Set(['x-service-key']),
     );
-    expect(kept).toEqual({});
+    expect(kept.headers).toEqual({});
+    expect(kept.dropped).toEqual(['Authorization', 'cookie', 'Proxy-Authorization', 'X-Service-Key']);
     expect(requests).toHaveLength(0);
   });
 
   test('a caller header follows only when its name reads as not a credential with a no that acts', async () => {
     const kept = await headersForOtherOrigin({ 'X-Auth-Token': 't', 'X-Maybe': 'm', 'X-Trace-Id': 'abc' }, new Set());
-    expect(kept).toEqual({ 'X-Trace-Id': 'abc' });
+    expect(kept.headers).toEqual({ 'X-Trace-Id': 'abc' });
+    expect(kept.dropped).toEqual(['X-Auth-Token', 'X-Maybe']);
     expect(requests.map((request) => request.state)).toEqual([{ header: 'X-Auth-Token' }, { header: 'X-Maybe' }, { header: 'X-Trace-Id' }]);
   });
 
   test('public request headers follow with no reading, and a name is read once for the process', async () => {
     const headers = { Accept: 'application/json', 'Content-Type': 'application/json', 'X-Trace-Id': 'abc' };
-    expect(await headersForOtherOrigin(headers, new Set())).toEqual(headers);
-    expect(await headersForOtherOrigin(headers, new Set())).toEqual(headers);
+    expect((await headersForOtherOrigin(headers, new Set())).headers).toEqual(headers);
+    expect((await headersForOtherOrigin(headers, new Set())).headers).toEqual(headers);
     expect(requests.map((request) => request.state)).toEqual([{ header: 'X-Trace-Id' }]);
   });
 });

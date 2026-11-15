@@ -3,12 +3,16 @@
  * fetch tool's `readable` and `summary` modes (fetch/page-reading.ts).
  *
  * Nothing here decides what is content. It follows the HTML grammar only:
- * the document head, comments, `script` and `style` are not rendered text;
- * block-level elements end one run of text and start the next; character
- * references decode to the characters they name. Every run keeps the path of
- * the grouping elements it sits in (tag, id and class, as written), which Jev
- * sees beside the text.
+ * the document head, comments, `script`, `style`, `noscript`, `template`,
+ * `textarea`, `svg` and `iframe` are not rendered text; block-level elements
+ * and `br` end one run of text and start the next, while an inline element
+ * adds nothing (`un<b>believ</b>able` is one word); character references
+ * decode to the characters they name; a heading keeps its level until its own
+ * closing tag. Every run keeps the path of the grouping elements it sits in
+ * (tag, id and class, as written), which Jev sees beside the text. The page
+ * is read by the one linear scanner (markup.ts).
  */
+import { scanMarkup } from './markup.js';
 
 /** Grouping elements: a run of text is keyed by the chain of these it sits in. */
 const REGION_TAGS = new Set([
@@ -60,20 +64,16 @@ export function decodeCharacterReferences(text: string): string {
 
 /** The text of the document's `<title>`, or empty. */
 export function pageTitle(html: string): string {
-  const match = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(html);
-  return match ? decodeCharacterReferences(match[1]!.replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim() : '';
+  for (const token of scanMarkup(html)) {
+    if (token.kind === 'element' && token.name === 'title') {
+      return decodeCharacterReferences(html.slice(token.contentStart, token.contentEnd)).replace(/\s+/g, ' ').trim();
+    }
+  }
+  return '';
 }
 
-/** The rendered part of the document: the body when one is written, without comments, scripts and styles. */
-function renderedMarkup(html: string): string {
-  const withoutHidden = html
-    .replace(/<!--[\s\S]*?-->/g, '')
-    .replace(/<head[\s>][\s\S]*?<\/head>/gi, '')
-    .replace(/<script[\s\S]*?<\/script>/gi, '')
-    .replace(/<style[\s\S]*?<\/style>/gi, '');
-  const body = /<body[^>]*>([\s\S]*?)(?:<\/body>|$)/i.exec(withoutHidden);
-  return body ? body[1]! : withoutHidden;
-}
+/** Elements whose content is never rendered as page text. */
+const NOT_RENDERED: ReadonlySet<string> = new Set(['head', 'noscript', 'template', 'svg', 'iframe']);
 
 function elementLabel(tag: string, attributes: string): string {
   const id = /\bid\s*=\s*["']([^"']*)["']/i.exec(attributes)?.[1]?.trim();
@@ -82,46 +82,49 @@ function elementLabel(tag: string, attributes: string): string {
   return label.length <= MAX_LABEL_CHARS ? label : `${label.slice(0, MAX_LABEL_CHARS)}...`;
 }
 
-const TOKEN = /<(\/?)([a-zA-Z][a-zA-Z0-9-]*)((?:[^>"']|"[^"]*"|'[^']*')*)>|([^<]+)|</g;
-
-/** The page's runs of rendered text, in document order. */
+/** The page's runs of rendered text, in document order. When a `<body>` is written, only its content counts. */
 export function pageUnits(html: string): PageUnit[] {
-  const units: PageUnit[] = [];
+  let units: PageUnit[] = [];
   const regions: { readonly tag: string; readonly label: string }[] = [];
   let text = '';
-  let headingLevel: number | undefined;
+  let openHeading: number | undefined;
 
   const flush = (): void => {
     const cleaned = text.replace(/\s+/g, ' ').trim();
     if (cleaned) {
       const path = regions.length > 0 ? regions.map((region) => region.label).join(' > ') : 'body';
-      units.push({ text: cleaned, path, ...(headingLevel === undefined ? {} : { headingLevel }) });
+      units.push({ text: cleaned, path, ...(openHeading === undefined ? {} : { headingLevel: openHeading }) });
     }
     text = '';
-    headingLevel = undefined;
   };
 
-  for (const match of renderedMarkup(html).matchAll(TOKEN)) {
-    const [, closing, rawTag, attributes, run] = match;
-    if (rawTag === undefined) {
-      text += decodeCharacterReferences(run ?? match[0]);
+  for (const token of scanMarkup(html, { skip: NOT_RENDERED })) {
+    if (token.kind === 'text') {
+      text += decodeCharacterReferences(html.slice(token.start, token.end));
       continue;
     }
-    const tag = rawTag.toLowerCase();
+    if (token.kind !== 'tag') continue;
+    const tag = token.name;
+    if (tag === 'body') {
+      flush();
+      if (token.closing) break;
+      // Text written before the body is not part of the rendered page.
+      units = [];
+      regions.length = 0;
+      openHeading = undefined;
+      continue;
+    }
     const isRegion = REGION_TAGS.has(tag);
-    if (!isRegion && !UNIT_TAGS.has(tag)) {
-      text += ' ';
-      continue;
-    }
+    if (!isRegion && !UNIT_TAGS.has(tag)) continue;
     flush();
     const heading = HEADING.exec(tag);
-    if (heading && !closing) headingLevel = Number(heading[1]);
+    if (heading) openHeading = token.closing ? undefined : Number(heading[1]);
     if (!isRegion) continue;
-    if (!closing && !(attributes ?? '').trimEnd().endsWith('/')) {
-      regions.push({ tag, label: elementLabel(tag, attributes ?? '') });
+    if (!token.closing && !token.selfClosing) {
+      regions.push({ tag, label: elementLabel(tag, token.attributes) });
       continue;
     }
-    if (closing) {
+    if (token.closing) {
       const open = regions.map((region) => region.tag).lastIndexOf(tag);
       if (open >= 0) regions.length = open;
     }

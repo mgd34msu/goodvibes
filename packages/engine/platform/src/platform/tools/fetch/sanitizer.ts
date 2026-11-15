@@ -16,6 +16,11 @@
  *                   printable characters. Use for untrusted or unknown hosts.
  */
 
+import { markupText, removeElements } from './markup.js';
+
+/** Elements both sanitizing modes drop whole, content included. */
+const SCRIPT_AND_STYLE: ReadonlySet<string> = new Set(['script', 'style']);
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -62,11 +67,9 @@ function sanitizeNone(content: string): SanitizeResult {
 function sanitizeSafeText(content: string): SanitizeResult {
   const original = content;
 
-  let sanitized = content
-    // Remove script blocks (including event handlers encoded in attributes)
-    .replace(/<script[\s\S]*?<\/script>/gi, '')
-    // Remove style blocks
-    .replace(/<style[\s\S]*?<\/style>/gi, '')
+  // Script and style elements are removed by the one linear markup scanner
+  // (markup.ts), so a page of unclosed openers cannot stall the call.
+  const sanitized = removeElements(content, SCRIPT_AND_STYLE)
     // Strip C0 control characters (0x00-0x08, 0x0B, 0x0C, 0x0E-0x1F) and DEL (0x7F)
     // Keep: 0x09 (tab), 0x0A (LF), 0x0D (CR)
     // eslint-disable-next-line no-control-regex
@@ -96,13 +99,8 @@ function sanitizeSafeText(content: string): SanitizeResult {
 function sanitizeStrict(content: string): SanitizeResult {
   const original = content;
 
-  let sanitized = content
-    // Remove script blocks
-    .replace(/<script[\s\S]*?<\/script>/gi, '')
-    // Remove style blocks
-    .replace(/<style[\s\S]*?<\/style>/gi, '')
-    // Strip all remaining HTML tags
-    .replace(/<[^>]+>/g, ' ')
+  // Script and style content, comments and every tag go in one linear pass (markup.ts).
+  const sanitized = markupText(content, ' ')
     // Allow only: printable ASCII (0x20-0x7E), tab (0x09), LF (0x0A), CR (0x0D)
     // eslint-disable-next-line no-control-regex
     .replace(/[^\x09\x0A\x0D\x20-\x7E]/g, '')

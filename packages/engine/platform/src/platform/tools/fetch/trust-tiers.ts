@@ -18,16 +18,21 @@ import { sanitizeUrlForLog } from '../../utils/fetch-with-timeout.js';
  *   - `blocked`  , Host matches an internal address, metadata endpoint, or
  *                   explicit blocklist entry. Request is denied pre-flight.
  *
- * SSRF protections detect (always blocked):
- *   - Private IPv4 ranges (RFC 1918) and link-local metadata (169.254.x.x)
- *   - IPv6 link-local and unique-local ranges
- *   - The link-local metadata address 169.254.169.254 written as the host;
- *     a name is checked by the addresses it resolves to (pinned-request.ts)
- *   - DNS rebinding patterns (encoded or obfuscated IP addresses)
+ * SSRF protections detect (always blocked, in every mode):
+ *   - An IP address written as the host that falls in a non-public range
+ *     (classifyResolvedAddress: private, link-local and metadata, shared,
+ *     reserved, multicast, unspecified, and mapped forms of these). A name is
+ *     never read as an address; it is checked by the addresses it resolves to
+ *     (pinned-request.ts).
+ *   - An IPv4 address spelled in another notation (hex, octal, a bare number).
+ *
+ * Hosts and list entries are compared in one form (host-utils.ts
+ * normalizeHost), so `a.example.com.` matches a pattern for `a.example.com`.
  */
 
+import { isIP } from 'node:net';
 import { logger } from '../../utils/logger.js';
-import { hostMatchesGlob } from './host-utils.js';
+import { hostMatchesGlob, normalizeHost } from './host-utils.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -73,35 +78,8 @@ export interface TrustTierConfig {
 }
 
 // ---------------------------------------------------------------------------
-// SSRF detection patterns
+// Classification helpers
 // ---------------------------------------------------------------------------
-
-/** IPv4 private/loopback ranges per RFC 1918, RFC 5735. */
-const PRIVATE_IPV4_PATTERNS: RegExp[] = [
-  // 127.0.0.0/8, loopback
-  /^127\./,
-  // 10.0.0.0/8
-  /^10\./,
-  // 172.16.0.0/12
-  /^172\.(1[6-9]|2[0-9]|3[01])\./,
-  // 192.168.0.0/16
-  /^192\.168\./,
-  // 169.254.0.0/16, link-local / AWS/GCP metadata
-  /^169\.254\./,
-  // 0.0.0.0, unspecified
-  /^0\.0\.0\.0$/,
-];
-
-/** IPv6 loopback, link-local, and private prefixes. */
-const PRIVATE_IPV6_PATTERNS: RegExp[] = [
-  // ::1, loopback
-  /^::1$/i,
-  // fe80::/10, link-local
-  /^fe[89ab][0-9a-f]:/i,
-  // fc00::/7, unique local (fc00:: and fd00::)
-  /^f[cd][0-9a-f]{2}:/i,
-];
-
 
 /** Known localhost aliases. */
 const LOCALHOST_ALIASES: ReadonlySet<string> = new Set([
@@ -112,98 +90,35 @@ const LOCALHOST_ALIASES: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Regex patterns for detecting encoded/obfuscated IP representations
- * used in DNS rebinding / SSRF bypass attempts.
- * Hex and octal variants are straightforward; decimal integers require
- * value-aware decoding via `isPrivateDecimalIp()`.
- */
-const ENCODED_IP_HEX_OCTAL_PATTERNS: RegExp[] = [
-  // Hex-encoded IPv4: 0xC0A80001 style
-  /^0x[0-9a-f]{1,8}$/i,
-  // Octal-encoded IPv4 segments: 0177.0.0.1 style
-  /^0[0-7]+\./,
-];
-
-/**
- * Returns true if the host is a decimal integer representation of a
- * private/loopback IPv4 address (e.g. 2130706433 = 127.0.0.1).
- *
- * Only block decimal integers that decode to private addresses; ordinary
- * numeric hostnames remain subject to the rest of the trust-tier checks.
- */
-function isPrivateDecimalIp(host: string): boolean {
-  if (!/^\d{1,10}$/.test(host)) return false;
-  const num = parseInt(host, 10);
-  if (num > 0xFFFFFFFF) return false;
-  const a = (num >>> 24) & 0xFF;
-  const b = (num >>> 16) & 0xFF;
-  // Private ranges: 10.x.x.x, 172.16-31.x.x, 192.168.x.x, 127.x.x.x
-  return a === 10 || a === 127 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168);
-}
-
-// ---------------------------------------------------------------------------
-// Classification helpers
-// ---------------------------------------------------------------------------
-
-/**
- * Returns true if the host is a private/loopback IPv4 address.
- */
-function isPrivateIpv4(host: string): boolean {
-  return PRIVATE_IPV4_PATTERNS.some((pattern) => pattern.test(host));
-}
-
-/**
- * Returns true if the host is an IPv6 loopback or private address.
- */
-function isPrivateIpv6(host: string): boolean {
-  // Strip brackets from bracketed IPv6: [::1] -> ::1
-  const normalized = host.startsWith('[') && host.endsWith(']')
-    ? host.slice(1, -1)
-    : host;
-  return PRIVATE_IPV6_PATTERNS.some((pattern) => pattern.test(normalized));
-}
-
-/**
- * Returns true if the host uses an encoded/obfuscated IP representation
- * commonly used to bypass naive SSRF filters.
- */
-function isEncodedIp(host: string): boolean {
-  return ENCODED_IP_HEX_OCTAL_PATTERNS.some((pattern) => pattern.test(host))
-    || isPrivateDecimalIp(host);
-}
-
-/**
- * Returns true if the host is written as an address in 169.254.0.0/16, the
- * link-local range that holds the cloud metadata endpoint 169.254.169.254.
- * A metadata host name is caught by the address it resolves to
- * (classifyResolvedAddress, checked before every request by
- * pinned-request.ts), so no list of provider host names is kept.
- */
-function isMetadataHost(host: string): boolean {
-  const octets = host.split('.');
-  return octets.length === 4 && octets[0] === '169' && octets[1] === '254';
-}
-
-/**
- * Returns true if the host is a localhost alias.
+ * Returns true if the host is a localhost alias. RFC 6761 reserves `localhost`
+ * and every name under `.localhost` for loopback.
  */
 function isLocalhostAlias(host: string): boolean {
-  const lower = host.toLowerCase().replace(/\.$/, '');
-  // RFC 6761 reserves `localhost` and every name under `.localhost` for loopback.
-  return LOCALHOST_ALIASES.has(lower) || lower.endsWith('.localhost');
+  return LOCALHOST_ALIASES.has(host) || host.endsWith('.localhost');
+}
+
+/** The address a host names when it is written as an IP literal (brackets removed), or null for a name. */
+function ipLiteral(host: string): string | null {
+  const bare = host.startsWith('[') && host.endsWith(']') ? host.slice(1, -1) : host;
+  return isIP(bare) === 0 ? null : bare;
 }
 
 /**
- * Returns true if the host is a plainly-written loopback target, a localhost
- * alias, a 127.0.0.0/8 IPv4 address, or IPv6 ::1. Encoded/obfuscated loopback
- * forms (hex, octal, decimal-int) deliberately do NOT count: writing
- * 0x7f000001 instead of localhost is a filter-bypass signal and stays blocked.
+ * The dotted IPv4 address a host spells in another notation (hex, octal, a
+ * single decimal number, fewer than four parts), as the URL parser reads it,
+ * or null when the host is a name or already a dotted address. The URL parser
+ * decides, so this agrees with where the request would go.
  */
-function isPlainLoopbackHost(host: string): boolean {
-  if (isLocalhostAlias(host)) return true;
-  if (/^127\./.test(host)) return true;
-  const normalized = host.startsWith('[') && host.endsWith(']') ? host.slice(1, -1) : host;
-  return /^::1$/i.test(normalized);
+function encodedIpv4(host: string): string | null {
+  if (ipLiteral(host) !== null) return null;
+  // Only digits, dots and hex letters with an x can spell an address; any other name is a name.
+  if (!/^[0-9a-fx.]+$/.test(host)) return null;
+  try {
+    const parsed = new URL(`http://${host}/`).hostname;
+    return isIP(parsed) === 4 && parsed !== host ? parsed : null;
+  } catch {
+    return null;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -240,7 +155,7 @@ export function classifyHostTrustTier(
   host: string,
   config: TrustTierConfig = {},
 ): TrustTierResult {
-  const normalizedHost = host.toLowerCase().trim();
+  const normalizedHost = normalizeHost(host);
 
   // 1. Explicit blocklist
   const blockedEntry = (config.blockedHosts ?? []).find((pattern) =>
@@ -256,7 +171,8 @@ export function classifyHostTrustTier(
 
   // 2. Plain loopback dev-server targets, their own tier, gated by the
   // per-project approval rather than blocked outright.
-  if (isPlainLoopbackHost(normalizedHost)) {
+  const literal = ipLiteral(normalizedHost);
+  if (isLocalhostAlias(normalizedHost) || (literal !== null && isPlainLoopbackAddress(literal))) {
     return {
       tier: 'localhost',
       reason: `host "${host}" is a loopback address, needs the per-project localhost approval (fetch.allowLocalhost)`,
@@ -264,36 +180,32 @@ export function classifyHostTrustTier(
     };
   }
 
-  // 3. SSRF, cloud metadata endpoints (checked before the generic private
-  // ranges so 169.254.169.254 reports the specific metadata reason).
-  if (isMetadataHost(normalizedHost)) {
-    return {
-      tier: 'blocked',
-      reason: `host "${host}" is a cloud metadata endpoint, SSRF risk`,
-      isSsrf: true,
-    };
+  // 3. An address written as the host is checked by its range, the same
+  // arithmetic the resolved-address check uses. A name is never read as an
+  // address: 10.example.com is a name.
+  if (literal !== null) {
+    const range = classifyResolvedAddress(literal);
+    if (range === 'metadata' || (range === 'link-local' && isIP(literal) === 4)) {
+      return {
+        tier: 'blocked',
+        reason: `host "${host}" is a cloud metadata endpoint (the 169.254.0.0/16 link-local range), SSRF risk`,
+        isSsrf: true,
+      };
+    }
+    if (range !== null) {
+      return {
+        tier: 'blocked',
+        reason: `host "${host}" is a ${range} ${isIP(literal) === 6 ? 'IPv6' : 'IPv4'} address, SSRF risk`,
+        isSsrf: true,
+      };
+    }
   }
 
-  // 4. SSRF, private IPv4
-  if (isPrivateIpv4(normalizedHost)) {
-    return {
-      tier: 'blocked',
-      reason: `host "${host}" is a private IPv4 address, SSRF risk`,
-      isSsrf: true,
-    };
-  }
-
-  // 5. SSRF, private IPv6
-  if (isPrivateIpv6(normalizedHost)) {
-    return {
-      tier: 'blocked',
-      reason: `host "${host}" is a private IPv6 address, SSRF risk`,
-      isSsrf: true,
-    };
-  }
-
-  // 6. SSRF, encoded/obfuscated IP bypass
-  if (isEncodedIp(normalizedHost)) {
+  // 4. An IPv4 address spelled in another notation (0x7f000001, 0177.0.0.1,
+  // 2130706433) is a filter-bypass signal, refused even for a loopback target.
+  // A plain decimal number that spells a public address stays a host.
+  const encoded = encodedIpv4(normalizedHost);
+  if (encoded !== null && (!/^\d+$/.test(normalizedHost) || classifyResolvedAddress(encoded) !== null)) {
     return {
       tier: 'blocked',
       reason: `host "${host}" uses encoded IP representation, DNS rebinding / SSRF bypass risk`,
@@ -301,7 +213,7 @@ export function classifyHostTrustTier(
     };
   }
 
-  // 7. Explicit trustlist
+  // 5. Explicit trustlist
   const trustedEntry = (config.trustedHosts ?? []).find((pattern) =>
     hostMatchesGlob(normalizedHost, pattern),
   );
@@ -313,12 +225,17 @@ export function classifyHostTrustTier(
     };
   }
 
-  // 8. Default, unknown
+  // 6. Default, unknown
   return {
     tier: 'unknown',
     reason: `host "${host}" is not in any trust list`,
     isSsrf: false,
   };
+}
+
+/** A plainly written loopback address: 127.0.0.0/8 or ::1, not a mapped or embedded form. */
+function isPlainLoopbackAddress(address: string): boolean {
+  return address === '::1' || (isIP(address) === 4 && address.startsWith('127.'));
 }
 
 /** What a resolved address is, when it is one a fetch must not reach by a name. */

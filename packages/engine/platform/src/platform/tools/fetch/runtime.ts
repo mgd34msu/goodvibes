@@ -3,7 +3,7 @@ import type { LocalhostFetchApproval, LocalhostFetchPermit } from '../../runtime
 import { logger } from '../../utils/logger.js';
 import { currentExecutionMode, isInvocationAdmitted, isYoloExecution } from '../../gate/execution-context.js';
 import { captureProjectionStructure, describeUnexpectedToolError } from '../input-projection.js';
-import { hasDifferentFetchInvocation, isAdmittedFetchRequest, runFetchInvocation, runFetchRequest, runFetchSocketHop, withoutFetchInvocation } from './invocation.js';
+import { hasDifferentFetchInvocation, isAdmittedFetchRequest, runFetchInvocation, runFetchRequest, withoutFetchInvocation } from './invocation.js';
 import type { Tool, ToolDefinition } from '../../types/tools.js';
 import { FETCH_TOOL_SCHEMA } from './schema.js';
 import type { FetchInput, FetchUrlInput, FetchAuthInput, FetchExtractMode, FetchVerbosity, FetchSanitizeMode } from './schema.js';
@@ -17,7 +17,7 @@ import {
   extractHostname,
   type TrustTierConfig,
 } from './trust-tiers.js';
-import { applyExtract, sniffContentType } from './extract.js';
+import { applyExtractDetailed, sniffContentType } from './extract.js';
 import { headersForOtherOrigin } from './redirect-headers.js';
 import { assertHttpScheme, pinnedFetch, resolveCheckedAddresses, type HostResolver } from './pinned-request.js';
 import type { FeatureFlagManager } from '../../runtime/feature-flags/index.js';
@@ -171,10 +171,8 @@ export class FetchRuntimeService {
       return runFetchRequest(input, urlInput, url, () => fetchOne(urlInput, fetchOpts, this));
     };
 
-    if (parallel) {
-      if (rateLimitMs > 0) {
-        logger.debug('fetch tool: rate_limit_ms is ignored in parallel mode; set parallel: false to enforce rate limiting');
-      }
+    // A rate limit is a request for pacing, so it runs the URLs one after another.
+    if (parallel && rateLimitMs === 0) {
       results = await mapWithConcurrency(input.urls, MAX_PARALLEL_FETCHES, runOne);
     } else {
       results = [];
@@ -349,6 +347,8 @@ interface FetchedResponse {
   readonly response: Response;
   readonly finalUrl: string;
   readonly redirects: number;
+  /** Request headers not sent on after a redirect to another origin. */
+  readonly droppedHeaders: readonly string[];
 }
 
 async function fetchWithValidatedRedirects(input: {
@@ -369,6 +369,7 @@ async function fetchWithValidatedRedirects(input: {
   let currentMethod = input.method;
   let currentBody = input.body;
   let currentHeaders = { ...input.headers };
+  const droppedHeaders: string[] = [];
   const autonomousLocalhostStart = currentExternalOperationSource() !== undefined
     && classifyHostTrustTier(extractHostname(input.url) ?? '', input.trustTierConfig).tier === 'localhost';
 
@@ -384,9 +385,11 @@ async function fetchWithValidatedRedirects(input: {
     const host = extractHostname(currentUrl);
     const local = host !== null && classifyHostTrustTier(host, input.trustTierConfig).tier === 'localhost';
     let permit: LocalhostFetchPermit | undefined;
-    let localhostApproved = input.localhostApproved;
     const admittedInitialRequest = redirectCount === 0 && isAdmittedFetchRequest(currentUrl);
-    if (local && operation && !isYoloExecution() && !admittedInitialRequest) {
+    // YOLO and an admitted call skip only the localhost prompt, and only for the
+    // host the caller wrote; a redirect target is the server's choice.
+    let localhostApproved = input.localhostApproved || (local && redirectCount === 0 && (isYoloExecution() || admittedInitialRequest));
+    if (local && operation && !localhostApproved) {
       const request: FetchUrlInput = {
         url: currentUrl, method: currentMethod as FetchUrlInput['method'], headers: { ...currentHeaders },
         ...(typeof currentBody === 'string' ? { body: currentBody } : {}),
@@ -404,8 +407,8 @@ async function fetchWithValidatedRedirects(input: {
       localhostApproved = true;
     }
     // Final claim follows checked DNS. The live guard also protects every address retry.
-    const addresses = await runFetchSocketHop(currentUrl, redirectCount, () => resolveCheckedAddresses(currentUrl,
-      { trustTierConfig: input.trustTierConfig, localhostApproved, resolveHost: input.resolveHost }));
+    const addresses = await resolveCheckedAddresses(currentUrl,
+      { trustTierConfig: input.trustTierConfig, localhostApproved, resolveHost: input.resolveHost });
     assertCurrent();
     permit?.assertCurrent();
     permit?.claim();
@@ -419,7 +422,7 @@ async function fetchWithValidatedRedirects(input: {
     } as RequestInit, addresses, 'default', guard);
     guard();
 
-    const settled = { response, finalUrl: currentUrl, redirects: redirectCount };
+    const settled = { response, finalUrl: currentUrl, redirects: redirectCount, droppedHeaders };
     if (!isRedirectStatus(response.status)) return settled;
 
     const location = response.headers.get('location');
@@ -436,11 +439,12 @@ async function fetchWithValidatedRedirects(input: {
     if (nextHost !== null) {
       const trustResult = classifyHostTrustTier(nextHost, input.trustTierConfig);
       emitHostTrustTier(nextHost, nextUrl, trustResult);
-      if (trustResult.tier === 'blocked' && (!trustResult.isSsrf || !isYoloExecution())) {
+      // A server may not choose an internal destination in any mode.
+      if (trustResult.tier === 'blocked') {
         if (trustResult.isSsrf) emitSsrfDeny(nextHost, nextUrl, trustResult.reason);
         throw new Error(`Redirect blocked: ${trustResult.reason}`);
       }
-      if (trustResult.tier === 'localhost' && !input.localhostApproved && !autonomousLocalhostStart && !isYoloExecution()) {
+      if (trustResult.tier === 'localhost' && !input.localhostApproved && !autonomousLocalhostStart) {
         // A public origin redirecting into loopback is an SSRF vector; only an
         // approved-for-this-project localhost target may be followed.
         emitSsrfDeny(nextHost, nextUrl, trustResult.reason);
@@ -454,7 +458,9 @@ async function fetchWithValidatedRedirects(input: {
       currentHeaders = removeContentHeaders(currentHeaders);
     }
     if (new URL(nextUrl).origin !== new URL(currentUrl).origin) {
-      currentHeaders = await headersForOtherOrigin(currentHeaders, input.credentialHeaders, input.signal);
+      const followed = await headersForOtherOrigin(currentHeaders, input.credentialHeaders, input.signal);
+      currentHeaders = followed.headers;
+      droppedHeaders.push(...followed.dropped);
     }
     currentUrl = nextUrl;
   }
@@ -585,10 +591,10 @@ async function fetchOne(
     initialTrustResult = classifyHostTrustTier(hostname, trustTierConfig);
     emitHostTrustTier(hostname, urlInput.url, initialTrustResult);
 
-    // Private-IP / metadata-endpoint blocking is absolute: no configuration,
-    // approval, or kill switch relaxes it. The tool result carries the honest
-    // reason; nothing else is surfaced.
-    if (initialTrustResult.tier === 'blocked' && (!initialTrustResult.isSsrf || (!isYoloExecution() && !isAdmittedFetchRequest(effectiveUrl)))) {
+    // Private-IP / metadata-endpoint blocking is absolute: no mode, approval,
+    // configuration or kill switch relaxes it. The tool result carries the
+    // honest reason; nothing else is surfaced.
+    if (initialTrustResult.tier === 'blocked') {
       if (initialTrustResult.isSsrf) {
         emitSsrfDeny(hostname, urlInput.url, initialTrustResult.reason);
       }
@@ -697,14 +703,14 @@ async function fetchOne(
 
     const durationMs = Math.round(performance.now() - startTime);
     let contentType = response.headers.get('content-type') ?? '';
-    const bodyResult = await readResponseText(response, effectiveMaxContent);
+    const bodyResult = await readResponseBody(response, effectiveMaxContent, extractMode === 'pdf');
     for (const permit of permits) permit.assertCurrent();
     let rawBody = bodyResult.text;
     contentType = sniffContentType(contentType, rawBody);
 
     const truncated = bodyResult.truncated;
 
-    const byteSize = Buffer.byteLength(rawBody, 'utf-8');
+    const byteSize = bodyResult.byteSize;
     const result: FetchUrlResult = buildFetchResultBase(urlInput, response, durationMs);
 
     if (verbosity === 'count_only') {
@@ -717,6 +723,7 @@ async function fetchOne(
     if (truncated) result.truncated = true;
     result.redirected = fetched.redirects > 0;
     result.final_url = fetched.finalUrl !== effectiveUrl ? fetched.finalUrl : undefined;
+    if (fetched.droppedHeaders.length > 0) result.redirect_dropped_headers = [...fetched.droppedHeaders];
 
     let effectiveSanitizeMode = sanitizationEnabled ? sanitizeMode : 'none' as const;
     if (sanitizationEnabled && hostname !== null) {
@@ -736,8 +743,12 @@ async function fetchOne(
     }
 
     if (verbosity !== 'minimal') {
-      const extracted = await applyExtract(rawBody, contentType, extractMode, { selectors: urlInput.selectors });
-      const sanitized = applySanitizer(extracted, effectiveSanitizeMode);
+      const extracted = await applyExtractDetailed(rawBody, contentType, extractMode, {
+        selectors: urlInput.selectors, bytes: bodyResult.bytes, truncated, signal: deps.signal,
+      });
+      if (extracted.jsonParseError !== undefined) result.json_parse_error = extracted.jsonParseError;
+      if (extracted.pdfError !== undefined) result.pdf_error = extracted.pdfError;
+      const sanitized = applySanitizer(extracted.content, effectiveSanitizeMode);
       logger.debug('SANITIZE_MODE_APPLIED', {
         event: 'SANITIZE_MODE_APPLIED',
         url: sanitizeUrlForLog(urlInput.url),
@@ -808,16 +819,24 @@ async function raceSignal<T>(promise: Promise<T>, signal: AbortSignal | undefine
   }
 }
 
-async function readResponseText(
+/**
+ * The response body as text, read up to `maxBytes`, with its byte count. With
+ * `keepBytes` the bytes are kept too: a PDF is binary, and a text decode
+ * replaces the bytes it cannot represent.
+ */
+async function readResponseBody(
   response: Response,
   maxBytes: number | undefined,
-): Promise<{ text: string; truncated: boolean }> {
+  keepBytes: boolean,
+): Promise<{ text: string; truncated: boolean; byteSize: number; bytes?: Uint8Array | undefined }> {
   if (maxBytes === undefined || maxBytes <= 0 || !response.body) {
-    return { text: await response.text(), truncated: false };
+    const all = new Uint8Array(await response.arrayBuffer());
+    return { text: new TextDecoder().decode(all), truncated: false, byteSize: all.byteLength, ...(keepBytes ? { bytes: all } : {}) };
   }
 
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
+  const chunks: Uint8Array[] = [];
   let total = 0;
   let text = '';
   let truncated = false;
@@ -834,6 +853,7 @@ async function readResponseText(
       }
       const chunk = value.byteLength > remaining ? value.subarray(0, remaining) : value;
       text += decoder.decode(chunk, { stream: true });
+      if (keepBytes) chunks.push(chunk);
       total += chunk.byteLength;
       if (value.byteLength > remaining) {
         truncated = true;
@@ -842,7 +862,7 @@ async function readResponseText(
       }
     }
     text += decoder.decode();
-    return { text, truncated };
+    return { text, truncated, byteSize: total, ...(keepBytes ? { bytes: Buffer.concat(chunks) } : {}) };
   } finally {
     reader.releaseLock();
   }

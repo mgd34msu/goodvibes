@@ -16,7 +16,7 @@ import {
   type HostTrustTier,
   type TrustTierConfig,
 } from '../../../tools/fetch/trust-tiers.js';
-import { globBodyToRegexSource } from '../../../utils/glob-to-regex.js';
+import { hostMatchesGlob } from '../../../tools/fetch/host-utils.js';
 
 /**
  * Re-export host trust tier types from the network scope module for
@@ -96,27 +96,6 @@ function extractHostTargets(args: Record<string, unknown>): Array<{ host: string
 }
 
 /**
- * hostGlobToRegex, Converts a host glob pattern to a RegExp.
- *
- * Supports:
- *   - `*` , matches any sequence of non-dot characters (one segment)
- *   - `**`, matches any sequence including dots (crosses subdomain boundaries)
- */
-function hostGlobToRegex(pattern: string): RegExp {
-  // `*` matches one non-dot segment; `**` crosses dots. Single forward pass
-  // (see globBodyToRegexSource), no lastIndex-prone `/g` sentinel round-trip.
-  return new RegExp(`^${globBodyToRegexSource(pattern, '[^.]*', '.*')}$`, 'i');
-}
-
-/**
- * hostMatchesPattern, Returns true if `host` matches the glob `pattern`.
- */
-function hostMatchesPattern(host: string, pattern: string): boolean {
-  if (pattern === '*') return true;
-  return hostGlobToRegex(pattern).test(host);
-}
-
-/**
  * evaluateNetworkScopeRule, Evaluates a single NetworkScopeRule against a tool call.
  *
  * Returns `matched: true` when:
@@ -169,7 +148,7 @@ export function evaluateNetworkScopeRule(
         return { matched: false, detail: `port ${port} not in allowed ports [${rule.ports.join(', ')}]` };
       }
     }
-    const matchedPattern = rule.hostPatterns.find((p) => hostMatchesPattern(host, p));
+    const matchedPattern = rule.hostPatterns.find((p) => hostMatchesGlob(host, p));
     return matchedPattern !== undefined
       ? { matched: true, detail: `host "${host}" matched pattern "${matchedPattern}"` }
       : { matched: false, detail: `host "${host}" did not match any of [${rule.hostPatterns.join(', ')}]` };

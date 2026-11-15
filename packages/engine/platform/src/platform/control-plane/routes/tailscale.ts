@@ -2,17 +2,20 @@
  * routes/tailscale.ts
  *
  * Handlers for the tailscale.* verbs over the remote-access tailscale module.
- * Detection is read-only; the serve action is the ONE state-changing tailscale
- * command, run only from this explicit user-initiated verb, recorded with an
- * honest receipt, and on success web.publicBaseUrl updates from the same
- * resolution (the https MagicDNS URL).
+ * Detection is read-only; serve and stop are the only state-changing tailscale
+ * commands, each run only from its explicit user-initiated verb and recorded
+ * with an honest receipt. A successful serve points web.publicBaseUrl at the
+ * https MagicDNS URL and remembers the value it replaced; a successful stop
+ * puts that value back when the address still points at the tailnet.
  */
 import type { GatewayMethodCatalog } from '../method-catalog.js';
 import type { GatewayMethodHandler, GatewayMethodInvocation } from '../method-catalog-shared.js';
 import {
   detectTailscaleAsync,
+  disableTailscaleServeAsync,
   enableTailscaleServeAsync,
   type TailscaleCommandRunner,
+  type TailscaleServeReceipt,
   type TailscaleServeReceiptStore,
 } from '../../remote-access/tailscale.js';
 import { GatewayVerbError } from './gateway-verb-error.js';
@@ -24,8 +27,13 @@ export interface TailscaleGatewayDeps {
   readonly receipts: TailscaleServeReceiptStore;
   /** The daemon web port `tailscale serve` fronts. */
   readonly resolveWebPort: () => number;
-  /** Persist the https MagicDNS URL as web.publicBaseUrl on a successful serve. */
+  /** Persist web.publicBaseUrl: the https MagicDNS URL on a serve, the earlier value on a stop. */
   readonly setPublicBaseUrl: (url: string) => void;
+  /**
+   * Read the current web.publicBaseUrl. Without it a serve cannot remember the
+   * value it replaced and a stop leaves web.publicBaseUrl as it is, saying so.
+   */
+  readonly getPublicBaseUrl?: (() => string) | undefined;
 }
 
 function requirePrincipal(invocation: GatewayMethodInvocation): void {
@@ -34,30 +42,43 @@ function requirePrincipal(invocation: GatewayMethodInvocation): void {
   }
 }
 
+/** Record a receipt; a store that cannot take it must not turn a command that already ran into an error. */
+function record(deps: TailscaleGatewayDeps, verb: string, receipt: TailscaleServeReceipt): boolean {
+  try {
+    deps.receipts.append(receipt);
+    return true;
+  } catch (error) {
+    logger.warn(`${verb}: the receipt could not be recorded`, {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return false;
+  }
+}
+
 function createGetHandler(deps: TailscaleGatewayDeps): GatewayMethodHandler {
   return async (invocation) => {
     requirePrincipal(invocation);
     const detection = await detectTailscaleAsync(deps.runner);
     const lastServe = deps.receipts.latest();
-    return { ...detection, ...(lastServe ? { lastServe } : {}) };
+    const activeServe = deps.receipts.active();
+    return { ...detection, ...(lastServe ? { lastServe } : {}), ...(activeServe ? { activeServe } : {}) };
   };
 }
 
 function createServeRunHandler(deps: TailscaleGatewayDeps): GatewayMethodHandler {
   return async (invocation) => {
     requirePrincipal(invocation);
-    const receipt = await enableTailscaleServeAsync(deps.resolveWebPort(), deps.runner);
-    // The attempt is recorded either way, an honest receipt, never a silent failure.
-    // A store that cannot take the record must not turn a serve that is already active into an error.
-    let receiptRecorded = true;
-    try {
-      deps.receipts.append(receipt);
-    } catch (error) {
-      receiptRecorded = false;
-      logger.warn('tailscale.serve.run: the receipt could not be recorded', {
-        error: error instanceof Error ? error.message : String(error),
-      });
+    const attempt = await enableTailscaleServeAsync(deps.resolveWebPort(), deps.runner);
+    let receipt = attempt;
+    if (attempt.ok && attempt.url && deps.getPublicBaseUrl) {
+      // A second serve while one is on must keep the address the first one
+      // replaced, not remember the tailnet URL as the value to restore.
+      const current = deps.getPublicBaseUrl();
+      const active = deps.receipts.active();
+      const previous = active?.url === current ? active.previousPublicBaseUrl : current;
+      if (previous !== undefined) receipt = { ...attempt, previousPublicBaseUrl: previous };
     }
+    const receiptRecorded = record(deps, 'tailscale.serve.run', receipt);
     let publicBaseUrlUpdated = false;
     if (receipt.ok && receipt.url) {
       try {
@@ -69,13 +90,46 @@ function createServeRunHandler(deps: TailscaleGatewayDeps): GatewayMethodHandler
         });
       }
     }
-    return { receipt, publicBaseUrlUpdated, ...(receiptRecorded ? {} : { receiptRecorded }) };
+    return { receipt, publicBaseUrlUpdated, receiptRecorded };
+  };
+}
+
+function createServeStopHandler(deps: TailscaleGatewayDeps): GatewayMethodHandler {
+  return async (invocation) => {
+    requirePrincipal(invocation);
+    const active = deps.receipts.active();
+    const receipt = await disableTailscaleServeAsync(active?.url, deps.runner);
+    const receiptRecorded = record(deps, 'tailscale.serve.stop', receipt);
+    let publicBaseUrlRestored = false;
+    let publicBaseUrlDetail: string;
+    if (!receipt.ok) {
+      publicBaseUrlDetail = 'web.publicBaseUrl is unchanged because tailscale serve was not stopped';
+    } else if (!active?.url) {
+      publicBaseUrlDetail = 'web.publicBaseUrl is unchanged: no serve started from this daemon is on record';
+    } else if (!deps.getPublicBaseUrl) {
+      publicBaseUrlDetail = `web.publicBaseUrl is unchanged: this daemon cannot read it; set it with config.set if it still names ${active.url}`;
+    } else if (deps.getPublicBaseUrl() !== active.url) {
+      publicBaseUrlDetail = 'web.publicBaseUrl is unchanged: it was changed after tailscale serve started';
+    } else {
+      const restored = active.previousPublicBaseUrl ?? '';
+      try {
+        deps.setPublicBaseUrl(restored);
+        publicBaseUrlRestored = true;
+        publicBaseUrlDetail = restored ? `web.publicBaseUrl is back to ${restored}` : 'web.publicBaseUrl is cleared';
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        logger.warn('tailscale.serve.stop: web.publicBaseUrl restore failed', { error: reason });
+        publicBaseUrlDetail = `web.publicBaseUrl still names ${active.url}: ${reason}; set it with config.set`;
+      }
+    }
+    return { receipt, publicBaseUrlRestored, publicBaseUrlDetail, receiptRecorded };
   };
 }
 
 const TAILSCALE_HANDLER_FACTORIES: Readonly<Record<string, (deps: TailscaleGatewayDeps) => GatewayMethodHandler>> = {
   'tailscale.get': createGetHandler,
   'tailscale.serve.run': createServeRunHandler,
+  'tailscale.serve.stop': createServeStopHandler,
 };
 
 /**

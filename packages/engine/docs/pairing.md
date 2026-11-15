@@ -462,8 +462,14 @@ tailscale serve --bg 3423
 
 The daemon offers this as a one-action affordance: `tailscale.get` (read-only
 detection: binary, logged-in state, MagicDNS name; where tailscale is absent,
-nothing nags) and `tailscale.serve.run` (runs the serve command above for you,
-records an honest receipt, and updates `web.publicBaseUrl` to the https URL).
+nothing nags), `tailscale.serve.run` (runs the serve command above for you,
+records an honest receipt, and updates `web.publicBaseUrl` to the https URL) and
+`tailscale.serve.stop` (runs `tailscale serve --https=443 off` and puts
+`web.publicBaseUrl` back to what it was before). Tailscale keeps a serve on,
+also after the daemon stops, until it is stopped; `tailscale.get` shows the
+serve that is on as `activeServe`. When the tailnet has Serve turned off,
+tailscale prints a link to turn it on, and the receipt carries that link as
+`enableUrl`.
 
 ### Token rotation
 

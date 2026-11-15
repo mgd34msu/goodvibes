@@ -145,6 +145,37 @@ describe('tailscale.* verbs over the catalog', () => {
     }
   });
 
+  test('tailscale.serve.stop turns off what serve.run started and puts web.publicBaseUrl back', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ts-wire-'));
+    try {
+      const calls: Call[] = [];
+      let publicBaseUrl = 'http://127.0.0.1:3423';
+      const catalog = new GatewayMethodCatalog();
+      registerTailscaleGatewayMethods(catalog, {
+        runner: fakeRunner('ready', calls),
+        receipts: new TailscaleServeReceiptStore(join(dir, 'receipts.json')),
+        resolveWebPort: () => 3423,
+        setPublicBaseUrl: (url) => { publicBaseUrl = url; },
+        getPublicBaseUrl: () => publicBaseUrl,
+      });
+      await catalog.invoke('tailscale.serve.run', { ...ctx, body: {} });
+      expect(publicBaseUrl).toBe('https://mybox.my-tailnet.ts.net');
+      const on = await catalog.invoke('tailscale.get', { ...ctx, body: {} }) as { activeServe?: { url?: string } };
+      expect(on.activeServe?.url).toBe('https://mybox.my-tailnet.ts.net');
+
+      const stop = await catalog.invoke('tailscale.serve.stop', { ...ctx, body: {} }) as { receipt: { ok: boolean }; publicBaseUrlRestored: boolean };
+      expect(stop.receipt.ok).toBe(true);
+      expect(stop.publicBaseUrlRestored).toBe(true);
+      expect(publicBaseUrl).toBe('http://127.0.0.1:3423');
+      const stateChanging = calls.filter((c) => c.args[0] === 'serve').map((c) => c.args.join(' '));
+      expect(stateChanging).toEqual(['serve --bg 3423', 'serve --https=443 off']);
+      const off = await catalog.invoke('tailscale.get', { ...ctx, body: {} }) as { activeServe?: unknown };
+      expect(off.activeServe).toBeUndefined();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test('where tailscale is absent: get is quiet, serve.run is an honest failed receipt, no config touch', async () => {
     const h = makeHarness('missing');
     try {
@@ -168,6 +199,19 @@ describe('a tailscale that did not run is described by why', () => {
     expect(detection.available).toBe(false);
     expect(detection.detail).toContain('did not answer');
     expect(detection.detail).not.toContain('not found');
+  });
+
+  test('a serve that timed out keeps the link tailscale printed', () => {
+    const link = 'https://login.tailscale.com/f/serve?node=n1';
+    const runner: TailscaleCommandRunner = {
+      run: (_command, args) => args[0] === 'status'
+        ? { status: 0, stdout: JSON.stringify({ BackendState: 'Running', Self: { DNSName: 'mybox.my-tailnet.ts.net.' } }), stderr: '' }
+        : { status: null, stdout: `Serve is not enabled on your tailnet.\nTo enable, visit:\n\n         ${link}\n`, stderr: '', errorCode: 'ETIMEDOUT' },
+    };
+    const receipt = enableTailscaleServe(3423, runner);
+    expect(receipt.ok).toBe(false);
+    expect(receipt.enableUrl).toBe(link);
+    expect(receipt.detail).toContain(link);
   });
 
   test('a missing binary is still reported as not found', () => {

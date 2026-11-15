@@ -184,7 +184,12 @@ reports the binary, logged-in state, and MagicDNS name; where tailscale is
 absent, nothing nags), and the pairing modal offers a single confirmed action
 to run the serve for you (`tailscale.serve.run`), which records an honest
 receipt and updates `web.publicBaseUrl` to the resulting `https` MagicDNS
-URL.
+URL. The serve stays on in Tailscale, also after the daemon stops or moves to
+another port, until you stop it: `tailscale.serve.stop` runs
+`tailscale serve --https=443 off` and puts `web.publicBaseUrl` back to its
+earlier value (by hand: `sudo tailscale serve --https=443 off`). If your
+tailnet has Serve turned off, the receipt carries the link Tailscale prints
+to turn it on.
 
 ## Step 7: the TUI over SSH, or cross-machine
 

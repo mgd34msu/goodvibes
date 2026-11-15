@@ -6,21 +6,21 @@
  * TLS with tailscale's own certificates, which is tailscale's business, never
  * the daemon's).
  *
- * Two operations, cleanly split by side effect:
+ * Operations, split by side effect:
  *  - `detectTailscale` is STRICTLY READ-ONLY: is the binary present, is the
  *    node logged in, what is the MagicDNS name. It never invokes a
  *    state-changing tailscale command. Where tailscale is absent, the result
  *    says so once and nothing nags.
- *  - `enableTailscaleServe` is the ONE state-changing action (`tailscale serve
- *    --bg <port>`), run only from the explicit user-initiated verb, recorded
- *    with an honest receipt either way.
+ *  - `enableTailscaleServe` starts publishing (`tailscale serve --bg <port>`)
+ *    and `disableTailscaleServeAsync` stops it (`tailscale serve --https=443
+ *    off`). Both run only from explicit user-initiated verbs and are recorded
+ *    with an honest receipt either way. tailscaled keeps a started serve after
+ *    the daemon stops, so stopping is a verb of its own, not a shutdown step.
  *
  * The command runner is injectable so tests never touch a real tailscale.
  */
 import { spawn, spawnSync } from 'node:child_process';
-import { readFileSync, existsSync, renameSync } from 'node:fs';
-import { logger } from '../utils/logger.js';
-import { writeFileAtomic } from '../utils/atomic-json-store.js';
+import { readDocument, writeDocument } from '../utils/atomic-json-store.js';
 
 /** One command's result. `errorCode` is the spawn error's errno code (ENOENT, ETIMEDOUT, ...) when it did not run to an exit status. */
 export interface TailscaleCommandResult {
@@ -108,10 +108,31 @@ export interface TailscaleDetection {
   readonly detail: string;
 }
 
-/** Why a tailscale command produced no exit status, from its errno code. */
+/** Longest stretch of a command's own output carried into a receipt. */
+const MAX_OUTPUT_IN_DETAIL = 600;
+
+/** What the command printed, stderr first, bounded for a receipt. */
+function capturedOutput(result: TailscaleCommandResult): string {
+  const text = [result.stderr.trim(), result.stdout.trim()].filter(Boolean).join('\n');
+  return text.length > MAX_OUTPUT_IN_DETAIL ? `${text.slice(0, MAX_OUTPUT_IN_DETAIL)}...` : text;
+}
+
+/**
+ * The first https link a command printed. On a tailnet where Serve or HTTPS is
+ * off, `tailscale serve` prints the admin link that turns it on and then waits,
+ * so the link is the user's next step even when the command timed out.
+ */
+function printedLink(result: TailscaleCommandResult): string | undefined {
+  return /https:\/\/[^\s"'<>]+/.exec(`${result.stdout}\n${result.stderr}`)?.[0];
+}
+
+/** Why a tailscale command produced no exit status, from its errno code, with what it printed before it stopped. */
 function notRunDetail(result: TailscaleCommandResult): string {
   if (result.errorCode === 'ENOENT') return 'tailscale binary not found';
-  if (result.errorCode === 'ETIMEDOUT') return `tailscale did not answer within ${COMMAND_TIMEOUT_MS / 1000} seconds`;
+  if (result.errorCode === 'ETIMEDOUT') {
+    const printed = capturedOutput(result);
+    return `tailscale did not answer within ${COMMAND_TIMEOUT_MS / 1000} seconds${printed ? `; it printed: ${printed}` : ''}`;
+  }
   const reason = result.stderr.trim();
   return `tailscale could not be run${reason ? `: ${reason}` : ''}`;
 }
@@ -171,50 +192,75 @@ function interpretTailscaleStatus(status: TailscaleCommandResult): TailscaleDete
   };
 }
 
-/** The honest record of one serve attempt, persisted either way. */
+/** The honest record of one serve or stop attempt, persisted either way. */
 export interface TailscaleServeReceipt {
   readonly at: number;
+  /** What was attempted. Receipts written before stopping existed carry no action and were serves. */
+  readonly action?: 'serve' | 'stop' | undefined;
   readonly command: string;
   readonly ok: boolean;
-  /** The https MagicDNS URL now fronting the daemon, on success. */
+  /** The https MagicDNS URL: now fronting the daemon after a serve, no longer fronting it after a stop. */
   readonly url?: string | undefined;
+  /** The local port a serve fronts. */
+  readonly port?: number | undefined;
+  /** The web.publicBaseUrl a successful serve replaced; a stop puts it back. */
+  readonly previousPublicBaseUrl?: string | undefined;
+  /** A link tailscale printed for the user to act on, such as the page that turns Serve on for the tailnet. */
+  readonly enableUrl?: string | undefined;
   readonly detail: string;
 }
 
+/** The command that stops what `tailscale serve --bg <port>` started: the https:443 handler it installs. */
+export const TAILSCALE_SERVE_STOP_ARGS: readonly string[] = ['serve', '--https=443', 'off'];
+
+function serveCommand(port: number): string {
+  return `tailscale serve --bg ${port}`;
+}
+
 /**
- * Run `tailscale serve --bg <port>`, the ONE state-changing tailscale action,
- * invoked only from the explicit user-initiated verb. Returns an honest receipt
- * either way; the caller persists it and updates web.publicBaseUrl on success.
+ * Run `tailscale serve --bg <port>`, invoked only from the explicit
+ * user-initiated verb. Returns an honest receipt either way; the caller
+ * persists it and updates web.publicBaseUrl on success.
  */
 export function enableTailscaleServe(
   port: number,
   runner: TailscaleCommandRunner = defaultTailscaleRunner(),
 ): TailscaleServeReceipt {
-  const command = `tailscale serve --bg ${port}`;
   const detection = detectTailscale(runner);
   if (!detection.available || !detection.loggedIn || !detection.httpsUrl) {
-    return { at: Date.now(), command, ok: false, detail: detection.detail };
+    return { at: Date.now(), action: 'serve', command: serveCommand(port), ok: false, port, detail: detection.detail };
   }
-  return serveReceipt(port, command, detection.httpsUrl, runner.run('tailscale', ['serve', '--bg', String(port)]));
+  return serveReceipt(port, detection.httpsUrl, runner.run('tailscale', ['serve', '--bg', String(port)]));
 }
 
-function serveReceipt(port: number, command: string, httpsUrl: string, result: TailscaleCommandResult): TailscaleServeReceipt {
-  if (result.status === null) return { at: Date.now(), command, ok: false, detail: notRunDetail(result) };
-  if (result.status !== 0) {
-    const stderr = result.stderr.trim() || result.stdout.trim() || 'tailscale serve failed';
-    return { at: Date.now(), command, ok: false, detail: stderr };
-  }
+function failedReceipt(base: Omit<TailscaleServeReceipt, 'at' | 'ok' | 'detail'>, result: TailscaleCommandResult, fallback: string): TailscaleServeReceipt {
+  const detail = result.status === null ? notRunDetail(result) : (capturedOutput(result) || fallback);
+  const enableUrl = printedLink(result);
+  return { at: Date.now(), ...base, ok: false, detail, ...(enableUrl ? { enableUrl } : {}) };
+}
+
+function serveReceipt(port: number, httpsUrl: string, result: TailscaleCommandResult): TailscaleServeReceipt {
+  const base = { action: 'serve' as const, command: serveCommand(port), port };
+  if (result.status !== 0) return failedReceipt(base, result, 'tailscale serve failed');
   return {
     at: Date.now(),
-    command,
+    ...base,
     ok: true,
     url: httpsUrl,
-    detail: `tailscale serve is fronting port ${port} at ${httpsUrl}`,
+    detail: `tailscale serve is fronting port ${port} at ${httpsUrl}. tailscale keeps it on, also after the daemon stops or restarts, until it is stopped with tailscale.serve.stop`,
   };
 }
 
-/** Serve attempts running now, by port: a second request for the same port waits for the first and shares its receipt. */
-const serveInFlight = new Map<number, Promise<TailscaleServeReceipt>>();
+/** Serve and stop attempts running now: a second request for the same thing waits for the first and shares its receipt. */
+const inFlight = new Map<string, Promise<TailscaleServeReceipt>>();
+
+function shared(key: string, attempt: () => Promise<TailscaleServeReceipt>): Promise<TailscaleServeReceipt> {
+  const running = inFlight.get(key);
+  if (running) return running;
+  const started = attempt().finally(() => { inFlight.delete(key); });
+  inFlight.set(key, started);
+  return started;
+}
 
 /**
  * {@link enableTailscaleServe} without blocking the thread while tailscale
@@ -225,67 +271,91 @@ export function enableTailscaleServeAsync(
   port: number,
   runner: TailscaleCommandRunner = defaultTailscaleRunner(),
 ): Promise<TailscaleServeReceipt> {
-  const running = serveInFlight.get(port);
-  if (running) return running;
-  const attempt = (async (): Promise<TailscaleServeReceipt> => {
-    const command = `tailscale serve --bg ${port}`;
+  return shared(`serve:${port}`, async () => {
     const detection = await detectTailscaleAsync(runner);
     if (!detection.available || !detection.loggedIn || !detection.httpsUrl) {
-      return { at: Date.now(), command, ok: false, detail: detection.detail };
+      return { at: Date.now(), action: 'serve', command: serveCommand(port), ok: false, port, detail: detection.detail };
     }
-    return serveReceipt(port, command, detection.httpsUrl, await runCommand(runner, 'tailscale', ['serve', '--bg', String(port)]));
-  })().finally(() => { serveInFlight.delete(port); });
-  serveInFlight.set(port, attempt);
-  return attempt;
+    return serveReceipt(port, detection.httpsUrl, await runCommand(runner, 'tailscale', ['serve', '--bg', String(port)]));
+  });
+}
+
+/**
+ * Stop publishing the daemon to the tailnet: `tailscale serve --https=443 off`
+ * removes the handler `tailscale serve --bg <port>` installed, whatever port it
+ * fronted. `url` is the address being withdrawn, for the receipt. Concurrent
+ * calls share one run.
+ */
+export function disableTailscaleServeAsync(
+  url: string | undefined,
+  runner: TailscaleCommandRunner = defaultTailscaleRunner(),
+): Promise<TailscaleServeReceipt> {
+  return shared('stop', async () => {
+    const base = { action: 'stop' as const, command: `tailscale ${TAILSCALE_SERVE_STOP_ARGS.join(' ')}`, ...(url ? { url } : {}) };
+    const result = await runCommand(runner, 'tailscale', TAILSCALE_SERVE_STOP_ARGS);
+    if (result.status !== 0) return failedReceipt(base, result, 'tailscale serve could not be stopped');
+    return {
+      at: Date.now(),
+      ...base,
+      ok: true,
+      detail: url ? `tailscale serve is stopped; ${url} no longer reaches this daemon` : 'tailscale serve is stopped for https port 443',
+    };
+  });
 }
 
 const MAX_RECEIPTS = 20;
 
-/** Bounded on-disk receipt log for serve attempts (newest last). */
+function isReceipt(value: unknown): value is TailscaleServeReceipt {
+  if (typeof value !== 'object' || value === null) return false;
+  const r = value as Record<string, unknown>;
+  return typeof r.at === 'number' && typeof r.command === 'string' && typeof r.ok === 'boolean' && typeof r.detail === 'string';
+}
+
+/**
+ * Bounded receipt log for serve and stop attempts (newest last). The document
+ * is read once, on first use, and held in memory; each append is one write and
+ * one rename. A file that cannot be read is moved aside by the shared document
+ * reader rather than replaced by the next append, because these receipts are
+ * the only record of what was published to the tailnet.
+ */
 export class TailscaleServeReceiptStore {
+  private receipts: readonly TailscaleServeReceipt[] | undefined;
+
   constructor(private readonly filePath: string) {}
 
   list(): TailscaleServeReceipt[] {
-    if (!existsSync(this.filePath)) return [];
-    try {
-      const parsed = JSON.parse(readFileSync(this.filePath, 'utf-8')) as { receipts?: TailscaleServeReceipt[] };
-      return Array.isArray(parsed.receipts) ? parsed.receipts : [];
-    } catch {
-      return [];
-    }
+    this.receipts ??= readDocument(this.filePath, {
+      label: 'tailscale/serve-receipts',
+      recovery: 'The tailscale serve receipt history starts empty; a serve that is still on can be stopped with tailscale.serve.stop.',
+      validate: (parsed) => {
+        const receipts = (parsed as { receipts?: unknown } | null)?.receipts;
+        if (!Array.isArray(receipts)) throw new Error('receipts is not a list');
+        return receipts.filter(isReceipt);
+      },
+    }) ?? [];
+    return [...this.receipts];
   }
 
+  /** Persist a receipt. Throws when it could not be written; the caller reports that. */
   append(receipt: TailscaleServeReceipt): void {
-    this.setAsideUnreadableLog();
-    const receipts = [...this.list(), receipt].slice(-MAX_RECEIPTS);
-    try {
-      // Staged beside the log and renamed over it, so a crash mid-write leaves
-      // the previous log intact instead of a torn file the next append would
-      // overwrite.
-      writeFileAtomic(this.filePath, JSON.stringify({ receipts }, null, 2), { durable: false });
-    } catch (error) {
-      logger.warn('TailscaleServeReceiptStore: flush failed', { path: this.filePath, error: String(error) });
-    }
-  }
-
-  /** A log that exists but cannot be read is kept as `.corrupt` rather than silently replaced by the next append. */
-  private setAsideUnreadableLog(): void {
-    if (!existsSync(this.filePath)) return;
-    try {
-      const parsed = JSON.parse(readFileSync(this.filePath, 'utf-8')) as { receipts?: unknown };
-      if (Array.isArray(parsed.receipts)) return;
-    } catch {
-      // fall through to set the file aside
-    }
-    try {
-      renameSync(this.filePath, `${this.filePath}.corrupt`);
-    } catch (error) {
-      logger.warn('TailscaleServeReceiptStore: could not set aside an unreadable log', { path: this.filePath, error: String(error) });
-    }
+    const next = [...this.list(), receipt].slice(-MAX_RECEIPTS);
+    writeDocument(this.filePath, { receipts: next });
+    this.receipts = next;
   }
 
   latest(): TailscaleServeReceipt | null {
     const receipts = this.list();
     return receipts[receipts.length - 1] ?? null;
+  }
+
+  /** The serve the daemon last started and has not since stopped, from the newest successful receipt. */
+  active(): TailscaleServeReceipt | null {
+    const receipts = this.list();
+    for (let i = receipts.length - 1; i >= 0; i--) {
+      const receipt = receipts[i]!;
+      if (!receipt.ok) continue;
+      return (receipt.action ?? 'serve') === 'serve' ? receipt : null;
+    }
+    return null;
   }
 }

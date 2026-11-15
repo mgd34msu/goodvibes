@@ -22,7 +22,7 @@ const propertySchema = (schema: Record<string, unknown>, name: string): Record<s
 
 describe('verbs that change the host are admin-only at the dispatch gate', () => {
   const helper = new DaemonControlPlaneHelper({ gatewayMethods: catalog } as unknown as DaemonControlPlaneContext);
-  for (const id of ['tailscale.serve.run', 'voice.local.install', 'voice.wake.provision']) {
+  for (const id of ['tailscale.serve.run', 'tailscale.serve.stop', 'voice.local.install', 'voice.wake.provision']) {
     test(`${id} refuses a non-admin caller that holds its scope and admits an admin`, () => {
       const descriptor = catalog.get(id);
       if (!descriptor) throw new Error(`${id} is not cataloged`);

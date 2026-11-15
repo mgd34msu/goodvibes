@@ -75,7 +75,9 @@ describe('the serve receipt log', () => {
     const store = new TailscaleServeReceiptStore(path);
     store.append(receipt(2));
     expect(store.list().map((r) => r.detail)).toEqual(['receipt 2']);
-    expect(readFileSync(`${path}.corrupt`, 'utf-8')).toContain('"at":1');
+    const setAside = readdirSync(dir).find((name) => name.startsWith('receipts.json.corrupt-') && !name.endsWith('.why'));
+    expect(setAside).toBeDefined();
+    expect(readFileSync(join(dir, setAside!), 'utf-8')).toContain('"at":1');
   });
 
   test('appending leaves no staging file behind and keeps the history', () => {

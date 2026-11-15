@@ -357,9 +357,9 @@ const VERB_FAMILIES: readonly VerbFamily[] = [
     methodIds: ['stepup.challenge.mint', 'stepup.credentials.list', 'stepup.credentials.register', 'stepup.credentials.remove'],
   },
   {
-    family: 'tailscale.get / tailscale.serve.run',
+    family: 'tailscale.get / tailscale.serve.run / tailscale.serve.stop',
     reason: 'Always registered: built internally from configManager and shellPaths.',
-    methodIds: ['tailscale.get', 'tailscale.serve.run'],
+    methodIds: ['tailscale.get', 'tailscale.serve.run', 'tailscale.serve.stop'],
   },
   {
     family: 'runtime.metrics.get',

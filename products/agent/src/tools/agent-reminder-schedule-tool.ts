@@ -153,10 +153,9 @@ export function createAgentReminderScheduleTool(
       sideEffects: ['network', 'state'],
     },
     execute: async (rawArgs, options) => {
-      // True once the request has gone to the connected host: a later throw cannot say it was not applied.
-      let invoked = false;
+      let effect: ReturnType<typeof captureScheduleEffect> | undefined;
       try {
-        const effect = captureScheduleEffect(rawArgs, options, shellPaths, configManager, registry);
+        effect = captureScheduleEffect(rawArgs, options, shellPaths, configManager, registry);
         const parsed = parseReminderScheduleArgs(buildReminderScheduleArgs(rawArgs));
         if (parsed.errors.length > 0) return { success: false, error: parsed.errors.join('\n') };
         const preview = buildReminderSchedulePreview(parsed);
@@ -165,17 +164,15 @@ export function createAgentReminderScheduleTool(
         const payload = provenance
           ? { ...preview.payload, prompt: `Request provenance:\n${provenance}\n\n${preview.payload.prompt}` }
           : preview.payload;
-        effect.assertCurrent();
-        invoked = true;
         const result = await effect.invoke('automation.schedules.create', payload);
-        effect.assertCurrent();
         return formatScheduleOperatorResult(result, 'Created GoodVibes schedule for Agent reminder');
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        if (invoked) {
+        // Only a request already handed to the transport can have been applied.
+        if (effect?.sent) {
           return { success: false, error: `outcome_unknown: the schedule request was sent to the connected host and then failed (${message}). It may have been applied; read the schedule list before repeating it.` };
         }
-        return { success: false, error: message };
+        return { success: false, error: effect ? `${message} Nothing was sent to the connected host.` : message };
       }
     },
   };

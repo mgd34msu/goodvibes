@@ -1,7 +1,6 @@
 import { agentResearchSourceOwner } from '../agent/protected-research-report.ts';
 import { withModelReadingSource, captureModelReadingInput, assertModelReadingInputCurrent } from './agent-harness-model-reading-source.ts';
 /** Preferred settings and compatibility harness share one exact effect-owner plan. */
-import { readFileSync } from 'node:fs';
 import { settingsOutcomeError } from './agent-settings-outcome.ts';
 import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
@@ -23,16 +22,12 @@ import { getAgentSettingsSchema } from '../config/settings-catalog.ts';
 import { agentDaemonConfigClient, agentDaemonConfigClientRevision, buildAgentConfigRouting, configKeyScope } from '../config/daemon-config-routing.ts';
 import { buildGoodVibesSecretKey, defaultSecretBackedScope, isSecretConfigKey, isSecretReferenceValue } from '../config/secret-config.ts';
 import { createAgentSettingsImportProjector, isAgentSettingsImportMutation } from './agent-settings-import-admission.ts';
+import { readSettingsAction } from './agent-settings-action.ts';
 
-const setActions = new Set(['set', 'update', 'change', 'configure', 'set_setting']);
-const resetActions = new Set(['reset', 'clear', 'default', 'restore', 'reset_setting']);
-const normalize = (value: unknown) => typeof value === 'string' ? value.trim().toLowerCase().replace(/-/g, '_') : '';
 export function preferredSettingsMutation(name: string, args: Record<string, unknown>): 'set' | 'reset' | undefined {
   if (name === 'agent_harness') return args.mode === 'set_setting' ? 'set' : args.mode === 'reset_setting' ? 'reset' : undefined;
-  const first = normalize(args.action);
-  const reads = new Set(['list', 'status', 'settings', 'catalog', 'search', 'find', 'browse', 'get', 'show', 'inspect', 'read', 'setting', 'get_setting', 'import', 'import_settings', 'settings_import', 'import_goodvibes', 'goodvibes_import', 'preview_import', 'apply_import']);
-  const action = setActions.has(first) || resetActions.has(first) || reads.has(first) ? first : normalize(args.mode);
-  return setActions.has(action) ? 'set' : resetActions.has(action) ? 'reset' : undefined;
+  const action = readSettingsAction(args);
+  return action === 'set' || action === 'reset' ? action : undefined;
 }
 const text = (value: unknown) => typeof value === 'string' ? value.trim() : '';
 const posture = (value: unknown) => Object.freeze({ redacted: true, configured: value !== undefined && value !== null && value !== '' });
@@ -42,7 +37,6 @@ interface Capture {
   readonly key: string;
   readonly lookup: HarnessSettingLookup;
   readonly local?: ToolPreparedSettingsMutation | undefined;
-  readonly localFacts?: PreparedConfigMutationFacts | undefined;
   readonly remote?: RemoteSettingsPrecondition | undefined;
   readonly applyRemote?: (() => Promise<PreparedConfigMutationReceipt & { verifiedInOwningStore?: boolean }>) | undefined;
   readonly assertOwner: () => void;
@@ -123,18 +117,25 @@ export function createPreferredSettingsProjector(platform: Pick<CommandContext['
     const found = exactIdentifier ? await resolveHarnessSettingAsync(config, lookupArgs, undefined, reading)
       : await withModelReadingSource(original, reading, async (_captured, scoped) => resolveHarnessSettingAsync(config, lookupArgs, undefined, scoped));
     assertSelection(); for (const guard of retained.values()) guard();
-    if (found?.status !== 'found' || !found.setting.writable) throw new ToolInputProjectionError('unavailable');
+    // Setting keys are names from the schema, never the caller's text, so they may be named here.
+    if (!found) throw new ToolInputProjectionError('invalid', 'No setting matches that key. List candidates with settings action:"list" query:"<words>" and pass the exact key it shows.');
+    if (found.status === 'ambiguous') {
+      throw new ToolInputProjectionError('invalid', `More than one setting matches; pass one exact key: ${found.candidates.map(candidate => candidate.key).join(', ')}.`);
+    }
+    if (!found.setting.writable) throw new ToolInputProjectionError('invalid', `The setting ${found.setting.key} is read-only here, so it cannot be ${operation === 'set' ? 'set' : 'reset'}. Tell the owner it can be changed where it is managed.`);
     const key = found.setting.key;
     const setting = schema.find(item => item.key === key)!;
     const secretKey = isSecretConfigKey(key) || isSecretBearingConfigKey(key);
     const coerced = operation === 'set' ? coerceHarnessSettingValue(setting, original.value) : setting.default;
     const value = secretKey && typeof coerced === 'string' ? coerced.trim() : coerced;
-    if (operation === 'set' && original.value === undefined) throw new ToolInputProjectionError('invalid');
+    if (operation === 'set' && original.value === undefined) throw new ToolInputProjectionError('invalid', 'settings action:"set" needs value.');
     // An alias must not hide declared credential material from the privacy floor.
     snapshotJudgmentInput({ key, value }, 'goodvibes_settings');
     assertSettingsWriteAllowed(operation, key, value);
     const credentialClear = secretKey && (operation === 'reset' || (typeof value === 'string' && value.trim() === ''));
-    if (secretKey && operation === 'set' && typeof value === 'string' && value.trim() && !isSecretReferenceValue(value)) throw new ToolInputProjectionError('held');
+    if (secretKey && operation === 'set' && typeof value === 'string' && value.trim() && !isSecretReferenceValue(value)) {
+      throw new ToolInputProjectionError('invalid', `The setting ${key} stores a credential, so it takes a secret reference, not the credential itself. Ask the owner to store the value with /secrets set <name> and pass its goodvibes://secrets/... reference.`);
+    }
     const capability = client?.preparedSettings;
     let route: ConfigWriteRoute | undefined;
     let remote: RemoteSettingsPrecondition | undefined;
@@ -148,7 +149,9 @@ export function createPreferredSettingsProjector(platform: Pick<CommandContext['
     const remoteRequest = { operation: operation === 'reset' ? 'reset-default' as const : 'set' as const, key,
       ...(operation === 'set' ? { value } : {}), ...(credentialClear ? { credentialClear: true as const } : {}) };
     if (configKeyScope(key) === 'daemon' && client) {
-      if (!client.ownsKey(key) || !capability) throw new ToolInputProjectionError('unconfigured');
+      if (!client.ownsKey(key) || !capability) {
+        throw new ToolInputProjectionError('unconfigured', `The setting ${key} belongs to the daemon, and this session's daemon connection cannot write daemon settings. Change it on the daemon (its settings or the web UI).`);
+      }
       remote = await capability.capture(remoteRequest);
       remoteAssert = () => { if (client.preparedSettings !== capability) throw new ToolInputProjectionError('stale'); capability.assertCurrent(remote!); };
       const facts = capability.inspect(remote);
@@ -196,7 +199,7 @@ export function createPreferredSettingsProjector(platform: Pick<CommandContext['
       if (route) assertPreparedConfigWriteRoute(route);
       remoteAssert?.();
     };
-    const capture: Capture = { argsJson: originalJson, operation, key, lookup: found.lookup, local, localFacts, remote, applyRemote,
+    const capture: Capture = { argsJson: originalJson, operation, key, lookup: found.lookup, local, remote, applyRemote,
       assertOwner, persistedTo, ...(companion ? { companion } : {}), released: false, spent: false };
     assertCapture(capture); captures.set(context, capture);
     return { status: 'projected', args: original, executionContext: context, settingsMutation: local,
@@ -221,21 +224,17 @@ export async function executeAdmittedPreferredSettings(args: Record<string, unkn
   if (capture.local) receipt = await commitCurrentToolSettingsPlan(args, options);
   else { claimCurrentToolSettingsDispatch(args, options); receipt = await capture.applyRemote!(); }
   let verified = receipt.status === 'committed' && receipt.verifiedInOwningStore === true;
-  if (receipt.status === 'committed' && capture.localFacts) {
+  const local = capture.local;
+  if (receipt.status === 'committed' && local) {
+    // Whether the commit landed is the owners' question, as for an import.
     try {
-      verified = (capture.localFacts.effects ?? [capture.localFacts]).every(effect => effect.destinations.every(destination => {
-        let value: unknown = JSON.parse(readFileSync(destination.path, 'utf8'));
-        for (const segment of effect.key.split('.')) value = value && typeof value === 'object' ? (value as Record<string, unknown>)[segment] : undefined;
-        return destination.operation === 'remove' ? value === undefined : JSON.stringify(value) === JSON.stringify(effect.value);
-      }));
-      const deletion = capture.local?.secretDeletion;
-      if (verified && deletion) {
-        try { deletion.owner.assertCompletedScopedDeletion(deletion.mutation); }
-        catch { verified = false; }
-      }
-    } catch (readBackError) {
+      if (local.mutation) local.owner.assertCompletedMutation(local.mutation);
+      if (local.secretDeletion) local.secretDeletion.owner.assertCompletedScopedDeletion(local.secretDeletion.mutation);
+      verified = true;
+    } catch (completionError) {
       // Reporting cannot undo an already committed effect; verified stays false and says so.
-      logger.warn('A committed setting could not be read back from its destination', { key: capture.key, error: summarizeError(readBackError) });
+      verified = false;
+      logger.warn('A committed setting could not be confirmed by its owner', { key: capture.key, error: summarizeError(completionError) });
     }
   }
   const refused = 'refused' in receipt && receipt.refused === true;
@@ -267,7 +266,7 @@ export function settingsCommitWarning(status: string, verified: boolean): string
  * spent, so it is reported with its cause and the instruction to read the
  * setting back instead of as an authorization hold.
  */
-/** Owner-only settings (payments, credential destinations, foreign secret references) are refused before any admission or effect. */
+/** Settings an agent may not write (card material, credential destinations, a literal or another key's secret) are refused before any admission or effect. */
 export class SettingsWriteRefusedError extends ToolInputProjectionError {
   // The refusal rides as the error's detail: a projector throw never reaches execute, so the host's describers are the only path to the agent.
   constructor(readonly refusal: string) { super('held', refusal); }
@@ -280,8 +279,8 @@ export function assertSettingsWriteAllowed(operation: 'set' | 'reset', key: stri
 
 export function settingsThrownFailure(subject: 'mutation' | 'import', thrown: unknown): { readonly success: false; readonly error: string } {
   if (thrown instanceof SettingsWriteRefusedError) return { success: false, error: thrown.refusal };
-  if (thrown instanceof ToolInputProjectionError) {
-    return { success: false, error: `Settings ${subject} requires a current recorded effect-owner admission. Nothing was applied. Settings change only for what the owner asked in this turn; confirm and explicitUserRequest are not authority. Ask the owner to make the request, and do not retry the same call.` };
-  }
+  // An admission problem (held, stale, released) means nothing was tried; the tool
+  // runtime words it with its cause and next step from the one table.
+  if (thrown instanceof ToolInputProjectionError) throw thrown;
   return { success: false, error: `Settings ${subject} did not finish: ${summarizeError(thrown)}. It may or may not have been applied and was not retried; read the setting before requesting it again.` };
 }

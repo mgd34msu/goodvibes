@@ -7,8 +7,6 @@ import {
 import { settingsThrownFailure } from './agent-settings-admission.ts';
 import { createAgentSettingsImportProjector, executeAdmittedAgentSettingsImport, isAgentSettingsImportMutation } from './agent-settings-import-admission.ts';
 
-type SettingsImportAction = 'preview' | 'apply';
-
 interface AgentSettingsImportArgs {
   readonly action?: unknown;
   readonly mode?: unknown;
@@ -25,16 +23,6 @@ function output(value: unknown): { readonly success: true; readonly output: stri
 
 function error(message: string): { readonly success: false; readonly error: string } {
   return { success: false, error: message };
-}
-
-function readString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
-}
-
-function readAction(args: AgentSettingsImportArgs): SettingsImportAction {
-  const raw = (readString(args.action) || readString(args.mode)).toLowerCase();
-  if (raw === 'apply' || raw === 'confirm' || raw === 'import') return 'apply';
-  return 'preview';
 }
 
 export function createAgentSettingsImportTool(commandContext: CommandContext): Tool {
@@ -65,20 +53,15 @@ export function createAgentSettingsImportTool(commandContext: CommandContext): T
         try { return await executeAdmittedAgentSettingsImport(commandContext, args as Record<string, unknown>, options); }
         catch (thrown) { return settingsThrownFailure('import', thrown); }
       }
+      // Every word that applies the import is a mutation above; anything else previews.
       const preview = previewAgentWorkspaceTuiSettingsImport(commandContext);
       if (!preview) return error('GoodVibes settings import is unavailable in this runtime.');
-      const action = readAction(args);
-
-      if (action === 'preview') {
-        return output({
-          status: 'preview',
-          action: 'import_goodvibes_settings',
-          preview,
-          next: 'Use action:"import" to apply the captured import through recorded settings admission.',
-        });
-      }
-
-      return error('Settings import requires a current recorded effect-owner admission. Nothing was applied. Settings change only for what the owner asked in this turn; confirm and explicitUserRequest are not authority. Ask the owner to make the request, and do not retry the same call.');
+      return output({
+        status: 'preview',
+        action: 'import_goodvibes_settings',
+        preview,
+        next: 'Use action:"import" to apply the captured import through recorded settings admission.',
+      });
     },
   };
 }

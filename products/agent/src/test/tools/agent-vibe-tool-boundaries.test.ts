@@ -86,6 +86,19 @@ describe('vibe held calls', () => {
 });
 
 describe('vibe import_persona', () => {
+  test('refuses a file that is not a VIBE.md location and makes no persona of it', async () => {
+    const context = tempContext();
+    const shellPaths = context.workspace.shellPaths!;
+    const other = join(shellPaths.workingDirectory, 'notes.md');
+    writeFileSync(other, 'private project notes');
+    const result = await admitLocalState(registry => registerAgentVibeTool(registry, context), 'vibe', {
+      action: 'import_persona', path: other, review: true, use: true,
+    }, { directory: shellPaths.workingDirectory });
+    expect(result.success).toBe(false);
+    expect(JSON.stringify(result)).not.toContain('private project notes');
+    expect(AgentPersonaRegistry.fromShellPaths(shellPaths).snapshot().personas).toHaveLength(0);
+  });
+
   test('a failure after the persona was created names the persona and the step that failed', async () => {
     const context = tempContext();
     const shellPaths = context.workspace.shellPaths!;

@@ -7,14 +7,8 @@ import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools
 import type { CommandContext, CommandRegistry } from '../input/command-registry.ts';
 import { createAgentHarnessTool } from './agent-harness-tool.ts';
 import { createAgentSettingsImportTool } from './agent-settings-import-tool.ts';
-import { executeAdmittedAgentSettingsImport, isAgentSettingsImportMutation } from './agent-settings-import-admission.ts';
-
-type AgentSettingsAction =
-  | 'list'
-  | 'get'
-  | 'set'
-  | 'reset'
-  | 'import';
+import { executeAdmittedAgentSettingsImport } from './agent-settings-import-admission.ts';
+import { readSettingsAction, SETTINGS_ACTION_WORDS } from './agent-settings-action.ts';
 
 interface AgentSettingsToolArgs {
   readonly action?: unknown;
@@ -50,30 +44,6 @@ function readString(value: unknown): string {
 
 function readBoolean(value: unknown): boolean {
   return value === true || (typeof value === 'string' && ['true', 'yes', 'apply', 'run'].includes(value.trim().toLowerCase()));
-}
-
-function normalizeSettingsAction(value: unknown): AgentSettingsAction | null {
-  const action = readString(value).toLowerCase().replace(/-/g, '_');
-  if (!action) return null;
-  if (action === 'list' || action === 'status' || action === 'settings' || action === 'catalog' || action === 'search' || action === 'find' || action === 'browse') return 'list';
-  if (action === 'get' || action === 'show' || action === 'inspect' || action === 'read' || action === 'setting' || action === 'get_setting') return 'get';
-  if (action === 'set' || action === 'update' || action === 'change' || action === 'configure' || action === 'set_setting') return 'set';
-  if (action === 'reset' || action === 'clear' || action === 'default' || action === 'restore' || action === 'reset_setting') return 'reset';
-  if (action === 'import' || action === 'import_settings' || action === 'settings_import' || action === 'import_goodvibes' || action === 'goodvibes_import' || action === 'preview_import' || action === 'apply_import') return 'import';
-  return null;
-}
-
-const SETTINGS_ACTION_WORDS = ['list', 'get', 'set', 'reset', 'import', 'preview_import'] as const;
-
-/**
- * The action, inferred from the fields only when none was named. A word that was
- * sent but is not an action gives null: reading it as `get` or `list` would
- * answer a different question than the one asked.
- */
-function readAction(args: AgentSettingsToolArgs): AgentSettingsAction | null {
-  if (readString(args.action) || readString(args.mode)) return normalizeSettingsAction(args.action) ?? normalizeSettingsAction(args.mode);
-  if (readString(args.key) || readString(args.setting)) return 'get';
-  return 'list';
 }
 
 function compactArgs(entries: Record<string, unknown>): Record<string, unknown> {
@@ -119,7 +89,7 @@ function settingsLookupArgs(mode: 'get_setting' | 'set_setting' | 'reset_setting
 
 function isSettingsQuery(input: Record<string, unknown>, context: CommandContext): boolean {
   const args = captureCatalogData(input) as AgentSettingsToolArgs;
-  const action = readAction(args);
+  const action = readSettingsAction(args as Record<string, unknown>);
   return action === 'list' ? isHarnessSettingsQuery(settingsListArgs(args), context.platform.configManager)
     : action === 'get' && isHarnessSettingsQuery(settingsLookupArgs('get_setting', args), context.platform.configManager);
 }
@@ -141,7 +111,7 @@ export function createAgentSettingsTool(deps: AgentSettingsToolDeps): Tool {
         properties: {
           action: {
             type: 'string',
-            enum: ['list', 'get', 'set', 'reset', 'import', 'preview_import'],
+            enum: [...SETTINGS_ACTION_WORDS],
             description: 'list/get read; set/reset change one setting and import applies the captured import, each through recorded admission; preview_import only shows what import would apply.',
           },
           mode: { type: 'string', description: 'Alias for action.' },
@@ -164,7 +134,7 @@ export function createAgentSettingsTool(deps: AgentSettingsToolDeps): Tool {
     },
     execute: async (rawArgs: unknown, options) => {
       const args = (rawArgs && typeof rawArgs === 'object' && !Array.isArray(rawArgs) ? rawArgs : {}) as AgentSettingsToolArgs;
-      const action = readAction(args);
+      const action = readSettingsAction(args as Record<string, unknown>);
       if (!action) return error(`Unknown settings action "${readString(args.action) || readString(args.mode)}". Use one of: ${SETTINGS_ACTION_WORDS.join(', ')}.`);
 
       if (action === 'list') return forwardHarnessCatalogCall(harnessTool, rawArgs as Record<string, unknown>, settingsListArgs(args), options);
@@ -173,8 +143,8 @@ export function createAgentSettingsTool(deps: AgentSettingsToolDeps): Tool {
         try { return await executeAdmittedPreferredSettings(rawArgs as Record<string, unknown>, options); }
         catch (thrown) { return settingsThrownFailure('mutation', thrown); }
       }
+      if (action === 'preview_import') return settingsImportTool.execute({ action: 'preview' }, options);
       if (action === 'import') {
-        if (!isAgentSettingsImportMutation('settings', rawArgs as Record<string, unknown>)) return settingsImportTool.execute({ action: 'preview' }, options);
         try { return await executeAdmittedAgentSettingsImport(deps.commandContext, rawArgs as Record<string, unknown>, options); }
         catch (thrown) { return settingsThrownFailure('import', thrown); }
       }

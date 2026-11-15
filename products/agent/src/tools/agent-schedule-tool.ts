@@ -92,7 +92,7 @@ function hasEditFields(args: AgentScheduleToolArgs): boolean {
   );
 }
 
-const SCHEDULE_ACTION_WORDS = ['list', 'create', 'autonomous', 'remind', 'reminder', 'edit', 'run', 'pause', 'resume', 'enable', 'disable', 'delete'] as const;
+const SCHEDULE_ACTION_WORDS = ['list', 'show', 'create', 'autonomous', 'remind', 'reminder', 'edit', 'run', 'pause', 'resume', 'enable', 'disable', 'delete'] as const;
 
 /** The action to take, or a refusal naming why none can be chosen. */
 function readAction(args: AgentScheduleToolArgs): { readonly action: ScheduleAction } | { readonly refusal: string } {
@@ -188,12 +188,48 @@ function editArgs(args: AgentScheduleToolArgs): Record<string, unknown> {
   };
 }
 
-function listInput(args: AgentScheduleToolArgs): Record<string, unknown> {
-  const input: Record<string, unknown> = {};
-  const query = readString(args.query) || readScheduleId(args);
-  if (query) input.query = query;
-  if (typeof args.limit === 'number' && Number.isFinite(args.limit)) input.limit = args.limit;
-  return input;
+const DEFAULT_LIST_LIMIT = 20;
+const MAX_LIST_LIMIT = 200;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * The host lists every schedule and takes no filter, so the lookup the tool
+ * offers is done here, on the list it already received: a schedule id returns
+ * that one schedule, `query` matches id or name, and `limit` bounds the rows.
+ */
+function selectListedSchedules(result: Awaited<ReturnType<Tool['execute']>>, args: AgentScheduleToolArgs): Awaited<ReturnType<Tool['execute']>> {
+  if (!result.success || !result.output) return result;
+  let parsed: unknown;
+  try { parsed = JSON.parse(result.output); } catch { return result; }
+  const receipt = parsed;
+  if (!isRecord(receipt) || !isRecord(receipt.body) || !Array.isArray(receipt.body.jobs)) return result;
+  const body = receipt.body;
+  const jobs: readonly unknown[] = receipt.body.jobs;
+  const scheduleId = readScheduleId(args);
+  if (scheduleId) {
+    const job = jobs.find(entry => isRecord(entry) && entry.id === scheduleId);
+    if (!job) return { success: false, error: `No schedule with id ${scheduleId} is on the connected host (${jobs.length} listed). Call schedule action:"list" to see the ids.` };
+    return { success: true, output: JSON.stringify({ ...receipt, body: { ...body, jobs: [job] }, shown: 1, total: jobs.length }, null, 2) };
+  }
+  const query = readString(args.query).toLowerCase();
+  const matching = query
+    ? jobs.filter(entry => isRecord(entry) && [entry.id, entry.name].some(field => typeof field === 'string' && field.toLowerCase().includes(query)))
+    : jobs;
+  const limit = typeof args.limit === 'number' && Number.isInteger(args.limit) && args.limit > 0
+    ? Math.min(args.limit, MAX_LIST_LIMIT) : DEFAULT_LIST_LIMIT;
+  const shown = matching.slice(0, limit);
+  const more = matching.length - shown.length;
+  return { success: true, output: JSON.stringify({
+    ...receipt,
+    body: { ...body, jobs: shown },
+    shown: shown.length,
+    total: jobs.length,
+    ...(query ? { matching: matching.length } : {}),
+    note: `${shown.length} of ${query ? `${matching.length} matching (${jobs.length} in all)` : jobs.length} shown.${more > 0 ? ` Pass limit (up to ${MAX_LIST_LIMIT}) or a narrower query to see the other ${more}.` : ''}`,
+  }, null, 2) };
 }
 
 export function createAgentScheduleTool(
@@ -210,10 +246,10 @@ export function createAgentScheduleTool(
         properties: {
           action: {
             type: 'string',
-            enum: ['list', 'create', 'autonomous', 'remind', 'reminder', 'edit', 'run', 'pause', 'resume', 'enable', 'disable', 'delete'],
-            description: 'Schedule action; changes require a current recorded admission.',
+            enum: [...SCHEDULE_ACTION_WORDS],
+            description: 'Schedule action; show is list with a scheduleId. Changes require a current recorded admission.',
           },
-          scheduleId: { type: 'string', description: 'Connected schedule id for edit/run/pause/resume/delete.' },
+          scheduleId: { type: 'string', description: 'Connected schedule id for edit/run/pause/resume/delete; with action:list, shows that one schedule.' },
           jobId: { type: 'string', description: 'Alias for scheduleId.' },
           targetId: { type: 'string', description: 'Alias for scheduleId.' },
           task: { type: 'string', description: 'Autonomous task for action:create, or replacement task for action:edit.' },
@@ -236,8 +272,8 @@ export function createAgentScheduleTool(
           deliveryRoute: { type: 'string', description: 'Optional connected route target.' },
           deliveryWebhook: { type: 'string', description: 'Optional webhook target.' },
           disabled: { type: 'boolean', description: 'Create schedule disabled.' },
-          query: { type: 'string', description: 'Optional list query or schedule lookup text.' },
-          limit: { type: 'number', description: 'Optional list limit when supported by the connected host.' },
+          query: { type: 'string', description: 'For action:list, show only schedules whose id or name contains this text.' },
+          limit: { type: 'number', description: `For action:list, the most schedules to show (default ${DEFAULT_LIST_LIMIT}, max ${MAX_LIST_LIMIT}).` },
           confirm: { type: 'boolean', description: 'Optional request provenance; does not grant permission.' },
           explicitUserRequest: { type: 'string', description: 'Optional request provenance; the original admitted source remains authoritative.' },
         },
@@ -260,10 +296,7 @@ export function createAgentScheduleTool(
         return { success: false, error: `schedule action:${action} creates a new schedule and takes no scheduleId; to change ${readScheduleId(args)} use action:edit.` };
       }
       if (action === 'list') {
-        return run('agent_operator_method', {
-          methodId: 'automation.schedules.list',
-          input: listInput(args),
-        });
+        return selectListedSchedules(await run('agent_operator_method', { methodId: 'automation.schedules.list', input: {} }), args);
       }
       if (action === 'create') return run('agent_autonomy_schedule', autonomyArgs(args));
       if (action === 'reminder') return run('agent_reminder_schedule', reminderArgs(args));

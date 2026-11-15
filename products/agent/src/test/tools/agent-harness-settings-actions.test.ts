@@ -2037,7 +2037,8 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
         try { await fixture.admittedTool.execute({ mode: 'set_setting', key: 'surfaces.slack.botToken', value: 'xoxb-secret-value', confirm: true, explicitUserRequest: 'Set the token.' }); } catch (error) { set = error; }
         expect(set).toBeInstanceOf(ToolInputProjectionError);
         if (!(set instanceof ToolInputProjectionError)) throw new Error('Expected native secret projection refusals.');
-        expect(set.problem).toBe('unavailable');
+        // A refusal of these arguments, not a service fault.
+        expect(set.problem).toBe('invalid');
         expect(String(set)).not.toContain('xoxb-secret-value');
         await refusePreparedHarnessSetting(fixture, 'harness-secret-reset-refusal',
           { mode: 'reset_setting', key: 'surfaces.slack.botToken', confirm: true, explicitUserRequest: 'Reset the token.' },

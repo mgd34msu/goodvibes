@@ -1,20 +1,9 @@
 import { describe, expect, test } from 'bun:test';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { settingsCommitWarning, settingsThrownFailure } from '../../tools/agent-settings-admission.ts';
 import { importReceiptResult } from '../../tools/agent-settings-import-admission.ts';
 import { settingsOutcomeError } from '../../tools/agent-settings-outcome.ts';
 
 describe('a settings call that threw', () => {
-  test('a missing or stale admission is reported as the authorization hold it is', () => {
-    const mutation = settingsThrownFailure('mutation', new ToolInputProjectionError('held')).error;
-    expect(mutation).toStartWith('Settings mutation requires a current recorded effect-owner admission.');
-    expect(mutation).toContain('only for what the owner asked in this turn');
-    expect(mutation).toContain('confirm and explicitUserRequest are not authority');
-    expect(mutation).toContain('Ask the owner to make the request');
-    expect(settingsThrownFailure('import', new ToolInputProjectionError('stale')).error)
-      .toStartWith('Settings import requires a current recorded effect-owner admission.');
-  });
-
   test('any other failure names its cause and says to read the setting back, not to ask for approval', () => {
     const failure = settingsThrownFailure('mutation', new Error('EACCES: permission denied, rename config.json'));
     expect(failure.success).toBe(false);

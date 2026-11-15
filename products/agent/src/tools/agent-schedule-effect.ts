@@ -12,7 +12,7 @@ import { agentArtifactEffectGuard, captureAgentExportPath } from './agent-artifa
 let nextScheduleCall = 0;
 const captures = new WeakMap<object, { readonly shellPaths: ShellPathService; readonly configManager: AgentConnectedHostConfigReader;
   readonly connection: ReturnType<typeof captureOperatorConnection>;
-  readonly selectedTarget?: { readonly id: string; readonly revision: string; readonly record: Readonly<Record<string, unknown>> } | undefined }>();
+  readonly selectedTarget?: { readonly id: string; readonly revision: string } | undefined }>();
 
 /** Resolve selected sources before any repair or model admission. */
 export function createScheduleInputProjector(shellPaths: ShellPathService, configManager: AgentConnectedHostConfigReader): ToolInputProjector {
@@ -31,7 +31,7 @@ export function createScheduleInputProjector(shellPaths: ShellPathService, confi
     });
     const assertCurrent = () => { request.assertCurrent(); connection.assertCurrent(); };
     assertCurrent();
-    let selectedTarget: { readonly id: string; readonly revision: string; readonly record: Readonly<Record<string, unknown>> } | undefined;
+    let selectedTarget: { readonly id: string; readonly revision: string } | undefined;
     if (request.name === 'agent_schedule_edit') {
       const id = [request.args.scheduleId, request.args.jobId].find(value => typeof value === 'string' && value.trim());
       if (typeof id !== 'string') throw new ToolInputProjectionError('held');
@@ -40,8 +40,8 @@ export function createScheduleInputProjector(shellPaths: ShellPathService, confi
         { signal: request.signal, assertCurrent });
       assertCurrent();
       const revision = native.wireFields.expectedMutationRevision;
-      if (typeof revision !== 'string' || !revision || !native.originalTarget) throw new ToolInputProjectionError('held');
-      selectedTarget = Object.freeze({ id: targetId, revision, record: native.originalTarget });
+      if (typeof revision !== 'string' || !revision) throw new ToolInputProjectionError('held');
+      selectedTarget = Object.freeze({ id: targetId, revision });
     }
     const context = Object.freeze({});
     captures.set(context, { shellPaths, configManager, connection, selectedTarget });
@@ -62,24 +62,27 @@ export function captureScheduleEffect(rawArgs: Record<string, unknown>, options:
   };
   const assertCurrent = () => { assertEffect(); assertSource(); };
   assertCurrent();
-  const invokeReceipt = async (methodId: string, input: Record<string, unknown>) => {
-    assertCurrent();
-    const receipt = await executeOperatorMethodWithReceipt(registry, `schedule-operator-${++nextScheduleCall}`, methodId,
-      input, options, { signal: options?.signal, assertCurrent: assertSource });
-    assertCurrent();
-    return receipt;
-  };
+  let sent = false;
   return {
     assertCurrent,
+    /** True once the request was handed to the transport: from then on a failure cannot say it was not applied. */
+    get sent() { return sent; },
     async invoke(methodId: string, input: Record<string, unknown>): Promise<Awaited<ReturnType<Tool['execute']>>> {
       let payload = input;
       if (methodId === 'automation.jobs.update') {
         const target = capture.selectedTarget;
         if (!target || target.id !== input.jobId) throw new ToolInputProjectionError('held');
+        // The revision read when the edit was admitted; the host refuses the update if the job moved since.
         payload = { ...input, expectedMutationRevision: target.revision, admission: 'autonomous' };
       }
-      const receipt = await invokeReceipt(methodId, payload);
       assertCurrent();
+      sent = true;
+      // Once the host has answered, its answer is the outcome: no fence runs after it.
+      const receipt = await executeOperatorMethodWithReceipt(registry, `schedule-operator-${++nextScheduleCall}`, methodId,
+        payload, options, { signal: options?.signal, assertCurrent: assertSource });
+      if (!receipt.result.success && methodId === 'automation.jobs.update' && /AUTOMATION_JOB_STALE|"status": 409\b/.test(receipt.result.error ?? '')) {
+        return { success: false, error: `The schedule changed since it was read, so the host refused the edit and nothing was changed. Read it again with schedule action:"list" scheduleId:"${String(input.jobId)}" and repeat the edit if it still applies.` };
+      }
       if (receipt.kind === 'held' && receipt.result.success) return { success: false, error: 'The native operator effect receipt is unavailable.' };
       if (receipt.kind === 'received') {
         const body = receipt.body;

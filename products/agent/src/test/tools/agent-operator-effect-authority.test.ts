@@ -118,10 +118,11 @@ test('generic schedule update retains private native target before admission and
   expect(JSON.parse(f.requests[1]!.body)).toEqual({ name: 'New name', admission: 'autonomous', expectedMutationRevision: 'original-target-generation' });
   expect(f.nativeMutations()).toBe(1); expect(JSON.stringify(readingRequests)).not.toContain('fixture-private-operator-token');
 });
-test('generic schedule update never advances a native parent to a changed target', async () => {
+test('a revision the caller already read is sent as given: no second list, and the host refuses a stale one', async () => {
   const f = scene('method'); f.targets([{ id: 'fixture-job', mutationRevision: 'new-generation' }], 'new-generation');
-  await expectHeld(f.fixture.run({ methodId: 'automation.jobs.update', input: { jobId: 'fixture-job', expectedMutationRevision: 'old-generation', name: 'New name' } }));
-  expect(f.requests).toHaveLength(1); expect(f.nativeMutations()).toBe(0);
+  expect(await f.fixture.run({ methodId: 'automation.jobs.update', input: { jobId: 'fixture-job', expectedMutationRevision: 'old-generation', name: 'New name' } })).toMatchObject({ success: false });
+  expect(f.requests.map(request => new URL(request.url).pathname)).toEqual(['/api/automation/jobs/fixture-job']);
+  expect(f.nativeMutations()).toBe(0);
 });
 test('native conditional update holds a target changed during local admission', async () => {
   const f = scene('method'); f.targets([{ id: 'fixture-job', mutationRevision: 'original-generation' }], 'original-generation');

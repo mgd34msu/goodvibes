@@ -1,5 +1,6 @@
 import { existsSync } from 'node:fs';
-import { mkdir, readdir, rm, stat, unlink, writeFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { link, mkdir, open, readdir, rename, rm, stat, unlink, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import type { ArtifactDescriptor, ArtifactRecord, ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
@@ -7,12 +8,15 @@ import type { ToolRegistry, ToolExecuteOptions } from '@goodvibes-jev/engine/pla
 import { toolErrorText } from './tool-error-text.ts';
 import { agentArtifactEffectGuard, assertAgentArtifactBytes, captureAgentArtifactSource, captureAgentExportPath } from './agent-artifact-effect.ts';
 import {
-  createZipArchive,
   packageArtifactFilename,
   safeArtifactExportFilename,
   sanitizeArtifactMetadata,
   sanitizeArtifactSourceUri,
   prepareArtifactMetadata,
+  zipSizeBound,
+  ZipWriter,
+  ZIP_MAX_BYTES,
+  ZIP_MAX_ENTRIES,
   type ArtifactPackageEntry,
 } from './artifact-archive.ts';
 
@@ -330,36 +334,28 @@ async function loadArtifactsForPackage(
     assertCurrent();
     assertAgentArtifactBytes(source.record, source.buffer);
     const assertSource = captureAgentArtifactSource(store, source.record, source.assertCurrent?.bind(source)); assertSource();
-    loaded.push({ record: source.record, buffer: Buffer.from(source.buffer), assertCurrent: assertSource });
+    loaded.push({ record: source.record, buffer: source.buffer, assertCurrent: assertSource });
   }
   return loaded;
 }
 
-async function buildArtifactPackagePayload(
-  loaded: readonly { readonly record: ArtifactRecord; readonly buffer: Buffer }[],
-  options: Parameters<typeof prepareArtifactMetadata>[1],
-): Promise<ArtifactPackagePayload> {
-  const usedFilenames = new Set<string>();
-  const manifestArtifacts: Array<Record<string, unknown>> = [];
-  const entries: ArtifactPackageEntry[] = [];
-  let totalBytes = 0;
-  const fileLines: string[] = [];
+/** What a package or archive records about one artifact it copied. */
+class PackageManifest {
+  readonly artifacts: Array<Record<string, unknown>> = [];
+  readonly fileLines: string[] = [];
+  totalBytes = 0;
 
-  for (let index = 0; index < loaded.length; index += 1) {
-    const { record, buffer } = loaded[index];
-    const filename = packageArtifactFilename(record, index, usedFilenames);
-    const relativePath = `artifacts/${filename}`;
-    entries.push({ path: relativePath, buffer });
-    totalBytes += buffer.byteLength;
-    fileLines.push(`- ${record.id}: ${relativePath} (${formatBytes(buffer.byteLength)}, ${record.mimeType})`);
-    manifestArtifacts.push({
+  async add(record: ArtifactRecord, relativePath: string, copiedBytes: number, options: Parameters<typeof prepareArtifactMetadata>[1]): Promise<void> {
+    this.totalBytes += copiedBytes;
+    this.fileLines.push(`- ${record.id}: ${relativePath} (${formatBytes(copiedBytes)}, ${record.mimeType})`);
+    this.artifacts.push({
       id: record.id,
       file: relativePath,
       originalFilename: record.filename ?? null,
       kind: record.kind,
       mimeType: record.mimeType,
       sizeBytes: record.sizeBytes,
-      copiedBytes: buffer.byteLength,
+      copiedBytes,
       sha256: record.sha256,
       createdAt: isoTime(record.createdAt),
       expiresAt: record.expiresAt ? isoTime(record.expiresAt) : null,
@@ -369,13 +365,37 @@ async function buildArtifactPackagePayload(
       metadata: await prepareArtifactMetadata(record.metadata, options),
     });
   }
+}
 
+async function buildArtifactPackagePayload(
+  loaded: readonly { readonly record: ArtifactRecord; readonly buffer: Buffer }[],
+  options: Parameters<typeof prepareArtifactMetadata>[1],
+): Promise<ArtifactPackagePayload> {
+  const usedFilenames = new Set<string>();
+  const manifest = new PackageManifest();
+  const entries: ArtifactPackageEntry[] = [];
+
+  for (let index = 0; index < loaded.length; index += 1) {
+    const { record, buffer } = loaded[index];
+    const relativePath = `artifacts/${packageArtifactFilename(record, index, usedFilenames)}`;
+    entries.push({ path: relativePath, buffer, mimeType: record.mimeType });
+    await manifest.add(record, relativePath, buffer.byteLength, options);
+  }
+  entries.push(...packageDocuments(manifest));
+  return { artifactCount: loaded.length, totalBytes: manifest.totalBytes, entries };
+}
+
+/** manifest.json and README.md for a package or archive. */
+function packageDocuments(collected: PackageManifest): ArtifactPackageEntry[] {
+  const { artifacts: manifestArtifacts, fileLines, totalBytes } = collected;
+  const count = manifestArtifacts.length;
+  const entries: ArtifactPackageEntry[] = [];
   const createdAt = new Date().toISOString();
   const manifest = {
     version: 1,
     product: 'goodvibes-agent',
     createdAt,
-    artifactCount: loaded.length,
+    artifactCount: count,
     totalBytes,
     policy: {
       content: 'Exact saved artifact bytes copied into artifacts/.',
@@ -396,7 +416,7 @@ async function buildArtifactPackagePayload(
         '# GoodVibes Agent Artifact Package',
         '',
         `Generated: ${createdAt}`,
-        `Artifacts: ${loaded.length}`,
+        `Artifacts: ${count}`,
         `Total bytes: ${totalBytes}`,
         '',
         'Files',
@@ -411,12 +431,7 @@ async function buildArtifactPackagePayload(
       'utf-8',
     ),
   });
-
-  return {
-    artifactCount: loaded.length,
-    totalBytes,
-    entries,
-  };
+  return entries;
 }
 
 async function writeArtifactPackageDirectory(resolvedPath: string, payload: ArtifactPackagePayload, assertCurrent: (target: string) => void, overwrite: boolean): Promise<void> {
@@ -508,6 +523,9 @@ async function exportArtifactPackage(
   ].join('\n');
 }
 
+/** Room for manifest.json, README.md and their headers when sizing an archive before it is written. */
+const ARCHIVE_DOCUMENT_ALLOWANCE = 1_048_576;
+
 async function exportArtifactArchive(
   store: AgentArtifactBrowserStore,
   args: AgentArtifactsToolArgs,
@@ -532,25 +550,80 @@ async function exportArtifactArchive(
       throw new Error(`Archive target already exists: ${resolvedPath}. Pass overwrite:true when replacement is part of the admitted action.`);
     }
   }
+  if (!store.readContent) throw new Error('Artifact archive export requires an artifact store with readContent support.');
+  const artifactIds = readStringList(args.artifactIds);
+  if (artifactIds.length === 0) throw new Error('artifactIds is required for mode:"archive". Provide a comma-separated string or string array.');
+  if (artifactIds.length + 2 > ZIP_MAX_ENTRIES) throw new Error(`An archive holds at most ${ZIP_MAX_ENTRIES - 2} artifacts; nothing was read or written. Archive fewer, or use mode:"package".`);
 
-  const loaded = await loadArtifactsForPackage(store, args, 'archive', assertCurrent);
-  const sources = loaded.map(source => source.assertCurrent);
-  const check = (path = resolvedPath) => { assertCurrent(); for (const source of sources) source(); target.assertCurrent(path); };
-  check();
-  const payload = await buildArtifactPackagePayload(loaded, { signal, assertCurrent: check });
-  const archive = createZipArchive(payload.entries);
+  // The size each record states is known before any content is read, so an archive that cannot fit is refused first.
+  if (store.get) {
+    const sized = artifactIds.map((id, index) => {
+      const record = store.get!(id);
+      if (!record) throw new Error(`Unknown artifact ${id}; nothing was read or written. Use agent_artifacts mode:"list" to see the ids.`);
+      return { path: `artifacts/${String(index + 1).padStart(2, '0')}-${record.id}-${safeArtifactExportFilename(record)}`, sizeBytes: record.sizeBytes };
+    });
+    const bound = zipSizeBound(sized, ARCHIVE_DOCUMENT_ALLOWANCE);
+    if (bound > ZIP_MAX_BYTES) {
+      const total = sized.reduce((sum, entry) => sum + entry.sizeBytes, 0);
+      throw new Error(`These ${artifactIds.length} artifacts hold ${formatBytes(total)}, more than a ZIP archive can record (4 GiB); nothing was read or written. Archive fewer artifacts at a time, or use mode:"package" to copy them into a directory.`);
+    }
+  }
+
+  const sources: Array<() => void> = [];
+  const check = () => { assertCurrent(); for (const source of sources) source(); target.assertCurrent(); };
   check();
   await mkdir(dirname(resolvedPath), { recursive: true });
   check();
-  await writeFile(resolvedPath, archive, { flag: overwrite ? 'w' : 'wx' });
-  check();
+  // Written beside the destination and moved into place only when complete, so a
+  // failed or cancelled export leaves no partial archive and an existing file intact.
+  const partial = `${resolvedPath}.${randomUUID().slice(0, 8)}.partial`;
+  const handle = await open(partial, 'wx');
+  let handleOpen = true;
+  const zip = new ZipWriter({ async write(chunk) {
+    for (let offset = 0; offset < chunk.byteLength;) offset += (await handle.write(chunk, offset, chunk.byteLength - offset)).bytesWritten;
+  } });
+  const manifest = new PackageManifest();
+  const usedFilenames = new Set<string>();
+  let archiveBytes = 0;
+  try {
+    for (let index = 0; index < artifactIds.length; index += 1) {
+      if (signal?.aborted) throw new Error(`Archive export cancelled after ${index} of ${artifactIds.length} artifacts; nothing was written to ${resolvedPath}.`);
+      check();
+      const source = await store.readContent(artifactIds[index]!);
+      assertCurrent();
+      assertAgentArtifactBytes(source.record, source.buffer);
+      const assertSource = captureAgentArtifactSource(store, source.record, source.assertCurrent?.bind(source)); assertSource();
+      sources.push(assertSource);
+      const relativePath = `artifacts/${packageArtifactFilename(source.record, index, usedFilenames)}`;
+      // One artifact's bytes are held at a time; they are written before the next is read.
+      await zip.add(relativePath, source.buffer, { mimeType: source.record.mimeType });
+      await manifest.add(source.record, relativePath, source.buffer.byteLength, { signal, assertCurrent: check });
+    }
+    for (const document of packageDocuments(manifest)) await zip.add(document.path, document.buffer);
+    archiveBytes = await zip.finish();
+    await handle.close(); handleOpen = false;
+    check();
+    if (overwrite) await rename(partial, resolvedPath);
+    else {
+      try { await link(partial, resolvedPath); }
+      catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'EEXIST') throw new Error(`Archive target already exists: ${resolvedPath}. Pass overwrite:true when replacement is part of the admitted action.`);
+        // A file system without hard links: the existence check above still holds the no-overwrite rule.
+        if (existsSync(resolvedPath)) throw error;
+        await rename(partial, resolvedPath);
+      }
+    }
+  } finally {
+    if (handleOpen) await handle.close().catch(() => undefined);
+    await unlink(partial).catch(() => undefined);
+  }
 
   return [
     'Exported Agent artifact archive',
     `  path ${resolvedPath}`,
-    `  artifacts ${payload.artifactCount}`,
-    `  sourceBytes ${payload.totalBytes}`,
-    `  archiveBytes ${archive.byteLength}`,
+    `  artifacts ${artifactIds.length}`,
+    `  sourceBytes ${manifest.totalBytes}`,
+    `  archiveBytes ${archiveBytes}`,
     '  archive zip',
     '  manifest manifest.json',
     `  overwrite ${overwrite ? 'yes' : 'no'}`,

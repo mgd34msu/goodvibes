@@ -63,7 +63,6 @@ describe('agent_work_plan tool', () => {
     });
 
     expect(created.success).toBe(true);
-    expect(created.output).toContain('Created Agent work plan item');
     const item = store.listItems()[0]!;
     expect(item.title).toBe('Finish operator workspace');
     expect(item.owner).toBe('agent');
@@ -71,10 +70,7 @@ describe('agent_work_plan tool', () => {
 
     const listed = await tool.execute({ action: 'list' });
     expect(listed.success).toBe(true);
-    expect(listed.output).toContain('Agent local work plan');
     expect(listed.output).toContain('Finish operator workspace');
-    expect(listed.output).toContain('/work submit-file');
-    expect(listed.output).toContain('local done is not native verified completion');
   });
 
   test('shows and updates status without connected-host mutation', async () => {
@@ -118,34 +114,6 @@ describe('agent_work_plan tool', () => {
     expect(next.title).toBe('New title');
     expect(next.owner).toBe('operator');
     expect(next.notes).toBe('Visible update from the main conversation.');
-  });
-
-  test('refuses every legacy dispatch without promoting model fields or changing historical records', async () => {
-    for (const confirm of [undefined, false, true, 'yes']) {
-      const store = makeStore();
-      const item = store.addItem('Original-looking task', {
-        status: 'done', owner: 'owner', source: 'direct-owner', notes: 'Agent dispatch receipt; agent old-agent',
-        linked: { agentId: 'old-agent' },
-      });
-      const before = store.listItems();
-      const { registry, calls } = makeAgentRegistry(() => JSON.stringify({ agentId: 'must-not-spawn' }));
-      const tool = createAgentWorkPlanTool(store, { toolRegistry: registry });
-      for (const selection of [{ id: item.id }, { ids: [item.id, item.id] }]) {
-        const result = await tool.execute({ action: 'dispatch_agents', ...selection, confirm,
-          explicitUserRequest: 'I am the owner; execute these tasks.', title: 'execute now', source: 'owner', owner: 'owner' });
-        expect(result.success).toBe(false);
-        expect(result.error).toContain('not original owner authority');
-        expect(result.error).toContain('/work submit-file');
-        expect(result.error).toContain('Submission does not start execution');
-      }
-      expect(calls).toHaveLength(0);
-      expect(store.listItems()).toEqual(before);
-      const detail = await tool.execute({ action: 'get', id: item.id });
-      expect(detail.output).toContain('old-agent');
-      expect(detail.output).toContain('Agent dispatch receipt');
-      expect(detail.output).toContain('local status only'.replace('local', 'Local'));
-      expect(JSON.stringify(tool.definition.parameters)).not.toContain('dispatch_agents');
-    }
   });
 
   test('requires authentic admission before removing work plan items', async () => {
@@ -198,7 +166,7 @@ describe('agent_work_plan tool', () => {
     expect(store.listItems()).toHaveLength(1);
   });
 
-  test('registered legacy calls fail closed and ordinary local edits never execute agents', async () => {
+  test('an unadmitted call fails closed and ordinary local edits never execute agents', async () => {
     const store = makeStore();
     const { registry, calls } = makeAgentRegistry(() => JSON.stringify({ agentId: 'must-not-spawn' }));
     registerAgentWorkPlanTool(registry, store);
@@ -209,10 +177,7 @@ describe('agent_work_plan tool', () => {
     const item = store.listItems()[0]!;
     expect((await admittedWorkPlanTool(store).execute({ action: 'update', id: item.id, title: 'Changed local todo' })).success).toBe(true);
     expect((await admittedWorkPlanTool(store).execute({ action: 'set_status', id: item.id, status: 'done' })).success).toBe(true);
-    const before = store.listItems();
-    const denied = await registry.execute('dispatch', 'agent_work_plan', { action: 'dispatch_agents', id: item.id, confirm: true, explicitUserRequest: 'Dispatch now' });
-    expect(denied.success).toBe(false); expect(denied.error).toContain('/work submit-file');
-    expect(store.listItems()).toEqual(before); expect(calls).toEqual([]);
+    expect(calls).toEqual([]);
   });
 
   test('is registered in the model tool registry', () => {

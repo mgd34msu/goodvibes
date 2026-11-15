@@ -10,15 +10,15 @@ function flags(zip: Buffer): { local: number; central: number } {
 }
 
 describe('ZIP entry names', () => {
-  test('a non-ASCII name is flagged as UTF-8 in both headers so unzip tools do not read it as CP437', () => {
-    const zip = createZipArchive([{ path: 'é.txt', buffer: Buffer.from('x') }]);
+  test('a non-ASCII name is flagged as UTF-8 in both headers so unzip tools do not read it as CP437', async () => {
+    const zip = await createZipArchive([{ path: 'é.txt', buffer: Buffer.from('x') }]);
     const { local, central } = flags(zip);
     expect(local & UTF8_FLAG).toBe(UTF8_FLAG);
     expect(central & UTF8_FLAG).toBe(UTF8_FLAG);
   });
 
-  test('an ASCII name keeps the plain flags', () => {
-    const zip = createZipArchive([{ path: 'a.txt', buffer: Buffer.from('x') }]);
+  test('an ASCII name keeps the plain flags', async () => {
+    const zip = await createZipArchive([{ path: 'a.txt', buffer: Buffer.from('x') }]);
     expect(flags(zip)).toEqual({ local: 0, central: 0 });
   });
 });

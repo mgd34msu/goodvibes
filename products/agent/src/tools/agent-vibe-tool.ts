@@ -1,6 +1,6 @@
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { assertCurrentToolExecution, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
-import { dirname, resolve } from 'node:path';
+import { resolve } from 'node:path';
 import { captureCatalogData, captureCatalogMethods } from './agent-harness-catalog-ranking.ts';
 import { agentLocalStateWrite, assertAgentLocalStateCurrent, createAgentLocalStateInputProjector } from './agent-local-state-admission.ts';
 import { AgentPersonaRegistry, personaStorePath } from '../agent/persona-registry.ts';
@@ -100,15 +100,17 @@ function readScope(args: AgentVibeToolArgs): 'project' | 'global' {
 const MAX_SHOWN_VIBE_CHARACTERS = 20_000;
 
 /**
- * `show` returns a file's whole body to the model, so it only reads the VIBE.md
- * locations the Agent itself uses; any other path is the read tool's business.
+ * The one source rule for `show` and `import_persona`: both read a file's whole
+ * body (to the model, or into a persona every later prompt carries), so both
+ * read only the VIBE.md locations the Agent itself uses; any other path is the
+ * read tool's business.
  */
-function vibeShowRefusal(shellPaths: ReturnType<typeof requireShellPaths>, reference: string): string | null {
+function vibeSourceRefusal(shellPaths: ReturnType<typeof requireShellPaths>, reference: string): string | null {
   const path = resolveVibePathReference(shellPaths, reference);
   const snapshot = discoverVibeFiles(shellPaths);
   const allowed = new Set([...snapshot.searchedPaths, snapshot.projectInitPath, snapshot.globalInitPath].map((entry) => resolve(entry)));
   if (allowed.has(resolve(path))) return null;
-  return `vibe show only reads a VIBE.md in the project or global location, not ${path}. Use scope:"project" or scope:"global", or one of: ${[...allowed].join(', ')}.`;
+  return `vibe only reads a VIBE.md in the project or global location, not ${path}. Use scope:"project" or scope:"global", or one of: ${[...allowed].join(', ')}.`;
 }
 
 function describeVibeFile(file: AgentVibeFile): Record<string, unknown> {
@@ -138,7 +140,7 @@ export function createAgentVibeTool(commandContext: CommandContext): Tool {
           mode: { type: 'string', description: 'Alias for action.' },
           scope: { type: 'string', enum: ['project', 'global'], description: 'VIBE.md scope for init/show/import.' },
           reference: { type: 'string', description: 'project, global, or path reference.' },
-          path: { type: 'string', description: 'Path reference for show/import.' },
+          path: { type: 'string', description: 'A VIBE.md location for show/import (project, global, or one of the paths status lists).' },
           target: { type: 'string', description: 'Alias for reference.' },
           query: { type: 'string', description: 'Alias for reference.' },
           name: { type: 'string', description: 'Persona name when importing.' },
@@ -196,7 +198,7 @@ export function createAgentVibeTool(commandContext: CommandContext): Tool {
 
         if (action === 'show') {
           const reference = readReference(args);
-          const refusal = vibeShowRefusal(shellPaths, reference);
+          const refusal = vibeSourceRefusal(shellPaths, reference);
           if (refusal) return error(refusal);
           const source = loadVibeImportSource(shellPaths, reference);
           assertAgentLocalStateCurrent(rawArgs, options);
@@ -238,6 +240,8 @@ export function createAgentVibeTool(commandContext: CommandContext): Tool {
 
         if (action === 'import_persona') {
           const reference = readReference(args);
+          const refusal = vibeSourceRefusal(shellPaths, reference);
+          if (refusal) return error(refusal);
           const source = loadVibeImportSource(shellPaths, reference);
           const name = readString(args.name) || source.name;
           const description = readString(args.description) || source.description;
@@ -311,10 +315,10 @@ export function registerAgentVibeTool(registry: ToolRegistry, commandContext: Co
       const root = readScope(args) === 'global' ? shellPaths.homeDirectory : shellPaths.workingDirectory;
       return { targets: [{ root, path: resolveVibePathReference(shellPaths, readScope(args)), access: 'write' }], assertDescriptors };
     }
+    // The source is one of the Agent's own VIBE.md locations (vibeSourceRefusal), read as status and show read
+    // them, so only the persona store is declared.
     if (action === 'import_persona') {
-      const path = resolveVibePathReference(shellPaths, readReference(args));
-      return { targets: [{ root: dirname(path), path, access: 'read' },
-        { root: shellPaths.homeDirectory, path: personaStorePath(shellPaths), access: 'write' }], assertDescriptors };
+      return { targets: [{ root: shellPaths.homeDirectory, path: personaStorePath(shellPaths), access: 'write' }], assertDescriptors };
     }
     return { targets: [], assertDescriptors };
   }, args => { const action = readAction(args); return action === null || action === 'status' || action === 'show'; }) });

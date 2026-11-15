@@ -252,10 +252,10 @@ describe('agent_schedule_edit tool', () => {
       expect(result.output).toContain('schedule action:"list" query:"sched-edit-1"');
       expect(result.output).toContain('schedule action:"run" scheduleId:"sched-edit-1"');
       expect(result.output).toContain('schedule action:"delete" scheduleId:"sched-edit-1"');
-      expect(requests).toHaveLength(3);
-      expect(requests[2]?.url).toBe('http://127.0.0.1:3421/api/automation/jobs/sched-edit-1');
-      expect(requests[2]?.method).toBe('PATCH');
-      const payload = JSON.parse(requests[2]?.body ?? '{}') as SchedulePatchPayload;
+      // One list read for the revision and one update: the update carries the revision, so it is not read twice.
+      expect(requests.map(request => request.method)).toEqual(['GET', 'PATCH']);
+      expect(requests[1]?.url).toBe('http://127.0.0.1:3421/api/automation/jobs/sched-edit-1');
+      const payload = JSON.parse(requests[1]?.body ?? '{}') as SchedulePatchPayload;
       expect(payload.jobId).toBeUndefined();
       expect(payload.expectedMutationRevision).toBe('synthetic-edit-revision-1');
       expect(payload.admission).toBe('autonomous');
@@ -293,7 +293,7 @@ describe('agent_schedule_edit tool', () => {
       });
 
       expect(result).toEqual(expect.objectContaining({ success: true }));
-      const payload = JSON.parse(requests[2]?.body ?? '{}') as SchedulePatchPayload;
+      const payload = JSON.parse(requests.find(request => request.method === 'PATCH')?.body ?? '{}') as SchedulePatchPayload;
       expect(payload.prompt).toContain('GoodVibes Agent autonomous schedule');
       expect(payload.prompt).toContain('Change the daily review to summarize blockers.');
       expect(payload.prompt).toContain('Report blocker count and highest priority action.');

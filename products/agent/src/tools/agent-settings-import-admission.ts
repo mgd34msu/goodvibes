@@ -12,25 +12,24 @@ import { AGENT_WAKE_SURFACE } from '../audio/wake-surface.ts';
 import { agentResearchSourceOwner } from '../agent/protected-research-report.ts';
 import { bindSettingSchemaDescriptors, coerceHarnessSettingValue } from '../agent/harness-control.ts';
 import { getAgentSettingsSchema } from '../config/settings-catalog.ts';
-import { agentDaemonConfigClient, agentDaemonConfigClientRevision, buildAgentConfigRouting } from '../config/daemon-config-routing.ts';
+import { agentDaemonConfigClient, agentDaemonConfigClientRevision, buildAgentConfigRouting, configKeyScope } from '../config/daemon-config-routing.ts';
 import { buildSecretBackedConfigUpdate, defaultSecretBackedScope, isSecretConfigKey, isSecretReferenceValue } from '../config/secret-config.ts';
 import { assertSettingsWriteAllowed } from './agent-settings-admission.ts';
 import { assertAgentWorkspaceImportPreviewPrivacy, captureAgentWorkspaceTuiSettingsImport } from '../input/agent-workspace-settings.ts';
 import type { CommandContext } from '../input/command-registry.ts';
 import { resolveWorkspaceActionIdentity } from './agent-harness-workspace-actions.ts';
 import { captureModelReadingInput, assertModelReadingInputCurrent, modelReadingServicePath } from './agent-harness-model-reading-source.ts';
+import { isImportApplyWord, readSettingsAction, settingsImportWord } from './agent-settings-action.ts';
 
 type Options = NonNullable<Parameters<Tool['execute']>[1]>;
-const normalize = (value: unknown) => typeof value === 'string' ? value.trim().toLowerCase().replace(/-/g, '_') : '';
-const imports = new Set(['import', 'import_settings', 'settings_import', 'import_goodvibes', 'goodvibes_import', 'apply_import', 'apply', 'confirm']);
 export function isAgentSettingsImportMutation(name: string, args: Record<string, unknown>): boolean {
-  const action = normalize(args.action) || normalize(args.mode);
-  if (name === 'import_goodvibes_settings') return imports.has(action);
-  if (name === 'settings') return imports.has(action) && action !== 'apply' && action !== 'confirm';
+  if (name === 'settings') return readSettingsAction(args) === 'import';
+  const word = settingsImportWord(args);
+  if (name === 'import_goodvibes_settings') return isImportApplyWord(word);
   if (name !== 'agent_harness' || args.mode !== 'run_workspace_action') return false;
   const resolved = resolveWorkspaceActionIdentity(args);
   return !!resolved && resolved.status !== 'ambiguous' && resolved.action.kind === 'settings-import'
-    && action !== 'preview' && (imports.has(action) || args.confirm === true);
+    && word !== 'preview' && (isImportApplyWord(word) || args.confirm === true);
 }
 
 /** Select only the native import preview after inspecting the complete caller input. */
@@ -106,7 +105,12 @@ export function createAgentSettingsImportProjector(context: CommandContext, fall
       const privateValues = new Map<string, unknown>(), credentialBySetting = new Map<string, SecretImportEntry>();
       for (const entry of source.settings) {
         const setting = schema.find(setting => setting.key === entry.key);
-        if (!setting || setting.kind === 'host') throw new ToolInputProjectionError('unavailable');
+        // The key comes from the owner's source settings file, not the model; only a key-shaped name is repeated.
+        if (!setting) {
+          const named = /^[A-Za-z0-9_.-]{1,120}$/.test(entry.key) ? entry.key : 'a key';
+          throw new ToolInputProjectionError('invalid', `The import names ${named}, which is not a setting in this version; remove it from the source settings or update GoodVibes, then import again.`);
+        }
+        if (setting.kind === 'host') throw new ToolInputProjectionError('invalid', `The import names ${setting.key}, a setting of this machine that an import cannot change; remove it from the source settings, then import again.`);
         const coerced = coerceHarnessSettingValue(setting, entry.value);
         // A raw credential in the import is stored under the key's own secret; only references can name another key's secret.
         if (!((isSecretConfigKey(entry.key) || isSecretBearingConfigKey(entry.key)) && typeof coerced === 'string' && !isSecretReferenceValue(coerced))) {
@@ -115,7 +119,7 @@ export function createAgentSettingsImportProjector(context: CommandContext, fall
         privateValues.set(entry.key, coerced);
         let value = coerced;
         if (isSecretConfigKey(entry.key) || isSecretBearingConfigKey(entry.key)) {
-          if (typeof coerced !== 'string') throw new ToolInputProjectionError('invalid');
+          if (typeof coerced !== 'string') throw new ToolInputProjectionError('invalid', `The import's value for ${setting.key} is not text; a credential setting takes a string or a goodvibes://secrets/... reference. Fix it in the source settings, then import again.`);
           const update = buildSecretBackedConfigUpdate(entry.key as ConfigKey, coerced);
           value = update.configValue;
           if (update.secretKey) credentialBySetting.set(entry.key, { key: update.secretKey, value: update.secretValue!, scope: defaultSecretBackedScope(entry.key as ConfigKey) });
@@ -126,18 +130,23 @@ export function createAgentSettingsImportProjector(context: CommandContext, fall
         const companion = resolveWakeEnablementCompanion(entry.key, value, key => config.get(key as ConfigKey), AGENT_WAKE_SURFACE);
         if (companion) { changes.set(companion.key, { operation: 'set', key: companion.key as ConfigKey, value: companion.value }); privateValues.set(companion.key, companion.value); }
       }
-      const routes: ConfigWriteRoute[] = [];
+      // Where a setting is written depends only on its scope, so each scope is resolved once per import.
+      const routes = new Map<string, ConfigWriteRoute>();
       const localChanges: PreparedConfigMutationRequest[] = [], remoteSettings: { key: string; value: unknown }[] = [], credentials: SecretImportEntry[] = [];
       let remoteEndpoint: Extract<ConfigWriteRoute, { mode: 'daemon' }>['endpoint'] | undefined;
       for (const change of changes.values()) {
         if (client && ownsKey?.call(client, change.key)) {
-          if (!clientImport) throw new ToolInputProjectionError('unconfigured');
+          if (!clientImport) throw new ToolInputProjectionError('unconfigured', `The import includes ${change.key}, a daemon setting, and this session's daemon connection cannot import daemon settings. Import on the daemon, or remove the daemon settings from the source.`);
           remoteSettings.push({ key: change.key, value: privateValues.get(change.key) });
           continue;
         }
-        const route = await resolvePreparedConfigWriteRoute(change.key, buildAgentConfigRouting({ homeDir: config.getHomeDirectory() ?? undefined }), assertSource);
-        assertSelection();
-        routes.push(route);
+        const scope = configKeyScope(change.key);
+        let route = routes.get(scope);
+        if (!route) {
+          route = await resolvePreparedConfigWriteRoute(change.key, buildAgentConfigRouting({ homeDir: config.getHomeDirectory() ?? undefined }), assertSource);
+          assertSelection();
+          routes.set(scope, route);
+        }
         if (route.mode === 'daemon') {
           if (remoteEndpoint && (remoteEndpoint.baseUrl !== route.endpoint.baseUrl || remoteEndpoint.token !== route.endpoint.token)) throw new ToolInputProjectionError('stale');
           remoteEndpoint = route.endpoint;
@@ -147,13 +156,13 @@ export function createAgentSettingsImportProjector(context: CommandContext, fall
           const credential = credentialBySetting.get(change.key); if (credential) credentials.push(credential);
         }
       }
-      const assertSourceCurrent = () => { assertSource(); for (const route of routes) assertPreparedConfigWriteRoute(route); };
+      const assertSourceCurrent = () => { assertSource(); for (const route of routes.values()) assertPreparedConfigWriteRoute(route); };
       let remoteImport: RemoteSettingsImportPrecondition | undefined;
       if (remoteSettings.length) {
         const restriction = { signal, assertCurrent: assertSourceCurrent };
         if (clientImport) remoteImport = await clientImport.capture({ settings: remoteSettings }, restriction);
         else if (remoteEndpoint) remoteImport = await captureRemoteSettingsImportPrecondition(remoteEndpoint, { settings: remoteSettings }, restriction);
-        else throw new ToolInputProjectionError('unconfigured');
+        else throw new ToolInputProjectionError('unconfigured', 'The import includes daemon settings and no daemon is reachable to take them. Start the daemon and import again.');
         assertSelection();
       }
       const remoteFacts = remoteImport ? inspectRemoteSettingsImportPrecondition(remoteImport) : undefined;
@@ -162,7 +171,7 @@ export function createAgentSettingsImportProjector(context: CommandContext, fall
         destinations: remoteFacts.destinations, ...(remoteFacts.credential ? { credential: remoteFacts.credential } : {}), endpoint: remoteFacts.endpoint } : undefined;
       const mutation = localChanges.length ? config.prepareSettingMutationPlan(localChanges) : undefined;
       const configFacts = mutation ? config.inspectPreparedMutation(mutation) : undefined;
-      if (credentials.length && !secrets || source.subscriptions.length && !subscriptions) throw new ToolInputProjectionError('unconfigured');
+      if (credentials.length && !secrets || source.subscriptions.length && !subscriptions) throw new ToolInputProjectionError('unconfigured', 'The import carries credentials or provider subscriptions, and this session has no store for them.');
       const secretImport = credentials.length && secrets ? Object.freeze({ owner: secrets, mutation: secrets.prepareImport(credentials) }) : undefined;
       const subscriptionImport = source.subscriptions.length && subscriptions ? Object.freeze({ owner: subscriptions, mutation: subscriptions.prepareImport(source.subscriptions) }) : undefined;
       const bindings = { owner: config, assertSourceCurrent, ...(remoteImport ? { remoteImport } : {}), ...(secretImport ? { secretImport } : {}), ...(subscriptionImport ? { subscriptionImport } : {}) };

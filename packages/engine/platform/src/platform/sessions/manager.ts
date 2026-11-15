@@ -8,6 +8,7 @@ import type { ConversationTitleSource } from '../core/conversation.js';
 import { summarizeError } from '../utils/error-display.js';
 import { resolveScopedDirectory } from '../runtime/surface-root.js';
 import type { SessionSurface } from '../runtime/session-surface.js';
+import { digestNameStem, storedNameStem } from '../utils/stored-name.js';
 
 /**
  * Metadata for a saved session (the first JSONL line).
@@ -41,6 +42,19 @@ export interface SessionMeta {
    * `saveSource: 'user'` ever changes the stamp, always upward.
    */
   saveSource?: 'user' | 'auto' | undefined;
+  /**
+   * The id of the conversation this file holds (the runtime session id). A
+   * save under a name whose file holds another conversation is refused
+   * unless the caller asks to replace it. Absent on files saved before it
+   * was recorded.
+   */
+  conversationId?: string | undefined;
+}
+
+/** Options of {@link SessionManager.save}. */
+export interface SessionSaveOptions {
+  /** Replace a file that holds another conversation (the user said so, e.g. `/save <name> --replace`). */
+  readonly replace?: boolean | undefined;
 }
 
 /** The conversation's side branches: every branch not currently open, and the name of the one that is. */
@@ -125,6 +139,15 @@ function readContractLine(value: unknown): Contract | null {
  * not two that can drift apart.
  */
 export function sanitizeSessionName(name: string): string {
+  return storedNameStem(name) || digestNameStem('session', name);
+}
+
+/**
+ * The stem names had before letters of every script were kept (only a-z,
+ * 0-9, `-` and `_`, else `session`). A file saved then is still found under
+ * it, but only when the name recorded inside it is the one asked for.
+ */
+function legacySessionStem(name: string): string {
   return name
     .toLowerCase()
     .replace(/\s+/g, '-')
@@ -250,8 +273,45 @@ export class SessionManager {
     return record?.saveSource === 'user' || record?.saveSource === 'auto' ? record.saveSource : undefined;
   }
 
+  /** The refusal for a save whose name already holds another conversation: when it was saved and how long it is. */
+  private _describeOtherConversation(name: string, filePath: string): string {
+    let saved = 'at an unknown time';
+    let count = 0;
+    try {
+      const lines = readFileSync(filePath, 'utf-8').split('\n');
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        const record = JSON.parse(line) as Record<string, unknown>;
+        if (record.type === 'meta' && typeof record.timestamp === 'number' && record.timestamp > 0) saved = new Date(record.timestamp).toLocaleString();
+        else if (record.type === 'message' && record.removed !== true) count += 1;
+      }
+    } catch { /* the refusal stands without the details */ }
+    return `A saved session named "${name}" already holds another conversation (saved ${saved}, ${count} message${count === 1 ? '' : 's'}). `
+      + `Nothing was saved. Use /save ${name} --replace to replace it, or save under another name.`;
+  }
+
+  /**
+   * The file a stored session `name` is in, or null when there is none. A file
+   * whose recorded name is another name is not this session (two names can
+   * share a stem), unless `name` is the file's own name; a file saved before letters of every script were kept is
+   * found under its old stem when its recorded name is exactly this one.
+   */
+  private _resolveSessionFile(name: string): string | null {
+    const stem = this.sanitizeName(name);
+    const filePath = join(this.sessionsDir, `${stem}.jsonl`);
+    if (existsSync(filePath)) {
+      // The file's own name (what list() shows) always addresses it.
+      if (name === stem) return filePath;
+      const recorded = this._readExistingMetaRecord(filePath)?.name;
+      return typeof recorded === 'string' && recorded !== name ? null : filePath;
+    }
+    const legacyPath = join(this.sessionsDir, `${legacySessionStem(name)}.jsonl`);
+    if (legacyPath === filePath || !existsSync(legacyPath)) return null;
+    return this._readExistingMetaRecord(legacyPath)?.name === name ? legacyPath : null;
+  }
+
   /** The meta line (line 0) of an existing session file, or undefined when absent, unreadable or not a meta line. */
-  private _readExistingMetaRecord(filePath: string): { saveSource?: unknown; name?: unknown } | undefined {
+  private _readExistingMetaRecord(filePath: string): { saveSource?: unknown; name?: unknown; conversationId?: unknown } | undefined {
     if (!existsSync(filePath)) return undefined;
     let fd: number;
     try {
@@ -276,7 +336,7 @@ export class SessionManager {
       }
       const firstLine = Buffer.concat(chunks).toString('utf-8');
       if (!firstLine.trim()) return undefined;
-      const record = JSON.parse(firstLine) as { type?: unknown; saveSource?: unknown; name?: unknown };
+      const record = JSON.parse(firstLine) as { type?: unknown; saveSource?: unknown; name?: unknown; conversationId?: unknown };
       return record.type === 'meta' ? record : undefined;
     } catch {
       return undefined;
@@ -310,22 +370,29 @@ export class SessionManager {
     contracts?: readonly ContractView[],
     /** Branches made with /branch; without them a resumed session has only its current transcript. */
     branches?: SessionBranches,
+    options: SessionSaveOptions = {},
   ): { filePath: string; sanitizedName: string } {
     if (!name || !name.trim()) throw new Error('Session name cannot be empty');
     mkdirSync(this.sessionsDir, { recursive: true });
     const sanitizedName = this.sanitizeName(name);
     const filePath = join(this.sessionsDir, `${sanitizedName}.jsonl`);
 
-    // Different names can reduce to one file name ("My Chat" and "my-chat", or any two
-    // names with no ASCII letters). A file that recorded the name it was saved under is
-    // never overwritten by a different name; files from before the name was recorded
-    // cannot be told apart and keep their overwrite behaviour.
-    const existingName = this._readExistingMetaRecord(filePath)?.name;
+    // Different names can still reduce to one file name ("My Chat" and "my-chat"). A file
+    // that recorded the name it was saved under is never overwritten by a different name;
+    // files from before the name was recorded cannot be told apart and keep their overwrite behaviour.
+    const existing = this._readExistingMetaRecord(filePath);
+    const existingName = existing?.name;
     if (typeof existingName === 'string' && existingName !== name) {
       throw new Error(
         `Session name "${name}" maps to the same file as the existing session "${existingName}" (${sanitizedName}.jsonl). `
-        + 'Nothing was saved; choose a name that differs in its letters, digits, "-" or "_".',
+        + 'Nothing was saved; choose a name that differs in more than case, spacing or punctuation.',
       );
+    }
+    // The same name in another conversation would replace that conversation's save.
+    const existingConversation = existing?.conversationId;
+    if (!options.replace && typeof existingConversation === 'string' && meta.conversationId !== undefined
+      && existingConversation !== meta.conversationId) {
+      throw new Error(this._describeOtherConversation(name, filePath));
     }
 
     const lines: string[] = [];
@@ -342,6 +409,7 @@ export class SessionManager {
       titleSource: meta.titleSource ?? 'system',
       returnContext: loadedReturnContext(meta.returnContext),
       saveSource: this._resolveSaveSource(filePath, meta.saveSource),
+      ...(meta.conversationId !== undefined ? { conversationId: meta.conversationId } : {}),
     };
     lines.push(JSON.stringify(metaRecord));
 
@@ -378,10 +446,8 @@ export class SessionManager {
    */
   load(name: string): { meta: SessionMeta; messages: object[]; agentRecords: AgentRecord[]; contracts: Contract[]; branches?: SessionBranches } {
     if (!name || !name.trim()) throw new Error('Session name cannot be empty');
-    const filename = this.sanitizeName(name);
-    const filePath = join(this.sessionsDir, `${filename}.jsonl`);
-
-    if (!existsSync(filePath)) {
+    const filePath = this._resolveSessionFile(name);
+    if (filePath === null) {
       throw new Error(`Session not found: ${name}`);
     }
 
@@ -423,6 +489,7 @@ export class SessionManager {
           returnContext: loadedReturnContext(record.returnContext),
           schemaVersion: fileVersion,
           saveSource: record.saveSource === 'user' || record.saveSource === 'auto' ? record.saveSource : undefined,
+          ...(typeof record.conversationId === 'string' ? { conversationId: record.conversationId } : {}),
         };
       } else if (record.type === 'message') {
         if (record.removed === true) continue;
@@ -575,9 +642,8 @@ export class SessionManager {
    */
   getMeta(name: string): SessionMeta | null {
     if (!name || !name.trim()) return null;
-    const filename = this.sanitizeName(name);
-    const filePath = join(this.sessionsDir, `${filename}.jsonl`);
-    if (!existsSync(filePath)) return null;
+    const filePath = this._resolveSessionFile(name);
+    if (filePath === null) return null;
     try {
       const raw = readFileSync(filePath, 'utf-8');
       const firstLine = raw.split('\n')[0];
@@ -594,6 +660,7 @@ export class SessionManager {
         returnContext: loadedReturnContext(record.returnContext),
         schemaVersion: fileVersion,
         saveSource: record.saveSource === 'user' || record.saveSource === 'auto' ? record.saveSource : undefined,
+        ...(typeof record.conversationId === 'string' ? { conversationId: record.conversationId } : {}),
       };
     } catch (err: unknown) {
       // Session file unreadable or missing meta: return null to caller.
@@ -614,9 +681,8 @@ export class SessionManager {
    */
   rename(name: string, newTitle: string): void {
     if (!name || !name.trim()) throw new Error('Session name cannot be empty');
-    const filename = this.sanitizeName(name);
-    const filePath = join(this.sessionsDir, `${filename}.jsonl`);
-    if (!existsSync(filePath)) throw new Error(`Session not found: ${name}`);
+    const filePath = this._resolveSessionFile(name);
+    if (filePath === null) throw new Error(`Session not found: ${name}`);
 
     const raw = readFileSync(filePath, 'utf-8');
     const lines = raw.split('\n');
@@ -648,9 +714,8 @@ export class SessionManager {
    */
   delete(name: string): void {
     if (!name || !name.trim()) throw new Error('Session name cannot be empty');
-    const filename = this.sanitizeName(name);
-    const filePath = join(this.sessionsDir, `${filename}.jsonl`);
-    if (!existsSync(filePath)) throw new Error(`Session not found: ${name}`);
+    const filePath = this._resolveSessionFile(name);
+    if (filePath === null) throw new Error(`Session not found: ${name}`);
     try {
       unlinkSync(filePath);
     } catch (e) {
@@ -720,13 +785,12 @@ export class SessionManager {
   /** Whether a saved conversation exists under this name or id (the store file is present). */
   has(name: string): boolean {
     if (!name || !name.trim()) return false;
-    return existsSync(join(this.sessionsDir, `${this.sanitizeName(name)}.jsonl`));
+    return this._resolveSessionFile(name) !== null;
   }
 
   /**
-   * Sanitize a session name into a safe filename.
-   * Replaces spaces with hyphens, strips non-alphanumeric/hyphen/underscore chars,
-   * collapses multiple hyphens, trims leading/trailing hyphens.
+   * Sanitize a session name into a safe filename: see {@link sanitizeSessionName}
+   * (letters and digits of every script, `-` and `_`; a digest when nothing is left).
    */
   sanitizeName(name: string): string {
     return sanitizeSessionName(name);

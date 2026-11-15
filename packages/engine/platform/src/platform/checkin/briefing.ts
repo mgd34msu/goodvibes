@@ -11,9 +11,9 @@ import type { CheckinStateSnapshot } from './types.js';
 /** A one-line summary of the snapshot, reused in receipts. */
 export function summarizeCheckinState(snapshot: CheckinStateSnapshot): string {
   return (
-    `${snapshot.runningSessions} running, ${snapshot.blockedSessions} blocked, ` +
-    `${snapshot.unreadChannelItems} unread, ${snapshot.recentCompletions} recent completions, ` +
-    `${snapshot.needsAttention.length} needs-attention`
+    `${snapshot.runningSessions} running, ${snapshot.blockedSessions} with messages not yet picked up, ` +
+    `${snapshot.unreadChannelItems} channel messages not yet picked up, ${snapshot.recentCompletions} recent completions, ` +
+    `${snapshot.needsAttention.length} attention lines`
   );
 }
 
@@ -22,8 +22,8 @@ export function assembleCheckinBriefing(snapshot: CheckinStateSnapshot): string 
   const lines: string[] = [
     'Current state:',
     `- Running sessions: ${snapshot.runningSessions}`,
-    `- Blocked sessions: ${snapshot.blockedSessions}`,
-    `- Unread channel items: ${snapshot.unreadChannelItems}`,
+    `- Sessions with the owner's messages not yet picked up: ${snapshot.blockedSessions}`,
+    `- Channel messages not yet picked up: ${snapshot.unreadChannelItems}`,
     `- Recent completions: ${snapshot.recentCompletions}`,
   ];
   if (snapshot.needsAttention.length > 0) {

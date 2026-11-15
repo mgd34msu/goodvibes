@@ -108,18 +108,23 @@ interface ControlPlaneWebSocketPeer { data: ControlPlaneWebSocketData; send(mess
 // --- DaemonServer ---
 
 type StartupOwner = 'session broker' | 'approval broker' | 'channel policy' | 'automation manager' | 'distributed runtime' | 'cluster rollback';
-interface StartupDrain { readonly pending: Set<Promise<void>>; readonly failures: Set<StartupOwner>; }
+interface StartupDrain { readonly pending: Set<Promise<void>>; readonly failures: Map<StartupOwner, Error>; }
 // Per-facade ownership without widening the public declaration surface. A
 // fail-fast join cannot retire sibling acquisitions or the first rollback stop.
 const startupDrains = new WeakMap<object, StartupDrain>();
 function ownStartup(owner: object, label: StartupOwner, action: () => Promise<void>): Promise<void> {
   let drain = startupDrains.get(owner);
-  if (!drain) { drain = { pending: new Set(), failures: new Set() }; startupDrains.set(owner, drain); }
+  if (!drain) { drain = { pending: new Set(), failures: new Map() }; startupDrains.set(owner, drain); }
   const state = drain;
   // Defer invocation until ownership is recorded, including synchronous throws.
-  const result = Promise.resolve().then(action).catch(() => {
-    state.failures.add(label);
-    throw new Error(`Daemon ${label} startup operation failed`);
+  const result = Promise.resolve().then(action).catch((error: unknown) => {
+    // The owner's own sentence names what to repair (a store file, a record id),
+    // so it is kept. Only a real Error is read: a thrown non-error may carry
+    // getters, and the label alone still names the owner.
+    const reason = error instanceof Error ? error.message : 'it threw a value that is not an error';
+    const failure = new Error(`Daemon ${label} did not start: ${reason}`, { cause: error });
+    state.failures.set(label, failure);
+    throw failure;
   });
   const settled = result.then(() => {}, () => {});
   state.pending.add(settled);
@@ -1000,8 +1005,7 @@ export class DaemonServer {
       if (restart) pending.push(restart.catch(() => { restartFailed = true; }));
       await Promise.all(pending);
     }
-    const failures: unknown[] = [...(startupDrains.get(this)?.failures ?? [])]
-      .map((label) => new Error(`Daemon ${label} startup operation failed`));
+    const failures: unknown[] = [...(startupDrains.get(this)?.failures.values() ?? [])];
     if (restartFailed) failures.push(new Error('Daemon config restart failed'));
     if (this.restartCycle.closed) {
       try { await this.lifecycle?.drainHandovers(false); }

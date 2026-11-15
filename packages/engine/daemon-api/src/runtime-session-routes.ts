@@ -467,17 +467,9 @@ function readPositiveInt(value: string | null): number | undefined {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
 }
 
-/**
- * How long an input a surface claimed stays that surface's before another may
- * take it. It is the time a surface has to start the work and name its agent;
- * past it the claimant is presumed gone, and the message must not wait forever.
- */
-const SURFACE_CLAIM_LEASE_MS = 2 * 60_000;
-
-class InputNotClaimableError extends Error {
-  constructor(readonly state: string) {
-    super(`input is ${state}`);
-  }
+/** The broker's refusal of a claim on an input another surface holds or that has ended. */
+function isInputNotClaimable(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && (error as { code?: unknown }).code === 'INPUT_NOT_CLAIMABLE';
 }
 
 const SURFACE_ANSWER_STATUSES = new Set(['completed', 'failed', 'cancelled']);
@@ -506,29 +498,32 @@ async function handleDeliverSharedSessionInput(
   const agentId = typeof body?.agentId === 'string' && body.agentId.trim() ? body.agentId.trim() : undefined;
   const answer = typeof body?.answer === 'string' ? body.answer : undefined;
   const claim = body?.claim === true && !consumed;
+  // A surface that could not start the message reports it failed, with why,
+  // so the row ends instead of waiting for an answer that will not come.
+  if (consumed && !agentId && readSurfaceAnswerStatus(body?.status) === 'failed' && context.sessionBroker.failInput) {
+    const reason = answer?.trim() || 'The surface that collected this message could not start it. Send it again to retry.';
+    const failed = await context.sessionBroker.failInput(sessionId, inputId, reason);
+    if (!failed) {
+      return Response.json({
+        error: 'Cannot mark input failed: it is unknown, or no longer queued or delivered; nothing was changed.',
+        code: 'INPUT_NOT_DELIVERABLE',
+        input: readSessionInput(context, sessionId, inputId),
+      }, { status: 409 });
+    }
+    return context.recordApiResponse(req, `/api/sessions/${sessionId}/inputs/${inputId}/deliver`, Response.json({ input: failed }, { status: 200 }));
+  }
   let input: unknown | null;
   try {
+    // A claim is granted to one surface; the broker checks it where the row moves.
     input = await context.sessionBroker.markInputDelivered(sessionId, inputId, {
       consumed,
       ...(agentId ? { agentId } : {}),
-      ...(claim ? {
-        claim,
-        // Checked and applied with no await between, so two surfaces racing for
-        // one input cannot both pass.
-        beforeApply: () => {
-          const current = readSessionInput(context, sessionId, inputId);
-          if (!isJsonRecord(current)) return;
-          const unbound = typeof current.activeAgentId !== 'string' || current.activeAgentId.length === 0;
-          const idleMs = typeof current.updatedAt === 'number' ? Date.now() - current.updatedAt : 0;
-          if (current.state === 'queued' || (current.state === 'delivered' && unbound && idleMs >= SURFACE_CLAIM_LEASE_MS)) return;
-          throw new InputNotClaimableError(typeof current.state === 'string' ? current.state : 'unknown');
-        },
-      } : {}),
+      ...(claim ? { claim } : {}),
     });
   } catch (error) {
-    if (!(error instanceof InputNotClaimableError)) throw error;
+    if (!isInputNotClaimable(error)) throw error;
     return Response.json({
-      error: `Cannot claim input: it is ${error.state}, so another surface already holds it or it has ended. Leave it to that surface; nothing was changed.`,
+      error: error instanceof Error ? error.message : 'Cannot claim input: another surface already holds it or it has ended. Leave it to that surface; nothing was changed.',
       code: 'INPUT_NOT_CLAIMABLE',
       input: readSessionInput(context, sessionId, inputId),
     }, { status: 409 });

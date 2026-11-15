@@ -27,16 +27,6 @@ function throwInvalidSessionSnapshot(): never {
   throw new Error('Shared session store snapshot is invalid.');
 }
 
-/** Name the entry that failed, so an operator can repair or remove that one record. */
-function describeInvalidEntry<T>(kind: string, value: unknown, index: number, read: () => T): T {
-  try {
-    return read();
-  } catch {
-    const id = isRecord(value) && typeof value['id'] === 'string' ? `'${value['id']}'` : `at position ${index}`;
-    throw new Error(`Shared session store snapshot is invalid: ${kind} ${id} is malformed. Repair or remove that entry in the sessions store file; no session can be read until then.`);
-  }
-}
-
 function validateOptionalString(value: unknown): void {
   if (value !== undefined && typeof value !== 'string') throwInvalidSessionSnapshot();
 }
@@ -309,27 +299,124 @@ export function sortInputs(records: Iterable<SharedSessionInputRecord>): SharedS
   return [...records].sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
 }
 
+/** A stored session, message or input this build cannot read: kept on disk untouched and named, never fatal. */
+export interface SetAsideSessionEntry {
+  readonly kind: 'session' | 'message' | 'input';
+  readonly id: string;
+  readonly reason: string;
+}
+
+/** Why one stored entry does not read, in the store's own terms, for the operator who repairs it. */
+function describeUnreadable(kind: SetAsideSessionEntry['kind'], value: unknown): string {
+  if (!isRecord(value)) return 'it is not an object';
+  if (kind === 'session') {
+    if (typeof value['kind'] === 'string' && !SESSION_KINDS.has(value['kind'] as SharedSessionRecord['kind'])) return `its kind '${value['kind']}' is not one this build knows`;
+    if (typeof value['status'] === 'string' && !SESSION_STATUSES.has(value['status'] as SharedSessionRecord['status'])) return `its status '${value['status']}' is not one this build knows`;
+  }
+  if (kind === 'message' && typeof value['role'] === 'string' && !MESSAGE_ROLES.has(value['role'] as SharedSessionMessage['role'])) return `its role '${value['role']}' is not one this build knows`;
+  if (kind === 'input') {
+    if (typeof value['intent'] === 'string' && !SHARED_SESSION_INPUT_INTENTS.includes(value['intent'] as SharedSessionInputRecord['intent'])) return `its intent '${value['intent']}' is not one this build knows`;
+    if (typeof value['state'] === 'string' && !SHARED_SESSION_INPUT_STATES.includes(value['state'] as SharedSessionInputRecord['state'])) return `its state '${value['state']}' is not one this build knows`;
+  }
+  return 'a field is missing or has the wrong type';
+}
+
+function entryId(value: unknown, index: number): string {
+  return isRecord(value) && typeof value['id'] === 'string' ? value['id'] : `#${index}`;
+}
+
+/** Read one stored message, or null and the reason when this build cannot. */
+export function readStoredSessionMessage(value: unknown, index: number, setAside: SetAsideSessionEntry[]): SharedSessionMessage | null {
+  try { return normalizeSessionMessage(value); } catch {
+    setAside.push({ kind: 'message', id: entryId(value, index), reason: describeUnreadable('message', value) });
+    return null;
+  }
+}
+
+/** Read one stored input, or null and the reason when this build cannot. */
+export function readStoredSessionInput(value: unknown, index: number, setAside: SetAsideSessionEntry[]): SharedSessionInputRecord | null {
+  try { return normalizeSessionInput(value); } catch {
+    setAside.push({ kind: 'input', id: entryId(value, index), reason: describeUnreadable('input', value) });
+    return null;
+  }
+}
+
+/** Read one stored session record against its messages and inputs, or null and the reason when this build cannot. */
+export function readStoredSessionRecord(
+  value: unknown,
+  index: number,
+  messages: readonly SharedSessionMessage[],
+  inputs: readonly SharedSessionInputRecord[],
+  setAside: SetAsideSessionEntry[],
+): SharedSessionRecord | null {
+  try { return normalizeSessionRecord(value, messages, inputs); } catch {
+    setAside.push({ kind: 'session', id: entryId(value, index), reason: describeUnreadable('session', value) });
+    return null;
+  }
+}
+
+/** The session index the per-session store writes: records only, messages and inputs live in each session's log. */
+export const SESSION_INDEX_VERSION = 2;
+
+export function isSessionIndexDocument(value: unknown): value is { readonly version: number; readonly sessions: readonly unknown[]; readonly setAside?: readonly unknown[] } {
+  return isRecord(value) && value['version'] === SESSION_INDEX_VERSION && Array.isArray(value['sessions']);
+}
+
+/**
+ * Read a whole store, strictly: one entry this build cannot read refuses the
+ * whole read. For callers that rewrite what they read (the legacy importer),
+ * where carrying an unread entry forward is impossible and dropping it would
+ * lose it. A per-session index reads as its records with no messages or
+ * inputs, which stay in each session's log.
+ */
 export function loadSessionBrokerState(snapshot: SharedSessionStoreSnapshot | null | undefined): {
   readonly sessions: Map<string, SharedSessionRecord>;
   readonly messages: Map<string, SharedSessionMessage[]>;
   readonly inputs: Map<string, SharedSessionInputRecord[]>;
+} {
+  const read = readSessionBrokerSnapshot(isSessionIndexDocument(snapshot)
+    ? { sessions: snapshot.sessions as SharedSessionRecord[], messages: [], inputs: [] }
+    : snapshot);
+  const first = read.setAside[0];
+  if (first) {
+    throw new Error(`Shared session store snapshot is invalid: ${first.kind} '${first.id}' cannot be read (${first.reason}). Repair or remove that entry in the sessions store file.`);
+  }
+  return read;
+}
+
+/**
+ * Read a whole store, per entry: a session, message or input this build cannot
+ * read is set aside (returned in `setAside` with its id and why, and in
+ * `unreadable` verbatim so the writer can carry it forward untouched) while
+ * every other entry loads.
+ */
+export function readSessionBrokerSnapshot(snapshot: SharedSessionStoreSnapshot | null | undefined): {
+  readonly sessions: Map<string, SharedSessionRecord>;
+  readonly messages: Map<string, SharedSessionMessage[]>;
+  readonly inputs: Map<string, SharedSessionInputRecord[]>;
+  readonly setAside: readonly SetAsideSessionEntry[];
+  readonly unreadable: { readonly sessions: readonly unknown[]; readonly messages: readonly unknown[]; readonly inputs: readonly unknown[] };
 } {
   if (snapshot) {
     if (!isRecord(snapshot) || !Array.isArray(snapshot.sessions) || !Array.isArray(snapshot.messages) || !Array.isArray(snapshot.inputs)) {
       throwInvalidSessionSnapshot();
     }
   }
+  const setAside: SetAsideSessionEntry[] = [];
+  const unreadable = { sessions: [] as unknown[], messages: [] as unknown[], inputs: [] as unknown[] };
   const sessions = new Map<string, SharedSessionRecord>();
   const messages = new Map<string, SharedSessionMessage[]>();
   const inputs = new Map<string, SharedSessionInputRecord[]>();
   for (const [index, message] of (snapshot?.messages ?? []).entries()) {
-    const normalized = describeInvalidEntry('message', message, index, () => normalizeSessionMessage(message));
+    const normalized = readStoredSessionMessage(message, index, setAside);
+    if (!normalized) { unreadable.messages.push(message); continue; }
     const bucket = messages.get(normalized.sessionId) ?? [];
     bucket.push(normalized);
     messages.set(normalized.sessionId, bucket);
   }
   for (const [index, input] of (snapshot?.inputs ?? []).entries()) {
-    const normalized = describeInvalidEntry('input', input, index, () => normalizeSessionInput(input));
+    const normalized = readStoredSessionInput(input, index, setAside);
+    if (!normalized) { unreadable.inputs.push(input); continue; }
     const bucket = inputs.get(normalized.sessionId) ?? [];
     bucket.push(normalized);
     inputs.set(normalized.sessionId, bucket);
@@ -340,17 +427,13 @@ export function loadSessionBrokerState(snapshot: SharedSessionStoreSnapshot | nu
   for (const [sessionId, bucket] of inputs.entries()) {
     inputs.set(sessionId, sortInputs(bucket));
   }
-  for (const session of snapshot?.sessions ?? []) {
-    if (!isRecord(session) || typeof session.id !== 'string') {
-      throwInvalidSessionSnapshot();
-    }
-    sessions.set(session.id, describeInvalidEntry('session', session, 0, () => normalizeSessionRecord(
-      session,
-      messages.get(session.id) ?? [],
-      inputs.get(session.id) ?? [],
-    )));
+  for (const [index, session] of (snapshot?.sessions ?? []).entries()) {
+    const id = isRecord(session) && typeof session.id === 'string' ? session.id : undefined;
+    const normalized = readStoredSessionRecord(session, index, messages.get(id ?? '') ?? [], inputs.get(id ?? '') ?? [], setAside);
+    if (!normalized) { unreadable.sessions.push(session); continue; }
+    sessions.set(normalized.id, normalized);
   }
-  return { sessions, messages, inputs };
+  return { sessions, messages, inputs, setAside, unreadable };
 }
 
 /**

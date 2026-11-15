@@ -3,12 +3,14 @@
  *
  * Purpose
  * ───────
- * Between full snapshots (written by persistConversation / writeRecoveryFile),
- * a SIGKILL loses every conversation turn since the last snapshot. This module
- * provides an append-only journal that records each durable conversation event
- * (user message submitted, assistant turn finalised, tool results appended,
- * compaction performed) so that a kill at any moment loses at most the
- * in-flight append, never a full turn.
+ * What it holds today: the terminal app (TUI) appends one record when a prompt
+ * is submitted, and one at turn end only when the session save failed; it is
+ * deleted after each successful save. Each record is the whole conversation.
+ * It is not a log of tool results or compaction, and nothing in the Agent
+ * appends to it. The crash snapshot written at turn moments
+ * (session-persistence.ts writeCrashSnapshotAtTurnMoments: prompt accepted,
+ * each tool batch done) is the copy that keeps a turn's work through a kill;
+ * this journal and its replay are left only until the TUI wiring moves to it.
  *
  * File format (NDJSON)
  * ────────────────────

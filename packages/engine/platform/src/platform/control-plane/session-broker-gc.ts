@@ -102,6 +102,8 @@ export interface BootOrphanSweepOptions {
   readonly idleEmptyMs: number;
   readonly idleLongMs: number;
   readonly now?: number;
+  /** Work running outside these records (a hosted turn) keeps its session, as in the running reaper. */
+  readonly isExternallyLive?: ((session: SharedSessionRecord) => boolean) | undefined;
 }
 
 /**
@@ -147,6 +149,7 @@ export function closeOrphanedSessionsAtBoot(
       idleLongMs: options.idleLongMs,
       deletionRetentionMs: Number.POSITIVE_INFINITY,
       publishUpdate: () => {},
+      isExternallyLive: options.isExternallyLive,
     })) continue;
     sessions.set(sessionId, {
       ...session,

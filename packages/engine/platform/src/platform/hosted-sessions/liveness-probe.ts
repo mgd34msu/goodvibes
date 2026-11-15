@@ -16,13 +16,9 @@
 import type { HostedSessionRecord } from './types.js';
 
 /**
- * How long after the hosted engine last touched a session the probe keeps
- * vouching for it.
- *
- * Matches the broker's own default idle-empty window: inside this window the
- * probe and the reaper would reach the same verdict anyway, so the probe only
- * changes an outcome where it has a positive reason to (a running turn, or an
- * engine-side touch the broker never saw).
+ * Kept for callers that pass a freshness window. The engine is the owner of
+ * whether a hosted session is alive, and it holds a session until it is
+ * terminated, so the probe no longer reads timestamps.
  */
 export const DEFAULT_HOSTED_LIVENESS_FRESHNESS_MS = 10 * 60 * 1000;
 
@@ -38,7 +34,9 @@ export interface ProbedSession {
 }
 
 export interface HostedSessionLivenessProbeOptions {
+  /** Unused: liveness is the engine's record, not a time window. */
   readonly now?: () => number;
+  /** Unused: liveness is the engine's record, not a time window. */
   readonly freshnessMs?: number;
 }
 
@@ -52,10 +50,8 @@ export interface HostedSessionLivenessProbeOptions {
  */
 export function createHostedSessionLivenessProbe(
   lookup: HostedSessionLivenessLookup,
-  options: HostedSessionLivenessProbeOptions = {},
+  _options: HostedSessionLivenessProbeOptions = {},
 ): (session: ProbedSession) => boolean {
-  const now = options.now ?? ((): number => Date.now());
-  const freshnessMs = options.freshnessMs ?? DEFAULT_HOSTED_LIVENESS_FRESHNESS_MS;
   return (session: ProbedSession): boolean => {
     if (session.kind !== 'hosted') return false;
     let record: HostedSessionRecord | null;
@@ -67,13 +63,9 @@ export function createHostedSessionLivenessProbe(
       return false;
     }
     if (!record) return false;
-    // A terminated session is done regardless of how recently it was touched;
-    // vouching for it would leave its broker record active forever.
-    if (record.status === 'terminated') return false;
-    // The decisive signal: a turn is in flight NOW. Deliberately independent of
-    // every timestamp, because the reported failure was precisely a running
-    // turn whose timestamps had stopped advancing.
-    if (record.status === 'running') return true;
-    return now() - record.updatedAt < freshnessMs;
+    // The engine holds this session until it is terminated: that is the one
+    // fact, owned here. A terminated one is done, and vouching for it would
+    // leave its broker record active forever.
+    return record.status !== 'terminated';
   };
 }

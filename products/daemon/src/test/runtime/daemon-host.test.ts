@@ -320,7 +320,7 @@ test('settled first rollback rejection remains visible to the barrier without ra
   expectCloseFailure(fx.host); await expect(fx.host.close()).rejects.toThrow('cleanup failed');
   const result = await fx.host.daemon!.waitForRestart().catch((error: unknown) => error) as AggregateError;
   expect(result.errors.map((error: Error) => error.message)).toEqual([
-    'Daemon approval broker startup operation failed', 'Daemon cluster rollback startup operation failed',
+    'Daemon approval broker did not start: synthetic startup failure', 'Daemon cluster rollback did not start: it threw a value that is not an error',
   ]);
   expect(touched).toBe(false);
 });

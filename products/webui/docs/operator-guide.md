@@ -426,6 +426,12 @@ and the receipts list. Every save is confirmed, because the configuration can
 enable proactive contact. Each receipt states its outcome plainly, never
 collapsed to a bare status dot.
 
+A check-in looks at what needs you: approvals and questions waiting in the
+owner inbox, and automation runs that failed since the previous check-in. When
+none of those is waiting, the run records Ran quiet without asking a model.
+Messages a session has not picked up yet are listed as that, never as the
+session waiting on you.
+
 | Outcome | Meaning |
 | --- | --- |
 | Delivered | The check-in ran and something was sent |

@@ -170,8 +170,8 @@ export function cancelQueuedSessionInputs(
  * row would stay queued and keep the daemon busy. A row younger than the
  * window is still within the time its surface was promised, so it stays
  * (a surface that deliberately detaches passes `minAgeMs: 0`).
- * Sessions an agent is answering, closed sessions, daemon-run sessions and
- * delegated rows belong to other owners and are left alone.
+ * Sessions an agent is answering, closed sessions, daemon-run sessions, hosted
+ * sessions and delegated rows belong to other owners and are left alone.
  */
 export function retireAbandonedSurfaceInputs(
   store: SharedSessionInputStore,
@@ -184,7 +184,8 @@ export function retireAbandonedSurfaceInputs(
   for (const [sessionId, bucket] of store.inputs.entries()) {
     if (options.sessionId !== undefined && options.sessionId !== sessionId) continue;
     const session = store.sessions.get(sessionId);
-    if (!session || session.status !== 'active' || session.activeAgentId || !isSurfaceManagedSession(session)) continue;
+    // A hosted session's inputs belong to the hosted engine, which fails its own when a session ends.
+    if (!session || session.status !== 'active' || session.activeAgentId || !isSurfaceManagedSession(session) || session.kind === 'hosted') continue;
     for (const entry of bucket.filter((candidate) => candidate.state === 'queued' && !isDelegatedSessionInput(candidate))) {
       if (entry.intent !== 'steer' && entry.intent !== 'follow-up') continue;
       if (now - entry.createdAt < minAgeMs) continue;
@@ -239,6 +240,34 @@ export function filterSessionInputsSince(
     return true;
   });
   return filtered.slice(-Math.max(1, options.limit ?? 100));
+}
+
+/**
+ * How long an input a surface claimed stays that surface's before another may
+ * take it: the time a surface has to start the work and name its agent. Past
+ * it the claimant is presumed gone, and the message must not wait forever.
+ */
+export const SURFACE_CLAIM_LEASE_MS = 2 * 60_000;
+
+/** Thrown by a claim on an input another surface holds or that has ended; nothing was changed. */
+export class InputNotClaimableError extends Error {
+  readonly code = 'INPUT_NOT_CLAIMABLE';
+  constructor(readonly state: string) {
+    super(`Cannot claim input: it is ${state}, so another surface already holds it or it has ended. Leave it to that surface; nothing was changed.`);
+  }
+}
+
+/**
+ * A claim is granted to one caller: a queued input, or a delivered one no
+ * agent was named for within the lease. Checked where the row moves, with no
+ * await between, so two surfaces racing for one input cannot both pass.
+ */
+export function assertSurfaceInputClaimable(store: SharedSessionInputStore, sessionId: string, inputId: string, now: number): void {
+  const current = store.inputs.get(sessionId)?.find((entry) => entry.id === inputId);
+  if (!current) return;
+  const unbound = !current.activeAgentId;
+  if (current.state === 'queued' || (current.state === 'delivered' && unbound && now - current.updatedAt >= SURFACE_CLAIM_LEASE_MS)) return;
+  throw new InputNotClaimableError(current.state);
 }
 
 /** A surface's delivery report, and whether it was applied to the row. */

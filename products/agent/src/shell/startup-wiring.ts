@@ -8,7 +8,7 @@ import {
   writeRecoveryFile,
 } from '@/runtime/index.ts';
 import type { SessionSnapshot, SessionSurface } from '@/runtime/index.ts';
-import { checkSessionLiveness, removeLivenessMarker, writeLivenessMarker } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { checkSessionLiveness, removeLivenessMarker, writeCrashSnapshotAtTurnMoments, writeLivenessMarker } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import {
   readOnboardingCheckMarker,
   readOnboardingCompletionMarker,
@@ -33,7 +33,7 @@ export interface SessionPersistenceAndRecoveryDeps {
   readonly render: () => void;
   readonly unsubs: Array<() => void>;
   readonly uiServicesTurns: {
-    on(event: 'TURN_COMPLETED' | 'STREAM_START' | 'STREAM_DELTA', handler: () => void): () => void;
+    on(event: 'TURN_COMPLETED' | 'STREAM_START' | 'STREAM_DELTA' | 'TURN_SUBMITTED' | 'TOOLS_DONE', handler: () => void): () => void;
   };
   readonly hookDispatcher: HookDispatcher;
   /**
@@ -64,7 +64,7 @@ export interface SessionPersistenceAndRecoveryDeps {
 }
 
 export interface SessionPersistenceAndRecoveryResult {
-  /** Interval handle for the periodic recovery-file writer; clear it on exit. */
+  /** Interval handle for the liveness-marker refresh; clear it on exit. The crash snapshot itself is written at turn moments. */
   recoveryInterval: ReturnType<typeof setInterval>;
   /**
    * The sessionId of the offered recovery snapshot when an unsaved session
@@ -117,6 +117,17 @@ export function wireSessionPersistenceAndRecovery(
   let streamStartTime = 0;
   let streamDeltaCount = 0;
 
+  // The crash snapshot: written when a prompt is accepted and after each tool
+  // batch (shared rule, runtime/session-persistence.ts), so a crash mid-turn
+  // keeps the turn's work; the session save below is the copy after that.
+  const writeCrashSnapshot = (): void => {
+    writeRecoveryFile(buildCurrentSessionSnapshot(), runtime.sessionId, conversation.title ?? '', { surface });
+  };
+  unsubs.push(writeCrashSnapshotAtTurnMoments({
+    subscribe: (moment, handler) => uiServicesTurns.on(moment, handler),
+    write: writeCrashSnapshot,
+  }));
+
   // One notice per failing streak: a full disk would otherwise repeat it every turn.
   let autosaveFailing = false;
   unsubs.push(uiServicesTurns.on('TURN_COMPLETED', () => {
@@ -139,6 +150,10 @@ export function wireSessionPersistenceAndRecovery(
       hookDispatcher.fire({ path: 'Lifecycle:session:save' as HookEventPath, phase: 'Lifecycle' as HookPhase, category: 'session' as HookCategory, specific: 'save', sessionId: runtime.sessionId, timestamp: Date.now(), payload: { sessionId: runtime.sessionId } }).catch((err: unknown) => logger.debug('hook fire error', { error: summarizeError(err) }));
     } catch (e) {
       logger.warn('auto-save on turn:complete failed', { error: summarizeError(e) });
+      // The session file did not take this turn: the crash snapshot keeps it.
+      try { writeCrashSnapshot(); } catch (error) {
+        logger.warn('[Recovery] Crash snapshot after a failed save also failed', { error: summarizeError(error) });
+      }
       if (!autosaveFailing) {
         autosaveFailing = true;
         systemMessageRouter.high('[Session] This session could not be saved after the last turn, so it may be lost if the process stops. Check free disk space and write access to the sessions directory; saving is retried after every turn.');
@@ -196,22 +211,9 @@ export function wireSessionPersistenceAndRecovery(
       logger.warn('[Recovery] Liveness marker removal failed', { error: summarizeError(error) });
     }
   });
-  const recoveryInterval = setInterval(() => {
-    // A timer callback that throws becomes an uncaught exception and ends the
-    // process; a failed tick only costs this snapshot, and the next tick retries.
-    try {
-      const snapshot = buildCurrentSessionSnapshot();
-      writeRecoveryFile(
-        snapshot,
-        runtime.sessionId,
-        conversation.title ?? '',
-        { surface },
-      );
-    } catch (error) {
-      logger.warn('[Recovery] Autosave snapshot failed', { error: summarizeError(error) });
-    }
-    refreshLivenessMarker();
-  }, 60_000);
+  // The marker says this terminal is alive; it is refreshed on a timer. The
+  // conversation itself is written at turn moments above, not on this timer.
+  const recoveryInterval = setInterval(refreshLivenessMarker, 60_000);
 
   // First-start registration prompt (owner-approved design): only when this
   // directory resolves to unknown (not covered, not declined) AND it isn't a

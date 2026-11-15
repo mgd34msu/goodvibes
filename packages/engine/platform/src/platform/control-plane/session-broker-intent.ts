@@ -22,7 +22,7 @@ import {
   updateSharedSessionInput,
   type SharedSessionInputStore,
 } from './session-broker-inputs.js';
-import { SURFACE_ROUTE_FRESHNESS_MS, shouldRouteInputToSurface } from './session-broker-sessions.js';
+import { isSystemClosedSession, SURFACE_ROUTE_FRESHNESS_MS, shouldRouteInputToSurface } from './session-broker-sessions.js';
 import { decideContinuationEscalation } from '../agents/conversation-continuation.js';
 import type { ConversationGateConfigReader } from '../agents/conversation-gate.js';
 import { isDelegatedSessionInput } from './session-intents.js';
@@ -32,12 +32,24 @@ import { logger } from '../utils/logger.js';
  * session-broker.ts's MAX_PERSISTED_INPUTS for its former home). */
 const MAX_PERSISTED_INPUTS = 500;
 
+/**
+ * What an earlier delivery of a provider message left: the message itself,
+ * answered or on its way (`held`, returned as the duplicate), or a message
+ * whose start failed (`retry`: answered again from the user message already
+ * stored, and with `input` from the row still queued for it).
+ */
+export type ProviderMessageClaim =
+  | { readonly kind: 'held'; readonly submission: SharedSessionSubmission }
+  | { readonly kind: 'retry'; readonly sessionId: string; readonly userMessage: SharedSessionMessage; readonly input?: SharedSessionInputRecord | undefined };
+
 export interface HandleSharedSessionIntentDeps {
   readonly sessions: Map<string, SharedSessionRecord>;
   readonly messageSender: SharedSessionMessageSender;
   start(): Promise<void>;
   resolveBinding(input: SubmitSharedSessionMessageInput): Promise<AutomationRouteBinding | null>;
   createSession(input?: CreateSharedSessionInput): Promise<SharedSessionRecord>;
+  /** Reopen a session the system closed (idle reaper, boot sweep), keeping its transcript. */
+  reopenSession?(sessionId: string): Promise<SharedSessionRecord | null>;
   attachParticipantAndRoute(
     session: SharedSessionRecord,
     input: ParticipantRouteAttachInput,
@@ -68,8 +80,8 @@ export interface HandleSharedSessionIntentDeps {
    */
   sendSurfaceNotice?: ((routeId: string, text: string) => void) | undefined;
   buildContinuationTask(sessionId: string): string;
-  /** The earlier submission recorded under this provider message key, when there is one still worth answering from. */
-  findProviderMessage?(key: string): SharedSessionSubmission | null;
+  /** What an earlier delivery recorded under this provider message key, when anything. */
+  findProviderMessage?(key: string): ProviderMessageClaim | null;
   /** Remember which input holds a provider message key. */
   noteProviderMessage?(key: string, sessionId: string, inputId: string): void;
   /**
@@ -118,16 +130,16 @@ function bindingMayRebind(binding: AutomationRouteBinding): boolean {
  *
  * So the hint is CHECKED on every resolve, and the check is written as
  * "prove it is usable", not "rule out the failures I have seen". The last two
- * branches are belt-and-braces: the snapshot loader rejects a malformed record
- * by refusing the whole file (session-broker-state.ts), so a record here is
- * normally well-formed by construction. They exist so that an in-process
+ * branches are belt-and-braces: the store loader sets a record it cannot read
+ * aside (session-broker-state.ts), so a record here is normally well-formed by
+ * construction. They exist so that an in-process
  * writer, or a status this enum grows later, cannot strand the channel just
  * because nobody predicted it.
  */
 function describeUnusableBoundSession(session: SharedSessionRecord | undefined): string | null {
-  if (!session) return 'the session it named is not in this node\'s store';
-  if (typeof session.id !== 'string' || session.id.length === 0) return 'the record it named has no id';
-  if (session.status === 'closed') return 'the session it named is closed';
+  if (!session) return 'the earlier conversation is not on this machine';
+  if (typeof session.id !== 'string' || session.id.length === 0) return 'the earlier conversation has no id';
+  if (session.status === 'closed') return 'the earlier conversation was closed';
   if (session.status !== 'active') return `the record it named has an unusable status (${String(session.status)})`;
   return null;
 }
@@ -186,7 +198,7 @@ function announceRolloverOnChannel(
   try {
     deps.sendSurfaceNotice(
       binding.id,
-      `Picking this up in a fresh conversation, ${reason}, so I no longer have the earlier messages in view. Nothing was deleted; the previous conversation is kept as history.`,
+      `Starting a new conversation: ${reason}, so I cannot see the earlier messages. Nothing was deleted; the earlier conversation is kept as history.`,
     );
   } catch (error) {
     logger.warn('Rollover notice could not be handed to the surface delivery path', {
@@ -216,10 +228,9 @@ export async function handleSharedSessionIntent(
   await deps.start();
 
   const providerKey = providerMessageKey(input);
-  if (providerKey) {
-    const earlier = deps.findProviderMessage?.(providerKey);
-    if (earlier) return earlier;
-  }
+  const earlier = providerKey ? deps.findProviderMessage?.(providerKey) ?? null : null;
+  if (earlier?.kind === 'held') return earlier.submission;
+  const retry = earlier?.kind === 'retry' ? earlier : undefined;
 
   const binding = await deps.resolveBinding(input);
   // WHERE the session came from decides what a CLOSED one means, and the two
@@ -227,9 +238,21 @@ export async function handleSharedSessionIntent(
   // specific record, it asked about THAT session, and the honest answer when
   // that session is closed is the 409 below. `binding.sessionId` is only where
   // the route last parked this conversation; the sender named nothing.
-  let session = input.sessionId ? deps.sessions.get(input.sessionId) ?? undefined : undefined;
+  // A retried provider message goes back to the session that already holds it.
+  let session = retry ? deps.sessions.get(retry.sessionId) ?? undefined
+    : input.sessionId ? deps.sessions.get(input.sessionId) ?? undefined : undefined;
   let created = false;
   let rolledOverFrom: string | undefined;
+  if (!session && binding?.sessionId) {
+    // A conversation the system closed (the idle timer, the boot sweep) was
+    // never ended by anyone: a channel has no heartbeat, so its next message
+    // is the sign of life, and it reopens with its transcript, as a terminal
+    // or web session does on its next heartbeat.
+    const parked = deps.sessions.get(binding.sessionId);
+    if (parked && parked.status === 'closed' && isSystemClosedSession(parked) && deps.reopenSession) {
+      session = (await deps.reopenSession(parked.id)) ?? undefined;
+    }
+  }
   if (!session && binding?.sessionId) {
     // VALIDATE THE HINT, THEN HEAL IT.
     //
@@ -310,10 +333,14 @@ export async function handleSharedSessionIntent(
     },
   };
   const delegated = isDelegatedSessionInput(input);
-  const userMessage = delegated
-    ? deps.appendUnpublishedMessage(updatedSession.id, messageInput)
-    : await deps.appendMessage(updatedSession.id, messageInput);
-  const queuedInput = recordSharedSessionInput(deps.sessionInputStore(), {
+  // A retry of a message whose start failed answers the user message already
+  // stored, so a redelivery never puts it in the transcript twice.
+  const reused = retry && retry.sessionId === updatedSession.id ? retry : undefined;
+  const userMessage = reused ? reused.userMessage
+    : delegated
+      ? deps.appendUnpublishedMessage(updatedSession.id, messageInput)
+      : await deps.appendMessage(updatedSession.id, messageInput);
+  const queuedInput = reused?.input ?? recordSharedSessionInput(deps.sessionInputStore(), {
     sessionId: updatedSession.id,
     intent,
     message: providerKey ? { ...input, metadata: { ...(input.metadata ?? {}), [PROVIDER_MESSAGE_KEY_FIELD]: providerKey } } : input,
@@ -341,9 +368,11 @@ export async function handleSharedSessionIntent(
     return { session: deps.sessions.get(updatedSession.id)!, userMessage, routeBinding: binding ?? undefined,
       input: queuedInput, intent, mode: 'queued-for-surface', state: queuedInput.state, created };
   }
-  deps.publishInputLifecycleEvent('session-input-queued', queuedInput, {
-    messageId: userMessage.id,
-  });
+  if (!reused?.input) {
+    deps.publishInputLifecycleEvent('session-input-queued', queuedInput, {
+      messageId: userMessage.id,
+    });
+  }
 
   const activeAgentId = deps.resolveActiveAgentId(updatedSession);
 
@@ -490,9 +519,12 @@ export async function handleSharedSessionIntent(
 
   // Surface routing: a steer/follow-up with a LIVE surface participant (other than the
   // sender) queues for that surface (sessions.inputs.list/deliver); no live surface keeps the executor path below.
+  // A hosted session's surface is the daemon's own hosted engine, which owns its
+  // liveness, so its steers always queue for it, however old its registration.
   if (
     (intent === 'steer' || intent === 'follow-up') &&
-    shouldRouteInputToSurface(updatedSession, Date.now(), SURFACE_ROUTE_FRESHNESS_MS, { surfaceId: input.surfaceId })
+    (updatedSession.kind === 'hosted'
+      || shouldRouteInputToSurface(updatedSession, Date.now(), SURFACE_ROUTE_FRESHNESS_MS, { surfaceId: input.surfaceId }))
   ) {
     await deps.persist();
     deps.publishInputLifecycleEvent('session-input-queued-for-surface', queuedInput, {

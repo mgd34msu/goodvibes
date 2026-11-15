@@ -196,10 +196,22 @@ export function requireHomeDirectory(options?: Pick<SessionPersistenceOptions, '
   return homeDirectory;
 }
 
+/**
+ * The one SessionManager of each surface, built on first use. Building it
+ * sweeps the sessions directory for temp files a crashed write left; that is a
+ * start-of-surface chore, so it runs once per surface, not on every save.
+ */
+const surfaceSessionManagers = new WeakMap<SessionSurface, SessionManager>();
+
 export function resolveSessionManager(options?: SessionPersistenceOptions): SessionManager {
   if (isSurfaceOptions(options)) {
     const surface = requireSurface(options);
-    return new SessionManager(surface.workingDirectory, { surface });
+    let manager = surfaceSessionManagers.get(surface);
+    if (!manager) {
+      manager = new SessionManager(surface.workingDirectory, { surface });
+      surfaceSessionManagers.set(surface, manager);
+    }
+    return manager;
   }
   warnLegacyOptionsOnce();
   if (options?.sessionManager) {

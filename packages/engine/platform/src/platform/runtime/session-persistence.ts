@@ -41,6 +41,35 @@ export {
   type SessionSnapshot,
 } from './session-persistence-scope.js';
 
+/**
+ * The turn moments a terminal writes the conversation to its crash snapshot:
+ * the prompt was accepted, and each batch of tool calls finished. The session
+ * save at turn end is the durable copy after that, so a crash mid-turn loses
+ * at most the tool batch in flight, never the turn.
+ */
+export type CrashSnapshotMoment = 'TURN_SUBMITTED' | 'TOOLS_DONE';
+
+/**
+ * Write the crash snapshot at each {@link CrashSnapshotMoment}, through the
+ * product's own atomic recovery write (`write`). Shared by both terminal apps
+ * so the two keep one rule. A failed write is logged and the next moment
+ * writes again. Returns the unsubscribe.
+ */
+export function writeCrashSnapshotAtTurnMoments(input: {
+  readonly subscribe: (moment: CrashSnapshotMoment, handler: () => void) => () => void;
+  readonly write: () => void;
+}): () => void {
+  const writeNow = (): void => {
+    try {
+      input.write();
+    } catch (error) {
+      logger.warn('[Recovery] Crash snapshot write failed; the next turn moment writes it again', { error: summarizeError(error) });
+    }
+  };
+  const unsubs = [input.subscribe('TURN_SUBMITTED', writeNow), input.subscribe('TOOLS_DONE', writeNow)];
+  return () => { for (const unsubscribe of unsubs) unsubscribe(); };
+}
+
 // The crash-recovery API, re-exported so `session-persistence.js` remains the
 // one import path for it (see session-recovery.ts for the semantics).
 export {

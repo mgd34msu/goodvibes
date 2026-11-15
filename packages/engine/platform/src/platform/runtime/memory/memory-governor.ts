@@ -275,11 +275,11 @@ function defaultGc(): void {
 }
 
 /**
- * While the daemon stays at `high` or `critical`, caches are flushed again this
- * often. Trimming only on a tier change would leave a daemon parked at
- * `critical` refusing work while everything refilled since the one flush.
+ * A tier is left only once RSS is this many points of the budget below the
+ * threshold that entered it, so an RSS sitting on a threshold does not flip
+ * pause/resume and trim/collect on consecutive samples.
  */
-export const PRESSURE_RETRIM_INTERVAL_MS = 30_000;
+export const TIER_RELEASE_MARGIN_PCT = 5;
 
 export class MemoryGovernor {
   private readonly caches: CacheRegistry;
@@ -305,8 +305,6 @@ export class MemoryGovernor {
 
   private tier: MemoryTier = 'normal';
   private refusing = false;
-  /** When caches were last flushed for pressure; gates the periodic re-trim at high and above. */
-  private lastPressureTrimAt = 0;
   private timer: ReturnType<typeof setInterval> | null = null;
   private exited = false;
 
@@ -411,10 +409,24 @@ export class MemoryGovernor {
       return {
         allowed: false,
         tier: this.tier,
-        reason: `Daemon is under critical memory pressure (RSS >= ${round1((this.criticalBytes / (this.budgetMb * MB)) * 100)}% of the ${this.budgetMb}MB budget = ${Math.round(this.criticalBytes / MB)}MB); ${label} refused. Retry once pressure clears.`,
+        reason: this.criticalRefusal(label),
       };
     }
     return { allowed: true, tier: this.tier };
+  }
+
+  /**
+   * The critical-tier refusal: the state, the reason and what to change. The
+   * caches this governor can shed hold little, so waiting rarely clears the
+   * pressure; the budget setting or a restart does.
+   */
+  private criticalRefusal(label: string): string {
+    const rssMb = Math.round(this.sampler().rssBytes / MB);
+    const largest = [...this.caches.footprints()].sort((a, b) => b.entries - a.entries)[0];
+    return `${label} refused: the daemon is at critical memory pressure (RSS ${rssMb}MB, at or above ${Math.round(this.criticalBytes / MB)}MB, `
+      + `${round1((this.criticalBytes / (this.budgetMb * MB)) * 100)}% of the ${this.budgetMb}MB memory.budgetMb). `
+      + (largest ? `The largest shed-able cache is ${largest.name} (${largest.entries} entries). ` : '')
+      + 'Raise memory.budgetMb, or restart the daemon to release memory, then try again.';
   }
 
   /** The full governor snapshot served by the ops.memory verb. */
@@ -451,15 +463,14 @@ export class MemoryGovernor {
     const sample = this.sampler();
     const rss = sample.rssBytes;
     const nextTier = this.tierFor(rss);
+    // Caches are shed once, on entering a tier: a repeated flush and forced
+    // collection while RSS stays put costs a blocking full collection and the
+    // reconnect replay, and cannot lower an RSS the shed-able caches do not hold.
     if (nextTier !== this.tier) {
       const previousTier = this.tier;
       this.tier = nextTier;
       this.recordTierTransition(nextTier);
       this.applyTier(nextTier, previousTier, sample);
-    } else if (TIER_RANK[this.tier] >= TIER_RANK.high && this.now() - this.lastPressureTrimAt >= PRESSURE_RETRIM_INTERVAL_MS) {
-      this.caches.trimAll('flush');
-      this.gc();
-      this.lastPressureTrimAt = this.now();
     }
     this.checkTripwire(sample);
     this.checkHardLimit(sample);
@@ -496,10 +507,14 @@ export class MemoryGovernor {
     }
   }
 
+  /** The tier for this RSS: up at a threshold, down only below it by the release margin. */
   private tierFor(rssBytes: number): MemoryTier {
-    if (rssBytes >= this.criticalBytes) return 'critical';
-    if (rssBytes >= this.highBytes) return 'high';
-    if (rssBytes >= this.elevatedBytes) return 'elevated';
+    const margin = this.budgetMb * MB * (TIER_RELEASE_MARGIN_PCT / 100);
+    const current = TIER_RANK[this.tier];
+    const at = (threshold: number, rank: number): boolean => rssBytes >= (current >= rank ? threshold - margin : threshold);
+    if (at(this.criticalBytes, TIER_RANK.critical)) return 'critical';
+    if (at(this.highBytes, TIER_RANK.high)) return 'high';
+    if (at(this.elevatedBytes, TIER_RANK.elevated)) return 'elevated';
     return 'normal';
   }
 
@@ -519,7 +534,6 @@ export class MemoryGovernor {
       // High/critical: full flush + pause deferrable jobs, and arm the tripwire
       // against the post-flush baseline.
       this.caches.trimAll('flush');
-      this.lastPressureTrimAt = this.now();
       this.pauses.pauseAll(`memory-pressure:${tier}`);
       this.armTripwire(sample);
     } else {

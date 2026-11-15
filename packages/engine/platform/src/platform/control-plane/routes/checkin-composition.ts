@@ -1,5 +1,6 @@
 /** The real registered check-in caller, shared by runtime composition and synthetic route tests. */
-import { CheckinService, CheckinReceiptStore, createProviderBackedCheckinJudge, createRuntimeCheckinStateReader } from '../../checkin/index.js';
+import { CheckinService, CheckinReceiptStore, createProviderBackedCheckinJudge } from '../../checkin/index.js';
+import { createRuntimeCheckinStateReader, judgeOnlyWhenOwnerNeeded } from '../../checkin/state-reader.js';
 import type { ConfigKey } from '../../config/schema.js';
 import { parseChannelDeliveryTarget } from '../../channels/delivery/types.js';
 import type { GatewayMethodCatalog } from '../method-catalog.js';
@@ -10,7 +11,7 @@ import { summarizeError } from '../../utils/error-display.js';
 import { controlPlaneStorePath } from '../control-plane-store-paths.js';
 
 export function registerComposedCheckinGatewayMethods(catalog: GatewayMethodCatalog, deps: Pick<GatewayVerbGroupDeps,
-  'channelDeliveryRouter' | 'providerRegistry' | 'automationManager' | 'sessionLister' | 'configManager' | 'shellPaths' | 'surfaceRoot' | 'disposal'>): void {
+  'channelDeliveryRouter' | 'providerRegistry' | 'automationManager' | 'sessionLister' | 'configManager' | 'shellPaths' | 'surfaceRoot' | 'disposal' | 'ownerInbox'>): void {
   if (deps.channelDeliveryRouter && deps.providerRegistry && deps.automationManager && deps.sessionLister && deps.configManager.onDidInvalidate) {
     const channelDeliveryRouter = deps.channelDeliveryRouter;
     const automation = deps.automationManager;
@@ -27,13 +28,16 @@ export function registerComposedCheckinGatewayMethods(catalog: GatewayMethodCata
       ...(subscribe ? { subscribe: (key: string, listener: () => void) => subscribe(key as ConfigKey, listener) } : {}),
       set: (key: string, value: string | boolean): void => configManager.set(key as ConfigKey, value as never),
     };
+    const ownerInbox = deps.ownerInbox;
+    const stateReader = createRuntimeCheckinStateReader({
+      listSessions: () => sessionLister.listSessions(500),
+      listRuns: () => automation.listRuns(),
+      ...(ownerInbox ? { listOwnerItems: () => ownerInbox.listNow({ status: 'open' }) } : {}),
+    });
     const checkinService = new CheckinService({
       config: checkinConfig,
-      stateReader: createRuntimeCheckinStateReader({
-        listSessions: () => sessionLister.listSessions(500),
-        listRuns: () => automation.listRuns(),
-      }),
-      judge: createProviderBackedCheckinJudge(deps.providerRegistry),
+      stateReader,
+      judge: judgeOnlyWhenOwnerNeeded(createProviderBackedCheckinJudge(deps.providerRegistry), stateReader),
       deliverer: {
         deliver: async (channel, message, lifetime) => {
           return channelDeliveryRouter.deliver({

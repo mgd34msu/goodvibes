@@ -1,4 +1,4 @@
-import { mkdirSync, existsSync } from 'node:fs';
+import { mkdirSync, existsSync, statSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { exportToMarkdown, type ExportMessage } from '@goodvibes-jev/engine/platform/platform/export';
@@ -44,11 +44,11 @@ export function createSessionContentCommands<Context extends ContentContext, Mes
   const exportCommand: TerminalSlashCommand<Context> = {
     name: 'export',
     description: 'Export conversation to a Markdown file',
-    usage: '[format] [path]' + (policy.confirmExport ? ' --yes' : ''),
+    usage: '[format] [path]' + (policy.confirmExport ? ' --yes' : ' [--yes]'),
     argsHint: '[markdown] [path]',
     async handler(args, ctx) {
       const shellPaths = policy.paths(ctx);
-      const { rest, yes } = policy.confirmExport ? stripYesFlag(args) : { rest: args, yes: true };
+      const { rest, yes } = stripYesFlag(args);
       let format = 'markdown',
         outPath: string | undefined;
       for (const arg of rest) {
@@ -65,7 +65,15 @@ export function createSessionContentCommands<Context extends ContentContext, Mes
         ctx.print(policy.invalidPath);
         return;
       }
-      if (!yes) {
+      // Replacing a file that is already there needs --yes in every product;
+      // a new file needs it only where the product asks for every export.
+      let replacing = false;
+      try { replacing = statSync(resolvedPath).isFile(); } catch { /* nothing there yet */ }
+      if (replacing && !yes) {
+        ctx.print(`${resolvedPath} already exists, so nothing was written. Run ${['/export', ...rest, '--yes'].join(' ')} to replace it, or give another path.`);
+        return;
+      }
+      if (policy.confirmExport && !yes) {
         requireYesFlag(ctx, 'export conversation to ' + resolvedPath, '/export [format] [path] --yes');
         return;
       }
@@ -158,11 +166,14 @@ export function createSessionSaveCommand<Context extends ContentContext>(policy:
   return {
     name: 'save',
     description: policy.description,
-    usage: '[name]',
+    usage: '[name] [--replace]',
     argsHint: '[name]',
     handler(args, ctx) {
       const manager = policy.manager(ctx);
-      const rawName = args[0] || ctx.session.conversationManager.title || `session-${Date.now()}`;
+      const replace = args.includes('--replace');
+      // Every word is the name: "/save my notes" saves "my notes".
+      const typedName = args.filter((arg) => arg !== '--replace').join(' ').trim();
+      const rawName = typedName || ctx.session.conversationManager.title || `session-${Date.now()}`;
       const messages = policy.messages(ctx);
       const meta = {
         title: ctx.session.conversationManager.title,
@@ -171,11 +182,13 @@ export function createSessionSaveCommand<Context extends ContentContext>(policy:
         timestamp: Date.now(),
         ...policy.extraMeta(ctx),
         saveSource: 'user' as const,
+        // Which conversation the file holds, so a second conversation cannot silently replace it.
+        conversationId: ctx.session.runtime.sessionId,
       };
       try {
         const records = policy.records(ctx);
         if (records === null) return;
-        const result = manager.save(rawName, messages, meta, records, undefined, ctx.session.conversationManager.branchState?.());
+        const result = manager.save(rawName, messages, meta, records, undefined, ctx.session.conversationManager.branchState?.(), { replace });
         ctx.print(policy.saved(rawName, result, records?.length ?? 0));
       } catch (error) {
         ctx.print(policy.failed(error));

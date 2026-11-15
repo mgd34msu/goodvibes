@@ -22,7 +22,7 @@ import {
   type MemoryTripwireReceipt,
 } from '../platform/src/platform/runtime/memory/index.js';
 
-import { PRESSURE_RETRIM_INTERVAL_MS } from '../platform/src/platform/runtime/memory/memory-governor.js';
+import { TIER_RELEASE_MARGIN_PCT } from '../platform/src/platform/runtime/memory/memory-governor.js';
 
 const MB = 1024 * 1024;
 
@@ -159,31 +159,26 @@ describe('MemoryGovernor tier machine', () => {
     expect(h.opsEvents.at(-1)?.tier).toBe('critical');
   });
 
-  test('a daemon parked at critical flushes its caches again on a schedule instead of only on the tier change', () => {
+  test('a daemon parked at critical sheds its caches once, not again on every sample', () => {
     const h = makeGovernor({ budgetMb: 100 });
     h.setRssMb(97);
     h.gov.sampleOnce();
     const afterEntry = h.trims.length;
-    h.advance(PRESSURE_RETRIM_INTERVAL_MS - 1);
-    h.gov.sampleOnce();
+    for (let i = 0; i < 20; i += 1) { h.advance(30_000); h.gov.sampleOnce(); }
     expect(h.trims.length).toBe(afterEntry);
-    h.advance(1);
-    h.gov.sampleOnce();
-    expect(h.trims.length).toBe(afterEntry + 1);
-    expect(h.trims.at(-1)).toBe('flush');
-    h.advance(PRESSURE_RETRIM_INTERVAL_MS);
-    h.gov.sampleOnce();
-    expect(h.trims.length).toBe(afterEntry + 2);
   });
 
-  test('elevated pressure does not re-flush on a schedule', () => {
+  test('an RSS sitting on a threshold does not flip the tier on each sample', () => {
     const h = makeGovernor({ budgetMb: 100 });
-    h.setRssMb(65);
+    h.setRssMb(81);
     h.gov.sampleOnce();
-    const afterEntry = h.trims.length;
-    h.advance(PRESSURE_RETRIM_INTERVAL_MS * 3);
+    expect(h.gov.currentTier()).toBe('high');
+    h.setRssMb(79);
     h.gov.sampleOnce();
-    expect(h.trims.length).toBe(afterEntry);
+    expect(h.gov.currentTier()).toBe('high');
+    h.setRssMb(80 - TIER_RELEASE_MARGIN_PCT - 1);
+    h.gov.sampleOnce();
+    expect(h.gov.currentTier()).toBe('elevated');
   });
 
   test('recovering below high resumes paused jobs and allows work again', () => {

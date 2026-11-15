@@ -52,13 +52,17 @@
  * landed, so a retry re-acknowledges it instead of starting a second agent.
  * Nothing here blocks a turn.
  *
- * ── Why it polls ───────────────────────────────────────────────────────────
+ * ── When it reads ──────────────────────────────────────────────────────────
  *
- * The same reason the inbound steer poller does: this is not a hot path, a
- * continuation arrives seconds apart at most, and a poll survives a suspended
- * laptop and a dropped tunnel without a reconnect state machine. The SSE stream
- * carries the same transitions for anything that genuinely needs per-token
- * latency.
+ * A client that can report input changes (`subscribeInputChanges`, fed from
+ * the daemon's session-update stream it already opens) drives dispatch: a
+ * change for a hosted session reads that session once, and one reconcile read
+ * a minute covers anything the stream missed (a suspended laptop, a dropped
+ * tunnel). A client without it is read every two seconds.
+ *
+ * A runner that keeps failing on one input is not retried forever: after
+ * MAX_RUNNER_FAILURES attempts the input is reported failed with the reason,
+ * so the row and the sender's surface say so instead of waiting in silence.
  */
 import { logger, summarizeError } from '../../utils/index.js';
 import type { SharedSessionInputRecord } from '../../control-plane/index.js';
@@ -108,6 +112,11 @@ export interface SessionInputsWireClient {
    * dispatches as before.
    */
   claimInput?(sessionId: string, inputId: string): Promise<unknown>;
+  /**
+   * Be told when a session's inputs change (from the session-update stream).
+   * Returns the unsubscribe. Optional: without it inputs are read on a short interval.
+   */
+  subscribeInputChanges?(onChange: (sessionId: string) => void): () => void;
   deliverInput(
     sessionId: string,
     inputId: string,
@@ -134,6 +143,10 @@ export function isInputClaimRefusal(error: unknown): boolean {
 type ContinuationRunner = SharedSessionContinuationRunner | null;
 
 const DEFAULT_INTERVAL_MS = 2_000;
+/** With input changes pushed, the interval read is only a reconcile for what the stream missed. */
+const RECONCILE_INTERVAL_MS = 60_000;
+/** Runner attempts on one input before it is reported failed with the reason. */
+const MAX_RUNNER_FAILURES = 3;
 
 /**
  * How long a claimed input with no agent is left to its claimant. The daemon
@@ -189,7 +202,7 @@ export interface WireSessionDispatchOptions {
    * keeps the reply binding but leaves the answer un-reported.
    */
   readonly readAgentOutcome?: ((agentId: string) => SurfaceAgentOutcome | null) | undefined;
-  /** Poll interval; defaults to two seconds. */
+  /** Read interval without pushed input changes; defaults to two seconds (one minute with them). */
   readonly intervalMs?: number;
   readonly log?: Pick<typeof logger, 'debug' | 'info' | 'warn'>;
   readonly now?: (() => number) | undefined;
@@ -219,11 +232,16 @@ export interface WireSessionDispatch extends SessionContinuationDispatch {
 export function createWireSessionDispatch(options: WireSessionDispatchOptions): WireSessionDispatch {
   const log = options.log ?? logger;
   const now = options.now ?? Date.now;
-  const intervalMs = options.intervalMs ?? DEFAULT_INTERVAL_MS;
   let runner: ContinuationRunner = null;
   let client: SessionInputsWireClient | null = null;
   let timer: ReturnType<typeof setInterval> | null = null;
+  let timerMs = 0;
+  let unsubscribe: (() => void) | null = null;
+  /** A change arrived while a read was running: read again when it ends. */
+  let rerun = false;
   let inFlight = false;
+  /** `sessionId\0inputId` -> runner failures so far on that input. */
+  const runnerFailures = new Map<string, number>();
   let generation = 0;
   /** agentId -> the input it is answering. Insertion-ordered, so the oldest is first. */
   const awaitingAnswers = new Map<string, AwaitedAnswer>();
@@ -380,13 +398,32 @@ export function createWireSessionDispatch(options: WireSessionDispatchOptions): 
           claim = agentId ? { kind: 'agent', agentId } : { kind: 'consumed' };
         }
       } catch (error) {
+        const failures = (runnerFailures.get(key) ?? 0) + 1;
+        runnerFailures.set(key, failures);
         log.warn('[session dispatch] the bound runner rejected a continuation', {
           sessionId,
           inputId: input.id,
+          attempt: failures,
           error: summarizeError(error),
         });
-        continue; // a transient runner failure must not consume the work; this process retries it
+        // A transient failure is retried; one that repeats is reported, so the
+        // input ends failed with the reason instead of being retried forever in silence.
+        if (failures >= MAX_RUNNER_FAILURES) {
+          try {
+            await active.deliverInput(sessionId, input.id, {
+              consumed: true,
+              status: 'failed',
+              answer: `This surface could not start the message after ${failures} attempts: ${summarizeError(error)}. Send it again to retry.`,
+            });
+            runnerFailures.delete(key);
+            claimedUnstarted.delete(key);
+          } catch (reportError) {
+            log.debug('[session dispatch] reporting a failed input did not reach the daemon; retrying next read', { sessionId, inputId: input.id, error: summarizeError(reportError) });
+          }
+        }
+        continue;
       }
+      runnerFailures.delete(key);
       // Recorded before anything else can fail or detach, so a later tick only
       // re-acknowledges this input instead of starting it a second time.
       recordClaim(key, claim);
@@ -467,8 +504,10 @@ export function createWireSessionDispatch(options: WireSessionDispatchOptions): 
 
   const tick = async (): Promise<void> => {
     const active = client;
-    if (!active || runner === null || inFlight) return;
+    if (!active || runner === null) return;
+    if (inFlight) { rerun = true; return; }
     inFlight = true;
+    rerun = false;
     try {
       // One session's failure (an unknown or unreadable session on the daemon)
       // must not starve the others, nor the answers already waiting.
@@ -485,12 +524,26 @@ export function createWireSessionDispatch(options: WireSessionDispatchOptions): 
     } finally {
       inFlight = false;
     }
+    if (rerun && client === active) void tick();
   };
 
   const ensureTimer = (): void => {
-    if (timer !== null) return;
-    timer = setInterval(() => { void tick(); }, intervalMs);
+    const wanted = options.intervalMs ?? (unsubscribe !== null ? RECONCILE_INTERVAL_MS : DEFAULT_INTERVAL_MS);
+    if (timer !== null && timerMs === wanted) return;
+    if (timer !== null) clearInterval(timer);
+    timerMs = wanted;
+    timer = setInterval(() => { void tick(); }, wanted);
     timer.unref?.();
+  };
+
+  const listen = (next: SessionInputsWireClient): void => {
+    unsubscribe?.();
+    unsubscribe = null;
+    if (!next.subscribeInputChanges) return;
+    unsubscribe = next.subscribeInputChanges((sessionId) => {
+      if (client !== next || !options.hostedSessionIds().includes(sessionId)) return;
+      void tick();
+    });
   };
 
   return {
@@ -500,16 +553,20 @@ export function createWireSessionDispatch(options: WireSessionDispatchOptions): 
     },
     activate(next) {
       ++generation; client = next;
-      if (runner !== null) ensureTimer();
+      listen(next);
+      // With changes pushed, read once now: what queued before the stream opened is not announced again.
+      if (runner !== null) { ensureTimer(); if (unsubscribe !== null) void tick(); }
       log.info('[session dispatch] adopted the daemon\'s session inputs for continuation dispatch');
     },
     deactivate(reason) {
       ++generation; client = null;
+      unsubscribe?.(); unsubscribe = null;
       log.info(`[session dispatch] detached: ${reason}`);
     },
     pollNow: tick,
     stop() {
       if (timer !== null) { clearInterval(timer); timer = null; }
+      unsubscribe?.(); unsubscribe = null;
       ++generation; client = null;
     },
   };

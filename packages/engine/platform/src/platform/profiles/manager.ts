@@ -5,6 +5,7 @@ import { join } from 'path';
 import { logger } from '../utils/logger.js';
 import type { GoodVibesConfig } from '../config/schema.js';
 import { summarizeError } from '../utils/error-display.js';
+import { storedNameStem } from '../utils/stored-name.js';
 
 /**
  * ProfileData - host-specific settings stored in a profile.
@@ -60,7 +61,7 @@ export class ProfileManager {
       throw new RefusalError(refusal({
         code: 'PROFILE_NAME_UNSTORABLE',
         state: 'the profile was not saved',
-        reason: `Profile name "${name}" keeps no characters once stored (only a-z, 0-9, "-" and "_" are kept), so it was not saved; use a name with at least one letter or digit`,
+        reason: `Profile name "${name}" keeps no characters once stored (letters and digits of any script, "-" and "_" are kept), so it was not saved; use a name with at least one letter or digit`,
         next: ['Save again under a name with at least one letter or digit'],
       }));
     }
@@ -182,12 +183,7 @@ export class ProfileManager {
    * refuse a name before anything is written.
    */
   public storedName(name: string): string | undefined {
-    const stored = name
-      .toLowerCase()
-      .replace(/\s+/g, '-')
-      .replace(/[^a-z0-9_-]/g, '')
-      .replace(/-+/g, '-')
-      .replace(/^-+|-+$/g, '');
+    const stored = storedNameStem(name);
     return stored === '' ? undefined : stored;
   }
 }

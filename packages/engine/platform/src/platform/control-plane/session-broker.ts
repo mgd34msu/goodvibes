@@ -5,8 +5,7 @@ import { withChannelExecutionMode } from '../channel-profiles/install-inbound-in
 import type { GatePresetName } from '../gate/presets.js';
 import { summarizeError } from '../utils/error-display.js';
 import { sessionsActive } from '../runtime/metrics.js';
-import { PersistentStore } from '../state/persistent-store.js';
-import { StoreWriteQueue } from '../state/store-write-queue.js';
+import type { PersistentStore } from '../state/persistent-store.js';
 import type { RuntimeEventBus } from '../runtime/events/index.js';
 import { RouteBindingManager } from '../channels/index.js';
 import type { AutomationRouteBinding } from '../automation/routes.js';
@@ -40,14 +39,22 @@ import {
   type SharedSessionStoreSnapshot,
 } from './session-broker-helpers.js';
 import {
-  createSessionBrokerSnapshot,
-  loadSessionBrokerState,
   reconcileSessionBrokerBoot,
   sortSessions,
 } from './session-broker-state.js';
 import {
+  SessionBrokerFileStorage,
+  SessionBrokerSnapshotStorage,
+  reportSetAsideSessionEntries,
+  withLoggedFacts,
+  type SessionBrokerStateView,
+  type SessionBrokerStorage,
+  type SetAsideSessionEntry,
+} from './session-broker-store.js';
+import {
   recordSharedSessionInput,
   applySurfaceInputDelivery,
+  assertSurfaceInputClaimable,
   cancelQueuedSessionInputs,
   claimNextQueuedSessionInput,
   moveSharedSessionInput,
@@ -80,22 +87,23 @@ import {
 } from './session-broker-sessions.js';
 import { applyBootOrphanSweep, sweepSharedSessions } from './session-broker-gc.js';
 import { SharedSessionRuntimeBusBridge } from './session-broker-runtime-bus.js';
-import { handleSharedSessionIntent, PROVIDER_MESSAGE_KEY_FIELD } from './session-broker-intent.js';
+import { handleSharedSessionIntent, PROVIDER_MESSAGE_KEY_FIELD, type ProviderMessageClaim } from './session-broker-intent.js';
 import { isDelegatedSessionInput } from './session-intents.js';
 import { submitDelegatedSessionMessage, type DelegatedSessionInputBinding, type DelegatedSessionSubmission } from './session-broker-delegated.js';
 import { revisionSource, type RevisionSource } from '../utils/revision.js';
 
 /** Closed sessions are history, so the stored transcript is never trimmed. */
 const MAX_PERSISTED_MESSAGES = Infinity;
+/** How long a closed session's history stays in memory after it was last needed. */
+const CLOSED_HISTORY_IDLE_MS = 10 * 60 * 1000;
 /** Most recent messages put into one continuation prompt; the stored transcript is untouched. */
 const MAX_CONTINUATION_MESSAGES = 100;
 /**
  * Default retention for CLOSED sessions (HISTORY): `POSITIVE_INFINITY` = retain
  * indefinitely, so the GC sweep NEVER deletes a closed session. A finite value
- * (constructor `deletionRetentionMs`) is the opt-in deletion authority. The store
- * is a full snapshot of memory, so there is no separate memory/disk eviction here
- * (unlike the companion manager): memory grows with retained sessions and messages
- * until a finite retention is configured.
+ * (constructor `deletionRetentionMs`) is the opt-in deletion authority. Memory
+ * is separate: a closed session's messages and inputs leave memory once it has
+ * been idle (on a store that keeps one log per session) and load again when asked for.
  */
 const SESSION_DELETION_RETENTION_MS = Number.POSITIVE_INFINITY;
 
@@ -105,17 +113,29 @@ const SPAWN_IN_FLIGHT_MS = 30_000;
 /**
  * Every session, message and input change replaces a map entry (records are
  * rebuilt, buckets set back after a push), so counting set, delete and clear
- * counts every change.
+ * counts every change, and the key says which session the next write covers.
  */
-class CountedMap<K, V> extends Map<K, V> {
-  constructor(private readonly changed: () => void) { super(); }
-  override set(key: K, value: V): this { this.changed(); return super.set(key, value); }
-  override delete(key: K): boolean { const removed = super.delete(key); if (removed) this.changed(); return removed; }
-  override clear(): void { if (this.size > 0) this.changed(); super.clear(); }
+class TrackedMap<V> extends Map<string, V> {
+  constructor(private readonly changed: (sessionId: string | null) => void) { super(); }
+  override set(key: string, value: V): this { this.changed(key); return super.set(key, value); }
+  override delete(key: string): boolean { const removed = super.delete(key); if (removed) this.changed(key); return removed; }
+  override clear(): void { if (this.size > 0) this.changed(null); super.clear(); }
+  /** Change the entry without counting it as a change (loading or unloading history). */
+  quietSet(key: string, value: V): void { Map.prototype.set.call(this, key, value); }
+  quietDelete(key: string): void { Map.prototype.delete.call(this, key); }
+  /** The entry if it is in memory, without loading it. */
+  peek(key: string): V | undefined { return Map.prototype.get.call(this, key) as V | undefined; }
+}
+
+/** A session's messages or inputs: read through `get`/`has`, a deferred session's history loads first. */
+class SessionBucketMap<V> extends TrackedMap<V> {
+  constructor(changed: (sessionId: string | null) => void, private readonly miss: (sessionId: string) => void) { super(changed); }
+  override get(key: string): V | undefined { if (!super.has(key)) this.miss(key); return super.get(key); }
+  override has(key: string): boolean { if (!super.has(key)) this.miss(key); return super.has(key); }
 }
 
 export class SharedSessionBroker {
-  private readonly store: PersistentStore<SharedSessionStoreSnapshot>;
+  private readonly storage: SessionBrokerStorage;
   /** The file this broker serves from, or null for an injected store. Boot folds/sweeps must NAME it, never re-derive it, see daemon/daemon-session-store-boot.ts. */
   readonly storePath: string | null;
   private readonly routeBindings: RouteBindingManager;
@@ -124,11 +144,23 @@ export class SharedSessionBroker {
   private readonly conversationGateConfig: ConversationGateConfigReader | undefined;
   #revision = 0;
   readonly #revisionSource = revisionSource('shared sessions', () => this.#revision);
-  private readonly sessions: Map<string, SharedSessionRecord> = new CountedMap(() => { this.#revision++; });
-  private readonly messages: Map<string, SharedSessionMessage[]> = new CountedMap(() => { this.#revision++; });
-  private readonly inputs: Map<string, SharedSessionInputRecord[]> = new CountedMap(() => { this.#revision++; });
+  /** Sessions whose record, messages or inputs changed since the last write. */
+  private readonly changed = new Set<string>();
+  private readonly noteChange = (sessionId: string | null): void => {
+    this.#revision++;
+    if (sessionId !== null) this.changed.add(sessionId);
+  };
+  private readonly sessions = new TrackedMap<SharedSessionRecord>(this.noteChange);
+  private readonly messages = new SessionBucketMap<SharedSessionMessage[]>(this.noteChange, (id) => this.loadDeferredHistory(id));
+  private readonly inputs = new SessionBucketMap<SharedSessionInputRecord[]>(this.noteChange, (id) => this.loadDeferredHistory(id));
+  /** Sessions whose messages and inputs are on disk only; they load on first use. */
+  private readonly deferred = new Set<string>();
+  /** When each closed session's loaded history was last asked for. */
+  private readonly historyTouchedAt = new Map<string, number>();
+  private setAside: readonly SetAsideSessionEntry[] = [];
+  /** The boot orphan sweep waits one heartbeat window, so surfaces that outlived a restart re-register first. */
+  private bootSweepDone = false;
   private readonly runtimeBusBridge = new SharedSessionRuntimeBusBridge();
-  private readonly writes = new StoreWriteQueue();
   private readonly changeListeners = new Set<() => void>();
   private intakeHold: (() => boolean) | null = null;
   /** provider message key -> the input that holds it; built from the persisted rows on first use. */
@@ -172,8 +204,10 @@ export class SharedSessionBroker {
     readonly conversationGateConfig?: ConversationGateConfigReader | undefined;
   }) {
     if (!config.store && !config.storePath) throw new Error('SharedSessionBroker requires an explicit store or storePath.');
-    this.store = config.store ?? new PersistentStore<SharedSessionStoreSnapshot>(config.storePath as string);
-    this.storePath = config.store ? null : (config.storePath ?? null); // null for an injected store: it has no file, and nothing may guess one for it
+    this.storage = config.store
+      ? new SessionBrokerSnapshotStorage(config.store)
+      : new SessionBrokerFileStorage(config.storePath as string);
+    this.storePath = this.storage.path; // null for an injected store: it has no file, and nothing may guess one for it
     this.routeBindings = config.routeBindings;
     this.agentStatusProvider = config.agentStatusProvider;
     this.messageSender = config.messageSender;
@@ -237,6 +271,7 @@ export class SharedSessionBroker {
     }
     this.runtimeBusBridge.stopAll();
     await this.persist();
+    this.storage.close();
   }
 
   /**
@@ -356,26 +391,29 @@ export class SharedSessionBroker {
 
   private async load(): Promise<void> {
     await this.routeBindings.start();
-    const { sessions, messages, inputs } = loadSessionBrokerState(await this.store.load());
+    const loaded = await this.storage.load();
     this.sessions.clear();
     this.messages.clear();
     this.inputs.clear();
-    for (const session of sessions.values()) {
-      this.sessions.set(session.id, session);
-    }
-    for (const [sessionId, bucket] of messages.entries()) {
-      this.messages.set(sessionId, bucket);
-    }
-    for (const [sessionId, bucket] of inputs.entries()) {
-      this.inputs.set(sessionId, bucket);
-    }
+    this.deferred.clear();
+    this.historyTouchedAt.clear();
+    for (const session of loaded.sessions.values()) this.sessions.quietSet(session.id, session);
+    for (const [sessionId, bucket] of loaded.messages.entries()) this.messages.quietSet(sessionId, bucket);
+    for (const [sessionId, bucket] of loaded.inputs.entries()) this.inputs.quietSet(sessionId, bucket);
+    for (const sessionId of loaded.deferred) this.deferred.add(sessionId);
+    this.setAside = loaded.setAside;
+    reportSetAsideSessionEntries(this.storePath, loaded.setAside);
+    this.changed.clear();
+    this.providerMessageIndex = null;
+    this.bootSweepDone = false;
     this.loadedAt = Date.now();
     // Boot reconciliation: cancel stuck spawned/delivered inputs, clear stale activeAgentId.
     for (const sessionId of reconcileSessionBrokerBoot(this.sessions, this.inputs)) {
       this.refreshPendingInputCount(sessionId);
     }
-    // Close (with the reason, never silently) sessions a dead process left active; see applyBootOrphanSweep for why "active at boot" alone is not the test.
-    applyBootOrphanSweep(this.sessions, { idleEmptyMs: this._idleEmptyMs, idleLongMs: this._idleLongMs }, (event, payload) => this.publishUpdate(event, payload));
+    // Sessions a dead process left active are closed by the first sweep one
+    // heartbeat window after this load (gcSweep): heartbeats are not written
+    // to disk, so the stored times cannot tell a live surface from a dead one.
     this.updateActiveSessionsGauge();
     // The sweep timer is installed before the first write so a store that fails
     // it cannot leave a broker that later reports loaded but never reaps.
@@ -581,8 +619,10 @@ export class SharedSessionBroker {
     // A hosted loop the engine still vouches for would register itself again as an empty active record.
     if (this.externalLivenessProbe?.(session) === true) return 'active';
     this.sessions.delete(sessionId);
-    this.messages.delete(sessionId);
-    this.inputs.delete(sessionId);
+    this.messages.quietDelete(sessionId);
+    this.inputs.quietDelete(sessionId);
+    this.deferred.delete(sessionId);
+    this.historyTouchedAt.delete(sessionId);
     await this.persist();
     this.updateActiveSessionsGauge();
     this.publishUpdate('session-deleted', { sessionId });
@@ -912,19 +952,27 @@ export class SharedSessionBroker {
   }
 
   /**
-   * The earlier submission for a provider message that was already recorded,
-   * rebuilt from the persisted rows so it holds across a restart.
+   * What an earlier delivery of this provider message already did, rebuilt
+   * from the stored rows so it holds across a restart. The broker owns the
+   * claim from the first submit: a row in any state but `failed` is that
+   * message, answered or on its way (`held`). A failed row, or a spawn row
+   * left queued past the start window (its start never came), is retried with
+   * the user message already stored, so the transcript never holds it twice.
    */
-  private findProviderMessage(key: string): SharedSessionSubmission | null {
+  private findProviderMessage(key: string): ProviderMessageClaim | null {
     const index = this.providerMessageIndexed();
     const held = index.get(key);
     if (!held) return null;
     const session = this.sessions.get(held.sessionId);
     const row = this.inputs.get(held.sessionId)?.find((entry) => entry.id === held.inputId);
     if (!session || !row) { index.delete(key); return null; }
-    // Only a row somebody is already answering (or has answered) makes the repeat a duplicate. One still queued may never have reached its runner, so the redelivery is the retry.
-    if (row.state !== 'delivered' && row.state !== 'spawned' && row.state !== 'completed') return null;
     const stored = this.messages.get(held.sessionId)?.find((entry) => entry.id === row.causationId);
+    const stalled = row.state === 'queued' && row.intent === 'submit' && !isDelegatedSessionInput(row)
+      && Date.now() - row.updatedAt >= SPAWN_IN_FLIGHT_MS && !this.hasSpawnInFlight(held.sessionId);
+    if ((row.state === 'failed' || stalled) && stored && session.status === 'active') {
+      return { kind: 'retry', sessionId: held.sessionId, userMessage: stored, ...(stalled ? { input: row } : {}) };
+    }
+    if (row.state === 'failed') return null;
     const userMessage: SharedSessionMessage = stored ?? {
       id: row.causationId ?? row.id,
       sessionId: held.sessionId,
@@ -934,16 +982,19 @@ export class SharedSessionBroker {
       metadata: {},
     };
     return {
-      session,
-      userMessage,
-      ...(row.routeId ? { routeBinding: this.routeBindings.getBinding(row.routeId) } : {}),
-      input: row,
-      intent: row.intent,
-      mode: 'continued-live',
-      state: row.state,
-      ...(row.activeAgentId ? { activeAgentId: row.activeAgentId } : {}),
-      created: false,
-      duplicate: true,
+      kind: 'held',
+      submission: {
+        session,
+        userMessage,
+        ...(row.routeId ? { routeBinding: this.routeBindings.getBinding(row.routeId) } : {}),
+        input: row,
+        intent: row.intent,
+        mode: 'continued-live',
+        state: row.state,
+        ...(row.activeAgentId ? { activeAgentId: row.activeAgentId } : {}),
+        created: false,
+        duplicate: true,
+      },
     };
   }
 
@@ -955,13 +1006,70 @@ export class SharedSessionBroker {
     });
   }
 
-  /** Snapshot now, write in call order, `gcSweep` persists unawaited and would
-   * otherwise land a stale view over a `cancelInput`. See StoreWriteQueue. */
+  /**
+   * Write what changed since the last write: on the daemon's store an appended
+   * line per message or input change and an index rewrite only when a listed
+   * field moved; a heartbeat writes nothing. Resolves once it is on disk.
+   */
   private async persist(durable = false): Promise<void> {
-    const state = { sessions: this.sessions, messages: this.messages, inputs: this.inputs };
-    const snapshot = createSessionBrokerSnapshot(state, MAX_PERSISTED_MESSAGES);
-    await this.writes.run(() => this.store.persist(snapshot, { durable }));
+    await this.storage.write(this.stateView(), this.changed, durable);
     this.notifyChanged();
+  }
+
+  private stateView(): SessionBrokerStateView {
+    return {
+      sessions: this.sessions,
+      peekMessages: (sessionId) => this.messages.peek(sessionId),
+      peekInputs: (sessionId) => this.inputs.peek(sessionId),
+      messages: this.messages,
+      inputs: this.inputs,
+    };
+  }
+
+  /** Bring a deferred session's messages and inputs into memory (first use after start or after it left memory). */
+  private loadDeferredHistory(sessionId: string): void {
+    if (!this.deferred.delete(sessionId)) return;
+    const record = this.sessions.peek(sessionId);
+    if (!record) return;
+    const history = this.storage.loadSession(sessionId);
+    if (history.messages.length > 0) this.messages.quietSet(sessionId, history.messages);
+    if (history.inputs.length > 0) this.inputs.quietSet(sessionId, history.inputs);
+    this.sessions.quietSet(sessionId, withLoggedFacts(record, history.messages, history.inputs));
+    this.historyTouchedAt.set(sessionId, Date.now());
+    if (this.providerMessageIndex) {
+      for (const row of history.inputs) {
+        const key = row.metadata[PROVIDER_MESSAGE_KEY_FIELD];
+        if (typeof key === 'string') this.providerMessageIndex.set(key, { sessionId, inputId: row.id });
+      }
+    }
+  }
+
+  /**
+   * Let closed sessions' history leave memory once nothing has asked for it
+   * for a while (or at once under memory pressure). It stays on disk and
+   * loads again on the next read. Only on a store with one log per session.
+   */
+  private releaseClosedHistory(idleMs: number): number {
+    if (!this.storage.defersSessions) return 0;
+    const now = Date.now();
+    let released = 0;
+    for (const [sessionId, session] of this.sessions) {
+      if (session.status !== 'closed' || session.pendingInputCount > 0 || this.changed.has(sessionId)) continue;
+      if (this.deferred.has(sessionId)) continue;
+      if (now - (this.historyTouchedAt.get(sessionId) ?? session.updatedAt) < idleMs) continue;
+      this.messages.quietDelete(sessionId);
+      this.inputs.quietDelete(sessionId);
+      this.storage.unload(sessionId);
+      this.deferred.add(sessionId);
+      this.historyTouchedAt.delete(sessionId);
+      released += 1;
+    }
+    return released;
+  }
+
+  /** Stored entries this build could not read at the last start, by id and why; they stay on disk untouched. */
+  unreadableEntries(): readonly SetAsideSessionEntry[] {
+    return this.setAside;
   }
 
   /**
@@ -1027,6 +1135,7 @@ export class SharedSessionBroker {
         start: () => this.start(),
         resolveBinding: (i) => this.resolveBinding(i),
         createSession: (i) => this.createSession(i),
+        reopenSession: (sessionId) => this.reopenSession(sessionId),
         attachParticipantAndRoute: (session, i, binding) => this.attachParticipantAndRoute(session, i, binding),
         appendMessage: (sessionId, i) => this.appendMessage(sessionId, i),
         appendUnpublishedMessage: (sessionId, i) => appendSharedSessionMessage(this.messageStore(), { sessionId, ...i }, MAX_PERSISTED_MESSAGES),
@@ -1065,15 +1174,13 @@ export class SharedSessionBroker {
     });
     const reserved = moveSharedSessionInputOrKeep(this.sessionInputStore(), sessionId, entry.id, 'delivered')!;
     // The exact canonical id and body must be durable before any native turn.
-    const snapshot = createSessionBrokerSnapshot({ sessions: this.sessions, messages: this.messages, inputs: this.inputs }, MAX_PERSISTED_MESSAGES);
-    try { await this.writes.run(() => this.store.persist(snapshot, { durable: true })); }
+    try { await this.storage.write(this.stateView(), this.changed, true); }
     catch (error) {
       // No caller received this reservation, so no turn can have started. A
       // monotonic failed observation clears local busy ownership without ever
       // rolling back possibly published reservation bytes or granting replay.
       moveSharedSessionInputOrKeep(this.sessionInputStore(), sessionId, reserved.id, 'failed', { error: 'Native reservation durability failed' });
-      const failed = createSessionBrokerSnapshot({ sessions: this.sessions, messages: this.messages, inputs: this.inputs }, MAX_PERSISTED_MESSAGES);
-      await this.writes.run(() => this.store.persist(failed, { durable: true })).catch(() => {});
+      await this.storage.write(this.stateView(), this.changed, true).catch(() => {});
       throw error;
     }
     return structuredClone(reserved);
@@ -1090,8 +1197,7 @@ export class SharedSessionBroker {
       || (current.state !== 'delivered' && current.state !== state)) throw new Error('Native hosted broker settlement mismatch');
     // Settling the same outcome again is the identity; any other move goes through the lifecycle.
     const updated = current.state === state ? current : moveSharedSessionInputOrKeep(this.sessionInputStore(), sessionId, inputId, state)!;
-    const snapshot = createSessionBrokerSnapshot({ sessions: this.sessions, messages: this.messages, inputs: this.inputs }, MAX_PERSISTED_MESSAGES);
-    await this.writes.run(() => this.store.persist(snapshot, { durable: true }));
+    await this.storage.write(this.stateView(), this.changed, true);
     this.publishInputLifecycleEvent(`session-input-${state}`, updated);
     return structuredClone(updated);
   }
@@ -1119,6 +1225,7 @@ export class SharedSessionBroker {
       drainOwned(checked);
       throw new Error('Session delivery authority checks must be synchronous');
     }
+    if (options.claim === true && options.consumed !== true) assertSurfaceInputClaimable(this.sessionInputStore(), sessionId, inputId, Date.now());
     const applied = applySurfaceInputDelivery(this.sessionInputStore(), sessionId, inputId, options, {
       publish: (event, payload) => this.publishUpdate(event, payload),
       publishInput: (event, input, extra) => this.publishInputLifecycleEvent(event, input, extra),
@@ -1253,9 +1360,13 @@ export class SharedSessionBroker {
     return total;
   }
 
-  /** Only explicit retention policy can delete durable session history. */
-  trimRetained(_level: 'floor' | 'flush'): void {
-    this.gcSweep();
+  /**
+   * Under memory pressure: closed sessions' history leaves memory (it stays
+   * on disk and loads again when asked for). `floor` releases what has been
+   * idle for the usual window, `flush` all of it. Nothing durable is deleted.
+   */
+  trimRetained(level: 'floor' | 'flush'): void {
+    this.releaseClosedHistory(level === 'flush' ? 0 : CLOSED_HISTORY_IDLE_MS);
   }
 
   /**
@@ -1279,7 +1390,20 @@ export class SharedSessionBroker {
         error: error instanceof Error ? error.message : String(error),
       });
     });
-    const anyChanged = sweepSharedSessions(
+    this.releaseClosedHistory(CLOSED_HISTORY_IDLE_MS);
+    // Surfaces that outlived a restart re-register within one heartbeat window;
+    // only after it can the stored times say which sessions a dead process left.
+    if (Date.now() - this.loadedAt < SURFACE_ROUTE_FRESHNESS_MS) return;
+    let orphaned = 0;
+    if (!this.bootSweepDone) {
+      this.bootSweepDone = true;
+      // Close (with the reason, never silently) sessions a dead process left active; see applyBootOrphanSweep for why "active at boot" alone is not the test.
+      orphaned = applyBootOrphanSweep(this.sessions, {
+        idleEmptyMs: this._idleEmptyMs, idleLongMs: this._idleLongMs,
+        isExternallyLive: (session) => this.externalLivenessProbe?.(session) === true,
+      }, (event, payload) => this.publishUpdate(event, payload)).length;
+    }
+    const swept = sweepSharedSessions(
       { sessions: this.sessions, messages: this.messages, inputs: this.inputs },
       {
         idleEmptyMs: this._idleEmptyMs,
@@ -1289,7 +1413,7 @@ export class SharedSessionBroker {
         isExternallyLive: (session) => this.externalLivenessProbe?.(session) === true,
       },
     );
-    if (anyChanged) {
+    if (swept || orphaned > 0) {
       this.updateActiveSessionsGauge();
       void this.persist().catch((error: unknown) => {
         logger.warn('[session-broker] GC persistence failed', {

@@ -20,11 +20,13 @@ import { decisionOrClassic, isClassicOperation, withConfiguredDecisionModelPolic
  * implements for a client across the wire, with the one difference that this
  * one shares a process with the broker.
  *
- * The heartbeat is not decoration. A steer goes to a live surface participant
- * when there is one and spawns a background AGENT when there is not, so a
- * hosted session whose participant went stale would quietly stop receiving its
- * own steers and start getting agents instead, the conversation would keep
- * answering, from the wrong thing.
+ * The engine is the one owner of "this hosted session is alive": the broker
+ * routes a steer for a `hosted` session to this intake whatever its
+ * participant's age, its reaper asks the engine (liveness-probe.ts), and so a
+ * session is registered when it appears or its title or workspace changes,
+ * never again as a heartbeat. Inputs are collected when the broker says its
+ * sessions changed (`subscribe`); the interval only retries deliveries and
+ * consumed marks that did not land.
  */
 
 import { hostedLifecycleCallbacks } from './lifecycle-callbacks.js';
@@ -85,6 +87,12 @@ export interface HostedSessionSpine {
    * honest, what must never happen is marking it consumed.
    */
   failInput?(sessionId: string, inputId: string, error: string): Promise<unknown>;
+  /**
+   * Be told when sessions, messages or inputs change, so inputs are collected
+   * as they arrive. Returns the unsubscribe. Optional: without it the intake
+   * reads on its interval.
+   */
+  subscribe?(listener: () => void): () => void;
 }
 
 /** What the intake needs from the engine that owns the sessions. */
@@ -99,7 +107,7 @@ export interface HostedSessionSpineIntakeOptions {
   /** Hand one collected input to its session's loop. */
   readonly deliver: (sessionId: string, text: string, correlationId?: string | undefined, delivery?: { readonly operatorInput?: boolean | undefined }) => Promise<void>;
   readonly now: () => number;
-  /** Tick interval. Default 750ms, the order every inbound-dispatch client here uses. */
+  /** Interval read. Default 750ms without a spine `subscribe`; with one, a 5 s retry pass for deliveries and marks that did not land. */
   readonly intervalMs?: number | undefined;
   /** Delivery attempts one collected input gets before it is failed. Default 3. */
   readonly maxDeliveryAttempts?: number | undefined;
@@ -112,13 +120,8 @@ export interface HostedSessionSpineIntakeOptions {
 }
 
 const DEFAULT_INTAKE_INTERVAL_MS = 750;
-/**
- * How often an unchanged session is registered again. The broker treats a
- * participant as fresh for two minutes, so this keeps a wide margin while not
- * turning every collecting tick into a snapshot write and a broadcast per
- * session. A changed title or workspace registers at the next tick.
- */
-const HEARTBEAT_INTERVAL_MS = 30_000;
+/** With changes pushed by the spine, the interval only retries what did not land. */
+const SUBSCRIBED_RETRY_INTERVAL_MS = 5_000;
 const HOSTED_PARTICIPANT_SURFACE_ID = 'daemon:hosted-sessions';
 
 /**
@@ -190,6 +193,10 @@ function pendingKey(sessionId: string, inputId: string): string {
 
 export class HostedSessionSpineIntake {
   private timer: ReturnType<typeof setInterval> | null = null;
+  private unsubscribe: (() => void) | null = null;
+  /** A change arrived while a pass was scheduling: run one more pass after it. */
+  private rerun = false;
+  private tickQueued = false;
   private scheduling = false;
   private stopped = false;
   private readonly lifetime = new AbortController();
@@ -219,15 +226,27 @@ export class HostedSessionSpineIntake {
 
   /** Begin collecting and heartbeating. A no-op without a spine. */
   start(): void {
-    if (this.timer || !this.options.spine || this.stopped) return;
-    const interval = this.options.intervalMs ?? DEFAULT_INTAKE_INTERVAL_MS;
+    const spine = this.options.spine;
+    if (this.timer || !spine || this.stopped) return;
+    if (spine.subscribe) this.unsubscribe = spine.subscribe(() => this.queueTick());
+    const interval = this.options.intervalMs ?? (this.unsubscribe ? SUBSCRIBED_RETRY_INTERVAL_MS : DEFAULT_INTAKE_INTERVAL_MS);
     this.timer = setInterval(() => { void this.tick(); }, interval);
     // Never hold the process open on account of an idle intake tick.
     (this.timer as unknown as { unref?: () => void }).unref?.();
+    if (this.unsubscribe) this.queueTick();
+  }
+
+  /** One pass after the current synchronous work: a burst of changes is one read. */
+  private queueTick(): void {
+    if (this.tickQueued || this.stopped) return;
+    this.tickQueued = true;
+    queueMicrotask(() => { this.tickQueued = false; void this.tick(); });
   }
 
   stop(): void {
     this.stopped = true;
+    this.unsubscribe?.();
+    this.unsubscribe = null;
     this.lifetime.abort();
     if (this.timer) {
       clearInterval(this.timer);
@@ -386,8 +405,10 @@ export class HostedSessionSpineIntake {
    */
   async tick(): Promise<void> {
     const spine = this.options.spine;
-    if (!spine || this.stopped || this.scheduling) return;
+    if (!spine || this.stopped) return;
+    if (this.scheduling) { this.rerun = true; return; }
     this.scheduling = true;
+    this.rerun = false;
     try {
       // Retries first: a message that has already waited a tick outranks one
       // still queued, and delivering out of order is how a steer arrives after
@@ -434,10 +455,12 @@ export class HostedSessionSpineIntake {
     } finally {
       this.scheduling = false;
     }
+    if (this.rerun) this.queueTick();
   }
 
   /**
-   * Register one session as this tick's heartbeat, without letting a broker
+   * Register one session when it is new to the spine or its title or workspace
+   * changed (never as a heartbeat: liveness is the engine's), without letting a broker
    * call that never settles hold the pass. A registration still outstanding
    * from an earlier tick is left to finish rather than stacked; a new one is
    * given one interval, then the pass moves on and it finishes on its own.
@@ -445,8 +468,7 @@ export class HostedSessionSpineIntake {
   private async heartbeat(record: HostedSessionRecord): Promise<void> {
     if ((this.registrations.get(record.id)?.size ?? 0) > 0) return;
     const last = this.lastRegistered.get(record.id);
-    if (last && last.title === record.title && last.project === record.workspaceRoot
-      && this.options.now() - last.at < HEARTBEAT_INTERVAL_MS) return;
+    if (last && last.title === record.title && last.project === record.workspaceRoot) return;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const bound = new Promise<void>((resolve) => {
       timer = setTimeout(resolve, this.options.intervalMs ?? DEFAULT_INTAKE_INTERVAL_MS);

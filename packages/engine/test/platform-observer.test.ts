@@ -268,3 +268,28 @@ describe('PlatformObserver: built-in adapters', () => {
     expect(spans.some((s) => s.name === 'platform.auth.transition' && s.ended)).toBe(true);
   });
 });
+
+describe('observer receives what happened', () => {
+  test('every HTTP receive carries its status, and a caller-set token over another is a replacement, not a refresh', async () => {
+    const { createHttpJsonTransport } = await import('../transport-http/src/http-core.js');
+    const activity: TransportActivityInfo[] = [];
+    let status = 200;
+    const transport = createHttpJsonTransport({
+      baseUrl: 'http://127.0.0.1:3421',
+      fetch: (async () => Response.json({ ok: status === 200 }, { status })) as unknown as typeof fetch,
+      retry: { maxAttempts: 1 },
+      observer: { onTransportActivity: (info) => { activity.push(info); } },
+    });
+    await transport.requestJson('/api/ok');
+    status = 404;
+    await transport.requestJson('/api/missing').catch(() => undefined);
+    expect(activity.filter((info) => info.direction === 'recv').map((info) => info.status)).toEqual([200, 404]);
+
+    const transitions: AuthTransitionInfo[] = [];
+    const auth = createGoodVibesAuthClient(makeOperator(), makeRawStore(), undefined, { onAuthTransition: (t) => { transitions.push(t); } });
+    await auth.setToken('a');
+    await auth.setToken('b');
+    await auth.setToken(null);
+    expect(transitions.map((t) => t.reason)).toEqual(['login', 'replace', 'logout']);
+  });
+});

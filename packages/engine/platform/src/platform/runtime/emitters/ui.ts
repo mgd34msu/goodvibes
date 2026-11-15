@@ -1,5 +1,5 @@
 /**
- * UI emitters, typed wrappers for UIEvent domain.
+ * UI emitters, typed wrappers for the UIEvent domain.
  */
 
 import { createEventEnvelope } from '../events/envelope.js';
@@ -16,42 +16,18 @@ function uiEvent<T extends UIEvent['type']>(
   return createEventEnvelope(type, { type, ...data } as Extract<UIEvent, { type: T }>, ctx);
 }
 
-export function emitUiRenderRequest(bus: RuntimeEventBus, ctx: EmitterContext): void {
-  bus.emit('ui', uiEvent('UI_RENDER_REQUEST', {}, ctx));
-}
-
-export function emitUiScrollDelta(bus: RuntimeEventBus, ctx: EmitterContext, data: { delta: number }): void {
-  bus.emit('ui', uiEvent('UI_SCROLL_DELTA', data, ctx));
-}
-
-export function emitUiScrollTo(bus: RuntimeEventBus, ctx: EmitterContext, data: { line: number }): void {
-  bus.emit('ui', uiEvent('UI_SCROLL_TO', data, ctx));
-}
-
-export function emitUiBlockToggleCollapse(bus: RuntimeEventBus, ctx: EmitterContext, data: { blockIndex: number }): void {
-  bus.emit('ui', uiEvent('UI_BLOCK_TOGGLE_COLLAPSE', data, ctx));
-}
-
-export function emitUiBlockRerun(bus: RuntimeEventBus, ctx: EmitterContext, data: { blockIndex: number; content: string }): void {
-  bus.emit('ui', uiEvent('UI_BLOCK_RERUN', data, ctx));
-}
-
-export function emitUiClearScreen(bus: RuntimeEventBus, ctx: EmitterContext): void {
-  bus.emit('ui', uiEvent('UI_CLEAR_SCREEN', {}, ctx));
-}
-
-export function emitUiPanelOpen(bus: RuntimeEventBus, ctx: EmitterContext, data: { panelId: string }): void {
+export function emitUiPanelOpen(bus: Pick<RuntimeEventBus, 'emit'>, ctx: EmitterContext, data: { panelId: string }): void {
   bus.emit('ui', uiEvent('UI_PANEL_OPEN', data, ctx));
 }
 
-export function emitUiPanelClose(bus: RuntimeEventBus, ctx: EmitterContext, data: { panelId: string }): void {
+export function emitUiPanelClose(bus: Pick<RuntimeEventBus, 'emit'>, ctx: EmitterContext, data: { panelId: string }): void {
   bus.emit('ui', uiEvent('UI_PANEL_CLOSE', data, ctx));
 }
 
-export function emitUiPanelFocus(bus: RuntimeEventBus, ctx: EmitterContext, data: { panelId: string }): void {
+export function emitUiPanelFocus(bus: Pick<RuntimeEventBus, 'emit'>, ctx: EmitterContext, data: { panelId: string }): void {
   bus.emit('ui', uiEvent('UI_PANEL_FOCUS', data, ctx));
 }
 
-export function emitUiViewChanged(bus: RuntimeEventBus, ctx: EmitterContext, data: { from: string; to: string }): void {
+export function emitUiViewChanged(bus: Pick<RuntimeEventBus, 'emit'>, ctx: EmitterContext, data: { from: string; to: string }): void {
   bus.emit('ui', uiEvent('UI_VIEW_CHANGED', data, ctx));
 }

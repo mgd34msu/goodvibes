@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 import { describeIngestionNotice } from '@goodvibes-jev/engine/platform/platform/config';
 import { isNativeConversationTurnReady, nativeConversationTurnInputOptions } from '@goodvibes-jev/engine/terminal-shell/native-ingress';
-import { readShellFrameFacts, createShellSubmissionPorts } from '@goodvibes-jev/engine/terminal-shell/shell-frame-facts';
+import { readShellFrameFacts, createShellSubmissionPorts, createUiEventPublisher, readUiFrame } from '@goodvibes-jev/engine/terminal-shell/shell-frame-facts';
 import { join } from 'node:path';
 import { sanitizeSessionName } from '@goodvibes-jev/engine/platform/platform/sessions';
 import { createHerdrSessionReporter } from '@goodvibes-jev/engine/terminal-shell';
@@ -742,6 +742,8 @@ async function main() {
   });
   sessionViews = views;
   input.sessionView = views;
+  // The `ui` event domain: panel open/close/focus and view changes, read from each painted frame.
+  const uiEvents = createUiEventPublisher(uiServices.runtime.runtimeBus, () => runtime.sessionId);
   unsubs.push(() => views.dispose());
   // Esc while the main transcript is scrolled back returns to the live bottom and never interrupts the turn (handler-modal-stack.ts).
   input.transcriptScroll = { scrolledBack: () => transcript.scrolledBack && !views.active, toBottom: scrollToLiveBottom };
@@ -820,6 +822,7 @@ async function main() {
 
   const renderFrame = () => {
     hostPairing?.checkPresentation();
+    uiEvents.observe(readUiFrame(input, views.focus.current));
     const width = stdout.columns || 80;
     const height = stdout.rows || 24;
 

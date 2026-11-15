@@ -209,7 +209,7 @@ Web (browser + service workers) platform entry.
 
 **Status:** preview
 
-Cloudflare Worker bridge for optional daemon batch integration. Exports `createGoodVibesCloudflareWorker` and structural Worker/Queue types. Use this when manually deploying a Worker that proxies `/batch/*` to the daemon, enqueues batch tick signals, consumes Cloudflare Queue messages, or runs scheduled ticks. Normal Worker-hosted clients that only need operator HTTP calls should keep using `./web`. platform-owned Cloudflare provisioning is exposed through daemon `/api/cloudflare/*` routes rather than this Worker entry point, including token bootstrap, discovery, Workers, Queues, Tunnel, Access, DNS, KV, Durable Objects, Secrets Store, and R2.
+Cloudflare Worker bridge for optional daemon batch integration. Exports `createGoodVibesCloudflareWorker`, the `GoodVibesCoordinator` Durable Object class (the daily queue budget), `buildGoodVibesCloudflareWorkerModule` (the module text platform provisioning uploads, built from the same code) and structural Worker, Queue, KV, R2 and Durable Object types. Use this when manually deploying a Worker that proxies `/batch/*` to the daemon, enqueues batch tick signals, consumes Cloudflare Queue messages, or runs scheduled ticks. Normal Worker-hosted clients that only need operator HTTP calls should keep using `./web`. platform-owned Cloudflare provisioning is exposed through daemon `/api/cloudflare/*` routes rather than this Worker entry point, including token bootstrap, discovery, Workers, Queues, Tunnel, Access, DNS, KV, Durable Objects, Secrets Store, and R2.
 
 ### `./react-native`: `@goodvibes-jev/engine/platform/react-native`
 
@@ -273,7 +273,7 @@ The following table lists the notable platform subpaths. The `exports` map in `p
 | `platform/config` | Config manager, secrets, schema, subscriptions | beta |
 | `platform/payments` | Payment decision order, budget pools, both approval/veto window state machines, taint gate, prompt rendering | beta |
 | `platform/payments/browser` | Browser-safe card-entry surface policy and CVV prompt trade-off warning; no stores, card scanning, judgment runtime or checkout execution | beta |
-| `platform/judgment-browser/catalogs` | Browser-safe fixed WebUI command descriptors and exhaustive producer status-tone catalogs; no provider, private source resolver or decision log | beta |
+| `platform/judgment-browser/catalogs` | Browser-safe status-tone catalogs and declared-fact rules (reply markers, fence languages, provider credential names, credential config keys); no provider, private source resolver or decision log | beta |
 | `platform/contract` | The contract runner: `createContractRunner`, the contract data model, turn intake (`createContractIntake`), the fleet controls, the operator service behind `contracts.*` (`createContractOperatorService`), the command line (`runContractCli`), the external work seam, and the Jev batteries and registry for contract decisions | beta |
 | `platform/workflow/work-ledger/native-execution` | Explicit paired-authority native work-attempt host, durable runner association and recovery refusal; does not switch product entrypoints | beta |
 | `platform/control-plane` | Control-plane gateway, method catalog, contracts, and session broker | beta |

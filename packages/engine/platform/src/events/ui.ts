@@ -1,30 +1,22 @@
 /**
- * UIEvent, discriminated union covering UI render, scroll, and panel events.
+ * UIEvent, what the terminal apps show: which panels are open and focused, and
+ * which view fills the screen.
  *
- * These events drive terminal and web surface rendering without coupling it to business logic.
- * Declared, not yet emitted: no code in the platform publishes any UI event, so a subscriber to the `ui` domain receives none.
+ * Published by the TUI and the Agent from the frame they draw
+ * (terminal-shell `createUiEventPublisher`), only when something changed. A
+ * panel is a modal on the screen (`settings`, `modelPicker`, a kit modal such
+ * as the command palette); the focused panel is the top one. A view is `main`,
+ * `agent:<id>` or `process:<id>`.
  */
 
 export type GoodVibesUIEvent =
-  /** A full re-render has been requested. */
-  | { type: 'UI_RENDER_REQUEST' }
-  /** Scroll by a relative delta (positive = down, negative = up). */
-  | { type: 'UI_SCROLL_DELTA'; delta: number }
-  /** Scroll to an absolute line number. */
-  | { type: 'UI_SCROLL_TO'; line: number }
-  /** A collapsible block's collapsed state was toggled. */
-  | { type: 'UI_BLOCK_TOGGLE_COLLAPSE'; blockIndex: number }
-  /** A block was requested to re-run. */
-  | { type: 'UI_BLOCK_RERUN'; blockIndex: number; content: string }
-  /** The screen was cleared. */
-  | { type: 'UI_CLEAR_SCREEN' }
   /** A panel was opened. */
   | { type: 'UI_PANEL_OPEN'; panelId: string }
   /** A panel was closed. */
   | { type: 'UI_PANEL_CLOSE'; panelId: string }
-  /** A panel was focused. */
+  /** A panel became the focused (top) panel. */
   | { type: 'UI_PANEL_FOCUS'; panelId: string }
-  /** The active view changed (e.g. chat -> search -> help). */
+  /** The view that fills the screen changed (e.g. main -> agent:a1). */
   | { type: 'UI_VIEW_CHANGED'; from: string; to: string };
 
 /** All GoodVibes UI event type literals as a union. */

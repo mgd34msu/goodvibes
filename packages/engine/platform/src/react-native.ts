@@ -27,6 +27,16 @@ export type ReactNativeGoodVibesPlatform =
     readonly realtime: ReactNativeGoodVibesRealtime;
   };
 
+/**
+ * React Native's WebSocket constructor: unlike the browser one it takes a third
+ * argument whose `headers` are sent on the upgrade request.
+ */
+type ReactNativeWebSocketConstructor = new (
+  url: string,
+  protocols?: string | string[],
+  options?: { readonly headers?: Record<string, string> },
+) => WebSocket;
+
 function requireReactNativeWebSocket(webSocketImpl?: typeof WebSocket): typeof WebSocket {
   const resolved = webSocketImpl ?? globalThis.WebSocket;
   if (typeof resolved !== 'function') {
@@ -46,10 +56,11 @@ function requireReactNativeWebSocket(webSocketImpl?: typeof WebSocket): typeof W
  * - Requires a `WebSocket` implementation (e.g. the global provided by the
  *   React Native runtime or the `react-native` package). Pass
  *   `options.WebSocketImpl` when the global is not available.
- * - The daemon authenticates the upgrade request itself and answers 401 when
- *   it carries no `Authorization` header, so realtime needs a wrapper
- *   implementation that attaches the bearer token via React Native's
- *   `(url, protocols, { headers })` constructor form (see the example).
+ * - The daemon authenticates the upgrade request itself, so every socket is
+ *   built with React Native's `(url, protocols, { headers })` constructor form
+ *   carrying `Authorization: Bearer <token>`, with the token resolved for that
+ *   connect (refreshed first when it is near expiry). A reconnect after a
+ *   token refresh presents the new token.
  * - Returns `ReactNativeGoodVibesPlatform` (extends `GoodVibesPlatform` with a
  *   React-Native-specific `realtime` namespace).
  *
@@ -62,15 +73,7 @@ function requireReactNativeWebSocket(webSocketImpl?: typeof WebSocket): typeof W
  *   authToken: await SecureStore.getItemAsync('token'),
  * });
  *
- * // The upgrade must carry the bearer token; RN's WebSocket accepts headers.
- * const token = await SecureStore.getItemAsync('token');
- * const AuthorizedWebSocket = function (url: string | URL): WebSocket {
- *   return new (WebSocket as never)(String(url), [], {
- *     headers: { Authorization: `Bearer ${token}` },
- *   });
- * } as unknown as typeof WebSocket;
- *
- * const events = platform.realtime.viaWebSocket(AuthorizedWebSocket);
+ * const events = platform.realtime.runtime();
  * events.agents.on('AGENT_SPAWNING', ({ agentId }) => console.log(agentId));
  */
 export function createReactNativeGoodVibesPlatform(
@@ -101,63 +104,41 @@ export function createReactNativeGoodVibesPlatform(
     realtime,
     WebSocketImpl: options.WebSocketImpl ?? globalThis.WebSocket,
   });
-  // Refresh a token inside the leeway window first, as the HTTP transport and
-  // the core realtime connectors do, so a (re)connect does not present a stale bearer.
+  // One store read per connect, refreshed first inside the leeway window, as
+  // the HTTP transport does, so a (re)connect never presents a stale bearer.
   const getAuthToken = async (): Promise<string | null> => {
     try {
-      await base.auth.ensureFreshToken();
+      return await base.auth.currentToken();
     } catch {
       // A refresh that cannot complete leaves the token as it was; connect with it
       // and let the daemon's answer decide, as a request would.
+      return base.auth.getToken();
     }
-    return base.auth.getToken();
   };
-  let warnedAboutPlainWebSocket = false;
-  // The daemon refuses an upgrade without an Authorization header, which a plain WebSocket cannot send.
-  const resolveWebSocket = (explicit: typeof WebSocket | undefined): typeof WebSocket => {
-    if (explicit === undefined && !warnedAboutPlainWebSocket) {
-      warnedAboutPlainWebSocket = true;
-      console.warn(
-        'GoodVibes React Native realtime is using the global WebSocket, which sends no Authorization header; the daemon will refuse the upgrade. Pass options.WebSocketImpl (or viaWebSocket(impl)) with a wrapper that attaches the bearer token.',
-      );
-    }
-    return requireReactNativeWebSocket(explicit);
+  const connectRuntime = (webSocketImpl: typeof WebSocket | undefined): RemoteRuntimeEvents<RuntimeEventRecord> => {
+    const WebSocketImpl = requireReactNativeWebSocket(webSocketImpl);
+    // The DOM typing has no third constructor argument; React Native's runtime does.
+    const construct = WebSocketImpl as unknown as ReactNativeWebSocketConstructor;
+    return createRemoteRuntimeEvents(
+      createWebSocketConnector(baseUrl, getAuthToken, WebSocketImpl, {
+        reconnect: realtime.webSocketReconnect,
+        onError: options.realtime?.onError,
+        // The daemon authenticates the upgrade itself, so the header carries
+        // the token this connect resolved; the auth frame repeats it.
+        createSocket: (url, token) => new construct(url, [], token ? { headers: { Authorization: `Bearer ${token}` } } : {}),
+      }),
+      { onError: (error) => options.realtime?.onError?.(error) },
+    );
   };
 
   return {
     ...base,
     realtime: {
       runtime(): RemoteRuntimeEvents<RuntimeEventRecord> {
-        return createRemoteRuntimeEvents(
-          createWebSocketConnector(
-            baseUrl,
-            getAuthToken,
-            resolveWebSocket(options.WebSocketImpl),
-            {
-              reconnect: realtime.webSocketReconnect,
-              onError: options.realtime?.onError,
-            },
-          ),
-          {
-            onError: (error) => options.realtime?.onError?.(error),
-          },
-        );
+        return connectRuntime(options.WebSocketImpl);
       },
       viaWebSocket(webSocketImpl?: typeof WebSocket): RemoteRuntimeEvents<RuntimeEventRecord> {
-        return createRemoteRuntimeEvents(
-          createWebSocketConnector(
-            baseUrl,
-            getAuthToken,
-            resolveWebSocket(webSocketImpl ?? options.WebSocketImpl),
-            {
-              reconnect: realtime.webSocketReconnect,
-              onError: options.realtime?.onError,
-            },
-          ),
-          {
-            onError: (error) => options.realtime?.onError?.(error),
-          },
-        );
+        return connectRuntime(webSocketImpl ?? options.WebSocketImpl);
       },
     },
   };

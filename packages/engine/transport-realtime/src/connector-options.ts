@@ -121,6 +121,14 @@ export interface RuntimeEventConnectorOptions {
   readonly onEmitter?: ((emitLocal: (data: string) => void) => void) | undefined;
   /** SSE and WebSocket. Defaults to `'session-current'`; see {@link RuntimeEventTurnScope}. */
   readonly turnScope?: RuntimeEventTurnScope | undefined;
+  /**
+   * WebSocket. Build each socket from its URL and the token resolved for this
+   * connect, for a runtime that sends headers on the upgrade (React Native:
+   * `new WebSocket(url, [], { headers: { Authorization } })`). The same token
+   * then goes in the auth frame, so one resolution serves the whole connect.
+   * Without it the socket is `new WebSocketImpl(url)`.
+   */
+  readonly createSocket?: ((url: string, token: string | null) => WebSocket) | undefined;
 }
 
 export type AuthTokenSource = string | null | undefined | AuthTokenResolver;

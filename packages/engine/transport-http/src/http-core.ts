@@ -475,6 +475,17 @@ export function createHttpJsonTransport(options: HttpJsonTransportOptions): Http
       // Notify observer before dispatching the request.
       invokeTransportObserver(() => observer?.onTransportActivity?.({ direction: 'send', url, kind: 'http' }), observer?.onObserverError);
       const sendAt = Date.now();
+      // The status of this attempt's response, once one arrives (error statuses included).
+      const received: { status?: number } = {};
+      const reportReceived = (status: number | undefined, durationMs: number | undefined): void => {
+        invokeTransportObserver(() => observer?.onTransportActivity?.({
+          direction: 'recv',
+          url,
+          kind: 'http',
+          ...(status !== undefined ? { status } : {}),
+          durationMs: durationMs ?? Date.now() - sendAt,
+        }), observer?.onObserverError);
+      };
 
       // Build the middleware context for this attempt.
       const ctx: TransportContext = {
@@ -503,6 +514,7 @@ export function createHttpJsonTransport(options: HttpJsonTransportOptions): Http
         } catch (error) {
           throw createNetworkTransportError(error, c.url, c.method);
         }
+        received.status = response.status;
         if (!response.ok) {
           const retryAfterMs = parseRetryAfterMs(response.headers);
           throw createTransportError(response.status, c.url, c.method, await readJsonBody(response), retryAfterMs);
@@ -534,25 +546,14 @@ export function createHttpJsonTransport(options: HttpJsonTransportOptions): Http
               method,
             });
           }
-          invokeTransportObserver(() => observer?.onTransportActivity?.({
-            direction: 'recv',
-            url,
-            kind: 'http',
-            durationMs: ctx.durationMs,
-          }), observer?.onObserverError);
+          reportReceived(received.status ?? ctx.response?.status, ctx.durationMs);
           return result;
         }
 
         // No middleware: the parsed body is the result, nothing else is built.
         await innerFetch(ctx);
         const result = ctx.parsedBody as T;
-        // Notify observer after a successful response.
-        invokeTransportObserver(() => observer?.onTransportActivity?.({
-          direction: 'recv',
-          url,
-          kind: 'http',
-          durationMs: Date.now() - sendAt,
-        }), observer?.onObserverError);
+        reportReceived(received.status, undefined);
         return result;
       } catch (error) {
         // Wrap middleware errors as GoodVibesError{kind:'unknown'} with middleware identity in cause.
@@ -573,6 +574,8 @@ export function createHttpJsonTransport(options: HttpJsonTransportOptions): Http
           if (error instanceof GoodVibesError) return error;
           return error;
         })();
+        // A response that arrived with an error status is still a receive.
+        if (received.status !== undefined) reportReceived(received.status, ctx.durationMs);
         // Notify observer of the transport error before deciding to retry or rethrow.
         invokeTransportObserver(() => observer?.onError?.(transportErrorFromUnknown(wrappedError, 'HTTP transport error')), observer?.onObserverError);
         const status = typeof wrappedError === 'object' && wrappedError !== null && 'transport' in wrappedError

@@ -29,34 +29,22 @@ The React Native realtime surface is WebSocket-only. `platformClient.realtime` e
 
 The daemon authenticates the WebSocket upgrade request itself and answers 401
 when it carries neither an `Authorization` header nor an operator session
-cookie. The platform's in-band auth frame is only read after an authenticated
-upgrade. React Native's `WebSocket` accepts a headers option, so pass a
-wrapper as the `WebSocketImpl` that attaches the bearer token to the upgrade:
+cookie. The platform builds every socket with React Native's
+`(url, protocols, { headers })` constructor form and sends
+`Authorization: Bearer <token>` with the token it resolved for that connect
+(one token-store read, refreshed first when it is inside the refresh window).
+A reconnect after the token was refreshed or replaced presents the new token,
+so nothing needs wrapping:
 
 ```ts
-const token = await SecureStore.getItemAsync('gv-token');
-
-// React Native's WebSocket accepts (url, protocols, { headers }); the DOM
-// types do not declare the third argument, hence the constructor cast.
-type RNWebSocketCtor = new (
-  url: string,
-  protocols: string[],
-  options: { headers: Record<string, string> },
-) => WebSocket;
-
-const AuthorizedWebSocket = function (url: string | URL): WebSocket {
-  return new (WebSocket as unknown as RNWebSocketCtor)(
-    String(url),
-    [],
-    { headers: { Authorization: `Bearer ${token}` } },
-  );
-} as unknown as typeof WebSocket;
-
-const events = platformClient.realtime.viaWebSocket(AuthorizedWebSocket);
+const events = platformClient.realtime.runtime();
 const unsubscribe = events.agents.on('AGENT_COMPLETED', (event) => {
   console.log(event);
 });
 ```
+
+`viaWebSocket(impl)` uses another WebSocket class the same way; it must accept
+React Native's third constructor argument.
 
 The factory applies React-Native-tuned defaults that you can override through `GoodVibesPlatformOptions`:
 
@@ -69,7 +57,7 @@ To scope a feed to a single session, wrap it with `forSession` (re-exported from
 ```ts
 import { createReactNativeGoodVibesPlatform, forSession } from '@goodvibes-jev/engine/platform/react-native';
 
-const sessionEvents = forSession(platformClient.realtime.viaWebSocket(AuthorizedWebSocket), sessionId);
+const sessionEvents = forSession(platformClient.realtime.runtime(), sessionId);
 sessionEvents.agents.on('AGENT_COMPLETED', (event) => console.log(event));
 ```
 

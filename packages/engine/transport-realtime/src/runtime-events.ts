@@ -438,6 +438,8 @@ export function createWebSocketConnector<TEvent extends RuntimeEventRecord = Run
     let connectionAbort = new AbortController();
     let flushing = false;
     let authenticated = false;
+    // Set by connect() when it resolved the token to build the socket with.
+    let connectToken: string | null | undefined;
     const getAuthToken = normalizeAuthToken(token ?? undefined);
     const emitLocal = (data: string): void => {
       // Checked before `stopped`: a connection that ended on its own is also disposed.
@@ -580,7 +582,8 @@ export function createWebSocketConnector<TEvent extends RuntimeEventRecord = Run
         ? candidateSocket
         : socket;
       try {
-        const authToken = (await getAuthToken()) ?? null;
+        // The token this socket was built with, when it was built with one; else resolve now.
+        const authToken = connectToken !== undefined ? connectToken : (await getAuthToken()) ?? null;
         // surface a diagnostic error when the token resolver returns null
         // before a reconnect loop is scheduled.
         if (authToken === null || authToken === undefined) {
@@ -751,8 +754,17 @@ export function createWebSocketConnector<TEvent extends RuntimeEventRecord = Run
       // A new socket subscribes, through its URL, to the domains carried now.
       url = buildWebSocketUrl(baseUrl, [...carried]);
       told = new Set(carried);
-      // A runtime may throw here (a blocked port, a bad scheme); the callers report that.
-      const nextSocket = new WebSocketImpl(url);
+      let nextSocket: WebSocket;
+      if (options.createSocket) {
+        const token = (await getAuthToken()) ?? null;
+        if (stopped) return;
+        connectToken = token;
+        // A runtime may throw here (a blocked port, a bad scheme); the callers report that.
+        nextSocket = options.createSocket(url, token);
+      } else {
+        connectToken = undefined;
+        nextSocket = new WebSocketImpl(url);
+      }
       socket = nextSocket;
       connectionAbort = new AbortController();
       nextSocket.addEventListener('open', onOpen);

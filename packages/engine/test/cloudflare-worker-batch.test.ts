@@ -91,7 +91,43 @@ describe('Cloudflare Worker batch bridge', () => {
       { waitUntil: () => undefined },
     );
     expect(res.status).toBe(503);
-    expect(await res.json()).toMatchObject({ code: 'WORKER_AUTH_TOKEN_REQUIRED' });
+    expect(await res.json()).toMatchObject({ code: 'WORKER_AUTH_NOT_CONFIGURED' });
+  });
+
+  test('refuses an http or private daemon URL without sending the operator token anywhere', async () => {
+    let outbound = 0;
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () => { outbound++; return Response.json({}); }) as unknown as typeof fetch;
+    try {
+      const worker = createGoodVibesCloudflareWorker();
+      const call = (daemonUrl: string) => worker.fetch(
+        new Request('https://worker.example/batch/jobs', { method: 'POST', headers: { Authorization: 'Bearer w' }, body: '{}' }),
+        { GOODVIBES_WORKER_TOKEN: 'w', GOODVIBES_OPERATOR_TOKEN: 'op', GOODVIBES_DAEMON_URL: daemonUrl },
+      );
+      expect((await call('http://daemon.example')).status).toBe(400);
+      expect((await call('https://10.0.0.1')).status).toBe(403);
+      expect(outbound).toBe(0);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('refuses at enqueue a job the daemon would refuse for queue size, and answers a job id for one it queues', async () => {
+    const sent: GoodVibesCloudflareQueuePayload[] = [];
+    const worker = createGoodVibesCloudflareWorker({ queueJobPayloads: true });
+    const env = { GOODVIBES_WORKER_TOKEN: 'w', GOODVIBES_MAX_QUEUE_PAYLOAD_BYTES: '16384', GOODVIBES_BATCH_QUEUE: { async send(m: GoodVibesCloudflareQueuePayload) { sent.push(m); } } };
+    const enqueue = (content: string) => worker.fetch(new Request('https://worker.example/batch/jobs/enqueue', {
+      method: 'POST', headers: { Authorization: 'Bearer w' }, body: JSON.stringify({ request: { messages: [{ role: 'user', content }] } }),
+    }), env);
+    const refused = await enqueue('x'.repeat(20 * 1024));
+    expect(refused.status).toBe(413);
+    expect(await refused.json()).toMatchObject({ code: 'QUEUE_PAYLOAD_TOO_LARGE' });
+    expect(sent).toHaveLength(0);
+    const queued = await enqueue('hi');
+    expect(queued.status).toBe(202);
+    const answer = await queued.json() as { jobId: string; jobPath: string };
+    expect(answer.jobPath).toBe(`/batch/jobs/${answer.jobId}`);
+    expect(sent).toHaveLength(1);
   });
 });
 

@@ -602,7 +602,10 @@ export interface PlatformObserver {
   /** Called when another callback throws at a transport seam. Notification only. */
   onObserverError?(err: Error): void;
 
-  /** Called at HTTP/SSE/WS transport boundaries. */
+  /**
+   * Called at HTTP/SSE/WS transport boundaries. An HTTP `recv` carries the
+   * response `status` (error statuses too) and `durationMs`.
+   */
   onTransportActivity?(activity: {
     readonly direction: 'send' | 'recv';
     readonly url: string;
@@ -611,11 +614,15 @@ export interface PlatformObserver {
     readonly kind?: 'http' | 'sse' | 'ws';
   }): void;
 
-  /** Called when auth state transitions (login, logout, refresh, expire, revoke). */
+  /**
+   * Called when auth state transitions. `replace` is a token the caller set
+   * over an existing one (`auth.setToken`); `refresh` is only the platform's
+   * own automatic refresh.
+   */
   onAuthTransition?(transition: {
-    readonly from: 'anonymous' | 'session' | 'token';
-    readonly to: 'anonymous' | 'session' | 'token';
-    readonly reason: 'login' | 'logout' | 'refresh' | 'expire' | 'revoke';
+    readonly from: 'anonymous' | 'token';
+    readonly to: 'anonymous' | 'token';
+    readonly reason: 'login' | 'logout' | 'replace' | 'refresh' | 'expire';
   }): void;
 }
 ```
@@ -702,8 +709,9 @@ The following table shows which `PlatformObserver` callbacks each transport seam
 |---|---|
 | `createGoodVibesAuthClient`: `onAuthTransition` on login | Wired |
 | `createGoodVibesAuthClient`: `onAuthTransition` on logout (clearToken) | Wired |
+| `createGoodVibesAuthClient`: `onAuthTransition` on setToken (`login` from anonymous, `replace` over a token, `logout` for null) | Wired |
 | `AutoRefreshCoordinator`: `onAuthTransition` reason `refresh` or `expire` | Wired |
-| `OperatorApiClient` or `PeerApiClient` HTTP transport: `onTransportActivity` (send + recv) | Wired |
+| `OperatorApiClient` or `PeerApiClient` HTTP transport: `onTransportActivity` (send + recv with status, error statuses included) | Wired |
 | SSE transport: `onTransportActivity` (send on connect, recv on event) | Wired |
 | WebSocket transport: `onTransportActivity` (send on connect, recv on message) | Wired |
 | SSE or WebSocket transport: `onEvent` (incoming remote runtime events) | Wired |
@@ -768,6 +776,8 @@ A unit passes only when every judged criterion reads met. `CONTRACT_PASSED`, `CO
 Every Jev reading the engine takes is recorded in the state layer's decision log (`<workspace>/.goodvibes/<surface>/decisions.sqlite`): the call, what the decision concluded (a `readings` note), what code did with it (an `action` note) and, once known, what was right (a `truth` note from a calibration fixture, an owner correction or an observed outcome). The observe subsystem (`@goodvibes-jev/engine/platform/platform/observe`) reads it without making new calls:
 
 A decision log written by a build this one does not recognise (a newer schema version) or a file that is not a database is never deleted and never stops start-up: it is moved to `decisions.sqlite.unrecognized-<n>` beside the log, a new log starts, and the composition's `decisionLogNotice` and the activity log say where the old one went.
+
+The log keeps 30 days of entries, and at most the newest 100,000; an entry carrying a `truth` note is kept whatever its age, because accuracy reports and calibration read it. Older entries and their notes are removed in small batches about ten seconds after start-up and once a day, so start-up never waits on a large log. A note written after the work it describes (readings, the action taken) never turns that work into a failure: when the log cannot write it, the count goes up and the activity log carries one warning.
 
 | Analysis | What it reads |
 |---|---|

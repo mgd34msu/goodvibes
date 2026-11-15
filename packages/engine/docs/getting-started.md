@@ -81,17 +81,9 @@ const platformClient = createReactNativeGoodVibesPlatform({
   authToken: token,
 });
 
-// The daemon authenticates the upgrade request itself, so the WebSocket must
-// carry the bearer token as a header. React Native's WebSocket accepts
-// (url, protocols, { headers }); hand the platform a wrapper that attaches it.
-// The full typed wrapper is in docs/react-native-integration.md.
-const AuthorizedWebSocket = function (url: string | URL): WebSocket {
-  return new (WebSocket as never)(String(url), [], {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-} as unknown as typeof WebSocket;
-
-const stop = platformClient.realtime.viaWebSocket(AuthorizedWebSocket)
+// The daemon authenticates the upgrade request itself; the platform builds each
+// socket with the current bearer token as a header (refreshed when needed).
+const stop = platformClient.realtime.runtime()
   .agents.on('AGENT_COMPLETED', (event) => {
     console.log(event);
   });

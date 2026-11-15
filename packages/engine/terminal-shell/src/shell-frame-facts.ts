@@ -1,5 +1,8 @@
 import type { ContentPart } from '@goodvibes-jev/engine/platform/platform/providers';
+import { emitUiPanelClose, emitUiPanelFocus, emitUiPanelOpen, emitUiViewChanged } from '@goodvibes-jev/engine/platform/platform/runtime/emitters';
 import { captureNativeConversationInput, type ProductInputContext } from './native/native-conversation-input.js';
+import { MODAL_NAMES, isModalActive, type ActiveModalState } from './modal-state.js';
+import type { SessionTarget } from './session-focus.js';
 /** Per-frame observations shared by terminal renderers; presentation remains in each shell. */
 export function readShellFrameFacts<PromptInfo>(
   processManager: {
@@ -26,5 +29,63 @@ export function createShellSubmissionPorts(
       submit(text, content, { spokenOutput: true, source: captureNativeConversationInput(text, content) }),
     stopSpokenOutput: stop,
     pasteFromClipboard: paste,
+  };
+}
+
+/** What the `ui` event stream describes, read from one frame: open panels bottom to top (the last is focused), and the view. */
+export interface UiFrame {
+  readonly panels: readonly string[];
+  /** `main`, `agent:<id>` or `process:<id>`. */
+  readonly view: string;
+}
+
+/**
+ * The panels on screen and the view, from the input handler's modal state and
+ * the session focus. Of the handler's modals the one that takes the screen
+ * (first active in MODAL_NAMES) is the top; kit modals always sit above them.
+ */
+export function readUiFrame(
+  input: ActiveModalState & { readonly surfaceModals?: { modals(): readonly { readonly name: string }[] } | undefined },
+  view: SessionTarget | null | undefined,
+): UiFrame {
+  const panels: string[] = [];
+  for (let index = MODAL_NAMES.length - 1; index >= 0; index--) {
+    const name = MODAL_NAMES[index]!;
+    if (isModalActive(input, name)) panels.push(name);
+  }
+  for (const modal of input.surfaceModals?.modals() ?? []) {
+    if (!panels.includes(modal.name)) panels.push(modal.name);
+  }
+  return { panels, view: !view || view.kind === 'main' ? 'main' : `${view.kind}:${view.id}` };
+}
+
+/**
+ * Publishes the `ui` domain from the frames a terminal app draws: one call per
+ * frame, events only for what changed (UI_PANEL_CLOSE, UI_PANEL_OPEN, then
+ * UI_PANEL_FOCUS for a new top panel, then UI_VIEW_CHANGED). An unchanged frame
+ * costs a comparison of a few short strings and emits nothing.
+ */
+export function createUiEventPublisher(
+  bus: Parameters<typeof emitUiPanelOpen>[0],
+  sessionId: () => string,
+): { observe(frame: UiFrame): void } {
+  let panels: readonly string[] = [];
+  let view = 'main';
+  return {
+    observe(frame) {
+      const same = frame.view === view
+        && frame.panels.length === panels.length
+        && frame.panels.every((panel, index) => panel === panels[index]);
+      if (same) return;
+      const id = sessionId();
+      const ctx = { sessionId: id, traceId: `${id}:ui`, source: 'terminal' };
+      for (const panel of panels) if (!frame.panels.includes(panel)) emitUiPanelClose(bus, ctx, { panelId: panel });
+      for (const panel of frame.panels) if (!panels.includes(panel)) emitUiPanelOpen(bus, ctx, { panelId: panel });
+      const top = frame.panels[frame.panels.length - 1];
+      if (top !== undefined && top !== panels[panels.length - 1]) emitUiPanelFocus(bus, ctx, { panelId: top });
+      if (frame.view !== view) emitUiViewChanged(bus, ctx, { from: view, to: frame.view });
+      panels = [...frame.panels];
+      view = frame.view;
+    },
   };
 }

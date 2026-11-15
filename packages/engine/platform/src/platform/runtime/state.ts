@@ -22,7 +22,7 @@ export {
   emitRouteBindingCreated,
   emitSurfaceEnabled,
   emitTokenBlocked,
-  emitUiRenderRequest,
+  emitUiViewChanged,
   emitWatcherStarted,
 } from './emitters/index.js';
 export {

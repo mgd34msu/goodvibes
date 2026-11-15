@@ -54,7 +54,7 @@ All routes require the same daemon auth as other daemon APIs. Queuing, cancellin
 | `/api/batch/config` (aliases `/api/batch`, `/api/batch/runtime`) | `GET` | Returns batch mode, queue backend, Cloudflare settings, limits, and supported providers. |
 | `/api/batch/jobs` | `POST` | Queues a chat batch job. Returns `202` with the job record. |
 | `/api/batch/jobs` | `GET` | Lists recent jobs. Supports `?limit=100`. |
-| `/api/batch/jobs/{jobId}` | `GET` | Reads one job. |
+| `/api/batch/jobs/{jobId}` | `GET` | Reads one job, by its id or by the `jobId` a Cloudflare Worker answered when it queued the job. |
 | `/api/batch/jobs/{jobId}/cancel` | `POST` | Cancels a queued job. A job cancelled while its batch is being submitted to the provider stays cancelled. A job already at the provider is refused with `409 BATCH_JOB_ALREADY_SUBMITTED`, which names its provider batch, because the provider runs that batch as a whole. |
 | `/api/batch/tick` | `POST` | Submits eligible queued jobs and polls submitted provider batches. Body may include `{ "force": true }`. |
 
@@ -277,43 +277,52 @@ When enabled, the optional components do the following:
 The platform exports `@goodvibes-jev/engine/platform/workers` for Worker deployments:
 
 ```ts
-import { createGoodVibesCloudflareWorker } from '@goodvibes-jev/engine/platform/workers';
+import { createGoodVibesCloudflareWorker, GoodVibesCoordinator } from '@goodvibes-jev/engine/platform/workers';
 
-// Reads GOODVIBES_DAEMON_URL, GOODVIBES_OPERATOR_TOKEN, and
-// GOODVIBES_WORKER_TOKEN from Worker environment bindings.
+// Reads GOODVIBES_DAEMON_URL, GOODVIBES_OPERATOR_TOKEN, GOODVIBES_WORKER_TOKEN
+// and the other GOODVIBES_* bindings from the Worker environment.
 export default createGoodVibesCloudflareWorker();
+// Only when the Worker binds GOODVIBES_COORDINATOR (the daily queue budget).
+export { GoodVibesCoordinator };
 ```
 
-The Worker refuses a daemon URL that is not `https:` and one that points at a private, loopback or link-local host. Two bindings relax that for a deliberate setup: `GOODVIBES_ALLOW_INSECURE_DAEMON_URL=true` allows an `http:` URL, and `GOODVIBES_ALLOW_PRIVATE_DAEMON_URL=true` allows a private host, for example behind a tunnel. Leave both unset otherwise.
+There is one Worker. Platform provisioning uploads the module text `buildGoodVibesCloudflareWorkerModule()` returns, which is this same code with every setting read from the environment, so a provisioned Worker and a hand-deployed one refuse, queue and answer the same way.
 
-Manual Worker deployments can still use that entry point, but platform provisioning uploads its own Worker module automatically so a client never has to build or upload one by hand. The two are close but not byte-identical: the auto-uploaded module skips daemon-URL hardening (scheme, private-host, and format checks) and the request-size and content-type checks that `createGoodVibesCloudflareWorker` adds, because provisioning always sets `daemonBaseUrl` itself and always installs `GOODVIBES_WORKER_TOKEN`, which makes those checks redundant on the path the platform controls. Deployments that import `createGoodVibesCloudflareWorker` directly get the fuller check set. The Worker bridge can:
+The Worker refuses a daemon URL that is not `https:` and one that points at a private, loopback or link-local host, before it sends anything (the operator token rides on every proxied call). Two bindings relax that for a deliberate setup: `GOODVIBES_ALLOW_INSECURE_DAEMON_URL=true` allows an `http:` URL, and `GOODVIBES_ALLOW_PRIVATE_DAEMON_URL=true` allows a private host, for example behind a tunnel. Leave both unset otherwise. The Worker can:
 
 - Proxy `/batch/*` requests to the daemon's `/api/batch/*` routes.
 - Queue small tick signals with `/batch/tick/enqueue`.
+- Queue whole jobs with `/batch/jobs/enqueue` when payload queueing is on (see below).
 - Run scheduled events that call `/api/batch/tick`.
 - Consume Cloudflare Queue messages and retry failures so Cloudflare dead-letter queues can capture exhausted messages.
+- Report the daily queue budget at `/batch/queue/budget` (with a coordinator bound) and a queued job's state at `/batch/queue/jobs/<jobId>` (with KV bound).
 
-Every Worker route except `/health` and `/batch/health` requires `Authorization: Bearer <token>` by default. Set the token with the Worker secret `GOODVIBES_WORKER_TOKEN` or `createGoodVibesCloudflareWorker({ workerAuthToken })`. The platform provisioning flow generates and installs `GOODVIBES_WORKER_TOKEN` automatically; the module it uploads answers `503` `WORKER_AUTH_NOT_CONFIGURED` to every non-health route if that secret is ever missing, compares tokens in constant time, and fails a scheduled invocation when the daemon refuses the tick. With `createGoodVibesCloudflareWorker`, if no token is configured the Worker refuses every non-health route with `WORKER_AUTH_TOKEN_REQUIRED` rather than silently allowing requests through; manual deployments that intentionally put the Worker behind another trusted auth layer must pass `allowUnauthenticated: true` as an explicit opt-out.
+Every Worker route except `/health` and `/batch/health` requires `Authorization: Bearer <token>`. Set the token with the Worker secret `GOODVIBES_WORKER_TOKEN` or `createGoodVibesCloudflareWorker({ workerAuthToken })`; provisioning generates and installs it. With no token configured the Worker answers `503` `WORKER_AUTH_NOT_CONFIGURED` to every non-health route rather than proxying with the operator credential; a manual deployment behind another trusted auth layer can pass `allowUnauthenticated: true` as an explicit opt-out. Tokens are compared in constant time. A scheduled tick the daemon refuses fails the invocation, so Cloudflare records it as failed.
 
-By default, the Worker does not queue full prompt/job payloads. Queue messages should be small signals, not prompt archives or secrets. This keeps usage free-tier friendly and avoids putting sensitive prompt bodies into Cloudflare Queues. Full job payload queueing requires `createGoodVibesCloudflareWorker({ queueJobPayloads: true })` or the Worker environment binding `GOODVIBES_QUEUE_JOB_PAYLOADS=true`. Each queued job carries a stable id that is sent as `source.id` on every delivery attempt. The queue consumer redelivers a message when the daemon answers 401, 403, 408, 429 or 5xx (or the request fails), and acknowledges it, with a logged warning, on any other 4xx or an unknown message type, so a malformed message does not loop. A scheduled tick the daemon refuses fails the invocation, so Cloudflare records it as failed.
+By default, the Worker does not queue full prompt/job payloads. Queue messages should be small signals, not prompt archives or secrets. Full job payload queueing requires `createGoodVibesCloudflareWorker({ queueJobPayloads: true })` or the binding `GOODVIBES_QUEUE_JOB_PAYLOADS=true`. The daemon's `batch.maxQueuePayloadBytes` is the one size limit for a job body that travels in the queue: provisioning passes it to the Worker as `GOODVIBES_MAX_QUEUE_PAYLOAD_BYTES` (a manual deployment sets that binding or `maxQueuePayloadBytes`, default 16 KiB), and the Worker refuses a larger body at enqueue with `413` `QUEUE_PAYLOAD_TOO_LARGE` instead of queueing a job the daemon would drop. With R2 bound, a larger body (and, in free-tier mode, every body) is kept in R2 and the queue carries only its key. An accepted job answers `202` with `jobId`, `jobPath` (`/batch/jobs/<id>` reads the job from the daemon once it is delivered; `404` until then) and, with KV bound, `statusPath` (queued, delivered or rejected, with the daemon's status and code). Each queued job is sent to the daemon with the same `source.id` on every delivery attempt, so a redelivery never makes a second job. The queue consumer redelivers a message when the daemon answers 401, 403, 408, 429 or 5xx (or the request fails), and acknowledges it, with a logged warning and a `rejected` status record, on any other 4xx or an unknown message type, so a malformed message does not loop.
 
 The platform provisioning route configures the queue consumer with `dead_letter_queue`. Manual deployments must configure the dead-letter queue in Cloudflare or Wrangler for the queue binding; the platform Worker consumes retries and allows failed messages to flow to the configured DLQ.
 
 **Worker HTTP error codes**
 
-The full set below is what `createGoodVibesCloudflareWorker` returns; the module platform provisioning uploads only ever returns `NOT_FOUND`, `QUEUE_PAYLOADS_DISABLED`, and `QUEUE_NOT_CONFIGURED` from this list, since provisioning guarantees the daemon URL and auth token are already valid.
-
 | Status | `code` | Meaning |
 |--------|--------|---------|
 | `401` | `WORKER_AUTH_REQUIRED` | A configured worker token did not match the request's `Authorization` header. |
-| `503` | `WORKER_AUTH_TOKEN_REQUIRED` | No `GOODVIBES_WORKER_TOKEN` or `workerAuthToken` is configured and `allowUnauthenticated` was not set. |
-| `404` | `NOT_FOUND` | The request path does not map to a `/batch/*` daemon route. |
+| `503` | `WORKER_AUTH_NOT_CONFIGURED` | No `GOODVIBES_WORKER_TOKEN` or `workerAuthToken` is configured and `allowUnauthenticated` was not set. |
+| `404` | `NOT_FOUND` | The request path does not map to a `/batch/*` daemon route, or no queued job has that id. |
 | `409` | `QUEUE_PAYLOADS_DISABLED` | `POST /batch/jobs/enqueue` was called without payload queueing enabled. |
+| `409` | `QUEUE_PAYLOADS_NEED_R2` | Free-tier mode keeps job bodies out of the queue and no R2 bucket is bound. |
+| `413` | `QUEUE_PAYLOAD_TOO_LARGE` | The job body is larger than the daemon's queue message limit and no R2 bucket is bound to hold it. |
+| `429` | `QUEUE_BUDGET_EXHAUSTED` | The daily queue budget is used up; the answer says what was used and when it resets. |
 | `503` | `QUEUE_NOT_CONFIGURED` | A queue route was called but the `GOODVIBES_BATCH_QUEUE` binding is missing. |
 | `503` | `DAEMON_URL_REQUIRED` | Neither `options.daemonUrl` nor `GOODVIBES_DAEMON_URL` is configured. |
+| `400` | `DAEMON_URL_INVALID` | The daemon URL is not a URL. |
+| `400` | `DAEMON_URL_INSECURE` | The daemon URL is not `https:` and `GOODVIBES_ALLOW_INSECURE_DAEMON_URL` is not set. |
+| `403` | `DAEMON_URL_PRIVATE_HOST` | The daemon URL is a private, loopback or link-local host and `GOODVIBES_ALLOW_PRIVATE_DAEMON_URL` is not set. |
 | `400` | `INVALID_JSON` | The request body could not be parsed as JSON. |
 | `415` | `UNSUPPORTED_MEDIA_TYPE` | A non-GET/HEAD proxy request set a `Content-Type` other than `application/json`. |
-| `413` | `PAYLOAD_TOO_LARGE` | The request body exceeded `maxRequestBodyBytes` (default 1 MB). |
+| `413` | `PAYLOAD_TOO_LARGE` | The request body exceeded `maxRequestBodyBytes` (default 4 MiB, the daemon's batch request limit). |
+| `404` | `BUDGET_NOT_COUNTED` / `JOB_STATUS_NOT_TRACKED` | No coordinator or no KV namespace is bound, so the budget or the queued job's state is not kept. |
 
 `/health` and `/batch/health` are always reachable without authentication; every other route requires `Authorization: Bearer <token>` unless `allowUnauthenticated` is set.
 

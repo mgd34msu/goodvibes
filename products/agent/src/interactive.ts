@@ -2,7 +2,7 @@
 import { describeIngestionNotice } from '@goodvibes-jev/engine/platform/platform/config';
 import { OwnedSelectionObservation } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 import { isNativeConversationTurnReady, nativeConversationTurnInputOptions } from '@goodvibes-jev/engine/terminal-shell/native-ingress';
-import { readShellFrameFacts, createShellSubmissionPorts } from '@goodvibes-jev/engine/terminal-shell/shell-frame-facts';
+import { readShellFrameFacts, createShellSubmissionPorts, createUiEventPublisher, readUiFrame } from '@goodvibes-jev/engine/terminal-shell/shell-frame-facts';
 import { readInitialExecutionMode } from './permissions/execution-mode.ts';
 import { isConversationUsageAvailable, isConversationContextAvailable } from './core/conversation-usage.ts';
 import type { NativeConversationIntakeState } from './runtime/native-conversation-intake.ts';
@@ -892,6 +892,9 @@ async function main() {
     toolCount,
   };
 
+  // The `ui` event domain: panel open/close/focus and view changes, read from each painted frame.
+  const uiEvents = createUiEventPublisher(ctx.services.runtimeBus, () => runtime.sessionId);
+
   // A hoisted DECLARATION, not `const`: callbacks wired above fire before this
   // line (bindApprovals starts an unawaited refresh + stream that repaint).
   // Under a `const` they hit the temporal dead zone, every boot logged "Cannot
@@ -900,6 +903,7 @@ async function main() {
   function render(): void {
     // Outside the window where this app owns the screen: the alternate screen does not exist yet, or the terminal has already been handed back. Never paint in either case.
     if (!paintWindow.isOpen()) return;
+    uiEvents.observe(readUiFrame(input, sessionViews.focus.current));
     void herdrSession.update(
       buildAgentHerdrSessionUpdate({
         runtime,

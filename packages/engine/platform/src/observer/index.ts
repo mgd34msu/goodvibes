@@ -29,15 +29,19 @@ export type { AnyRuntimeEvent };
 /**
  * The auth state kind used in transition notifications.
  * - `'anonymous'`, no credentials present
- * - `'session'`, session-cookie or short-lived token
- * - `'token'`, long-lived bearer token
+ * - `'token'`, a bearer token is stored
  */
-export type AuthStateKind = 'anonymous' | 'session' | 'token';
+export type AuthStateKind = 'anonymous' | 'token';
 
 /**
  * The reason an auth transition occurred.
+ * - `'login'`, `auth.login()`, or a token set where there was none
+ * - `'logout'`, `auth.clearToken()` or `auth.setToken(null)`
+ * - `'replace'`, the caller set a new token over an existing one (`auth.setToken`)
+ * - `'refresh'`, the platform refreshed the token itself (auto-refresh)
+ * - `'expire'`, a refresh was refused for good and the token was cleared
  */
-export type AuthTransitionReason = 'login' | 'logout' | 'refresh' | 'expire' | 'revoke';
+export type AuthTransitionReason = 'login' | 'logout' | 'replace' | 'refresh' | 'expire';
 
 /**
  * Re-export TransportActivityInfo from transport-core so platform consumers
@@ -86,7 +90,8 @@ export interface PlatformObserver extends TransportObserver {
   /**
    * Called at HTTP/SSE/WebSocket transport boundaries.
    * - `'send'` fires before the request is dispatched.
-   * - `'recv'` fires after a response is received (with status + duration).
+   * - `'recv'` fires when an HTTP response arrives (with `status` and
+   *   `durationMs`, error statuses included), and per realtime message.
    *
    * Wired as of 0.19.7, fires in `transport-http` request/response boundary
    * and in realtime connect/message boundaries.
@@ -94,8 +99,8 @@ export interface PlatformObserver extends TransportObserver {
   onTransportActivity?(activity: TransportActivityInfo): void;
 
   /**
-   * Called when the platform's auth state transitions (login, logout, token
-   * refresh, expiry, or revocation).
+   * Called when the platform's auth state transitions (login, logout, a
+   * caller-set token replacing another, an automatic refresh, or expiry).
    */
   onAuthTransition?(transition: AuthTransitionInfo): void;
 }

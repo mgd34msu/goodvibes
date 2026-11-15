@@ -77,6 +77,11 @@ export interface GoodVibesAuthClient {
   ensureFreshToken(): Promise<void>;
   /** Retrieve the current token. Delegates to `TokenStore.getToken()`. */
   getToken(): Promise<string | null>;
+  /**
+   * The token to present on a request or connection now: one store read,
+   * refreshed first when it is inside the refresh window (auto-refresh on).
+   */
+  currentToken(): Promise<string | null>;
   /** Persist a token. Delegates to `TokenStore.setToken()`. */
   setToken(token: string | null): Promise<void>;
   /** Clear the stored token. Delegates to `TokenStore.clearToken()`. */
@@ -357,15 +362,21 @@ export function createGoodVibesAuthClient(
       }
       return await readToken(null, getAuthToken);
     },
+    async currentToken(): Promise<string | null> {
+      if (coordinator) return coordinator.currentToken();
+      if (ts) return ts.getToken();
+      return await readToken(null, getAuthToken);
+    },
     async setToken(token: string | null): Promise<void> {
       const priorToken = await ts?.getToken();
       await assertWritableTokenStore(ts).setToken(token);
-      // Notify observer of the token state transition.
+      // A token the caller sets is never an automatic refresh: it starts a
+      // session, replaces one, or (null) ends it.
       invokeObserver(() =>
         observer?.onAuthTransition?.({
           from: priorToken ? 'token' : 'anonymous',
           to: token ? 'token' : 'anonymous',
-          reason: token ? 'refresh' : 'logout',
+          reason: !token ? 'logout' : priorToken ? 'replace' : 'login',
         }),
         { label: 'onAuthTransition' },
       );

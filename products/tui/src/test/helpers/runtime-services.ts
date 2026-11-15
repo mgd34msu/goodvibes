@@ -27,7 +27,6 @@ import { RemoteSupervisor } from '@/runtime/index.ts';
 import { createRuntimeServices, type RuntimeServices } from '../../runtime/services.ts';
 import { createShellPathService } from '@/runtime/index.ts';
 import { createRuntimeStore } from '../../runtime/store/index.ts';
-import { TaskScheduler } from '@goodvibes-jev/engine/platform/platform/scheduler';
 import { SpawnTokenManager } from '@goodvibes-jev/engine/platform/platform/security';
 import { FileUndoManager } from '@goodvibes-jev/engine/platform/platform/state';
 import { MemoryEmbeddingProviderRegistry } from '@goodvibes-jev/engine/platform/platform/state';
@@ -66,7 +65,6 @@ let toolLLMRuntimeServices: RuntimeServices | null = null;
 let lspService: LspService | null = null;
 let treeSitterService: TreeSitterService | null = null;
 let codeIntelligence: CodeIntelligence | null = null;
-let taskScheduler: TaskScheduler | null = null;
 let featureFlags: FeatureFlagManager | null = null;
 const spawnTokenManagers = new Map<string, SpawnTokenManager>();
 const projectIndexes = new Map<string, ProjectIndex>();
@@ -199,7 +197,7 @@ export async function drainTestRuntimeServices(): Promise<void> {
  *
  * Also removes `getTestRoots()`'s temp directory (the `gv-test-runtime-*`
  * scratch shared by getTestRuntimeServices/getTestLspService/
- * getTestCodeIntelligence/getTestTaskScheduler), which used to rely on a
+ * getTestCodeIntelligence), which used to rely on a
  * `process.on('exit', ...)` hook registered lazily inside getTestRoots, Bun's
  * test runner never fires that under `bun test`, so it leaked the ENTIRE
  * directory tree (never removed at all) for every test file that touched any
@@ -440,21 +438,6 @@ export function resetTestProcessManager(): void {
   resetTestRuntimeServices();
 }
 
-export function getTestTaskScheduler(
-  config?: string | ConstructorParameters<typeof TaskScheduler>[0],
-): TaskScheduler {
-  taskScheduler ??= new TaskScheduler(config ?? {
-    storePath: join(getTestRoots().root, 'scheduler.json'),
-    spawnTask: () => 'test-agent',
-  });
-  return taskScheduler;
-}
-
-export function resetTestTaskScheduler(): void {
-  taskScheduler?.stop();
-  taskScheduler = null;
-}
-
 export function getTestSpawnTokenManager(sessionId: string): SpawnTokenManager {
   const existing = spawnTokenManagers.get(sessionId);
   if (existing) return existing;
@@ -512,7 +495,6 @@ export function resetAllTestServiceState(): void {
   resetTestRuntimeServices();
   resetTestToolLLM();
   resetTestCodeIntelligence();
-  resetTestTaskScheduler();
   resetTestSpawnTokenManagers();
   resetTestFeatureFlagManager();
   resetTestProjectIndexes();

@@ -202,7 +202,7 @@ Workflow state machines, automation triggers, and scheduled tasks. See [Automati
 - Named workflow definitions: `contract` (starts a contract whose units are checked against acceptance criteria), `fix_loop`, `test_then_fix`, `review_only`
 - State machine with validated transitions: prevents invalid state changes
 - Automation triggers: fire shell commands when specific hook events occur, with optional JS conditions
-- Cron scheduler: full 5-field cron expressions with IANA timezone support, missed-run detection, per-task run history, and enable/disable control; persists to `.goodvibes/tui/schedules.json`
+- Scheduled jobs run by the automation manager: 5-field cron expressions read in an IANA timezone (a leap-day `0 0 29 2 *` is accepted; a day no named month has, such as `0 0 31 2 *`, is refused), fixed intervals and one-shot times, missed-run recording, per-job run history, and enable/disable control; persists to `.goodvibes/tui/automation-jobs.json`
 - Full lifecycle: start, transition, cancel, list active instances
 
 ### task / team / worklist

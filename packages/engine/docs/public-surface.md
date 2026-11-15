@@ -350,7 +350,6 @@ The following table lists the notable platform subpaths. The `exports` map in `p
 | `platform/runtime/provider-health` | Pure typed provider-console domain summaries and descriptor auth posture; browser-safe, no credential reads | beta |
 | `platform/runtime/ui` | Curated UI surface (model-picker, provider-health); not a barrel of `runtime/ui/` subdirectory | beta |
 | `platform/runtime/voice-setup` | The daemon's managed local-voice setup service; `install()` is single-flight so concurrent callers join the in-progress install instead of starting parallel downloads | beta |
-| `platform/scheduler` | Scheduler service | beta |
 | `platform/security` | User auth, token audit, and security helpers | beta |
 | `platform/sessions` | Session manager, change tracking, and orchestration | beta |
 | `platform/skills` | The canonical skill service: Markdown+frontmatter skill documents, a progressive-disclosure read path, and CRUD, shared by every consumer instead of each carrying its own copy | beta |

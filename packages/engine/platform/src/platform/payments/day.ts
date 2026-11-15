@@ -2,7 +2,7 @@
  * day.ts, what "today" means for a budget that resets daily.
  *
  * The daemon had no timezone concept before this. Schedules carried per-schedule
- * IANA names (scheduler/scheduler.ts, automation/schedules.ts) and `device.location.*`
+ * IANA names (automation/schedules.ts, automation/cron.ts) and `device.location.*`
  * is a paired phone's GPS permission, but nothing described where the daemon
  * itself thinks it is. A daily budget cannot be built without that, so
  * `daemon.timezone` is added as a GENERAL daemon setting rather than a payments

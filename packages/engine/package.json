@@ -1092,11 +1092,6 @@
       "types": "./platform/dist/platform/runtime/voice-setup.d.ts",
       "import": "./platform/dist/platform/runtime/voice-setup.js"
     },
-    "./platform/platform/scheduler": {
-      "bun": "./platform/src/platform/scheduler/index.ts",
-      "types": "./platform/dist/platform/scheduler/index.d.ts",
-      "import": "./platform/dist/platform/scheduler/index.js"
-    },
     "./platform/platform/security": {
       "bun": "./platform/src/platform/security/index.ts",
       "types": "./platform/dist/platform/security/index.d.ts",

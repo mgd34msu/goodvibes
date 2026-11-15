@@ -12,5 +12,3 @@ export { AgentTaskAdapter } from './agent-adapter.js';
 export type { AgentOwner } from './agent-adapter.js';
 
 export { AcpTaskAdapter } from './acp-adapter.js';
-
-export { SchedulerTaskAdapter } from './scheduler-adapter.js';

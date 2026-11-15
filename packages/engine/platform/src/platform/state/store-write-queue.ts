@@ -58,8 +58,6 @@
  *  - The four automation stores, up to `automation.maxConcurrentRuns` writers
  *    plus a 2-second reconcile timer. A completed run reads back 'running' and
  *    the reconciler executes the job again.
- *  - `TaskScheduler`, add/remove/setEnabled each fire an unawaited save. A
- *    deleted cron task comes back and spawns an agent on the next start.
  *  - `CiWatchService`, a poll's write, requested before its network round
  *    trip returned, landing after a delete. The deleted watch keeps notifying.
  *  - `PrincipalRegistry` / `ChannelProfileRegistry`, a create/set landing

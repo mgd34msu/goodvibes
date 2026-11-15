@@ -1,5 +1,5 @@
 import { randomInt } from 'node:crypto';
-import { TaskScheduler } from '../scheduler/scheduler.js';
+import { computeNextCronRun, parseCron, validateTimezone } from './cron.js';
 
 export interface AutomationAtSchedule {
   readonly kind: 'at';
@@ -29,13 +29,8 @@ export type AutomationScheduleDefinition =
 export type AutomationScheduleKind = AutomationScheduleDefinition['kind'];
 
 const EVERY_PATTERN = /^(\d+(?:\.\d+)?)(ms|s|m|h|d)$/;
-const CRON_HELPER_STATE_PATH = '.goodvibes/.automation-cron-helper.json';
 
 export const DEFAULT_TOP_OF_HOUR_STAGGER_MS = 5 * 60 * 1_000;
-
-function createCronHelper(): TaskScheduler {
-  return new TaskScheduler(CRON_HELPER_STATE_PATH);
-}
 
 function ensurePositiveFinite(value: number, label: string): void {
   if (!Number.isFinite(value) || value <= 0) {
@@ -174,12 +169,12 @@ export function validateSchedule(schedule: AutomationScheduleDefinition): void {
         throw new Error('schedule.expression must not be empty');
       }
       if (schedule.timezone) {
-        TaskScheduler.validateTimezone(schedule.timezone);
+        validateTimezone(schedule.timezone);
       }
       if (schedule.staggerMs !== undefined && normalizeCronStaggerMs(schedule.staggerMs) === undefined) {
         throw new Error('schedule.staggerMs must be a finite number when provided');
       }
-      createCronHelper().getNextRun(schedule.expression, new Date(), schedule.timezone);
+      parseCron(schedule.expression);
       break;
     default: {
       // A stored or posted object is not checked by the compiler: one without a
@@ -222,7 +217,7 @@ export function normalizeCronSchedule(expression: string, timezone?: string, sta
 }
 
 function getNextCronOccurrence(schedule: AutomationCronSchedule, fromMs: number): number {
-  return createCronHelper().getNextRun(schedule.expression, new Date(fromMs), schedule.timezone).getTime();
+  return computeNextCronRun(schedule.expression, fromMs, schedule.timezone);
 }
 
 export function getNextAutomationOccurrence(

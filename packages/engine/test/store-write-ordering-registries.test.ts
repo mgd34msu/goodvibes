@@ -2,7 +2,7 @@
  * store-write-ordering-registries.test.ts
  *
  * The same defect as `store-write-ordering.test.ts`, in the stores behind the
- * automation scheduler, the workspace registry, the cron scheduler, CI watches,
+ * automation scheduler, the workspace registry, CI watches,
  * the principal registry and the channel-profile registry. Same harness, same
  * rule for the assertion: the REAL consequence, read back off the file, not a
  * statement about ordering.
@@ -29,7 +29,6 @@ import type { AutomationJob } from '../platform/src/platform/automation/jobs.js'
 import type { AutomationRun } from '../platform/src/platform/automation/runs.js';
 import type { AutomationRouteBinding } from '../platform/src/platform/automation/routes.js';
 import { WorkspaceRegistrationStore } from '../platform/src/platform/workspace/registration/index.js';
-import { TaskScheduler } from '../platform/src/platform/scheduler/scheduler.js';
 import { CiWatchService, CiWatchStore } from '../platform/src/platform/ci-watch/index.js';
 import type { CiJob, CiStatusSource } from '../platform/src/platform/ci-watch/index.js';
 import { PrincipalRegistry } from '../platform/src/platform/principals/registry.js';
@@ -303,44 +302,6 @@ describe('WorkspaceRegistrationStore: no registration is lost', () => {
       expect(snapshot.workspaces.map((w) => w.root).sort()).toEqual(['/home/dev/proj-cli', '/home/dev/proj-daemon']);
     } finally {
       rmSync(dir, { recursive: true, force: true });
-    }
-  });
-});
-
-// ---------------------------------------------------------------------------
-// TaskScheduler, a removed task does not come back and fire again.
-// ---------------------------------------------------------------------------
-
-interface SchedulerFileShape extends Record<string, unknown> {
-  readonly tasks: readonly { readonly id: string }[];
-}
-
-describe('TaskScheduler: a removed task does not come back', () => {
-  test('an earlier unawaited save cannot restore a task deleted after it', async () => {
-    const { store, path, cleanup } = makeControllableStore<SchedulerFileShape>('scheduler-order', 'scheduler.json');
-    try {
-      const scheduler = new TaskScheduler({ storePath: path });
-      replaceInternalStore(scheduler, 'store', store);
-
-      const task = scheduler.add({ name: 'nightly', cron: '0 3 * * *', prompt: 'run the report', enabled: true });
-      await waitFor(() => store.finished >= 1);
-
-      // None of add/remove/setEnabled waits for its own write, so two of them
-      // are trivially in flight at once.
-      const release = store.holdNext();
-      scheduler.setEnabled(task.id, true);
-      await waitFor(() => store.started >= 2);
-
-      expect(scheduler.remove(task.id)).toBe(true);
-      await settleCompetingWrite(store, 2);
-      release();
-      await waitFor(() => store.finished >= 3);
-
-      // A task on disk is a cron the next daemon start arms a timer for, so
-      // this is a scheduled agent spawning on a schedule nobody wants.
-      expect(readOnDisk<SchedulerFileShape>(path)?.tasks ?? []).toHaveLength(0);
-    } finally {
-      cleanup();
     }
   });
 });

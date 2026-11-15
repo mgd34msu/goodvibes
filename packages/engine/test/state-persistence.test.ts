@@ -15,7 +15,6 @@ import { AutomationJobStore } from '../platform/src/platform/automation/store/jo
 import { AutomationRunStore } from '../platform/src/platform/automation/store/runs.ts';
 import { AutomationRouteStore } from '../platform/src/platform/automation/store/routes.ts';
 import { AutomationSourceStore } from '../platform/src/platform/automation/store/sources.ts';
-import { TaskScheduler } from '../platform/src/platform/scheduler/scheduler.ts';
 import { ApprovalBroker } from '../platform/src/platform/control-plane/approval-broker.ts';
 import { loadSessionBrokerState } from '../platform/src/platform/control-plane/session-broker-state.ts';
 import { ChannelPolicyManager } from '../platform/src/platform/channels/policy-manager.ts';
@@ -292,34 +291,6 @@ describe('state persistence failures', () => {
     await expect(new AutomationRunStore(runs).load()).rejects.toThrow('Automation runs store snapshot is invalid');
     await expect(new AutomationRouteStore(routes).load()).rejects.toThrow('Automation routes store snapshot is invalid');
     await expect(new AutomationSourceStore(sources).load()).rejects.toThrow('Automation sources store snapshot is invalid');
-  });
-
-  test('TaskScheduler rejects malformed snapshots instead of starting empty', async () => {
-    const dir = tempDir('scheduler-store');
-    mkdirSync(dir, { recursive: true });
-    const file = join(dir, 'scheduler.json');
-    writeFileSync(file, JSON.stringify({ tasks: {}, history: [] }), 'utf-8');
-
-    await expect(new TaskScheduler({ storePath: file }).start()).rejects.toThrow('TaskScheduler store snapshot is invalid');
-  });
-
-  test('TaskScheduler rejects malformed persisted task records', async () => {
-    const dir = tempDir('scheduler-records');
-    mkdirSync(dir, { recursive: true });
-    const file = join(dir, 'scheduler.json');
-    writeFileSync(file, JSON.stringify({
-      tasks: [{
-        name: 'missing id',
-        cron: '* * * * *',
-        prompt: 'run',
-        enabled: true,
-        runCount: 0,
-        createdAt: Date.now(),
-      }],
-      history: [],
-    }), 'utf-8');
-
-    await expect(new TaskScheduler({ storePath: file }).start()).rejects.toThrow('TaskScheduler store snapshot is invalid');
   });
 
   test('control-plane, channel, and distributed stores reject malformed records', async () => {

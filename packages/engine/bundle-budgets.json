@@ -557,10 +557,6 @@
     "gzip_bytes": 3142,
     "rationale": "measured 2618 B gzip @ v2.0.9 release verification (setup chain, round-trip proof and supersede receipts); headroom max(ceil(2618*1.2)=3142, 2618+50=2668) -> 3142 (1.2x dominates)"
   },
-  "./platform/scheduler": {
-    "gzip_bytes": 102,
-    "rationale": "new public package export budget; measured 52 B gzip @ v0.33.0 release verification; headroom max(ceil(52*1.2)=63, 52+50=102) -> 102 (+50 B floor dominates)"
-  },
   "./platform/security": {
     "gzip_bytes": 772,
     "rationale": "auth/token surface plus the untrusted-content contract: the standing rule text, the per-process ingest ledger, the outward-effect decision, and the port factory a browser engine is handed. Hoisted here from one product when the daemon gained browser and mail verbs of its own and needed the same contract; a second copy of the refusal wording would have drifted within a release. Re-anchored after the owner-approval store and content fingerprint, the exposure/source/who-controls wording, the owner-direct turn boundary, the content-taint finder and the owner-identity address resolution joined the same surface for the same reason. Measured 643 B gzip @ commit 625afa04 (was 371 B); headroom max(ceil(643*1.2)=772, 643+50=693) \u2192 772 (1.2x dominates by 79 B)"

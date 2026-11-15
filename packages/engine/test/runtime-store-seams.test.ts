@@ -1,7 +1,5 @@
 import { describe, expect, test } from 'bun:test';
 import { createDomainDispatch, createRuntimeStore } from '../platform/src/platform/runtime/store/index.js';
-import { SchedulerTaskAdapter } from '../platform/src/platform/runtime/tasks/adapters/scheduler-adapter.js';
-import type { ScheduledTask, TaskRunRecord } from '../platform/src/platform/scheduler/scheduler.js';
 
 describe('runtime store lifecycle seams', () => {
   test('task events do not synthesize records or double-count terminal state', () => {
@@ -175,34 +173,5 @@ describe('runtime store lifecycle seams', () => {
     dispatch.dispatchAgentEvent({ type: 'AGENT_FAILED', agentId: 'w2', error: 'x', durationMs: 1 });
     dispatch.transitionRuntimeAgent('w2', 'running', undefined, 'test');
     expect(store.getState().agents.agents.get('w2')?.status).toBe('failed');
-  });
-
-  test('scheduler adapter preserves failed run status when wrapping history', () => {
-    const store = createRuntimeStore();
-    const adapter = new SchedulerTaskAdapter(store);
-    const run: TaskRunRecord = {
-      taskId: 'scheduled-1',
-      agentId: 'run-agent-1',
-      startedAt: Date.now(),
-      status: 'failed',
-      error: 'scheduled job failed',
-    };
-    const scheduledTask: ScheduledTask = {
-      id: 'scheduled-1',
-      name: 'Nightly check',
-      cron: '0 0 * * *',
-      prompt: 'Check runtime state',
-      enabled: true,
-      runCount: 1,
-      missedRuns: 0,
-      createdAt: Date.now(),
-    };
-
-    const taskId = adapter.wrapScheduledRun(run, scheduledTask);
-    const task = store.getState().tasks.tasks.get(taskId);
-
-    expect(task?.status).toBe('failed');
-    expect(task?.error).toBe('scheduled job failed');
-    expect(store.getState().tasks.totalFailed).toBe(1);
   });
 });

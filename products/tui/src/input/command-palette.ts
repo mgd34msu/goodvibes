@@ -21,7 +21,7 @@ import { readCommandDiscovery, type CommandDiscoveryReading } from '@goodvibes-j
 import { retainStrictJudgmentJson, assertJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
 import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
 import type { SlashCommand } from './command-registry.ts';
-import type { SurfaceModal, SurfaceModalHost } from './surface-modal-host.ts';
+import type { SurfaceModal, SurfaceModalHost } from '@goodvibes-jev/engine/terminal-shell/surface-modal-host';
 import type { SurfaceLayer } from '../renderer/surface-kit.ts';
 import { renderCommandPalette } from '../renderer/command-palette.ts';
 import { isTextBackspace } from './delete-key-policy.ts';

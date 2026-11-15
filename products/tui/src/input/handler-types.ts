@@ -28,7 +28,7 @@ import type { SettingsModal } from './settings-modal.ts';
 import type { McpWorkspace } from './mcp-workspace.ts';
 import type { SessionPickerModal } from './session-picker-modal.ts';
 import type { ConfigModal } from './config-modal.ts';
-import type { ProfilePickerModal } from './profile-picker-modal.ts';
+import type { ProfilePickerModal } from '@goodvibes-jev/engine/terminal-shell/profile-picker-state';
 import type { ContextInspectorModal } from '../renderer/context-inspector.ts';
 import type { FilePickerModal } from './file-picker.ts';
 import type { BlockActionsMenu } from '../renderer/block-actions.ts';
@@ -117,7 +117,7 @@ export interface InputHandlerLike {
   modelPicker: ModelPickerModal;
   filePicker: FilePickerModal;
   blockActionsMenu: BlockActionsMenu;
-  surfaceModals: import('./surface-modal-host.ts').SurfaceModalHost;
+  surfaceModals: import('@goodvibes-jev/engine/terminal-shell/surface-modal-host').SurfaceModalHost;
   sessionView: import('./handler-session-view-route.ts').SessionViewControls | null;
   transcriptScroll: import('./handler-modal-stack.ts').TranscriptScrollControls | null;
   selectionModal: SelectionModal;

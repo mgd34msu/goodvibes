@@ -6,7 +6,7 @@ import { afterEach, expect, test } from 'bun:test';
 import type { HostedSessionRecord } from '@goodvibes-jev/engine/platform/platform/hosted-sessions';
 import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
 import { AgentsModal } from '../../input/agents-modal.ts';
-import { SurfaceModalHost } from '../../input/surface-modal-host.ts';
+import { SurfaceModalHost } from '@goodvibes-jev/engine/terminal-shell/surface-modal-host';
 import { HostedSessionFeed } from '../../views/hosted-session-feed.ts';
 import { buildFleetSnapshot, createStaticFleetReadModel } from '../../views/fleet-read-model.ts';
 

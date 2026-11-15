@@ -13,7 +13,7 @@ import { createFeedInputTokens } from '@goodvibes-jev/engine/terminal-shell/inpu
 import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
 import type { InfiniteBuffer } from '@goodvibes-jev/engine/terminal-shell';
 import type { CommandContext, CommandRegistry } from './command-registry.ts';
-import type { SurfaceModalHost } from './surface-modal-host.ts';
+import type { SurfaceModalHost } from '@goodvibes-jev/engine/terminal-shell/surface-modal-host';
 import { AutocompleteEngine } from './autocomplete.ts';
 import { FilePickerModal } from './file-picker.ts';
 import { ModelPickerModal } from './model-picker.ts';
@@ -30,7 +30,7 @@ import { SettingsModal } from './settings-modal.ts';
 import type { McpWorkspace } from './mcp-workspace.ts';
 import { SessionPickerModal } from './session-picker-modal.ts';
 import type { ConfigModal } from './config-modal.ts';
-import { ProfilePickerModal } from './profile-picker-modal.ts';
+import { ProfilePickerModal } from '@goodvibes-jev/engine/terminal-shell/profile-picker-state';
 import type { OnboardingWizardController } from './onboarding/onboarding-wizard.ts';
 import type { OnboardingWizardAction } from './onboarding/onboarding-wizard.ts';
 import { handleIndicatorFocusToken, handleMouseToken, handlePromptKeyToken, handlePromptTextToken } from './handler-feed-routes.ts';

@@ -14,7 +14,7 @@ import { SETTINGS_CHOICE_ACTIONS, type SettingsChoiceAction } from '@goodvibes-j
 import { handleConfirmInput } from '../views/confirm-state.ts';
 import type { FlagEntry, McpEntry, SettingEntry, SubscriptionEntry } from './settings-modal-types.ts';
 import { buildMcpEntries, buildSubscriptionEntries } from './settings-modal-data.ts';
-import { modelPickerLaunchForKey } from './settings-modal-behavior.ts';
+import { modelPickerLaunchForKey } from '@goodvibes-jev/engine/terminal-shell/settings-behavior';
 import type { ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
 import type { SubscriptionManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { ServiceInspectionQuery } from '@/runtime/index.ts';

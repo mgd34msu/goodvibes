@@ -3,7 +3,7 @@ import { createProcessRegistry, type ProcessRegistryDeps } from '@goodvibes-jev/
 import type { ContractView } from '@goodvibes-jev/engine/platform/platform/contract';
 import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
 import { AgentsModal } from '../../input/agents-modal.ts';
-import { SurfaceModalHost } from '../../input/surface-modal-host.ts';
+import { SurfaceModalHost } from '@goodvibes-jev/engine/terminal-shell/surface-modal-host';
 import { confirmThrough } from '../../input/confirm-dialog.ts';
 import { FleetActs } from '../../views/fleet-acts.ts';
 import type { FleetGateway } from '../../views/fleet-gateway.ts';

@@ -2,7 +2,7 @@
  * Tests for renderProfilePickerModal renderer.
  */
 import { describe, test, expect } from 'bun:test';
-import { ProfilePickerModal } from '../../input/profile-picker-modal.ts';
+import { ProfilePickerModal } from '@goodvibes-jev/engine/terminal-shell/profile-picker-state';
 import { ProfileManager } from '@goodvibes-jev/engine/platform/platform/profiles';
 import { renderProfilePickerModal } from '../../renderer/profile-picker-modal.ts';
 import { layerText, layerTextBlock } from '../helpers/surface-frame.ts';

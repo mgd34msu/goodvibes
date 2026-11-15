@@ -295,12 +295,9 @@ export function createBootstrapShell(options: BootstrapShellOptions): BootstrapS
     .catch(() => {
       /* non-fatal */
     });
-  // FIX 2: the header's git segment otherwise only refreshes on
-  // TURN_COMPLETED/TOOL_SUCCEEDED/TOOL_FAILED (see turn-event-wiring.ts's
-  // refreshGit()), if the user runs `git init` externally and never submits
-  // another turn, the header stays stuck on the startup-time fallback
-  // indefinitely. Poll at the same 5s cadence the other live modals use for
-  // their own self-polls so the mechanisms are cadence-consistent.
+  // Turn and tool events refresh the header after the agent's own work; this
+  // poll covers changes made outside the app (another terminal's checkout,
+  // commit or edit) while the user is idle.
   gitStatusProvider.startPolling(5_000, (info) => {
     lastGitInfoRef.value = info;
     requestRender();

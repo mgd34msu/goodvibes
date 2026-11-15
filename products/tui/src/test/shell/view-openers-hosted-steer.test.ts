@@ -8,7 +8,7 @@ import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { CommandContext } from '../../input/command-registry.ts';
 import { AgentsModal } from '../../input/agents-modal.ts';
-import { SurfaceModalHost } from '../../input/surface-modal-host.ts';
+import { SurfaceModalHost } from '@goodvibes-jev/engine/terminal-shell/surface-modal-host';
 import { getSharedHostedSessionFeed } from '../../views/hosted-session-feed.ts';
 import { wireViewOpeners } from '../../shell/view-openers.ts';
 import { sayToHosted } from '../../input/commands/hosted-runtime.ts';

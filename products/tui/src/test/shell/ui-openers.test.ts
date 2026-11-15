@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, mock, spyOn, test } from 'bun:test';
-import { SurfaceModalHost } from '../../input/surface-modal-host.ts';
+import { SurfaceModalHost } from '@goodvibes-jev/engine/terminal-shell/surface-modal-host';
 import { wireShellUiOpeners } from '../../shell/ui-openers.ts';
 import { createTestManagers } from '../helpers/test-managers.ts';
 import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';

@@ -5,7 +5,7 @@ import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { mkdirSync, rmSync, existsSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { ProfilePickerModal } from '../../input/profile-picker-modal.ts';
+import { ProfilePickerModal } from '@goodvibes-jev/engine/terminal-shell/profile-picker-state';
 import { ProfileManager } from '@goodvibes-jev/engine/platform/platform/profiles';
 import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 

@@ -19,7 +19,7 @@ import { CommandRegistry } from '../../input/command-registry.ts';
 import type { CommandContext } from '../../input/command-registry.ts';
 import { registerLocalAuthRuntimeCommands } from '../../input/commands/local-auth-runtime.ts';
 import { createBootstrapCommandActions } from '../../runtime/bootstrap-command-parts.ts';
-import { SurfaceModalHost } from '../../input/surface-modal-host.ts';
+import { SurfaceModalHost } from '@goodvibes-jev/engine/terminal-shell/surface-modal-host';
 import { MaskedEntryModal } from '../../input/masked-entry-modal.ts';
 import { wireViewOpeners } from '../../shell/view-openers.ts';
 import { layerTextBlock } from '../helpers/surface-frame.ts';
@@ -116,7 +116,7 @@ describe('local-auth masked entry: command routing into the kit modal', () => {
     expect((top as MaskedEntryModal).username).toBe('alice');
   });
 
-  test('typed keystrokes render only as dots, and Enter rotates the password through the real manager', async () => {
+  test('typed keystrokes render only as dots, and the confirmed entry rotates the password through the real manager', async () => {
     auth.addUser('bob', 'old-pass', ['admin']);
     const registry = new CommandRegistry();
     registerLocalAuthRuntimeCommands(registry);
@@ -131,6 +131,11 @@ describe('local-auth masked entry: command routing into the kit modal', () => {
     expect(text).toContain('●'.repeat(10));
     expect(text).toContain('bob');
 
+    feed(host, '\r');
+    expect(modal.step).toBe('confirm');
+    expect(auth.authenticate('bob', 'old-pass').ok).toBe(true);
+    for (const ch of 'new-pass-9') feed(host, ch);
+    expect(layerTextBlock(modal.render(100, 30))).not.toContain('new-pass');
     feed(host, '\r');
     expect(host.active).toBe(false);
     expect(modal.passwordLength).toBe(0);
@@ -152,6 +157,8 @@ describe('local-auth masked entry: command routing into the kit modal', () => {
     const text = layerTextBlock(modal.render(100, 30));
     expect(text).not.toContain('secret-1');
     feed(host, '\r');
+    feed(host, 'secret-1');
+    feed(host, '\r');
     expect(host.active).toBe(false);
     expect(printed.join('\n')).toContain('Added local auth user carol');    expect(auth.listUsers().find((user) => user.username === 'carol')?.roles).toEqual(['user']);
   });
@@ -164,6 +171,8 @@ describe('local-auth masked entry: command routing into the kit modal', () => {
     expect(() => auth.rotatePassword('erin', 'short')).toThrow('Password must be at least 8 characters.');
     const userBytes = readFileSync(join(dir, 'users.json'));
     await withPublicErrorText(['Password must be at least 8 characters.'], () => {
+      feed(host, 'short');
+      feed(host, '\r');
       feed(host, 'short');
       feed(host, '\r');
     });
@@ -181,9 +190,30 @@ describe('local-auth masked entry: command routing into the kit modal', () => {
     const modal = host.top() as MaskedEntryModal;
     feed(host, 'long-enough-pw');
     feed(host, '\r');
+    feed(host, 'long-enough-pw');
+    feed(host, '\r');
     expect(host.active).toBe(true);
     expect(modal.error).not.toBeNull();
     expect(modal.passwordLength).toBe(0);
+  });
+
+  test('a confirmation that differs changes nothing and starts the password over', async () => {
+    auth.addUser('frank', 'initial-pass', ['admin']);
+    const { context } = makeContext(auth, host, true);
+    context.openLocalAuthMaskedEntry!('rotate-password', 'frank');
+    const modal = host.top() as MaskedEntryModal;
+    const userBytes = readFileSync(join(dir, 'users.json'));
+    feed(host, 'new-pass-1');
+    feed(host, '\r');
+    feed(host, 'new-pass-2');
+    feed(host, '\r');
+    expect(host.active).toBe(true);
+    expect(modal.step).toBe('password');
+    expect(modal.passwordLength).toBe(0);
+    expect(modal.confirmLength).toBe(0);
+    expect(modal.error).not.toBeNull();
+    expect(readFileSync(join(dir, 'users.json'))).toEqual(userBytes);
+    expect(auth.authenticate('frank', 'initial-pass').ok).toBe(true);
   });
 
   test('Esc closes the modal and drops the buffer', async () => {

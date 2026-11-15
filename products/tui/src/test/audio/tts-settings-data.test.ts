@@ -23,7 +23,7 @@ import {
   deepEqual,
   refreshEntryValues,
 } from '../../input/settings-modal-data.ts';
-import { adjustedSettingValue } from '../../input/settings-modal-behavior.ts';
+import { adjustedSettingValue } from '@goodvibes-jev/engine/terminal-shell/settings-behavior';
 import type { BuiltinSettingEntry, SettingEntry, SettingsCategory } from '../../input/settings-modal-types.ts';
 
 const TTS_SPEED = 'tts.speed' as ConfigKey;

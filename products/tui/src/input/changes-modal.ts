@@ -18,7 +18,7 @@
 import { realpathSync } from 'node:fs';
 import { isAbsolute, relative, sep } from 'node:path';
 import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
-import type { SurfaceModal, SurfaceModalCloseReason, SurfaceModalHost } from './surface-modal-host.ts';
+import type { SurfaceModal, SurfaceModalCloseReason, SurfaceModalHost } from '@goodvibes-jev/engine/terminal-shell/surface-modal-host';
 import type { SurfaceLayer, KitHint } from '../renderer/surface-kit.ts';
 import type { KitRow } from '../renderer/surface-kit-list.ts';
 import { formatSemanticDiffSummary, type SemanticDiff } from '../renderer/semantic-diff.ts';

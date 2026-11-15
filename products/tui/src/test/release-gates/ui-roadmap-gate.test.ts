@@ -1,7 +1,7 @@
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort, choiceAnswer } from '@goodvibes-jev/judgment/testing';
 import { describe, expect, test } from 'bun:test';
-import { SurfaceModalHost } from '../../input/surface-modal-host.ts';
+import { SurfaceModalHost } from '@goodvibes-jev/engine/terminal-shell/surface-modal-host';
 import { DEFAULT_CONFIG } from '@goodvibes-jev/engine/platform/platform/config';
 import { ConversationManager } from '../../core/conversation';
 import type { CommandContext } from '../../input/command-registry.ts';

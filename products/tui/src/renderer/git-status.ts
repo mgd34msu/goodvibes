@@ -12,6 +12,10 @@ export interface GitHeaderInfo {
 
 const FALLBACK: GitHeaderInfo = { branch: '?', dirty: false, ahead: 0, behind: 0 };
 
+function sameHeaderInfo(a: GitHeaderInfo, b: GitHeaderInfo): boolean {
+  return a.branch === b.branch && a.dirty === b.dirty && a.ahead === b.ahead && a.behind === b.behind;
+}
+
 /**
  * GitStatusProvider, Fetches git state for the header bar.
  *
@@ -25,7 +29,6 @@ export class GitStatusProvider {
   private readonly ttlMs = 2000;
   private fetching = false;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
-
   constructor(private readonly workingDirectory: string) {}
 
   /** Returns cached info immediately; refreshes in background if TTL expired. */
@@ -55,36 +58,27 @@ export class GitStatusProvider {
   }
 
   /**
-   * Start a lightweight live-repo-state poll. Follows the Changes modal's principle of
-   * never trusting a cached "is this a repo" flag (its git diff actions are
-   * all gated on a fresh GitService.isGitRepo() check) but amortizes the cost for the header: the
-   * cheap synchronous isGitRepo() spawn runs every tick; the heavier async
-   * status()+branch() fetch (this.refresh()) only runs when that boolean
-   * actually flips, e.g. an external `git init`, or `.git` removed.
+   * Keep the header current while the app is idle: every tick runs the same
+   * non-blocking fetch as refresh(), so a branch switch, commit, newly dirty
+   * tree, `git init` or removed `.git` made in another terminal shows within
+   * one interval. onChange fires only when the reading differs from the one
+   * already shown. A tick is skipped while a fetch is in flight, so a stalled
+   * git never stacks processes or blocks input.
    */
   startPolling(intervalMs: number, onChange: (info: GitHeaderInfo) => void): void {
     if (this.pollTimer !== null) return;
-    const checkIsRepo = (): boolean | null => {
-      try {
-        return GitService.isGitRepo(this.workingDirectory);
-      } catch (err) {
-        logger.debug('GitStatusProvider: isGitRepo poll check failed', { error: summarizeError(err) });
-        return null;
-      }
-    };
-    let lastKnownIsRepo = checkIsRepo();
     this.pollTimer = setInterval(() => {
-      const isRepoNow = checkIsRepo();
-      if (isRepoNow !== null && isRepoNow !== lastKnownIsRepo) {
-        lastKnownIsRepo = isRepoNow;
-        this.refresh().then(onChange).catch((err) => {
-          logger.debug('GitStatusProvider: poll-triggered refresh failed', { error: summarizeError(err) });
-        });
-      }
+      if (this.fetching) return;
+      const shown = this.cache;
+      this.refresh().then((info) => {
+        if (!sameHeaderInfo(shown, info)) onChange(info);
+      }).catch((err) => {
+        logger.debug('GitStatusProvider: poll refresh failed', { error: summarizeError(err) });
+      });
     }, intervalMs);
   }
 
-  /** Stop the live-repo-state poll started by startPolling(). No-op if not polling. */
+  /** Stop the poll started by startPolling(). No-op if not polling. */
   stopPolling(): void {
     if (this.pollTimer !== null) {
       clearInterval(this.pollTimer);

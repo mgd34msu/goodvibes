@@ -8,7 +8,7 @@ import { fakePort, choiceAnswer } from '@goodvibes-jev/judgment/testing';
 import { recordedBuiltinArchetypes, recordedFamilyPort } from '../helpers/teamwork-family-reading.ts';
 import { ScheduleReadingLifetime } from '../../input/commands/schedule-reading-lifetime.ts';
 import { createTaskManager } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
-import { SurfaceModalHost } from '../../input/surface-modal-host.ts';
+import { SurfaceModalHost } from '@goodvibes-jev/engine/terminal-shell/surface-modal-host';
 import { ConversationManager } from '../../core/conversation.ts';
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';

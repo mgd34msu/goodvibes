@@ -1,8 +1,9 @@
-// Deliberately per-repo test, byte-identical to the sibling product's copy by design: the module it exercises is this repo's own and has diverged from the sibling's, so the two copies prove different code and neither can stand in for the other.
 import { describe, test, expect } from 'bun:test';
-import { renderHistorySearchOverlay } from '../../renderer/history-search-overlay.ts';
-import { HistorySearch } from '../../input/input-history.ts';
-import { lineToString } from '../setup.ts';
+import type { Line } from '../platform/src/platform/types/index.ts';
+import { renderHistorySearchOverlay } from '../terminal-shell/src/renderer/history-search-overlay.ts';
+import { HistorySearch } from '../terminal-shell/src/input-history.ts';
+
+const lineToString = (line: Line): string => line.map((c) => c.char).join('').trimEnd();
 
 const W = 80;
 

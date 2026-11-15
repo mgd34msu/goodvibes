@@ -15,7 +15,7 @@ import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/conf
 import type { McpRegistry } from '@goodvibes-jev/engine/platform/platform/mcp';
 import { isSecretConfigKey } from '../config/secret-config.ts';
 import { setSecretBackedSettingValue, type SettingsSecretsManager } from './settings-modal-secrets.ts';
-import { parseNumberEditBuffer } from './settings-modal-behavior.ts';
+import { parseNumberEditBuffer } from '@goodvibes-jev/engine/terminal-shell/settings-behavior';
 import { buildMcpEntries } from './settings-modal-data.ts';
 import { isWorktreeSetupListConfigKey, parseWorktreeSetupListInput } from './worktree-setup-config.ts';
 import { isSandboxExecListConfigKey, parseSandboxExecListInput } from './sandbox-exec-config.ts';

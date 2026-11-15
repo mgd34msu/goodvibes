@@ -29,7 +29,7 @@ import type { ConversationMessageSnapshot } from '@goodvibes-jev/engine/platform
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { ProcessNode, SteerResult } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
 import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
-import type { SurfaceModal, SurfaceModalHost } from './surface-modal-host.ts';
+import type { SurfaceModal, SurfaceModalHost } from '@goodvibes-jev/engine/terminal-shell/surface-modal-host';
 import type { KitHint, SurfaceLayer } from '../renderer/surface-kit.ts';
 import type { KitRow } from '../renderer/surface-kit-list.ts';
 import { activeTokens } from '../renderer/theme.ts';

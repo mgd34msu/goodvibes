@@ -5,7 +5,7 @@ import type { SelectionResult, SelectionModal } from './selection-modal.ts';
 import type { BookmarkModal } from './bookmark-modal.ts';
 import type { SettingsModal } from './settings-modal.ts';
 import type { SessionPickerModal } from './session-picker-modal.ts';
-import type { ProfilePickerModal } from './profile-picker-modal.ts';
+import type { ProfilePickerModal } from '@goodvibes-jev/engine/terminal-shell/profile-picker-state';
 import type { ConfigModal } from './config-modal.ts';
 import type { HistorySearch } from './input-history.ts';
 import type { ModelPickerModal } from './model-picker.ts';

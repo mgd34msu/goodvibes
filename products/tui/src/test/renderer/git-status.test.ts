@@ -1,8 +1,6 @@
 import { describe, test, expect, afterEach, beforeEach, jest } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { GitService } from '@goodvibes-jev/engine/platform/platform/git';
 import { GitStatusProvider } from '../../renderer/git-status.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
@@ -171,12 +169,10 @@ describe('GitStatusProvider', () => {
   });
 
   // -------------------------------------------------------------------------
-  // FIX 2: startPolling / stopPolling
+  // startPolling / stopPolling
   // -------------------------------------------------------------------------
   describe('startPolling / stopPolling', () => {
     const POLL_MS = 20;
-    let tmpDir: string | null = null;
-    const originalIsGitRepo = GitService.isGitRepo;
     const providers: GitStatusProvider[] = [];
 
     beforeEach(() => {
@@ -184,98 +180,54 @@ describe('GitStatusProvider', () => {
     });
 
     afterEach(() => {
-      // Always restore the real static method and stop any timers we started,
-      // even if an assertion above threw mid-test.
-      GitService.isGitRepo = originalIsGitRepo;
       for (const p of providers.splice(0)) p.stopPolling();
       jest.useRealTimers();
-      if (tmpDir) {
-        rmSync(tmpDir, { recursive: true, force: true });
-        tmpDir = null;
-      }
     });
 
-    /** Replace the repo probe with a controllable one that counts its calls. */
-    function fakeRepoProbe(initial: boolean): { calls: () => number; setIsRepo: (v: boolean) => void } {
-      let isRepo = initial;
-      let calls = 0;
-      GitService.isGitRepo = () => { calls++; return isRepo; };
-      return { calls: () => calls, setIsRepo: (v) => { isRepo = v; } };
+    /** A provider whose fetch reads a branch the test can change, counting fetches. */
+    function providerWithBranch(initial: string): { provider: GitStatusProvider; setBranch: (b: string) => void; fetches: () => number } {
+      let branch = initial;
+      let fetches = 0;
+      const provider = new GitStatusProvider(process.cwd());
+      providers.push(provider);
+      const p = provider as unknown as { _fetch: () => Promise<void>; cache: { branch: string; dirty: boolean; ahead: number; behind: number }; lastFetch: number };
+      p._fetch = async () => {
+        fetches++;
+        p.cache = { branch, dirty: false, ahead: 0, behind: 0 };
+        p.lastFetch = Date.now();
+      };
+      return { provider, setBranch: (b) => { branch = b; }, fetches: () => fetches };
     }
 
-    test('a live not-a-repo -> is-a-repo flip (external `git init`) triggers exactly one refresh-driven onChange call', async () => {
-      tmpDir = mkdtempSync(join(tmpdir(), 'gv-git-status-poll-'));
-      Bun.spawnSync(['git', 'init', '-q', tmpDir]);
-      const probe = fakeRepoProbe(false);
-      const provider = new GitStatusProvider(tmpDir);
-      providers.push(provider);
+    async function settle(): Promise<void> {
+      for (let i = 0; i < 3; i++) await Promise.resolve();
+    }
 
-      const seen: Array<{ branch: string }> = [];
-      let changed!: () => void;
-      const firstChange = new Promise<void>((resolve) => { changed = resolve; });
-      provider.startPolling(POLL_MS, (info) => { seen.push(info); changed(); });
+    test('a branch switched outside the app reaches onChange once, and an unchanged reading never does', async () => {
+      const { provider, setBranch, fetches } = providerWithBranch('main');
+      await provider.refresh();
+      const seen: string[] = [];
+      provider.startPolling(POLL_MS, (info) => { seen.push(info.branch); });
 
-      jest.advanceTimersByTime(POLL_MS * 2);
-      // The poll ran (initial probe plus two ticks) and saw no flip, so no refresh.
-      expect(probe.calls()).toBe(3);
+      for (let i = 0; i < 3; i++) { jest.advanceTimersByTime(POLL_MS); await settle(); }
       expect(seen).toEqual([]);
 
-      probe.setIsRepo(true);
-      // The first tick sees the flip; the later ticks see a stable answer and must not refresh again.
-      jest.advanceTimersByTime(POLL_MS * 4);
-      expect(probe.calls()).toBe(7);
-      // The refresh spawns git for real; its completion is awaited on real timers.
-      jest.useRealTimers();
-      await firstChange;
-      await new Promise<void>((resolve) => { setImmediate(resolve); });
-      expect(seen.length).toBe(1);
-      expect(typeof seen[0]?.branch).toBe('string');
+      setBranch('feature');
+      for (let i = 0; i < 3; i++) { jest.advanceTimersByTime(POLL_MS); await settle(); }
+      expect(seen).toEqual(['feature']);
+      expect(fetches()).toBe(7);
     });
 
-    test('no-op if the repo state does not change between ticks', () => {
-      const probe = fakeRepoProbe(false);
-      const provider = new GitStatusProvider(process.cwd());
-      providers.push(provider);
-
-      const seen: Array<{ branch: string }> = [];
-      provider.startPolling(POLL_MS, (info) => { seen.push(info); });
-
-      jest.advanceTimersByTime(POLL_MS * 8);
-      // The probe ran on every tick, yet an unchanged answer never refreshes.
-      expect(probe.calls()).toBe(9);
-      expect(seen).toEqual([]);
-    });
-
-    test('stopPolling() clears the interval: the repo is not probed again after it is called', () => {
-      const probe = fakeRepoProbe(false);
-      const provider = new GitStatusProvider(process.cwd());
-      providers.push(provider);
-
-      const seen: Array<{ branch: string }> = [];
-      provider.startPolling(POLL_MS, (info) => { seen.push(info); });
+    test('stopPolling() stops fetching', async () => {
+      const { provider, fetches } = providerWithBranch('main');
+      provider.startPolling(POLL_MS, () => {});
       jest.advanceTimersByTime(POLL_MS);
-      expect(probe.calls()).toBe(2); // the poll was running
+      await settle();
+      expect(fetches()).toBe(1);
       provider.stopPolling();
-
-      probe.setIsRepo(true);
       jest.advanceTimersByTime(POLL_MS * 10);
-      expect(probe.calls()).toBe(2);
-      expect(seen).toEqual([]);
-    });
-
-    test('never throws even if GitService.isGitRepo itself throws, and keeps polling', () => {
-      const provider = new GitStatusProvider(process.cwd());
-      providers.push(provider);
-
-      let calls = 0;
-      GitService.isGitRepo = () => { calls++; throw new Error('boom'); };
-
-      expect(() => {
-        provider.startPolling(POLL_MS, () => {});
-      }).not.toThrow();
-
-      expect(() => jest.advanceTimersByTime(POLL_MS * 5)).not.toThrow();
-      expect(calls).toBe(6);
+      await settle();
+      expect(fetches()).toBe(1);
     });
   });
 });

@@ -15,7 +15,6 @@ import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/conf
 import type { FeatureFlagManager } from '@/runtime/index.ts';
 import type { FlagEntry, McpEntry, SettingEntry } from './settings-modal-types.ts';
 import { buildMcpEntries } from './settings-modal-data.ts';
-import './settings-modal-behavior.ts';
 import type { McpRegistry } from '@goodvibes-jev/engine/platform/platform/mcp';
 
 // ---------------------------------------------------------------------------

@@ -13,7 +13,7 @@ import type { ConfigManager, ConfigSetting } from '@goodvibes-jev/engine/platfor
 import { getResolvedSettingLookup } from '@/runtime/index.ts';
 import type { FeatureFlagManager } from '@/runtime/index.ts';
 
-import { buildSubscriptionEntries } from './settings-modal-subscriptions.ts';
+import { buildSubscriptionEntries } from '@goodvibes-jev/engine/terminal-shell/settings-subscriptions';
 import type { SubscriptionManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { ServiceInspectionQuery } from '@/runtime/index.ts';
 import { CODE_INDEX_ENABLED_CONFIG_KEY, NOTIFICATIONS_METADATA_ONLY_KEY } from '@goodvibes-jev/engine/platform/platform/runtime/operations';

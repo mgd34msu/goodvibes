@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort, choiceAnswer, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { CommandPalette } from '../../input/command-palette.ts';
-import { SurfaceModalHost } from '../../input/surface-modal-host.ts';
+import { SurfaceModalHost } from '@goodvibes-jev/engine/terminal-shell/surface-modal-host';
 import type { PaletteEntry } from '../../input/command-palette-types.ts';
 import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
 import { holdTimers, type HeldTimers } from '../helpers/held-timers.ts';

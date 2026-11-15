@@ -12,7 +12,7 @@
  */
 
 import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
-import type { SurfaceModal, SurfaceModalHost } from './surface-modal-host.ts';
+import type { SurfaceModal, SurfaceModalHost } from '@goodvibes-jev/engine/terminal-shell/surface-modal-host';
 import type { SurfaceLayer } from '../renderer/surface-kit.ts';
 import { renderUsageModal, USAGE_TABS, type UsageModalView, type UsageTab } from '../renderer/usage-modal.ts';
 import type { UsageTracker } from '../runtime/usage-tracker.ts';

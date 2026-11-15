@@ -78,7 +78,7 @@ import { SettingsModal } from './settings-modal.ts';
 import { McpWorkspace } from './mcp-workspace.ts';
 import { SessionPickerModal, getSharedHostedSessionRoster } from './session-picker-modal.ts';
 import { ConfigModal } from './config-modal.ts';
-import { ProfilePickerModal } from './profile-picker-modal.ts';
+import { ProfilePickerModal } from '@goodvibes-jev/engine/terminal-shell/profile-picker-state';
 import { OnboardingWizardController, type OnboardingWizardAction, type OnboardingWizardMode } from './onboarding/onboarding-wizard.ts';
 import '../runtime/onboarding/index.ts';
 import type { OnboardingApplyRequest, OnboardingVerificationItem } from '../runtime/onboarding/index.ts';
@@ -115,7 +115,7 @@ import type { InputHandlerLike } from './handler-types.ts';
 import { buildInitialFeedContext, syncFeedContextMutableFields } from './feed-context-factory.ts';
 import type { UiRuntimeServices } from '../runtime/ui-services.ts';
 import type { ModelPickerTarget } from './model-picker.ts';
-import { SurfaceModalHost } from './surface-modal-host.ts';
+import { SurfaceModalHost } from '@goodvibes-jev/engine/terminal-shell/surface-modal-host';
 
 type SelectionModalCallback = (result: SelectionResult | null) => void;
 

@@ -14,7 +14,7 @@
  */
 import { describe, expect, test } from 'bun:test';
 import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
-import { SurfaceModalHost, type SurfaceModal } from '../../input/surface-modal-host.ts';
+import { SurfaceModalHost, type SurfaceModal } from '@goodvibes-jev/engine/terminal-shell/surface-modal-host';
 import { handleEscape } from '../../input/handler-modal-stack.ts';
 import { CommandPalette, buildPaletteEntries, paletteScore, recordPaletteUse, resetPaletteUsageForTests } from '../../input/command-palette.ts';
 import { ConfirmDialog, confirmThrough } from '../../input/confirm-dialog.ts';

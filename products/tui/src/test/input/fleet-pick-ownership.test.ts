@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { createProcessRegistry } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
 import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
 import { AgentsModal } from '../../input/agents-modal.ts';
-import { SurfaceModalHost } from '../../input/surface-modal-host.ts';
+import { SurfaceModalHost } from '@goodvibes-jev/engine/terminal-shell/surface-modal-host';
 import { ChangesModal } from '../../input/changes-modal.ts';
 import { FleetActs, type FleetDiffSurface } from '../../views/fleet-acts.ts';
 import { createFleetReadModel } from '../../views/fleet-read-model.ts';

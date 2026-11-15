@@ -2207,11 +2207,6 @@
       "types": "./terminal-shell/dist/renderer/block-actions-overlay.d.ts",
       "import": "./terminal-shell/dist/renderer/block-actions-overlay.js"
     },
-    "./terminal-shell/composer-fragments": {
-      "bun": "./terminal-shell/src/renderer/composer-fragments.ts",
-      "types": "./terminal-shell/dist/renderer/composer-fragments.d.ts",
-      "import": "./terminal-shell/dist/renderer/composer-fragments.js"
-    },
     "./platform/platform/utils/product-identity": {
       "bun": "./platform/src/platform/utils/product-identity.ts",
       "types": "./platform/dist/platform/utils/product-identity.d.ts",

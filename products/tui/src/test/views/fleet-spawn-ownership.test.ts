@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
 import { FleetSpawn, type AcpDiscoveredAgent, type AcpWorkspaceRegistration, type AcpSpawnGateway } from '../../views/fleet-spawn.ts';
 import { AgentsModal } from '../../input/agents-modal.ts';
-import { SurfaceModalHost } from '../../input/surface-modal-host.ts';
+import { SurfaceModalHost } from '@goodvibes-jev/engine/terminal-shell/surface-modal-host';
 import { buildFleetSnapshot, createStaticFleetReadModel } from '../../views/fleet-read-model.ts';
 
 const agent: AcpDiscoveredAgent = { id: 'synthetic-agent', title: 'Synthetic agent', binaryPath: '/synthetic/agent', args: [] };

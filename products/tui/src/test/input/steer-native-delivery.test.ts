@@ -120,7 +120,7 @@ function userMessageContents(messages: readonly unknown[]): string[] {
 
 
 import { AgentsModal } from '../../input/agents-modal.ts';
-import { SurfaceModalHost } from '../../input/surface-modal-host.ts';
+import { SurfaceModalHost } from '@goodvibes-jev/engine/terminal-shell/surface-modal-host';
 import { createFleetReadModel } from '../../views/fleet-read-model.ts';
 import { reconcileSteerBadges, STEER_BADGE_LINGER_MS } from '../../views/fleet-steer.ts';
 

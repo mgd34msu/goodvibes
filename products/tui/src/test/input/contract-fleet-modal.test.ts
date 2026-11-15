@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { ProcessNode } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
 import { AgentsModal } from '../../input/agents-modal.ts';
-import { SurfaceModalHost } from '../../input/surface-modal-host.ts';
+import { SurfaceModalHost } from '@goodvibes-jev/engine/terminal-shell/surface-modal-host';
 import { buildFleetSnapshot, createStaticFleetReadModel } from '../../views/fleet-read-model.ts';
 import { contractFixture } from '../helpers/contract-work-tree-fixtures.ts';
 

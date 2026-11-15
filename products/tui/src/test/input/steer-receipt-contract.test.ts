@@ -3,7 +3,7 @@ import { createProcessRegistry, STEER_TTL_MS, type ProcessRegistryDeps } from '@
 import { RuntimeEventBus } from '@goodvibes-jev/engine/platform/platform/runtime/state';
 import { emitCommunicationConsumed } from '@goodvibes-jev/engine/platform/platform/runtime/emitters';
 import { AgentsModal } from '../../input/agents-modal.ts';
-import { SurfaceModalHost } from '../../input/surface-modal-host.ts';
+import { SurfaceModalHost } from '@goodvibes-jev/engine/terminal-shell/surface-modal-host';
 import { createFleetReadModel } from '../../views/fleet-read-model.ts';
 import { reconcileSteerBadges } from '../../views/fleet-steer.ts';
 

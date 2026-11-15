@@ -16,7 +16,7 @@ import {
 import { RuntimeEventBus, createEventEnvelope, createUiRuntimeEvents } from '@/runtime/index.ts';
 import { UsageTracker } from '../../runtime/usage-tracker.ts';
 import { UsageModal } from '../../input/usage-modal.ts';
-import { SurfaceModalHost } from '../../input/surface-modal-host.ts';
+import { SurfaceModalHost } from '@goodvibes-jev/engine/terminal-shell/surface-modal-host';
 import { layerTextBlock } from '../helpers/surface-frame.ts';
 
 const TEST_ENV_CTX = { sessionId: 'test-session', traceId: 'test-trace', source: 'usage-pricing-test' };

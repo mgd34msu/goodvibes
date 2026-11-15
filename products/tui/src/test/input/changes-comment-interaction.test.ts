@@ -1,7 +1,7 @@
 import { describe, test, expect } from 'bun:test';
 import { ChangesModal } from '../../input/changes-modal.ts';
 import { parseChanges } from '../../input/changes-model.ts';
-import { SurfaceModalHost } from '../../input/surface-modal-host.ts';
+import { SurfaceModalHost } from '@goodvibes-jev/engine/terminal-shell/surface-modal-host';
 import { layerTextBlock } from '../helpers/surface-frame.ts';
 
 const DIFF = [

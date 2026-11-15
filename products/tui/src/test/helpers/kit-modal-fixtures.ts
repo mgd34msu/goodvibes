@@ -26,7 +26,7 @@ import { BookmarkModal } from '../../input/bookmark-modal.ts';
 import { renderBookmarkModal } from '../../renderer/bookmark-modal.ts';
 import { BlockActionsMenu } from '../../renderer/block-actions.ts';
 import { renderBlockActionsMenu } from '../../renderer/block-actions-overlay.ts';
-import { ProfilePickerModal } from '../../input/profile-picker-modal.ts';
+import { ProfilePickerModal } from '@goodvibes-jev/engine/terminal-shell/profile-picker-state';
 import { renderProfilePickerModal } from '../../renderer/profile-picker-modal.ts';
 import { McpWorkspace } from '../../input/mcp-workspace.ts';
 import { renderMcpWorkspace } from '../../renderer/mcp-workspace.ts';

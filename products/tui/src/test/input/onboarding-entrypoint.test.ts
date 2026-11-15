@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { SurfaceModalHost } from '../../input/surface-modal-host.ts';
+import { SurfaceModalHost } from '@goodvibes-jev/engine/terminal-shell/surface-modal-host';
 import { CommandRegistry, type CommandContext } from '../../input/command-registry.ts';
 import { registerGuidanceRuntimeCommands } from '../../input/commands/guidance-runtime.ts';
 import { registerLocalSetupCommands } from '../../input/commands/local-setup.ts';

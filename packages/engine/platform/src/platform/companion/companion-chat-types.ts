@@ -89,8 +89,21 @@ export interface CompanionChatMessage {
    *   never start, because the chat was closed, the service shut down, or the
    *   daemon restarted first. The honest record that nothing answered it;
    *   resend it to get a reply.
+   * - `'failed'` (assistant, terminal): the reply ended in an error, or the
+   *   daemon stopped while it was being written. The content is the partial
+   *   text that existed then (possibly empty) and `failureReason` says why;
+   *   regenerate to try the same exchange again.
    */
-  readonly deliveryState?: 'cancelled' | 'queued' | 'unanswered' | undefined;
+  readonly deliveryState?: 'cancelled' | 'queued' | 'unanswered' | 'failed' | undefined;
+  /** On a `'failed'` reply: why it failed, in words a person can act on. */
+  readonly failureReason?: string | undefined;
+  /**
+   * On a reply whose turn used tools: what the turn added to the model's
+   * history, in order (each tool-calling round with its results, then the
+   * closing text). Kept so a chat reloaded after a restart gives the model the
+   * same history it had; clients may ignore it.
+   */
+  readonly modelHistory?: readonly CompanionChatHistoryEntry[] | undefined;
   /**
    * On an assistant message: the id of the user message this reply answers.
    * The transcript is append-ordered, so with queued sends a reply can land
@@ -99,6 +112,27 @@ export interface CompanionChatMessage {
    */
   readonly inReplyTo?: string | undefined;
 }
+
+/** One tool call the model made during a reply, as it was sent back to the model. */
+export interface CompanionChatHistoryToolCall {
+  readonly id: string;
+  readonly name: string;
+  readonly arguments: Record<string, unknown>;
+}
+
+/** One tool result, as the model received it. */
+export interface CompanionChatHistoryToolResult {
+  readonly callId: string;
+  readonly success: boolean;
+  readonly output?: string | undefined;
+  readonly error?: string | undefined;
+  readonly cancelled?: boolean | undefined;
+}
+
+/** One entry a reply added to the model-facing history. */
+export type CompanionChatHistoryEntry =
+  | { readonly role: 'assistant'; readonly content: string; readonly toolCalls?: readonly CompanionChatHistoryToolCall[] | undefined }
+  | { readonly role: 'tool-results'; readonly results: readonly CompanionChatHistoryToolResult[] };
 
 export interface CompanionChatSession {
   readonly id: string;
@@ -175,23 +209,46 @@ export interface GetCompanionChatSessionOutput {
   readonly messages: CompanionChatMessage[];
 }
 
+/** A page of a chat's transcript, oldest first. */
+export interface CompanionChatMessagePage {
+  readonly messages: readonly CompanionChatMessage[];
+  /** Messages in the whole transcript, superseded history included. */
+  readonly total: number;
+  /** True when older messages exist before this page; pass `nextBefore` as `before` to read them. */
+  readonly more: boolean;
+  readonly nextBefore?: string | undefined;
+}
+
+export interface ReopenCompanionChatSessionOutput {
+  readonly sessionId: string;
+  readonly status: CompanionChatSessionStatus;
+  /** False when the chat was already open. */
+  readonly reopened: boolean;
+}
+
 // ---------------------------------------------------------------------------
 // Regenerate / edit-and-branch I/O shapes (honest lineage)
 // ---------------------------------------------------------------------------
 
 export interface RegenerateCompanionChatMessageInput {
   /**
-   * The assistant message to regenerate. Omit to regenerate the latest assistant
-   * response. The referenced message and any messages after it are superseded
-   * (retained as history), then a fresh turn re-runs from the preceding user
-   * message.
+   * The assistant message to regenerate. Omit to answer the latest user message
+   * again: whatever followed it (a reply, a failed reply, or nothing) is
+   * superseded, so pressing regenerate again after a failed attempt retries the
+   * same exchange. With an id, that message and everything after it are
+   * superseded (retained as history) and the preceding user message is answered
+   * again.
    */
   readonly messageId?: string | undefined;
 }
 
 export interface RegenerateCompanionChatMessageOutput {
   readonly sessionId: string;
-  /** The assistant message id whose turn was re-run (now superseded, still retrievable). */
+  /**
+   * The assistant message whose turn was re-run (now superseded, still
+   * retrievable); the user message answered again when the exchange had no
+   * reply to replace (it was stopped before any text arrived).
+   */
   readonly regeneratedFrom: string;
   /** Every message id superseded by this regenerate, retained history, never deleted. */
   readonly supersededMessageIds: readonly string[];
@@ -308,6 +365,8 @@ export interface CompanionChatTurnErrorEvent {
   readonly sessionId: string;
   readonly turnId: string;
   readonly error: string;
+  /** The saved failed reply (`deliveryState: 'failed'`) that carries the partial text and the reason. */
+  readonly assistantMessageId?: string | undefined;
 }
 
 /** Who stopped a cancelled turn. */

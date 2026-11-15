@@ -13,8 +13,10 @@
  * companion-chat-verbs-daemon-wire.test.ts.
  */
 
-import { describe, expect, test } from 'bun:test';
-import { settleEvents } from './_helpers/test-timeout.js';
+import { afterEach, describe, expect, test } from 'bun:test';
+import { rmSync } from 'node:fs';
+import { settleEvents, waitFor } from './_helpers/test-timeout.js';
+import { makeProjectTempDir } from './_helpers/project-temp.ts';
 import { trackDisposables } from './_helpers/disposables.ts';
 import { CompanionChatManager } from '../platform/src/platform/companion/companion-chat-manager.js';
 import type {
@@ -108,14 +110,14 @@ describe('regenerate: honest lineage', () => {
     expect(secondTurnMessages.some((m) => JSON.stringify(m).includes('first answer'))).toBe(false);
   });
 
-  test('regenerating with no assistant response is an honest refusal', () => {
+  test('regenerating in a chat with no message to answer is an honest refusal', () => {
     const manager = makeManager(makeScriptedProvider([]));
     const session = manager.createSession({ provider: 'p', model: 'm' });
     expect(() => manager.regenerateMessage(session.id)).toThrow();
     try {
       manager.regenerateMessage(session.id);
     } catch (err) {
-      expect((err as { code?: string }).code).toBe('NO_ASSISTANT_MESSAGE');
+      expect((err as { code?: string }).code).toBe('NO_ANCHOR_MESSAGE');
       expect((err as { status?: number }).status).toBe(409);
     }
   });
@@ -234,5 +236,59 @@ describe('closed / unknown session refusals', () => {
         expect((err as { status?: number }).status).toBe(404);
       }
     }
+  });
+});
+
+describe('regenerate after a failed attempt', () => {
+  test('pressing regenerate again answers the same message instead of rewinding a whole exchange', async () => {
+    let call = 0;
+    const manager = makeManager({
+      async *chatStream(): AsyncIterable<CompanionProviderChunk> {
+        call += 1;
+        if (call === 3) { yield { type: 'error', error: 'provider unavailable' }; return; }
+        yield { type: 'text_delta', delta: `answer ${call}` };
+        yield { type: 'done' };
+      },
+    });
+    const session = manager.createSession({ provider: 'p', model: 'm' });
+    await manager.postMessageAndWaitForReply(session.id, 'U1');
+    const u2 = await manager.postMessage(session.id, 'U2');
+    await waitFor(() => manager.getMessages(session.id).filter((m) => m.role === 'assistant').length === 2);
+
+    manager.regenerateMessage(session.id); // fails
+    await waitFor(() => manager.getMessages(session.id).some((m) => m.deliveryState === 'failed'));
+    const retry = manager.regenerateMessage(session.id);
+    await waitFor(() => call === 4);
+    await settleEvents();
+
+    const active = activeOnly(manager.getMessages(session.id));
+    expect(active.map((m) => m.content)).toEqual(['U1', 'answer 1', 'U2', 'answer 4']);
+    expect(retry.supersededMessageIds.every((id) => manager.getMessages(session.id).find((m) => m.id === id)?.role === 'assistant')).toBe(true);
+    expect(active.find((m) => m.content === 'answer 4')?.inReplyTo).toBe(u2);
+  });
+});
+
+describe('history after a restart', () => {
+  const roots: string[] = [];
+  afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
+
+  test('the model is given the active chain only, not the reply that was regenerated away', async () => {
+    const root = makeProjectTempDir('companion-branch-restart');
+    roots.push(root);
+    const before = makeScriptedProvider(['first answer', 'second answer']);
+    const first = new CompanionChatManager({ provider: before, eventPublisher: { publishEvent() {} }, gcIntervalMs: 999_999, rateLimiter: false, persist: true, sessionsDir: root });
+    const session = first.createSession({ provider: 'p', model: 'm' });
+    await first.postMessageAndWaitForReply(session.id, 'question');
+    first.regenerateMessage(session.id);
+    await waitFor(() => before.turns.length === 2);
+    await settleEvents();
+    await first.close();
+
+    const after = makeScriptedProvider(['third answer']);
+    const second = disposables.add(new CompanionChatManager({ provider: after, eventPublisher: { publishEvent() {} }, gcIntervalMs: 999_999, rateLimiter: false, persist: true, sessionsDir: root }));
+    await second.init();
+    await second.postMessageAndWaitForReply(session.id, 'follow-up');
+    const seen = after.turns[0]!.map((m) => `${m.role}:${typeof m.content === 'string' ? m.content : ''}`);
+    expect(seen).toEqual(['user:question', 'assistant:second answer', 'user:follow-up']);
   });
 });

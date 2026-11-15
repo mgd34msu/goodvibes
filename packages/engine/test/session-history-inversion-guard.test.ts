@@ -81,8 +81,11 @@ describe('inversion guard: the 299-closed-chat scenario is never mass-deleted', 
       const persistence = new CompanionChatPersistence(sessionsDir);
       for (let i = 0; i < N; i++) {
         // Half carry message bodies (eviction candidates), half are empty.
-        await persistence.save(ancientClosedChat(`chat-${i}`, i % 2 === 0 ? 6 : 0));
+        const chat = ancientClosedChat(`chat-${i}`, i % 2 === 0 ? 6 : 0);
+        persistence.writeMeta(chat.meta);
+        persistence.appendMessages(chat.meta.id, chat.messages);
       }
+      persistence.close();
 
       const manager = makeManager(sessionsDir);
       await manager.init();

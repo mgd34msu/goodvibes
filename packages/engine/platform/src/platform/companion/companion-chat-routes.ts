@@ -8,9 +8,10 @@
  *   GET    /api/companion/chat/sessions/:sessionId
  *   PATCH  /api/companion/chat/sessions/:sessionId
  *   POST   /api/companion/chat/sessions/:sessionId/close   (soft close, history preserved)
+ *   POST   /api/companion/chat/sessions/:sessionId/reopen  (a closed chat accepts messages again)
  *   DELETE /api/companion/chat/sessions/:sessionId         (hard delete, record permanently removed)
  *   POST   /api/companion/chat/sessions/:sessionId/messages
- *   GET    /api/companion/chat/sessions/:sessionId/messages
+ *   GET    /api/companion/chat/sessions/:sessionId/messages   (?limit=&before= for one page)
  *   POST   /api/companion/chat/sessions/:sessionId/turns/cancel (stop the in-flight turn)
  *   POST   /api/companion/chat/sessions/:sessionId/messages/steer (interrupt + send now)
  *   GET    /api/companion/chat/sessions/:sessionId/events  (SSE)
@@ -22,7 +23,7 @@
 
 import { createHash } from 'node:crypto';
 import { readReasoningEffortLevel } from '../providers/reasoning-effort.js';
-import { EngineErrorCodes } from '@goodvibes-jev/engine/errors';
+import { EngineErrorCodes, readRefusal, refusal, refusalErrorBody, type Refusal } from '@goodvibes-jev/engine/errors';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 import type {
@@ -69,6 +70,7 @@ export const COMPANION_CHAT_ROUTES: readonly { readonly method: string; readonly
   { method: 'PATCH', path: '/api/companion/chat/sessions/{sessionId}' },
   { method: 'DELETE', path: '/api/companion/chat/sessions/{sessionId}' },
   { method: 'POST', path: '/api/companion/chat/sessions/{sessionId}/close' },
+  { method: 'POST', path: '/api/companion/chat/sessions/{sessionId}/reopen' },
   { method: 'POST', path: '/api/companion/chat/sessions/{sessionId}/messages' },
   { method: 'GET', path: '/api/companion/chat/sessions/{sessionId}/messages' },
   { method: 'POST', path: '/api/companion/chat/sessions/{sessionId}/messages/retry' },
@@ -118,6 +120,11 @@ export async function dispatchCompanionChatRoutes(
     return handleCloseSession(sessionId, context);
   }
 
+  // POST /api/companion/chat/sessions/:sessionId/reopen
+  if (sub === 'reopen' && req.method === 'POST') {
+    return handleReopenSession(sessionId, context);
+  }
+
   // DELETE /api/companion/chat/sessions/:sessionId
   if (!sub && req.method === 'DELETE') {
     return handleDeleteSession(sessionId, context);
@@ -129,7 +136,7 @@ export async function dispatchCompanionChatRoutes(
   }
 
   if (sub === 'messages' && req.method === 'GET') {
-    return handleGetMessages(sessionId, context);
+    return handleGetMessages(url, sessionId, context);
   }
 
   // POST /api/companion/chat/sessions/:sessionId/messages/retry   (regenerate)
@@ -209,16 +216,20 @@ async function handleCreateSession(
     );
   }
 
-  const session = context.chatManager.createSession(input);
-  await context.chatManager.flushSession(session.id);
-  // Drain the best-effort broker mirror before responding so /api/sessions
-  // reflects this session synchronously, matching CompanionBrokerSync's
-  // documented contract (see companion-chat-broker-sync.ts).
-  await context.chatManager.flushBrokerSync();
-  return Response.json(
-    { sessionId: session.id, createdAt: session.createdAt, session },
-    { status: 201 },
-  );
+  try {
+    // Saved before it is returned: a chat whose save failed is refused, not half-created.
+    const session = context.chatManager.createSession(input);
+    // Drain the best-effort broker mirror before responding so /api/sessions
+    // reflects this session synchronously, matching CompanionBrokerSync's
+    // documented contract (see companion-chat-broker-sync.ts).
+    await context.chatManager.flushBrokerSync();
+    return Response.json(
+      { sessionId: session.id, createdAt: session.createdAt, session },
+      { status: 201 },
+    );
+  } catch (err: unknown) {
+    return respondWithManagerError(err);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -261,8 +272,13 @@ async function handleGetSession(
   if (!session) {
     return Response.json({ error: 'Session not found', code: 'SESSION_NOT_FOUND' }, { status: 404 });
   }
-  const messages = context.chatManager.getMessages(sessionId);
-  return Response.json({ session, messages });
+  try {
+    // Read after the transcript loads: opening a chat can settle what a restart left unfinished.
+    const messages = context.chatManager.getMessages(sessionId);
+    return Response.json({ session: context.chatManager.getSession(sessionId) ?? session, messages });
+  } catch (err: unknown) {
+    return respondWithManagerError(err);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -372,15 +388,36 @@ async function handleCloseSession(
   sessionId: string,
   context: CompanionChatRouteContext,
 ): Promise<Response> {
-  const session = context.chatManager.closeSession(sessionId);
-  await context.chatManager.flushSession(sessionId);
-  if (!session) {
-    return Response.json({ error: 'Session not found', code: 'SESSION_NOT_FOUND' }, { status: 404 });
+  try {
+    const session = context.chatManager.closeSession(sessionId);
+    if (!session) {
+      return Response.json({ error: 'Session not found', code: 'SESSION_NOT_FOUND' }, { status: 404 });
+    }
+    // Drain the best-effort broker mirror before responding so /api/sessions
+    // reflects the close synchronously (matches CompanionBrokerSync's docs).
+    await context.chatManager.flushBrokerSync();
+    return Response.json({ sessionId: session.id, status: session.status });
+  } catch (err: unknown) {
+    return respondWithManagerError(err);
   }
-  // Drain the best-effort broker mirror before responding so /api/sessions
-  // reflects the close synchronously (matches CompanionBrokerSync's docs).
-  await context.chatManager.flushBrokerSync();
-  return Response.json({ sessionId: session.id, status: session.status });
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/companion/chat/sessions/:sessionId/reopen
+// ---------------------------------------------------------------------------
+
+/** Reopen a closed chat; the model's history is rebuilt from the transcript on the next send. */
+async function handleReopenSession(
+  sessionId: string,
+  context: CompanionChatRouteContext,
+): Promise<Response> {
+  try {
+    const result = context.chatManager.reopenSession(sessionId);
+    await context.chatManager.flushBrokerSync();
+    return Response.json(result);
+  } catch (err: unknown) {
+    return respondWithManagerError(err);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -545,16 +582,33 @@ async function handlePostMessage(
   }
 }
 
+/** A refusal as the wire answer: state, reason and next step, with Retry-After when it says when. */
+function respondWithRefusal(value: Refusal): Response {
+  const status = value.status ?? 500;
+  return Response.json(refusalErrorBody(value), {
+    status,
+    ...(value.retryAfterMs !== undefined
+      ? { headers: { 'Retry-After': String(Math.max(1, Math.ceil(value.retryAfterMs / 1000))) } }
+      : {}),
+  });
+}
+
 /**
  * Map a manager error to a JSON error response.
  *
- * Only errors the manager raised on purpose (a string `code` and a client-error
- * status, or a rate-limit refusal) reach the caller with their own message. Any
- * other failure, and the persistence failure whose message names a storage path,
- * is logged in full and answered with a fixed sentence: a paired device or a
- * signed-in user gets what it can act on, not filesystem detail.
+ * A refusal the manager raised (a save that failed, the service stopping, a
+ * closed chat) is answered with its own state, reason and next step; those
+ * never carry a storage path. Other errors the manager raised on purpose (a
+ * string `code` and a client-error status, or a rate-limit refusal) reach the
+ * caller with their own message. Anything else is logged in full and answered
+ * with a fixed sentence.
  */
 function respondWithManagerError(err: unknown): Response {
+  const declared = readRefusal(err);
+  if (declared && declared.status !== undefined) {
+    if (declared.status >= 500) logger.warn('Companion chat request refused', { code: declared.code, error: summarizeError(err) });
+    return respondWithRefusal(declared);
+  }
   const e = (typeof err === 'object' && err !== null ? err : {}) as {
     code?: unknown; status?: unknown; message?: unknown; category?: unknown; retryAfterMs?: unknown;
   };
@@ -570,16 +624,6 @@ function respondWithManagerError(err: unknown): Response {
           ? { headers: { 'Retry-After': String(Math.max(1, Math.ceil(e.retryAfterMs / 1000))) } }
           : {}),
       },
-    );
-  }
-  if (code === 'CHAT_PERSISTENCE_UNAVAILABLE') {
-    logger.warn('Companion chat storage unavailable', { error: message });
-    return Response.json(
-      {
-        error: 'Saving this chat failed, so it accepts no more changes for now. The daemon retries on its own; check that the companion chat storage directory is writable and has space, then try again in a minute.',
-        code,
-      },
-      { status: 503 },
     );
   }
   if (code !== undefined && status !== undefined && status >= 400 && status < 500) {
@@ -712,9 +756,13 @@ async function handleEditMessage(
 /**
  * Handle GET /api/companion/chat/sessions/:sessionId/messages.
  *
- * Response shape matches the `messages` field of the session-detail endpoint.
+ * Without query parameters the whole transcript is returned (the `messages`
+ * field of the session-detail endpoint). With `limit` (1-1000) and/or `before`
+ * (a message id) one page is returned, oldest first, with `total`, `more` and
+ * `nextBefore` to read the page before it.
  */
 async function handleGetMessages(
+  url: URL,
   sessionId: string,
   context: CompanionChatRouteContext,
 ): Promise<Response> {
@@ -722,8 +770,17 @@ async function handleGetMessages(
   if (!session) {
     return Response.json({ error: 'Session not found', code: 'SESSION_NOT_FOUND' }, { status: 404 });
   }
-  const messages = context.chatManager.getMessages(sessionId);
-  return Response.json({ sessionId, messages });
+  const limit = readLimitQuery(url);
+  const before = url.searchParams.get('before') ?? undefined;
+  try {
+    if (limit === undefined && before === undefined) {
+      const messages = context.chatManager.getMessages(sessionId);
+      return Response.json({ sessionId, messages, total: messages.length, more: false });
+    }
+    return Response.json({ sessionId, ...context.chatManager.getMessagePage(sessionId, { before, limit }) });
+  } catch (err: unknown) {
+    return respondWithManagerError(err);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -819,10 +876,14 @@ async function handleGetEvents(
     return Response.json({ error: 'Session not found', code: 'SESSION_NOT_FOUND' }, { status: 404 });
   }
   if (session.status === 'closed') {
-    return Response.json(
-      { error: 'Session is closed', code: EngineErrorCodes.SESSION_CLOSED },
-      { status: 410 },
-    );
+    return respondWithRefusal(refusal({
+      code: EngineErrorCodes.SESSION_CLOSED,
+      status: 410,
+      retryable: false,
+      state: 'the chat is closed',
+      reason: 'A closed chat has no live events',
+      next: ['Reopen the chat (companion.chat.sessions.reopen), then open its event stream again'],
+    }));
   }
 
   // Delegate to the caller-provided SSE stream opener which wires up the

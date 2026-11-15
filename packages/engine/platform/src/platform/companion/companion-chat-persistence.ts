@@ -1,28 +1,34 @@
 /**
  * companion-chat-persistence.ts
  *
- * Disk-backed session store for CompanionChatManager.
+ * Disk store for CompanionChatManager. Each chat is two files under the
+ * sessions directory:
  *
- * Design:
- * - Sessions and their messages are stored as individual JSON files under
- *   `<sessionsDir>/<sessionId>.json` using atomic tmp-file + rename writes.
- * - The store is loaded eagerly at construction time (async init()) and
- *   thereafter kept in sync with every createSession / updateSession /
- *   appendMessage / closeSession mutation.
- * - Default storage root: ~/.goodvibes/companion-chat/sessions/
+ * - `<id>.meta.json`: the chat's summary (title, route, status, counts), a
+ *   small document replaced atomically when it changes. Start-up and the chat
+ *   list read only these.
+ * - `<id>.jsonl`: the transcript, one record per line. Saving a message is one
+ *   appended line, whatever the chat already holds; a changed message (a
+ *   delivery state, a superseded mark) is appended again and the latest line
+ *   wins. The transcript is read when the chat is opened, not at start-up.
+ *
+ * Chats saved by earlier versions as one `<id>.json` file are converted on
+ * first start-up and the old file is kept beside them as `<id>.json.migrated`.
+ *
+ * Default storage root: ~/.goodvibes/companion-chat/sessions/
  */
 
-import { existsSync, readdirSync, renameSync, unlinkSync } from 'node:fs';
-import { prepareAtomicPublicationDirectory, writeFileAtomic } from '../utils/atomic-json-store.js';
-import { promises as fs } from 'node:fs';
-import { join } from 'node:path';
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 import type { CompanionChatMessage, CompanionChatSession } from './companion-chat-types.js';
+import { openRecordLog, type RecordLog } from '../state/record-log.js';
+import { readDocument, writeDocument } from '../utils/atomic-json-store.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 
 // ---------------------------------------------------------------------------
-// On-disk shape
+// On-disk shapes
 // ---------------------------------------------------------------------------
 
 /** A saved chat file that could not be loaded and was set aside, with why. */
@@ -30,13 +36,39 @@ export interface RejectedChatFile {
   /** File name as found in the sessions directory. */
   readonly file: string;
   readonly reason: string;
-  /** Where the file now lives; absent when it could not be moved. */
-  readonly movedTo?: string | undefined;
 }
 
 export interface PersistedChatSession {
   readonly meta: CompanionChatSession;
   readonly messages: CompanionChatMessage[];
+}
+
+/** The last turn boundary written to a transcript. */
+export interface PersistedTurnMark {
+  readonly userMessageId: string;
+  readonly phase: 'started' | 'ended';
+  readonly at: number;
+}
+
+/** A transcript as read from disk. */
+export interface PersistedTranscript {
+  readonly messages: CompanionChatMessage[];
+  /** Absent for a chat converted from the single-file format, which wrote no turn marks. */
+  readonly lastTurn?: PersistedTurnMark | undefined;
+}
+
+type ChatRecord =
+  | { readonly m: CompanionChatMessage }
+  | { readonly turn: PersistedTurnMark };
+
+function recordKey(record: ChatRecord): string {
+  return 'm' in record ? `m:${record.m.id}` : 'turn';
+}
+
+/** A transcript record without the per-process revision the manager issues on load. */
+function storedMessage(message: CompanionChatMessage): CompanionChatMessage {
+  const { contentRevision: _issuedOnLoad, ...rest } = message;
+  return rest;
 }
 
 // ---------------------------------------------------------------------------
@@ -55,135 +87,283 @@ export function defaultSessionsDir(homeDirectory?: string): string {
   return join(homeDirectory ?? homedir(), '.goodvibes', 'companion-chat', 'sessions');
 }
 
+const META_SUFFIX = '.meta.json';
+const LOG_SUFFIX = '.jsonl';
+const LEGACY_SUFFIX = '.json';
+/** Rewrite a transcript whose superseded lines outnumber its messages by this much, when it is opened. */
+const COMPACT_SLACK = 64;
+
 // ---------------------------------------------------------------------------
 // CompanionChatPersistence
 // ---------------------------------------------------------------------------
 
 export class CompanionChatPersistence {
   private readonly sessionsDir: string;
-  private directoryOwner: ReturnType<typeof prepareAtomicPublicationDirectory> | undefined;
+  private dirReady = false;
   #rejected: RejectedChatFile[] = [];
+  private readonly logs = new Map<string, RecordLog<ChatRecord>>();
 
-  /** Files the most recent loadAll() set aside because their content is unusable. */
+  /** Files the most recent load set aside or skipped because their content is unusable. */
   rejectedOnLoad(): readonly RejectedChatFile[] { return this.#rejected; }
 
   constructor(sessionsDir?: string) {
     this.sessionsDir = sessionsDir ?? defaultSessionsDir();
   }
 
-  /** Ensure the sessions directory exists. */
+  /** Create the directory (and missing parents) private to the owner, whatever the process umask. */
   private ensureDir(): void {
-    if (!this.directoryOwner) this.directoryOwner = prepareAtomicPublicationDirectory(this.sessionsDir);
-    this.directoryOwner.assertCurrent();
+    if (this.dirReady) return;
+    const missing: string[] = [];
+    for (let dir = this.sessionsDir; !existsSync(dir); dir = dirname(dir)) {
+      missing.unshift(dir);
+      if (dirname(dir) === dir) break;
+    }
+    for (const dir of missing) {
+      try { mkdirSync(dir, { mode: 0o700 }); } catch (err) { if (!isNodeErrorCode(err, 'EEXIST')) throw err; }
+      chmodSync(dir, 0o700);
+    }
+    this.dirReady = true;
   }
 
-  private filePath(sessionId: string): string {
+  private path(sessionId: string, suffix: string): string {
     if (!safeSessionId(sessionId)) throw new Error('Invalid saved chat identifier');
-    return join(this.sessionsDir, `${sessionId}.json`);
+    return join(this.sessionsDir, `${sessionId}${suffix}`);
   }
 
-  /** Load all persisted sessions from disk. Returns an empty array on directory failure. */
-  async loadAll(): Promise<PersistedChatSession[]> {
-    const results: PersistedChatSession[] = [];
-    const rejected: RejectedChatFile[] = [];
-    this.#rejected = rejected;
-    let entries: string[];
-
+  /**
+   * The summary of every saved chat, for start-up. Converts chats saved in the
+   * single-file format first. An unreadable summary is moved aside by the
+   * document reader and reported in {@link rejectedOnLoad}.
+   */
+  loadIndex(): CompanionChatSession[] {
+    this.#rejected = [];
+    let names: string[];
     try {
       this.ensureDir();
-      entries = readdirSync(this.sessionsDir).filter((f) => f.endsWith('.json'));
+      names = readdirSync(this.sessionsDir);
     } catch (err) {
-      logger.warn('CompanionChatPersistence: failed to read sessions directory', {
-        dir: this.sessionsDir,
-        error: summarizeError(err),
+      logger.warn('CompanionChatPersistence: failed to read sessions directory', { dir: this.sessionsDir, error: summarizeError(err) });
+      return [];
+    }
+    const present = new Set(names);
+    for (const name of names) {
+      if (!name.endsWith(LEGACY_SUFFIX) || name.endsWith(META_SUFFIX)) continue;
+      const id = name.slice(0, -LEGACY_SUFFIX.length);
+      if (present.has(`${id}${META_SUFFIX}`)) continue;
+      if (this.migrateLegacy(name)) present.add(`${id}${META_SUFFIX}`);
+    }
+    const metas: CompanionChatSession[] = [];
+    for (const name of present) {
+      if (!name.endsWith(META_SUFFIX)) continue;
+      const id = name.slice(0, -META_SUFFIX.length);
+      if (!safeSessionId(id)) continue;
+      const meta = readDocument(join(this.sessionsDir, name), {
+        label: 'companion-chat/meta',
+        validate: (parsed) => readMeta(parsed, id),
+        recovery: 'The chat no longer appears in the chat list; its transcript file is left in place.',
       });
-      return results;
+      if (meta) metas.push(meta);
+      else if (existsSync(join(this.sessionsDir, name)) === false) this.#rejected.push({ file: name, reason: 'summary could not be read and was set aside' });
     }
-
-    await Promise.all(
-      entries.map(async (filename) => {
-        const filePath = join(this.sessionsDir, filename);
-        try {
-          this.directoryOwner!.assertCurrent();
-          const raw = await fs.readFile(filePath, 'utf-8');
-          this.directoryOwner!.assertCurrent();
-          let parsed: unknown;
-          try { parsed = JSON.parse(raw) as unknown; }
-          catch (parseError) { rejected.push(this.setAside(filename, `not valid JSON (${summarizeError(parseError)})`)); return; }
-          if (!isPersistedChatSession(parsed)) {
-            // A file that parses but is not a chat this build understands (torn,
-            // hand-edited, or written by a newer build) is moved aside, never
-            // deleted: left under its own name, a later save of the same id would
-            // overwrite it, and it would vanish from every listing unexplained.
-            rejected.push(this.setAside(filename, 'content is not a saved chat this version understands'));
-          } else if (safeSessionId(parsed.meta.id) && filename === `${parsed.meta.id}.json`) {
-            results.push(parsed);
-          } else {
-            // A well-formed chat under another name is not ours to rename: it is
-            // reported and left exactly where it is.
-            rejected.push({ file: filename, reason: 'file name does not match the chat id inside it' });
-          }
-        } catch (err) {
-          logger.warn('CompanionChatPersistence: failed to load session', {
-            file: filePath,
-            error: summarizeError(err),
-          });
-        }
-      }),
-    );
-
-    this.directoryOwner!.assertCurrent();
-    return results;
+    return metas;
   }
 
-  /** Rename an unusable chat file to `<name>.rejected` (a numbered name if that is taken). */
-  private setAside(filename: string, reason: string): RejectedChatFile {
+  /** Convert one single-file chat. True when the chat now has a summary file. */
+  private migrateLegacy(name: string): boolean {
+    const file = join(this.sessionsDir, name);
+    const id = name.slice(0, -LEGACY_SUFFIX.length);
+    let mismatch = false;
+    const chat = readDocument(file, {
+      label: 'companion-chat/legacy',
+      validate: (parsed) => {
+        if (!isPersistedChatSession(parsed)) throw new Error('content is not a saved chat this version understands');
+        if (parsed.meta.id !== id || !safeSessionId(id)) { mismatch = true; return null; }
+        return parsed;
+      },
+      recovery: 'The chat no longer appears in the chat list.',
+    });
+    if (mismatch) {
+      // A well-formed chat under another name is not ours to rename: reported and left where it is.
+      this.#rejected.push({ file: name, reason: 'file name does not match the chat id inside it' });
+      return false;
+    }
+    if (!chat) {
+      if (!existsSync(file)) this.#rejected.push({ file: name, reason: 'content is not a saved chat this version understands; set aside' });
+      return false;
+    }
     try {
-      this.directoryOwner!.assertCurrent();
-      const dir = this.directoryOwner!.canonical;
-      let target = join(dir, `${filename}.rejected`);
-      for (let n = 2; existsSync(target); n++) target = join(dir, `${filename}.rejected.${n}`);
-      renameSync(join(dir, filename), target);
-      logger.warn('CompanionChatPersistence: set aside an unusable saved chat', { file: filename, movedTo: target, reason });
-      return { file: filename, reason, movedTo: target };
+      const log = this.open(id);
+      for (const message of chat.messages) log.append({ m: storedMessage(message) });
+      log.close();
+      this.logs.delete(id);
+      writeDocument(this.path(id, META_SUFFIX), chat.meta, { mode: 0o600 });
+      renameSync(file, `${file}.migrated`);
+      return true;
     } catch (err) {
-      logger.warn('CompanionChatPersistence: could not set aside an unusable saved chat', { file: filename, reason, error: summarizeError(err) });
-      return { file: filename, reason };
+      logger.warn('CompanionChatPersistence: could not convert a saved chat; it stays in its old file', { file: name, error: summarizeError(err) });
+      this.#rejected.push({ file: name, reason: 'could not be converted to the current format' });
+      return false;
     }
   }
 
-  /** One native synchronous publication lets metadata commit its in-memory
-   * state only after the exact file is durable, without an async adoption gap. */
-  saveSync(session: PersistedChatSession): void {
-    const filePath = this.filePath(session.meta.id);
+  private open(sessionId: string): RecordLog<ChatRecord> {
+    const existing = this.logs.get(sessionId);
+    if (existing) return existing;
     this.ensureDir();
-    const content = JSON.stringify(session, null, 2) + '\n';
-    writeFileAtomic(filePath, content, { durable: true, mode: 0o600, mkdirp: false, assertCurrent: () => this.directoryOwner!.assertCurrent() });
+    const log = openRecordLog<ChatRecord>(this.path(sessionId, LOG_SUFFIX), { fsync: 'batch', key: recordKey });
+    this.logs.set(sessionId, log);
+    return log;
   }
 
-  /** The queued background-save API preserves its existing async contract. */
-  async save(session: PersistedChatSession): Promise<void> { this.saveSync(session); }
+  /** Read one chat's transcript (one file read). Rewrites it first when superseded lines dominate. */
+  loadTranscript(sessionId: string): PersistedTranscript {
+    const log = this.open(sessionId);
+    const transcript = readRecords(log.scan());
+    if (log.size <= transcript.messages.length * 2 + COMPACT_SLACK) return transcript;
+    const remaining = new Map<string, number>();
+    for (const record of log.scan()) remaining.set(recordKey(record), (remaining.get(recordKey(record)) ?? 0) + 1);
+    // The rewrite runs to completion before compact() returns its promise; a failure leaves the log as it was.
+    void log.compact((record) => {
+      const key = recordKey(record), left = (remaining.get(key) ?? 1) - 1;
+      remaining.set(key, left);
+      return left === 0;
+    }).catch((err: unknown) => {
+      logger.warn('CompanionChatPersistence: rewriting a long transcript failed; it stays as it was', { sessionId, error: summarizeError(err) });
+    });
+    return transcript;
+  }
 
-  /** Delete a session file from disk (called when a closed session is GC'd). Rejects on unlink failure. */
+  /** Replace the chat's summary (one small write and rename). */
+  writeMeta(meta: CompanionChatSession): void {
+    this.ensureDir();
+    writeDocument(this.path(meta.id, META_SUFFIX), meta, { mode: 0o600 });
+  }
+
+  /** Append the current state of these messages (one line each). */
+  appendMessages(sessionId: string, messages: readonly CompanionChatMessage[]): void {
+    if (messages.length === 0) return;
+    const log = this.open(sessionId);
+    for (const message of messages) log.append({ m: storedMessage(message) });
+  }
+
+  /** Record that a turn started or ended, so a restart can tell a reply the daemon died in. */
+  markTurn(sessionId: string, mark: PersistedTurnMark): void {
+    this.open(sessionId).append({ turn: mark });
+  }
+
+  /** Close the transcript file of a chat that left memory. */
+  release(sessionId: string): void {
+    const log = this.logs.get(sessionId);
+    if (!log) return;
+    this.logs.delete(sessionId);
+    try { log.close(); } catch (err) {
+      logger.warn('CompanionChatPersistence: closing a transcript failed', { sessionId, error: summarizeError(err) });
+    }
+  }
+
+  /** Resolves once every appended line is on disk. */
+  async flush(): Promise<void> {
+    await Promise.all([...this.logs.values()].map((log) => log.flush()));
+  }
+
+  close(): void {
+    for (const id of [...this.logs.keys()]) this.release(id);
+  }
+
+  /** Delete a chat's files. Rejects when a file could not be removed. */
   async delete(sessionId: string): Promise<void> {
-    this.filePath(sessionId);
-    this.ensureDir();
-
-    try {
-      this.directoryOwner!.assertCurrent();
-      unlinkSync(join(this.directoryOwner!.canonical, `${sessionId}.json`));
-    } catch (err) {
-      if (isNodeErrorCode(err, 'ENOENT')) return;
-      throw new Error(`Companion chat session delete failed for ${sessionId}: ${summarizeError(err)}`);
+    this.release(sessionId);
+    for (const suffix of [META_SUFFIX, LOG_SUFFIX, LEGACY_SUFFIX, `${LEGACY_SUFFIX}.migrated`]) {
+      try {
+        unlinkSync(this.path(sessionId, suffix));
+      } catch (err) {
+        if (isNodeErrorCode(err, 'ENOENT')) continue;
+        throw new Error(`Companion chat session delete failed for ${sessionId}: ${summarizeError(err)}`);
+      }
     }
+  }
+
+  /**
+   * Every saved chat with its whole transcript, read without changing anything
+   * on disk. For the start-up fold into the shared session store, which may
+   * run beside the manager.
+   */
+  async loadAll(): Promise<PersistedChatSession[]> {
+    const rejected: RejectedChatFile[] = [];
+    this.#rejected = rejected;
+    let names: string[];
+    try { names = readdirSync(this.sessionsDir); } catch (err) {
+      if (!isNodeErrorCode(err, 'ENOENT')) {
+        logger.warn('CompanionChatPersistence: failed to read sessions directory', { dir: this.sessionsDir, error: summarizeError(err) });
+      }
+      return [];
+    }
+    const present = new Set(names);
+    const results: PersistedChatSession[] = [];
+    for (const name of names) {
+      try {
+        if (name.endsWith(META_SUFFIX)) {
+          const id = name.slice(0, -META_SUFFIX.length);
+          const meta = readMeta(JSON.parse(readFileSync(join(this.sessionsDir, name), 'utf-8')) as unknown, id);
+          const lines = present.has(`${id}${LOG_SUFFIX}`) ? readFileSync(join(this.sessionsDir, `${id}${LOG_SUFFIX}`), 'utf-8') : '';
+          results.push({ meta, messages: readRecords(parseLines(lines)).messages });
+        } else if (name.endsWith(LEGACY_SUFFIX) && !present.has(`${name.slice(0, -LEGACY_SUFFIX.length)}${META_SUFFIX}`)) {
+          const parsed = JSON.parse(readFileSync(join(this.sessionsDir, name), 'utf-8')) as unknown;
+          if (!isPersistedChatSession(parsed)) rejected.push({ file: name, reason: 'content is not a saved chat this version understands' });
+          else if (`${parsed.meta.id}${LEGACY_SUFFIX}` !== name) rejected.push({ file: name, reason: 'file name does not match the chat id inside it' });
+          else results.push(parsed);
+        }
+      } catch (err) {
+        rejected.push({ file: name, reason: `could not be read (${summarizeError(err)})` });
+      }
+    }
+    return results;
   }
 }
 
 // ---------------------------------------------------------------------------
-// Type guard
+// Reading records
 // ---------------------------------------------------------------------------
 
-function safeSessionId(id: string): boolean { return id.length > 0 && !/[\\/\0]/.test(id); }
+function* parseLines(text: string): Iterable<ChatRecord> {
+  for (const line of text.split('\n')) {
+    if (!line.trim()) continue;
+    try { yield JSON.parse(line) as ChatRecord; } catch { /* a torn last line from an interrupted write */ }
+  }
+}
+
+/** The latest line per message, in the order messages first appeared. */
+function readRecords(records: Iterable<ChatRecord>): PersistedTranscript {
+  const messages = new Map<string, CompanionChatMessage>();
+  let lastTurn: PersistedTurnMark | undefined;
+  for (const record of records) {
+    if (!record || typeof record !== 'object') continue;
+    if ('m' in record && isMessage(record.m)) messages.set(record.m.id, record.m);
+    else if ('turn' in record && record.turn && typeof record.turn.userMessageId === 'string') lastTurn = record.turn;
+  }
+  return { messages: [...messages.values()], ...(lastTurn ? { lastTurn } : {}) };
+}
+
+// ---------------------------------------------------------------------------
+// Type guards
+// ---------------------------------------------------------------------------
+
+function safeSessionId(id: string): boolean { return id.length > 0 && !/[\\/\0]/.test(id) && id !== '.' && id !== '..'; }
+
+function readMeta(parsed: unknown, id: string): CompanionChatSession {
+  if (typeof parsed !== 'object' || parsed === null) throw new Error('summary is not an object');
+  const meta = parsed as Partial<CompanionChatSession>;
+  if (meta.id !== id) throw new Error('summary does not name this chat');
+  if (meta.status !== 'active' && meta.status !== 'closed') throw new Error('summary has no status');
+  if (typeof meta.createdAt !== 'number' || typeof meta.updatedAt !== 'number') throw new Error('summary has no times');
+  return parsed as CompanionChatSession;
+}
+
+function isMessage(value: unknown): value is CompanionChatMessage {
+  if (typeof value !== 'object' || value === null) return false;
+  const m = value as Record<string, unknown>;
+  return typeof m['id'] === 'string' && (m['role'] === 'user' || m['role'] === 'assistant') && typeof m['content'] === 'string';
+}
 
 function isPersistedChatSession(value: unknown): value is PersistedChatSession {
   if (typeof value !== 'object' || value === null) return false;

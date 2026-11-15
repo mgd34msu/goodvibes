@@ -39,8 +39,9 @@ import { waitFor } from './_helpers/test-timeout.ts';
 import {
   getProcessUntrustedContentLedger,
   resetProcessUntrustedContentLedgerForTests,
+  withUntrustedContentScope,
 } from '../platform/src/platform/security/untrusted-content.ts';
-import { CompanionChatManager } from '../platform/src/platform/companion/companion-chat-manager.ts';
+import { CompanionChatManager, companionChatContentScope } from '../platform/src/platform/companion/companion-chat-manager.ts';
 import type { CompanionLLMProvider } from '../platform/src/platform/companion/companion-chat-manager.ts';
 
 const disposables = trackDisposables();
@@ -73,7 +74,9 @@ function recordAPageRead(): void {
   });
 }
 
-const exposed = (): boolean => getProcessUntrustedContentLedger().hasIngestedThisTurn();
+/** Whether the chat's own turn has read untrusted text (its turns run in the chat's scope). */
+const exposed = (sessionId: string): boolean =>
+  withUntrustedContentScope(companionChatContentScope(sessionId), () => getProcessUntrustedContentLedger().hasIngestedThisTurn());
 
 beforeEach(() => { resetProcessUntrustedContentLedgerForTests(); });
 afterEach(() => { resetProcessUntrustedContentLedgerForTests(); });
@@ -85,10 +88,10 @@ describe('an authenticated owner message ends the previous turn', () => {
     const { manager } = makeManager();
     const session = manager.createSession();
     recordAPageRead();
-    expect(exposed()).toBe(true);
+    expect(exposed(session.id)).toBe(true);
 
     await manager.postMessage(session.id, 'hello', '', { ownerDirect: true });
-    expect(exposed()).toBe(false);
+    expect(exposed(session.id)).toBe(false);
   });
 
   test('a message queued behind a running turn resets the window when its own turn starts', async () => {
@@ -101,11 +104,11 @@ describe('an authenticated owner message ends the previous turn', () => {
 
     // Posted while the first turn runs: it waits, and the attestation must wait with it.
     await manager.postMessage(session.id, 'second', '', { ownerDirect: true });
-    expect(exposed()).toBe(true);
+    expect(exposed(session.id)).toBe(true);
 
     release();
     await waitFor(() => completed() === 2);
-    expect(exposed()).toBe(false);
+    expect(exposed(session.id)).toBe(false);
   });
 });
 
@@ -116,7 +119,7 @@ describe('a relayed message does not', () => {
     recordAPageRead();
 
     await manager.postMessage(session.id, 'from a topic');
-    expect(exposed()).toBe(true);
+    expect(exposed(session.id)).toBe(true);
   });
 
   test('an explicit false is honoured', async () => {
@@ -125,7 +128,7 @@ describe('a relayed message does not', () => {
     recordAPageRead();
 
     await manager.postMessage(session.id, 'hello', '', { ownerDirect: false });
-    expect(exposed()).toBe(true);
+    expect(exposed(session.id)).toBe(true);
   });
 
   test('the wait-for-reply entry the relays use cannot attest', async () => {
@@ -134,7 +137,7 @@ describe('a relayed message does not', () => {
     recordAPageRead();
 
     await manager.postMessageAndWaitForReply(session.id, 'from a room', '', { timeoutMs: 5_000 });
-    expect(exposed()).toBe(true);
+    expect(exposed(session.id)).toBe(true);
   });
 });
 
@@ -159,5 +162,22 @@ describe('the transports', () => {
         .join('\n');
       expect(code).not.toMatch(/ownerDirect\s*[:=]/);
     }
+  });
+});
+
+describe('a chat turn is scoped to its own chat', () => {
+  test('an owner message in one chat does not end another session\'s exposure window', async () => {
+    const { manager } = makeManager();
+    const session = manager.createSession();
+    const ledger = getProcessUntrustedContentLedger();
+    withUntrustedContentScope('principal:automation', () => {
+      ledger.startTurn();
+      ledger.record({ surface: 'web-page', origin: 'https://news.example', at: new Date().toISOString(), content: 'text a stranger published' });
+    });
+
+    await manager.postMessage(session.id, 'hello', '', { ownerDirect: true });
+    expect(withUntrustedContentScope('principal:automation', () => ledger.hasIngestedThisTurn())).toBe(true);
+    // What another session read does not count against this chat either.
+    expect(exposed(session.id)).toBe(false);
   });
 });

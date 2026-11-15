@@ -5,8 +5,7 @@
  * create → message → close, happy path
  * closed sessions reject further messages with 409
  * sessions that were never found return 404
- * idle GC closes empty sessions after idleEmptyMs
- * idle GC closes content sessions after idleActiveMs
+ * idle GC never closes a chat; the next send continues it with its history
  * GC leaves sessions with recent activity alone
  */
 
@@ -152,54 +151,36 @@ describe('non-existent sessions', () => {
 });
 
 // ---------------------------------------------------------------------------
-// GC closes empty sessions after idleEmptyMs
+// Idleness never closes a chat: the GC drops its history from memory and the
+// next send rebuilds it, so the conversation continues where it was.
 // ---------------------------------------------------------------------------
 
-describe('GC closes empty idle sessions', () => {
-  test('empty session idle beyond idleEmptyMs is closed by _gcSweep()', () => {
-    const manager = makeManager({ idleEmptyMs: 100 });
+describe('GC keeps idle chats open', () => {
+  test('an idle chat stays open and its next send carries the earlier history', async () => {
+    const seen: string[][] = [];
+    const manager = disposables.add(new CompanionChatManager({
+      provider: {
+        async *chatStream(messages) {
+          seen.push(messages.map((message) => `${message.role}:${typeof message.content === 'string' ? message.content : ''}`));
+          yield { type: 'text_delta', delta: `answer ${seen.length}` } satisfies CompanionProviderChunk;
+          yield { type: 'done' } satisfies CompanionProviderChunk;
+        },
+      },
+      eventPublisher: { publishEvent() {} },
+      gcIntervalMs: 999_999,
+      idleActiveMs: 0,
+      idleEmptyMs: 0,
+    }));
     const session = manager.createSession();
-    expect(session.status).toBe('active');
-    expect(manager.getMessages(session.id)).toHaveLength(0);
-
-    // Manually age the session by directly mutating lastActivityAt
-    // (Testing internal state via the GC sweep interface.)
-    // We call _gcSweep after waiting slightly more than idleEmptyMs.
-    // Since Jest/bun fake timers are not always available, we use a real wait.
-    // The idleEmptyMs is 100ms so this should be fast.
-    const internalSessions = (manager as unknown as { sessions: Map<string, { lastActivityAt: number }> }).sessions;
-    const internal = internalSessions.get(session.id);
-    if (internal) internal.lastActivityAt = Date.now() - 200;
-
-    manager._gcSweep();
-
-    const retrieved = manager.getSession(session.id);
-    expect(retrieved?.status).toBe('closed');
-  });
-});
-
-// ---------------------------------------------------------------------------
-// GC closes content sessions after idleActiveMs
-// ---------------------------------------------------------------------------
-
-describe('GC closes active sessions after idleActiveMs', () => {
-  test('session with messages idle beyond idleActiveMs is closed by _gcSweep()', async () => {
-    const manager = makeManager({ idleActiveMs: 100 });
-    const session = manager.createSession();
-
-    await manager.postMessage(session.id, 'Hello');
+    await manager.postMessage(session.id, 'first');
     await waitFor(() => manager.getMessages(session.id).some((message) => message.role === 'assistant'));
 
-    expect(manager.getMessages(session.id).map((message) => message.role)).toEqual(['user', 'assistant']);
-
-    // Age the session
-    const internalSessions = (manager as unknown as { sessions: Map<string, { lastActivityAt: number }> }).sessions;
-    const internal = internalSessions.get(session.id);
-    if (internal) internal.lastActivityAt = Date.now() - 200;
-
     manager._gcSweep();
+    expect(manager.getSession(session.id)?.status).toBe('active');
 
-    expect(manager.getSession(session.id)?.status).toBe('closed');
+    await manager.postMessage(session.id, 'second');
+    await waitFor(() => manager.getMessages(session.id).filter((message) => message.role === 'assistant').length === 2);
+    expect(seen[1]).toEqual(['user:first', 'assistant:answer 1', 'user:second']);
   });
 });
 

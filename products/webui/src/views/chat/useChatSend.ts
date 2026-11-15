@@ -122,6 +122,28 @@ function isServerMessageId(id: string): boolean {
   return !id.startsWith('local-') && !id.startsWith('assistant-') && !id.startsWith('user-');
 }
 
+const CLOSED_CHAT_MESSAGE = 'This chat is closed and could not be reopened; start a new chat to keep going.';
+
+/**
+ * Run a chat verb; when the daemon answers that the chat is closed, reopen it
+ * (companion.chat.sessions.reopen) and run the verb once more. Writing in a
+ * closed chat is the person asking to continue it. A daemon that cannot reopen
+ * leaves the original closed-chat error in place.
+ */
+async function withReopen<T>(sessionId: string, run: () => Promise<T>): Promise<T> {
+  try {
+    return await run();
+  } catch (error) {
+    if (!isSessionClosedError(error)) throw error;
+    try {
+      await platformClient.operator.invoke('companion.chat.sessions.reopen', { sessionId });
+    } catch {
+      throw error;
+    }
+    return await run();
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Hook implementation
 // ---------------------------------------------------------------------------
@@ -291,10 +313,10 @@ export function useChatSend({
           // doesn't exist, fall back to an ordinary send and SAY so, never
           // silently pretend the interruption happened.
           try {
-            result = await platformClient.chat.messages.steer(sessionId, payload);
+            result = await withReopen(sessionId, () => platformClient.chat.messages.steer(sessionId, payload));
           } catch (steerError) {
             if (!isCurrent(lease) || !isMethodUnavailableError(steerError)) throw steerError;
-            result = await platformClient.chat.messages.create(sessionId, payload);
+            result = await withReopen(sessionId, () => platformClient.chat.messages.create(sessionId, payload));
             if (!isCurrent(lease)) return;
             setTurnError(
               'Sent as a normal message: this daemon does not support steering '
@@ -302,7 +324,7 @@ export function useChatSend({
             );
           }
         } else {
-          result = await platformClient.chat.messages.create(sessionId, payload);
+          result = await withReopen(sessionId, () => platformClient.chat.messages.create(sessionId, payload));
         }
       } catch (error) {
         if (!isCurrent(lease)) throw error;
@@ -343,6 +365,11 @@ export function useChatSend({
         onAuthExpired();
         setTurnState('session expired');
         setTurnError('Your session expired: sign in again to continue.');
+        return;
+      }
+      if (isSessionClosedError(error)) {
+        setTurnState('idle');
+        setTurnError(CLOSED_CHAT_MESSAGE);
         return;
       }
       setTurnState('send failed');
@@ -420,7 +447,7 @@ export function useChatSend({
     }
     if (isSessionClosedError(error)) {
       setTurnState('idle');
-      setTurnError('This chat is closed; reopen or start a new chat to keep going.');
+      setTurnError(CLOSED_CHAT_MESSAGE);
       return;
     }
     setTurnState('error');
@@ -432,10 +459,10 @@ export function useChatSend({
     mutationFn: async (vars) => {
       if (!isCurrent(vars.lease)) return vars;
       beginLineageTurn();
-      await platformClient.chat.messages.retry(
+      await withReopen(vars.sessionId, () => platformClient.chat.messages.retry(
         vars.sessionId,
         vars.messageId ? { messageId: vars.messageId } : undefined,
-      );
+      ));
       if (isCurrent(vars.lease)) await invalidateChatState(vars.sessionId);
       return vars;
     },
@@ -447,7 +474,7 @@ export function useChatSend({
     mutationFn: async (vars) => {
       if (!isCurrent(vars.lease)) return vars;
       beginLineageTurn();
-      await platformClient.chat.messages.edit(vars.sessionId, vars.messageId, { content: vars.content });
+      await withReopen(vars.sessionId, () => platformClient.chat.messages.edit(vars.sessionId, vars.messageId, { content: vars.content }));
       if (isCurrent(vars.lease)) await invalidateChatState(vars.sessionId);
       return vars;
     },

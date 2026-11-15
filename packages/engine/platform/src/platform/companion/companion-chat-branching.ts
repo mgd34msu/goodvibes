@@ -68,20 +68,23 @@ export function activeMessages(messages: readonly CompanionChatMessage[]): Compa
 }
 
 export interface RegeneratePlan {
-  readonly regeneratedFrom: string;
+  /** The superseded reply the new turn replaces; absent when the exchange had no reply (a stop before any text). */
+  readonly regeneratedFrom?: string | undefined;
   readonly supersededMessageIds: readonly string[];
   /** The user message the re-run turn is anchored on. */
   readonly anchorUserMessageId: string;
 }
 
 /**
- * Plan a regenerate: pick the target assistant message (an explicit id, or the
- * latest active assistant message), supersede it and everything after it, and
- * return the preceding active user message as the anchor for the new turn.
+ * Plan a regenerate. Without an id the anchor is the LAST active user message
+ * and whatever follows it (its reply, a failed reply, or nothing) is
+ * superseded, so a regenerate whose new turn failed is retried by the identical
+ * call instead of rewinding the chat by one exchange. With an id, that active
+ * assistant message and everything after it are superseded and the nearest
+ * active user message before it is the anchor.
  *
- * Throws when the session has no assistant message to regenerate, when an
- * explicit id is unknown or is not an active assistant message, or when there is
- * no user message preceding the target to re-run from.
+ * Throws when an explicit id is unknown, superseded or not an assistant
+ * message, or when there is no user message to answer again.
  */
 export function planRegenerate(
   session: BranchingSession,
@@ -90,13 +93,14 @@ export function planRegenerate(
 ): RegeneratePlan {
   const messages = session.messages;
 
-  let targetIndex: number;
+  let fromIndex: number;
+  let anchorIndex = -1;
   if (targetMessageId !== undefined) {
-    targetIndex = messages.findIndex((m) => m.id === targetMessageId);
-    if (targetIndex === -1) {
+    fromIndex = messages.findIndex((m) => m.id === targetMessageId);
+    if (fromIndex === -1) {
       throw branchError(`Message not found: ${targetMessageId}`, 'MESSAGE_NOT_FOUND', 404);
     }
-    const target = messages[targetIndex]!;
+    const target = messages[fromIndex]!;
     if (target.supersededAt !== undefined) {
       throw branchError(
         'That message is already superseded history; regenerate the active response instead.',
@@ -111,42 +115,36 @@ export function planRegenerate(
         400,
       );
     }
+    // The message it answers when the link is there, else the nearest active user message before it.
+    const linked = target.inReplyTo === undefined ? -1 : messages.findIndex((m) => m.id === target.inReplyTo && m.supersededAt === undefined);
+    anchorIndex = linked;
+    for (let i = fromIndex - 1; anchorIndex === -1 && i >= 0; i--) {
+      const m = messages[i]!;
+      if (m.supersededAt === undefined && m.role === 'user') anchorIndex = i;
+    }
   } else {
-    targetIndex = -1;
     for (let i = messages.length - 1; i >= 0; i--) {
       const m = messages[i]!;
-      if (m.supersededAt === undefined && m.role === 'assistant') {
-        targetIndex = i;
+      if (m.supersededAt === undefined && m.role === 'user' && m.deliveryState !== 'queued' && m.deliveryState !== 'unanswered') {
+        anchorIndex = i;
         break;
       }
     }
-    if (targetIndex === -1) {
-      throw branchError('No assistant response to regenerate.', 'NO_ASSISTANT_MESSAGE', 409);
-    }
+    fromIndex = anchorIndex + 1;
   }
-
-  const regeneratedFrom = messages[targetIndex]!.id;
-
-  // The anchor is the nearest active user message before the target assistant.
-  let anchorUserMessageId: string | null = null;
-  for (let i = targetIndex - 1; i >= 0; i--) {
-    const m = messages[i]!;
-    if (m.supersededAt === undefined && m.role === 'user') {
-      anchorUserMessageId = m.id;
-      break;
-    }
-  }
-  if (anchorUserMessageId === null) {
+  if (anchorIndex === -1) {
     throw branchError(
-      'No user message precedes that response to regenerate from.',
+      targetMessageId === undefined ? 'There is no message to answer again yet.' : 'No user message precedes that response to regenerate from.',
       'NO_ANCHOR_MESSAGE',
       409,
     );
   }
 
-  const supersededMessageIds = supersedeFrom(session, targetIndex, 'regenerate', now);
+  const anchorUserMessageId = messages[anchorIndex]!.id;
+  const regeneratedFrom = messages.slice(fromIndex).find((m) => m.supersededAt === undefined && m.role === 'assistant')?.id;
+  const supersededMessageIds = supersedeFrom(session, fromIndex, 'regenerate', now);
   session.lastActivityAt = now;
-  return { regeneratedFrom, supersededMessageIds, anchorUserMessageId };
+  return { ...(regeneratedFrom !== undefined ? { regeneratedFrom } : {}), supersededMessageIds, anchorUserMessageId };
 }
 
 export interface EditBranchPlan {

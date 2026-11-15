@@ -13,6 +13,7 @@ import { trackDisposables } from './_helpers/disposables.ts';
 import {
   COMPANION_MAX_TOOL_ROUNDS,
   CompanionChatManager,
+  companionChatContentScope,
 } from '../platform/src/platform/companion/companion-chat-manager.js';
 import type {
   CompanionChatArtifactStore,
@@ -27,6 +28,7 @@ import type { ProviderMessage } from '../platform/src/platform/providers/interfa
 import {
   getProcessUntrustedContentLedger,
   resetProcessUntrustedContentLedgerForTests,
+  withUntrustedContentScope,
 } from '../platform/src/platform/security/untrusted-content.ts';
 
 const disposables = trackDisposables();
@@ -287,12 +289,13 @@ describe('edit and regenerate', () => {
 
     readAPage();
     const unattested = manager.editMessage(session.id, { messageId: original, content: 'edit one' });
-    expect(ledger.hasIngestedThisTurn()).toBe(true);
+    const inChat = (): boolean => withUntrustedContentScope(companionChatContentScope(session.id), () => ledger.hasIngestedThisTurn());
+    expect(inChat()).toBe(true);
     await waitFor(() => seen.length === 2);
     await settleEvents(20);
 
     manager.editMessage(session.id, { messageId: unattested.messageId, content: 'edit two' }, { ownerDirect: true });
-    expect(ledger.hasIngestedThisTurn()).toBe(false);
+    expect(inChat()).toBe(false);
   });
 });
 

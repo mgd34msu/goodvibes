@@ -57,7 +57,7 @@ afterAll(async () => {
 });
 
 function companionFilePath(sessionId: string): string {
-  return join(home, '.goodvibes', 'companion-chat', 'sessions', `${sessionId}.json`);
+  return join(home, '.goodvibes', 'companion-chat', 'sessions', `${sessionId}.meta.json`);
 }
 
 // ---------------------------------------------------------------------------

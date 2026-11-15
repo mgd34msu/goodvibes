@@ -198,18 +198,18 @@ All companion-chat routes are registered in the live method catalog. Fetch the c
 | `GET /api/companion/chat/sessions` | List companion-chat sessions |
 | `PATCH /api/companion/chat/sessions/:id` | Update session provider/model metadata |
 | `POST /api/companion/chat/sessions/:id/messages` | Send a message to the companion-chat session |
-| `GET /api/companion/chat/sessions/:id/messages` | Fetch the message history for the session |
+| `GET /api/companion/chat/sessions/:id/messages` | Fetch the message history for the session; `?limit=` (1-1000) and `?before=<messageId>` return one page with `total`, `more` and `nextBefore` |
 | `GET /api/companion/chat/sessions/:id` | Fetch one companion-chat session |
 | `POST /api/companion/chat/sessions/:id/close` | Soft-close a session; its record and messages are kept |
+| `POST /api/companion/chat/sessions/:id/reopen` | Open a closed session again; the next message continues it with its history |
 | `DELETE /api/companion/chat/sessions/:id` | Permanently remove a session (it must be closed first) |
-| `POST /api/companion/chat/sessions/:id/messages/retry` | Regenerate an assistant response; the earlier response is kept as superseded history |
+| `POST /api/companion/chat/sessions/:id/messages/retry` | Answer the latest message again (or the one before a given reply); whatever followed it is kept as superseded history, so pressing it again after a failed attempt retries the same exchange |
 | `POST /api/companion/chat/sessions/:id/messages/edit` | Edit a user message and branch the conversation from it |
 | `POST /api/companion/chat/sessions/:id/messages/steer` | Send a message that interrupts the in-flight turn and runs immediately |
 | `POST /api/companion/chat/sessions/:id/turns/cancel` | Stop the in-flight turn; any partial reply is kept marked as cancelled |
 | `GET /api/companion/chat/sessions/:id/events` | Stream the session's turn events |
-| `GET /api/companion/chat/sessions/:id/events` | Stream events for the session |
-| `GET /api/companion/chat/sessions/:id` | Get session details |
-| `DELETE /api/companion/chat/sessions/:id` | Delete the session |
+
+A chat is never closed for being idle: the daemon drops an unused chat's history from memory and rebuilds it from the saved transcript on the next message. A reply that fails, or that the daemon stopped while writing, is saved as an assistant message with `deliveryState: "failed"`, its partial text and a `failureReason`. A change whose save fails is refused with `503 CHAT_SAVE_FAILED` (and `Retry-After`); only that request is refused, and the next one is accepted as usual.
 
 ### Companion chat rate limit
 

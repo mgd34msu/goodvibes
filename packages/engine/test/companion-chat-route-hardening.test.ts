@@ -18,6 +18,7 @@ import type { CompanionChatRouteContext } from '../platform/src/platform/compani
 import { CompanionChatPersistence } from '../platform/src/platform/companion/companion-chat-persistence.js';
 import { logger } from '../platform/src/platform/utils/logger.js';
 import { awaitCompanionReply } from '../platform/src/platform/companion/companion-chat-turn-control.js';
+import { RefusalError, refusal } from '@goodvibes-jev/engine/errors';
 
 const provider: CompanionLLMProvider = {
   async *chatStream() {
@@ -199,17 +200,24 @@ describe('companion chat error responses', () => {
     expect(JSON.parse(text).code).toBe('INTERNAL_ERROR');
   });
 
-  test('a storage failure keeps its code and 503 but not the path from the save error', async () => {
+  test('a refused save answers with its own code, state, next step and Retry-After', async () => {
     const manager = makeManager({ perClientLimit: 30, perSessionLimit: 10 });
     const id = manager.createSession({ provider: 'p', model: 'm' }).id;
     manager.postMessage = (async () => {
-      throw Object.assign(new Error('Saving this chat failed (ENOSPC: /var/lib/goodvibes/chats/x.json)'), { code: 'CHAT_PERSISTENCE_UNAVAILABLE', status: 503 });
+      throw new RefusalError(refusal({
+        code: 'CHAT_SAVE_FAILED', status: 503, retryAfterMs: 1_000, state: 'not saved',
+        reason: 'Saving the chat failed (ENOSPC)', next: ['Send the same request again'],
+      }), { cause: new Error('ENOSPC: /var/lib/goodvibes/chats/x.jsonl') });
     }) as typeof manager.postMessage;
     const res = await dispatchCompanionChatRoutes(post(`/api/companion/chat/sessions/${id}/messages`, { body: 'hi' }, 't'), context(manager));
     expect(res!.status).toBe(503);
+    expect(res!.headers.get('Retry-After')).toBe('1');
     const text = await res!.text();
     expect(text).not.toContain('/var/lib');
-    expect(JSON.parse(text).code).toBe('CHAT_PERSISTENCE_UNAVAILABLE');
+    const body = JSON.parse(text) as { code: string; next: string[]; recoverable: boolean };
+    expect(body.code).toBe('CHAT_SAVE_FAILED');
+    expect(body.next).toEqual(['Send the same request again']);
+    expect(body.recoverable).toBe(true);
   });
 
   test('a deliberate client error keeps its own message and status', async () => {
@@ -229,14 +237,14 @@ describe('saved chat files that cannot be loaded', () => {
     writeFileSync(join(dir, 'torn.json'), '{"meta":');
 
     const store = new CompanionChatPersistence(dir);
-    const loaded = await store.loadAll();
+    expect(store.loadIndex()).toEqual([]);
 
-    expect(loaded).toEqual([]);
     const rejected = store.rejectedOnLoad();
     expect(rejected.map((entry) => entry.file).sort()).toEqual(['bad.json', 'torn.json']);
-    expect(rejected.every((entry) => entry.reason.length > 0 && entry.movedTo !== undefined)).toBe(true);
+    expect(rejected.every((entry) => entry.reason.length > 0)).toBe(true);
+    // Moved aside under another name: a later save of the same id cannot overwrite it.
     expect(readdirSync(dir).filter((name) => name.endsWith('.json'))).toEqual([]);
-    expect(existsSync(join(dir, 'bad.json.rejected'))).toBe(true);
+    expect(readdirSync(dir).some((name) => name.startsWith('bad.json.'))).toBe(true);
   });
 
   test('a well-formed chat under another file name is reported but left where it is', async () => {
@@ -245,7 +253,7 @@ describe('saved chat files that cannot be loaded', () => {
     const file = join(dir, 'copy.json');
     writeFileSync(file, JSON.stringify({ meta: { id: 'real-id' }, messages: [] }));
     const store = new CompanionChatPersistence(dir);
-    expect(await store.loadAll()).toEqual([]);
+    expect(store.loadIndex()).toEqual([]);
     expect(store.rejectedOnLoad()).toEqual([{ file: 'copy.json', reason: 'file name does not match the chat id inside it' }]);
     expect(existsSync(file)).toBe(true);
   });

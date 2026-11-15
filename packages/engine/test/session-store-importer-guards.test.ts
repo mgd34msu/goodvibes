@@ -8,7 +8,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { importLegacySessionStores } from '../platform/src/platform/control-plane/index.ts';
 import { HomeSessionStoreUnreadableError } from '../platform/src/platform/control-plane/session-store-importer.ts';
-import { CompanionChatPersistence } from '../platform/src/platform/companion/companion-chat-persistence.ts';
+import type { PersistedChatSession } from '../platform/src/platform/companion/companion-chat-persistence.ts';
+
+/** A companion chat saved as one file by an earlier version, the format the fold reads from other instances. */
+function saveCompanionChat(dir: string, chat: PersistedChatSession): void {
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, `${chat.meta.id}.json`), JSON.stringify(chat));
+}
 
 const roots: string[] = [];
 function root(): string { const dir = mkdtempSync(join(tmpdir(), 'importer-guards-')); roots.push(dir); return dir; }
@@ -16,10 +22,9 @@ afterEach(() => { for (const dir of roots.splice(0)) rmSync(dir, { recursive: tr
 
 async function companionDirWith(sessions: string[]): Promise<string> {
   const dir = join(root(), 'companion');
-  const persistence = new CompanionChatPersistence(dir);
   const now = Date.now();
   for (const id of sessions) {
-    await persistence.save({
+    saveCompanionChat(dir, {
       meta: { id, kind: 'companion-chat', title: `Chat ${id}`, model: null, provider: null, systemPrompt: null, status: 'active', createdAt: now, updatedAt: now, closedAt: null, messageCount: 1 },
       messages: [{ id: `${id}-m1`, sessionId: id, role: 'user', content: 'hello', attachments: [], createdAt: now }],
     });

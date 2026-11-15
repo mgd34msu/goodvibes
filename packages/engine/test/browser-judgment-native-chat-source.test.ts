@@ -17,6 +17,9 @@ const principal: AuthenticatedPrincipal = { principalId: 'native-chat-owner', pr
 test('HTTP history revisions bind actual code and speech readers and expire across a daemon reload', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'native-chat-source-'));
   const persistence = new CompanionChatPersistence(directory);
+  const save = (chat: PersistedChatSession): void => {
+    persistence.writeMeta(chat.meta); persistence.appendMessages(chat.meta.id, chat.messages); persistence.close();
+  };
   const stored: PersistedChatSession = {
     meta: { id: 'native-chat', kind: 'companion-chat', title: 'Source', model: null, provider: null, systemPrompt: null,
       status: 'closed', createdAt: 1, updatedAt: 2, closedAt: 2, messageCount: 1 },
@@ -42,7 +45,7 @@ test('HTTP history revisions bind actual code and speech readers and expire acro
   });
   let unbind: (() => void) | undefined;
   try {
-    await persistence.save(stored);
+    save(stored);
     const manager = makeManager(); managers.push(manager); await manager.init();
     unbind = service.bindChatSessions(manager);
     const response = await dispatchCompanionChatRoutes(new Request('http://localhost/api/companion/chat/sessions/native-chat'),
@@ -71,7 +74,7 @@ test('HTTP history revisions bind actual code and speech readers and expire acro
     expect(calls).toHaveLength(priorCalls);
     unbind(); unbind = undefined; manager.dispose();
     // Even the same saved bytes and an asserted prior revision cannot impersonate a new owner.
-    await persistence.save({ ...stored, messages: [{ ...stored.messages[0]!, contentRevision: message.contentRevision }] });
+    save({ ...stored, messages: [{ ...stored.messages[0]!, contentRevision: message.contentRevision }] });
     const restored = makeManager(); managers.push(restored); await restored.init();
     unbind = service.bindChatSessions(restored);
     expect(restored.getMessages('native-chat')[0]!.contentRevision).not.toBe(message.contentRevision);

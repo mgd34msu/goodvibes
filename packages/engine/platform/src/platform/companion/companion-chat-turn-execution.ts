@@ -70,23 +70,34 @@ export async function executeCompanionToolCalls(
     });
   }
 
-  const results = await executeOrchestratorToolCalls({
-    toolRegistry,
-    permissionManager: deps.permissionManager,
-    hookDispatcher: deps.hookDispatcher,
-    runtimeBus: deps.runtimeBus,
-    sessionId,
-    autonomousSource: deps.autonomousSource,
-    turnSignal: options.signal,
-    onToolSettled: options.onSettled,
-    toolBudget: () => toolBudgetFromConfig(deps.configManager),
-    maxParallel: () => maxParallelToolCalls(deps.configManager),
-    emitterContext: (id) => ({
+  let results: ToolResult[];
+  const settled = new Map<string, ToolResult>();
+  try {
+    results = await executeOrchestratorToolCalls({
+      toolRegistry,
+      permissionManager: deps.permissionManager,
+      hookDispatcher: deps.hookDispatcher,
+      runtimeBus: deps.runtimeBus,
       sessionId,
-      traceId: `${sessionId}:${id}`,
-      source: 'companion-chat',
-    }),
-  }, turnId, toolCalls);
+      autonomousSource: deps.autonomousSource,
+      turnSignal: options.signal,
+      onToolSettled: (result) => { settled.set(result.callId, result); options.onSettled?.(result); },
+      toolBudget: () => toolBudgetFromConfig(deps.configManager),
+      maxParallel: () => maxParallelToolCalls(deps.configManager),
+      emitterContext: (id) => ({
+        sessionId,
+        traceId: `${sessionId}:${id}`,
+        source: 'companion-chat',
+      }),
+    }, turnId, toolCalls);
+  } catch (error) {
+    // A cancelled turn is closed by the turn loop. Any other failure becomes one
+    // error result per call that has none, so the model sees what happened and
+    // the history keeps a result for every call it made.
+    if (options.signal?.aborted) throw error;
+    const reason = `Tool execution failed: ${error instanceof Error ? error.message : String(error)}`;
+    results = toolCalls.map((call) => settled.get(call.id) ?? { callId: call.id, success: false, error: reason });
+  }
 
   for (const [index, toolResult] of results.entries()) {
     const call = toolCalls[index]!;

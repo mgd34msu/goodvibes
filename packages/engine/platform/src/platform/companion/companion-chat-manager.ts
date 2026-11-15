@@ -8,43 +8,50 @@ import type { NativeDataWriteOwner } from '../runtime/native-reader-compatibilit
  * Disk-backed manager for companion-app chat-mode sessions.
  *
  * Design:
- * - Each session owns a ConversationManager (isolated message history).
- * - Sessions survive daemon restart via CompanionChatPersistence (atomic JSON files).
+ * - Each session has a transcript (what clients read) and a model-facing
+ *   history (a ConversationManager). Either can be absent from memory: an idle
+ *   or closed chat keeps only its summary, the transcript is read from disk
+ *   when the chat is opened, and the history is rebuilt from the transcript on
+ *   the next send (companion-chat-history.ts).
+ * - Sessions survive daemon restart via CompanionChatPersistence: a summary
+ *   document per chat and an append-only transcript, so a save is one small
+ *   write whatever the chat's length.
  * - Inbound messages are rate-limited per session and per client via
  *   CompanionChatRateLimiter (token-bucket, 30 msgs/min per client,
  *   10 msgs/min per session by default, configurable).
- * - When a user message is posted, the manager appends it to the conversation
- *   and runs a lightweight LLM turn using the provider registry.
- * - Tool calls emitted by the LLM are executed via the injected ToolRegistry
- *   (if provided); results are fed back into the stream and published as
- *   turn.tool_result events.
+ * - When a user message is posted, the manager appends it to the transcript
+ *   and runs a turn through the one turn loop (core/turn-loop.ts). Each turn
+ *   runs in its own untrusted-content scope, so what one chat reads and when
+ *   its owner speaks never move another session's exposure window.
  * - Streaming chunks are fanned out via ControlPlaneGateway.publishEvent
- *   with a per-session clientId filter, so they only reach the subscriber
- *   for that specific session, never the global TUI event feed.
- * - A GC sweep closes sessions that have been idle beyond the TTL.
+ *   with a per-session clientId filter, so they only reach the subscribers
+ *   of that specific session, never the global TUI event feed.
+ * - Idleness never closes a chat; only a person (or the integration that
+ *   owns it) does, and a closed chat can be reopened.
  */
 
 import { randomUUID } from 'node:crypto';
-import { EngineErrorCodes } from '@goodvibes-jev/engine/errors';
-import { ConversationManager } from '../core/conversation.js';
+import { EngineErrorCodes, RefusalError, refusal } from '@goodvibes-jev/engine/errors';
+import type { ConversationManager } from '../core/conversation.js';
 import { startTurnForOwnerInput } from '../security/turn-boundary.js';
+import { withUntrustedContentScope } from '../security/untrusted-content.js';
 import type { CompanionPostMessageOptions } from './companion-chat-turn-control.js';
-import type { ProviderMessage } from '../providers/interface.js';
 import type {
   CancelCompanionChatTurnInput,
   CancelCompanionChatTurnOutput,
   SteerCompanionChatMessageOutput,
   CompanionChatMessageAttachmentInput,
   CompanionChatMessage,
+  CompanionChatMessagePage,
   CompanionChatSession,
   CompanionChatTurnEvent,
-  CompanionChatTurnStoppedBy,
   ConversationMessageEnvelope,
   CreateCompanionChatSessionInput,
   EditCompanionChatMessageInput,
   EditCompanionChatMessageOutput,
   RegenerateCompanionChatMessageInput,
   RegenerateCompanionChatMessageOutput,
+  ReopenCompanionChatSessionOutput,
   UpdateCompanionChatSessionInput,
 } from './companion-chat-types.js';
 import {
@@ -53,15 +60,19 @@ import {
 } from './companion-chat-persistence.js';
 import {
   buildProviderUserContent,
-  buildReplayUserContent,
   resolveAttachments,
   type CompanionChatArtifactStore,
 } from './companion-chat-attachments.js';
 import {
-  activeMessages,
   applyEditBranch,
   planRegenerate,
 } from './companion-chat-branching.js';
+import {
+  DAEMON_STOPPED_REASON,
+  TurnHistoryWriter,
+  rebuildConversation,
+  turnFailureNote,
+} from './companion-chat-history.js';
 import {
   executeCompanionToolCalls,
 } from './companion-chat-turn-execution.js';
@@ -71,7 +82,7 @@ import { CompanionBrokerSync } from './companion-chat-broker-sync.js';
 import { CompanionChatRateLimiter } from './companion-chat-rate-limiter.js';
 import type { CompanionChatRateLimiterOptions } from './companion-chat-rate-limiter.js';
 import type { ToolRegistry } from '../tools/registry.js';
-import type { ToolCall, ToolDefinition, ToolResult } from '../types/tools.js';
+import type { ToolCall, ToolResult } from '../types/tools.js';
 import { runTurn, type TurnModelResponse, type TurnRequest } from '../core/turn-loop.js';
 import type { PermissionManager } from '../permissions/manager.js';
 import type { RuntimeEventBus } from '../runtime/events/index.js';
@@ -79,7 +90,6 @@ import type { HookEvent, HookResult } from '../hooks/types.js';
 import { appendGoodVibesRuntimeAwarenessPrompt } from '../tools/goodvibes-runtime/index.js';
 import { summarizeError } from '../utils/error-display.js';
 import { logger } from '../utils/logger.js';
-import { AtomicWriteDurabilityError } from '../utils/atomic-json-store.js';
 import type { ConfigManager } from '../config/manager.js';
 
 // ---------------------------------------------------------------------------
@@ -123,14 +133,16 @@ export interface CompanionChatEventPublisher {
 }
 
 // ---------------------------------------------------------------------------
-// Idle GC constants (customisable for tests)
+// Memory constants (customisable for tests)
 // ---------------------------------------------------------------------------
 
-const DEFAULT_IDLE_ACTIVE_MS = 30 * 60 * 1_000; // 30 minutes with messages
-const DEFAULT_IDLE_EMPTY_MS = 5 * 60 * 1_000;   // 5 minutes empty session
+const DEFAULT_IDLE_ACTIVE_MS = 30 * 60 * 1_000; // drop an idle chat's history from memory after 30 minutes
+const DEFAULT_IDLE_EMPTY_MS = 5 * 60 * 1_000;   // 5 minutes for an empty chat
 const DEFAULT_CLOSED_MEMORY_GRACE_MS = 5 * 60 * 1_000; // evict closed bodies from RAM after 5 min
 const MAX_REMEMBERED_CLIENT_MESSAGE_IDS = 500; // per session
 const GC_INTERVAL_MS = 60 * 1_000;               // sweep every minute
+const DEFAULT_MESSAGE_PAGE = 100;
+const MAX_MESSAGE_PAGE = 1_000;
 
 /**
  * Most model/tool rounds one reply may take. A model that keeps asking for
@@ -151,11 +163,25 @@ function assertCompleteProviderModelRoute(
   });
 }
 
+/** The untrusted-content scope a chat's turns run in. */
+export function companionChatContentScope(sessionId: string): string {
+  return `companion-chat:${sessionId}`;
+}
+
+/** What a storage failure is called in a refusal: its error code, never a path. */
+function storageFailureName(error: unknown): string {
+  const code = typeof error === 'object' && error !== null ? (error as { code?: unknown }).code : undefined;
+  return typeof code === 'string' && /^[A-Z0-9_]+$/.test(code) ? code : 'a storage error';
+}
+
 interface InternalSession {
-  readonly meta: CompanionChatSession;
-  conversation: ConversationManager;
-  messages: CompanionChatMessage[];
-  readonly abortController: AbortController;
+  meta: CompanionChatSession;
+  /** The transcript; null while it is only on disk (an idle or closed chat). */
+  messages: CompanionChatMessage[] | null;
+  /** The model-facing history; null until it is rebuilt from the transcript for the next turn. */
+  conversation: ConversationManager | null;
+  /** Aborts everything the chat runs; replaced when a closed chat is reopened. */
+  abortController: AbortController;
   /** The in-flight turn, when one is running (see ActiveCompanionTurn). */
   activeTurn?: ActiveCompanionTurn | null;
   /** User messages whose turns have not started yet (queue-when-busy + steer-to-front). */
@@ -163,15 +189,12 @@ interface InternalSession {
   preparingTurns?: number;
   /** Client-chosen send ids already accepted, so a re-sent request answers with the first message instead of a second turn. Memory only: forgotten with the session or on a restart. */
   clientMessageIds?: Map<string, string>;
-  routingUpdatePending?: boolean;
   lastActivityAt: number;
-  /**
-   * True once the GC has dropped this closed session's replay state (its
-   * ConversationManager). The transcript itself stays resident because the
-   * session and message routes serve it from memory; evicting it would show a
-   * closed chat as empty and let a later save overwrite the file with nothing.
-   */
-  replayEvicted?: boolean;
+  /** Messages whose save failed after they were already in memory; the next save of this chat writes them. */
+  unsaved?: Set<string>;
+  metaUnsaved?: boolean;
+  /** Why the last of those saves failed. */
+  saveError?: unknown;
 }
 
 type MutableSessionMeta = {
@@ -220,7 +243,7 @@ export interface CompanionChatManagerConfig {
   readonly configManager?: Pick<ConfigManager, 'get'> | undefined;
   /** Optional artifact store used to resolve and inline chat attachments. */
   readonly artifactStore?: CompanionChatArtifactStore | null | undefined;
-  /** Directory for session JSON files. Default `<homeDirectory>/.goodvibes/companion-chat/sessions/`
+  /** Directory for session files. Default `<homeDirectory>/.goodvibes/companion-chat/sessions/`
    * (else OS home). Prefer passing this (or `homeDirectory`) so an isolated-home daemon stays in. */
   readonly sessionsDir?: string | undefined;
   /** Injected home dir; when `sessionsDir` is omitted, the persistence root is
@@ -228,17 +251,18 @@ export interface CompanionChatManagerConfig {
   readonly homeDirectory?: string | undefined;
   /**
    * Optional bridge to the shared session broker. When supplied, companion
-   * sessions register INTO the broker at write time (create/close), so
+   * sessions register INTO the broker at write time (create/close/reopen), so
    * `/api/sessions` reflects companion activity immediately (same-process, no
    * restart). The boot-time importer fold remains the reconciliation path.
    */
   readonly sessionBroker?: CompanionSessionBrokerBridge | null | undefined;
-  /** Age (ms past closedAt) at which a CLOSED session's heavy in-memory handles
-   * are evicted while its meta stays listable (bounds resident memory). Default 5 min. */
+  /** Age (ms past closedAt) at which a CLOSED session's transcript leaves memory
+   * while its summary stays listable (bounds resident memory). Default 5 min. */
   readonly closedSessionMemoryGraceMs?: number | undefined;
-  /** Age (ms past closedAt) at which a CLOSED session's persisted file is PERMANENTLY
-   * deleted. Closed sessions are HISTORY: default `undefined` = retain indefinitely. */
-  readonly closedSessionRetentionMs?: number | undefined;
+  /** Age (ms past closedAt) at which a CLOSED session's files are PERMANENTLY
+   * deleted, or a reader of it that is asked on every sweep (a setting). Closed
+   * sessions are HISTORY: absent or undefined = retain indefinitely. */
+  readonly closedSessionRetentionMs?: number | (() => number | undefined) | undefined;
   /** Pass `false` to disable disk persistence entirely (useful in tests). Default: true */
   readonly persist?: boolean | undefined;
   /** Actual installed writer declares retained session-effort semantics before publication. */
@@ -271,7 +295,8 @@ export class CompanionChatManager {
   private readonly idleActiveMs: number;
   private readonly idleEmptyMs: number;
   private readonly closedMemoryGraceMs: number;
-  private readonly closedRetentionMs: number | undefined;
+  private readonly closedRetention: () => number | undefined;
+  private readonly sessionBroker: CompanionSessionBrokerBridge | null;
   /** Live mirror of sessions into the shared broker store. */
   private readonly _brokerSync: CompanionBrokerSync;
   private gcTimer: ReturnType<typeof setInterval> | null = null;
@@ -280,14 +305,6 @@ export class CompanionChatManager {
   private readonly pendingReplies = new Map<string, PendingReply>();
   /** True once dispose() ran, lets a cancelled turn report stoppedBy 'shutdown' honestly. */
   private disposed = false;
-  /**
-   * Serializes persistence writes per session to prevent write-after-write
-   * races where two concurrent saves could result in an older snapshot
-   * overwriting a newer one.
-   */
-  private readonly _pendingSaves = new Map<string, Promise<void>>();
-  private readonly saveFailures = new Map<string, unknown>();
-  private readonly recoveringSaves = new Set<string>();
   private readonly activeWork = new Set<Promise<unknown>>();
   private closing: Promise<void> | undefined;
 
@@ -305,8 +322,10 @@ export class CompanionChatManager {
     this.idleActiveMs = config.idleActiveMs ?? DEFAULT_IDLE_ACTIVE_MS;
     this.idleEmptyMs = config.idleEmptyMs ?? DEFAULT_IDLE_EMPTY_MS;
     this.closedMemoryGraceMs = config.closedSessionMemoryGraceMs ?? DEFAULT_CLOSED_MEMORY_GRACE_MS;
-    this.closedRetentionMs = config.closedSessionRetentionMs;
-    this._brokerSync = new CompanionBrokerSync(config.sessionBroker ?? null);
+    const retention = config.closedSessionRetentionMs;
+    this.closedRetention = typeof retention === 'function' ? retention : () => retention;
+    this.sessionBroker = config.sessionBroker ?? null;
+    this._brokerSync = new CompanionBrokerSync(this.sessionBroker);
 
     // Persistence
     // Default is false, most callers (tests, downstream consumers) get the
@@ -328,9 +347,6 @@ export class CompanionChatManager {
     this.gcTimer = setInterval(() => {
       this._gcSweep();
       this.rateLimiter?.cleanup();
-      void this.recoverFailedSaves().catch((error: unknown) => {
-        logger.warn('[companion-chat] retrying failed chat saves threw', { error: summarizeError(error) });
-      });
     }, gcIntervalMs);
     // Don't block node process on this timer
     this.gcTimer.unref?.();
@@ -341,7 +357,8 @@ export class CompanionChatManager {
   // ---------------------------------------------------------------------------
 
   /**
-   * Load sessions persisted from a previous daemon run.
+   * Load the summaries of sessions persisted by a previous daemon run. Their
+   * transcripts are read when each chat is first opened.
    * Should be called once after construction before accepting requests.
    * Safe to call multiple times (idempotent after first call).
    */
@@ -351,7 +368,7 @@ export class CompanionChatManager {
       return;
     }
 
-    const stored = await this.persistence.loadAll();
+    const metas = this.persistence.loadIndex();
     const rejected = this.persistence.rejectedOnLoad();
     if (rejected.length > 0) {
       // Set-aside chats are not in the list; say so at startup so a missing chat is explained.
@@ -360,33 +377,14 @@ export class CompanionChatManager {
         rejectedFiles: rejected.map((entry) => `${entry.file}: ${entry.reason}`),
       });
     }
-    for (const { meta, messages } of stored) {
-      const normalizedMessages = messages.map((message) => this.normalizeMessage(message));
-      const conversation = new ConversationManager();
-      // Closed-skip fix: closed sessions load in a lightweight terminal state
-      // (meta + messages retained, listable/importable; no history replay). GC
-      // (_gcSweep) remains the sole deletion authority.
-      if (meta.status !== 'closed') {
-        for (const msg of normalizedMessages) {
-          if (msg.role === 'user') {
-            conversation.addUserMessage(buildReplayUserContent(msg));
-          } else {
-            conversation.addAssistantMessage(msg.content);
-          }
-        }
-      }
-
-      const loaded: InternalSession = {
+    for (const meta of metas) {
+      this.sessions.set(meta.id, {
         meta,
-        conversation,
-        messages: normalizedMessages,
+        messages: null,
+        conversation: null,
         abortController: new AbortController(),
         lastActivityAt: meta.updatedAt,
-      };
-      this.sessions.set(meta.id, loaded);
-      // A queued send lived in memory only; nothing is left to run it after a
-      // restart, so the transcript must stop saying it is waiting.
-      if (this._markUnanswered(loaded)) this._persist(meta.id);
+      });
     }
 
     this.initCompleted = true;
@@ -400,7 +398,6 @@ export class CompanionChatManager {
     this.assertAvailable();
     assertCompleteProviderModelRoute(input);
     this.assertEffortPublication(input.reasoningEffort);
-    this.assertAvailable();
     const id = randomUUID();
     const now = Date.now();
     const meta: CompanionChatSession = {
@@ -418,17 +415,17 @@ export class CompanionChatManager {
       messageCount: 0,
     };
 
-    const conversation = new ConversationManager();
-
-    this.sessions.set(id, {
+    const session: InternalSession = {
       meta,
-      conversation,
+      conversation: null,
       messages: [],
       abortController: new AbortController(),
       lastActivityAt: now,
-    });
-
-    this._persist(id);
+    };
+    // Saved before it exists anywhere else: a chat whose summary could not be
+    // written is refused rather than lost at the next restart.
+    this.saveForRequest(session, [], meta);
+    this.sessions.set(id, session);
     // Live spine: mirror the new session into the shared broker at write time so
     // /api/sessions reflects it same-process (no restart). Best-effort.
     this._brokerSync.track(meta.id, () => this._brokerSync.registerSession(meta));
@@ -467,12 +464,40 @@ export class CompanionChatManager {
 
   getMessages(sessionId: string): CompanionChatMessage[] {
     // Headers belong to the manager. A caller may rearrange its view, never the transcript.
-    return [...(this.sessions.get(sessionId)?.messages ?? [])];
+    const session = this.sessions.get(sessionId);
+    return session ? [...this.transcript(session)] : [];
+  }
+
+  /**
+   * One page of a chat's transcript, oldest first: the `limit` messages
+   * (default 100, at most 1000) before `before`, or the latest ones without it.
+   */
+  getMessagePage(sessionId: string, input: { readonly before?: string | undefined; readonly limit?: number | undefined } = {}): CompanionChatMessagePage {
+    const session = this.sessions.get(sessionId);
+    const all = session ? this.transcript(session) : [];
+    const limit = Math.min(MAX_MESSAGE_PAGE, Math.max(1, Math.floor(input.limit ?? DEFAULT_MESSAGE_PAGE)));
+    let end = all.length;
+    if (input.before !== undefined) {
+      const index = all.findIndex((message) => message.id === input.before);
+      if (index === -1) {
+        throw Object.assign(new Error(`Message not found: ${input.before}`), { code: 'MESSAGE_NOT_FOUND', status: 404 });
+      }
+      end = index;
+    }
+    const start = Math.max(0, end - limit);
+    const messages = all.slice(start, end);
+    return {
+      messages,
+      total: all.length,
+      more: start > 0,
+      ...(start > 0 && messages[0] ? { nextBefore: messages[0].id } : {}),
+    };
   }
 
   /** Borrow one immutable header for a live source check without copying the transcript. */
   getMessage(sessionId: string, messageId: string): CompanionChatMessage | undefined {
-    return this.sessions.get(sessionId)?.messages.find(message => message.id === messageId);
+    const session = this.sessions.get(sessionId);
+    return session ? this.transcript(session).find(message => message.id === messageId) : undefined;
   }
 
   private normalizeMessage(message: CompanionChatMessage): CompanionChatMessage {
@@ -487,63 +512,95 @@ export class CompanionChatManager {
     return owned;
   }
 
+  /**
+   * The chat's transcript, read from disk when it is not in memory. Reading it
+   * also settles what a previous daemon run left unfinished: a queued send
+   * (the queue lived in memory) is marked unanswered, and a reply the daemon
+   * stopped in is recorded as a failed reply.
+   */
+  private transcript(session: InternalSession): CompanionChatMessage[] {
+    if (session.messages) return session.messages;
+    if (!this.persistence) return (session.messages = []);
+    const loaded = this.persistence.loadTranscript(session.meta.id);
+    const messages = loaded.messages.map((message) => this.normalizeMessage(message));
+    session.messages = messages;
+    const changed: CompanionChatMessage[] = [];
+    for (const [index, message] of messages.entries()) {
+      if (message.role !== 'user' || message.deliveryState !== 'queued') continue;
+      const unanswered = this.normalizeMessage({ ...message, deliveryState: 'unanswered' });
+      messages[index] = unanswered;
+      changed.push(unanswered);
+    }
+    const stoppedIn = this.unfinishedReplyAfterLoad(session, messages, loaded.lastTurn);
+    if (stoppedIn) {
+      const failed = this.normalizeMessage({
+        id: randomUUID(),
+        sessionId: session.meta.id,
+        role: 'assistant',
+        content: '',
+        attachments: [],
+        createdAt: Date.now(),
+        inReplyTo: stoppedIn,
+        deliveryState: 'failed',
+        failureReason: DAEMON_STOPPED_REASON,
+      });
+      messages.push(failed);
+      changed.push(failed);
+    }
+    const counted = messages.length !== session.meta.messageCount;
+    if (counted) session.meta = { ...session.meta, messageCount: messages.length };
+    if (changed.length > 0 || counted) this.saveInBackground(session, changed, changed.length > 0 || counted);
+    return messages;
+  }
+
+  /** The user message whose reply a previous daemon run was writing when it stopped, if any. */
+  private unfinishedReplyAfterLoad(
+    session: InternalSession,
+    messages: readonly CompanionChatMessage[],
+    lastTurn: { readonly userMessageId: string; readonly phase: 'started' | 'ended' } | undefined,
+  ): string | undefined {
+    const answered = (id: string): boolean => messages.some((m) => m.role === 'assistant' && m.inReplyTo === id);
+    if (lastTurn) {
+      return lastTurn.phase === 'started' && !answered(lastTurn.userMessageId) && messages.some((m) => m.id === lastTurn.userMessageId)
+        ? lastTurn.userMessageId
+        : undefined;
+    }
+    // Chats saved before turns were marked: an active chat that ends in a
+    // delivered question with no reply was cut off.
+    if (session.meta.status !== 'active') return undefined;
+    const last = [...messages].reverse().find((m) => m.supersededAt === undefined);
+    return last?.role === 'user' && last.deliveryState === undefined && !answered(last.id) ? last.id : undefined;
+  }
+
   updateSession(
     sessionId: string,
     input: UpdateCompanionChatSessionInput,
   ): CompanionChatSession {
     const session = this._requireOpenSession(sessionId);
-    const patch = this.prepareSessionPatch(session, input);
-    const updated = this._updateMeta(session, patch);
-    this._persist(sessionId);
+    const admitted = captureOwnedJson(input) as UpdateCompanionChatSessionInput;
+    const patch = this.prepareSessionPatch(session, admitted);
+    const updated: CompanionChatSession = { ...session.meta, ...patch };
+    // Saved before the change takes effect: a refused save leaves the chat as it was.
+    this.saveForRequest(session, [], updated);
+    session.meta = updated;
     // Heartbeat the broker record (advances participant.lastSeenAt). Title is
     // never overwritten by this path (broker treats register as a heartbeat).
     this._brokerSync.track(updated.id, () => this._brokerSync.registerSession(updated));
     return updated;
   }
 
-  /**
-   * Register the SSE clientId for this session so events are routed only to
-   * the correct subscriber. Replaces any previous registration (single subscriber
-   * per session in v1, the last SSE connection wins).
-   */
-  /** HTTP metadata changes publish before acknowledging or changing the live
-   * route. A failure leaves the old in-memory metadata and saved bytes intact
-   * when publication was not reached; uncertain publication holds the session. */
+  /** The HTTP form of {@link updateSession}: the change is saved before it is acknowledged. */
   async updateSessionPersisted(sessionId: string, input: UpdateCompanionChatSessionInput): Promise<CompanionChatSession> {
-    const session = this._requireOpenSession(sessionId);
-    const admitted = captureOwnedJson(input) as UpdateCompanionChatSessionInput;
-    this.prepareSessionPatch(session, admitted);
-    const routing = admitted.model !== undefined || admitted.provider !== undefined || admitted.reasoningEffort !== undefined;
-    if (routing) session.routingUpdatePending = true;
-    try {
-      return await this.queueSave(sessionId, () => {
-        if (this.sessions.get(sessionId) !== session || session.meta.status !== 'active') throw Object.assign(new Error('Original chat ended before metadata publication'), { chatEnded: true });
-        const patch = this.prepareSessionPatch(session, admitted, routing);
-        const updated = { ...session.meta, ...patch };
-        if (this.persistence) this.persistence.saveSync({ meta: updated, messages: session.messages });
-        const committed = this._updateMeta(session, patch);
-        this._brokerSync.track(committed.id, () => this._brokerSync.registerSession(committed));
-        return committed;
-      });
-    } catch (error) {
-      // A failed write is named as one: the failure is recorded for the chat a
-      // tick later, so the generic "shutting down or changed" text would send
-      // the operator to a restart when the disk is the problem.
-      const chatEnded = typeof error === 'object' && error !== null && (error as { chatEnded?: unknown }).chatEnded === true;
-      throw this.storageUnavailable(chatEnded ? undefined : sessionId, chatEnded ? undefined : error);
-    }
-    finally { if (routing) session.routingUpdatePending = false; }
+    return this.updateSession(sessionId, input);
   }
 
-  private prepareSessionPatch(session: InternalSession, input: UpdateCompanionChatSessionInput, ownPending = false): Partial<MutableSessionMeta> {
+  private prepareSessionPatch(session: InternalSession, input: UpdateCompanionChatSessionInput): Partial<MutableSessionMeta> {
     assertCompleteProviderModelRoute(input);
-    if ((session.activeTurn || session.preparingTurns || session.routingUpdatePending && !ownPending)
+    if ((session.activeTurn || session.preparingTurns)
       && (input.model !== undefined || input.provider !== undefined || input.reasoningEffort !== undefined)) {
       throw Object.assign(new Error('Wait for this chat’s current reply to finish before changing its model or effort.'), { code: 'CHAT_ROUTE_BUSY', status: 409 });
     }
-    const original = session.meta, closing = this.disposed;
     this.assertEffortPublication(input.reasoningEffort);
-    if (session.meta !== original || this.sessions.get(original.id) !== session || this.disposed !== closing) throw this.storageUnavailable();
     const patch: Partial<MutableSessionMeta> = { updatedAt: Date.now() };
     if (input.title !== undefined) patch.title = input.title;
     if (input.model !== undefined) patch.model = input.model;
@@ -567,24 +624,64 @@ export class CompanionChatManager {
   }
 
   /**
-   * Close a session cleanly. Aborts any in-flight turn. Returns the session
-   * snapshot, or null if not found.
+   * Close a session cleanly (a person's or its integration's decision). Aborts
+   * any in-flight turn. Returns the session snapshot, or null if not found. A
+   * closed chat can be reopened with {@link reopenSession}.
    */
   closeSession(sessionId: string): CompanionChatSession | null {
+    this.assertAvailable();
     const session = this.sessions.get(sessionId);
     if (!session) return null;
     if (session.meta.status === 'closed') return session.meta;
 
-    session.abortController.abort();
-    this._abandonQueuedTurns(session, 'This chat was closed before this queued message was answered.');
     const now = Date.now();
-    const updated = this._updateMeta(session, { status: 'closed', closedAt: now, updatedAt: now });
-
-    this._persist(sessionId);
+    const updated: CompanionChatSession = { ...session.meta, status: 'closed', closedAt: now, updatedAt: now };
+    this.saveForRequest(session, [], updated);
+    session.abortController.abort();
+    session.meta = updated;
+    this._abandonQueuedTurns(session, 'This chat was closed before this queued message was answered.');
     // Live spine: flip the shared broker record to closed at write time.
     this._brokerSync.track(sessionId, () => this._brokerSync.closeSession(sessionId));
 
     return updated;
+  }
+
+  /**
+   * Open a closed chat again (`companion.chat.sessions.reopen`). The model's
+   * history is rebuilt from the transcript on the next send. Reopening an open
+   * chat changes nothing and says so.
+   */
+  reopenSession(sessionId: string): ReopenCompanionChatSessionOutput {
+    this.assertAvailable();
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'SESSION_NOT_FOUND', status: 404 });
+    }
+    if (session.meta.status !== 'closed') return { sessionId, status: session.meta.status, reopened: false };
+    const updated: CompanionChatSession = { ...session.meta, status: 'active', closedAt: null, updatedAt: Date.now() };
+    this.saveForRequest(session, [], updated);
+    session.meta = updated;
+    session.abortController = new AbortController();
+    session.conversation = null;
+    session.lastActivityAt = updated.updatedAt;
+    const broker = this.sessionBroker;
+    if (broker) {
+      this._brokerSync.track(sessionId, async () => {
+        try {
+          await broker.register({
+            sessionId,
+            kind: 'companion-chat',
+            project: 'unknown',
+            title: updated.title,
+            participant: { surfaceKind: 'companion', surfaceId: sessionId, lastSeenAt: Date.now() },
+            reopen: true,
+          });
+        } catch (error) {
+          logger.warn('[companion-chat] broker reopen failed', { sessionId, error: summarizeError(error) });
+        }
+      });
+    }
+    return { sessionId, status: 'active', reopened: true };
   }
 
   /**
@@ -593,7 +690,7 @@ export class CompanionChatManager {
    * bounded finalization wait live in companion-chat-turn-control.ts.
    */
   async cancelTurn(sessionId: string, input: CancelCompanionChatTurnInput = {}): Promise<CancelCompanionChatTurnOutput> {
-    this.assertAvailable(sessionId);
+    this.assertAvailable();
     const session = this.sessions.get(sessionId);
     if (!session) {
       throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'SESSION_NOT_FOUND', status: 404 });
@@ -604,7 +701,7 @@ export class CompanionChatManager {
   /**
    * Permanently delete a session (see CHANGELOG 1.0.0: `delete` is now a genuine removal,
    * distinct from `closeSession` above). Aborts any in-flight turn, removes
-   * the on-disk record file, and drops the in-memory entry, reusing
+   * the on-disk files, and drops the in-memory entry, reusing
    * {@link _hardRemove}, the SAME primitive the GC 'delete-persistent' sweep
    * action uses, so there is exactly one removal code path.
    *
@@ -615,7 +712,7 @@ export class CompanionChatManager {
    * `{ code: 'SESSION_NOT_FOUND', status: 404 }`, delete is not a 200-noop.
    */
   async deleteSession(sessionId: string): Promise<{ readonly sessionId: string; readonly deleted: true }> {
-    this.assertAvailable(sessionId);
+    this.assertAvailable();
     const session = this.sessions.get(sessionId);
     if (!session) {
       throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'SESSION_NOT_FOUND', status: 404 });
@@ -694,14 +791,7 @@ export class CompanionChatManager {
       readonly onEnqueued?: ((activeTurn: ActiveCompanionTurn | null) => void) | undefined;
     } = {},
   ): Promise<string> {
-    this.assertAvailable(sessionId);
-    const session = this.sessions.get(sessionId);
-    if (!session) {
-      throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'SESSION_NOT_FOUND', status: 404 });
-    }
-    if (session.meta.status === 'closed') {
-      throw Object.assign(new Error('Session is closed'), { code: EngineErrorCodes.SESSION_CLOSED, status: 409 });
-    }
+    const session = this._requireOpenSession(sessionId);
 
     // A re-sent request (the first answer never arrived) is answered with the
     // first message, before it can count against the rate limit or run again.
@@ -711,7 +801,6 @@ export class CompanionChatManager {
     // Rate-limit check (throws GoodVibesError on violation)
     this.rateLimiter?.check(sessionId, clientId);
 
-    if (session.routingUpdatePending) throw Object.assign(new Error('Wait for this chat’s model or effort change to finish.'), { code: 'CHAT_ROUTE_BUSY', status: 409 });
     this.assertEffortPublication(session.meta.reasoningEffort);
     const route = this.captureTurnRoute(session.meta);
     const attachments = resolveAttachments(options.attachments ?? [], this.artifactStore);
@@ -720,7 +809,6 @@ export class CompanionChatManager {
     }
 
     const messageId = randomUUID();
-    const now = Date.now();
 
     // Provider-ready content is built at post time but committed to the
     // conversation only when the turn STARTS, committing now would leak a
@@ -732,9 +820,12 @@ export class CompanionChatManager {
     this.activeWork.add(preparation);
     try { providerContent = await preparation; }
     finally { session.preparingTurns--; this.activeWork.delete(preparation); }
-    if (this.disposed || this.sessions.get(sessionId) !== session || session.meta.status !== 'active') {
-      throw Object.assign(new Error('The original chat ended before its message was prepared.'), { code: EngineErrorCodes.SESSION_CLOSED, status: 409 });
-    }
+    if (this.disposed) throw this.serviceStopping();
+    if (this.sessions.get(sessionId) !== session || session.meta.status !== 'active') throw this.chatClosed('The chat was closed while this message was being prepared.');
+
+    // A duplicate that was still being prepared when the first one landed.
+    const acceptedWhilePreparing = options.clientMessageId === undefined ? undefined : session.clientMessageIds?.get(options.clientMessageId);
+    if (acceptedWhilePreparing !== undefined) return acceptedWhilePreparing;
 
     // A send that lands while another turn is running QUEUES (visible in the
     // transcript immediately, marked 'queued', answered after the current
@@ -742,19 +833,9 @@ export class CompanionChatManager {
     // conversation. A steer jumps the queue instead (see steerMessage). Decided
     // here, after the preparation await, because a turn that started during it
     // is the one this message waits behind.
-    // A duplicate that was still being prepared when the first one landed.
-    const acceptedWhilePreparing = options.clientMessageId === undefined ? undefined : session.clientMessageIds?.get(options.clientMessageId);
-    if (acceptedWhilePreparing !== undefined) return acceptedWhilePreparing;
-    if (options.clientMessageId !== undefined) {
-      const accepted = (session.clientMessageIds ??= new Map());
-      accepted.set(options.clientMessageId, messageId);
-      if (accepted.size > MAX_REMEMBERED_CLIENT_MESSAGE_IDS) {
-        const oldest = accepted.keys().next().value;
-        if (oldest !== undefined) accepted.delete(oldest);
-      }
-    }
     const queuedBehindActiveTurn = session.activeTurn != null && options.steer !== true;
-    const userMsg: CompanionChatMessage = {
+    const now = Date.now();
+    const userMsg = this.normalizeMessage({
       id: messageId,
       sessionId,
       role: 'user',
@@ -763,15 +844,24 @@ export class CompanionChatManager {
       ...(options.metadata !== undefined ? { metadata: options.metadata } : {}),
       createdAt: now,
       ...(queuedBehindActiveTurn ? { deliveryState: 'queued' as const } : {}),
-    };
-    session.messages.push(this.normalizeMessage(userMsg));
-    session.lastActivityAt = now;
-    this._updateMeta(session, {
-      messageCount: session.messages.length,
-      updatedAt: now,
     });
+    const messages = this.transcript(session);
+    const meta: CompanionChatSession = { ...session.meta, messageCount: messages.length + 1, updatedAt: now };
+    // Saved before it is accepted: a message whose save failed is refused, and
+    // nothing else about the chat changes.
+    this.saveForRequest(session, [userMsg], meta);
+    messages.push(userMsg);
+    session.meta = meta;
+    session.lastActivityAt = now;
 
-    this._persist(sessionId);
+    if (options.clientMessageId !== undefined) {
+      const accepted = (session.clientMessageIds ??= new Map());
+      accepted.set(options.clientMessageId, messageId);
+      if (accepted.size > MAX_REMEMBERED_CLIENT_MESSAGE_IDS) {
+        const oldest = accepted.keys().next().value;
+        if (oldest !== undefined) accepted.delete(oldest);
+      }
+    }
 
     if (options.pendingReply) {
       this.pendingReplies.set(messageId, options.pendingReply);
@@ -805,17 +895,18 @@ export class CompanionChatManager {
     if (this.gcTimer) { clearInterval(this.gcTimer); this.gcTimer = null; }
     for (const session of this.sessions.values()) {
       session.abortController.abort();
-      const hadQueued = session.messages.some((message) => message.deliveryState === 'queued');
       this._abandonQueuedTurns(session, 'The companion chat service shut down before this queued message was answered.');
-      if (hadQueued) this._persist(session.meta.id);
     }
     void (async () => {
       while (this.activeWork.size) await Promise.allSettled([...this.activeWork]);
-      while (this._pendingSaves.size) await Promise.allSettled([...this._pendingSaves.values()]);
       await this._brokerSync.flush();
-      const failures = [...this.saveFailures.values()];
+      // One last attempt for changes whose save failed earlier; what still fails is reported.
+      const owes = (session: InternalSession): boolean => Boolean(session.unsaved?.size || session.metaUnsaved);
+      for (const session of this.sessions.values()) if (owes(session)) this.saveInBackground(session, [], false);
+      const stillUnsaved = [...this.sessions.values()].filter(owes).length;
+      try { await this.persistence?.flush(); } finally { this.persistence?.close(); }
       this.sessions.clear();
-      if (failures.length) throw new AggregateError(failures, 'Companion chat persistence did not complete');
+      if (stillUnsaved) throw new Error(`Companion chat changes were not saved for ${stillUnsaved} chat(s)`);
     })().then(completion.resolve, completion.reject);
     return this.closing;
   }
@@ -892,31 +983,49 @@ export class CompanionChatManager {
     if (this.disposed || session.activeTurn || session.meta.status === 'closed') return;
     const next = session.pendingTurns?.shift();
     if (!next) return;
-    const idx = session.messages.findIndex((m) => m.id === next.userMessageId);
-    const queuedMsg = idx >= 0 ? session.messages[idx] : undefined;
+    const messages = this.transcript(session);
+    const idx = messages.findIndex((m) => m.id === next.userMessageId);
+    const queuedMsg = idx >= 0 ? messages[idx] : undefined;
     if (queuedMsg?.deliveryState === 'queued') {
-      const { deliveryState: _cleared, ...delivered } = queuedMsg;
-      session.messages[idx] = this.normalizeMessage(delivered);
-      this._persist(session.meta.id);
+      const { deliveryState: _cleared, ...rest } = queuedMsg;
+      const delivered = this.normalizeMessage(rest);
+      messages[idx] = delivered;
+      this.saveInBackground(session, [delivered], false);
     }
-    // The companion/webui turn boundary: this manager runs its own turn loop,
-    // so the one in Orchestrator.runTurn never reached it. See turn-boundary.ts.
-    startTurnForOwnerInput({ ownerDirect: next.ownerDirect === true });
+    this.launchTurn(session, next.ownerDirect === true, () => this._runTurn(session, next.userMessageId, next.onTurnEvent, next.route, async () => {
+      const conversation = await this.ensureConversation(session, next.userMessageId);
+      conversation.addUserMessage(next.providerContent);
+      return conversation;
+    }));
+  }
 
-    // Deferred from post time (see _postMessageInternal).
-    session.conversation.addUserMessage(next.providerContent);
-    this.ownTurn(this._runTurn(session, next.userMessageId, next.onTurnEvent, next.route), (error: unknown) => {
-      logger.warn('[companion-chat] turn execution failed', {
-        sessionId: session.meta.id,
-        messageId: next.userMessageId,
-        error: summarizeError(error),
-      });
+  /**
+   * Start a turn in the chat's own untrusted-content scope. The scope is what
+   * keeps the owner's message here from ending another session's exposure
+   * window, and what this chat's tools read from counting against another
+   * session's sends. Cost: one AsyncLocalStorage.run per turn.
+   */
+  private launchTurn(session: InternalSession, ownerDirect: boolean, run: () => Promise<void>): void {
+    const sessionId = session.meta.id;
+    const work = withUntrustedContentScope(companionChatContentScope(sessionId), () => {
+      // The companion/webui turn boundary: this manager runs its own turn loop,
+      // so the one in Orchestrator.runTurn never reached it. See turn-boundary.ts.
+      startTurnForOwnerInput({ ownerDirect });
+      return run();
+    });
+    this.activeWork.add(work);
+    void work.then(() => { this.activeWork.delete(work); }, (error: unknown) => {
+      this.activeWork.delete(work);
+      logger.warn('[companion-chat] turn execution failed', { sessionId, error: summarizeError(error) });
     });
   }
 
-  private ownTurn(work: Promise<void>, failed: (error: unknown) => void): void {
-    this.activeWork.add(work);
-    void work.then(() => { this.activeWork.delete(work); }, error => { this.activeWork.delete(work); failed(error); });
+  /** The chat's model-facing history, rebuilt from the transcript when it is not in memory. */
+  private async ensureConversation(session: InternalSession, answering: string): Promise<ConversationManager> {
+    if (session.conversation) return session.conversation;
+    const rebuilt = await rebuildConversation(this.transcript(session), answering, this.artifactStore);
+    session.conversation ??= rebuilt;
+    return session.conversation;
   }
 
   private captureTurnRoute(meta: CompanionChatSession): QueuedCompanionTurn['route'] {
@@ -934,13 +1043,31 @@ export class CompanionChatManager {
       ...(effort === undefined ? {} : { reasoningEffort: effort }) });
   }
 
+  private markTurn(session: InternalSession, userMessageId: string, phase: 'started' | 'ended'): void {
+    if (!this.persistence) return;
+    try {
+      this.persistence.markTurn(session.meta.id, { userMessageId, phase, at: Date.now() });
+    } catch (error) {
+      logger.warn('[companion-chat] recording a turn boundary failed', { sessionId: session.meta.id, error: summarizeError(error) });
+    }
+  }
+
+  /** Add a reply the turn produced to the transcript and save it. */
+  private recordReply(session: InternalSession, message: CompanionChatMessage): void {
+    const owned = this.normalizeMessage(message);
+    this.transcript(session).push(owned);
+    session.lastActivityAt = owned.createdAt;
+    session.meta = { ...session.meta, messageCount: this.transcript(session).length, updatedAt: owned.createdAt };
+    this.saveInBackground(session, [owned], true);
+  }
+
   private async _runTurn(
     session: InternalSession,
     userMessageId: string,
-    onTurnEvent?: (event: CompanionChatTurnEvent) => void,
-    route = this.captureTurnRoute(session.meta),
-    /** Runs inside the turn, after it owns the active slot and before the first provider round. */
-    prepareConversation?: () => Promise<void>,
+    onTurnEvent: ((event: CompanionChatTurnEvent) => void) | undefined,
+    route: QueuedCompanionTurn['route'],
+    /** Runs inside the turn, after it owns the active slot: brings the history to the point the turn answers. */
+    prepareConversation: () => Promise<ConversationManager>,
   ): Promise<void> {
     const turnId = randomUUID();
     const sessionId = session.meta.id;
@@ -975,7 +1102,7 @@ export class CompanionChatManager {
     };
 
     // Build user-message envelope for turn.started
-    const userMsg = session.messages.find((m) => m.id === userMessageId);
+    const userMsg = this.transcript(session).find((m) => m.id === userMessageId);
     const startEnvelope: ConversationMessageEnvelope = {
       sessionId,
       messageId: userMessageId,
@@ -987,10 +1114,11 @@ export class CompanionChatManager {
 
     let assistantContent = '';
     // The tail not yet committed to the conversation history (completed tool
-    // rounds commit as they finish), what a cancel hands to the model-facing
-    // history so later turns can reason about the interruption.
+    // rounds commit as they finish), what a cancel or failure hands to the
+    // model-facing history so later turns can reason about the interruption.
     let uncommittedContent = '';
     const assistantMessageId = randomUUID();
+    let writer: TurnHistoryWriter | null = null;
 
     const finalizeCancelled = (): void => finalizeCancelledTurn({
       sessionId,
@@ -999,16 +1127,14 @@ export class CompanionChatManager {
       userMessageId,
       getAssistantContent: () => assistantContent,
       getUncommittedContent: () => uncommittedContent,
-      commitPartialToHistory: (content) => { session.conversation.addAssistantMessage(content); },
+      commitPartialToHistory: (content) => { writer?.addAssistantMessage(content); },
       openToolCalls,
       wasCancelRequested: () => scope.activeTurn.cancelRequested,
       isShutdown: () => this.disposed,
       publish,
       persistPartial: (message) => {
-        session.messages.push(this.normalizeMessage(message));
-        session.lastActivityAt = message.createdAt;
-        this._updateMeta(session, { messageCount: session.messages.length, updatedAt: message.createdAt });
-        this._persist(sessionId);
+        const history = writer?.entriesToSave();
+        this.recordReply(session, { ...message, ...(history ? { modelHistory: history } : {}) });
       },
       resolveReply: (extra) => this.resolvePendingReply(userMessageId, { messageId: userMessageId, ...extra, error: 'Turn cancelled' }),
       settle: scope.settle,
@@ -1019,16 +1145,19 @@ export class CompanionChatManager {
     try {
       // Inside the try so a throwing publisher still releases the slot and drains the queue.
       session.activeTurn = scope.activeTurn;
+      this.markTurn(session, userMessageId, 'started');
       publish({ type: 'turn.started', sessionId, messageId: userMessageId, turnId, envelope: startEnvelope });
       const toolDefinitions = this.toolRegistry?.getToolDefinitions() ?? [];
-      if (prepareConversation) await prepareConversation();
+      const conversation = await prepareConversation();
+      const history = new TurnHistoryWriter(conversation);
+      writer = history;
 
       const toolRegistry = this.toolRegistry;
       // One request of the turn. The closing request after the round limit asks
       // for an answer without tools, under the finalizer prompt.
       const request = async ({ tools, signal, onDelta }: TurnRequest): Promise<TurnModelResponse> => {
         uncommittedContent = '';
-        const stream = this.provider.chatStream([...session.conversation.getMessagesForLLM()], {
+        const stream = this.provider.chatStream([...conversation.getMessagesForLLM()], {
           routingContext: { sessionId, turnId, ...(tools && userMsg ? { prompt: userMsg.content } : {}) },
           systemPrompt: appendGoodVibesRuntimeAwarenessPrompt(tools
             ? route.systemPrompt
@@ -1093,10 +1222,13 @@ export class CompanionChatManager {
         request,
         conversation: {
           addAssistantMessage: (content, options) => {
-            session.conversation.addAssistantMessage(content, options);
+            history.addAssistantMessage(content, options);
+            if (!options?.toolCalls?.length) uncommittedContent = '';
+          },
+          addToolResults: (results) => {
+            history.addToolResults(results);
             uncommittedContent = '';
           },
-          addToolResults: (results) => session.conversation.addToolResults(results),
         },
         ...(toolRegistry ? {
           executeTools: (calls: ToolCall[], { signal, onSettled }: { signal: AbortSignal; onSettled(result: ToolResult): void }) => executeCompanionToolCalls(
@@ -1134,7 +1266,8 @@ export class CompanionChatManager {
       }
 
       const now = Date.now();
-      const assistantMsg: CompanionChatMessage = {
+      const modelHistory = history.entriesToSave();
+      this.recordReply(session, {
         id: assistantMessageId,
         sessionId,
         role: 'assistant',
@@ -1143,13 +1276,8 @@ export class CompanionChatManager {
         attachments: [],
         createdAt: now,
         inReplyTo: userMessageId,
-      };
-      session.messages.push(this.normalizeMessage(assistantMsg));
-      session.lastActivityAt = now;
-      this._updateMeta(session, { messageCount: session.messages.length, updatedAt: now });
-
-      // Persist assistant reply
-      this._persist(sessionId);
+        ...(modelHistory ? { modelHistory } : {}),
+      });
 
       const completedEnvelope: ConversationMessageEnvelope = {
         sessionId,
@@ -1163,10 +1291,10 @@ export class CompanionChatManager {
       this.resolvePendingReply(userMessageId, { messageId: userMessageId, assistantMessageId, response: assistantContent });
     } catch (err: unknown) {
       if (!abortSignal.aborted) {
-        const errorMessage = err instanceof Error ? err.message : String(err);
-        // The waiter is answered first: a publisher that threw once may throw again.
-        this.resolvePendingReply(userMessageId, { messageId: userMessageId, error: errorMessage });
-        publish({ type: 'turn.error', sessionId, turnId, error: errorMessage });
+        this.recordFailedTurn(session, {
+          error: err, turnId, userMessageId, assistantMessageId, writer,
+          assistantContent, uncommittedContent, publish,
+        });
       } else {
         finalizeCancelled();
       }
@@ -1176,6 +1304,7 @@ export class CompanionChatManager {
       // and settle for any exit path that did not run finalizeCancelled
       // (resolve is idempotent, a second call is a no-op).
       if (session.activeTurn === scope.activeTurn) session.activeTurn = null;
+      this.markTurn(session, userMessageId, 'ended');
       scope.detach();
       scope.settle({ partialPersisted: false });
       // Drain: a queued send (or a steer that jumped the queue) starts now.
@@ -1183,16 +1312,69 @@ export class CompanionChatManager {
     }
   }
 
+  /**
+   * The error exit of a turn, recorded like a cancel: the partial text is
+   * saved as a failed reply with the reason, the model-facing history gets the
+   * partial and a failure note (so the next send is not two questions in a
+   * row), and the waiter and every stream are told.
+   */
+  private recordFailedTurn(session: InternalSession, turn: {
+    readonly error: unknown;
+    readonly turnId: string;
+    readonly userMessageId: string;
+    readonly assistantMessageId: string;
+    readonly writer: TurnHistoryWriter | null;
+    readonly assistantContent: string;
+    readonly uncommittedContent: string;
+    readonly publish: (event: CompanionChatTurnEvent) => void;
+  }): void {
+    const sessionId = session.meta.id;
+    const reason = turn.error instanceof Error ? turn.error.message : String(turn.error);
+    if (turn.writer) {
+      turn.writer.dropHeld();
+      turn.writer.addAssistantMessage(turn.uncommittedContent + turnFailureNote(reason));
+    } else {
+      // The turn failed before its history was ready; the next turn rebuilds it from the transcript.
+      session.conversation = null;
+    }
+    const modelHistory = turn.writer?.entriesToSave();
+    try {
+      this.recordReply(session, {
+        id: turn.assistantMessageId,
+        sessionId,
+        role: 'assistant',
+        content: turn.assistantContent,
+        attachments: [],
+        createdAt: Date.now(),
+        inReplyTo: turn.userMessageId,
+        deliveryState: 'failed',
+        failureReason: reason,
+        ...(modelHistory ? { modelHistory } : {}),
+      });
+    } catch (error) {
+      logger.warn('[companion-chat] recording a failed reply failed', { sessionId, error: summarizeError(error) });
+    }
+    // The waiter is answered first: a publisher that threw once may throw again.
+    this.resolvePendingReply(turn.userMessageId, {
+      messageId: turn.userMessageId,
+      assistantMessageId: turn.assistantMessageId,
+      ...(turn.assistantContent ? { response: turn.assistantContent } : {}),
+      error: reason,
+    });
+    turn.publish({ type: 'turn.error', sessionId, turnId: turn.turnId, error: reason, assistantMessageId: turn.assistantMessageId });
+  }
+
   // ---------------------------------------------------------------------------
   // Regenerate + edit-and-branch (honest lineage, see companion-chat-branching.ts)
   // ---------------------------------------------------------------------------
 
   /**
-   * Regenerate an assistant response: supersede the target assistant message (an
-   * explicit id, or the latest response) and everything after it, retained as
-   * history, never deleted, then re-run a fresh turn from the preceding user
-   * message. Refuses a closed (409 SESSION_CLOSED) or unknown (404
-   * SESSION_NOT_FOUND) session; honest code when there is nothing to regenerate.
+   * Regenerate: answer a user message again. Without an id the latest user
+   * message is answered again and whatever followed it is superseded (so a
+   * regenerate whose turn failed is retried by pressing it again); with an
+   * assistant id, that reply and everything after it are superseded. Nothing
+   * is deleted. Refuses a closed (409 SESSION_CLOSED) or unknown (404
+   * SESSION_NOT_FOUND) session; honest code when there is nothing to answer.
    */
   regenerateMessage(
     sessionId: string,
@@ -1204,10 +1386,16 @@ export class CompanionChatManager {
     this.rateLimiter?.check(sessionId, options.clientId ?? '');
     const route = this.captureTurnRoute(session.meta);
     const now = Date.now();
-    const plan = planRegenerate(session, input.messageId, now);
-    this._commitBranchAndRun(session, sessionId, plan.anchorUserMessageId, now, route, options.ownerDirect === true);
-    const { regeneratedFrom, supersededMessageIds } = plan;
-    return { sessionId, regeneratedFrom, supersededMessageIds, turnStarted: true };
+    const branch = { messages: [...this.transcript(session)], lastActivityAt: session.lastActivityAt };
+    const plan = planRegenerate(branch, input.messageId, now);
+    this._commitBranchAndRun(session, branch, plan.anchorUserMessageId, now, route, options.ownerDirect === true);
+    const { regeneratedFrom, supersededMessageIds, anchorUserMessageId } = plan;
+    return {
+      sessionId,
+      regeneratedFrom: regeneratedFrom ?? anchorUserMessageId,
+      supersededMessageIds,
+      turnStarted: true,
+    };
   }
 
   /**
@@ -1226,8 +1414,9 @@ export class CompanionChatManager {
     this.rateLimiter?.check(sessionId, options.clientId ?? '');
     const route = this.captureTurnRoute(session.meta);
     const now = Date.now();
-    const plan = applyEditBranch(session, sessionId, input, this.artifactStore, now);
-    this._commitBranchAndRun(session, sessionId, plan.newMessageId, now, route, options.ownerDirect === true);
+    const branch = { messages: [...this.transcript(session)], lastActivityAt: session.lastActivityAt };
+    const plan = applyEditBranch(branch, sessionId, input, this.artifactStore, now);
+    this._commitBranchAndRun(session, branch, plan.newMessageId, now, route, options.ownerDirect === true);
     const { editedFrom, newMessageId, supersededMessageIds } = plan;
     return { sessionId, editedFrom, messageId: newMessageId, supersededMessageIds, turnStarted: true };
   }
@@ -1239,7 +1428,7 @@ export class CompanionChatManager {
    */
   private _assertNoTurnInFlight(session: InternalSession, action: string): void {
     const queued = session.pendingTurns?.length ?? 0;
-    if (!session.activeTurn && !session.preparingTurns && !queued && !session.routingUpdatePending) return;
+    if (!session.activeTurn && !session.preparingTurns && !queued) return;
     const state = session.activeTurn ? 'is still replying' : queued ? `has ${String(queued)} queued message${queued === 1 ? '' : 's'} waiting` : 'is still preparing a message';
     throw Object.assign(
       new Error(`This chat ${state}, so it cannot ${action} now. Stop the current reply (or wait for it and any queued messages to finish), then try again.`),
@@ -1249,54 +1438,46 @@ export class CompanionChatManager {
 
   /** Look up an active (open) session or throw the closed/not-found machine codes. */
   private _requireOpenSession(sessionId: string): InternalSession {
-    this.assertAvailable(sessionId);
+    this.assertAvailable();
     const session = this.sessions.get(sessionId);
     if (!session) {
       throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'SESSION_NOT_FOUND', status: 404 });
     }
-    if (session.meta.status === 'closed') {
-      throw Object.assign(new Error('Session is closed'), { code: EngineErrorCodes.SESSION_CLOSED, status: 409 });
-    }
+    if (session.meta.status === 'closed') throw this.chatClosed('This chat is closed.');
     return session;
   }
 
   /**
-   * Shared tail of regenerate/edit: rebuild the LLM-facing conversation from the
-   * ACTIVE (non-superseded) chain (mirroring init()'s replay so the next turn
-   * sees only the live branch), persist, and fire the new turn.
+   * Shared tail of regenerate/edit: save the branch (superseded marks and any
+   * new message) before it takes effect, drop the model-facing history so the
+   * turn rebuilds it from the active chain, and fire the new turn.
    */
   private _commitBranchAndRun(
     session: InternalSession,
-    sessionId: string,
+    branch: { messages: CompanionChatMessage[]; lastActivityAt: number },
     anchorUserMessageId: string,
     now: number,
     route: QueuedCompanionTurn['route'],
     ownerDirect: boolean,
   ): void {
-    session.messages = session.messages.map(message => this.normalizeMessage(message));
-    const conversation = new ConversationManager();
-    let anchor: CompanionChatMessage | undefined;
-    for (const msg of activeMessages(session.messages)) {
-      if (msg.id === anchorUserMessageId) { anchor = msg; continue; }
-      if (msg.role === 'user') conversation.addUserMessage(buildReplayUserContent(msg));
-      else conversation.addAssistantMessage(msg.content);
-    }
-    session.conversation = conversation;
-    this._updateMeta(session, { messageCount: session.messages.length, updatedAt: now });
-    this._persist(sessionId);
-    // Same funnel as a fresh send: an owner-driven edit restarts the
-    // untrusted-content window; a caller that cannot attest ownership does not.
-    startTurnForOwnerInput({ ownerDirect });
+    const before = new Set(this.transcript(session));
+    const messages = branch.messages.map(message => this.normalizeMessage(message));
+    const changed = messages.filter((message) => !before.has(message));
+    const meta: CompanionChatSession = { ...session.meta, messageCount: messages.length, updatedAt: now };
+    this.saveForRequest(session, changed, meta);
+    session.messages = messages;
+    session.meta = meta;
+    session.lastActivityAt = branch.lastActivityAt;
+    session.conversation = null;
+    const anchor = messages.find((message) => message.id === anchorUserMessageId);
     // The message the turn answers goes to the model the way a fresh send
-    // does, with its files read in, not as the text-only summary used to
-    // rebuild older history. Built inside the turn so its read is owned by it.
-    const prepareAnchor = async (): Promise<void> => {
-      if (!anchor) return;
-      conversation.addUserMessage(await buildProviderUserContent(anchor.content, anchor.attachments ?? [], this.artifactStore));
-    };
-    this.ownTurn(this._runTurn(session, anchorUserMessageId, undefined, route, prepareAnchor), (error: unknown) => {
-      logger.warn('[companion-chat] branch turn execution failed', { sessionId, error: summarizeError(error) });
-    });
+    // does, with its files read in. An owner-driven edit restarts the
+    // untrusted-content window; a caller that cannot attest ownership does not.
+    this.launchTurn(session, ownerDirect, () => this._runTurn(session, anchorUserMessageId, undefined, route, async () => {
+      const conversation = await this.ensureConversation(session, anchorUserMessageId);
+      if (anchor) conversation.addUserMessage(await buildProviderUserContent(anchor.content, anchor.attachments ?? [], this.artifactStore));
+      return conversation;
+    }));
   }
 
   // ---------------------------------------------------------------------------
@@ -1305,47 +1486,41 @@ export class CompanionChatManager {
 
   /**
    * Periodic GC sweep. Deletion authority is SPLIT (charter: closed sessions are
-   * HISTORY): close-idle closes an idle active session; evict-memory drops a
-   * long-closed session's replay state (transcript, meta and on-disk copy kept);
-   * delete-persistent removes the file ONLY under an explicit finite retention
+   * HISTORY): evict-memory drops an idle or long-closed chat's transcript and
+   * history from memory (summary and files kept; both come back on demand);
+   * delete-persistent removes the files ONLY under an explicit finite retention
    * window (default retains indefinitely, see {@link planCompanionSweep}).
    */
   _gcSweep(): void {
     const now = Date.now();
+    const closedRetentionMs = this.closedRetention();
     for (const [id, session] of this.sessions) {
       const action = planCompanionSweep(
         {
           status: session.meta.status,
           closedAt: session.meta.closedAt,
           lastActivityAt: session.lastActivityAt,
-          hasReplayInMemory: !session.replayEvicted,
-          isEmpty: session.messages.length === 0,
+          hasReplayInMemory: session.conversation !== null || (this.persistence !== null && session.messages !== null),
+          isEmpty: session.meta.messageCount === 0,
         },
         {
           now,
           idleActiveMs: this.idleActiveMs,
           idleEmptyMs: this.idleEmptyMs,
           closedMemoryGraceMs: this.closedMemoryGraceMs,
-          closedRetentionMs: this.closedRetentionMs,
+          closedRetentionMs,
         },
       );
 
       switch (action.kind) {
-        case 'close-idle':
-          // A long reply or queued work is activity, however long ago the last message landed.
-          if (session.activeTurn || session.preparingTurns || session.pendingTurns?.length) break;
-          session.abortController.abort();
-          this._abandonQueuedTurns(session, 'This chat was closed for inactivity before this queued message was answered.');
-          this._updateMeta(session, { status: 'closed', closedAt: now, updatedAt: now });
-          this._persist(id);
-          this._brokerSync.track(id, () => this._brokerSync.closeSession(id));
-          break;
         case 'evict-memory':
-          // Free the replay state only. The transcript stays: the routes serve
-          // it from memory, and a later save writes it, so dropping it would
-          // show an empty chat and could replace the saved file with nothing.
-          session.conversation = new ConversationManager();
-          session.replayEvicted = true;
+          // A long reply, queued work or a change not yet saved keeps the chat in memory.
+          if (session.activeTurn || session.preparingTurns || session.pendingTurns?.length || session.unsaved?.size || session.metaUnsaved) break;
+          session.conversation = null;
+          if (this.persistence) {
+            session.messages = null;
+            this.persistence.release(id);
+          }
           break;
         case 'delete-persistent':
           void this._hardRemove(id).catch((error: unknown) => {
@@ -1359,15 +1534,6 @@ export class CompanionChatManager {
           break;
       }
     }
-  }
-
-  private _updateMeta(
-    session: InternalSession,
-    patch: Partial<MutableSessionMeta>,
-  ): CompanionChatSession {
-    const updated: CompanionChatSession = { ...session.meta, ...patch };
-    (session as { meta: CompanionChatSession }).meta = updated;
-    return updated;
   }
 
   // ---------------------------------------------------------------------------
@@ -1385,19 +1551,14 @@ export class CompanionChatManager {
   }
 
   /**
-   * Hard-remove a session's persisted file and in-memory record. The ONE
+   * Hard-remove a session's persisted files and in-memory record. The ONE
    * removal code path, shared by {@link deleteSession} and the GC
-   * 'delete-persistent' action. Never fork this. Order matters:
-   * drop the map entry, drain any in-flight {@link _persist} save for this
-   * id, THEN unlink, else a save mid-write from {@link closeSession} can
-   * resurrect the file post-unlink.
+   * 'delete-persistent' action. Never fork this.
    */
   private async _hardRemove(sessionId: string): Promise<void> {
     const session = this.sessions.get(sessionId);
     this.sessions.delete(sessionId);
     try {
-      const pendingSave = this._pendingSaves.get(sessionId);
-      if (pendingSave) await pendingSave.catch(() => {});
       await this.persistence?.delete(sessionId);
     } catch (error) {
       // The file is still on disk, so the chat must stay known: otherwise it is
@@ -1408,11 +1569,19 @@ export class CompanionChatManager {
   }
 
   /**
-   * Schedule a persistence save for the given session.
-   * Saves are serialized per-session: each new save waits for the prior one to
-   * complete before writing. The save always reads the CURRENT session state,
-   * so rapid create→update→close sequences correctly persist the final state.
+   * Resolves once everything this chat saved is on disk. A change still owed
+   * from an earlier failed save is written first; when that fails again the
+   * call rejects with the refusal that says so.
    */
+  async flushSession(sessionId: string): Promise<void> {
+    const session = this.sessions.get(sessionId);
+    if (session && (session.unsaved?.size || session.metaUnsaved)) {
+      this.saveInBackground(session, [], false);
+      if (session.unsaved?.size || session.metaUnsaved) throw this.saveFailed(session.saveError);
+    }
+    await this.persistence?.flush();
+  }
+
   private assertEffortPublication(effort: string | null | undefined): void {
     if (effort === undefined) return;
     if (effort !== null && readReasoningEffortLevel(effort) === undefined) {
@@ -1425,103 +1594,99 @@ export class CompanionChatManager {
     } catch (error) { drainOwned(error); throw error instanceof Error ? error : new Error('Session effort publication is unavailable'); }
   }
 
-  async flushSession(sessionId: string): Promise<void> {
+  // ---------------------------------------------------------------------------
+  // Saving. A change a request makes is saved before it takes effect, and a
+  // failed save refuses that request only. A change a turn makes (a reply, a
+  // delivery state) is already in memory when it is saved; if that save fails
+  // the change is kept and written by the chat's next save. Each save is one
+  // appended line per message plus, when the summary changed, one small
+  // document: its cost does not grow with the chat.
+  // ---------------------------------------------------------------------------
+
+  /** Write the chat's changes now, or refuse the request that made them. */
+  private saveForRequest(session: InternalSession, changed: readonly CompanionChatMessage[], meta: CompanionChatSession): void {
+    if (!this.persistence) return;
     try {
-      await this._pendingSaves.get(sessionId);
-      if (this.saveFailures.has(sessionId)) throw this.storageUnavailable(sessionId);
-    } catch { throw this.storageUnavailable(sessionId); }
-  }
-
-  private storageUnavailable(sessionId?: string, cause?: unknown): Error & { readonly code: string; readonly status: number } {
-    // A failed save is not retried by the change that follows it: a later snapshot could land out of order. The chat refuses changes until recoverFailedSaves() writes its current state in one piece.
-    const failure = sessionId !== undefined && this.saveFailures.has(sessionId) ? this.saveFailures.get(sessionId) : cause;
-    const held = failure instanceof AtomicWriteDurabilityError && failure.phase === 'published-indeterminate';
-    const message = failure === undefined
-      ? 'The companion chat service is shutting down, or this chat changed while the request was running. Retry the request; if the service is shutting down, retry after it restarts.'
-      : held
-        ? `Saving this chat may have partly succeeded (${summarizeError(failure)}), so the daemon cannot tell what is on disk and the chat accepts no more changes. Restart the daemon: it reloads the saved chat, and the chat opens again.`
-        : `Saving this chat failed (${summarizeError(failure)}), so it accepts no more changes for now. The daemon retries saving it on its own and opens the chat again once that works; check that the companion chat storage directory is writable and has space, then try again in a minute.`;
-    return Object.assign(new Error(message), { code: 'CHAT_PERSISTENCE_UNAVAILABLE', status: 503 });
-  }
-
-  private assertAvailable(sessionId?: string): void {
-    if (this.disposed || sessionId !== undefined && this.saveFailures.has(sessionId)) {
-      throw this.storageUnavailable(sessionId);
+      this.write(session, changed, meta);
+    } catch (error) {
+      logger.warn('[companion-chat] saving a chat change failed; the request was refused', { sessionId: meta.id, error: summarizeError(error) });
+      throw this.saveFailed(error);
     }
   }
 
-  private queueSave<T>(sessionId: string, save: () => T | Promise<T>): Promise<T> {
-    const prior = this._pendingSaves.get(sessionId) ?? Promise.resolve();
-    const operation = prior.then(() => { this.assertAvailableForSave(sessionId); return save(); });
-    const tracked = operation.then(() => undefined);
-    this._pendingSaves.set(sessionId, tracked);
-    const done = () => { if (this._pendingSaves.get(sessionId) === tracked) this._pendingSaves.delete(sessionId); };
-    void tracked.then(done, error => {
-      this.saveFailures.set(sessionId, error); done();
-      logger.warn('[companion-chat] session persistence failed', { sessionId, error: summarizeError(error) });
-    });
-    return operation;
-  }
-
-  private assertAvailableForSave(sessionId: string): void {
-    if (this.saveFailures.has(sessionId)) throw this.saveFailures.get(sessionId);
-  }
-
-  /**
-   * Try again to save every chat whose save failed, and reopen the ones that
-   * work.
-   *
-   * Safe against an older snapshot landing over a newer one: a chat with a
-   * recorded failure refuses every change and every queued save, so once its
-   * saves already in flight have settled nothing else can be writing it, and
-   * the snapshot taken here is the latest there is. Run by the periodic sweep.
-   * Returns how many chats were reopened.
-   */
-  async recoverFailedSaves(): Promise<number> {
-    if (!this.persistence || this.disposed) return 0;
-    let reopened = 0;
-    for (const sessionId of [...this.saveFailures.keys()]) {
-      if (this.recoveringSaves.has(sessionId)) continue;
-      // A write that may already have been published is held for a restart to
-      // reload from disk: what it published is not necessarily this chat's
-      // in-memory state (a refused route change), so rewriting would guess.
-      const failure = this.saveFailures.get(sessionId);
-      if (failure instanceof AtomicWriteDurabilityError && failure.phase === 'published-indeterminate') continue;
-      this.recoveringSaves.add(sessionId);
-      try {
-        await this._pendingSaves.get(sessionId)?.catch(() => undefined);
-        const session = this.sessions.get(sessionId);
-        if (!session) { this.saveFailures.delete(sessionId); continue; }
-        if (this.disposed) return reopened;
-        try {
-          await this.persistence.save({ meta: session.meta, messages: session.messages });
-        } catch (error) {
-          this.saveFailures.set(sessionId, error);
-          logger.debug('[companion-chat] retrying a failed chat save did not work yet', { sessionId, error: summarizeError(error) });
-          continue;
-        }
-        this.saveFailures.delete(sessionId);
-        reopened += 1;
-        logger.info('[companion-chat] a chat whose save had failed saved again and accepts changes', { sessionId });
-        // A turn that was already running while the chat was refused may have
-        // appended since the snapshot above; its own saves were refused.
-        this._persist(sessionId);
-      } finally { this.recoveringSaves.delete(sessionId); }
+  /** Write changes already in memory; a failure is kept for the chat's next save. */
+  private saveInBackground(session: InternalSession, changed: readonly CompanionChatMessage[], metaChanged: boolean): void {
+    if (!this.persistence) return;
+    try {
+      this.write(session, changed, metaChanged || session.metaUnsaved ? session.meta : undefined);
+    } catch (error) {
+      logger.warn('[companion-chat] saving a chat change failed; the next change of this chat writes it', { sessionId: session.meta.id, error: summarizeError(error) });
+      const unsaved = (session.unsaved ??= new Set());
+      for (const message of changed) unsaved.add(message.id);
+      if (metaChanged) session.metaUnsaved = true;
+      session.saveError = error;
     }
-    return reopened;
   }
 
-  private _persist(sessionId: string): void {
-    if (!this.persistence) return;
-    void this.queueSave(sessionId, () => this._doSave(sessionId));
+  private write(session: InternalSession, changed: readonly CompanionChatMessage[], meta: CompanionChatSession | undefined): void {
+    const persistence = this.persistence;
+    if (!persistence) return;
+    const owed = session.unsaved?.size && session.messages
+      ? session.messages.filter((message) => session.unsaved!.has(message.id) && !changed.includes(message))
+      : [];
+    const summary = meta ?? (session.metaUnsaved ? session.meta : undefined);
+    if (summary) {
+      this.assertEffortPublication(summary.reasoningEffort);
+      persistence.writeMeta(summary);
+    }
+    persistence.appendMessages(summary?.id ?? session.meta.id, [...owed, ...changed]);
+    delete session.unsaved;
+    delete session.saveError;
+    session.metaUnsaved = false;
   }
 
-  private async _doSave(sessionId: string): Promise<void> {
-    if (!this.persistence) return;
-    const session = this.sessions.get(sessionId);
-    if (!session) return;
-    this.assertEffortPublication(session.meta.reasoningEffort);
-    await this.persistence.save({ meta: session.meta, messages: session.messages });
+  // ---------------------------------------------------------------------------
+  // Refusals
+  // ---------------------------------------------------------------------------
+
+  private saveFailed(error: unknown): RefusalError {
+    return new RefusalError(refusal({
+      code: 'CHAT_SAVE_FAILED',
+      status: 503,
+      retryAfterMs: 1_000,
+      state: 'this change to the chat was not saved and did not take effect',
+      reason: `Saving the chat failed (${storageFailureName(error)})`,
+      next: [
+        'Send the same request again',
+        'If it keeps failing, check that the companion chat storage directory is writable and has free space',
+      ],
+    }), { cause: error });
+  }
+
+  private serviceStopping(): RefusalError {
+    return new RefusalError(refusal({
+      code: 'SERVICE_STOPPING',
+      status: 503,
+      retryable: true,
+      state: 'the companion chat service is stopping',
+      reason: 'The daemon is shutting down, so the chat accepts no changes',
+      next: ['Send the request again once the daemon has restarted'],
+    }));
+  }
+
+  private chatClosed(reason: string): RefusalError {
+    return new RefusalError(refusal({
+      code: EngineErrorCodes.SESSION_CLOSED,
+      status: 409,
+      retryable: false,
+      state: 'the chat is closed',
+      reason,
+      next: ['Reopen the chat (companion.chat.sessions.reopen), then send again', 'Or start a new chat'],
+    }));
+  }
+
+  private assertAvailable(): void {
+    if (this.disposed) throw this.serviceStopping();
   }
 
   /**
@@ -1529,24 +1694,22 @@ export class CompanionChatManager {
    * service is going away): answer every waiter with an error instead of
    * leaving it pending forever, and move each from `queued` to the terminal
    * `unanswered` in the transcript so nothing keeps showing a message as
-   * waiting for a turn that will never run. The caller persists.
+   * waiting for a turn that will never run.
    */
   private _abandonQueuedTurns(session: InternalSession, reason: string): void {
     for (const entry of session.pendingTurns?.splice(0) ?? []) {
       this.resolvePendingReply(entry.userMessageId, { messageId: entry.userMessageId, error: reason });
     }
-    this._markUnanswered(session);
-  }
-
-  /** Every user message still marked `queued` becomes `unanswered`. True when any changed. */
-  private _markUnanswered(session: InternalSession): boolean {
-    let changed = false;
-    session.messages = session.messages.map((message) => {
-      if (message.role !== 'user' || message.deliveryState !== 'queued') return message;
-      changed = true;
-      return this.normalizeMessage({ ...message, deliveryState: 'unanswered' });
-    });
-    return changed;
+    const messages = session.messages;
+    if (!messages) return;
+    const changed: CompanionChatMessage[] = [];
+    for (const [index, message] of messages.entries()) {
+      if (message.role !== 'user' || message.deliveryState !== 'queued') continue;
+      const unanswered = this.normalizeMessage({ ...message, deliveryState: 'unanswered' });
+      messages[index] = unanswered;
+      changed.push(unanswered);
+    }
+    if (changed.length > 0) this.saveInBackground(session, changed, false);
   }
 
   private resolvePendingReply(messageId: string, result: CompanionChatReplyResult): void {

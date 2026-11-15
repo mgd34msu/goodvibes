@@ -13,7 +13,7 @@
 import { describe, expect, test } from 'bun:test';
 import { waitFor, withTestTimeout } from './_helpers/test-timeout.js';
 import { trackDisposables } from './_helpers/disposables.ts';
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { CompanionChatManager } from '../platform/src/platform/companion/companion-chat-manager.js';
@@ -56,6 +56,12 @@ function makeManager(
     ...(overrides.closedSessionMemoryGraceMs !== undefined ? { closedSessionMemoryGraceMs: overrides.closedSessionMemoryGraceMs } : {}),
     ...(overrides.closedSessionRetentionMs !== undefined ? { closedSessionRetentionMs: overrides.closedSessionRetentionMs } : {}),
   }));
+}
+
+/** A chat saved by an earlier version as one file; start-up converts it. */
+function seedSavedChat(sessionsDir: string, chat: PersistedChatSession): void {
+  mkdirSync(sessionsDir, { recursive: true });
+  writeFileSync(join(sessionsDir, `${chat.meta.id}.json`), JSON.stringify(chat));
 }
 
 function makePersistedSession(id: string): PersistedChatSession {
@@ -217,7 +223,7 @@ describe('closed sessions survive restart and stay listable', () => {
         },
         messages: [],
       };
-      await new CompanionChatPersistence(sessionsDir).save(stale);
+      seedSavedChat(sessionsDir, stale);
 
       const manager = makeManager(sessionsDir); // default retention = indefinite
       await manager.init();
@@ -238,7 +244,7 @@ describe('closed sessions survive restart and stay listable', () => {
     }
   });
 
-  test('memory eviction: an ancient-closed session keeps its transcript, meta and disk copy', async () => {
+  test('memory eviction: an ancient-closed session leaves memory and reads back whole from disk', async () => {
     const sessionsDir = mkdtempSync(join(tmpdir(), 'companion-persist-evict-'));
     try {
       const stale: PersistedChatSession = {
@@ -252,15 +258,14 @@ describe('closed sessions survive restart and stay listable', () => {
           { id: 'm2', sessionId: 'evict-me', role: 'assistant', content: 'yo', attachments: [], createdAt: 3 },
         ],
       };
-      await new CompanionChatPersistence(sessionsDir).save(stale);
+      seedSavedChat(sessionsDir, stale);
 
       const manager = makeManager(sessionsDir, { closedSessionMemoryGraceMs: 5 * 60_000 });
       await manager.init();
       expect(manager.getMessages('evict-me')).toHaveLength(2);
 
-      manager._gcSweep(); // past grace → replay state evicted
-      // The routes serve the transcript from memory, so it stays: an empty list
-      // next to a count of 2 would show a closed chat as erased.
+      manager._gcSweep(); // past grace → transcript and history leave memory
+      // Reading the chat again loads the transcript from disk: never an empty list next to a count of 2.
       expect(manager.getSession('evict-me')?.status).toBe('closed');
       expect(manager.getMessages('evict-me')).toHaveLength(2);
       expect(manager.getSession('evict-me')?.messageCount).toBe(2);
@@ -287,14 +292,14 @@ describe('closed sessions survive restart and stay listable', () => {
         },
         messages: [],
       };
-      await new CompanionChatPersistence(sessionsDir).save(stale);
+      seedSavedChat(sessionsDir, stale);
 
       const manager = makeManager(sessionsDir, { closedSessionRetentionMs: 5 * 60_000 });
       await manager.init();
       expect(manager.getSession('retire-me')).not.toBeNull();
       manager._gcSweep(); // past the finite retention window → delete
-      await manager.flushSession('retire-me');
-      expect(manager.getSession('retire-me')).toBeNull();
+      await waitFor(() => manager.getSession('retire-me') === null);
+      expect(readdirSync(sessionsDir).filter((name) => name.startsWith('retire-me') && !name.endsWith('.migrated'))).toEqual([]);
       manager.dispose();
 
       // Deleted from disk too.
@@ -321,7 +326,6 @@ describe('sessions directory created if missing', () => {
       await manager.init(); // should not throw even if dir doesn't exist
 
       const session = manager.createSession({ title: 'Auto-created dir' });
-      await manager.flushSession(session.id);
 
       // Confirm the session was persisted (directory was auto-created)
       manager.dispose();
@@ -342,16 +346,14 @@ describe('sessions directory created if missing', () => {
 // ---------------------------------------------------------------------------
 
 describe('persistence failures are observable', () => {
-  test('save rejects when the atomic rename target cannot be replaced', async () => {
+  test('a summary save throws when its file cannot be replaced', () => {
     const sessionsDir = mkdtempSync(join(tmpdir(), 'companion-persist-'));
     try {
       const persistence = new CompanionChatPersistence(sessionsDir);
-      mkdirSync(join(sessionsDir, 'blocked.json'));
+      mkdirSync(join(sessionsDir, 'blocked.meta.json'));
 
-      await expect(persistence.save(makePersistedSession('blocked'))).rejects.toMatchObject({
-        code: 'ATOMIC_WRITE_DURABILITY_FAILED', phase: 'before-publication',
-      });
-      expect(existsSync(join(sessionsDir, 'blocked.json'))).toBe(true);
+      expect(() => persistence.writeMeta(makePersistedSession('blocked').meta)).toThrow();
+      expect(existsSync(join(sessionsDir, 'blocked.meta.json'))).toBe(true);
     } finally {
       rmSync(sessionsDir, { recursive: true, force: true });
     }
@@ -373,70 +375,25 @@ describe('persistence failures are observable', () => {
 });
 
 // ---------------------------------------------------------------------------
-// deleteSession never loses a race against closeSession's fire-and-forget
-// persist save (regression). closeSession schedules its save via
-// _persist() without awaiting it, so a caller that immediately follows close
-// with delete (the webui's normal close-then-delete sequence) can have that
-// save's write+rename still in flight when the delete would unlink. Forcing
-// the save to hang on a controllable gate makes the race deterministic:
-// deleteSession must drain the in-flight save BEFORE it unlinks, so the file
-// never gets resurrected after "delete" reports success.
+// Close then delete leaves nothing a restart could reload.
 // ---------------------------------------------------------------------------
 
-describe('deleteSession drains an in-flight close-time save before unlinking', () => {
-  test('a gated close-time save cannot resurrect the file after delete, even across a simulated restart', async () => {
+describe('deleteSession after closeSession', () => {
+  test('removes every file of the chat, so a restart does not bring it back', async () => {
     const sessionsDir = mkdtempSync(join(tmpdir(), 'companion-persist-race-'));
     try {
       const manager = makeManager(sessionsDir);
       await manager.init();
 
       const session = manager.createSession();
-      // Let the create-time save land so the file genuinely exists first.
-      await manager.flushSession(session.id);
-      const filePath = join(sessionsDir, `${session.id}.json`);
-      expect(existsSync(filePath)).toBe(true);
-
-      // Gate the persistence layer's save() so we control exactly when the
-      // close-time write actually reaches disk.
-      const persistence = (manager as unknown as {
-        persistence: { save(session: PersistedChatSession): Promise<void> };
-      }).persistence;
-      const realSave = persistence.save.bind(persistence);
-      let releaseSave: (() => void) | undefined;
-      const gate = new Promise<void>((resolve) => { releaseSave = resolve; });
-      let saveEntered = false;
-      persistence.save = async (persisted: PersistedChatSession): Promise<void> => {
-        saveEntered = true;
-        await gate;
-        return realSave(persisted);
-      };
-
-      // Close: schedules the (now-gated) fire-and-forget persist save.
+      await manager.postMessage(session.id, 'hello');
+      await waitFor(() => manager.getMessages(session.id).some((message) => message.role === 'assistant'));
       manager.closeSession(session.id);
-      await waitFor(() => saveEntered); // the save chain has reached the gate
-
-      // Fire delete WHILE the close-time save is still gated open (in flight).
-      const deletePromise = manager.deleteSession(session.id);
-
-      // It must NOT have unlinked the file yet, because the save it must drain is
-      // still blocked on our gate. A delete that did not drain would unlink and then
-      // see the released save rewrite the file; the final assertions catch that.
-      expect(existsSync(filePath)).toBe(true);
-
-      // Now release the gate, the drained save completes its write, and
-      // only then should deleteSession proceed to unlink.
-      releaseSave!();
-      const result = await withTestTimeout(deletePromise, 2_000, 'deleteSession did not settle after the gated save was released');
+      const result = await withTestTimeout(manager.deleteSession(session.id), 2_000, 'deleteSession did not settle');
       expect(result).toEqual({ sessionId: session.id, deleted: true });
+      await manager.close();
+      expect(readdirSync(sessionsDir).filter((name) => name.startsWith(session.id))).toEqual([]);
 
-      // The resurrected-then-deleted file must be gone, not resurrected.
-      expect(existsSync(filePath)).toBe(false);
-      await manager.close(); // drains any save still in flight
-      expect(existsSync(filePath)).toBe(false);
-
-
-      // Simulated re-init (fresh manager instance, same dir) must not reload
-      // the deleted session, proving there's no leftover file to reload.
       const reloaded = makeManager(sessionsDir);
       await reloaded.init();
       expect(reloaded.getSession(session.id)).toBeNull();

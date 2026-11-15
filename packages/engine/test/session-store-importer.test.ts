@@ -8,7 +8,7 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -16,10 +16,15 @@ import {
   importLegacySessionStores,
 } from '../platform/src/platform/control-plane/index.ts';
 import { SharedSessionBroker } from '../platform/src/platform/control-plane/session-broker.ts';
-import { CompanionChatPersistence } from '../platform/src/platform/companion/companion-chat-persistence.ts';
 import type { PersistedChatSession } from '../platform/src/platform/companion/companion-chat-persistence.ts';
 import { RouteBindingManager } from '../platform/src/platform/channels/index.ts';
 import { trackDisposables } from './_helpers/disposables.ts';
+
+/** A companion chat saved as one file by an earlier version, the format the fold reads from other instances. */
+function saveCompanionChat(dir: string, chat: PersistedChatSession): void {
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, `${chat.meta.id}.json`), JSON.stringify(chat));
+}
 
 const disposables = trackDisposables();
 
@@ -58,9 +63,8 @@ async function buildFixture(): Promise<Fixture> {
   const homeStorePath = join(root, 'home', '.goodvibes', 'control-plane', 'sessions.json');
 
   // 1) Companion dir, active + closed (the 299-style, closed-inclusive class).
-  const persistence = new CompanionChatPersistence(companionDir);
-  await persistence.save(companionSession('comp-active', 'active'));
-  await persistence.save(companionSession('comp-closed', 'closed'));
+  saveCompanionChat(companionDir, companionSession('comp-active', 'active'));
+  saveCompanionChat(companionDir, companionSession('comp-closed', 'closed'));
 
   // 2) Per-project broker store under the 'goodvibes' surface (created without a
   //    project field, so the importer must stamp project = projectRoot).
@@ -211,10 +215,9 @@ describe('legacy migration preserves full transcripts', () => {
     try {
       const companionDir = join(root, 'home', '.goodvibes', 'companion-chat', 'sessions');
       const homeStorePath = join(root, 'home', '.goodvibes', 'control-plane', 'sessions.json');
-      const persistence = new CompanionChatPersistence(companionDir);
       const N = 299;
       for (let i = 0; i < N; i++) {
-        await persistence.save(companionSessionWithMessages(`chat-${i}`, 10));
+        saveCompanionChat(companionDir, companionSessionWithMessages(`chat-${i}`, 10));
       }
 
       const sources = discoverLegacySessionSources({ projectRoot: join(root, 'projX'), companionSessionsDir: companionDir });
@@ -249,7 +252,7 @@ describe('legacy migration preserves full transcripts', () => {
       const companionDir = join(root, 'home', '.goodvibes', 'companion-chat', 'sessions');
       const homeStorePath = join(root, 'home', '.goodvibes', 'control-plane', 'sessions.json');
       // This transcript exceeds the historical 2 000-message default.
-      await new CompanionChatPersistence(companionDir).save(companionSessionWithMessages('huge', 2_500));
+      saveCompanionChat(companionDir, companionSessionWithMessages('huge', 2_500));
 
       const sources = discoverLegacySessionSources({ projectRoot: join(root, 'projX'), companionSessionsDir: companionDir });
       await importLegacySessionStores({ homeStorePath, sources });

@@ -13,7 +13,7 @@ import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
 import type { FilePickerModal } from '../file-picker.js';
 import { activeTokens } from './theme.js';
 import { renderPopup } from './surface-kit-parts.js';
-import type { KitRow, KitSpan } from './surface-kit-list.js';
+import { lazyRows, type KitRow, type KitRowSource, type KitSpan } from './surface-kit-list.js';
 
 function popupRows(viewportHeight: number): number {
   return Math.max(4, Math.min(12, Math.floor(viewportHeight * 0.5)));
@@ -62,17 +62,20 @@ export function renderFilePickerOverlay(
     // The header stays visible while the list scrolls, so a partial walk is flagged here.
     right: picker.truncated ? `${count ? `${count} ` : ''}(list truncated)` : count || undefined,
   };
-  const rows: KitRow[] = [];
+  let rows: KitRowSource;
   if (picker.results.length === 0) {
-    const empty = picker.loadError ?? (picker.query ? 'No matching files' : 'Loading files…');
-    rows.push({ label: picker.truncated && !picker.loadError ? `${empty} (more files exist than were listed)` : empty, muted: true });
+    const empty = picker.loadError ?? (picker.query ? 'No matching files' : picker.listed ? 'No files here' : 'Loading files…');
+    rows = [{ label: picker.truncated && !picker.loadError ? `${empty} (more files exist than were listed)` : empty, muted: true }];
   } else {
-    picker.results.forEach((file, index) => {
-      const selected = index === picker.selectedIndex;
-      rows.push({ spans: fileSpans(file, picker.query, selected), selected });
+    // Only the rows on screen are built: the list can hold thousands of files.
+    const { results, query, selectedIndex } = picker;
+    rows = lazyRows(results.length, (index): KitRow => {
+      const selected = index === selectedIndex;
+      return { spans: fileSpans(results[index]!, query, selected), selected };
     });
   }
-  return renderPopup({ width, rows, header, maxRows: popupRows(viewportHeight), scrollOwner: picker }).lines;
+  const activeIndex = picker.results.length === 0 ? undefined : picker.selectedIndex;
+  return renderPopup({ width, rows, activeIndex, header, maxRows: popupRows(viewportHeight), scrollOwner: picker }).lines;
 }
 
 /** The static strings this surface can show (checked by package verification). */
@@ -81,6 +84,7 @@ export function renderFilePickerPackageText(): string {
     '@<query>',
     '<n> files',
     'No matching files',
+    'No files here',
     'Loading files…',
     'File listing unavailable. Close and reopen to retry.',
   ].join('\n');

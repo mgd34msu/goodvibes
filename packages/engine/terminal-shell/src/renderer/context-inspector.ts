@@ -36,6 +36,8 @@ export function renderContextInspectorPackageText(): string {
         'Context inspector',
         'No messages in conversation yet.',
         'Total ~<tokens> tokens in <count> messages · <tokens> of <window> (<percent>)',
+        '<tokens> tokens sent with the last request · <tokens> of <window> (<percent>)',
+        'system prompt and tools',
         'Context is 80% full or more. Run /compact to free space.',
         '● <count> messages use <percent> of context (each over 10%).',
         'Run /compact to summarise and reduce context size.',
@@ -112,11 +114,25 @@ function messageEntries(conversation: InspectorConversation): {
  * Lists each message with its estimated token count and share of the total
  * (right-aligned), marks large consumers (>10%) with an amber ●, shows the
  * total against the context window, and suggests compaction targets.
+ *
+ * `providerTokens` is the provider's own count of the last request (system
+ * prompt, tool definitions and messages), the number the status-line meter
+ * shows. When it is known it is the total and the fill percentage, and the
+ * part the messages do not account for is one "system prompt and tools" row,
+ * so the two displays agree. Before the first reply the header shows the
+ * messages' estimate (marked ~).
  */
-export function renderContextInspector(conversation: InspectorConversation, screenWidth: number, screenHeight = 24, contextWindow = 0, modal?: ContextInspectorModal | undefined): SurfaceLayer {
+export function renderContextInspector(conversation: InspectorConversation, screenWidth: number, screenHeight = 24, contextWindow = 0, modal?: ContextInspectorModal | undefined, providerTokens = 0): SurfaceLayer {
     const t = activeTokens();
-    const { entries, total } = messageEntries(conversation);
-    if (entries.length === 0) {
+    const measured = messageEntries(conversation);
+    const counted = providerTokens > 0;
+    const remainder = counted ? Math.max(0, providerTokens - measured.total) : 0;
+    const entries: MsgEntry[] = remainder > 0 ? [{ tokens: remainder, label: 'system prompt and tools' }, ...measured.entries] : measured.entries;
+    const total = counted ? providerTokens : measured.total;
+    // Messages added since the last request can exceed its count: shares are of the larger.
+    const shareBase = Math.max(total, measured.total);
+    const messageCount = measured.entries.length;
+    if (messageCount === 0) {
         const lines: TextLine[] = [{ text: 'No messages in conversation yet.', style: { fg: t.textMuted } }];
         const width = modalTextWidth(screenWidth, screenHeight);
         const height = modalHeightFor(screenWidth, screenHeight, {}, textBlockHeight(lines, width));
@@ -124,18 +140,18 @@ export function renderContextInspector(conversation: InspectorConversation, scre
         drawTextBlock(f.canvas, f.l, f.top, f.r - f.l + 1, lines, f.bottom);
         return finishModal(f);
     }
-    const largeThreshold = total * 0.10;
-    const large = entries.filter((e) => e.tokens > largeThreshold);
+    const largeThreshold = shareBase * 0.10;
+    const large = measured.entries.filter((e) => e.tokens > largeThreshold);
     const capacity = contextWindow > 0 ? ` · ${fmtN(total)} of ${fmtN(contextWindow)} (${fmtPct(total / contextWindow)})` : '';
-    const topLines: TextLine[] = [
-        { text: `Total ~${fmtN(total)} tokens in ${entries.length} message${entries.length === 1 ? '' : 's'}${capacity}`, style: { fg: t.text, bold: true } },
-    ];
+    const topLines: TextLine[] = counted
+        ? [{ text: `${fmtN(total)} tokens sent with the last request${capacity}`, style: { fg: t.text, bold: true } }]
+        : [{ text: `Total ~${fmtN(total)} tokens in ${messageCount} message${messageCount === 1 ? '' : 's'}${capacity}`, style: { fg: t.text, bold: true } }];
     if (contextWindow > 0 && total / contextWindow >= 0.80) {
         topLines.push({ text: 'Context is 80% full or more. Run /compact to free space.', style: { fg: t.warning, bold: true } });
     }
     const bottomLines: TextLine[] = [];
     if (large.length > 0) {
-        const share = fmtPct(large.reduce((s, e) => s + e.tokens, 0) / total);
+        const share = fmtPct(large.reduce((s, e) => s + e.tokens, 0) / shareBase);
         bottomLines.push({ text: `● ${large.length} message${large.length > 1 ? 's use' : ' uses'} ${share} of context (each over 10%).`, style: { fg: t.accent } });
         bottomLines.push({ text: 'Run /compact to summarise and reduce context size.', style: { fg: t.textFaint } });
     }
@@ -151,7 +167,7 @@ export function renderContextInspector(conversation: InspectorConversation, scre
         const isLarge = e.tokens > largeThreshold;
         return {
             label: e.label,
-            right: `${fmtPct(total > 0 ? e.tokens / total : 0)} · ~${fmtN(e.tokens)}`,
+            right: `${fmtPct(shareBase > 0 ? e.tokens / shareBase : 0)} · ~${fmtN(e.tokens)}`,
             mark: isLarge ? '●' : undefined,
             markFg: t.warning,
             labelFg: isLarge ? t.warning : undefined,

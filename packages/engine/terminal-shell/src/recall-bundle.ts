@@ -4,7 +4,7 @@ import type { MemoryApi } from '@goodvibes-jev/engine/platform/platform/knowledg
 import type { MemoryBundle, MemorySearchFilter } from '@goodvibes-jev/engine/platform/platform/state';
 import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-import { VALID_CLASSES, VALID_SCOPES, isValidClass, isValidScope, resolveConfinedBundlePath } from './recall-shared.js';
+import { VALID_CLASSES, VALID_SCOPES, isValidClass, isValidScope, readRecallFlags, resolveConfinedBundlePath, type RecallFlagKind } from './recall-shared.js';
 import { afterMemory, mutationArguments, type RecallQueryContext } from './recall-query.js';
 function isMemoryBundle(value: unknown): value is MemoryBundle {
   if (typeof value !== 'object' || value === null) return false;
@@ -19,6 +19,9 @@ function isMemoryBundle(value: unknown): value is MemoryBundle {
     Array.isArray(bundle['links'])
   );
 }
+// `--yes` is read by mutationArguments where a product asks for it and is harmless where it does not.
+const EXPORT_FLAGS: Readonly<Record<string, RecallFlagKind>> = { '--scope': 'word', '--cls': 'word', '--yes': 'switch' };
+const HANDOFF_EXPORT_FLAGS: Readonly<Record<string, RecallFlagKind>> = { '--scope': 'word', '--yes': 'switch' };
 export function createRecallBundleCommands<Context extends RecallQueryContext>(
   getMemory: (context: Context) => {
     exportBundle(filter: MemorySearchFilter): MemoryBundle | Promise<MemoryBundle>;
@@ -63,11 +66,15 @@ export function createRecallBundleCommands<Context extends RecallQueryContext>(
     if (!memory) {
       return;
     }
-    const pathArg = args[0];
-    if (!pathArg) {
-      context.print(
-        `${presentation.tag} Usage: /${presentation.command} export <path> [--scope <scope>] [--cls <class>]${presentation.confirmMutations ? ' --yes' : ''}`,
-      );
+    const usage = `${presentation.tag} Usage: /${presentation.command} export <path> [--scope <scope>] [--cls <class>]${presentation.confirmMutations ? ' --yes' : ''}`;
+    const flags = readRecallFlags(args, EXPORT_FLAGS);
+    if ('refusal' in flags) {
+      context.print(`${presentation.tag} ${flags.refusal}\n${usage}`);
+      return;
+    }
+    const [pathArg, ...extra] = flags.positional;
+    if (!pathArg || extra.length > 0) {
+      context.print(usage);
       return;
     }
     if (!parsed.yes) {
@@ -77,9 +84,8 @@ export function createRecallBundleCommands<Context extends RecallQueryContext>(
       return;
     }
     const filter: MemorySearchFilter = {};
-    const scopeIdx = args.indexOf('--scope');
-    const scope = scopeIdx !== -1 ? args[scopeIdx + 1] : undefined;
-    if (scope) {
+    const scope = flags.values.get('--scope');
+    if (scope !== undefined) {
       if (!isValidScope(scope)) {
         context.print(
           `${presentation.tag} Unknown scope "${scope}". ${presentation.validValuesLabel} ${VALID_SCOPES.join(', ')}${presentation.validValuesSuffix}`,
@@ -88,9 +94,8 @@ export function createRecallBundleCommands<Context extends RecallQueryContext>(
       }
       filter.scope = scope;
     }
-    const clsIdx = args.indexOf('--cls');
-    const cls = clsIdx !== -1 ? args[clsIdx + 1] : undefined;
-    if (cls) {
+    const cls = flags.values.get('--cls');
+    if (cls !== undefined) {
       if (!isValidClass(cls)) {
         context.print(
           `${presentation.tag} Unknown class "${cls}". ${presentation.validValuesLabel} ${VALID_CLASSES.join(', ')}${presentation.validValuesSuffix}`,
@@ -99,9 +104,9 @@ export function createRecallBundleCommands<Context extends RecallQueryContext>(
       }
       filter.cls = cls;
     }
+    const targetPath = bundlePath(pathArg, context);
+    if (targetPath === undefined) return;
     return afterMemory(memory.exportBundle(filter), (bundle) => {
-      const targetPath = bundlePath(pathArg, context);
-      if (targetPath === undefined) return;
       writeBundle(targetPath, bundle);
       context.print(`${presentation.tag} Exported ${bundle.recordCount} record(s) and ${bundle.linkCount} link(s) to ${targetPath}`);
     });
@@ -130,7 +135,7 @@ export function createRecallBundleCommands<Context extends RecallQueryContext>(
     try {
       bundle = readBundle(targetPath);
     } catch (error) {
-      context.print(`${presentation.tag} Failed to read memory bundle${presentation.errorSeparator}${summarizeError(error)}`);
+      context.print(`${presentation.tag} Nothing was imported: could not read the memory bundle at ${targetPath}${presentation.errorSeparator}${summarizeError(error)}`);
       return;
     }
     const result = await memory.importBundle(bundle);
@@ -154,11 +159,15 @@ export function createRecallBundleCommands<Context extends RecallQueryContext>(
     if (!memory) {
       return;
     }
-    const pathArg = args[0];
-    if (!pathArg) {
-      context.print(
-        `${presentation.tag} Usage: /${presentation.command} handoff-export <path> [--scope <scope>]${presentation.confirmMutations ? ' --yes' : ''}`,
-      );
+    const usage = `${presentation.tag} Usage: /${presentation.command} handoff-export <path> [--scope <scope>]${presentation.confirmMutations ? ' --yes' : ''}`;
+    const flags = readRecallFlags(args, HANDOFF_EXPORT_FLAGS);
+    if ('refusal' in flags) {
+      context.print(`${presentation.tag} ${flags.refusal}\n${usage}`);
+      return;
+    }
+    const [pathArg, ...extra] = flags.positional;
+    if (!pathArg || extra.length > 0) {
+      context.print(usage);
       return;
     }
     if (!parsed.yes) {
@@ -167,17 +176,16 @@ export function createRecallBundleCommands<Context extends RecallQueryContext>(
       );
       return;
     }
-    const scopeIdx = args.indexOf('--scope');
-    const scopeRaw = scopeIdx !== -1 ? args[scopeIdx + 1] : 'team';
-    if (!scopeRaw || !isValidScope(scopeRaw)) {
+    const scopeRaw = flags.values.get('--scope') ?? 'team';
+    if (!isValidScope(scopeRaw)) {
       context.print(
-        `${presentation.tag} Unknown scope "${scopeRaw ?? ''}". ${presentation.validValuesLabel} ${VALID_SCOPES.join(', ')}${presentation.validValuesSuffix}`,
+        `${presentation.tag} Unknown scope "${scopeRaw}". ${presentation.validValuesLabel} ${VALID_SCOPES.join(', ')}${presentation.validValuesSuffix}`,
       );
       return;
     }
+    const targetPath = bundlePath(pathArg, context);
+    if (targetPath === undefined) return;
     return afterMemory(memory.exportBundle({ scope: scopeRaw }), (bundle) => {
-      const targetPath = bundlePath(pathArg, context);
-      if (targetPath === undefined) return;
       writeBundle(targetPath, bundle);
       context.print(`${presentation.tag} Exported ${scopeRaw} handoff bundle to ${targetPath}`);
     });

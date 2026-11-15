@@ -28,7 +28,6 @@ export function emptyTerminalPalette(): TerminalPalette {
 }
 
 let probedPalette: TerminalPalette | null = null;
-const listeners = new Set<(palette: TerminalPalette) => void>();
 
 /**
  * The palette reported by the terminal at startup, or null when the probe has
@@ -39,20 +38,15 @@ export function getTerminalPalette(): TerminalPalette | null {
   return probedPalette;
 }
 
-/** Record the probe result and notify listeners. Called by the probe once. */
+/**
+ * Record the probe result. Called by the probe once; whoever acts on it is
+ * told through the probe's own `onTerminalPalette` option.
+ */
 export function setTerminalPalette(palette: TerminalPalette): void {
   probedPalette = palette;
-  for (const listener of listeners) listener(palette);
 }
 
-/** Subscribe to the probe result. Returns an unsubscribe function. */
-export function onTerminalPalette(listener: (palette: TerminalPalette) => void): () => void {
-  listeners.add(listener);
-  return () => { listeners.delete(listener); };
-}
-
-/** Test hook: forget the stored palette and listeners. */
+/** Test hook: forget the stored palette. */
 export function resetTerminalPaletteForTests(): void {
   probedPalette = null;
-  listeners.clear();
 }

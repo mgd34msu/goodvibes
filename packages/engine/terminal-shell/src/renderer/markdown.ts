@@ -154,12 +154,9 @@ export function renderMarkdownTracked(
     const isTableStart = raw.includes('|') && i + 1 < rawLines.length && isLikelyTableHeaderRow(raw) && isLikelyTableSeparatorRow(requireDefined(rawLines[i + 1]));
     if (!isQuoteLine && !isRule && !isTableStart) beforeContent();
 
-    const h3 = raw.match(/^### (.+)/);
-    const h2 = raw.match(/^## (.+)/);
-    const h1 = raw.match(/^# (.+)/);
-    // Headings keep their own case and carry no rule rows; the heading
-    // color and weight are what mark them.
-    const heading = h1?.[1] ?? h2?.[1] ?? h3?.[1];
+    // Headings (levels one to six) keep their own case and carry no rule
+    // rows; the heading color and weight are what mark them.
+    const heading = raw.match(/^#{1,6} (.+)/)?.[1];
     if (heading !== undefined) {
       // A heading is a block: one blank row above (unless it opens the
       // message) and one below.

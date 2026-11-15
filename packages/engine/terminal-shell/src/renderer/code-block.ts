@@ -1,6 +1,6 @@
 import { requireDefined } from '@goodvibes-jev/engine/platform/platform/utils';
 import { type Line, type Cell, createStyledCell, createEmptyLine } from '@goodvibes-jev/engine/platform/platform/types';
-import { getDisplayWidth, wrapPreservingIndent } from '@goodvibes-jev/engine/platform/platform/utils';
+import { BODY_TAB_WIDTH, getDisplayWidth, wrapPreservingIndent } from '@goodvibes-jev/engine/platform/platform/utils';
 import { TRANSCRIPT_LAYOUT as LAYOUT } from '../transcript-layout.js';
 import { SyntaxHighlighter, type SyntaxToken as HLToken } from './syntax-highlighter.js';
 import { activeTokens } from './theme.js';
@@ -408,8 +408,11 @@ export function renderCodeBlock(
     return line;
   };
   for (let i = 0; i < codeLines.length; i++) {
-    // Control characters (a tab included) take one blank column, as they always have.
-    const rawLine = Array.from(codeLines[i] ?? '').map((ch) => {
+    // Tokens are read from the line with every control character as one
+    // blank; a tab then widens to the body tab width (as in diffs and opened
+    // reads) carrying its style, other control characters stay one blank.
+    const source = Array.from(codeLines[i] ?? '');
+    const oneColumn = source.map((ch) => {
       const code = ch.charCodeAt(0);
       return code < 32 || code === 127 ? ' ' : ch;
     }).join('');
@@ -419,16 +422,24 @@ export function renderCodeBlock(
     const tokens: SyntaxToken[] =
       hlLines && i < hlLines.length && requireDefined(hlLines[i]).length > 0
         ? (hlLines[i] as HLToken[])
-        : regexTokenize(rawLine);
+        : regexTokenize(oneColumn);
     // Each character's style, when the tokens spell the line (plain otherwise).
-    const chars = Array.from(rawLine);
-    const styles: Array<Pick<SyntaxToken, 'fg' | 'bold' | 'italic'>> = [];
+    const sourceStyles: Array<Pick<SyntaxToken, 'fg' | 'bold' | 'italic'>> = [];
     const spelled = tokens.map((tk) => tk.text).join('').replace(/[\x00-\x1f\x7f]/g, ' ');
-    if (spelled === rawLine) {
-      for (const token of tokens) for (const _ of Array.from(token.text)) styles.push({ fg: token.fg, bold: token.bold ?? false, italic: token.italic ?? false });
-    } else {
-      for (let k = 0; k < chars.length; k++) styles.push({ fg: palette.text });
+    if (spelled === oneColumn) {
+      for (const token of tokens) for (const _ of Array.from(token.text)) sourceStyles.push({ fg: token.fg, bold: token.bold ?? false, italic: token.italic ?? false });
     }
+    const chars: string[] = [];
+    const styles: Array<Pick<SyntaxToken, 'fg' | 'bold' | 'italic'>> = [];
+    const oneColumnChars = Array.from(oneColumn);
+    oneColumnChars.forEach((ch, k) => {
+      const style = sourceStyles[k] ?? { fg: palette.text };
+      for (let n = source[k] === '\t' ? BODY_TAB_WIDTH : 1; n > 0; n--) {
+        chars.push(ch);
+        styles.push(style);
+      }
+    });
+    const rawLine = chars.join('');
 
     const parts = getDisplayWidth(rawLine.replace(/\s+$/, '')) <= textWidth ? [rawLine] : wrapPreservingIndent(rawLine, textWidth);
     let cursor = 0;

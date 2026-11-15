@@ -1,9 +1,13 @@
+import { getDisplayWidth } from '@goodvibes-jev/engine/platform/platform/utils';
+
 type WrappedSegment = { rawStart: number; length: number };
 
 export type WrappedPromptInfo = {
+  /** Rows of the prompt, each at most the content width in screen columns. */
   wrappedLines: string[];
   segments: WrappedSegment[];
   cursorWrappedLine: number;
+  /** The cursor's offset into its row's text (the composer turns it into a screen column). */
   cursorCol: number;
   visibleLines: string[];
   visibleCursorLine: number;
@@ -40,44 +44,60 @@ export function shouldCoalesceUndo(
   return (nowMs - lastEditMs) < UNDO_COALESCE_MS;
 }
 
+/**
+ * Wrap one line of the prompt to `maxW` screen columns, the unit the composer
+ * paints in: a wide character (CJK, most emoji) takes two. The rows joined
+ * give back the line exactly, so offsets into the rows are offsets into it.
+ */
 export function wordWrapLine(line: string, maxW: number): string[] {
   if (maxW <= 0) return [line];
   if (line.length === 0) return [''];
 
   const result: string[] = [];
   let current = '';
-  let wordBuf = '';
+  let currentW = 0;
+  let word = '';
+  let wordW = 0;
 
-  const flushWord = () => {
-    if (wordBuf.length === 0) return;
-    if (current.length > 0 && current.length + wordBuf.length > maxW) {
-      result.push(current);
-      current = '';
-    }
-    while (wordBuf.length > maxW) {
-      if (current.length > 0) {
-        result.push(current);
-        current = '';
-      }
-      result.push(wordBuf.slice(0, maxW));
-      wordBuf = wordBuf.slice(maxW);
-    }
-    current += wordBuf;
-    wordBuf = '';
+  const pushCurrent = (): void => {
+    result.push(current);
+    current = '';
+    currentW = 0;
   };
-
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i]!;
-    if (ch === ' ') {
-      flushWord();
-      if (current.length >= maxW) {
-        result.push(current);
-        current = ' ';
-      } else {
-        current += ' ';
+  const flushWord = (): void => {
+    if (word.length === 0) return;
+    if (currentW > 0 && currentW + wordW > maxW) pushCurrent();
+    if (wordW > maxW) {
+      // A word wider than the row is cut at the column edge, never inside a character.
+      if (current.length > 0) pushCurrent();
+      for (const ch of word) {
+        const w = getDisplayWidth(ch);
+        if (currentW > 0 && currentW + w > maxW) pushCurrent();
+        current += ch;
+        currentW += w;
       }
     } else {
-      wordBuf += ch;
+      current += word;
+      currentW += wordW;
+    }
+    word = '';
+    wordW = 0;
+  };
+
+  for (const ch of line) {
+    if (ch === ' ') {
+      flushWord();
+      if (currentW >= maxW) {
+        pushCurrent();
+        current = ' ';
+        currentW = 1;
+      } else {
+        current += ' ';
+        currentW += 1;
+      }
+    } else {
+      word += ch;
+      wordW += getDisplayWidth(ch);
     }
   }
   flushWord();
@@ -85,6 +105,19 @@ export function wordWrapLine(line: string, maxW: number): string[] {
     result.push(current);
   }
   return result;
+}
+
+/** The offset in `text` whose prefix is `column` screen columns wide, never past the end or inside a character. */
+function offsetAtColumn(text: string, column: number): number {
+  let width = 0;
+  let offset = 0;
+  for (const ch of text) {
+    const w = getDisplayWidth(ch);
+    if (width + w > column) break;
+    width += w;
+    offset += ch.length;
+  }
+  return offset;
 }
 
 export function getWrappedPromptInfo(
@@ -202,8 +235,9 @@ export function moveCursorVertical(
     return { moved: false, cursorPos, inputScrollTop };
   }
 
-  const col = Math.min(info.cursorCol, info.segments[targetLine]!.length);
-  const nextCursorPos = info.segments[targetLine]!.rawStart + col;
+  // Keep the screen column, not the character count, so the cursor moves straight up or down across wide characters.
+  const column = getDisplayWidth(info.wrappedLines[info.cursorWrappedLine]!.slice(0, info.cursorCol));
+  const nextCursorPos = info.segments[targetLine]!.rawStart + offsetAtColumn(info.wrappedLines[targetLine]!, column);
   const nextScrollTop = ensureInputCursorVisible(prompt, nextCursorPos, inputScrollTop, contentWidth, maxRows);
   return { moved: true, cursorPos: nextCursorPos, inputScrollTop: nextScrollTop };
 }

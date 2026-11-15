@@ -6,7 +6,16 @@ import {
   buildPolicyPreflightMemoryAddOptions,
   type ProvenanceLink,
 } from '@goodvibes-jev/engine/platform/platform/state';
-import { VALID_CLASSES, VALID_SCOPES, isValidClass, isValidScope } from './recall-shared.js';
+import { VALID_CLASSES, VALID_SCOPES, isValidClass, isValidScope, readRecallFlags, type RecallFlagKind } from './recall-shared.js';
+
+const ADD_FLAGS: Readonly<Record<string, RecallFlagKind>> = {
+  '--detail': 'text',
+  '--tags': 'word',
+  '--scope': 'word',
+  '--session': 'word',
+  '--task': 'word',
+  '--file': 'word',
+};
 export interface RecallCaptureContext {
   readonly print: (message: string) => void;
   readonly session: {
@@ -85,47 +94,38 @@ export function createRecallCaptureCommands<Context extends RecallCaptureContext
       );
       return;
     }
-    const flagArgs = args.slice(1);
-    const detailIdx = flagArgs.indexOf('--detail');
-    const tagsIdx = flagArgs.indexOf('--tags');
-    const sessionIdx = flagArgs.indexOf('--session');
-    const taskIdx = flagArgs.indexOf('--task');
-    const fileIdx = flagArgs.indexOf('--file');
-    const scopeIdx = flagArgs.indexOf('--scope');
-    const detail = detailIdx !== -1 ? flagArgs[detailIdx + 1] : undefined;
-    const tagsRaw = tagsIdx !== -1 ? flagArgs[tagsIdx + 1] : undefined;
-    const scopeRaw = scopeIdx !== -1 ? flagArgs[scopeIdx + 1] : undefined;
-    const tags = tagsRaw
-      ? tagsRaw
-          .split(',')
-          .map((token) => token.trim())
-          .filter(Boolean)
-      : [];
-    const scope = scopeRaw && isValidScope(scopeRaw) ? scopeRaw : 'project';
-    if (scopeRaw && !isValidScope(scopeRaw)) {
+    const usage = `${presentation.tag} Usage: /${presentation.command} add <class> <summary> [--detail <text>] [--tags <t1,t2>] [--scope <scope>] [--session <id>] [--task <id>] [--file <path>]`;
+    const flags = readRecallFlags(args.slice(1), ADD_FLAGS);
+    if ('refusal' in flags) {
+      context.print(`${presentation.tag} ${flags.refusal}\n${usage}`);
+      return;
+    }
+    const detail = flags.values.get('--detail');
+    const tags = (flags.values.get('--tags') ?? '')
+      .split(',')
+      .map((token) => token.trim())
+      .filter(Boolean);
+    const scopeRaw = flags.values.get('--scope');
+    if (scopeRaw !== undefined && !isValidScope(scopeRaw)) {
       context.print(
         `${presentation.tag} Invalid scope "${scopeRaw}". ${presentation.validValuesLabel} ${VALID_SCOPES.join(', ')}${presentation.validValuesSuffix}`,
       );
       return;
     }
+    const scope = scopeRaw !== undefined && isValidScope(scopeRaw) ? scopeRaw : 'project';
     const provenance: ProvenanceLink[] = [];
-    const sessionRef = sessionIdx !== -1 ? flagArgs[sessionIdx + 1] : undefined;
+    const sessionRef = flags.values.get('--session');
     if (sessionRef) provenance.push({ kind: 'session', ref: sessionRef });
-    const taskRef = taskIdx !== -1 ? flagArgs[taskIdx + 1] : undefined;
+    const taskRef = flags.values.get('--task');
     if (taskRef) provenance.push({ kind: 'task', ref: taskRef });
-    const fileRef = fileIdx !== -1 ? flagArgs[fileIdx + 1] : undefined;
+    const fileRef = flags.values.get('--file');
     if (fileRef) provenance.push({ kind: 'file', ref: fileRef });
     if (!provenance.some((entry) => entry.kind === 'session') && context.session.runtime.sessionId) {
       provenance.push({ kind: 'session', ref: context.session.runtime.sessionId });
     }
-    const summaryTokens: string[] = [];
-    for (const token of flagArgs) {
-      if (token.startsWith('--')) break;
-      summaryTokens.push(token);
-    }
-    const summary = summaryTokens.join(' ');
+    const summary = flags.positional.join(' ');
     if (!summary.trim()) {
-      context.print(`${presentation.tag} Usage: /${presentation.command} add <class> <summary> [--detail <text>] [--tags <t1,t2>]`);
+      context.print(usage);
       return;
     }
     const record = await memory.add({ scope, cls, summary, detail, tags, provenance });

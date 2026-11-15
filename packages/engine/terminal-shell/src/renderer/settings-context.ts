@@ -1,6 +1,13 @@
 import { maskConcealedText } from '../concealed-input.js';
 import { NOTIFICATIONS_METADATA_ONLY_KEY } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { inferSubscriptionRouteReason, type SubscriptionEntry } from '../settings-subscriptions.js';
+import { helpLineText, type HelpLine } from './settings-documentation.js';
+
+const text = (line: string): HelpLine => ({ kind: 'text', text: line });
+const heading = (line: string): HelpLine => ({ kind: 'heading', text: line });
+const blank: HelpLine = { kind: 'text', text: '' };
+/** A `Label: value` fact; `folded` is its entry in the one facts row. */
+const fact = (label: string, value: string, folded?: string): HelpLine => ({ kind: 'fact', text: `${label}: ${value}`, folded });
 export function formatDefaultValue(value: unknown): string {
   if (value === '') return '(empty)';
   if (value === null || value === undefined) return '(unset)';
@@ -41,56 +48,70 @@ export function createSettingContext<Modal extends SettingContextModal, Entry ex
     }
     return policy.formatValue(entry);
   }
-  function buildSettingContext(modal: Modal, entry: Entry): string[] {
-    const lines = [
-      policy.label(entry),
-      `Key: ${entry.setting.key}`,
-      `Current: ${currentSettingValue(modal, entry, true)}`,
-      `Default: ${formatDefaultValue(entry.setting.default)}`,
-      `Type: ${entry.setting.type}${entry.setting.enumValues ? ` with ${entry.setting.enumValues.length} possible value(s)` : ''}`,
-      `Source: ${policy.source(entry)}${entry.sourceLabel ? ` from ${entry.sourceLabel}` : ''}`,
+  /**
+   * The help for one setting, each line with its kind (see HelpLine). The
+   * product's own detail lines stay plain strings, read by their wording.
+   */
+  function buildSettingHelp(modal: Modal, entry: Entry): Array<string | HelpLine> {
+    const type = `${entry.setting.type}${entry.setting.enumValues ? ` with ${entry.setting.enumValues.length} possible value(s)` : ''}`;
+    const source = `${policy.source(entry)}${entry.sourceLabel ? ` from ${entry.sourceLabel}` : ''}`;
+    const defaultValue = formatDefaultValue(entry.setting.default);
+    const lines: Array<string | HelpLine> = [
+      text(policy.label(entry)),
+      fact('Key', entry.setting.key, entry.setting.key),
+      { ...fact('Current', currentSettingValue(modal, entry, true)), onRow: true },
+      fact('Default', defaultValue, `default ${defaultValue}`),
+      fact('Type', type, type),
+      fact('Source', source, `source ${source}`),
       ...policy.detail(entry),
-      ...(entry.setting.description ? ['', entry.setting.description] : []),
+      ...(entry.setting.description ? [blank, text(entry.setting.description)] : []),
     ];
     if (policy.routingKeys.includes(entry.setting.key))
-      lines.push(`Routing meaning: ${policy.describeUiRouting(String(entry.currentValue))}.`);
+      lines.push(text(`Routing meaning: ${policy.describeUiRouting(String(entry.currentValue))}.`));
     if (entry.setting.type === 'boolean') {
-      lines.push('', 'Possible values:');
+      lines.push(blank, heading('Possible values:'));
       if (entry.setting.key === NOTIFICATIONS_METADATA_ONLY_KEY)
         lines.push(
-          'true: Keep notifications metadata-only (restrictive default).',
-          'false: Explicitly permit notification details on supported paths.',
+          text('true: Keep notifications metadata-only (restrictive default).'),
+          text('false: Explicitly permit notification details on supported paths.'),
         );
-      else lines.push('true: enabled or allowed for this setting.', 'false: disabled or not allowed for this setting.');
+      else lines.push(text('true: enabled or allowed for this setting.'), text('false: disabled or not allowed for this setting.'));
     }
     if (entry.setting.type === 'enum' && entry.setting.enumValues) {
-      lines.push('', 'Possible values:');
+      lines.push(blank, heading('Possible values:'));
       const descriptions = Object.hasOwn(policy.enumDescriptions, entry.setting.key)
         ? policy.enumDescriptions[entry.setting.key]
         : undefined;
       for (const value of entry.setting.enumValues)
         lines.push(
-          `${value}: ${descriptions && Object.hasOwn(descriptions, value) ? descriptions[value] : `Use ${value} for this setting.`}`,
+          text(`${value}: ${descriptions && Object.hasOwn(descriptions, value) ? descriptions[value] : `Use ${value} for this setting.`}`),
         );
     }
     const secret = policy.isSecretKey(entry.setting.key);
     if (secret)
       lines.push(
-        '',
-        'Secret handling: raw values entered here are stored through the secret manager and the config receives a goodvibes:// secret reference. Empty input clears the config value.',
+        blank,
+        {
+          kind: 'warning',
+          text: 'Secret handling: raw values entered here are stored through the secret manager and the config receives a goodvibes:// secret reference. Empty input clears the config value.',
+        },
       );
     if (entry.setting.type === 'number')
-      lines.push('', 'Editing: Enter opens inline edit, then type the value and press Enter to save. Arrow keys only navigate.');
+      lines.push(blank, text('Editing: Enter opens inline edit, then type the value and press Enter to save. Arrow keys only navigate.'));
     const customEditing = policy.customEditing?.(entry);
-    if (customEditing) lines.push('', customEditing);
+    if (customEditing) lines.push(blank, text(customEditing));
     else if (entry.setting.type === 'string' && !secret)
       lines.push(
-        '',
-        'Editing: Enter opens inline edit. Delete the current text to save an empty value when that is valid for the setting.',
+        blank,
+        text('Editing: Enter opens inline edit. Delete the current text to save an empty value when that is valid for the setting.'),
       );
     return lines;
   }
-  return { currentSettingValue, buildSettingContext };
+  /** The same help as plain text lines. */
+  function buildSettingContext(modal: Modal, entry: Entry): string[] {
+    return helpLineText(buildSettingHelp(modal, entry));
+  }
+  return { currentSettingValue, buildSettingHelp, buildSettingContext };
 }
 export function createSubscriptionContext<Modal extends { readonly subscriptionLogoutConfirmationTarget: string | null }>(policy: {
   readonly confirmLogout: (provider: string) => string;
@@ -98,8 +119,8 @@ export function createSubscriptionContext<Modal extends { readonly subscriptionL
   readonly login: (provider: string) => string;
   readonly route: (value: SubscriptionEntry['activeRoute'] | SubscriptionEntry['preferredRoute']) => string;
 }) {
-  return (modal: Modal, entry: SubscriptionEntry | null): string[] => {
-    if (!entry) return ['Subscriptions', 'No subscription provider is selected.'];
+  const help = (modal: Modal, entry: SubscriptionEntry | null): HelpLine[] => {
+    if (!entry) return [text('Subscriptions'), text('No subscription provider is selected.')];
     const routeReason = inferSubscriptionRouteReason(entry);
     const logout =
       entry.state === 'active' || entry.state === 'pending'
@@ -108,17 +129,21 @@ export function createSubscriptionContext<Modal extends { readonly subscriptionL
           : policy.beginLogout
         : policy.login(entry.provider);
     return [
-      entry.provider,
-      `State: ${entry.state}`,
-      ...(routeReason ? [routeReason] : []),
-      logout,
-      `Active route: ${policy.route(entry.activeRoute)}`,
-      `Preferred route: ${policy.route(entry.preferredRoute)}`,
-      `OAuth configured: ${entry.oauthConfigured ? 'yes' : 'no'}`,
-      `Freshness: ${entry.authFreshness ?? 'n/a'}`,
-      `Expires: ${entry.expiresAt ? new Date(entry.expiresAt).toISOString() : 'not reported'}`,
-      ...((entry.issues ?? []).length ? ['', 'Issues:', ...(entry.issues ?? [])] : []),
-      ...((entry.nextActions ?? []).length ? ['', 'Next actions:', ...(entry.nextActions ?? [])] : []),
+      text(entry.provider),
+      fact('State', entry.state),
+      ...(routeReason ? [text(routeReason)] : []),
+      modal.subscriptionLogoutConfirmationTarget === entry.provider && (entry.state === 'active' || entry.state === 'pending')
+        ? { kind: 'warning' as const, text: logout }
+        : text(logout),
+      fact('Active route', policy.route(entry.activeRoute)),
+      fact('Preferred route', policy.route(entry.preferredRoute)),
+      fact('OAuth configured', entry.oauthConfigured ? 'yes' : 'no'),
+      fact('Freshness', entry.authFreshness ?? 'n/a'),
+      fact('Expires', entry.expiresAt ? new Date(entry.expiresAt).toISOString() : 'not reported'),
+      ...((entry.issues ?? []).length ? [blank, heading('Issues:'), ...(entry.issues ?? []).map(text)] : []),
+      ...((entry.nextActions ?? []).length ? [blank, heading('Next actions:'), ...(entry.nextActions ?? []).map(text)] : []),
     ];
   };
+  // Help lines with their kinds, and the same lines as plain text.
+  return Object.assign((modal: Modal, entry: SubscriptionEntry | null): string[] => helpLineText(help(modal, entry)), { help });
 }

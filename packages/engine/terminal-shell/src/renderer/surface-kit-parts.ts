@@ -25,7 +25,7 @@ import {
   type KitStyle,
   type SurfaceLayer,
 } from './surface-kit.js';
-import { drawList, drawRow, drawScrollingList, measureRow, type KitListResult, type KitRow } from './surface-kit-list.js';
+import { drawList, drawRow, drawScrollingList, measureList, measureRow, type KitListResult, type KitRow, type KitRowSource } from './surface-kit-list.js';
 
 // ---------------------------------------------------------------------------
 // Element insets
@@ -310,7 +310,10 @@ export const POPUP_BAR_X = 2;
 export interface PopupOptions {
   /** Width of the lines to produce (the conversation width). */
   readonly width: number;
-  readonly rows: readonly KitRow[];
+  /** The rows; a long list passes a `lazyRows` source and `activeIndex`, so only the rows shown are built. */
+  readonly rows: KitRowSource;
+  /** The selected row's index (otherwise found by its `selected` mark). */
+  readonly activeIndex?: number | undefined;
   /** A row pinned above the list (it never scrolls away), e.g. the typed query. */
   readonly header?: (KitRow) | undefined;
   /** Maximum rows the content may use (padding rows excluded). */
@@ -342,22 +345,20 @@ export function renderPopup(options: PopupOptions): PopupResult {
   const headerRows = options.header ? measureRow(options.header, x0, x1) : 0;
   const listMax = Math.max(1, options.maxRows - headerRows);
   const scrollKey = options.scrollOwner ? { owner: options.scrollOwner, name: 'popup' } : undefined;
-  // Measure on a scratch canvas: how many rows the list really needs.
+  // How many rows the list really needs, measured without drawing it.
   const compact = width < NARROW_MODAL_BREAKPOINT;
-  const scratch = new SurfaceCanvas(width, listMax + 1);
-  scratch.compact = compact;
-  const trial = drawList(scratch, { rows: options.rows, top: 0, bottom: listMax - 1, x0, x1, scrollKey });
-  const overflow = trial.above > 0 || trial.below > 0;
-  const listUsed = overflow ? listMax : Math.max(1, trial.endY);
+  const fit = measureList(compact, { rows: options.rows, activeIndex: options.activeIndex, top: 0, bottom: listMax - 1, x0, x1, scrollKey });
+  const overflow = fit.scrolls;
+  const listUsed = overflow ? listMax : Math.max(1, fit.used);
   const used = headerRows + listUsed;
   const canvas = new SurfaceCanvas(width, used + 2);
   canvas.compact = compact;
   canvas.fill(fillX, 0, fillW, used + 2, t.backgroundPanel);
   if (options.header) drawRow(canvas, 1, options.header, x0, x1);
-  const listOptions = { rows: options.rows, top: 1 + headerRows, bottom: used, x0, x1, scrollKey };
+  const listOptions = { rows: options.rows, activeIndex: options.activeIndex, top: 1 + headerRows, bottom: used, x0, x1, scrollKey };
   // Content-sized popups retain the help height measured at their full budget.
   // Recomputing its percentage after shrinking would move options on focus.
-  const context = { height: Math.max(0, trial.listTop - 1) };
+  const context = { height: fit.contextHeight };
   const list = overflow ? drawScrollingList(canvas, { ...listOptions, context }) : drawList(canvas, { ...listOptions, context });
   for (let r = 0; r < used + 2; r++) canvas.put(POPUP_BAR_X, r, '┃', { fg: t.textFaint });
   return { lines: canvas.lines, list };

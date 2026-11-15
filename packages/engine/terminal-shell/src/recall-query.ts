@@ -1,12 +1,20 @@
 import type { MemoryApi } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import type { MemoryRecord, MemorySearchFilter, MemoryLink } from '@goodvibes-jev/engine/platform/platform/state';
-import { VALID_CLASSES, VALID_SCOPES, isValidClass, isValidScope, temporalStatusLabel } from './recall-shared.js';
+import { VALID_CLASSES, VALID_SCOPES, isValidClass, isValidScope, readRecallFlags, temporalStatusLabel, type RecallFlagKind } from './recall-shared.js';
 export interface RecallQueryContext {
   readonly print: (message: string) => void;
   /** True when a model, not the owner at the keyboard, is running the command. */
   readonly invokedByModel?: boolean | undefined;
 }
 const RECALL_LIST_LIMIT = 50;
+const SEARCH_FLAGS: Readonly<Record<string, RecallFlagKind>> = {
+  '--cls': 'word',
+  '--scope': 'word',
+  '--limit': 'word',
+  '--semantic': 'switch',
+  '--vector': 'switch',
+};
+const LIST_FLAGS: Readonly<Record<string, RecallFlagKind>> = { '--scope': 'word' };
 type Awaitable<T> = T | Promise<T>;
 export interface RecallQueryPort {
   list(filter: MemorySearchFilter): Promise<readonly MemoryRecord[]>;
@@ -47,12 +55,16 @@ export function createRecallQueryCommands<Context extends RecallQueryContext>(
     if (!memory) {
       return;
     }
-    const clsIdx = args.indexOf('--cls');
-    const limitIdx = args.indexOf('--limit');
-    const semantic = args.includes('--semantic') || args.includes('--vector');
+    const usage = `${presentation.tag} Usage: /${presentation.command} search <query...> [--cls <class>] [--scope <scope>] [--limit <n>] [--semantic]`;
+    const flags = readRecallFlags(args, SEARCH_FLAGS);
+    if ('refusal' in flags) {
+      context.print(`${presentation.tag} ${flags.refusal}\n${usage}`);
+      return;
+    }
+    const semantic = flags.values.has('--semantic') || flags.values.has('--vector');
     const filter: MemorySearchFilter = {};
-    const cls = clsIdx !== -1 ? args[clsIdx + 1] : undefined;
-    if (cls) {
+    const cls = flags.values.get('--cls');
+    if (cls !== undefined) {
       if (isValidClass(cls)) filter.cls = cls;
       else {
         context.print(
@@ -61,9 +73,8 @@ export function createRecallQueryCommands<Context extends RecallQueryContext>(
         return;
       }
     }
-    const scopeIdx = args.indexOf('--scope');
-    const scope = scopeIdx !== -1 ? args[scopeIdx + 1] : undefined;
-    if (scope) {
+    const scope = flags.values.get('--scope');
+    if (scope !== undefined) {
       if (isValidScope(scope)) filter.scope = scope;
       else {
         context.print(
@@ -72,19 +83,15 @@ export function createRecallQueryCommands<Context extends RecallQueryContext>(
         return;
       }
     }
-    const limit = limitIdx !== -1 ? args[limitIdx + 1] : undefined;
-    if (limit) {
+    const limit = flags.values.get('--limit');
+    if (limit !== undefined) {
       if (!/^[1-9]\d*$/.test(limit)) {
         context.print(`${presentation.tag} Invalid --limit "${limit}". Use a positive whole number.`);
         return;
       }
       filter.limit = Number(limit);
     }
-    const queryTokens = args.filter((token, index) => {
-      if (token.startsWith('--')) return false;
-      if (index > 0 && ['--cls', '--limit', '--scope'].includes(args[index - 1]!)) return false;
-      return true;
-    });
+    const queryTokens = flags.positional;
     if (queryTokens.length) filter.query = queryTokens.join(' ');
     if (semantic) filter.semantic = true;
     const semanticResults = semantic ? await memory.searchSemantic(filter) : [];
@@ -142,7 +149,16 @@ export function createRecallQueryCommands<Context extends RecallQueryContext>(
     if (!memory) {
       return;
     }
-    const cls = args.find((arg, index) => !arg.startsWith('--') && args[index - 1] !== '--scope');
+    const flags = readRecallFlags(args, LIST_FLAGS);
+    if ('refusal' in flags) {
+      context.print(`${presentation.tag} ${flags.refusal}\n${presentation.tag} Usage: /${presentation.command} list [class] [--scope <scope>]`);
+      return;
+    }
+    const [cls, ...extra] = flags.positional;
+    if (extra.length > 0) {
+      context.print(`${presentation.tag} list takes one class, not "${flags.positional.join(' ')}". Use search to find records by words.`);
+      return;
+    }
     const filter: MemorySearchFilter = { limit: RECALL_LIST_LIMIT };
     if (cls) {
       if (!isValidClass(cls)) {
@@ -153,9 +169,8 @@ export function createRecallQueryCommands<Context extends RecallQueryContext>(
       }
       filter.cls = cls;
     }
-    const scopeIdx = args.indexOf('--scope');
-    const scope = scopeIdx !== -1 ? args[scopeIdx + 1] : undefined;
-    if (scope) {
+    const scope = flags.values.get('--scope');
+    if (scope !== undefined) {
       if (!isValidScope(scope)) {
         context.print(
           `${presentation.tag} Unknown scope "${scope}". ${presentation.validValuesLabel} ${VALID_SCOPES.join(', ')}${presentation.validValuesSuffix}`,

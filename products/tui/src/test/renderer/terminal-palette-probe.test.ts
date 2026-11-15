@@ -24,7 +24,6 @@ import {
 } from '@goodvibes-jev/engine/terminal-shell/terminal-palette';
 import {
   getTerminalPalette,
-  onTerminalPalette,
   resetTerminalPaletteForTests,
   type TerminalPalette,
 } from '@goodvibes-jev/engine/terminal-shell/terminal-palette';
@@ -316,8 +315,6 @@ describe('installBackgroundThemeProbe: palette batching', () => {
   test('auto: background probe still flips to light; palette stored with background', () => {
     let repaints = 0;
     const paletteResults: PaletteProbeResolution[] = [];
-    const notified: TerminalPalette[] = [];
-    onTerminalPalette((p) => notified.push(p));
     const handle = installBackgroundThemeProbe({
       configManager: fakeConfig('auto'), isTTY: true, probePalette: true,
       timeoutMs: 1_000, paletteTimeoutMs: 1_000,
@@ -336,7 +333,6 @@ describe('installBackgroundThemeProbe: palette batching', () => {
     expect(stored?.background).toBe('#ffffff');
     expect(stored?.foreground).toBe('#000000');
     expect(stored?.ansi[15]).toBe(slotHex(15));
-    expect(notified).toEqual([stored!]);
     expect(handle.filterInput('after')).toBe('after');
   });
 

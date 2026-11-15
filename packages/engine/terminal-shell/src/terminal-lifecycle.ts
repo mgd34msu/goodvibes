@@ -66,6 +66,41 @@ export interface TerminalSequenceSet {
   readonly CLEAR_VIEWPORT_HOME: string;
 }
 
+/**
+ * The bytes written to enter terminal mode: alt screen (unless disabled),
+ * clear + home (no 3J), cursor hidden, then the input modes.
+ */
+export function buildEnterSequence(noAltScreen: boolean, escapes: TerminalSequenceSet = TERMINAL_ESCAPES): string {
+  return (noAltScreen ? '' : escapes.ALT_SCREEN_ENTER)
+    + escapes.CLEAR_VIEWPORT_HOME
+    + escapes.CURSOR_HIDE
+    + escapes.MOUSE_ENABLE
+    + escapes.KEYBOARD_EXT_ENABLE
+    + escapes.PASTE_ENABLE
+    + escapes.FOCUS_ENABLE;
+}
+
+/**
+ * The bytes written to hand the terminal back: input modes off, then the
+ * screen switch, then cursor-show LAST so visibility applies to the screen the
+ * shell prompt lands on.
+ *
+ * Alt-screen path: just leave the alt screen, 1049l restores the primary
+ * screen and cursor exactly as they were at launch. Clearing first is
+ * pointless (the alt screen is discarded) and actively harmful: a clear with
+ * ESC[3J wipes the PRIMARY scrollback on several emulators even when issued
+ * from the alt screen.
+ *
+ * No-alt path: the compositor painted over the primary screen, so clear the
+ * viewport and home the cursor, but WITHOUT 3J, the user's scrollback is
+ * theirs.
+ */
+export function buildExitSequence(noAltScreen: boolean, escapes: TerminalSequenceSet = TERMINAL_ESCAPES): string {
+  const exitScreen = noAltScreen ? escapes.CLEAR_VIEWPORT_HOME : escapes.ALT_SCREEN_EXIT;
+  return escapes.PASTE_DISABLE + escapes.KEYBOARD_EXT_DISABLE + escapes.MOUSE_DISABLE + escapes.FOCUS_DISABLE
+    + exitScreen + escapes.CURSOR_SHOW;
+}
+
 export interface TerminalLifecycleDeps {
   /** Raw write to the terminal output stream (typically stdout.write bound). */
   readonly write: (data: string) => void;
@@ -140,17 +175,7 @@ export function createTerminalLifecycle(deps: TerminalLifecycleDeps): TerminalLi
   let terminalRestored = false;
   const enterTerminal = (): void => {
     if (terminalActive || terminalRestored) return;
-    guardedWrite(() =>
-      deps.write(
-        (deps.noAltScreen ? '' : escapes.ALT_SCREEN_ENTER)
-        + escapes.CLEAR_VIEWPORT_HOME
-        + escapes.CURSOR_HIDE
-        + escapes.MOUSE_ENABLE
-        + escapes.KEYBOARD_EXT_ENABLE
-        + escapes.PASTE_ENABLE
-        + escapes.FOCUS_ENABLE,
-      ),
-    );
+    guardedWrite(() => deps.write(buildEnterSequence(deps.noAltScreen, escapes)));
     terminalActive = true;
   };
 
@@ -159,22 +184,7 @@ export function createTerminalLifecycle(deps: TerminalLifecycleDeps): TerminalLi
     // mode, or pop it a second time if shutdown happens in an external editor.
     if (!terminalActive) return;
     terminalActive = false;
-    // Alt-screen path: just leave the alt screen, 1049l restores the primary
-    // screen and cursor exactly as they were at launch. Clearing first is
-    // pointless (the alt screen is discarded) and actively harmful: a clear
-    // with ESC[3J wipes the PRIMARY scrollback on several emulators even when
-    // issued from the alt screen.
-    // No-alt path: the compositor painted over the primary screen, so clear
-    // the viewport and home the cursor, but WITHOUT 3J, the user's scrollback
-    // is theirs. CURSOR_SHOW goes AFTER the screen switch so visibility
-    // applies to the screen the shell prompt lands on.
-    const exitScreen = deps.noAltScreen ? escapes.CLEAR_VIEWPORT_HOME : escapes.ALT_SCREEN_EXIT;
-    guardedWrite(() =>
-      deps.write(
-        escapes.PASTE_DISABLE + escapes.KEYBOARD_EXT_DISABLE + escapes.MOUSE_DISABLE + escapes.FOCUS_DISABLE
-        + exitScreen + escapes.CURSOR_SHOW,
-      ),
-    );
+    guardedWrite(() => deps.write(buildExitSequence(deps.noAltScreen, escapes)));
   };
 
   const restoreTerminal = (): void => {

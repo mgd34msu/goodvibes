@@ -1,11 +1,12 @@
 import { mkdirSync, existsSync, statSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
-import { exportToMarkdown, type ExportMessage } from '@goodvibes-jev/engine/platform/platform/export';
+import type { ExportMessage } from '@goodvibes-jev/engine/platform/platform/export';
 import { redactSensitiveDataAsync } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 import type { TerminalSlashCommand } from './command-registry.js';
 import { requireYesFlag, stripYesFlag } from './command-confirmation.js';
+import { formatTranscript, parseTranscriptFormat, type TranscriptFormat } from './session-export-format.js';
 interface ContentContext {
   readonly session: {
     readonly runtime: { readonly model: string; readonly provider: string; readonly sessionId: string };
@@ -49,11 +50,11 @@ export function createSessionContentCommands<Context extends ContentContext, Mes
     async handler(args, ctx) {
       const shellPaths = policy.paths(ctx);
       const { rest, yes } = stripYesFlag(args);
-      let format = 'markdown',
+      let format: TranscriptFormat = 'markdown',
         outPath: string | undefined;
       for (const arg of rest) {
-        if (arg === 'markdown' || arg === 'md' || arg === 'text' || arg === 'txt')
-          format = arg === 'md' ? 'markdown' : arg === 'txt' ? 'text' : arg;
+        const named = parseTranscriptFormat(arg);
+        if (named) format = named;
         else outPath = arg;
       }
       if (!outPath) {
@@ -79,23 +80,12 @@ export function createSessionContentCommands<Context extends ContentContext, Mes
       }
       try {
         const messages = policy.capture(ctx);
-        let fileContent: string;
-        if (format === 'markdown')
-          fileContent = exportToMarkdown(policy.markdown(messages), {
-            model: ctx.session.runtime.model,
-            provider: ctx.session.runtime.provider,
-            sessionId: ctx.session.runtime.sessionId,
-            title: ctx.session.conversationManager.title || undefined,
-          });
-        else {
-          const lines: string[] = [];
-          for (const message of messages) {
-            const content = policy.text(message);
-            if (!content.trim()) continue;
-            lines.push('[' + policy.role(message).toUpperCase() + ']', content, '');
-          }
-          fileContent = lines.join('\n');
-        }
+        let fileContent = formatTranscript(messages, format, policy, {
+          model: ctx.session.runtime.model,
+          provider: ctx.session.runtime.provider,
+          sessionId: ctx.session.runtime.sessionId,
+          title: ctx.session.conversationManager.title || undefined,
+        });
         // The file is the durable copy of a transcript, so it is redacted like
         // the printed `/session export`. A failed redaction writes nothing.
         fileContent = await (policy.redact ? policy.redact(fileContent, ctx) : redactSensitiveDataAsync(fileContent, { purpose: 'export' }));
@@ -142,7 +132,7 @@ export function createSessionContentCommands<Context extends ContentContext, Mes
       // Remove the old turn only when the message can be sent again, and send
       // nothing if it could not be removed (that would duplicate the turn).
       if (policy.retryRemovesLastTurn && !ctx.session.conversationManager.undo()) {
-        ctx.print('Nothing was retried: the last turn could not be removed.');
+        ctx.print('Nothing was retried: the last turn could not be removed, and sending it again would duplicate it. Type the message as a new prompt if you still want an answer.');
         return;
       }
       ctx.submitInput(args.length ? args.join(' ') : last);

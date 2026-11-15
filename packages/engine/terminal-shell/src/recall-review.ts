@@ -1,9 +1,20 @@
 import type { MemoryApi } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import type { MemoryRecord, MemoryReviewPatch, MemoryScope } from '@goodvibes-jev/engine/platform/platform/state';
-import { VALID_REVIEW_STATES, VALID_SCOPES, isValidReviewState, isValidScope, temporalStatusLabel } from './recall-shared.js';
+import {
+  VALID_REVIEW_STATES,
+  VALID_SCOPES,
+  isValidReviewState,
+  isValidScope,
+  readRecallFlags,
+  temporalStatusLabel,
+  type RecallFlagKind,
+} from './recall-shared.js';
 import { afterMemory, mutationArguments, type RecallQueryContext } from './recall-query.js';
+const REVIEW_FLAGS: Readonly<Record<string, RecallFlagKind>> = { '--confidence': 'word', '--by': 'text', '--reason': 'text' };
+const EXPLAIN_FLAGS: Readonly<Record<string, RecallFlagKind>> = { '--scope': 'words' };
+const QUEUE_FLAGS: Readonly<Record<string, RecallFlagKind>> = { '--scope': 'word' };
 export interface RecallReviewPort {
-  reviewQueue(limit: number): Promise<readonly MemoryRecord[]>;
+  reviewQueue(limit: number, scope?: MemoryScope): Promise<readonly MemoryRecord[]>;
   updateReview(id: string, patch: MemoryReviewPatch): MemoryRecord | null | Promise<MemoryRecord | null>;
   update(
     id: string,
@@ -33,25 +44,33 @@ export function createRecallReviewCommands<Context extends RecallQueryContext>(
     if (!memory) {
       return;
     }
-    const [id, stateRaw, ...rest] = args;
-    if (!id || !stateRaw || !isValidReviewState(stateRaw)) {
-      context.print(
-        `${presentation.tag} Usage: /${presentation.command} review <id> <${VALID_REVIEW_STATES.join('|')}> [--confidence <0-100>] [--by <name>] [--reason <text>]`,
-      );
+    const usage = `${presentation.tag} Usage: /${presentation.command} review <id> <${VALID_REVIEW_STATES.join('|')}> [--confidence <0-100>] [--by <name>] [--reason <text>]`;
+    const flags = readRecallFlags(args, REVIEW_FLAGS);
+    if ('refusal' in flags) {
+      context.print(`${presentation.tag} ${flags.refusal}\n${usage}`);
       return;
     }
-    const confidenceIdx = rest.indexOf('--confidence');
-    const byIdx = rest.indexOf('--by');
-    const reasonIdx = rest.indexOf('--reason');
-    const confidence = confidenceIdx !== -1 ? parseInt(rest[confidenceIdx + 1] ?? '', 10) : undefined;
-    const reviewedBy = byIdx !== -1 ? rest[byIdx + 1] : 'operator';
-    const staleReason = reasonIdx !== -1 ? rest.slice(reasonIdx + 1).join(' ') : undefined;
+    const [id, stateRaw, ...extra] = flags.positional;
+    if (!id || !stateRaw || !isValidReviewState(stateRaw)) {
+      context.print(usage);
+      return;
+    }
+    if (extra.length > 0) {
+      context.print(`${presentation.tag} "${extra.join(' ')}" is not part of a review; a reason goes after --reason. Nothing was changed.\n${usage}`);
+      return;
+    }
+    const confidenceRaw = flags.values.get('--confidence');
+    if (confidenceRaw !== undefined && !/^(100|[1-9]?\d)$/.test(confidenceRaw)) {
+      context.print(`${presentation.tag} --confidence takes a whole number from 0 to 100, not "${confidenceRaw}". Nothing was changed.`);
+      return;
+    }
+    const reason = flags.values.get('--reason');
     return afterMemory(
       memory.updateReview(id, {
         state: stateRaw,
-        confidence: Number.isFinite(confidence) ? confidence : undefined,
-        reviewedBy,
-        staleReason,
+        confidence: confidenceRaw === undefined ? undefined : Number(confidenceRaw),
+        reviewedBy: flags.values.get('--by') ?? 'operator',
+        staleReason: reason,
       }),
       (record) => {
         if (!record) {
@@ -67,16 +86,16 @@ export function createRecallReviewCommands<Context extends RecallQueryContext>(
     if (!memory) {
       return;
     }
-    const scopeIdx = args.indexOf('--scope');
-    const scopeValues = scopeIdx !== -1 ? args.slice(scopeIdx + 1).filter((token) => !token.startsWith('--')) : [];
-    const taskTokens = args.filter((token, index) => {
-      if (token === '--scope') return false;
-      if (scopeIdx !== -1 && index > scopeIdx) return false;
-      return true;
-    });
-    const task = taskTokens.join(' ').trim();
+    const usage = `${presentation.tag} Usage: /${presentation.command} explain <task description...> [--scope <write-scope> ...]`;
+    const flags = readRecallFlags(args, EXPLAIN_FLAGS);
+    if ('refusal' in flags) {
+      context.print(`${presentation.tag} ${flags.refusal}\n${usage}`);
+      return;
+    }
+    const scopeValues = [...(flags.lists.get('--scope') ?? [])];
+    const task = flags.positional.join(' ').trim();
     if (!task) {
-      context.print(`${presentation.tag} Usage: /${presentation.command} explain <task description...> [--scope <write-scope> ...]`);
+      context.print(usage);
       return;
     }
     const explanation = await memory.explain(task, scopeValues);
@@ -89,26 +108,31 @@ export function createRecallReviewCommands<Context extends RecallQueryContext>(
   async function handleRecallQueue(args: string[], context: Context): Promise<void> {
     const memory = getMemory(context);
     if (!memory) return;
-    let scopeFilter: MemoryScope | undefined;
-    let remaining = args;
-    if (presentation.scopedQueue) {
-      const index = args.indexOf('--scope');
-      const scope = args[index + 1];
-      if (index !== -1 && scope) {
-        if (!isValidScope(scope)) {
-          context.print(
-            `${presentation.tag} Unknown scope "${scope}". ${presentation.validValuesLabel} ${VALID_SCOPES.join(', ')}${presentation.validValuesSuffix}`,
-          );
-          return;
-        }
-        scopeFilter = scope;
-        remaining = args.filter((_, i) => i !== index && i !== index + 1);
-      }
+    const usage = `${presentation.tag} Usage: /${presentation.command} queue [limit]${presentation.scopedQueue ? ' [--scope <scope>]' : ''}`;
+    const flags = readRecallFlags(args, presentation.scopedQueue ? QUEUE_FLAGS : {});
+    if ('refusal' in flags) {
+      context.print(`${presentation.tag} ${flags.refusal}\n${usage}`);
+      return;
     }
-    const limitRaw = presentation.scopedQueue ? remaining.find((a) => !a.startsWith('--')) : remaining[0];
-    const limit = Math.max(1, parseInt(limitRaw ?? '10', 10) || 10);
-    const raw = await memory.reviewQueue(scopeFilter ? 1000 : limit);
-    const queue = scopeFilter ? raw.filter((r) => r.scope === scopeFilter).slice(0, limit) : raw;
+    let scopeFilter: MemoryScope | undefined;
+    const scope = flags.values.get('--scope');
+    if (scope !== undefined) {
+      if (!isValidScope(scope)) {
+        context.print(
+          `${presentation.tag} Unknown scope "${scope}". ${presentation.validValuesLabel} ${VALID_SCOPES.join(', ')}${presentation.validValuesSuffix}`,
+        );
+        return;
+      }
+      scopeFilter = scope;
+    }
+    const [limitRaw, ...unexpected] = flags.positional;
+    if (unexpected.length > 0 ||(limitRaw !== undefined && !/^[1-9]\d*$/.test(limitRaw))) {
+      context.print(`${presentation.tag} The queue takes one limit, a positive whole number. Nothing was listed.\n${usage}`);
+      return;
+    }
+    const limit = limitRaw === undefined ? 10 : Number(limitRaw);
+    // The store filters by scope, so a scoped queue is one page of that scope.
+    const queue = await memory.reviewQueue(limit, scopeFilter);
     const extra = presentation.queueExtras?.(context) ?? [];
     if (!queue.length) {
       context.print(`${presentation.tag} Review queue is empty.`);

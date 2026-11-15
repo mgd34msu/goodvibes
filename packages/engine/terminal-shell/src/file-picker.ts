@@ -43,6 +43,11 @@ export class FilePickerModal {
 
   private onUpdate: (() => void) | null = null;
 
+  /** True once a walk of this directory has finished, so an empty list means there are no files. */
+  get listed(): boolean {
+    return this.filesCached;
+  }
+
   /** Set a callback to trigger re-render when file list loads. */
   setOnUpdate(fn: () => void): void {
     this.onUpdate = fn;

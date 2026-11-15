@@ -25,6 +25,7 @@ import {
   THEME_MODE_CONFIG_KEY,
 } from '../../renderer/theme-mode-config.ts';
 import { getActiveThemeMode, setActiveThemeMode } from '../../renderer/theme.ts';
+import { resetTerminalPaletteForTests, setTerminalPalette } from '@goodvibes-jev/engine/terminal-shell/terminal-palette';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
 function makeTmpDir(): string {
@@ -156,12 +157,21 @@ describe('applyThemeModeSettingChange (the ui-openers apply hook)', () => {
     expect(result.message).toBe('Theme mode: dark (applied now)');
   });
 
-  test('auto does NOT flip the mode and states the next-launch contract', () => {
+  test('auto with no reported background leaves the mode for the next launch', () => {
+    resetTerminalPaletteForTests();
     let repaints = 0;
-    const result = applyThemeModeSettingChange('auto', () => { repaints += 1; });
+    applyThemeModeSettingChange('auto', () => { repaints += 1; });
     expect(getActiveThemeMode()).toBe('dark'); // unchanged
     expect(repaints).toBe(0);
-    expect(result.message).toBe('Theme mode: auto (probes terminal on next startup)');
+  });
+
+  test('auto applies the background the terminal reported at startup now', () => {
+    setTerminalPalette({ background: '#ffffff', ansi: [] });
+    let repaints = 0;
+    applyThemeModeSettingChange('auto', () => { repaints += 1; });
+    expect(getActiveThemeMode()).toBe('light');
+    expect(repaints).toBe(1);
+    resetTerminalPaletteForTests();
   });
 
   test('garbage input coerces to the default (auto): no flip', () => {

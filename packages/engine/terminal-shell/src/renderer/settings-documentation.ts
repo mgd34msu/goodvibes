@@ -6,6 +6,27 @@ export interface DocLine {
   readonly fg: string;
   readonly bold?: boolean | undefined;
 }
+/**
+ * One line of settings help with its kind stated by the code that wrote it:
+ * `fact` (faint; folded into the one facts row when `folded` is set, left out
+ * when `onRow` because the selected row already shows it), `warning` (shown
+ * first, in the warning color), `heading` (bold) or `text`. A blank `text`
+ * line separates paragraphs.
+ */
+export interface HelpLine {
+  readonly kind: 'fact' | 'warning' | 'heading' | 'text';
+  readonly text: string;
+  readonly folded?: string | undefined;
+  readonly onRow?: boolean | undefined;
+}
+
+/** The plain text of help lines, for callers that print them. */
+export function helpLineText(lines: readonly (string | HelpLine)[]): string[] {
+  return lines.map((line) => (typeof line === 'string' ? line : line.text));
+}
+
+// Lines still passed as plain strings are read by their wording; a typed
+// HelpLine never is.
 const FACT_PREFIXES = [
   'Key:',
   'Current:',
@@ -44,13 +65,22 @@ export function fitValue(value: string, width: number, editing: boolean, label =
   if (editing) return tailText(value, Math.max(8, width - getDisplayWidth(label) - 4));
   return clipText(value, Math.max(8, Math.floor(width * 0.45)));
 }
+function readUntypedLine(line: string): HelpLine {
+  if (line.startsWith('Current: ')) return { kind: 'fact', text: line, onRow: true };
+  const fold = FOLDED_FACTS.find(([prefix]) => line.startsWith(prefix));
+  if (fold) return { kind: 'fact', text: line, folded: fold[1](line.slice(fold[0].length)) };
+  if (WARN_PREFIXES.some((prefix) => line.startsWith(prefix))) return { kind: 'warning', text: line };
+  if (line.endsWith(':')) return { kind: 'heading', text: line };
+  return { kind: FACT_PREFIXES.some((prefix) => line.startsWith(prefix)) ? 'fact' : 'text', text: line };
+}
+
 /** Products supply documentation content; wrapping, fact folding and windowing have one implementation. */
 export function createSettingsDocumentation<
   Modal extends {
     contextScroll?: number | undefined;
   },
 >(
-  context: (modal: Modal) => readonly string[],
+  context: (modal: Modal) => readonly (string | HelpLine)[],
   presentation: {
     readonly clampStoredOffset: boolean;
     readonly countIndicatorRow: boolean;
@@ -58,36 +88,26 @@ export function createSettingsDocumentation<
 ) {
   function docLines(modal: Modal, hasSelection: boolean, width: number): DocLine[] {
     const t = activeTokens();
-    const source = context(modal);
+    const source = context(modal).map((line) => (typeof line === 'string' ? readUntypedLine(line) : line));
     // With a selected row, the first line (its name) is already on the row.
-    const lines = hasSelection ? source.slice(1) : source;
-    const facts: string[] = [];
-    const rest: string[] = [];
-    for (const line of lines) {
-      if (line.startsWith('Current: ')) continue;
-      const fact = FOLDED_FACTS.find(([prefix]) => line.startsWith(prefix));
-      if (fact) facts.push(fact[1](line.slice(fact[0].length)));
-      else rest.push(line);
-    }
+    const lines = (hasSelection ? source.slice(1) : source).filter((line) => line.onRow !== true);
+    const facts = lines.flatMap((line) => (line.kind === 'fact' && line.folded !== undefined ? [line.folded] : []));
+    const rest = lines.filter((line) => !(line.kind === 'fact' && line.folded !== undefined));
     const out: DocLine[] = [];
     // Confirmations and constraints must be visible before optional metadata,
     // even when the help viewport is short. They remain outside the options.
-    for (const line of rest.filter(line => WARN_PREFIXES.some(prefix => line.startsWith(prefix))))
-      for (const wrapped of wrapLines(line, width)) out.push({ text: wrapped, fg: t.warning });
+    for (const line of rest.filter((line) => line.kind === 'warning'))
+      for (const wrapped of wrapLines(line.text, width)) out.push({ text: wrapped, fg: t.warning });
     if (facts.length > 0) for (const wrapped of wrapLines(facts.join(' · '), width)) out.push({ text: wrapped, fg: t.textFaint });
     for (const line of rest) {
-      if (WARN_PREFIXES.some(prefix => line.startsWith(prefix))) continue;
-      if (line === '') {
+      if (line.kind === 'warning') continue;
+      if (line.text === '') {
         if (out.length > 0 && out[out.length - 1]!.text !== '') out.push({ text: '', fg: t.textMuted });
         continue;
       }
-      const fg = WARN_PREFIXES.some((p) => line.startsWith(p))
-        ? t.warning
-        : FACT_PREFIXES.some((p) => line.startsWith(p))
-          ? t.textFaint
-          : t.textMuted;
-      const bold = line.endsWith(':');
-      for (const wrapped of wrapLines(line, width)) out.push({ text: wrapped, fg: bold ? t.text : fg, bold });
+      const bold = line.kind === 'heading';
+      const fg = bold ? t.text : line.kind === 'fact' ? t.textFaint : t.textMuted;
+      for (const wrapped of wrapLines(line.text, width)) out.push({ text: wrapped, fg, bold });
     }
     while (out.length > 0 && out[out.length - 1]!.text === '') out.pop();
     return out;

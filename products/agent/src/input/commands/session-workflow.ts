@@ -1,4 +1,4 @@
-import { formatSessionExport, resolveSessionExportRequest } from '@goodvibes-jev/engine/terminal-shell/session-export-format';
+import { formatTranscript, resolveSessionExportRequest, type TranscriptFormat } from '@goodvibes-jev/engine/terminal-shell/session-export-format';
 import { createSessionWorkflowCommands } from '@goodvibes-jev/engine/terminal-shell/session-workflow-commands';
 import '@goodvibes-jev/engine/terminal-shell/transcript-review';
 
@@ -31,17 +31,18 @@ async function printSessionExport(
   sessionId: string,
   title: string,
   messages: readonly ConversationMessageSnapshot[],
-  format: string,
+  format: TranscriptFormat,
   current: boolean,
 ): Promise<void> {
   const signal = ctx.judgmentReadingOptions?.signal;
   const live = current ? ctx.session.conversationManager.revisionSource : undefined;
   const liveRevision = live?.revision();
-  const formatted = formatSessionExport(sessionId, title, messages, format, {
+  // The same renderer `/export` uses, so both commands give one transcript of a session.
+  const formatted = formatTranscript(messages, format, {
+    markdown: (all) => [...all],
+    text: conversationMessageContentText,
     role: (message) => message.role,
-    content: conversationMessageContentText,
-    tool: (message) => (message.role === 'tool' ? (message.toolName ?? 'tool') : 'tool'),
-  });
+  }, { sessionId, title: title || undefined });
   // A transcript is the one place a value the model was handed becomes a
   // durable document. The canonical redactor carries the platform's credential
   // patterns AND, in a process that has loaded the owner profile, that

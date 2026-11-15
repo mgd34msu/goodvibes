@@ -1,15 +1,9 @@
 /**
- * Pins for buildEnterSequence / buildExitSequence, main.ts's terminal
- * enter/restore sequencing. Mirrors goodvibes-tui's
- * src/test/runtime/process-lifecycle-restore.test.ts pins: the exit teardown
- * must never wipe the user's scrollback (ESC[3J) and must show the cursor
- * only AFTER the screen switch, so it applies to the screen the shell prompt
- * lands on.
- *
- * Regression context: main.ts's exit path used to write CLEAR_SCREEN (which
- * included ESC[3J) both standalone (no-alt-screen path) and ahead of the
- * alt-screen exit, and wrote CURSOR_SHOW before the screen switch instead of
- * after it.
+ * Pins for buildEnterSequence / buildExitSequence, the composers the shared
+ * terminal lifecycle writes on enter, suspend and exit in both apps: the exit
+ * teardown must never wipe the user's scrollback (ESC[3J) and must show the
+ * cursor only AFTER the screen switch, so it applies to the screen the shell
+ * prompt lands on.
  */
 import { describe, expect, test } from 'bun:test';
 import {

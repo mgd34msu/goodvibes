@@ -1,4 +1,4 @@
-import { formatSessionExport, resolveSessionExportRequest } from '@goodvibes-jev/engine/terminal-shell/session-export-format';
+import { exportMessageFromRecord, formatTranscript, resolveSessionExportRequest, type TranscriptFormat } from '@goodvibes-jev/engine/terminal-shell/session-export-format';
 import { createSessionWorkflowCommands } from '@goodvibes-jev/engine/terminal-shell/session-workflow-commands';
 import { resolveSessionTarget } from '@goodvibes-jev/engine/platform/platform/sessions';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -62,14 +62,15 @@ async function exportSessionTranscript(
   sessionId: string,
   title: string,
   messages: Array<Record<string, unknown>>,
-  format: string,
+  format: TranscriptFormat,
   output: { readonly printOnly: boolean; readonly path: string | undefined },
 ): Promise<void> {
-  const formatted = formatSessionExport(sessionId, title, messages, format, {
+  // The same renderer `/export` uses, so both commands give one transcript of a session.
+  const formatted = formatTranscript(messages, format, {
+    markdown: (all) => all.map(exportMessageFromRecord),
+    text: (message) => flattenMessageContent(message.content),
     role: (message) => String(message.role ?? 'unknown'),
-    content: (message) => flattenMessageContent(message.content),
-    tool: (message) => String(message.toolName ?? 'tool'),
-  });
+  }, { sessionId, title: title || undefined });
   // A failed redaction writes and prints nothing.
   const redacted = await redactSensitiveDataAsync(formatted, { purpose: 'export' });
   if (output.printOnly) {

@@ -64,7 +64,7 @@ export function isLikelyTableSeparatorRow(row: string): boolean {
   if (!row.includes('|')) return false;
   const cells = splitTableCells(row);
   if (cells.length === 0) return false;
-  return cells.every((cell) => /:?-{3,}:?/.test(cell));
+  return cells.every((cell) => /^:?-{3,}:?$/.test(cell));
 }
 
 export function isLikelyTableHeaderRow(row: string): boolean {
@@ -357,12 +357,13 @@ function renderStackedTable(
 export function renderTable(rows: string[], width: number, indent: number, rightGutter = 0): Line[] {
   const lines: Line[] = [];
 
-  // Parse rows into cells, skip separator
+  // Parse rows into cells; only the row right after the header is the
+  // separator, so a body row of dashes is kept as content.
   const parsedRows: string[][] = [];
   let hasSeparator = false;
-  for (const row of rows) {
+  for (const [index, row] of rows.entries()) {
     const trimmed = row.trim();
-    if (isLikelyTableSeparatorRow(trimmed)) {
+    if (index === 1 && isLikelyTableSeparatorRow(trimmed)) {
       hasSeparator = true;
       continue;
     }

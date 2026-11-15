@@ -1,6 +1,8 @@
 import type { ConfigKey, ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { normalizeThemeName, setActiveThemeMode, setActiveThemeName } from './theme.js';
-import type { ThemeModeSetting } from './theme.js';
+import type { ThemeMode, ThemeModeSetting } from './theme.js';
+import { getTerminalPalette } from '../terminal-palette-store.js';
+import { classifyBackgroundLuminance, parseColorSpec } from './terminal-bg-probe.js';
 export const THEME_MODE_CONFIG_KEY: ConfigKey = 'display.themeMode';
 export function coerceThemeModeSetting(raw: unknown): ThemeModeSetting {
     return raw === 'auto' || raw === 'dark' || raw === 'light' ? raw : 'auto';
@@ -14,10 +16,20 @@ export function resolveConfiguredThemeMode(configManager: Pick<ConfigManager, 'g
     }
 }
 /**
- * Apply a display.themeMode settings change with the honest timing contract:
- * forced dark/light flip the active mode NOW (caller passes its full-repaint
- * hook); auto is only evaluated by the startup probe, so it takes effect on the
- * next launch, the returned message states which happened. Called by the
+ * Light or dark from the background colour the terminal reported at startup
+ * (the startup probe reads it in every mode), or null when it never answered.
+ */
+function terminalBackgroundMode(): ThemeMode | null {
+    const background = getTerminalPalette()?.background;
+    const rgb = background === undefined ? null : parseColorSpec(background);
+    return rgb === null ? null : classifyBackgroundLuminance(rgb);
+}
+/**
+ * Apply a display.themeMode settings change now: forced dark/light flip the
+ * active mode; auto classifies the background the terminal reported at
+ * startup and applies that. Only when the terminal never answered does auto
+ * wait for the next launch's probe; the returned message states which
+ * happened. The caller passes its full-repaint hook. Called by the
  * settings-modal onSettingApplied hook (ui-openers).
  */
 export function applyThemeModeSettingChange(value: unknown, requestFullRepaint?: (() => void) | undefined): {
@@ -29,7 +41,13 @@ export function applyThemeModeSettingChange(value: unknown, requestFullRepaint?:
         requestFullRepaint?.();
         return { message: `Theme mode: ${next} (applied now)` };
     }
-    return { message: 'Theme mode: auto (probes terminal on next startup)' };
+    const detected = terminalBackgroundMode();
+    if (detected !== null) {
+        setActiveThemeMode(detected);
+        requestFullRepaint?.();
+        return { message: `Theme mode: auto (terminal is ${detected}, applied now)` };
+    }
+    return { message: 'Theme mode: auto (the terminal did not report its background; probes it on next startup)' };
 }
 /** Config key backing the color theme (bundled name, 'system', or legacy 'vaporwave'). */
 export const THEME_NAME_CONFIG_KEY: ConfigKey = 'display.theme';

@@ -65,6 +65,54 @@ export function isHeader(row: KitRow): boolean {
   return row.header !== undefined;
 }
 
+/**
+ * The rows of a list: an array, or a count and a function that builds one row
+ * when it is needed. A list draws, measures and counts only the rows on screen
+ * (plus at most one screenful to find where the window starts), so a catalog of
+ * thousands of rows costs what a page of it costs.
+ */
+export interface KitRowSource {
+  readonly length: number;
+  at(index: number): KitRow | undefined;
+  /** No row is a group header: hidden-row counts are index arithmetic and build nothing. */
+  readonly noHeaders?: boolean | undefined;
+}
+
+/**
+ * A list source that builds row `index` on first use and keeps it for this
+ * source's life (one frame). Its rows are items, never group headers; the
+ * selected-item help area of a list over it is sized from the selected row.
+ */
+export function lazyRows(length: number, build: (index: number) => KitRow): KitRowSource {
+  const built = new Map<number, KitRow>();
+  return {
+    length,
+    noHeaders: true,
+    at(index: number): KitRow | undefined {
+      if (!Number.isInteger(index) || index < 0 || index >= length) return undefined;
+      let row = built.get(index);
+      if (row === undefined) {
+        row = build(index);
+        built.set(index, row);
+      }
+      return row;
+    },
+  };
+}
+
+function rowAt(rows: KitRowSource, index: number): KitRow {
+  return rows.at(index) ?? EMPTY_ROW;
+}
+const EMPTY_ROW: KitRow = { label: '' };
+
+/** The row the list keeps in view: `activeIndex`, else the row marked selected (a long source passes `activeIndex`). */
+function selectedRowIndex(options: Pick<KitListOptions, 'rows' | 'activeIndex'>): number {
+  if (options.activeIndex !== undefined) return options.activeIndex;
+  const { rows } = options;
+  for (let i = 0; i < rows.length; i++) if (rows.at(i)?.selected === true) return i;
+  return -1;
+}
+
 // ---------------------------------------------------------------------------
 // Wrapping styled spans
 // ---------------------------------------------------------------------------
@@ -203,7 +251,7 @@ export interface KitListOptions {
   readonly context?: KitListContext | undefined;
   /** Opt in only when this list uses Up/Down and Enter. */
   readonly mouseNavigation?: (boolean) | undefined;
-  readonly rows: readonly KitRow[];
+  readonly rows: KitRowSource;
   /** Current option for scrolling/help when focus is in a separate category rail. */
   readonly activeIndex?: number | undefined;
   /** First and last canvas rows the list may use (inclusive). */
@@ -236,14 +284,15 @@ export interface KitListContext {
 function contextLayout(options: KitListOptions): { height: number; lines: readonly KitSpan[] } {
   const width = Math.max(1, options.x1 - options.x0 + 1);
   const capacity = Math.max(0, options.bottom - options.top + 1);
+  const { rows } = options;
   let minimumItems = 0;
-  for (const row of options.rows) {
-    if (!isHeader(row) && ++minimumItems === 3) break;
+  for (let i = 0; i < rows.length; i++) {
+    if (!isHeader(rowAt(rows, i)) && ++minimumItems === 3) break;
   }
   const maximumHeight = Math.max(0, capacity - Math.max(1, minimumItems) - 1);
   if (maximumHeight === 0) return { height: 0, lines: [] };
   let desired = options.context?.height;
-  const selectedIndex = options.activeIndex ?? options.rows.findIndex(row => row.selected);
+  const selectedIndex = selectedRowIndex(options);
   let selectedDetail: string[] | undefined;
   // Reserve the same area across selection changes, including items with no
   // help. Changing focus must never move the list or insert prose between rows.
@@ -253,19 +302,30 @@ function contextLayout(options: KitListOptions): { height: number; lines: readon
       desired = 0;
       // Explicit documentation already supplies its own lines/window. Only
       // measure row details for automatic sizing, stopping at the viewport cap.
-      for (const [index, row] of options.rows.entries()) {
+      // A built-on-demand source is sized from its selected row alone, so
+      // nothing off screen is built for it.
+      const measured = Array.isArray(rows) ? rows.length : 0;
+      for (let index = 0; index < measured; index++) {
+        const row = rowAt(rows, index);
         if (!row.detail) continue;
         const detail = wrapLines(row.detail, width);
         if (index === selectedIndex) selectedDetail = detail;
         desired = Math.max(desired, detail.length);
         if (desired >= maximumHeight) break;
       }
+      if (!Array.isArray(rows) && selectedIndex >= 0) {
+        const detail = rows.at(selectedIndex)?.detail;
+        if (detail) {
+          selectedDetail = wrapLines(detail, width);
+          desired = selectedDetail.length;
+        }
+      }
     }
   }
   const height = Math.max(0, Math.min(desired, maximumHeight));
   if (height === 0) return { height, lines: [] };
   if (options.context?.window) return { height, lines: options.context.window(height).slice(0, height) };
-  const selected = options.rows[selectedIndex]?.detail;
+  const selected = selectedIndex >= 0 ? rows.at(selectedIndex)?.detail : undefined;
   const lines = options.context?.lines ?? (selectedDetail ?? (selected ? wrapLines(selected, width) : []))
     .map(text => ({ text, fg: activeTokens().textMuted }));
   if (lines.length <= height) {
@@ -316,42 +376,69 @@ export interface KitListResult {
 
 interface ListPlan {
   readonly capacity: number;
-  readonly heights: readonly number[];
+  /** Canvas rows row `index` takes (measured once per plan, when first asked). */
+  readonly heightOf: (index: number) => number;
   /** Whether the blank row above each group header (but the first) is drawn. */
   readonly gaps: boolean;
   /** True when the rows do not all fit and the list scrolls. */
   readonly scrolls: boolean;
-  /** Canvas rows that rows from..to take, spacing included when `gaps` is on. */
+  /**
+   * Canvas rows that rows from..to take, spacing included when `gaps` is on,
+   * exact up to `capacity` and `capacity + 1` for anything longer.
+   */
   readonly spanOf: (from: number, to: number) => number;
 }
 
-/** Heights, group spacing and whether the list scrolls, by the rules drawList documents. */
-function planList(canvas: SurfaceCanvas, options: KitListOptions): ListPlan {
+/**
+ * Heights, group spacing and whether the list scrolls, by the rules drawList
+ * documents. Every row takes at least one canvas row, so a span is measured
+ * only until it passes the capacity: a plan measures about one screenful of
+ * rows, however long the list.
+ */
+function planList(compact: boolean, options: KitListOptions): ListPlan {
   const { rows, top, bottom, x0, x1 } = options;
   const capacity = Math.max(1, bottom - top + 1);
-  const heights = rows.map((row) => measureRow(row, x0, x1));
-  // Prefix sums keep every span query O(1): catalogs run to thousands of rows.
-  const heightPre = [0];
-  const headerPre = [0];
-  for (let i = 0; i < rows.length; i++) {
-    heightPre.push(heightPre[i]! + heights[i]!);
-    headerPre.push(headerPre[i]! + (isHeader(rows[i]!) ? 1 : 0));
-  }
+  const heights = new Map<number, number>();
+  const heightOf = (index: number): number => {
+    let height = heights.get(index);
+    if (height === undefined) {
+      height = measureRow(rowAt(rows, index), x0, x1);
+      heights.set(index, height);
+    }
+    return height;
+  };
+  const headerAt = (index: number): boolean => rows.noHeaders !== true && isHeader(rowAt(rows, index));
   const span = (from: number, to: number, withGaps: boolean): number => {
-    if (to < from) return 0;
-    const base = heightPre[to + 1]! - heightPre[from]!;
-    // A blank row above every header after the first row of the span.
-    return withGaps ? base + (headerPre[to + 1]! - headerPre[from + 1]!) : base;
+    let sum = 0;
+    for (let i = from; i <= to; i++) {
+      // A blank row above every header after the first row of the span.
+      sum += heightOf(i) + (withGaps && i > from && headerAt(i) ? 1 : 0);
+      if (sum > capacity) return capacity + 1;
+    }
+    return sum;
   };
   const last = rows.length - 1;
   if (rows.length === 0 || span(0, last, true) <= capacity) {
-    return { capacity, heights, gaps: true, scrolls: false, spanOf: (from, to) => span(from, to, true) };
+    return { capacity, heightOf, gaps: true, scrolls: false, spanOf: (from, to) => span(from, to, true) };
   }
   // Spacing collapses before anything is cut; when the list scrolls anyway it
   // stays on a wide screen with room, and goes on a narrow screen or a short list.
   const scrolls = span(0, last, false) > capacity;
-  const gaps = scrolls && !canvas.compact && capacity >= SHORT_LIST_ROWS;
-  return { capacity, heights, gaps, scrolls, spanOf: (from, to) => span(from, to, gaps) };
+  const gaps = scrolls && !compact && capacity >= SHORT_LIST_ROWS;
+  return { capacity, heightOf, gaps, scrolls, spanOf: (from, to) => span(from, to, gaps) };
+}
+
+/**
+ * What a list needs without drawing it: the help area's height, whether the
+ * rows scroll, and the canvas rows it uses (help area and its blank row
+ * included; the whole area when it scrolls).
+ */
+export function measureList(compact: boolean, options: KitListOptions): { readonly contextHeight: number; readonly scrolls: boolean; readonly used: number } {
+  const contextHeight = contextLayout(options).height;
+  const area = listArea(options, contextHeight);
+  const plan = planList(compact, area);
+  const rowsUsed = plan.scrolls ? plan.capacity : Math.min(plan.capacity, plan.spanOf(0, options.rows.length - 1));
+  return { contextHeight, scrolls: plan.scrolls, used: area.top - options.top + rowsUsed };
 }
 
 /**
@@ -360,7 +447,7 @@ function planList(canvas: SurfaceCanvas, options: KitListOptions): ListPlan {
  * need to know where the end is, by the same spacing rules drawList uses.
  */
 export function listScrollEnd(canvas: SurfaceCanvas, options: KitListOptions): number {
-  const plan = planList(canvas, listArea(options, contextLayout(options).height));
+  const plan = planList(canvas.compact, listArea(options, contextLayout(options).height));
   if (!plan.scrolls) return 0;
   const last = options.rows.length - 1;
   let start = last;
@@ -389,48 +476,65 @@ export function drawList(canvas: SurfaceCanvas, options: KitListOptions): KitLis
 
 function drawListRows(canvas: SurfaceCanvas, options: KitListOptions): KitListResult {
   const { rows, top, bottom, x0, x1 } = options;
-  const plan = planList(canvas, options);
-  const { gaps, heights } = plan;
+  const plan = planList(canvas.compact, options);
+  const { gaps, heightOf } = plan;
   let start = 0;
   const last = rows.length - 1;
+  const selected = selectedRowIndex(options);
   if (plan.scrolls) {
     const { capacity, spanOf } = plan;
-    const selected = options.activeIndex ?? rows.findIndex((row) => row.selected === true);
     start = Math.max(0, Math.min(rememberedStart(options.scrollKey) ?? options.scrollStart ?? 0, last));
     if (selected >= 0) {
       if (selected < start) start = selected;
+      // More rows than the area holds cannot fit whatever their height: skip them unmeasured.
+      if (selected - start + 1 > capacity) start = selected - capacity + 1;
       while (start < selected && spanOf(start, selected) > capacity) start++;
       // Show the selected row's group header when there is room for it.
-      if (start > 0 && start === selected && isHeader(rows[start - 1]!) && spanOf(start - 1, selected) <= capacity) start--;
+      if (start > 0 && start === selected && isHeader(rowAt(rows, start - 1)) && spanOf(start - 1, selected) <= capacity) start--;
     }
-    // Do not leave empty space at the end when scrolled down.
-    while (start > 0 && spanOf(start - 1, last) <= capacity) start--;
+    // Do not leave empty space at the end when scrolled down (more rows than
+    // the area holds from here to the end already fill it).
+    if (last - start + 1 <= capacity) {
+      while (start > 0 && spanOf(start - 1, last) <= capacity) start--;
+    }
   }
 
   rememberStart(options.scrollKey, start);
   let y = top;
   let lastDrawn = start - 1;
-  const itemIndexes = rows.map((row, index) => isHeader(row) || row.selectable === false ? -1 : index).filter(index => index >= 0);
-  const selectedItem = itemIndexes.findIndex(index => rows[index]!.selected);
+  const isItem = (index: number): boolean => {
+    const row = rowAt(rows, index);
+    return !isHeader(row) && row.selectable !== false;
+  };
+  // Mouse targets press Up/Down from the selected item, so they need its place among the items.
+  const selectedItem = options.mouseNavigation && selected >= 0 && rowAt(rows, selected).selected === true && isItem(selected) ? selected : -1;
+  const itemsBetween = (from: number, to: number): number => {
+    let n = 0;
+    for (let i = from; i <= to; i++) if (isItem(i)) n++;
+    return n;
+  };
   for (let i = start; i < rows.length; i++) {
-    const gap = gaps && i > start && isHeader(rows[i]!) ? 1 : 0;
+    const row = rowAt(rows, i);
+    const gap = gaps && i > start && isHeader(row) ? 1 : 0;
     if (y + gap > bottom) break;
     // A header with no room for an item under it is left for the next page.
-    if (isHeader(rows[i]!) && y + gap + 1 > bottom && i < rows.length - 1) break;
+    if (isHeader(row) && y + gap + 1 > bottom && i < rows.length - 1) break;
     y += gap;
-    const used = drawRow(canvas, y, rows[i]!, x0, x1, bottom);
-    if (options.mouseNavigation && selectedItem >= 0 && !isHeader(rows[i]!) && rows[i]!.selectable !== false && !rows[i]!.onClick) {
-      const delta = itemIndexes.indexOf(i) - selectedItem;
+    const used = drawRow(canvas, y, row, x0, x1, bottom);
+    if (selectedItem >= 0 && isItem(i) && !row.onClick) {
+      const delta = i === selectedItem ? 0 : i < selectedItem ? -itemsBetween(i, selectedItem - 1) : itemsBetween(selectedItem + 1, i);
       const keys = delta === 0 ? ['enter'] : Array.from({ length: Math.abs(delta) }, () => delta < 0 ? 'up' : 'down');
-      canvas.hitTargets.push({ id: `item:${i}:${rows[i]!.label ?? ''}`, keys, x: x0 - MODAL_MARK_INSET, y, width: x1 - x0 + 1 + MODAL_MARK_INSET, height: used });
+      canvas.hitTargets.push({ id: `item:${i}:${row.label ?? ''}`, keys, x: x0 - MODAL_MARK_INSET, y, width: x1 - x0 + 1 + MODAL_MARK_INSET, height: used });
     }
     y += used;
     lastDrawn = i;
-    if (used < heights[i]!) break;
+    if (used < heightOf(i)) break;
   }
   const countItems = (from: number, to: number): number => {
+    if (to < from) return 0;
+    if (rows.noHeaders === true) return to - from + 1;
     let n = 0;
-    for (let i = from; i <= to; i++) if (!isHeader(rows[i]!)) n++;
+    for (let i = from; i <= to; i++) if (!isHeader(rowAt(rows, i))) n++;
     return n;
   };
   return {
@@ -450,10 +554,8 @@ export function drawScrollingList(canvas: SurfaceCanvas, options: KitListOptions
   const context = contextLayout(options);
   context.lines.forEach((line, index) => canvas.put(options.x0, options.top + index, line.text, line));
   const area = listArea(options, context.height);
-  const scratch = new SurfaceCanvas(canvas.width, canvas.height);
-  scratch.compact = canvas.compact;
-  const trial = drawListRows(scratch, area);
-  if (trial.above === 0 && trial.below === 0) return drawListRows(canvas, area);
+  // A list that fits hides nothing and needs no count row.
+  if (!planList(canvas.compact, area).scrolls) return drawListRows(canvas, area);
   // On a very short screen the option itself takes precedence over a count.
   if (area.bottom <= area.top) return drawListRows(canvas, area);
   const result = drawListRows(canvas, { ...area, bottom: area.bottom - 1 });

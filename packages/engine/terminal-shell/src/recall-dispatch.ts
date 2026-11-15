@@ -18,6 +18,12 @@ export function createRecallDispatch<Context>(ports: {
   readonly handoffInspect: (args: string[], context: Context) => unknown;
   readonly handoffImport: (args: string[], context: Context) => unknown;
 }) {
+  // `stale <id> <reason words> [--by <name>]`: the words after the id are the reason, read by the review grammar.
+  const reviewAs = (state: 'stale' | 'contradicted') => (args: string[], context: Context): unknown => {
+    const [id = '', ...rest] = args;
+    const reasonFirst = rest.length > 0 && !rest[0]!.startsWith('--');
+    return ports.review([id, state, ...(reasonFirst ? ['--reason'] : []), ...rest], context);
+  };
   const handlers = new Map<string, (args: string[], context: Context) => unknown>([
     ['add', ports.add],
     ['search', ports.search],
@@ -29,8 +35,8 @@ export function createRecallDispatch<Context>(ports: {
     ['show', ports.get],
     ['queue', ports.queue],
     ['review', ports.review],
-    ['stale', (args, context) => ports.review([args[0] ?? '', 'stale', '--reason', ...args.slice(1)], context)],
-    ['contradict', (args, context) => ports.review([args[0] ?? '', 'contradicted', '--reason', ...args.slice(1)], context)],
+    ['stale', reviewAs('stale')],
+    ['contradict', reviewAs('contradicted')],
     ['explain', ports.explain],
     ['promote', ports.promote],
     ['link', ports.link],

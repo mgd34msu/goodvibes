@@ -71,7 +71,7 @@ import { connectedHostSummary, describeConnectedHostCapability, settingsPolicySu
 import { countHarnessSettingCatalog, formatHarnessError, resolveEffectiveHarnessSetting } from '../agent/harness-control.ts';
 import { harnessSettingsCatalog, isHarnessSettingsQuery } from './agent-harness-settings-catalog.ts';
 import { buildAssistantCockpitFromSummaries } from '../agent/assistant-cockpit.ts';
-import { remoteCatalogStatus, remotePairApproveHandoff, remotePairRejectHandoff, remotePairRequestsSummary, remotePeersInvokeHandoff, remoteMissingInput, remotePeersSummary, remoteSnapshotSummary, remoteWorkCancelHandoff, remoteWorkSummary } from './agent-harness-remote.ts';
+import { isAgentHarnessRemoteMode, remoteCatalogStatus, runRemoteMode } from './agent-harness-remote.ts';
 import { channelDraftSaveHandoff, channelDraftSendHandoff, channelDraftsSummary, channelRoutingAssignHandoff, channelRoutingRemoveHandoff, channelRoutingSummary, unifiedInboxSummary } from './agent-harness-comms.ts';
 
 /**
@@ -416,7 +416,7 @@ function buildAgentHarnessTool(deps: AgentHarnessToolDeps): Tool {
           }));
           const operatorMethods = operatorMethodCatalogStatus();
           const servicePosture = servicePostureCatalogStatus();
-          const remote = remoteCatalogStatus(deps.commandContext);
+          const remote = remoteCatalogStatus();
           const connectedHost = connectedHostSummary(deps.commandContext, deps.toolRegistry, {
             includeParameters: args.includeParameters === true,
           });
@@ -873,54 +873,23 @@ function buildAgentHarnessTool(deps: AgentHarnessToolDeps): Tool {
           assertSkillDraftRunResultCurrent(result, deps.commandContext, learningEffectOptions);
           return rendered;
         }
-        if (dispatchMode === 'remote_snapshot') return output(remoteSnapshotSummary(args));
-        if (dispatchMode === 'remote_peers') return output(remotePeersSummary(args));
-        if (dispatchMode === 'remote_work') return output(remoteWorkSummary(args));
-        if (dispatchMode === 'remote_pair_requests') return output(remotePairRequestsSummary(args));
-        if (dispatchMode === 'remote_pair_approve') {
-          const missingInput = remoteMissingInput('remote_pair_approve', args);
-          if (missingInput) return error(`${missingInput.error} ${missingInput.next}`);
-          const confirmationError = requireConfirmedAction(rawArgs, options, 'Remote pair request approval');
-          if (confirmationError) return error(confirmationError);
-          return output(remotePairApproveHandoff(args));
-        }
-        if (dispatchMode === 'remote_pair_reject') {
-          const missingInput = remoteMissingInput('remote_pair_reject', args);
-          if (missingInput) return error(`${missingInput.error} ${missingInput.next}`);
-          const confirmationError = requireConfirmedAction(rawArgs, options, 'Remote pair request rejection');
-          if (confirmationError) return error(confirmationError);
-          return output(remotePairRejectHandoff(args));
-        }
-        if (dispatchMode === 'remote_peers_invoke') {
-          const missingInput = remoteMissingInput('remote_peers_invoke', args);
-          if (missingInput) return error(`${missingInput.error} ${missingInput.next}`);
-          const confirmationError = requireConfirmedAction(rawArgs, options, 'Remote peer command invocation');
-          if (confirmationError) return error(confirmationError);
-          return output(remotePeersInvokeHandoff(args));
-        }
-        if (dispatchMode === 'remote_work_cancel') {
-          const missingInput = remoteMissingInput('remote_work_cancel', args);
-          if (missingInput) return error(`${missingInput.error} ${missingInput.next}`);
-          const confirmationError = requireConfirmedAction(rawArgs, options, 'Remote work cancellation');
-          if (confirmationError) return error(confirmationError);
-          return output(remoteWorkCancelHandoff(args));
-        }
+        if (isAgentHarnessRemoteMode(dispatchMode)) return await runRemoteMode(deps.toolRegistry, dispatchMode, args, rawArgs, options);
         if (dispatchMode === 'unified_inbox') return output(await unifiedInboxSummary(deps.commandContext, args));
         if (dispatchMode === 'channel_drafts') return output(await channelDraftsSummary(deps.commandContext, args));
         if (dispatchMode === 'channel_draft_save') {
-          const result = await channelDraftSaveHandoff(deps.commandContext, rawArgs, options); return typeof result === 'string' ? error(result) : output(result);
+          const result = await channelDraftSaveHandoff(deps.commandContext, rawArgs, options); return typeof result === 'string' ? error(result) : effectOutput(result);
         }
         if (dispatchMode === 'channel_draft_send') {
-          const result = await channelDraftSendHandoff(deps.commandContext, rawArgs, options); return typeof result === 'string' ? error(result) : output(result);
+          const result = await channelDraftSendHandoff(deps.commandContext, rawArgs, options); return typeof result === 'string' ? error(result) : effectOutput(result);
         }
         if (dispatchMode === 'channel_routing') return output(channelRoutingSummary(deps.commandContext, args));
         if (dispatchMode === 'channel_routing_assign') {
           const result = await channelRoutingAssignHandoff(deps.commandContext, rawArgs, options);
-          return typeof result === 'string' ? error(result) : output(result);
+          return typeof result === 'string' ? error(result) : effectOutput(result);
         }
         if (dispatchMode === 'channel_routing_remove') {
           const result = await channelRoutingRemoveHandoff(deps.commandContext, rawArgs, options);
-          return typeof result === 'string' ? error(result) : output(result);
+          return typeof result === 'string' ? error(result) : effectOutput(result);
         }
         return error(`Unhandled agent_harness mode: ${dispatchMode}`);
       } catch (err) {

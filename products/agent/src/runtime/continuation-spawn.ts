@@ -1,60 +1,14 @@
 /**
- * continuation-spawn.ts, what an inbound shared-session follow-up is spawned with.
- *
- * `restrictTools: true` with no tool list means an empty registry: an agent that
- * can answer and do nothing else. So the decision is made once here, the same
- * one the daemon and the platform runtime make: a follow-up that starts a
- * contract (an explicit work authorization, or a local surface) keeps the full
- * tool set; any other follow-up is a conversation, spawned with the tools a
- * conversational turn needs and the write authority of the channel it arrived on.
+ * continuation-spawn.ts, how an inbound shared-session follow-up is answered
+ * from this Agent: handed to the daemon to host when it can be, otherwise spawned
+ * here with the platform's one spawn decision (`buildContinuationSpawnInput`).
  */
-import { continuationContractOptions, decideContinuationEscalation } from '@goodvibes-jev/engine/platform/platform/agents';
-import { buildSharedSessionAgentSpawnRoutingInput } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import { buildContinuationSpawnInput, type ContinuationSpawnDeps } from '@goodvibes-jev/engine/platform/platform/runtime/bootstrap';
 import type { SharedSessionContinuationRequest } from '@goodvibes-jev/engine/platform/platform/control-plane';
-import { conversationalTurnSpawnOptions, type ConversationalTurnConfigReader } from '@goodvibes-jev/engine/platform/platform/personal-capture';
 import type { AgentManager } from '@goodvibes-jev/engine/platform/platform/tools';
 import { heldDispositionForUnconfirmedHandoff, type HostedConversationHandoff } from './client/hosted-handoff.ts';
 
-type ModelCandidates = NonNullable<Parameters<typeof buildSharedSessionAgentSpawnRoutingInput>[1]>['modelCandidates'];
-
-type GateConfigReader = NonNullable<NonNullable<Parameters<typeof decideContinuationEscalation>[1]>['configReader']>;
-
-export interface ContinuationSpawnDeps {
-  /** The live config manager: it answers both the conversation-gate keys and the capture-authority keys. */
-  readonly configReader: GateConfigReader & ConversationalTurnConfigReader;
-  readonly modelCandidates: ModelCandidates;
-}
-
-export function buildContinuationSpawnInput(
-  request: Pick<SharedSessionContinuationRequest, 'task' | 'input' | 'routeBinding'>,
-  deps: ContinuationSpawnDeps,
-): Parameters<AgentManager['spawn']>[0] {
-  const { task, input, routeBinding } = request;
-  const escalation = decideContinuationEscalation(input, { configReader: deps.configReader });
-  const address = routeBinding?.channelId ?? input.externalId;
-  return {
-    mode: 'spawn',
-    task,
-    // Resolves through the platform's shared model-reference resolver (a unique
-    // bare id auto-qualifies; an ambiguous or unknown one throws naming the
-    // candidates).
-    ...buildSharedSessionAgentSpawnRoutingInput(input.routing, { modelCandidates: deps.modelCandidates }),
-    // Conversation first: a follow-up gets an answer, not a write-review-fix
-    // chain. Both `conversationGate.mode` and `gatedSurfaces` read the live config.
-    ...(escalation.startsContract ? { context: `shared-session:${input.sessionId}` } : {
-      ...continuationContractOptions(input, { configReader: deps.configReader }),
-      ...conversationalTurnSpawnOptions(input, {
-        configReader: deps.configReader,
-        tools: input.routing?.tools,
-        channel: {
-          routed: true,
-          ...(input.surfaceKind ? { surfaceKind: input.surfaceKind } : {}),
-          ...(address ? { address } : {}),
-        },
-      }),
-    }),
-  };
-}
+export type { ContinuationSpawnDeps };
 
 export interface HostedContinuationDeps {
   readonly hostedHandoff: Pick<HostedConversationHandoff, 'promote'>;
@@ -105,6 +59,6 @@ export async function runHostedContinuation(
       reason: handoff.reason,
     });
   }
-  const record = deps.spawn(buildContinuationSpawnInput({ task, input, ...(routeBinding ? { routeBinding } : {}) }, deps.spawnDeps));
+  const record = deps.spawn(buildContinuationSpawnInput({ task, input, ...(routeBinding ? { routeBinding } : {}) }, { ...deps.spawnDeps, sharedSessionContext: true }));
   return { agentId: record.id };
 }

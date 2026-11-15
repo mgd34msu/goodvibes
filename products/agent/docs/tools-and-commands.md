@@ -428,7 +428,7 @@ Routine promotion is an explicit scheduling route. Local routines stay local unt
 | `/memory` | Add, search, review, stale, or delete Agent-local memory records. `/memory files sync` writes standing records as markdown files and commits them in their own repository; `files review` shows what editing those files would change; `files apply <id>...` applies the proposals you name. A command run by the model may review but not sync or apply. |
 | `/mode` | Manage Agent interaction mode and per-domain verbosity. |
 | `/model` | Select or display the current LLM model. |
-| `/network-scan` | Turn local-network scanning for model servers on or off, or check its status. Off until explicitly turned on; never scans silently on first run. |
+| `/network-scan` | Turn local-network scanning for model servers on or off, or check its status. Model servers on this computer and providers whose API key is in the environment are registered at every start; the network is scanned only after `/network-scan on`, which scans at once and then at each start. |
 | `/next-error` | Jump to the next error message in the conversation. |
 | `/notes` | Open Agent-local scratchpad notes in the operator workspace. |
 | `/notifications` | Show every notice and notification in full, newest first (each notice also shows briefly as a toast). |

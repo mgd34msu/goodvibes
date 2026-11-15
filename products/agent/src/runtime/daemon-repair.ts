@@ -296,7 +296,7 @@ export async function runDaemonRepair(options: DaemonRepairRunOptions): Promise<
   }
 
   if (!offer.serviceInstalled) {
-    const installed = installDaemonService(options.runDaemonCli ?? createDaemonCliRunner());
+    const installed = await installDaemonService(options.runDaemonCli ?? createDaemonCliRunner());
     if (!installed.ok) {
       steps.push(`could not install the daemon service: ${installed.detail}`);
       return finish(false, `[Daemon] Not repaired: ${DAEMON_ENABLED_KEY} is now true, but the daemon service could not be installed (${installed.detail}). Install it with: ${DAEMON_INSTALL_COMMAND}`);

@@ -13,7 +13,7 @@ import { ChannelDeliveryRouter } from '../channels/delivery-router.js';
 import { ApprovalBroker, GatewayMethodCatalog, SessionLiveTurnControlsHolder, SharedSessionBroker, registerGatewayVerbGroups, registerNativeAutomationGatewayMethods, controlPlaneStorePath } from '../control-plane/index.js';
 import { StepUpService } from '../relay/step-up-service.js';
 import { hasFreshSurfaceParticipant, SURFACE_ROUTE_FRESHNESS_MS } from '../control-plane/session-broker-sessions.js';
-import { buildSharedSessionAgentSpawnRoutingInput } from '../control-plane/session-intents.js';
+import { buildContinuationSpawnInput } from './continuation-spawn.js';
 import { WatcherRegistry } from '../watchers/index.js';
 import { TriggerManager } from '../triggers/manager.js';
 import { createBunStreamHost, createProcessManagerTriggerHost, createTriggerActionExecutor } from '../triggers/hosts.js';
@@ -42,8 +42,7 @@ import { cancelAllAgentRuns, type AgentManager } from '../tools/agent/index.js';
 import type { AgentMessageBus } from '../agents/message-bus.js';
 import type { AgentOrchestrator } from '../agents/orchestrator.js';
 import type { ArchetypeLoader } from '../agents/archetypes.js';
-import { continuationContractOptions, decideContinuationEscalation } from '../agents/conversation-continuation.js';
-import { PersonalCaptureHolder, conversationalTurnSpawnOptions } from '../personal-capture/index.js';
+import { PersonalCaptureHolder } from '../personal-capture/index.js';
 import { ProcessManager } from '../tools/shared/process-manager.js';
 import { ModeManager } from '../state/mode-manager.js';
 import { FileUndoManager } from '../state/file-undo.js';
@@ -638,27 +637,10 @@ function buildRuntimeGraph(product: ProductComposition, disposalScope: AsyncDisp
   // profile store and occasions service are actually built.
   const personalCapture = new PersonalCaptureHolder();
   sessionBroker.setContinuationRunner(async ({ task, input, routeBinding }) => {
-    const escalation = decideContinuationEscalation(input, { configReader: configManager });
-    const routing = buildSharedSessionAgentSpawnRoutingInput(input.routing, { modelCandidates: providerRegistry.listModels() });
-    const record = agentManager.spawn({
-      mode: 'spawn',
-      task,
-      ...routing,
-      // Authorization and local-surface policy select the capability boundary;
-      // a confirmed contract must not inherit conversational restrictions.
-      ...(escalation.startsContract ? {} : {
-        ...continuationContractOptions(input, { configReader: configManager }),
-        ...conversationalTurnSpawnOptions(input, {
-          configReader: configManager,
-          tools: input.routing?.tools,
-          channel: {
-            routed: true,
-            ...(input.surfaceKind ? { surfaceKind: input.surfaceKind } : {}),
-            ...(routeBinding?.channelId ?? input.externalId ? { address: routeBinding?.channelId ?? input.externalId } : {}),
-          },
-        }),
-      }),
-    });
+    const record = agentManager.spawn(buildContinuationSpawnInput(
+      { task, input, ...(routeBinding ? { routeBinding } : {}) },
+      { configReader: configManager, modelCandidates: providerRegistry.listModels() },
+    ));
     return { agentId: record.id };
   });
   const artifactStore = new ArtifactStore({ configManager });

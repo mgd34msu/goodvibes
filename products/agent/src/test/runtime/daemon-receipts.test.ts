@@ -9,7 +9,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { AgentDaemonReceiptFeed, createDaemonReceiptConsumption, type DaemonReceipt } from '../../runtime/daemon-receipts.ts';
 import { createSessionSpineReceiptConsumer as createSpineReceiptConsumer } from '@goodvibes-jev/engine/platform/platform/runtime/session-spine';
-import { DaemonBuildGuard, readDaemonStatusPayload } from '../../runtime/daemon-build-compatibility.ts';
+import { readDaemonStatusPayload } from '../../runtime/daemon-build-compatibility.ts';
 
 describe('AgentDaemonReceiptFeed', () => {
   test('buffers receipts captured before the renderer attaches, then flushes in order', () => {
@@ -79,9 +79,6 @@ describe('receipt consumption once per attach', () => {
     expect(rendered).toEqual([]);
 
     const attach = createDaemonReceiptConsumption({
-      resolveConnection: connection,
-      readStatus: readDaemonStatusPayload,
-      guard: new DaemonBuildGuard({ floor: '3.2.0' }),
       consumeReceipts: createSpineReceiptConsumer({ resolveConnection: connection }),
       feed,
       afterAttach: async () => {},
@@ -89,7 +86,7 @@ describe('receipt consumption once per attach', () => {
     requests.length = 0;
     await attach();
 
-    expect(requests).toEqual(['/status', '/status?receipts=peek', '/status?receipts=ack&ids=update-1']);
+    expect(requests).toEqual(['/status?receipts=peek', '/status?receipts=ack&ids=update-1']);
     expect(rendered).toEqual(['updated from 1.9.0 to 1.9.1']);
 
     // The daemon delivered it, so a second attach finds nothing to render.
@@ -103,9 +100,6 @@ describe('receipt consumption once per attach', () => {
     const feed = new AgentDaemonReceiptFeed();
     const order: string[] = [];
     await createDaemonReceiptConsumption({
-      resolveConnection: connection,
-      readStatus: readDaemonStatusPayload,
-      guard: new DaemonBuildGuard({ floor: '3.2.0' }),
       consumeReceipts: async () => {
         order.push('consume');
         return [{ id: 'r-1', text: 'restarted after a crash', at: 1 }];

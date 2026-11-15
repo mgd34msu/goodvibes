@@ -5,6 +5,7 @@ import {
   discoveredProvidersFilePath,
   loadLanScanConsent,
   saveLanScanConsent,
+  startLanScanNow,
   NETWORK_SCAN_DISABLE_COMMAND,
   NETWORK_SCAN_ENABLE_COMMAND,
 } from '../../runtime/lan-scan-consent.ts';
@@ -13,7 +14,8 @@ function statusText(storePath: string, decision: ReturnType<typeof loadLanScanCo
   if (!decision || decision.decision === 'declined') {
     return [
       'Local network scanning: off',
-      '  What it would do   Check other devices on your local network (your subnet only, nothing beyond it) for model servers such as Ollama or LM Studio.',
+      '  At each start      Model servers on this computer (such as Ollama or LM Studio) are found and registered; providers whose API key is in the environment are registered.',
+      '  What it would do   Check other devices on your local network (your subnet only, nothing beyond it) for model servers.',
       `  What it stores     Found servers would be saved to ${storePath}.`,
       `  Turn it on         ${NETWORK_SCAN_ENABLE_COMMAND}`,
     ].join('\n');
@@ -29,10 +31,10 @@ function statusText(storePath: string, decision: ReturnType<typeof loadLanScanCo
 }
 
 /**
- * /network-scan, the consent + status surface for the Phase-8 LAN provider
- * discovery scan (see src/runtime/lan-scan-consent.ts). Declining or never
- * deciding is a first-class, fully supported path: the scan simply never
- * runs until this command turns it on.
+ * /network-scan, the consent + status surface for the subnet part of provider
+ * discovery (see src/runtime/lan-scan-consent.ts). Declining or never deciding
+ * is a first-class path: this computer is still scanned at each start, the
+ * network never is until this command turns it on, and turning it on scans at once.
  */
 export function registerNetworkScanRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
@@ -53,9 +55,10 @@ export function registerNetworkScanRuntimeCommands(registry: CommandRegistry): v
 
       if (sub === 'on' || sub === 'enable') {
         saveLanScanConsent(shellPaths, GOODVIBES_AGENT_SURFACE_ROOT, 'granted');
+        const scanning = startLanScanNow();
         ctx.print(
-          'Local network scanning is now on. Starting next launch, the agent will check other devices on your ' +
-          `local network (your subnet only) for model servers such as Ollama or LM Studio, and save what it finds to ${storePath}. ` +
+          `Local network scanning is now on. ${scanning ? 'Scanning now, and at each start,' : 'From the next start,'} the agent checks other devices on your ` +
+          `local network (your subnet only) for model servers such as Ollama or LM Studio, and saves what it finds to ${storePath}. ` +
           'Run /provider to see discovered servers. Turn it off anytime with /network-scan off.',
         );
         return;

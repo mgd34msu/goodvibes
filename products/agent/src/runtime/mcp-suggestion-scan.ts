@@ -23,7 +23,7 @@ import type { McpRegistry } from '@goodvibes-jev/engine/platform/platform/mcp';
 const SCAN_DELAY_MS = 2000;
 
 export interface McpSuggestionScanOptions {
-  readonly mcpRegistry: Pick<McpRegistry, 'serverNames' | 'disconnectAll'>;
+  readonly mcpRegistry: Pick<McpRegistry, 'serverNames'>;
   readonly systemMessageRouter: { low(message: string): void };
   readonly requestRender: () => void;
   readonly shellPaths: Omit<Parameters<typeof scanMcpServers>[0], 'surfaceRoot'>;
@@ -31,16 +31,17 @@ export interface McpSuggestionScanOptions {
 }
 
 export interface McpSuggestionScanHandle {
-  /** Cancels the scan and releases servers that were started on first use; await it at shutdown. */
-  stop(): Promise<void>;
+  /** Cancels the scan if it has not run yet. */
+  stop(): void;
 }
 
 /**
- * Scan for installed-but-unconfigured MCP servers and suggest them, once.
+ * Scan for installed-but-unconfigured MCP servers and suggest them, once, two
+ * seconds after start-up.
  *
  * Deliberately does NOT connect to anything, then or later.
  */
-export function scheduleMcpSuggestionScanOnFirstUse(
+export function scheduleMcpSuggestionScan(
   options: McpSuggestionScanOptions,
 ): McpSuggestionScanHandle {
   let stopped = false;
@@ -71,16 +72,12 @@ export function scheduleMcpSuggestionScanOnFirstUse(
   (timer as unknown as { unref?: () => void }).unref?.();
 
   return {
-    stop: (): Promise<void> => {
+    stop: (): void => {
       stopped = true;
       if (timer) {
         clearTimeout(timer);
         timer = null;
       }
-      // Servers are started lazily on first use; nothing else owns their stdio children at shutdown.
-      return options.mcpRegistry.disconnectAll().catch((error: unknown) => {
-        logger.warn('MCP disconnect at shutdown failed', { error: summarizeError(error) });
-      });
     },
   };
 }

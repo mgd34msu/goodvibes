@@ -96,188 +96,52 @@ describe('lan-scan-consent: persistence', () => {
   });
 });
 
-describe('runGatedLanScan: consent gate (test doubles only: never a real network probe)', () => {
-  test('first run never scans silently: no decision on disk -> discovery is not invoked', () => {
+describe('runGatedLanScan: the network is scanned only with consent (test doubles only: never a real network probe)', () => {
+  function recordRun(root: string, router = makeRouterSpy().router) {
+    const runs: BackgroundProviderDiscoveryOptions[] = [];
+    runGatedLanScan(makeGateOptions(root, { systemMessageRouter: router, startDiscovery: (opts) => {
+      runs.push(opts);
+      return { stopped: false, stop() {} };
+    } }));
+    return runs;
+  }
+
+  test('first run: this computer is scanned, the network is not, and the network scan is explained once and recorded off', () => {
     const root = makeProjectTempDir('gv-lan-consent');
-    const discovery = fakeDiscovery(() => {
-      throw new Error('must never be called before consent is granted');
-    });
     const { router, low } = makeRouterSpy();
-
-    const handle = runGatedLanScan(makeGateOptions(root, { systemMessageRouter: router, startDiscovery: discovery.fn }));
-
-    expect(discovery.calls).toBe(0);
-    expect(handle.stopped).toBe(false);
+    const runs = recordRun(root, router);
+    expect(runs).toHaveLength(1);
+    expect(runs[0]!.registerNetworkServers).toBe(false);
     expect(low).toHaveLength(1);
-    expect(low[0]).toContain('local network');
-    expect(low[0]).toContain('subnet only');
     expect(low[0]).toContain(NETWORK_SCAN_ENABLE_COMMAND);
-    expect(low[0]).toContain(discoveredProvidersFilePath(createShellPathService({ workingDirectory: root, homeDirectory: root }), SURFACE_ROOT));
-  });
-
-  test('first run persists the off-until-consented default so it is not silently re-asked forever', () => {
-    const root = makeProjectTempDir('gv-lan-consent');
-    const discovery = fakeDiscovery(() => {});
-    runGatedLanScan(makeGateOptions(root, { startDiscovery: discovery.fn }));
-
     const shellPaths = createShellPathService({ workingDirectory: root, homeDirectory: root });
     expect(loadLanScanConsent(shellPaths, SURFACE_ROOT)?.decision).toBe('declined');
   });
 
-  test('declining (already decided, i.e. a relaunch) -> no scan, and no repeated reminder (F3): silent, discoverable via /network-scan status', () => {
+  test('declined: still a local pass, never the network, and no repeated reminder', () => {
     const root = makeProjectTempDir('gv-lan-consent');
-    const shellPaths = createShellPathService({ workingDirectory: root, homeDirectory: root });
-    saveLanScanConsent(shellPaths, SURFACE_ROOT, 'declined');
-
-    const discovery = fakeDiscovery(() => {
-      throw new Error('must never be called while declined');
-    });
+    saveLanScanConsent(createShellPathService({ workingDirectory: root, homeDirectory: root }), SURFACE_ROOT, 'declined');
     const { router, low } = makeRouterSpy();
-
-    const handle = runGatedLanScan(makeGateOptions(root, { systemMessageRouter: router, startDiscovery: discovery.fn }));
-
-    expect(discovery.calls).toBe(0);
-    expect(handle.stopped).toBe(false);
+    const runs = recordRun(root, router);
+    expect(runs.map((run) => run.registerNetworkServers)).toEqual([false]);
     expect(low).toEqual([]);
   });
 
-  test('declining stays silent across many relaunches in a row (never nags forever)', () => {
+  test('granted: the network is scanned', () => {
     const root = makeProjectTempDir('gv-lan-consent');
-    const shellPaths = createShellPathService({ workingDirectory: root, homeDirectory: root });
-    saveLanScanConsent(shellPaths, SURFACE_ROOT, 'declined');
+    saveLanScanConsent(createShellPathService({ workingDirectory: root, homeDirectory: root }), SURFACE_ROOT, 'granted');
+    expect(recordRun(root).map((run) => run.registerNetworkServers)).toEqual([true]);
+  });
 
-    const discovery = fakeDiscovery(() => {
-      throw new Error('must never be called while declined');
-    });
+  test('the report is worded as counts, never a host:port', () => {
+    const root = makeProjectTempDir('gv-lan-consent');
     const { router, low } = makeRouterSpy();
-
-    for (let i = 0; i < 5; i += 1) {
-      runGatedLanScan(makeGateOptions(root, { systemMessageRouter: router, startDiscovery: discovery.fn }));
-    }
-
-    expect(discovery.calls).toBe(0);
-    expect(low).toEqual([]);
-  });
-
-  test('the decision persists across relaunches: a granted decision keeps scanning without re-asking', () => {
-    const root = makeProjectTempDir('gv-lan-consent');
-    const shellPaths = createShellPathService({ workingDirectory: root, homeDirectory: root });
-    saveLanScanConsent(shellPaths, SURFACE_ROOT, 'granted');
-
-    const discovery = fakeDiscovery((opts) => {
-      opts.systemMessageRouter.low('[Scan] Found ollama at 192.168.1.42:11434 (1 model)');
-      opts.requestRender();
-    });
-    const { router, low } = makeRouterSpy();
-
-    // Two "relaunches" in a row, both should scan (via the fake), neither shows a consent prompt.
-    runGatedLanScan(makeGateOptions(root, { systemMessageRouter: router, startDiscovery: discovery.fn }));
-    runGatedLanScan(makeGateOptions(root, { systemMessageRouter: router, startDiscovery: discovery.fn }));
-
-    expect(discovery.calls).toBe(2);
-    expect(low.filter((m) => m.includes('off by default'))).toHaveLength(0);
-    expect(low.filter((m) => m.includes('Discovered'))).toHaveLength(2);
-  });
-
-  test('a granted scan opts in to registering servers found on the network', () => {
-    const root = makeProjectTempDir('gv-lan-consent');
-    const shellPaths = createShellPathService({ workingDirectory: root, homeDirectory: root });
-    saveLanScanConsent(shellPaths, SURFACE_ROOT, 'granted');
-    let seen: boolean | undefined;
-    runGatedLanScan(makeGateOptions(root, { startDiscovery: (opts) => {
-      seen = opts.registerNetworkServers;
-      return { stopped: false, stop() {} };
-    } }));
-    expect(seen).toBe(true);
-  });
-
-  test('consenting -> framed summary output only, no raw host:port spew, detail deferred to /provider', () => {
-    const root = makeProjectTempDir('gv-lan-consent');
-    const shellPaths = createShellPathService({ workingDirectory: root, homeDirectory: root });
-    saveLanScanConsent(shellPaths, SURFACE_ROOT, 'granted');
-
-    const discovery = fakeDiscovery((opts) => {
-      // Mimics the platform's real per-server raw emit shape verbatim (bootstrap-background.js).
-      opts.systemMessageRouter.low('[Local] Ollama at 192.168.1.7:11434 (2 models) — from last session');
-      opts.systemMessageRouter.low('[Scan] Found LM Studio at 10.0.0.5:1234 (3 models)');
-      opts.requestRender();
-    });
-    const { router, low } = makeRouterSpy();
-
-    runGatedLanScan(makeGateOptions(root, { systemMessageRouter: router, startDiscovery: discovery.fn }));
-
-    expect(low).toHaveLength(1);
-    expect(low[0]).toContain('Discovered 2 local model servers');
-    expect(low[0]).toContain('/provider');
-    for (const message of low) {
-      expect(message).not.toMatch(/\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}:\d+/);
-    }
-  });
-
-  test('framing aggregates a removed-server batch into one honest line, separately from a found batch', () => {
-    const root = makeProjectTempDir('gv-lan-consent');
-    const shellPaths = createShellPathService({ workingDirectory: root, homeDirectory: root });
-    saveLanScanConsent(shellPaths, SURFACE_ROOT, 'granted');
-
-    const discovery = fakeDiscovery((opts) => {
-      opts.systemMessageRouter.low('[Scan] Ollama at 192.168.1.7:11434 is no longer reachable — removed');
-      opts.systemMessageRouter.high('[Scan] Active model was on Ollama (192.168.1.7) — switched to openrouter:openrouter/free');
-      opts.requestRender();
-    });
-    const { router, low, high } = makeRouterSpy();
-
-    runGatedLanScan(makeGateOptions(root, { systemMessageRouter: router, startDiscovery: discovery.fn }));
-
-    expect(low).toEqual(['[Scan] 1 previously found server no longer reachable, removed.']);
-    expect(high).toHaveLength(1);
-    expect(high[0]).toBe('[Scan] Active model was on Ollama — switched to openrouter:openrouter/free');
-    expect(high[0]).not.toContain('192.168.1.7');
-  });
-
-  test('when discovery reports nothing new or removed, no summary line is emitted (matches original silent-when-empty behavior)', () => {
-    const root = makeProjectTempDir('gv-lan-consent');
-    const shellPaths = createShellPathService({ workingDirectory: root, homeDirectory: root });
-    saveLanScanConsent(shellPaths, SURFACE_ROOT, 'granted');
-
-    let renderCalls = 0;
-    const discovery = fakeDiscovery((opts) => {
-      opts.requestRender();
-      renderCalls += 1;
-    });
-    const { router, low } = makeRouterSpy();
-
-    runGatedLanScan(makeGateOptions(root, { systemMessageRouter: router, startDiscovery: discovery.fn }));
-
-    expect(low).toEqual([]);
-    expect(renderCalls).toBe(1);
-  });
-
-  test('passes runtime/configManager/providerRegistry/restoreRuntimeModel through to the discovery pass untouched', () => {
-    const root = makeProjectTempDir('gv-lan-consent');
-    const shellPaths = createShellPathService({ workingDirectory: root, homeDirectory: root });
-    saveLanScanConsent(shellPaths, SURFACE_ROOT, 'granted');
-
-    const runtime = { model: 'x:y', provider: 'x' };
-    const configManager = { marker: 'config' } as unknown as BackgroundProviderDiscoveryOptions['configManager'];
-    const providerRegistry = { marker: 'providers' } as unknown as BackgroundProviderDiscoveryOptions['providerRegistry'];
-    const restoreRuntimeModel = () => {};
-
-    let seen: BackgroundProviderDiscoveryOptions | undefined;
-    const discovery = fakeDiscovery((opts) => {
-      seen = opts;
-    });
-
-    runGatedLanScan(makeGateOptions(root, {
-      runtime,
-      configManager,
-      providerRegistry,
-      restoreRuntimeModel,
-      startDiscovery: discovery.fn,
-    }));
-
-    expect(seen?.runtime).toBe(runtime);
-    expect(seen?.configManager).toBe(configManager);
-    expect(seen?.providerRegistry).toBe(providerRegistry);
-    expect(seen?.restoreRuntimeModel).toBe(restoreRuntimeModel);
+    const runs = recordRun(root, router);
+    const server = { name: 'LM Studio', host: '10.0.0.5', port: 1234, models: 3 };
+    runs[0]!.report?.restored?.({ registered: [server], unregisteredNetwork: [server] });
+    runs[0]!.report?.scanned?.({ found: [server, server], kept: [server], unregisteredNetwork: [] });
+    const said = low.slice(1);
+    expect(said).toHaveLength(4);
+    for (const line of said) expect(line).not.toMatch(/\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/);
   });
 });

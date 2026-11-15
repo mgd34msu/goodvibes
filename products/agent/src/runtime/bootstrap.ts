@@ -39,7 +39,7 @@ import type { SystemMessageRouter } from '../core/system-message-router.ts';
 import '@/runtime/index.ts';
 import { loadLastConversation } from '@/runtime/index.ts';
 import { bindWriteLastSessionPointerToSurface } from '@/runtime/index.ts';
-import { scheduleMcpSuggestionScanOnFirstUse } from './mcp-suggestion-scan.ts';
+import { scheduleMcpSuggestionScan } from './mcp-suggestion-scan.ts';
 import { restoreSavedModel } from '@/runtime/index.ts';
 import { runGatedLanScan } from './lan-scan-consent.ts';
 import { scheduleCalendarSubscriptionBootRefresh } from './calendar-boot-refresh.ts';
@@ -257,6 +257,7 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
     runtimeBus.on<Extract<TurnEvent, { type: 'TURN_SUBMITTED' }>>('TURN_SUBMITTED', (event) => {
       activePromptTurnId = event.payload.turnId;
       activePromptTurnText = event.payload.prompt;
+      occasionsNudgeSurface.noteTurnSubmitted();
       // Per-turn recall refresh (platform 1.2.0 sync-recall seam): the ASYNC
       // pre-turn hook. getSystemPrompt below is SYNCHRONOUS and cannot await
       // this, so it is fired here (not awaited) and read back via the cached
@@ -292,7 +293,8 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
       // Raise anything outstanding, now that the transcript is quiet. Appending
       // the agent's own line while a response was still streaming would
       // interleave two voices in one transcript, which is why this rides the
-      // turn's completion rather than its submission. Not awaited and it never
+      // turn's completion rather than its submission, and why a pull overtaken by
+      // the owner's next message says nothing until that turn ends. Not awaited and it never
       // throws, a nudge that could not be pulled must not disturb the turn it
       // rode in on.
       void occasionsNudgeSurface.raiseNow();
@@ -641,11 +643,9 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
   // ── Phase 8: Background provider registration (non-blocking) ────────────
   // These run after the initial render so they don't delay startup.
   //
-  // Gated: the platform's discovery pass probes every host on the local subnet
-  // unconditionally, so it is only ever invoked through runGatedLanScan,
-  // which requires an explicit, persisted consent decision first and reframes
-  // whatever the platform emits into a single honest summary line. See
-  // src/runtime/lan-scan-consent.ts.
+  // Environment-key providers, the saved servers on this computer and a scan of
+  // this computer always run; the scan of the local subnet runs only with the
+  // owner's recorded consent. See src/runtime/lan-scan-consent.ts.
 
   runGatedLanScan({
     configManager,
@@ -668,15 +668,24 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
     systemMessageRouter,
     requestRender,
   });
-  const mcpDiscovery = scheduleMcpSuggestionScanOnFirstUse({
-    // lazy, see mcp-lazy-start.ts
+  const mcpSuggestions = scheduleMcpSuggestionScan({
     mcpRegistry: services.mcpRegistry,
     systemMessageRouter,
     requestRender,
     shellPaths: services.shellPaths,
     surfaceRoot: GOODVIBES_AGENT_SURFACE_ROOT,
   });
-  wireTerminalMcpReload(services.shellPaths, services.mcpRegistry, mcpDiscovery, bootstrapUnsubs, systemMessageRouter, requestRender);
+  // The one release of the MCP servers started on use (mcp-lazy-start.ts),
+  // run at shutdown after the config watcher has stopped.
+  const mcpServers = {
+    stop: (): Promise<void> => {
+      mcpSuggestions.stop();
+      return services.mcpRegistry.disconnectAll().catch((error: unknown) => {
+        logger.warn('MCP disconnect at shutdown failed', { error: summarizeError(error) });
+      });
+    },
+  };
+  wireTerminalMcpReload(services.shellPaths, services.mcpRegistry, mcpServers, bootstrapUnsubs, systemMessageRouter, requestRender);
   // The reclaim half of what the anchors above write. The live session id is
   // read at sweep time, so a resume repointing it is respected.
   bootstrapUnsubs.push(

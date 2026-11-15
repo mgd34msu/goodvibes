@@ -154,7 +154,7 @@ import type { MemoryConsolidationRunReceipt } from '@goodvibes-jev/engine/platfo
 // the keep-awake toggle. Constructed exactly as the platform composition root does
 // (wireRuntimePower binds runtimeBus work signals and starts the manager).
 import { createUnavailablePowerSeam, wireRuntimePower } from '@goodvibes-jev/engine/platform/platform/power';
-import { createKeepAwakeForwardQueue, forwardKeepAwakeWithNotice, queueKeepAwakeResend } from './keep-awake-forward.ts';
+import { createAgentKeepAwakeForwarder } from './keep-awake-forward.ts';
 import { createAutomationSpawnTask } from './automation-spawn.ts';
 import { gateConsolidationToLocalWriter } from './memory-consolidation-gate.ts';
 import { StoreSnapshotScheduler } from '@goodvibes-jev/engine/platform/platform/state/store-snapshots';
@@ -838,7 +838,9 @@ function composeRuntimeServices(options: RuntimeServicesOptions, disposalScope: 
   // One set of options, used twice on purpose: the verb caller dials the host
   // with them, and the approval-update stream resolves the SAME host and token
   // from them. Two resolutions would be two hosts the day they disagree.
-  const connectedHostAccess = { configManager, homeDirectory };
+  // The build verdict on the attached host, set once the build guard below exists.
+  let connectedHostRefusal: () => string | undefined = () => undefined;
+  const connectedHostAccess = { configManager, homeDirectory, hostRefusal: () => connectedHostRefusal() };
   const daemonVerbs: DaemonVerbCaller = createAgentDaemonVerbCaller(connectedHostAccess);
   // What this process is actually running, answered from itself rather than from
   // the daemon's cross-surface register. Feeds inbound dispatch, the
@@ -1227,15 +1229,13 @@ function composeRuntimeServices(options: RuntimeServicesOptions, disposalScope: 
       daemonReceiptFeed.push([{ id: `daemon-build-floor:${verdict.floor ?? 'unknown'}`, text: verdict.message, at: Date.now() }]);
     },
   });
+  connectedHostRefusal = () => daemonBuildGuard.refusal();
   const mayAdoptDaemonBuild = createDaemonAdoptionGate({
     resolveConnection: spineResolveConnection,
     readStatus: readDaemonStatusPayload,
     guard: daemonBuildGuard,
   });
   const consumeDaemonReceipts = createDaemonReceiptConsumption({
-    resolveConnection: spineResolveConnection,
-    readStatus: readDaemonStatusPayload,
-    guard: daemonBuildGuard,
     consumeReceipts: spineReceiptConsumer,
     feed: daemonReceiptFeed,
     afterAttach: () => forwardKeepAwakeOnAttach(),
@@ -2044,30 +2044,23 @@ function composeRuntimeServices(options: RuntimeServicesOptions, disposalScope: 
   // local config write never reaches an externally-adopted daemon's own
   // config file; the only way to reach a durable, out-of-process hold is to
   // forward the toggle explicitly over the wire whenever a daemon is
-  // reachable right now (the same adoption signal the memory/session spine
-  // already use). Best-effort and silent on failure beyond a warn log, a
-  // down or incompatible daemon must never break the local settings-modal
-  // apply this rides alongside.
+  // adopted right now (the memory spine's adoption fact, no extra probe). A
+  // down or incompatible daemon never breaks the local settings-modal apply
+  // this rides alongside; what the daemon did not take is told to the owner.
   // Toggles run one after another so two quick ones cannot reach the daemon out
-  // of order, and the daemon's answer is shown to the owner. The same forward
-  // is repeated once per attach (consumeDaemonReceipts) when keep-awake is on,
-  // so a daemon that started or restarted after the toggle still holds it.
-  const keepAwakeForwardQueue = createKeepAwakeForwardQueue();
-  forwardKeepAwakeOnAttach = () => {
-    return queueKeepAwakeResend(keepAwakeForwardQueue, () => configManager.get('power.keepAwake') === true, {
-      probeReachability: () => sessionSpineClient.probeReachability(),
-      resolveConnection: spineResolveConnection,
-      notify: pushKeepAwakeNotice,
-    });
-  };
+  // of order. The current value, on or off, is sent again once per attach
+  // (consumeDaemonReceipts), so a daemon that started or restarted after the
+  // toggle still holds it.
+  const keepAwakeForwarder = createAgentKeepAwakeForwarder({
+    readKeepAwake: () => configManager.get('power.keepAwake') === true,
+    isAdopted: () => memorySpineClient.active,
+    resolveConnection: spineResolveConnection,
+    notify: pushKeepAwakeNotice,
+  });
+  forwardKeepAwakeOnAttach = () => keepAwakeForwarder.attached();
   configManager.subscribe('power.keepAwake', (newValue, oldValue) => {
     if (newValue === oldValue) return;
-    const enabled = newValue === true;
-    void keepAwakeForwardQueue.run(() => forwardKeepAwakeWithNotice(enabled, {
-      probeReachability: () => sessionSpineClient.probeReachability(),
-      resolveConnection: spineResolveConnection,
-      notify: pushKeepAwakeNotice,
-    }));
+    void keepAwakeForwarder.set(newValue === true);
   });
 
   // Memory governance: construct + START the MemoryGovernor (default ON, it

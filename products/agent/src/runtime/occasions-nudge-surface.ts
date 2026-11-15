@@ -63,6 +63,9 @@
  * appending an assistant message while a response is still streaming interleaves
  * two voices in one transcript. This is the same placement the platform's own
  * follow-up acknowledgements use, an assistant message after the turn settles.
+ * The pull itself takes time, so the placement is enforced, not assumed: a pull
+ * that the owner's next message overtook says nothing, and the next completion
+ * raises the same open items (one integer comparison per pull).
  *
  * ## Why the daemon's words go in verbatim
  *
@@ -145,6 +148,12 @@ export interface OccasionsNudgeSurface {
    * the turn it rode in on.
    */
   readonly raiseNow: () => Promise<number>;
+  /**
+   * Called when the owner submits a turn. A pull that was in flight when he did
+   * says nothing: its lines would land after his new message, inside the reply
+   * to it. The items stay open on the daemon, so the next completion raises them.
+   */
+  readonly noteTurnSubmitted: () => void;
 }
 
 export function createOccasionsNudgeSurface(
@@ -157,11 +166,15 @@ export function createOccasionsNudgeSurface(
   // The last failure warned about, so a daemon that keeps failing the same way
   // is one warning, not one per turn. Cleared by the next good pull.
   let warned: string | null = null;
+  // Turns the owner has submitted; compared across the pull's await.
+  let turnsSubmitted = 0;
 
   const raiseNow = async (): Promise<number> => {
     if (!deps.isEnabled()) return 0;
 
+    const pulledAtTurn = turnsSubmitted;
     const result = await deps.invoke(OCCASIONS_METHOD_IDS.pending, {});
+    if (turnsSubmitted !== pulledAtTurn) return 0;
     if (!result.ok) {
       const error = result.error ?? 'no reason given';
       // Nothing about an occasion is logged at any level, this whole subject
@@ -207,6 +220,7 @@ export function createOccasionsNudgeSurface(
   let inFlight: Promise<number> | null = null;
 
   return {
+    noteTurnSubmitted: (): void => { turnsSubmitted++; },
     raiseNow: (): Promise<number> => {
       if (inFlight) return inFlight;
       inFlight = (async (): Promise<number> => {

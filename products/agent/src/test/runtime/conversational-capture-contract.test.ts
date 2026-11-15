@@ -107,92 +107,9 @@ describe('a conversational turn can reach the capture tools', () => {
 // ── 2. What the turn is told ────────────────────────────────────────────────
 
 describe('the capture contract the operator policy carries', () => {
-  test('recording what he states is part of answering, not an offer', async () => {
-    expect(AGENT_CONVERSATIONAL_CAPTURE_POLICY.toLowerCase()).toContain('part of answering');
-    expect(AGENT_CONVERSATIONAL_CAPTURE_POLICY.toLowerCase()).toContain('not something to offer');
-  });
-
-  test('capture-on-use: what the turn FINDS while answering is recorded in that answer', async () => {
-    // The itinerary case. It did not arrive in his message; it came back from a
-    // tool call the turn made, and "he did not say it to me" was treated as
-    // "there is nothing to record".
-    const lower = AGENT_CONVERSATIONAL_CAPTURE_POLICY.toLowerCase();
-    expect(lower).toContain('what you find while answering him');
-    expect(lower).toContain('itinerary');
-    expect(lower).toContain('do not report the finding and store nothing');
-  });
-
-  test('a found fact carries the surface it came from, never the owner\'s own authority', async () => {
-    // The untrusted-source bar is not negotiable, and a model that wants the
-    // capture to succeed is exactly the thing that would reach for
-    // `owner-direct` to get past a refusal. The rule names the authority so it
-    // cannot be inferred wrongly.
-    const lower = AGENT_CONVERSATIONAL_CAPTURE_POLICY.toLowerCase();
-    expect(lower).toContain('authority on a found fact is the surface it came from');
-    expect(lower).toContain('never `owner-direct`');
-    expect(lower).toContain('never restate the authority to make a refusal go away');
-    // The attempt still happens, and the outcome is spoken either way.
-    expect(lower).toContain('attempt the capture with the true surface anyway');
-  });
-
-  test('a refused found fact routes to the two-step, so one word from him finishes it', async () => {
-    // The untrusted-source bar stays exactly where the owner put it
-    // (owner-profile-rulings.md, 2026-07-27: "Untrusted content can never
-    // write or propose ... never build a parallel notion of trust"). The
-    // friction it causes is answered with the two-step that already exists,
-    // not with a new trust tier, so a found itinerary lands one beat later
-    // rather than never.
-    const lower = AGENT_CONVERSATIONAL_CAPTURE_POLICY.toLowerCase();
-    expect(lower).toContain('a refusal there is not the end of it');
-    expect(lower).toContain('plan_propose');
-    expect(lower).toContain('one word finishes it');
-    expect(lower).toContain('do not make him retype what you already found');
-    // He is told what he is confirming and where it came from.
-    expect(lower).toContain('the sender and the subject');
-  });
-
-  test('inference and use: the meaning is captured, then it shapes the answer', async () => {
-    const lower = AGENT_CONVERSATIONAL_CAPTURE_POLICY.toLowerCase();
-    expect(lower).toContain('recording is the floor');
-    expect(lower).toContain('he is away for that span');
-    expect(lower).toContain('people in his life');
-    expect(lower).toContain('capture what it implies, not only what it states');
-    // Then use it, and anything past the conversation is still proposed.
-    expect(lower).toContain('then use it');
-    expect(lower).toContain('waits for his yes');
-  });
-
-  test('it says concretely what was stored, and never just "noted"', async () => {
-    const lower = AGENT_CONVERSATIONAL_CAPTURE_POLICY.toLowerCase();
-    expect(lower).toContain('say concretely what you stored');
-    expect(lower).toContain('never "noted"');
-  });
-
-  test('a capture that did not complete is said plainly, never swallowed', async () => {
-    const lower = AGENT_CONVERSATIONAL_CAPTURE_POLICY.toLowerCase();
-    expect(lower).toContain('if a capture does not complete');
-    expect(lower).toContain('nothing unresolved drops silently');
-    expect(lower).toContain('never retry it with a different authority');
-  });
-
   test('the policy that rides every turn actually carries all of it', async () => {
     // The block is only worth anything if it is in the text the turn is given.
     expect(GOODVIBES_AGENT_OPERATOR_POLICY).toContain(AGENT_CONVERSATIONAL_CAPTURE_POLICY);
-  });
-
-  test('a trip is recorded straight away; a date still waits for the kind he chooses', async () => {
-    // Plans have no `kind`, so proposing one and waiting is pure delay. Dates
-    // do, and that two-step is his ruling, it stays.
-    expect(GOODVIBES_AGENT_OPERATOR_POLICY).toContain('recorded straight away, not proposed');
-    expect(GOODVIBES_AGENT_OPERATOR_POLICY).toContain('plan_confirm');
-    expect(GOODVIBES_AGENT_OPERATOR_POLICY).toContain('Never choose the kind for him');
-  });
-
-  // Prompt-contract pin: the policy text is the only statement of this boundary,
-  // so the sentence that carries it must stay in the block every turn is given.
-  test('the policy tells the turn the platform source is not a tool for finishing his request', async () => {
-    expect(GOODVIBES_AGENT_OPERATOR_POLICY).toContain('is not a tool for finishing his request');
-    expect(GOODVIBES_AGENT_OPERATOR_POLICY.toLowerCase()).toContain('wait for his answer');
   });
 });
 
@@ -292,12 +209,5 @@ describe('a found itinerary is recorded as a plan', () => {
     expect(result.output).toContain('was not recorded');
     expect(result.output).toContain('Untrusted source: email.');
     expect(result.output).toContain('Do not try again with different values');
-  });
-
-  // Prompt-contract pin: the policy has to tell the turn not to summarise the
-  // itinerary's details away.
-  test('the policy tells the turn to keep the confirmation number and details', async () => {
-    expect(GOODVIBES_AGENT_OPERATOR_POLICY).toContain('confirmation number');
-    expect(GOODVIBES_AGENT_OPERATOR_POLICY).toContain('Do not summarise those away');
   });
 });

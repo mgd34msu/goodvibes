@@ -87,9 +87,7 @@ describe('selected-host live readiness', () => {
       } });
       try {
         options = fixture(server.port!);
-        if (change === 'host' || change === 'port' || change === 'disabled') {
-          await expect(readConnectedHostReadiness(options)).rejects.toThrow('configuration owner changed');
-        } else expect((await readConnectedHostReadiness(options)).status).toBe('changed');
+        expect((await readConnectedHostReadiness(options)).status).toBe('changed');
       } finally { server.stop(true); }
     });
   }
@@ -127,8 +125,9 @@ describe('selected-host live readiness', () => {
       calls++;
       init?.signal?.addEventListener('abort', () => reject(new Error('synthetic-timeout-secret')), { once: true });
     })) as unknown as typeof fetch;
-    const result = await readConnectedHostReadiness({ ...options, fetchImpl });
+    const result = await readConnectedHostReadiness({ ...options, fetchImpl }, { deadlineMs: 50 });
     expect(result.status).toBe('unavailable');
+    expect(result.detail).toContain('did not answer within');
     expect(calls).toBe(1);
     expect(JSON.stringify(result)).not.toContain('synthetic-timeout-secret');
   });

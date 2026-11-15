@@ -34,14 +34,14 @@
  * rewind verbs and `sessions.permissionMode.set`. 3.1.1 and earlier answer
  * those with a 404 that reads as a broken feature; 3.1.2 and later serve them.
  *
- * The floor REFUSES, it does not merely warn. A daemon below it is not adopted:
- * `judgeForAdoption` is asked before the memory spine activates, and a
- * below-floor answer means the spine stays on its local store, the inbound
- * continuation dispatch never binds, and every daemon-dependent path takes the
- * same route it takes when no daemon is configured at all, plus one notice
- * naming both versions. Half-adopting an old daemon is the state this exists to
- * prevent, so the refusal is at adoption, which is the single place adoption is
- * decided, rather than at each capability's call site.
+ * The floor REFUSES, it does not merely warn. The verdict is set by the one
+ * `/status` read on the adoption edge (`judgeForAdoption`). A daemon below the
+ * floor is not adopted: the memory spine stays on its local store, the inbound
+ * continuation dispatch never binds, and the connected-host resolution every
+ * verb call and hosted conversation goes through (client/daemon-verbs.ts) answers
+ * with the verdict's message instead of an address, so each of those paths
+ * refuses with the same sentence naming both versions and none needs its own
+ * check. Half-adopting an old daemon is the state this exists to prevent.
  *
  * The owner is told exactly once, naming both versions, and the number is
  * recorded in this repository's CHANGELOG and release notes because raising the
@@ -77,9 +77,9 @@ export interface DaemonBuildGuardOptions {
 /**
  * The live verdict about the daemon this process is attached to.
  *
- * Latched, for the mirror image of the forward guard's reason: once a daemon
- * has been judged too old, a later read that cannot determine a version (a
- * restart, a truncated response) must not silently clear the finding.
+ * Set only by a `/status` body that was read. When no body could be read (the
+ * daemon did not answer), the adoption gate keeps the last verdict rather than
+ * clearing it, so a daemon judged too old is not adopted on a failed read.
  *
  * The latch is dropped by `reset()`, which the attach path calls when it moves
  * to a DIFFERENT daemon, a verdict about the old peer says nothing about the
@@ -104,15 +104,6 @@ export class DaemonBuildGuard {
     };
   }
 
-  /** Feed a parsed `/status` body. `daemonLabel` names the peer in the message. */
-  observeStatus(statusPayload: unknown, daemonLabel?: string): DaemonCompatibilityVerdict {
-    if (this.verdict.status === 'daemon-update-required') return this.verdict;
-    const next = evaluateDaemonStatusCompatibility(statusPayload, this.options.floor, daemonLabel);
-    this.verdict = next;
-    this.announce(next);
-    return next;
-  }
-
   /** Say a refusal once; the platform decided whether there is one. */
   private announce(verdict: DaemonCompatibilityVerdict): void {
     if (verdict.notice === null || this.announced) return;
@@ -123,15 +114,9 @@ export class DaemonBuildGuard {
   /**
    * Judge a freshly-read `/status` for the ADOPTION decision.
    *
-   * Unlatched, unlike `observeStatus`, and deliberately so: a daemon CAN become
-   * new enough while this process runs, that is exactly what a daemon update
-   * does, and the attach that sees the newer build has to be allowed to adopt
-   * it. The latch exists to stop an UNREADABLE later read from clearing a
-   * finding; a read that positively reports a new-enough build is not that, so
-   * it clears the finding and re-arms the notice for a future refusal.
-   *
-   * `observeStatus` keeps its latched behaviour for the capability verdict.
-   * This is the one the adoption path calls.
+   * A daemon CAN become new enough while this process runs, that is exactly
+   * what a daemon update does, so a read that positively reports a new-enough
+   * build clears the finding and re-arms the notice for a future refusal.
    */
   judgeForAdoption(statusPayload: unknown, daemonLabel?: string): DaemonCompatibilityVerdict {
     const next = evaluateDaemonStatusCompatibility(statusPayload, this.options.floor, daemonLabel);
@@ -147,16 +132,12 @@ export class DaemonBuildGuard {
   }
 
   /**
-   * False once the attached daemon has been judged not adoptable for this build.
-   *
-   * This is what the adoption path asks before routing anything over the wire:
-   * a daemon below the floor is not adopted at all, so the spine stays local and
-   * the daemon-dependent services take the same path they take when no daemon is
-   * configured. It is not a per-capability question asked at each call site,
-   * adoption is the single choke point.
+   * The refusal every connected-host call answers with while the attached
+   * daemon is judged not adoptable, or undefined when it may be used. A field
+   * read; the verdict was settled by the adoption read.
    */
-  mayUseDaemonCapabilities(): boolean {
-    return this.verdict.adopt;
+  refusal(): string | undefined {
+    return this.verdict.adopt ? undefined : this.verdict.message;
   }
 
   /** Forget everything observed. For an attach to a different daemon. */
@@ -209,20 +190,21 @@ export async function readDaemonStatusPayload(
  * The adoption gate. Asked on the adoption edge, before anything routes over
  * the wire, so a daemon below the floor is refused rather than half-used.
  *
- * Nothing read means nothing known: the answer is adopt, and a daemon that is
- * not answering is left to the reachability handling that owns that question.
- * Its own plain `/status` read, never the receipt-consuming one, because that
- * read has a side effect and must not be what decides adoption.
+ * Nothing read means nothing new: the answer is the verdict already held (adopt
+ * when nothing was ever judged), and a daemon that is not answering is left to
+ * the reachability handling that owns that question. Its own plain `/status`
+ * read, never the receipt-consuming one, because that read has a side effect
+ * and must not be what decides adoption.
  */
 export function createDaemonAdoptionGate(deps: {
   readonly resolveConnection: () => DaemonStatusConnection;
   readonly readStatus: (connection: DaemonStatusConnection) => Promise<unknown | null>;
-  readonly guard: Pick<DaemonBuildGuard, 'judgeForAdoption'>;
+  readonly guard: Pick<DaemonBuildGuard, 'judgeForAdoption' | 'current'>;
 }): () => Promise<boolean> {
   return async () => {
     const connection = deps.resolveConnection();
     const status = await deps.readStatus(connection);
-    if (status === null) return true;
+    if (status === null) return deps.guard.current().adopt;
     return deps.guard.judgeForAdoption(status, connection.baseUrl).adopt;
   };
 }

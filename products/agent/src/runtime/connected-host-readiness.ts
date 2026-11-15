@@ -1,10 +1,6 @@
-import { captureNativeReadBindings, captureNativeReadRestrictions } from './read-restrictions.ts';
-import { retainCliConfig } from '@goodvibes-jev/engine/terminal-shell';
 import { canonicalizePairingHost } from './connected-host-pairing-store.ts';
-import { resolveConnectedHostBaseUrl } from '../config/connected-host-dial.ts';
-import { createOperatorApiClient } from '@goodvibes-jev/engine/operator-client';
-import { resolveConnectedHostDialEnabled } from '@goodvibes-jev/engine/platform/platform/config';
-import { resolveConnectedHostConnection, type AgentDaemonVerbCallerOptions } from './client/daemon-verbs.ts';
+import { createConnectedHost, isHostFailure, resolveConnectedHost, type ConnectedHostConnection } from '../agent/connected-host-client.ts';
+import type { AgentDaemonVerbCallerOptions } from './client/daemon-verbs.ts';
 import { isNativePairedPrincipal } from './native-paired-principal.ts';
 
 export interface ConnectedHostReadiness {
@@ -12,60 +8,73 @@ export interface ConnectedHostReadiness {
   readonly detail: string;
 }
 
-/** Fresh, read-only evidence for the exact host and effective credential used by native intake.
- * Never returns credentials, raw remote errors, or a durable authority claim.
+/** How long `setup status` and the setup tool wait for the host's answer. */
+export const CONNECTED_HOST_READINESS_DEADLINE_MS = 5_000;
+
+const sameConnection = (a: ConnectedHostConnection, b: ConnectedHostConnection): boolean =>
+  a.baseUrl === b.baseUrl && a.token === b.token && a.expectedPrincipalId === b.expectedPrincipalId;
+
+/**
+ * The cause of a failed probe, worded here from the failure's code and status.
+ * The host's own error text is never repeated: it can carry anything.
  */
-export async function readConnectedHostReadiness(options: AgentDaemonVerbCallerOptions, ownership: { readonly signal?: AbortSignal | undefined; readonly assertCurrent?: (() => void) | undefined } = {}): Promise<ConnectedHostReadiness> {
-  const optionBindings = captureNativeReadBindings(options);
-  const restrictions = captureNativeReadRestrictions(ownership);
-  optionBindings(); restrictions();
-  const retainedConfig = retainCliConfig(options.configManager);
-  const originalSignal = ownership.signal;
-  const assertCurrent = () => {
-    optionBindings(); restrictions();
-    retainedConfig.assertCurrent();
-    optionBindings(); retainedConfig.assertCurrent(); restrictions();
-  };
-  assertCurrent();
-  if (!resolveConnectedHostDialEnabled(options.configManager)) {
-    return { status: 'disabled', detail: 'Connected-host dialing is disabled; no auth probe was made.' };
+function failureDetail(error: unknown, baseUrl: string, deadlineMs: number): string {
+  if (!isHostFailure(error)) return `The auth check against ${baseUrl} failed before it was sent. Rerun setup status.`;
+  const { code, status } = error.refusal;
+  switch (code) {
+    case 'host_timeout':
+      return status === undefined
+        ? `The host at ${baseUrl} did not answer within ${deadlineMs / 1000} s. Check that the daemon there is running and reachable from this machine, then rerun setup status.`
+        : `The host at ${baseUrl} timed out (HTTP ${status}). Rerun setup status.`;
+    case 'host_unreachable':
+      return `Nothing answered at ${baseUrl}. Start the GoodVibes daemon there or correct controlPlane.host and controlPlane.port, then rerun setup status.`;
+    case 'auth_rejected':
+      return `The host at ${baseUrl} rejected the current credential (HTTP ${status ?? 401}). Pair again with setup pair, then rerun setup status.`;
+    case 'forbidden':
+      return `The host at ${baseUrl} accepted the credential but refused the auth check (HTTP ${status ?? 403}). Use a paired owner credential, then rerun setup status.`;
+    case 'incompatible':
+      return `The GoodVibes host at ${baseUrl} does not serve the auth check (HTTP 404); it is older than this Agent. Update GoodVibes on the host, then rerun setup status.`;
+    case 'route_unavailable':
+      return `Nothing at ${baseUrl} answered as a GoodVibes daemon (HTTP 404). Check controlPlane.host and controlPlane.port, then rerun setup status.`;
+    case 'response_invalid':
+      return `The host at ${baseUrl} answered the auth check in a shape this Agent cannot read. Run the same GoodVibes version on the host and here, then rerun setup status.`;
+    case 'cancelled':
+      return 'The auth check was cancelled before the host answered.';
+    default:
+      return `The host at ${baseUrl} failed the auth check${status === undefined ? '' : ` (HTTP ${status})`}. Read the daemon log on the host, then rerun setup status.`;
   }
-  if (!canonicalizePairingHost(resolveConnectedHostBaseUrl(options.configManager))) return { status: 'unavailable', detail: 'The selected host URL is invalid; no auth probe was made.' };
-  const selected = resolveConnectedHostConnection(options);
-  if ('reason' in selected) {
-    return { status: 'missing-credential', detail: 'No effective connected-host credential is available for a live auth check.' };
+}
+
+/**
+ * Read-only evidence for the host and effective credential native intake uses:
+ * one connection resolution, one request, one comparison after the reply (the
+ * `changed` status). Never returns a credential or the host's error text.
+ */
+export async function readConnectedHostReadiness(options: AgentDaemonVerbCallerOptions, ownership: { readonly signal?: AbortSignal | undefined; readonly assertCurrent?: (() => void) | undefined; readonly deadlineMs?: number | undefined } = {}): Promise<ConnectedHostReadiness> {
+  ownership.assertCurrent?.();
+  const selection = { configManager: options.configManager, homeDirectory: options.homeDirectory };
+  const selected = resolveConnectedHost(selection);
+  if (selected.unavailable?.code === 'dial_disabled') {
+    return { status: 'disabled', detail: 'Connected-host dialing is disabled (daemon.connectedHost.enabled is false); no auth check was made.' };
   }
-  let operator: ReturnType<typeof createOperatorApiClient> | undefined;
+  if (!canonicalizePairingHost(selected.baseUrl)) {
+    return { status: 'unavailable', detail: 'The configured host address is not a usable http(s) origin; no auth check was made. Correct controlPlane.host and controlPlane.port.' };
+  }
+  if (selected.token === null) {
+    return { status: 'missing-credential', detail: `No effective connected-host credential: ${selected.unavailable?.reason ?? `nothing found in ${selected.credential}`}. Pair with setup pair, then rerun setup status.` };
+  }
+  const host = createConnectedHost(() => selected, { ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}) });
+  const deadlineMs = ownership.deadlineMs ?? CONNECTED_HOST_READINESS_DEADLINE_MS;
   let result: ConnectedHostReadiness;
   try {
-    const nativeFetch = options.fetchImpl ?? fetch;
-    const assertConnection = () => {
-      assertCurrent();
-      const current = resolveConnectedHostConnection(options);
-      if ('reason' in current || current.baseUrl !== selected.baseUrl || current.token !== selected.token
-        || current.selectionIdentity !== selected.selectionIdentity || current.expectedPrincipalId !== selected.expectedPrincipalId)
-        throw new Error('Connected-host read source changed.');
-    };
-    const fetchImpl = Object.assign((...args: Parameters<typeof fetch>): ReturnType<typeof fetch> => {
-      assertConnection();
-      return nativeFetch(...args);
-    }, { preconnect: nativeFetch.preconnect });
-    assertConnection();
-    operator = createOperatorApiClient({ baseUrl: selected.baseUrl, authToken: selected.token, fetchImpl });
-    const timeout = AbortSignal.timeout(1500);
-    const auth = await operator.invoke('control.auth.current', {}, { signal: originalSignal ? AbortSignal.any([originalSignal, timeout]) : timeout });
-    assertConnection();
+    const auth = await host.invoke('control.auth.current', {}, { signal: ownership.signal, deadlineMs });
     result = isNativePairedPrincipal(auth, selected.expectedPrincipalId)
       ? { status: 'ready', detail: 'The selected host verified the current credential as a paired owner with native intake scopes.' }
-      : { status: 'unsupported-principal', detail: 'The selected host did not verify a paired owner with read:work-ledger and write:work-ledger. A shared token is insufficient.' };
-  } catch {
-    assertCurrent();
-    result = { status: 'unavailable', detail: 'Live connected-host auth could not be verified. Rerun setup status after checking the selected host and credential.' };
-  } finally { operator?.dispose(); }
-  assertCurrent();
-  const current = resolveConnectedHostConnection(options);
-  if ('reason' in current || current.baseUrl !== selected.baseUrl || current.token !== selected.token
-    || current.selectionIdentity !== selected.selectionIdentity || current.expectedPrincipalId !== selected.expectedPrincipalId) {
+      : { status: 'unsupported-principal', detail: 'The selected host did not verify a paired owner with read:work-ledger and write:work-ledger. A shared token is insufficient; pair with setup pair.' };
+  } catch (error) {
+    result = { status: 'unavailable', detail: failureDetail(error, selected.baseUrl, deadlineMs) };
+  }
+  if (!sameConnection(resolveConnectedHost(selection), selected)) {
     return { status: 'changed', detail: 'The selected host or effective credential changed during verification. Rerun setup status.' };
   }
   return result;

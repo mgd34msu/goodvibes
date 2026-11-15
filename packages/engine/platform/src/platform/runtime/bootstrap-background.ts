@@ -36,6 +36,27 @@ export interface BackgroundProviderDiscoveryOptions {
   registerNetworkServers?: boolean | undefined;
   /** The scan; replaceable so a host or a test supplies its own. */
   scan?: typeof scan | undefined;
+  /**
+   * The outcome as data, for a host that words it itself. When present, the
+   * per-server lines are not written to `systemMessageRouter`; a warning that the
+   * active model's server did not answer is still written there.
+   */
+  report?: ProviderDiscoveryReporter | undefined;
+}
+
+/** One model server, as a discovery report names it. */
+export interface DiscoveredServerSummary {
+  readonly name: string;
+  readonly host: string;
+  readonly port: number;
+  readonly models: number;
+}
+
+export interface ProviderDiscoveryReporter {
+  /** Servers saved by an earlier session: registered ones, and network ones left unregistered. */
+  restored?(report: { readonly registered: readonly DiscoveredServerSummary[]; readonly unregisteredNetwork: readonly DiscoveredServerSummary[] }): void;
+  /** One scan: servers registered for the first time, saved ones that did not answer and were kept, network ones left unregistered. */
+  scanned?(report: { readonly found: readonly DiscoveredServerSummary[]; readonly kept: readonly DiscoveredServerSummary[]; readonly unregisteredNetwork: readonly DiscoveredServerSummary[] }): void;
 }
 
 export interface BackgroundRuntimeTaskHandle {
@@ -53,6 +74,8 @@ function isLoopbackHost(host: string): boolean {
 const serverKey = (server: { readonly host: string; readonly port: number }): string => `${server.host}:${server.port}`;
 const describeModels = (server: { readonly models: readonly unknown[] }): string =>
   `${server.models.length} model${server.models.length !== 1 ? 's' : ''}`;
+const summarize = (server: { readonly name: string; readonly host: string; readonly port: number; readonly models: readonly unknown[] }): DiscoveredServerSummary =>
+  ({ name: server.name, host: server.host, port: server.port, models: server.models.length });
 
 /**
  * Starts one asynchronous provider discovery pass and returns a handle whose
@@ -62,7 +85,7 @@ const describeModels = (server: { readonly models: readonly unknown[] }): string
 export function startBackgroundProviderDiscovery(
   options: BackgroundProviderDiscoveryOptions,
 ): BackgroundRuntimeTaskHandle {
-  const { configManager, providerRegistry, runtime, requestRender, restoreRuntimeModel, systemMessageRouter, shellPaths, surfaceRoot } = options;
+  const { configManager, providerRegistry, runtime, requestRender, restoreRuntimeModel, systemMessageRouter, shellPaths, surfaceRoot, report } = options;
   const runScan: typeof scan = options.scan
     ?? (options.registerNetworkServers === true ? scan : (_onProgress, signal) => scanLocalhost(signal));
   const trusted = (server: { readonly host: string }): boolean => options.registerNetworkServers === true || isLoopbackHost(server.host);
@@ -91,10 +114,14 @@ export function startBackgroundProviderDiscovery(
           runtime,
         );
       }
-      for (const server of persisted) {
-        systemMessageRouter.low(trusted(server)
-          ? `[Local] ${server.name} at ${server.host}:${server.port} (${describeModels(server)}), from last session`
-          : `[Local] ${server.name} at ${server.host}:${server.port} is on the network, not on this computer, so it was not registered`);
+      if (report) {
+        report.restored?.({ registered: registrable.map(summarize), unregisteredNetwork: persisted.filter((server) => !trusted(server)).map(summarize) });
+      } else {
+        for (const server of persisted) {
+          systemMessageRouter.low(trusted(server)
+            ? `[Local] ${server.name} at ${server.host}:${server.port} (${describeModels(server)}), from last session`
+            : `[Local] ${server.name} at ${server.host}:${server.port} is on the network, not on this computer, so it was not registered`);
+        }
       }
       requestRender();
     } catch (err) {
@@ -128,25 +155,31 @@ export function startBackgroundProviderDiscovery(
       }
     }
 
-    for (const server of newServers) {
-      systemMessageRouter.low(
-        `[Scan] Found ${server.name} at ${server.host}:${server.port} (${describeModels(server)})`,
-      );
-    }
-    // A network host is never registered or remembered on its own say-so.
-    for (const server of network) {
-      systemMessageRouter.low(
-        `[Scan] Found ${server.name} at ${server.host}:${server.port} (${describeModels(server)}) on the network; it was not registered. Register it only if you trust that machine.`,
-      );
+    // A missed server is reported only when the scan reached something, as below.
+    const kept = local.length > 0 ? missedServers : [];
+    if (report) {
+      report.scanned?.({ found: newServers.map(summarize), kept: kept.map(summarize), unregisteredNetwork: network.map(summarize) });
+    } else {
+      for (const server of newServers) {
+        systemMessageRouter.low(
+          `[Scan] Found ${server.name} at ${server.host}:${server.port} (${describeModels(server)})`,
+        );
+      }
+      // A network host is never registered or remembered on its own say-so.
+      for (const server of network) {
+        systemMessageRouter.low(
+          `[Scan] Found ${server.name} at ${server.host}:${server.port} (${describeModels(server)}) on the network; it was not registered. Register it only if you trust that machine.`,
+        );
+      }
     }
 
     // One scan that misses a server is not proof it is gone (it may still be starting), so nothing is
     // removed, switched or rewritten here; the cache drops a server that stays unseen for its age limit.
-    if (local.length > 0 && missedServers.length > 0) {
+    if (kept.length > 0) {
       let currentModelBareId: string | undefined;
       try { currentModelBareId = splitModelRegistryKey(configManager.get('provider.model') as string).resolvedModelId; } catch { /* An unqualified saved model names no server. */ }
-      for (const server of missedServers) {
-        systemMessageRouter.low(`[Scan] ${server.name} at ${server.host}:${server.port} did not answer this scan; it is kept`);
+      for (const server of kept) {
+        if (!report) systemMessageRouter.low(`[Scan] ${server.name} at ${server.host}:${server.port} did not answer this scan; it is kept`);
         if (currentModelBareId !== undefined && server.models.includes(currentModelBareId)) {
           systemMessageRouter.high(
             `[Scan] The active model is on ${server.name}, which did not answer this scan. Nothing was switched and your saved model is unchanged; pick another model if requests fail.`,
@@ -159,7 +192,7 @@ export function startBackgroundProviderDiscovery(
       persistProviders({ ...shellPaths, surfaceRoot }, local);
     }
 
-    if (newServers.length > 0 || missedServers.length > 0 || network.length > 0) {
+    if (newServers.length > 0 || kept.length > 0 || network.length > 0) {
       requestRender();
     }
   }).catch((error: unknown) => {

@@ -64,7 +64,6 @@ describe('MCP servers do not start at boot', () => {
     const lazy = createLazyMcpRegistry(fake.registry, ROOTS);
     expect(lazy.registry.serverNames).toEqual(['playwright', 'zen-devtools']);
     expect(fake.connects).toEqual([]);
-    expect(lazy.isConnected()).toBe(false);
   });
 
   test('synchronous registry methods stay synchronous and start nothing', () => {
@@ -84,7 +83,6 @@ describe('a use connects only the server it addresses', () => {
     await lazy.registry.callTool('mcp:playwright:navigate', {});
     expect(fake.connects).toEqual(['playwright']);
     expect(fake.calls).toEqual(['callTool']);
-    expect(lazy.isConnected()).toBe(true);
   });
 
   test('concurrent calls to one server connect it once', async () => {
@@ -109,19 +107,10 @@ describe('a use connects only the server it addresses', () => {
   test('a failed connect rejects with the real reason and the next call tries again', async () => {
     const fake = fakeRegistry({ failConnect: 1 });
     const lazy = createLazyMcpRegistry(fake.registry, ROOTS);
-    await expect(lazy.registry.callTool('mcp:s:t', {})).rejects.toThrow('MCP connect failed: server not installed');
+    await expect(lazy.registry.callTool('mcp:s:t', {})).rejects.toThrow("MCP server 's' failed to start: server not installed");
     expect(fake.calls).toEqual([]);
     await lazy.registry.callTool('mcp:s:t', {});
     expect(fake.connects).toEqual(['s', 's']);
     expect(fake.calls).toEqual(['callTool']);
-  });
-
-  test('the first-connect hook runs once', async () => {
-    const fake = fakeRegistry();
-    let hooks = 0;
-    const lazy = createLazyMcpRegistry(fake.registry, ROOTS, { onFirstConnect: () => { hooks += 1; } });
-    await lazy.registry.callTool('mcp:a:b', {});
-    await lazy.registry.callTool('mcp:c:d', {});
-    expect(hooks).toBe(1);
   });
 });

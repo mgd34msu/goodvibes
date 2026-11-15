@@ -146,7 +146,7 @@ describe('diagnoseDaemonRepair', () => {
 
 describe('runDaemonRepair', () => {
   function cliRunner(exitCode: number, calls: string[]) {
-    return (args: readonly string[]): DaemonCliRun => {
+    return async (args: readonly string[]): Promise<DaemonCliRun> => {
       calls.push(args.join(' '));
       return { ran: true, exitCode, stdout: exitCode === 0 ? 'installed' : '', stderr: exitCode === 0 ? '' : 'unit write refused' };
     };

@@ -1,32 +1,22 @@
 /**
  * LAN-scan consent gate.
  *
- * The platform's background provider-discovery pass (`startBackgroundProviderDiscovery`
- * in `@goodvibes-jev/engine/platform/platform/runtime`) probes every host on this
- * computer's local subnet (254 addresses per non-internal network interface)
- * looking for local model servers such as Ollama or LM Studio, then dumps one
- * raw "[Scan] Found <name> at <host>:<port>" line per server straight into the
- * activity feed. It ran unconditionally, with no consent step, and no way to
- * turn it off.
+ * The platform's provider start-up pass (`startBackgroundProviderDiscovery` in
+ * `@goodvibes-jev/engine/platform/platform/runtime`) does three things: it registers
+ * the providers whose API key is in the environment, restores the model
+ * servers an earlier session found, and scans for model servers. The consent
+ * here covers only the part that reaches other machines: probing the local
+ * subnet (254 addresses per non-internal network interface) and registering
+ * the servers it finds there.
  *
- * This module is the only place in the Agent that is allowed to call the platform
- * discovery entry point. It:
- *   1. Gates the call behind a persisted, explicit consent decision. The very
- *      first time the Agent starts, nothing is scanned; the user is told what
- *      the feature does, what it touches (the local subnet, nothing beyond
- *      it), and what it stores, then the decision defaults to "off" until the
- *      user turns it on.
- *   2. Reframes whatever the platform emits when consent has been granted: instead
- *      of one raw host:port line per server, the Agent surfaces a single
- *      framed summary ("Discovered N local model servers ..."), with full
- *      detail available on demand via /provider.
+ * At every start the Agent runs the pass. Without consent it scans this
+ * computer only (loopback, which needs no consent) and registers only servers
+ * on this computer; with consent it scans the subnet too. The first start with
+ * no recorded decision explains the subnet scan once and records "off".
+ * `/network-scan on` records consent and scans at once.
  *
- * The platform scanner itself is not modified, it lives behind the
- * `platform/discovery` and `platform/runtime` subpaths, which is also how this
- * file reaches it. Named by subpath rather than by build-output path on
- * purpose: `dist/` is not a public entry point, an exports map is entitled to
- * stop resolving it, and a comment that names one reads to an audit like an
- * import that would fail against a published package.
+ * The platform reports what it found as data; this file words it, one summary
+ * line per outcome, never a host:port per server (`/provider` shows the detail).
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
@@ -39,6 +29,7 @@ import {
   type HostSystemMessageSink,
   type ShellPathService,
 } from '@/runtime/index.ts';
+import type { ProviderDiscoveryReporter } from '@goodvibes-jev/engine/platform/platform/runtime/bootstrap';
 
 export type LanScanDecision = 'granted' | 'declined';
 
@@ -110,97 +101,31 @@ export const NETWORK_SCAN_STATUS_COMMAND = '/network-scan';
 export function firstRunConsentMessage(roots: ConsentRoots, surfaceRoot: string): string {
   const storePath = discoveredProvidersFilePath(roots, surfaceRoot);
   return (
-    '[Scan] Local network scanning for model servers is off by default. ' +
+    '[Scan] Model servers on this computer (such as Ollama or LM Studio) are found at each start. ' +
+    'Scanning the local network for model servers on other devices is off by default. ' +
     'If turned on, it checks other devices on this computer\'s local network (your subnet only, nothing beyond it) ' +
-    'for model servers such as Ollama or LM Studio, so they can be added as chat providers. ' +
-    `Servers it finds are saved to ${storePath}. ` +
-    `Turn it on with ${NETWORK_SCAN_ENABLE_COMMAND}; nothing is scanned until you do.`
+    'so the servers it finds can be added as chat providers. ' +
+    `Servers found are saved to ${storePath}. ` +
+    `Turn it on with ${NETWORK_SCAN_ENABLE_COMMAND}; nothing on the network is scanned until you do.`
   );
 }
 
-/**
- * F3 fix: the first-run explanation (firstRunConsentMessage) already told the
- * user this is off and how to turn it on. Printing that reminder again on
- * EVERY subsequent boot forever, with no way to quiet it short of turning
- * the feature on, was the friction: an indefinitely repeating notice for a
- * state the user already chose. The off state is still fully discoverable on
- * demand via `/network-scan status`; boot itself stays silent about it from
- * the second run onward. The granted-path behavior (framed scan summary) is
- * unchanged.
- */
+// ── Wording the platform's report ───────────────────────────────────────
 
-// ── Output framing ───────────────────────────────────────────────────────
+const servers = (count: number): string => `${count} model server${count === 1 ? '' : 's'}`;
 
-const FOUND_OR_RESTORED_RE = /\bat\s+\S+:\d+\s+\(\d+\s+models?\)/;
-const REMOVED_RE = /\bat\s+\S+:\d+\s+is no longer reachable\b/;
-const RAW_IP_PAREN_RE = /\s*\(\d{1,3}(?:\.\d{1,3}){3}\)/g;
-
-/** Strips a bare "(1.2.3.4)" parenthetical from an otherwise-fine message, defense in depth. */
-function stripRawIpMention(message: string): string {
-  return message.replace(RAW_IP_PAREN_RE, '');
-}
-
-/**
- * Wraps the real system-message sink + requestRender callback so that the raw
- * per-server "[Scan] Found X at host:port" / "[Local] X at host:port ... from
- * last session" / "[Scan] X at host:port is no longer reachable" lines the platform
- * emits are never forwarded verbatim. Instead they are counted, and a single
- * framed summary line is emitted the next time requestRender fires, which the
- * platform reliably calls exactly once per batch of emitted messages (see
- * bootstrap-background.js), so this stays in lockstep with the underlying
- * scan/restore passes without needing to touch the platform.
- */
-function createFramedDiscoverySink(
-  realRouter: HostSystemMessageSink,
-  realRequestRender: () => void,
-): { readonly sink: HostSystemMessageSink; readonly requestRender: () => void } {
-  let foundCount = 0;
-  let removedCount = 0;
-
-  const sink: HostSystemMessageSink = {
-    low(message: string) {
-      if (FOUND_OR_RESTORED_RE.test(message)) {
-        foundCount += 1;
-        return;
-      }
-      if (REMOVED_RE.test(message)) {
-        removedCount += 1;
-        return;
-      }
-      realRouter.low(stripRawIpMention(message));
-    },
-    high(message: string) {
-      realRouter.high(stripRawIpMention(message));
-    },
-  };
-
-  const requestRender = () => {
-    if (foundCount > 0) {
-      realRouter.low(
-        `[Scan] Discovered ${foundCount} local model server${foundCount === 1 ? '' : 's'} on this network, run /provider to see them.`,
-      );
-    }
-    if (removedCount > 0) {
-      realRouter.low(
-        `[Scan] ${removedCount} previously found server${removedCount === 1 ? '' : 's'} no longer reachable, removed.`,
-      );
-    }
-    foundCount = 0;
-    removedCount = 0;
-    realRequestRender();
-  };
-
-  return { sink, requestRender };
-}
-
-function noopHandle(): BackgroundRuntimeTaskHandle {
-  let stopped = false;
+function reporterFor(router: HostSystemMessageSink, networkScan: boolean): ProviderDiscoveryReporter {
   return {
-    get stopped() {
-      return stopped;
+    restored({ registered, unregisteredNetwork }) {
+      if (registered.length > 0) router.low(`[Local] ${servers(registered.length)} from the last session registered as providers, run /provider to see them.`);
+      if (unregisteredNetwork.length > 0) {
+        router.low(`[Local] ${servers(unregisteredNetwork.length)} saved from the network ${unregisteredNetwork.length === 1 ? 'was' : 'were'} not registered because network scanning is off; ${NETWORK_SCAN_ENABLE_COMMAND} registers ${unregisteredNetwork.length === 1 ? 'it' : 'them'}.`);
+      }
     },
-    stop() {
-      stopped = true;
+    scanned({ found, kept, unregisteredNetwork }) {
+      if (found.length > 0) router.low(`[Scan] Discovered ${servers(found.length)} ${networkScan ? 'on this computer and its network' : 'on this computer'}, run /provider to see them.`);
+      if (kept.length > 0) router.low(`[Scan] ${servers(kept.length)} saved earlier did not answer this scan; ${kept.length === 1 ? 'it is' : 'they are'} kept.`);
+      if (unregisteredNetwork.length > 0) router.low(`[Scan] ${servers(unregisteredNetwork.length)} on the network ${unregisteredNetwork.length === 1 ? 'was' : 'were'} not registered.`);
     },
   };
 }
@@ -208,51 +133,50 @@ function noopHandle(): BackgroundRuntimeTaskHandle {
 export interface LanScanGateOptions extends BackgroundProviderDiscoveryOptions {
   readonly shellPaths: BackgroundProviderDiscoveryOptions['shellPaths'] & ConsentRoots;
   /**
-   * Injectable seam for tests. Defaults to the real platform discovery pass
-   * (`startBackgroundProviderRegistration`, which performs a real subnet
-   * scan). Tests must supply a fake here instead of exercising the real
-   * network, never let a test fall through to the default.
+   * Injectable seam for tests. Defaults to the real platform pass
+   * (`startBackgroundProviderRegistration`). Tests must supply a fake here
+   * instead of exercising the real network, never let a test fall through to
+   * the default.
    */
   readonly startDiscovery?: (opts: BackgroundProviderDiscoveryOptions) => BackgroundRuntimeTaskHandle;
 }
 
+/** The options the start-up pass ran with, so `/network-scan on` can scan at once. */
+let lastGateOptions: LanScanGateOptions | null = null;
+
+function startPass(options: LanScanGateOptions, networkScan: boolean): BackgroundRuntimeTaskHandle {
+  const { startDiscovery = startBackgroundProviderRegistration } = options;
+  return startDiscovery({
+    ...options,
+    registerNetworkServers: networkScan,
+    report: reporterFor(options.systemMessageRouter, networkScan),
+  });
+}
+
 /**
- * The single gated entry point to LAN provider discovery. Bootstrap's Phase 8
- * and the /network-scan command are the only two callers; neither calls the
- * platform's startBackgroundProviderRegistration/startBackgroundProviderDiscovery
- * directly.
- *
- * - No decision recorded (first run): shows the full consent explanation,
- *   persists "declined" as the honest first-run default, and returns without
- *   scanning.
- * - Decision is "declined" (F3): stays silent and returns without scanning,
- *   the first-run boot already explained the off state and how to turn it
- *   on; the ongoing state is discoverable on demand via `/network-scan
- *   status`, not repeated on every boot.
- * - Decision is "granted": runs the platform discovery pass through a framing
- *   wrapper that replaces the raw per-server feed dump with a single summary
- *   line.
+ * The Agent's provider start-up pass. Bootstrap calls it once; it always
+ * registers environment-key providers, restores saved servers on this computer
+ * and scans this computer, and scans the subnet only with recorded consent.
+ * The first start with no decision explains the subnet scan and records "off".
  */
 export function runGatedLanScan(options: LanScanGateOptions): BackgroundRuntimeTaskHandle {
-  const { shellPaths, surfaceRoot, systemMessageRouter, requestRender, startDiscovery = startBackgroundProviderRegistration } = options;
+  const { shellPaths, surfaceRoot, systemMessageRouter } = options;
+  lastGateOptions = options;
   const existing = loadLanScanConsent(shellPaths, surfaceRoot);
-
   if (!existing) {
     saveLanScanConsent(shellPaths, surfaceRoot, 'declined');
     systemMessageRouter.low(firstRunConsentMessage(shellPaths, surfaceRoot));
-    return noopHandle();
   }
+  return startPass(options, existing?.decision === 'granted');
+}
 
-  if (existing.decision === 'declined') {
-    return noopHandle();
-  }
-
-  const framed = createFramedDiscoverySink(systemMessageRouter, requestRender);
-  // The user turned the network scan on so the servers it finds can be chat providers.
-  return startDiscovery({
-    ...options,
-    registerNetworkServers: true,
-    systemMessageRouter: framed.sink,
-    requestRender: framed.requestRender,
-  });
+/**
+ * Scan the network now, after the owner turned scanning on. False when the
+ * start-up pass has not run in this process (nothing to scan with yet); the
+ * next start then scans.
+ */
+export function startLanScanNow(): boolean {
+  if (!lastGateOptions) return false;
+  startPass(lastGateOptions, true);
+  return true;
 }

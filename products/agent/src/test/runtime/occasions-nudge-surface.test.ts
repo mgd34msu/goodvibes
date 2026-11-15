@@ -70,6 +70,21 @@ function harness(
 }
 
 describe('occasions nudge surface', () => {
+  test('a pull overtaken by his next message says nothing, and the next completion raises it', async () => {
+    let surface!: ReturnType<typeof createOccasionsNudgeSurface>;
+    let overtake = true;
+    const built = harness(() => {
+      if (overtake) surface.noteTurnSubmitted();
+      return { ok: true, data: pendingPayload(), route: 'in-process' };
+    });
+    surface = built.surface;
+    expect(await surface.raiseNow()).toBe(0);
+    expect(built.seen.said).toEqual([]);
+    overtake = false;
+    expect(await surface.raiseNow()).toBe(1);
+    expect(built.seen.said).toEqual([NUDGE_MESSAGE]);
+  });
+
   test("the daemon's message becomes the agent's own words, unaltered", async () => {
     const { surface, seen } = harness(() => ({ ok: true, data: pendingPayload(), route: 'in-process' }));
     expect(await surface.raiseNow()).toBe(1);

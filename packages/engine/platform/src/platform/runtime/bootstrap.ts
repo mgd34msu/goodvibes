@@ -6,7 +6,9 @@ export type {
   BackgroundRuntimeTaskHandle,
   BackgroundMcpDiscoveryOptions,
   BackgroundProviderDiscoveryOptions,
+  DiscoveredServerSummary,
   HostSystemMessageSink,
+  ProviderDiscoveryReporter,
   RuntimeSelectionState,
 } from './bootstrap-background.js';
 export {
@@ -16,6 +18,7 @@ export {
   synchronizeConfiguredServices,
 } from './bootstrap-helpers.js';
 export type { RuntimeModelSelectionState } from './bootstrap-helpers.js';
+export { buildContinuationSpawnInput, type ContinuationSpawnDeps } from './continuation-spawn.js';
 export { registerBootstrapRuntimeEvents, registerHostRuntimeEvents, registerContractRuntimeEvents, registerGateRuntimeEvents, checkCohortCompletion, runtimeEventKey, runtimeEventOfNotice } from './bootstrap-runtime-events.js';
 export type {
   BootstrapRuntimeEventBridgeOptions,

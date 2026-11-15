@@ -24,7 +24,6 @@
  */
 
 import type { DaemonReceipt } from '@goodvibes-jev/engine/platform/platform/daemon/receipts';
-import type { DaemonBuildGuard, DaemonStatusConnection } from './daemon-build-compatibility.ts';
 
 export type { DaemonReceipt };
 
@@ -54,23 +53,16 @@ export class AgentDaemonReceiptFeed {
 }
 
 /**
- * What runs once per attach: a plain `/status` read for the daemon's build, then
- * the receipt-taking read, whose receipts go to the feed. Two separate reads of
- * the same route because taking receipts has a side effect and the build check
- * must not be the thing that drains them.
+ * What runs once per attach: the receipt-taking `/status` read, whose receipts
+ * go to the feed. The daemon's build was already judged by the adoption read
+ * that led to this attach, so this read takes receipts only.
  */
 export function createDaemonReceiptConsumption(deps: {
-  readonly resolveConnection: () => DaemonStatusConnection;
-  readonly readStatus: (connection: DaemonStatusConnection) => Promise<unknown | null>;
-  readonly guard: Pick<DaemonBuildGuard, 'observeStatus'>;
   readonly consumeReceipts: () => Promise<readonly DaemonReceipt[]>;
   readonly feed: Pick<AgentDaemonReceiptFeed, 'push'>;
   readonly afterAttach: () => Promise<void>;
 }): () => Promise<void> {
   return async () => {
-    const connection = deps.resolveConnection();
-    const status = await deps.readStatus(connection);
-    if (status !== null) deps.guard.observeStatus(status, connection.baseUrl);
     const receipts = await deps.consumeReceipts();
     if (receipts.length > 0) deps.feed.push(receipts);
     await deps.afterAttach();

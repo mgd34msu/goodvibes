@@ -33,9 +33,14 @@
  * when they want to know what is CONFIGURED, and making that question spawn
  * processes would rebuild the problem through the back door.
  *
- * The suggestion scan ("discovered server X, add it to mcp.json") moved behind
- * the same gate. It only ever produced advice about servers, so an agent whose
- * session never touches MCP now does none of that work either.
+ * A server that failed to start is not remembered as failed: the next call
+ * addressed to it tries again, and the call that failed is refused with the
+ * reason, so the model can say "server X failed to start: why" instead of
+ * "no such tool".
+ *
+ * The suggestion scan ("discovered server X, add it to mcp.json",
+ * mcp-suggestion-scan.ts) reads only configured names and the filesystem, so
+ * it starts nothing either.
  */
 
 import type { McpRegistry } from '@goodvibes-jev/engine/platform/platform/mcp';
@@ -50,10 +55,6 @@ export interface LazyMcpStart {
    * except that it starts servers on demand.
    */
   readonly registry: McpRegistry;
-  /** Connect every configured server now and wait for them. Single-flighted. */
-  ensureConnected(): Promise<void>;
-  /** Whether any server has been started yet. False on a boot nobody used MCP in. */
-  isConnected(): boolean;
 }
 
 /** The server a qualified tool name (`mcp:<server>:<tool>`) addresses. */
@@ -66,53 +67,20 @@ function serverOf(qualifiedName: unknown): string | undefined {
 export function createLazyMcpRegistry(
   registry: McpRegistry,
   roots: McpConfigRoots,
-  hooks: {
-    /** Runs once, after the first successful connect, the suggestion scan. */
-    readonly onFirstConnect?: (() => void) | undefined;
-  } = {},
 ): LazyMcpStart {
-  let connectingAll: Promise<void> | null = null;
-  let connected = false;
   const connecting = new Map<string, Promise<void>>();
-
-  const noteConnected = (): void => {
-    if (connected) return;
-    connected = true;
-    try {
-      hooks.onFirstConnect?.();
-    } catch (error) {
-      logger.debug('[mcp] first-connect hook threw', { error: summarizeError(error) });
-    }
-  };
-
-  const connectFailed = (error: unknown): Error => {
-    logger.warn('MCP connect-on-use failed', { error: summarizeError(error) });
-    // Reject with the real reason: resolving here would let the gated call
-    // run against a registry that never connected, and the model would be
-    // told the server or tool does not exist instead of why.
-    return new Error(`MCP connect failed: ${summarizeError(error)}. The call was not made; the next MCP call tries to connect again.`);
-  };
-
-  const ensureConnected = async (): Promise<void> => {
-    // Single-flight: three concurrent uses start the servers once, not three times.
-    connectingAll ??= registry.connectAll(roots)
-      .then(noteConnected)
-      .catch((error: unknown) => {
-        // Allow a later attempt: a server that was not installed when the first
-        // call happened may be there by the next one.
-        connectingAll = null;
-        throw connectFailed(error);
-      });
-    await connectingAll;
-  };
 
   /** Connect only the addressed server; a name that is not configured is left for the call to report. */
   const ensureServer = async (serverName: string): Promise<void> => {
     let pending = connecting.get(serverName);
     if (!pending) {
       pending = registry.connectConfigured(roots, serverName)
-        .then(() => { if (registry.getClient(serverName)?.isConnected) noteConnected(); })
-        .catch((error: unknown) => { throw connectFailed(error); })
+        .catch((error: unknown) => {
+          logger.warn('MCP connect-on-use failed', { server: serverName, error: summarizeError(error) });
+          // Refused with the real reason: running the call against a server that
+          // never connected would tell the model the tool does not exist.
+          throw new Error(`MCP server '${serverName}' failed to start: ${summarizeError(error)}. The call was not made; the next call to this server tries to start it again.`);
+        })
         .finally(() => connecting.delete(serverName));
       connecting.set(serverName, pending);
     }
@@ -128,7 +96,7 @@ export function createLazyMcpRegistry(
   const startUnready = (target: McpRegistry): void => {
     if (startedAll) return;
     startedAll = true;
-    target.startConfigured(roots, (name, error) => { if (!error && target.getClient(name)?.isConnected) noteConnected(); });
+    target.startConfigured(roots);
   };
 
   const proxied = new Proxy(registry, {
@@ -161,9 +129,5 @@ export function createLazyMcpRegistry(
     },
   });
 
-  return {
-    registry: proxied,
-    ensureConnected,
-    isConnected: () => connected,
-  };
+  return { registry: proxied };
 }

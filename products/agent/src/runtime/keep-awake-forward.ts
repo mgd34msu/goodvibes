@@ -1,41 +1,41 @@
 import {
-  createKeepAwakeForwardQueue,
-  describeKeepAwakeOutcome,
+  createKeepAwakeForwarder,
   forwardKeepAwakeToAdoptedDaemon,
-  forwardKeepAwakeWithNotice as forwardWithNotice,
   type ForwardKeepAwakeDeps,
+  type KeepAwakeForwarder,
 } from '@goodvibes-jev/engine/platform/platform/power';
 
-// The engine owns the forwarder (queue, notice, re-send rule); this file binds
-// it to the Agent's transport: a reachability probe and a raw-REST post.
-export { createKeepAwakeForwardQueue, describeKeepAwakeOutcome };
-
-export interface KeepAwakeForwardDeps extends ForwardKeepAwakeDeps {
+export interface AgentKeepAwakeForwarderDeps {
+  /** The current `power.keepAwake` value, read when a re-send's turn comes. */
+  readonly readKeepAwake: () => boolean;
+  /**
+   * Whether a daemon is adopted right now: the adoption reconciler's fact
+   * (`memorySpineClient.active`), read instead of another `/status` probe. A
+   * toggle sent to a daemon that has just gone away fails and says so, and the
+   * re-send on the next attach delivers the value.
+   */
+  readonly isAdopted: () => boolean;
+  readonly resolveConnection: ForwardKeepAwakeDeps['resolveConnection'];
+  /** Test seam for the HTTP post. */
+  readonly post?: ForwardKeepAwakeDeps['post'];
   /** Shown to the owner. Absent: the outcome is logged only. */
   readonly notify?: ((text: string) => void) | undefined;
-  /** Whether an unreachable daemon is worth a notice (a toggle: yes; a re-send on attach: it is online by definition). */
-  readonly tellWhenUnreachable?: boolean;
-}
-
-/** Forward a keep-awake change to the adopted daemon and report what the daemon did. Never throws. */
-export function forwardKeepAwakeWithNotice(enabled: boolean, deps: KeepAwakeForwardDeps): Promise<void> {
-  return forwardWithNotice(enabled, {
-    send: (value) => forwardKeepAwakeToAdoptedDaemon(value, deps),
-    notify: deps.notify,
-    tellWhenUnreachable: deps.tellWhenUnreachable,
-  });
 }
 
 /**
- * The re-send done once per attach: the CURRENT value, on or off, so a change
- * made while the daemon was unreachable reaches it. Queued behind any toggle
- * already on its way, and the setting is read when its turn comes, so an "off"
- * set meanwhile is never followed by a late "on".
+ * The Agent's keep-awake forwarder: the engine's one forwarder (ordered queue,
+ * notice, re-send rule) bound to the adopted daemon. `set` on a toggle,
+ * `attached` on the adoption edge.
  */
-export function queueKeepAwakeResend(
-  queue: { run<T>(step: () => Promise<T>): Promise<T> },
-  readKeepAwake: () => boolean,
-  deps: KeepAwakeForwardDeps,
-): Promise<void> {
-  return queue.run(() => forwardKeepAwakeWithNotice(readKeepAwake(), { ...deps, tellWhenUnreachable: false }));
+export function createAgentKeepAwakeForwarder(deps: AgentKeepAwakeForwarderDeps): KeepAwakeForwarder {
+  const send: ForwardKeepAwakeDeps = {
+    probeReachability: () => Promise.resolve(deps.isAdopted() ? 'online' : 'offline'),
+    resolveConnection: deps.resolveConnection,
+    ...(deps.post ? { post: deps.post } : {}),
+  };
+  return createKeepAwakeForwarder({
+    readKeepAwake: deps.readKeepAwake,
+    notify: deps.notify,
+    send: (enabled) => forwardKeepAwakeToAdoptedDaemon(enabled, send),
+  });
 }

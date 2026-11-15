@@ -77,6 +77,13 @@ export interface AgentDaemonVerbCallerOptions {
   readonly invokeTimeoutMs?: number;
   /** Test seam: the signal that bounds one verb call. Overrides `invokeTimeoutMs`. */
   readonly invokeSignal?: () => AbortSignal;
+  /**
+   * Why the attached host may not be used, when it was judged too old for this
+   * build (runtime/daemon-build-compatibility.ts). Every call and stream that
+   * resolves through here refuses with that sentence instead of reaching a
+   * host that would answer 404.
+   */
+  readonly hostRefusal?: () => string | undefined;
 }
 
 const DEFAULT_INVOKE_TIMEOUT_MS = 120_000;
@@ -92,11 +99,10 @@ interface ResolvedConnection {
 // credential or a persisted owner. Explicit observers also support new option
 // views within the same operation; unrelated callers cannot replace its frame.
 const connectionObservations = new WeakMap<AgentDaemonVerbCallerOptions, OwnedSelectionObservation>();
-const getConnectionObservation = WeakMap.prototype.get, setConnectionObservation = WeakMap.prototype.set;
 
 /** Resolve the connected host, or a refusal naming what is missing. */
 function resolveConnection(options: AgentDaemonVerbCallerOptions): ResolvedConnection | { readonly reason: string } {
-  let observation = options.observation ?? (Reflect.apply(getConnectionObservation, connectionObservations, [options]) as OwnedSelectionObservation | undefined);
+  let observation = options.observation ?? connectionObservations.get(options);
   const unavailable = (reason: string) => { observation?.retire(); return { reason }; };
   try {
     const { configManager } = options;
@@ -123,11 +129,13 @@ function resolveConnection(options: AgentDaemonVerbCallerOptions): ResolvedConne
       return unavailable('this surface is set not to dial a connected host (daemon.connectedHost.enabled=false), '
         + 'nothing to reach. Set it to true in settings, then retry.');
     }
+    const refusal = options.hostRefusal?.();
+    if (refusal) return unavailable(refusal);
     const homeDirectory = typeof options.homeDirectory === 'function' ? options.homeDirectory() : options.homeDirectory;
     const baseUrl = resolveConnectedHostBaseUrl(configManager);
     if (!observation) {
       observation = new OwnedSelectionObservation();
-      Reflect.apply(setConnectionObservation, connectionObservations, [options, observation]);
+      connectionObservations.set(options, observation);
     }
     const token = readConnectedHostOperatorToken(homeDirectory, baseUrl, observation, configManager);
     if (!token.token) {

@@ -1,9 +1,11 @@
 import { PermissionPromptFacts } from '@goodvibes-jev/engine/terminal-shell/permission-prompt-facts';
-import '@goodvibes-jev/engine/terminal-shell/permission-category-label';
 import { activeTokens } from '../renderer/theme.ts';
-import { beginModal, finishModal, wrapLines, type KitHint, type SurfaceLayer } from '../renderer/surface-kit.ts';
+import { beginModal, clipText, finishModal, wrapLines, type KitHint, type SurfaceLayer } from '../renderer/surface-kit.ts';
 import { button, buttonWidth, type ButtonTone } from '../renderer/surface-kit-parts.ts';
 import { modalHeightFor, modalTextWidth } from '../renderer/surface-kit-extra.ts';
+import { renderDiffView } from '../renderer/diff-view.ts';
+import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
+import { approvalDiffText } from './approval-diff.ts';
 import { buildPermissionApprovalBrief, execFileOperationLines, fallbackAnalysis } from '@goodvibes-jev/engine/platform/platform/permissions';
 
 import type {
@@ -89,9 +91,10 @@ export class PermissionPromptUI extends PermissionPromptFacts {
   /**
    * The permission dialog as a kit modal layer: an amber cap (red for a high
    * risk), the request's title, the facts wrapped (a command or path longer than the
-   * screen keeps its start and end around a "not shown" marker), and the three
-   * choices. Drawn above every other modal; the keys (y / a / n, Esc denies)
-   * live in shell/blocking-input.ts.
+   * screen keeps its start and end around a "not shown" marker), for a `write` or
+   * `edit` the change itself as a diff under the facts, and the three choices.
+   * Drawn above every other modal; the keys (y / a / n, Esc denies) live in
+   * shell/blocking-input.ts.
    */
   static createPromptLayer(screenWidth: number, screenHeight: number, request: PermissionRequest): SurfaceLayer {
     const tokens = activeTokens();
@@ -104,7 +107,10 @@ export class PermissionPromptUI extends PermissionPromptFacts {
     const valueW = Math.max(8, width - labelW - 1);
     const facts = this.promptFacts(request);
     const factRows = facts.reduce((n, fact) => n + wrapLines(fact.value, valueW).length, 0);
-    const body = factRows + 2;
+    // No change can show more source lines than the screen has rows, so none past that are drawn.
+    const diff = approvalDiffText(request, Math.max(1, screenHeight));
+    const diffLines = diff ? renderDiffView(diff.text, width) : [];
+    const body = factRows + diffLines.length + (diff && diff.hiddenLines > 0 ? 1 : 0) + 2;
     const hints = promptHints(request);
     const height = modalHeightFor(screenWidth, screenHeight, { hints }, body);
     const f = beginModal(screenWidth, screenHeight, {
@@ -120,9 +126,14 @@ export class PermissionPromptUI extends PermissionPromptFacts {
     let y = f.top;
     const capacity = Math.max(0, f.bottom - 1 - f.top);
     const subjectIndex = facts.findIndex((fact) => fact.label === brief.subjectLabel);
-    for (const fact of fitFactRows(facts, valueW, capacity, subjectIndex, tokens.warning)) {
+    const diffRows = fitDiffRows(diffLines, diff ?? { hiddenLines: 0, totalLines: 0 }, capacity, factRows);
+    for (const fact of fitFactRows(facts, valueW, capacity - diffRows.length, subjectIndex, tokens.warning)) {
       if (fact.label) f.canvas.put(f.l, y, fact.label, { fg: tokens.textFaint });
       f.canvas.put(f.l + labelW + 1, y++, fact.text, { fg: fact.fg });
+    }
+    for (const row of diffRows) {
+      if (typeof row === 'string') f.canvas.put(f.l, y++, clipText(row, width), { fg: tokens.warning });
+      else drawLine(f.canvas.lines[y++], f.l, row);
     }
     // The choices, as chips on the last body row.
     let x = f.l;
@@ -175,6 +186,36 @@ function fitFactRows(
     ...rows.slice(0, shown),
     ...(capacity > 0 ? [{ label: '', text: `… ${hidden} more row${hidden === 1 ? '' : 's'} not shown; enlarge the terminal …`, fg: markerFg }] : []),
   ];
+}
+
+/** Rows a diff keeps when the card is short of room, so a cramped screen still shows the start of the change. */
+const MIN_DIFF_ROWS = 6;
+
+/**
+ * The diff rows the card draws in `capacity` rows that the facts share. The facts come first;
+ * the diff takes what they leave, but never fewer than MIN_DIFF_ROWS while the card has them.
+ * A diff that does not fit, or whose source was longer than was drawn, keeps its start and ends
+ * in a marker row (a string) saying the rest is not shown and how long the whole change is.
+ */
+function fitDiffRows(
+  lines: readonly Line[],
+  source: { readonly hiddenLines: number; readonly totalLines: number },
+  capacity: number,
+  factRows: number,
+): Array<Line | string> {
+  if (lines.length === 0 || capacity <= 0) return [];
+  const budget = Math.min(capacity, Math.max(Math.min(MIN_DIFF_ROWS, capacity), capacity - factRows));
+  if (source.hiddenLines === 0 && lines.length <= budget) return [...lines];
+  const shown = Math.min(lines.length, Math.max(0, budget - 1));
+  return [...lines.slice(0, shown), `… the rest of the change is not shown (${source.totalLines} diff lines in all); enlarge the terminal …`];
+}
+
+/** Copy a rendered row onto the card from column `x`. */
+function drawLine(target: Line | undefined, x: number, row: Line): void {
+  if (!target) return;
+  row.forEach((cell, i) => {
+    if (x + i < target.length) target[x + i] = cell;
+  });
 }
 
 /** Keycap hints of the permission dialog (the keys live in shell/blocking-input.ts). */

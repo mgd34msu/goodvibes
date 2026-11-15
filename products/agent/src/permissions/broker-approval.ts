@@ -22,7 +22,9 @@
  * reaches every waiter on that record, including a tool call blocked on it
  * in this same process, and any other surface polling/watching the record.
  *
- * Deliberately narrower than the TUI's broker-approval-card.ts: this product's
+ * The card is the same one a local ask opens (permissions/prompt.ts), so a
+ * broker-originated write or edit shows its change as a diff too. It is
+ * deliberately narrower than the TUI's broker-approval-card.ts: this product's
  * PendingPermissionState (shell/blocking-input.ts) has no hunk-selection, no
  * typed-reply modes, and no CI fix-session concept (the agent does not own
  * build/fix/review worktrees, see DisabledAgentWorktreeRegistry in

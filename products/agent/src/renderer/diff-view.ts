@@ -1,18 +1,23 @@
 import { type Line, type Cell, createStyledCell } from '@goodvibes-jev/engine/platform/platform/types';
 import { UIFactory } from './ui-factory.ts';
-import { getDisplayWidth } from '../utils/terminal-width.ts';
+import { expandTabs, getDisplayWidth } from '../utils/terminal-width.ts';
 import { activeTokens } from './theme.ts';
 import { diffRowTints } from './diff-tint.ts';
+
+/** Columns between the diff's fill edges and its text. */
+const DIFF_PAD = 2;
+/** Width of the line-number label after the gutter character. */
+const LINE_LABEL_WIDTH = 5;
 
 /**
  * renderDiffView - Render a unified diff string as styled Line[].
  * Colours come from the active theme's diff tokens (diffAdded/diffRemoved/
  * diffHunkHeader, the matching backgrounds and the line-number tokens); the
  * row tints are kept visibly apart from the diff's own fill (diff-tint.ts).
+ * A line wider than the block continues on the rows below it, so nothing is
+ * cut at the right edge. A hunk header without positions (`@@ path @@`) marks
+ * a hunk whose line numbers are not known, and its rows carry none.
  */
-/** Columns between the diff's fill edges and its text. */
-const DIFF_PAD = 2;
-
 export function renderDiffView(diffText: string, width: number, filename?: string): Line[] {
   const lines: Line[] = [];
   const p = activeTokens();
@@ -28,49 +33,47 @@ export function renderDiffView(diffText: string, width: number, filename?: strin
   const diffLines = diffText.split('\n');
   let oldLineNo = 0;
   let newLineNo = 0;
+  let numbered = true;
+  const label = (n: number): string => (numbered ? `${String(n).padStart(LINE_LABEL_WIDTH - 1)} ` : ' ');
   // The diff is one filled block: an empty row above and below, and text two
   // columns in from both edges (the Measurements padding rule).
   lines.push(makeFilledLine(width, BG));
 
   for (const raw of diffLines) {
     if (raw === '') {
-      const emptyLine = makeFilledLine(width, BG);
-      lines.push(emptyLine);
+      lines.push(makeFilledLine(width, BG));
       continue;
     }
 
     // Hunk header: @@ -old,count +new,count @@
     if (raw.startsWith('@@')) {
-      const hunkMatch = raw.match(/@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+      const hunkMatch = raw.match(/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+      numbered = hunkMatch !== null;
       if (hunkMatch) {
-        oldLineNo = parseInt(hunkMatch[1], 10) - 1;
-        newLineNo = parseInt(hunkMatch[2], 10) - 1;
+        oldLineNo = parseInt(hunkMatch[1]!, 10) - 1;
+        newLineNo = parseInt(hunkMatch[2]!, 10) - 1;
       }
-      lines.push(makeStyledLine(raw, width, p.diffHunkHeader, BG, false));
+      lines.push(...makeStyledLines(raw, width, p.diffHunkHeader, BG, false));
       continue;
     }
 
     // File headers: --- and +++
     if (raw.startsWith('--- ') || raw.startsWith('+++ ')) {
-      lines.push(makeStyledLine(raw, width, p.textMuted, BG, false));
+      lines.push(...makeStyledLines(raw, width, p.textMuted, BG, false));
       continue;
     }
 
     // Added line
     if (raw.startsWith('+')) {
       newLineNo++;
-      const lineLabel = `${String(newLineNo).padStart(4)} `;
-      const content = raw.slice(1);
-      lines.push(makeGutterLine('+', lineLabel, content, width, p.diffAdded, tints.addedRow, tints.addedGutter));
+      lines.push(...makeGutterLines('+', label(newLineNo), raw.slice(1), width, p.diffAdded, tints.addedRow, tints.addedGutter));
       continue;
     }
 
     // Removed line
     if (raw.startsWith('-')) {
       oldLineNo++;
-      const lineLabel = `${String(oldLineNo).padStart(4)} `;
-      const content = raw.slice(1);
-      lines.push(makeGutterLine('-', lineLabel, content, width, p.diffRemoved, tints.removedRow, tints.removedGutter));
+      lines.push(...makeGutterLines('-', label(oldLineNo), raw.slice(1), width, p.diffRemoved, tints.removedRow, tints.removedGutter));
       continue;
     }
 
@@ -78,9 +81,8 @@ export function renderDiffView(diffText: string, width: number, filename?: strin
     if (raw.startsWith(' ') || (!raw.startsWith('\\') && raw.length > 0)) {
       oldLineNo++;
       newLineNo++;
-      const lineLabel = `${String(oldLineNo).padStart(4)} `;
       const content = raw.startsWith(' ') ? raw.slice(1) : raw;
-      lines.push(makeGutterLine(' ', lineLabel, content, width, p.diffContext, BG, BG));
+      lines.push(...makeGutterLines(' ', label(oldLineNo), content, width, p.diffContext, BG, BG));
     }
   }
 
@@ -88,8 +90,49 @@ export function renderDiffView(diffText: string, width: number, filename?: strin
   return lines;
 }
 
-/** Build a line with gutter indicator, line number, and content. */
-function makeGutterLine(
+/**
+ * Cut `text` into pieces no wider than `room` display columns. Control
+ * characters are dropped and tabs expanded, so the drawn width is the
+ * measured width.
+ */
+function wrapToWidth(text: string, room: number): string[] {
+  const clean = expandTabs(text).replace(/[\u0000-\u001f\u007f]/g, '');
+  if (room <= 0) return [''];
+  const pieces: string[] = [];
+  let piece = '';
+  let used = 0;
+  for (const ch of clean) {
+    const cw = Math.max(1, getDisplayWidth(ch));
+    if (used + cw > room && piece !== '') {
+      pieces.push(piece);
+      piece = '';
+      used = 0;
+    }
+    piece += ch;
+    used += cw;
+  }
+  pieces.push(piece);
+  return pieces;
+}
+
+/** Draw `text` on `line` from column `x` up to (not including) `end`. */
+function drawText(line: Line, x: number, end: number, text: string, style: { fg: string; bg: string; bold?: boolean }): void {
+  let cx = x;
+  for (const ch of text) {
+    const cw = Math.max(1, getDisplayWidth(ch));
+    if (cx + cw > end) break;
+    line[cx] = createStyledCell(ch, style);
+    if (cw === 2) line[cx + 1] = { ...line[cx]!, char: '' };
+    cx += cw;
+  }
+}
+
+/**
+ * A diff line with its gutter indicator and line number, wrapped onto as many
+ * rows as its content needs. Continuation rows keep the row tint and leave the
+ * gutter and number blank.
+ */
+function makeGutterLines(
   gutter: string,
   lineLabel: string,
   content: string,
@@ -97,49 +140,30 @@ function makeGutterLine(
   fg: string,
   bg: string,
   lineNumBg: string,
-): Line {
-  const line = makeFilledLine(width, bg);
+): Line[] {
   const end = width - DIFF_PAD;
-  let cx = DIFF_PAD;
-
-  // Gutter char
-  line[cx++] = createStyledCell(gutter, { fg, bg, bold: gutter !== ' ' });
-
-  // Line number
-  for (const ch of lineLabel) {
-    if (cx >= width) break;
-    line[cx++] = createStyledCell(ch, { fg: activeTokens().diffLineNumber, bg: lineNumBg });
-  }
-
-  // Content
-  for (const ch of content) {
-    const cw = getDisplayWidth(ch);
-    if (cx + Math.max(1, cw) > end) break;
-    const code = ch.charCodeAt(0);
-    if (code < 32) { cx++; continue; }
-    line[cx] = createStyledCell(ch, { fg, bg });
-    if (cw === 2) line[cx + 1] = { ...line[cx], char: '' };
-    cx += cw;
-  }
-
-  return line;
+  const textX = DIFF_PAD + 1 + lineLabel.length;
+  return wrapToWidth(content, end - textX).map((piece, index) => {
+    const line = makeFilledLine(width, bg);
+    if (index === 0) {
+      if (DIFF_PAD < width) line[DIFF_PAD] = createStyledCell(gutter, { fg, bg, bold: gutter !== ' ' });
+      drawText(line, DIFF_PAD + 1, Math.min(width, textX), lineLabel, { fg: activeTokens().diffLineNumber, bg: lineNumBg });
+    } else {
+      drawText(line, DIFF_PAD + 1, Math.min(width, textX), ' '.repeat(lineLabel.length), { fg: activeTokens().diffLineNumber, bg: lineNumBg });
+    }
+    drawText(line, textX, end, piece, { fg, bg });
+    return line;
+  });
 }
 
-/** Build a simple styled line from text. */
-function makeStyledLine(text: string, width: number, fg: string, bg: string, bold: boolean): Line {
-  const line = makeFilledLine(width, bg);
+/** A plain styled line (hunk or file header), wrapped onto as many rows as it needs. */
+function makeStyledLines(text: string, width: number, fg: string, bg: string, bold: boolean): Line[] {
   const end = width - DIFF_PAD;
-  let cx = DIFF_PAD;
-  for (const ch of text) {
-    const cw = getDisplayWidth(ch);
-    if (cx + Math.max(1, cw) > end) break;
-    const code = ch.charCodeAt(0);
-    if (code < 32) { cx++; continue; }
-    line[cx] = createStyledCell(ch, { fg, bg, bold });
-    if (cw === 2) line[cx + 1] = { ...line[cx], char: '' };
-    cx += cw;
-  }
-  return line;
+  return wrapToWidth(text, end - DIFF_PAD).map((piece) => {
+    const line = makeFilledLine(width, bg);
+    drawText(line, DIFF_PAD, end, piece, { fg, bg, bold });
+    return line;
+  });
 }
 
 /** Create a line filled with bg color. */

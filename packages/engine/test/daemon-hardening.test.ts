@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, setSystemTime, test } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ConfigManager } from '../platform/src/platform/config/manager.js';
 import { WebSocketOutbox } from '../platform/src/platform/daemon/websocket-outbox.js';
+import { WEBSOCKET_CHUNK_CHARS, WebSocketMessageAssembler } from '../transport-core/src/websocket-messages.js';
 import { isSurfaceDeliveryEnabled } from '../platform/src/platform/daemon/surface-policy.js';
 import { readResponseTextBounded } from '../platform/src/platform/daemon/control-plane.js';
 import { isPortAvailable } from '../platform/src/platform/daemon/port-check.js';
@@ -86,6 +87,50 @@ describe('websocket outbox', () => {
     await closedOnce;
     expect(closed).toEqual([{ code: 1013, reason: 'WebSocket client is too slow' }]);
     expect(dropped).toEqual([2]);
+    outbox.close();
+  });
+
+  test('a frame the socket drops on the direct path is counted and the connection is closed so the client can resynchronise', () => {
+    const closed: number[] = [];
+    const dropped: number[] = [];
+    const outbox = new WebSocketOutbox({ send: () => 0, getBufferedAmount: () => 0, close: (code: number) => { closed.push(code); } }, undefined, (count) => dropped.push(count));
+    outbox.send('x');
+    expect(dropped).toEqual([1]);
+    expect(closed).toEqual([1011]);
+    outbox.close();
+  });
+
+  test('long messages to a socket that keeps up never touch the spill directory and arrive in order', () => {
+    const spillDirs = () => readdirSync(tmpdir()).filter((name) => name.startsWith(`goodvibes-ws-${process.pid}-`)).length;
+    const before = spillDirs();
+    const sent: string[] = [];
+    const outbox = new WebSocketOutbox({ send: (data: string) => { sent.push(data); return data.length; }, getBufferedAmount: () => 0 });
+    const long = JSON.stringify('x'.repeat(WEBSOCKET_CHUNK_CHARS * 2 + 10));
+    for (let i = 0; i < 50; i += 1) { outbox.send(long); outbox.send(JSON.stringify(`after-${i}`)); }
+    expect(spillDirs()).toBe(before);
+    const assembler = new WebSocketMessageAssembler();
+    const received = sent.map((frame) => assembler.accept(JSON.parse(frame) as unknown)).filter((value) => value !== undefined);
+    expect(received).toHaveLength(100);
+    expect(received[1]).toBe('after-0');
+    expect(received[99]).toBe('after-49');
+    outbox.close();
+  });
+
+  test('a socket that falls behind mid-message gets the rest of it before anything sent later', async () => {
+    let buffered = 0;
+    const sent: string[] = [];
+    const outbox = new WebSocketOutbox({
+      send: (data: string) => { sent.push(data); if (sent.length === 1) buffered = 64 * 1024 * 1024; return data.length; },
+      getBufferedAmount: () => buffered,
+    });
+    outbox.send(JSON.stringify('y'.repeat(WEBSOCKET_CHUNK_CHARS * 3)));
+    outbox.send(JSON.stringify('later'));
+    expect(sent).toHaveLength(1);
+    buffered = 0;
+    for (let i = 0; i < 50 && sent.length < 5; i += 1) await new Promise((resolve) => setTimeout(resolve, 15));
+    const assembler = new WebSocketMessageAssembler();
+    const received = sent.map((frame) => assembler.accept(JSON.parse(frame) as unknown)).filter((value) => value !== undefined);
+    expect(received).toEqual(['y'.repeat(WEBSOCKET_CHUNK_CHARS * 3), 'later']);
     outbox.close();
   });
 });

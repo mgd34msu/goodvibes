@@ -48,12 +48,16 @@ export class WebSocketMessageAssembler {
   }
 }
 
-/** Pause native writes at a high-water mark; producers await delivery or cancellation. */
+/**
+ * Pause native writes at a high-water mark; producers await delivery or cancellation.
+ * `message` is the text of one message, or the frames still to send of a message already
+ * split by `encodeWebSocketMessage` (a sender that started it synchronously hands over the rest).
+ */
 export async function sendWebSocketMessage(
   socket: { send(data: string): unknown; readonly bufferedAmount?: number; getBufferedAmount?(): number; readonly readyState?: number },
-  text: string, signal?: AbortSignal,
+  message: string | Iterable<string>, signal?: AbortSignal,
 ): Promise<void> {
-  for (const frame of encodeWebSocketMessage(text)) {
+  for (const frame of typeof message === 'string' ? encodeWebSocketMessage(message) : message) {
     signal?.throwIfAborted();
     assertOpen(socket);
     while ((socket.getBufferedAmount?.() ?? socket.bufferedAmount ?? 0) > 4 * 1024 * 1024) {

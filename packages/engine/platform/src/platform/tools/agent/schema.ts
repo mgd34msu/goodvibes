@@ -2,11 +2,8 @@ import type { ToolDefinition } from '../../types/tools.js';
 import type { ExecutionIntent } from '../../runtime/execution-intents.js';
 import { REASONING_EFFORT_SEVERITY } from '../../providers/reasoning-effort.js';
 
-/**
- * JSON Schema for the agent tool's input.
- * Manages in-process subagents: spawn, status, cancel, list, templates.
- */
-export const AGENT_TOOL_SCHEMA: ToolDefinition = {
+/** The agent tool's definition as written; {@link AGENT_TOOL_SCHEMA} adds the per-field notes from the field rules. */
+const AGENT_TOOL_DEFINITION: ToolDefinition = {
   name: 'agent',
   description:
     'Manages in-process subagents. Modes: spawn (create a new agent task), ' +
@@ -46,10 +43,6 @@ export const AGENT_TOOL_SCHEMA: ToolDefinition = {
         type: 'string',
         description: 'Task description (mode: spawn). Without outsideContract it becomes the proposed unit of a new contract; with outsideContract it is the agent\'s own task. Describe the deliverable itself.',
       },
-      authoritativeTask: {
-        type: 'string',
-        description: 'The user\'s own request, verbatim, supplied by the host. A contract started by this call takes it as its ask; do not invent or narrow it.',
-      },
       template: {
         type: 'string',
         enum: ['orchestrator', 'planner', 'engineer', 'reviewer', 'tester', 'researcher', 'integrator', 'general'],
@@ -59,11 +52,11 @@ export const AGENT_TOOL_SCHEMA: ToolDefinition = {
       },
       model: {
         type: 'string',
-        description: 'Model for the spawned agent (mode: spawn). A bare model id (e.g. "claude-fable-5") resolves automatically; use the provider:model form only when the id exists on more than one provider.' + ' Applies only with outsideContract=true; without it the work runs as a contract and this is not carried.',
+        description: 'Model for the spawned agent (mode: spawn). A bare model id (e.g. "claude-fable-5") resolves automatically; use the provider:model form only when the id exists on more than one provider.',
       },
       provider: {
         type: 'string',
-        description: 'Provider override for the spawned agent (mode: spawn). Applies only with outsideContract=true; without it the work runs as a contract and this is not carried.',
+        description: 'Provider override for the spawned agent (mode: spawn).',
       },
       fallbackModels: {
         type: 'array',
@@ -94,7 +87,7 @@ export const AGENT_TOOL_SCHEMA: ToolDefinition = {
           },
         },
         additionalProperties: false,
-        description: 'Explicit execution-intent hints for policy-aware runtimes (mode: spawn). Needs outsideContract=true: on a contract this is refused, because the contract planner chooses the tools and write scope of each unit.',
+        description: 'Explicit execution-intent hints for policy-aware runtimes (mode: spawn).',
       },
       reasoningEffort: {
         type: 'string',
@@ -106,8 +99,7 @@ export const AGENT_TOOL_SCHEMA: ToolDefinition = {
         items: { type: 'string' },
         description:
           'Explicit tool subset for the agent (mode: spawn). ' +
-          'Defaults to template defaults. The "agent" tool is never included.' +
-          ' Needs outsideContract=true: on a contract this is refused, because the contract planner chooses the tools and write scope of each unit.',
+          'Defaults to template defaults. The "agent" tool is never included.',
       },
       context: {
         type: 'string',
@@ -116,17 +108,17 @@ export const AGENT_TOOL_SCHEMA: ToolDefinition = {
       successCriteria: {
         type: 'array',
         items: { type: 'string' },
-        description: 'Concrete success criteria the spawned agent must satisfy (mode: spawn). Applies only with outsideContract=true; without it the work runs as a contract and this is not carried.',
+        description: 'Concrete success criteria the spawned agent must satisfy (mode: spawn).',
       },
       requiredEvidence: {
         type: 'array',
         items: { type: 'string' },
-        description: 'Evidence the spawned agent must return before completion (mode: spawn). Applies only with outsideContract=true; without it the work runs as a contract and this is not carried.',
+        description: 'Evidence the spawned agent must return before completion (mode: spawn).',
       },
       writeScope: {
         type: 'array',
         items: { type: 'string' },
-        description: 'Expected file or path scope for writes owned by the spawned agent (mode: spawn). Needs outsideContract=true: on a contract this is refused, because the contract planner chooses the tools and write scope of each unit.',
+        description: 'Expected file or path scope for writes owned by the spawned agent (mode: spawn).',
       },
       executionProtocol: {
         type: 'string',
@@ -164,8 +156,7 @@ export const AGENT_TOOL_SCHEMA: ToolDefinition = {
         description:
           'If true, use ONLY the specified tools (override mode). ' +
           'If false or omitted, specified tools are merged with template defaults (additive mode). ' +
-          'Only applies when tools is also provided (mode: spawn).' +
-          ' Needs outsideContract=true: on a contract this is refused, because the contract planner chooses the tools and write scope of each unit.',
+          'Only applies when tools is also provided (mode: spawn).',
         default: false,
       },
       outsideContract: {
@@ -258,6 +249,67 @@ export const AGENT_TOOL_SCHEMA: ToolDefinition = {
     },
   },
 };
+
+/**
+ * How the agent tool treats an input field the model does not simply set:
+ * - `host-stamped`: the host writes it after the model's call (the model's own value is replaced), so the model is not offered it;
+ * - `host-only`: only the composition sets it; a model's value is removed;
+ * - `contract-fence`: a limit on a worker's authority, refused unless `outsideContract` is set, because a contract's planner chooses it per unit;
+ * - `standalone-only`: honoured only with `outsideContract`; on a contract it is reported back as not applied.
+ * The one table: the schema, the stripping, the refusal and the not-applied report all read it.
+ */
+export type AgentInputFieldRule = 'host-stamped' | 'host-only' | 'contract-fence' | 'standalone-only';
+export const AGENT_INPUT_FIELD_RULES = {
+  authoritativeTask: 'host-stamped',
+  captureAuthority: 'host-only', systemPromptAddendum: 'host-only', proposedUnits: 'host-only',
+  replyStyle: 'host-only', workingDirectory: 'host-only', routing: 'host-only',
+  tools: 'contract-fence', restrictTools: 'contract-fence', writeScope: 'contract-fence', executionIntent: 'contract-fence',
+  model: 'standalone-only', provider: 'standalone-only', fallbackModels: 'standalone-only', reasoningEffort: 'standalone-only',
+  successCriteria: 'standalone-only', requiredEvidence: 'standalone-only', executionProtocol: 'standalone-only',
+  reviewMode: 'standalone-only', communicationLane: 'standalone-only', orchestrationGraphId: 'standalone-only',
+  orchestrationNodeId: 'standalone-only', parentNodeId: 'standalone-only', cohort: 'standalone-only',
+} as const satisfies Partial<Record<keyof AgentInput, AgentInputFieldRule>>;
+
+/** The fields under one rule. */
+export function agentInputFields(rule: AgentInputFieldRule): (keyof AgentInput)[] {
+  return (Object.keys(AGENT_INPUT_FIELD_RULES) as (keyof typeof AGENT_INPUT_FIELD_RULES)[])
+    .filter((key) => AGENT_INPUT_FIELD_RULES[key] === rule);
+}
+
+const FIELD_RULE_NOTES: Partial<Record<AgentInputFieldRule, string>> = {
+  'contract-fence': ' Needs outsideContract=true: on a contract this is refused, because the contract planner chooses the tools and write scope of each unit.',
+  'standalone-only': ' Applies only with outsideContract=true; without it the work runs as a contract and this is not carried.',
+};
+
+/** The model-facing schema: host fields left out, and each fenced or standalone-only field (top level and in `tasks`) carrying its note. */
+function withFieldRuleNotes(definition: ToolDefinition): ToolDefinition {
+  const annotate = (properties: Record<string, Record<string, unknown>>): Record<string, Record<string, unknown>> => Object.fromEntries(
+    Object.entries(properties).flatMap(([key, property]) => {
+      const rule = (AGENT_INPUT_FIELD_RULES as Partial<Record<string, AgentInputFieldRule>>)[key];
+      if (rule === 'host-stamped' || rule === 'host-only') return [];
+      const note = rule === undefined ? undefined : FIELD_RULE_NOTES[rule];
+      return [[key, note && typeof property.description === 'string' && !property.description.includes('outsideContract') ? { ...property, description: property.description + note } : property]];
+    }),
+  );
+  const parameters = definition.parameters as { properties: Record<string, Record<string, unknown>> } & Record<string, unknown>;
+  const tasks = parameters.properties.tasks as { items: { properties: Record<string, Record<string, unknown>> } & Record<string, unknown> } & Record<string, unknown>;
+  return {
+    ...definition,
+    parameters: {
+      ...parameters,
+      properties: {
+        ...annotate(parameters.properties),
+        tasks: { ...tasks, items: { ...tasks.items, properties: annotate(tasks.items.properties) } },
+      },
+    },
+  };
+}
+
+/**
+ * JSON Schema for the agent tool's input.
+ * Manages in-process subagents: spawn, status, cancel, list, templates.
+ */
+export const AGENT_TOOL_SCHEMA: ToolDefinition = withFieldRuleNotes(AGENT_TOOL_DEFINITION);
 
 export interface AgentProviderRoutingPolicy {
   providerSelection?: 'inherit-current' | 'concrete' | 'synthetic' | undefined;

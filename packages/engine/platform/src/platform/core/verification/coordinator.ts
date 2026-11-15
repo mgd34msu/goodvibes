@@ -139,7 +139,20 @@ export class CompletionVerification {
   private originalTurns: ReadonlyMap<string, readonly VerificationSource[]> = new Map();
   private previousSources: { identity: object; request: unknown; ids: Set<string> } | undefined;
   private finalEvidence: { input: unknown; identity: object; frontier: VerificationReceipt[]; seen: Set<string>; opened: readonly VerificationSource[]; earlier: VerificationReceipt[] } | undefined;
-  constructor(private readonly writer: VerificationWriter, readonly store = new VerificationStore()) {}
+  /** One requirement id per (text, cited sources) for the life of this coordinator, so a re-read ledger keeps what was settled for each requirement. */
+  private readonly requirementIds = new Map<string, string>();
+  constructor(private writer: VerificationWriter, readonly store = new VerificationStore()) {}
+  /** The coordinator outlives a turn (one per session store); each turn's checks write through that turn's writer. */
+  useWriter(writer: VerificationWriter): void { this.writer = writer; }
+  private stableRequirements(parsed: VerificationRequirement[]): VerificationRequirement[] {
+    return parsed.map((requirement) => {
+      const key = JSON.stringify([requirement.text, requirement.sources]);
+      const id = this.requirementIds.get(key);
+      if (id !== undefined) return { ...requirement, id };
+      this.requirementIds.set(key, requirement.id);
+      return requirement;
+    });
+  }
   private readonly ownSource = (source: VerificationSourceInput) => this.store.retainSource(source);
 
   private readViews(sources: readonly VerificationSource[]) {
@@ -242,10 +255,12 @@ export class CompletionVerification {
     const userTexts = new Set(instructions.filter(source => source.messageRole === 'user' && source.completeMessage).flatMap(source => {
       try { const value = JSON.parse(source.text); return typeof value.content === 'string' ? [value.content] : []; } catch { return []; }
     }));
-    const currentTexts = new Set(instructions.filter(source => source.reference.startsWith('current user request')).map(source => source.text));
-    const originals = instructions.filter(source => !((source.reference.startsWith('current user request') || source.reference.startsWith('original request at turn entry')) && userTexts.has(source.text))
-      && !(source.reference.startsWith('original request at turn entry') && currentTexts.has(source.text)))
-      .sort((left, right) => Number(left.reference.startsWith('current user request')) - Number(right.reference.startsWith('current user request')));
+    const isCurrentRequest = (source: VerificationSource) => source.lane === 'request';
+    const isEntryRequest = (source: VerificationSource) => source.lane === 'turn-entry-request';
+    const currentTexts = new Set(instructions.filter(isCurrentRequest).map(source => source.text));
+    const originals = instructions.filter(source => !((isCurrentRequest(source) || isEntryRequest(source)) && userTexts.has(source.text))
+      && !(isEntryRequest(source) && currentTexts.has(source.text)))
+      .sort((left, right) => Number(isCurrentRequest(left)) - Number(isCurrentRequest(right)));
     // Exact originals use the existing source-frame budget. The smaller
     // overview is only a preview; outgrowing it must not force repeated scope
     // paraphrases when the complete originals still fit a native source page.
@@ -254,12 +269,12 @@ export class CompletionVerification {
     // as observations, then the ledger is audited against EVERY original page.
     const pages = verificationFrames(instructions, VERIFICATION_FRAME_CHARACTERS, source => JSON.stringify(verificationWireSource(source)).length);
     const source = pages.length <= 1 ? instructions.map(verificationWireSource) : (await this.evidenceTree(instructions, access)).map(node => this.compactNode(node));
-    const context = { sources: source, currentRequest: instructions.filter(entry => entry.reference.startsWith('current user request')),
+    const context = { sources: source, currentRequest: instructions.filter(isCurrentRequest),
       granularity: 'Use independently checkable obligations: performed work and delivery of its artifact are separate requirements. Preserve explicit scope and constraints; do not turn a full-codebase request into only representative subsystem sampling or add exhaustive runtime testing unless requested.' };
     // Immutable source IDs already identify the original bytes. Qualification
     // is scoped to the live access identity; an AI overview grants no scope.
     const key = JSON.stringify(['scope-v2', instructions.map(entry => [entry.id, entry.kind, entry.messageRole, entry.completeMessage])]);
-    try { return await this.proposal('requirements', context, key, access, value => requirements(value, new Set([...instructions.map(entry => entry.id), ...source.map(entry => entry.id)])), async proposed => {
+    try { return await this.proposal('requirements', context, key, access, value => this.stableRequirements(requirements(value, new Set([...instructions.map(entry => entry.id), ...source.map(entry => entry.id)]))), async proposed => {
       const runs = await ownedMapLimit(access, pages, 3, async (sources, access) => {
         const run = await verificationScope.run(access.port, { sources: sources.map(verificationWireSource), instructionOverview: source, proposed, instruction: 'Check omissions against this original page; assess invented scope against the COMPLETE instruction overview. Other original pages may support other ledger items. Do not require one page to prove all work.' } as never,
           { ...this.options(access), site: verificationScope.name });
@@ -1003,10 +1018,8 @@ export class CompletionVerification {
     const added = indexed && previous?.identity === access.identity && isDeepStrictEqual(previous.request, requestSource) ? observations.filter(source => !previous.ids.has(source.id) && source.kind === 'observation') : [];
     const acceptance = new Map<string, VerificationSource[]>();
     for (const source of observations) {
-      if (!source.reference.startsWith('host completed contract ')) continue;
-      const boundary = source.reference.indexOf('; acceptance and publication;');
-      if (boundary < 0) continue;
-      const contract = source.reference.slice(0, boundary);
+      if (source.lane !== 'contract-acceptance') continue;
+      const contract = source.contractId ?? '';
       const pages = acceptance.get(contract) ?? []; pages.push(source); acceptance.set(contract, pages);
     }
     // Begin with bounded actual host acceptance evidence instead of an empty
@@ -1020,8 +1033,8 @@ export class CompletionVerification {
     const hostPrimary = preferred
       ? verificationFrames(preferred, VERIFICATION_FRAME_CHARACTERS, source => JSON.stringify(verificationWireSource(source)).length)[0] ?? []
       : [];
-    const hostReference = hostPrimary[0]?.reference.split('; acceptance and publication;')[0];
-    const savedAnswer = hostReference ? observations.filter(source => source.reference.startsWith(`${hostReference}; exact saved answer;`)) : [];
+    const hostContract = hostPrimary[0];
+    const savedAnswer = hostContract ? observations.filter(source => source.lane === 'contract-answer' && source.contractId === hostContract.contractId) : [];
     const answerFrames = verificationFrames(savedAnswer, VERIFICATION_FRAME_CHARACTERS, source => JSON.stringify(verificationWireSource(source)).length);
     // The approval digest alone does not tell a reader WHICH result was
     // approved. Keep a bounded saved answer intact beside its exact receipt;
@@ -1070,10 +1083,9 @@ export class CompletionVerification {
     // inspected or returned. Keep bounded actual worker observations beside
     // that receipt so opening old counterevidence cannot displace the proof.
     // These remain observations; every work/quality and final gate still runs.
-    const delegatedSources = observations.filter(source => source.reference.startsWith('delegated assignment/result ')
-      || source.reference.startsWith('delegated '));
+    const delegatedSources = observations.filter(source => source.lane === 'delegated-assignment' || source.lane === 'delegated-evidence');
     const delegatedAssignments = delegatedSources.flatMap(source => {
-      if (!source.reference.startsWith('delegated assignment/result ') || source.completeMessage === false) return [];
+      if (source.lane !== 'delegated-assignment' || source.completeMessage === false) return [];
       try {
         const original = JSON.parse(source.text);
         return original && typeof original === 'object' && !Array.isArray(original)
@@ -1088,14 +1100,11 @@ export class CompletionVerification {
       // the existing packet budget. Every omitted original remains available
       // to retrieval and the mandatory complete-history counterevidence audit.
       delegatedPrimary = [];
-      const assignments = delegatedSources.filter(source => source.reference.startsWith('delegated assignment/result '));
+      const assignments = delegatedSources.filter(source => source.lane === 'delegated-assignment');
       for (const assignment of [...assignments].reverse()) {
-        const marker = 'delegated assignment/result ';
-        const boundary = assignment.reference.indexOf(';', marker.length);
-        if (boundary < 0) continue;
-        const id = assignment.reference.slice(marker.length, boundary);
-        const group = delegatedSources.filter(source => source.reference.startsWith(`${marker}${id};`)
-          || source.reference.startsWith(`delegated ${id}.evidence[`));
+        const id = assignment.workerId;
+        if (id === undefined) continue;
+        const group = delegatedSources.filter(source => source.workerId === id);
         const candidate = [...delegatedPrimary, ...group];
         if (bounded(candidate.map(verificationWireSource), VERIFICATION_FRAME_CHARACTERS * 2)) delegatedPrimary = candidate;
       }

@@ -1,7 +1,28 @@
 import type { CallOptions, JudgmentPort } from '@goodvibes-jev/judgment';
 import type { CompletionFinding } from '../response-completion-findings.js';
 
-export interface VerificationSource {
+/**
+ * Where a source came from, as the producer knows it. `reference` is display
+ * text for the model; code reads these fields and never parses the label.
+ */
+export type VerificationLane =
+  | 'request' | 'criteria' | 'turn-entry-request'
+  | 'transcript' | 'initial-transcript' | 'archive'
+  | 'delegated-assignment' | 'delegated-evidence'
+  | 'contract' | 'contract-acceptance' | 'contract-answer'
+  | 'answer';
+export interface VerificationOrigin {
+  readonly lane?: VerificationLane;
+  /** Which pre-compaction history, for the `archive` lane. */
+  readonly archiveIndex?: number;
+  /** The message's position in its lane's message list. */
+  readonly messageIndex?: number;
+  /** The delegated worker, for the `delegated-*` lanes. */
+  readonly workerId?: string;
+  /** The host-completed contract, for the `contract*` lanes. */
+  readonly contractId?: string;
+}
+export interface VerificationSource extends VerificationOrigin {
   readonly id: string;
   readonly kind: 'instruction' | 'observation' | 'answer';
   readonly reference: string;

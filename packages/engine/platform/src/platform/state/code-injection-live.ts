@@ -6,6 +6,28 @@ import { captureCodeFileObservation, type CodeFileObservation } from './code-fil
 import { rankCodeInjectionSnapshots, type CodeInjectionAuthorityOptions } from './code-injection-ranking.js';
 import type { CodeContextResult } from './code-index-types.js';
 
+/**
+ * The most bytes of one hit's file read back to rank it: the whole file is read
+ * (its revision is the hash of all of it) and screened locally; only the hit's
+ * lines are sent. The same bound as the lexical code index.
+ */
+export const CODE_INJECTION_READ_BYTES = 1024 * 1024;
+
+/** Why one code hit was left out of this turn's injection. */
+export type SkippedCodeHitReason = 'changed' | 'missing' | 'too-large' | 'restricted';
+/** A code hit left out of the injection, and the file it named. */
+export interface SkippedCodeHit {
+  readonly path: string;
+  readonly absolutePath: string;
+  readonly reason: SkippedCodeHitReason;
+}
+
+/**
+ * Ranks the hits whose files are as indexed. A hit whose file changed since
+ * indexing, is gone, is over the read bound or is not readable now is left out
+ * and listed in `skipped`; the other hits are still ranked. Only a failure of
+ * the whole operation (the root, the read authority, cancellation) throws.
+ */
 export async function rankLiveCodeInjection(root: string, query: string, hits: readonly CodeContextResult[], options: CodeInjectionAuthorityOptions, assertSource: () => void) {
   const policy = options.readAccessFilter;
   if (!policy) throw new Error('Code injection requires current read authority');
@@ -31,7 +53,7 @@ export async function rankLiveCodeInjection(root: string, query: string, hits: r
   };
   const read = (hit: CodeContextResult): string => {
     const path = sourcePath(hit);
-    const source = captureCodeFileObservation(sourceRoot, path, 128 * 1024);
+    const source = captureCodeFileObservation(sourceRoot, path, CODE_INJECTION_READ_BYTES);
     if (source.revision !== hit.chunk.fileRevision) throw new Error('Code injection source is stale');
     const previous = observed.get(path);
     if (previous) {
@@ -46,13 +68,33 @@ export async function rankLiveCodeInjection(root: string, query: string, hits: r
   try {
     await authorize(root); await authorize(sourceRoot);
     const snapshots: { hit: CodeContextResult; code: string }[] = [];
+    const skipped: SkippedCodeHit[] = [];
     for (const hit of hits) {
-      const path = sourcePath(hit);
+      const absolutePath = join(sourceRoot, hit.chunk.path);
+      const skip = (reason: SkippedCodeHitReason) => { skipped.push({ path: hit.chunk.path, absolutePath, reason }); };
+      let path: string;
+      try { path = sourcePath(hit); } catch { skip('missing'); continue; }
+      const size = (() => { try { return lstatSync(path).size; } catch { return undefined; } })();
+      if (size === undefined) { skip('missing'); continue; }
+      if (size > CODE_INJECTION_READ_BYTES) { skip('too-large'); continue; }
+      const checked: string[] = [];
+      let readable = true;
       for (let directory = dirname(path); directory !== sourceRoot; directory = dirname(directory)) {
-        await authorize(directory);
-        directories.set(directory, identity(lstatSync(directory)));
+        if (directories.has(directory)) continue;
+        if (!(await executePolicyCheck(() => policy(directory), signal))) { readable = false; break; }
+        checked.push(directory);
       }
-      await authorize(path); snapshots.push({ hit, code: read(hit) });
+      signal.throwIfAborted();
+      if (!readable || !(await executePolicyCheck(() => policy(path), signal))) { skip('restricted'); continue; }
+      for (const directory of checked) directories.set(directory, identity(lstatSync(directory)));
+      let code: string;
+      try { code = read(hit); }
+      catch (error) {
+        signal.throwIfAborted();
+        skip(error instanceof Error && /stale|changed/i.test(error.message) ? 'changed' : 'missing');
+        continue;
+      }
+      snapshots.push({ hit, code });
     }
     check();
     const assertCurrent = async () => {
@@ -65,8 +107,10 @@ export async function rankLiveCodeInjection(root: string, query: string, hits: r
       for (const original of observed.values()) original.assertCurrent();
       } finally { clearTimeout(assertionTimer); }
     };
-    const reading = await rankCodeInjectionSnapshots(query, snapshots, { signal, assertCurrent, checkedBeforeRequest: true });
-    return reading;
+    const reading = snapshots.length === 0
+      ? { ranked: [], assertCurrent }
+      : await rankCodeInjectionSnapshots(query, snapshots, { signal, assertCurrent, checkedBeforeRequest: true });
+    return { ...reading, skipped: Object.freeze(skipped) };
   } catch (error) { controller.abort(); throw error; }
   finally { clearTimeout(timer); }
 }

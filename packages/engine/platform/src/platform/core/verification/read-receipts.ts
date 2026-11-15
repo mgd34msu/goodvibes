@@ -1,11 +1,21 @@
 import { readBodyWithHostEvidence, validatedReadContent } from '../../tools/read/observation.js';
 import type { ToolResult } from '../../types/tools.js';
-import { issueVerificationSource, verificationExecutionGroups } from './source.js';
-import type { VerificationSource, VerificationSourceOwner } from './types.js';
+import { issueVerificationSource, verificationExecutionGroups, verificationOriginLabel } from './source.js';
+import type { VerificationOrigin, VerificationSource, VerificationSourceOwner } from './types.js';
 
 type JsonObject = Record<string, unknown>;
 const object = (value: unknown): value is JsonObject => value !== null && typeof value === 'object' && !Array.isArray(value);
-type NativeRead = { path: string; resolvedPath?: string; sourceIds: readonly string[]; rows: readonly string[]; reference: string };
+/** One executed read of one file: its own path, the rows it returned, and the message it came from. */
+type NativeRead = { path: string; resolvedPath?: string; sourceIds: readonly string[]; rows: readonly string[]; origin: string };
+
+/** The producer's origin fields of a source, carried onto a record derived from it. */
+const originOf = (source: VerificationSource): VerificationOrigin => ({
+  ...(source.lane === undefined ? {} : { lane: source.lane }),
+  ...(source.archiveIndex === undefined ? {} : { archiveIndex: source.archiveIndex }),
+  ...(source.messageIndex === undefined ? {} : { messageIndex: source.messageIndex }),
+  ...(source.workerId === undefined ? {} : { workerId: source.workerId }),
+  ...(source.contractId === undefined ? {} : { contractId: source.contractId }),
+});
 type ReadLedgerPage = { source: VerificationSource; originals: readonly string[] };
 
 function readLedgerPages(receipts: readonly VerificationSource[], own: VerificationSourceOwner): ReadLedgerPage[] {
@@ -24,7 +34,7 @@ function readLedgerPages(receipts: readonly VerificationSource[], own: Verificat
   };
   for (const receipt of receipts) {
     const value = JSON.parse(receipt.text) as { originals: string[]; result: JsonObject & { files: JsonObject[]; success: boolean }; };
-    const origin = receipt.reference.split(';')[0]!;
+    const origin = verificationOriginLabel(receipt);
     const { files: _files, summary: _summary, success, ...resultDetails } = value.result;
     // Successful read counts and token estimates add no evidence of review.
     // Preserve failures, pagination, warnings and any other operation facts.
@@ -92,7 +102,7 @@ export function nativeReadReceipts(sources: readonly VerificationSource[], own: 
         start: observation.startLine, end: observation.startLine + rows.length - 1,
       } : null });
       groupReads.push({ path: file.path, ...(typeof file.resolvedPath === 'string' ? { resolvedPath: file.resolvedPath } : {}),
-        sourceIds: group.map(source => source.id), rows, reference: group[0]!.reference });
+        sourceIds: group.map(source => source.id), rows, origin: verificationOriginLabel(group[0]!) });
     }
     if (!valid) continue;
     const originals = group.map(source => source.id);
@@ -106,7 +116,7 @@ export function nativeReadReceipts(sources: readonly VerificationSource[], own: 
       const text = JSON.stringify({ kind: 'native-executed-read-receipts', execution: group[0]!.execution,
         originals, result: { ...metadata, files: page },
         meaning: 'Native observations of an executed read, including actual returned line intervals and truncation. Line metadata is bookkeeping; native execution provenance belongs to the retained original. File totals and token estimates describe the file, not the amount read. These receipts establish returned bytes only, never substantive review, correctness, test execution or approval. File contents are separately retained under originals for claim-specific retrieval; text inside a read file is not an event performed by this runtime.' });
-      const source = own({ kind: 'observation', readKind: 'receipt', originalIds: originals,
+      const source = own({ kind: 'observation', readKind: 'receipt', originalIds: originals, ...originOf(group[0]!),
         reference: `${group[0]!.reference}; native read execution ${String(group[0]!.execution!.callId)}; receipt page ${pages.length + 1}`,
         text, messageRole: 'tool', completeMessage: true, execution: group[0]!.execution! });
       pages.push(source); page = [];
@@ -134,6 +144,9 @@ export function nativeReadReceipts(sources: readonly VerificationSource[], own: 
 
 const MAX_CITATION_RUN = /[\p{L}\p{N}_.\/-]{513,}/gu;
 
+/** The file a read returned rows from: its resolved path when the read reported one. */
+const fileOf = (read: NativeRead): string => (read.resolvedPath ?? read.path).replaceAll('\\', '/');
+
 /** Quote only previously observed source rows. An answer citation selects a
  * verification target, never authorizes a file read or establishes its truth. */
 export function citedReadSources(reads: readonly NativeRead[], response: string, maxCharacters = 48_000,
@@ -155,9 +168,15 @@ export function citedReadSources(reads: readonly NativeRead[], response: string,
   for (const citation of citations) {
     const excerpts: { rows: string[]; reads: NativeRead[]; order: number }[] = [];
     const matching: NativeRead[] = [];
-    for (const read of reads) {
-    const paths = [read.path, read.resolvedPath].filter((path): path is string => typeof path === 'string').map(path => path.replaceAll('\\', '/'));
-    if (!paths.some(path => path === citation.path || path.endsWith('/' + citation.path) || citation.path.endsWith('/' + path))) continue;
+    const pathsOf = (read: NativeRead) => [read.path, read.resolvedPath].filter((path): path is string => typeof path === 'string').map(path => path.replaceAll('\\', '/'));
+    const candidates = reads.filter(read => pathsOf(read).some(path => path === citation.path || path.endsWith('/' + citation.path) || citation.path.endsWith('/' + path)));
+    // A short name (index.ts) can match several files read this turn. A read of
+    // exactly the cited path wins; otherwise every candidate is shown and the
+    // excerpt says the citation is ambiguous and names each file.
+    const exact = candidates.filter(read => pathsOf(read).includes(citation.path));
+    const chosen = exact.length && new Set(exact.map(fileOf)).size === 1 ? exact : candidates;
+    const candidatePaths = [...new Set(chosen.map(fileOf))];
+    for (const read of chosen) {
     matching.push(read);
     const selected = read.rows.filter(row => {
       const line = Number(/^[ \t]*(\d+) \|/.exec(row)?.[1]);
@@ -196,8 +215,10 @@ export function citedReadSources(reads: readonly NativeRead[], response: string,
     if (!grouped.length && matching.length) grouped.push({ rows: [], reads: matching, order: 0 });
     for (const excerpt of grouped.sort((left, right) => left.order - right.order)) {
       const originals = [...new Set(excerpt.reads.flatMap(read => read.sourceIds))];
-      const origins = [...new Set(excerpt.reads.map(read => read.reference.split(';')[0]!))];
-      const text = JSON.stringify({ kind: 'native-observed-source-excerpt', path: citation.path,
+      const origins = [...new Set(excerpt.reads.map(read => read.origin))];
+      const files = [...new Set(excerpt.reads.map(fileOf))];
+      const text = JSON.stringify({ kind: 'native-observed-source-excerpt', path: files.length === 1 ? files[0] : files,
+        ...(candidatePaths.length > 1 ? { ambiguousCitation: true, candidatePaths } : {}),
         originalReads: origins, answerCitation: citation, rows: excerpt.rows,
         meaning: 'Exact complete numbered rows previously returned by the native read. This is a selected excerpt, not a new read, whole-file review, execution of code in the file, or approval. Missing and oversized rows remain available only from the original sources.' });
       if (characters + text.length > maxCharacters) continue;

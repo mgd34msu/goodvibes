@@ -172,6 +172,9 @@ export function collectResponseDelegates(conversation: ConversationManager,
 }
 
 /** One guard per run. Rejected final drafts return to the model, never to a successful terminal event. */
+/** The verification coordinator and its cache identities, held for as long as the session's verification store. */
+const sessionVerification = new WeakMap<VerificationStore, { readonly coordinator: CompletionVerification; readonly identities: Map<string, object> }>();
+
 export class ResponseCompletionGuard {
   private hasSemanticRefusal = false;
   private readonly initial: unknown;
@@ -195,6 +198,8 @@ export class ResponseCompletionGuard {
   private admittedDraft: string | undefined;
   /** Stable cache key for verification work across this turn's draft cycles; currentness stays enforced by the access assertions. */
   private readonly verificationCacheIdentity = {};
+  /** The session's cache identities, one per decision model, when this guard checks through a session store. */
+  private readonly sessionIdentities: Map<string, object> | undefined;
   /**
    * The last rejected cycle. Rewording a draft cannot repair held evidence-
    * dependent work, so an equivalent draft over unchanged evidence returns the
@@ -207,13 +212,35 @@ export class ResponseCompletionGuard {
   private readonly onCompletionRequired: (() => void) | undefined;
   private publication: { source: unknown; identity: object; completion: Set<string>; consolidation: Set<string>; execution: Set<string> } | undefined;
 
+  /**
+   * The identity verification caches are kept under: the session's, per
+   * decision model (a settled audit is not reused across a model change), or
+   * this guard's own when there is no session store.
+   */
+  private cacheIdentity(port: { readonly model: string }): object {
+    if (!this.sessionIdentities) return this.verificationCacheIdentity;
+    let identity = this.sessionIdentities.get(port.model);
+    if (!identity) { identity = {}; this.sessionIdentities.set(port.model, identity); }
+    return identity;
+  }
+
   constructor(initial?: { readonly request: string; readonly conversation: ConversationManager; readonly verificationWriter?: VerificationWriter; readonly verificationStore?: VerificationStore; readonly onCompletionRequired?: () => void }) {
     this.sourceStore = initial?.verificationStore ?? new VerificationStore();
     if (isClassicOperation()) { this.initial = null; return; }
     this.onCompletionRequired = initial?.onCompletionRequired;
     this.reviewStore = initial?.verificationStore;
     this.reviewBranch = initial?.verificationStore ? initial.conversation.getCurrentBranch() : undefined;
-    this.verification = initial?.verificationWriter ? new CompletionVerification(initial.verificationWriter, this.sourceStore) : undefined;
+    if (initial?.verificationWriter && initial.verificationStore) {
+      // One coordinator per session store: the (requirement, page) audits it settled hold for the next draft and the next turn.
+      let held = sessionVerification.get(initial.verificationStore);
+      if (held) held.coordinator.useWriter(initial.verificationWriter);
+      else {
+        held = { coordinator: new CompletionVerification(initial.verificationWriter, this.sourceStore), identities: new Map() };
+        sessionVerification.set(initial.verificationStore, held);
+      }
+      this.verification = held.coordinator;
+      this.sessionIdentities = held.identities;
+    } else this.verification = initial?.verificationWriter ? new CompletionVerification(initial.verificationWriter, this.sourceStore) : undefined;
     if (initial?.verificationStore) {
       const projection = new CompletionEvidenceProjection();
       const projected = new WeakMap<object, { readonly messages: readonly Record<string, unknown>[] }>();
@@ -679,13 +706,13 @@ export class ResponseCompletionGuard {
     let checkpoint = !withoutCheckpoint && JSON.stringify(fullState).length > 100_000
       ? nativeWorkCheckpoint(input.completedWork ?? [], source.snapshot.completedWork, fullState, this.ownSource) : undefined;
     if (checkpoint && !await this.checkCheckpointHistory(fullState, checkpoint, { ...readingOptions, port,
-      identity: this.verificationCacheIdentity, assertCurrent: owner.assertCurrent })) checkpoint = undefined;
+      identity: this.cacheIdentity(port), assertCurrent: owner.assertCurrent })) checkpoint = undefined;
     let verificationFindings: readonly import('./response-completion-findings.js').CompletionFinding[] = [];
     if (checkpoint) state = checkpoint;
     else if (requireVerification || JSON.stringify(fullState).length > 100_000) {
       if (!this.verification) throw new VerificationHeldError('missing private verification provider');
       let checked;
-      try { checked = await this.verification.prepare(fullState, { ...readingOptions, port, identity: this.verificationCacheIdentity, assertCurrent: owner.assertCurrent }); }
+      try { checked = await this.verification.prepare(fullState, { ...readingOptions, port, identity: this.cacheIdentity(port), assertCurrent: owner.assertCurrent }); }
       catch (error) {
         if (!(error instanceof VerificationUnsettledError)) { batch.abort(); throw error; }
         // The service responded, but a specific semantic question is still
@@ -812,7 +839,7 @@ export class ResponseCompletionGuard {
     }
     if (state !== fullState && this.verification && (needsFinalSource || needsDelegatedSource || (!executionAccepted && !verificationFindings.length))) {
       const opened = await this.verification.openFinal(state, { completion: run.readings, consolidation: consolidation?.readings ?? null, execution: execution?.readings ?? null },
-        { ...readingOptions, port, identity: this.verificationCacheIdentity, assertCurrent: owner.assertCurrent });
+        { ...readingOptions, port, identity: this.cacheIdentity(port), assertCurrent: owner.assertCurrent });
       if (opened) {
         run.recordAction('Keep this exact draft private and retrieve primary evidence to settle the held publication readings.');
         consolidation?.recordAction('Retrieve primary evidence before declaring a synthesis defect.');

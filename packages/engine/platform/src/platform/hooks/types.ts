@@ -71,11 +71,16 @@ export interface HookDefinition {
   headers?: Record<string, string> | undefined;
   /** For prompt/agent hooks: LLM model to use */
   model?: string | undefined;
-  /** Timeout in seconds (default: 30 for command/prompt/http/ts, 60 for agent; 0 means no deadline) */
+  /**
+   * Timeout in seconds (default: 30 for command/prompt/http/ts, 60 for agent).
+   * At the deadline the hook is asked to stop; one that has not stopped 2 s later
+   * is left running and reported as failed, and the turn goes on. 0 means no
+   * deadline and is accepted only for an `async` hook.
+   */
   timeout?: number | undefined;
   /** Custom status message shown while hook runs */
   statusMessage?: string | undefined;
-  /** Run in background without blocking */
+  /** Run in the background: the turn neither waits for it nor cancels it; its own deadline still applies. */
   async?: boolean | undefined;
   /** Run once then auto-remove */
   once?: boolean | undefined;

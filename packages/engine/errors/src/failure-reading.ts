@@ -276,7 +276,8 @@ function remember(memo: Map<string, Promise<FailureConclusions>>, state: string,
  * A failure with no HTTP status whose code is in the connection-code table is
  * settled by that table with no request: the code already answers every
  * question. The caller's `beforeAttempt` runs once before each model attempt,
- * the last point before a request leaves the process.
+ * the last point before a request leaves the process. A reading that fails
+ * (unavailable, refused, timed out) answers from the status and code tables.
  */
 export async function readFailure(evidence: FailureEvidence, site: string, options?: FailureReadOptions): Promise<FailureConclusions> {
   options?.signal?.throwIfAborted();
@@ -286,7 +287,9 @@ export async function readFailure(evidence: FailureEvidence, site: string, optio
   try { return await readDecisionFailure(evidence, site, options); }
   catch (error) {
     options?.signal?.throwIfAborted();
-    if (!tryClassicDecisionFallback(error)) throw error;
+    // A reading that could not be made never replaces the failure it was about:
+    // the tables answer. Only the caller's own retirement still surfaces.
+    if (error instanceof JudgmentAuthorityRetiredError && !tryClassicDecisionFallback(error)) throw error;
     return structuralFailureConclusions(evidence);
   }
 }

@@ -7,9 +7,8 @@ export function verificationOriginalTurns(sources: readonly VerificationSource[]
   const current = new Map<string, { instructionIndex: string; members: VerificationSource[] }>();
   const result = new Map<string, readonly VerificationSource[]>();
   for (const source of sources) {
-    const match = /^(transcript|initial\.transcript|original history before compaction \d+)\[(\d+)\];/u.exec(source.reference);
-    if (!match) continue;
-    const lane = match[1]!, index = match[2]!;
+    if (source.messageIndex === undefined || !(source.lane === 'transcript' || source.lane === 'initial-transcript' || source.lane === 'archive')) continue;
+    const lane = source.lane === 'archive' ? `archive ${source.archiveIndex ?? 0}` : source.lane, index = String(source.messageIndex);
     let turn = current.get(lane);
     if (source.kind === 'instruction' && source.messageRole === 'user' && turn?.instructionIndex !== index) {
       turn = { instructionIndex: index, members: [] };

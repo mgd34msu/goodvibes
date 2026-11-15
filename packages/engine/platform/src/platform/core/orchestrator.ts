@@ -93,7 +93,8 @@ import {
   type ChatResponseWithReasoning,
   prepareConversationForTurn,
 } from './orchestrator-turn-helpers.js';
-import { executeOrchestratorTurnLoop } from './orchestrator-turn-loop.js';
+import { executeOrchestratorTurnLoop, openVerificationStore } from './orchestrator-turn-loop.js';
+import type { VerificationStore } from './verification/store.js';
 import { recordTurnInjection, type TurnInjectionRecord } from '../agents/turn-knowledge-injection.js';
 import { permissionModeLine } from '../agents/orchestrator-prompts.js';
 import type { OrchestratorUsageTotals } from './orchestrator-usage.js';
@@ -1133,6 +1134,8 @@ export class Orchestrator {
       codeIndex: this.coreServices.codeIndex,
       codeReadAccessFilter: async path => (await this.permissionManager.readAccess(path, this.currentSessionId)) === 'allow',
       isPassiveCodeInjectionEnabled: () => this.isPassiveCodeInjectionEnabled(),
+      onCodeSourcesChanged: (paths) => { for (const path of paths) this.coreServices.codeIndexReindexScheduler?.schedule?.(path); },
+      verificationStoreFor: (workingDirectory, sessionId, onNotice) => this.sessionVerificationStore(workingDirectory, sessionId, onNotice),
       getAlreadyInjectedKnowledgeIds: () => this.getAlreadyInjectedKnowledgeIds(),
       addInjectedKnowledgeIds: (ids) => { this.addInjectedKnowledgeIds(ids); },
       recordTurnKnowledgeInjection: (record) => { this.recordTurnKnowledgeInjection(record); },
@@ -1394,6 +1397,17 @@ export class Orchestrator {
   private isPassiveKnowledgeInjectionEnabled(): boolean { return isPassiveKnowledgeInjectionEnabled(this.turnFlags); }
 
   private isPassiveCodeInjectionEnabled(): boolean { return isPassiveCodeInjectionEnabled(this.turnFlags); }
+
+  /** The session's verification store, opened on its first checked turn and kept until the session or workspace changes. */
+  private heldVerificationStore: { readonly workingDirectory: string | undefined; readonly sessionId: string; readonly store: VerificationStore } | undefined;
+  private sessionVerificationStore(workingDirectory: string | undefined, sessionId: string, onNotice: (notice: string) => void): VerificationStore {
+    const held = this.heldVerificationStore;
+    // One stat: another process that wrote this session's journal since means it is read again.
+    if (held && held.workingDirectory === workingDirectory && held.sessionId === sessionId && held.store.isCurrentOnDisk()) return held.store;
+    const store = openVerificationStore(workingDirectory, sessionId, onNotice);
+    this.heldVerificationStore = { workingDirectory, sessionId, store };
+    return store;
+  }
 
   /**
    * Ids never to re-surface in a later per-turn knowledge block. The main

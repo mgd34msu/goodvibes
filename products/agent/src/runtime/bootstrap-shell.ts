@@ -166,6 +166,7 @@ export function createBootstrapShell(options: BootstrapShellOptions): BootstrapS
   const planRuntime = createShellPlanRuntime({
     adaptivePlanner: services.adaptivePlanner,
     runtimeBus,
+    isEnabled: () => configManager.get('planner.adaptive') === true,
   });
 
   const commandContext: CommandContext = createBootstrapCommandContext({

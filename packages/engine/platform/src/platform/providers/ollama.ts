@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { ProviderAttemptDeniedError, revalidateProviderAttempt } from './attempt-guard.js';
 import { withRetry } from '../utils/retry.js';
 import { trackDeliveredOutput } from './stream-delivery.js';
@@ -265,6 +266,10 @@ export class OllamaProvider implements LLMProvider {
     let doneReason = '';
     let sawDone = false;
     const finalToolCalls: ToolCall[] = [];
+    // Ollama sends no call ids. One minted per response keeps every call of a
+    // conversation distinct (results, receipts and history pair by id), where
+    // numbering from zero would repeat in each response.
+    const responseId = randomUUID().slice(0, 8);
 
     await consumeNDJSON(response.body, (chunk) => {
       if (chunk.error !== undefined && chunk.error !== null) {
@@ -291,7 +296,7 @@ export class OllamaProvider implements LLMProvider {
       if (Array.isArray(message?.tool_calls) && message.tool_calls.length > 0) {
         // Each chunk carries the calls it adds; ids continue from the calls
         // already seen so parallel calls streamed in separate chunks stay distinct.
-        const normalized = normalizeOllamaToolCalls(message.tool_calls, finalToolCalls.length);
+        const normalized = normalizeOllamaToolCalls(message.tool_calls, finalToolCalls.length, responseId);
         normalized.forEach((call) => {
           const index = finalToolCalls.length;
           finalToolCalls.push(call);
@@ -414,13 +419,14 @@ function contentPartsToOllamaMessage(
 function normalizeOllamaToolCalls(
   calls: NonNullable<NonNullable<OllamaChatChunk['message']>['tool_calls']>,
   firstIndex: number,
+  responseId: string,
 ): ToolCall[] {
   let next = firstIndex;
   return calls.flatMap((call) => {
     const fn = call.function;
     if (!fn || typeof fn.name !== 'string' || fn.name.length === 0) return [];
     return [{
-      id: `ollama_call_${next++}`,
+      id: `ollama_call_${responseId}_${next++}`,
       name: fn.name,
       arguments: fn.arguments && typeof fn.arguments === 'object' ? fn.arguments : {},
     }];

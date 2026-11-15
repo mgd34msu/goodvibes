@@ -54,8 +54,8 @@ export async function run(hook: HookDefinition, event: HookEvent, projectRoot: s
       return { ok: false, error: `ts hook at ${path} does not export a default function` };
     }
 
-    // In-process handlers cannot be forcibly stopped. Keep the invocation
-    // owned until its actual settlement, even if it ignores the signal.
+    // An in-process handler cannot be forced to stop; it is asked through its
+    // signal, and the dispatcher's join stops waiting after the stop grace.
     const result: unknown = await handler(event, { signal: execution.signal });
     execution.signal.throwIfAborted();
     // A handler with no return value, or a bare decision, is a normal outcome:

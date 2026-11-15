@@ -44,12 +44,12 @@ describe('native Ollama streaming', () => {
       onDelta: (delta) => { deltas.push(delta); },
     });
     expect(response.toolCalls).toEqual([
-      { id: 'ollama_call_0', name: 'read', arguments: { path: 'a.md' } },
-      { id: 'ollama_call_1', name: 'read', arguments: { path: 'b.md' } },
+      { id: expect.stringMatching(/^ollama_call_[0-9a-f]{8}_0$/), name: 'read', arguments: { path: 'a.md' } },
+      { id: expect.stringMatching(/^ollama_call_[0-9a-f]{8}_1$/), name: 'read', arguments: { path: 'b.md' } },
     ]);
     expect(response.stopReason).toBe('tool_call');
     const announced = deltas.flatMap((delta) => delta.toolCalls ?? []).map((call) => [call.index, call.id]);
-    expect(announced).toEqual([[0, 'ollama_call_0'], [1, 'ollama_call_1']]);
+    expect(announced).toEqual([[0, response.toolCalls[0]!.id], [1, response.toolCalls[1]!.id]]);
   });
 
   test('a stream that ends without its final chunk is an error, not a finished turn', async () => {

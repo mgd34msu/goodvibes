@@ -7,7 +7,7 @@ import { readCompletionRepairContext } from '../../core/completion-repair-contex
 import type { Tool, ToolExecuteOptions } from '../../types/tools.js';
 import { assertCurrentToolInvocation } from '../registry.js';
 import type { ConfigManager } from '../../config/manager.js';
-import { AGENT_TOOL_SCHEMA } from './schema.js';
+import { AGENT_TOOL_SCHEMA, agentInputFields } from './schema.js';
 import type { AgentInput, ProposedUnit } from './schema.js';
 import { ArchetypeLoader } from '../../agents/archetypes.js';
 import { AgentMessageBus } from '../../agents/message-bus.js';
@@ -174,7 +174,7 @@ function batchAsk(input: AgentInput, units: readonly ProposedUnit[]): string {
 const AGENT_MESSAGE_TTL_MS = Number.POSITIVE_INFINITY;
 
 /** Fields only the host sets: a model must not choose a tool root, its own write authority, or its own prompt. */
-const HOST_ONLY_INPUT_KEYS = ['captureAuthority', 'systemPromptAddendum', 'proposedUnits', 'replyStyle', 'workingDirectory', 'routing'] as const;
+const HOST_ONLY_INPUT_KEYS = agentInputFields('host-only');
 
 /** The call's arguments as the model may set them: every host-only field is removed, including from batch tasks. */
 function modelAgentInput(args: AgentInput): AgentInput {
@@ -192,10 +192,9 @@ function modelAgentInput(args: AgentInput): AgentInput {
 }
 
 /** Limits on a worker's authority; a contract's planner chooses these per unit, so a request for them cannot be kept on the contract path. */
-const CONTRACT_PATH_FENCES = ['tools', 'restrictTools', 'writeScope', 'executionIntent'] as const;
+const CONTRACT_PATH_FENCES = agentInputFields('contract-fence');
 /** Settings that only apply to a standalone agent; the contract path does not carry them. */
-const CONTRACT_PATH_IGNORED = ['model', 'provider', 'fallbackModels', 'reasoningEffort', 'successCriteria', 'requiredEvidence',
-  'executionProtocol', 'reviewMode', 'communicationLane', 'orchestrationGraphId', 'orchestrationNodeId', 'parentNodeId', 'cohort'] as const;
+const CONTRACT_PATH_IGNORED = agentInputFields('standalone-only');
 
 function suppliedParameters(inputs: readonly AgentInput[], keys: readonly (keyof AgentInput)[]): string[] {
   return keys.filter((key) => inputs.some((input) => {

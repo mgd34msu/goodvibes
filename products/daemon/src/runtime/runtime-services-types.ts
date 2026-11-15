@@ -244,7 +244,7 @@ export interface RuntimeServices {
   readonly agentManager: AgentManager;
   readonly agentMessageBus: AgentMessageBus;
   readonly agentOrchestrator: AgentOrchestrator;
-  readonly contextAccountingHolder: ContextAccountingHolder; // bound at bootstrap.ts; see context-accounting-source.ts
+  readonly contextAccountingHolder: ContextAccountingHolder; // never bound to a session: workers answer through their own scoped source, and each hosted session binds its own holder (hosted-sessions/session-runtime.ts)
   readonly contractRunner: ContractRunner;
   readonly contractOperator: ContractOperatorService;
   readonly judgment: JudgmentServices;

@@ -21,7 +21,7 @@ import type { ToolRegistry } from '../tools/registry.js';
 import { logger } from '../utils/logger.js';
 import { CIRCUIT_BREAKER_TRIPPED, CONSECUTIVE_ERROR_BREAK, ConsecutiveErrorBreaker } from '../core/circuit-breaker.js';
 import { collectResponseDelegates, ResponseCompletionGuard, ResponseCompletionError } from '../core/response-completion.js';
-import { createVerificationWriter } from '../core/verification/writer.js';
+import { createVerificationWriter, reportVerificationUsage } from '../core/verification/writer.js';
 import { VerificationStore } from '../core/verification/store.js';
 import { appendVerificationObservation, beginVerificationConversation } from '../core/verification/archive.js';
 import { failureEvidence, isBillingOrCreditError, isRateLimitOrQuotaError, isContextSizeExceededError, isNetworkTransportError } from '../types/errors.js';
@@ -35,7 +35,7 @@ import type { AgentRecord } from '../tools/agent/index.js';
 import { moveAgentRun } from '../tools/agent/record.js';
 import type { LLMProvider, StreamDelta } from '../providers/interface.js';
 import type { ToolResult } from '../types/tools.js';
-import { emitAgentAwaitingTool, emitCommunicationConsumed, emitLlmResponseReceived } from '../runtime/emitters/index.js';
+import { emitAgentAwaitingTool, emitCommunicationConsumed } from '../runtime/emitters/index.js';
 import { compactAgentConversation, maybeCompactAfterModelContextWarning, setAgentProgress, summarizeToolArgs } from './orchestrator-utils.js';
 import { assertOrchestratorKnowledgeCurrent, buildLayeredOrchestratorSystemPrompt, buildOrchestratorSystemPrompt, permissionModeLine, prepareOrchestratorPromptContext, resolveSpawnKnowledgeInjections, withOpenTierProfileBlock } from './orchestrator-prompts.js';
 import { completeOrRegenerate, recoverEmptyConversationalReply } from './conversational-reply-recovery.js';
@@ -671,10 +671,8 @@ async function runAgentTaskWithPolicy(context: AgentOrchestratorRunContext, reco
             cacheReadTokens: (record.usage!.cacheReadTokens ?? 0) + (response.usage.cacheReadTokens ?? 0),
             cacheWriteTokens: (record.usage!.cacheWriteTokens ?? 0) + (response.usage.cacheWriteTokens ?? 0),
             llmCallCount: (record.usage!.llmCallCount ?? 0) + 1 };
-          if (context.runtimeBus) emitLlmResponseReceived(context.runtimeBus, context.emitterContext(record.id), {
-            turnId: record.id, provider: activeRoute.provider.name, model: activeRoute.modelId,
-            contentSummary: '<private evidence verification>', toolCallCount: 0, ...response.usage, durationMs, costSource: 'unknown',
-          });
+          reportVerificationUsage({ runtimeBus: context.runtimeBus, emitterContext: context.emitterContext(record.id), turnId: record.id,
+            provider: activeRoute.provider.name, model: activeRoute.modelId, pricing: undefined, response, durationMs });
         },
       }),
     });

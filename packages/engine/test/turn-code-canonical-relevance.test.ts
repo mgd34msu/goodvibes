@@ -1,7 +1,7 @@
 /** Offline proofs through the real passive injection caller and canonical rerank owner. */
 import { afterEach, expect, test } from 'bun:test';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { installJudgmentPort, bindJudgmentPortAuthority, JudgmentAuthorityRetiredError, JudgmentPortMissingError } from '../errors/src/index.js';
+import { installJudgmentPort, bindJudgmentPortAuthority, JudgmentAuthorityRetiredError } from '../errors/src/index.js';
 import { buildPerTurnKnowledgeInjection, type TurnCodeIndexSource } from '../platform/src/platform/agents/turn-knowledge-injection.js';
 import { rankCodeInjectionSnapshots } from '../platform/src/platform/state/code-injection-ranking.js';
 import type { CodeContextResult } from '../platform/src/platform/state/code-index-types.js';
@@ -57,14 +57,24 @@ test('missing rank capability cannot resurrect vector confidence', async () => {
 for (const [name, probability] of [['unsettled', 0.5], ['malformed', Number.NaN]] as const) {
   test(`${name} reading holds injection without vector fallback`, async () => {
     use(fakePort(() => noulAnswer(probability)).port);
-    await expect(run(source([irrelevant]))).rejects.toThrow(`Code injection relevance ${name}`);
+    // The code side is left out and says why; the turn's other context is kept.
+    const result = await run(source([irrelevant]));
+    expect(result.record.injectedIds).toEqual([]);
+    expect(result.record.codeInjectionSkipped).toContain(`Code injection relevance ${name}`);
   });
 }
-test('unavailable port holds injection', async () => { use(undefined); await expect(run(source([irrelevant]))).rejects.toBeInstanceOf(JudgmentPortMissingError); });
+test('unavailable port leaves code out and says so', async () => {
+  use(undefined);
+  const result = await run(source([irrelevant]));
+  expect(result.record.injectedIds).toEqual([]);
+  expect(result.record.codeInjectionSkipped).toContain('code context unavailable this turn');
+});
 test('port replacement during a reading invalidates authority', async () => {
   const replacement = fakePort(() => noulAnswer(0.99)).port;
   use(fakePort(() => { installJudgmentPort(replacement); return noulAnswer(0.99); }).port);
-  await expect(run(source([irrelevant]))).rejects.toBeInstanceOf(JudgmentAuthorityRetiredError);
+  const result = await run(source([irrelevant]));
+  expect(result.record.injectedIds).toEqual([]);
+  expect(result.record.codeInjectionSkipped).toContain('code context unavailable this turn');
 });
 test('generation change during a reading invalidates consumption', async () => {
   let stale = false;
@@ -75,12 +85,13 @@ test('generation change during a reading invalidates consumption', async () => {
 test('canceling a pending uncooperative reading returns no injection', async () => {
   const stop = new AbortController(); const fake = fakePort(() => noulAnswer(0.99));
   use({ ...fake.port, ask: async () => { stop.abort(); return new Promise(() => {}); } });
-  await expect(run(source([irrelevant], { signal: stop.signal }))).rejects.toThrow('canceled');
+  // The turn's own signal cancels the whole injection.
+  await expect(run(source([irrelevant], { signal: stop.signal }), { codeAuthority: { signal: stop.signal } })).rejects.toThrow('canceled');
 });
 test('entire source privacy is checked before clipping or port access', async () => {
   const fake = fakePort(() => noulAnswer(0.99)); use(fake.port);
   const code = ' '.repeat(7000) + '\nAuthorization: Bearer synthetic9NotReal7Q2kLmXz';
-  await expect(run(source([irrelevant], { code }))).rejects.toThrow('Refused before judgment');
+  expect((await run(source([irrelevant], { code }))).record.codeInjectionSkipped).toContain('Refused before judgment');
   expect(fake.requests).toHaveLength(0);
 });
 test('a later operation reads again instead of reusing authority', async () => {
@@ -100,7 +111,7 @@ test('retiring a source authority holds a pending noncooperating port', async ()
   const owner = new AbortController(); const fake = fakePort(() => noulAnswer(0.99));
   const port = { ...fake.port, ask: async () => { owner.abort(); return new Promise<never>(() => {}); } };
   bindJudgmentPortAuthority(port, () => ({ identity: {}, signal: owner.signal, assertCurrent() {} })); use(port);
-  await expect(run(source([irrelevant]))).rejects.toBeInstanceOf(JudgmentAuthorityRetiredError);
+  expect((await run(source([irrelevant]))).record.codeInjectionSkipped).toContain('code context unavailable this turn');
 });
 
 import { createCanonicalLiveCodeSource } from './_helpers/code-injection-readings.js';
@@ -109,8 +120,10 @@ test('real live vector source requires current policy before code enters canonic
   const fake = fakePort(() => noulAnswer(0.99)); use(fake.port);
   const live = await createCanonicalLiveCodeSource();
   try {
-    await expect(run(live.store)).rejects.toThrow('current read authority');
-    await expect(run(live.store, { codeAuthority: { readAccessFilter: async path => path !== live.path } })).rejects.toThrow('access-restricted');
+    expect((await run(live.store)).record.codeInjectionSkipped).toContain('current read authority');
+    // A hit the read rules refuse is left out on its own and named.
+    const refused = await run(live.store, { codeAuthority: { readAccessFilter: async path => path !== live.path } });
+    expect(refused.record.codeHitsSkipped).toEqual([{ path: expect.any(String), reason: 'restricted' }]);
     expect(fake.requests).toEqual([]);
     const result = await run(live.store, { codeAuthority: { readAccessFilter: live.readAccessFilter } });
     expect(result.record.injectedSources).toEqual(['code-index']);

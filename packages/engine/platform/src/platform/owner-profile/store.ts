@@ -777,9 +777,10 @@ export class OwnerProfileStore {
       return { ok: false, reason: edit.reason, changes: [], disclosure: '' };
     }
 
+    let current = false;
     for (let attempt = 0; attempt < 3; attempt += 1) {
       const onDisk = statOf(this.filePath);
-      if (this.matchesLastSeen(onDisk)) break;
+      if (this.matchesLastSeen(onDisk)) { current = true; break; }
 
       // Someone else, the owner, wrote to this file since the projection was built.
       options.lifetime?.assertCurrent();
@@ -810,7 +811,8 @@ export class OwnerProfileStore {
       });
     }
 
-    if (!this.matchesLastSeen(statOf(this.filePath))) {
+    // After three replays the file is checked once more; a loop that found it current has just checked.
+    if (!current && !this.matchesLastSeen(statOf(this.filePath))) {
       return refusal(
         'Your profile is being changed faster than this write could be applied, so nothing was recorded. '
         + 'Try again in a moment.',

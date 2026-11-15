@@ -211,10 +211,9 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     id: 'runtime-tools-budget-enforcement',
     name: 'Runtime Budget Enforcement',
     description:
-      'Fails a tool call that finishes over its wall-clock (BUDGET_EXCEEDED_MS), token '
-      + '(BUDGET_EXCEEDED_TOKENS) or cost (BUDGET_EXCEEDED_COST) limit (runtime.toolBudget.*). '
-      + 'The check runs when the tool returns, so its action may have taken effect. '
-      + 'Disable to report over-limit calls as successful.',
+      'Applies the per-call limits in runtime.toolBudget.* to every tool call: a call is stopped '
+      + 'when it reaches its wall-clock limit, and a call that returns over its token or cost limit '
+      + 'is reported to the model as failed, output kept, with a note that its action may have taken effect.',
     defaultState: 'disabled',
     tier: 8,
     runtimeToggleable: true,

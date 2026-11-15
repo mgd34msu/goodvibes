@@ -1,5 +1,5 @@
-import { appendFileSync, closeSync, constants, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, renameSync } from 'node:fs';
-import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { appendFileSync, closeSync, constants, fstatSync, fsyncSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import { captureOwnedJson, snapshotJudgmentEvidence } from '../../gate/judgment-input.js';
 import type { VerificationReceipt, VerificationSource, VerificationSourceInput } from './types.js';
@@ -8,6 +8,7 @@ import type { VerificationArchive } from './archive.js';
 import { VerificationHeldError } from './types.js';
 import { VerificationJournalSource, type VerificationJournalRecord } from './journal-source.js';
 import type { CompletionFinding } from '../response-completion-findings.js';
+import { logger } from '../../utils/logger.js';
 type SourceIndex = VerificationReceipt & { readonly representation: 'source-index' };
 type QualifiedEvidence = VerificationReceipt & { readonly representation: 'jev-qualified' };
 type RetainedReceipt = SourceIndex | QualifiedEvidence;
@@ -59,6 +60,39 @@ function repairCheckpoint(value: unknown): VerificationRepairCheckpoint {
 
 /** One private append-only journal per session, with deduplicated source chunks
  * and proposal records. Disk records never carry reusable approval authority. */
+/** Where a session's verification journal lives under a workspace root. */
+function verificationJournalPath(root: string, sessionId: string): string {
+  if (!isAbsolute(root) || !/^[A-Za-z0-9_:-]+$/.test(sessionId)) throw new Error('Invalid verification journal location');
+  // Native daemon sessions use namespaced IDs. Encode their colon so the
+  // same identity has a portable filename; legacy session names stay exact.
+  return join(resolve(root), '.goodvibes', 'verification', `${encodeURIComponent(sessionId)}.jsonl`);
+}
+
+/**
+ * Removes a session's verification journal and the copies set aside from it.
+ * Called when the session is deleted: the journal holds that session's tool
+ * output and file contents. Returns how many files were removed.
+ */
+export function removeVerificationJournal(root: string, sessionId: string): number {
+  const path = verificationJournalPath(root, sessionId);
+  const directory = dirname(path), name = basename(path);
+  let names: string[];
+  try { names = readdirSync(directory); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 0; throw error; }
+  let removed = 0;
+  for (const entry of names) {
+    if (entry !== name && !entry.startsWith(`${name}.held-`)) continue;
+    rmSync(join(directory, entry), { force: true });
+    removed++;
+  }
+  return removed;
+}
+
+/** A journal is rewritten from its live records on open once superseded records are more than half of it, and it is at least this big. */
+const COMPACT_JOURNAL_MIN_BYTES = 256 * 1024;
+/** Record kinds in the order a rewritten journal holds them: every record after the ones it names. */
+const JOURNAL_KIND_ORDER = ['original', 'message', 'history', 'source', 'proposal', 'index', 'evidence', 'repair'] as const;
+
 export class VerificationStore {
   readonly sources = new Map<string, VerificationSource>();
   readonly proposals = new Map<string, string>();
@@ -78,14 +112,15 @@ export class VerificationStore {
   private readonly latestRepairOriginals = new Map<string, Pick<VerificationRepairCheckpoint, 'requestSource' | 'sourceIds'>>();
   private readonly path: string | undefined;
   private readonly root: string | undefined;
+  /** The journal file as this store last read or wrote it; another writer changes it. */
+  private observed: { readonly size: number; readonly mtimeMs: number; readonly ino: number } | undefined;
+  /** The latest archive position per branch, as written, for a rewrite of the journal. */
+  private readonly archivePositions = new Map<string, unknown>();
   archive: VerificationArchive | undefined;
   readonly archives = new Map<string, VerificationArchive>();
   constructor(root?: string, sessionId?: string) {
     if (!root || !sessionId) return;
-    if (!isAbsolute(root) || !/^[A-Za-z0-9_:-]+$/.test(sessionId)) throw new Error('Invalid verification journal location');
-    // Native daemon sessions use namespaced IDs. Encode their colon so the
-    // same identity has a portable filename; legacy session names stay exact.
-    const journalPath = join(resolve(root), '.goodvibes', 'verification', `${encodeURIComponent(sessionId)}.jsonl`);
+    const journalPath = verificationJournalPath(root, sessionId);
     this.path = journalPath;
     this.root = resolve(root);
     try { this.load(journalPath); }
@@ -111,9 +146,20 @@ export class VerificationStore {
     try {
       this.assertDirectories();
       if (lstatSync(path).isSymbolicLink()) throw new Error('Verification journal is a symbolic link');
+      // Bytes of records a later record of the same slot replaced; once they are most of the file it is rewritten.
+      let total = 0, superseded = 0;
+      const latestBytes = new Map<string, number>();
       for (const line of readFileSync(path, 'utf8').split('\n')) {
         if (!line) continue;
-        let record: unknown; try { record = JSON.parse(line); } catch { continue; }
+        const bytes = Buffer.byteLength(line) + 2;
+        total += bytes;
+        let record: unknown; try { record = JSON.parse(line); } catch { superseded += bytes; continue; }
+        {
+          const row = record as { kind?: unknown; key?: unknown } | null;
+          const slot = row && typeof row === 'object' && typeof row.key === 'string' ? JSON.stringify([row.kind, row.key]) : undefined;
+          if (slot === undefined) superseded += bytes;
+          else { superseded += latestBytes.get(slot) ?? 0; latestBytes.set(slot, bytes); }
+        }
         // Admissible bytes and matching local identities are still untrusted
         // proposals: every restored record needs a current Jev qualification.
         try { record = snapshotJudgmentEvidence(record); }
@@ -207,6 +253,7 @@ export class VerificationStore {
               ...(entry.runtimeMessages ? { runtimeMessages: entry.runtimeMessages } : {}),
               ...(entry.messageRecords ? { messageRecords: entry.messageRecords } : {}) };
             this.archives.set(this.archive.branch!, this.archive);
+            this.archivePositions.set(value.key, value.value);
             if (Array.isArray(metadata.historyKeys)) this.archiveHistoryKeys.set(this.archive.branch!, Object.freeze([...metadata.historyKeys]));
             else this.archiveHistoryKeys.delete(this.archive.branch!);
           }
@@ -215,7 +262,53 @@ export class VerificationStore {
           this.written.set(JSON.stringify([value.kind, value.key]), value.value);
         }
       }
+      if (total >= COMPACT_JOURNAL_MIN_BYTES && superseded * 2 > total) this.rewrite(path);
+      this.observe(statSync(path));
     } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+  }
+  private observe(stat: { readonly size: number; readonly mtimeMs: number; readonly ino: number }): void {
+    this.observed = { size: stat.size, mtimeMs: stat.mtimeMs, ino: stat.ino };
+  }
+  /**
+   * Whether the journal on disk is still the one this store holds: one `stat`.
+   * False when another process wrote the session's journal since, so the
+   * holder opens it again rather than writing over records it has not read.
+   */
+  isCurrentOnDisk(): boolean {
+    if (!this.path) return true;
+    try {
+      const stat = statSync(this.path), seen = this.observed;
+      return seen !== undefined && stat.size === seen.size && stat.mtimeMs === seen.mtimeMs && stat.ino === seen.ino;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return this.observed === undefined;
+      return false;
+    }
+  }
+  /**
+   * Rewrites the journal from the live records: one record per slot, each
+   * after the records it names, the latest archive position per branch last.
+   * Written to a temporary file and renamed over the journal, so a crash leaves
+   * the old journal or the new one. A failed rewrite keeps the old journal.
+   * Costs one pass over the live records, on open only, and only when most of
+   * the file is records that were replaced.
+   */
+  private rewrite(path: string): void {
+    const lines: string[] = [];
+    for (const kind of JOURNAL_KIND_ORDER) for (const [slot, value] of this.written) {
+      const [recordKind, key] = JSON.parse(slot) as [string, string];
+      if (recordKind === kind) lines.push(JSON.stringify({ kind, key, value }));
+    }
+    for (const [key, value] of this.archivePositions) lines.push(JSON.stringify({ kind: 'archive', key, value }));
+    const temporary = `${path}.rewrite-${process.pid}`;
+    try {
+      writeFileSync(temporary, lines.map(line => `\n${line}\n`).join(''), { mode: 0o600, flag: 'w' });
+      const fd = openSync(temporary, constants.O_RDONLY);
+      try { fsyncSync(fd); } finally { closeSync(fd); }
+      renameSync(temporary, path);
+    } catch (error) {
+      rmSync(temporary, { force: true });
+      logger.warn('Verification journal was not rewritten; the existing journal is kept', { path, error: error instanceof Error ? error.message : String(error) });
+    }
   }
   private assertDirectories(): void {
     if (!this.root) return;
@@ -243,10 +336,12 @@ export class VerificationStore {
       try {
         appendFileSync(fd, '\n' + JSON.stringify(record) + '\n');
         if (kind === 'archive') fsyncSync(fd);
+        this.observe(fstatSync(fd));
       } finally { closeSync(fd); }
       } catch (error) { throw new VerificationHeldError('verification journal storage', { cause: error }); }
     }
     if (kind !== 'archive') this.written.set(slot, record.value);
+    else this.archivePositions.set(key, record.value);
     return record.value;
   }
   private rememberLatestSource(source: VerificationSource): void {

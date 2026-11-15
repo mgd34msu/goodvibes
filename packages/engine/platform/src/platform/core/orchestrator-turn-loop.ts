@@ -11,7 +11,7 @@ import type { ExecutionPlan } from './execution-plan.js';
 import { ConsecutiveErrorBreaker } from './circuit-breaker.js';
 import { collectResponseDelegates, ResponseCompletionGuard, waitForResponseDelegates, waitForTaskRecovery } from './response-completion.js';
 import { decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
-import { createVerificationWriter } from './verification/writer.js';
+import { createVerificationWriter, reportVerificationUsage } from './verification/writer.js';
 import { VerificationStore } from './verification/store.js';
 import type { CacheHitTracker } from '../providers/cache-strategy.js';
 import type { ConfigManager } from '../config/manager.js';
@@ -240,6 +240,13 @@ export interface OrchestratorTurnLoopContext {
   readonly codeReadAccessFilter?: import('../tools/shared/read-access.js').ReadAccessFilter | undefined;
   readonly isPassiveCodeInjectionEnabled: () => boolean;
   /**
+   * The session's verification store, held across its turns (the journal is
+   * read once per session, not once per turn). Absent: each turn opens it.
+   */
+  readonly verificationStoreFor?: ((workingDirectory: string | undefined, sessionId: string, onNotice: (notice: string) => void) => VerificationStore) | undefined;
+  /** Reindexes the files of code hits this turn left out because they changed or are gone since indexing. */
+  readonly onCodeSourcesChanged?: ((absolutePaths: readonly string[]) => void) | undefined;
+  /**
    * The main session has no spawn-time `AgentRecord.knowledgeInjections` baseline, so this
    * starts empty and grows monotonically for the life of the Orchestrator, no record is
    * ever surfaced twice across the whole interactive session (mirrors the agent-runner's
@@ -270,7 +277,8 @@ export interface OrchestratorTurnLoopContext {
  * completion evidence held in memory for this turn only, and the person is
  * told what is wrong and how to fix it.
  */
-function openVerificationStore(workingDirectory: string | undefined, sessionId: string, onNotice: (notice: string) => void): VerificationStore {
+/** Opens the session's verification journal, or an in-memory store with a notice when it cannot be used. */
+export function openVerificationStore(workingDirectory: string | undefined, sessionId: string, onNotice: (notice: string) => void): VerificationStore {
   try {
     const store = new VerificationStore(workingDirectory, sessionId);
     if (store.setAsideNotice) { logger.warn(store.setAsideNotice); onNotice(store.setAsideNotice); }
@@ -331,22 +339,17 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
   let assertVerificationProvider: () => void | Promise<void> = assertActiveTurn;
   const completionGuard = new ResponseCompletionGuard({ request: context.text, conversation: context.conversation,
     onCompletionRequired: () => { context.setCompletionActivity?.('checking'); context.requestRender(); },
-    verificationStore: openVerificationStore(context.configManager.getWorkingDirectory?.() ?? undefined, context.sessionId, notice => context.conversation.addNotice(notice, { level: 'warning' })),
+    verificationStore: (context.verificationStoreFor ?? openVerificationStore)(context.configManager.getWorkingDirectory?.() ?? undefined, context.sessionId, notice => context.conversation.addNotice(notice, { level: 'warning' })),
     verificationWriter: createVerificationWriter({
       route: () => ({ provider, model: model.id, reasoning: turnReasoning() }),
       beforeAttempt: () => assertVerificationProvider(),
       onUsage: (response, durationMs) => {
         context.usage.input += response.usage.inputTokens; context.usage.output += response.usage.outputTokens;
         context.usage.cacheRead += response.usage.cacheReadTokens ?? 0; context.usage.cacheWrite += response.usage.cacheWriteTokens ?? 0;
-        const pricing = context.providerRegistry.resolveModelPricing(model.id, model.provider);
-        const costUsdCents = computeUsageCostUsdCents(pricing, response.usage, model.provider);
+        const costUsdCents = reportVerificationUsage({ runtimeBus: context.runtimeBus, emitterContext: context.emitterContext(context.turnId),
+          turnId: context.turnId, provider: model.provider, model: model.id,
+          pricing: context.providerRegistry.resolveModelPricing(model.id, model.provider), response, durationMs });
         if (costUsdCents !== null) context.usage.costUsd = (context.usage.costUsd ?? 0) + costUsdCents / 100;
-        if (context.runtimeBus) {
-          emitLlmResponseReceived(context.runtimeBus, context.emitterContext(context.turnId), {
-            turnId: context.turnId, provider: model.provider, model: model.id, contentSummary: '<private evidence verification>', toolCallCount: 0,
-            ...response.usage, durationMs, ...(costUsdCents === null ? {} : { costUsdCents }), costSource: usageCostSource(pricing),
-          });
-        }
       },
     }),
   });
@@ -586,6 +589,7 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
           codeAuthority: { readAccessFilter: context.codeReadAccessFilter, signal },
           codeInjectionEnabled,
           codeLimit: context.configManager.get('agents.passiveInjection.codeLimit'),
+          onCodeSourcesChanged: context.onCodeSourcesChanged,
         }).catch((error: unknown) => {
           signal?.throwIfAborted();
           // Optional context may be omitted; its readings never veto the user's message.

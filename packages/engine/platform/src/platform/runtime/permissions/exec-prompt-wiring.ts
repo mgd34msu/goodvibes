@@ -1,11 +1,13 @@
 import { currentExternalOperationSource } from '../../permissions/external-operation-scope.js';
 import { answerExecPrompt, type AutonomousToolPromptHost } from './autonomous-tool-prompts.js';
 /**
- * Canonical autonomous hosts select finite terminal controls through recorded
- * Jev judgment and an exact, single-use effect admission. Missing host wiring
- * within an autonomous operation refuses rather than opening a human wait.
- * The broker adapter remains available only to legacy direct callers outside
- * that operation context; it never manufactures autonomous authority.
+ * One rule for a command stopped on its terminal. A fixed control prompt
+ * ([y/N], yes/no) in a model's run is answered by the autonomous host through a
+ * recorded, single-use admission. Any other prompt (a passphrase, a package
+ * name), or one the host does not answer, is put to the person as the
+ * `exec:prompt` ask when a person is attached to the surface, or when no model
+ * run is in progress; an unattended run declines it and the run stops with the
+ * prompt on its result.
  */
 import { randomUUID } from 'node:crypto';
 import type { PermissionPromptDecision, PermissionPromptRequest } from '../../permissions/prompt.js';
@@ -21,6 +23,12 @@ export type ExecPromptAnswerHandler = (ask: ExecPromptAsk, execution?: ExecPromp
 /** The broker seam this wiring routes through. */
 export interface ExecPromptWiringDeps {
   readonly autonomousHost?: AutonomousToolPromptHost | undefined;
+  /**
+   * Whether a person can answer on this surface now (a terminal app, or a
+   * connected client of a hosted session). Read when a prompt arrives.
+   * Absent: no one is attached, so a model's run never waits on a person.
+   */
+  readonly attended?: (() => boolean) | undefined;
   readonly requestApproval: (input: {
     readonly request: PermissionPromptRequest;
     readonly metadata?: Record<string, unknown> | undefined;
@@ -36,8 +44,13 @@ export interface ExecPromptWiringDeps {
  */
 export function buildExecPromptAnswerHandler(deps: ExecPromptWiringDeps): ExecPromptAnswerHandler {
   return async (ask, execution) => {
-    if (deps.autonomousHost) return answerExecPrompt(deps.autonomousHost, ask, execution);
-    if (currentExternalOperationSource()) return { answered: false };
+    if (currentExternalOperationSource()) {
+      if (deps.autonomousHost) {
+        const controlled = await answerExecPrompt(deps.autonomousHost, ask, execution);
+        if (controlled.answered) return controlled;
+      }
+      if (deps.attended?.() !== true) return { answered: false };
+    }
     const request: PermissionPromptRequest = {
       callId: `exec-prompt-${randomUUID().slice(0, 8)}`,
       tool: 'exec:prompt',

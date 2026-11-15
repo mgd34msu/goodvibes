@@ -27,7 +27,7 @@ export function retainedDelegationSources(full: Record<string, unknown>, retaine
     }
   };
   const archives = full.archive;
-  if (Array.isArray(archives)) archives.forEach((entry, index) => visit(entry?.messages, `original archived history ${index}`));
+  if (Array.isArray(archives)) archives.forEach((entry, index) => visit(entry?.messages, `original history before compaction ${index}`));
   visit((full.initial as { transcript?: unknown } | null)?.transcript, 'initial.transcript');
   visit(full.transcript, 'transcript');
   const live = new Set(Array.isArray(full.delegated) ? full.delegated.map(agent => agent?.id) : []);
@@ -38,8 +38,8 @@ export function retainedDelegationSources(full: Record<string, unknown>, retaine
   for (const [id, parent] of known) {
     if (live.has(id)) continue;
     for (const source of originals) {
-      if (source.kind !== 'observation' || !(source.reference.startsWith(`delegated assignment/result ${id};`)
-        || source.reference.startsWith(`delegated ${id}.evidence[`))) continue;
+      if (source.kind !== 'observation' || source.workerId !== id
+        || !(source.lane === 'delegated-assignment' || source.lane === 'delegated-evidence')) continue;
       const reference = `${source.reference}; retained historical worker observation associated with ${parent}. Not a new execution, user instruction or current approval.`;
       const { id: originalId, ...original } = source;
       sources.push(own({ ...original, reference, originalIds: [originalId] }));

@@ -3,9 +3,9 @@ import { expect, test } from 'bun:test';
 import {
   ContextAccountingHolder,
   createContextAccountingTool,
-  turnLimitWarning,
   type ContextAccountingSource,
 } from '../platform/src/platform/tools/context-accounting/index.js';
+import { formatTurnLimitWarning } from '../platform/src/platform/agents/turn-budget.js';
 
 function source(used: number, limit: number | null): ContextAccountingSource {
   return {
@@ -30,9 +30,9 @@ test('below 80% the turns are reported without a warning', async () => {
 
 test('at 80% the result tells the model to finish', async () => {
   const out = await run(8, 10);
-  expect(out.turns.warning).toContain('2 turn(s) left');
-  expect(turnLimitWarning(8, 10)).toBe(out.turns.warning);
-  expect(turnLimitWarning(100, null)).toBeUndefined();
+  // The runner's own sentence for turn 8 of 10, so the model is never told two different counts.
+  expect(out.turns.warning).toBe(formatTurnLimitWarning(8, 10));
+  expect((await run(100, null)).turns.warning).toBeUndefined();
 });
 
 test('concurrent workers each see their own source through one shared holder, with their run state', async () => {

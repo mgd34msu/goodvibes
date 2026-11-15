@@ -1,5 +1,5 @@
 import type { HookDispatchOptions, HookWorkAdmission, TurnHookOwner } from './turn-ownership.js';
-import type { HookExecutionOptions } from './execution.js';
+import { hookTimeoutSeconds, joinHookWithin, type HookExecutionOptions } from './execution.js';
 import { existsSync, readFileSync, statSync } from 'fs';
 import { dirname } from 'path';
 import type { HookDefinition, HookChain, HookEvent, HookEventPath, HookResult, HookType } from './types.js';
@@ -101,6 +101,12 @@ export function hookDefinitionProblem(def: unknown, pattern?: string): string | 
   if (pattern !== undefined && typeof d.match === 'string' && d.match !== pattern) {
     return `hook "match" is "${d.match}" but it is listed under "${pattern}", which decides when it fires; move it under "${d.match}" or remove "match"`;
   }
+  if (d.timeout !== undefined && (typeof d.timeout !== 'number' || !Number.isFinite(d.timeout) || d.timeout < 0)) {
+    return 'hook "timeout" must be a number of seconds, 0 or more';
+  }
+  if (d.timeout === 0 && d.async !== true) {
+    return 'hook "timeout" is 0 (no deadline), which only a background hook may have; give it a timeout in seconds or set "async": true';
+  }
   return null;
 }
 
@@ -164,7 +170,12 @@ export class HookDispatcher {
       if (--outstanding === 0) { settled = true; this.activeInvocations--; this.notifyActivity(); }
     };
     const retain = (work: Promise<unknown>) => { if (!settled) { outstanding++; void work.then(release, release); } };
-    try { return await withHookWorkObserver(retain, () => runHook(hook, event, this.runnerDeps, this.hooksBaseDirectory, execution)); }
+    try {
+      const work = withHookWorkObserver(retain, () => runHook(hook, event, this.runnerDeps, this.hooksBaseDirectory, execution));
+      // A run left behind past its deadline and grace still counts as active until it really ends.
+      retain(work);
+      return await joinHookWithin(work, { name: hook.name ?? hook.type, timeoutSeconds: hookTimeoutSeconds(hook, hook.type), signal: execution?.signal });
+    }
     finally { release(); }
   }
 
@@ -380,7 +391,7 @@ export class HookDispatcher {
       // A once hook is claimed before it runs, so a second fire that selected
       // it while this one is still awaiting it does not run it again.
       if (hook.once && !this.claimOnce(pattern, hook)) continue;
-      // Async hooks run concurrently; a turn owner joins them before settlement.
+      // Async hooks run in the background under their own deadline: the turn neither waits for them nor cancels them.
       if (hook.async) {
         const asyncStart = Date.now();
         const execute = (signal?: AbortSignal) => this.runTrackedHook(hook, event, signal ? { signal } : undefined)
@@ -411,12 +422,8 @@ export class HookDispatcher {
               turnId: owner?.turnId,
             });
           });
-        // Reserve the complete runner/recording chain before runHook can call
-        // any host code. Async still means concurrent, never unowned.
-        const running = admitHook ? admitHook((signal) => execute(signal)) : execute();
-        void running.catch((error) => {
-          if (!owner?.signal.aborted) logger.warn('Hook dispatch admission failed', { path: event.path, error: summarizeError(error) });
-        });
+        // The dispatcher counts it (activeInvocationCount) until it ends; its deadline and grace bound it.
+        void execute();
         continue;
       }
 

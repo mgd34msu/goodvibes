@@ -378,7 +378,7 @@ export const FEATURE_ONBOARDING_SECTIONS: readonly FeatureSection[] = [
       {
         flagId: 'runtime-tools-budget-enforcement',
         label: 'Runtime budget enforcement',
-        hint: 'Fail a tool call that finishes over its wall-clock, token, or cost limit; limits are tuned in /settings.',
+        hint: 'Stop a tool call at its time limit, and fail one that returns over its token or cost limit; limits are tuned in /settings.',
       },
       {
         flagId: 'overflow-spill-backends',

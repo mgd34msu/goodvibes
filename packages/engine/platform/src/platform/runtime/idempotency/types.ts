@@ -2,7 +2,8 @@
  * Idempotency, types.
  *
  * Defines the record structure and configuration for the in-process idempotency
- * store used by the phased tool executor and orchestrator turn submission.
+ * store that keeps one orchestrator turn submission from running twice. Keys are
+ * minted by the runtime, never taken from a provider-supplied id.
  */
 
 /**

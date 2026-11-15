@@ -66,9 +66,10 @@ export type OrchestratorCoreServices = {
   /**
    * Tool-site reindex scheduler. Optional/undefined is a hard no-op. When wired,
    * a successful write/edit tool call schedules a debounced incremental reindex of the touched
-   * path(s) (never blocking the tool result).
+   * path(s) (never blocking the tool result). `schedule` also takes the files of code hits a
+   * turn left out because they changed on disk since indexing.
    */
-  codeIndexReindexScheduler?: Pick<CodeIndexReindexScheduler, 'onToolExecuted'> | undefined;
+  codeIndexReindexScheduler?: (Pick<CodeIndexReindexScheduler, 'onToolExecuted'> & Partial<Pick<CodeIndexReindexScheduler, 'schedule'>>) | undefined;
   /**
    * The daemon's live-turn controls holder (control-plane
    * SessionLiveTurnControlsHolder, typed structurally to keep core free of a

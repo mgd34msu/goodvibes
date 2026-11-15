@@ -11,6 +11,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import type { Tool, ToolDefinition, ToolResult } from '../../types/tools.js';
 import type { TurnInjectionRecord } from '../../agents/turn-knowledge-injection.js';
 import { summarizeError } from '../../utils/error-display.js';
+import { formatTurnLimitWarning, turnLimitWarningTurn } from '../../agents/turn-budget.js';
 
 /** Measured + configured token state for the bound session. */
 export interface ContextTokenState {
@@ -46,17 +47,13 @@ export interface ContextAccountingSource {
   getRunState?(): { readonly mode?: string | undefined; readonly toolCalls?: number | undefined; readonly activeChildren?: number | undefined };
 }
 
-/** Share of the turn limit at which the model is told to wrap up. */
-export const TURN_LIMIT_WARNING_RATIO = 0.8;
-
 /**
- * The model-facing warning once `used` reaches 80% of `limit`, else undefined.
- * A runner can append it to tool results; this tool reports it too.
+ * The turn-limit warning for the turn in progress, in the runner's own words
+ * (turn-budget.ts owns the threshold and the sentence), or undefined below it.
  */
-export function turnLimitWarning(used: number, limit: number | null): string | undefined {
-  if (limit === null || !Number.isFinite(limit) || limit <= 0 || used < Math.ceil(limit * TURN_LIMIT_WARNING_RATIO)) return undefined;
-  const remaining = Math.max(0, limit - used);
-  return `Turn ${used} of ${limit}: ${remaining} turn(s) left before this run is stopped. Finish the current step and give your final answer; do not start new work.`;
+function turnLimitWarning(used: number, limit: number | null): string | undefined {
+  if (limit === null || !Number.isFinite(limit) || limit <= 0 || used < turnLimitWarningTurn(limit)) return undefined;
+  return formatTurnLimitWarning(Math.min(used, limit), limit);
 }
 
 /**
@@ -112,7 +109,7 @@ function buildRecallContract(record: TurnInjectionRecord | undefined) {
     notes.push(`${record.droppedForBudget.length} record(s) cleared the relevance floor but were dropped to fit the token budget.`);
   }
   if (degraded) notes.push('Semantic recall degraded to lexical matching (no usable vector index).');
-  if (record.codeInjectionSkipped) notes.push(`Code index contributed nothing: ${record.codeInjectionSkipped}.`);
+  if (record.codeInjectionSkipped) notes.push(`Code index: ${record.codeInjectionSkipped}.`);
   return {
     relevanceFloor: record.relevanceFloor,
     budgetTokens: record.budgetTokens,
@@ -120,6 +117,7 @@ function buildRecallContract(record: TurnInjectionRecord | undefined) {
     embeddingBackend: record.embeddingBackend,
     degraded,
     ...(record.codeInjectionSkipped ? { codeInjectionSkipped: record.codeInjectionSkipped } : {}),
+    ...(record.codeHitsSkipped?.length ? { codeHitsSkipped: record.codeHitsSkipped } : {}),
     note: notes.length > 0 ? notes.join(' ') : 'Recall ran with no floor exclusions or degraded modes this turn.',
   };
 }
@@ -155,7 +153,7 @@ export function createContextAccountingTool(holder: ContextAccountingHolder): To
           success: true,
           output: JSON.stringify({
             available: false,
-            reason: 'No live session context is bound to this tool instance (background runs without a session have none). '
+            reason: 'No session context is bound to this call: it was made outside a session (a background run with no session of its own). '
               + 'Nothing is wrong with your call; do not retry it. Continue the task.',
           }),
         };
@@ -189,6 +187,7 @@ export function createContextAccountingTool(holder: ContextAccountingHolder): To
             contextUsedPctEstimated: contextUsedPct,
           },
           compaction,
+          // `remaining` counts the turns after the one in progress; the warning counts this one too.
           ...(turnState ? { turns: { used: turnState.used, limit: turnState.limit,
             ...(turnState.limit !== null ? { remaining: Math.max(0, turnState.limit - turnState.used) } : {}),
             ...(turnWarning ? { warning: turnWarning } : {}) } } : {}),

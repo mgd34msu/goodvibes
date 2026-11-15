@@ -27,8 +27,6 @@ import type { PermissionConfigReader } from '../platform/src/platform/permission
 import type { PolicyRuntimeState } from '../platform/src/platform/runtime/permissions/policy-runtime.js';
 import { createPluginLifecycleManager } from '../platform/src/platform/runtime/plugins/index.js';
 import { createMcpLifecycleManager } from '../platform/src/platform/runtime/mcp/index.js';
-import { createShellPlanRuntime } from '../platform/src/platform/runtime/shell-command-ops.js';
-import { AdaptivePlanner } from '../platform/src/platform/core/adaptive-planner.js';
 import { createTelemetryProvider } from '../platform/src/platform/runtime/telemetry/index.js';
 import { createRuntimeStore } from '../platform/src/platform/runtime/store/index.js';
 import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.js';
@@ -1275,19 +1273,6 @@ describe('feature flag safe-default gates', () => {
     expect(() => {
       createMcpLifecycleManager({}, flags(['mcp-lifecycle']));
     }).not.toThrow();
-  });
-
-  test('adaptive-execution-planner controls plan command runtime exposure', () => {
-    const planner = new AdaptivePlanner();
-
-    expect(createShellPlanRuntime({
-      adaptivePlanner: planner,
-      featureFlags: flags([]),
-    })).toBeUndefined();
-    expect(typeof createShellPlanRuntime({
-      adaptivePlanner: planner,
-      featureFlags: flags(['adaptive-execution-planner']),
-    })).toBe('function');
   });
 
   test('otel-foundation controls default telemetry tracing', () => {

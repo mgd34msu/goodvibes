@@ -60,7 +60,11 @@ export class TurnHookOwner {
     return this.work.run(() => start(this.signal));
   }
 
-  /** No deadline races: an abort-ignoring hook remains owned until it settles. */
+  /**
+   * Waits for the hooks admitted in this turn. Each is joined only to its
+   * deadline plus the stop grace (`joinHookWithin`), and cancelling the turn
+   * asks them to stop, so this join is bounded even when a hook ignores its signal.
+   */
   closeAndDrain(): Promise<void> {
     if (this.draining) return this.draining;
     this.accepting = false;

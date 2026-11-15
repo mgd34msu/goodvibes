@@ -20,6 +20,8 @@
 // turn" cache-reuse guard and the AgentRecord/session-transcript recording; this module is
 // a pure function of its inputs so it can be unit-tested without a live agent loop.
 import type { CodeInjectionRanking, CodeInjectionAuthorityOptions } from '../state/code-injection-ranking.js';
+import type { SkippedCodeHit, SkippedCodeHitReason } from '../state/code-injection-live.js';
+import { summarizeError } from '../utils/error-display.js';
 import { isClassicOperation } from '../runtime/decision-policy.js';
 import type { ContentPart, ProviderMessage } from '../providers/interface.js';
 import { estimateTokens } from '../core/context-compaction.js';
@@ -78,7 +80,8 @@ export type TurnCodeIndexSource = {
   assertCurrent?(expected?: string): Promise<void>;
   finishTurn?(): void;
   dispose?(): void;
-  rankForInjection?(query: string, hits: readonly CodeContextResult[], options?: CodeInjectionAuthorityOptions): Promise<CodeInjectionRanking>;
+  /** Ranks the hits; a live source lists the hits it left out (file changed, gone, too large, not readable now) in `skipped`. */
+  rankForInjection?(query: string, hits: readonly CodeContextResult[], options?: CodeInjectionAuthorityOptions): Promise<CodeInjectionRanking & { readonly skipped?: readonly SkippedCodeHit[] }>;
   search(query: string, opts?: { limit?: number }): Promise<readonly CodeContextResult[]>;
   stats(): Pick<
     CodeIndexStats,
@@ -149,13 +152,16 @@ export interface TurnInjectionRecord {
    */
   readonly ingestModes: readonly string[];
   /**
-   * Present exactly when a code source WAS wired and enabled this turn but contributed no
-   * injected line, stating why in the store's own terms: 'code index empty', a provider-space
-   * mismatch string, 'no semantic embedding provider', or 'no code chunks cleared the relevance
-   * floor'. Undefined when code injected at least one line, or when code injection was off (the
-   * flag/setting gate never called into the index, nothing to explain).
+   * Why code contributed less than it could this turn, in the store's own terms: 'code index
+   * empty', a provider-space mismatch string, 'no semantic embedding provider', 'no code chunks
+   * cleared the relevance floor', the hits left out ("2 code hits skipped: file changed since
+   * indexing", also when other hits were injected), or 'code context unavailable this turn: …'
+   * when the code side failed (memory context is injected all the same). Undefined when nothing
+   * needs explaining, or when code injection was off.
    */
   readonly codeInjectionSkipped?: string | undefined;
+  /** Code hits left out of this turn while the others were ranked: the file and why (changed since indexing, gone, too large, not readable). */
+  readonly codeHitsSkipped?: readonly { readonly path: string; readonly reason: SkippedCodeHitReason }[] | undefined;
   /** Honest embeddings signal: 'available' when the registry's vector index is enabled and
    *  usable, 'fallback-lexical' when there is no vector index to build the shortlist from
    *  (no vector index, the query embed failed this turn, or the registry does not expose
@@ -215,6 +221,8 @@ export interface BuildPerTurnKnowledgeInjectionInput {
   readonly codeInjectionEnabled?: boolean | undefined;
   /** Candidate breadth for the code-index retrieval. Defaults to DEFAULT_TURN_CODE_LIMIT. */
   readonly codeLimit?: number | undefined;
+  /** Told the files of hits left out because they changed or are gone since indexing, so they are reindexed. */
+  readonly onCodeSourcesChanged?: ((absolutePaths: readonly string[]) => void) | undefined;
 }
 
 export interface BuildPerTurnKnowledgeInjectionResult {
@@ -317,7 +325,7 @@ async function collectCodeInjectionCandidates(
   codeLimit: number,
   alreadyInjectedIdSet: ReadonlySet<string>,
   authority?: CodeInjectionAuthorityOptions,
-): Promise<{ candidates: MergedCandidate[]; considered: number; skipped: string | undefined; assertCurrent?: (() => Promise<void>) | undefined }> {
+): Promise<{ candidates: MergedCandidate[]; considered: number; skipped: string | undefined; skippedHits?: readonly SkippedCodeHit[]; assertCurrent?: (() => Promise<void>) | undefined }> {
   if (!enabled || !codeIndex) return { candidates: [], considered: 0, skipped: undefined };
 
   await codeIndex.prepare?.();
@@ -347,10 +355,25 @@ async function collectCodeInjectionCandidates(
     if (score < relevanceFloor) continue;
     candidates.push({ source: 'code-index', score, id, ingestMode: hit.label, hit });
   }
-  const skipped = candidates.length === 0 && considered > 0
-    ? 'no code chunks cleared the relevance floor'
-    : undefined;
-  return { candidates, considered, skipped, assertCurrent: reading.assertCurrent };
+  const skippedHits = reading.skipped ?? [];
+  const skipped = skippedHits.length > 0
+    ? describeSkippedCodeHits(skippedHits)
+    : candidates.length === 0 && considered > 0 ? 'no code chunks cleared the relevance floor' : undefined;
+  return { candidates, considered, skipped, ...(skippedHits.length ? { skippedHits } : {}), assertCurrent: reading.assertCurrent };
+}
+
+const SKIP_WORDING: Readonly<Record<SkippedCodeHitReason, string>> = {
+  changed: 'file changed since indexing',
+  missing: 'file no longer there',
+  'too-large': 'file over the read limit',
+  restricted: 'file not readable under the current read rules',
+};
+
+/** "2 code hits skipped: file changed since indexing; 1 code hit skipped: file no longer there". */
+function describeSkippedCodeHits(skipped: readonly SkippedCodeHit[]): string {
+  const counts = new Map<SkippedCodeHitReason, number>();
+  for (const hit of skipped) counts.set(hit.reason, (counts.get(hit.reason) ?? 0) + 1);
+  return [...counts].map(([reason, n]) => `${n} code hit${n === 1 ? '' : 's'} skipped: ${SKIP_WORDING[reason]}`).join('; ');
 }
 
 /**
@@ -408,6 +431,7 @@ export async function buildPerTurnKnowledgeInjection(
     codeAuthority,
     codeInjectionEnabled = false,
     codeLimit = DEFAULT_TURN_CODE_LIMIT,
+    onCodeSourcesChanged,
   } = input;
 
   const query = deriveTurnKnowledgeQuery(task, conversationTail);
@@ -436,7 +460,15 @@ export async function buildPerTurnKnowledgeInjection(
       injection: entry.injection,
     }));
 
-  const code = await collectCodeInjectionCandidates(codeIndex, codeInjectionEnabled, query, relevanceFloor, codeLimit, alreadyInjectedIdSet, codeAuthority);
+  // The code side never takes the turn's memory context with it: a failure leaves the memory candidates and says why.
+  const code: Awaited<ReturnType<typeof collectCodeInjectionCandidates>> = await collectCodeInjectionCandidates(
+    codeIndex, codeInjectionEnabled, query, relevanceFloor, codeLimit, alreadyInjectedIdSet, codeAuthority,
+  ).catch((error: unknown) => {
+    codeAuthority?.signal?.throwIfAborted();
+    return { candidates: [], considered: 0, skipped: `code context unavailable this turn: ${summarizeError(error)}` };
+  });
+  const changedSources = (code.skippedHits ?? []).filter(hit => hit.reason === 'changed' || hit.reason === 'missing').map(hit => hit.absolutePath);
+  if (changedSources.length > 0) onCodeSourcesChanged?.(changedSources);
 
   // One merged pool, sorted best-first, so memory and code compete in the SAME budget and the
   // trim always drops the globally-lowest-scored surviving line regardless of its source.
@@ -451,6 +483,7 @@ export async function buildPerTurnKnowledgeInjection(
     relevanceFloor,
     embeddingBackend,
     ...(code.skipped ? { codeInjectionSkipped: code.skipped } : {}),
+    ...(code.skippedHits ? { codeHitsSkipped: code.skippedHits.map(({ path, reason }) => ({ path, reason })) } : {}),
   };
 
   if (clearedFloor.length === 0) {

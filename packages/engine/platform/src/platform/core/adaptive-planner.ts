@@ -170,7 +170,7 @@ const REASON_EXPLANATIONS: Record<StrategyReasonCode, string> = {
   USER_OVERRIDE:
     'The strategy was set explicitly by the user via /plan override.',
   FLAG_DISABLED:
-    'The adaptive execution planner is turned off (see the planner.adaptive setting); using single.',
+    'The adaptive execution planner is off, so no strategy is chosen and nothing set with /plan is read. Turn it on with the planner.adaptive setting.',
   INVALID_STRATEGY:
     'The supplied strategy name is not recognised. No change was made.',
 };

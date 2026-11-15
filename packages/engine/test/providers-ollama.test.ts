@@ -92,7 +92,7 @@ describe('OllamaProvider', () => {
 
     expect(response.stopReason).toBe('tool_call');
     expect(response.toolCalls).toEqual([
-      { id: 'ollama_call_0', name: 'read', arguments: { path: 'README.md' } },
+      { id: expect.stringMatching(/^ollama_call_[0-9a-f]{8}_0$/), name: 'read', arguments: { path: 'README.md' } },
     ]);
   });
 

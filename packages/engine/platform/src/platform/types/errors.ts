@@ -8,6 +8,7 @@ import {
   HttpStatusError,
   readFailure,
   RETRYABLE_STATUS_CODES,
+  structuralFailureConclusions,
   structuredTransience,
   type FailureConclusions,
   type FailureEvidence,
@@ -156,12 +157,29 @@ export function failureEvidence(err: Error): FailureEvidence {
   };
 }
 
-/** Reads what an error's wording says about the failure (one Jev request per distinct wording). */
-export function readErrorFailure(err: Error, site: string): Promise<FailureConclusions> {
+/**
+ * Reads what an error's wording says about the failure (one Jev request per
+ * distinct wording). A reading that cannot be made (unavailable, refused
+ * input, failed) answers from the status and code tables, so the caller acts
+ * on the provider's own error and never on the judgment layer's.
+ */
+export async function readErrorFailure(err: Error, site: string): Promise<FailureConclusions> {
   const evidence = failureEvidence(err);
-  assertJudgmentInput(evidence);
-  return readFailure(evidence, site);
+  try {
+    assertJudgmentInput(evidence);
+    return await readFailure(evidence, site);
+  } catch {
+    return structuralFailureConclusions(evidence);
+  }
 }
+
+/**
+ * Statuses under which a provider reports a spent account, a rate limit or a
+ * context-window refusal with wording only (Anthropic a 400 "credit balance is
+ * too low", OpenAI a 429 insufficient_quota, a 413 body too large). Any other
+ * status answers those questions no without a reading.
+ */
+const WORDING_DECIDES_STATUS: ReadonlySet<number> = new Set([400, 413, 429]);
 
 /**
  * How long to wait before retrying, in milliseconds: the explicit value the
@@ -189,6 +207,12 @@ export async function readRetryWait(err: unknown, site = 'types.errors.retry-wai
 export async function isBillingOrCreditError(err: unknown, site = 'types.errors.billing'): Promise<boolean> {
   if (err instanceof AppError && (err.category === 'billing' || err.statusCode === 402)) return true;
   if (!(err instanceof Error)) return false;
+  const evidence = failureEvidence(err);
+  if (evidence.status !== undefined && !WORDING_DECIDES_STATUS.has(evidence.status)) return false;
+  if (evidence.status === undefined) {
+    const classified = classifyFailure(err)?.category;
+    if (classified !== undefined) return classified === 'billing';
+  }
   return (await readErrorFailure(err, site)).billing;
 }
 
@@ -206,6 +230,13 @@ export async function isBillingOrCreditError(err: unknown, site = 'types.errors.
 export async function isRateLimitOrQuotaError(err: unknown, site = 'types.errors.rate-limit'): Promise<boolean> {
   if (err instanceof ProviderError && (err.statusCode === 429 || err.statusCode === 402)) return true;
   if (!(err instanceof Error)) return false;
+  const evidence = failureEvidence(err);
+  if (evidence.status === 429 || evidence.status === 402) return true;
+  if (evidence.status !== undefined && !WORDING_DECIDES_STATUS.has(evidence.status)) return false;
+  if (evidence.status === undefined) {
+    const classified = classifyFailure(err)?.category;
+    if (classified !== undefined) return classified === 'rate_limit' || classified === 'billing';
+  }
   return (await readErrorFailure(err, site)).rateLimited;
 }
 
@@ -227,8 +258,7 @@ export async function isContextSizeExceededError(err: unknown, site = 'types.err
   if (evidence.code !== undefined && CONTEXT_REFUSAL_CODES.has(evidence.code)) return true;
   if (evidence.status !== undefined && !CONTEXT_REFUSAL_STATUS.has(evidence.status)) return false;
   if (evidence.status === undefined && classifyFailure(err) !== undefined) return false;
-  try { return (await readErrorFailure(err, site)).contextExceeded; }
-  catch { return false; }
+  return (await readErrorFailure(err, site)).contextExceeded;
 }
 
 /**
@@ -260,6 +290,11 @@ export async function isNetworkTransportError(err: unknown, site = 'types.errors
     return err.category === 'network' && err.recoverable === true;
   }
   if (!(err instanceof Error)) return false;
+  // A response came back, so the transport carried it; a code in the connection table answers on its own.
+  const evidence = failureEvidence(err);
+  if (evidence.status !== undefined) return false;
+  const classified = classifyFailure(err);
+  if (classified !== undefined) return classified.category === 'network' || classified.category === 'timeout';
   return (await readErrorFailure(err, site)).transientNetwork;
 }
 
@@ -277,8 +312,7 @@ export async function isNonTransientProviderFailure(err: unknown, site = 'types.
   if (status !== undefined) return NON_TRANSIENT_STATUS.has(status);
   const category = err instanceof AppError && err.category !== 'unknown' ? err.category : classifyFailure(err)?.category;
   if (category !== undefined) return NON_TRANSIENT_CATEGORIES.has(category);
-  try { return (await readErrorFailure(err, site)).providerUnusable; }
-  catch { return false; }
+  return (await readErrorFailure(err, site)).providerUnusable;
 }
 
 const NON_TRANSIENT_CATEGORIES: ReadonlySet<string> = new Set(['authentication', 'authorization', 'billing']);

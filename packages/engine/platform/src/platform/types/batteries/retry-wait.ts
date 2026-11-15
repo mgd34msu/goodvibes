@@ -1,5 +1,5 @@
 import { runDecisionOrClassic as decisionOrClassic } from '@goodvibes-jev/engine/errors';
-import { assertJudgmentInput, JudgmentInputError } from '../../gate/judgment-input.js';
+import { assertJudgmentInput } from '../../gate/judgment-input.js';
 /**
  * `engine.provider.retry-wait`: which number in a provider's error message,
  * if any, states how long to wait before retrying, and in which unit it is
@@ -78,8 +78,12 @@ const UNIT_ANSWERS = Object.keys(UNIT_OPTIONS);
 /** Milliseconds per unit; code does the conversion, never the model. */
 const MS_PER_UNIT: Readonly<Record<RetryWaitUnit, number>> = { ms: 1, s: 1_000, min: 60_000 };
 
-/** Long provider bodies say what they mean in their opening; the same clip the failure reading uses. */
-export const MAX_RETRY_WAIT_MESSAGE_CHARS = Number.POSITIVE_INFINITY;
+/**
+ * Characters of a provider message the reading sees. A wait is stated in the
+ * opening of a provider body (and the reading offers only the first numbers
+ * anyway), so a long body is clipped here rather than sent whole.
+ */
+export const MAX_RETRY_WAIT_MESSAGE_CHARS = 2_000;
 
 /** Characters of text shown on each side of a number. */
 const ADJACENT_CHARS = 32;
@@ -354,8 +358,7 @@ export async function readRetryWaitMs(evidence: RetryWaitEvidence, site: string)
 
 async function readDecisionRetryWaitMs(evidence: RetryWaitEvidence, site: string): Promise<number | undefined> {
   assertJudgmentInput(evidence);
-  if (evidence.message.length > MAX_RETRY_WAIT_MESSAGE_CHARS) return Promise.reject(new JudgmentInputError('unsupported-input'));
-  const captured: RetryWaitEvidence = { message: evidence.message, status: evidence.status };
+  const captured: RetryWaitEvidence = { message: evidence.message.slice(0, MAX_RETRY_WAIT_MESSAGE_CHARS), status: evidence.status };
   const spans = numberSpans(captured.message);
   if (spans.length === 0) return Promise.resolve(undefined);
   const port = judgmentPort(site), model = port.model;

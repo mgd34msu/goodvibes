@@ -388,7 +388,9 @@ async function fetchWithValidatedRedirects(input: {
     const admittedInitialRequest = redirectCount === 0 && isAdmittedFetchRequest(currentUrl);
     // YOLO and an admitted call skip only the localhost prompt, and only for the
     // host the caller wrote; a redirect target is the server's choice.
-    let localhostApproved = input.localhostApproved || (local && redirectCount === 0 && (isYoloExecution() || admittedInitialRequest));
+    // The owner's fetch.allowLocalhost covers every localhost hop, in a model's run too, with no admission request.
+    let localhostApproved = input.localhostApproved || (local && (input.deps.isLocalhostAllowed?.() ?? false))
+      || (local && redirectCount === 0 && (isYoloExecution() || admittedInitialRequest));
     if (local && operation && !localhostApproved) {
       const request: FetchUrlInput = {
         url: currentUrl, method: currentMethod as FetchUrlInput['method'], headers: { ...currentHeaders },
@@ -399,7 +401,10 @@ async function fetchWithValidatedRedirects(input: {
       };
       const approved = await input.deps.approveLocalhostFetch?.({ url: currentUrl, host: host!, request,
         originalRequest: input.originalRequest, credentialHeaders: [...input.credentialHeaders] }, { signal: input.signal, assertCurrent });
-      if (!approved || typeof approved === 'boolean') throw new Error('Request blocked: autonomous localhost fetch requires exact-hop admission');
+      if (!approved || typeof approved === 'boolean') {
+        throw new Error(`Request blocked: the fetch to the localhost host "${host}" was not admitted for this run, and localhost fetches are not allowed (fetch.allowLocalhost is off). `
+          + 'Ask the owner to set fetch.allowLocalhost to true, or fetch a URL that is not on this machine.');
+      }
       permit = approved;
       input.permits.push(permit);
       assertCurrent();
@@ -607,7 +612,12 @@ async function fetchOne(
     }
 
     // Loopback dev servers: allowed for this project, or a one-tap ask that
-    // persists the approval; otherwise refused with the setting named.
+    // persists the approval; otherwise refused with the setting named. In a
+    // model's run the owner's setting allows it the same way; without it each
+    // hop is admitted on its own.
+    if (initialTrustResult.tier === 'localhost' && currentExternalOperationSource() && (deps.isLocalhostAllowed?.() ?? false)) {
+      localhostApproved = true;
+    }
     if (initialTrustResult.tier === 'localhost' && !currentExternalOperationSource()) {
       localhostApproved = isYoloExecution() || isAdmittedFetchRequest(effectiveUrl) || (deps.isLocalhostAllowed?.() ?? false);
       if (!localhostApproved && deps.approveLocalhostFetch) {

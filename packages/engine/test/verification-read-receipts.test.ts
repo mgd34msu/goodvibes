@@ -139,9 +139,9 @@ test('citation excerpts share equal observed bytes without duplicating empty exc
   const { input } = observedRead();
   const native = nativeReadReceipts(verificationSources(input));
   const first = native.reads[0]!;
-  const repeated = { ...first, sourceIds: ['second-read'], reference: 'transcript[3]; complete source' };
+  const repeated = { ...first, sourceIds: ['second-read'], origin: 'transcript[3]' };
   const otherRange = { ...first, rows: ['  900 | unrelated row'], sourceIds: ['third-read'] };
-  const changed = { ...first, rows: ['   50 | changed implementation'], sourceIds: ['changed-read'], reference: 'transcript[5]; complete source' };
+  const changed = { ...first, rows: ['   50 | changed implementation'], sourceIds: ['changed-read'], origin: 'transcript[5]' };
   const same = citedReadSources([first, repeated, otherRange], 'src/client.ts:50-52');
   expect(same).toHaveLength(1);
   expect(same[0]!.originals).toEqual([...first.sourceIds, 'second-read']);

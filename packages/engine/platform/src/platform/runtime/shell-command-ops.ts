@@ -1,11 +1,10 @@
 import type { ExternalOperationSource } from '../permissions/external-request.js';
 import { handlePlanCommand } from '../core/plan-command-handler.js';
-import type { AdaptivePlanner } from '../core/adaptive-planner.js';
+import { AdaptivePlanner } from '../core/adaptive-planner.js';
 import type { SubagentTask } from '../acp/protocol.js';
 import { exportRemoteArtifactForAgent } from './remote/runner-registry.js';
 import type { RuntimeEventBus } from './events/index.js';
 import type { RuntimeStore } from './store/index.js';
-import type { FeatureFlagManager } from './feature-flags/index.js';
 import type { AgentInput } from '../tools/agent/schema.js';
 import type { AgentRecord } from '../tools/agent/manager.js';
 import type { AcpConnection } from './store/domains/acp.js';
@@ -206,15 +205,19 @@ export function createShellRemoteCommandService(options: {
   };
 }
 
+/**
+ * The `/plan` runtime. `isEnabled` is read on every command (the setting can be
+ * changed while the session runs), so with the planner off each subcommand
+ * says so and changes nothing, rather than reporting a mode nothing reads.
+ */
 export function createShellPlanRuntime(options: {
   readonly adaptivePlanner?: AdaptivePlanner | undefined;
   readonly runtimeBus?: RuntimeEventBus | undefined;
-  readonly featureFlags?: Pick<FeatureFlagManager, 'isEnabled'> | null | undefined;
+  readonly isEnabled: () => boolean;
 }): PlanRuntimeService | undefined {
-  const { adaptivePlanner, runtimeBus, featureFlags } = options;
+  const { adaptivePlanner, runtimeBus, isEnabled } = options;
   if (!adaptivePlanner) return undefined;
-  if (featureFlags && !featureFlags.isEnabled('adaptive-execution-planner')) {
-    return undefined;
-  }
-  return (subcommand, args) => handlePlanCommand({ adaptivePlanner, runtimeBus }, subcommand, args);
+  return (subcommand, args) => isEnabled()
+    ? handlePlanCommand({ adaptivePlanner, runtimeBus }, subcommand, args)
+    : { ok: false, output: AdaptivePlanner.explainReasonCode('FLAG_DISABLED') };
 }

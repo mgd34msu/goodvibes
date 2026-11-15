@@ -1,5 +1,5 @@
 import { isDeepStrictEqual } from 'node:util';
-import type { VerificationSource, VerificationSourceInput, VerificationSourceOwner } from './types.js';
+import type { VerificationOrigin, VerificationSource, VerificationSourceInput, VerificationSourceOwner } from './types.js';
 
 export const VERIFICATION_FRAME_CHARACTERS = 28_000;
 export const VERIFICATION_OVERVIEW_CHARACTERS = 16_000;
@@ -41,11 +41,37 @@ export function verificationExecutionGroups(sources: readonly VerificationSource
   return { groups: ordered.map(group => group.sources), has: (execution: VerificationSource['execution']) => find(execution) !== undefined };
 }
 
+/**
+ * The message a source came from, written from its origin fields: the lane and
+ * its position (`transcript[3]`, `delegated w1.evidence[0]`). The one place a
+ * label is made from those facts; a source with no origin fields keeps the head
+ * of its reference.
+ */
+export function verificationOriginLabel(source: Pick<VerificationSource, keyof VerificationOrigin | 'reference'>): string {
+  const at = source.messageIndex === undefined ? '' : `[${source.messageIndex}]`;
+  switch (source.lane) {
+    case 'request': return 'current user request';
+    case 'criteria': return 'host acceptance criteria, subordinate to original user scope';
+    case 'turn-entry-request': return 'original request at turn entry';
+    case 'transcript': return `transcript${at}`;
+    case 'initial-transcript': return `initial.transcript${at}`;
+    case 'archive': return `original history before compaction ${source.archiveIndex ?? 0}${at}`;
+    case 'delegated-assignment': return `delegated assignment/result ${source.workerId ?? 'unknown'}`;
+    case 'delegated-evidence': return `delegated ${source.workerId ?? 'unknown'}.evidence${at}`;
+    case 'contract': return `host completed contract ${source.contractId ?? 'unavailable'}`;
+    case 'contract-acceptance': return `host completed contract ${source.contractId ?? 'unavailable'}; acceptance and publication`;
+    case 'contract-answer': return `host completed contract ${source.contractId ?? 'unavailable'}; exact saved answer`;
+    case 'answer': return 'exact proposed answer, not an execution observation';
+    default: return source.reference.split(';')[0]!;
+  }
+}
+
 /** Every byte belongs to an identified source interval. Boundaries are visible;
  * no middle is dropped and a fragment never claims to be a whole observation. */
 export function verificationSources(state: Record<string, unknown>, own: VerificationSourceOwner = issueVerificationSource): VerificationSource[] {
   const result: VerificationSource[] = [];
-  const add = (kind: VerificationSource['kind'], reference: string, value: unknown, messageRole?: VerificationSource['messageRole'], execution?: VerificationSource['execution'], toolCallIds?: readonly string[]) => {
+  const add = (kind: VerificationSource['kind'], origin: VerificationOrigin, detail: string | undefined, value: unknown, messageRole?: VerificationSource['messageRole'], execution?: VerificationSource['execution'], toolCallIds?: readonly string[]) => {
+    const reference = `${verificationOriginLabel({ ...origin, reference: '' })}${detail ? `; ${detail}` : ''}`;
     const text = typeof value === 'string' ? value : JSON.stringify(value);
     if (!text) return;
     for (let start = 0; start < text.length;) {
@@ -67,16 +93,16 @@ export function verificationSources(state: Record<string, unknown>, own: Verific
         }
       }
       const label = `${reference}; ${start === 0 && end === text.length ? 'complete source' : 'partial source'}; characters ${start}..${end} of ${text.length}`;
-      result.push(own({ kind, reference: label, text: text.slice(start, end),
+      result.push(own({ kind, reference: label, ...origin, text: text.slice(start, end),
         ...(messageRole ? { messageRole, completeMessage: start === 0 && end === text.length } : {}), ...(execution ? { execution } : {}), ...(toolCallIds?.length ? { toolCallIds } : {}) }));
       start = end;
     }
   };
-  add('instruction', 'current user request', state.request);
-  if (state.requirements != null) add('instruction', 'host acceptance criteria, subordinate to original user scope', state.requirements);
+  add('instruction', { lane: 'request' }, undefined, state.request);
+  if (state.requirements != null) add('instruction', { lane: 'criteria' }, undefined, state.requirements);
   const seenExecutions = new Map<string, string[]>();
   const mainCalls = new Map<string, { id: string; name?: string; arguments?: unknown }>();
-  const transcript = (messages: unknown, prefix: string, callContext = new Map<string, { id: string; name?: string; arguments?: unknown }>(), lane = 'main', originalInstructions = true) => {
+  const transcript = (messages: unknown, origin: VerificationOrigin, callContext = new Map<string, { id: string; name?: string; arguments?: unknown }>(), lane = 'main', originalInstructions = true) => {
     if (!Array.isArray(messages)) return;
     messages.forEach((message: Record<string, unknown>, index) => {
       const calls = message.toolCalls as { id: string; name?: string; arguments?: unknown }[] | undefined;
@@ -95,46 +121,50 @@ export function verificationSources(state: Record<string, unknown>, own: Verific
       const call = message.role === 'tool' && typeof message.callId === 'string' ? callContext.get(message.callId) : undefined;
       const execution = message.role === 'tool' ? { callId: message.callId, outcome: message.outcome ?? 'unknown', ...(call ? { tool: call.name,
         ...(JSON.stringify(call.arguments ?? null).length <= 2_000 ? { exactArguments: call.arguments ?? null } : { argumentsSource: `Original assistant call ${call.id}; arguments are retained separately, not clipped or inferred.` }) } : {}) } : undefined;
-      add(originalInstructions && message.role === 'user' ? 'instruction' : 'observation', `${prefix}[${index}]; role ${message.role}`, serializedMessage, role, execution, message.role === 'assistant' ? calls?.map(call => call.id) : undefined);
+      add(originalInstructions && message.role === 'user' ? 'instruction' : 'observation', { ...origin, messageIndex: index }, `role ${message.role}`, serializedMessage, role, execution, message.role === 'assistant' ? calls?.map(call => call.id) : undefined);
     });
   };
   const archive = state.archive as readonly { messages: unknown }[] | undefined;
-  archive?.forEach((entry, index) => transcript(entry.messages, `original history before compaction ${index}`, mainCalls));
+  archive?.forEach((entry, index) => transcript(entry.messages, { lane: 'archive', archiveIndex: index }, mainCalls));
   const initial = state.initial as { request?: unknown; transcript?: unknown } | null;
   if (initial) {
-    add('instruction', 'original request at turn entry', initial.request);
+    add('instruction', { lane: 'turn-entry-request' }, undefined, initial.request);
     const current = state.transcript as readonly unknown[];
     const before = initial.transcript;
-    if (!Array.isArray(before) || !before.every((message, index) => JSON.stringify(message) === JSON.stringify(current[index]))) transcript(before, 'initial.transcript', mainCalls);
+    if (!Array.isArray(before) || !before.every((message, index) => JSON.stringify(message) === JSON.stringify(current[index]))) transcript(before, { lane: 'initial-transcript' }, mainCalls);
   }
-  transcript(state.transcript, 'transcript', mainCalls);
+  transcript(state.transcript, { lane: 'transcript' }, mainCalls);
   for (const agent of (state.delegated ?? []) as Record<string, unknown>[]) {
-    add('observation', `delegated assignment/result ${agent.id}`, { ...agent, evidence: undefined });
-    transcript(agent.evidence, `delegated ${agent.id}.evidence`, new Map(), `delegated:${agent.id}`, false);
+    const workerId = String(agent.id);
+    add('observation', { lane: 'delegated-assignment', workerId }, undefined, { ...agent, evidence: undefined });
+    transcript(agent.evidence, { lane: 'delegated-evidence', workerId }, new Map(), `delegated:${workerId}`, false);
   }
   for (const work of (state.completedWork ?? []) as Record<string, unknown>[]) {
-    add('observation', `host completed contract ${work.id ?? 'unavailable'}; scoped checks and publication, not final response approval`, work);
+    const contractId = work.id === undefined ? undefined : String(work.id);
+    const contract = { ...(contractId === undefined ? {} : { contractId }) };
+    add('observation', { lane: 'contract', ...contract }, 'scoped checks and publication, not final response approval', work);
     if (work.kind === 'host-completed-contract') {
       // Keep the full record above. Also expose its exact acceptance fields as
       // an independently retrievable primary, so a long answer/unit history
       // cannot bury the scope, actual final check or publication outcome.
       const { units: _units, answer: _answer, ...acceptance } = work;
-      add('observation', `host completed contract ${work.id}; acceptance and publication`, acceptance);
-      if (typeof work.answer === 'string') add('observation', `host completed contract ${work.id}; exact saved answer`, {
+      add('observation', { lane: 'contract-acceptance', ...contract }, undefined, acceptance);
+      if (typeof work.answer === 'string') add('observation', { lane: 'contract-answer', ...contract }, undefined, {
         kind: 'host-saved-contract-answer', id: work.id, answer: work.answer,
         contentReview: work.contentReview, goalCoverage: work.goalCoverage,
         meaning: 'Exact saved result whose native review bindings are supplied beside it. This is the prior checked result, not the current proposed answer, user instructions or a new completion permit.',
       });
     }
   }
-  if (typeof state.response === 'string' && JSON.stringify(state.response).length > 12_000) add('answer', 'exact proposed answer, not an execution observation', state.response);
+  if (typeof state.response === 'string' && JSON.stringify(state.response).length > 12_000) add('answer', { lane: 'answer' }, undefined, state.response);
   return result;
 }
 
 /** Exact run encoding, not a summary: joining every segment count times
  * reconstructs the original code units, including escaped JSON newlines. */
 export function verificationWireSource(source: VerificationSource) {
-  const { messageRole: _localRole, completeMessage: _localBoundary, originalIds: _localOrigins, readKind: _localReadKind, ...wire } = source;
+  const { messageRole: _localRole, completeMessage: _localBoundary, originalIds: _localOrigins, readKind: _localReadKind,
+    lane: _lane, archiveIndex: _archiveIndex, messageIndex: _messageIndex, workerId: _workerId, contractId: _contractId, ...wire } = source;
   const segments = source.text.split(/(?<=\n)|(?<=\\n)/u);
   const runs: { text: string; count: number }[] = [];
   for (const text of segments) {

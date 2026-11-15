@@ -20,13 +20,20 @@
  * standing memory or a destructive delete is emitted as a PROPOSAL routed to the
  * existing confirmation-gated path, this pass never silently writes a new memory
  * or deletes a record. Every run returns a RECEIPT describing exactly what it
- * merged, archived, decayed, and proposed.
+ * merged, archived, decayed, and newly proposed.
+ *
+ * The pass remembers its own work: a cursor in the memory store's meta table
+ * says up to when records were compared, so a pass compares only records
+ * changed since (each against its nearest records of the same class, capped)
+ * and asks nothing when nothing changed. Each pair is applied as its reading
+ * settles, so a failed request loses that pair only. Proposals are kept in
+ * the store once each (keyed by kind and record ids), so they survive a
+ * restart and a pass that finds one again does not report it again.
  */
 
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
-import { mapLimit } from '@goodvibes-jev/judgment';
 import { agreementContent, alignmentContent, memoryAgreement, memoryAlignment, type MemoryReplacement } from './batteries/memory-alignment.js';
-import type { MemoryRecord, MemoryReviewPatch, MemoryScope } from './memory-store.js';
+import type { MemoryRecord, MemoryReviewPatch, MemoryScope, MemorySearchFilter, MemorySemanticSearchResult } from './memory-store.js';
 import type { MemoryOperationOptions } from './memory-operation.js';
 import type { ResolvedMemoryConsolidationConfig } from './memory-consolidation-config.js';
 import { decisionOrClassic } from '../runtime/decision-policy.js';
@@ -55,6 +62,14 @@ export interface MemoryConsolidationRegistry {
   getAll(): readonly MemoryRecord[];
   review(id: string, patch: MemoryReviewPatch, options?: MemoryOperationOptions): MemoryRecord | null;
   update(id: string, patch: { scope?: MemoryScope; summary?: string; detail?: string; tags?: string[] }): MemoryRecord | null;
+  /** Vector neighbours of a record, nearest first; without it a changed record is compared with the newest of its class. */
+  semanticCandidates?(filter: MemorySearchFilter): readonly MemorySemanticSearchResult[] | Promise<readonly MemorySemanticSearchResult[]>;
+  /** The store's meta table, which holds the pass's cursor; without it every pass compares every active record. */
+  readStoreMeta?(key: string): string | null;
+  writeStoreMeta?(key: string, value: string): void;
+  /** The store's standing proposals; returns the ones not already standing. Without it every proposal is reported each run. */
+  addConsolidationProposals?(proposals: readonly MemoryConsolidationProposal[], at?: number): MemoryConsolidationProposal[];
+  listConsolidationProposals?(): MemoryConsolidationProposal[];
 }
 
 export interface MemoryConsolidationInput {
@@ -111,7 +126,10 @@ export interface MemoryConsolidationRunReceipt {
   readonly merged: readonly MemoryConsolidationMergeEntry[];
   readonly archived: readonly MemoryConsolidationArchiveEntry[];
   readonly decayed: readonly MemoryConsolidationDecayEntry[];
+  /** Proposals this run added; ones already standing from earlier runs are not repeated. */
   readonly proposed: readonly MemoryConsolidationProposal[];
+  /** Record pairs read this run (one or two decision-model requests each). */
+  readonly pairsRead?: number;
   readonly usageSignalAvailable: boolean;
   readonly note: string;
 }
@@ -122,15 +140,53 @@ const STALE_DELETE_PROPOSAL_AGE_DAYS = 90;
 const SITE = 'state.memory-consolidation';
 
 /**
- * Most record pairs one pass reads. Every pair costs one or two requests, so
- * the pass reads the pairs whose newer record is newest first (a new record
- * is the likeliest duplicate of an old one) and leaves the rest for later
- * passes. Without a bound, n records of one class cost n(n-1)/2 readings.
+ * Most record pairs one pass reads. Every pair costs one or two requests. A
+ * pass reads only pairs with a record changed since the cursor; when more than
+ * this many are due, the cursor stops before the first record not compared,
+ * so the next pass carries on from there.
  */
 const MAX_PAIR_READINGS_PER_RUN = 200;
 
-/** Pair readings in flight at once. */
-const PAIR_CONCURRENCY = 8;
+/**
+ * A changed record is compared with at most this many records of its class,
+ * nearest by vector similarity first (a new record is the likeliest duplicate
+ * of a close old one). Also the pair readings in flight at once.
+ */
+const PAIRS_PER_CHANGED_RECORD = 8;
+
+/** Meta key of the pass's cursor in the memory store. */
+const CURSOR_KEY = 'consolidation.cursor';
+
+/**
+ * Up to when records were compared (`at`, epoch ms), and the records the pass
+ * itself last wrote with the updatedAt it left them at (`own`), so its own
+ * merges and decays do not count as changes for the next pass.
+ */
+export interface MemoryConsolidationCursor {
+  readonly at: number;
+  readonly own: Readonly<Record<string, number>>;
+}
+
+/** The stored cursor, or null when no pass has completed (or the registry has no meta table). */
+export function readMemoryConsolidationCursor(registry: Pick<MemoryConsolidationRegistry, 'readStoreMeta'>): MemoryConsolidationCursor | null {
+  const raw = registry.readStoreMeta?.(CURSOR_KEY);
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as { at?: unknown; own?: unknown };
+    if (typeof parsed.at !== 'number' || !Number.isFinite(parsed.at)) return null;
+    const own: Record<string, number> = {};
+    if (parsed.own && typeof parsed.own === 'object') {
+      for (const [id, stamp] of Object.entries(parsed.own as Record<string, unknown>)) if (typeof stamp === 'number') own[id] = stamp;
+    }
+    return { at: parsed.at, own };
+  } catch {
+    return null;
+  }
+}
+
+function changedSince(record: MemoryRecord, cursor: MemoryConsolidationCursor | null): boolean {
+  return cursor === null || (record.updatedAt > cursor.at && cursor.own[record.id] !== record.updatedAt);
+}
 
 function verifiedRank(record: MemoryRecord): number {
   if (record.reviewState === 'reviewed') return 2;
@@ -215,8 +271,12 @@ class AutomatedReviewGuard {
     if (!written) return 'changed';
     this.known.set(id, written);
     if (this.current !== this.known) this.current.set(id, written);
+    this.written.set(id, written.updatedAt);
     return 'applied';
   }
+
+  /** Records this pass wrote, with the updatedAt each write left. */
+  readonly written = new Map<string, number>();
 }
 
 function isPersonReviewed(record: MemoryRecord): boolean {
@@ -228,6 +288,13 @@ interface MergePlanResult {
   readonly proposals: MemoryConsolidationProposal[];
   /** Ids consumed by a merge/contradiction this run, excluded from decay. */
   readonly touched: Set<string>;
+  readonly pairsRead: number;
+  /** The oldest updatedAt among changed records whose comparisons did not all complete; undefined when every one did. */
+  readonly incompleteFrom: number | undefined;
+  /** Changed records whose comparisons all completed, with the updatedAt they were compared at. */
+  readonly compared: ReadonlyMap<string, number>;
+  /** Why the pass stopped reading pairs early, when every reading of a record failed. */
+  readonly readFailure: string | undefined;
 }
 
 export type MemoryPairRelation = 'duplicate' | 'contradiction' | 'unrelated';
@@ -243,31 +310,35 @@ export interface MemoryPairReading {
 }
 
 /**
- * Candidate pairs, grouped structurally: only records of the same class are
- * compared (any scope, so cross-scope collisions surface). Within a class the
- * newest records pair first; at most MAX_PAIR_READINGS_PER_RUN pairs overall.
+ * The records a changed record is compared with: same class (any scope, so
+ * cross-scope collisions surface), nearest by the vector index first, then
+ * the newest of the class, at most PAIRS_PER_CHANGED_RECORD.
  */
-function candidatePairs(active: readonly MemoryRecord[]): Array<readonly [MemoryRecord, MemoryRecord]> {
-  const byClass = new Map<string, MemoryRecord[]>();
-  for (const record of active) {
-    const bucket = byClass.get(record.cls) ?? [];
-    bucket.push(record);
-    byClass.set(record.cls, bucket);
-  }
-  const pairs: Array<readonly [MemoryRecord, MemoryRecord]> = [];
-  for (const bucket of byClass.values()) {
-    const newestFirst = [...bucket].sort((left, right) => right.updatedAt - left.updatedAt);
-    let taken = 0;
-    for (let i = 0; i < newestFirst.length && taken < MAX_PAIR_READINGS_PER_RUN; i += 1) {
-      for (let j = i + 1; j < newestFirst.length && taken < MAX_PAIR_READINGS_PER_RUN; j += 1) {
-        pairs.push([newestFirst[i]!, newestFirst[j]!]);
-        taken += 1;
+async function comparisonPartners(
+  registry: MemoryConsolidationRegistry,
+  record: MemoryRecord,
+  sameClass: readonly MemoryRecord[],
+): Promise<MemoryRecord[]> {
+  const byId = new Map(sameClass.filter((other) => other.id !== record.id).map((other) => [other.id, other]));
+  const partners: MemoryRecord[] = [];
+  if (registry.semanticCandidates && byId.size > PAIRS_PER_CHANGED_RECORD) {
+    try {
+      const neighbours = await registry.semanticCandidates({ query: record.summary, cls: record.cls, limit: PAIRS_PER_CHANGED_RECORD * 2 });
+      for (const { record: neighbour } of neighbours) {
+        const other = byId.get(neighbour.id);
+        if (!other || partners.includes(other)) continue;
+        partners.push(other);
+        if (partners.length >= PAIRS_PER_CHANGED_RECORD) return partners;
       }
+    } catch (error) {
+      logger.debug('[memory] consolidation neighbour lookup failed; comparing with the newest records of the class', { error: summarizeError(error) });
     }
   }
-  return pairs
-    .sort((left, right) => right[0].updatedAt - left[0].updatedAt || right[1].updatedAt - left[1].updatedAt)
-    .slice(0, MAX_PAIR_READINGS_PER_RUN);
+  for (const other of [...byId.values()].sort((left, right) => right.updatedAt - left.updatedAt)) {
+    if (partners.length >= PAIRS_PER_CHANGED_RECORD) break;
+    if (!partners.includes(other)) partners.push(other);
+  }
+  return partners;
 }
 
 /**
@@ -311,6 +382,7 @@ const CURATOR_ROUTE = 'memory action:"curator" query:"consolidation"';
 async function planAndApplyMerges(
   input: MemoryConsolidationInput,
   active: readonly MemoryRecord[],
+  changed: readonly MemoryRecord[],
   guard: AutomatedReviewGuard,
 ): Promise<MergePlanResult> {
   const proposals: MemoryConsolidationProposal[] = [];
@@ -318,108 +390,169 @@ async function planAndApplyMerges(
   /** Records marked stale or contradicted this run; they take part in no further pair. */
   const resolved = new Set<string>();
   const merges = new Map<string, { survivor: MemoryRecord; tags: Set<string>; duplicateIds: string[] }>();
+  const byClass = new Map<string, MemoryRecord[]>();
+  for (const record of active) {
+    const bucket = byClass.get(record.cls) ?? [];
+    bucket.push(record);
+    byClass.set(record.cls, bucket);
+  }
+  const readPairs = new Set<string>();
+  const compared = new Map<string, number>();
+  let pairsRead = 0;
+  let incompleteFrom: number | undefined;
+  let readFailure: string | undefined;
+  let stopped = false;
+  const incomplete = (record: MemoryRecord): void => {
+    incompleteFrom = incompleteFrom === undefined ? record.updatedAt : Math.min(incompleteFrom, record.updatedAt);
+  };
 
-  const pairs = candidatePairs(active);
-  const readings = await mapLimit(pairs, PAIR_CONCURRENCY, ([a, b]) => classifyMemoryPair(a, b));
-  guard.refresh();
-
-  for (const [index, [a, b]] of pairs.entries()) {
-    if (guard.failure !== undefined) break;
-    const { relation, replacement } = readings[index]!;
-    if (relation === 'unrelated' || resolved.has(a.id) || resolved.has(b.id)) continue;
-
-    if (a.scope !== b.scope && relation === 'duplicate') {
-      // These records do not disagree, so they stay as they are and stay
-      // injectable; the proposal is what reaches a person. Touched so decay
-      // leaves them alone this run.
-      proposals.push({
-        kind: 'cross-scope-duplicate',
-        ids: [a.id, b.id],
-        route: CURATOR_ROUTE,
-        reason: 'Records in different scopes state the same fact; merging across scope needs review.',
-      });
-      touched.add(a.id);
-      touched.add(b.id);
-      continue;
+  for (const record of changed) {
+    if (stopped) { incomplete(record); continue; }
+    if (resolved.has(record.id)) continue;
+    const partners = (await comparisonPartners(input.memoryRegistry, record, byClass.get(record.cls) ?? []))
+      .filter((other) => !resolved.has(other.id) && !readPairs.has(pairKey(record, other)));
+    if (partners.length === 0) { compared.set(record.id, record.updatedAt); continue; }
+    if (pairsRead + partners.length > MAX_PAIR_READINGS_PER_RUN) { stopped = true; incomplete(record); continue; }
+    for (const other of partners) readPairs.add(pairKey(record, other));
+    pairsRead += partners.length;
+    // Each pair is applied as its reading settles: a failed request loses that pair, not the pass.
+    const settled = await Promise.allSettled(partners.map((other) => classifyMemoryPair(record, other)));
+    guard.refresh();
+    const failures = settled.filter((outcome): outcome is PromiseRejectedResult => outcome.status === 'rejected');
+    if (failures.length > 0) {
+      incomplete(record);
+      logger.warn('[memory] consolidation pair readings failed', { id: record.id, failed: failures.length, of: partners.length, error: summarizeError(failures[0]!.reason) });
+      // Every reading of this record failed: the decision model is unavailable, so stop instead of paying for the rest.
+      if (failures.length === partners.length) { stopped = true; readFailure = summarizeError(failures[0]!.reason); }
+    } else {
+      compared.set(record.id, record.updatedAt);
     }
-
-    // A duplicate keeps the more trusted record; a contradiction the reading
-    // settles keeps the record it names as the later correction.
-    const replacer = replacement === 'a_replaces_b' ? a : replacement === 'b_replaces_a' ? b : undefined;
-    const survivor = relation === 'contradiction' && replacer ? replacer : chooseSurvivor([a, b]);
-    const loser = survivor.id === a.id ? b : a;
-    // A record that already absorbed others this run stays their survivor.
-    if (merges.has(loser.id)) continue;
-    const sameScope = a.scope === b.scope;
-    // The replacing record must be at least as reviewed as the one it
-    // replaces; the guard additionally refuses to move a person's review.
-    const supersedes = relation === 'contradiction' && sameScope && replacer !== undefined
-      && verifiedRank(survivor) >= verifiedRank(loser);
-
-    if (relation === 'contradiction' && !supersedes) {
-      const reason = sameScope
-        ? 'Records disagree about the same fact and neither is a later correction at least as reviewed as the other.'
-        : 'Records in different scopes disagree about the same fact; resolving across scope needs review.';
-      proposals.push({ kind: 'contradiction', ids: [survivor.id, loser.id], route: CURATOR_ROUTE, reason });
-      // The proposal REACHES the review machinery: each disagreeing record
-      // the guard lets automation move is marked contradicted, which
-      // prioritises it in the review queue and excludes it from injection
-      // until a human resolves it. A record a person reviewed keeps that
-      // review. Nothing is deleted; the resolution stays the human's.
-      for (const id of [survivor.id, loser.id]) {
-        guard.applyAutomatedReview(id, () => ({ state: 'contradicted', staleReason: reason, reviewedBy: 'consolidation' }));
-        touched.add(id);
-        resolved.add(id);
-      }
-      continue;
+    for (const [index, other] of partners.entries()) {
+      const outcome = settled[index]!;
+      if (outcome.status !== 'fulfilled') continue;
+      applyPairReading(input, record, other, outcome.value, { proposals, touched, resolved, merges }, guard);
     }
-
-    const entry = merges.get(survivor.id);
-    if (!entry && merges.size >= input.config.maxMergesPerRun) continue;
-    const survivorNow = guard.unchanged(survivor.id);
-    const loserNow = guard.unchanged(loser.id);
-    const tags = new Set(entry?.tags ?? survivor.tags);
-    if (relation === 'duplicate') for (const tag of loser.tags) tags.add(tag);
-    let outcome: AutomatedWriteOutcome;
-    if (!survivorNow || !loserNow) outcome = 'changed';
-    else if (isPersonReviewed(loserNow)) outcome = 'person-reviewed';
-    // The survivor takes the loser's tags first, so a stopped pass never
-    // leaves a loser marked stale whose tags nobody kept.
-    else if (tags.size !== survivorNow.tags.length && guard.applyAutomatedTagUpdate(survivor.id, [...tags]) !== 'applied') outcome = 'changed';
-    else {
-      outcome = guard.applyAutomatedReview(loser.id, () => ({
-        state: 'stale',
-        staleReason: relation === 'duplicate'
-          ? `Duplicate of ${survivor.id}; merged by idle consolidation.`
-          : `Superseded by ${survivor.id}, a later correction or update of it; resolved by idle consolidation.`,
-        reviewedBy: 'consolidation',
-      }));
-    }
-    touched.add(loser.id);
-    touched.add(survivor.id);
-    resolved.add(loser.id);
-    if (outcome !== 'applied') {
-      if (outcome === 'person-reviewed' && relation === 'contradiction') {
-        proposals.push({
-          kind: 'contradiction',
-          ids: [survivor.id, loser.id],
-          route: CURATOR_ROUTE,
-          reason: `The reading names ${survivor.id} a later correction of ${loser.id}, but a person reviewed ${loser.id}; resolving it needs review.`,
-        });
-      }
-      continue;
-    }
-    const merge = entry ?? { survivor, tags, duplicateIds: [] };
-    merge.tags = tags;
-    merges.set(survivor.id, merge);
-    merge.duplicateIds.push(loser.id);
+    // A failed write stops the pass; this record's pairs are compared again next time.
+    if (guard.failure !== undefined) { compared.delete(record.id); incomplete(record); stopped = true; }
   }
 
   const merged: MemoryConsolidationMergeEntry[] = [];
   for (const { survivor, duplicateIds } of merges.values()) {
     merged.push({ survivorId: survivor.id, duplicateIds, scope: survivor.scope, cls: survivor.cls });
   }
-  return { merged, proposals, touched };
+  return { merged, proposals, touched, pairsRead, incompleteFrom, compared, readFailure };
+}
+
+function pairKey(a: MemoryRecord, b: MemoryRecord): string {
+  return a.id < b.id ? `${a.id}\0${b.id}` : `${b.id}\0${a.id}`;
+}
+
+interface PairState {
+  readonly proposals: MemoryConsolidationProposal[];
+  readonly touched: Set<string>;
+  readonly resolved: Set<string>;
+  readonly merges: Map<string, { survivor: MemoryRecord; tags: Set<string>; duplicateIds: string[] }>;
+}
+
+/** Act on one pair's reading (see planAndApplyMerges). */
+function applyPairReading(
+  input: MemoryConsolidationInput,
+  a: MemoryRecord,
+  b: MemoryRecord,
+  reading: MemoryPairReading,
+  state: PairState,
+  guard: AutomatedReviewGuard,
+): void {
+  const { proposals, touched, resolved, merges } = state;
+  if (guard.failure !== undefined) return;
+  const { relation, replacement } = reading;
+  if (relation === 'unrelated' || resolved.has(a.id) || resolved.has(b.id)) return;
+
+  if (a.scope !== b.scope && relation === 'duplicate') {
+    // These records do not disagree, so they stay as they are and stay
+    // injectable; the proposal is what reaches a person. Touched so decay
+    // leaves them alone this run.
+    proposals.push({
+      kind: 'cross-scope-duplicate',
+      ids: [a.id, b.id],
+      route: CURATOR_ROUTE,
+      reason: 'Records in different scopes state the same fact; merging across scope needs review.',
+    });
+    touched.add(a.id);
+    touched.add(b.id);
+    return;
+  }
+
+  // A duplicate keeps the more trusted record; a contradiction the reading
+  // settles keeps the record it names as the later correction.
+  const replacer = replacement === 'a_replaces_b' ? a : replacement === 'b_replaces_a' ? b : undefined;
+  const survivor = relation === 'contradiction' && replacer ? replacer : chooseSurvivor([a, b]);
+  const loser = survivor.id === a.id ? b : a;
+  // A record that already absorbed others this run stays their survivor.
+  if (merges.has(loser.id)) return;
+  const sameScope = a.scope === b.scope;
+  // The replacing record must be at least as reviewed as the one it
+  // replaces; the guard additionally refuses to move a person's review.
+  const supersedes = relation === 'contradiction' && sameScope && replacer !== undefined
+    && verifiedRank(survivor) >= verifiedRank(loser);
+
+  if (relation === 'contradiction' && !supersedes) {
+    const reason = sameScope
+      ? 'Records disagree about the same fact and neither is a later correction at least as reviewed as the other.'
+      : 'Records in different scopes disagree about the same fact; resolving across scope needs review.';
+    proposals.push({ kind: 'contradiction', ids: [survivor.id, loser.id], route: CURATOR_ROUTE, reason });
+    // The proposal REACHES the review machinery: each disagreeing record
+    // the guard lets automation move is marked contradicted, which
+    // prioritises it in the review queue and excludes it from injection
+    // until a human resolves it. A record a person reviewed keeps that
+    // review. Nothing is deleted; the resolution stays the human's.
+    for (const id of [survivor.id, loser.id]) {
+      guard.applyAutomatedReview(id, () => ({ state: 'contradicted', staleReason: reason, reviewedBy: 'consolidation' }));
+      touched.add(id);
+      resolved.add(id);
+    }
+    return;
+  }
+
+  const entry = merges.get(survivor.id);
+  if (!entry && merges.size >= input.config.maxMergesPerRun) return;
+  const survivorNow = guard.unchanged(survivor.id);
+  const loserNow = guard.unchanged(loser.id);
+  const tags = new Set(entry?.tags ?? survivor.tags);
+  if (relation === 'duplicate') for (const tag of loser.tags) tags.add(tag);
+  let outcome: AutomatedWriteOutcome;
+  if (!survivorNow || !loserNow) outcome = 'changed';
+  else if (isPersonReviewed(loserNow)) outcome = 'person-reviewed';
+  // The survivor takes the loser's tags first, so a stopped pass never
+  // leaves a loser marked stale whose tags nobody kept.
+  else if (tags.size !== survivorNow.tags.length && guard.applyAutomatedTagUpdate(survivor.id, [...tags]) !== 'applied') outcome = 'changed';
+  else {
+    outcome = guard.applyAutomatedReview(loser.id, () => ({
+      state: 'stale',
+      staleReason: relation === 'duplicate'
+        ? `Duplicate of ${survivor.id}; merged by idle consolidation.`
+        : `Superseded by ${survivor.id}, a later correction or update of it; resolved by idle consolidation.`,
+      reviewedBy: 'consolidation',
+    }));
+  }
+  touched.add(loser.id);
+  touched.add(survivor.id);
+  resolved.add(loser.id);
+  if (outcome !== 'applied') {
+    if (outcome === 'person-reviewed' && relation === 'contradiction') {
+      proposals.push({
+        kind: 'contradiction',
+        ids: [survivor.id, loser.id],
+        route: CURATOR_ROUTE,
+        reason: `The reading names ${survivor.id} a later correction of ${loser.id}, but a person reviewed ${loser.id}; resolving it needs review.`,
+      });
+    }
+    return;
+  }
+  const merge = entry ?? { survivor, tags, duplicateIds: [] };
+  merge.tags = tags;
+  merges.set(survivor.id, merge);
+  merge.duplicateIds.push(loser.id);
 }
 
 /**
@@ -485,16 +618,19 @@ function applyDecay(
   return { decayed, archived };
 }
 
-/** Propose (never perform) deletion of long-stale records through the gated memory route. */
+/**
+ * Propose (never perform) deletion of long-stale records through the gated
+ * memory route. Every candidate is offered to the store, which keeps each
+ * once; the run's cap applies to what the receipt reports, so a long list is
+ * worked through instead of the same first few being found every time.
+ */
 function planStaleDeleteProposals(
   input: MemoryConsolidationInput,
   records: readonly MemoryRecord[],
-  used: number,
 ): MemoryConsolidationProposal[] {
   const proposals: MemoryConsolidationProposal[] = [];
   const cutoff = input.now - STALE_DELETE_PROPOSAL_AGE_DAYS * DAY_MS;
   for (const record of records) {
-    if (used + proposals.length >= input.config.maxProposalsPerRun) break;
     if (record.reviewState !== 'stale') continue;
     if (record.updatedAt > cutoff) continue;
     proposals.push({
@@ -505,6 +641,42 @@ function planStaleDeleteProposals(
     });
   }
   return proposals;
+}
+
+/** The proposals not already standing in the store; all of them when the store cannot keep them. */
+function keepProposals(registry: MemoryConsolidationRegistry, found: readonly MemoryConsolidationProposal[], now: number): readonly MemoryConsolidationProposal[] {
+  if (!registry.addConsolidationProposals) return found;
+  try {
+    return registry.addConsolidationProposals(found, now);
+  } catch (error) {
+    logger.warn('[memory] consolidation proposals were not kept; this run reports all it found', { error: summarizeError(error) });
+    return found;
+  }
+}
+
+/**
+ * Move the cursor to `at` and remember the records newer than it that need no
+ * comparison next time: those this pass compared or wrote, and earlier entries
+ * whose record still carries the stamp they name.
+ */
+function writeCursor(
+  registry: MemoryConsolidationRegistry,
+  previous: MemoryConsolidationCursor | null,
+  guard: AutomatedReviewGuard,
+  compared: ReadonlyMap<string, number>,
+  at: number,
+): void {
+  if (!registry.writeStoreMeta) return;
+  const current = new Map(registry.getAll().map((record) => [record.id, record.updatedAt]));
+  const own: Record<string, number> = {};
+  for (const [id, stamp] of Object.entries(previous?.own ?? {})) if (current.get(id) === stamp && stamp > at) own[id] = stamp;
+  for (const [id, stamp] of compared) if (current.get(id) === stamp && stamp > at) own[id] = stamp;
+  for (const [id, stamp] of guard.written) if (current.get(id) === stamp && stamp > at) own[id] = stamp;
+  try {
+    registry.writeStoreMeta(CURSOR_KEY, JSON.stringify({ at: Math.max(previous?.at ?? 0, at), own }));
+  } catch (error) {
+    logger.warn('[memory] consolidation cursor was not saved; the next pass compares these records again', { error: summarizeError(error) });
+  }
 }
 
 export async function runMemoryConsolidation(input: MemoryConsolidationInput): Promise<MemoryConsolidationRunReceipt> {
@@ -519,16 +691,22 @@ export async function runMemoryConsolidation(input: MemoryConsolidationInput): P
   });
 }
 async function runDecisionMemoryConsolidation(input: MemoryConsolidationInput): Promise<MemoryConsolidationRunReceipt> {
-  const all = input.memoryRegistry.getAll();
+  const registry = input.memoryRegistry;
+  const all = registry.getAll();
   const active = all.filter(isActive);
+  const cursor = readMemoryConsolidationCursor(registry);
+  // Newest change first: a new record is the likeliest duplicate. Records
+  // compared before the pass stopped are kept in the cursor's `own` list.
+  const changed = active.filter((record) => changedSince(record, cursor))
+    .sort((left, right) => right.updatedAt - left.updatedAt || left.id.localeCompare(right.id));
 
-  const guard = new AutomatedReviewGuard(input.memoryRegistry, all);
-  const mergeResult = await planAndApplyMerges(input, active, guard);
+  const guard = new AutomatedReviewGuard(registry, all);
+  const mergeResult = await planAndApplyMerges(input, active, changed, guard);
   const decayResult = applyDecay(input, active, mergeResult.touched, guard);
-  const proposals = [
-    ...mergeResult.proposals,
-    ...planStaleDeleteProposals(input, all, mergeResult.proposals.length),
-  ].slice(0, input.config.maxProposalsPerRun);
+  const found = [...mergeResult.proposals, ...planStaleDeleteProposals(input, all)];
+  const proposals = keepProposals(registry, found, input.now).slice(0, input.config.maxProposalsPerRun);
+  // One millisecond back, so a record stamped in the same millisecond the pass began is compared next time, not skipped.
+  writeCursor(registry, cursor, guard, mergeResult.compared, Math.min(input.now - 1, mergeResult.incompleteFrom === undefined ? input.now : mergeResult.incompleteFrom - 1));
 
   const suffix = input.randomSuffix ? input.randomSuffix() : Math.random().toString(36).slice(2, 8);
   const runId = `mcon-${input.now.toString(36)}-${suffix}`;
@@ -542,9 +720,12 @@ async function runDecisionMemoryConsolidation(input: MemoryConsolidationInput): 
     archived: decayResult.archived,
     decayed: decayResult.decayed,
     proposed: proposals,
+    pairsRead: mergeResult.pairsRead,
     usageSignalAvailable: input.usageLookup !== undefined,
     note: guard.failure !== undefined
       ? `Idle consolidation stopped early because a memory write failed (${guard.failure}). The merges, archives and decays listed were applied; nothing else was changed.`
+      : mergeResult.readFailure !== undefined
+        ? `Idle consolidation stopped comparing records early because the decision model did not answer (${mergeResult.readFailure}). What is listed was applied; the records not compared are compared on the next pass.`
       : 'Idle consolidation performs only reversible merges (loser marked stale, not deleted) and decays only records known never to have been referenced. New memories and deletes are proposed through the existing confirmation-gated routes, never written silently.',
   };
 }

@@ -13,7 +13,7 @@ test('state set before a restart is read back when the same conversation session
   const sessionId = 'f47ac10b-58cc-4372-a567-0e02b2c3d479';
   const first = new KVState({ stateDir, sessionId });
   await first.set({ plan: 'step two' });
-  // Disposal is what flushes a write still waiting on the 5 s debounce.
+  // set resolves once the value is on disk; dispose only stops housekeeping.
   await first.dispose();
 
   const resumed = new KVState({ stateDir, sessionId });

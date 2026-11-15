@@ -16,6 +16,7 @@ import { useMemoryReadings } from './_helpers/memory-readings.ts';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import type {
   MemoryConsolidationRegistry,
+  MemoryConsolidationRunReceipt,
   MemoryRecord,
 } from '../platform/src/platform/state/index.js';
 // MemoryReviewPatch is defined in memory-store.ts but not re-exported from the
@@ -237,14 +238,17 @@ describe('memory consolidation scheduler: the daemon runs the engine', () => {
     expect(receipts.length).toBe(1);
   });
 
-  test('with no judgment port a pass that has pairs to read fails and leaves no receipt, never a guessed merge', async () => {
+  test('with no judgment port a pass merges nothing and its receipt says the decision model did not answer, never a guessed merge', async () => {
     const previous = installJudgmentPort(undefined);
     try {
       const registry = new FakeRegistry([rec({ id: 'a', summary: 'same' }), rec({ id: 'b', summary: 'same' })]);
       const { scheduler, receipts } = makeScheduler({ registry, idle: true });
       await scheduler.tick();
       scheduler.stop();
-      expect(receipts.length).toBe(0);
+      expect(receipts.length).toBe(1);
+      const receipt = receipts[0] as MemoryConsolidationRunReceipt;
+      expect(receipt.merged).toEqual([]);
+      expect(receipt.note).toContain('decision model did not answer');
       expect(registry.records.get('a')!.reviewState).toBe('fresh');
       expect(registry.records.get('b')!.reviewState).toBe('fresh');
     } finally {

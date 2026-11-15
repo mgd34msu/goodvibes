@@ -46,7 +46,6 @@ import { createConfiguredFetchDeps, createFetchTool } from './fetch/index.js';
 import { createStateTool } from './state/index.js';
 import { createWorkflowServices, createWorkflowTool } from './workflow/index.js';
 import { createRegistryTool } from './registry-tool/index.js';
-import type { KVState } from '../state/kv-state.js';
 import { createKeyedStateReclaimCheck, createSessionBoundKvState } from './session-kv-state.js';
 import { createTaskTool } from './task/index.js';
 import { createTeamTool } from './team/index.js';
@@ -238,10 +237,6 @@ export function registerToolWithContractGate(
     strictPermissionClass: false,
   }, registration);
 }
-
-/** Session key-value stores not yet disposed; one shared exit hook flushes them, however many registries were built. */
-const liveKvStates = new Set<KVState>();
-let kvExitHookInstalled = false;
 
 /**
  * Register all built-in tools into the given registry.
@@ -647,15 +642,9 @@ export function registerAllTools(
       ...(reclaimCheck ? { canReclaimKeyedState: reclaimCheck } : {}),
     },
     deps.resolveSessionId,
-    { onBind: (live) => { liveKvStates.add(live); }, onRelease: (live) => { liveKvStates.delete(live); } },
   );
+  // Every state-tool write is on disk when the call returns, so no exit hook is needed to flush it.
   const kvState = kvBinding.state;
-  // KVState writes behind a debounce timer; flush the last write when the loop drains. A host that
-  // shuts down explicitly calls the returned `dispose` instead, which does the same and unregisters.
-  if (!kvExitHookInstalled) {
-    kvExitHookInstalled = true;
-    process.on('beforeExit', () => { for (const live of liveKvStates) void live.dispose(); liveKvStates.clear(); });
-  }
   const dispose = async (): Promise<void> => {
     await codeIntelligence.dispose();
     await kvBinding.dispose();

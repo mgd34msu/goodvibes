@@ -89,7 +89,7 @@ describe('buildPerTurnKnowledgeInjection: query derivation pulls records the fro
     // "rate limiting" makes it read as relevant, so this genuinely exercises query
     // derivation rather than a trusted record clearing the floor on its own.
     const records = [
-      makeRecord({ id: 'mem_ratelimit', summary: 'rate limiting uses a token bucket, 100 req/min', tags: ['rate-limiting'], reviewState: 'fresh', confidence: 55 }),
+      makeRecord({ id: 'mem_ratelimit', summary: 'rate limiting uses a token bucket, 100 req/min', tags: ['rate-limiting'], reviewState: 'fresh', confidence: 60 }),
     ];
     const registry = fakeRegistry(records);
     const tail: ProviderMessage[] = [
@@ -126,7 +126,7 @@ describe('buildPerTurnKnowledgeInjection: query derivation pulls records the fro
 describe('buildPerTurnKnowledgeInjection: relevance floor (stage 2)', () => {
   test('all candidates below the floor => block===null, honest reason, zero injectedIds', async () => {
     const records = [
-      makeRecord({ id: 'mem_weak', summary: 'a barely-related note about auth', tags: ['auth'], reviewState: 'fresh', confidence: 55 }),
+      makeRecord({ id: 'mem_weak', summary: 'a barely-related note about auth', tags: ['auth'], reviewState: 'fresh', confidence: 60 }),
     ];
     const result = await buildPerTurnKnowledgeInjection({
       memoryRegistry: fakeRegistry(records),

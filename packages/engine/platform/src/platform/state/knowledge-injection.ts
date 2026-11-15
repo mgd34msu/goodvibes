@@ -14,7 +14,7 @@ import type {
   MemorySearchFilter,
   MemorySemanticSearchResult,
 } from './memory-store.js';
-import { isMemoryTemporallyActive } from './memory-store.js';
+import { isPromptActiveMemory, MIN_PROMPT_MEMORY_CONFIDENCE } from './memory-recall-contract.js';
 import { decisionOrClassic } from '../runtime/decision-policy.js';
 
 export interface KnowledgeInjection {
@@ -40,9 +40,6 @@ type KnowledgeRegistrySource = {
   /** Vector-index candidates in similarity order, retrieval only (MemoryRegistry.semanticCandidates). */
   semanticCandidates?(input: MemorySearchFilter): readonly MemorySemanticSearchResult[] | Promise<readonly MemorySemanticSearchResult[]>;
 };
-
-/** Records under this confidence are never injected: the retrieval gate, code. */
-const MIN_INJECTION_CONFIDENCE = 55;
 
 /**
  * A ranked candidate's `score` is its `relevant` reading's probability times
@@ -84,18 +81,6 @@ function lexicalTokens(text: string): Set<string> {
   return new Set(text.toLowerCase().split(/[^a-z0-9_]+/).filter(token => token.length >= 3 && !LEXICAL_STOPWORDS.has(token)));
 }
 
-function isInjectable(record: MemoryRecord, now: number): boolean {
-  // A record OUTSIDE its temporal validity window (pending or expired) is never
-  // injected, and neither is a flagged one (stale: merged away or superseded;
-  // contradicted), whatever its confidence, mirrors the recall contract so both
-  // injection paths agree on what is flagged. The confidence floor is this
-  // path's own.
-  return isMemoryTemporallyActive(record, now)
-    && record.confidence >= MIN_INJECTION_CONFIDENCE
-    && record.reviewState !== 'contradicted'
-    && record.reviewState !== 'stale';
-}
-
 interface ShortlistEntry {
   readonly record: MemoryRecord;
   /** Present when the vector index put the record on the shortlist. */
@@ -103,7 +88,10 @@ interface ShortlistEntry {
 }
 
 /**
- * Retrieval, all code. Only what retrieval puts forward is read by Jev: the
+ * Retrieval, all code. A record is injectable exactly when the recall contract
+ * says it is prompt-active (isPromptActiveMemory: temporal window, not flagged,
+ * at or above the one confidence floor), so /memory and the turn record agree.
+ * Only what retrieval puts forward is read by Jev: the
  * vector index's injectable records at or above KNOWLEDGE_SIMILARITY_FLOOR, or,
  * when there is no vector index (or it returned nothing because it failed), the
  * injectable records sharing a word with the task. Ids in `exclude` (already
@@ -119,11 +107,11 @@ async function buildShortlist(
   const seen = new Set<string>(exclude);
   const query = [task, ...writeScope].join(' ');
   const semantic = registry.semanticCandidates
-    ? await registry.semanticCandidates({ query, minConfidence: MIN_INJECTION_CONFIDENCE, limit: size })
+    ? await registry.semanticCandidates({ query, minConfidence: MIN_PROMPT_MEMORY_CONFIDENCE, limit: size })
     : undefined;
   for (const entry of semantic ?? []) {
     if (shortlist.length >= size) break;
-    if (entry.similarity < KNOWLEDGE_SIMILARITY_FLOOR || seen.has(entry.record.id) || !isInjectable(entry.record, now)) continue;
+    if (entry.similarity < KNOWLEDGE_SIMILARITY_FLOOR || seen.has(entry.record.id) || !isPromptActiveMemory(entry.record, now)) continue;
     seen.add(entry.record.id);
     shortlist.push({ record: entry.record, similarity: entry.similarity });
   }
@@ -131,7 +119,7 @@ async function buildShortlist(
   const tokens = lexicalTokens(query);
   if (tokens.size === 0) return shortlist;
   const lexical = registry.getAll()
-    .filter((record) => !seen.has(record.id) && isInjectable(record, now))
+    .filter((record) => !seen.has(record.id) && isPromptActiveMemory(record, now))
     .map((record) => {
       const words = lexicalTokens([record.summary, record.detail ?? '', ...record.tags].join(' '));
       let hits = 0;

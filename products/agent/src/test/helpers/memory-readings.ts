@@ -91,6 +91,27 @@ export const DEFAULT_MEMORY_READINGS: Required<MemoryReadingTable> = {
 type State = Record<string, unknown>;
 
 function answer(table: Required<MemoryReadingTable>, name: string, question: Question, state: State): unknown {
+  if ('query' in state && Array.isArray(state.candidates) && question.type === 'choice') {
+    // A together rerank reads every candidate in one Choice: each candidate's
+    // share against "none" is its yes reading. Which rerank it is shows in its
+    // test line: memory usage, memory search, or knowledge injection.
+    const test = String((question.instructions as { test?: unknown } | undefined)?.test ?? '');
+    const query = state.query as string | { task: string; write_scope?: string[] };
+    const task = typeof query === 'string' ? query : query.task;
+    const scope = typeof query === 'string' ? [] : query.write_scope ?? [];
+    const yesOf = (content: RecordText): number => test.includes('model response') ? table.usage(content, task)
+      : test.includes('searched their project memory') ? table.searchMatch(task, content)
+        : table.relevance(task, scope, content).relevant;
+    const weights: Record<string, number> = { none: 1 };
+    for (const candidate of state.candidates as { id: string; content: RecordText }[]) {
+      const yes = Math.min(0.999, Math.max(0.001, yesOf(candidate.content)));
+      weights[candidate.id] = yes / (1 - yes);
+    }
+    const total = Object.values(weights).reduce((sum, weight) => sum + weight, 0);
+    const probabilities = Object.fromEntries(Object.keys(question.criteria).map((option) => [option, (weights[option] ?? 0) / total]));
+    const choice = Object.entries(probabilities).sort((a, b) => b[1] - a[1])[0]![0];
+    return { type: 'choice', choice, confidence: 0.9, probabilities };
+  }
   if ('task' in state && 'record' in state) {
     const reading = table.relevance(state.task as string, state.write_scope as string[], state.record as RecordText);
     if (name === 'relevant') return noulAnswer(reading.relevant);

@@ -1,8 +1,10 @@
-import { captureMemoryOperation, assertMemoryOperationCurrent, awaitMemoryOperation, type MemoryOperationOptions } from './memory-operation.js';
+import { captureMemoryOperation, assertMemoryOperationCurrent, type MemoryOperationOptions } from './memory-operation.js';
 import { assertMemoryPreparedAddOptionsBinding, captureMemoryPreparedAddOptions, prepareMemoryStoreAdd, retainMemoryAddBinding } from './memory-store.js';
 import type { MemoryClass, MemoryPreparedAdd, MemoryPreparedAddCommitOptions, MemoryAddPublication, MemoryAddOptions, MemoryBundle, MemoryDoctorReport, MemoryLink, MemoryRecord, MemoryReviewPatch, MemoryScope, MemorySearchFilter, MemorySemanticSearchResult, MemoryStore } from './memory-store.js';
 import type { MemoryVectorStats } from './memory-vector-store.js';
 import type { MemoryImportResult } from './memory-store.js';
+import type { MemoryUsageChange, MemoryUsageEntry, MemoryUsageTopEntry } from './memory-usage-stats.js';
+import type { MemoryConsolidationProposal } from './memory-consolidation.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 import { runHonestMemorySearch, type HonestMemorySearchOptions, type HonestMemorySearchResult } from './memory-recall-contract.js';
@@ -21,7 +23,7 @@ function ownerMapSet<K extends object, V>(map: WeakMap<K, V>, key: K, value: V):
   memoryOwnerMapApply(memoryOwnerMapSet, map, [key, value]);
 }
 
-const nativeRegistries = new WeakMap<object, { readonly store: MemoryStore; readonly notify: (operation: MemoryOperationOptions) => void }>();
+const nativeRegistries = new WeakMap<object, { readonly store: MemoryStore; readonly notify: () => void }>();
 
 export class MemoryRegistry {
   private store: MemoryStore;
@@ -29,7 +31,7 @@ export class MemoryRegistry {
 
   constructor(store: MemoryStore) {
     this.store = store;
-    ownerMapSet(nativeRegistries, this, Object.freeze({ store, notify: (operation: MemoryOperationOptions) => this.notify(operation) }));
+    ownerMapSet(nativeRegistries, this, Object.freeze({ store, notify: () => this.notify() }));
   }
 
   getStore(): MemoryStore {
@@ -51,15 +53,16 @@ export class MemoryRegistry {
     };
   }
 
-  private notify(operation: MemoryOperationOptions): void {
+  /**
+   * Tell every listener after a write the store committed. The write is
+   * already published, so nothing here can make it look failed (a retry would
+   * store the memory twice): not the caller's lifecycle ending meanwhile, not a
+   * panel that throws, and every listener is told.
+   */
+  private notify(): void {
     for (const fn of this.listeners) {
-      assertMemoryOperationCurrent(operation);
-      // The write is already durable: a panel that throws must not make the
-      // write look failed (a retry would store the memory twice) or starve the
-      // listeners after it.
       try { fn(); } catch (error) { logger.warn('MemoryRegistry: a listener threw', { error: summarizeError(error) }); }
     }
-    assertMemoryOperationCurrent(operation);
   }
 
   async add(opts: MemoryAddOptions, options?: MemoryOperationOptions): Promise<MemoryRecord> {
@@ -68,8 +71,11 @@ export class MemoryRegistry {
     const claimsAutomation = options?.automatedReview !== true && opts.review?.reviewedBy?.trim().toLowerCase() === 'consolidation';
     if (claimsAutomation) logger.warn('MemoryRegistry: add claimed the reserved consolidation reviewer; recorded as operator');
     const safeOpts = claimsAutomation ? { ...opts, review: { ...opts.review, reviewedBy: 'operator' } } : opts;
-    const record = await awaitMemoryOperation(() => this.store.add(safeOpts, operation), operation);
-    this.notify(operation);
+    // Not raced against the signal: the store checks it before the row is
+    // published and then lets the write finish, so an aborted add either
+    // stores nothing or resolves with the stored record.
+    const record = await this.store.add(safeOpts, operation);
+    this.notify();
     return record;
   }
 
@@ -123,8 +129,8 @@ export class MemoryRegistry {
 
   async importBundle(bundle: MemoryBundle, options?: MemoryOperationOptions): Promise<MemoryImportResult> {
     const operation = captureMemoryOperation(options);
-    const result = await awaitMemoryOperation(() => this.store.importBundle(bundle, operation), operation);
-    this.notify(operation);
+    const result = await this.store.importBundle(bundle, operation);
+    this.notify();
     return result;
   }
 
@@ -134,8 +140,8 @@ export class MemoryRegistry {
 
   async link(fromId: string, toId: string, relation: string, options?: MemoryOperationOptions): Promise<MemoryLink | null> {
     const operation = captureMemoryOperation(options);
-    const link = await awaitMemoryOperation(() => this.store.link(fromId, toId, relation, operation), operation);
-    if (link) this.notify(operation);
+    const link = await this.store.link(fromId, toId, relation, operation);
+    if (link) this.notify();
     return link;
   }
 
@@ -146,7 +152,7 @@ export class MemoryRegistry {
   update(id: string, patch: { cls?: MemoryClass; scope?: MemoryScope; summary?: string; detail?: string; tags?: string[]; validFrom?: number | null; validUntil?: number | null; resetReview?: true }, options?: MemoryOperationOptions): MemoryRecord | null {
     const operation = captureMemoryOperation(options);
     const record = this.store.update(id, patch, operation);
-    if (record) this.notify(operation);
+    if (record) this.notify();
     return record;
   }
 
@@ -157,19 +163,49 @@ export class MemoryRegistry {
     if (claimsAutomation) logger.warn('MemoryRegistry: review claimed the reserved consolidation reviewer; recorded as operator', { id });
     const operation = captureMemoryOperation(options);
     const record = this.store.review(id, claimsAutomation ? { ...patch, reviewedBy: 'operator' } : patch, operation);
-    if (record) this.notify(operation);
+    if (record) this.notify();
     return record;
   }
 
   delete(id: string, options?: MemoryOperationOptions): boolean {
     const operation = captureMemoryOperation(options);
     const removed = this.store.delete(id, operation);
-    if (removed) this.notify(operation);
+    if (removed) this.notify();
     return removed;
   }
 
   getAll(): MemoryRecord[] {
     return this.store.retrieve({});
+  }
+
+  /** One turn's usage counts, one store update (see MemoryStore.recordUsage). Counters are not record edits, so listeners are not told. */
+  recordUsage(change: MemoryUsageChange, at?: number): Promise<void> {
+    return this.store.recordUsage(change, at);
+  }
+
+  usage(id: string): MemoryUsageEntry | null {
+    return this.store.usage(id);
+  }
+
+  usageEntries(): MemoryUsageTopEntry[] {
+    return this.store.usageEntries();
+  }
+
+  readStoreMeta(key: string): string | null {
+    return this.store.readMeta(key);
+  }
+
+  writeStoreMeta(key: string, value: string): void {
+    this.store.writeMeta(key, value);
+  }
+
+  /** Keeps consolidation proposals once each; returns the ones that were not already standing. */
+  addConsolidationProposals(proposals: readonly MemoryConsolidationProposal[], at?: number): MemoryConsolidationProposal[] {
+    return this.store.addConsolidationProposals(proposals, at);
+  }
+
+  listConsolidationProposals(): MemoryConsolidationProposal[] {
+    return this.store.listConsolidationProposals();
   }
 
   /**
@@ -237,13 +273,9 @@ export function prepareMemoryRegistryAdd(registry: object, input: MemoryAddOptio
           }
         },
       });
-      // The row is published and saved: only the callers' lifecycles can
-      // still retire the result, not an unrelated write that landed since.
-      assertCommitCurrent();
-      // Reuse the original observable path after durable save, with the same restrictions.
-      const operation = captureMemoryOperation({ signal: commitLifecycle.signal, assertCurrent: assertCommitCurrent });
-      owner.notify(operation);
-      assertCommitCurrent();
+      // The row is published and saved: every listener is told and the record
+      // returned, whatever happened to the callers' lifecycles meanwhile.
+      owner.notify();
       return result;
     },
   });

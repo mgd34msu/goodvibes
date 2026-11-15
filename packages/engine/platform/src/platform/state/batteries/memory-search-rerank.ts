@@ -6,8 +6,10 @@
  * the similarity*100 + lexical*0.25 fusion memory-store.ts searchSemantic used.
  *
  * The re-ranking cookbook: retrieval (the SQL filter and the vector index)
- * builds a shortlist, then one yes/no per query-record pair, each in its own
- * request, orders it by probability.
+ * builds a shortlist, then the whole shortlist is read in ONE request (a
+ * yes/no per record, together) and ordered by probability. A search costs one
+ * decision-model request at any limit, none when every candidate was read
+ * before for the same query (memory-search-ranking.ts keeps the readings).
  *
  * Band: low stakes. The order only decides which records a reader sees first;
  * nothing is changed or injected on the strength of it.
@@ -18,14 +20,17 @@ import type { MemoryRecord } from '../memory-store.js';
 /** Most records one search sends to the rerank; retrieval order decides which. */
 export const MAX_RERANK_SHORTLIST = 50;
 
+/** Candidates read beyond the requested count, so a near miss in retrieval order can still rise into the results. */
+const RERANK_MARGIN = 5;
+
 /**
- * How many retrieved records a search reranks: four per requested result, at
- * least 12, never more than MAX_RERANK_SHORTLIST. The same breadth
- * knowledge-injection.ts has always asked the vector index for.
+ * How many retrieved records a search reranks: the requested count plus a
+ * small margin, at least 8, never more than MAX_RERANK_SHORTLIST. The list is
+ * read in one request, so this sizes the request, not the number of requests.
  */
 export function rerankShortlistSize(limit: number | undefined): number {
   if (limit === undefined) return MAX_RERANK_SHORTLIST;
-  return Math.min(MAX_RERANK_SHORTLIST, Math.max(limit * 4, 12));
+  return Math.min(MAX_RERANK_SHORTLIST, Math.max(limit + RERANK_MARGIN, 8));
 }
 
 /** What the rerank sees of a record: its words, never its ids, scores or timestamps. */
@@ -56,7 +61,7 @@ const KEY_ROTATION = {
 
 export const memorySearchRerank = defineRerank({
   name: 'engine.state.memory-search',
-  version: 1,
+  version: 2,
   description: 'Orders project-memory records by whether each one is what someone searching project memory for the query wants to find.',
   accuracyFloor: 0.9,
   instructions: 'Someone searched their project memory for `query`. Is `candidate` a record they are looking for?',
@@ -65,6 +70,7 @@ export const memorySearchRerank = defineRerank({
     false: 'The record only shares a word or a loose topic with the query, or is about something else.',
   },
   band: STAKES_BANDS.low.yesNo,
+  together: true,
   fixtures: [
     { name: 'which test runner', query: 'test runner', candidates: [TEST_FLAKE, RELEASE, TEST_RUNNER], expect: { top: 'test-runner' } },
     { name: 'flaky test on CI', query: 'why did the tests time out on CI', candidates: [TEST_RUNNER, TEST_FLAKE, PORT_CONFLICT], expect: { top: 'test-flake' } },

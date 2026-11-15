@@ -4,14 +4,15 @@ import { detectReferencedMemoryIds } from '../platform/src/platform/state/index.
 import { useMemoryReadings } from './_helpers/memory-readings.ts';
 
 /**
- * Two-tier reference detection: each injected memory is read by the
- * `engine.state.memory-usage` battery against the response. 'referenced' only
- * when the reading says yes; an uncertain or no reading is 'present'.
+ * Two-tier reference detection: every memory injected into a turn is read by
+ * the `engine.state.memory-usage` battery against the response in ONE request.
+ * 'referenced' only when the reading says yes; an uncertain or no reading is
+ * 'present'.
  */
 describe('detectReferencedMemoryIds', () => {
   const readings = useMemoryReadings();
 
-  test('asks one usage question per memory, carrying the memory text and the response', async () => {
+  test('one request per turn, however many memories: the response is sent once with every memory', async () => {
     readings.use({ usage: (memory) => (memory.summary.includes('rollout') ? 0.95 : 0.05) });
     const result = await detectReferencedMemoryIds('I ran deploy/rollout.sh as configured.', [
       { id: 'm1', summary: 'Kubernetes rollout script', detail: 'deploy/rollout.sh' },
@@ -21,11 +22,23 @@ describe('detectReferencedMemoryIds', () => {
     expect(result.present).toEqual(['m2']);
     expect(result.perId.get('m1')).toBe('referenced');
     expect(result.perId.get('m2')).toBe('present');
-    expect(readings.requests).toHaveLength(2);
+    expect(result.assessed).toEqual(['m1', 'm2']);
+    expect(readings.requests).toHaveLength(1);
     expect(readings.requests[0]!.state).toEqual({
-      memory: { summary: 'Kubernetes rollout script', detail: 'deploy/rollout.sh' },
-      response: 'I ran deploy/rollout.sh as configured.',
+      query: 'I ran deploy/rollout.sh as configured.',
+      candidates: [
+        { id: 'm1', content: { summary: 'Kubernetes rollout script', detail: 'deploy/rollout.sh' } },
+        { id: 'm2', content: { summary: 'Release checklist' } },
+      ],
     });
+  });
+
+  test('eight injected memories cost one decision-model request', async () => {
+    readings.use({ usage: () => 0.05 });
+    const records = Array.from({ length: 8 }, (_, index) => ({ id: `m${index}`, summary: `memory ${index}` }));
+    const result = await detectReferencedMemoryIds('an unrelated answer', records);
+    expect(readings.requests).toHaveLength(1);
+    expect(result.present).toHaveLength(8);
   });
 
   test('an uncertain reading stays present: the tier claims use only on a yes', async () => {

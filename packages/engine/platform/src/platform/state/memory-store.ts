@@ -29,6 +29,8 @@ import {
 } from './memory-embeddings.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
+import type { MemoryUsageChange, MemoryUsageEntry, MemoryUsageTopEntry } from './memory-usage-stats.js';
+import type { MemoryConsolidationProposal } from './memory-consolidation.js';
 import {
   assertValidMemoryBundle,
   assertValidMemoryFields,
@@ -475,9 +477,19 @@ export class MemoryStore {
       operation,
     );
 
-    this.vectorIndex?.upsert(record, operation);
-    await this.persistNow(operation);
-    assertMemoryOperationCurrent(operation);
+    // The row is published: from here only a failed save can make this add
+    // fail, never the caller's lifecycle or another write landing meanwhile, or
+    // the caller would retry a row that already exists into a duplicate. The
+    // index follows the committed row whatever happened to the caller.
+    this.indexCommitted(() => this.vectorIndex?.upsert(record, this.committedOperation()));
+    try {
+      await this.persistNow();
+    } catch (error) {
+      this.withdrawUnsavedAdd(id);
+      if (error instanceof MemoryStoreChangedOnDiskError) throw error;
+      const cause = error instanceof Error && error.cause !== undefined ? error.cause : error;
+      throw new Error(`MemoryStore: the memory could not be saved to disk (${summarizeError(cause)}); nothing was stored. Retry once the disk can be written.`, { cause });
+    }
     logger.info('MemoryStore: record added', { id, cls: opts.cls });
     return record;
   }
@@ -570,16 +582,10 @@ export class MemoryStore {
           } finally { publishing = false; }
         });
         store.vectorIndex?.upsert(written, operation);
-        // The row is published. Only the caller's lifecycle can still retire
-        // the result; an unrelated write landing during the save cannot, or
+        // The row is published: neither the caller's lifecycle nor an
+        // unrelated write landing during the save can retire the result, or
         // the caller would retry a row that already exists into a duplicate.
-        const published = store.captureOperation({ signal, assertCurrent: () => {
-          assertBindings(); scope(); assertBindings(); assertMemoryOperationCurrent(lifecycle);
-          if (commitLifecycle) assertMemoryOperationCurrent(commitLifecycle);
-          assertBindings();
-        } }, 'read');
-        await store.save(published);
-        assertMemoryOperationCurrent(published);
+        await store.persistNow();
         logger.info('MemoryStore: prepared record added', { id: written.id, cls: written.cls });
         return { ...canonical, tags: [...canonical.tags], provenance: canonical.provenance.map(link => ({ ...link })) };
       },
@@ -742,12 +748,11 @@ export class MemoryStore {
     return awaitMemoryOperation(() => rankSemanticSearch(this, filter, operation), operation);
   }
 
-  /** Records to review: the least trusted records, ordered by the memory-review-priority reading. */
+  /** Records to review, most in need of a person first (compareReviewNeed: stored fields only, no model request). */
   async reviewQueue(limit = 10, scope?: MemoryScope, options?: MemoryOperationOptions): Promise<MemoryRecord[]> {
     const operation = this.captureOperation(options, 'read');
     assertMemoryOperationCurrent(operation);
-    const leastTrustedFirst = this.retrieve(scope ? { scope } : {}, operation).reverse();
-    return awaitMemoryOperation(() => rankReviewQueue(leastTrustedFirst.slice(0, Math.max(limit * 4, 25)), limit, operation), operation);
+    return rankReviewQueue(this.retrieve(scope ? { scope } : {}, operation), limit);
   }
 
   /** Exports the records the filter selects; a query here filters, it does not rank. */
@@ -879,8 +884,8 @@ export class MemoryStore {
       throw error;
     }
 
-    await this.persistNow(operation);
-    assertMemoryOperationCurrent(operation);
+    // Published: only a failed save can still fail the import (see add).
+    await this.persistNow();
     logger.info('MemoryStore: bundle imported', { importedRecords, skippedRecords, importedLinks });
     return { importedRecords, skippedRecords, importedLinks };
   }
@@ -922,7 +927,7 @@ export class MemoryStore {
       return null;
     }
 
-    await this.persistNow(operation);
+    await this.persistNow();
     return { fromId, toId, relation, createdAt: now };
   }
 
@@ -1001,9 +1006,8 @@ export class MemoryStore {
 
     const updated: MemoryRecord = { ...existing, cls: newClass, scope: newScope, summary: newSummary, detail: newDetail, tags: newTags, validFrom: newValidFrom, validUntil: newValidUntil, updatedAt: now,
       ...(resetReview ? { reviewState: 'fresh', confidence: FRESH_MEMORY_CONFIDENCE, reviewedAt: undefined, reviewedBy: undefined, staleReason: undefined } : {}) };
-    this.vectorIndex?.upsert(updated, operation);
-    this.persist(operation);
-    assertMemoryOperationCurrent(operation);
+    this.indexCommitted(() => this.vectorIndex?.upsert(updated, this.committedOperation()));
+    this.persist();
     logger.info('MemoryStore: record updated', { id });
     return updated;
   }
@@ -1048,9 +1052,8 @@ export class MemoryStore {
     );
 
     const reviewed = { ...existing, reviewState, confidence, reviewedAt, reviewedBy, staleReason, updatedAt: now };
-    this.vectorIndex?.upsert(reviewed, operation);
-    this.persist(operation);
-    assertMemoryOperationCurrent(operation);
+    this.indexCommitted(() => this.vectorIndex?.upsert(reviewed, this.committedOperation()));
+    this.persist();
     logger.info('MemoryStore: record reviewed', { id, reviewState, confidence });
     return reviewed;
   }
@@ -1068,11 +1071,123 @@ export class MemoryStore {
     // stores with FK enforcement disabled for a connection.
     this.runMutation('DELETE FROM memory_links WHERE from_id = ? OR to_id = ?', [id, id], operation);
     this.runMutation('DELETE FROM memory_records WHERE id = ?', [id], operation);
-    this.vectorIndex?.delete(id, operation);
-    this.persist(operation);
-    assertMemoryOperationCurrent(operation);
+    this.indexCommitted(() => this.vectorIndex?.delete(id, this.committedOperation()));
+    this.persist();
     logger.info('MemoryStore: record deleted', { id });
     return true;
+  }
+
+  // ── Usage counters, store meta, consolidation proposals ──────────────────────
+  //
+  // None of these is a record field another write computes from, so they are
+  // written straight to the image without moving mutationRevision (a usage
+  // count landing mid-way must never make a memory write refuse), and saved in
+  // the background like update/review/delete.
+
+  /**
+   * Count one turn's use of memories in one step: every id in `injected` was in
+   * the prompt, every id in `assessed` had its use read, every id in
+   * `referenced` was read as used. Unknown ids are ignored; a deleted record
+   * takes its counts with it.
+   */
+  async recordUsage(change: MemoryUsageChange, at: number = Date.now()): Promise<void> {
+    if (!this.ready) return;
+    if (this.imageIsStale()) await this.reloadIfChanged();
+    const apply = (ids: readonly string[] | undefined, assignments: string, params: (string | number)[]): boolean => {
+      const unique = [...new Set((ids ?? []).filter((id) => id.trim()))];
+      if (unique.length === 0) return false;
+      this.sqlite.run(`UPDATE memory_records SET ${assignments} WHERE id IN (${unique.map(() => '?').join(', ')})`, [...params, ...unique]);
+      return true;
+    };
+    const injected = apply(change.injected, 'injected_count = injected_count + 1, last_injected_at = ?', [at]);
+    const assessed = apply(change.assessed, 'assessed_count = assessed_count + 1', []);
+    const referenced = apply(change.referenced, 'referenced_count = referenced_count + 1, last_referenced_at = ?', [at]);
+    if (injected || assessed || referenced) this.persist();
+  }
+
+  /** One record's usage counters, or null when there is no such record. */
+  usage(id: string): MemoryUsageEntry | null {
+    if (!this.ready) return null;
+    const row = this.sqlite.exec(
+      'SELECT injected_count, assessed_count, referenced_count, last_injected_at, last_referenced_at FROM memory_records WHERE id = ? LIMIT 1',
+      [id],
+    )[0]?.values[0];
+    return row ? usageFromRow(row) : null;
+  }
+
+  /** Every record that was ever injected, with its counters. */
+  usageEntries(): MemoryUsageTopEntry[] {
+    if (!this.ready) return [];
+    const rows = this.sqlite.exec(
+      'SELECT injected_count, assessed_count, referenced_count, last_injected_at, last_referenced_at, id FROM memory_records WHERE injected_count > 0',
+    )[0]?.values ?? [];
+    return rows.map((row) => ({ id: String(row[5]), ...usageFromRow(row) }));
+  }
+
+  /** A store-owned fact by key (the consolidation cursor), or null. */
+  readMeta(key: string): string | null {
+    if (!this.ready) return null;
+    const value = this.sqlite.exec('SELECT value FROM memory_meta WHERE key = ? LIMIT 1', [key])[0]?.values[0]?.[0];
+    return typeof value === 'string' ? value : null;
+  }
+
+  writeMeta(key: string, value: string): void {
+    if (!this.ready) return;
+    this.refuseStaleImageSync();
+    this.sqlite.run('INSERT OR REPLACE INTO memory_meta (key, value) VALUES (?, ?)', [key, value]);
+    this.persist();
+  }
+
+  /**
+   * Keep consolidation proposals, one row per kind and set of record ids.
+   * Returns the proposals that were not already standing, so a pass reports a
+   * proposal once however many passes find it again.
+   */
+  addConsolidationProposals(proposals: readonly MemoryConsolidationProposal[], at: number = Date.now()): MemoryConsolidationProposal[] {
+    if (!this.ready || proposals.length === 0) return [];
+    this.refuseStaleImageSync();
+    const added: MemoryConsolidationProposal[] = [];
+    for (const proposal of proposals) {
+      const key = consolidationProposalKey(proposal);
+      if ((this.sqlite.exec('SELECT 1 FROM memory_proposals WHERE key = ? LIMIT 1', [key])[0]?.values.length ?? 0) > 0) continue;
+      this.sqlite.run(
+        'INSERT INTO memory_proposals (key, kind, ids, route, reason, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+        [key, proposal.kind, JSON.stringify(proposal.ids), proposal.route, proposal.reason, at],
+      );
+      added.push(proposal);
+    }
+    if (added.length > 0) this.persist();
+    return added;
+  }
+
+  /**
+   * The standing consolidation proposals, oldest first. A proposal whose
+   * records are gone, or that no longer holds (a stale-delete whose record is
+   * no longer stale, a contradiction one of whose records a person marked
+   * stale, a cross-scope duplicate one of whose records is no longer active),
+   * is dropped here, so the list only shows what still needs a person.
+   */
+  listConsolidationProposals(): MemoryConsolidationProposal[] {
+    if (!this.ready) return [];
+    const rows = this.sqlite.exec('SELECT key, kind, ids, route, reason FROM memory_proposals ORDER BY created_at, key')[0]?.values ?? [];
+    const standing: MemoryConsolidationProposal[] = [];
+    const settled: string[] = [];
+    for (const [key, kind, rawIds, route, reason] of rows) {
+      let ids: string[];
+      try { ids = (JSON.parse(String(rawIds)) as unknown[]).map(String); } catch { settled.push(String(key)); continue; }
+      const records = ids.map((id) => this.get(id));
+      const holds = records.every((record) => record !== null) && (
+        kind === 'stale-delete' ? records[0]?.reviewState === 'stale'
+          : kind === 'contradiction' ? records.every((record) => record?.reviewState !== 'stale')
+            : records.every((record) => record?.reviewState === 'fresh' || record?.reviewState === 'reviewed'));
+      if (!holds) { settled.push(String(key)); continue; }
+      standing.push({ kind: kind as MemoryConsolidationProposal['kind'], ids, route: String(route), reason: String(reason) });
+    }
+    if (settled.length > 0 && !this.imageIsStale()) {
+      for (const key of settled) this.sqlite.run('DELETE FROM memory_proposals WHERE key = ?', [key]);
+      this.persist();
+    }
+    return standing;
   }
 
   rebuildVectorIndex(): MemoryVectorStats {
@@ -1359,22 +1474,52 @@ export class MemoryStore {
     );
   }
 
+  /**
+   * The commit point. The caller's lifecycle and the write's revision are
+   * checked before the statement runs and nowhere after: once the row is in
+   * the image it is published, and a check after it could only report a
+   * write that happened as failed.
+   */
   private runMutation(sql: Parameters<SQLiteStore['run']>[0], params: Parameters<SQLiteStore['run']>[1], operation: MemoryOperationOptions, onPublished?: () => void): void {
     assertMemoryOperationCurrent(operation);
     this.refuseStaleImageSync();
     const state = this.operations.get(operation);
     if (!state) throw new Error('Memory operation is not owned by this store');
     const revision = ++this.mutationRevision;
+    this.sqlite.run(sql, params);
+    state.revision = revision;
+    onPublished?.();
+  }
+
+  /**
+   * The operation for work that follows a committed row (its vector entry):
+   * bound to the store's backend only, never to the caller's lifecycle, so a
+   * caller that is gone cannot leave a committed row unindexed or make it look
+   * failed.
+   */
+  private committedOperation(): MemoryOperationOptions {
+    return this.captureOperation(undefined, 'read');
+  }
+
+  /**
+   * Keep the index in step with a committed row. A refusal here (a later write
+   * already replaced the row and indexes it itself, or the index cannot be
+   * written) is logged; it never turns the committed write into a failure.
+   */
+  private indexCommitted(work: () => void): void {
     try {
-      this.sqlite.run(sql, params);
-      if (this.mutationRevision !== revision) throw new Error('Memory operation source changed');
-      state.revision = revision;
-      onPublished?.();
+      work();
+    } catch (error) {
+      logger.debug('MemoryStore: the index entry of a committed write was not written; the row is stored', { error: summarizeError(error) });
     }
-    finally {
-      if (this.mutationRevision !== revision) throw new Error('Memory operation source changed');
-      state.revision = revision;
-      assertMemoryOperationCurrent(operation);
+  }
+
+  /** Starts the image save; a synchronous refusal becomes a rejected promise. */
+  private startSave(): Promise<boolean> {
+    try {
+      return this.saveImage();
+    } catch (error) {
+      return Promise.reject(error);
     }
   }
 
@@ -1384,10 +1529,8 @@ export class MemoryStore {
    * process's image only, and the next successful save writes it, but a reload
    * of a changed file would drop it, which is logged when it happens.
    */
-  private persist(operation: MemoryOperationOptions): void {
-    assertMemoryOperationCurrent(operation);
-    void this.save(operation).then(() => { this.unsavedChanges = 0; }, (err: unknown) => {
-      try { assertMemoryOperationCurrent(operation); } catch { return; }
+  private persist(): void {
+    void this.startSave().then(() => { this.unsavedChanges = 0; }, (err: unknown) => {
       this.unsavedChanges += 1;
       logger.warn('MemoryStore: autosave failed', { error: summarizeError(err), unsavedChanges: this.unsavedChanges });
     });
@@ -1397,20 +1540,52 @@ export class MemoryStore {
    * Save and wait, for the async writes (add, import, link): a save that did
    * not happen is reported to the caller instead of returning the record as
    * remembered. A refusal because another process saved the file keeps its own
-   * error, which already says to retry.
+   * error, which already says to retry. The caller's lifecycle is not consulted:
+   * the write is published, so only the save's own outcome counts.
    */
-  private async persistNow(operation: MemoryOperationOptions): Promise<void> {
-    assertMemoryOperationCurrent(operation);
+  private async persistNow(): Promise<void> {
     try {
-      await this.save(operation);
+      await this.startSave();
       this.unsavedChanges = 0;
     } catch (err) {
-      assertMemoryOperationCurrent(operation);
-      this.unsavedChanges += 1;
       if (err instanceof MemoryStoreChangedOnDiskError) throw err;
+      this.unsavedChanges += 1;
       throw new Error(`MemoryStore: the change was applied in memory but could not be saved to disk, so it may be lost when the store reloads: ${summarizeError(err)}`, { cause: err });
     }
   }
+
+  /**
+   * An add whose save failed is taken back out of the image, so the error the
+   * caller gets means nothing was stored and a retry stores the record once.
+   * Runs outside runMutation: after a changed-on-disk refusal the image is
+   * stale, and the reload would drop the row anyway.
+   */
+  private withdrawUnsavedAdd(id: string): void {
+    try {
+      this.sqlite.run('DELETE FROM memory_records WHERE id = ?', [id]);
+      this.mutationRevision++;
+      this.vectorIndex?.delete(id, this.committedOperation());
+    } catch (error) {
+      logger.warn('MemoryStore: could not withdraw an add whose save failed', { id, error: summarizeError(error) });
+    }
+  }
+}
+
+function usageFromRow(row: readonly unknown[]): MemoryUsageEntry {
+  const count = (value: unknown): number => (typeof value === 'number' && Number.isFinite(value) ? value : 0);
+  const time = (value: unknown): number | null => (typeof value === 'number' && Number.isFinite(value) ? value : null);
+  return {
+    injectedCount: count(row[0]),
+    assessedCount: count(row[1]),
+    referencedCount: count(row[2]),
+    lastInjectedAt: time(row[3]),
+    lastReferencedAt: time(row[4]),
+  };
+}
+
+/** One proposal per kind and set of records, whatever order a pass found them in. */
+function consolidationProposalKey(proposal: Pick<MemoryConsolidationProposal, 'kind' | 'ids'>): string {
+  return `${proposal.kind}:${[...proposal.ids].sort().join(',')}`;
 }
 
 function freezeNewMemoryData(value: unknown): void {

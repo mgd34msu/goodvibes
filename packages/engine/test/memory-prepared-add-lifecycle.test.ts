@@ -187,7 +187,7 @@ test('an unrelated reentrant publication cannot adopt an unconstrained current m
   expect(f.notifications()).toBe(0);
 });
 
-test('listener retirement after exact durable publication cannot return a successful result', async () => {
+test('listener retirement after exact durable publication still returns the stored record', async () => {
   const f = await fixture();
   let callerCurrent = true;
   f.registry.subscribe(() => { callerCurrent = false; });
@@ -195,7 +195,8 @@ test('listener retirement after exact durable publication cannot return a succes
     assertCurrent() { if (!callerCurrent) throw new Error('Original caller retired by listener'); },
   });
   const transition = exactTransition(f.api, plan);
-  await expect(plan.commit(transition)).rejects.toThrow('Original caller retired by listener');
+  // The row is published and saved: a caller retired afterwards gets the record, never an error to retry into a duplicate.
+  expect<unknown>(await plan.commit(transition)).toEqual(plan.record);
   expect(transition.publications()).toBe(1);
   const reopened = new MemoryStore(f.path, { embeddingRegistry: f.embeddings, enableVectorIndex: false });
   cleanups.push(() => reopened.close()); await reopened.init();

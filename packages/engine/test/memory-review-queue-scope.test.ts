@@ -6,7 +6,7 @@ import { MemoryEmbeddingProviderRegistry, MemoryRegistry, MemoryStore } from '..
 import { ConfigManager } from '../platform/src/platform/config/manager.js';
 import { useMemoryReadings } from './_helpers/memory-readings.ts';
 
-// The queue order is the memory-review-priority reading; the fake port answers it.
+// The queue order is code (stored fields), no reading; the port is installed for the adds' other readings.
 useMemoryReadings();
 
 /**

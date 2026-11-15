@@ -124,6 +124,18 @@ test('a prepared add whose row is saved reports success even when another write 
   expect(reopened.get(viaRegistry.record.id)?.summary).toBe('prepared through the registry');
 });
 
+test('two adds in flight together, or an add with another write during its save, each succeed once', async () => {
+  const { open } = setup();
+  const store = await open();
+  const other = await store.add({ cls: 'fact', summary: 'other record' });
+  const both = await Promise.allSettled([store.add({ cls: 'fact', summary: 'first' }), store.add({ cls: 'fact', summary: 'second' })]);
+  expect(both.map((result) => result.status)).toEqual(['fulfilled', 'fulfilled']);
+  const pending = store.add({ cls: 'fact', summary: 'third' });
+  store.review(other.id, { state: 'reviewed' });
+  await pending;
+  expect(store.retrieve({}).map((record) => record.summary).sort()).toEqual(['first', 'other record', 'second', 'third']);
+});
+
 test('an imported record that needs normalising is imported whole, with its links', async () => {
   const { open } = setup(true);
   const store = await open();

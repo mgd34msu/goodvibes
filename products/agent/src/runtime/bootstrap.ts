@@ -233,12 +233,11 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
   // runtime/services.ts the way the platform's own RuntimeServices composition
   // constructs it: a standing 5-minute tick, not turn-settled events). This
   // repo's old turn-settled-driven local wiring is retired.
-  // Usage-outcome instrumentation: records which memories were injected and, at
-  // turn completion, whether the model output plausibly referenced them (honest
-  // heuristic overlap). No longer feeds consolidation's decay ranking (the platform's
-  // own composition root does not wire a usageLookup into its scheduler either,
-  // matched here for parity); still tracked for its own reporting.
-  const memoryUsageTracker = createMemoryUsageTracker(services.shellPaths, services.memoryRegistry);
+  // Usage-outcome instrumentation: the memories injected into a turn and, at its
+  // end, one Jev reading of which the response used, written as one counter
+  // update on the memory records. Consolidation's decay reads those counters
+  // from the store, so every product sharing the store orders decay the same way.
+  const memoryUsageTracker = createMemoryUsageTracker(services.memoryRegistry);
   // Both halves of the owner ruling that occasion nudges go to Telegram AND the
   // agent (docs/occasions.md §4.2): this product is a PUSH destination the daemon
   // addresses, and the surface that PULLS what is outstanding. Neither replaces

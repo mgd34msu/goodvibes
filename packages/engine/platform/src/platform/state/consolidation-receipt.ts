@@ -12,8 +12,9 @@
 // awaiting human judgment, never auto-applied) names where to actually look:
 // the memory surface's Proposals view (`/memory`), which lists each proposal's
 // kind, reason, and affected record ids and jumps to them in the review queue.
-// Without that pointer the receipt line is the only trace a proposal ever
-// existed, a count with nowhere to go.
+// The count is of proposals NEW this run: a standing proposal is kept once in
+// the memory store and listed there until a person resolves it, so the notice
+// does not repeat it on every attach.
 // ---------------------------------------------------------------------------
 
 import type { MemoryConsolidationRunReceipt } from './memory-consolidation.js';

@@ -161,7 +161,7 @@ class SlowJsonFileStore extends JsonFileStore<Record<string, unknown>> {
 }
 
 describe('KVState: a cleared key does not come back', () => {
-  test('a debounced write already in flight cannot restore a key cleared after it', async () => {
+  test('a write still in flight cannot restore a key cleared after it', async () => {
     const dir = tempDir('kv-order');
     const path = join(dir, 'session_abcdef12.json');
     const disposables: KVState[] = [];
@@ -172,22 +172,15 @@ describe('KVState: a cleared key does not come back', () => {
       replaceInternalStore(kv, 'store', slow);
       await kv.load();
 
-      await kv.set({ deploy_token: 'value-the-agent-was-told-to-forget' });
-      await kv.persist();
-
-      // Two writers, and nothing ordered them: the 5-second debounce armed by
-      // set/clear, and dispose(), which clears the timer and writes directly.
-      // Clearing a timer that has ALREADY fired stops nothing.
+      // set and clear each write before they resolve; the set's write is
+      // parked with the key in it while the clear arrives.
       const release = slow.holdNext();
-      const inFlight = kv.persist();
-      await waitFor(() => slow.started >= 2);
-
-      const clearing = kv.clear(['deploy_token']).then(() => kv.persist());
-      await settleCompetingWrite(slow, 2);
+      const setting = kv.set({ deploy_token: 'value-the-agent-was-told-to-forget' });
+      await waitFor(() => slow.started >= 1);
+      const clearing = kv.clear(['deploy_token']);
       release();
+      await setting;
       await clearing;
-      await inFlight;
-      await waitFor(() => slow.finished >= 3);
 
       // What a resumed session reads back.
       const resumed = new KVState({ sessionId: 'abcdef12', stateDir: dir });

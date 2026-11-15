@@ -2,8 +2,9 @@
  * MemoryStore search ranking: retrieval (the SQL filter, the vector index) is
  * code, and the `engine.state.memory-search` rerank orders what retrieval found
  * whenever there is a query. With no query the order is structural
- * (compareByTrust: unflagged first, then confidence, then recency). The review
- * queue is ordered by the `engine.state.memory-review-priority` reading.
+ * (compareByTrust: unflagged first, then confidence, then recency). A search
+ * costs one rerank request for its whole shortlist. The review queue is
+ * ordered in code from the stored fields, with no request.
  */
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -70,9 +71,14 @@ describe('MemoryStore.search with a query', () => {
       'deploy note: production rollouts are blue-green via deploy/rollout.sh',
       'deploy note: staging uses deploy/staging.sh',
     ]);
-    // Only the three records the SQL filter retrieved were read, each in its own request.
-    expect(memoryRequests(readings, 'engine.state.memory-search')).toHaveLength(3);
-    expect(memoryRequests(readings, 'engine.state.memory-search').map((request) => (request.state as { query: string }).query)).toEqual(['deploy', 'deploy', 'deploy']);
+    // Only the three records the SQL filter retrieved were read, all in one request.
+    expect(memoryRequests(readings, 'engine.state.memory-search')).toHaveLength(1);
+    const request = memoryRequests(readings, 'engine.state.memory-search')[0]!.state as { query: string; candidates: unknown[] };
+    expect(request.query).toBe('deploy');
+    expect(request.candidates).toHaveLength(3);
+    // The same search again reads nothing: the readings are kept per query and record revision.
+    await store.search({ query: 'deploy', limit: 2 });
+    expect(memoryRequests(readings, 'engine.state.memory-search')).toHaveLength(1);
     store.close();
   });
 
@@ -84,8 +90,9 @@ describe('MemoryStore.search with a query', () => {
     }
     const found = await store.search({ query: 'alpha', limit: 1 });
     expect(found).toHaveLength(1);
-    // limit 1 reranks max(1*4, 12) = 12 of the 20 retrieved records.
-    expect(memoryRequests(readings, 'engine.state.memory-search')).toHaveLength(12);
+    // limit 1 reranks max(1 + 5, 8) = 8 of the 20 retrieved records, in one request.
+    expect(memoryRequests(readings, 'engine.state.memory-search')).toHaveLength(1);
+    expect((memoryRequests(readings, 'engine.state.memory-search')[0]!.state as { candidates: unknown[] }).candidates).toHaveLength(8);
     store.close();
   });
 
@@ -136,7 +143,7 @@ describe('MemoryStore.searchSemantic', () => {
     ]);
     expect(results[0]!.score).toBeCloseTo(94);
     expect(results[0]!.similarity).toBeGreaterThan(0);
-    expect(memoryRequests(readings, 'engine.state.memory-search')).toHaveLength(3);
+    expect(memoryRequests(readings, 'engine.state.memory-search')).toHaveLength(1);
     store.close();
   });
 
@@ -184,31 +191,26 @@ describe('SqliteVecMemoryIndex staleOnly', () => {
 });
 
 describe('MemoryStore.reviewQueue', () => {
-  const readings = useMemoryReadings({
-    reviewPriority: (record) => ({ 'unverified guess': 0.97, 'stale runtime note': 0.8, 'reviewed convention': 0.1 })[record.summary] ?? 0.5,
-  });
+  const readings = useMemoryReadings();
 
-  test('orders candidates by the review-priority reading, one request each, carrying review state and confidence', async () => {
+  test('orders from the stored fields with no request: flagged first, then unreviewed low confidence, then reviewed', async () => {
     const store = await openStore(false);
     await store.add({ cls: 'pattern', summary: 'reviewed convention', review: { state: 'reviewed', confidence: 92 } });
     await store.add({ cls: 'constraint', summary: 'stale runtime note', review: { state: 'stale', confidence: 70, staleReason: 'aged out' } });
     await store.add({ cls: 'incident', summary: 'unverified guess', review: { confidence: 35 } });
     const queue = await store.reviewQueue(2);
-    expect(queue.map((record) => record.summary)).toEqual(['unverified guess', 'stale runtime note']);
-    expect(memoryRequests(readings, 'engine.state.memory-review-priority')).toHaveLength(3);
-    const states = memoryRequests(readings, 'engine.state.memory-review-priority').map((request) => (request.state as { record: Record<string, unknown> }).record);
-    expect(states).toContainEqual({ review_state: 'stale', confidence: 70, stale_reason: 'aged out', class: 'constraint', summary: 'stale runtime note', tags: [] });
+    expect(queue.map((record) => record.summary)).toEqual(['stale runtime note', 'unverified guess']);
+    expect(memoryRequests(readings, 'engine.state.memory-review-priority')).toHaveLength(0);
     store.close();
   });
 
-  test('an empty queue makes no request; a non-empty one with no port installed throws', async () => {
+  test('works with no judgment port installed', async () => {
     const store = await openStore(false);
     expect(await store.reviewQueue(5)).toEqual([]);
-    expect(memoryRequests(readings, 'engine.state.memory-review-priority')).toHaveLength(0);
     await store.add({ cls: 'fact', summary: 'anything' });
     const previous = installJudgmentPort(undefined);
     try {
-      await expect(store.reviewQueue(5)).rejects.toBeInstanceOf(JudgmentPortMissingError);
+      expect((await store.reviewQueue(5)).map((record) => record.summary)).toEqual(['anything']);
     } finally {
       installJudgmentPort(previous);
       store.close();

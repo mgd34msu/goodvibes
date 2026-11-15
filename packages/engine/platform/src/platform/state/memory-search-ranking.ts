@@ -5,18 +5,12 @@ import { captureMemoryOperation, assertMemoryOperationCurrent, awaitMemoryOperat
  * `engine.state.memory-search` rerank orders it here.
  */
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
-import { mapLimit } from '@goodvibes-jev/judgment';
-import { memoryReviewPriority, reviewPriorityState } from './batteries/memory-review-priority.js';
 import { memorySearchRerank, rerankContent, rerankShortlistSize } from './batteries/memory-search-rerank.js';
 import type { MemoryRecord, MemorySearchFilter, MemorySemanticSearchResult } from './memory-store.js';
 import { decisionOrClassic } from '../runtime/decision-policy.js';
 import { classicLexicalOverlap } from './classic-ranking.js';
 
 const SEARCH_SITE = 'state.memory-search';
-const REVIEW_SITE = 'state.memory-review-queue';
-
-/** Readings in flight at once for one review queue. */
-const REVIEW_CONCURRENCY = 8;
 
 /** The rerank's probability for each record against the query, by record id. */
 export async function rerankProbabilities(query: string, records: readonly MemoryRecord[], options?: MemoryOperationOptions): Promise<Map<string, number>> {
@@ -26,17 +20,55 @@ export async function rerankProbabilities(query: string, records: readonly Memor
   });
 }
 
+/**
+ * Readings kept per process, keyed by the query, the record id and the
+ * record's updatedAt (every write moves it), so a reading is never reused for
+ * a changed record or another question, and repeating a search asks nothing.
+ */
+const READING_CACHE_LIMIT = 1024;
+const readingCache = new Map<string, number>();
+function readingKey(query: string, record: MemoryRecord): string {
+  return `${query}\0${record.id}\0${record.updatedAt}`;
+}
+function cachedReading(key: string): number | undefined {
+  const value = readingCache.get(key);
+  if (value !== undefined) { readingCache.delete(key); readingCache.set(key, value); }
+  return value;
+}
+function rememberReading(key: string, probability: number): void {
+  readingCache.set(key, probability);
+  if (readingCache.size > READING_CACHE_LIMIT) readingCache.delete(readingCache.keys().next().value!);
+}
+/** Tests reset the process-scope readings. */
+export function forgetMemorySearchReadings(): void { readingCache.clear(); }
+
+/**
+ * One rerank request over every candidate not read before for this query
+ * (the battery reads the list together); none when all were read.
+ */
 async function readRerankProbabilities(query: string, records: readonly MemoryRecord[], options?: MemoryOperationOptions): Promise<Map<string, number>> {
   const operation = captureMemoryOperation(options);
   assertMemoryOperationCurrent(operation);
   if (records.length === 0) return new Map();
-  const { ranked } = await awaitMemoryOperation(() => memorySearchRerank.rerank(
-    judgmentPort(SEARCH_SITE),
-    query,
-    records.map((record) => ({ id: record.id, content: rerankContent(record) })),
-    { site: SEARCH_SITE, ...(operation.signal === undefined ? {} : { signal: operation.signal }), beforeAttempt: () => assertMemoryOperationCurrent(operation) },
-  ), operation);
-  return new Map(ranked.map((entry) => [entry.id, entry.probability]));
+  const unread = records.filter((record) => cachedReading(readingKey(query, record)) === undefined);
+  if (unread.length > 0) {
+    const { ranked } = await awaitMemoryOperation(() => memorySearchRerank.rerank(
+      judgmentPort(SEARCH_SITE),
+      query,
+      unread.map((record) => ({ id: record.id, content: rerankContent(record) })),
+      { site: SEARCH_SITE, ...(operation.signal === undefined ? {} : { signal: operation.signal }), beforeAttempt: () => assertMemoryOperationCurrent(operation) },
+    ), operation);
+    for (const entry of ranked) {
+      const record = unread.find((candidate) => candidate.id === entry.id);
+      if (record) rememberReading(readingKey(query, record), entry.probability);
+    }
+  }
+  const probabilities = new Map<string, number>();
+  for (const record of records) {
+    const probability = cachedReading(readingKey(query, record));
+    if (probability !== undefined) probabilities.set(record.id, probability);
+  }
+  return probabilities;
 }
 
 /**
@@ -135,34 +167,23 @@ async function rankDecisionSemanticSearch(store: SemanticRetrieval, filter: Memo
     .slice(0, requestedLimit);
 }
 
+/** Review states in order of need: a disagreement first, then superseded, then never reviewed. */
+const REVIEW_NEED: Readonly<Record<MemoryRecord['reviewState'], number>> = { contradicted: 0, stale: 1, fresh: 2, reviewed: 3 };
+
 /**
- * The review queue's order: the first rerankShortlistSize(limit) candidates
- * (in the order given) are read by memory-review-priority and put first, most
- * in need of a person first, ties to the most recently updated; the rest
- * follow in the order given. Returns at most `limit` records.
+ * Which record most needs a person, from the stored fields: flagged first
+ * (contradicted, then stale), then never reviewed, then lowest confidence,
+ * then the longest untouched. No model request: every field is a fact the
+ * store holds.
  */
-export async function rankReviewQueue(candidates: readonly MemoryRecord[], limit: number, options?: MemoryOperationOptions): Promise<MemoryRecord[]> {
-  return decisionOrClassic(() => rankDecisionReviewQueue(candidates, limit, options), () => {
-    assertMemoryOperationCurrent(captureMemoryOperation(options));
-    return [...candidates].sort((a, b) => b.updatedAt - a.updatedAt || b.createdAt - a.createdAt).slice(0, limit);
-  });
+export function compareReviewNeed(a: MemoryRecord, b: MemoryRecord): number {
+  return REVIEW_NEED[a.reviewState] - REVIEW_NEED[b.reviewState]
+    || a.confidence - b.confidence
+    || a.updatedAt - b.updatedAt
+    || a.createdAt - b.createdAt;
 }
 
-async function rankDecisionReviewQueue(candidates: readonly MemoryRecord[], limit: number, options?: MemoryOperationOptions): Promise<MemoryRecord[]> {
-  const operation = captureMemoryOperation(options);
-  assertMemoryOperationCurrent(operation);
-  const size = rerankShortlistSize(limit);
-  const shortlist = candidates.slice(0, size);
-  if (shortlist.length === 0) return [];
-  const port = judgmentPort(REVIEW_SITE);
-  const read = await awaitMemoryOperation(() => mapLimit(shortlist, REVIEW_CONCURRENCY, async (record) => {
-    assertMemoryOperationCurrent(operation);
-    const run = await awaitMemoryOperation(() => memoryReviewPriority.run(port, reviewPriorityState(record), { site: REVIEW_SITE, ...(operation.signal === undefined ? {} : { signal: operation.signal }), beforeAttempt: () => assertMemoryOperationCurrent(operation) }), operation);
-    run.recordAction('queued');
-    return { record, probability: run.readings.needs_review.probability };
-  }), operation);
-  const ranked = read
-    .sort((a, b) => b.probability - a.probability || b.record.updatedAt - a.record.updatedAt || b.record.createdAt - a.record.createdAt)
-    .map((entry) => entry.record);
-  return [...ranked, ...candidates.slice(size)].slice(0, limit);
+/** The review queue: the records most in need of a person first, at most `limit`. */
+export function rankReviewQueue(candidates: readonly MemoryRecord[], limit: number): MemoryRecord[] {
+  return [...candidates].sort(compareReviewNeed).slice(0, limit);
 }

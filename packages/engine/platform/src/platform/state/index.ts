@@ -90,6 +90,7 @@ export {
   listMemoryProjections,
   getMemoryProjection,
   diffProjectionToProposals,
+  findOrphanedProjectionFiles,
   applyMemoryProjectionProposals,
   createMemoryProjectionGit,
 } from './memory-file-projection.js';
@@ -132,17 +133,20 @@ export type {
 // source, usage lookup, run receipt) are already exported just above.
 export { MemoryConsolidationScheduler } from './memory-consolidation-scheduler.js';
 export type { MemoryConsolidationSchedulerOptions } from './memory-consolidation-scheduler.js';
-export { detectReferencedMemoryIds } from './memory-usage-detection.js';
+export { detectReferencedMemoryIds, MemoryUsageTracker } from './memory-usage-detection.js';
 export type {
   MemoryReferenceTier,
   MemoryReferenceInput,
   MemoryReferenceResult,
+  MemoryUsageRecordSource,
 } from './memory-usage-detection.js';
-export { MemoryUsageStatsStore, MEMORY_USAGE_SIGNAL_NOTE } from './memory-usage-stats.js';
+export { MemoryUsageStatsStore, MEMORY_USAGE_SIGNAL_NOTE, memoryUsageSignal, summarizeMemoryUsage } from './memory-usage-stats.js';
 export type {
   MemoryUsageEntry,
   MemoryUsageTopEntry,
   MemoryUsageSummary,
+  MemoryUsageChange,
+  MemoryUsageSource,
 } from './memory-usage-stats.js';
 export {
   MEMORY_VECTOR_DIMS,

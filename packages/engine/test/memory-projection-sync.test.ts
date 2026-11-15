@@ -1,9 +1,10 @@
-import { mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, test } from 'bun:test';
 import {
   diffProjectionToProposals,
+  findOrphanedProjectionFiles,
   projectMemoryToFiles,
   readProjectedMemoryFiles,
   readProjectedMemoryIds,
@@ -59,6 +60,25 @@ describe('a record the store gained after the last sync', () => {
     projectMemoryToFiles([record()], dir, { now: 1_000 });
     expect(readProjectedMemoryIds(join(dir, 'nowhere'))).toBeNull();
     expect(diffProjectionToProposals([record()], [], { projectedIds: readProjectedMemoryIds(join(dir, 'nowhere')) })).toEqual([]);
+  });
+});
+
+describe('a record deleted from the store', () => {
+  test('loses its untouched file at the next sync; an edited one is kept and listed as an orphan', () => {
+    const dir = projectionDir();
+    const first = [record({ id: 'mem_1' }), record({ id: 'mem_2', createdAt: 2_000 }), record({ id: 'mem_3', createdAt: 3_000 })];
+    projectMemoryToFiles(first, dir, { now: 1_000 });
+    const edited = join(dir, 'mem_3.md');
+    writeFileSync(edited, readFileSync(edited, 'utf-8').replace('# use bun', '# use bun everywhere'));
+    const remaining = [first[0]!];
+    const report = projectMemoryToFiles(remaining, dir, { now: 2_000 });
+    expect(report.removed).toEqual(['mem_2']);
+    expect(report.orphaned).toEqual(['mem_3']);
+    expect(existsSync(join(dir, 'mem_2.md'))).toBe(false);
+    expect(existsSync(edited)).toBe(true);
+    const files = readProjectedMemoryFiles(dir);
+    expect(findOrphanedProjectionFiles(remaining, files).map((file) => file.id)).toEqual(['mem_3']);
+    expect(diffProjectionToProposals(remaining, files)).toEqual([]);
   });
 });
 

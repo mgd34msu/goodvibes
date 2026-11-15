@@ -111,10 +111,10 @@ describe('runHonestMemorySearch: semantic fallback is honest, never a silent emp
     expect(result.requestedSemantic).toBe(false);
     expect(result.indexUnavailableReason).toBeNull();
     expect(result.mode).toBe('literal');
-    // The literal match is ranked by one rerank request per retrieved record.
+    // The literal matches are ranked by one rerank request for the whole shortlist.
     expect(result.records.map((r) => r.summary)).toEqual(['beta outage postmortem']);
     expect(memoryRequests(readings, 'engine.state.memory-search')).toHaveLength(1);
-    expect(memoryRequests(readings, 'engine.state.memory-search')[0]!.state).toEqual({ query: 'beta', candidate: { class: 'incident', summary: 'beta outage postmortem', tags: [] } });
+    expect(memoryRequests(readings, 'engine.state.memory-search')[0]!.state).toMatchObject({ query: 'beta', candidates: [{ content: { class: 'incident', summary: 'beta outage postmortem', tags: [] } }] });
   });
 
   test('a search with no query ranks nothing and makes no request', async () => {

@@ -90,7 +90,7 @@ function makeMemoryRecord(overrides: Partial<MemoryRecord> & { id: string }): Me
     tags: [],
     provenance: [],
     reviewState: 'fresh',
-    confidence: 55,
+    confidence: 60,
     createdAt: 1,
     updatedAt: 1,
     ...overrides,
@@ -294,7 +294,7 @@ describe('orchestrator-turn-loop: main-session per-turn passive knowledge inject
   test('honest zero-injection: no record clears the relevance floor -> a reasoned record is still produced, prompt unaffected', async () => {
     const { registry: memoryRegistry } = makeCountingMemoryRegistry([
       // Shares no word with the query text below, so the relevance reading rules it out.
-      makeMemoryRecord({ id: 'mem_unrelated', summary: 'unrelated topic entirely', confidence: 55 }),
+      makeMemoryRecord({ id: 'mem_unrelated', summary: 'unrelated topic entirely', confidence: 60 }),
     ]);
 
     const { context, capturedSystemPrompts, turnInjectionRecords } = makeContext({

@@ -87,7 +87,7 @@ function makeMemoryRecord(overrides: Partial<MemoryRecord> & { id: string }): Me
     tags: [],
     provenance: [],
     reviewState: 'fresh',
-    confidence: 55,
+    confidence: 60,
     createdAt: 1,
     updatedAt: 1,
     ...overrides,
@@ -264,7 +264,7 @@ describe('orchestrator-runner: per-turn passive knowledge injection', () => {
         summary: 'rate limiting: token bucket, 100 requests per minute',
         tags: ['rate-limiting'],
         reviewState: 'fresh',
-        confidence: 55,
+        confidence: 60,
       }),
     ]);
 

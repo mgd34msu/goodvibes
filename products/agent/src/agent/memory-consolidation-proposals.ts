@@ -1,38 +1,27 @@
 /**
  * memory-consolidation-proposals.ts
  *
- * Adopts the platform's memory.consolidation.receipts verb SHAPE (receipts +
- * pendingProposals, see the platform's daemon-api/src/integration-routes.ts
- * getMemoryConsolidationReceipts handler) for this repo's memory-review
- * surface, WITHOUT going over the wire: this runtime IS the consolidation
- * scheduler's owner (services.memoryConsolidationScheduler, constructed in
- * runtime/services.ts), so the same derivation the daemon's HTTP handler
- * does, flatten every retained receipt's `proposed` array, runs directly
- * in-process. A judgment proposal (a contradiction, a cross-scope duplicate,
- * a stale-delete candidate) was previously computed and logged but reached no
- * surface a human could act on; this makes it legible (what, why) and
- * jumpable into the EXISTING review flow (`/memory review <id> <state>`,
+ * The memory-review surface's view of idle consolidation's proposals (a
+ * contradiction, a cross-scope duplicate, a stale-delete candidate). They are
+ * kept in the memory store once each and listed by the consolidation
+ * scheduler (MemoryConsolidationScheduler.listProposals), so the list is the
+ * same after a restart and a proposal found by several passes appears once.
+ * Each line jumps into the EXISTING review flow (`/memory review <id> <state>`,
  * handleRecallReview in input/commands/recall-review.ts) rather than adding a
  * second, parallel review mechanism.
  */
-import type { MemoryConsolidationProposal, MemoryConsolidationRunReceipt } from '@goodvibes-jev/engine/platform/platform/state';
+import type { MemoryConsolidationProposal } from '@goodvibes-jev/engine/platform/platform/state';
 
-/** The narrow scheduler slice this module needs, mirrors the platform's memoryConsolidation route dependency shape. */
+/** The narrow scheduler slice this module needs. */
 export interface ConsolidationReceiptSource {
-  listReceipts(): readonly MemoryConsolidationRunReceipt[];
+  listProposals(): readonly MemoryConsolidationProposal[];
 }
 
-/**
- * Every proposal carried by the retained receipt ring (bounded, see
- * MemoryConsolidationScheduler's RECEIPT_RING_SIZE), newest-receipt-last, in
- * the SAME order the platform's memory.consolidation.receipts verb returns them
- * (receipts.flatMap(r => r.proposed)), kept identical on purpose so a
- * consumer of either surface sees the same list.
- */
+/** Every proposal still waiting for a person, oldest first, each once. */
 export function listPendingConsolidationProposals(
   source: ConsolidationReceiptSource,
 ): readonly MemoryConsolidationProposal[] {
-  return source.listReceipts().flatMap((receipt) => receipt.proposed);
+  return source.listProposals();
 }
 
 const PROPOSAL_KIND_LABELS: Readonly<Record<MemoryConsolidationProposal['kind'], string>> = {

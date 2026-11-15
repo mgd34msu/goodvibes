@@ -174,7 +174,16 @@ async function postEmbeddingRequest(
     if (check !== undefined) await check;
     request.signal?.throwIfAborted();
     const signal = request.signal ?? AbortSignal.timeout(EMBEDDING_REQUEST_TIMEOUT_MS);
-    const response = await fetchImpl(url, { ...init, signal, redirect: 'error' });
+    let response: Response;
+    try {
+      response = await fetchImpl(url, { ...init, signal, redirect: 'error' });
+    } catch (error) {
+      // Our own deadline, not the caller's: name the provider and the limit instead of a bare abort.
+      if (request.signal === undefined && signal.aborted) {
+        throw new Error(`Embedding provider ${definition.id} did not answer within ${EMBEDDING_REQUEST_TIMEOUT_MS / 1_000} s (${url}); nothing was embedded. Check that the provider is reachable, then retry.`, { cause: error });
+      }
+      throw error;
+    }
     if (response.status === 429 && attempt < RATE_LIMIT_ATTEMPTS) {
       const waitMs = retryAfterMs(response.headers.get('retry-after')) ?? 1_000 * 2 ** (attempt - 1);
       if (waitMs <= RATE_LIMIT_MAX_WAIT_MS) {

@@ -3,7 +3,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'bun:test';
 import { PersistentStore } from '../platform/src/platform/state/persistent-store.js';
-import { MemoryUsageStatsStore } from '../platform/src/platform/state/memory-usage-stats.js';
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
@@ -40,24 +39,4 @@ test('reading the same unreadable file again does not make another copy, and the
     await store.loadOrDiscard();
   }
   expect(readdirSync(root).filter((name) => name.includes('.corrupt-')).length).toBeLessThanOrEqual(5);
-});
-
-test('usage counters from two processes sharing one file are both kept', () => {
-  const root = dir();
-  const path = join(root, 'usage.json');
-  const daemon = new MemoryUsageStatsStore(path);
-  const terminal = new MemoryUsageStatsStore(path);
-  daemon.recordInjected(['a'], 1);
-  terminal.recordInjected(['b'], 2);
-  daemon.recordInjected(['a'], 3);
-  expect(new MemoryUsageStatsStore(path).get('a')?.injectedCount).toBe(2);
-  expect(new MemoryUsageStatsStore(path).get('b')?.injectedCount).toBe(1);
-});
-
-test('a usage file that cannot be written does not throw into the caller', () => {
-  const root = dir();
-  const blocked = join(root, 'blocked');
-  writeFileSync(blocked, 'a file where the directory should be');
-  const store = new MemoryUsageStatsStore(join(blocked, 'usage.json'));
-  expect(() => store.recordInjected(['a'], 1)).not.toThrow();
 });

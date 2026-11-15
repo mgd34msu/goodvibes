@@ -118,7 +118,7 @@ test('a caller callback without authentic admission cannot authorize the memory 
   expect(f.store.retrieve({})).toHaveLength(0);
 });
 
-test('cancellation after the actual SQL insert stops vector writes and notifications', async () => {
+test('a cancellation that lands after the row is committed resolves with the stored record and tells every listener', async () => {
   const controller = new AbortController(), stopped = new Error('cancel after native SQL');
   const original = SQLiteStore.prototype.run;
   const native = spyOn(SQLiteStore.prototype, 'run').mockImplementation(function(this: SQLiteStore, ...args: Parameters<SQLiteStore['run']>) {
@@ -130,20 +130,21 @@ test('cancellation after the actual SQL insert stops vector writes and notificat
   const f = await fixture();
   let notifications = 0;
   f.registry.subscribe(() => { notifications++; });
-  await expect(f.client.add({ cls: 'fact', summary: 'SQL already committed' }, { signal: controller.signal })).rejects.toBe(stopped);
+  const added = await f.registry.add({ cls: 'fact', summary: 'SQL already committed' }, { signal: controller.signal });
+  expect(added.summary).toBe('SQL already committed');
   expect(f.store.retrieve({}).map(record => record.summary)).toEqual(['SQL already committed']);
-  expect(f.store.vectorStats().indexedRecords).toBe(0);
-  expect(notifications).toBe(0);
+  expect(notifications).toBe(1);
 });
 
-test('a notification listener cannot publish a successful result after retiring the outer source', async () => {
+test('a caller retired by a listener after the commit still gets its stored record', async () => {
   const f = await fixture();
   let current = true, notifications = 0;
   const unsubscribe = f.registry.subscribe(() => { notifications++; current = false; });
   cleanups.push(unsubscribe);
-  await expect(f.registry.add({ cls: 'fact', summary: 'committed before listener retirement' }, {
+  const added = await f.registry.add({ cls: 'fact', summary: 'committed before listener retirement' }, {
     assertCurrent: () => { if (!current) throw new Error('retired by memory notification'); },
-  })).rejects.toThrow('retired by memory notification');
+  });
+  expect(added.summary).toBe('committed before listener retirement');
   expect(notifications).toBe(1);
   expect(f.store.retrieve({})).toHaveLength(1);
   expect(f.store.vectorStats().indexedRecords).toBe(1);
@@ -161,7 +162,8 @@ test('a reentrant store mutation prevents the older operation from overwriting i
       return { vector: new Float32Array(request.dimensions).fill(1), dimensions: request.dimensions };
     },
   }, { makeDefault: true });
-  await expect(f.client.add({ cls: 'fact', summary: 'older record' })).rejects.toThrow('source changed');
+  // The add committed its row: the newer write owns the index entry, and the add still succeeds.
+  await f.client.add({ cls: 'fact', summary: 'older record' });
   const current = f.store.get(id);
   expect(current?.summary).toBe('newer canonical record');
   if (!current) throw new Error('Native canonical record missing');

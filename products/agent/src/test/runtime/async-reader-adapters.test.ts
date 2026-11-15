@@ -1,12 +1,11 @@
 import { afterEach, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
+import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
-import type { MemoryRecord, MemoryRegistry, MemorySemanticSearchResult, MemoryUsageStatsStore } from '@goodvibes-jev/engine/platform/platform/state';
+import { MemoryUsageTracker, type MemoryRecord, type MemoryRegistry, type MemorySemanticSearchResult, type MemoryUsageChange } from '@goodvibes-jev/engine/platform/platform/state';
 import { buildReviewedMemoryPrompt } from '../../agent/memory-prompt.ts';
-import { composeRuntimePromptWithReceipt, type PromptContextReceiptDraft } from '../../agent/prompt-context-receipts.ts';
+import { composeRuntimePromptWithReceipt } from '../../agent/prompt-context-receipts.ts';
 import { deliverAgentChannelMessage } from '../../agent/channel-delivery.ts';
-import { MemoryUsageTracker } from '../../runtime/memory-usage-wiring.ts';
 import { readLiveAgentMemoryCounters } from '../../input/agent-workspace-snapshot.ts';
 import type { CommandContext } from '../../input/command-registry.ts';
 import { createShellPathService } from '../../runtime/index.ts';
@@ -76,11 +75,13 @@ test('unavailable card reading never reaches delivery', async () => {
 });
 
 test('memory reference credit waits for the reader and is consumed once', async () => {
-  const gate = delayedReading(0.99);
+  const gate = deferred<void>();
+  const fake = fakePort((_name, question) => choiceAnswer(question, record.id, 0.99));
+  previous = installJudgmentPort({ ...fake.port, ask: async (request) => { await gate.promise; return fake.port.ask(request); } });
+  installed = true;
   const credited: string[] = [];
-  const store = { recordInjected: () => {}, recordReferenced: (ids: string[]) => credited.push(...ids) } as unknown as MemoryUsageStatsStore;
-  const tracker = new MemoryUsageTracker(store, registry(async () => []));
-  tracker.onComposed('turn', { segments: [{ id: 'memory', selected: [{ id: record.id }] }] } as unknown as PromptContextReceiptDraft);
+  const tracker = new MemoryUsageTracker({ get: () => record, recordUsage: async (change: MemoryUsageChange) => { credited.push(...(change.referenced ?? [])); } });
+  tracker.onComposed('turn', [record.id]);
   const pending = tracker.onTurnCompleted('turn', 'fixture response');
   await Promise.resolve();
   expect(credited).toEqual([]);

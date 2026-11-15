@@ -54,6 +54,27 @@ export function createSchema(db: { run(sql: string): void; exec(sql: string, par
   ensureColumn(db, 'memory_records', 'valid_from INTEGER', 'valid_from');
   ensureColumn(db, 'memory_records', 'valid_until INTEGER', 'valid_until');
   ensureColumn(db, 'memory_records', "gv_revision TEXT NOT NULL DEFAULT ''", 'gv_revision');
+  // Usage counters live on the record: removed with it, updated in place, and
+  // outside the revision trigger's column list, so a count never looks like an edit.
+  ensureColumn(db, 'memory_records', 'injected_count INTEGER NOT NULL DEFAULT 0', 'injected_count');
+  ensureColumn(db, 'memory_records', 'assessed_count INTEGER NOT NULL DEFAULT 0', 'assessed_count');
+  ensureColumn(db, 'memory_records', 'referenced_count INTEGER NOT NULL DEFAULT 0', 'referenced_count');
+  ensureColumn(db, 'memory_records', 'last_injected_at INTEGER', 'last_injected_at');
+  ensureColumn(db, 'memory_records', 'last_referenced_at INTEGER', 'last_referenced_at');
+
+  // Small store-owned facts (the consolidation cursor) and the standing
+  // consolidation proposals, one row each, keyed by kind and record ids.
+  db.run(`CREATE TABLE IF NOT EXISTS memory_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`);
+  db.run(`
+    CREATE TABLE IF NOT EXISTS memory_proposals (
+      key        TEXT PRIMARY KEY,
+      kind       TEXT NOT NULL,
+      ids        TEXT NOT NULL,
+      route      TEXT NOT NULL,
+      reason     TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    )
+  `);
 
   const revisions = db.exec("SELECT name FROM sqlite_master WHERE type = 'trigger' AND name IN ('memory_record_revision_insert', 'memory_record_revision_update')")[0]?.values ?? [];
   if (revisions.length === 0) {

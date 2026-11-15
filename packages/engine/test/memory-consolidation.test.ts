@@ -11,6 +11,7 @@ import {
   runMemoryConsolidation,
 } from '../platform/src/platform/state/index.js';
 import type {
+  MemoryConsolidationProposal,
   MemoryConsolidationRegistry,
   MemoryConsolidationUsageSignal,
   MemoryRecord,
@@ -20,7 +21,7 @@ import type {
 // re-exported from the state barrel (state/index.ts), pull it from source.
 import type { MemoryReviewPatch } from '../platform/src/platform/state/memory-store.js';
 import { ConfigManager } from '../platform/src/platform/config/manager.js';
-import { installJudgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
+import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { useMemoryReadings } from './_helpers/memory-readings.ts';
 
 /**
@@ -94,6 +95,25 @@ class FakeRegistry implements MemoryConsolidationRegistry {
     this.records.set(id, updated);
     return updated;
   }
+}
+
+/** A registry with the store's meta table and proposal list, so passes remember their work. */
+class MetaRegistry extends FakeRegistry {
+  private readonly meta = new Map<string, string>();
+  private readonly proposals = new Map<string, MemoryConsolidationProposal>();
+  readStoreMeta(key: string): string | null { return this.meta.get(key) ?? null; }
+  writeStoreMeta(key: string, value: string): void { this.meta.set(key, value); }
+  addConsolidationProposals(proposals: readonly MemoryConsolidationProposal[]): MemoryConsolidationProposal[] {
+    const added: MemoryConsolidationProposal[] = [];
+    for (const proposal of proposals) {
+      const key = `${proposal.kind}:${[...proposal.ids].sort().join(',')}`;
+      if (this.proposals.has(key)) continue;
+      this.proposals.set(key, proposal);
+      added.push(proposal);
+    }
+    return added;
+  }
+  listConsolidationProposals(): MemoryConsolidationProposal[] { return [...this.proposals.values()]; }
 }
 
 const NOW = 1_000_000_000_000;
@@ -277,22 +297,46 @@ describe('runMemoryConsolidation: pair readings', () => {
     expect(reg.reviewCalls).toEqual([]);
   });
 
-  test('all pairs are read without an implicit per-run cap', async () => {
+  test('a second pass with nothing changed sends nothing; a new record is compared with at most 8 others, each request about it', async () => {
     readings.use({ pair: () => ({ link: 0, restates: false, conflicts: false }) });
-    const records = Array.from({ length: 20 }, (_, index) => rec({ id: `r${index}`, summary: `fact ${index}`, updatedAt: NOW - index }));
-    await runMemoryConsolidation({ memoryRegistry: new FakeRegistry(records), config: cfg(), now: NOW, trigger: 'idle', idle: true });
-    // Every pair is retained, newest pairs first.
-    expect(readings.requests).toHaveLength(190);
-    const first = readings.requests[0]!.state as { entity_a: { summary: string } };
-    expect(first.entity_a.summary).toBe('fact 0');
+    const records = Array.from({ length: 21 }, (_, index) => rec({ id: `r${index}`, summary: `fact ${index}`, updatedAt: NOW - 1000 - index }));
+    const reg = new MetaRegistry(records);
+    await runMemoryConsolidation({ memoryRegistry: reg, config: cfg(), now: NOW, trigger: 'idle', idle: true });
+    const first = readings.requests.length;
+    expect(first).toBeGreaterThan(0);
+    expect(first).toBeLessThanOrEqual(21 * 8);
+    // The newest record is compared first.
+    expect((readings.requests[0]!.state as { entity_a: { summary: string } }).entity_a.summary).toBe('fact 0');
+
+    await runMemoryConsolidation({ memoryRegistry: reg, config: cfg(), now: NOW + 1000, trigger: 'idle', idle: true });
+    expect(readings.requests.length).toBe(first);
+
+    reg.records.set('new', rec({ id: 'new', summary: 'fresh fact', updatedAt: NOW + 1500 }));
+    await runMemoryConsolidation({ memoryRegistry: reg, config: cfg(), now: NOW + 2000, trigger: 'idle', idle: true });
+    const third = readings.requests.slice(first);
+    expect(third.length).toBeGreaterThan(0);
+    expect(third.length).toBeLessThanOrEqual(8);
+    expect(third.every((request) => JSON.stringify(request.state).includes('fresh fact'))).toBe(true);
   });
 
-  test('a pass with a pair to read and no judgment port installed throws', async () => {
+  test('a standing proposal is reported once and listed once across passes', async () => {
+    const longStale = rec({ id: 'old-stale', reviewState: 'stale', updatedAt: NOW - 120 * DAY_MS });
+    const reg = new MetaRegistry([longStale]);
+    const first = await runMemoryConsolidation({ memoryRegistry: reg, config: cfg(), now: NOW, trigger: 'idle', idle: true });
+    const second = await runMemoryConsolidation({ memoryRegistry: reg, config: cfg(), now: NOW + 1000, trigger: 'idle', idle: true });
+    expect(first.proposed.map((proposal) => proposal.kind)).toEqual(['stale-delete']);
+    expect(second.proposed).toEqual([]);
+    expect(reg.listConsolidationProposals()).toHaveLength(1);
+  });
+
+  test('a pass with a pair to read and no judgment port merges nothing and says the decision model did not answer', async () => {
     const previous = installJudgmentPort(undefined);
     try {
       const reg = new FakeRegistry([rec({ id: 'a' }), rec({ id: 'b' })]);
-      await expect(runMemoryConsolidation({ memoryRegistry: reg, config: cfg(), now: NOW, trigger: 'idle', idle: true }))
-        .rejects.toBeInstanceOf(JudgmentPortMissingError);
+      const receipt = await runMemoryConsolidation({ memoryRegistry: reg, config: cfg(), now: NOW, trigger: 'idle', idle: true });
+      expect(receipt.merged).toEqual([]);
+      expect(receipt.note).toContain('decision model did not answer');
+      expect(reg.reviewCalls).toEqual([]);
     } finally {
       installJudgmentPort(previous);
     }

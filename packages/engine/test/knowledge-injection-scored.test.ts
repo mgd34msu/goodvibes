@@ -86,7 +86,7 @@ describe('knowledge-injection.ts: ranking through one knowledge-injection readin
     const registry = makeRegistry(records);
     await selectKnowledgeForTaskScored(registry, 'write the deployment note', [], 2);
     expect(readings.requests).toHaveLength(1);
-    expect((readings.requests[0]!.state as { candidates: unknown[] }).candidates).toHaveLength(12);
+    expect((readings.requests[0]!.state as { candidates: unknown[] }).candidates).toHaveLength(8);
     await selectKnowledgeForTaskScored(registry, 'write the deployment note', [], 2);
     expect(readings.requests).toHaveLength(1);
   });

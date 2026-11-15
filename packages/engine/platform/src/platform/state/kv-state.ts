@@ -234,13 +234,13 @@ export interface KVStateOptions {
  * Storage: <stateDir>/session_{id}.json (session-{id}.json for a caller-supplied id)
  * Session ID: 8-char hex string, auto-generated if not provided. Pass the
  * conversation's own session id so state set before a restart is read back when
- * that session resumes, and dispose() the instance at shutdown so a write still
- * waiting on the debounce timer is flushed.
+ * that session resumes. A `set` or `clear` resolves once the file is written, so
+ * a value reported as stored survives an exit code, a signal or a crash.
  *
  * Features:
  * - Lazy load: defers disk read until first operation.
  * - Atomic persistence: write to temp file then rename.
- * - Debounced auto-persist: 5-second timer after each set().
+ * - Write-through: set() and clear() write the (small) file before they resolve.
  * - Bounded store: every session file older than SESSION_MAX_AGE_MS, and every
  *   file past the SESSION_KEEP_COUNT most recent, is reclaimed at recovery and
  *   then on a SWEEP_INTERVAL_MS timer. The instance's own file is exempt.
@@ -252,7 +252,6 @@ export class KVState {
   /** Basename of this instance's own file, the one name housekeeping must never touch. */
   private readonly fileName: string;
   private data: Record<string, unknown> | null = null;
-  private persistTimer: ReturnType<typeof setTimeout> | null = null;
   private loadPromise: Promise<void> | null = null;
   private readonly store: JsonFileStore<Record<string, unknown>>;
   /** Legacy unscoped store to fall back to for reads only; undefined when no legacyStateDir was given or it is identical to the scoped stateDir. */
@@ -303,7 +302,7 @@ export class KVState {
     for (const [key, value] of Object.entries(values)) {
       this.data![key] = value;
     }
-    this.schedulePersist();
+    await this.persist();
   }
 
   async list(prefix?: string): Promise<Record<string, unknown>> {
@@ -331,7 +330,7 @@ export class KVState {
         changed = true;
       }
     }
-    if (changed) this.schedulePersist();
+    if (changed) await this.persist();
   }
 
   async load(): Promise<void> {
@@ -374,8 +373,11 @@ export class KVState {
         if (!this.data.id) this.data.id = this.sessionId;
         if (!this.data.started_at) this.data.started_at = new Date().toISOString();
         // Copy forward into the scoped location so a future load never needs
-        // the legacy fallback again. The legacy file is left in place.
-        this.schedulePersist();
+        // the legacy fallback again. The legacy file is left in place and still
+        // holds the data, so this write is not awaited by the read that loaded it.
+        this.persist().catch((err: unknown) => {
+          logger.warn('KVState: copying legacy session state forward failed', { filePath: this.filePath, error: summarizeError(err) });
+        });
         return;
       }
     }
@@ -388,19 +390,12 @@ export class KVState {
 
   /**
    * Write the session file, after every write already queued has finished.
+   * Concurrent `set`/`clear` calls each write; `JsonFileStore.save` renames
+   * atomically without saying which rename lands last, so the queue orders them
+   * and an older view can never land after a newer one.
    *
-   * There are two writers and nothing ordered them: the 5-second debounce armed
-   * by `set`/`clear`, and `dispose()`, which clears the timer and writes
-   * directly. Clearing a timer that has ALREADY fired stops nothing, so an
-   * agent that finishes just after a debounced write started has two writes in
-   * flight, and `JsonFileStore.save` renames atomically without saying which
-   * rename lands last. Unordered, the earlier write's older view can land second
-   * and put back a key `clear` removed, which a resumed session then reads as
-   * still set.
-   *
-   * `this.data` is passed by reference, as it always was: `save` serialises it
-   * when the write RUNS, so each queued write emits a view at least as new as
-   * the one before it. Only the order was missing.
+   * `this.data` is passed by reference: `save` serialises it when the write
+   * RUNS, so each queued write emits a view at least as new as the one before it.
    */
   async persist(): Promise<void> {
     const data = this.data;
@@ -444,16 +439,13 @@ export class KVState {
     );
   }
 
+  /** Stops housekeeping and waits for any write still in flight (every acknowledged write is already on disk). */
   async dispose(): Promise<void> {
-    if (this.persistTimer !== null) {
-      clearTimeout(this.persistTimer);
-      this.persistTimer = null;
-    }
     if (this.sweepTimer !== null) {
       clearInterval(this.sweepTimer);
       this.sweepTimer = null;
     }
-    await this.persist();
+    await this.writes.drain();
   }
 
   /**
@@ -562,19 +554,6 @@ export class KVState {
       });
     }
     return this.loadPromise;
-  }
-
-  private schedulePersist(): void {
-    if (this.persistTimer !== null) {
-      clearTimeout(this.persistTimer);
-    }
-    this.persistTimer = setTimeout(() => {
-      this.persistTimer = null;
-      this.persist().catch(err => {
-        logger.warn('KVState: scheduled persist failed', { filePath: this.filePath, error: summarizeError(err) });
-      });
-    }, 5000);
-    this.persistTimer.unref?.();
   }
 
   private static generateId(): string {

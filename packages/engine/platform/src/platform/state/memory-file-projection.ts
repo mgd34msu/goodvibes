@@ -18,12 +18,15 @@
  * hash of the file it wrote). That manifest is how an unreviewed edit or a
  * deletion is told apart from a record the store gained since the last sync:
  * `sync` keeps a file the user changed, `diffProjectionToProposals` proposes a
- * delete only for an id the manifest says was projected. The `cls`,
+ * delete only for an id the manifest says was projected. A file whose record
+ * left the store (or the projected scopes) is removed by `sync` when the user
+ * did not touch it, and kept and reported when they did; `review` lists such
+ * files as orphans (`findOrphanedProjectionFiles`). The `cls`,
  * `confidence`, `reviewState` and `status` front-matter lines are read-only:
  * the memory update verbs cannot change them, so an edit there is not a proposal.
  */
 
-import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, unlinkSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
@@ -148,6 +151,10 @@ export interface MemoryProjectionWriteReport {
   readonly written: readonly string[];
   /** Ids whose file was left as it is: the user edited or deleted it and has not reviewed that yet. */
   readonly kept?: readonly string[] | undefined;
+  /** Ids whose record is gone from the store (or the projected scopes) and whose untouched file was removed. */
+  readonly removed?: readonly string[] | undefined;
+  /** Ids whose record is gone but whose file the user edited: the file is kept, and review lists it as an orphan. */
+  readonly orphaned?: readonly string[] | undefined;
   readonly committed: boolean;
 }
 
@@ -255,9 +262,12 @@ function recordFileName(id: string): string {
  * deletion that has not been reviewed): that file is kept as it is and its id
  * is reported in `kept`, so a correction is never overwritten before it can
  * become a proposal. When a git seam is supplied, stages + commits the
- * directory so the projection is durable and diffable. Never deletes existing
- * files (a store deletion is surfaced as a proposal on the next diff, not a
- * silent unlink).
+ * directory so the projection is durable and diffable. A file the last sync
+ * wrote for a record that is no longer in the store (or no longer in a
+ * projected scope) is removed when its content is still what sync wrote, so
+ * the directory never shows a memory that does not exist; when the user
+ * edited it, it is kept and reported in `orphaned` (one manifest lookup per
+ * such id, nothing else is read).
  */
 export function projectMemoryToFiles(
   records: readonly MemoryRecord[],
@@ -308,6 +318,22 @@ export function projectMemoryToFiles(
     next[record.id] = contentHash(markdown);
     written.push(path);
   }
+  const standingIds = new Set(standing.map((record) => record.id));
+  const removed: string[] = [];
+  const orphaned: string[] = [];
+  for (const [id, lastHash] of Object.entries(previous)) {
+    if (standingIds.has(id)) continue;
+    const path = join(dir, recordFileName(id));
+    if (!existsSync(path)) continue;
+    if (contentHash(readFileSync(path, 'utf-8')) === lastHash) {
+      unlinkSync(path);
+      removed.push(id);
+    } else {
+      // Still tracked, so the next sync keeps it too until the user removes it.
+      next[id] = lastHash;
+      orphaned.push(id);
+    }
+  }
   writeFileSync(join(dir, MANIFEST_NAME), `${JSON.stringify({ version: 1, files: next }, null, 2)}\n`, 'utf-8');
   let committed = false;
   if (options.git) {
@@ -321,9 +347,16 @@ export function projectMemoryToFiles(
       options.git.init(dir);
     }
     options.git.add(dir);
-    committed = options.git.commit(dir, `memory projection: ${written.length} record(s)`) !== false;
+    const removal = removed.length > 0 ? `, ${removed.length} removed` : '';
+    committed = options.git.commit(dir, `memory projection: ${written.length} record(s)${removal}`) !== false;
   }
-  return { dir, written, ...(kept.length > 0 ? { kept } : {}), committed };
+  return {
+    dir, written,
+    ...(kept.length > 0 ? { kept } : {}),
+    ...(removed.length > 0 ? { removed } : {}),
+    ...(orphaned.length > 0 ? { orphaned } : {}),
+    committed,
+  };
 }
 
 /** Parse one projected markdown file. Returns null when it has no `id` front-matter key. */
@@ -501,8 +534,8 @@ function sameTags(a: readonly string[], b: readonly string[]): boolean {
  * `readProjectedMemoryFiles` carry it) says it was projected, because a record
  * the store gained after the last sync has no file either and is not a
  * deletion; without `projectedIds` no delete is proposed. A file with
- * no matching record is ignored (its record is already gone). Nothing here
- * mutates the store.
+ * no matching record has nothing to propose (its record is already gone);
+ * `findOrphanedProjectionFiles` lists those. Nothing here mutates the store.
  */
 export function diffProjectionToProposals(
   records: readonly MemoryRecord[],
@@ -564,6 +597,21 @@ export function diffProjectionToProposals(
   }
 
   return proposals;
+}
+
+/**
+ * Files in the projection whose record is no longer in the store, or no longer
+ * in a projected scope. PURE, no I/O. Review lists them so the directory is
+ * never reported as matching the store while it shows memories that do not
+ * exist; an edit to such a file cannot reach the store.
+ */
+export function findOrphanedProjectionFiles(
+  records: readonly MemoryRecord[],
+  files: readonly MemoryProjectionFile[],
+  options: MemoryProjectionOptions = {},
+): MemoryProjectionFile[] {
+  const standingIds = new Set(selectStandingRecords(records, options).map((record) => record.id));
+  return files.filter((file) => !standingIds.has(file.id));
 }
 
 /** The registry surface the projection apply needs, update + delete only. */

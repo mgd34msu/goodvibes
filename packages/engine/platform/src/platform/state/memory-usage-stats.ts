@@ -1,27 +1,24 @@
 /**
- * memory-usage-stats.ts, per-memory usage counters (HOISTED to the platform).
+ * memory-usage-stats.ts, per-memory usage counters.
  *
- * Answers "was injected context actually used?". Promoted verbatim from the
- * agent surface so every consumer records the SAME instrumentation the SAME way.
+ * Answers "was injected context actually used?". The counters are columns on
+ * the memory record itself (MemoryStore.recordUsage): how many times a memory
+ * was injected into a prompt, how many of those injections had their use read
+ * (memory-usage-detection.ts, one Jev reading per turn, not ground truth) and
+ * how many were read as used. One update per turn, removed with the record,
+ * the same counts for every product that shares the store.
  *
- * The store records, per memory id, how many times it was injected into a prompt
- * and how many of those injections were plausibly referenced by the model's
- * output (see memory-usage-detection.ts, a Jev reading per memory, not
- * ground truth). It duplicates no memory content: it keys on the id
- * only. It is instrumentation data, not a second memory store, same durable JSON
- * sidecar idiom as the prompt-context and consolidation receipts.
- *
- * The counters feed the idle consolidation decay ordering (never-referenced
- * memories decay first) via `lookup`.
+ * The counters feed the idle consolidation decay ordering (a memory read as
+ * never used decays first) via `lookup`. A memory whose use was never read is
+ * "not assessed", never "never referenced".
  */
 import { existsSync, readFileSync } from 'node:fs';
 import type { MemoryConsolidationUsageSignal } from './memory-consolidation.js';
-import { logger } from '../utils/logger.js';
-import { writeJsonFileAtomic } from '../utils/atomic-json-store.js';
-import { summarizeError } from '../utils/error-display.js';
 
 export interface MemoryUsageEntry {
   readonly injectedCount: number;
+  /** Injections whose use was read (decision models on); the rest were not assessed. */
+  readonly assessedCount: number;
   readonly referencedCount: number;
   readonly lastInjectedAt: number | null;
   readonly lastReferencedAt: number | null;
@@ -31,165 +28,131 @@ export interface MemoryUsageTopEntry extends MemoryUsageEntry {
   readonly id: string;
 }
 
+/** One turn's use of memories, applied in one step. */
+export interface MemoryUsageChange {
+  readonly injected?: readonly string[] | undefined;
+  readonly assessed?: readonly string[] | undefined;
+  readonly referenced?: readonly string[] | undefined;
+}
+
 export interface MemoryUsageSummary {
   readonly totalTracked: number;
   readonly everInjected: number;
+  /** Memories whose use was read at least once. */
+  readonly assessed?: number | undefined;
+  /** Memories injected but whose use was never read: not counted as never referenced. */
+  readonly notAssessed?: number | undefined;
   readonly everReferenced: number;
+  /** Memories read at least once and never read as used. */
   readonly neverReferenced: number;
   readonly mostReferenced: readonly MemoryUsageTopEntry[];
   readonly neverReferencedSample: readonly MemoryUsageTopEntry[];
   readonly signalNote: string;
 }
 
-interface MutableEntry {
-  injectedCount: number;
-  referencedCount: number;
-  lastInjectedAt: number | null;
-  lastReferencedAt: number | null;
+/** Where the counters live: the memory store (MemoryStore / MemoryRegistry). */
+export interface MemoryUsageSource {
+  recordUsage(change: MemoryUsageChange, at?: number): Promise<void>;
+  usage(id: string): MemoryUsageEntry | null;
+  usageEntries(): readonly MemoryUsageTopEntry[];
 }
 
-const USAGE_FILE_VERSION = 1;
-
 export const MEMORY_USAGE_SIGNAL_NOTE =
-  'Reference detection is a judgment reading: it says whether the model output used the injected memory\'s specific information, not ground truth that the memory changed the answer.';
+  'Reference detection is a judgment reading: it says whether the model output used the injected memory\'s specific information, not ground truth that the memory changed the answer. A memory whose use was never read is counted as not assessed.';
 
-function isEntry(value: unknown): value is MemoryUsageEntry {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
-  const record = value as Record<string, unknown>;
-  return typeof record.injectedCount === 'number' && typeof record.referencedCount === 'number';
+/** Read-only view of the counters file an older release wrote; nothing writes it any more. */
+function readLegacyCounters(filePath: string): MemoryUsageTopEntry[] {
+  if (!existsSync(filePath)) return [];
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(filePath, 'utf-8'));
+    const raw = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as Record<string, unknown>).entries : null;
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return [];
+    return Object.entries(raw as Record<string, unknown>).flatMap(([id, value]) => {
+      if (!value || typeof value !== 'object') return [];
+      const entry = value as Record<string, unknown>;
+      if (typeof entry.injectedCount !== 'number' || typeof entry.referencedCount !== 'number') return [];
+      return [{
+        id,
+        injectedCount: entry.injectedCount,
+        // That file recorded only the reads that found a use.
+        assessedCount: entry.referencedCount,
+        referencedCount: entry.referencedCount,
+        lastInjectedAt: typeof entry.lastInjectedAt === 'number' ? entry.lastInjectedAt : null,
+        lastReferencedAt: typeof entry.lastReferencedAt === 'number' ? entry.lastReferencedAt : null,
+      }];
+    });
+  } catch {
+    return [];
+  }
 }
 
 export class MemoryUsageStatsStore {
-  private readonly entries = new Map<string, MutableEntry>();
-  private loaded = false;
-
-  public constructor(private readonly filePath: string) {}
-
-  private ensureLoaded(): void {
-    if (this.loaded) return;
-    this.loaded = true;
-    this.readFromDisk();
-  }
+  private readonly source: MemoryUsageSource | null;
+  private readonly legacy: readonly MemoryUsageTopEntry[];
 
   /**
-   * Counters are read again before each write so another process's counts
-   * (the daemon and a terminal share this file) are not overwritten by this
-   * process's older copy.
+   * Over the memory store's own counters. A string is the path of the counters
+   * file an older release kept beside the store: it is read, never written, so
+   * a reader that still passes a path shows the counts recorded before the
+   * counters moved onto the record.
    */
-  private reloadForWrite(): void {
-    this.loaded = true;
-    this.readFromDisk();
+  public constructor(source: MemoryUsageSource | string) {
+    this.source = typeof source === 'string' ? null : source;
+    this.legacy = typeof source === 'string' ? readLegacyCounters(source) : [];
   }
 
-  private readFromDisk(): void {
-    if (!existsSync(this.filePath)) return;
-    try {
-      this.entries.clear();
-      const parsed: unknown = JSON.parse(readFileSync(this.filePath, 'utf-8'));
-      const raw = parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-        ? (parsed as Record<string, unknown>).entries
-        : null;
-      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return;
-      for (const [id, value] of Object.entries(raw as Record<string, unknown>)) {
-        if (!isEntry(value)) continue;
-        this.entries.set(id, {
-          injectedCount: value.injectedCount,
-          referencedCount: value.referencedCount,
-          lastInjectedAt: value.lastInjectedAt ?? null,
-          lastReferencedAt: value.lastReferencedAt ?? null,
-        });
-      }
-    } catch {
-      // Corrupt file: start from empty, next write repairs it.
-    }
-  }
-
-  private persist(): void {
-    const record: Record<string, MemoryUsageEntry> = {};
-    for (const [id, entry] of this.entries.entries()) record[id] = { ...entry };
-    // Counters are rewritten on every injection; skip the fsync, a lost write only loses a count.
-    writeJsonFileAtomic(this.filePath, { version: USAGE_FILE_VERSION, entries: record }, { durable: false });
-  }
-
-  /** Usage counters are instrumentation: a failed write is logged, never thrown into the prompt or consolidation path that recorded it. */
-  private persistBestEffort(): void {
-    try {
-      this.persist();
-    } catch (error) {
-      logger.warn('[memory] usage counters were not saved', { error: summarizeError(error) });
-    }
-  }
-
-  private mutable(id: string): MutableEntry {
-    let entry = this.entries.get(id);
-    if (!entry) {
-      entry = { injectedCount: 0, referencedCount: 0, lastInjectedAt: null, lastReferencedAt: null };
-      this.entries.set(id, entry);
-    }
-    return entry;
-  }
-
-  public recordInjected(ids: readonly string[], at: number = Date.now()): void {
-    const unique = [...new Set(ids.filter((id) => id.trim()))];
-    if (unique.length === 0) return;
-    this.reloadForWrite();
-    for (const id of unique) {
-      const entry = this.mutable(id);
-      entry.injectedCount += 1;
-      entry.lastInjectedAt = at;
-    }
-    this.persistBestEffort();
-  }
-
-  public recordReferenced(ids: readonly string[], at: number = Date.now()): void {
-    const unique = [...new Set(ids.filter((id) => id.trim()))];
-    if (unique.length === 0) return;
-    this.reloadForWrite();
-    for (const id of unique) {
-      const entry = this.mutable(id);
-      entry.referencedCount += 1;
-      entry.lastReferencedAt = at;
-    }
-    this.persistBestEffort();
+  /** One turn's use, one store update. Not available over a legacy counters file. */
+  public async record(change: MemoryUsageChange, at: number = Date.now()): Promise<void> {
+    await this.source?.recordUsage(change, at);
   }
 
   public get(id: string): MemoryUsageEntry | null {
-    this.ensureLoaded();
-    const entry = this.entries.get(id);
-    return entry ? { ...entry } : null;
+    if (this.source) return this.source.usage(id);
+    const entry = this.legacy.find((candidate) => candidate.id === id);
+    if (!entry) return null;
+    return {
+      injectedCount: entry.injectedCount, assessedCount: entry.assessedCount, referencedCount: entry.referencedCount,
+      lastInjectedAt: entry.lastInjectedAt, lastReferencedAt: entry.lastReferencedAt,
+    };
   }
 
-  /** Consolidation decay ordering seam, undefined when the id was never instrumented. */
+  /**
+   * Consolidation decay seam: a memory is offered for decay only when its use
+   * was read at least once, so a memory nobody assessed keeps its confidence.
+   */
   public lookup(id: string): MemoryConsolidationUsageSignal | undefined {
-    const entry = this.get(id);
-    if (!entry) return undefined;
-    return {
-      injectedCount: entry.injectedCount,
-      referencedCount: entry.referencedCount,
-      lastReferencedAt: entry.lastReferencedAt,
-    };
+    return memoryUsageSignal(this.get(id));
   }
 
   public summary(sampleLimit = 5): MemoryUsageSummary {
-    this.ensureLoaded();
-    const all: MemoryUsageTopEntry[] = [...this.entries.entries()].map(([id, entry]) => ({ id, ...entry }));
-    const everInjected = all.filter((entry) => entry.injectedCount > 0);
-    const everReferenced = all.filter((entry) => entry.referencedCount > 0);
-    const neverReferenced = everInjected.filter((entry) => entry.referencedCount === 0);
-    const mostReferenced = [...everReferenced]
-      .sort((left, right) => right.referencedCount - left.referencedCount || (right.lastReferencedAt ?? 0) - (left.lastReferencedAt ?? 0))
-      .slice(0, Math.max(1, sampleLimit));
-    const neverReferencedSample = [...neverReferenced]
-      .sort((left, right) => right.injectedCount - left.injectedCount)
-      .slice(0, Math.max(1, sampleLimit));
-    return {
-      totalTracked: all.length,
-      everInjected: everInjected.length,
-      everReferenced: everReferenced.length,
-      neverReferenced: neverReferenced.length,
-      mostReferenced,
-      neverReferencedSample,
-      signalNote: MEMORY_USAGE_SIGNAL_NOTE,
-    };
+    return summarizeMemoryUsage(this.source ? this.source.usageEntries() : this.legacy, sampleLimit);
   }
+}
+
+/** The decay signal for one record's counters; undefined when its use was never read. */
+export function memoryUsageSignal(entry: MemoryUsageEntry | null | undefined): MemoryConsolidationUsageSignal | undefined {
+  if (!entry || entry.assessedCount === 0) return undefined;
+  return { injectedCount: entry.injectedCount, referencedCount: entry.referencedCount, lastReferencedAt: entry.lastReferencedAt };
+}
+
+export function summarizeMemoryUsage(entries: readonly MemoryUsageTopEntry[], sampleLimit = 5): MemoryUsageSummary {
+  const everInjected = entries.filter((entry) => entry.injectedCount > 0);
+  const assessed = everInjected.filter((entry) => entry.assessedCount > 0);
+  const everReferenced = entries.filter((entry) => entry.referencedCount > 0);
+  const neverReferenced = assessed.filter((entry) => entry.referencedCount === 0);
+  return {
+    totalTracked: entries.length,
+    everInjected: everInjected.length,
+    assessed: assessed.length,
+    notAssessed: everInjected.length - assessed.length,
+    everReferenced: everReferenced.length,
+    neverReferenced: neverReferenced.length,
+    mostReferenced: [...everReferenced]
+      .sort((left, right) => right.referencedCount - left.referencedCount || (right.lastReferencedAt ?? 0) - (left.lastReferencedAt ?? 0))
+      .slice(0, Math.max(1, sampleLimit)),
+    neverReferencedSample: [...neverReferenced]
+      .sort((left, right) => right.injectedCount - left.injectedCount)
+      .slice(0, Math.max(1, sampleLimit)),
+    signalNote: MEMORY_USAGE_SIGNAL_NOTE,
+  };
 }

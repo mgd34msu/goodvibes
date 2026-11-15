@@ -99,17 +99,18 @@ import {
   type HistoryDeltaDeps,
   type HistoryDeltaUnavailable,
   isPermanentFetchProblem,
+  reachedHistoryId,
 } from '../../google/history-delta.js';
 
 /**
  * How long 403s with no named cause may go on, unbroken, before they are read
- * as a refused grant. A per-user rate limit lasts minutes at the 5 s expecting
- * interval, so a count of polls would give up on it within seconds; unbounded
- * would let a revoked scope retry for ever as if it were a rate limit.
+ * as a refused grant. A 403 Google names a usage limit never counts; this is
+ * for one that names nothing. Unbounded would let a revoked scope retry for
+ * ever as if it were a rate limit.
  */
 const MAX_UNEXPLAINED_FORBIDDEN_MS = 10 * 60_000;
 
-/** Refusals of the same delta by the sink, in a row, before the verdict says so. */
+/** Refusals by the sink, in a row with no complete delta between, before the verdict says so. */
 const MAX_CONSECUTIVE_DELIVERY_FAILURES = 3;
 
 /**
@@ -176,6 +177,12 @@ export interface GmailMailSourceDeps {
   readonly clock: WatcherClock;
   /** Injected; see `ExpectationPresence`. */
   readonly expectationOpen: ExpectationPresence;
+  /**
+   * Subscribe to "an expectation was just opened"; returns the unsubscribe.
+   * With it, an idle wait is one timer that this wakes early; without it the
+   * wait is sliced at `pollExpectingMs` so an opening is still noticed in time.
+   */
+  readonly expectationOpened?: ((wake: () => void) => () => void) | undefined;
   /** `surfaces.email.inbound.gmailPollSecondsExpecting`, in milliseconds. */
   readonly pollExpectingMs: number;
   /** `surfaces.email.inbound.gmailPollSecondsIdle`, in milliseconds. */
@@ -214,6 +221,12 @@ export class GmailMailSource implements InboundMailSource {
   private deliveryFailures = 0;
   /** Consecutive passes in which each message id was permanently unreadable. */
   private readonly permanentUnreadable = new Map<string, number>();
+  /**
+   * The history position this source last read or wrote. This source is the
+   * only writer of its own cursor record, so the file is read once, at the
+   * first poll, and written only when the position moves.
+   */
+  private position: string | null = null;
 
   constructor(deps: GmailMailSourceDeps) {
     this.deps = deps;
@@ -348,40 +361,56 @@ export class GmailMailSource implements InboundMailSource {
   }
 
   /**
-   * Wait out the interval in force, asking again at every `pollExpectingMs`
-   * whether it has changed.
+   * Wait out the interval in force, and shorten it when an expectation opens.
    *
-   * A single sleep of `waitMs()` is fixed when it starts, so an expectation
-   * opening during a long idle sleep (up to an hour by configuration) would
-   * not be polled for until that sleep ended, past the expectation's own
-   * window, while `latency` already reported the short interval. Slicing costs
-   * a timer per slice and no request: Google is only asked when the whole
-   * interval in force has elapsed. A refused grant is not sliced, nothing
-   * about it changes when an expectation opens.
+   * A single fixed sleep of the idle interval (up to an hour by configuration)
+   * would not poll for an expectation opened during it until it ended, past the
+   * expectation's own window. With `expectationOpened` wired the wait is one
+   * timer that the opening wakes; without it the wait is sliced at
+   * `pollExpectingMs` and the interval re-read each slice. Either way Google is
+   * only asked when the whole interval in force has elapsed. A refused grant is
+   * not sliced, nothing about it changes when an expectation opens.
    */
   private async sleepUntilDue(signal: AbortSignal): Promise<void> {
     const startedAt = this.deps.clock.now();
     // Only ever shortened: an expectation closing mid-wait is no reason to
     // make the poll that was already due wait longer.
     const planned = this.waitMs();
+    const subscribe = this.deps.expectationOpened;
     while (!signal.aborted) {
       const remaining = Math.min(planned, this.waitMs()) - (this.deps.clock.now() - startedAt);
       if (remaining <= 0) return;
-      const slice = this.tracker.state === 'insufficient'
-        ? remaining
-        : Math.min(remaining, this.pollExpectingMs);
-      await this.deps.clock.sleep(slice, signal);
+      if (this.tracker.state === 'insufficient') {
+        await this.deps.clock.sleep(remaining, signal);
+        continue;
+      }
+      if (subscribe === undefined) {
+        await this.deps.clock.sleep(Math.min(remaining, this.pollExpectingMs), signal);
+        continue;
+      }
+      const opened = new AbortController();
+      const unsubscribe = subscribe(() => opened.abort());
+      const either = anySignal([signal, opened.signal]);
+      try {
+        await this.deps.clock.sleep(remaining, either.signal);
+      } finally {
+        either.dispose();
+        unsubscribe();
+      }
     }
   }
 
   private async pollOnce(signal: AbortSignal): Promise<InboundCapabilityVerdict> {
     if (signal.aborted) return this.verdict;
 
-    const cursor = await this.deps.cursors.getGmail(this.deps.account, this.deps.mailbox);
-    if (cursor === null) return this.establish(false);
+    if (this.position === null) {
+      const cursor = await this.deps.cursors.getGmail(this.deps.account, this.deps.mailbox);
+      if (cursor === null) return this.establish(false);
+      this.position = cursor.historyId;
+    }
 
     const result = await collectHistoryDelta(this.deps.history, {
-      startHistoryId: cursor.historyId,
+      startHistoryId: this.position,
       labelId: this.deps.mailbox,
       historyTypes: ['messageAdded'],
       // The one place the owner's policy changes what is ASKED FOR rather than
@@ -431,6 +460,7 @@ export class GmailMailSource implements InboundMailSource {
       currentHistoryId: fresh.value,
       historyExpired: afterExpiry,
     });
+    this.position = resolution.cursor.historyId;
 
     if (resolution.kind === 'history-expired') {
       this.note('cursor-reset',
@@ -447,24 +477,18 @@ export class GmailMailSource implements InboundMailSource {
   }
 
   /**
-   * Hand a delta's messages to the sink, then move the cursor.
+   * Hand a delta's messages to the sink, then move the cursor as far as the
+   * messages that were done reach.
    *
-   * The cursor moves ONCE, after the last message, and this differs from the
-   * IMAP path on purpose. There, each UID is its own position, so the cursor
-   * can advance per message. A delta's `historyId` is one position for the
-   * whole batch: advancing to it after the first message would put the cursor
-   * above messages two onwards, and a crash there would lose them silently.
-   * So a refused delivery leaves the whole delta above the cursor and it is
-   * fetched again, dedup turns the re-delivery into a suppressed duplicate,
-   * which is the failure this design chooses.
-   *
-   * A delta carrying `unreadable` entries takes the same exit for the same
-   * reason. Those are messages Google named and would not hand over, and on a
-   * forward-only history log the cursor moving past them is not a delay, it is
-   * a permanent loss. The one case that DOES let the position move is a
-   * message deleted between `history.list` and `messages.get`, and
-   * `collectHistoryDelta` has already removed those, nothing here has to
-   * re-decide it.
+   * Each history record has its own id, so the cursor moves to the last record
+   * whose messages were all read and handed on, the same per-message rule the
+   * IMAP path follows with UIDs, and never past a message that was not. A
+   * refused delivery or a message Google would not hand over stops the cursor
+   * just below that message's record: on a forward-only history log moving past
+   * it would be a permanent loss, not a delay. Only what follows is fetched
+   * again, and dedup suppresses any message behind it that was already handed
+   * on. A message deleted between `history.list` and `messages.get` counts as
+   * done; `collectHistoryDelta` has already removed it.
    */
   private async deliver(
     delta: GmailHistoryDelta,
@@ -491,16 +515,23 @@ export class GmailMailSource implements InboundMailSource {
         { availability: 'metadata-only' },
       ));
 
-    for (const message of messages) {
+    const held = this.heldUnreadable(delta);
+    const notDone = new Set(held.map((problem) => problem.id));
+    // Set by `pollOnce` before every delta; the history position this delta started from.
+    const start = this.position;
+    for (const [index, message] of messages.entries()) {
       if (signal.aborted) return this.verdict;
       try {
         await this.deps.sink.deliver(message);
       } catch (error) {
         // Google answered, so any run of unexplained 403s is over.
         this.unexplainedForbiddenSince = null;
+        for (const rest of messages.slice(index)) notDone.add(rest.resourceId);
+        const reached = start === null ? null : reachedHistoryId(delta, start, (id) => !notDone.has(id));
+        if (reached !== null) await this.moveCursor(reached);
         this.note('delivery-failed',
-          `Message ${message.resourceId} was not processed, so the history position stays where it `
-          + `was and the whole delta will be fetched again: ${errorText(error)}`);
+          `Message ${message.resourceId} was not processed, so the history position moves only to `
+          + `${reached ?? 'where it was'}, just below it, and the mail from there on is fetched again: ${errorText(error)}`);
         // Deliberately no backoff. The stated worst case is the poll interval,
         // and stretching the interval because a sink refused would make that
         // number untrue, the sink's problem is not a reason to notice the
@@ -518,28 +549,21 @@ export class GmailMailSource implements InboundMailSource {
     }
     this.deliveryFailures = 0;
 
-    const held = this.heldUnreadable(delta);
     if (held.length > 0) {
       // Messages this delta named and Google would not hand over. NOT messages
       // that are gone, `collectHistoryDelta` has already separated those out
       // and dropped them. These are still in the mailbox, and Gmail's history
       // is forward-only, so advancing to `delta.historyId` here would put the
-      // cursor above records that can never be requested again. That is the
-      // whole defect: the verification email nobody is ever told about, under
-      // a `healthy` verdict.
-      //
-      // So the position stays exactly where it was and the delta is fetched
-      // again on the next pass, the same choice the delivery-failure path
-      // above makes, for the same reason, with dedup absorbing the duplicates
-      // among whatever DID come back this time.
-      this.note('fetch-unreadable', this.unreadableDetail({ ...delta, unreadable: held }));
+      // cursor above records that can never be requested again: the
+      // verification email nobody is ever told about, under a `healthy`
+      // verdict. So the position moves only to just below the first of them.
+      const reached = start === null ? null : reachedHistoryId(delta, start, (id) => !notDone.has(id));
+      if (reached !== null) await this.moveCursor(reached);
+      this.note('fetch-unreadable', this.unreadableDetail({ ...delta, unreadable: held }, reached ?? 'where it was'));
       return this.recordFailure(this.firstUnreadableFailure({ ...delta, unreadable: held }));
     }
 
-    await this.deps.cursors.advanceGmail(
-      { account: this.deps.account, mailbox: this.deps.mailbox },
-      { historyId: delta.historyId },
-    );
+    await this.moveCursor(delta.historyId);
     if (delta.messages.length > 0) {
       this.note('delta-drained',
         `${String(delta.messages.length)} message(s) delivered; history position advanced to `
@@ -551,6 +575,22 @@ export class GmailMailSource implements InboundMailSource {
     // a source doing exactly what it was asked to do.
     if (delta.bodies === 'withheld-metadata-only') return this.record(this.noticeOnlyVerdict());
     return this.record(capabilityVerdict('polling-configured', this.pollingDetail()));
+  }
+
+  /** Persist the history position, when it moved. */
+  private async moveCursor(historyId: string): Promise<void> {
+    if (historyId === this.position) return;
+    try {
+      const advanced = await this.deps.cursors.advanceGmail(
+        { account: this.deps.account, mailbox: this.deps.mailbox },
+        { historyId },
+      );
+      this.position = advanced.historyId;
+    } catch (error) {
+      // The record may have been removed under us; the next poll reads it again.
+      this.position = null;
+      throw error;
+    }
   }
 
   /**
@@ -620,15 +660,15 @@ export class GmailMailSource implements InboundMailSource {
     return held;
   }
 
-  private unreadableDetail(delta: GmailHistoryDelta): string {
+  private unreadableDetail(delta: GmailHistoryDelta, reached: string): string {
     const reasons = [...new Set(delta.unreadable.map((problem) => problem.detail))].join('; ');
     const ids = delta.unreadable.map((problem) => problem.id).join(', ');
     return `${String(delta.unreadable.length)} message(s) in this delta could not be fetched `
       + `(${ids}): ${reasons}. An answer we could not read is not evidence the message is gone, `
-      + `so the history position stays at the value it already had rather than advancing to `
-      + `${delta.historyId}, and the whole delta is fetched again. `
-      + `${String(delta.messages.length)} message(s) in the same delta were delivered and are `
-      + 'suppressed as duplicates when it is re-fetched.';
+      + `so the history position moves only to ${reached}, just below the first of them, rather `
+      + `than to ${delta.historyId}, and the mail from there on is fetched again. `
+      + `${String(delta.messages.length)} message(s) in the same delta were delivered; any of them `
+      + 'fetched again is suppressed as a duplicate.';
   }
 
   /**
@@ -760,9 +800,10 @@ export class GmailMailSource implements InboundMailSource {
    * "cannot", and the delta is still above the cursor when it clears.
    *
    * A 403 is ambiguous: Google sends it for a missing scope or a disabled API,
-   * which only a new grant fixes, and also for a per-user rate limit, which
-   * clears by itself. Only the first two causes are taken as a refusal, a
-   * 403 whose cause was not established is polled again, and
+   * which only a new grant fixes, and also for a usage limit, which clears by
+   * itself. The client reads which one from Google's own reason fields. A
+   * usage limit (`rate-limited`) is waited out and never counts towards a
+   * refusal. A 403 whose cause Google did not name is polled again, and
    * an unbroken run of them lasting `MAX_UNEXPLAINED_FORBIDDEN_MS` is taken as a
    * real refusal so a revoked scope cannot retry for ever. Any other failure
    * ends the run. A grant Google reports as dead
@@ -774,7 +815,7 @@ export class GmailMailSource implements InboundMailSource {
       || failure.reason === 'missing-scopes'
       || failure.reason === 'api-disabled'
       || failure.status === 401;
-    if (!rejected && failure.status === 403) {
+    if (!rejected && failure.status === 403 && failure.reason !== 'rate-limited') {
       const now = this.deps.clock.now();
       this.unexplainedForbiddenSince ??= now;
       rejected = now - this.unexplainedForbiddenSince >= MAX_UNEXPLAINED_FORBIDDEN_MS;

@@ -445,10 +445,19 @@ describe('gmail source: delivery', () => {
     expect(await harness.store.get(ACCOUNT, LABEL)).toBeNull();
   });
 
-  test('a refused delivery leaves the whole delta above the cursor', async () => {
+  test('a refused delivery leaves its own history record above the cursor, and only that', async () => {
     const harness = await build({
       seedHistoryId: '100',
-      page: historyPage('140', ['m1', 'm2']),
+      page: {
+        ok: true,
+        value: {
+          historyId: '140',
+          history: [
+            { id: '120', messagesAdded: [{ message: { id: 'm1' } }] },
+            { id: '140', messagesAdded: [{ message: { id: 'm2' } }] },
+          ],
+        },
+      },
       messages: [gmailMessage('m1', 'one'), gmailMessage('m2', 'two')],
     });
     harness.sink.refuse.add('m2');
@@ -457,7 +466,7 @@ describe('gmail source: delivery', () => {
 
     expect(harness.sink.delivered).toHaveLength(1);
     const cursor = await harness.store.getGmail(ACCOUNT, LABEL);
-    expect(cursor?.historyId).toBe('100');
+    expect(cursor?.historyId).toBe('120');
     expect(harness.notes.map((note) => note.kind)).toContain('delivery-failed');
   });
 
@@ -565,11 +574,12 @@ describe('gmail source: a delta that could not be fully read', () => {
 
     const note = harness.notes.find((entry) => entry.kind === 'fetch-unreadable');
     expect(note).toBeDefined();
-    // The note names the message, says the position did not move, and does not
-    // claim the message is gone.
+    // The note names the message and does not claim the message is gone; the
+    // position stays below it.
     expect(note?.detail).toContain('m1');
     expect(note?.detail).toContain('rate limit');
-    expect(note?.detail).toContain('stays at the value it already had');
+    const cursor = await harness.store.getGmail(ACCOUNT, LABEL);
+    expect(cursor?.historyId).toBe('100');
   });
 
   test('a token refused mid-delta is insufficient, and still does not advance', async () => {

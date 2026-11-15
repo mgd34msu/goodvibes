@@ -7,7 +7,6 @@ import { fakePort } from '@goodvibes-jev/judgment/testing';
 import { noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { withDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.js';
 import { readServiceLogPosture } from '../terminal-shell/src/service-posture.js';
-import { readEditorMessage } from '../platform/src/platform/presentation/editor-message.js';
 import { makeProjectTempDir } from './_helpers/project-temp.js';
 import { classifyFailure } from '../platform/src/platform/runtime/forensics/classifier.js';
 import { ForensicsCollector } from '../platform/src/platform/runtime/forensics/collector.js';
@@ -27,7 +26,7 @@ function install(port: JudgmentPort) {
 let restore: (() => void) | undefined;
 afterEach(() => { restore?.(); restore = undefined; });
 
-test('Classic service logs and editor presentation retain local output without acquiring a decision owner', async () => {
+test('Classic service logs retain local output without acquiring a decision owner', async () => {
   const fake = fakePort(() => noulAnswer(0.99));
   const previous = installJudgmentPort(fake.port);
   restore = () => { installJudgmentPort(previous); };
@@ -39,8 +38,6 @@ test('Classic service logs and editor presentation retain local output without a
     const result = await readServiceLogPosture(path, 4096, {}, () => { captures++; throw new Error('No decision owner should be acquired'); });
     expect(result).toMatchObject({ provenance: 'classic', exists: true, tail: 'Ordinary service log line.\n' });
     expect(captures).toBe(0);
-    const presentation = await readEditorMessage({ message: 'Saved the file.', kind: 'note', mode: 'create' }, new AbortController().signal);
-    expect(presentation).toEqual({ provenance: 'classic' });
   });
   expect(fake.requests).toHaveLength(0);
 });

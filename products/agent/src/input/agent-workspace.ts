@@ -1,6 +1,6 @@
 import { agentResearchReportSourceOwner } from '../agent/protected-research-report.ts';
 import { submitProtectedAgentResearchReport } from './agent-workspace-research-report-editor.ts';
-import { WorkspaceEditorMessage } from './agent-workspace-editor-message.ts';
+import { settleEditorMessageTone } from './agent-workspace-editor-message.ts';
 import type { MemoryApi } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import type { MemoryRecord } from '@goodvibes-jev/engine/platform/platform/state';
 import type { AgentConfigSetting } from '../config/settings-catalog.ts';
@@ -49,14 +49,11 @@ export class AgentWorkspace {
   public lastActionResult: AgentWorkspaceActionResult | null = null;
   private _localEditor: AgentWorkspaceLocalEditor | null = null;
   private researchSubmission: AbortController | null = null;
-  private readonly editorMessage = new WorkspaceEditorMessage();
-  get editorMessageState() { return this.editorMessage.state; }
   get localEditor(): AgentWorkspaceLocalEditor | null { return this._localEditor; }
   set localEditor(editor: AgentWorkspaceLocalEditor | null) {
     this.researchSubmission?.abort();
     this.researchSubmission = null;
-    this._localEditor = editor;
-    this.editorMessage.update(editor, () => this.context?.renderRequest?.());
+    this._localEditor = editor ? settleEditorMessageTone(this._localEditor, editor) : null;
   }
   public actionSearchActive = false;
   public actionSearchQuery = '';

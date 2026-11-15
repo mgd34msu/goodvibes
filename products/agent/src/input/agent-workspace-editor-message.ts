@@ -1,97 +1,21 @@
-import { readEditorMessage, type EditorMessageReading } from '@goodvibes-jev/engine/platform/platform/presentation/editor-message';
 import type { AgentWorkspaceLocalEditor } from './agent-workspace-types.ts';
 
-export type EditorMessageState =
-  | { readonly status: 'empty'; readonly revision: number }
-  | { readonly status: 'pending' | 'unavailable' | 'protected'; readonly revision: number }
-  | { readonly status: 'classic'; readonly revision: number; readonly provenance: 'classic' }
-  | { readonly status: 'read' | 'uncertain'; readonly revision: number; readonly reading: EditorMessageReading };
-
-interface MessageOrigin { readonly message: string; readonly spans: readonly string[]; }
-
 /**
- * Owned by the input state, never by paint. Identity and relevant context bind
- * every completion; selecting a field or repainting cannot start another read.
- * Field values are deliberately excluded from judgment input. Declared secrets
- * echoed into an error are held locally using literal containment, not meaning.
+ * Settles the tone of the message an editor is about to show, from how the
+ * editor reached the workspace rather than from its wording.
+ *
+ * A form built fresh (no tone yet) shows its own help text: `info`, unless the
+ * builder stated a tone. A form derived from a shown one (`{ ...editor, ... }`
+ * carries the tone) whose message was rewritten is a submit that did not
+ * complete: every completed submit closes the form, so the new message is a
+ * refusal, a missing confirmation or a failure and reads `warn`. Typing and
+ * moving between fields keep the message and so keep the tone.
  */
-export class WorkspaceEditorMessage {
-  private revision = 0;
-  private key: string | undefined;
-  private controller: AbortController | undefined;
-  // Message origin is immutable while its wording is unchanged. Field edits
-  // cannot make preexisting help secret-derived or make an old echo safe.
-  // Only the current message lineage is held strongly. Weak associations let
-  // an editor object carry its origin when reused without retaining old forms.
-  private origin: MessageOrigin | undefined;
-  private readonly editorOrigins = new WeakMap<AgentWorkspaceLocalEditor, MessageOrigin>();
-
-  private messageOrigin(editor: AgentWorkspaceLocalEditor): MessageOrigin {
-    const retained = this.editorOrigins.get(editor);
-    if (retained?.message === editor.message) return this.origin = retained;
-    if (this.origin?.message === editor.message) {
-      this.editorOrigins.set(editor, this.origin);
-      return this.origin;
-    }
-    // A new message inherits only the proven origin spans it still contains.
-    // A genuinely new safe message ends the previous privacy lineage. Closing
-    // alone does not: a reopened/reworded current error must remain protected.
-    const spans = (this.origin?.spans ?? []).filter(span => editor.message.includes(span));
-    for (const field of editor.fields) {
-      if (!field.redact) continue;
-      const submittedValue = field.value.trim();
-      if (!submittedValue) continue;
-      // Workspace submission reads trim surrounding whitespace. Protect both
-      // the entered bytes and that submitted representation when an error
-      // echoes them; an empty trimmed field must never match every message.
-      for (const value of new Set([field.value, submittedValue])) {
-        if (!value || !editor.message.includes(value)) continue;
-        if (!spans.includes(value)) spans.push(value);
-      }
-    }
-    const origin = Object.freeze({ message: editor.message, spans: Object.freeze(spans) });
-    this.editorOrigins.set(editor, origin);
-    return this.origin = origin;
-  }
-  public state: EditorMessageState = { status: 'empty', revision: 0 };
-
-  update(editor: AgentWorkspaceLocalEditor | null, requestRender: () => void): void {
-    // Typed per-field redaction declarations are security metadata, not a prose classifier.
-    const protectedMessage = editor ? this.messageOrigin(editor).spans.length > 0 : false;
-    const key = editor ? JSON.stringify([editor.kind, editor.mode, editor.recordId, editor.title, editor.message, protectedMessage]) : undefined;
-    if (key === this.key) return;
-    this.controller?.abort();
-    this.key = key;
-    const revision = ++this.revision;
-    if (!editor || !editor.message) {
-      this.state = { status: 'empty', revision };
-      return;
-    }
-    if (protectedMessage) {
-      this.state = { status: 'protected', revision };
-      return;
-    }
-    const controller = this.controller = new AbortController();
-    this.state = { status: 'pending', revision };
-    void readEditorMessage({ message: editor.message, kind: editor.kind, mode: editor.mode }, controller.signal).then((reading) => {
-      if ('provenance' in reading) {
-        if (controller.signal.aborted || revision !== this.revision) return;
-        this.state = { status: 'classic', revision, provenance: 'classic' };
-        requestRender(); return;
-      }
-      if (controller.signal.aborted || revision !== this.revision) {
-        reading.recordAction('Discarded stale editor message presentation reading.');
-        return;
-      }
-      const verdict = reading.readings.blocking;
-      const settled = verdict.outcome === 'act' && verdict.verdict !== 'uncertain';
-      this.state = { status: settled ? 'read' : 'uncertain', revision, reading };
-      reading.recordAction(settled ? `Editor message presentation: ${verdict.verdict === 'yes' ? 'warn' : 'info'}.` : 'Editor message presentation remains uncertain; no semantic tone assigned.');
-      requestRender();
-    }).catch(() => {
-      if (controller.signal.aborted || revision !== this.revision) return;
-      this.state = { status: 'unavailable', revision };
-      requestRender();
-    });
-  }
+export function settleEditorMessageTone(
+  previous: AgentWorkspaceLocalEditor | null,
+  next: AgentWorkspaceLocalEditor,
+): AgentWorkspaceLocalEditor {
+  if (next.messageTone === undefined) return { ...next, messageTone: 'info' };
+  if (previous && previous.message !== next.message && next.messageTone !== 'warn') return { ...next, messageTone: 'warn' };
+  return next;
 }

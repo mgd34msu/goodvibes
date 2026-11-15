@@ -458,11 +458,11 @@ function shouldRenderOnboardingSettingsTable(actions: readonly AgentWorkspaceAct
   return nonFinish.length > 0;
 }
 
-function editorContextLines(editor: AgentWorkspaceLocalEditor, snapshot: AgentWorkspaceRuntimeSnapshot | null, messageState: AgentWorkspace['editorMessageState']): ContextLine[] {
+function editorContextLines(editor: AgentWorkspaceLocalEditor, snapshot: AgentWorkspaceRuntimeSnapshot | null): ContextLine[] {
   const selected = editor.fields[editor.selectedFieldIndex];
   const lines: ContextLine[] = [
     { text: editor.title, fg: PALETTE.title, bold: true },
-    { text: compactText(editor.message), fg: messageState.status === 'read' ? (messageState.reading.readings.blocking.verdict === 'yes' ? PALETTE.warn : PALETTE.info) : messageState.status === 'classic' ? PALETTE.info : PALETTE.muted },
+    { text: compactText(editor.message), fg: editor.messageTone === 'warn' ? PALETTE.warn : PALETTE.info },
     { text: 'Enter next/save; Ctrl-J newline; Esc cancel.', fg: PALETTE.muted },
   ];
   if (selected) {
@@ -512,7 +512,7 @@ function buildContextRows(workspace: AgentWorkspace, category: AgentWorkspaceCat
       },
       { text: 'Enter opens; Esc clears.', fg: PALETTE.muted },
     ] satisfies ContextLine[] : []),
-    ...(workspace.localEditor ? editorContextLines(workspace.localEditor, workspace.runtimeSnapshot, workspace.editorMessageState) : []),
+    ...(workspace.localEditor ? editorContextLines(workspace.localEditor, workspace.runtimeSnapshot) : []),
   ];
 
   const selectedActionLines: ContextLine[] = action

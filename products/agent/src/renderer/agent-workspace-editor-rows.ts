@@ -15,7 +15,7 @@ const MAX_VALUE_LINES = 4;
 export function buildEditorRows(editor: AgentWorkspaceLocalEditor, width: number, height: number): WorkspaceRow[] {
   const rows: WorkspaceRow[] = [
     { text: editor.title, fg: PALETTE.title, bold: true },
-    { text: editor.message, fg: PALETTE.info },
+    { text: editor.message, fg: editor.messageTone === 'warn' ? PALETTE.warn : PALETTE.info },
     { text: '' },
   ];
   const footerRows: WorkspaceRow[] = [

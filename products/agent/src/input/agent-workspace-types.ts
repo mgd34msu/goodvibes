@@ -104,6 +104,12 @@ export interface AgentWorkspaceLocalEditor {
   readonly fields: readonly AgentWorkspaceEditorField[];
   readonly selectedFieldIndex: number;
   readonly message: string;
+  /**
+   * `info` for help text, `warn` for a refusal, missing confirmation or failed
+   * save. The workspace settles it when the editor is shown; a builder may
+   * state it for a form that opens in an already-failed state.
+   */
+  readonly messageTone?: 'info' | 'warn';
 }
 
 export interface AgentWorkspaceAction {

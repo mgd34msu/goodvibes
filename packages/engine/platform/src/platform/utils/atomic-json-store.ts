@@ -9,6 +9,13 @@
  * `watchers/` can all import it without creating a layering edge between two
  * domains that must stay independent.
  *
+ * A small document a store holds in memory and writes on a real change uses
+ * {@link writeDocument} (one temp file, one write, one sync, one rename) and
+ * {@link readDocument} when it opens. Rows go in a SQLite file
+ * (`state/sqlite-file.ts`) and records that only grow in a record log
+ * (`state/record-log.ts`). The guarded writer below remains for stores that
+ * still need its path and effect observation.
+ *
  * The two mechanics:
  *
  *   1. {@link writeFileAtomic} / {@link writeJsonFileAtomic}, write to a
@@ -74,6 +81,7 @@ import {
   constants,
   fchmodSync,
   existsSync,
+  fdatasyncSync,
   fstatSync,
   fsyncSync,
   lstatSync,
@@ -638,6 +646,88 @@ export function writeJsonFileAtomicSafe(
       ...(syscall !== undefined ? { syscall } : {}),
     };
   }
+}
+
+export interface DocumentWriteOptions {
+  /** Exact mode of the file. Default `0o600`. */
+  readonly mode?: number;
+  /** `JSON.stringify` indent; `null` writes compact JSON. Default `2`. */
+  readonly indent?: number | null;
+}
+
+/** Parent directories this process already created or found, so a write does not ask again. */
+const documentParents = new Set<string>();
+
+function openDocumentTemp(temp: string, parent: string, mode: number): number {
+  const flags = constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW;
+  if (!documentParents.has(parent)) {
+    mkdirSync(parent, { recursive: true });
+    documentParents.add(parent);
+  }
+  try {
+    return openSync(temp, flags, mode);
+  } catch (error) {
+    if (!atomicMissing(error)) throw error;
+    // The directory was removed since it was first seen; make it once more.
+    mkdirSync(parent, { recursive: true });
+    return openSync(temp, flags, mode);
+  }
+}
+
+/**
+ * The document writer: a small JSON document held in memory by its owner and
+ * written whole on a real change. One temp file beside the target, one write,
+ * one data sync, one rename; the parent directory is resolved once per process.
+ *
+ * A reader sees the old document or the new one, never part of either, and a
+ * crash leaves one of the two. The rename itself is not synced to the
+ * directory: after a power loss the previous document may be the one found,
+ * which a document store accepts. Leftover temp files and unreadable documents
+ * are dealt with once, when the owner opens the document ({@link readDocument}).
+ * Throws when the document was not written.
+ */
+export function writeDocument(filePath: string, value: unknown, options: DocumentWriteOptions = {}): void {
+  const indent = options.indent === undefined ? 2 : options.indent;
+  const serialized = indent === null ? JSON.stringify(value) : JSON.stringify(value, null, indent);
+  if (serialized === undefined) throw new Error('Document value did not serialize to JSON');
+  const contents = Buffer.from(`${serialized}\n`, 'utf8');
+  const absolute = isAbsolute(filePath) ? filePath : `${process.cwd()}${sep}${filePath}`;
+  const mode = options.mode ?? DEFAULT_STORE_FILE_MODE;
+  const temp = createAtomicTempPath(absolute);
+  let fd: number | undefined = openDocumentTemp(temp, dirname(absolute), mode);
+  let renamed = false;
+  try {
+    fchmodSync(fd, mode);
+    const written = writeSync(fd, contents, 0, contents.length);
+    if (written !== contents.length) throw new Error(`Document write was short: ${written} of ${contents.length} bytes`);
+    fdatasyncSync(fd);
+    const done = fd;
+    fd = undefined;
+    closeSync(done);
+    renameSync(temp, absolute);
+    renamed = true;
+  } finally {
+    if (fd !== undefined) { try { closeSync(fd); } catch { /* the write error is the one reported */ } }
+    if (!renamed) { try { unlinkSync(temp); } catch { /* nothing was published */ } }
+  }
+}
+
+/**
+ * Open a document: remove temp files a dead writer left beside it, then read
+ * it, moving an unreadable one aside exactly as {@link readJsonFileOrQuarantine}
+ * does. Returns null when there is no document yet. Call once when the owner
+ * loads the document; writes then go through {@link writeDocument}.
+ */
+export function readDocument<T>(filePath: string, options: QuarantineLoadOptions<T>): T | null {
+  const absolute = isAbsolute(filePath) ? filePath : `${process.cwd()}${sep}${filePath}`;
+  const dir = dirname(absolute), prefix = `${basename(absolute)}.tmp-`;
+  let names: string[] = [];
+  try { names = readdirSync(dir); } catch { /* no directory yet: nothing to read or reap */ }
+  const staleBefore = Date.now() - STALE_TEMP_FILE_MIN_AGE_MS;
+  for (const name of names) {
+    if (name.startsWith(prefix)) cleanupStaleTempFile(dir, absolute, name, staleBefore, () => {}, undefined);
+  }
+  return readJsonFileOrQuarantine(absolute, options);
 }
 
 export interface QuarantineLoadOptions<T> {

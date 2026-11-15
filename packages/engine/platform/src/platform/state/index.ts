@@ -193,3 +193,9 @@ export type {
 
 export { formatConsolidationReceipt } from './consolidation-receipt.js';
 export { DECISION_LOG_FILE, decisionLogPath, openStateDecisionLog } from './decision-log.js';
+// The store kinds: rows in a SQLite file, records appended to a log. A small
+// document is written with writeDocument from platform/utils.
+export { openSqliteFile, adoptSqliteDatabase, SqliteMigrationError } from './sqlite-file.js';
+export type { SqliteFile, SqliteFileOptions, SqliteMigration } from './sqlite-file.js';
+export { openRecordLog } from './record-log.js';
+export type { RecordLog, RecordLogOptions } from './record-log.js';

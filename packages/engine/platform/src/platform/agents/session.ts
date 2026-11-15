@@ -1,9 +1,9 @@
-import { appendFileSync, mkdirSync } from 'fs';
-import { join, dirname } from 'path';
+import { join } from 'path';
 import { ConversationManager } from '../core/conversation.js';
 import { verificationHistory, verificationMessages } from '../core/verification/archive.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
+import { openRecordLog, type RecordLog } from '../state/record-log.js';
 import {
   type AtRestPolicy,
   DEFAULT_AT_REST_POLICY,
@@ -32,14 +32,17 @@ function resolveAgentSessionPaths(paths: AgentSessionPaths): AgentSessionPaths {
 /**
  * AgentSession, Isolated session context for a spawned agent.
  *
- * Each agent gets its own ConversationManager and JSONL message log file.
+ * Each agent gets its own ConversationManager and JSONL message log file. The
+ * log stays open for the run: a line is one write, and one background sync
+ * covers every line written since the last.
  */
 export class AgentSession {
   /** The agent's unique identifier. */
   readonly agentId: string;
 
-  /** Guard to ensure session directory is only created once. */
-  private dirCreated = false;
+  /** The open journal; null before the first line and after disposal. */
+  private journal: RecordLog<string> | null = null;
+  private journalClosed = false;
 
   /** Isolated conversation history for this agent. */
   readonly conversation: ConversationManager;
@@ -86,8 +89,10 @@ export class AgentSession {
     // JSONL log path
     this.sessionFile = join(resolvedPaths.sessionsDir, `${agentId}.jsonl`);
 
+    // The journal (and its directory) exists from construction, before any line is ready.
+    this.journal = this._openJournal();
+
     // Write a session-start entry
-    this._ensureSessionDir();
     this.appendMessage({
       type: 'meta',
       agentId,
@@ -109,9 +114,6 @@ export class AgentSession {
    */
   appendMessage(msg: Record<string, unknown>): void {
     try {
-      if (!this.dirCreated) {
-        this._ensureSessionDir();
-      }
       const serialized = JSON.stringify(msg);
       if (this.atRestPolicy.redact) {
         this.lineWriter.write(serialized, (line) => this._appendLine(line));
@@ -144,6 +146,17 @@ export class AgentSession {
       archive: verificationHistory(this.conversation), timestamp: Date.now() });
     this.disposal = (async () => {
       await this.flush();
+      const journal = this.journal;
+      this.journal = null;
+      this.journalClosed = true;
+      try {
+        await journal?.flush();
+      } catch (err) {
+        this.lostWrites += 1;
+        logger.error('AgentSession journal could not be synced', { agentId: this.agentId, error: summarizeError(err) });
+      } finally {
+        journal?.close();
+      }
       if (this.lostWrites > 0) {
         logger.error('AgentSession disposed with an incomplete journal', { agentId: this.agentId, lostWrites: this.lostWrites, sessionFile: this.sessionFile });
       }
@@ -158,15 +171,21 @@ export class AgentSession {
 
   private _appendLine(line: string): void {
     try {
-      appendFileSync(this.sessionFile, line + '\n', 'utf-8');
+      if (!this.journalClosed) {
+        (this.journal ??= this._openJournal()).append(line);
+        return;
+      }
+      // A line that arrives after disposal still lands; the journal is not kept open for it.
+      const late = this._openJournal();
+      try { late.append(line); } finally { late.close(); }
     } catch (err) {
       this.lostWrites += 1;
       logger.error('AgentSession.appendMessage failed', { agentId: this.agentId, error: summarizeError(err) });
     }
   }
 
-  private _ensureSessionDir(): void {
-    mkdirSync(dirname(this.sessionFile), { recursive: true });
-    this.dirCreated = true;
+  private _openJournal(): RecordLog<string> {
+    // Lines arrive already serialized (and redacted when the policy says so).
+    return openRecordLog<string>(this.sessionFile, { fsync: 'batch', encode: (line) => line, decode: (line) => line });
   }
 }

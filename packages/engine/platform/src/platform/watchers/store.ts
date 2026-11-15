@@ -1,9 +1,5 @@
 import { resolveSharedDirectory } from '../runtime/surface-root.js';
-import {
-  readJsonFileOrQuarantine,
-  writeJsonFileAtomic,
-  writeJsonFileAtomicSafe,
-} from '../utils/atomic-json-store.js';
+import { readDocument, writeDocument } from '../utils/atomic-json-store.js';
 import type { AtomicWriteOutcome } from '../utils/atomic-json-store.js';
 import type { WatcherRecord } from '../runtime/store/domains/watchers.js';
 import { logger } from '../utils/logger.js';
@@ -50,7 +46,7 @@ export function loadWatcherSnapshot(storePath: string): WatcherStoreSnapshot | n
  * snapshot degrades to an empty one instead of crash-looping the reader.
  */
 export function loadWatcherSnapshotFromPath(storePath: string): WatcherStoreSnapshot | null {
-  try { return readJsonFileOrQuarantine<WatcherStoreSnapshot>(storePath, {
+  try { return readDocument<WatcherStoreSnapshot>(storePath, {
     label: 'watchers/store',
     recovery: WATCHER_STORE_RECOVERY,
     validate: (parsed) => {
@@ -81,12 +77,12 @@ export function saveWatcherSnapshot(watchers: readonly WatcherRecord[], storePat
 }
 
 /**
- * Save a watcher store snapshot atomically via the shared helper: temp file
- * beside the target, fsync, rename over it, stale-temp sweep first. A reader,
- * or a process that dies mid-write, only ever sees a complete snapshot.
+ * Save a watcher store snapshot: one temp file beside the target, one write,
+ * one sync, one rename. A reader, or a process that dies mid-write, only ever
+ * sees a complete snapshot; a temp file left by a crash is removed on load.
  */
 export function saveWatcherSnapshotToPath(watchers: readonly WatcherRecord[], storePath: string): void {
-  writeJsonFileAtomic(storePath, buildSnapshot(watchers));
+  writeDocument(storePath, buildSnapshot(watchers));
 }
 
 /**
@@ -96,17 +92,27 @@ export function saveWatcherSnapshotToPath(watchers: readonly WatcherRecord[], st
  *
  * The registry persists on every list refresh, and the fleet registry's
  * coalesced tick calls that list on a timer. An exception raised there has no
- * caller above it to catch anything, so it reaches the top as an uncaught
- * exception and takes the process with it, which is precisely what happened
- * on a live machine when a concurrent writer's sweep removed this store's temp
- * file mid-write and the `chmod` came back ENOENT. Watcher state costs nothing
- * to lose (see {@link WATCHER_STORE_RECOVERY}); the host process does not.
+ * caller above it to catch anything, so it would reach the top as an uncaught
+ * exception and take the process with it. Watcher state costs nothing to lose
+ * (see {@link WATCHER_STORE_RECOVERY}); the host process does not.
  */
 export function saveWatcherSnapshotToPathSafe(
   watchers: readonly WatcherRecord[],
   storePath: string,
 ): AtomicWriteOutcome {
-  return writeJsonFileAtomicSafe(storePath, buildSnapshot(watchers), { label: 'watchers/store' });
+  try {
+    writeDocument(storePath, buildSnapshot(watchers));
+    return { ok: true, filePath: storePath };
+  } catch (error) {
+    const failure = error instanceof Error ? error : new Error(String(error));
+    const fields = error as { code?: unknown; syscall?: unknown } | null;
+    const code = typeof fields?.code === 'string' ? fields.code : undefined;
+    const syscall = typeof fields?.syscall === 'string' ? fields.syscall : undefined;
+    logger.error('[watchers/store] could not save the watcher snapshot; the in-memory state stands and the next save retries', {
+      filePath: storePath, code, syscall, error: failure.message,
+    });
+    return { ok: false, filePath: storePath, error: failure, ...(code !== undefined ? { code } : {}), ...(syscall !== undefined ? { syscall } : {}) };
+  }
 }
 
 function buildSnapshot(watchers: readonly WatcherRecord[]): WatcherStoreSnapshot {

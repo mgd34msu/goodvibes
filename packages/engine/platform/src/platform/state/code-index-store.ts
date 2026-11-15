@@ -99,7 +99,7 @@ import {
   isBinary,
   type FindDiagnostics,
 } from '../tools/find/shared.js';
-import { openVersionedBunSqliteStore } from './store-versioning.js';
+import { adoptSqliteDatabase } from './sqlite-file.js';
 import { CodeSourceChangedError, readCodeIndexFile, type CodeFileObservation } from './code-file-observation.js';
 import { rankLiveCodeInjection } from './code-injection-live.js';
 import type { CodeInjectionAuthorityOptions } from './code-injection-ranking.js';
@@ -240,28 +240,23 @@ export class CodeIndexStore {
       }
       this.db = new (bunSqliteDatabase())(this.dbPath);
       const opened = this.db;
-      // Two windows on one workspace share this file; wait for the other writer instead of failing mid-file.
-      opened.run(`PRAGMA busy_timeout = ${SQLITE_BUSY_TIMEOUT_MS}`);
       await loadSqliteVecExtension(opened);
       // close() while the extension was loading already closed this handle and
       // cleared it; carrying on would mark a closed store available and then
       // fail in versioning with an error that has nothing to do with the cause.
       if (this.db !== opened) return;
       this.available = true;
-      // Schema versioning: pre-migration snapshot, auto-restore on failure,
-      // and a downgrade guard (an older binary refuses a newer schema).
-      openVersionedBunSqliteStore({
-        storeName: 'code index store',
-        dbPath: this.dbPath,
-        db: this.db,
-        targetVersion: CODE_INDEX_SCHEMA_VERSION,
-        migrations: [{ toVersion: CODE_INDEX_SCHEMA_VERSION, migrate: () => migrateCodeIndexSchema(this.db!) }],
-        closeDb: () => {
-          this.db?.close();
-          this.db = null;
-        },
+      // WAL so two windows on one workspace read while the other writes, a
+      // busy wait for the other writer instead of failing mid-file, and the
+      // schema brought forward in one transaction after one consistent copy.
+      // A newer file than this build is refused untouched.
+      adoptSqliteDatabase(opened, this.dbPath, {
+        name: 'code index store',
+        busyTimeoutMs: SQLITE_BUSY_TIMEOUT_MS,
+        foreignKeys: false,
+        migrations: [{ toVersion: CODE_INDEX_SCHEMA_VERSION, up: migrateCodeIndexSchema }],
       });
-      createCodeIndexSchema(this.db);
+      createCodeIndexSchema(opened);
     } catch (err) {
       this.close();
       this.available = false;

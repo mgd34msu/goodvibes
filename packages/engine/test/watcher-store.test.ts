@@ -102,7 +102,7 @@ describe('watcher store: atomic save', () => {
     expect(tempFileSiblings(dir, storePath)).toEqual([]);
   });
 
-  test('a stale temp file left by a previous crash is cleaned up by the next save', () => {
+  test('a stale temp file left by a previous crash is cleaned up by the next load', () => {
     const dir = makeStoreDir();
     const storePath = storePathIn(dir);
     mkdirSync(dir, { recursive: true });
@@ -118,6 +118,7 @@ describe('watcher store: atomic save', () => {
     expect(existsSync(staleTemp)).toBe(true);
 
     saveWatcherSnapshotToPath([makeWatcherRecord('fresh')], storePath);
+    loadWatcherSnapshotFromPath(storePath);
 
     expect(existsSync(staleTemp)).toBe(false);
     expect(tempFileSiblings(dir, storePath)).toEqual([]);

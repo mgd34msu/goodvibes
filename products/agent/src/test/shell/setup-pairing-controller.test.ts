@@ -291,7 +291,7 @@ describe('interactive pairing controller over the real pairing core', () => {
           return;
         }
         pending = handleBlockingShellInput({
-          data, pendingPermission: pending, recoveryPending: null, daemonRepairPrompt: null,
+          data, pendingPermission: pending, recoveryPending: null,
           abortTurn: () => {}, conversation: {} as never, systemMessageRouter: {} as never,
           render: () => {}, consumeRecovery: () => null, removeRecoveryPoint: () => {},
         }).pendingPermission;

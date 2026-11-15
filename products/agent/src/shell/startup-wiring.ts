@@ -14,11 +14,12 @@ import {
   readOnboardingCompletionMarker,
 } from '../runtime/onboarding/index.ts';
 import { deriveOnboardingState } from '../runtime/onboarding/onboarding-state.ts';
+import { isOnboardingComplete } from '../runtime/onboarding/completion.ts';
 import { buildSetupIncompleteHint } from '../core/setup-incomplete-hint.ts';
 import { answerWorkspaceRegistrationPrompt, isBroadWorkspaceRoot, normalizeWorkspaceRoot, resolveWorkspaceRegistrationSync } from '../config/workspace-registration.ts';
 import type { AskWorkspaceRegistration } from './workspace-registration-question.ts';
-import { createDaemonRepairPrompt, type DaemonRepairPrompt } from './daemon-repair-prompt.ts';
-import { createDaemonRepairSessionMemory, diagnoseDaemonRepair, type DaemonRepairConfig, type DaemonRepairSessionMemory } from '../runtime/daemon-repair.ts';
+import { createDaemonRepairPrompt, type AskDaemonRepair, type DaemonRepairPrompt } from './daemon-repair-prompt.ts';
+import { createDaemonRepairSessionMemory, diagnoseDaemonRepair, type DaemonHost, type DaemonRepairConfig, type DaemonRepairSessionMemory } from '../runtime/daemon-repair.ts';
 import type { DaemonCliRunner } from '../runtime/daemon-cli-service.ts';
 
 export interface SessionPersistenceAndRecoveryDeps {
@@ -33,8 +34,14 @@ export interface SessionPersistenceAndRecoveryDeps {
   readonly render: () => void;
   readonly unsubs: Array<() => void>;
   readonly uiServicesTurns: {
-    on(event: 'TURN_COMPLETED' | 'STREAM_START' | 'STREAM_DELTA' | 'TURN_SUBMITTED' | 'TOOLS_DONE', handler: () => void): () => void;
+    on(event: 'TURN_COMPLETED' | 'STREAM_START' | 'STREAM_DELTA' | 'TURN_SUBMITTED' | 'TOOLS_DONE', handler: (event?: { readonly turnId?: string }) => void): () => void;
   };
+  /**
+   * True for a turn the connected host ran (shell/remote-conversation-wiring.ts).
+   * Its transcript is kept by the host and mirrored under the hosted id, so the
+   * local autosave and crash snapshot skip it instead of saving a second copy.
+   */
+  readonly isHostedTurn?: ((turnId: string) => boolean) | undefined;
   readonly hookDispatcher: HookDispatcher;
   /**
    * Called whenever the computed stream-token speed changes so that main.ts
@@ -54,6 +61,10 @@ export interface SessionPersistenceAndRecoveryDeps {
     readonly runDaemonCli?: DaemonCliRunner | undefined;
     /** Injectable repair, so a test drives accept without touching a service manager. */
     readonly repair?: Parameters<typeof createDaemonRepairPrompt>[0]['repair'];
+    /** Shows the repair question (a selection modal, shell/daemon-repair-prompt.ts). Absent, no repair is offered this launch. */
+    readonly ask?: AskDaemonRepair | undefined;
+    /** The connected-host controller's daemon, so an accepted repair adopts the daemon in this session. */
+    readonly host?: DaemonHost | undefined;
   } | undefined;
   /**
    * Asks the first-start workspace question where the owner can see it (the
@@ -123,14 +134,18 @@ export function wireSessionPersistenceAndRecovery(
   const writeCrashSnapshot = (): void => {
     writeRecoveryFile(buildCurrentSessionSnapshot(), runtime.sessionId, conversation.title ?? '', { surface });
   };
+  const hostedTurn = (event: { readonly turnId?: string } | undefined): boolean =>
+    event?.turnId !== undefined && deps.isHostedTurn?.(event.turnId) === true;
   unsubs.push(writeCrashSnapshotAtTurnMoments({
-    subscribe: (moment, handler) => uiServicesTurns.on(moment, handler),
+    subscribe: (moment, handler) => uiServicesTurns.on(moment, (event) => { if (!hostedTurn(event)) handler(); }),
     write: writeCrashSnapshot,
   }));
 
   // One notice per failing streak: a full disk would otherwise repeat it every turn.
   let autosaveFailing = false;
-  unsubs.push(uiServicesTurns.on('TURN_COMPLETED', () => {
+  unsubs.push(uiServicesTurns.on('TURN_COMPLETED', (event) => {
+    // A hosted turn's record is the host's transcript, mirrored under its hosted id.
+    if (hostedTurn(event)) return;
     // Auto-save after every LLM turn so kills don't lose the session
     try {
       const snapshot = buildCurrentSessionSnapshot();
@@ -182,7 +197,7 @@ export function wireSessionPersistenceAndRecovery(
   // Ctrl+R take and delete the file the other terminal is still writing.
   const recoveryOwner = recoveryInfo ? checkSessionLiveness(surface, recoveryInfo.sessionId) : null;
   if (recoveryInfo && !(recoveryOwner?.live && recoveryOwner.pid !== process.pid)) {
-    systemMessageRouter.high(`[Recovery] Found unsaved session from ${new Date(recoveryInfo.timestamp).toLocaleString()}. Title: "${recoveryInfo.title}". Press Ctrl+R to restore, Esc to discard, or start typing to ignore it.`);
+    systemMessageRouter.high(`[Recovery] Found unsaved session from ${new Date(recoveryInfo.timestamp).toLocaleString()}. Title: "${recoveryInfo.title}". Press Ctrl+R to restore it or Esc to discard it. Typing leaves it saved for the next launch.`);
     for (const line of formatReturnContextForDisplay(recoveryInfo.returnContext)) {
       systemMessageRouter.low(`[Recovery] ${line}`);
     }
@@ -223,7 +238,7 @@ export function wireSessionPersistenceAndRecovery(
   // already claimed this launch's ambient attention, and while onboarding is
   // still incomplete, the full-screen onboarding wizard would otherwise
   // compete with this prompt for the very next keypress the owner types.
-  const onboardingDone = Boolean(readOnboardingCompletionMarker(shellPaths, 'user').payload);
+  const onboardingDone = isOnboardingComplete(shellPaths);
 
   // One-touch daemon repair, offered before the workspace prompt below because
   // the two compete for the very next keypress and this one is about a machine
@@ -233,12 +248,12 @@ export function wireSessionPersistenceAndRecovery(
   // machine, it reads one setting and returns, and only consults the daemon's
   // CLI once that setting is already false. See runtime/daemon-repair.ts.
   let daemonRepairPrompt: DaemonRepairPrompt | null = null;
-  if (!recoveryPending && onboardingDone && daemonRepair) {
+  if (!recoveryPending && onboardingDone && daemonRepair?.ask) {
     const daemonRepairSession = daemonRepair.session ?? createDaemonRepairSessionMemory();
     const offer = diagnoseDaemonRepair({
       config: daemonRepair.config,
       session: daemonRepairSession,
-      ...(daemonRepair.runDaemonCli ? { runDaemonCli: daemonRepair.runDaemonCli } : {}),
+      host: daemonRepair.host,
     });
     if (offer) {
       // One line: what is wrong, then the offer. Both come from the policy
@@ -252,6 +267,8 @@ export function wireSessionPersistenceAndRecovery(
         session: daemonRepairSession,
         systemMessageRouter,
         render,
+        ask: daemonRepair.ask,
+        host: daemonRepair.host,
         runDaemonCli: daemonRepair.runDaemonCli,
         repair: daemonRepair.repair,
       });
@@ -265,11 +282,15 @@ export function wireSessionPersistenceAndRecovery(
       const root = normalizeWorkspaceRoot(workingDir);
       workspaceRegistrationAsked = root;
       deps.askWorkspaceRegistration(root, (accepted) => {
-        void answerWorkspaceRegistrationPrompt(shellPaths, root, accepted);
-        systemMessageRouter.high(accepted
-          ? `[Workspace] Registered ${root}, automatic checkpoints are now allowed here.`
-          : `[Workspace] Not registered, automatic checkpoints stay off here (won't ask again for this location).`);
-        render();
+        // The line says what the store did, once it did it.
+        void answerWorkspaceRegistrationPrompt(shellPaths, root, accepted).then((answer) => {
+          systemMessageRouter.high(answer.outcome === 'registered'
+            ? `[Workspace] Registered ${root}, automatic checkpoints are now allowed here.`
+            : answer.outcome === 'declined'
+              ? `[Workspace] Not registered, automatic checkpoints stay off here (won't ask again for this location).`
+              : `[Workspace] ${accepted ? 'Not registered' : 'Your answer was not saved'}: ${answer.reason}. Automatic checkpoints stay off here; run "goodvibes-agent workspaces register --yes" in this directory to try again.`);
+          render();
+        });
       });
     }
   }

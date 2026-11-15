@@ -214,7 +214,7 @@ describe('runDaemonRepair', () => {
   });
 });
 
-// ── Layer 3: the interactive prompt controller ──────────────────────────────
+// ── Layer 3: the question and its controller ────────────────────────────────
 
 describe('createDaemonRepairPrompt', () => {
   const offer: DaemonRepairOffer = {
@@ -224,136 +224,62 @@ describe('createDaemonRepairPrompt', () => {
     offer: 'offered',
   };
 
-  test('"y" runs the repair and reports every step it took', async () => {
+  function promptWith(repair: () => Promise<{ repaired: boolean; steps: string[]; summary: string }>) {
     const router = fakeRouter();
     const session = createDaemonRepairSessionMemory();
-    let repaired = false;
+    const config = fakeConfig(false);
+    let answer: ((accepted: boolean) => void) | null = null;
     const prompt = createDaemonRepairPrompt({
       offer,
-      config: fakeConfig(false),
+      config,
       session,
       systemMessageRouter: router,
       render: () => {},
-      repair: async () => {
-        repaired = true;
-        return { repaired: true, steps: ['step one', 'step two'], summary: '[Daemon] Repaired: all good.' };
-      },
+      ask: (_offer, reply) => { answer = reply; },
+      repair,
+    });
+    return { prompt, router, session, config, answer: (accepted: boolean) => answer!(accepted) };
+  }
+
+  test('only choosing the repair in the question runs it; typed keys never reach it', async () => {
+    let runs = 0;
+    const { prompt, router, session, answer } = promptWith(async () => {
+      runs += 1;
+      return { repaired: true, steps: ['step one'], summary: '[Daemon] Repaired: all good.' };
     });
     expect(prompt.pending()).toBe(true);
-    expect(prompt.answer('y')).toBe(true);
-    // y alone installs nothing: Enter confirms.
-    expect(prompt.pending()).toBe(true);
-    expect(repaired).toBe(false);
-    expect(prompt.answer('\r')).toBe(true);
+    // A "y" typed into the composer goes to the composer: the shell's key path no longer knows the question.
+    const typed = handleBlockingShellInput({
+      data: 'y',
+      pendingPermission: null,
+      recoveryPending: null,
+      abortTurn: () => {},
+      conversation: {} as unknown as ConversationManager,
+      systemMessageRouter: fakeRouter() as unknown as SystemMessageRouter,
+      render: () => {},
+      consumeRecovery: () => null,
+      removeRecoveryPoint: () => {},
+    });
+    expect(typed.handled).toBe(false);
+    expect(runs).toBe(0);
+    answer(true);
     expect(prompt.pending()).toBe(false);
-    // The repair is fire-and-forget from the keypress; let it settle.
     await Promise.resolve();
     await Promise.resolve();
-    expect(repaired).toBe(true);
+    expect(runs).toBe(1);
     expect(session.declined()).toBe(false);
-    expect(router.messages.some((message) => message.includes('Starting the daemon service'))).toBe(true);
     expect(router.messages.some((message) => message.includes('Repaired: all good.'))).toBe(true);
-    expect(router.messages.some((message) => message.includes('step one'))).toBe(true);
   });
 
-  test('any other key declines: nothing runs, nothing changes, and the session remembers', () => {
-    for (const key of ['n', '\x1b', '\x03', 'q', '\r']) {
-      const router = fakeRouter();
-      const session = createDaemonRepairSessionMemory();
-      const config = fakeConfig(false);
-      let ran = false;
-      const prompt = createDaemonRepairPrompt({
-        offer,
-        config,
-        session,
-        systemMessageRouter: router,
-        render: () => {},
-        repair: async () => { ran = true; return { repaired: true, steps: [], summary: '' }; },
-      });
-      expect(prompt.answer(key)).toBe(true);
-      expect(ran).toBe(false);
-      expect(config.writes).toEqual([]);
-      expect(config.value()).toBe(false);
-      expect(session.declined()).toBe(true);
-      expect(router.messages[0]).toContain('nothing was changed');
-    }
-  });
-
-  test('the offer is answered once: a later keystroke is not this prompt\'s to consume', () => {
-    const prompt = createDaemonRepairPrompt({
-      offer,
-      config: fakeConfig(false),
-      session: createDaemonRepairSessionMemory(),
-      systemMessageRouter: fakeRouter(),
-      render: () => {},
-      repair: async () => ({ repaired: true, steps: [], summary: '' }),
-    });
-    expect(prompt.answer('n')).toBe(true);
-    expect(prompt.answer('y')).toBe(false);
+  test('leaving it (or Escape) changes nothing and is remembered for the session', () => {
+    let runs = 0;
+    const { prompt, router, session, config, answer } = promptWith(async () => { runs += 1; return { repaired: true, steps: [], summary: '' }; });
+    answer(false);
+    expect(runs).toBe(0);
+    expect(config.writes).toEqual([]);
+    expect(session.declined()).toBe(true);
     expect(prompt.pending()).toBe(false);
-  });
-});
-
-// ── Layer 4: the shell's keypress path ──────────────────────────────────────
-
-describe('handleBlockingShellInput (daemon repair offer)', () => {
-  function shellOptions(daemonRepairPrompt: ReturnType<typeof createDaemonRepairPrompt> | null) {
-    const router = fakeRouter();
-    return {
-      options: {
-        data: 'y',
-        pendingPermission: null,
-        recoveryPending: null,
-        daemonRepairPrompt,
-        abortTurn: () => {},
-        conversation: {} as unknown as ConversationManager,
-        systemMessageRouter: router as unknown as SystemMessageRouter,
-        render: () => {},
-        consumeRecovery: () => null,
-        removeRecoveryPoint: () => {},
-      },
-      router,
-    };
-  }
-
-  function promptFor(onAnswer: (key: string) => void) {
-    return createDaemonRepairPrompt({
-      offer: { serviceInstalled: true, serviceName: 'goodvibes', diagnosis: 'd', offer: 'o' },
-      config: fakeConfig(false),
-      session: createDaemonRepairSessionMemory(),
-      systemMessageRouter: fakeRouter(),
-      render: () => {},
-      repair: async () => { onAnswer('y'); return { repaired: true, steps: [], summary: 's' }; },
-    });
-  }
-
-  test('the pending offer consumes y and Enter and starts the repair', () => {
-    let started = false;
-    const prompt = promptFor(() => { started = true; });
-    const { options } = shellOptions(prompt);
-    const result = handleBlockingShellInput(options);
-    // handled: true is what keeps the "y" out of the composer, the user
-    // answered a question, they did not type a character into their prompt.
-    expect(result.handled).toBe(true);
-    expect(prompt.pending()).toBe(true);
-    expect(started).toBe(false);
-    expect(handleBlockingShellInput({ ...options, data: '\r' }).handled).toBe(true);
-    expect(prompt.pending()).toBe(false);
-    expect(started).toBe(true);
-  });
-
-  test('once answered, the offer gets out of the way and typing flows through again', () => {
-    const prompt = promptFor(() => {});
-    const { options } = shellOptions(prompt);
-    handleBlockingShellInput(options);
-    handleBlockingShellInput({ ...options, data: '\r' });
-    const second = handleBlockingShellInput({ ...options, data: 'hello' });
-    expect(second.handled).toBe(false);
-  });
-
-  test('with no offer pending, nothing about this path is engaged', () => {
-    const { options } = shellOptions(null);
-    expect(handleBlockingShellInput({ ...options, data: 'hello' }).handled).toBe(false);
+    expect(router.messages[0]).toContain('nothing was changed');
   });
 });
 

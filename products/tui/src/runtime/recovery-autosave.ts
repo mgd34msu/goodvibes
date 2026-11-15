@@ -1,24 +1,23 @@
 import { buildPersistedSessionContextFromFacts } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 /**
- * recovery-autosave.ts, periodic recovery-file autosave + liveness-marker
- * refresh, extracted out of main.ts to keep it under the architecture
+ * recovery-autosave.ts, the liveness-marker refresh and the out-of-turn crash
+ * snapshot, extracted out of main.ts to keep it under the architecture
  * line-count gate.
  *
  * Two writes:
- *   1. The crash-recovery snapshot (writeRecoveryFile). Given the turn events,
- *      it is written when a prompt is accepted and after each tool batch (the
- *      rule both terminal apps share); without them, on the interval.
- *   2. The liveness marker refresh (see session-liveness-marker.ts), on the
- *      interval (default 60s), that lets a second instance tell "this session
- *      is open in another terminal right now" from "this is an orphaned crash
- *      snapshot".
- * The marker is also written once immediately (not just on the first tick of
- * the interval) so a second instance checking soon after this one launches
- * sees it promptly rather than waiting up to a minute.
+ *   1. The liveness marker (see session-liveness-marker.ts), written at once
+ *      and refreshed on the interval (default 60s), that lets a second instance
+ *      tell "this session is open in another terminal right now" from "this is
+ *      an orphaned crash snapshot".
+ *   2. The crash-recovery snapshot (writeRecoveryFile) for a change made outside
+ *      a turn (/undo, /title, a branch switch). Turns write it themselves, when
+ *      a prompt is accepted and after each tool batch (core/turn-event-wiring.ts);
+ *      the interval writes it only when the conversation's revision moved since
+ *      the last write here, so an idle session writes nothing.
  */
 import { writeRecoveryFile } from '@/runtime/index.ts';
 import type { SessionSurface } from '@/runtime/index.ts';
-import { writeCrashSnapshotAtTurnMoments, writeLivenessMarker, type CrashSnapshotMoment } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { writeLivenessMarker } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { ConversationManager, ConversationMessageSnapshot } from '../core/conversation.ts';
 
@@ -32,20 +31,16 @@ export interface StartRecoveryAutosaveOptions {
    */
   readonly surface: SessionSurface;
   readonly buildSessionContinuityHints: () => Parameters<typeof buildPersistedSessionContextFromFacts>[2];
-  /**
-   * The turn events. Given, the snapshot is written when a prompt is accepted
-   * and after each tool batch (the shared rule both terminal apps use) and the
-   * interval only refreshes the liveness marker; absent, the snapshot is also
-   * written on the interval.
-   */
-  readonly turns?: { on(event: CrashSnapshotMoment, handler: () => void): () => void } | undefined;
   /** Overridable for tests. Defaults to 60s. */
   readonly intervalMs?: number;
 }
 
 export function startRecoveryAutosave(options: StartRecoveryAutosaveOptions): ReturnType<typeof setInterval> {
-  const { conversation, runtime, surface, buildSessionContinuityHints, intervalMs = 60_000, turns } = options;
+  const { conversation, runtime, surface, buildSessionContinuityHints, intervalMs = 60_000 } = options;
   writeLivenessMarker(surface, runtime.sessionId);
+  // The revision written last; the boot conversation needs no snapshot.
+  let writtenRevision = conversation.revisionSource.revision();
+  let writtenSessionId = runtime.sessionId;
   const writeSnapshot = (): void => {
     const snapshot = conversation.toJSON() as { messages: Array<ConversationMessageSnapshot> };
     const persisted = buildPersistedSessionContextFromFacts(
@@ -55,14 +50,15 @@ export function startRecoveryAutosave(options: StartRecoveryAutosaveOptions): Re
     );
     writeRecoveryFile({ ...snapshot, ...persisted }, runtime.sessionId, conversation.title ?? '', { surface });
   };
-  // Lives as long as the process: the turn feed is the process's own.
-  if (turns) writeCrashSnapshotAtTurnMoments({ subscribe: (moment, handler) => turns.on(moment, handler), write: writeSnapshot });
   return setInterval(() => {
     // A timer callback that throws becomes an uncaught exception and ends the
     // TUI; a failed tick only costs this snapshot, and the next tick retries.
-    if (!turns) {
+    const revision = conversation.revisionSource.revision();
+    if (revision !== writtenRevision || runtime.sessionId !== writtenSessionId) {
       try {
         writeSnapshot();
+        writtenRevision = revision;
+        writtenSessionId = runtime.sessionId;
       } catch (error) {
         logger.warn('[Recovery] Autosave snapshot failed', { error: summarizeError(error) });
       }

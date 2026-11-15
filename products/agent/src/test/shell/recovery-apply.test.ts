@@ -40,7 +40,6 @@ function setup(options: { readonly fromJsonThrows: boolean }) {
     data: '\x12',
     pendingPermission: null,
     recoveryPending: 'crashed-session',
-    daemonRepairPrompt: null,
     abortTurn: () => {},
     conversation: conversation as never,
     systemMessageRouter: { high: (message: string) => high.push(message) } as never,

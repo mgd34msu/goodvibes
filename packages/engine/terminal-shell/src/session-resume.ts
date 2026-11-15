@@ -83,6 +83,8 @@ export interface SessionResumeOutcome {
   readonly journalReplay: ReplayIntoConversationResult;
   /** Steps after the transcript was committed that failed; the resume itself stands. */
   readonly warnings?: readonly string[] | undefined;
+  /** Lines for the person about what the resume left out (a damaged side branch); empty when nothing was. */
+  readonly notices: readonly string[];
 }
 /**
  * The canonical resume sequence: load, reset + restore the conversation,
@@ -116,7 +118,7 @@ export async function resumeSessionCore(sessionId: string, deps: SessionResumeDe
     throw new Error('The active session changed or a turn started while resuming. Try again when idle.');
   }
   deps.beforeRestore?.();
-  restoreSessionConversation(sessionId, { meta, messages, ...(branches ? { branches } : {}) }, deps.conversation, deps.runtime, deps.surface);
+  const leftOut = restoreSessionConversation(sessionId, { meta, messages, ...(branches ? { branches } : {}) }, deps.conversation, deps.runtime, deps.surface);
   // The transcript and its identity are committed above, so the model and
   // provider move with them; the sidecar steps below are recoveries that must
   // not leave the new transcript running on the old model.
@@ -173,6 +175,7 @@ export async function resumeSessionCore(sessionId: string, deps: SessionResumeDe
     restoredAnchorCount,
     journalReplay,
     ...(warnings.length ? { warnings } : {}),
+    notices: describeLeftOutBranches(leftOut),
   };
 }
 import { rmSync } from 'node:fs';
@@ -199,11 +202,11 @@ export function restoreLoadedSession(
     };
     restoreTurnAnchors?: ((sessionId: string) => number) | undefined;
   },
-): number {
-  restoreSessionConversation(sessionId, loaded, deps.conversation, deps.runtime, deps.surface);
+): { readonly restoredAnchorCount: number; readonly leftOutBranches: readonly LeftOutBranch[] } {
+  const leftOutBranches = restoreSessionConversation(sessionId, loaded, deps.conversation, deps.runtime, deps.surface);
   if (loaded.meta.model) deps.runtime.model = loaded.meta.model;
   if (loaded.meta.provider) deps.runtime.provider = loaded.meta.provider;
-  return deps.restoreTurnAnchors?.(sessionId) ?? 0;
+  return { restoredAnchorCount: deps.restoreTurnAnchors?.(sessionId) ?? 0, leftOutBranches };
 }
 export function copySessionSidecars(
   source: string,
@@ -219,17 +222,40 @@ export function copySessionSidecars(
   else persistTurnAnchors(destination, surface);
   saveWorkTreeFolds(surface.sessionsDir, destination, conversation.workTree.foldState(), conversation.workTree.turnOutcomes());
 }
-/** A damaged side branch is left out and reported; it must not stop the session's own transcript from resuming. */
-export function readSavedBranches(sessionId: string, saved: SessionBranches): Record<string, ConversationMessageSnapshot[]> {
-  const restored: Record<string, ConversationMessageSnapshot[]> = {};
+/** A saved side branch a restore could not read, and why. */
+export interface LeftOutBranch {
+  readonly name: string;
+  readonly reason: string;
+}
+
+/**
+ * The saved side branches this build can read. A damaged one is left out and
+ * named in `leftOut`; it must not stop the session's own transcript from
+ * resuming. Show `leftOut` with {@link describeLeftOutBranches}.
+ */
+export function readSavedBranches(
+  sessionId: string,
+  saved: SessionBranches,
+): { readonly branches: Record<string, ConversationMessageSnapshot[]>; readonly leftOut: readonly LeftOutBranch[] } {
+  const branches: Record<string, ConversationMessageSnapshot[]> = {};
+  const leftOut: LeftOutBranch[] = [];
   for (const [name, messages] of Object.entries(saved.branches)) {
     try {
-      restored[name] = readConversationMessageSnapshots(messages);
+      branches[name] = readConversationMessageSnapshots(messages);
     } catch (error) {
-      logger.warn('session resume: a saved branch could not be read and was left out', { sessionId, branch: name, error: summarizeError(error) });
+      const reason = summarizeError(error);
+      logger.warn('session resume: a saved branch could not be read and was left out', { sessionId, branch: name, error: reason });
+      leftOut.push({ name, reason });
     }
   }
-  return restored;
+  return { branches, leftOut };
+}
+
+/** One line per left-out branch, worded the same in every terminal app. */
+export function describeLeftOutBranches(leftOut: readonly LeftOutBranch[]): string[] {
+  return leftOut.map(({ name, reason }) =>
+    `Side branch "${name}" was left out of the restore because it could not be read (${reason}). `
+      + 'The rest of the session was restored; the next save of this session is written without that branch.');
 }
 function restoreSessionConversation(
   sessionId: string,
@@ -241,17 +267,19 @@ function restoreSessionConversation(
   conversation: ConversationManager,
   runtime: Pick<SessionResumeRuntime, 'sessionId'>,
   surface?: SessionSurface | undefined,
-): void {
+): readonly LeftOutBranch[] {
+  const saved = loaded.branches ? readSavedBranches(sessionId, loaded.branches) : undefined;
   conversation.resetAll();
   conversation.fromJSON({
     messages: readConversationMessageSnapshots(loaded.messages),
     title: loaded.meta.title,
     titleSource: loaded.meta.titleSource,
-    ...(loaded.branches ? { branches: readSavedBranches(sessionId, loaded.branches), currentBranch: loaded.branches.currentBranch } : {}),
+    ...(saved && loaded.branches ? { branches: saved.branches, currentBranch: loaded.branches.currentBranch } : {}),
   });
   if (surface) restoreWorkTreeFolds(conversation, surface.sessionsDir, sessionId);
   conversation.rebuildHistory();
   runtime.sessionId = sessionId;
+  return saved?.leftOut ?? [];
 }
 
 /** What `loadSavedSessionIntoLive` needs from the shell that runs it. */
@@ -268,14 +296,23 @@ export interface LoadSavedSessionDeps {
 
 export interface LoadedSavedSession {
   readonly name: string;
+  readonly meta: SessionMeta;
   readonly messageCount: number;
   readonly agentRecords: ReturnType<SessionManager['load']>['agentRecords'];
   readonly restoredAnchorCount: number;
+  /** Lines for the person about what the load left out (a damaged side branch); empty when nothing was. */
+  readonly notices: readonly string[];
+}
+
+/** Options of {@link loadSavedSessionIntoLive}. */
+export interface LoadSavedSessionOptions {
+  /** Take over a session another running terminal has marked open (`/session resume <id> --force`). */
+  readonly force?: boolean | undefined;
 }
 
 /**
- * The one way a saved session replaces the live conversation outside `/session resume`
- * (`/load`, the `/sessions` list, the session picker). It refuses while a turn runs, reads and
+ * The one way a saved session replaces the live conversation (`/session resume`, `/load`,
+ * the `/sessions` list, the session picker). It refuses while a turn runs, reads and
  * validates the saved messages before touching the live conversation, and then switches the
  * session identity the same way a resume does, so later autosaves go to the loaded session
  * instead of overwriting the one that was open. A session another running terminal has marked
@@ -288,12 +325,14 @@ export function loadSavedSessionIntoLive(
   deps: LoadSavedSessionDeps,
   sessionManager: Pick<SessionManager, 'load'>,
   name: string,
+  options: LoadSavedSessionOptions = {},
 ): LoadedSavedSession {
   if (deps.isGenerating?.()) {
     throw new Error('A turn is still running. Stop it with Esc or let it finish, then load the session.');
   }
   const surface = deps.surface;
-  if (surface) {
+  // Two terminals saving one session overwrite each other's turns; one small marker read per load.
+  if (surface && !options.force) {
     const liveness = checkSessionLiveness(surface, name);
     if (liveness.live && liveness.pid !== process.pid) {
       throw new Error(
@@ -305,7 +344,7 @@ export function loadSavedSessionIntoLive(
   const { meta, messages, agentRecords, branches } = sessionManager.load(name);
   readConversationMessageSnapshots(messages);
   const previousSessionId = deps.runtime.sessionId;
-  const restoredAnchorCount = restoreLoadedSession(
+  const { restoredAnchorCount, leftOutBranches } = restoreLoadedSession(
     name,
     { meta, messages, ...(branches ? { branches } : {}) },
     { conversation: deps.conversation, runtime: deps.runtime, surface, restoreTurnAnchors: deps.restoreTurnAnchors },
@@ -315,5 +354,5 @@ export function loadSavedSessionIntoLive(
     writeLivenessMarker(surface, name);
   }
   deps.afterSwitch?.(name);
-  return { name, messageCount: messages.length, agentRecords, restoredAnchorCount };
+  return { name, meta, messageCount: messages.length, agentRecords, restoredAnchorCount, notices: describeLeftOutBranches(leftOutBranches) };
 }

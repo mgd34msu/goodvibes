@@ -26,7 +26,7 @@ These are the package-facing docs for the GoodVibes Agent `3.2.x` release line.
 - Install/runtime: Bun `1.3.14` or newer.
 - Agent version source: exact `package.json` semver, kept in sync with `CHANGELOG.md` and `src/version.ts` during release.
 - Connected-host compatibility: public Agent routes report readiness through the `compat` and `status` CLI commands plus `host action:"status"`.
-- Connected host: owned outside Agent; Agent reports and uses it and does not manage its lifecycle, with two exceptions: the boot-time start of an installed but stopped host, and the one-touch daemon repair after the person confirms (see [Connected host](connected-host.md)).
+- Connected host: owned outside Agent; Agent reports and uses it and does not manage its lifecycle, with two exceptions: the boot-time start of an installed but stopped host, and the daemon repair the person chooses in a question at start (see [Connected host](connected-host.md)).
 - Agent Knowledge: only `/api/goodvibes-agent/knowledge/*`; no default knowledge fallback.
 - Local state: VIBE.md personality, project context files, memory, notes, personas, skills, routines, sessions, setup, and profiles live under the Agent home or current project.
 - Computer work: local read/edit/exec routes are allowed when the current Agent workspace and permissions are sufficient; process monitor/live tail/tool inspector supervision and local file edit/write recovery are inspectable and confirmation-gated; delegation is for isolation, parallelism, remote execution, separate worktrees, or user-requested delegated review.

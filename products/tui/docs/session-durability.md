@@ -1,154 +1,51 @@
 # Session durability
 
-GoodVibes TUI uses a two-layer durability strategy to protect conversation history from data loss.
+GoodVibes TUI keeps two copies of a conversation on disk: the saved session and, while a turn
+runs, a crash snapshot.
 
-## Snapshot layer (baseline)
+## Saved session
 
-After every completed assistant turn (`TURN_COMPLETED`), `persistConversation` writes a full
-conversation snapshot via `SessionManager`. A periodic recovery file is also written every 60
-seconds via `writeRecoveryFile` (`src/runtime/recovery-autosave.ts`), on the same 60-second tick
-as a liveness marker that records this session as actively open. On the next startup the TUI
-checks for a recovery file and offers to restore it, unless the marker shows the session is
-still live in another terminal right now, in which case the file belongs to that other terminal's
-live state rather than to a crash, and the offer is skipped.
+After every completed assistant turn (`TURN_COMPLETED`), `persistConversation` writes the whole
+conversation through `SessionManager` (one temp file, one rename). This is the copy `/session
+resume`, `--continue`, `--resume` and the session browser read. The first line of the file carries
+the session's title, model and message count, so listing sessions reads one line per file.
 
-**Gap**: between the last periodic recovery file and a SIGKILL, any turns that completed without
-triggering a recovery-file write would be lost.
+## Crash snapshot
 
-## WAL journal layer (gap-filler)
+The crash snapshot (`writeRecoveryFile`) is written:
 
-The transcript journal (the platform's `TranscriptJournal`, wired in `src/core/turn-event-wiring.ts`)
-fills this gap with a per-session append-only NDJSON file that records durable conversation events
-**before** the turn snapshot is written.
+- when a prompt is accepted (`TURN_SUBMITTED`), so the message survives a kill during the stream;
+- after each batch of tool calls (`TOOLS_DONE`), so a kill mid-turn keeps the tool work done so far;
+- when the save at the end of a turn fails, so that turn is not lost;
+- for a change made outside a turn (`/undo`, `/title`, a branch switch), at most once a minute and
+  only when the conversation changed since the last write (`src/runtime/recovery-autosave.ts`).
 
-### How it works
+The turn-time writes live in `src/core/turn-event-wiring.ts` and follow the rule both terminal apps
+share (`writeCrashSnapshotAtTurnMoments`). An idle session writes nothing; the one-minute tick
+then only refreshes the liveness marker that records this session as open in this terminal.
 
-1. **User submits a turn** (`TURN_SUBMITTED`) → the current conversation snapshot is appended to
-   the journal as a `user_message` record. This ensures the user's message survives even if the
-   process is killed during the subsequent stream.
+On the next start the TUI offers the newest snapshot that is not older than its session's own
+saved file, unless the liveness marker shows that session is still open in another terminal, in
+which case the snapshot is that terminal's live state and is not offered.
 
-2. **Turn completes** (`TURN_COMPLETED`) → `persistConversation` writes the full snapshot.
-   If the snapshot succeeds, `journal.rotate()` deletes the journal (it is no longer needed as a
-   gap-filler). If the snapshot fails, the full conversation state is appended as an
-   `assistant_turn` record so recovery can still reconstruct it.
+A kill at any moment loses at most the streaming text of the turn in flight and any tool calls of
+that turn that had not finished. A completed turn is never lost.
 
-3. **Restart / session resume** → `replayJournalForSession()` (the platform's, called from
-   `resumeSessionCore` in `src/core/session-resume-core.ts`) is reached from two call sites:
-   (a) `session-workflow.ts`, which handles `/session resume` directly and is also where
-   `--continue`, `--resume`, and `--fork` route through (see [CLI flags](cli-flags.md)); and
-   (b) `bootstrap-hook-bridge.ts`'s `createResumeSessionHandler`, used both for the automatic
-   startup recovery modal (see "The startup recovery modal" in
-   [getting-started.md](getting-started.md)) and for resuming from the in-TUI session browser.
-   It calls `replayJournal(journalPath, snapshotTimestamp)` to find records that post-date
-   the loaded snapshot, applies the final record's messages to the live conversation (each
-   record carries the full snapshot, so the last record is authoritative), writes a fresh
-   snapshot via the SessionManager, and calls `journal.rotate()`. Only the `session-workflow.ts`
-   seam prints the replay notice to the conversation (`[Recovery] Replayed N journal record(s):
-   restored turns since last snapshot.`); the startup-modal and session-browser seam replays
-   silently. When the journal tail was quarantined as corrupt, `session-workflow.ts` also prints
-   one of two follow-up lines. When no record could be replayed, it prints a "journal tail was
-   corrupt or unrecognised, proceeding with snapshot only" notice. When at least one record did
-   survive, it prints a "journal tail was partially corrupt, replay stopped at last good record"
-   notice instead.
+Journals written by earlier versions (`transcript-<sessionId>.journal`) are still replayed once
+when their session is resumed; nothing writes new ones.
 
-The journal that `turn-event-wiring.ts` opens for the running session is wrapped so that a
-session switch (`/session resume` or `/session fork` reassigning `runtime.sessionId` on the live
-`MutableRuntimeState`) re-checks the session id before every append and, if it changed, calls
-`journal.rebind()` to point at the new session's file. Without this, a session switch would keep
-appending the new session's records into the old session's journal file, and a later resume of
-the old session would replay the wrong conversation into it.
+## Side branches left out of a restore
 
-### File format
-
-The journal is NDJSON (one JSON object per line):
-
-```
-line 0 is the header: { "version": 1, "sessionId": "...", "createdAt": <epochMs> }
-line 1+ are records: { "type": "...", "seq": <n>, "ts": <epochMs>, "messages": [...] }
-```
-
-Two record types are written, each at a different durable moment:
-
-| Type | Written when |
-| --- | --- |
-| `user_message` | A turn is submitted, so the user's message survives a kill during the stream |
-| `assistant_turn` | The post-turn snapshot fails, so recovery can still reconstruct the turn |
-
-The record format also names `tool_results` and `compaction`, but nothing writes them: a batch of
-tool results or a compaction does not add a journal record. A kill in the middle of a turn
-therefore restores the submitted user message plus the last recovery file or snapshot, not that
-turn's tool output.
-
-The `seq` field is monotonically increasing within each journal file (resets to 0 after rotation).
-The `ts` field is the wall-clock time (`Date.now()`) at the moment of the append.
-
-### File location
-
-```
-<homeDirectory>/.goodvibes/tui/transcript-<sessionId>.journal
-```
-
-This mirrors the recovery file location (homeDirectory-scoped, not project-scoped) so all
-per-session durability artefacts live together.
-
-### Durability guarantee
-
-At most one in-flight record append is lost on SIGKILL. A partial (truncated) JSON line at the
-tail of the journal is tolerated: replay stops at the first unparseable line and renames the
-remainder to `<path>.unrecognized` (the same quarantine convention used by `readVersioned`).
-
-### Performance tradeoff
-
-`appendRecord()` performs one `appendFileSync` + one `fsyncSync` per call. This means one fsync
-per journal record (user message submitted, assistant turn finalised after a failed snapshot). It does **not** fsync per streaming token. The streaming path never calls
-`appendRecord()`.
-
-At typical usage (2–6 events per minute), the write amplification is negligible on any modern
-filesystem.
-
-### Orphaned journal cleanup
-
-`journal.rotate()` deletes a journal once its records have been folded into a snapshot or
-replayed, but a session that crashes and is never resumed never reaches either step, so its
-journal would otherwise stay on disk forever. A reaper (`reapOrphanedJournals`, wired into the
-TUI's bootstrap at `src/runtime/services.ts` through the platform's `createDurabilityServices`, which
-runs it once at startup and then every six hours) sweeps the journal directory and deletes a
-file that is neither the current process's own session nor apparently open in another running
-process, provided it is either empty or has gone untouched for longer than seven days. Whatever
-survives those two rules is then capped at 50 files, oldest deleted first.
-
-The rules are based on modification time and liveness, never on whether the file parses, because
-an unparseable tail is the normal, expected shape of a journal killed mid-append, exactly the
-data replay exists to salvage. A parse failure alone never makes a journal eligible for deletion.
-
-### schemaVersion gate
-
-The journal header carries `"version": 1`. `replayJournal` checks for an exact match, so any
-header that carries a different version, from a future process or a corrupted write, is
-quarantined rather than partially trusted or crashed on (the same convention as `readVersioned`).
-
-## Summary
-
-| Layer | Cadence | What is protected |
-|---|---|---|
-| Recovery file | Every 60 s | Full snapshot |
-| SessionManager snapshot | Every completed turn | Full snapshot |
-| Transcript journal | Each submitted turn, and a completed turn whose snapshot failed | User messages, and completed turns that were not snapshotted |
-
-A SIGKILL loses at most the in-flight journal append (one partial JSON line) and, for a turn that
-was still running, its work since the last recovery file (every 60 s) or snapshot: the submitted
-user message survives, the turn's tool results may not. A completed turn is never lost. `--continue`/`--resume`/`--fork`, `/session resume`,
-the startup recovery modal, and the in-TUI session browser are every resume path, and each routes
-through `resumeSessionCore`, which calls `replayJournalForSession`, so the gap is closed on
-whichever path the user takes.
+A saved side branch (made with `/branch`) that this version cannot read is left out of a resume or
+crash restore, and the transcript names it and the reason. The rest of the session is restored;
+the next save of that session is written without the branch.
 
 ### `--continue` with no last-session pointer
 
 If a session was killed before the first snapshot was written (i.e., no last-session pointer
 exists), `--continue` and a bare `--resume` print "No previous conversation to continue. This is
 a new one; /session list shows saved ones." in the transcript and then start as a plain launch
-would: onboarding for a new user, or the setup wizard where a returning user left it. The journal
-for the unsnapshotted session is still present on disk. **Recovery path:** the startup recovery
+would: onboarding for a new user, or the setup wizard where a returning user left it. **Recovery path:** the startup recovery
 modal (see "The startup recovery modal" in [getting-started.md](getting-started.md)) offers to
 resume from the recovery snapshot if one exists, or use `/session resume <id>` once a snapshot
 exists.

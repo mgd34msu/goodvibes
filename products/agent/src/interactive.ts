@@ -25,7 +25,7 @@ import '@goodvibes-jev/engine/platform/platform/core';
 import { conversationMessagesAsSessionRecords } from './core/conversation-message-snapshot.ts';
 import { createTranscriptNavigators } from './shell/transcript-navigation.ts';
 import { InputHandler } from './input/handler.ts';
-import { createHerdrSessionReporter } from '@goodvibes-jev/engine/terminal-shell';
+import { applyConfiguredHitlMode, createHerdrSessionReporter } from '@goodvibes-jev/engine/terminal-shell';
 import type { ContentPart } from '@goodvibes-jev/engine/platform/platform/providers';
 import '@goodvibes-jev/engine/platform/platform/tools';
 import '@goodvibes-jev/engine/platform/platform/tools';
@@ -49,7 +49,6 @@ import { envFlag, logger, summarizeError } from '@goodvibes-jev/engine/platform/
 import { bootstrapRuntime } from './runtime/bootstrap.ts';
 import { readAgentHostSetting } from './config/host-settings.ts';
 import type { BootstrapContext } from './runtime/bootstrap.ts';
-import type { HITLMode } from '@goodvibes-jev/engine/platform/platform/state';
 import { startFirstRenderFollowups, type DaemonRepairPrompt } from './shell/first-render-followups.ts';
 import './tools/agent-harness-model-routing.ts';
 import './tools/agent-harness-setup-model-helpers.ts';
@@ -58,6 +57,7 @@ import type { SessionSnapshot } from '@/runtime/index.ts';
 import { buildAgentRecoveryApply } from './shell/recovery-apply.ts';
 import { handleBlockingShellInput, type PendingPermissionState } from './shell/blocking-input.ts';
 import { createWorkspaceRegistrationQuestion } from './shell/workspace-registration-question.ts';
+import { createDaemonRepairQuestion } from './shell/daemon-repair-prompt.ts';
 import { getTerminalSize } from './shell/terminal-size.ts';
 import { buildShellSessionContinuityHints } from './shell/session-continuity-hints.ts';
 import { wireShellUiOpeners } from './shell/ui-openers.ts';
@@ -202,12 +202,8 @@ async function main() {
   // screen wipes the stdout copies written before the renderer existed).
   for (const line of launchUpdateLines) systemMessageRouter.high(`[Update] ${line}`);
   for (const line of reachabilityLines) systemMessageRouter.high(`[Install] ${line}`);
-  {
-    const hitlMode = configManager.get('behavior.hitlMode') as HITLMode | undefined;
-    if (hitlMode && (hitlMode === 'quiet' || hitlMode === 'balanced' || hitlMode === 'operator')) {
-      modeManager.setHITLMode(hitlMode);
-    }
-  }
+  // The print level (behavior.hitlMode) follows the setting, whoever changes it.
+  applyConfiguredHitlMode(configManager, modeManager);
 
   const buildSessionContinuityHints = () =>
     buildShellSessionContinuityHints(
@@ -1223,7 +1219,6 @@ async function main() {
       data,
       pendingPermission,
       recoveryPending,
-      daemonRepairPrompt,
       abortTurn: () => orchestrator.abort(),
       composerEmpty: input.prompt.length === 0,
       conversation,
@@ -1237,6 +1232,7 @@ async function main() {
         runtime,
         conversation,
         hydrateSessionUsage: commandContext.session?.hydrateSessionUsage,
+        notify: (line) => systemMessageRouter.high(line),
       }),
       consumeRecovery: () => consumeRecovery(ctx.services.surface, recoveryPending ?? undefined).snapshot,
       removeRecoveryPoint: () => {
@@ -1269,8 +1265,9 @@ async function main() {
     shellPaths: ctx.services.shellPaths,
     providerRegistry,
     commandContext,
-    daemonRepair: { config: configManager },
+    daemonRepair: { config: configManager, ask: createDaemonRepairQuestion(input) },
     askWorkspaceRegistration: createWorkspaceRegistrationQuestion(input),
+    isHostedTurn: (turnId) => remoteConversation.isHostedTurn?.(turnId) ?? false,
     autonomy,
     buildCurrentSessionSnapshot,
     runtime,

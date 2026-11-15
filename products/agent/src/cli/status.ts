@@ -14,16 +14,20 @@ import { formatAgentKnowledgeFailureKind } from './agent-knowledge-format.ts';
 import { readApprovalPostureFromConfig, type ApprovalPosture } from '../permissions/approval-posture.ts';
 import { appendTemporalLabel } from './temporal-label.ts';
 
-/** The marker that decides first-run state: the user's marker when its file exists. */
+/**
+ * The marker that decides first-run state, when it holds a payload this build
+ * reads; a damaged or set-aside marker is "not done" here as at start-up
+ * (runtime/onboarding/completion.ts).
+ */
 function effectiveMarker(marker: OnboardingCheckMarkerState | undefined): OnboardingCheckMarkerState | null {
-  return marker?.exists ? marker : null;
+  return marker?.payload ? marker : null;
 }
 
 export interface CliStatusOptions {
   readonly configManager: Pick<ConfigManager, 'get'>;
   readonly workingDirectory: string;
   readonly homeDirectory: string;
-  /** The first-run check marker (per user); absent or `exists: false` when first run was not marked. */
+  /** The marker that decides whether setup is done (`readOnboardingDoneMarker`); absent when not read. */
   readonly onboardingMarker?: OnboardingCheckMarkerState;
   readonly nativeReadiness?: ConnectedHostReadiness;
   readonly pairingStatus?: string;

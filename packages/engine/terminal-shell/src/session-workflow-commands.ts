@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { findSessionCandidates, type SessionManager, type SessionMeta } from '@goodvibes-jev/engine/platform/platform/sessions';
+import { resolveSessionTarget, type SessionManager, type SessionMeta } from '@goodvibes-jev/engine/platform/platform/sessions';
 import { formatReturnContextForDisplay } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import type { TerminalConversationManager } from './terminal-conversation.js';
 import {
@@ -137,31 +137,12 @@ export function createSessionWorkflowCommands<Context extends SessionWorkflowCon
       const operation = sub;
       const source = ctx.session.runtime.sessionId;
       const newId = sub === 'fork' ? 'user-' + randomBytes(4).toString('hex') : undefined;
+      // `--replace` (or `--yes`) lets a save replace another conversation's save.
       const confirmation = sub === 'save' ? stripYesFlag(args.slice(1)) : { rest: args.slice(1), yes: false };
-      const requested = confirmation.rest.join(' ').trim();
+      const replace = confirmation.yes || confirmation.rest.includes('--replace');
+      const requested = confirmation.rest.filter((arg) => arg !== '--replace').join(' ').trim();
       const currentTitle = ctx.session.conversationManager.title;
-      // Names with no file-name characters (for example a title written only
-      // in CJK script) all collapse to the same fallback id, so two different
-      // conversations would share one file.
-      const usable = (candidate: string): boolean => /[a-z0-9_]/.test(candidate.toLowerCase());
-      if (sub === 'save' && requested && !usable(requested)) {
-        ctx.print(`Cannot save as "${requested}": the name has no letters a-z, digits or underscores to use as a file name, so it would share a file with other such names. Give a name such as /session save my-notes.`);
-        return true;
-      }
-      const name = requested
-        ? requested
-        : sub === 'fork'
-          ? 'fork-of-' + source.slice(0, 8)
-          : currentTitle && usable(currentTitle) ? currentTitle : source;
-      if (sub === 'save' && !confirmation.yes) {
-        const target = sm.sanitizeName(name);
-        const existing = target === source ? null : sm.getMeta(target);
-        if (existing) {
-          const title = existing.title ? ` ("${existing.title}")` : '';
-          ctx.print(`Not saved: a different saved session already uses the id ${target}${title}, and saving would replace it. Choose another name with /session save <name>, or replace it with /session save ${name} --yes.`);
-          return true;
-        }
-      }
+      const name = requested || (sub === 'fork' ? 'fork-of-' + source.slice(0, 8) : currentTitle || source);
       const snapshot = policy.captureSession(ctx);
       const metadata: SessionMeta = {
         title: sub === 'fork' ? name : currentTitle,
@@ -170,9 +151,13 @@ export function createSessionWorkflowCommands<Context extends SessionWorkflowCon
         timestamp: Date.now(),
         ...snapshot.metadata,
         saveSource: 'user',
+        // The session manager refuses a name that holds another conversation (same rule as /save);
+        // the file records the id the conversation continues under.
+        ...(sub === 'save' ? { conversationId: sm.sanitizeName(name) } : {}),
       };
       try {
-        const result = sm.save(newId ?? name, snapshot.messages, metadata, undefined, undefined, ctx.session.conversationManager.branchState());
+        const result = sm.save(newId ?? name, snapshot.messages, metadata, undefined, undefined, ctx.session.conversationManager.branchState(),
+          sub === 'save' ? { replace, savingConversationId: source } : {});
         const destination = newId ?? result.sanitizedName;
         policy.copySidecars(ctx, source, destination);
         policy.beforeSwitch(ctx, operation, source, destination);
@@ -191,8 +176,7 @@ export function createSessionWorkflowCommands<Context extends SessionWorkflowCon
 
     if (sub === 'info') {
       const target = args[1] || ctx.session.runtime.sessionId;
-      const sessions = sm.list();
-      const candidates = findSessionCandidates(sessions, target);
+      const candidates = resolveSessionTarget(sm, target);
       if (candidates.length > 1) {
         ctx.print(`Ambiguous session: ${target}. Use an exact ID: ${candidates.map((session) => session.name).join(', ')}`);
         return true;
@@ -275,12 +259,8 @@ export function createSessionWorkflowCommands<Context extends SessionWorkflowCon
         ctx.print('Usage: /session delete <session-id>' + (policy.confirmDelete ? ' --yes' : ''));
         return true;
       }
-      if (!parsed.yes) {
-        requireYesFlag(ctx, 'delete saved session ' + target, '/session delete <session-id> --yes');
-        return true;
-      }
-      const sessions = sm.list();
-      const candidates = findSessionCandidates(sessions, target);
+      // Resolve first, so the confirmation names the session that would be removed.
+      const candidates = resolveSessionTarget(sm, target);
       if (candidates.length > 1) {
         ctx.print(`Ambiguous session: ${target}. Use an exact ID: ${candidates.map((session) => session.name).join(', ')}`);
         return true;
@@ -292,6 +272,11 @@ export function createSessionWorkflowCommands<Context extends SessionWorkflowCon
       }
       if (found.name === ctx.session.runtime.sessionId) {
         ctx.print(`Cannot delete the active session (${found.name}).\nSwitch to another session first with /session resume <id>.`);
+        return true;
+      }
+      if (!parsed.yes) {
+        const described = `${found.name}${found.title ? ` ("${found.title}")` : ''}, ${found.messageCount} message${found.messageCount === 1 ? '' : 's'}`;
+        requireYesFlag(ctx, 'delete saved session ' + described, `/session delete ${found.name} --yes`);
         return true;
       }
       try {

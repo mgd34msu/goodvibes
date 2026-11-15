@@ -1,7 +1,7 @@
 import type { ArtifactDescriptor } from '@goodvibes-jev/engine/platform/platform/artifacts';
 import type { CommandContext } from './command-registry.ts';
 import { readSetupWizardCheckpoint } from '../agent/setup-wizard-checkpoint.ts';
-import { readOnboardingCompletionMarker } from '../runtime/onboarding/index.ts';
+import { isOnboardingComplete } from '../runtime/onboarding/completion.ts';
 import { DEFAULT_AGENT_SETUP_WIZARD_CLEAR_CHECKPOINT_ROUTE, DEFAULT_AGENT_SETUP_WIZARD_INSPECT_CHECKPOINT_ROUTE, DEFAULT_AGENT_SETUP_WIZARD_MARK_CHECKPOINT_ROUTE, DEFAULT_AGENT_SETUP_WIZARD_RERUN_SMOKE_ROUTE, DEFAULT_AGENT_SETUP_WIZARD_SAVE_SMOKE_ROUTE, buildAgentSetupWizard, emptyAgentSetupSmokeHistory, emptyAgentSetupWizardCheckpoint, type AgentSetupWizard, type AgentSetupWizardBlockedCheckFrequency, type AgentSetupWizardCheckpoint, type AgentSetupWizardDurableReceipt, type AgentSetupWizardSmokeHistory, type AgentSetupWizardSourceItem } from '../agent/setup-wizard.ts';
 import type { AgentWorkspaceSetupChecklistItem } from './agent-workspace-setup.ts';
 import { readArtifactMetadataString, readArtifactMetadataStringList } from './agent-workspace-artifact-metadata.ts';
@@ -202,7 +202,7 @@ export function setupCompletionMarkerExists(context: CommandContext): boolean {
   const shellPaths = context.workspace?.shellPaths;
   if (!shellPaths || typeof shellPaths.resolveUserPath !== 'function') return false;
   try {
-    return readOnboardingCompletionMarker(shellPaths, 'user').exists;
+    return isOnboardingComplete(shellPaths);
   } catch {
     return false;
   }

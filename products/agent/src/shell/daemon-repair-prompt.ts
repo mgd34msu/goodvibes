@@ -1,18 +1,16 @@
 /**
- * daemon-repair-prompt.ts, the interactive half of the one-touch daemon
- * repair: one line at boot, one keypress, and the platform does the rest.
+ * daemon-repair-prompt.ts, the interactive half of the daemon repair: one
+ * question at boot, asked as a selection modal, and the platform does the rest.
  *
  * The policy, the diagnosis and every effect live in runtime/daemon-repair.ts.
- * This module is only the terminal-facing shape of it: it owns the "waiting for
- * an answer" state, consumes exactly one keystroke, and turns each outcome into
- * a message on the router.
+ * This module is only the terminal-facing shape of it: the question, the
+ * "waiting for an answer" state, and a message on the router for each outcome.
  *
- * It is a self-contained controller rather than another `pendingX` variable
- * threaded through main.ts on purpose. main.ts already carries three of those
- * and sits against the 800-line architecture cap; a controller keeps the state,
- * the wording and the follow-up all in one readable place, and gives the shell
- * a two-method surface (`pending()` / `answer()`) instead of a state field plus
- * two callbacks it would have to thread and reassign.
+ * The question is a modal for the reason the workspace question is one
+ * (shell/workspace-registration-question.ts): it is drawn where the owner is
+ * looking and receives only the keys aimed at it, so a sentence typed into the
+ * composer, a paste or a focus report from the terminal is never its answer.
+ * The default is "leave it as it is"; Escape declines.
  */
 import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import {
@@ -25,17 +23,38 @@ import {
   type DaemonRepairSessionMemory,
 } from '../runtime/daemon-repair.ts';
 import type { DaemonCliRunner } from '../runtime/daemon-cli-service.ts';
+import type { SelectionItem } from '../input/selection-modal.ts';
+import type { SelectionOpener } from './workspace-registration-question.ts';
 
-/** The two-method surface the shell's keypress path talks to. */
+export const DAEMON_REPAIR_QUESTION = 'Repair the daemon connection?';
+
+/** Opens the repair question for `offer`; `answer` is called once, true for repair. */
+export type AskDaemonRepair = (offer: DaemonRepairOffer, answer: (accepted: boolean) => void) => void;
+
+export function daemonRepairItems(offer: DaemonRepairOffer): SelectionItem[] {
+  return [
+    {
+      id: 'repair',
+      label: offer.serviceInstalled ? 'Start the daemon' : 'Install and start the daemon',
+      detail: `sets ${DAEMON_ENABLED_KEY} to true, ${offer.serviceInstalled ? 'starts the daemon service' : 'installs and starts the daemon service'}, then connects`,
+    },
+    { id: 'leave', label: 'Leave it as it is', detail: "nothing is changed; not asked again this session" },
+  ];
+}
+
+/** The question on the input handler's selection modal. Escape or closing it declines. */
+export function createDaemonRepairQuestion(opener: SelectionOpener): AskDaemonRepair {
+  return (offer, answer) => {
+    opener.openSelection(DAEMON_REPAIR_QUESTION, daemonRepairItems(offer), { preSelectId: 'leave', allowSearch: false }, (result) => {
+      answer(result?.item.id === 'repair');
+    });
+  };
+}
+
+/** What the shell asks of the open question. */
 export interface DaemonRepairPrompt {
-  /** True while the offer is on screen awaiting the user's single keypress. */
+  /** True while the question is on screen awaiting the owner's answer. */
   readonly pending: () => boolean;
-  /**
-   * Consume one keystroke. `y` accepts, EVERY other key declines, default no,
-   * matching every other boot-time offer in this shell. Returns true when this
-   * prompt was the thing waiting, so the caller knows the key was spent.
-   */
-  readonly answer: (key: string) => boolean;
 }
 
 export interface DaemonRepairPromptOptions {
@@ -44,6 +63,8 @@ export interface DaemonRepairPromptOptions {
   readonly session: DaemonRepairSessionMemory;
   readonly systemMessageRouter: { high(message: string): void };
   readonly render: () => void;
+  /** Shows the question (the shell passes {@link createDaemonRepairQuestion} over its selection modal). */
+  readonly ask: AskDaemonRepair;
   /**
    * The daemon on this machine. Pass the connected-host controller's `daemon`
    * so an accepted repair adopts the daemon in this session; without it the
@@ -62,8 +83,6 @@ export interface DaemonRepairPromptOptions {
 export function createDaemonRepairPrompt(options: DaemonRepairPromptOptions): DaemonRepairPrompt {
   const { offer, config, session, systemMessageRouter, render } = options;
   let awaitingAnswer = true;
-  // `y` alone does not install a system service: it asks for Enter first, so a sentence starting with y cannot.
-  let confirming = false;
 
   const repair = options.repair ?? ((pending: DaemonRepairOffer) => runDaemonRepair({
     config,
@@ -72,49 +91,39 @@ export function createDaemonRepairPrompt(options: DaemonRepairPromptOptions): Da
     runDaemonCli: options.runDaemonCli,
   }));
 
-  return {
-    pending: () => awaitingAnswer,
-    answer: (key: string) => {
-      if (!awaitingAnswer) return false;
-      if (!confirming && key.toLowerCase().trim() === 'y') {
-        confirming = true;
-        systemMessageRouter.high(offer.serviceInstalled
-          ? '[Daemon] Press Enter to start the daemon service, or any other key to leave it as it is.'
-          : '[Daemon] Press Enter to install and start the daemon service, or any other key to leave it as it is.');
-        render();
-        return true;
-      }
-      awaitingAnswer = false;
-      if (!confirming || (key !== '\r' && key !== '\n')) {
-        // A decline changes nothing at all, not the setting, not the service,
-        // and is remembered for the rest of the session so it is never re-asked.
-        session.decline();
-        systemMessageRouter.high(`[Daemon] Left as it is, nothing was changed. Set ${DAEMON_ENABLED_KEY} to true in settings whenever you want this machine to reach the platform again.`);
-        render();
-        return true;
-      }
-
-      systemMessageRouter.high(offer.serviceInstalled
-        ? '[Daemon] Starting the daemon service and connecting to it...'
-        : '[Daemon] Installing and starting the daemon service, then connecting to it...');
+  options.ask(offer, (accepted) => {
+    if (!awaitingAnswer) return;
+    awaitingAnswer = false;
+    if (!accepted) {
+      // A decline changes nothing at all, not the setting, not the service,
+      // and is remembered for the rest of the session so it is never re-asked.
+      session.decline();
+      systemMessageRouter.high(`[Daemon] Left as it is, nothing was changed. Set ${DAEMON_ENABLED_KEY} to true in settings whenever you want this machine to reach the platform again.`);
       render();
+      return;
+    }
 
-      // Not awaited: this runs inside a keypress handler, and the repair waits
-      // for the daemon to answer. Each outcome lands on the router when it
-      // happens; runDaemonRepair never throws, so the catch below only keeps a
-      // defect from becoming an unhandled rejection.
-      void repair(offer)
-        .then((result) => {
-          systemMessageRouter.high(result.summary);
-          for (const step of result.steps) systemMessageRouter.high(`[Daemon]   - ${step}`);
-          render();
-        })
-        .catch((error: unknown) => {
-          logger.error('[daemon-repair] the repair failed unexpectedly', { error: summarizeError(error) });
-          systemMessageRouter.high(`[Daemon] The repair did not complete: ${summarizeError(error)}`);
-          render();
-        });
-      return true;
-    },
-  };
+    systemMessageRouter.high(offer.serviceInstalled
+      ? '[Daemon] Starting the daemon service and connecting to it...'
+      : '[Daemon] Installing and starting the daemon service, then connecting to it...');
+    render();
+
+    // Not awaited: the repair waits for the service manager and the daemon,
+    // and the CLI runs as a child process, so the screen keeps painting. Each
+    // outcome lands on the router when it happens; runDaemonRepair never
+    // throws, so the catch below only keeps a defect from becoming an
+    // unhandled rejection.
+    void repair(offer)
+      .then((result) => {
+        systemMessageRouter.high(result.summary);
+        for (const step of result.steps) systemMessageRouter.high(`[Daemon]   - ${step}`);
+        render();
+      })
+      .catch((error: unknown) => {
+        logger.error('[daemon-repair] the repair failed unexpectedly', { error: summarizeError(error) });
+        systemMessageRouter.high(`[Daemon] The repair did not complete: ${summarizeError(error)}`);
+        render();
+      });
+  });
+  return { pending: () => awaitingAnswer };
 }

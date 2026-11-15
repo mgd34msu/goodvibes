@@ -6,7 +6,7 @@
  *
  * - the boot-time autostart (bootstrap-external-services.ts), which starts an
  *   installed-but-stopped service through the platform service manager;
- * - the repair offer at first render (shell/daemon-repair-prompt.ts), for a
+ * - the repair question at first render (shell/daemon-repair-prompt.ts), for a
  *   machine whose `daemon.enabled` is false while no daemon runs, where the
  *   flag stops discovery before the autostart is ever consulted;
  * - a headless run, which cannot prompt and prints the commands that repair it.
@@ -242,8 +242,8 @@ export function diagnoseDaemonRepair(options: DaemonRepairDiagnosisOptions): Dae
     ? `This machine cannot reach a GoodVibes daemon: its service${named} is installed but stopped, and this Agent's ${DAEMON_ENABLED_KEY} setting is false, which stops it from even looking.`
     : `This machine cannot reach a GoodVibes daemon: no daemon service is installed here, and this Agent's ${DAEMON_ENABLED_KEY} setting is false, which stops it from even looking.`;
   const offer = serviceInstalled
-    ? `Repair it? Press "y" and the Agent will set ${DAEMON_ENABLED_KEY} to true, start the daemon service, and connect to it. Any other key leaves everything untouched.`
-    : `Repair it? Press "y" and the Agent will set ${DAEMON_ENABLED_KEY} to true, install and start the daemon service, and connect to it. Any other key leaves everything untouched.`;
+    ? `Choose "Start the daemon" in the question to set ${DAEMON_ENABLED_KEY} to true, start the daemon service, and connect to it; "Leave it as it is" or Escape changes nothing.`
+    : `Choose "Install and start the daemon" in the question to set ${DAEMON_ENABLED_KEY} to true, install and start the daemon service, and connect to it; "Leave it as it is" or Escape changes nothing.`;
 
   return { serviceInstalled, serviceName: state.serviceName, diagnosis, offer };
 }

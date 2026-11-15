@@ -16,7 +16,7 @@ import type { ApplyRecoverySnapshotResult } from '@goodvibes-jev/engine/platform
 import { writeLastSessionPointer, type SessionSurface } from '@/runtime/index.ts';
 import type { SessionBranches, SessionManager } from '@goodvibes-jev/engine/platform/platform/sessions';
 import type { ConversationManager, ConversationMessageSnapshot } from '../core/conversation.ts';
-import { readSavedBranches } from '../core/session-resume-core.ts';
+import { describeLeftOutBranches, readSavedBranches } from '../core/session-resume-core.ts';
 
 export interface AgentRecoveryApplyInput {
   readonly surface: SessionSurface;
@@ -24,6 +24,8 @@ export interface AgentRecoveryApplyInput {
   readonly runtime: { sessionId: string; model: string; provider: string };
   readonly conversation: ConversationManager;
   readonly hydrateSessionUsage?: (() => void) | undefined;
+  /** Shows the person a line about the restore (a side branch left out). */
+  readonly notify?: ((line: string) => void) | undefined;
 }
 
 /**
@@ -67,13 +69,17 @@ export function buildAgentRecoveryApply(input: AgentRecoveryApplyInput): (sessio
     // The restore reset the live conversation, which dropped the side branches;
     // without them back in memory the next turn's autosave rewrites the session without them.
     const branches = carriedBranches();
-    if (branches) input.conversation.fromJSON({
-      messages: input.conversation.getMessageSnapshot(),
-      title: input.conversation.title,
-      titleSource: input.conversation.getTitleSource(),
-      branches: readSavedBranches(sessionId, branches),
-      currentBranch: branches.currentBranch,
-    });
+    if (branches) {
+      const saved = readSavedBranches(sessionId, branches);
+      input.conversation.fromJSON({
+        messages: input.conversation.getMessageSnapshot(),
+        title: input.conversation.title,
+        titleSource: input.conversation.getTitleSource(),
+        branches: saved.branches,
+        currentBranch: branches.currentBranch,
+      });
+      for (const line of describeLeftOutBranches(saved.leftOut)) input.notify?.(`[Recovery] ${line}`);
+    }
     // The snapshot file is gone now; until this lands the recovered conversation
     // exists only in memory.
     persist(input.conversation.getMessageSnapshot() as ConversationMessageSnapshot[]);

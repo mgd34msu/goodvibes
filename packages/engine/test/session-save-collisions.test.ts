@@ -59,8 +59,18 @@ describe('/session save', () => {
 
     expect(contentOf(sm, 'my-notes')).toBe('first');
     expect(second.ctx.session.runtime.sessionId).toBe('second-conversation');
-    expect(second.printed.join('\n')).toContain('a different saved session already uses the id my-notes');
-    expect(second.printed.join('\n')).toContain('/session save my-notes --yes');
+    expect(second.printed.join('\n')).toContain('maps to the same file as the existing session "My Notes"');
+  });
+
+  test('refuses to replace another conversation saved under the same name', async () => {
+    const sm = new SessionManager('/unused', { sessionsDir: sessionsDir() });
+    await harness(sm, 'first-conversation', 'one', 'first').run(['save', 'notes']);
+    const second = harness(sm, 'second-conversation', 'two', 'second');
+    await second.run(['save', 'notes']);
+
+    expect(contentOf(sm, 'notes')).toBe('first');
+    expect(second.ctx.session.runtime.sessionId).toBe('second-conversation');
+    expect(second.printed.join('\n')).toContain('already holds another conversation');
   });
 
   test('saving the same conversation again overwrites its own file', async () => {
@@ -72,33 +82,21 @@ describe('/session save', () => {
     expect(first.printed.at(-1)).toContain('Session saved');
   });
 
-  test('--yes replaces the existing session deliberately', async () => {
+  test('--replace (or --yes) replaces the existing session deliberately', async () => {
     const sm = new SessionManager('/unused', { sessionsDir: sessionsDir() });
     await harness(sm, 'first-conversation', 'one', 'first').run(['save', 'notes']);
-    await harness(sm, 'second-conversation', 'two', 'second').run(['save', 'notes', '--yes']);
+    await harness(sm, 'second-conversation', 'two', 'second').run(['save', 'notes', '--replace']);
     expect(contentOf(sm, 'notes')).toBe('second');
   });
 
-  test('a name with no file-name characters is refused instead of sharing one fallback file', async () => {
+  test('names in any script get their own file', async () => {
     const sm = new SessionManager('/unused', { sessionsDir: sessionsDir() });
     await harness(sm, 'first-conversation', 'one', 'first').run(['save', '設計']);
-    const second = harness(sm, 'second-conversation', 'two', 'second');
-    await second.run(['save', '会議']);
-
-    expect(sm.list()).toHaveLength(0);
-    expect(second.printed.join('\n')).toContain('Cannot save as "会議"');
+    await harness(sm, 'second-conversation', 'two', 'second').run(['save', '会議']);
+    expect(contentOf(sm, '設計')).toBe('first');
+    expect(contentOf(sm, '会議')).toBe('second');
   });
 
-  test('an untitled-in-ASCII conversation saved without a name keeps its own id', async () => {
-    const sm = new SessionManager('/unused', { sessionsDir: sessionsDir() });
-    await harness(sm, 'first-conversation', '設計', 'first').run(['save']);
-    await harness(sm, 'second-conversation', '会議', 'second').run(['save']);
-    expect(contentOf(sm, 'first-conversation')).toBe('first');
-    expect(contentOf(sm, 'second-conversation')).toBe('second');
-  });
-});
-
-describe('SessionManager', () => {
   test('a user save stays user when its meta line is longer than 8 KB', () => {
     const sm = new SessionManager('/unused', { sessionsDir: sessionsDir() });
     const title = 'x'.repeat(20_000);

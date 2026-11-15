@@ -80,7 +80,8 @@ describe('wireSessionPersistenceAndRecovery: first-start registration prompt', (
 
     asked[0]!.answer(true);
 
-    expect(messages.some((m) => m.includes('Registered') && m.includes(work))).toBe(true);
+    // The line follows the store's answer, so it lands once the write settled.
+    expect(await pollUntil(async () => messages.some((m) => m.includes('Registered') && m.includes(work)))).toBe(true);
     expect(renderCount()).toBeGreaterThanOrEqual(1);
     const store = createWorkspaceRegistrationStore(shellPaths);
     expect(await pollUntil(async () => (await store.resolve(work)).status === 'covered')).toBe(true);
@@ -94,7 +95,7 @@ describe('wireSessionPersistenceAndRecovery: first-start registration prompt', (
 
     first.asked[0]!.answer(false);
 
-    expect(first.messages.some((m) => m.includes('Not registered'))).toBe(true);
+    expect(await pollUntil(async () => first.messages.some((m) => m.includes('Not registered')))).toBe(true);
     const store = createWorkspaceRegistrationStore(shellPaths);
     expect(await pollUntil(async () => (await store.resolve(work)).status === 'declined')).toBe(true);
     const second = makeDeps({ workingDir: work, homeDirectory: home });

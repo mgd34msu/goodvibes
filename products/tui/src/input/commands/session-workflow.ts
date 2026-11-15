@@ -3,7 +3,7 @@ import { createSessionWorkflowCommands } from '@goodvibes-jev/engine/terminal-sh
 import '@goodvibes-jev/engine/terminal-shell/transcript-review';
 
 import '@goodvibes-jev/engine/terminal-shell/transcript-kinds';
-import { findSessionCandidates } from '@goodvibes-jev/engine/platform/platform/sessions';
+import { resolveSessionTarget } from '@goodvibes-jev/engine/platform/platform/sessions';
 import './transcript-reading.ts';
 import 'node:crypto';
 import { rmSync } from 'node:fs';
@@ -142,8 +142,8 @@ export const { handleSessionWorkflowCommand } = createSessionWorkflowCommands<Co
         ctx.print('Usage: /session resume <session-id-or-name> [--force]');
         return true;
       }
-      const sessions = sm.list();
-      const candidates = findSessionCandidates(sessions, target);
+      // An exact id reads one meta line; only a title or prefix lists the directory.
+      const candidates = resolveSessionTarget(sm, target);
       if (candidates.length > 1) {
         ctx.print(`Ambiguous session: ${target}\nUse an exact session ID: ${candidates.map((session) => session.name).join(', ')}`);
         return true;
@@ -189,6 +189,8 @@ export const { handleSessionWorkflowCommand } = createSessionWorkflowCommands<Co
         if (restoredAnchorCount > 0) {
           ctx.print(`  Rewind: restored ${restoredAnchorCount} turn anchor(s); /rewind is available for this resumed session.`);
         }
+        for (const line of outcome.notices) ctx.print(`  ${line}`);
+        for (const warning of outcome.warnings ?? []) ctx.print(`  [Resume] ${warning}; the resumed conversation stands.`);
         if (journalReplay.replayed > 0) {
           ctx.print(`  [Recovery] Replayed ${journalReplay.replayed} journal record(s): restored turns since last snapshot.`);
         }

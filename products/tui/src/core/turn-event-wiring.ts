@@ -1,6 +1,6 @@
 import { buildPersistedSessionContextFromFacts } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import type { UiRuntimeEvents, RuntimeEventBus } from '@/runtime/index.ts';
-import { persistConversation } from '@/runtime/index.ts';
+import { persistConversation, writeRecoveryFile } from '@/runtime/index.ts';
 import { buildCompactionReceiptBlock } from './compaction-receipt.ts';
 import { workstreamFailureNotification } from './workstream-notification.ts';
 import { persistTurnAnchors, recordTurnAnchor, summarizeTurnLabel } from '@goodvibes-jev/engine/platform/platform/rewind';
@@ -9,7 +9,7 @@ import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { HookDispatcher, HookPhase, HookCategory, HookEventPath } from '@goodvibes-jev/engine/platform/platform/hooks';
 import type { ConversationManager } from './conversation.ts';
 import type { SessionSurface } from '@/runtime/index.ts';
-import { journalPathFor, openTranscriptJournal, type TranscriptJournal } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { writeCrashSnapshotAtTurnMoments } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import type { WebhookNotifier } from '@goodvibes-jev/engine/platform/platform/integrations';
 import { notifyCompletion } from '@goodvibes-jev/engine/platform/platform/utils';
 import { maybeNotifyLongTask, readNotifyAfterSeconds } from './long-task-notifier.ts';
@@ -82,7 +82,7 @@ export interface WireTurnEventHandlersOptions {
   readonly hookDispatcher: HookDispatcher;
   /**
    * The app's declare-once session-storage handle. The turn snapshot, the
-   * last-session pointer it writes, the transcript journal, and the rewind
+   * last-session pointer it writes, the crash snapshot, and the rewind
    * anchor sidecar all resolve off this one handle, so the boot notice and
    * `--continue`, which read through the same handle, land on the files this
    * writer actually produced.
@@ -143,43 +143,6 @@ export interface WireTurnEventHandlersOptions {
   readonly _clock?: () => number;
 }
 
-/**
- * Wrap a TranscriptJournal so every write first checks whether
- * `runtime.sessionId` has moved on from the session the journal is currently
- * bound to, rebinding to the new session's file when it has. See the
- * `transcriptJournal` construction above for why this is necessary.
- */
-function wrapJournalWithSessionRebind(
-  journal: TranscriptJournal,
-  surface: SessionSurface,
-  runtime: { readonly sessionId: string },
-): TranscriptJournal {
-  let boundSessionId = runtime.sessionId;
-  const ensureBoundToCurrentSession = (): void => {
-    if (runtime.sessionId !== boundSessionId) {
-      boundSessionId = runtime.sessionId;
-      journal.rebind(journalPathFor(surface, boundSessionId), boundSessionId);
-    }
-  };
-  return {
-    get path(): string {
-      return journal.path;
-    },
-    appendRecord: (type, messages) => {
-      ensureBoundToCurrentSession();
-      journal.appendRecord(type, messages);
-    },
-    rotate: () => {
-      ensureBoundToCurrentSession();
-      journal.rotate();
-    },
-    rebind: (path, sessionId) => {
-      boundSessionId = sessionId;
-      journal.rebind(path, sessionId);
-    },
-  };
-}
-
 /** The Orchestrator's own popup rang the bell for a turn over this long. */
 const TURN_BELL_AFTER_MS = 5_000;
 
@@ -208,8 +171,6 @@ export interface WireTurnEventHandlersResult {
   readonly refreshGit: () => void;
   /** Unsubscribe functions to push into the parent unsubs array. */
   readonly unsubs: ReadonlyArray<() => void>;
-  /** The per-session transcript journal; call appendRecord() for user-submitted events. */
-  readonly transcriptJournal: TranscriptJournal;
 }
 
 /**
@@ -267,22 +228,19 @@ export function wireTurnEventHandlers(options: WireTurnEventHandlersOptions): Wi
   const releaseTurnEndNotice = orchestrator.turnEndNotice?.handOff();
   if (releaseTurnEndNotice) unsubs.push(releaseTurnEndNotice);
 
-  // Create the per-session transcript journal. Path mirrors recovery-file
-  // convention (homeDirectory-scoped). Created lazily on first append.
-  //
-  // `runtime` is the same MutableRuntimeState object /session resume and
-  // /session fork reassign `sessionId` on in place (session-workflow.ts,
-  // bootstrap-hook-bridge.ts), so a session switch is visible here just by
-  // re-reading `runtime.sessionId`. Wrapped so every write re-checks it and
-  // rebinds to the new session's file first, otherwise the journal opened
-  // for the OLD session keeps appending the NEW session's snapshots into the
-  // OLD session's file, and a later resume of the old session replays the
-  // wrong conversation.
-  const transcriptJournal: TranscriptJournal = wrapJournalWithSessionRebind(
-    openTranscriptJournal(journalPathFor(surface, runtime.sessionId), runtime.sessionId),
-    surface,
-    runtime,
-  );
+  // The crash snapshot: one copy of the conversation, written when a prompt is
+  // accepted and after each tool batch (the rule both terminal apps share,
+  // runtime/session-persistence.ts) and when the turn-end save fails. The
+  // session save at turn end is the durable copy after that.
+  const writeCrashSnapshot = (): void => {
+    const snapshot = conversation.toJSON() as { messages: Array<import('./conversation.ts').ConversationMessageSnapshot> };
+    const persisted = buildPersistedSessionContextFromFacts(snapshot.messages, conversation.getTitleSource(), buildSessionContinuityHints());
+    writeRecoveryFile({ ...snapshot, ...persisted }, runtime.sessionId, conversation.title ?? '', { surface });
+  };
+  unsubs.push(writeCrashSnapshotAtTurnMoments({
+    subscribe: (moment, handler) => events.turns.on(moment, handler),
+    write: writeCrashSnapshot,
+  }));
 
   // Set while a user turn runs (failover retries included); gates the activity tally.
   let turnStartTime: number | null = null;
@@ -413,19 +371,6 @@ export function wireTurnEventHandlers(options: WireTurnEventHandlersOptions): Wi
       });
   };
 
-  // Journal user message immediately on TURN_SUBMITTED so a SIGKILL during
-  // the subsequent stream loses at most the in-flight token chunk.
-  unsubs.push(
-    events.turns.on('TURN_SUBMITTED', () => {
-      try {
-        const snap = conversation.toJSON() as { messages: Array<import('./conversation.ts').ConversationMessageSnapshot> };
-        transcriptJournal.appendRecord('user_message', snap.messages);
-      } catch {
-        /* best-effort */
-      }
-    }),
-  );
-
   unsubs.push(
     events.turns.on('TURN_COMPLETED', (evt) => {
       // Auto-save after every LLM turn so kills don't lose the session
@@ -462,17 +407,13 @@ export function wireTurnEventHandlers(options: WireTurnEventHandlersOptions): Wi
             payload: { sessionId: runtime.sessionId },
           })
           .catch((err: unknown) => logger.debug('hook fire error', { error: summarizeError(err) }));
-        // Snapshot succeeded, rotate the journal (gap-filler no longer needed).
-        transcriptJournal.rotate();
         autoSaveFailureShown = false;
       } catch (e) {
-        // Snapshot failed, append the turn to the journal so recovery can
-        // reconstruct it. Best-effort; never crash the TUI.
+        // The session file did not take this turn: the crash snapshot keeps it.
         try {
-          const snap = conversation.toJSON() as { messages: Array<import('./conversation.ts').ConversationMessageSnapshot> };
-          transcriptJournal.appendRecord('assistant_turn', snap.messages);
-        } catch {
-          /* best-effort */
+          writeCrashSnapshot();
+        } catch (error) {
+          logger.warn('[Recovery] Crash snapshot after a failed save also failed', { error: summarizeError(error) });
         }
         logger.debug('auto-save on turn:complete failed', { error: summarizeError(e) });
         if (!autoSaveFailureShown) {
@@ -663,5 +604,5 @@ export function wireTurnEventHandlers(options: WireTurnEventHandlersOptions): Wi
     workstreams.clear();
     readTurnText = null;
   });
-  return { refreshGit, unsubs, transcriptJournal };
+  return { refreshGit, unsubs };
 }

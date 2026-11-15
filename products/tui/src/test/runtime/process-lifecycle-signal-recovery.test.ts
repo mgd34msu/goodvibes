@@ -73,6 +73,7 @@ test('an uncaught exception writes the recovery snapshot before exiting with 1',
 
 test('an autosave tick that throws is contained instead of crashing the process', async () => {
   let calls = 0;
+  let revision = 0;
   // Three failed ticks in a row: a first tick that escaped as an uncaught
   // exception would have been reported before the third one runs.
   const thirdTick = Promise.withResolvers<void>();
@@ -80,6 +81,8 @@ test('an autosave tick that throws is contained instead of crashing the process'
     toJSON: () => { calls += 1; if (calls === 3) thirdTick.resolve(); throw new Error('snapshot failed'); },
     getTitleSource: () => 'auto',
     title: '',
+    // A revision that moves on every read, so every tick has a change to write.
+    revisionSource: { revision: () => (revision += 1) },
   } as unknown as ConversationManager;
   const uncaught: unknown[] = [];
   const onUncaught = (error: unknown): void => { uncaught.push(error); };

@@ -60,7 +60,6 @@ describe('shell/blocking-input', () => {
       data: 'y',
       pendingPermission,
       recoveryPending: null,
-      daemonRepairPrompt: null,
       abortTurn: () => { aborted++; },
       conversation: conversation as never,
       systemMessageRouter: router as never,
@@ -96,7 +95,6 @@ describe('shell/blocking-input', () => {
       data: '\x1b',
       pendingPermission,
       recoveryPending: null,
-      daemonRepairPrompt: null,
       abortTurn: () => { aborted++; },
       conversation: conversation as never,
       systemMessageRouter: router as never,
@@ -122,7 +120,6 @@ describe('shell/blocking-input', () => {
       data: '\x12',
       pendingPermission: null,
       recoveryPending: 'recovery-session-1',
-      daemonRepairPrompt: null,
       abortTurn: () => {},
       conversation: conversation as never,
       systemMessageRouter: router as never,
@@ -152,7 +149,6 @@ describe('shell/blocking-input', () => {
       data: '\x12',
       pendingPermission: null,
       recoveryPending: 'recovery-session-1',
-      daemonRepairPrompt: null,
       abortTurn: () => {},
       conversation: conversation as never,
       systemMessageRouter: router as never,
@@ -179,7 +175,6 @@ describe('shell/blocking-input', () => {
       data: 'h',
       pendingPermission: null,
       recoveryPending: 'recovery-session-1',
-      daemonRepairPrompt: null,
       abortTurn: () => {},
       conversation: conversation as never,
       systemMessageRouter: router as never,
@@ -190,12 +185,29 @@ describe('shell/blocking-input', () => {
       removeRecoveryPoint: () => { removed++; },
     });
 
+    // Typing closes the offer for this launch and leaves the snapshot on disk.
     expect(result.handled).toBe(false);
     expect(result.recoveryPending).toBeNull();
     expect(restored).toEqual([]);
-    expect(messages).toContain('[Recovery] Ignored saved session; starting a new prompt.');
-    expect(removed).toBe(1);
+    expect(messages).toContain('[Recovery] Left the unsaved session on disk; it is offered again at the next launch.');
+    expect(removed).toBe(0);
     expect(rendered).toBe(1);
+
+    // A focus report from the terminal is not an answer: the offer stays and nothing is removed.
+    const focus = handleBlockingShellInput({
+      data: '\x1b[O',
+      pendingPermission: null,
+      recoveryPending: 'recovery-session-1',
+      abortTurn: () => {},
+      conversation: conversation as never,
+      systemMessageRouter: router as never,
+      render: () => {},
+      consumeRecovery: () => null,
+      removeRecoveryPoint: () => { removed++; },
+    });
+    expect(focus.handled).toBe(false);
+    expect(focus.recoveryPending).toBe('recovery-session-1');
+    expect(removed).toBe(0);
   });
 
   test('discards recovery on escape without passing escape to input', () => {
@@ -208,7 +220,6 @@ describe('shell/blocking-input', () => {
       data: '\x1b',
       pendingPermission: null,
       recoveryPending: 'recovery-session-1',
-      daemonRepairPrompt: null,
       abortTurn: () => {},
       conversation: conversation as never,
       systemMessageRouter: router as never,
@@ -266,7 +277,6 @@ describe('shell/blocking-input: recovery targets exactly the offered snapshot', 
       data: '\x12',
       pendingPermission: null,
       recoveryPending: offered!.sessionId,
-      daemonRepairPrompt: null,
       abortTurn: () => {},
       conversation: conversation as never,
       systemMessageRouter: router as never,
@@ -295,7 +305,6 @@ describe('shell/blocking-input: recovery targets exactly the offered snapshot', 
       data: '\x1b',
       pendingPermission: null,
       recoveryPending: offered!.sessionId,
-      daemonRepairPrompt: null,
       abortTurn: () => {},
       conversation: conversation as never,
       systemMessageRouter: router as never,

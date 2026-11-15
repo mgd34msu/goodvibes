@@ -17,7 +17,7 @@ import type { NativeConversationInput } from '../runtime/native-conversation-inp
 import { nativeConversationIntakeLines, type NativeConversationIntakeActions, type NativeConversationIntakeState } from '../runtime/native-conversation-intake.ts';
 import { createRemoteConversationRouter, sameNativeRemoteConnection, type ConnectedHostResolution } from '../runtime/client/remote-conversation.ts';
 import { mirrorHostedSessionToStore, recoverUnmirroredHostedSessions, type HostedAttachReply } from '../runtime/client/hosted-session-mirror.ts';
-import { persistConversation } from '@/runtime/index.ts';
+import { persistConversation, readLastSessionPointer, saveSession } from '@/runtime/index.ts';
 import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { BootstrapContext } from '../runtime/bootstrap.ts';
 import type { HostedSessionFrame, HostedTurnCompletion } from '../runtime/client/hosted-frame-render.ts';
@@ -55,6 +55,12 @@ export interface RemoteConversationWiring {
   /** The local conversation was cleared or replaced: the next message opens a new hosted session. */
   resetHostedSession(): void;
   dispose(): void;
+  /**
+   * True for a turn the connected host ran (its frames carried this turn id).
+   * The host's transcript is that conversation's record, so the local autosave
+   * and crash snapshot skip it.
+   */
+  isHostedTurn?(turnId: string): boolean;
 }
 
 export interface NativeRemoteConversationWiring extends RemoteConversationWiring {
@@ -131,6 +137,15 @@ export function installRemoteConversationRouting(
     requestRender: options.render,
   });
   const clientId = `goodvibes-agent:${ctx.runtime.sessionId}`;
+  // Turn ids the host ran, newest kept; read synchronously by the autosave
+  // when the bridged TURN_COMPLETED fires.
+  const hostedTurnIds = new Set<string>();
+  const noteHostedTurn = (frame: HostedSessionFrame): void => {
+    const turnId = frame.payload?.['turnId'];
+    if (typeof turnId !== 'string' || hostedTurnIds.has(turnId)) return;
+    hostedTurnIds.add(turnId);
+    if (hostedTurnIds.size > 64) hostedTurnIds.delete(hostedTurnIds.values().next().value as string);
+  };
   /**
    * Put the daemon's authoritative transcript into this agent's session store
    * and move last-session.json onto it, so the conversation is resumable from
@@ -174,8 +189,17 @@ export function installRemoteConversationRouting(
   void recoverUnmirroredHostedSessions({
     verbs: ctx.services.daemonVerbs,
     clientId,
-    persist: (sessionId, snapshot, model, provider, title) => {
-      persistConversation(sessionId, snapshot, model, provider, title, { surface: ctx.services.surface }, 'auto');
+    persist: (sessionId, snapshot, model, provider, title, movePointer) => {
+      if (movePointer === false) saveSession(sessionId, snapshot, model, provider, title, { surface: ctx.services.surface }, 'auto');
+      else persistConversation(sessionId, snapshot, model, provider, title, { surface: ctx.services.surface }, 'auto');
+    },
+    pointerTargetTimestamp: () => {
+      try {
+        const target = readLastSessionPointer({ surface: ctx.services.surface });
+        return target ? ctx.services.sessionManager.getMeta(target)?.timestamp ?? null : null;
+      } catch {
+        return null;
+      }
     },
     fallbackModel: ctx.runtime.model,
     fallbackProvider: ctx.runtime.provider,
@@ -216,6 +240,7 @@ export function installRemoteConversationRouting(
       } else if (frame.type === 'TOOL_SUCCEEDED' || frame.type === 'TOOL_FAILED') {
         activity.noteTool(null);
       }
+      noteHostedTurn(frame);
       // Republish onto this process's own runtime bus, see
       // hosted-turn-bus-bridge.ts. Without this, a daemon-hosted turn never
       // fires TURN_SUBMITTED/STREAM_DELTA/TURN_COMPLETED locally, so anything
@@ -311,6 +336,7 @@ export function installRemoteConversationRouting(
   };
 
   return {
+    isHostedTurn: (turnId: string) => hostedTurnIds.has(turnId),
     observeNative,
     routeNativeOrExplain: async (source, intake, onNotSent) => {
       if (disposed) return detachedHandle();

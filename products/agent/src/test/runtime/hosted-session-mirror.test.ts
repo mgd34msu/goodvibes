@@ -137,12 +137,15 @@ describe('mirroring a hosted conversation into the session store', () => {
     expect(outcome.mirrored).toBe(false);
   });
 
-  test('tool rows keep their content and say so about the synthesized call id', () => {
+  test('a tool result is stored as one only beside its call; otherwise it is kept as text, never with an invented id', () => {
     const messages = hostedHistoryToStoreMessages([
       { role: 'user', content: 'run it' },
       { role: 'tool', content: 'exit 0' },
+      { role: 'assistant', content: '', toolCalls: [{ id: 'call-7', name: 'exec' }] },
+      { role: 'tool', content: 'exit 1', callId: 'call-7' },
     ]);
-    expect(messages[1]).toEqual({ role: 'tool', callId: 'hosted-1', content: 'exit 0' });
+    expect(messages[1]).toEqual({ role: 'assistant', content: 'Tool result (the host did not record which call): exit 0' });
+    expect(messages[3]).toEqual({ role: 'tool', callId: 'call-7', content: 'exit 1' });
   });
 });
 
@@ -152,7 +155,7 @@ describe('crash path: completion is never delivered', () => {
     // reaches this surface, so nothing mirrored at turn end. The daemon still
     // holds the transcript.
     const { deps, persisted } = harness({
-      list: { sessions: [{ id: 'hosted-1', workspaceRoot: '/proj', messageCount: 2 }] },
+      list: { sessions: [{ id: 'hosted-1', workspaceRoot: '/proj', messageCount: 2, nativeConversation: true as const }] },
     });
 
     const outcomes = await recoverUnmirroredHostedSessions({
@@ -169,13 +172,27 @@ describe('crash path: completion is never delivered', () => {
 
   test('a session the store already holds is left alone', async () => {
     const { deps, persisted } = harness({
-      list: { sessions: [{ id: 'hosted-1', workspaceRoot: '/proj', messageCount: 2 }] },
+      list: { sessions: [{ id: 'hosted-1', workspaceRoot: '/proj', messageCount: 2, nativeConversation: true as const }] },
     });
 
     await recoverUnmirroredHostedSessions({
       ...deps,
       workspaceRoot: '/proj',
       knownSessionIds: () => ['hosted-1'],
+    });
+
+    expect(persisted).toEqual([]);
+  });
+
+  test('a conversation a channel handed to the host is not recovered as a terminal session', async () => {
+    const { deps, persisted } = harness({
+      list: { sessions: [{ id: 'hosted-channel', workspaceRoot: '/proj', messageCount: 3 }] },
+    });
+
+    await recoverUnmirroredHostedSessions({
+      ...deps,
+      workspaceRoot: '/proj',
+      knownSessionIds: () => [],
     });
 
     expect(persisted).toEqual([]);
@@ -201,6 +218,7 @@ describe('crash path: completion is never delivered', () => {
       id: `hosted-${11 - index}`,
       workspaceRoot: '/proj',
       messageCount: 2,
+      nativeConversation: true as const,
       updatedAt: 1000 + (11 - index),
     }));
     const { deps, persisted, attachedIds } = harness({ list: { sessions } });

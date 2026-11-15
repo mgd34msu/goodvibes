@@ -5,7 +5,7 @@ import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platfor
 import type { SetupSmokeNativeEvidence } from './agent-setup-smoke-reference.ts';
 import type { CommandContext } from '../input/command-registry.ts';
 import { requireShellPaths } from '../input/commands/runtime-services.ts';
-import { readOnboardingCompletionMarker } from '../runtime/onboarding/index.ts';
+import { isOnboardingComplete } from '../runtime/onboarding/completion.ts';
 import { buildSetupWizardDurableReceipts } from '../agent/setup-wizard-artifact-receipts.ts';
 import { mergeSetupWizardDurableReceipts, readSetupWizardLiveDurableReceipts } from '../input/setup-wizard-live-receipts.ts';
 import { clearSetupWizardCheckpoint, readSetupWizardCheckpoint, saveSetupWizardCheckpoint } from '../agent/setup-wizard-checkpoint.ts';
@@ -613,7 +613,7 @@ export function setupWizardDurableReceipts(context: CommandContext): readonly Ag
 
 export function setupCompletionMarkerExists(context: CommandContext): boolean {
   try {
-    return readOnboardingCompletionMarker(requireShellPaths(context), 'user').exists;
+    return isOnboardingComplete(requireShellPaths(context));
   } catch {
     return false;
   }

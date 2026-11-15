@@ -9,10 +9,10 @@
  * session, so resuming would have opened the wrong conversation and the real
  * one was unreachable from the surface that started it.
  *
- * Why it was missing: a local turn is persisted off `TURN_COMPLETED`
- * (shell/startup-wiring.ts), and a hosted turn emits no local `TURN_COMPLETED`
- *, its turn runs daemon-side. Every durable-write path hung off an event that
- * hosted conversations never fire.
+ * One record per conversation: a hosted turn's `TURN_COMPLETED` is bridged onto
+ * the local bus (hosted-turn-bus-bridge.ts), and the local autosave skips it
+ * (shell/startup-wiring.ts `isHostedTurn`), so the only stored copy of a hosted
+ * conversation is this mirror, keyed by the hosted session id.
  *
  * Where the content comes from: the DAEMON's record is authoritative, not this
  * process's screen mirror. `sessions.hosted.attach` returns the transcript the
@@ -29,6 +29,10 @@ export interface HostedHistoryMessage {
   readonly role: 'user' | 'assistant' | 'system' | 'tool';
   readonly content: string;
   readonly at?: number;
+  /** The calls an assistant row made, when the host's history carries them. */
+  readonly toolCalls?: ReadonlyArray<{ readonly id: string; readonly name: string; readonly arguments?: unknown }> | undefined;
+  /** The call a tool row answers, when the host's history carries it. */
+  readonly callId?: string | undefined;
 }
 
 /** The subset of the daemon's hosted record this mirror reads. */
@@ -60,6 +64,8 @@ export interface HostedSessionMirrorDeps {
     model: string,
     provider: string,
     title?: string,
+    /** False when the last-session pointer must stay where it is (a recovered conversation older than its target). */
+    movePointer?: boolean,
   ) => void;
   readonly fallbackModel: string;
   readonly fallbackProvider: string;
@@ -73,17 +79,26 @@ export type HostedMirrorOutcome =
 /**
  * Convert the daemon's history into the store's message shape.
  *
- * Tool rows are kept rather than dropped, but the daemon's history does not
- * carry the tool-call id that a locally-recorded tool result has, so the mirror
- * synthesizes a positional one. That is stated here rather than hidden: the
- * content is faithful, the correlation id is not the original.
+ * A tool result is stored as one only when the host's history names the call
+ * it answers and that call is in an earlier assistant row: a provider refuses
+ * a tool result with no matching call, so an invented id would make the
+ * resumed conversation fail on its first message. A tool row the host gave
+ * without its call is kept as an assistant line saying what the tool returned.
  */
 export function hostedHistoryToStoreMessages(
   history: readonly HostedHistoryMessage[],
 ): Array<Record<string, unknown>> {
-  return history.map((message, index) => {
+  const calls = new Set<string>();
+  return history.map((message) => {
+    if (message.role === 'assistant' && message.toolCalls && message.toolCalls.length > 0) {
+      for (const call of message.toolCalls) calls.add(call.id);
+      return { role: 'assistant', content: message.content, toolCalls: message.toolCalls.map((call) => ({ ...call })) };
+    }
     if (message.role === 'tool') {
-      return { role: 'tool', callId: `hosted-${index}`, content: message.content };
+      if (message.callId !== undefined && calls.has(message.callId)) {
+        return { role: 'tool', callId: message.callId, content: message.content };
+      }
+      return { role: 'assistant', content: `Tool result (the host did not record which call): ${message.content}` };
     }
     return { role: message.role, content: message.content };
   });
@@ -100,6 +115,7 @@ export function hostedHistoryToStoreMessages(
 export async function mirrorHostedSessionToStore(
   sessionId: string,
   deps: HostedSessionMirrorDeps,
+  options: { readonly timestamp?: number; readonly movePointer?: boolean } = {},
 ): Promise<HostedMirrorOutcome> {
   let reply: HostedAttachReply;
   try {
@@ -125,10 +141,11 @@ export async function mirrorHostedSessionToStore(
   try {
     deps.persist(
       sessionId,
-      { messages, timestamp: (deps.now ?? Date.now)(), ...(title ? { title } : {}) },
+      { messages, timestamp: options.timestamp ?? (deps.now ?? Date.now)(), ...(title ? { title } : {}) },
       reply.session?.modelId ?? deps.fallbackModel,
       reply.session?.providerId ?? deps.fallbackProvider,
       title,
+      options.movePointer ?? true,
     );
   } catch (error) {
     const reason = `writing hosted session ${sessionId} to the session store failed, ${summarizeError(error)}`;
@@ -149,6 +166,8 @@ export interface HostedListReply {
     readonly workspaceRoot?: string | undefined;
     readonly updatedAt?: number | undefined;
     readonly status?: string | undefined;
+    /** Set by the host for a conversation a terminal surface started (native intake); absent for a channel hand-off. */
+    readonly nativeConversation?: true | undefined;
   })[];
 }
 
@@ -159,6 +178,8 @@ export interface HostedRecoveryDeps extends HostedSessionMirrorDeps {
   readonly knownSessionIds: () => readonly string[];
   /** Bound on how many orphans one boot will pull back. */
   readonly maxRecovered?: number;
+  /** When the session the last-session pointer names was saved, or null when it names none; a recovered conversation older than it leaves the pointer alone. */
+  readonly pointerTargetTimestamp?: () => number | null;
 }
 
 /** Default bound on a single boot's recovery pass. */
@@ -198,6 +219,9 @@ export async function recoverUnmirroredHostedSessions(
   const known = new Set(deps.knownSessionIds());
   const unknown = (reply?.sessions ?? []).filter((session) =>
     session.workspaceRoot === deps.workspaceRoot
+    // Only conversations a terminal started: a channel conversation handed to
+    // the host is not a crashed terminal session.
+    && session.nativeConversation === true
     && !known.has(session.id)
     && (session.messageCount ?? 0) > 0);
   const ended = unknown.filter((session) => session.status === 'terminated');
@@ -218,8 +242,13 @@ export async function recoverUnmirroredHostedSessions(
   const limit = deps.maxRecovered ?? DEFAULT_MAX_RECOVERED_HOSTED_SESSIONS;
   const selected = candidates.slice(-limit);
   const outcomes: HostedMirrorOutcome[] = [];
+  let pointerAt = deps.pointerTargetTimestamp?.() ?? null;
   for (const session of selected) {
-    outcomes.push(await mirrorHostedSessionToStore(session.id, deps));
+    const updatedAt = session.updatedAt ?? 0;
+    const movePointer = pointerAt === null || updatedAt > pointerAt;
+    const outcome = await mirrorHostedSessionToStore(session.id, deps, { ...(updatedAt > 0 ? { timestamp: updatedAt } : {}), movePointer });
+    if (outcome.mirrored && movePointer) pointerAt = updatedAt;
+    outcomes.push(outcome);
   }
   const recovered = outcomes.filter((outcome) => outcome.mirrored).length;
   if (recovered > 0) {

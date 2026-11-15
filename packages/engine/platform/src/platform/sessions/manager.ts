@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, readSync, readdirSync, statSync, writeFileSync, unlinkSync, renameSync, openSync, fsyncSync, closeSync } from 'fs';
-import { join } from 'path';
+import { basename, join } from 'path';
 import { logger } from '../utils/logger.js';
 import type { AgentRecord } from '../tools/agent/index.js';
 import type { Contract, ContractView } from '../contract/types.js';
@@ -49,18 +49,61 @@ export interface SessionMeta {
    * was recorded.
    */
   conversationId?: string | undefined;
+  /**
+   * How many messages the file holds, written into the meta line so a listing
+   * reads one line per file. Absent on files saved before it was recorded.
+   */
+  messageCount?: number | undefined;
 }
 
 /** Options of {@link SessionManager.save}. */
 export interface SessionSaveOptions {
   /** Replace a file that holds another conversation (the user said so, e.g. `/save <name> --replace`). */
   readonly replace?: boolean | undefined;
+  /**
+   * The conversation being saved, when the file records a different one: a
+   * save-as that moves the live conversation to the saved name records the
+   * new id, while the check compares the conversation's id before the move.
+   */
+  readonly savingConversationId?: string | undefined;
 }
 
 /** The conversation's side branches: every branch not currently open, and the name of the one that is. */
 export interface SessionBranches {
   readonly branches: Readonly<Record<string, readonly object[]>>;
   readonly currentBranch: string;
+}
+
+/** The meta fields of a parsed meta line (line 0); `messageCount` only when the file recorded it. */
+function metaFromRecord(record: Record<string, unknown>): SessionMeta {
+  const fileVersion = typeof record.schemaVersion === 'number' ? record.schemaVersion : 0;
+  return {
+    title: String(record.title ?? ''),
+    model: String(record.model ?? ''),
+    provider: String(record.provider ?? ''),
+    timestamp: Number(record.timestamp ?? 0),
+    titleSource: record.titleSource === 'user' ? 'user' : 'system',
+    returnContext: loadedReturnContext(record.returnContext),
+    schemaVersion: fileVersion,
+    saveSource: record.saveSource === 'user' || record.saveSource === 'auto' ? record.saveSource : undefined,
+    ...(typeof record.conversationId === 'string' ? { conversationId: record.conversationId } : {}),
+    ...(typeof record.messageCount === 'number' && Number.isSafeInteger(record.messageCount) && record.messageCount >= 0
+      ? { messageCount: record.messageCount } : {}),
+  };
+}
+
+/** Messages in a file saved before its meta line recorded the count: every non-removed message line. */
+function countMessageLines(raw: string): number {
+  let count = 0;
+  for (const line of raw.split('\n').slice(1)) {
+    if (!line.trim()) continue;
+    let record: unknown;
+    try { record = JSON.parse(line); } catch { continue; }
+    if (record !== null && typeof record === 'object'
+      && (record as Record<string, unknown>).type === 'message'
+      && (record as Record<string, unknown>).removed !== true) count++;
+  }
+  return count;
 }
 
 function readBranchesLine(record: Record<string, unknown>): SessionBranches | null {
@@ -278,16 +321,12 @@ export class SessionManager {
     let saved = 'at an unknown time';
     let count = 0;
     try {
-      const lines = readFileSync(filePath, 'utf-8').split('\n');
-      for (const line of lines) {
-        if (!line.trim()) continue;
-        const record = JSON.parse(line) as Record<string, unknown>;
-        if (record.type === 'meta' && typeof record.timestamp === 'number' && record.timestamp > 0) saved = new Date(record.timestamp).toLocaleString();
-        else if (record.type === 'message' && record.removed !== true) count += 1;
-      }
+      const meta = this._readMetaOf(filePath);
+      if (meta && meta.timestamp > 0) saved = new Date(meta.timestamp).toLocaleString();
+      count = meta?.messageCount ?? countMessageLines(readFileSync(filePath, 'utf-8'));
     } catch { /* the refusal stands without the details */ }
     return `A saved session named "${name}" already holds another conversation (saved ${saved}, ${count} message${count === 1 ? '' : 's'}). `
-      + `Nothing was saved. Use /save ${name} --replace to replace it, or save under another name.`;
+      + 'Nothing was saved. Save again with --replace to replace it, or save under another name.';
   }
 
   /**
@@ -310,8 +349,14 @@ export class SessionManager {
     return this._readExistingMetaRecord(legacyPath)?.name === name ? legacyPath : null;
   }
 
+  /** The meta of a session file from its first line alone, or null when it has no readable meta line. */
+  private _readMetaOf(filePath: string): SessionMeta | null {
+    const record = this._readExistingMetaRecord(filePath);
+    return record ? metaFromRecord(record) : null;
+  }
+
   /** The meta line (line 0) of an existing session file, or undefined when absent, unreadable or not a meta line. */
-  private _readExistingMetaRecord(filePath: string): { saveSource?: unknown; name?: unknown; conversationId?: unknown } | undefined {
+  private _readExistingMetaRecord(filePath: string): Record<string, unknown> & { saveSource?: unknown; name?: unknown; conversationId?: unknown } | undefined {
     if (!existsSync(filePath)) return undefined;
     let fd: number;
     try {
@@ -336,8 +381,8 @@ export class SessionManager {
       }
       const firstLine = Buffer.concat(chunks).toString('utf-8');
       if (!firstLine.trim()) return undefined;
-      const record = JSON.parse(firstLine) as { type?: unknown; saveSource?: unknown; name?: unknown; conversationId?: unknown };
-      return record.type === 'meta' ? record : undefined;
+      const record = JSON.parse(firstLine) as Record<string, unknown>;
+      return record !== null && typeof record === 'object' && record.type === 'meta' ? record : undefined;
     } catch {
       return undefined;
     } finally {
@@ -389,10 +434,15 @@ export class SessionManager {
       );
     }
     // The same name in another conversation would replace that conversation's save.
-    const existingConversation = existing?.conversationId;
-    if (!options.replace && typeof existingConversation === 'string' && meta.conversationId !== undefined
-      && existingConversation !== meta.conversationId) {
-      throw new Error(this._describeOtherConversation(name, filePath));
+    // A file saved before the conversation was recorded holds the conversation
+    // it is named after (an automatic save is named by its session id).
+    const saving = options.savingConversationId ?? meta.conversationId;
+    if (existing && !options.replace && saving !== undefined) {
+      const existingConversation = typeof existing.conversationId === 'string' ? existing.conversationId
+        : typeof existingName === 'string' ? existingName : sanitizedName;
+      if (existingConversation !== saving) {
+        throw new Error(this._describeOtherConversation(name, filePath));
+      }
     }
 
     const lines: string[] = [];
@@ -410,6 +460,7 @@ export class SessionManager {
       returnContext: loadedReturnContext(meta.returnContext),
       saveSource: this._resolveSaveSource(filePath, meta.saveSource),
       ...(meta.conversationId !== undefined ? { conversationId: meta.conversationId } : {}),
+      messageCount: messages.filter(message => (message as { removed?: unknown }).removed !== true).length,
     };
     lines.push(JSON.stringify(metaRecord));
 
@@ -472,25 +523,14 @@ export class SessionManager {
       }
 
       if (record.type === 'meta') {
-        const fileVersion = typeof record.schemaVersion === 'number' ? record.schemaVersion : 0;
-        if (fileVersion > CURRENT_SESSION_SCHEMA_VERSION) {
+        meta = metaFromRecord(record);
+        if ((meta.schemaVersion ?? 0) > CURRENT_SESSION_SCHEMA_VERSION) {
           logger.warn('SessionManager: session file has a newer schemaVersion, loading with best-effort parsing', {
             name,
-            fileVersion,
+            fileVersion: meta.schemaVersion,
             currentVersion: CURRENT_SESSION_SCHEMA_VERSION,
           });
         }
-        meta = {
-          title: String(record.title ?? ''),
-          model: String(record.model ?? ''),
-          provider: String(record.provider ?? ''),
-          timestamp: Number(record.timestamp ?? 0),
-          titleSource: record.titleSource === 'user' ? 'user' : 'system',
-          returnContext: loadedReturnContext(record.returnContext),
-          schemaVersion: fileVersion,
-          saveSource: record.saveSource === 'user' || record.saveSource === 'auto' ? record.saveSource : undefined,
-          ...(typeof record.conversationId === 'string' ? { conversationId: record.conversationId } : {}),
-        };
       } else if (record.type === 'message') {
         if (record.removed === true) continue;
         // Strip the 'type' wrapper before returning raw message
@@ -556,59 +596,16 @@ export class SessionManager {
 
     const sessions: SessionInfo[] = [];
 
+    // One line per file: the meta line carries the message count. A file saved
+    // before the count was recorded is read whole once, until its next save.
     for (const file of files) {
       const name = file.replace(/\.jsonl$/, '');
       const filePath = join(this.sessionsDir, file);
-
-      let meta: SessionMeta = { title: '', model: '', provider: '', timestamp: 0, titleSource: 'system' };
-      let messageCount = 0;
-
+      let meta: SessionMeta | null;
+      let messageCount: number;
       try {
-        const raw = readFileSync(filePath, 'utf-8');
-        const lines = raw.split('\n').filter(l => l.trim().length > 0);
-
-        // Parse only the first line for meta; count remaining non-removed message lines
-        if (lines.length > 0) {
-          try {
-            const first = JSON.parse(lines[0]!) as Record<string, unknown>;
-            if (first.type === 'meta') {
-              const fileVersion = typeof first.schemaVersion === 'number' ? first.schemaVersion : 0;
-              meta = {
-                title: String(first.title ?? ''),
-                model: String(first.model ?? ''),
-                provider: String(first.provider ?? ''),
-                timestamp: Number(first.timestamp ?? 0),
-                titleSource: first.titleSource === 'user' ? 'user' : 'system',
-                returnContext: loadedReturnContext(first.returnContext),
-                schemaVersion: fileVersion,
-              };
-            }
-          } catch (err: unknown) {
-            // Malformed meta line: list session with default title/model.
-            logger.warn('SessionManager: malformed meta line', {
-              name,
-              error: summarizeError(err),
-            });
-          }
-        }
-
-        // Count the message records that are not removed, from each parsed
-        // record: the fields' order in the line is not fixed (save writes
-        // `type` last), and text inside a record can contain any substring.
-        for (const l of lines.slice(1)) {
-          let record: unknown;
-          try {
-            record = JSON.parse(l);
-          } catch {
-            // A malformed line is not a message; load() skips it the same way.
-            continue;
-          }
-          if (record !== null && typeof record === 'object'
-            && (record as Record<string, unknown>).type === 'message'
-            && (record as Record<string, unknown>).removed !== true) {
-            messageCount++;
-          }
-        }
+        meta = this._readMetaOf(filePath);
+        messageCount = meta?.messageCount ?? countMessageLines(readFileSync(filePath, 'utf-8'));
       } catch (err: unknown) {
         // Session file unreadable: skip it from the listing.
         logger.warn('SessionManager: unreadable session file', {
@@ -617,18 +614,7 @@ export class SessionManager {
         });
         continue;
       }
-
-      sessions.push({
-        name,
-        title: meta.title,
-        model: meta.model,
-        provider: meta.provider,
-        timestamp: meta.timestamp,
-        messageCount,
-        filePath,
-        titleSource: meta.titleSource,
-        returnContext: meta.returnContext,
-      });
+      sessions.push(this._infoOf(name, filePath, meta, messageCount));
     }
 
     // Sort by most recent first
@@ -636,40 +622,48 @@ export class SessionManager {
     return sessions;
   }
 
+  private _infoOf(name: string, filePath: string, meta: SessionMeta | null, messageCount: number): SessionInfo {
+    return {
+      name,
+      title: meta?.title ?? '',
+      model: meta?.model ?? '',
+      provider: meta?.provider ?? '',
+      timestamp: meta?.timestamp ?? 0,
+      messageCount,
+      filePath,
+      titleSource: meta?.titleSource ?? 'system',
+      returnContext: meta?.returnContext,
+    };
+  }
+
   /**
-   * Get just the metadata for a session without loading all messages.
+   * The listing entry of the one session `name` addresses (its file name, or
+   * the name it was saved under), read from its meta line; null when there is
+   * none. An exact id never lists the directory.
+   */
+  info(name: string): SessionInfo | null {
+    if (!name || !name.trim()) return null;
+    const filePath = this._resolveSessionFile(name);
+    if (filePath === null) return null;
+    try {
+      const meta = this._readMetaOf(filePath);
+      const messageCount = meta?.messageCount ?? countMessageLines(readFileSync(filePath, 'utf-8'));
+      return this._infoOf(basename(filePath).replace(/\.jsonl$/, ''), filePath, meta, messageCount);
+    } catch (err: unknown) {
+      logger.warn('SessionManager: could not read session meta', { name: filePath, error: summarizeError(err) });
+      return null;
+    }
+  }
+
+  /**
+   * Get just the metadata for a session without loading all messages (its first line).
    * Returns null if the session does not exist or meta cannot be parsed.
    */
   getMeta(name: string): SessionMeta | null {
     if (!name || !name.trim()) return null;
     const filePath = this._resolveSessionFile(name);
     if (filePath === null) return null;
-    try {
-      const raw = readFileSync(filePath, 'utf-8');
-      const firstLine = raw.split('\n')[0];
-      if (!firstLine?.trim()) return null;
-      const record = JSON.parse(firstLine) as Record<string, unknown>;
-      if (record.type !== 'meta') return null;
-      const fileVersion = typeof record.schemaVersion === 'number' ? record.schemaVersion : 0;
-      return {
-        title: String(record.title ?? ''),
-        model: String(record.model ?? ''),
-        provider: String(record.provider ?? ''),
-        timestamp: Number(record.timestamp ?? 0),
-        titleSource: record.titleSource === 'user' ? 'user' : 'system',
-        returnContext: loadedReturnContext(record.returnContext),
-        schemaVersion: fileVersion,
-        saveSource: record.saveSource === 'user' || record.saveSource === 'auto' ? record.saveSource : undefined,
-        ...(typeof record.conversationId === 'string' ? { conversationId: record.conversationId } : {}),
-      };
-    } catch (err: unknown) {
-      // Session file unreadable or missing meta: return null to caller.
-      logger.warn('SessionManager: could not read session meta', {
-        name: filePath,
-        error: summarizeError(err),
-      });
-      return null;
-    }
+    return this._readMetaOf(filePath);
   }
 
   /**
@@ -795,6 +789,16 @@ export class SessionManager {
   sanitizeName(name: string): string {
     return sanitizeSessionName(name);
   }
+}
+
+/**
+ * The sessions `target` names: an exact id (or saved name) is one meta-line
+ * read; only a title or id prefix lists the directory. Callers must
+ * disambiguate multiple matches.
+ */
+export function resolveSessionTarget(manager: Pick<SessionManager, 'info' | 'list'>, target: string): SessionInfo[] {
+  const exact = manager.info(target);
+  return exact ? [exact] : findSessionCandidates(manager.list(), target);
 }
 
 /** Exact ids win over titles and prefixes; callers must disambiguate multiple matches. */

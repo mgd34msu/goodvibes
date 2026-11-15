@@ -558,21 +558,31 @@ export function isBroadWorkspaceRoot(shellPaths: StoreShellPaths, root: string):
   return broadRootReason(root, shellPaths.homeDirectory, shellPaths.resolveUserPath()) !== null;
 }
 
+/** What answering the first-start question actually did. */
+export type WorkspaceRegistrationAnswer =
+  | { readonly outcome: 'registered' | 'declined' }
+  /** The store refused or could not write; `reason` is its own message. */
+  | { readonly outcome: 'not-saved'; readonly reason: string };
+
 /**
  * Resolve a first-start registration prompt's answer against the shared
- * store. A keypress handler has no async context and ignores the returned
- * promise, but a write error is never a silent failure: it is logged, not
- * lost. The promise settles once the answer is persisted (it never rejects).
+ * store, and say what happened: registered, declined, or not saved with the
+ * store's reason (a root it refuses, a locked or unwritable register). Never
+ * rejects.
  */
-export function answerWorkspaceRegistrationPrompt(shellPaths: StoreShellPaths, root: string, accepted: boolean): Promise<void> {
+export function answerWorkspaceRegistrationPrompt(shellPaths: StoreShellPaths, root: string, accepted: boolean): Promise<WorkspaceRegistrationAnswer> {
   // Accepting the first-start prompt is an EXPLICIT owner opt-in, so it goes
   // through registerWorkspaceForCheckpoints (registers AND stamps eligibility),
   // not a plain store.add, which would register without making the workspace
   // checkpoint-eligible. Declining stays a plain decline.
-  const outcome = accepted
+  const outcome: Promise<unknown> = accepted
     ? registerWorkspaceForCheckpoints(shellPaths, root)
     : createWorkspaceRegistrationStore(shellPaths).decline(root);
-  return outcome.then(() => undefined, (error: unknown) => {
-    logger.error('Failed to persist workspace registration prompt answer', { root, accepted, error: summarizeError(error) });
-  });
+  return outcome.then(
+    (): WorkspaceRegistrationAnswer => ({ outcome: accepted ? 'registered' : 'declined' }),
+    (error: unknown): WorkspaceRegistrationAnswer => {
+      logger.error('Failed to persist workspace registration prompt answer', { root, accepted, error: summarizeError(error) });
+      return { outcome: 'not-saved', reason: summarizeError(error) };
+    },
+  );
 }

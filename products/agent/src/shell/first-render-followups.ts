@@ -47,6 +47,7 @@ export function startFirstRenderFollowups(deps: FirstRenderFollowupDeps): Sessio
     workingDir,
     daemonRepair,
     askWorkspaceRegistration,
+    isHostedTurn,
   } = deps;
 
   // Async GPU probe runs off the render frame, nvidia-smi result will populate
@@ -92,5 +93,6 @@ export function startFirstRenderFollowups(deps: FirstRenderFollowupDeps): Sessio
     onStreamSpeedUpdate,
     daemonRepair,
     askWorkspaceRegistration,
+    isHostedTurn,
   });
 }

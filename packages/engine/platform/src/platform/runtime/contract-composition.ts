@@ -61,8 +61,14 @@ export interface NativeContractCompositionOwner {
 
 export interface ContractRunnerCompositionOptions {
   readonly judgmentLog?: Pick<import('@goodvibes-jev/judgment').DecisionLog, 'get'> | undefined;
-  /** Registered conversation surface; absent hosts contribute no owner history. */
+  /** Registered conversation surface, read for an owner session not loaded in this process. */
   readonly surfaceRoot?: string | undefined;
+  /**
+   * The stored messages of an owner conversation loaded in this process (the
+   * objects the conversation holds), so a contract started mid-turn sees the
+   * owner's reads at once; undefined for a session not loaded here.
+   */
+  readonly ownerConversationMessages?: ((sessionId: string) => readonly object[] | undefined) | undefined;
   readonly runtimeBus: RuntimeEventBus;
   readonly agentManager: AgentManager;
   readonly agentMessageBus: AgentMessageBus;
@@ -291,7 +297,12 @@ export function composeContractRunner(options: ContractRunnerCompositionOptions)
   }, options.providerRegistry.benchmarks);
   const runner = createContractRunner({
     judgmentLog: options.judgmentLog,
-    readOwnerEvidence: options.surfaceRoot ? createOwnerReadEvidenceReader(resolveSurfaceDirectory(options.projectRoot, options.surfaceRoot)) : undefined,
+    readOwnerEvidence: options.surfaceRoot || options.ownerConversationMessages
+      ? createOwnerReadEvidenceReader({
+        liveMessages: options.ownerConversationMessages,
+        surfaceDirectory: options.surfaceRoot ? resolveSurfaceDirectory(options.projectRoot, options.surfaceRoot) : undefined,
+      })
+      : undefined,
     getSelectedModel: () => options.providerRegistry.getCurrentModel(),
     ...(options.nativeOwner === undefined ? {} : { nativeDecisions: options.nativeOwner.decisions, durableAdmission: options.nativeOwner.admission }),
     agentManager: options.agentManager,

@@ -29,7 +29,7 @@
 import { applyRecoverySnapshot, confirmRecoveryRestore } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import type { RecoveryPromptDeps, RecoveryTypeaheadHooks } from './recovery-prompt.ts';
 import type { ConversationManager, ConversationMessageSnapshot } from '../core/conversation.ts';
-import { readSavedBranches } from '../core/session-resume-core.ts';
+import { describeLeftOutBranches, readSavedBranches } from '../core/session-resume-core.ts';
 import type { CommandContext } from '../input/command-registry.ts';
 import type { SessionSurface } from '@/runtime/index.ts';
 import type { SessionBranches, SessionManager } from '@goodvibes-jev/engine/platform/platform/sessions';
@@ -125,13 +125,17 @@ export function buildRecoveryOfferWiring(input: RecoveryOfferWiringInput): Recov
       // The restore reset the live conversation, which dropped the side branches;
       // without them back in memory the next turn's autosave rewrites the session without them.
       const branches = carriedBranches();
-      if (branches) input.conversation.fromJSON({
-      messages: input.conversation.getMessageSnapshot(),
-      title: input.conversation.title,
-      titleSource: input.conversation.getTitleSource(),
-      branches: readSavedBranches(sessionId, branches),
-      currentBranch: branches.currentBranch,
-    });
+      if (branches) {
+        const saved = readSavedBranches(sessionId, branches);
+        input.conversation.fromJSON({
+          messages: input.conversation.getMessageSnapshot(),
+          title: input.conversation.title,
+          titleSource: input.conversation.getTitleSource(),
+          branches: saved.branches,
+          currentBranch: branches.currentBranch,
+        });
+        for (const line of describeLeftOutBranches(saved.leftOut)) input.receipt(`[Recovery] ${line}`);
+      }
       // Unconditional, and the reason is the whole point of this feature: a
       // crash-recovery snapshot is NOT a session-store entry. The snapshot
       // file has just been retired by the read that loaded it, so until this

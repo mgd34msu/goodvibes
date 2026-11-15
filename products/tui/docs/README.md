@@ -38,7 +38,7 @@ This directory contains the current product documentation for `goodvibes-tui`.
   Omnichannel surfaces, reply routing, remote peers, node-host contracts, and the daemon/control-plane HTTP + streaming surfaces.
 
 - [Session durability](session-durability.md)
-  Two-layer durability, combining post-turn snapshots plus periodic recovery files with the fsync-per-record transcript journal replayed at every resume seam.
+  The saved session written after every turn, and the crash snapshot written when a prompt is accepted and after each tool batch.
 
 - [Share command](share-command.md)
   `/share` session export to HTML/JSON/Markdown with redaction, upload, clipboard, and open options.

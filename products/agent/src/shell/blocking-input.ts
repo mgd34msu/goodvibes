@@ -5,7 +5,6 @@ import type { SessionSnapshot } from '@/runtime/index.ts';
 import type { ApplyRecoverySnapshotResult } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import type { SystemMessageRouter } from '../core/system-message-router.ts';
 import { readConversationMessageSnapshots } from '../core/conversation-message-snapshot.ts';
-import type { DaemonRepairPrompt } from './daemon-repair-prompt.ts';
 
 export type PendingPermissionState = PermissionRequest & {
   resolve: (approved: boolean, remember?: boolean) => void;
@@ -24,13 +23,6 @@ export type BlockingInputHandlerOptions = {
   pendingPermission: PendingPermissionState | null;
   /** The sessionId of the offered recovery snapshot, or null when none is pending. Callers key consumeRecovery/removeRecoveryPoint to this exact id, see BlockingInputHandlerResult.recoveryPending. */
   recoveryPending: string | null;
-  /**
-   * The one-touch daemon repair offer, when this launch made one. A
-   * self-contained controller (shell/daemon-repair-prompt.ts) rather than a
-   * state field plus callbacks: it owns the awaiting-answer state, the wording
-   * and the follow-up, so nothing here has to be threaded back out.
-   */
-  daemonRepairPrompt: DaemonRepairPrompt | null;
   abortTurn: () => void;
   /** False while the composer holds a draft: keys keep going to it until Tab moves to the card. */
   composerEmpty?: boolean;
@@ -58,9 +50,6 @@ export type BlockingInputHandlerResult = {
   handled: boolean;
   pendingPermission: PendingPermissionState | null;
   recoveryPending: string | null;
-  // Deliberately no daemonRepairPrompt: the controller owns its own
-  // awaiting-answer state, so unlike the fields above there is nothing for the
-  // shell to carry back and reassign.
 };
 
 export function handleBlockingShellInput(options: BlockingInputHandlerOptions): BlockingInputHandlerResult {
@@ -68,7 +57,6 @@ export function handleBlockingShellInput(options: BlockingInputHandlerOptions): 
     data,
     pendingPermission,
     recoveryPending,
-    daemonRepairPrompt,
     abortTurn,
     conversation,
     systemMessageRouter,
@@ -170,30 +158,29 @@ export function handleBlockingShellInput(options: BlockingInputHandlerOptions): 
       return { handled: true, pendingPermission: null, recoveryPending: null };
     }
 
-    if (data === '\x1b' || data === '\x03') {
+    // Only Esc on an empty composer discards. A lone Esc byte is the key; a
+    // longer escape sequence is a focus or mouse report, an arrow or a paste.
+    if (data === '\x1b' && (options.composerEmpty ?? true)) {
       systemMessageRouter.high('[Recovery] Discarded recovery data.');
       removeRecoveryPoint();
       render();
       return { handled: true, pendingPermission: null, recoveryPending: null };
     }
 
-    systemMessageRouter.high('[Recovery] Ignored saved session; starting a new prompt.');
-    removeRecoveryPoint();
+    // Reports the terminal sends on its own (focus, mouse) and navigation keys
+    // are not an answer: they reach the composer and the offer stays open.
+    if (data.startsWith('\x1b')) return { handled: false, pendingPermission: null, recoveryPending };
+
+    // Typing means "not now": the offer closes for this launch and the snapshot
+    // stays on disk, so the next launch offers it again.
+    systemMessageRouter.high('[Recovery] Left the unsaved session on disk; it is offered again at the next launch.');
     render();
     return { handled: false, pendingPermission: null, recoveryPending: null };
   }
 
-  // Daemon repair: 'y' then Enter repairs, EVERY other key declines, default
-  // no, matching the workspace prompt below and every other boot-time offer.
-  // Declining changes nothing whatsoever and is remembered for the rest of the
-  // session, so the question is asked once and never turn after turn.
-  if (daemonRepairPrompt?.pending()) {
-    daemonRepairPrompt.answer(data);
-    return { handled: true, pendingPermission: null, recoveryPending };
-  }
-
-  // The first-start workspace question is a selection modal now
-  // (shell/workspace-registration-question.ts): it receives only the keys aimed
-  // at it, so nothing here waits on a question the screen does not show.
+  // The first-start workspace question and the daemon repair question are
+  // selection modals (shell/workspace-registration-question.ts,
+  // shell/daemon-repair-prompt.ts): they receive only the keys aimed at them,
+  // so nothing here waits on a question the screen does not show.
   return { handled: false, pendingPermission, recoveryPending };
 }

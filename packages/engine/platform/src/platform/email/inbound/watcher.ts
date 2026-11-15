@@ -39,7 +39,7 @@
  */
 
 import type { JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
-import { assertImapReadingCurrent, ImapReadingError } from '../imap-readings.js';
+import { assertImapReadingCurrent, imapFailureText, ImapReadingError } from '../imap-readings.js';
 import {
   BackoffSchedule,
   DEFAULT_BACKOFF_POLICY,
@@ -661,8 +661,11 @@ export class InboundMailboxWatcher {
     assertImapReadingCurrent(reading);
     result.assertCurrent?.();
     const { verdict, terminal, notice } = result;
+    // Only a server refusal counts toward the ceiling; a dropped socket is
+    // also `reconnecting` but says nothing about whether FETCH is refused.
     this.uncodedFetchRefusals = phase === 'fetch'
-      && (verdict.reason === 'reconnecting' || verdict.reason === 'fetch-refused')
+      && verdict.reason === 'reconnecting'
+      && /^IMAP command failed:/.test(imapFailureText(report.error))
       ? this.uncodedFetchRefusals + 1
       : 0;
     if (terminal) {

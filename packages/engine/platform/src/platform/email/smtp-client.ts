@@ -18,7 +18,7 @@
  *   - Multiple recipients in a single session (call sendMail per recipient)
  *   - DSN / delivery-status-notification extensions
  *   - PIPELINING (all commands are sent sequentially and await a reply)
- *   - Credentials are never logged
+ *   - Credentials are never logged, and no error carries a credential line
  *
  * Transport injection
  * ────────────────────
@@ -31,6 +31,7 @@
 import { randomBytes } from 'node:crypto';
 import type { Socket } from 'node:net';
 import { assertDeliveryCurrent, runDeliveryPublication, type DeliveryLifetime } from '../utils/delivery-lifetime.js';
+import { composePlainTextMessage } from './message-compose.js';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -168,11 +169,10 @@ export function validateSmtpThreadHeader(value: string, field: 'inReplyTo' | 're
   }
 }
 
-function dotStuff(body: string): string {
-  // RFC 2821 §4.5.2: lines beginning with '.' get an extra '.'
-  return body
-    .replace(/\r\n/g, '\n')
-    .split('\n')
+function dotStuff(message: string): string {
+  // RFC 5321 §4.5.2: lines beginning with '.' get an extra '.'
+  return message
+    .split(CRLF)
     .map((line) => (line.startsWith('.') ? `.${line}` : line))
     .join(CRLF);
 }
@@ -293,12 +293,18 @@ class SmtpSession {
     });
   }
 
-  /** Send a command and assert the response code. Throws on failure. */
-  async cmd(line: string, expectCode: number): Promise<{ code: number; lines: string[] }> {
+  /**
+   * Send a command and assert the response code. Throws on failure.
+   *
+   * The error names the command by `label`, never by the line: during AUTH the
+   * line is the encoded user name or password, and the error reaches tool
+   * output, transcripts and logs.
+   */
+  async cmd(line: string, expectCode: number, label: string): Promise<{ code: number; lines: string[] }> {
     await this.send(line);
     const resp = await this.readResponse();
     if (resp.code !== expectCode) {
-      throw new Error(`SMTP ${line.split(' ')[0] ?? 'CMD'} failed: ${resp.lines.join(' | ')}`);
+      throw new Error(`SMTP ${label} failed: ${resp.lines.join(' | ')}`);
     }
     return resp;
   }
@@ -371,33 +377,18 @@ export class SmtpClient {
       if (opts.inReplyTo !== undefined) validateSmtpThreadHeader(opts.inReplyTo, 'inReplyTo');
       if (opts.references !== undefined) validateSmtpThreadHeader(opts.references, 'references');
 
-      const date = new Date().toUTCString();
-      const headers = [
-        `From: ${opts.from}`,
-        `To: ${opts.to}`,
-        `Subject: ${opts.subject}`,
-        `Date: ${date}`,
-        `MIME-Version: 1.0`,
-        `Content-Type: text/plain; charset=utf-8`,
-        ...(opts.inReplyTo === undefined || opts.inReplyTo.trim() === '' ? [] : [`In-Reply-To: ${opts.inReplyTo.trim()}`]),
-        ...(opts.references === undefined || opts.references.trim() === '' ? [] : [`References: ${opts.references.trim()}`]),
-      ];
-
-      // Two Message-ID headers is a protocol error, so an id already present in
-      // the composed headers is reported rather than replaced.
-      const existing = headers.find((header) => /^message-id:/i.test(header));
-      const messageId = existing === undefined
-        ? generateMessageId(opts.from, hostname)
-        : existing.slice(existing.indexOf(':') + 1).trim();
-      if (existing === undefined) headers.push(`Message-ID: ${messageId}`);
-
-      const message = [...headers, '', dotStuff(opts.body), '.'].join(CRLF) + CRLF;
+      // The same builder as a saved draft, so the sent copy reads as the draft did.
+      const messageId = generateMessageId(opts.from, hostname);
+      const eightBitAllowed = capabilities.includes('8BITMIME');
+      const composed = composePlainTextMessage({ ...opts, messageId }, new Date(), { eightBitAllowed });
+      const message = `${dotStuff(composed.message)}.${CRLF}`;
+      const bodyParameter = composed.bodyEncoding === '8bit' ? ' BODY=8BITMIME' : '';
 
       const result = await runDeliveryPublication(opts, async current => {
         // Authentication is preparation; only the message transaction retains publication ownership.
-        current(); await session.cmd(`MAIL FROM:<${opts.from}>`, 250);
-        current(); await session.cmd(`RCPT TO:<${opts.to}>`, 250);
-        current(); await session.cmd('DATA', 354);
+        current(); await session.cmd(`MAIL FROM:<${opts.from}>${bodyParameter}`, 250, 'MAIL FROM');
+        current(); await session.cmd(`RCPT TO:<${opts.to}>`, 250, 'RCPT TO');
+        current(); await session.cmd('DATA', 354, 'DATA');
         current(); await session.sendRaw(message);
         // From here the server may have accepted the message, so a failed wait
         // is an unknown outcome rather than a failed send.
@@ -436,7 +427,7 @@ export class SmtpClient {
       throw new Error(`SMTP unexpected greeting: ${greeting.lines.join(' | ')}`);
     }
     assertDeliveryCurrent(lifetime);
-    const ehlo = await session.cmd(`EHLO ${hostname}`, 250);
+    const ehlo = await session.cmd(`EHLO ${hostname}`, 250, 'EHLO');
     return { capabilities: ehlo.lines.map((l) => l.slice(4).trim().toUpperCase()) };
   }
 
@@ -453,12 +444,12 @@ export class SmtpClient {
     if (hasPlain) {
       // AUTH PLAIN: base64(\x00username\x00password)
       const token = base64(`\x00${username}\x00${password}`);
-      assertDeliveryCurrent(lifetime); await session.cmd(`AUTH PLAIN ${token}`, 235);
+      assertDeliveryCurrent(lifetime); await session.cmd(`AUTH PLAIN ${token}`, 235, 'AUTH PLAIN');
     } else if (hasLogin) {
       // AUTH LOGIN: two-step base64 exchange
-      assertDeliveryCurrent(lifetime); await session.cmd('AUTH LOGIN', 334);
-      assertDeliveryCurrent(lifetime); await session.cmd(base64(username), 334);
-      assertDeliveryCurrent(lifetime); await session.cmd(base64(password), 235);
+      assertDeliveryCurrent(lifetime); await session.cmd('AUTH LOGIN', 334, 'AUTH LOGIN');
+      assertDeliveryCurrent(lifetime); await session.cmd(base64(username), 334, 'AUTH LOGIN (user name)');
+      assertDeliveryCurrent(lifetime); await session.cmd(base64(password), 235, 'AUTH LOGIN (password)');
     } else {
       throw new Error('SMTP server does not advertise AUTH PLAIN or AUTH LOGIN');
     }

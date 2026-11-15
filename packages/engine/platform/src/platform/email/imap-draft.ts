@@ -32,8 +32,9 @@ import { assertImapReadingCurrent, ImapReadingError, imapReadingLease, readImapD
 import type { ImapFetchFrame } from './imap-fetch-response.js';
 import type { ImapAppendDraftInput } from './imap-client.js';
 import { validateSmtpAddress, validateSmtpSubject } from './smtp-client.js';
+import { composePlainTextMessage } from './message-compose.js';
 
-const CRLF = '\r\n';
+export { encodeHeaderValue, formatRfc5322Date } from './message-compose.js';
 
 /**
  * The conventional folder name. The IMAP client never falls back to it: a server
@@ -84,66 +85,11 @@ export function validateDraftInput(input: ImapAppendDraftInput): void {
 // Message composition
 // ---------------------------------------------------------------------------
 
-const RFC5322_DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-const RFC5322_MONTHS = [
-  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
-];
-
-/** `Mon, 27 Jul 2026 14:03:05 +0000`, RFC 5322 §3.3, always in UTC. */
-export function formatRfc5322Date(date: Date): string {
-  const pad = (n: number): string => String(n).padStart(2, '0');
-  const day = RFC5322_DAYS[date.getUTCDay()] ?? 'Mon';
-  const month = RFC5322_MONTHS[date.getUTCMonth()] ?? 'Jan';
-  return (
-    `${day}, ${pad(date.getUTCDate())} ${month} ${date.getUTCFullYear()} ` +
-    `${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}:${pad(date.getUTCSeconds())} +0000`
-  );
-}
-
-/** Bytes of UTF-8 per encoded-word, chosen so each folded line stays under 76. */
-const ENCODED_WORD_BYTE_BUDGET = 45;
-
 /**
- * Encode a header value as RFC 2047 encoded-words when it is not plain ASCII.
- *
- * A subject in any language other than English is the ordinary case, not an
- * edge one, and mail clients read `=?UTF-8?B?..?=` everywhere while raw UTF-8
- * in a header is only understood by servers that announce RFC 6532 support.
- * Long values are split on character boundaries and folded, because an
- * encoded-word longer than 75 characters is not one.
- */
-export function encodeHeaderValue(value: string): string {
-  if (!/[^\x20-\x7e]/.test(value)) return value;
-
-  const words: string[] = [];
-  let chunk = '';
-  let chunkBytes = 0;
-  for (const char of value) {
-    const width = Buffer.byteLength(char, 'utf8');
-    if (chunkBytes + width > ENCODED_WORD_BYTE_BUDGET && chunk.length > 0) {
-      words.push(chunk);
-      chunk = '';
-      chunkBytes = 0;
-    }
-    chunk += char;
-    chunkBytes += width;
-  }
-  if (chunk.length > 0) words.push(chunk);
-
-  return words
-    .map((word) => `=?UTF-8?B?${Buffer.from(word, 'utf8').toString('base64')}?=`)
-    .join(`${CRLF} `);
-}
-
-/**
- * Compose the RFC 5322 message an APPEND uploads.
- *
- * The body goes out as UTF-8 with `Content-Transfer-Encoding: 8bit` rather
- * than being re-encoded, so what the owner later sees in the draft is exactly
- * the text that was handed in. That is also why the caller must count the
- * literal in bytes: this string is longer in bytes than in characters for any
- * body that is not pure ASCII.
+ * Compose the RFC 5322 message an APPEND uploads: the same bytes a send would
+ * carry (`composePlainTextMessage`), so a draft and the mail sent from it
+ * agree on the wire. The caller must count the literal in bytes: this string
+ * is longer in bytes than in characters for any body that is not pure ASCII.
  *
  * No `Message-ID` is written. The message has not been sent, and the id that
  * matters is the one the sending path stamps at send time; a second one
@@ -153,26 +99,7 @@ export function encodeHeaderValue(value: string): string {
  */
 export function buildDraftMessage(input: ImapAppendDraftInput, now: Date): string {
   validateDraftInput(input);
-
-  const headers = [
-    `Date: ${formatRfc5322Date(now)}`,
-    `From: ${input.from}`,
-    `To: ${input.to}`,
-    `Subject: ${encodeHeaderValue(input.subject)}`,
-  ];
-  if (input.inReplyTo !== undefined && input.inReplyTo.length > 0) {
-    headers.push(`In-Reply-To: ${input.inReplyTo}`);
-  }
-  if (input.references !== undefined && input.references.length > 0) {
-    headers.push(`References: ${input.references}`);
-  }
-  headers.push('MIME-Version: 1.0');
-  headers.push('Content-Type: text/plain; charset=utf-8');
-  headers.push('Content-Transfer-Encoding: 8bit');
-
-  const body = input.body.replace(/\r\n/g, '\n').replace(/\n/g, CRLF);
-  const terminated = body.endsWith(CRLF) ? body : `${body}${CRLF}`;
-  return `${headers.join(CRLF)}${CRLF}${CRLF}${terminated}`;
+  return composePlainTextMessage(input, now).message;
 }
 
 // ---------------------------------------------------------------------------

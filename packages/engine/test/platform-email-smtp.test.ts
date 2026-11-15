@@ -517,6 +517,48 @@ describe('SmtpClient protocol', () => {
     ).rejects.toThrow('SMTP AUTH');
   });
 
+  test('a refused AUTH LOGIN never carries the encoded user name or password in its error', async () => {
+    const username = 'user@example.test';
+    const password = 'correct horse battery staple';
+    for (const refuseAt of ['user name', 'password'] as const) {
+      fakeServer?.close();
+      fakeServer = await makeFakeSmtpServer((sock) => {
+        serverWrite(sock, '220 fake.smtp.example.test ESMTP ready');
+        sock.setEncoding('utf8');
+        let buffer = '';
+        let loginStep = 0;
+        sock.on('data', (chunk) => {
+          buffer += chunk;
+          let pos: number;
+          while ((pos = buffer.indexOf('\n')) !== -1) {
+            const line = buffer.slice(0, pos).replace(/\r$/, '');
+            buffer = buffer.slice(pos + 1);
+            if (line.toUpperCase().startsWith('EHLO')) {
+              serverWrite(sock, '250-fake.smtp.example.test Hello');
+              serverWrite(sock, '250 AUTH LOGIN');
+            } else if (line.toUpperCase() === 'AUTH LOGIN') {
+              loginStep = 1;
+              serverWrite(sock, '334 VXNlcm5hbWU6');
+            } else if (loginStep === 1) {
+              loginStep = 2;
+              serverWrite(sock, refuseAt === 'user name' ? '535 5.7.139 Authentication unsuccessful' : '334 UGFzc3dvcmQ6');
+            } else if (loginStep === 2) {
+              serverWrite(sock, '535 5.7.139 Authentication unsuccessful');
+            }
+          }
+        });
+      });
+      const socket = await connectSocket(fakeServer.address.port);
+      const client = new SmtpClient({ socket, hostname: 'client.test', username, password, timeoutMs: 5000 });
+      const error = await client.verifyAuth().then(() => null, (caught: unknown) => caught);
+      expect(error).toBeInstanceOf(Error);
+      const message = (error as Error).message;
+      expect(message).toContain(`AUTH LOGIN (${refuseAt})`);
+      expect(message).not.toContain(Buffer.from(username, 'utf8').toString('base64'));
+      expect(message).not.toContain(Buffer.from(password, 'utf8').toString('base64'));
+    }
+  });
+
   test('non-empty body passes through to DATA phase (regression guard)', async () => {
     const collectedData: string[] = [];
     fakeServer = await makeFakeSmtpServer((sock) => happyPathScript(sock, collectedData));

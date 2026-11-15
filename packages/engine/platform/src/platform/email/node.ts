@@ -31,6 +31,17 @@ import type { EmailTransportPort } from './email-service.js';
 
 const CRLF = '\r\n';
 
+/**
+ * TCP keep-alive probe delay for IMAP connections. An IDLE is silent for up to
+ * the re-issue interval, so a path that a router or carrier dropped without a
+ * reset would otherwise look like a quiet mailbox until then (27 minutes);
+ * with probes the socket fails once the kernel's probes go unanswered (about
+ * 12 minutes on Linux defaults, less where the probe interval is shorter) and
+ * the watcher reconnects and drains what arrived.
+ * The probes are kernel packets: no IMAP traffic and no cost per message.
+ */
+const IMAP_KEEPALIVE_DELAY_MS = 60_000;
+
 // ---------------------------------------------------------------------------
 // Socket factories (production)
 // ---------------------------------------------------------------------------
@@ -57,6 +68,7 @@ export function createImapTlsSocket(
       clearTimeout(timer);
       resolve(sock as unknown as Socket);
     });
+    sock.setKeepAlive(true, IMAP_KEEPALIVE_DELAY_MS);
 
     sock.once('error', (err: Error) => {
       clearTimeout(timer);
@@ -88,6 +100,7 @@ export function createImapPlainSocket(
       clearTimeout(timer);
       resolve(sock);
     });
+    sock.setKeepAlive(true, IMAP_KEEPALIVE_DELAY_MS);
 
     sock.once('error', (err: Error) => {
       clearTimeout(timer);

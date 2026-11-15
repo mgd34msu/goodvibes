@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { registerTerminalKnowledgeCleanup } from '@goodvibes-jev/engine/terminal-shell/bootstrap-lifecycle';
 import { createTerminalMemoryAdmission } from '@goodvibes-jev/engine/terminal-shell/bootstrap-lifecycle';
 import { join } from 'node:path';
@@ -14,7 +15,7 @@ import type { shell as RuntimeShell, bootstrap as RuntimeBootstrap } from '@good
 import { applyRawSecretLiteralHandling, type SecretsManager } from '../config/secrets.ts';
 import { readCheckpointGuardSettings, readCheckpointRegistrationSetting } from '../config/checkpoint-settings.ts';
 import { createAgentResearchSourceOwner } from './research-source-screening.ts';
-import type { ProtectedSourceOwner } from '@goodvibes-jev/engine/platform/platform/security';
+import { createClassicProtectedSourceOwner, type ProtectedSourceOwner } from '@goodvibes-jev/engine/platform/platform/security';
 import {
   backfillCheckpointEligibilityIfNeeded,
   createWorkspaceRegistrationLiveChecker,
@@ -654,6 +655,13 @@ export interface RuntimeServices extends Omit<PlatformRuntimeServices,
   readonly secretsManager: SecretsManager;
   /** Report-only native grant; captures stay held until explicitly configured. */
   readonly researchReportSourceOwner: ProtectedSourceOwner;
+  /**
+   * The owner first-party local reads go through (catalogs, settings, model
+   * status, MCP servers, queues, personal ops): code-only screening on this
+   * machine, no hosted provider, nothing sent anywhere, so it needs no consent
+   * and is always bound. Research content keeps `researchReportSourceOwner`.
+   */
+  readonly localReadSourceOwner: ProtectedSourceOwner;
   readonly subscriptionManager: SubscriptionManager;
   readonly localUserAuthManager: UserAuthManager;
   readonly profileManager: ProfileManager;
@@ -1006,6 +1014,13 @@ function composeRuntimeServices(options: RuntimeServicesOptions, disposalScope: 
   const researchScreeningLifetime = new AbortController();
   const researchReportSourceOwner = createAgentResearchSourceOwner(configManager, secretsManager, researchScreeningLifetime.signal);
   disposalScope.registry.add('research screening owner', () => researchReportSourceOwner.close());
+  const localReadSourceOwner = createClassicProtectedSourceOwner(Object.freeze({
+    ownerId: `agent-local-reads-${randomUUID()}`,
+    revision: randomUUID(),
+    signal: researchScreeningLifetime.signal,
+    assertCurrent: () => researchScreeningLifetime.signal.throwIfAborted(),
+  }));
+  disposalScope.registry.add('local read source owner', () => localReadSourceOwner.close());
   registerTerminalKnowledgeCleanup(disposalScope.registry, {
     closeAgentStore: () => agentKnowledgeStore.close(),
     closeHomeGraphStore: () => homeGraphKnowledgeStore.close(),
@@ -2274,6 +2289,7 @@ function composeRuntimeServices(options: RuntimeServicesOptions, disposalScope: 
     serviceRegistry,
     secretsManager,
     researchReportSourceOwner,
+    localReadSourceOwner,
     subscriptionManager,
     localUserAuthManager,
     profileManager,

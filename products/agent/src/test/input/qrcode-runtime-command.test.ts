@@ -1,3 +1,4 @@
+import { readRefusal } from '@goodvibes-jev/engine/errors';
 import { describe, expect, test } from 'bun:test';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -69,10 +70,9 @@ describe('qrcode runtime command model invocation', () => {
       invokedByModel: true,
     } as unknown as CommandContext;
 
-    await registry.get('qrcode')!.handler([], ctx);
+    const refused = await Promise.resolve().then(() => registry.get('qrcode')!.handler([], ctx)).then(() => undefined, (error: unknown) => error);
 
-    const text = out.join('\n');
-    expect(text).toStartWith('Refused');
-    expect(text).not.toContain(HOST_TOKEN);
+    expect(readRefusal(refused)?.code).toBe('OWNER_ONLY_COMMAND');
+    expect(out.join('\n')).not.toContain(HOST_TOKEN);
   });
 });

@@ -51,7 +51,7 @@ describe('bindOrchestratorContextAccounting (platform 1.6.1 context_accounting t
       holder,
       runtimeBus,
       runtimeStore,
-      sessionId: 'session-ctx-1',
+      getSessionId: () => 'session-ctx-1',
       getContextWindow: () => 200_000,
       scope: 'main session',
     });
@@ -85,7 +85,7 @@ describe('bindOrchestratorContextAccounting (platform 1.6.1 context_accounting t
       holder,
       runtimeBus,
       runtimeStore,
-      sessionId: 'session-ctx-2',
+      getSessionId: () => 'session-ctx-2',
       getContextWindow: () => null,
     });
     const tool = createContextAccountingTool(holder);

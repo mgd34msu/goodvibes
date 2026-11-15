@@ -1,10 +1,7 @@
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { CommandContext, CommandRegistry } from '../input/command-registry.ts';
-import { harnessCatalogExecutionGuard, retainHarnessCatalogCurrent } from './agent-harness-catalog-ingress.ts';
 import { createHarnessFacade, registerHarnessFacade, type HarnessFacadeDeps } from './agent-harness-facade.ts';
-import { selectHarnessCatalog } from './agent-harness-catalog-selection.ts';
-import { agentResearchSourceOwner } from '../agent/protected-research-report.ts';
 
 type AgentAuditAction = 'readiness' | 'item' | 'evidence' | 'artifact';
 
@@ -127,14 +124,7 @@ export function createAgentAuditTool(deps: AgentAuditToolDeps): Tool {
       sideEffects: [],
       concurrency: 'parallel',
     },
-    async route({ args, rawArgs, options, forward: forwardCall }) {
-      const executionCurrent = harnessCatalogExecutionGuard(rawArgs, options);
-      const sourceOwner = agentResearchSourceOwner(deps.toolRegistry);
-      const current = () => {
-        executionCurrent();
-        if (agentResearchSourceOwner(deps.toolRegistry) !== sourceOwner) throw new Error('Audit source owner changed.');
-      };
-      const forward = (translated: Record<string, unknown>) => forwardCall(translated, current);
+    async route({ args, forward }) {
       let action = readExplicitAction(args);
       if (!action && !readString(args.action) && !readString(args.mode)) {
         // A bare id names either a release item or an evidence artifact and there
@@ -143,17 +133,12 @@ export function createAgentAuditTool(deps: AgentAuditToolDeps): Tool {
         if (readString(args.id)) {
           return error('audit got id without action, and an id alone cannot say whether it is a release readiness item or an evidence artifact. Re-send with action:"item" (or itemId) for a readiness item, or action:"artifact" (or artifactId) for an evidence artifact.');
         }
-        const query = readString(args.query) || readString(args.target);
-        if (!query) action = 'readiness';
-        else {
-          try {
-            const selected = await selectHarnessCatalog(AUDIT_ACTIONS, query, entry => entry,
-              { signal: options?.signal, sourceOwner, assertCurrent: current, retainCurrent: retainHarnessCatalogCurrent(rawArgs), requirePreservedSource: true },
-              'agent.audit.intent', args);
-            current();
-            action = selected?.id ?? null;
-          } catch { return error('Audit intent could not be established. Specify action:"readiness", "item", "evidence", or "artifact".'); }
+        // Search text without an action does not say which list it searches;
+        // the four actions are the answer, and the caller picks one.
+        if (readString(args.query) || readString(args.target)) {
+          return error(`audit got search text without action. Nothing was read. Re-send with one of: ${AUDIT_ACTIONS.map((entry) => `action:"${entry.id}" (${entry.description})`).join('; ')}`);
         }
+        action = 'readiness';
       }
       if (!action) return error('Unknown audit action. Use action:"readiness", "item", "evidence", or "artifact".');
       if (action === 'readiness') return forward(readinessArgs(args));

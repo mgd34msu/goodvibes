@@ -47,13 +47,13 @@ test('real recorded admission creates and removes local work items without confi
   expect(removed.success).toBe(true); expect(f.store.listItems()).toHaveLength(0);
 });
 
-test('recorded admission initializes VIBE and imports a reviewed active persona without flags', async () => {
+test('recorded admission initializes VIBE and imports an active persona without flags', async () => {
   const f = fixture(), register = (registry: Parameters<typeof registerAgentVibeTool>[0]) => registerAgentVibeTool(registry, f.context);
   expect((await admitLocalState(register, 'vibe', { action: 'init' }, { directory: f.workspace })).success).toBe(true);
   expect(readFileSync(join(f.workspace, 'VIBE.md'), 'utf8')).toContain('Describe how GoodVibes Agent');
-  expect((await admitLocalState(register, 'vibe', { action: 'import_persona', review: true, use: true }, { directory: f.workspace })).success).toBe(true);
+  expect((await admitLocalState(register, 'vibe', { action: 'import_persona', use: true }, { directory: f.workspace })).success).toBe(true);
   const active = AgentPersonaRegistry.fromShellPaths(f.paths).snapshot().activePersona;
-  expect(active?.name).toBe('Project Vibe'); expect(active?.reviewState).toBe('reviewed');
+  expect(active?.name).toBe('Project Vibe');
 });
 
 test.each(['work-plan', 'vibe'] as const)('%s writes respect deterministic read-only mode even with synthetic read classification', async kind => {

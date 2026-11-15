@@ -97,7 +97,6 @@ function submitPersonaEditor(
 ): void {
   const registry = AgentPersonaRegistry.fromShellPaths(shellPaths);
   if (editor.mode === 'update' && editor.recordId) {
-    const wasActive = registry.snapshot().activePersonaId === editor.recordId;
     const updated = registry.update(editor.recordId, {
       name: field('name'),
       description: field('description'),
@@ -105,10 +104,7 @@ function submitPersonaEditor(
       tags: splitList(field('tags')),
       triggers: splitList(field('triggers')),
       provenance: 'Workspace',
-    });
-    runFollowUpWrite(`Persona "${updated.name}" (the edit)`, 'updating which persona is active', () => {
-      if (isEnabledValue(field('activate'))) registry.setActive(updated.id);
-      else if (wasActive) registry.clearActive();
+      active: isEnabledValue(field('activate')),
     });
     finish('persona', updated.id, updated.name, 'Updated');
     return;
@@ -121,8 +117,8 @@ function submitPersonaEditor(
     triggers: splitList(field('triggers')),
     source: 'user',
     provenance: 'Workspace',
+    active: isEnabledValue(field('activate')),
   });
-  if (isEnabledValue(field('activate'))) runFollowUpWrite(`Persona "${created.name}"`, 'making it active', () => registry.setActive(created.id));
   finish('persona', created.id, created.name, 'Created');
 }
 
@@ -143,7 +139,8 @@ function submitSkillEditor(
       requirements: buildAgentWorkspaceRequirements(field),
       provenance: 'Workspace',
     });
-    runFollowUpWrite(`Skill "${updated.name}" (the edit)`, 'applying the enabled setting', () => registry.setEnabled(updated.id, isEnabledValue(field('enabled'))));
+    const enabled = isEnabledValue(field('enabled'));
+    if (updated.enabled !== enabled) runFollowUpWrite(`Skill "${updated.name}" (the edit)`, 'applying the enabled setting', () => registry.setEnabled(updated.id, enabled));
     finish('skill', updated.id, updated.name, 'Updated');
     return;
   }
@@ -178,7 +175,8 @@ function submitRoutineEditor(
       requirements: buildAgentWorkspaceRequirements(field),
       provenance: 'Workspace',
     });
-    runFollowUpWrite(`Routine "${updated.name}" (the edit)`, 'applying the enabled setting', () => registry.setEnabled(updated.id, isEnabledValue(field('enabled'))));
+    const enabled = isEnabledValue(field('enabled'));
+    if (updated.enabled !== enabled) runFollowUpWrite(`Routine "${updated.name}" (the edit)`, 'applying the enabled setting', () => registry.setEnabled(updated.id, enabled));
     finish('routine', updated.id, updated.name, 'Updated');
     return;
   }

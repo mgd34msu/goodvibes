@@ -2930,7 +2930,7 @@ describe('AgentWorkspace', () => {
         readModels: {
           setup: {
             receipts: {
-              getSnapshot: () => ({
+              list: () => ({
                 receipts: {
                   auth: {
                     setupStepId: 'connected-host-auth',
@@ -3353,7 +3353,6 @@ describe('AgentWorkspace', () => {
       expect(snapshot.voiceMediaReadiness.voiceProviders[0]?.missingSecretKeyOptions).toEqual(['ELEVENLABS_API_KEY', 'XI_API_KEY']);
       expect(snapshot.voiceMediaReadiness.mediaProviders[1]?.missingSecretKeyOptions).toEqual(['FAL_KEY', 'FAL_API_KEY']);
       expect(snapshot.browserToolExposureEnabled).toBe(true);
-      expect(snapshot.browserToolPublicBaseUrl).toBe('https://agent.example.test');
     } finally {
       for (const key of keys) {
         const value = previous.get(key);

@@ -504,7 +504,6 @@ export interface AgentWorkspaceRuntimeSnapshot {
   readonly workingDirectory: string;
   readonly homeDirectory: string;
   readonly runtimeBaseUrl: string;
-  readonly runtimeOwnership: 'external';
   readonly activeSubscriptionCount: number;
   readonly pendingSubscriptionCount: number;
   readonly availableSubscriptionProviderCount: number;
@@ -584,7 +583,6 @@ export interface AgentWorkspaceRuntimeSnapshot {
   readonly mcpQuarantinedServerCount: number;
   readonly mcpAllowAllServerCount: number;
   readonly browserToolExposureEnabled: boolean;
-  readonly browserToolPublicBaseUrl: string;
   readonly activeRuntimeProfile: string;
   readonly selectedRuntimeProfile: string | null;
   readonly selectedRuntimeProfileExists: boolean;

@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { RefusalError } from '@goodvibes-jev/engine/errors';
 import {
   AgentSkillRegistry,
   buildAgentSkillRequirements,
@@ -14,6 +15,7 @@ import { formatAgentRecordOrigin, formatAgentRecordReviewState } from '../../age
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { parseAgentLocalLibraryArgs, resolveCommandFilePath, type ParsedAgentLocalLibraryArgs } from './agent-local-library-args.ts';
 import { requireShellPaths } from './runtime-services.ts';
+import { assertActorMayEnable, assertActorMayMarkReviewed, type RegistryActor } from '../../agent/review-authority.ts';
 
 const SKILL_VALUE_FLAGS = ['name', 'description', 'procedure', 'tags', 'triggers', 'requires-env', 'requires-command', 'requires-commands', 'skills'] as const;
 
@@ -30,8 +32,10 @@ function existingRequirementNames(registry: AgentSkillRegistry, id: string, kind
   return (registry.get(id)?.requirements ?? []).filter((requirement) => requirement.kind === kind).map((requirement) => requirement.name);
 }
 
-const MODEL_REVIEW_REFUSAL = 'Refused: marking a skill reviewed is the owner\'s decision that its text may reach the prompt, so it only counts when you type it yourself. '
-  + 'This came from the model running a command, which is the route content that was just read would use.';
+/** Who this command acts for: the model when it ran the command, the owner otherwise. */
+function actorOf(ctx: CommandContext): RegistryActor {
+  return ctx.invokedByModel === true ? 'model' : 'owner';
+}
 
 function registryFromContext(ctx: CommandContext): AgentSkillRegistry {
   return AgentSkillRegistry.fromShellPaths(requireShellPaths(ctx));
@@ -146,7 +150,7 @@ async function importDiscoveredSkill(args: readonly string[], ctx: CommandContex
   const parsed = parseSkillArgs(args);
   const name = parsed.rest.join(' ').trim();
   if (!name) {
-    ctx.print('Usage: /skills import-discovered <name> --yes\n  Note: discovered skills import disabled; review then enable via /skills enable <name>.');
+    ctx.print('Usage: /skills import-discovered <name> [--enabled] --yes\n  Note: discovered skills import disabled unless --enabled; review then enable via /skills enable <name>.');
     return;
   }
   const discovered = findDiscoveredSkill(await discoverSkills(requireShellPaths(ctx)), name);
@@ -166,6 +170,9 @@ async function importDiscoveredSkill(args: readonly string[], ctx: CommandContex
     ].join('\n'));
     return;
   }
+  // "Enable now": the owner may enable what was just imported; nobody has reviewed it, so the model may not.
+  const enable = parsed.flags.get('enabled') === 'true';
+  if (enable) assertActorMayEnable(actorOf(ctx), 'skill', discovered.name, 'fresh');
   const skill = skillRegistry.create({
     name: discovered.name,
     description: discovered.description || `Imported skill from ${discovered.origin} skill file.`,
@@ -176,12 +183,12 @@ async function importDiscoveredSkill(args: readonly string[], ctx: CommandContex
       env: frontmatterAnyList(discovered, ['requiresEnv', 'requires-env', 'requires_env']),
       commands: frontmatterAnyList(discovered, ['requiresCommands', 'requires-commands', 'requires_commands', 'commands']),
     }),
-    enabled: false,
+    enabled: enable,
     source: 'imported',
     provenance: `Imported file (${discovered.origin}): ${discovered.path}`,
   });
   ctx.print(formatSkillReceipt('Imported Agent skill', skill, [
-    '  enabled no, imported disabled (review it, then enable it)',
+    enable ? '  enabled yes, enabled on import by the owner' : '  enabled no, imported disabled (review it, then enable it)',
     '  review pending',
   ]));
 }
@@ -294,6 +301,7 @@ function runBundleCommand(args: readonly string[], ctx: CommandContext, skillReg
   }
   if (sub === 'create') {
     const parsed = parseSkillArgs(args.slice(1));
+    if (parsed.flags.get('enabled') === 'true') assertActorMayEnable(actorOf(ctx), 'skill bundle', requiredFlag(parsed.flags, 'name'), 'fresh');
     const bundle = skillRegistry.createBundle({
       name: requiredFlag(parsed.flags, 'name'),
       description: requiredFlag(parsed.flags, 'description'),
@@ -327,10 +335,7 @@ function runBundleCommand(args: readonly string[], ctx: CommandContext, skillReg
       ctx.print(`Usage: /skills bundle ${sub} <id>`);
       return;
     }
-    if (sub === 'enable' && ctx.invokedByModel === true && skillRegistry.getBundle(id)?.reviewState !== 'reviewed') {
-      ctx.print(`Refused: Agent skill bundle ${id} has not been reviewed, and only the owner typing the command can enable an unreviewed bundle.`);
-      return;
-    }
+    if (sub === 'enable') assertActorMayEnable(actorOf(ctx), 'skill bundle', id, skillRegistry.getBundle(id)?.reviewState);
     const bundle = skillRegistry.setBundleEnabled(id, sub === 'enable');
     ctx.print(formatSkillReceipt(`${sub === 'enable' ? 'Enabled' : 'Disabled'} Agent skill bundle`, bundle));
     return;
@@ -341,10 +346,7 @@ function runBundleCommand(args: readonly string[], ctx: CommandContext, skillReg
       ctx.print('Usage: /skills bundle review <id>');
       return;
     }
-    if (ctx.invokedByModel === true) {
-      ctx.print(MODEL_REVIEW_REFUSAL.replace('a skill reviewed', 'a skill bundle reviewed'));
-      return;
-    }
+    assertActorMayMarkReviewed(actorOf(ctx), 'skill bundle', id);
     const bundle = skillRegistry.markBundleReviewed(id);
     ctx.print(formatSkillReceipt('Reviewed Agent skill bundle', bundle));
     return;
@@ -483,6 +485,7 @@ export async function runAgentSkillsRuntimeCommand(args: readonly string[], ctx:
     }
     if (sub === 'create') {
       const parsed = parseSkillArgs(args.slice(1));
+      if (parsed.flags.get('enabled') === 'true') assertActorMayEnable(actorOf(ctx), 'skill', requiredFlag(parsed.flags, 'name'), 'fresh');
       const procedure = parsed.flags.get('procedure')?.trim() || parsed.rest.join(' ').trim();
       const skill = skillRegistry.create({
         name: requiredFlag(parsed.flags, 'name'),
@@ -534,10 +537,7 @@ export async function runAgentSkillsRuntimeCommand(args: readonly string[], ctx:
         ctx.print(`Usage: /skills ${sub} <id>`);
         return;
       }
-      if (sub === 'enable' && ctx.invokedByModel === true && skillRegistry.get(id)?.reviewState !== 'reviewed') {
-        ctx.print(`Refused: Agent skill ${id} has not been reviewed, and only the owner typing the command can enable an unreviewed skill.`);
-        return;
-      }
+      if (sub === 'enable') assertActorMayEnable(actorOf(ctx), 'skill', id, skillRegistry.get(id)?.reviewState);
       const skill = skillRegistry.setEnabled(id, sub === 'enable');
       ctx.print(formatSkillReceipt(`${sub === 'enable' ? 'Enabled' : 'Disabled'} Agent skill`, skill));
       return;
@@ -548,10 +548,7 @@ export async function runAgentSkillsRuntimeCommand(args: readonly string[], ctx:
         ctx.print('Usage: /skills review <id>');
         return;
       }
-      if (ctx.invokedByModel === true) {
-        ctx.print(MODEL_REVIEW_REFUSAL);
-        return;
-      }
+      assertActorMayMarkReviewed(actorOf(ctx), 'skill', id);
       const skill = skillRegistry.markReviewed(id);
       ctx.print(formatSkillReceipt('Reviewed Agent skill', skill));
       return;
@@ -583,6 +580,8 @@ export async function runAgentSkillsRuntimeCommand(args: readonly string[], ctx:
     }
     ctx.print('Usage: /skills [list|enabled|attention|discover|import-discovered|search|show|create|update|enable|disable|review|stale|delete|bundle]');
   } catch (error) {
+    // A refusal is the command's result (state, reason, next step), not a printed error.
+    if (error instanceof RefusalError) throw error;
     printError(ctx, error);
   }
 }
@@ -593,7 +592,7 @@ export function registerAgentSkillsRuntimeCommands(registry: CommandRegistry): v
     aliases: ['skill', 'agent-skills', 'askills', 'local-skills'],
     description: 'Manage Agent-local skills',
     hidden: true,
-    usage: '[list|enabled|attention|discover|import-discovered <name> --yes|search <query>|show <id>|create --name <name> --description <summary> --procedure <steps> [--requires-env A,B] [--requires-command gh,jq]|update <id> [--name ...] [--description ...] [--procedure ...]|enable <id>|disable <id>|review <id>|stale <id> <reason...>|delete <id> --yes|bundle ...]',
+    usage: '[list|enabled|attention|discover|import-discovered <name> [--enabled] --yes|search <query>|show <id>|create --name <name> --description <summary> --procedure <steps> [--requires-env A,B] [--requires-command gh,jq]|update <id> [--name ...] [--description ...] [--procedure ...]|enable <id>|disable <id>|review <id>|stale <id> <reason...>|delete <id> --yes|bundle ...]',
     handler: runAgentSkillsRuntimeCommand,
   });
 }

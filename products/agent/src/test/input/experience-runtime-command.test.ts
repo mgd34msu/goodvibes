@@ -496,9 +496,8 @@ describe('experience runtime commands', () => {
       clients: {},
     } as unknown as CommandContext;
 
+    // The command ends with the install, so its caller holds the receipt.
     await command!.handler(['setup', '--yes'], context);
-    // The install runs fire-and-forget so the prompt is never blocked on a
-    // multi-hundred-MB download; wait for its receipt rather than a timer.
     await awaitFixtureSignal(receiptPrinted.promise, 'voice install receipt');
 
     const text = out.join('\n');
@@ -588,11 +587,11 @@ describe('experience runtime commands', () => {
       clients: {},
     } as unknown as CommandContext;
 
+    let running: void | Promise<void> = undefined;
     try {
-      await command!.handler(['setup', '--yes'], context);
+      running = command!.handler(['setup', '--yes'], context);
       await awaitFixtureSignal(progressObserved.promise, 'three voice install progress polls');
-      // Returning control to the prompt and rendering live progress must both
-      // happen before settlement. The duplicate download snapshot exercises
+      // Live progress renders before settlement. The duplicate download snapshot exercises
       // deduplication across polls rather than relying on a timing window.
       expect(installRunning).toBe(true);
       expect(statusReads).toBe(3);
@@ -600,6 +599,7 @@ describe('experience runtime commands', () => {
     } finally {
       finishInstall.resolve();
     }
+    await running;
     await awaitFixtureSignal(receiptPrinted.promise, 'voice install receipt');
 
     const text = out.join('\n');
@@ -664,13 +664,14 @@ describe('experience runtime commands', () => {
       clients: {},
     } as unknown as CommandContext;
 
-    await command!.handler(['setup', '--yes'], context);
+    const running = command!.handler(['setup', '--yes'], context);
     // Hold the install open until the poller has read status at least once, so
     // an absent installInProgress section is really observed mid-install.
     await awaitFixtureSignal(statusRead.promise, 'a status poll during the install');
     // No progress lines were fabricated from the absent section: only the busy line so far.
     expect(out).toEqual(['Installing managed local-voice runtime...']);
     finishInstall.resolve();
+    await running;
     await awaitFixtureSignal(receiptPrinted.promise, 'voice install receipt');
 
     const text = out.join('\n');

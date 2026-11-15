@@ -40,6 +40,8 @@ export interface AgentPersonaCreateInput {
   readonly triggers?: readonly string[];
   readonly source?: AgentPersonaSource;
   readonly provenance?: string;
+  /** Make it the active persona in the same write that saves it. */
+  readonly active?: boolean;
 }
 
 export interface AgentPersonaUpdateInput {
@@ -49,6 +51,8 @@ export interface AgentPersonaUpdateInput {
   readonly tags?: readonly string[];
   readonly triggers?: readonly string[];
   readonly provenance?: string;
+  /** true makes it active, false stops it being active, absent leaves the active persona as it is; same write as the edit. */
+  readonly active?: boolean;
 }
 
 export interface AgentPersonaSnapshot {
@@ -266,7 +270,7 @@ export class AgentPersonaRegistry {
         createdAt: timestamp,
         updatedAt: timestamp,
       };
-      this.writeStore({ ...store, personas: [...store.personas, persona] });
+      this.writeStore({ ...store, personas: [...store.personas, persona], ...(input.active === true ? { activePersonaId: persona.id } : {}) });
       return persona;
     });
   }
@@ -294,9 +298,13 @@ export class AgentPersonaRegistry {
         ...freshReviewPatch(),
         updatedAt: nowIso(),
       };
+      const activePersonaId = input.active === true ? existing.id
+        : input.active === false && store.activePersonaId === existing.id ? null
+          : store.activePersonaId;
       this.writeStore({
         ...store,
         personas: store.personas.map((persona) => persona.id === existing.id ? updated : persona),
+        activePersonaId,
       });
       return updated;
     });

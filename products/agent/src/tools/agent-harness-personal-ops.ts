@@ -1,6 +1,7 @@
 import { withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime';
 import { runPersonalOpsStyleDraft, STYLE_DRAFT_RECORD_ID } from './agent-harness-personal-ops-style-draft.ts';
-import { buildAgentWorkspaceRuntimeSnapshot } from '../input/agent-workspace-snapshot.ts';
+import { buildAgentWorkspaceRoutineCounters } from '../input/agent-workspace-snapshot.ts';
+import { buildAgentWorkspaceChannels } from '../input/agent-workspace-channels.ts';
 import { snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
 import { captureCatalogData, captureCatalogMethods, rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { harnessCatalogInvocationAuthority } from './agent-harness-catalog-ingress.ts';
@@ -20,9 +21,11 @@ import { artifactShowRoute } from './agent-harness-personal-ops-routes.ts';
 import { UNTRUSTED_CONTENT_RULE } from '../trust/untrusted-content.ts';
 
 export function personalOpsCatalogStatus(context: CommandContext): Record<string, unknown> {
-  const snapshot = buildAgentWorkspaceRuntimeSnapshot(context);
-  const readyChannels = snapshot.channels.filter(channel => channel.ready).length;
-  const readyRoutines = snapshot.localRoutines.filter(routine => routine.enabled === true && routine.reviewState === 'reviewed' && (routine.missingRequirementCount ?? 0) === 0).length;
+  // Only the two parts this status reads: channels and routines.
+  const channels = buildAgentWorkspaceChannels(context);
+  const localRoutines = buildAgentWorkspaceRoutineCounters(context).items;
+  const readyChannels = channels.filter(channel => channel.ready).length;
+  const readyRoutines = localRoutines.filter(routine => routine.enabled === true && routine.reviewState === 'reviewed' && (routine.missingRequirementCount ?? 0) === 0).length;
   // Startup counts native registrations only. Capability discovery is an explicit
   // awaited personal_ops read and cannot be inferred from a connector name.
   return {
@@ -34,7 +37,7 @@ export function personalOpsCatalogStatus(context: CommandContext): Record<string
     bestReadyStatus: 3,
     // These counts cover native lanes only; connector-derived lane status appears in personal_ops action:"status".
     countsCover: 'native-only',
-    configuredChannels: snapshot.channels.length, configuredRoutines: snapshot.localRoutines.length,
+    configuredChannels: channels.length, configuredRoutines: localRoutines.length,
     capabilityDiscovery: 'read-on-request',
   };
 }

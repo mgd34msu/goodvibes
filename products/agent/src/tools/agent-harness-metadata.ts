@@ -284,7 +284,7 @@ export function describeCommandPolicy(commandName: string): CommandExecutionPoli
       effect: 'external-network',
       confirmation,
       preferredModelTool: 'google',
-      boundary: 'Connects the Google account that backs mail and calendar. /google connect runs the connection flow; /google adopt takes up credentials from files you point it at. Once connected, the google tool is the model route, no MCP server is involved.',
+      boundary: 'Connects the Google account that backs mail and calendar. /google connect runs the connection flow; /google adopt takes up credentials from files you point it at. Once connected, the google tool is the model route, no MCP server is involved. forget, adopt, account, calendar-address, client, client-file and approve store, adopt, remove or unlock credentials, so only the owner typing them counts; a model invocation is refused.',
     };
   }
   if (root === 'email') {
@@ -292,7 +292,7 @@ export function describeCommandPolicy(commandName: string): CommandExecutionPoli
       effect: 'external-network',
       confirmation,
       preferredModelTool: `${agentHarnessModes('run_command')} (use /email set to configure, /email config to view settings)`,
-      boundary: 'Email IMAP reads are read-only (EXAMINE); sends require explicit --yes confirmation and route only to the configured account. Use /email set email.<key> <value> to configure email settings; use /email config to view current settings. /email set is the reviewed path for email.* keys: it validates each field and stores the password as a secret reference. The generic settings action routes an email.* write to the daemon that owns the key, under the same recorded admission; prefer /email set.',
+      boundary: 'Email IMAP reads are read-only (EXAMINE); sends require explicit --yes confirmation and route only to the configured account. Use /email set email.<key> <value> to configure email settings; use /email config to view current settings. /email set is the reviewed path for email.* keys: it validates each field and stores the password as a secret reference. The generic settings action routes an email.* write to the daemon that owns the key, under the same recorded admission; prefer /email set. Setting the mail servers, ports, security, username or password changes where the stored password is presented, so only the owner typing /email set counts; a model invocation is refused.',
     };
   }
   if (root === 'calendar' || root === 'cal') {
@@ -300,7 +300,7 @@ export function describeCommandPolicy(commandName: string): CommandExecutionPoli
       effect: 'mixed',
       confirmation,
       preferredModelTool: agentHarnessModes('run_command'),
-      boundary: '/calendar list, add, delete, import and export work on local ICS events; import/export and mutations require explicit --yes confirmation. subscribe, unsubscribe and refresh fetch or store external feed URLs, and connect, disconnect and accounts run connected-calendar OAuth; those are owner-terminal flows that a model invocation is refused, and the command carries the outward-effect floor, not the local one. Calendar configuration is set via /calendar subcommands.',
+      boundary: '/calendar list, upcoming, subscriptions and accounts read and need no admission. add, delete, import and export change local ICS events (--yes required) under the local-write admission; subscribe and refresh fetch a feed under the outward one. unsubscribe (deletes a stored feed address), connect and disconnect (sign a calendar account in or out) are the owner\'s to type: a model invocation is refused before it runs. Calendar configuration is set via /calendar subcommands.',
     };
   }
   if (root === 'channels' || root === 'channel' || root === 'notify') {
@@ -427,7 +427,7 @@ export function describeCommandPolicy(commandName: string): CommandExecutionPoli
       effect: 'connected-host-state',
       confirmation,
       preferredModelTool: agentHarnessModes('run_command'),
-      boundary: 'Pairing details embed the connected host operator token, so only the owner typing the command in the live terminal receives them; a model invocation is refused. The Agent does not manage connected-host listener lifecycle.',
+      boundary: 'Each run mints a named device token that gives a new device access to the connected host, so only the owner typing the command counts; a model invocation is refused before anything is minted. The Agent does not manage connected-host listener lifecycle.',
     };
   }
   return {

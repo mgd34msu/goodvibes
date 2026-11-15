@@ -10,9 +10,7 @@ import type { AgentHarnessToolDeps } from './agent-harness-tool-types.ts';
 import { error, output } from './agent-harness-tool-utils.ts';
 import { forwardHarnessCatalogCall, harnessCatalogExecutionGuard, harnessCatalogInvocationAuthority, retainHarnessCatalogCurrent } from './agent-harness-catalog-ingress.ts';
 import { describeCommandPolicy } from './agent-harness-metadata.ts';
-
-/** The calendar verbs that only read local state; the rest of the command keeps the outward floor. */
-const CALENDAR_READ_VERBS: ReadonlySet<string> = new Set(['list', 'all', 'upcoming', 'subscriptions', 'subs', 'accounts']);
+import { commandVerbPolicy, ownerOnlyVerbRefusal } from '../input/commands/command-verbs.ts';
 
 /** Verbs of otherwise state-changing commands that only show records; the first argument is the verb, absent means the default. */
 const READ_ONLY_COMMAND_VERBS: Readonly<Record<string, { readonly verbs: ReadonlySet<string>; readonly fallback: string }>> = {
@@ -63,14 +61,17 @@ export async function runCommand(deps: AgentHarnessToolDeps, args: Record<string
   const assertCommandEffect = (name: string, commandArgs: readonly string[]) => {
     assertCommandMethods();
     options.signal?.throwIfAborted(); options.assertCurrent?.();
+    // A command that declares its verbs (command-verbs.ts) says which admission
+    // each needs; the others are read from the command policy table.
+    const verb = commandVerbPolicy(registry.get(name), commandArgs);
     const policy = describeCommandPolicy(name);
     // These work-import verbs are host-owned reads. Every mutation keeps the
     // original invocation floor as well as the command's own host authority.
-    const read = policy.effect === 'read-only' || name === 'work-import' && ['preview', 'status'].includes(commandArgs[0] ?? '')
-      || (name === 'calendar' || name === 'cal') && CALENDAR_READ_VERBS.has((commandArgs[0] ?? 'list').toLowerCase())
+    const read = verb ? verb.effect === 'read' : policy.effect === 'read-only' || name === 'work-import' && ['preview', 'status'].includes(commandArgs[0] ?? '')
       || (READ_ONLY_COMMAND_VERBS[name]?.verbs.has((commandArgs[0] ?? READ_ONLY_COMMAND_VERBS[name]!.fallback).toLowerCase()) ?? false);
-    if (!read && !harnessCatalogInvocationAuthority(args, executionOptions,
-      ['local-state', 'ui-navigation', 'session-lifecycle'].includes(policy.effect) ? 'write' : 'send')) throw new ToolInputProjectionError('held');
+    const effect = verb ? (verb.effect === 'local-write' ? 'write' : 'send')
+      : ['local-state', 'ui-navigation', 'session-lifecycle'].includes(policy.effect) ? 'write' : 'send';
+    if (!read && !harnessCatalogInvocationAuthority(args, executionOptions, effect)) throw new ToolInputProjectionError('held');
     resolved.assertCurrent?.(); assertCommandMethods();
     if (deps.commandRegistry !== registry || registry.execute !== execute || deps.commandContext !== context) throw new ToolInputProjectionError('held');
   };
@@ -101,6 +102,9 @@ export async function runCommand(deps: AgentHarnessToolDeps, args: Record<string
   const executeModelCommand = async (name: string, commandArgs: readonly string[]): Promise<boolean> => {
     assertCommandMethods();
     const command = registry.get(name);
+    // An owner-only verb is refused before any admission is asked for it.
+    const verb = commandVerbPolicy(command, commandArgs);
+    if (command && verb?.ownerOnly) throw ownerOnlyVerbRefusal(command.name, verb);
     assertCommandEffect(name, commandArgs);
     if (!command) return false;
     const mutation = nativeSettingsCommandMutation(command, commandArgs);
@@ -123,14 +127,16 @@ export async function runCommand(deps: AgentHarnessToolDeps, args: Record<string
     return true;
   };
   const commandArgs = invocationArgsFromLookup(resolved.lookup);
-  assertCommandEffect(resolved.command.name, commandArgs);
-  if (deps.commandRegistry.get(resolved.command.name) !== resolved.command) throw new ToolInputProjectionError('stale');
   // The command's own result decides: a command that refuses throws its refusal
   // (state, reason and next step); one that returns did what it says. Its
   // printed wording is never read for that.
   let handled: boolean;
   let refused: Refusal | undefined;
   try {
+    const ownerOnly = commandVerbPolicy(resolved.command, commandArgs);
+    if (ownerOnly?.ownerOnly) throw ownerOnlyVerbRefusal(resolved.command.name, ownerOnly);
+    assertCommandEffect(resolved.command.name, commandArgs);
+    if (deps.commandRegistry.get(resolved.command.name) !== resolved.command) throw new ToolInputProjectionError('stale');
     handled = await executeModelCommand(resolved.command.name, commandArgs);
   } catch (thrown) {
     refused = readRefusal(thrown);

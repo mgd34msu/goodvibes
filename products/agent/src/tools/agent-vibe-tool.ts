@@ -15,6 +15,8 @@ import type { CommandContext } from '../input/command-registry.ts';
 import { requireShellPaths } from '../input/commands/runtime-services.ts';
 import { previewHarnessText } from './agent-harness-text.ts';
 import { failureMessage } from './agent-projection-failure.ts';
+import { assertActorMayMarkReviewed } from '../agent/review-authority.ts';
+import { formatRefusal, readRefusal } from '@goodvibes-jev/engine/errors';
 
 type AgentVibeAction = 'status' | 'show' | 'init' | 'import_persona';
 
@@ -146,7 +148,7 @@ export function createAgentVibeTool(commandContext: CommandContext): Tool {
           name: { type: 'string', description: 'Persona name when importing.' },
           description: { type: 'string', description: 'Persona description when importing.' },
           force: { type: 'boolean', description: 'Replace existing VIBE.md on admitted init.' },
-          review: { type: 'boolean', description: 'Mark imported persona reviewed.' },
+          review: { type: 'boolean', description: 'Refused: reviewing a persona is the owner\'s (they run /personas review <id>); nothing is imported when set.' },
           use: { type: 'boolean', description: 'Set imported persona active.' },
           includeParameters: { type: 'boolean', description: 'Include searched paths and route details.' },
           confirm: { type: 'boolean', description: 'Optional provenance; never grants write authority.' },
@@ -189,7 +191,7 @@ export function createAgentVibeTool(commandContext: CommandContext): Tool {
               showProject: 'vibe action:"show" scope:"project"',
               showGlobal: 'vibe action:"show" scope:"global"',
               initProject: 'vibe action:"init" scope:"project"',
-              importProjectPersona: 'vibe action:"import_persona" scope:"project" review:true use:true',
+              importProjectPersona: 'vibe action:"import_persona" scope:"project" use:true (the owner reviews it with /personas review <id>)',
               promptContext: 'context action:"prompt" includeParameters:true',
             },
             ...(readBoolean(args.includeParameters) ? { searchedPaths: snapshot.searchedPaths } : {}),
@@ -245,6 +247,11 @@ export function createAgentVibeTool(commandContext: CommandContext): Tool {
           const source = loadVibeImportSource(shellPaths, reference);
           const name = readString(args.name) || source.name;
           const description = readString(args.description) || source.description;
+          // Marking it reviewed is the owner's; refused before anything is written.
+          if (readBoolean(args.review)) {
+            try { assertActorMayMarkReviewed('model', 'persona', name); }
+            catch (refused) { const shaped = readRefusal(refused); return error(shaped ? `Nothing was imported. ${formatRefusal(shaped)}` : failureMessage(refused, options?.signal)); }
+          }
           const effects = agentLocalStateWrite(rawArgs, options);
           const personaRegistry = AgentPersonaRegistry.fromShellPaths(shellPaths, effects);
           const created = personaRegistry.create({
@@ -255,32 +262,23 @@ export function createAgentVibeTool(commandContext: CommandContext): Tool {
             triggers: ['vibe'],
             source: 'imported',
             provenance: `Imported VIBE.md (${source.scope}): ${source.path}`,
+            // Made active in the same write when asked.
+            active: readBoolean(args.use),
           });
-          // Three separate store writes with no rollback: say which step failed and
-          // that the persona already exists, so a retry does not create a duplicate.
-          let reviewed = created;
-          let active: { readonly id: string } | null = null;
-          let step = 'create';
-          try {
-            if (readBoolean(args.review)) { step = 'review'; reviewed = personaRegistry.markReviewed(created.id); }
-            if (readBoolean(args.use)) { step = 'activate'; active = personaRegistry.setActive(created.id); }
-          } catch (failure) {
-            return error(`Created Agent-local persona ${created.id}, but the ${step} step failed: ${failureMessage(failure, options?.signal)}. The persona exists; do not import again. Finish with agent_local_registry domain:"persona" action:"${step === 'review' ? 'review' : 'use'}" id:"${created.id}".`);
-          }
           return output({
             status: 'imported',
             action: 'vibe_import_persona',
             source: source.scope,
             path: source.path,
             persona: {
-              id: reviewed.id,
-              name: reviewed.name,
-              description: reviewed.description,
-              reviewState: reviewed.reviewState,
-              active: active?.id === reviewed.id,
+              id: created.id,
+              name: created.name,
+              description: created.description,
+              reviewState: created.reviewState,
+              active: readBoolean(args.use),
             },
             routes: {
-              inspectPersona: `agent_local_registry domain:"persona" action:"get" id:"${reviewed.id}"`,
+              inspectPersona: `agent_local_registry domain:"persona" action:"get" id:"${created.id}"`,
               promptContext: 'context action:"prompt" includeParameters:true',
             },
             policy: {

@@ -230,6 +230,82 @@ export function buildAgentWorkspaceRoutineCounters(context: CommandContext, fail
   }
 }
 
+/** Where the Agent's isolated knowledge is served, and how it is kept apart; fixed by this build. */
+export const AGENT_KNOWLEDGE_ROUTE = '/api/goodvibes-agent/knowledge';
+export const AGENT_KNOWLEDGE_ISOLATION = 'agent-only';
+
+/**
+ * The review packet part: document drafts and the artifact list it is built
+ * from. A tool that needs only this part builds only this part.
+ */
+export function buildAgentWorkspaceReviewPacketPart(context: CommandContext, readFailures?: AgentWorkspaceReadFailures) {
+  const artifactListSnapshot = buildAgentWorkspaceArtifactListSnapshot(context, readFailures);
+  const recentReviewerHandoffs = buildAgentWorkspaceRecentReviewerHandoffsSnapshot(artifactListSnapshot.items);
+  const documentDrafts = readDocumentDrafts(context, readFailures);
+  const artifactListInfo = {
+    truncated: artifactListSnapshot.truncated,
+    resolveArtifact: buildAgentWorkspaceArtifactResolver(context),
+  };
+  const reviewPacketDefaults = buildReviewPacketDefaults(documentDrafts, artifactListSnapshot.items);
+  return {
+    artifactListSnapshot,
+    recentReviewerHandoffs,
+    documentDrafts,
+    reviewPacketDefaults,
+    reviewerBadge: reviewerReadinessBadge(documentDrafts, artifactListSnapshot.items, artifactListSnapshot.available, artifactListInfo, reviewPacketDefaults),
+    reviewPacketTimeline: buildReviewPacketTimeline(documentDrafts, artifactListSnapshot.items, artifactListSnapshot.available, artifactListInfo),
+    reviewPacketWizard: buildReviewPacketWizard(documentDrafts, artifactListSnapshot.available, reviewPacketDefaults, artifactListInfo),
+  };
+}
+
+/** The voice and media part: provider descriptors and their readiness. */
+export function buildAgentWorkspaceVoiceMediaPart(context: CommandContext) {
+  const { voiceProviders, mediaProviders } = buildAgentWorkspaceVoiceMediaProvidersSnapshot(context);
+  const voiceProviderDescriptors = voiceProviders.map((provider) => ({ id: provider.id, label: provider.label, capabilities: provider.capabilities }));
+  const mediaProviderDescriptors = mediaProviders.map((provider) => ({ id: provider.id, label: provider.label, capabilities: provider.capabilities }));
+  return {
+    voiceProviders,
+    mediaProviders,
+    voiceMediaReadiness: buildAgentWorkspaceVoiceMediaReadiness({ context, voiceProviders: voiceProviderDescriptors, mediaProviders: mediaProviderDescriptors }),
+  };
+}
+
+/** What the Document Ops lanes read: the review packet part, the voice and media part, and a few runtime facts. */
+export function buildAgentWorkspaceDocumentOpsPart(context: CommandContext): Pick<AgentWorkspaceRuntimeSnapshot,
+  'modelDisplayName' | 'provider' | 'artifactMaxBytes' | 'sessionId' | 'knowledgeRoute' | 'knowledgeIsolation'
+  | 'mediaProviderCount' | 'mediaGenerationProviderCount' | 'voiceMediaReadiness' | 'reviewPacketTimeline' | 'reviewPacketWizard'> {
+  const model = context.session?.runtime?.model ?? 'unknown';
+  const reviewPacket = buildAgentWorkspaceReviewPacketPart(context);
+  const voiceMedia = buildAgentWorkspaceVoiceMediaPart(context);
+  return {
+    modelDisplayName: buildAgentWorkspaceCurrentModelSnapshot(context)?.displayName ?? model,
+    provider: context.session?.runtime?.provider ?? 'unknown',
+    artifactMaxBytes: buildAgentWorkspaceConfigSettingsSnapshot(context).artifactMaxBytes,
+    sessionId: context.session?.runtime?.sessionId ?? 'unknown',
+    knowledgeRoute: AGENT_KNOWLEDGE_ROUTE,
+    knowledgeIsolation: AGENT_KNOWLEDGE_ISOLATION,
+    mediaProviderCount: voiceMedia.mediaProviders.length,
+    mediaGenerationProviderCount: voiceMedia.mediaProviders.filter((entry) => entry.capabilities.includes('generate')).length,
+    voiceMediaReadiness: voiceMedia.voiceMediaReadiness,
+    reviewPacketTimeline: reviewPacket.reviewPacketTimeline,
+    reviewPacketWizard: reviewPacket.reviewPacketWizard,
+  };
+}
+
+/** What a workspace editor opened by a model tool reads: starter templates, routines, the review packet part, calendar OAuth status. */
+export function buildAgentWorkspaceEditorContextPart(context: CommandContext): Pick<AgentWorkspaceRuntimeSnapshot,
+  'runtimeStarterTemplates' | 'localRoutines' | 'recentReviewerHandoffArtifacts' | 'reviewPacketDefaults' | 'calendarOAuthConfigStatus'> {
+  const { runtimeStarterTemplates } = buildAgentWorkspaceRuntimeProfilesSnapshot(inferRuntimeProfileBaseHome(context.workspace?.shellPaths?.homeDirectory ?? ''));
+  const reviewPacket = buildAgentWorkspaceReviewPacketPart(context);
+  return {
+    runtimeStarterTemplates: runtimeStarterTemplates.map(summarizeStarterTemplate),
+    localRoutines: buildAgentWorkspaceRoutineCounters(context).items,
+    recentReviewerHandoffArtifacts: reviewPacket.recentReviewerHandoffs.items,
+    reviewPacketDefaults: reviewPacket.reviewPacketDefaults,
+    calendarOAuthConfigStatus: buildAgentWorkspaceCalendarOAuthConfigStatus(context),
+  };
+}
+
 /**
  * Assembles the full Agent workspace runtime snapshot. Composes the
  * sub-builders in agent-workspace-snapshot-builders.ts (split out of what
@@ -252,56 +328,18 @@ export function buildAgentWorkspaceRuntimeSnapshot(context: CommandContext): Age
   const routineScheduleReceipts = buildAgentWorkspaceRoutineScheduleReceiptsSnapshot(context, readFailures);
   const researchSourceSnapshot = buildAgentWorkspaceResearchSourceSnapshot(context, readFailures);
   const researchRunSnapshot = buildAgentWorkspaceResearchRunSnapshot(context, readFailures);
-  const artifactListSnapshot = buildAgentWorkspaceArtifactListSnapshot(context, readFailures);
+  const reviewPacket = buildAgentWorkspaceReviewPacketPart(context, readFailures);
+  const { artifactListSnapshot, recentReviewerHandoffs, reviewPacketDefaults, reviewerBadge, reviewPacketTimeline, reviewPacketWizard } = reviewPacket;
   const setupSmokeHistory = buildSetupSmokeHistory(artifactListSnapshot.items, artifactListSnapshot.available);
   const liveSetupReceipts = readSetupWizardLiveDurableReceipts(context);
   if (liveSetupReceipts.unavailable.length > 0) readFailures.set('setup-receipts', `receipts unavailable: ${liveSetupReceipts.unavailable.join(', ')}`);
   // Artifact metadata is not setup evidence; only the live read models publish receipts.
   const durableSetupReceipts = liveSetupReceipts.receipts;
-  const recentReviewerHandoffs = buildAgentWorkspaceRecentReviewerHandoffsSnapshot(artifactListSnapshot.items);
-  const documentDrafts = readDocumentDrafts(context, readFailures);
-  const artifactListInfo = {
-    truncated: artifactListSnapshot.truncated,
-    resolveArtifact: buildAgentWorkspaceArtifactResolver(context),
-  };
-  const reviewPacketDefaults = buildReviewPacketDefaults(
-    documentDrafts,
-    artifactListSnapshot.items,
-  );
-  const reviewerBadge = reviewerReadinessBadge(
-    documentDrafts,
-    artifactListSnapshot.items,
-    artifactListSnapshot.available,
-    artifactListInfo,
-    reviewPacketDefaults,
-  );
-  const reviewPacketTimeline = buildReviewPacketTimeline(
-    documentDrafts,
-    artifactListSnapshot.items,
-    artifactListSnapshot.available,
-    artifactListInfo,
-  );
-  const reviewPacketWizard = buildReviewPacketWizard(
-    documentDrafts,
-    artifactListSnapshot.available,
-    reviewPacketDefaults,
-    artifactListInfo,
-  );
   const discoveredBehavior = summarizeAgentBehaviorDiscovery(context.workspace?.shellPaths);
   const profileBaseHome = inferRuntimeProfileBaseHome(context.workspace?.shellPaths?.homeDirectory ?? '');
   const { runtimeProfiles, runtimeStarterTemplates, selectedRuntimeProfile, runtimeProfileRoot } = buildAgentWorkspaceRuntimeProfilesSnapshot(profileBaseHome);
-  const { voiceProviders, mediaProviders } = buildAgentWorkspaceVoiceMediaProvidersSnapshot(context);
+  const { voiceProviders, mediaProviders, voiceMediaReadiness } = buildAgentWorkspaceVoiceMediaPart(context);
   const mcpSnapshot = buildAgentWorkspaceMcpServerSnapshot(context);
-  const voiceProviderDescriptors = voiceProviders.map((provider) => ({
-    id: provider.id,
-    label: provider.label,
-    capabilities: provider.capabilities,
-  }));
-  const mediaProviderDescriptors = mediaProviders.map((provider) => ({
-    id: provider.id,
-    label: provider.label,
-    capabilities: provider.capabilities,
-  }));
   const warnings: string[] = [];
   if (provider === 'unknown' || model === 'unknown') warnings.push('Provider/model unavailable in this runtime context.');
   if (!context.executeCommand) warnings.push('Command dispatch is unavailable; workspace actions will show guidance only.');
@@ -311,11 +349,6 @@ export function buildAgentWorkspaceRuntimeSnapshot(context: CommandContext): Age
   const subscriptionSnapshot = buildAgentWorkspaceSubscriptionSnapshot(context);
   const channels = buildAgentWorkspaceChannels(context);
   const channelSetupGuide = buildAgentWorkspaceChannelSetupGuide(channels);
-  const voiceMediaReadiness = buildAgentWorkspaceVoiceMediaReadiness({
-    context,
-    voiceProviders: voiceProviderDescriptors,
-    mediaProviders: mediaProviderDescriptors,
-  });
   const homeDirectory = context.workspace?.shellPaths?.homeDirectory;
   const nativeCredential = homeDirectory
     ? readConnectedHostOperatorToken(homeDirectory, runtimeBaseUrl)
@@ -413,7 +446,6 @@ export function buildAgentWorkspaceRuntimeSnapshot(context: CommandContext): Age
     workingDirectory: context.workspace?.shellPaths?.workingDirectory ?? 'unavailable',
     homeDirectory: context.workspace?.shellPaths?.homeDirectory ?? 'unavailable',
     runtimeBaseUrl,
-    runtimeOwnership: 'external',
     activeSubscriptionCount: subscriptionSnapshot.active,
     pendingSubscriptionCount: subscriptionSnapshot.pending,
     availableSubscriptionProviderCount: subscriptionSnapshot.available,
@@ -469,8 +501,8 @@ export function buildAgentWorkspaceRuntimeSnapshot(context: CommandContext): Age
     activePersonaName: personaSnapshot.activeName,
     localPersonas: personaSnapshot.items,
     discoveredBehavior,
-    knowledgeRoute: '/api/goodvibes-agent/knowledge',
-    knowledgeIsolation: 'agent-only',
+    knowledgeRoute: AGENT_KNOWLEDGE_ROUTE,
+    knowledgeIsolation: AGENT_KNOWLEDGE_ISOLATION,
     executionPolicy: 'serial-proactive',
     delegatedReviewPolicy: 'explicit-build-delegation-only',
     companionAccess,
@@ -493,7 +525,6 @@ export function buildAgentWorkspaceRuntimeSnapshot(context: CommandContext): Age
     mcpQuarantinedServerCount: mcpSnapshot.quarantinedCount,
     mcpAllowAllServerCount: mcpSnapshot.allowAllCount,
     browserToolExposureEnabled: config.browserPwaEnabled,
-    browserToolPublicBaseUrl: config.browserPwaPublicBaseUrl,
     activeRuntimeProfile: inferActiveRuntimeProfile(context.workspace?.shellPaths?.homeDirectory ?? ''),
     selectedRuntimeProfile: selectedRuntimeProfile?.id ?? null,
     selectedRuntimeProfileExists: selectedRuntimeProfile?.exists ?? false,

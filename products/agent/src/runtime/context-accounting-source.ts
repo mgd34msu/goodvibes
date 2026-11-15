@@ -49,8 +49,8 @@ export interface BindOrchestratorContextAccountingOptions {
   readonly holder: ContextAccountingHolder;
   readonly runtimeBus: RuntimeEventBus;
   readonly runtimeStore: RuntimeStore;
-  /** Same sessionId passed to the Orchestrator's own constructor. */
-  readonly sessionId: string;
+  /** The session in use, read when the tool runs, so a resume or fork is followed. */
+  readonly getSessionId: () => string;
   /** Resolves the active model's context window; omitted/null when unknown (matches providerRegistry.getContextWindowForModel). */
   readonly getContextWindow: () => number | null;
   /** Human-readable scope label so the tool's caller knows whose context this is. Defaults to 'main session'. */
@@ -65,23 +65,24 @@ export interface BindOrchestratorContextAccountingOptions {
  * shutdown leaves no dangling bus subscription.
  */
 export function bindOrchestratorContextAccounting(options: BindOrchestratorContextAccountingOptions): () => void {
-  const { orchestrator, holder, runtimeBus, runtimeStore, sessionId, getContextWindow } = options;
+  const { orchestrator, holder, runtimeBus, runtimeStore, getSessionId, getContextWindow } = options;
   const scope = options.scope ?? 'main session';
 
-  // Local running count of applied compactions for THIS session, the platform
+  // Local running count of applied compactions, per session id, the platform
   // emits the mandatory COMPACTION_RECEIPT after every compaction path
   // (agent-runtime-events.ts routes the same event into the visible system
-  // message; this tracks only the count, filtered to this session so a
+  // message; this tracks only the count, filtered to the session in use so a
   // background agent's own compaction does not inflate the main session's
-  // number).
-  let compactionCount = 0;
+  // number, and a resume reports the resumed session's count).
+  const compactionCounts = new Map<string, number>();
   const unsubReceipt = runtimeBus.on<Extract<CompactionEvent, { type: 'COMPACTION_RECEIPT' }>>('COMPACTION_RECEIPT', ({ payload }) => {
-    if (payload.sessionId === sessionId && payload.outcome === 'applied') compactionCount += 1;
+    if (payload.outcome !== 'applied' || payload.sessionId !== getSessionId()) return;
+    compactionCounts.set(payload.sessionId, (compactionCounts.get(payload.sessionId) ?? 0) + 1);
   });
 
-  const source: ContextAccountingSource = createLiveContextAccountingSource({
+  const live: ContextAccountingSource = createLiveContextAccountingSource({
     orchestrator: orchestrator,
-    sessionId: sessionId,
+    sessionId: getSessionId(),
     scope: scope,
     copyAllUsage: false,
     getContextWindow: getContextWindow,
@@ -89,10 +90,17 @@ export function bindOrchestratorContextAccounting(options: BindOrchestratorConte
       const compactionState = runtimeStore.getState().session.compactionState;
       return {
         isCompacting: COMPACTING_STATES.has(compactionState),
-        compactionCount,
+        compactionCount: compactionCounts.get(getSessionId()) ?? 0,
       };
     },
   });
+  const source: ContextAccountingSource = {
+    scope: live.scope,
+    get sessionId() { return getSessionId(); },
+    getTurnInjections: () => live.getTurnInjections(),
+    getTokenState: () => live.getTokenState(),
+    getCompactionState: () => live.getCompactionState(),
+  };
 
   holder.setSource(source);
 

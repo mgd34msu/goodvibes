@@ -21,8 +21,9 @@ import {
   resetOutwardApprovalStoreForTests,
 } from '../../trust/outward-approvals.ts';
 import { GOOGLE_CONFIG_KEYS, GOOGLE_SECRET_KEYS } from '@goodvibes-jev/engine/platform/platform/google';
-import { runGoogleCommand } from '../../input/commands/google-runtime.ts';
-import type { CommandContext } from '../../input/command-registry.ts';
+import { registerGoogleRuntimeCommands, runGoogleCommand } from '../../input/commands/google-runtime.ts';
+import { CommandRegistry, type CommandContext } from '../../input/command-registry.ts';
+import { readRefusal } from '@goodvibes-jev/engine/errors';
 import { startTurnForOwnerInput } from '@goodvibes-jev/engine/platform/platform/security';
 
 let home = '';
@@ -222,10 +223,13 @@ describe('what untrusted content cannot manufacture', () => {
     // This is the whole attack: the message the agent just read talks the model
     // into running the command that clears the gate. `agent_harness
     // mode:"run_command"` can reach every registered command, so the refusal
-    // has to live in the command itself and not in the advice about it.
+    // has to live in the command's registration and not in the advice about it.
+    const registry = new CommandRegistry();
+    registerGoogleRuntimeCommands(registry);
     const printed: string[] = [];
-    await runGoogleCommand(['approve'], modelInvokedContext(printed));
-    expect(printed.join(' ')).toContain('Refused');
+    const refused = await registry.execute('google', ['approve', '--yes'], modelInvokedContext(printed)).then(() => undefined, (error: unknown) => error);
+    expect(readRefusal(refused)?.code).toBe('OWNER_ONLY_COMMAND');
+    expect(printed).toEqual([]);
 
     const retried = await run(tool, TAINTED_SEND);
     expect(retried.success).toBe(false);

@@ -8,7 +8,7 @@ import { resolveRuntimeEndpointBinding } from '../cli/endpoints.ts';
 import { AGENT_WORKSPACE_CATEGORIES } from '../input/agent-workspace-categories.ts';
 import type { AgentSetupWizardDurableReceipt } from '../agent/setup-wizard.ts';
 import { buildSetupWizardDurableReceipts } from '../agent/setup-wizard-artifact-receipts.ts';
-import { mergeSetupWizardDurableReceipts, readSetupWizardLiveDurableReceipts } from '../input/setup-wizard-live-receipts.ts';
+import { mergeSetupWizardDurableReceipts, readSetupWizardLiveDurableReceipts, SETUP_RECEIPTS_READ_METHOD, SETUP_RECEIPTS_READ_MODEL_PATH } from '../input/setup-wizard-live-receipts.ts';
 import { readOnboardingCompletionMarker } from '../runtime/onboarding/index.ts';
 import { urlHostForConfiguredHost } from '../config/connected-host-dial.ts';
 import {
@@ -24,7 +24,7 @@ import {
 const browserConnectHost = urlHostForConfiguredHost;
 
 /** The one list of setup-receipt read paths, so the captured sources and the viewed sources cannot drift apart. */
-const SETUP_RECEIPT_PATHS = ["context.platform.readModels.setup.receipts", "context.platform.readModels.setup.setupReceipts", "context.platform.readModels.setup.receiptEvents", "context.platform.readModels.setup.eventStream", "context.platform.readModels.setup", "context.platform.readModels.setupWizard.receipts", "context.platform.readModels.setupWizard.durableReceipts", "context.platform.readModels.setupWizard.receiptEvents", "context.platform.readModels.setupWizard.eventStream", "context.platform.readModels.setupReceipts", "context.platform.readModels.setupReceiptEvents", "context.platform.readModels.setupReceiptEventStream", "context.platform.readModels.durableSetupReceipts", "context.platform.readModels.firstRun.receipts", "context.platform.readModels.browserPwa.firstRunReceipts", "context.platform.setupReceipts", "context.platform.setupReceiptEvents", "context.clients.operator.setupReceipts", "context.clients.operator.setupReceiptEvents"];
+const SETUP_RECEIPT_PATHS = [SETUP_RECEIPTS_READ_MODEL_PATH];
 
 export const BROWSER_COCKPIT_EXPECTED_LANES = [
   {
@@ -336,7 +336,7 @@ export async function connectedBrowserCockpitRoute(context: CommandContext, rawO
   caller.retainSourceCurrent();
   const setupCurrent = captureSetupReadSource(context);
   caller.options.retainCurrent(setupCurrent, 'agent.cockpit.setup-native-source');
-  const setupSource = captureCatalogProducerSources(context, SETUP_RECEIPT_PATHS, ["getSnapshot", "snapshot", "list", "listReceipts", "listEvents", "listReceiptEvents", "readEvents"], true);
+  const setupSource = captureCatalogProducerSources(context, SETUP_RECEIPT_PATHS, [SETUP_RECEIPTS_READ_METHOD], true);
   caller.options.retainCurrent(setupSource.assertCurrent, 'agent.cockpit.receipt-native-source');
   const setupViews = SETUP_RECEIPT_PATHS.map(path => ({ path, source: setupSource.source(path) }));
   const live = readSetupWizardLiveDurableReceipts(context, setupViews);

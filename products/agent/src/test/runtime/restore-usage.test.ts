@@ -41,7 +41,7 @@ async function fixture() {
     restoreTurnAnchors: () => 0, announceSessionResumed: () => {},
   });
   const holder = new ContextAccountingHolder();
-  cleanups.push(bindOrchestratorContextAccounting({ orchestrator, holder, runtimeBus, runtimeStore, sessionId: runtime.sessionId, getContextWindow: () => 100_000 }));
+  cleanups.push(bindOrchestratorContextAccounting({ orchestrator, holder, runtimeBus, runtimeStore, getSessionId: () => runtime.sessionId, getContextWindow: () => 100_000 }));
   const save = (id: string, messages: object[]) => services.sessionManager.save(id, messages, { title: id, model: 'mock-model', provider: 'mock', timestamp: Date.now() });
   const resume = async (id: string) => {
     const picker = new SessionPickerModal(services.sessionManager);

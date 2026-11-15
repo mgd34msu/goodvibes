@@ -1419,16 +1419,6 @@ export function createHarnessFixtureReadings(): JudgmentPort {
     [memoryClass.name, learningMemoryClass.port], [learningDuplicateAlignment.name, learningAlignment.port],
     [learningSurvivorSelection.name, learningSelection.port], [learningSurvivorEquivalence.name, learningEquivalence.port],
   ]);
-  const researchSchema = fakePort((name, question, state) => {
-    if (name !== 'match' || question.type !== 'noul' || !learningObject(state) || state.query !== 'Explicit schema certification'
-      || !learningObject(state.candidate) || typeof state.candidate.evidenceJson !== 'string') throw new Error('Unscripted complete research schema fixture');
-    const evidence: unknown = JSON.parse(state.candidate.evidenceJson);
-    if (!learningObject(evidence) || evidence.explicit !== 'certified' || !Array.isArray(evidence.records)) throw new Error('Missing authored research certification evidence');
-    const schemas: Readonly<Record<string, string>> = { 'live-runner-1': 'goodvibes.research.browser-run.v1', 'visual-report-render-1': 'goodvibes.research.visual-report.v1' };
-    if (!evidence.records.some(record => learningObject(record) && typeof record.id === 'string'
-      && schemas[record.id] === record.schemaVersion && record.schemaStatus === 'certified' && record.publisher === 'goodvibes-daemon')) throw new Error('Unscripted native research publisher');
-    return noulAnswer(0.999);
-  });
   const catalogGroups = fakePort((name, question, raw) => {
     const state = learningObject(raw) ? raw : undefined;
     const query = state && (typeof state.query === 'string' ? state.query : learningObject(state.query) ? state.query.query : undefined);
@@ -1480,7 +1470,6 @@ export function createHarnessFixtureReadings(): JudgmentPort {
     ask: async request => { try {
       const learning = learningPorts.get(request.context?.battery ?? '');
       if (learning) return await learning.ask(request);
-      if (request.context?.battery === 'engine.tools.research-schema-status') return await researchSchema.port.ask(request);
       if (request.context?.battery === 'engine.tools.registry-catalog-group') return await catalogGroups.port.ask(request);
       if (request.context?.battery === 'engine.tools.registry-select') return await catalogSelection.port.ask(request);
       if (request.context?.battery === 'agent.browser-device.evidence') return await deviceEvidence.port.ask(request);

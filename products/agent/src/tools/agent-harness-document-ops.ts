@@ -2,7 +2,7 @@ import type { CommandContext } from '../input/command-registry.ts';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { captureCatalogData, captureCatalogMethods, rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { AGENT_WORKSPACE_CATEGORIES } from '../input/agent-workspace-categories.ts';
-import { buildAgentWorkspaceRuntimeSnapshot } from '../input/agent-workspace-snapshot.ts';
+import { buildAgentWorkspaceDocumentOpsPart } from '../input/agent-workspace-snapshot.ts';
 import type { AgentWorkspaceReviewPacketWizard, AgentWorkspaceReviewPacketWizardStep } from '../input/agent-workspace-types.ts';
 import { previewHarnessText } from './agent-harness-text.ts';
 import { buildReviewerReadinessChecklist } from './agent-harness-document-ops-reviewer-readiness.ts';
@@ -204,7 +204,8 @@ export function describeLane(lane: DocumentOpsLane, includeParameters: boolean):
 }
 
 function buildLanes(context: CommandContext): readonly DocumentOpsLane[] {
-  const snapshot = buildAgentWorkspaceRuntimeSnapshot(context);
+  // Only the parts the lanes read (review packet, voice and media, a few runtime facts).
+  const snapshot = buildAgentWorkspaceDocumentOpsPart(context);
   const available = workspaceActionIds();
   const documentActions = existingActions([
     'document-browse-drafts',
@@ -605,7 +606,7 @@ function captureDocumentBackend(context: CommandContext) {
   const guards = [captureCatalogMethods(context, ['extensions', 'session', 'platform', 'workspace', 'provider', 'clients', 'executeCommand']),
     captureCatalogMethods(context.extensions, ['toolRegistry', 'mcpRegistry']), captureCatalogMethods(context.extensions.toolRegistry, ['has']),
     captureCatalogMethods(context.session, ['runtime', 'sessionMemoryStore']), captureCatalogMethods(context.session.runtime, ['sessionId', 'model', 'provider']),
-    captureCatalogMethods(context.platform, ['config', 'configManager', 'artifactStore', 'voiceProviderRegistry', 'mediaProviderRegistry', 'subscriptionManager', 'serviceRegistry', 'readModels', 'setupReceipts', 'setupReceiptEvents']),
+    captureCatalogMethods(context.platform, ['config', 'configManager', 'artifactStore', 'voiceProviderRegistry', 'mediaProviderRegistry', 'subscriptionManager', 'serviceRegistry', 'readModels']),
     captureCatalogMethods(context.workspace, ['shellPaths', 'processManager']),
     () => { if (JSON.stringify(captureCatalogData(AGENT_WORKSPACE_CATEGORIES)) !== categoryRevision) throw new ToolInputProjectionError('stale'); }];
   const retainService = (value: unknown, keys: readonly string[]) => { if (value && typeof value === 'object') guards.push(captureCatalogMethods(value, keys)); };
@@ -637,10 +638,9 @@ function captureDocumentBackend(context: CommandContext) {
     const revision = JSON.stringify(captureCatalogData(Reflect.get(subject, key)));
     guards.push(() => { if (JSON.stringify(captureCatalogData(Reflect.get(subject, key))) !== revision) throw new ToolInputProjectionError('stale'); });
   };
-  for (const key of ['config', 'setupReceipts', 'setupReceiptEvents']) retainPublished(context.platform, key);
+  retainPublished(context.platform, 'config');
   const readModels: unknown = Reflect.get(context.platform, 'readModels');
-  if (readModels && typeof readModels === 'object') for (const key of ['setup', 'setupWizard', 'setupReceipts', 'setupReceiptEvents', 'setupReceiptEventStream', 'durableSetupReceipts', 'firstRun', 'browserPwa']) retainPublished(readModels, key);
-  if (context.clients?.operator) for (const key of ['setupReceipts', 'setupReceiptEvents']) retainPublished(context.clients.operator, key);
+  if (readModels && typeof readModels === 'object') retainPublished(readModels, 'setup');
   return () => { for (const guard of guards) guard(); };
 }
 

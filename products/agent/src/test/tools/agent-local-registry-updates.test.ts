@@ -98,10 +98,16 @@ describe('agent_local_registry updates and limits', () => {
     ]);
   });
 
-  test('enabled on a skill update is applied, not silently ignored', async () => {
+  test('enabled on a skill update is applied once the owner reviewed it, and refused before', async () => {
     const { paths, tool } = await toolFixture();
-    const skill = AgentSkillRegistry.fromShellPaths(paths).create({ name: 'Deploy', description: 'Deploy it.', procedure: 'Run deploy.', source: 'agent' });
+    const registry = AgentSkillRegistry.fromShellPaths(paths);
+    const skill = registry.create({ name: 'Deploy', description: 'Deploy it.', procedure: 'Run deploy.', source: 'agent' });
     expect(skill.enabled).toBe(false);
+    const refused = await tool.execute({ domain: 'skill', action: 'update', id: skill.id, enabled: true });
+    expect(refused.success).toBe(false);
+    expect(refused.error).toContain(`/skills review ${skill.id}`);
+    expect(AgentSkillRegistry.fromShellPaths(paths).get(skill.id)?.enabled).toBe(false);
+    registry.markReviewed(skill.id);
     const result = await tool.execute({ domain: 'skill', action: 'update', id: skill.id, enabled: true });
     expect(result.success, result.error).toBe(true);
     expect(AgentSkillRegistry.fromShellPaths(paths).get(skill.id)?.enabled).toBe(true);

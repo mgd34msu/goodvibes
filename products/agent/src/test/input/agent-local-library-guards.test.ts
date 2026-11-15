@@ -49,20 +49,18 @@ describe('/skills update', () => {
 
 describe('review is the owner\'s gesture', () => {
   test('a model-run /skills review leaves the skill unreviewed; the owner can review it', async () => {
-    const { registry, owner, model, out, shellPaths } = rig();
+    const { registry, owner, model, shellPaths } = rig();
     await registry.execute('skills', CREATE, owner);
-    await registry.execute('skills', ['review', 'inbox-triage'], model);
-    expect(out.at(-1)).toContain('Refused');
+    await expect(registry.execute('skills', ['review', 'inbox-triage'], model)).rejects.toMatchObject({ code: 'OWNER_REVIEW_REQUIRED' });
     expect(AgentSkillRegistry.fromShellPaths(shellPaths).get('inbox-triage')!.reviewState).not.toBe('reviewed');
     await registry.execute('skills', ['review', 'inbox-triage'], owner);
     expect(AgentSkillRegistry.fromShellPaths(shellPaths).get('inbox-triage')!.reviewState).toBe('reviewed');
   });
 
   test('a model cannot enable an unreviewed skill but can enable a reviewed one', async () => {
-    const { registry, owner, model, out, shellPaths } = rig();
+    const { registry, owner, model, shellPaths } = rig();
     await registry.execute('skills', CREATE, owner);
-    await registry.execute('skills', ['enable', 'inbox-triage'], model);
-    expect(out.at(-1)).toContain('has not been reviewed');
+    await expect(registry.execute('skills', ['enable', 'inbox-triage'], model)).rejects.toThrow('has not been reviewed');
     expect(AgentSkillRegistry.fromShellPaths(shellPaths).get('inbox-triage')!.enabled).toBe(false);
     await registry.execute('skills', ['review', 'inbox-triage'], owner);
     await registry.execute('skills', ['enable', 'inbox-triage'], model);
@@ -70,11 +68,10 @@ describe('review is the owner\'s gesture', () => {
   });
 
   test('a model-run /skills bundle review is refused', async () => {
-    const { registry, owner, model, out, shellPaths } = rig();
+    const { registry, owner, model, shellPaths } = rig();
     await registry.execute('skills', CREATE, owner);
     await registry.execute('skills', ['bundle', 'create', '--name', 'Ops', '--description', 'Ops skills', '--skills', 'inbox-triage'], owner);
-    await registry.execute('skills', ['bundle', 'review', 'ops'], model);
-    expect(out.at(-1)).toContain('Refused');
+    await expect(registry.execute('skills', ['bundle', 'review', 'ops'], model)).rejects.toMatchObject({ code: 'OWNER_REVIEW_REQUIRED' });
     expect(AgentSkillRegistry.fromShellPaths(shellPaths).getBundle('ops')!.reviewState).not.toBe('reviewed');
   });
 

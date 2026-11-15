@@ -852,8 +852,8 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
     const fixture = makeFixture();
     try {
       const readModels = fixture.context.platform.readModels as unknown as Record<string, unknown>;
-      readModels.setup = {
-        getSnapshot: () => ({
+      readModels.setup = { receipts: {
+        list: () => ({
           setupReceipts: {
             service: {
               setupStepId: 'connected-host-readiness',
@@ -880,29 +880,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
             },
           },
         }),
-      };
-      readModels.setupReceiptEventStream = {
-        listEvents: () => ({
-          cursor: 'setup-cursor-0006',
-          events: [{
-            setupStepId: 'install-smoke',
-            receiptId: 'live-smoke-event-ready',
-            receiptStatus: 'ready',
-            recordedAt: '1970-01-01T00:00:06.000Z',
-            summary: 'Setup smoke event stream certified first-run output with token=event-stream-secret.',
-            schemaVersion: 'goodvibes.setup.receipt.v1',
-            schemaStatus: 'certified',
-            methodId: 'setup.smoke',
-            repairRoute: 'setup action:"smoke" setupItemId:"install-smoke" confirm:true explicitUserRequest:"..."',
-            actionRoute: 'setup action:"finish" confirm:true explicitUserRequest:"..."',
-            publicationGuarantee: 'The GoodVibes daemon publishes ordered setup receipt events before closeout; token=publication-secret.',
-            publisher: 'goodvibes-daemon',
-            eventSequence: 6,
-            inspectRoute: 'setup action:"item" setupItemId:"install-smoke" includeParameters:true',
-          }],
-        }),
-      };
-
+      } };
       const posture = await executeHarnessJson<{
         readonly setupWizard: {
           readonly steps: readonly { readonly id: string; readonly status: string; readonly detail: string }[];
@@ -937,27 +915,13 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       expect(steps.get('connected-host-auth')?.detail).not.toContain('hidden-live-secret');
       expect(steps.get('install-smoke')?.status).toBe('done');
       const durableHistory = posture.setupWizard._diagnostic.stepHistory.filter((entry: { kind: string; receiptId: string }) => entry.kind === 'durable-receipt');
-      expect(durableHistory).toHaveLength(4);
-      expect(durableHistory.filter((entry: { receiptId: string; source?: string }) => entry.receiptId !== 'live-smoke-event-ready').every((entry: { source?: string }) => entry.source === 'context.platform.readModels.setup')).toBe(true);
+      expect(durableHistory).toHaveLength(3);
+      // One declared source: the setup read model's receipts, read through list().
+      expect(durableHistory.every((entry: { source?: string }) => entry.source === 'context.platform.readModels.setup.receipts')).toBe(true);
       expect(durableHistory.find((entry: { receiptId: string; summary: string }) => entry.receiptId === 'live-auth-ready')?.summary).toContain('token=<redacted>');
-      const eventReceipt = durableHistory.find((entry: { receiptId: string }) => entry.receiptId === 'live-smoke-event-ready');
-      expect(eventReceipt?.source).toBe('context.platform.readModels.setupReceiptEventStream');
-      expect(eventReceipt?.schemaStatus).toBe('certified');
-      expect(eventReceipt?.schemaVersion).toBe('goodvibes.setup.receipt.v1');
-      expect(eventReceipt?.eventCursor).toBe('setup-cursor-0006');
-      expect(eventReceipt?.eventSequence).toBe(6);
-      expect(eventReceipt?.publisher).toBe('goodvibes-daemon');
-      expect(eventReceipt?.summary).toContain('token=<redacted>');
-      expect(eventReceipt?.summary).not.toContain('event-stream-secret');
-      expect(eventReceipt?.publicationGuarantee).toContain('token=<redacted>');
-      expect(eventReceipt?.publicationGuarantee).not.toContain('publication-secret');
-      expect(eventReceipt?.provenance?.join('\n')).toContain('method setup.smoke');
-      expect(eventReceipt?.provenance?.join('\n')).toContain('repair setup action:"smoke"');
       expect(durableHistory.every((entry: { satisfiesReceipt?: boolean }) => entry.satisfiesReceipt === true)).toBe(true);
       expect(posture.setupWizard._diagnostic.receiptGaps).toEqual([]);
       expect(posture.setupWizard._diagnostic.closeout.evidence.join('\n')).toContain('setup smoke receipt: ready');
-      expect(posture.setupWizard._diagnostic.closeout.evidence.join('\n')).toContain('certified setup receipts: 1/4');
-      expect(posture.setupWizard._diagnostic.closeout.evidence.join('\n')).toContain('setup receipt event streams: 1');
     } finally {
       await fixture.cleanup();
     }

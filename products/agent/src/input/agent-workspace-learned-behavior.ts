@@ -21,9 +21,9 @@ export interface AgentWorkspaceLearnedBehaviorResult {
 }
 
 /**
- * Runs the second write of a two-write save (the record, then its enabled/active flag).
- * The registries have no single-write form, so when the second write fails the record is
- * already on disk; the error says so, which stops a retry from creating a duplicate.
+ * Runs the second write of a two-write save (an edited skill or routine, then its enabled
+ * flag; their registries' update takes no enabled value yet). When the second write fails the
+ * edit is already on disk; the error says so, which stops a retry from repeating it.
  */
 export function runFollowUpWrite(saved: string, followUp: string, write: () => void): void {
   try {
@@ -42,6 +42,7 @@ export function createAgentWorkspaceLearnedBehavior(
   if (input.target === 'persona') {
     const registry = AgentPersonaRegistry.fromShellPaths(shellPaths);
     assertCurrent?.();
+    // Saved and made active in one write: nothing can leave it saved but not active.
     const created = registry.create({
       name: input.name,
       description: input.description,
@@ -50,11 +51,8 @@ export function createAgentWorkspaceLearnedBehavior(
       triggers: input.triggers,
       source: 'agent',
       provenance: 'agent-workspace-learned-behavior',
+      active: input.enable,
     });
-    if (input.enable) {
-      assertCurrent?.();
-      runFollowUpWrite(`Persona "${created.name}"`, 'making it active', () => registry.setActive(created.id));
-    }
     return { kind: 'persona', id: created.id, name: created.name };
   }
 

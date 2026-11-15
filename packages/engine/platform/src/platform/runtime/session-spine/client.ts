@@ -324,6 +324,18 @@ export class SessionSpineClient {
   }
 
   /**
+   * MOVE: the process now uses `record.sessionId` instead of `previousId` (a
+   * resume, fork or recovery). The previous id is closed before the next is
+   * reopened, so it stops receiving keepalive heartbeats and leaves the daemon's
+   * live list. The same id is a no-op.
+   */
+  move(previousId: string, record: SessionSpineRecord): void {
+    if (previousId === record.sessionId) return;
+    this.close(previousId);
+    this.reopen(record);
+  }
+
+  /**
    * HEARTBEAT: debounced re-register, coalesced to one wire call per window, no title,
    * no reopen. Safe to call on every turn/render tick, internally a no-op unless the
    * window has elapsed.

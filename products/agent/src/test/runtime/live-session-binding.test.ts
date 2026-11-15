@@ -15,21 +15,22 @@ function harness(boot: string) {
     registerConversation: (id: string, c: typeof conversation) => { calls.push(`register:${id}:${c.name}`); },
     unregisterConversation: (id: string) => { calls.push(`unregister:${id}`); },
     rewindHost: { start: (id: string) => { calls.push(`rewind:${id}`); } },
-    spine: { reopen: (input: { sessionId: string; project: string }) => { calls.push(`reopen:${input.sessionId}:${input.project}`); } },
+    spine: { move: (previous: string, input: { sessionId: string; project: string }) => { calls.push(`move:${previous}->${input.sessionId}:${input.project}`); } },
     project: '/work',
+    openSessionRecord: (id: string) => { calls.push(`record:${id}`); },
   };
   return { deps, ref, hosted, calls };
 }
 
 describe('moveLiveSession', () => {
-  test('a resume moves the ref, the hosted set, the rewind registry and host, and the spine to the new id', () => {
+  test('a resume moves the ref, the hosted set, the rewind registry and host, the spine (closing the old id) and the register record to the new id', () => {
     const { deps, ref, hosted, calls } = harness('boot');
     moveLiveSession(deps, 'resumed');
     expect(ref.value).toBe('resumed');
     expect(hosted.hosts('resumed')).toBe(true);
     expect(hosted.hosts('boot')).toBe(false);
     expect([...hosted.ids()]).toEqual(['resumed']);
-    expect(calls).toEqual(['unregister:boot', 'register:resumed:conversation', 'rewind:resumed', 'reopen:resumed:/work']);
+    expect(calls).toEqual(['unregister:boot', 'register:resumed:conversation', 'rewind:resumed', 'move:boot->resumed:/work', 'record:resumed']);
   });
 
   test('assigning the id already in use changes nothing', () => {

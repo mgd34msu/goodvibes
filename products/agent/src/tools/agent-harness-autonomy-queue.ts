@@ -3,7 +3,9 @@ import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platfor
 import { captureCatalogData, captureCatalogMethods, rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { contractMethodsForAutonomy } from './agent-harness-personal-ops-discovery.ts';
 import type { CommandContext } from '../input/command-registry.ts';
-import { buildAgentWorkspaceRuntimeSnapshot } from '../input/agent-workspace-snapshot.ts';
+import { buildAgentWorkspaceRoutineCounters } from '../input/agent-workspace-snapshot.ts';
+import { buildAgentWorkspaceResearchRunSnapshot, buildAgentWorkspaceRoutineScheduleReceiptsSnapshot } from '../input/agent-workspace-snapshot-builders.ts';
+import { buildAgentWorkspaceChannels } from '../input/agent-workspace-channels.ts';
 import { autonomyLiveNativeFacts, captureAutonomyLiveRecords, controlAvailable, firstAvailableControlRoute,
   type AutonomyLiveRecordBundle, type AutonomyLiveNativeFacts } from './agent-harness-autonomy-live-records.ts';
 import { watcherReadModelLiveRecords, watcherReadModelNativeFacts, watcherReadModelPublication } from './agent-harness-autonomy-watcher-read-models.ts';
@@ -214,7 +216,21 @@ function buildQueueItems(context: CommandContext, watcherReadModelRecords: reado
   records: AutonomyLiveRecordBundle, methodReadiness: AutonomyMethodReadiness, supervised: QueueSideFacts,
   facts: AutonomyLiveNativeFacts = nativeFactsForBundle(records),
   watcherFacts: readonly Pick<AutonomyQueueLiveRecord, 'status'>[] = watcherReadModelRecords): readonly AutonomyQueueItem[] {
-  const snapshot = buildAgentWorkspaceRuntimeSnapshot(context);
+  // Only the parts the queue reads: channels, routines with their schedule receipts, research run counts.
+  const routineReceipts = buildAgentWorkspaceRoutineScheduleReceiptsSnapshot(context);
+  const researchRunCounts = buildAgentWorkspaceResearchRunSnapshot(context);
+  const snapshot = {
+    channels: buildAgentWorkspaceChannels(context),
+    localRoutines: buildAgentWorkspaceRoutineCounters(context).items,
+    routineScheduleReceiptCount: routineReceipts.count,
+    successfulRoutineScheduleReceiptCount: routineReceipts.successful,
+    failedRoutineScheduleReceiptCount: routineReceipts.failed,
+    researchRunCount: researchRunCounts.count,
+    researchRunPlannedCount: researchRunCounts.planned,
+    researchRunRunningCount: researchRunCounts.running,
+    researchRunPausedCount: researchRunCounts.paused,
+    researchRunBlockedCount: researchRunCounts.blocked,
+  };
   const methods = methodReadiness.status === 'qualified' ? methodReadiness.methods : undefined;
   const approvalMethods = methods?.approvals.available ?? [];
   const automationMethods = methods?.automation.available ?? [];

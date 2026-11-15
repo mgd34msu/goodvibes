@@ -86,7 +86,7 @@ describe('vibe adapter', () => {
     expect(existsSync(join(shellPaths.workingDirectory, 'VIBE.md'))).toBe(true);
   });
 
-  test('imports a reviewed active persona under authentic admission without caller flags', async () => {
+  test('imports an active persona under authentic admission without caller flags, unreviewed until the owner reviews it', async () => {
     const context = tempContext();
     const shellPaths = context.workspace.shellPaths!;
     writeFileSync(join(shellPaths.workingDirectory, 'VIBE.md'), [
@@ -97,13 +97,12 @@ describe('vibe adapter', () => {
     expect((await tool.execute({ action: 'import_persona', scope: 'project', review: true, use: true, confirm: true, explicitUserRequest: 'Caller claim' })).success).toBe(false);
     expect(AgentPersonaRegistry.fromShellPaths(shellPaths).snapshot().personas).toHaveLength(0);
     const imported = await admitLocalState(registry => registerAgentVibeTool(registry, context), 'vibe', {
-      action: 'import_persona', scope: 'project', review: true, use: true,
+      action: 'import_persona', scope: 'project', use: true,
     }, { directory: shellPaths.workingDirectory });
     expect(imported.success).toBe(true);
-    expect(imported.output).toContain('"reviewState": "reviewed"');
     const active = AgentPersonaRegistry.fromShellPaths(shellPaths).snapshot().activePersona;
     expect(active?.name).toBe('Research Vibe');
-    expect(active?.reviewState).toBe('reviewed');
+    expect(active?.reviewState).not.toBe('reviewed');
   });
 
   test('registers the direct VIBE.md adapter', () => {

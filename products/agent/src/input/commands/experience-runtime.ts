@@ -76,12 +76,6 @@ const approvalMatrixCommand = createApprovalMatrixCommand<CommandContext>({
   },
   action: handleApprovalOperatorAction,
 });
-// A second `setup --yes` while one is running would start another download and
-// another progress poller over the same install. Keyed on the voice service so
-// separate runtimes stay independent.
-const voiceInstallsInFlight = new WeakSet<object>();
-const wakeProvisionsInFlight = new WeakSet<object>();
-
 const voiceExperienceCommand = createVoiceExperienceCommand<CommandContext>({
   description:
     'Review voice posture, manage the managed local-voice runtime and the wake-word models, and package portable voice interaction metadata',
@@ -91,7 +85,7 @@ const voiceExperienceCommand = createVoiceExperienceCommand<CommandContext>({
   confirmMutations: true,
   reportFailure: true,
   paths: requireShellPaths,
-  wake(args, ctx, _shellPaths, yes) {
+  async wake(args, ctx, _shellPaths, yes) {
     // Wake artifacts live under the same managed voice root as the local
     // runtime, in its `wake` subdirectory, and are served by the same
     // voiceSetup service, so this reads and provisions through the platform's
@@ -118,27 +112,21 @@ const voiceExperienceCommand = createVoiceExperienceCommand<CommandContext>({
         requireYesFlag(ctx, 'download the pinned wake-word classifier and speech-embedding front end (~3.7 MB)', '/voice wake setup --yes');
         return;
       }
-      if (wakeProvisionsInFlight.has(voiceSetup)) {
-        ctx.print('Wake-Word Setup\n  already running; its receipt prints here when it finishes. Check /voice wake status.');
-        return;
-      }
-      wakeProvisionsInFlight.add(voiceSetup);
+      // The command ends when the download does, so whoever ran it (the owner
+      // or the model) gets the receipt; the owner's composer is not held by it.
       ctx.print(WAKE_SETUP_ANNOUNCEMENT);
-      void voiceSetup
-        .wakeProvision()
-        .finally(() => { wakeProvisionsInFlight.delete(voiceSetup); })
-        .then((result) => {
-          ctx.print(['Wake-Word Setup, receipt', ...wakeProvisionReceiptLines(result)].join('\n'));
-        })
-        .catch((error: unknown) => {
-          ctx.print(`Wake-Word Setup\n  provisioning failed: ${error instanceof Error ? error.message : String(error)}`);
-        });
+      try {
+        const result = await voiceSetup.wakeProvision();
+        ctx.print(['Wake-Word Setup, receipt', ...wakeProvisionReceiptLines(result)].join('\n'));
+      } catch (error) {
+        ctx.print(`Wake-Word Setup\n  provisioning failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
       return;
     }
     ctx.print('Usage: /voice wake [status|setup --yes]');
     return;
   },
-  provision(sub, _args, ctx, _shellPaths, yes) {
+  async provision(sub, _args, ctx, _shellPaths, yes) {
     if (sub === 'status') {
       const status = requireVoiceSetup(ctx).status();
       // Live install progress: voice.local.status carries an
@@ -170,17 +158,15 @@ const voiceExperienceCommand = createVoiceExperienceCommand<CommandContext>({
         return;
       }
       const voiceSetup = requireVoiceSetup(ctx);
-      if (voiceInstallsInFlight.has(voiceSetup)) {
-        ctx.print('A managed local-voice install is already running; its receipt prints here when it finishes. Check /voice status for progress.');
-        return;
-      }
-      voiceInstallsInFlight.add(voiceSetup);
+      // install() is single-flight: a second run joins the one in progress and
+      // gets the same receipt. The command ends when the install does, so
+      // whoever ran it (the owner or the model) gets the receipt; the owner's
+      // composer is not held by it.
       ctx.print('Installing managed local-voice runtime...');
-      // Poll voice.local.status while the install call is in flight and
-      // render live per-component progress from its installInProgress
-      // section (platform 5357f09e). Honest fallback: a host build whose status
-      // never carries the section (an older daemon) just keeps the busy
-      // line above until the final receipt, no fabricated progress.
+      // Live per-component progress from voice.local.status while the install
+      // runs (an older host build whose status carries no installInProgress
+      // section shows only the line above until the receipt). The poll ends
+      // with the install.
       let installSettled = false;
       const renderedProgress = new Map<string, string>();
       const pollInstallProgress = async (): Promise<void> => {
@@ -203,34 +189,27 @@ const voiceExperienceCommand = createVoiceExperienceCommand<CommandContext>({
         }
       };
       void pollInstallProgress();
-      void voiceSetup
-        .install()
-        .then((result) => {
-          const lines = [
-            'Managed Local-Voice Setup',
-            ...result.components.map(
-              (component) =>
-                `  ${component.id}: ${formatVoiceComponentState(component.state)}${component.error ? ` (${component.error})` : ''}`,
-            ),
-            `  tts (${result.tts.engine}): ${formatVoiceComponentState(result.tts.state)}${result.tts.reason ? ` (${result.tts.reason})` : ''}`,
-            // STT (whisper.cpp) provisions only where goodvibes has published a
-            // pinned per-platform bundle; elsewhere (or before that bundle is
-            // published for this platform) it reports its real state honestly
-            // rather than a fabricated success.
-            `  stt (${result.stt.engine}): ${formatVoiceComponentState(result.stt.state)}${result.stt.reason ? ` (${result.stt.reason})` : ''}`,
-            `  result: ${result.provisioned ? 'voice.local.* configured' : 'not provisioned'}`,
-            ...result.configured.set.map((entry) => `  set ${entry.key} = ${entry.value}`),
-            ...result.configured.skipped.map((entry) => `  skipped ${entry.key} (${entry.reason})`),
-          ];
-          ctx.print(lines.join('\n'));
-        })
-        .catch((error) => {
-          ctx.print(`voice setup failed: ${error instanceof Error ? error.message : String(error)}`);
-        })
-        .finally(() => {
-          installSettled = true;
-          voiceInstallsInFlight.delete(voiceSetup);
-        });
+      try {
+        const result = await voiceSetup.install();
+        ctx.print([
+          'Managed Local-Voice Setup',
+          ...result.components.map(
+            (component) =>
+              `  ${component.id}: ${formatVoiceComponentState(component.state)}${component.error ? ` (${component.error})` : ''}`,
+          ),
+          `  tts (${result.tts.engine}): ${formatVoiceComponentState(result.tts.state)}${result.tts.reason ? ` (${result.tts.reason})` : ''}`,
+          // STT (whisper.cpp) provisions only where goodvibes has published a
+          // pinned per-platform bundle; elsewhere it reports its real state.
+          `  stt (${result.stt.engine}): ${formatVoiceComponentState(result.stt.state)}${result.stt.reason ? ` (${result.stt.reason})` : ''}`,
+          `  result: ${result.provisioned ? 'voice.local.* configured' : 'not provisioned'}`,
+          ...result.configured.set.map((entry) => `  set ${entry.key} = ${entry.value}`),
+          ...result.configured.skipped.map((entry) => `  skipped ${entry.key} (${entry.reason})`),
+        ].join('\n'));
+      } catch (error) {
+        ctx.print(`voice setup failed: ${error instanceof Error ? error.message : String(error)}`);
+      } finally {
+        installSettled = true;
+      }
       return;
     }
   },

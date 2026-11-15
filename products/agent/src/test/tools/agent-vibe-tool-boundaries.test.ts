@@ -99,23 +99,15 @@ describe('vibe import_persona', () => {
     expect(AgentPersonaRegistry.fromShellPaths(shellPaths).snapshot().personas).toHaveLength(0);
   });
 
-  test('a failure after the persona was created names the persona and the step that failed', async () => {
+  test('the model asking to mark the import reviewed is refused and nothing is imported', async () => {
     const context = tempContext();
     const shellPaths = context.workspace.shellPaths!;
     writeFileSync(join(shellPaths.workingDirectory, 'VIBE.md'), ['---', 'name: Half Vibe', '---', 'Be brief.'].join('\n'));
-    const original = AgentPersonaRegistry.prototype.setActive;
-    AgentPersonaRegistry.prototype.setActive = function setActive(): never { throw new Error('active store is read-only'); };
-    try {
-      const result = await admitLocalState(registry => registerAgentVibeTool(registry, context), 'vibe', {
-        action: 'import_persona', scope: 'project', review: true, use: true,
-      }, { directory: shellPaths.workingDirectory });
-      expect(result.success).toBe(false);
-      expect(result.error).toContain('activate step failed');
-      expect(result.error).toContain('active store is read-only');
-      expect(result.error).toContain('do not import again');
-    } finally { AgentPersonaRegistry.prototype.setActive = original; }
-    const personas = AgentPersonaRegistry.fromShellPaths(shellPaths).snapshot().personas;
-    expect(personas).toHaveLength(1);
-    expect(personas[0]!.reviewState).toBe('reviewed');
+    const result = await admitLocalState(registry => registerAgentVibeTool(registry, context), 'vibe', {
+      action: 'import_persona', scope: 'project', review: true, use: true,
+    }, { directory: shellPaths.workingDirectory });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('/personas review');
+    expect(AgentPersonaRegistry.fromShellPaths(shellPaths).snapshot().personas).toHaveLength(0);
   });
 });

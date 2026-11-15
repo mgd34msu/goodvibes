@@ -433,7 +433,7 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
       holder: services.contextAccountingHolder,
       runtimeBus,
       runtimeStore: store,
-      sessionId: runtime.sessionId,
+      getSessionId: () => runtime.sessionId,
       getContextWindow: () => providerRegistry.getKnownContextWindowForModel(providerRegistry.getCurrentModel()),
     }),
   );
@@ -728,7 +728,7 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
     hookDispatcher,
     fileCache,
     projectIndex,
-    sessionId: userSessionId,
+    get sessionId() { return runtime.sessionId; },
     isResumed: false, // Sessions start fresh; use /session resume to load a previous one
     runtime,
     orchestrator,

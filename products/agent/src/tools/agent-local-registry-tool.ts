@@ -9,6 +9,8 @@ import { AgentNoteRegistry, type AgentNoteRecord } from '../agent/note-registry.
 import { AgentRoutineRegistry, type AgentRoutineRecord } from '../agent/routine-registry.ts';
 import { AgentSkillRegistry, type AgentSkillBundleRecord, type AgentSkillRecord } from '../agent/skill-registry.ts';
 import { formatAgentRecordOrigin, formatAgentRecordReviewState } from '../agent/record-labels.ts';
+import { assertActorMayEnable, assertActorMayMarkReviewed } from '../agent/review-authority.ts';
+import { formatRefusal, readRefusal } from '@goodvibes-jev/engine/errors';
 import { buildAgentLocalRequirements } from './agent-local-registry-requirements.ts';
 import {
   AGENT_TOOL_PROVENANCE,
@@ -188,6 +190,7 @@ function handlePersona(shellPaths: ShellPathService, action: AgentLocalRegistryA
   }
   if (action === 'create') {
     const activate = readActivation(args.activate);
+    // Saved and, when asked, made active in one write.
     const persona = registry.create({
       name: requireName(args),
       description: requireDescription(args),
@@ -196,11 +199,8 @@ function handlePersona(shellPaths: ShellPathService, action: AgentLocalRegistryA
       triggers: readStringList(args.triggers),
       source: 'agent',
       provenance: readString(args.provenance) || AGENT_TOOL_PROVENANCE,
+      ...(activate === true ? { active: true } : {}),
     });
-    if (activate === true) {
-      try { registry.setActive(persona.id); }
-      catch (error) { throw new Error(`Created Agent-local persona ${persona.id}, but activating it failed: ${error instanceof Error ? error.message : String(error)}. Use action:"use" id:"${persona.id}" to retry.`); }
-    }
     return [
       'Created Agent-local persona',
       `  id ${persona.id}`,
@@ -209,8 +209,8 @@ function handlePersona(shellPaths: ShellPathService, action: AgentLocalRegistryA
   }
   if (action === 'update') {
     const activate = readActivation(args.activate);
-    const wasActive = registry.snapshot().activePersonaId === requireId(args);
     requireUpdateFields('persona', { name: args.name, description: args.description, body: args.body, tags: args.tags, triggers: args.triggers, activate: activate });
+    // The edit and the active-state change are one write.
     const persona = registry.update(requireId(args), {
       name: readString(args.name) || undefined,
       description: readString(args.description) || undefined,
@@ -218,11 +218,8 @@ function handlePersona(shellPaths: ShellPathService, action: AgentLocalRegistryA
       tags: args.tags === undefined ? undefined : readStringList(args.tags),
       triggers: args.triggers === undefined ? undefined : readStringList(args.triggers),
       provenance: readString(args.provenance) || AGENT_TOOL_PROVENANCE,
+      ...(activate === undefined ? {} : { active: activate }),
     });
-    if (activate !== undefined) {
-      try { if (activate) registry.setActive(persona.id); else if (wasActive) registry.clearActive(); }
-      catch (error) { throw new Error(`Updated Agent-local persona ${persona.id}, but changing its active state failed: ${error instanceof Error ? error.message : String(error)}.`); }
-    }
     return [
       'Updated Agent-local persona',
       `  id ${persona.id}`,
@@ -242,6 +239,7 @@ function handlePersona(shellPaths: ShellPathService, action: AgentLocalRegistryA
     return 'Cleared active Agent-local persona.';
   }
   if (action === 'review') {
+    assertActorMayMarkReviewed('model', 'persona', requireId(args));
     const persona = registry.markReviewed(requireId(args));
     return [
       'Reviewed Agent-local persona',
@@ -284,6 +282,7 @@ function handleSkill(shellPaths: ShellPathService, action: AgentLocalRegistryAct
     ].join('\n');
   }
   if (action === 'create') {
+    if (args.enabled === true) assertActorMayEnable('model', 'skill', requireName(args), 'fresh');
     const skill = registry.create({
       name: requireName(args),
       description: requireDescription(args),
@@ -303,6 +302,9 @@ function handleSkill(shellPaths: ShellPathService, action: AgentLocalRegistryAct
   }
   if (action === 'update') {
     const id = requireId(args);
+    // An edit returns the skill to unreviewed, so enabling in the same call needs the owner.
+    if (args.enabled === true) assertActorMayEnable('model', 'skill', id, [args.name, args.description, args.procedure, args.triggers, args.tags,
+      args.requiresEnv, args.requiresCommands].some((value) => value !== undefined) ? 'fresh' : registry.get(id)?.reviewState);
     requireUpdateFields('skill', { name: args.name, description: args.description, procedure: args.procedure, triggers: args.triggers, tags: args.tags,
       requiresEnv: args.requiresEnv, requiresCommands: args.requiresCommands, enabled: typeof args.enabled === 'boolean' ? args.enabled : undefined });
     const skill = registry.update(id, {
@@ -322,6 +324,7 @@ function handleSkill(shellPaths: ShellPathService, action: AgentLocalRegistryAct
     ].join('\n');
   }
   if (action === 'enable' || action === 'disable') {
+    if (action === 'enable') assertActorMayEnable('model', 'skill', requireId(args), registry.get(requireId(args))?.reviewState);
     const skill = registry.setEnabled(requireId(args), action === 'enable');
     return [
       `${action === 'enable' ? 'Enabled' : 'Disabled'} Agent-local skill`,
@@ -330,6 +333,7 @@ function handleSkill(shellPaths: ShellPathService, action: AgentLocalRegistryAct
     ].join('\n');
   }
   if (action === 'review') {
+    assertActorMayMarkReviewed('model', 'skill', requireId(args));
     const skill = registry.markReviewed(requireId(args));
     return [
       'Reviewed Agent-local skill',
@@ -370,6 +374,7 @@ function handleSkillBundle(shellPaths: ShellPathService, action: AgentLocalRegis
     ].join('\n');
   }
   if (action === 'create') {
+    if (args.enabled === true) assertActorMayEnable('model', 'skill bundle', requireName(args), 'fresh');
     const bundle = registry.createBundle({
       name: requireName(args),
       description: requireDescription(args),
@@ -386,6 +391,8 @@ function handleSkillBundle(shellPaths: ShellPathService, action: AgentLocalRegis
   }
   if (action === 'update') {
     const id = requireId(args);
+    if (args.enabled === true) assertActorMayEnable('model', 'skill bundle', id,
+      [args.name, args.description, args.skillIds, args.skills].some((value) => value !== undefined) ? 'fresh' : registry.getBundle(id)?.reviewState);
     requireUpdateFields('skill bundle', { name: args.name, description: args.description, skillIds: args.skillIds ?? args.skills, enabled: typeof args.enabled === 'boolean' ? args.enabled : undefined });
     const bundle = registry.updateBundle(id, {
       name: readString(args.name) || undefined,
@@ -401,6 +408,7 @@ function handleSkillBundle(shellPaths: ShellPathService, action: AgentLocalRegis
     ].join('\n');
   }
   if (action === 'enable' || action === 'disable') {
+    if (action === 'enable') assertActorMayEnable('model', 'skill bundle', requireId(args), registry.getBundle(requireId(args))?.reviewState);
     const bundle = registry.setBundleEnabled(requireId(args), action === 'enable');
     return [
       `${action === 'enable' ? 'Enabled' : 'Disabled'} Agent-local skill bundle`,
@@ -409,6 +417,7 @@ function handleSkillBundle(shellPaths: ShellPathService, action: AgentLocalRegis
     ].join('\n');
   }
   if (action === 'review') {
+    assertActorMayMarkReviewed('model', 'skill bundle', requireId(args));
     const bundle = registry.markBundleReviewed(requireId(args));
     return [
       'Reviewed Agent-local skill bundle',
@@ -450,6 +459,7 @@ function handleRoutine(shellPaths: ShellPathService, action: AgentLocalRegistryA
     ].join('\n');
   }
   if (action === 'create') {
+    if (args.enabled === true) assertActorMayEnable('model', 'routine', requireName(args), 'fresh');
     const routine = registry.create({
       name: requireName(args),
       description: requireDescription(args),
@@ -469,6 +479,8 @@ function handleRoutine(shellPaths: ShellPathService, action: AgentLocalRegistryA
   }
   if (action === 'update') {
     const id = requireId(args);
+    if (args.enabled === true) assertActorMayEnable('model', 'routine', id, [args.name, args.description, args.steps, args.triggers, args.tags,
+      args.requiresEnv, args.requiresCommands].some((value) => value !== undefined) ? 'fresh' : registry.get(id)?.reviewState);
     requireUpdateFields('routine', { name: args.name, description: args.description, steps: args.steps, triggers: args.triggers, tags: args.tags,
       requiresEnv: args.requiresEnv, requiresCommands: args.requiresCommands, enabled: typeof args.enabled === 'boolean' ? args.enabled : undefined });
     const routine = registry.update(id, {
@@ -488,6 +500,7 @@ function handleRoutine(shellPaths: ShellPathService, action: AgentLocalRegistryA
     ].join('\n');
   }
   if (action === 'enable' || action === 'disable') {
+    if (action === 'enable') assertActorMayEnable('model', 'routine', requireId(args), registry.get(requireId(args))?.reviewState);
     const routine = registry.setEnabled(requireId(args), action === 'enable');
     return [
       `${action === 'enable' ? 'Enabled' : 'Disabled'} Agent-local routine`,
@@ -507,6 +520,7 @@ function handleRoutine(shellPaths: ShellPathService, action: AgentLocalRegistryA
     ].join('\n');
   }
   if (action === 'review') {
+    assertActorMayMarkReviewed('model', 'routine', requireId(args));
     const routine = registry.markReviewed(requireId(args));
     return [
       'Reviewed Agent-local routine',
@@ -535,7 +549,7 @@ export function createAgentLocalRegistryTool(shellPaths: ShellPathService, memor
   return {
     definition: {
       name: 'agent_local_registry',
-      description: 'Inspect or update Agent-local records by domain. Actions per domain: memory, note: list, search, get, create, update, review, stale, delete. persona adds use and clear_active. skill and skill_bundle add enable and disable. routine adds enable, disable and start. Create needs: memory summary; note title and body; persona name, description and body; skill name, description and procedure; skill_bundle name, description and skillIds; routine name, description and steps. Writes need current recorded admission.',
+      description: 'Inspect or update Agent-local records by domain. Actions per domain: memory, note: list, search, get, create, update, review, stale, delete. persona adds use and clear_active. skill and skill_bundle add enable and disable. routine adds enable, disable and start. Create needs: memory summary; note title and body; persona name, description and body; skill name, description and procedure; skill_bundle name, description and skillIds; routine name, description and steps. Writes need current recorded admission. Marking a persona, skill, skill bundle or routine reviewed, and enabling one nobody reviewed, are the owner\'s: refused here with the command the owner types.',
       parameters: {
         type: 'object',
         properties: {
@@ -602,7 +616,8 @@ export function createAgentLocalRegistryTool(shellPaths: ShellPathService, memor
         if (args.domain === 'skill_bundle') return registryOutput(handleSkillBundle(shellPaths, args.action, args, effects));
         return registryOutput(handleRoutine(shellPaths, args.action, args, effects));
       } catch (error) {
-        return registryError(error instanceof Error ? error.message : String(error));
+        const refused = readRefusal(error);
+        return registryError(refused ? formatRefusal(refused) : error instanceof Error ? error.message : String(error));
       }
     },
   };

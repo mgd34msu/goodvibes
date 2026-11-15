@@ -274,8 +274,12 @@ describe('agent_local_registry tool', () => {
     expect(memoryRegistry.getAll()).toHaveLength(0);
   });
 
-  test('creates and enables an Agent-local skill without external side effects', async () => {
+  test('creates an Agent-local skill; enabling one nobody reviewed is the owner\'s', async () => {
     const { paths, tool } = await toolFixture();
+
+    const enabledUnreviewed = await tool.execute({ domain: 'skill', action: 'create', name: 'Inbox triage', description: 'x', procedure: 'y', enabled: true });
+    expect(enabledUnreviewed.success).toBe(false);
+    expect(AgentSkillRegistry.fromShellPaths(paths).list()).toHaveLength(0);
 
     const created = await tool.execute({
       domain: 'skill',
@@ -287,16 +291,15 @@ describe('agent_local_registry tool', () => {
       triggers: ['inbox', 'email'],
       requiresEnv: ['MAILBOX_TOKEN'],
       requiresCommands: ['mailctl'],
-      enabled: true,
     });
 
     expect(created.success).toBe(true);
     expect(created.output).toContain('Created Agent-local skill inbox-triage');
     const snapshot = AgentSkillRegistry.fromShellPaths(paths).snapshot();
     expect(snapshot.skills).toHaveLength(1);
-    expect(snapshot.enabledSkills[0]?.source).toBe('agent');
-    expect(snapshot.enabledSkills[0]?.provenance).toBe('agent-local-registry-tool');
-    expect(snapshot.enabledSkills[0]?.requirements.map((requirement) => `${requirement.kind}:${requirement.name}`)).toEqual([
+    expect(snapshot.skills[0]?.source).toBe('agent');
+    expect(snapshot.skills[0]?.provenance).toBe('agent-local-registry-tool');
+    expect(snapshot.skills[0]?.requirements.map((requirement) => `${requirement.kind}:${requirement.name}`)).toEqual([
       'env:MAILBOX_TOKEN',
       'command:mailctl',
     ]);
@@ -361,7 +364,7 @@ describe('agent_local_registry tool', () => {
     expect(AgentRoutineRegistry.fromShellPaths(paths).list()).toHaveLength(0);
   });
 
-  test('creates and enables Agent-local skill bundles from the model-visible tool', async () => {
+  test('creates Agent-local skill bundles from the model-visible tool; review and enabling an unreviewed one are the owner\'s', async () => {
     const { paths, tool } = await toolFixture();
     await tool.execute({
       domain: 'skill',
@@ -369,7 +372,6 @@ describe('agent_local_registry tool', () => {
       name: 'Research brief',
       description: 'Build concise source-backed research summaries.',
       procedure: 'Search sources, extract key facts, cite provenance, and summarize tradeoffs.',
-      enabled: true,
     });
     await tool.execute({
       domain: 'skill',
@@ -377,7 +379,6 @@ describe('agent_local_registry tool', () => {
       name: 'Action checklist',
       description: 'Turn findings into a short execution checklist.',
       procedure: 'Create a bounded checklist with owners, risks, and next actions.',
-      enabled: false,
     });
 
     const created = await tool.execute({
@@ -386,20 +387,23 @@ describe('agent_local_registry tool', () => {
       name: 'Research operator',
       description: 'Source-backed research followed by action planning.',
       skills: ['research-brief', 'action-checklist'],
-      enabled: true,
     });
 
     expect(created.success).toBe(true);
     expect(created.output).toContain('Created Agent-local skill bundle research-operator');
-    let snapshot = AgentSkillRegistry.fromShellPaths(paths).snapshot();
-    expect(snapshot.bundles).toHaveLength(1);
-    expect(snapshot.enabledBundles[0]?.skillIds).toEqual(['research-brief', 'action-checklist']);
-    expect(snapshot.activeSkills.map((skill) => skill.id)).toEqual(['research-brief', 'action-checklist']);
+    const registry = AgentSkillRegistry.fromShellPaths(paths);
+    expect(registry.snapshot().bundles).toHaveLength(1);
 
     const reviewed = await tool.execute({ domain: 'skill_bundle', action: 'review', id: 'research-operator' });
-    expect(reviewed.success).toBe(true);
-    snapshot = AgentSkillRegistry.fromShellPaths(paths).snapshot();
-    expect(snapshot.bundles[0]?.reviewState).toBe('reviewed');
+    expect(reviewed.success).toBe(false);
+    expect(reviewed.error).toContain('/skills bundle review research-operator');
+    expect((await tool.execute({ domain: 'skill_bundle', action: 'enable', id: 'research-operator' })).success).toBe(false);
+    expect(registry.snapshot().bundles[0]?.reviewState).not.toBe('reviewed');
+
+    registry.markBundleReviewed('research-operator');
+    expect((await tool.execute({ domain: 'skill_bundle', action: 'enable', id: 'research-operator' })).success).toBe(true);
+    const snapshot = AgentSkillRegistry.fromShellPaths(paths).snapshot();
+    expect(snapshot.enabledBundles[0]?.skillIds).toEqual(['research-brief', 'action-checklist']);
 
     const searched = await tool.execute({ domain: 'skill_bundle', action: 'search', query: 'research' });
     expect(searched.success).toBe(true);
@@ -451,7 +455,6 @@ describe('agent_local_registry tool', () => {
       steps: 'Check local memory, work plan, approvals, and Agent Knowledge status.',
       requiresEnv: ['GOODVIBES_OPERATOR_TOKEN'],
       requiresCommands: ['goodvibes-agent'],
-      enabled: true,
     });
 
     const started = await tool.execute({ domain: 'routine', action: 'start', id: 'morning-brief' });

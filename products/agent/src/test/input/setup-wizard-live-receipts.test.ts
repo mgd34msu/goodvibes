@@ -9,14 +9,14 @@ function contextWith(setupReceipts: unknown): CommandContext {
 
 describe('setup receipts from the host read models', () => {
   test('a read model that throws is reported as unavailable, not as having no receipts', () => {
-    const result = readSetupWizardLiveDurableReceipts(contextWith(() => { throw new Error('host unreachable'); }));
+    const result = readSetupWizardLiveDurableReceipts(contextWith({ list: () => { throw new Error('host unreachable'); } }));
     expect(result.receipts).toEqual([]);
     expect(result.unavailable).toContain('context.platform.readModels.setup.receipts');
   });
 
   test('a read model that answers asynchronously is reported as unavailable and its rejection stays handled', async () => {
     const rejected = Promise.reject(new Error('late failure'));
-    const result = readSetupWizardLiveDurableReceipts(contextWith(() => rejected));
+    const result = readSetupWizardLiveDurableReceipts(contextWith({ list: () => rejected }));
     expect(result.unavailable).toContain('context.platform.readModels.setup.receipts');
     // No unhandled rejection: the promise already has a handler attached.
     await rejected.catch(() => {});
@@ -28,7 +28,7 @@ describe('setup receipts from the host read models', () => {
   });
 
   test('the setup wizard says its receipts are unavailable instead of presenting an empty list', () => {
-    const wizard = buildSetupWizard([], contextWith(() => { throw new Error('host unreachable'); }));
+    const wizard = buildSetupWizard([], contextWith({ list: () => { throw new Error('host unreachable'); } }));
     expect(wizard.next).toContain('receipts unavailable: context.platform.readModels.setup.receipts');
     const healthy = buildSetupWizard([], { platform: {}, clients: {} } as unknown as CommandContext);
     expect(healthy.next).not.toContain('receipts unavailable');

@@ -1,3 +1,4 @@
+import { readRefusal } from '@goodvibes-jev/engine/errors';
 /**
  * /calendar subscription verb + merged-view tests.
  *
@@ -166,8 +167,10 @@ describe('/calendar run by the model', () => {
     const { ctx, output, secretStore } = makeContext(tmpRoot());
     const registry = new CommandRegistry();
     registerCalendarRuntimeCommands(registry);
-    await registry.execute('calendar', [verb, 'http://127.0.0.1:1/', '--yes'], { ...ctx, invokedByModel: true } as CommandContext);
-    expect(output()).toStartWith(`Refused: /calendar ${verb}`);
+    const refused = await registry.execute('calendar', [verb, 'http://127.0.0.1:1/', '--yes'], { ...ctx, invokedByModel: true } as CommandContext)
+      .then(() => undefined, (error: unknown) => error);
+    expect(readRefusal(refused)?.code).toBe('OWNER_ONLY_COMMAND');
+    expect(output()).toBe('');
     expect(secretStore.size).toBe(0);
   });
 });

@@ -1,8 +1,7 @@
 import { afterAll, afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort, choiceAnswer, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { bindAgentResearchSourceOwner } from '../../agent/protected-research-report.ts';
-import { ordinaryResearchOwner, cleanupResearchScreeningFixtures, researchScreeningFixture, exactSensitiveSpans } from '../helpers/research-screening.ts';
+import { cleanupResearchScreeningFixtures } from '../helpers/research-screening.ts';
 import { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import type { CommandContext, CommandRegistry } from '../../input/command-registry.ts';
@@ -147,51 +146,18 @@ describe('audit adapter', () => {
     expect(calls).toEqual([]);
   });
 
-  test('reads implicit audit intent from the complete protected query', async () => {
+  test('search text without an action is answered with the four actions and no reading', async () => {
     const calls: Record<string, unknown>[] = [];
-    const registry = new ToolRegistry(); bindAgentResearchSourceOwner(registry, ordinaryResearchOwner());
     const fake = intentPort(2); installJudgmentPort(fake.port);
-    const tool = createAgentAuditTool({ commandRegistry: {} as CommandRegistry, commandContext: fakeContext(), toolRegistry: registry, harnessTool: fakeHarness(calls) });
-    const query = 'show the packaged proof that shipped with this release';
-    await tool.execute({ query });
-    expect(calls).toEqual([{ mode: 'release_evidence', query }]);
-    expect(fake.requests).toHaveLength(1);
-    expect(JSON.stringify(fake.requests[0]!.state)).toContain(query);
-  });
-
-  test('an incidental evidence word follows the reading; explicit actions and ids bypass Jev', async () => {
-    const calls: Record<string, unknown>[] = [];
-    const registry = new ToolRegistry(); bindAgentResearchSourceOwner(registry, ordinaryResearchOwner());
-    const fake = intentPort(0); installJudgmentPort(fake.port);
-    const tool = createAgentAuditTool({ commandRegistry: {} as CommandRegistry, commandContext: fakeContext(), toolRegistry: registry, harnessTool: fakeHarness(calls) });
-    await tool.execute({ query: 'show overall readiness, not the evidence ledger' });
+    const tool = createAgentAuditTool({ commandRegistry: {} as CommandRegistry, commandContext: fakeContext(), toolRegistry: new ToolRegistry(), harnessTool: fakeHarness(calls) });
+    const result = await tool.execute({ query: 'show the packaged proof that shipped with this release' });
+    expect(result.success).toBe(false);
+    for (const action of ['readiness', 'item', 'evidence', 'artifact']) expect(result.error).toContain(`action:"${action}"`);
+    expect((await tool.execute({ action: 'unregistered', query: 'show release proof' })).success).toBe(false);
     await tool.execute({ action: 'evidence', query: 'readiness' });
     await tool.execute({ artifactId: 'artifact-a' });
-    expect(calls.map(call => call.mode)).toEqual(['release_readiness', 'release_evidence', 'release_evidence_artifact']);
-    expect(fake.requests).toHaveLength(1);
-  });
-
-  test('missing ownership, weak readings and unknown explicit actions do not silently choose readiness', async () => {
-    const calls: Record<string, unknown>[] = [];
-    const registry = new ToolRegistry();
-    const tool = createAgentAuditTool({ commandRegistry: {} as CommandRegistry, commandContext: fakeContext(), toolRegistry: registry, harnessTool: fakeHarness(calls) });
-    expect((await tool.execute({ query: 'show release proof' })).success).toBe(false);
-    bindAgentResearchSourceOwner(registry, ordinaryResearchOwner()); installJudgmentPort(intentPort(2, 0.55).port);
-    expect((await tool.execute({ query: 'show release proof' })).success).toBe(false);
-    expect((await tool.execute({ action: 'unregistered', query: 'show release proof' })).success).toBe(false);
-    expect(calls).toEqual([]);
-  });
-
-  test('the full original input is screened before any reading', async () => {
-    const calls: Record<string, unknown>[] = [];
-    const registry = new ToolRegistry();
-    const protectedSource = researchScreeningFixture({ spans: exactSensitiveSpans(['synthetic-private-value']) });
-    bindAgentResearchSourceOwner(registry, protectedSource.owner);
-    const fake = intentPort(2); installJudgmentPort(fake.port);
-    const tool = createAgentAuditTool({ commandRegistry: {} as CommandRegistry, commandContext: fakeContext(), toolRegistry: registry, harnessTool: fakeHarness(calls) });
-    expect((await tool.execute({ query: 'show release proof', omittedMetadata: 'synthetic-private-value' })).success).toBe(false);
+    expect(calls.map(call => call.mode)).toEqual(['release_evidence', 'release_evidence_artifact']);
     expect(fake.requests).toHaveLength(0);
-    expect(calls).toEqual([]);
   });
 
   test('registers once', () => {

@@ -5,6 +5,7 @@ import { formatJsonStoreWriteReport } from '@/utils/store-file.ts';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { parseAgentLocalLibraryArgs, resolveCommandFilePath } from './agent-local-library-args.ts';
 import { requireShellPaths } from './runtime-services.ts';
+import { LOCAL_WRITE_VERB, OUTWARD_VERB, READ_VERB, ownerOnlyVerb, withCommandVerbs, type CommandVerbs } from './command-verbs.ts';
 import {
   CALENDAR_SUBSCRIPTION_VERBS,
   renderSubscribedSection,
@@ -306,32 +307,37 @@ export async function runCalendarRuntimeCommand(args: readonly string[], ctx: Co
 }
 
 /**
- * Verbs that grant or remove access (an account sign-in, a stored private feed
- * address) are the owner's to type. Subscribing to a public feed and refreshing
- * one are outward reads the tool gate already admitted for a model-run command.
+ * What each /calendar verb does. Signing an account in or out grants or removes
+ * access, and unsubscribing deletes a stored private feed address: those are
+ * the owner's to type. Subscribing to a public feed and refreshing one are
+ * outward reads the tool admission covers for a model-run command.
  */
-const OWNER_ONLY_CALENDAR_VERBS: ReadonlySet<string> = new Set(['unsubscribe', 'connect', 'disconnect']);
+export const CALENDAR_VERBS: CommandVerbs = {
+  defaultVerb: 'list',
+  verbs: {
+    list: READ_VERB, all: READ_VERB, upcoming: READ_VERB, subscriptions: READ_VERB, subs: READ_VERB, accounts: READ_VERB,
+    add: LOCAL_WRITE_VERB, create: LOCAL_WRITE_VERB, delete: LOCAL_WRITE_VERB, remove: LOCAL_WRITE_VERB, import: LOCAL_WRITE_VERB, export: LOCAL_WRITE_VERB,
+    subscribe: OUTWARD_VERB, refresh: OUTWARD_VERB,
+    unsubscribe: ownerOnlyVerb('local-write', 'removes a stored feed address that cannot be recovered from here'),
+    connect: ownerOnlyVerb('credential', 'signs a calendar account in, which grants access'),
+    disconnect: ownerOnlyVerb('credential', 'signs a calendar account out and removes its stored credential'),
+  },
+  otherwise: READ_VERB,
+};
 
 export function registerCalendarRuntimeCommands(registry: CommandRegistry): void {
-  registry.register({
+  registry.register(withCommandVerbs({
     name: 'calendar',
     aliases: ['cal'],
     description: 'Manage local calendar events, external calendar subscriptions, and connected calendar accounts',
     usage: '[list|upcoming [--days N]|connect <google|outlook> [--device]|disconnect <google|outlook>|accounts|import <path> [--yes]|export [--dest <path>] [--yes]|add --title <title> --start <ISO> [--end <ISO>] [--location <loc>] [--notes <notes>] --yes|delete <id> --yes|subscribe <ics-url> [--name N] [--every MIN] [--yes]|unsubscribe <name> --yes|subscriptions|refresh [name]]',
     handler: async (args: readonly string[], ctx: CommandContext) => {
       const sub = (args[0] ?? 'list').toLowerCase();
-      if (ctx.invokedByModel === true && OWNER_ONLY_CALENDAR_VERBS.has(sub)) {
-        ctx.print(
-          `Refused: /calendar ${sub} changes which calendars are connected or removes a stored feed address, so it only counts when you type it yourself `
-          + '(in the terminal: /calendar ' + sub + '). Nothing was changed. The model can still use /calendar list, upcoming, subscriptions, accounts, subscribe and refresh.',
-        );
-        return;
-      }
       if (CALENDAR_SUBSCRIPTION_VERBS.has(sub)) {
         await runCalendarSubscriptionCommand(sub, args.slice(1), ctx);
         return;
       }
       await runCalendarRuntimeCommand(args, ctx);
     },
-  });
+  }, CALENDAR_VERBS));
 }

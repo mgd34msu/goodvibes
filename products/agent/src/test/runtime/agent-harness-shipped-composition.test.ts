@@ -11,14 +11,10 @@ import { registerAgentTools } from '../../runtime/bootstrap-agent-tools.ts';
 import { CommandRegistry, type CommandContext } from '../../input/command-registry.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
-// The harness tests build their registry by hand and bind a research screening
-// owner the shipped Agent never binds, so they cannot see a refusal the product
-// gives. This one builds the registry the way bootstrap-core.ts and bootstrap.ts
-// do. It is marked failing while composeAgentToolRegistry leaves the shared
-// screening owner unbound (the call is refused as "Tool input projection
-// unavailable."); once the composition binds it, this turns red: make it a
-// plain test.
-test.failing('agent_harness summary answers on the registry the shipped Agent composes', async () => {
+// The harness tests build their registry by hand and bind their own research
+// screening owner. This one builds the registry the way bootstrap-core.ts and
+// bootstrap.ts do, with the local first-party read owner the shipped Agent binds.
+test('agent_harness summary answers on the registry the shipped Agent composes', async () => {
   const root = makeProjectTempDir('agent-harness-shipped-composition');
   const workspace = join(root, 'workspace');
   const homeDir = join(root, 'home');
@@ -36,6 +32,7 @@ test.failing('agent_harness summary answers on the registry the shipped Agent co
     resolveSessionId: () => 'shipped-composition',
     getLastUserMessage: () => 'What can you do?',
     researchReportSourceOwner: services.researchReportSourceOwner,
+    researchSourceOwner: services.localReadSourceOwner,
   });
   try {
     // The shell's command context is only read for the fields below during registration and a summary read.

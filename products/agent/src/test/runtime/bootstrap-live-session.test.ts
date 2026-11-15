@@ -25,15 +25,16 @@ test('the runtime the Agent bootstrap composes moves every session-keyed seam wh
     registerConversation: (id) => { calls.push(`register:${id}`); },
     unregisterConversation: (id) => { calls.push(`unregister:${id}`); },
     rewindHost: { start: (id) => { calls.push(`rewind:${id}`); } },
-    spine: { reopen: (input) => { calls.push(`reopen:${input.sessionId}`); } },
+    spine: { move: (previous, input) => { calls.push(`move:${previous}->${input.sessionId}`); } },
     project: root,
+    openSessionRecord: (id) => { calls.push(`record:${id}`); },
   });
   expect(runtime.sessionId).toBe('boot');
   runtime.sessionId = 'resumed';
   expect(runtime.sessionId).toBe('resumed');
   expect(ref.value).toBe('resumed');
   expect([...hosted.ids()]).toEqual(['resumed']);
-  expect(calls).toEqual(['unregister:boot', 'register:resumed', 'rewind:resumed', 'reopen:resumed']);
+  expect(calls).toEqual(['unregister:boot', 'register:resumed', 'rewind:resumed', 'move:boot->resumed', 'record:resumed']);
   ref.value = 'other';
   expect(runtime.sessionId).toBe('other');
 });

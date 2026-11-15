@@ -3,6 +3,8 @@
  * together whenever the session id changes (a resume or a fork assigns
  * `runtime.sessionId`). Keeping the moves in one place is what stops a resume
  * from leaving the anchor, checkpoint, hosting and rewind seams on the boot id.
+ * Anything else that needs the id reads `runtime.sessionId` when it runs
+ * instead of holding a copy.
  */
 export interface LiveSessionBindingDeps<Conversation> {
   readonly ref: { value: string };
@@ -14,8 +16,11 @@ export interface LiveSessionBindingDeps<Conversation> {
   readonly registerConversation: (sessionId: string, conversation: Conversation) => void;
   readonly unregisterConversation: (sessionId: string) => void;
   readonly rewindHost: { start(sessionId: string): void };
-  readonly spine: { reopen(input: { sessionId: string; project: string }): unknown };
+  /** Closes the previous id on the daemon and reopens the next one, in that order. */
+  readonly spine: { move(previousId: string, input: { sessionId: string; project: string }): unknown };
   readonly project: string;
+  /** Makes sure the session register holds a record for `sessionId` (idempotent). */
+  readonly openSessionRecord: (sessionId: string) => void;
 }
 
 /** Moves every session-keyed seam from the current id to `next`; a repeated id is a no-op. */
@@ -30,5 +35,6 @@ export function moveLiveSession<Conversation>(deps: LiveSessionBindingDeps<Conve
   deps.unregisterConversation(previous);
   deps.registerConversation(next, deps.conversation);
   deps.rewindHost.start(next);
-  deps.spine.reopen({ sessionId: next, project: deps.project });
+  deps.spine.move(previous, { sessionId: next, project: deps.project });
+  deps.openSessionRecord(next);
 }

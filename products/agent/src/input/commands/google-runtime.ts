@@ -28,6 +28,7 @@ import type { FeedFetcher } from '@goodvibes-jev/engine/platform/platform/calend
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { subscriptionRegistryForWrite } from './calendar-subscription-runtime.ts';
 import { requireSecretsManager } from './runtime-services.ts';
+import { CREDENTIAL_VERB, READ_VERB, ownerOnlyVerb, withCommandVerbs, type CommandVerbs } from './command-verbs.ts';
 import { renderGoogleSetupReport } from '@goodvibes-jev/engine/platform/platform/google';
 import { renderGoogleSetupRunbook } from '@goodvibes-jev/engine/platform/platform/google';
 import { GOOGLE_CONFIG_KEYS, GOOGLE_SECRET_KEYS } from '@goodvibes-jev/engine/platform/platform/google';
@@ -213,19 +214,12 @@ function describePending(entry: PendingOutwardAction): string[] {
  * exactly as shown. The bytes approved are the bytes sent: nothing waits on
  * the model to repeat its call word for word.
  *
- * Refuses when the MODEL got here. `agent_harness mode:"run_command"` can run
- * any registered command, so without this check the remedy would be reachable
- * by exactly the route it exists to defend against: content steers the model,
+ * Owner-only (GOOGLE_VERBS): `agent_harness mode:"run_command"` can run any
+ * registered command, so without that the remedy would be reachable by
+ * exactly the route it exists to defend against: content steers the model,
  * the model runs the command, the approval appears.
  */
 async function approveRefusedOutwardAction(rest: readonly string[], ctx: CommandContext): Promise<void> {
-  if (ctx.invokedByModel === true) {
-    ctx.print(
-      'Refused: /google approve grants authority, so it only counts when you type it yourself. '
-      + 'This came from the model running a command, which is the route content that was just read would use.',
-    );
-    return;
-  }
   const waiting = listRefusedOutwardActions();
   if (waiting.length === 0) {
     ctx.print('Nothing is waiting for approval. A refused send stays here for five minutes.');
@@ -347,13 +341,38 @@ export async function runGoogleCommand(args: readonly string[], ctx: CommandCont
   }
 }
 
+/**
+ * What each /google verb does. Anything that stores, adopts, replaces or
+ * removes a Google credential, changes the account mail is sent as, or clears
+ * an outward-effect refusal is the owner's to type.
+ */
+const GOOGLE_VERBS: CommandVerbs = {
+  defaultVerb: 'status',
+  verbs: {
+    status: READ_VERB,
+    runbook: READ_VERB,
+    connect: CREDENTIAL_VERB,
+    reauthorize: CREDENTIAL_VERB,
+    reauth: CREDENTIAL_VERB,
+    setup: CREDENTIAL_VERB,
+    forget: ownerOnlyVerb('credential', 'removes every stored Google credential'),
+    adopt: ownerOnlyVerb('credential', 'takes up credential files from the home directory'),
+    account: ownerOnlyVerb('credential', 'changes the address mail is sent and signed in as'),
+    'calendar-address': ownerOnlyVerb('credential', 'stores a private calendar address (a credential) and replaces the current feed'),
+    client: ownerOnlyVerb('credential', 'stores a client secret'),
+    'client-file': ownerOnlyVerb('credential', 'stores the client secret from a file'),
+    approve: ownerOnlyVerb('credential', 'clears a refused outward action, which grants authority'),
+  },
+  otherwise: READ_VERB,
+};
+
 export function registerGoogleRuntimeCommands(registry: CommandRegistry): void {
-  registry.register({
+  registry.register(withCommandVerbs({
     name: 'google',
     aliases: ['gmail'],
     description: 'Connect Gmail and Google Calendar: one command, one consent link, proven by use',
     usage: 'connect | status | reauthorize | forget [--yes] | adopt [--yes] | setup [--path app-password|oauth|existing-client] | client-file <path> | client <id> <secret> | account <address> | calendar-address <url> | runbook | approve [<n>] [--yes|--drop]',
     argsHint: 'connect|status|reauthorize|forget|adopt|setup|client-file|client|account|calendar-address|runbook|approve',
     handler: (args, ctx) => runGoogleCommand(args, ctx),
-  });
+  }, GOOGLE_VERBS));
 }

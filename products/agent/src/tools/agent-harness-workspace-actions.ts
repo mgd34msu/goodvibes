@@ -6,7 +6,7 @@ import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platfor
 import type { CommandContext } from '../input/command-registry.ts';
 import { createAgentWorkspaceEditor } from '../input/agent-workspace-activation.ts';
 import { AGENT_WORKSPACE_CATEGORIES } from '../input/agent-workspace-categories.ts';
-import { buildAgentWorkspaceRuntimeSnapshot } from '../input/agent-workspace-snapshot.ts';
+import { buildAgentWorkspaceEditorContextPart } from '../input/agent-workspace-snapshot.ts';
 import type { AgentWorkspaceAction, AgentWorkspaceCategory, AgentWorkspaceEditorKind, AgentWorkspaceLocalEditor, AgentWorkspaceLocalLibraryItem, AgentWorkspaceRuntimeSnapshot } from '../input/agent-workspace-types.ts';
 import { parseSlashCommand } from '../input/slash-command-parser.ts';
 import { describeCommandPolicy } from './agent-harness-metadata.ts';
@@ -264,7 +264,7 @@ function workspaceActionRouteHint(action: AgentWorkspaceAction): string {
 }
 
 function selectedRoutineFromArgs(
-  snapshot: AgentWorkspaceRuntimeSnapshot,
+  snapshot: Pick<AgentWorkspaceRuntimeSnapshot, 'localRoutines'>,
   args: AgentHarnessWorkspaceActionArgs,
 ): AgentWorkspaceLocalLibraryItem | null {
   const fields = readFieldMap(args.fields);
@@ -275,7 +275,8 @@ function selectedRoutineFromArgs(
 
 export function buildWorkspaceEditorContext(context: CommandContext, args: AgentHarnessWorkspaceActionArgs): WorkspaceEditorContext {
   try {
-    const snapshot = buildAgentWorkspaceRuntimeSnapshot(context);
+    // Only the parts an editor reads, not the whole workspace.
+    const snapshot = buildAgentWorkspaceEditorContextPart(context);
     return {
       runtimeStarterTemplates: snapshot.runtimeStarterTemplates,
       selectedRoutine: selectedRoutineFromArgs(snapshot, args),

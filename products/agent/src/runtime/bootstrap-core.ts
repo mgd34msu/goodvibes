@@ -55,7 +55,6 @@ import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { createUiRuntimeServices, type UiRuntimeServices } from './ui-services.ts';
 import { getTerminalSize } from '../shell/terminal-size.ts';
 import { composeAgentToolRegistry, decorateAgentWorkerRegistry } from './agent-tool-registry.ts';
-import { agentOwnerQuestions } from './client/owner-questions.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import { registerAgentRuntimeEvents } from './agent-runtime-events.ts';
 import { installAgentOrchestratorDependencies } from './agent-orchestrator-deps.ts';
@@ -238,6 +237,8 @@ export async function initializeBootstrapCore(
     resolveSessionId: () => runtimeSessionIdRef.value,
     getLastUserMessage: () => conversation.getLastUserMessage(),
     researchReportSourceOwner: services.researchReportSourceOwner,
+    // First-party local reads need no hosted screening: a code-only local owner, always bound.
+    researchSourceOwner: services.localReadSourceOwner,
   });
   // The permission gate is the graph's. services.permissionManager rides the
   // client raiser: the ask is posted to the daemon AND prompted here, and the
@@ -257,8 +258,6 @@ export async function initializeBootstrapCore(
       cloudflareAuthToken: () => readDaemonOperatorToken(homeDirectory),
       surfaceRoot: GOODVIBES_AGENT_SURFACE_ROOT,
       knowledgeService: services.agentKnowledgeService,
-      // A spawned agent asks the owner in the same inbox; the answer comes back to this conversation.
-      ownerQuestions: () => agentOwnerQuestions(services, { configManager, homeDirectory }, () => runtimeSessionIdRef.value),
       // The same daemon routing and restrictions the main registry has: a worker
       // must not write a daemon-owned key into the local file, or fetch, mutate
       // channels or MCP, and so on past what the main conversation may.
@@ -393,6 +392,51 @@ export async function initializeBootstrapCore(
     logger.warn('agent hooks file not loaded; continuing without file hooks (non-fatal)', { error: summarizeError(err) });
   }
 
+  // The automation session register's record for a session: created for the
+  // boot id here and for every id a resume or fork moves to (moveLiveSession).
+  // A record that already exists is kept as it is.
+  const openSessionRecord = (sessionId: string): void => {
+    void sharedSessionBroker
+      .createSession({
+        id: sessionId,
+        // The record's IDENTITY axis, and it has to be said out loud here.
+        //
+        // This call named neither `kind` nor `project`, so the broker fell back to
+        // its documented defaults for an ungrounded create: `classifySessionOriginKind`
+        // (session-broker-sessions.ts) maps a non-channel surface, this one is
+        // 'service', to 'tui', and project defaults to 'unknown'. The local mirror
+        // at ~/.goodvibes/agent/control-plane/sessions.json therefore filed every
+        // agent session as kind:"tui" project:"unknown", while the spine
+        // registration twenty lines below correctly filed the SAME session as
+        // kind:'agent' with its real project. Two stores describing one session and
+        // disagreeing about what it is: a fleet listing filtered on kind:"agent"
+        // missed this process's own sessions, and one filtered on kind:"tui" claimed
+        // terminal sessions that were never opened.
+        //
+        // The default was never wrong for what it knew, it is a fallback for a
+        // caller that says nothing. Saying it is this call site's job.
+        kind: 'agent',
+        project: workingDir,
+        title: 'GoodVibes Agent session',
+        // Declares the session permission mode at creation time in the shared
+        // metadata bag (safe-owner, safe-jev, yolo, or the read-only plan posture).
+        // Read-only declaration, the execution owner
+        // itself always reads permissions.mode live off configManager, so this
+        // does not change enforcement; it lets cross-session tooling see which
+        // mode a session started under without re-deriving it.
+        metadata: { source: 'goodvibes-agent', permissionMode: configManager.get('permissions.mode') },
+        participant: {
+          surfaceKind: 'service',
+          surfaceId: 'surface:goodvibes-agent',
+          displayName: 'GoodVibes Agent',
+          lastSeenAt: Date.now(),
+        },
+      })
+      .catch((err) => {
+        logger.debug('session broker create session failed at bootstrap', { err });
+      });
+  };
+
   // A resume or fork assigns `runtime.sessionId` (terminal-shell session-resume
   // and session-workflow-commands); see composeAgentRuntimeState.
   const runtime = composeAgentRuntimeState(configManager, {
@@ -404,6 +448,7 @@ export async function initializeBootstrapCore(
     rewindHost: services.conversationRewindHost,
     spine: services.sessionSpineClient,
     project: workingDir,
+    openSessionRecord: (sessionId) => openSessionRecord(sessionId),
   }, (sessionId) => { domainDispatch.syncSessionState({ conversationSessionId: sessionId }, 'runtime.session-id'); });
   runtimeSessionIdRef.value = userSessionId;
   // Register this process's live conversation so the composed daemon's
@@ -422,45 +467,7 @@ export async function initializeBootstrapCore(
   // answer to a question it could not reach. Released at shutdown; a lapsed
   // lease reaches the same end state if this process dies first.
   services.conversationRewindHost.start(runtime.sessionId);
-  void sharedSessionBroker
-    .createSession({
-      id: runtime.sessionId,
-      // The record's IDENTITY axis, and it has to be said out loud here.
-      //
-      // This call named neither `kind` nor `project`, so the broker fell back to
-      // its documented defaults for an ungrounded create: `classifySessionOriginKind`
-      // (session-broker-sessions.ts) maps a non-channel surface, this one is
-      // 'service', to 'tui', and project defaults to 'unknown'. The local mirror
-      // at ~/.goodvibes/agent/control-plane/sessions.json therefore filed every
-      // agent session as kind:"tui" project:"unknown", while the spine
-      // registration twenty lines below correctly filed the SAME session as
-      // kind:'agent' with its real project. Two stores describing one session and
-      // disagreeing about what it is: a fleet listing filtered on kind:"agent"
-      // missed this process's own sessions, and one filtered on kind:"tui" claimed
-      // terminal sessions that were never opened.
-      //
-      // The default was never wrong for what it knew, it is a fallback for a
-      // caller that says nothing. Saying it is this call site's job.
-      kind: 'agent',
-      project: workingDir,
-      title: 'GoodVibes Agent session',
-      // Declares the session permission mode at creation time in the shared
-      // metadata bag (safe-owner, safe-jev, yolo, or the read-only plan posture).
-      // Read-only declaration, the execution owner
-      // itself always reads permissions.mode live off configManager, so this
-      // does not change enforcement; it lets cross-session tooling see which
-      // mode a session started under without re-deriving it.
-      metadata: { source: 'goodvibes-agent', permissionMode: configManager.get('permissions.mode') },
-      participant: {
-        surfaceKind: 'service',
-        surfaceId: 'surface:goodvibes-agent',
-        displayName: 'GoodVibes Agent',
-        lastSeenAt: Date.now(),
-      },
-    })
-    .catch((err) => {
-      logger.debug('session broker create session failed at bootstrap', { err });
-    });
+  openSessionRecord(runtime.sessionId);
 
   // Mirror the create into the daemon spine (fire-and-forget; the local
   // broker above stays the source of truth). kind:'agent' is the canonical record

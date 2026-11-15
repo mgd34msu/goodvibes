@@ -13,6 +13,7 @@ import type { AgentRuntimeProfileInfo } from '../agent/runtime-profile.ts';
 import { AgentSkillRegistry } from '../agent/skill-registry.ts';
 import { activateAgentWorkspaceSelection } from './agent-workspace-activation.ts';
 import { AGENT_WORKSPACE_CATEGORIES } from './agent-workspace-categories.ts';
+import { submitAgentResearchRunEditor } from './agent-workspace-research-run-editor.ts';
 import { buildAgentWorkspaceCommandEditorSubmission, isAgentWorkspaceCommandEditorKind } from './agent-workspace-command-editor.ts';
 import { createDeleteEditor, editorCategoryId } from './agent-workspace-editors.ts';
 import { submitAgentWorkspaceLocalRegistryEditor } from './agent-workspace-local-editor-submission.ts';
@@ -773,6 +774,20 @@ export class AgentWorkspace {
   }
 
   private submitCommandEditor(editor: AgentWorkspaceLocalEditor): void {
+    const shellPaths = this.context?.workspace?.shellPaths;
+    if (editor.kind === 'research-run' && shellPaths) {
+      // The owner's typed fields become the run directly; no model turn.
+      const outcome = submitAgentResearchRunEditor(shellPaths, editor, (fieldId) => this.editorField(fieldId));
+      this.status = outcome.status;
+      if (outcome.actionResult) this.lastActionResult = outcome.actionResult;
+      if (outcome.kind === 'editor') {
+        this.localEditor = outcome.editor;
+        return;
+      }
+      this.localEditor = null;
+      if (this.context) this.runtimeSnapshot = buildAgentWorkspaceRuntimeSnapshot(this.context);
+      return;
+    }
     const result = buildAgentWorkspaceCommandEditorSubmission(editor, (fieldId) => this.editorField(fieldId), this.hasCommandDispatch(), this.hasPromptDispatch());
     if (result.kind === 'editor') {
       this.localEditor = result.editor;

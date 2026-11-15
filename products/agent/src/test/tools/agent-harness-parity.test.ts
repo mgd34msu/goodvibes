@@ -14,6 +14,8 @@ import { HARNESS_MODE_DESCRIPTORS } from '../../tools/agent-harness-mode-catalog
 import { bindAgentResearchSourceOwner } from '../../agent/protected-research-report.ts';
 import { makeHandoffFixture } from './agent-harness-handoff-fixture.ts';
 import { ordinaryResearchOwner, cleanupResearchScreeningFixtures } from '../helpers/research-screening.ts';
+import { CALENDAR_VERBS } from '../../input/commands/calendar-runtime.ts';
+import { withCommandVerbs } from '../../input/commands/command-verbs.ts';
 
 let previousPort: ReturnType<typeof installJudgmentPort>;
 let readings: ReturnType<typeof fakePort>;
@@ -218,18 +220,18 @@ describe('agent_harness parity', () => {
     } finally { await fixture.cleanup(); }
   });
 
-  test('/calendar read verbs run without admission while subscribe and connect are held', async () => {
+  test('/calendar read verbs run without admission, subscribe is held and connect is the owner\'s', async () => {
     const fixture = makeParityFixture();
     try {
       const ran: string[][] = [];
-      fixture.commandRegistry.register({ name: 'calendar', aliases: ['cal'], description: 'calendar', handler: (args, ctx) => { ran.push([...args]); ctx.print('ok'); } });
+      fixture.commandRegistry.register(withCommandVerbs({ name: 'calendar', aliases: ['cal'], description: 'calendar', handler: (args, ctx) => { ran.push([...args]); ctx.print('ok'); } }, CALENDAR_VERBS));
       const list = await fixture.tool.execute({ mode: 'run_command', command: '/calendar list' });
       expect(list.success).toBe(true);
       await fixture.tool.execute({ mode: 'run_command', command: '/calendar' });
       await fixture.tool.execute({ mode: 'run_command', command: '/cal subscriptions' });
       expect(ran).toEqual([['list'], [], ['subscriptions']]);
       await expectEffectHeld(fixture.tool.execute({ mode: 'run_command', command: '/calendar subscribe https://example.com/a.ics' }));
-      await expectEffectHeld(fixture.tool.execute({ mode: 'run_command', command: '/calendar connect google' }));
+      expect((await fixture.tool.execute({ mode: 'run_command', command: '/calendar connect google' })).success).toBe(false);
       expect(ran).toHaveLength(3);
     } finally { await fixture.cleanup(); }
   });

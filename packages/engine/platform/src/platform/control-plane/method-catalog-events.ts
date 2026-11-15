@@ -96,7 +96,7 @@ const RUNTIME_DOMAIN_DESCRIPTIONS = {
   mcp: 'MCP server, tool, and connection events.',
   transport: 'Transport connect, disconnect, and lifecycle events.',
   compaction: 'Context compaction and summary events.',
-  ui: 'UI-focused state and operational events.',
+  ui: 'Terminal app panel and view changes: UI_PANEL_OPEN, UI_PANEL_CLOSE, UI_PANEL_FOCUS (panelId) and UI_VIEW_CHANGED (from, to: main, agent:<id> or process:<id>), published by the TUI and the Agent as they happen.',
   ops: 'Operational diagnostics and control events.',
   forensics: 'Forensics and incident trail events.',
   security: 'Security posture and policy events.',
@@ -255,8 +255,8 @@ export const builtinGatewayEventDescriptors: readonly GatewayEventDescriptor[] =
       + 'This is the channel that makes approvals.raise usable from a surface that is not in the daemon '
       + 'process: raise returns the pending record and the DECISION arrives here, so a client gets '
       + 'keystroke-fast prompt delivery instead of polling approvals.list on a timer. '
-      + 'Domain-tagged `permissions` (gateway-scope-enforcement.ts EVENT_DOMAIN), so a client that opened '
-      + 'the stream with ?domains=… must include `permissions` to receive it; a client that opted into no '
+      + 'Domain-tagged `gate` (gateway-scope-enforcement.ts EVENT_DOMAIN), so a client that opened '
+      + 'the stream with ?domains=… must include `gate` to receive it; a client that opted into no '
       + 'domain narrowing receives it as before. '
       + 'The record is the daemon\'s, not the subscriber\'s: several surfaces see the same transition and the '
       + 'daemon remains the single source of the applied result, a surface renders what the record says '

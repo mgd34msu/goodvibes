@@ -62,6 +62,9 @@ export const GATEWAY_REST_ROUTES: readonly GatewayRestRoute[] = [
   route('DELETE', '/api/automation/jobs/{jobId}', 'automation.jobs.delete'),
   route('POST', '/api/automation/jobs/{jobId}/enable', 'automation.jobs.enable'),
   route('POST', '/api/automation/jobs/{jobId}/disable', 'automation.jobs.disable'),
+  // pause and resume are the same state change as disable and enable, through the same native handler.
+  route('POST', '/api/automation/jobs/{jobId}/pause', 'automation.jobs.disable'),
+  route('POST', '/api/automation/jobs/{jobId}/resume', 'automation.jobs.enable'),
   route('POST', '/api/automation/schedules', 'automation.schedules.create'),
   route('DELETE', '/api/automation/schedules/{scheduleId}', 'automation.schedules.delete'),
   route('POST', '/api/automation/schedules/{scheduleId}/enable', 'automation.schedules.enable'),
@@ -262,6 +265,9 @@ export const GATEWAY_REST_ROUTES: readonly GatewayRestRoute[] = [
   route('GET', '/api/calendar/events', 'calendar.events.list'),
   route('GET', '/api/calendar/events/{eventId}', 'calendar.events.get'),
   route('POST', '/api/calendar/events', 'calendar.events.create'),
+  route('PATCH', '/api/calendar/events/{eventId}', 'calendar.events.update'),
+  route('DELETE', '/api/calendar/events/{eventId}', 'calendar.events.delete'),
+  route('GET', '/api/calendar/calendars', 'calendar.calendars.list'),
   route('GET', '/api/calendar/ics/export', 'calendar.ics.export'),
   route('POST', '/api/calendar/ics/import', 'calendar.ics.import'),
   // email.*, inbox read and outbound send over the platform IMAP/SMTP

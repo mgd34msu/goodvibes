@@ -9,6 +9,7 @@ import {
 } from './route-helpers.js';
 import { jsonErrorResponse, readJsonErrorResponse } from './error-response.js';
 import { withAdmin } from './auth-helpers.js';
+import { requestActor } from './http-policy.js';
 import type {
   ApprovalRememberTier,
   AutomationDeliveryGuarantee,
@@ -268,16 +269,16 @@ export function createDaemonSystemRouteHandlers(
       if (!context.isValidConfigKey(key)) {
         return jsonErrorResponse({ error: 'Invalid config key' }, { status: 400 });
       }
-      // A credential never goes into a config file as a literal. The settings
-      // precondition lane files it in the secret store and leaves a reference;
-      // a value that already is such a reference is safe to write here.
+      // A credential never goes into a config file as a literal. credentials.set
+      // files it in the secret store and leaves a reference; a value that already
+      // is such a reference is safe to write here.
       if (context.isSecretBearingConfigKey?.(key) && !isSecretReference(value)) {
         return jsonErrorResponse(
           {
-            error: `Config key ${key} holds a credential and cannot be written as plain text. Nothing was changed. `
-              + 'Write it through the settings precondition (capture, then apply), which stores it in the secret store, '
-              + 'or pass a goodvibes://secrets/ reference.',
-            code: 'SECRET_CONFIG_KEY',
+            error: `Config key ${key} holds a credential and is not written to the config file as plain text.`,
+            code: 'SECRET_CONFIG_KEY', state: 'the setting is unchanged',
+            next: [`Store it with credentials.set { "key": "${key}", "value": "<secret>" }, which files it in the secret store and points ${key} at it.`,
+              'Or pass a goodvibes://secrets/ reference to config.set.'],
           },
           { status: 400 },
         );
@@ -335,26 +336,32 @@ export function createDaemonSystemRouteHandlers(
       const currentAdmin = context.requireAdmin(req);
       if (currentAdmin) return currentAdmin;
       const { key } = payload;
+      const unchanged = 'the setting is unchanged';
       if (!key || typeof key !== 'string') {
-        return jsonErrorResponse({ error: 'Missing or invalid key' }, { status: 400 });
+        return jsonErrorResponse({ error: 'The request names no config key.', code: 'INVALID_ARGUMENT', state: unchanged,
+          next: ['Send { "key": "<config key>" }; config.get lists the keys.'] }, { status: 400 });
       }
-      if (key === 'runtime.workingDir' || !context.isValidConfigKey(key)) {
-        return jsonErrorResponse({ error: 'Invalid config key' }, { status: 400 });
+      // The workspace root moves through the swap manager, which config.set drives; a reset here would skip it.
+      if (key === 'runtime.workingDir') {
+        return jsonErrorResponse({ error: 'runtime.workingDir is not reset; the workspace is moved by a swap.', code: 'INVALID_ARGUMENT', state: unchanged,
+          next: ['Set runtime.workingDir to the directory you want with config.set.'] }, { status: 400 });
+      }
+      if (!context.isValidConfigKey(key)) {
+        return jsonErrorResponse({ error: `${key} is not a config key this daemon knows.`, code: 'INVALID_ARGUMENT', state: unchanged,
+          next: ['Check the key name; config.get lists the keys.'] }, { status: 400 });
       }
       // Resetting would leave the stored secret behind with nothing pointing at it.
       if (context.isSecretBearingConfigKey?.(key)) {
-        return jsonErrorResponse(
-          {
-            error: `Config key ${key} holds a credential. Nothing was changed. Remove it with credentials.delete, which clears the stored secret and then the reference.`,
-            code: 'SECRET_CONFIG_KEY',
-          },
-          { status: 400 },
-        );
+        return jsonErrorResponse({ error: `Config key ${key} holds a credential, and a reset would leave the stored secret behind.`,
+          code: 'SECRET_CONFIG_KEY', state: unchanged,
+          next: ['Remove it with credentials.delete, which clears the stored secret and then the reference.'] }, { status: 400 });
       }
       if (!context.configManager.reset) {
-        return jsonErrorResponse({ error: 'This host cannot reset a setting. Nothing was changed.', code: 'CONFIG_RESET_UNSUPPORTED' }, { status: 409 });
+        return jsonErrorResponse({ error: 'This host cannot reset a setting.', code: 'CONFIG_RESET_UNSUPPORTED', state: unchanged,
+          next: ['Write the default value with config.set instead.'] }, { status: 409 });
       }
       try {
+        // The manager owns the managed-policy lock and refuses a locked key here.
         context.configManager.reset(key);
       } catch (error: unknown) {
         return readJsonErrorResponse(error, { status: 400, fallbackMessage: 'Failed to reset config' });
@@ -639,7 +646,7 @@ async function handleApprovalAction(
   const body = await context.parseOptionalJsonBody(req);
   if (body instanceof Response) return context.recordApiResponse(req, `/api/approvals/${approvalId}/${action}`, body);
   const payload = body ?? {} as JsonRecord;
-  const actor = context.requireAuthenticatedSession(req)?.username ?? 'operator';
+  const actor = requestActor(context, req);
   const note = typeof payload.note === 'string' ? payload.note : undefined;
   if (action === 'claim') {
     const outcome: { applied?: boolean | undefined } = {};
@@ -833,8 +840,8 @@ function approvalActionOutcome(
   const status = typeof record.status === 'string' ? record.status : 'unknown';
   const target = APPROVAL_ACTION_TARGET[action];
   const by = action === 'claim' ? record.claimedBy : record.resolvedBy;
-  // The broker says whether this call moved the record; callers sharing one
-  // actor name cannot be told apart by comparing names. A broker that does not
+  // The broker says whether this call moved the record; two calls by the same
+  // principal cannot be told apart by comparing names. A broker that does not
   // report it falls back to comparing the actor.
   const applied = typeof outcome.applied === 'boolean' ? outcome.applied && status === target : status === target && by === actor;
   if (applied) return { applied: true };

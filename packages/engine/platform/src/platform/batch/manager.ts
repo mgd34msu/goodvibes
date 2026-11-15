@@ -277,6 +277,12 @@ export class DaemonBatchManager {
       readonly providerRegistry: Pick<ProviderRegistry, 'getCurrentModel' | 'getForModel' | 'getRegistered' | 'listProviders'>;
       /** The store's name: jobs live in the directory of the same name without `.json`. */
       readonly storePath?: string | undefined;
+      /**
+       * Called once when a job reaches a final state (completed, failed,
+       * cancelled, expired, dead-lettered), so the daemon can publish it on the
+       * event stream and a surface can show the result without polling.
+       */
+      readonly onJobSettled?: ((job: DaemonBatchJob) => void) | undefined;
     },
   ) {
     this.files = new BatchJobFiles(
@@ -349,7 +355,19 @@ export class DaemonBatchManager {
     const provider = input.provider?.trim() || defaults.provider;
     const model = input.model?.trim() || defaults.id;
     const providerInstance = this.getBatchProvider(model, provider);
-    this.requireProviderBatchSupport(providerInstance, provider);
+    // A provider that cannot batch runs the request on the live path when
+    // `batch.fallback` is `live`, and the job is answered already finished.
+    let runLive = false;
+    try {
+      this.requireProviderBatchSupport(providerInstance, provider);
+    } catch (error) {
+      if (this.getFallback() !== 'live') throw error;
+      runLive = true;
+    }
+    if (runLive) {
+      const redelivered = this.findQueueRedelivery(input);
+      return redelivered ?? this.runLiveJob(input, provider, model, providerInstance);
+    }
     const payloadBytes = estimateJsonBytes(input);
     if (payloadBytes > MAX_BATCH_REQUEST_BYTES) {
       throw new DaemonBatchError(
@@ -372,12 +390,8 @@ export class DaemonBatchManager {
     }
 
     const jobs = this.load();
-    // A queue redelivers a message whose first attempt may have committed before the reply was lost: the same queue message is the same job.
-    const queueMessageId = input.source?.kind === 'cloudflare-queue' ? input.source.id : undefined;
-    if (queueMessageId) {
-      const existing = Object.values(jobs).find((job) => job.source?.kind === 'cloudflare-queue' && job.source.id === queueMessageId);
-      if (existing) return existing;
-    }
+    const existing = this.findQueueRedelivery(input);
+    if (existing) return existing;
     const timestamp = now();
     const job: DaemonBatchJob = {
       id: `batch-job-${crypto.randomUUID()}`,
@@ -386,14 +400,7 @@ export class DaemonBatchManager {
       status: 'queued',
       createdAt: timestamp,
       updatedAt: timestamp,
-      request: {
-        messages: [...input.request.messages],
-        ...(input.request.tools ? { tools: [...input.request.tools] } : {}),
-        ...(input.request.systemPrompt ? { systemPrompt: input.request.systemPrompt } : {}),
-        ...(input.request.maxTokens !== undefined ? { maxTokens: input.request.maxTokens } : {}),
-        ...(input.request.reasoningEffort ? { reasoningEffort: input.request.reasoningEffort } : {}),
-        ...(input.request.reasoningSummary !== undefined ? { reasoningSummary: input.request.reasoningSummary } : {}),
-      },
+      request: copyBatchRequest(input.request),
       ...(input.source ? { source: input.source } : {}),
       ...(input.metadata ? { metadata: { ...input.metadata } } : {}),
       attempts: 0,
@@ -411,8 +418,74 @@ export class DaemonBatchManager {
     return job;
   }
 
+  /** A queue redelivers a message whose first attempt may have committed before the reply was lost: the same queue message is the same job. */
+  private findQueueRedelivery(input: CreateDaemonBatchJobInput): DaemonBatchJob | undefined {
+    const queueMessageId = input.source?.kind === 'cloudflare-queue' ? input.source.id : undefined;
+    if (!queueMessageId) return undefined;
+    return Object.values(this.load()).find((job) => job.source?.kind === 'cloudflare-queue' && job.source.id === queueMessageId);
+  }
+
+  /**
+   * The `fallback: live` path: one ordinary chat request to the provider, kept
+   * as a job that is created finished (completed with its result, or failed with
+   * the provider's error), so the caller reads it like any batch job.
+   */
+  private async runLiveJob(input: CreateDaemonBatchJobInput, provider: string, model: string, providerInstance: LLMProvider): Promise<DaemonBatchJob> {
+    const request = copyBatchRequest(input.request);
+    const startedAt = now();
+    let outcome: Pick<DaemonBatchJob, 'status' | 'result' | 'error'>;
+    try {
+      const result = await providerInstance.chat({
+        model,
+        messages: [...request.messages],
+        ...(request.tools ? { tools: [...request.tools] } : {}),
+        ...(request.systemPrompt ? { systemPrompt: request.systemPrompt } : {}),
+        ...(request.maxTokens !== undefined ? { maxTokens: request.maxTokens } : {}),
+        ...(request.reasoningEffort ? { reasoningEffort: request.reasoningEffort } : {}),
+        ...(request.reasoningSummary !== undefined ? { reasoningSummary: request.reasoningSummary } : {}),
+      });
+      outcome = { status: 'completed', result };
+    } catch (error) {
+      outcome = { status: 'failed', error: { code: 'LIVE_FALLBACK_FAILED', message: `${provider} cannot batch, so the request ran live, and the live request failed: ${summarizeError(error)}` } };
+    }
+    const finishedAt = now();
+    const job: DaemonBatchJob = {
+      id: `batch-job-${crypto.randomUUID()}`,
+      provider,
+      model,
+      ...outcome,
+      createdAt: startedAt,
+      updatedAt: finishedAt,
+      completedAt: finishedAt,
+      request,
+      ...(input.source ? { source: input.source } : {}),
+      // Says how the job ran: the provider has no batch for it, and none was billed at batch rates.
+      metadata: { ...(input.metadata ?? {}), 'goodvibes.execution': 'live-fallback' },
+      attempts: 1,
+    };
+    this.load()[job.id] = job;
+    if (!this.save(job)) {
+      logger.warn('A live fallback batch job finished but its record is not on disk yet; it is written again at the end of the next pass', { jobId: job.id });
+    }
+    this.notifySettled(job);
+    return job;
+  }
+
+  private notifySettled(job: DaemonBatchJob): void {
+    if (!this.options.onJobSettled || !daemonBatchJobLifecycle.isTerminal(job.status)) return;
+    try {
+      this.options.onJobSettled(job);
+    } catch (error) {
+      logger.warn('Publishing a finished batch job failed; the job itself is saved', { jobId: job.id, error: summarizeError(error) });
+    }
+  }
+
+  /** A job by its id, or by the queue job id a Cloudflare Worker answered at enqueue (`source.id`). */
   async getJob(jobId: string): Promise<DaemonBatchJob | null> {
-    return this.load()[jobId] ?? null;
+    const jobs = this.load();
+    return jobs[jobId]
+      ?? Object.values(jobs).find((job) => job.source?.kind === 'cloudflare-queue' && job.source.id === jobId)
+      ?? null;
   }
 
   async listJobs(limit = 100): Promise<readonly DaemonBatchJob[]> {
@@ -865,6 +938,7 @@ export class DaemonBatchManager {
     const next: DaemonBatchJob = { ...current, ...patch, status: to, updatedAt: now() };
     this.jobs![id] = next;
     this.save(next);
+    this.notifySettled(next);
     return next;
   }
 
@@ -984,5 +1058,16 @@ function emptyTickResult(): DaemonBatchTickResult {
     polledProviderBatches: 0,
     completedJobs: 0,
     failedJobs: 0,
+  };
+}
+
+function copyBatchRequest(request: CreateDaemonBatchJobInput['request']): DaemonBatchJob['request'] {
+  return {
+    messages: [...request.messages],
+    ...(request.tools ? { tools: [...request.tools] } : {}),
+    ...(request.systemPrompt ? { systemPrompt: request.systemPrompt } : {}),
+    ...(request.maxTokens !== undefined ? { maxTokens: request.maxTokens } : {}),
+    ...(request.reasoningEffort ? { reasoningEffort: request.reasoningEffort } : {}),
+    ...(request.reasoningSummary !== undefined ? { reasoningSummary: request.reasoningSummary } : {}),
   };
 }

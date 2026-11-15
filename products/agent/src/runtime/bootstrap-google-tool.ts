@@ -7,9 +7,10 @@
  * it belongs next to the wiring, not buried in a file that registers thirty
  * other things.
  *
- * The native Gmail/Calendar route. The operator contract catalogs `email.send`
- * and `calendar.events.list` with `invokable: false`, no daemon serves them,
- * so this is the route the capability index points at.
+ * Mail runs in this process on the native connector. Calendar actions run on
+ * the adopted daemon's `calendar.events.*` methods when `daemon.enabled` is on
+ * and a connected-host credential is present, so both terminal apps reach the
+ * same calendar backend; otherwise they run here too.
  */
 
 import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
@@ -19,6 +20,7 @@ import { getOutwardApprovalStore, OUTWARD_APPROVAL_GESTURE } from '../trust/outw
 import type { ConfigManager, SecretsManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { retainGoogleConnectionOwners } from '../tools/agent-google-admission.ts';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
+import { createConnectedHost, resolveConnectedHost, type ConnectedHost } from '../agent/connected-host-client.ts';
 
 /** The slice of the runtime this wiring needs. Nothing wider. */
 export interface GoogleToolWiringDeps {
@@ -43,8 +45,19 @@ export function captureGoogleConnectionCurrent(deps: GoogleToolWiringDeps): () =
   return retainGoogleConnectionOwners(deps);
 }
 
+/** The adopted daemon for calendar calls, or null when calendar work stays in this process. One config read and one credential lookup per call. */
+function adoptedCalendarHost(deps: GoogleToolWiringDeps): () => ConnectedHost | null {
+  const selection = { configManager: deps.configManager, homeDirectory: deps.homeDirectory };
+  const host = createConnectedHost(selection);
+  return () => {
+    if (deps.configManager.get('daemon.enabled') !== true) return null;
+    return resolveConnectedHost(selection).unavailable === undefined ? host : null;
+  };
+}
+
 export function wireAgentGoogleTool(registry: ToolRegistry, deps: GoogleToolWiringDeps): void {
   registerAgentGoogleTool(registry, {
+    calendarHost: adoptedCalendarHost(deps),
     homeDirectory: deps.homeDirectory,
     configManager: deps.configManager,
     secretsManager: deps.secretsManager,

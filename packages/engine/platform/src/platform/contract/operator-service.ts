@@ -11,6 +11,11 @@
  * the contract, and `start` goes to the hosted session's floor when the
  * session id names a live hosted session, else to the daemon's own runner.
  *
+ * One ownership rule covers all five methods: a caller sees and acts on a
+ * contract only when its session is not owned by another principal
+ * (`HostedContractRunners.ownedByOthers`). A contract of another principal's
+ * session reads as not found, so its existence is not disclosed either.
+ *
  * Every choice here is code over ids and recorded statuses; nothing is judged.
  */
 import { realpathSync } from 'node:fs';
@@ -98,13 +103,22 @@ export interface OperatorDispatchInput {
  */
 export type OperatorWorkDispatcher = Pick<ContractExternalWorkAdapter, 'dispatch'>;
 
+/**
+ * Who is asking over the operator surface. Given, the session-ownership rule
+ * applies (`principalId` undefined is an anonymous caller); omitted, the
+ * caller is the daemon itself (the external work adapters), which sees all.
+ */
+export interface OperatorCaller {
+  readonly principalId: string | undefined;
+}
+
 export interface ContractOperatorService {
-  list(filter?: { readonly sessionId?: string | undefined; readonly includeTerminal?: boolean | undefined }): ContractView[];
-  get(contractId: string): ContractView | null;
+  list(filter?: { readonly sessionId?: string | undefined; readonly includeTerminal?: boolean | undefined }, caller?: OperatorCaller): ContractView[];
+  get(contractId: string, caller?: OperatorCaller): ContractView | null;
   start(input: OperatorStartInput): Promise<OperatorStartedContract>;
   /** False when the contract is known but already ended. */
-  cancel(contractId: string, reason: string): boolean;
-  reply(contractId: string, escalationId: string, text: string): Promise<OwnerReplyOutcome>;
+  cancel(contractId: string, reason: string, caller?: OperatorCaller): boolean;
+  reply(contractId: string, escalationId: string, text: string, caller?: OperatorCaller): Promise<OwnerReplyOutcome>;
   /**
    * Joins the hosted-session runners in, or takes them out with null. The
    * hosted-session engine is composed after the runtime services that build
@@ -225,11 +239,17 @@ export function createContractOperatorService(deps: ContractOperatorServiceDeps)
   let dispatcher: OperatorWorkDispatcher | null = null;
   const runners = (): readonly Pick<ContractRunner, 'get' | 'list' | 'reply'>[] => [deps.runner, ...(nativeRunner === null ? [] : [nativeRunner]), ...(hostedRunners?.runners() ?? [])];
 
-  /** The runner holding a contract, with its view; first found wins. */
-  function holder(contractId: string): { readonly runner: Pick<ContractRunner, 'get' | 'list' | 'reply'>; readonly contract: ContractView } {
+  /** The one ownership rule: whether `caller` may see and act on a contract of `sessionId`. */
+  function visibleTo(sessionId: string, caller: OperatorCaller | undefined): boolean {
+    return caller === undefined || hostedRunners?.ownedByOthers?.(sessionId, caller.principalId) !== true;
+  }
+
+  /** The runner holding a contract the caller may see, with its view; first found wins. */
+  function holder(contractId: string, caller?: OperatorCaller): { readonly runner: Pick<ContractRunner, 'get' | 'list' | 'reply'>; readonly contract: ContractView } {
     for (const runner of runners()) {
       const contract = runner.get(contractId);
-      if (contract !== null) return { runner, contract };
+      if (contract !== null && visibleTo(contract.sessionId, caller)) return { runner, contract };
+      if (contract !== null) break;
     }
     throw new ContractOperatorError(`No contract ${contractId} on this daemon.`, 'CONTRACT_NOT_FOUND', 404);
   }
@@ -245,7 +265,7 @@ export function createContractOperatorService(deps: ContractOperatorServiceDeps)
         'workspaceRoot',
       );
     }
-    if (input.sessionId !== undefined && hostedRunners?.ownedByOthers?.(input.sessionId, input.principalId) === true) {
+    if (input.sessionId !== undefined && !visibleTo(input.sessionId, { principalId: input.principalId })) {
       throw new ContractOperatorError(
         `Hosted session ${input.sessionId} belongs to another caller, so a contract cannot be started in it from this identity. Omit sessionId, or attach to that session first.`,
         'SESSION_NOT_OWNED',
@@ -302,28 +322,29 @@ export function createContractOperatorService(deps: ContractOperatorServiceDeps)
   }
 
   return {
-    list(filter = {}) {
+    list(filter = {}, caller) {
       const seen = new Set<string>();
       const contracts: ContractView[] = [];
       for (const runner of runners()) {
         for (const contract of runner.list({ ...filter, includeInputSnapshot: false })) {
           if (seen.has(contract.id)) continue;
           seen.add(contract.id);
+          if (!visibleTo(contract.sessionId, caller)) continue;
           contracts.push(summarized(projectContractOperatorView(contract)));
         }
       }
       return contracts.sort((a, b) => b.createdAt - a.createdAt);
     },
-    get(contractId) {
+    get(contractId, caller) {
       for (const runner of runners()) {
         const contract = runner.get(contractId);
-        if (contract !== null) return projectContractOperatorView(contract);
+        if (contract !== null) return visibleTo(contract.sessionId, caller) ? projectContractOperatorView(contract) : null;
       }
       return null;
     },
     start,
-    cancel(contractId, reason) {
-      const { runner } = holder(contractId);
+    cancel(contractId, reason, caller) {
+      const { runner } = holder(contractId, caller);
       if (runner === nativeRunner) {
         throw new ContractOperatorError(`Contract ${contractId} is native work: stop it through the native work execution, or answer its open question with "cancel".`, 'CONTRACT_NATIVE', 409);
       }
@@ -333,8 +354,8 @@ export function createContractOperatorService(deps: ContractOperatorServiceDeps)
       if (stored !== null && !isTerminalContractStatus(stored.status)) throw notRunning(contractId, stored.status);
       return false;
     },
-    async reply(contractId, escalationId, text) {
-      const { runner, contract } = holder(contractId);
+    async reply(contractId, escalationId, text, caller) {
+      const { runner, contract } = holder(contractId, caller);
       if (isTerminalContractStatus(contract.status)) {
         throw new ContractOperatorError(`Contract ${contractId} has ended (${contract.status}); there is nothing to reply to.`, 'CONTRACT_ENDED', 409);
       }

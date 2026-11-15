@@ -54,6 +54,9 @@ function optionalIsolation(params: Record<string, unknown>): 'auto' | 'worktree'
   throw new GatewayVerbError('Invalid isolation: expected auto, worktree or shared', 'INVALID_ARGUMENT', 400, 'isolation');
 }
 
+/** The caller every method applies the session-ownership rule to. */
+const callerOf = (invocation: Parameters<GatewayMethodHandler>[0]) => ({ principalId: invocation.context.principalId || undefined });
+
 /** Map the service's refusals onto the wire shape a client can act on. */
 function toGatewayVerbError(error: unknown): never {
   if (error instanceof ContractOperatorError) {
@@ -74,7 +77,7 @@ export function createContractsListHandler(service: ContractOperatorService): Ga
       contracts: service.list({
         ...(sessionId === undefined ? {} : { sessionId }),
         ...(includeTerminal === undefined ? {} : { includeTerminal }),
-      }).map(projectContractOperatorView),
+      }, callerOf(invocation)).map(projectContractOperatorView),
     };
   };
 }
@@ -82,7 +85,7 @@ export function createContractsListHandler(service: ContractOperatorService): Ga
 export function createContractsGetHandler(service: ContractOperatorService): GatewayMethodHandler {
   return (invocation) => {
     const contractId = requireString(readInvocationParams(invocation), 'contractId');
-    const contract = service.get(contractId);
+    const contract = service.get(contractId, callerOf(invocation));
     if (contract === null) throw new GatewayVerbError(`No contract ${contractId} on this daemon.`, 'CONTRACT_NOT_FOUND', 404);
     return projectContractOperatorView(contract);
   };
@@ -145,7 +148,7 @@ export function createContractsCancelHandler(service: ContractOperatorService): 
     const contractId = requireString(params, 'contractId');
     const reason = optionalString(params, 'reason') ?? OPERATOR_CANCEL_REASON;
     try {
-      return { cancelled: service.cancel(contractId, reason) };
+      return { cancelled: service.cancel(contractId, reason, callerOf(invocation)) };
     } catch (error) {
       return toGatewayVerbError(error);
     }
@@ -159,7 +162,7 @@ export function createContractsReplyHandler(service: ContractOperatorService): G
     const escalationId = requireString(params, 'escalationId');
     const text = requireString(params, 'text');
     try {
-      return await service.reply(contractId, escalationId, text);
+      return await service.reply(contractId, escalationId, text, callerOf(invocation));
     } catch (error) {
       return toGatewayVerbError(error);
     }

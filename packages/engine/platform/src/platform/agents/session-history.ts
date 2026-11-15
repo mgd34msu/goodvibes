@@ -70,13 +70,13 @@ export async function readAgentSessionHistory(input: {
     if (before.dev !== after.dev || before.ino !== after.ino || before.size !== after.size
       || before.mtimeNs !== after.mtimeNs || before.ctimeNs !== after.ctimeNs
       || after.dev !== named.dev || after.ino !== named.ino || after.ctimeNs !== named.ctimeNs) return unreadable('the saved journal changed while it was read');
-    let metadataMatches = false, saved: Record<string, unknown> | undefined;
+    let metadataMatches = false, sawMetadata = false, saved: Record<string, unknown> | undefined;
     for (const line of text.split('\n')) {
       if (!line.trim()) continue;
       const row: unknown = JSON.parse(line);
       if (!row || typeof row !== 'object' || Array.isArray(row)) return unreadable('a line of the saved journal is not a JSON object');
       const entry = row as Record<string, unknown>;
-      if (entry.type === 'meta') { metadataMatches = entry.agentId === agentId; saved = undefined; }
+      if (entry.type === 'meta') { metadataMatches = entry.agentId === agentId; sawMetadata ||= metadataMatches; saved = undefined; }
       if (entry.type !== 'agent_conversation') continue;
       if (!metadataMatches || entry.agentId !== agentId || entry.version !== 1 || !Array.isArray(entry.messages)
         || !Array.isArray(entry.archive) || !entry.messages.every((message: unknown) => message && typeof message === 'object'
@@ -84,6 +84,10 @@ export async function readAgentSessionHistory(input: {
       saved = entry;
     }
     current();
+    // The run started a journal but its final conversation entry is not in it: the run is still going in
+    // another process, or the entry could not be written (a full disk, a permission error). Either way the
+    // history is incomplete, which is not the same as "this agent never ran".
+    if (!saved && sawMetadata) return unreadable('the journal is incomplete: it has no saved conversation for this run (the run has not finished, or its last entries could not be written)');
     return saved ? { ...saved, kind: 'historical-agent-conversation', executionActive: false,
       meaning: 'Saved worker observations, not a live agent, new execution, current permission or completion approval. Preserve original scopes, versions and source roles.' } : undefined;
   } catch (error) {

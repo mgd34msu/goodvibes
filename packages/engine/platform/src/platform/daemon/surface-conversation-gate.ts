@@ -220,7 +220,8 @@ async function gateOwnedSurfaceSpawn(
   // wire. Until then listPending excludes it, so a message arriving in the
   // meantime is treated as what it is rather than as an answer to something
   // the owner was never shown. Fails closed: any refusal drops the proposal.
-  const delivery = await deliverProposalNotice(deps, binding, renderWorkProposalMessage({ summary, expiresInMs: config.proposalTtlMs }));
+  // The store may have folded an earlier pending request from this conversation into this proposal; the notice names both.
+  const delivery = await deliverProposalNotice(deps, binding, renderWorkProposalMessage({ summary: proposal.summary, expiresInMs: config.proposalTtlMs, requestCount: proposal.requestCount }));
   try { assertCurrent(); }
   catch (error) { store.markUndeliverable(proposal.id, 'source-invalidated'); throw error; }
   if (!delivery.delivered) {
@@ -246,7 +247,8 @@ async function gateOwnedSurfaceSpawn(
     outcome: 'work-proposed',
     proposalId: proposal.id,
     expiresAt: proposal.expiresAt,
-    summary,
+    summary: proposal.summary,
+    ...(proposal.requestCount ? { requestCount: proposal.requestCount } : {}),
     ...(sessionId ? { sessionId } : {}),
   }, { status: 202 });
 }

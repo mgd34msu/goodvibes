@@ -19,7 +19,12 @@ const fingerprint = (s: BigIntStats): string => `${s.dev}:${s.ino}:${s.mode}:${s
 interface Snapshot { readonly path: string; readonly mtimeMs: number; readonly fingerprint: string; readonly content?: string }
 interface Generation { readonly files: readonly Snapshot[]; readonly directories: ReadonlyMap<string, string>; readonly id: string }
 
-/** Preparation budget. Exceeding a count or byte total makes the code source unavailable; it never aborts the run. */
+/**
+ * Preparation budget. These bound what one turn sends to the embedding provider
+ * and how long the turn waits on it. A file over the per-file size is left out;
+ * exceeding a count or byte total makes the code source unavailable with the cap
+ * named, and the run continues without code context.
+ */
 const MAX_DISCOVERY_ENTRIES = 1_024;
 const MAX_FILES = 64;
 const MAX_FILE_BYTES = 128 * 1_024;
@@ -193,8 +198,6 @@ export function createCapturedCodeContext(input: {
               if (!admitFile(path)) continue;
               const read = bytes(path);
               if (read.content.includes('\0')) continue;
-              await new Promise<void>(resolve => setImmediate(resolve));
-              signal.throwIfAborted();
               files.push({ path: rel, fingerprint: read.fingerprint, mtimeMs: read.mtimeMs, ...(contractInputAuthorityMutable(authority) ? { content: read.content } : {}) });
               for (let directory = dirname(path); directory !== root; directory = dirname(directory)) {
                 await authorize(directory, signal);

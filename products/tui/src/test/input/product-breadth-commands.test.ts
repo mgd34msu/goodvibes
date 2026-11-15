@@ -2406,7 +2406,7 @@ describe('product breadth commands', () => {
     expect(created[1]?.owner).toBe('custom:doc-specialist');
     expect(builtin.requests).toHaveLength(1);
     expect(builtin.requests[0]?.context).toEqual({ battery: 'engine.agents.archetype-family', pattern: 'fan-out', site: 'agents.archetype-family' });
-    expect(builtin.requests[0]?.state).toEqual({ archetypes: recordedBuiltinArchetypes.map(({ name, description, tools }) => ({ name, description, tools: [...tools], isCustom: false, origin: 'builtin' })) });
+    expect(builtin.requests[0]?.state).toEqual({ archetypes: recordedBuiltinArchetypes.map(({ name, description, tools }) => ({ name, description, tools: [...tools] })) });
     expect(Object.keys(builtin.requests[0]?.questions ?? {})).toEqual(recordedBuiltinArchetypes.map((_, index) => `archetype${index}__family`));
     expect(listing.requests).toHaveLength(4);
     for (const request of listing.requests) {
@@ -2414,7 +2414,7 @@ describe('product breadth commands', () => {
       expect(request.context).toEqual({ battery: 'engine.agents.archetype-family', pattern: 'fan-out', site: 'agents.archetype-family' });
       expect(request.state).toMatchObject({ archetypes: [...recordedBuiltinArchetypes, doc].map(({ name, description, tools }) => ({ name, description, tools: [...tools] })) });
       expect(request.state).toMatchObject({ archetypes: expect.arrayContaining([expect.objectContaining({ name: doc.name,
-        sourceDocument: expect.stringContaining('You write precise operator-facing docs.') })]) });
+        systemPrompt: expect.stringContaining('You write precise operator-facing docs.') })]) });
       expect(Object.keys(request.questions)).toEqual([...recordedBuiltinArchetypes, doc].map((_, index) => `archetype${index}__family`));
     }
     const stored = opsApi.tasks.list();

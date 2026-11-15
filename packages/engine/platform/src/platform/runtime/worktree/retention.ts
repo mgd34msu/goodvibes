@@ -11,6 +11,9 @@ import { join, relative, sep } from 'node:path';
  * - Uncommitted changes, ignored files (`.env`, local databases, build output:
  *   removing a worktree deletes them and git keeps no copy), or git state that
  *   cannot be read: never removed here.
+ * - No created-by record (made by a version before the record existed): removed
+ *   once no running owner holds it, whatever it holds; its branch is kept unless
+ *   every commit on it is already in its base.
  */
 export const DEFAULT_WORKTREE_RETENTION_DAYS = 14;
 export const DEFAULT_WORKTREE_RETENTION_MS = DEFAULT_WORKTREE_RETENTION_DAYS * 24 * 60 * 60 * 1000;
@@ -164,8 +167,12 @@ export function formatAge(ms: number): string {
 
 /** What the policy does with one worktree. */
 export interface WorktreeEvaluation {
-  /** `remove-all`: directory and branch. `prune-directory`: directory only, the branch stays. `keep`: nothing is touched. */
-  readonly action: 'remove-all' | 'prune-directory' | 'keep';
+  /**
+   * `remove-all`: directory and branch. `prune-directory`: directory only, the branch stays.
+   * `remove-unmarked`: a worktree from before the created-by record, removed with whatever it holds.
+   * `keep`: nothing is touched.
+   */
+  readonly action: 'remove-all' | 'prune-directory' | 'remove-unmarked' | 'keep';
   readonly reason: WorktreeKeepReason;
   readonly assessment: WorktreeAssessment;
   /** The moment retention counts from: when the owner ended, else the last sign of life. */
@@ -213,4 +220,31 @@ export async function evaluateWorktree(input: {
     return keep({ why: 'unmerged', detail: `${assessment.commits} commit(s) not in ${assessment.base}; the directory is pruned in ${pruneInDays} day(s), the branch is kept`, pruneInDays });
   }
   return { action: 'prune-directory', reason: { why: 'unmerged', detail: `${assessment.commits} commit(s) not in ${assessment.base}; past retention, directory pruned and branch ${assessment.branch ?? ''} kept`, pruneInDays: 0 }, assessment, sinceMs };
+}
+
+/**
+ * Decide on a worktree under `.goodvibes/.worktrees` that carries no created-by
+ * record: one made by a version of the product before that record existed. The
+ * owner's rule is that these go, uncommitted changes included; only a running
+ * owner keeps one. What it held is read so the removal can say what was lost.
+ */
+export async function evaluateUnmarkedWorktree(input: {
+  readonly path: string;
+  readonly rootDir: string;
+  readonly registeredAt: number;
+  readonly owner: WorktreeOwnerInfo;
+  readonly now: number;
+}): Promise<WorktreeEvaluation> {
+  const { path, rootDir, owner, now } = input;
+  if (owner.state === 'running') {
+    return { action: 'keep', reason: { why: 'running', detail: 'its contract or agent is still running' }, assessment: { kind: 'unreadable', reason: 'not read while running' }, sinceMs: now };
+  }
+  const assessment = await assessWorktree(path, rootDir, owner.baseBranch);
+  const sinceMs = owner.state === 'ended' && owner.endedAt !== undefined ? owner.endedAt : input.registeredAt;
+  // Git cannot remove a tree it does not recognise as its worktree; say why it stays rather than fail the removal.
+  if (assessment.kind === 'unreadable') return { action: 'keep', reason: { why: 'unreadable', detail: `kept because ${assessment.reason}` }, assessment, sinceMs };
+  const held = assessment.kind === 'uncommitted' ? `; ${describeLocalState(assessment.changes, assessment.ignored)} removed with it`
+    : assessment.kind === 'unmerged' ? `; ${assessment.commits} commit(s) not in ${assessment.base} stay on branch ${assessment.branch ?? '(detached)'}`
+      : '';
+  return { action: 'remove-unmarked', reason: { why: 'removable', detail: `created before this release (no created-by record), so it is removed${held}` }, assessment, sinceMs };
 }

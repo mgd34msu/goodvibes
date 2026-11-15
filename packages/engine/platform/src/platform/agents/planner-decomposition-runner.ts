@@ -4,22 +4,25 @@ import { getContractActionSource, getContractActionPort, hasContractPlanConsumer
  * Production `DecompositionRunner` backed by the real `AgentManager`.
  *
  * This is the concrete driver that spawns a bounded, READ-ONLY `planner`
- * agent through the existing agents machinery and polls it to completion. It
+ * agent through the existing agents machinery and awaits its completion. It
  * lives in the agents layer (not `core`) precisely so `core/plan-decomposition.ts`
  * can stay free of any agent-machinery import and be unit-tested against a
  * stubbed runner. The planning agent it spawns is an ordinary `AgentManager`
  * agent, so it surfaces in the fleet like any other and honours kill/steer;
  * an external kill lands here as a `'cancelled'` result → heuristic fallback.
  *
- * Bounds are enforced cooperatively by polling `AgentRecord.usage`:
+ * Completion is the agent's own `join`, so the result is read the moment the
+ * run settles. The bounds are checked on a slower tick while it runs:
  *   - wall-clock: optional positive timeout cancels once `now() >= start + wallTimeoutMs`
  *   - token ceiling: `cancel()` once input+output tokens exceed the ceiling
  *   - turns: `cancel()` once `usage.turnCount` exceeds `maxTurns`
  * All three collapse to a `'cancelled'` run result (with a `detail`), which the
- * service turns into an honest `fallbackReason`.
+ * service turns into an honest `fallbackReason`. Without `join` the tick alone
+ * finds completion.
  */
 
 import type { AgentManager } from '../tools/agent/manager.js';
+import { builtinAgentTemplate } from './builtin-templates.js';
 import type { AgentInput } from '../tools/agent/schema.js';
 import { summarizeError } from '../utils/error-display.js';
 import type {
@@ -29,9 +32,8 @@ import type {
 } from '../core/plan-decomposition.js';
 import type { DecompositionAgentUsage } from '../core/plan-proposal.js';
 
-/** The read-only tool set the planner template resolves to. Kept in lockstep
- *  with AGENT_TEMPLATES.planner and passed with restrictTools for a hard cap. */
-export const PLANNER_DECOMPOSITION_TOOLS = ['read', 'find', 'analyze', 'inspect'] as const;
+/** The planner template's read-only tool set, passed with restrictTools for a hard cap. */
+export const PLANNER_DECOMPOSITION_TOOLS: readonly string[] = builtinAgentTemplate('planner')!.tools;
 
 export interface AgentManagerDecompositionRunnerDeps {
   agentManager: Pick<AgentManager, 'spawn' | 'getStatus' | 'cancel'> & Partial<Pick<AgentManager, 'join'>>;
@@ -39,7 +41,7 @@ export interface AgentManagerDecompositionRunnerDeps {
   now?: () => number;
   /** Injectable sleep (tests). */
   sleep?: (ms: number) => Promise<void>;
-  /** Poll interval in ms (default 50). */
+  /** How often the token, turn and wall-clock bounds are checked, in ms (default 500 with `join`, 50 without). */
   pollIntervalMs?: number;
   /** Optional model registry key override for the planner agent. */
   model?: string | undefined;
@@ -90,7 +92,7 @@ export function createAgentManagerDecompositionRunner(
 ): DecompositionRunner {
   const now = deps.now ?? Date.now;
   const sleep = deps.sleep ?? defaultSleep;
-  const pollIntervalMs = deps.pollIntervalMs ?? 50;
+  const pollIntervalMs = deps.pollIntervalMs ?? (deps.agentManager.join ? 500 : 50);
 
   return {
     async run(request: DecompositionRunnerRequest): Promise<DecompositionRunResult> {
@@ -146,8 +148,17 @@ export function createAgentManagerDecompositionRunner(
 
       const deadline = start + request.bounds.wallTimeoutMs;
       let stopDetail: string | undefined;
+      // Settles when the run does, or when the caller stops it, so neither waits out a tick.
+      const woken = Promise.race([
+        ...(join ? [join(agentId).then(() => undefined, () => undefined)] : []),
+        ...(request.signal ? [new Promise<void>((resolve) => {
+          if (request.signal!.aborted) resolve();
+          else request.signal!.addEventListener('abort', () => resolve(), { once: true });
+        })] : []),
+      ]);
+      let wokenSettled = false;
+      void woken.then(() => { wokenSettled = true; });
 
-      // Poll until terminal or a bound trips.
       // eslint-disable-next-line no-constant-condition
       while (true) {
         const cur = deps.agentManager.getStatus(agentId);
@@ -177,7 +188,10 @@ export function createAgentManagerDecompositionRunner(
           deps.agentManager.cancel(agentId, 'kill');
           break;
         }
-        await sleep(pollIntervalMs);
+        const untilDeadline = request.bounds.wallTimeoutMs > 0 ? Math.max(0, deadline - now()) : pollIntervalMs;
+        const tick = sleep(Math.min(pollIntervalMs, untilDeadline));
+        // Once woken has settled it is only a tick: a status that lags its join must not spin this loop.
+        await (wokenSettled ? tick : Promise.race([tick, woken]));
       }
 
       const final = deps.agentManager.getStatus(agentId);

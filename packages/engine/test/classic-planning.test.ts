@@ -49,7 +49,6 @@ test('Classic automatic planning uses one worker while retaining explicit owner 
     expect(pinned.decisionId).toBeUndefined(); expect(pinned.outcome).toBeUndefined();
     const families = await readArchetypeFamilies([{ name: 'custom', description: 'Owner-defined worker', tools: ['read'], isCustom: true, origin: 'local-markdown' }]);
     expect(families.readings).toEqual([{ kind: 'unclassified', provenance: 'classic' }]);
-    families.assertCurrent();
   });
   expect(requests).toHaveLength(0);
 });

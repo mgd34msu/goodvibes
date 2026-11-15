@@ -1,4 +1,4 @@
-/** An agent's saved journal: an unreadable one is reported as unreadable, and lost writes are counted rather than silent. */
+/** An agent's saved journal: an unreadable or incomplete one is reported as such, never as "no history". */
 import { afterEach, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -36,17 +36,12 @@ test('a journal with a malformed line is reported unreadable; an absent one is n
   expect(reasons).toEqual([]);
 });
 
-test('lines that could not be written are counted, so a journal that lost history is distinguishable', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'agent-journal-lost-')); roots.push(root);
-  const sessionsDir = join(root, 'sessions');
-  const session = new AgentSession('agent-lossy', 'model', 'provider', { sessionsDir, stateDir: join(root, 'state') });
-  expect(session.lostWriteCount).toBe(0);
-  // The directory is replaced by a file, so every later append fails.
-  rmSync(sessionsDir, { recursive: true, force: true });
-  writeFileSync(sessionsDir, 'not a directory');
-  session.appendMessage({ type: 'note' });
-  session.appendMessage({ type: 'note' });
-  expect(session.lostWriteCount).toBe(2);
-  await session.dispose();
-  expect(session.lostWriteCount).toBe(3);
+test('a journal that lost its final conversation entry is reported incomplete, not as no history', async () => {
+  const { request, session } = await savedWorker();
+  // Keep only the run's opening line, as when the final entry could not be written.
+  writeFileSync(session.sessionFile, `${readFileSync(session.sessionFile, 'utf8').split('\n')[0]}\n`);
+  const reasons: string[] = [];
+  expect(await readAgentSessionHistory({ ...request, onUnreadable: (reason) => reasons.push(reason) })).toBeUndefined();
+  expect(reasons).toHaveLength(1);
+  expect(reasons[0]).toContain('incomplete');
 });

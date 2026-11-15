@@ -15,6 +15,7 @@ import { decisionOrClassic, isClassicOperation } from '../runtime/decision-polic
 import { findNearestAgentsFile } from '../utils/prompt-loader.js';
 import { presetForMode } from '../gate/presets.js';
 import { knowledgeQueryText } from './turn-knowledge-injection.js';
+import { builtinAgentTemplate } from './builtin-templates.js';
 
 type PromptContextDeps = {
   readonly workingDirectory: string;
@@ -27,7 +28,21 @@ type PromptContextDeps = {
         loadArchetype(template: string): { systemPrompt?: string | undefined } | null | undefined;
       }
     | undefined;
+  /** The run's tool registry; the prompt describes each tool from its own definition. */
+  readonly getFullRegistry?: (() => { getToolDefinitions(): readonly { readonly name: string; readonly description: string }[] }) | undefined;
 };
+
+/** First sentence of each registered tool's description, by tool name. */
+function toolSummaries(deps: PromptContextDeps | undefined): ReadonlyMap<string, string> {
+  const summaries = new Map<string, string>();
+  for (const definition of deps?.getFullRegistry?.().getToolDefinitions() ?? []) {
+    const text = definition.description.replace(/\s+/g, ' ').trim();
+    const end = text.search(/\.(\s|$)/);
+    const sentence = end === -1 ? text : text.slice(0, end);
+    if (sentence) summaries.set(definition.name, sentence.length > 200 ? `${sentence.slice(0, 199).trimEnd()}…` : sentence);
+  }
+  return summaries;
+}
 
 /** One awaited reading per real prompt rebuild. Synchronous layout alternatives
  * consume only this exact completed handle, never a process-wide query cache.
@@ -334,24 +349,11 @@ export function buildOrchestratorSystemPrompt(
   const parts: string[] = [];
 
   // --- Layer 1: Base instructions ---
-  // Build tool descriptions for only the tools this agent has
-  const toolDescriptions: Record<string, string> = {
-    read: 'read files (supports extract modes: content, outline, symbols, lines)',
-    write: 'create new files (auto-creates parent directories)',
-    edit: 'find-and-replace in existing files (supports exact, fuzzy, regex matching)',
-    find: 'search files by glob pattern, content regex, or symbol extraction',
-    exec: 'run shell commands (build, test, lint, install)',
-    analyze: 'code analysis (impact, dependencies, dead code, security, coverage)',
-    inspect: 'project structure, API routes, database schema, components',
-    state: 'read/write session state and persistent memory',
-    fetch: 'HTTP requests with extraction modes (json, markdown, text, code blocks)',
-    workflow: 'manage workflow state machines, triggers, and scheduled tasks',
-    registry: 'discover and inspect available skills, agents, and tools',
-  };
-
+  // Each tool's line is the first sentence of its own registered definition.
+  const toolDescriptions = toolSummaries(deps);
   const toolLines = record.tools
     .filter(t => t !== 'agent')
-    .map(t => toolDescriptions[t] ? `- ${t}, ${toolDescriptions[t]}` : `- ${t}`)
+    .map(t => toolDescriptions.get(t) ? `- ${t}, ${toolDescriptions.get(t)}` : `- ${t}`)
     .join('\n');
 
   const toolNames = record.tools.filter(t => t !== 'agent').join(', ');
@@ -371,17 +373,8 @@ ${conversational ? `${CONVERSATIONAL_OUTPUT_SECTION}\n\n${CONVERSATIONAL_DIAGNOS
   if (archetype?.systemPrompt) {
     parts.push(archetype.systemPrompt);
   } else {
-    // Use the minimal role description from built-in templates.
-    const roleDescriptions: Record<string, string> = {
-      engineer: '## Role: Engineer\nFull-stack implementation agent. Build production-ready features with error handling, type safety, input validation, and security. Follow existing project patterns.\n\nEngineer execution protocol:\n1. Gather: read the necessary files, symbols, and constraints before editing.\n2. Plan: decide the exact writes and tool actions before making changes.\n3. Apply: perform the smallest correct set of edits and validations.\n\nYour final message MUST include a structured EngineerReport JSON block with gatheredContext, plannedActions, and appliedChanges (see Structured Output section).\n\nWill NOT do: architecture planning, code review, test writing, deployment.',
-      reviewer: '## Role: Reviewer\nCode review and quality assessment agent. Evaluate code for correctness, security, performance, and adherence to project conventions. Report specific issues with the file and line each one is at.\n\nYour final message MUST include a structured generic completion report (see Structured Output section).\n\nWill NOT do: implementation, deployment, testing.',
-      tester: '## Role: Tester\nTest writing and execution agent. Write comprehensive tests, run test suites, and report coverage. Ensure edge cases are covered.\n\nYour final message MUST include a structured TesterReport JSON block (see Structured Output section).\n\nWill NOT do: implementation, architecture, deployment.',
-      researcher: '## Role: Researcher\nCodebase exploration and analysis agent. Investigate code structure, trace data flows, find patterns, and report findings. Answer questions about how the code works.\n\nWill NOT do: implementation, testing, deployment.',
-      integrator: '## Role: Integrator\nCross-deliverable integration agent. Combine the finished parts of the work into one coherent result, resolve API and file conflicts, update exports/docs/tests, and preserve the original ask. Treat this as implementation work and return an EngineerReport JSON block so the checks can read the concrete changes.\n\nWill NOT do: independent feature development outside the parts being combined, code review, deployment.',
-      general: '## Role: General\nGeneral-purpose agent. Complete the assigned task using the tools available.',
-    };
-    const roleDesc = roleDescriptions[record.template] ?? roleDescriptions.general;
-    parts.push(roleDesc!);
+    // The role text of the built-in template, from the one template table.
+    parts.push((builtinAgentTemplate(record.template) ?? builtinAgentTemplate('general')!).role);
   }
 
   // The archetype overlay is written for working agents, and both the built-in

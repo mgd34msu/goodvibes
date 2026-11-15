@@ -1,5 +1,5 @@
-import { readFileSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 import {
@@ -8,6 +8,7 @@ import {
   extractMarkdownSections,
   materializeMarkdownBody,
 } from '../utils/markdown-disclosure.js';
+import { BUILTIN_AGENT_TEMPLATES } from './builtin-templates.js';
 
 // ---------------------------------------------------------------------------
 // AgentArchetype type
@@ -36,6 +37,12 @@ export interface AgentArchetype {
   sourcePath?: string | undefined;
   /** Validation or schema issues discovered while loading. */
   validationIssues?: readonly string[] | undefined;
+  /**
+   * False when the file could not be read as an archetype (no frontmatter,
+   * frontmatter that is not YAML, a field of the wrong type). Such an entry is
+   * listed with its issues so the owner can see it, and is never spawned.
+   */
+  usable?: boolean | undefined;
   /** Brief preview of the archetype body. */
   preview?: string | undefined;
   /** Lazy @ references discovered in the body. */
@@ -44,160 +51,17 @@ export interface AgentArchetype {
   sections?: readonly string[] | undefined;
 }
 
+const BUILT_IN_ARCHETYPES: readonly AgentArchetype[] = BUILTIN_AGENT_TEMPLATES.map((template) => ({
+  name: template.name,
+  description: template.description,
+  tools: [...template.tools],
+  isCustom: false,
+  origin: 'builtin' as const,
+}));
+
 // ---------------------------------------------------------------------------
-// Built-in archetypes mirror AGENT_TEMPLATES in src/tools/agent/index.ts so
-// archetypes.ts has no circular dependency on the tool module.
+// Frontmatter
 // ---------------------------------------------------------------------------
-
-const BUILT_IN_ARCHETYPES: AgentArchetype[] = [
-  {
-    name: 'orchestrator',
-    description: 'Contract owner: represents a contract and carries its answer',
-    tools: ['read', 'find', 'analyze', 'inspect', 'registry'],
-    isCustom: false,
-    origin: 'builtin',
-  },
-  {
-    name: 'planner',
-    description: 'Read-only goal-decomposition agent (no write/edit/exec/delegate)',
-    tools: ['read', 'find', 'analyze', 'inspect'],
-    isCustom: false,
-    origin: 'builtin',
-  },
-  {
-    name: 'engineer',
-    description: 'Full-stack implementation agent',
-    tools: ['read', 'write', 'edit', 'find', 'exec', 'analyze', 'inspect', 'fetch', 'registry'],
-    isCustom: false,
-    origin: 'builtin',
-  },
-  {
-    name: 'reviewer',
-    description: 'Code review and quality assessment',
-    tools: ['read', 'find', 'analyze', 'inspect', 'fetch', 'registry'],
-    isCustom: false,
-    origin: 'builtin',
-  },
-  {
-    name: 'tester',
-    description: 'Test writing and execution',
-    tools: ['read', 'write', 'find', 'exec', 'analyze', 'inspect'],
-    isCustom: false,
-    origin: 'builtin',
-  },
-  {
-    name: 'researcher',
-    description: 'Codebase exploration and analysis',
-    tools: ['read', 'find', 'analyze', 'inspect', 'fetch', 'registry'],
-    isCustom: false,
-    origin: 'builtin',
-  },
-  {
-    name: 'integrator',
-    description: 'Cross-deliverable integration agent',
-    tools: ['read', 'write', 'edit', 'find', 'exec', 'analyze', 'inspect', 'fetch', 'registry'],
-    isCustom: false,
-    origin: 'builtin',
-  },
-  {
-    name: 'general',
-    description: 'General purpose agent',
-    tools: ['read', 'write', 'edit', 'find', 'exec', 'analyze', 'inspect', 'fetch', 'registry'],
-    isCustom: false,
-    origin: 'builtin',
-  },
-];
-
-// Minimal YAML frontmatter parser. Supports the subset used in agent markdown files:
-//   key: value
-//   tools: [read, write, edit]
-//   tools:
-//     - read
-//     - write
-
-interface RawFrontmatter {
-  name?: string | undefined;
-  description?: string | undefined;
-  tools?: string[] | undefined;
-  model?: string | undefined;
-  provider?: string | undefined;
-  system_prompt?: string | undefined;
-}
-
-function parseSimpleYaml(yaml: string): RawFrontmatter {
-  const result: RawFrontmatter = {};
-  const lines = yaml.split('\n');
-  let i = 0;
-  let currentKey: string | null = null;
-  let collectingList = false;
-  const listBuffer: string[] = [];
-
-  const flushList = () => {
-    if (currentKey && collectingList) {
-      (result as Record<string, unknown>)[currentKey] = listBuffer.slice();
-    }
-    collectingList = false;
-    listBuffer.length = 0;
-  };
-
-  while (i < lines.length) {
-    const line = lines[i]!;
-    i++;
-
-    // Skip comments and blank lines
-    if (!line.trim() || line.trim().startsWith('#')) {
-      if (collectingList) flushList();
-      continue;
-    }
-
-    // List item under current key
-    const listItemMatch = line.match(/^\s+-\s+(.+)$/);
-    if (listItemMatch && collectingList) {
-      listBuffer.push(listItemMatch[1]?.trim() ?? '');
-      continue;
-    }
-
-    // Key: value line
-    const kvMatch = line.match(/^([\w_]+):\s*(.*)$/);
-    if (kvMatch) {
-      // Flush any pending list
-      if (collectingList) flushList();
-
-      currentKey = kvMatch[1]!;
-      const rawValue = kvMatch[2]?.trim() ?? '';
-
-      if (!rawValue) {
-        // Value will be on following list lines
-        collectingList = true;
-        continue;
-      }
-
-      // Inline list: [a, b, c]
-      const inlineListMatch = rawValue.match(/^\[(.*)\]$/);
-      if (inlineListMatch) {
-        (result as Record<string, unknown>)[currentKey] = inlineListMatch[1]!
-          .split(',')
-          .map((s) => s.trim())
-          .filter(Boolean);
-        continue;
-      }
-
-      // Multi-line string with | (just take first line for simple values)
-      const stripped = rawValue.replace(/^['"]|['"]$/g, '');
-      (result as Record<string, unknown>)[currentKey] = stripped;
-    }
-  }
-
-  // Flush any trailing list
-  if (collectingList) flushList();
-
-  // `tools: read` is a one-tool list written as a scalar; leaving it a string makes the file unusable.
-  if (typeof (result as { tools?: unknown }).tools === 'string') {
-    result.tools = ((result as { tools: unknown }).tools as string).split(',').map((tool) => tool.trim()).filter(Boolean);
-  }
-
-  return result;
-}
 
 /** Extract `--- frontmatter ---` + body from markdown text.
  *  Returns null if no frontmatter block is present. */
@@ -213,6 +77,61 @@ function extractFrontmatter(content: string): { raw: string; body: string } | nu
   return { raw, body };
 }
 
+interface Frontmatter {
+  readonly name?: string | undefined;
+  readonly description?: string | undefined;
+  readonly tools?: string[] | undefined;
+  readonly model?: string | undefined;
+  readonly provider?: string | undefined;
+  readonly systemPrompt?: string | undefined;
+}
+
+/**
+ * Read the frontmatter with a real YAML parser (block scalars, quoting and
+ * empty values mean what YAML says). Returns the fields, or the reasons the
+ * file cannot be used. An empty value (`description:`) reads as absent.
+ */
+function readFrontmatter(raw: string): { ok: true; fields: Frontmatter } | { ok: false; issues: string[] } {
+  let parsed: unknown;
+  try {
+    parsed = raw.length === 0 ? {} : Bun.YAML.parse(raw);
+  } catch (error) {
+    return { ok: false, issues: [`frontmatter is not valid YAML: ${summarizeError(error)}`] };
+  }
+  if (parsed === null || parsed === undefined) parsed = {};
+  if (typeof parsed !== 'object' || Array.isArray(parsed)) return { ok: false, issues: ['frontmatter is not a set of key: value fields'] };
+  const record = parsed as Record<string, unknown>;
+  const issues: string[] = [];
+  const text = (key: string): string | undefined => {
+    const value = record[key];
+    if (value === undefined || value === null) return undefined;
+    if (typeof value === 'string') return value;
+    if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+    issues.push(`'${key}' must be text`);
+    return undefined;
+  };
+  let tools: string[] | undefined;
+  const rawTools = record['tools'];
+  if (Array.isArray(rawTools)) {
+    if (rawTools.every((tool) => typeof tool === 'string')) tools = rawTools.map((tool) => tool.trim());
+    else issues.push("'tools' must be a list of tool names");
+  } else if (typeof rawTools === 'string') {
+    // `tools: read` or `tools: read, write` is a list written as a scalar.
+    tools = rawTools.split(',').map((tool) => tool.trim()).filter(Boolean);
+  } else if (rawTools !== undefined && rawTools !== null) {
+    issues.push("'tools' must be a list of tool names");
+  }
+  const fields: Frontmatter = {
+    name: text('name'),
+    description: text('description'),
+    tools,
+    model: text('model'),
+    provider: text('provider'),
+    systemPrompt: text('system_prompt'),
+  };
+  return issues.length > 0 ? { ok: false, issues } : { ok: true, fields };
+}
+
 function validateArchetype(archetype: Omit<AgentArchetype, 'validationIssues'>): string[] {
   const issues: string[] = [];
   if (!archetype.name.trim()) issues.push('missing name');
@@ -220,6 +139,7 @@ function validateArchetype(archetype: Omit<AgentArchetype, 'validationIssues'>):
   if (archetype.tools.length === 0) issues.push('no tools declared');
   const uniqueTools = new Set(archetype.tools.map((tool) => tool.trim()).filter(Boolean));
   if (uniqueTools.size !== archetype.tools.length) issues.push('duplicate or empty tool declarations');
+  if (archetype.systemPrompt !== undefined && !archetype.systemPrompt.trim()) issues.push('system_prompt is empty');
   return issues;
 }
 
@@ -227,20 +147,36 @@ function validateArchetype(archetype: Omit<AgentArchetype, 'validationIssues'>):
 // ArchetypeLoader
 // ---------------------------------------------------------------------------
 
+/** What the directory looked like at the last scan: one entry per stat'd path. */
+type DirectorySignature = ReadonlyMap<string, string>;
+
+function statSignature(path: string): string {
+  try {
+    const stat = statSync(path, { bigint: true });
+    return `${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`;
+  } catch (error) {
+    return `missing:${(error as NodeJS.ErrnoException).code ?? 'unknown'}`;
+  }
+}
+
 /** Loads and caches agent archetypes from .goodvibes/agents/*.md files.
  *
  * Progressive loading:
  *  - `listArchetypes()` returns all known archetypes (frontmatter only);
  *    full body (system_prompt) is populated on first call to `loadArchetype()`.
  *  - Built-in archetypes are available when no local .md file is found.
+ *
+ * Freshness: every list or load stats the directory and the files of the last
+ * scan (one `stat` each) and scans again when any of them changed, so a file
+ * added or edited in a running app is what the next spawn and listing use.
  */
 export class ArchetypeLoader {
   /** Map from archetype name -> AgentArchetype (may be partially loaded) */
   private cache = new Map<string, AgentArchetype>();
   /** Map from archetype name -> raw markdown body (lazy) */
   private bodyCache = new Map<string, string>();
-  /** Whether the directory scan has been run */
-  private scanned = false;
+  /** The stat signature of the last scan; null before the first. */
+  private signature: DirectorySignature | null = null;
   /** Directory to scan for .md files */
   private dir: string;
 
@@ -252,86 +188,134 @@ export class ArchetypeLoader {
   // Scanning
   // -------------------------------------------------------------------------
 
-  /** Scan the agents directory and populate cache with frontmatter-only entries.
- *  Called automatically on first access. */
+  private isCurrent(): boolean {
+    const signature = this.signature;
+    if (!signature) return false;
+    if (!this.dir) return true;
+    for (const [path, stamp] of signature) {
+      if (statSignature(path) !== stamp) return false;
+    }
+    return true;
+  }
+
+  /** Scan the agents directory when it changed since the last scan. */
   private scan(): void {
-    if (this.scanned) return;
-    this.scanned = true;
+    if (this.isCurrent()) return;
+    this.cache.clear();
+    this.bodyCache.clear();
 
     // Seed built-ins first; local markdown files override matching names.
     for (const builtin of BUILT_IN_ARCHETYPES) {
-      this.cache.set(builtin.name, { ...builtin });
+      this.cache.set(builtin.name, { ...builtin, tools: [...builtin.tools] });
     }
 
+    const signature = new Map<string, string>();
+    this.signature = signature;
     if (!this.dir) {
       logger.debug('ArchetypeLoader: no archetype directory configured, using built-ins only');
       return;
     }
 
+    // The directory stamp is taken before reading it, so a change during the scan is seen next time.
+    signature.set(this.dir, statSignature(this.dir));
     let files: string[];
     try {
-      files = readdirSync(this.dir).filter((f) => f.endsWith('.md'));
+      files = readdirSync(this.dir).filter((f) => f.endsWith('.md')).sort();
     } catch {
       // Directory doesn't exist, built-ins are the only archetypes
       logger.debug('ArchetypeLoader: agents dir not found, using built-ins', { dir: this.dir });
       return;
     }
 
+    const declaredBy = new Map<string, string>();
     for (const file of files) {
+      const filePath = join(this.dir, file);
+      signature.set(filePath, statSignature(filePath));
+      const fallbackName = file.replace(/\.md$/, '');
+      let content: string;
       try {
-        const filePath = join(this.dir, file);
-        const content = readFileSync(filePath, 'utf-8');
-        const parsed = extractFrontmatter(content);
-        if (!parsed) {
-          logger.warn('ArchetypeLoader: agent file skipped, it has no --- frontmatter block', { file });
-          continue;
-        }
-
-        const fm = parseSimpleYaml(parsed.raw);
-        const name = fm.name ?? file.replace(/\.md$/, '');
-
-        const archetype: AgentArchetype = {
-          name,
-          description: fm.description ?? '',
-          tools: fm.tools ?? [],
-          model: fm.model,
-          provider: fm.provider,
-          // systemPrompt intentionally omitted here, lazy loaded
-          isCustom: true,
-          origin: 'local-markdown',
-          sourcePath: filePath,
-        };
-
-        // Store body for lazy loading
-        if (fm.system_prompt) {
-          // If system_prompt is inline in frontmatter, set it directly
-          archetype.systemPrompt = fm.system_prompt;
-        } else {
-          // Otherwise, the markdown body is the system prompt
-          this.bodyCache.set(name, parsed.body);
-          archetype.preview = extractMarkdownPreview(parsed.body);
-          archetype.includes = collectMarkdownReferences(parsed.body);
-          archetype.sections = extractMarkdownSections(parsed.body);
-        }
-
-        const issues = validateArchetype(archetype);
-        const builtin = BUILT_IN_ARCHETYPES.find((candidate) => candidate.name === name);
-        if (builtin) {
-          issues.push(`replaces the built-in '${name}' archetype`);
-          const added = archetype.tools.filter((tool) => !builtin.tools.includes(tool));
-          if (added.length > 0) issues.push(`adds tools the built-in '${name}' archetype does not have: ${added.join(', ')}`);
-        }
-        if (issues.length > 0) logger.warn('ArchetypeLoader: agent file has issues', { file, issues });
-        archetype.validationIssues = issues;
-
-        this.cache.set(name, archetype);
+        content = readFileSync(filePath, 'utf-8');
       } catch (err) {
-        logger.error('ArchetypeLoader: failed to parse agent file', {
-          file,
-          error: summarizeError(err),
-        });
+        this.addUnusable(fallbackName, filePath, [`could not be read: ${summarizeError(err)}`], declaredBy);
+        continue;
       }
+      const parsed = extractFrontmatter(content);
+      if (!parsed) {
+        this.addUnusable(fallbackName, filePath, ['has no --- frontmatter block'], declaredBy);
+        continue;
+      }
+      const frontmatter = readFrontmatter(parsed.raw);
+      if (!frontmatter.ok) {
+        this.addUnusable(fallbackName, filePath, frontmatter.issues, declaredBy);
+        continue;
+      }
+      const fm = frontmatter.fields;
+      const name = fm.name?.trim() || fallbackName;
+
+      const archetype: AgentArchetype = {
+        name,
+        description: fm.description ?? '',
+        tools: fm.tools ?? [],
+        model: fm.model?.trim() || undefined,
+        provider: fm.provider?.trim() || undefined,
+        // systemPrompt intentionally omitted here, lazy loaded
+        isCustom: true,
+        origin: 'local-markdown',
+        sourcePath: filePath,
+        usable: true,
+      };
+
+      if (fm.systemPrompt !== undefined) {
+        // An inline system_prompt replaces the markdown body.
+        archetype.systemPrompt = fm.systemPrompt;
+      } else {
+        archetype.preview = extractMarkdownPreview(parsed.body);
+        archetype.includes = collectMarkdownReferences(parsed.body);
+        archetype.sections = extractMarkdownSections(parsed.body);
+      }
+
+      const issues = validateArchetype(archetype);
+      const builtin = BUILT_IN_ARCHETYPES.find((candidate) => candidate.name === name);
+      if (builtin) {
+        issues.push(`replaces the built-in '${name}' archetype`);
+        const added = archetype.tools.filter((tool) => !builtin.tools.includes(tool));
+        if (added.length > 0) issues.push(`adds tools the built-in '${name}' archetype does not have: ${added.join(', ')}`);
+      }
+      archetype.validationIssues = issues;
+      if (this.register(archetype, file, declaredBy) && fm.systemPrompt === undefined) this.bodyCache.set(name, parsed.body);
     }
+  }
+
+  /** Keep the first file that declares a name; a later one is reported on the kept entry, never silently dropped. */
+  private register(archetype: AgentArchetype, file: string, declaredBy: Map<string, string>): boolean {
+    const first = declaredBy.get(archetype.name);
+    if (first !== undefined) {
+      const kept = this.cache.get(archetype.name);
+      const issue = `the name '${archetype.name}' is declared by both ${first} and ${file}; ${file} is ignored until one of them is renamed`;
+      if (kept) kept.validationIssues = [...(kept.validationIssues ?? []), issue];
+      logger.warn('ArchetypeLoader: two agent files declare one name', { name: archetype.name, kept: first, ignored: file });
+      return false;
+    }
+    declaredBy.set(archetype.name, file);
+    if ((archetype.validationIssues?.length ?? 0) > 0) {
+      logger.warn('ArchetypeLoader: agent file has issues', { file, issues: archetype.validationIssues });
+    }
+    this.cache.set(archetype.name, archetype);
+    return true;
+  }
+
+  private addUnusable(name: string, sourcePath: string, issues: string[], declaredBy: Map<string, string>): void {
+    const file = sourcePath.slice(this.dir.length + 1);
+    this.register({
+      name,
+      description: '',
+      tools: [],
+      isCustom: true,
+      origin: 'local-markdown',
+      sourcePath,
+      usable: false,
+      validationIssues: [...issues, 'not used: fix the file and it is read again on the next listing or spawn'],
+    }, file, declaredBy);
   }
 
   // -------------------------------------------------------------------------
@@ -339,12 +323,12 @@ export class ArchetypeLoader {
   // -------------------------------------------------------------------------
 
   /** Load a named archetype with full content (including system prompt).
-   *  Returns null if not found in files or built-ins. */
+   *  Returns null if not found in files or built-ins, or if its file cannot be used. */
   loadArchetype(name: string): AgentArchetype | null {
     this.scan();
 
     const archetype = this.cache.get(name);
-    if (!archetype) return null;
+    if (!archetype || archetype.usable === false) return null;
 
     // Lazy-load body as system prompt if not yet resolved
     if (!archetype.systemPrompt && this.bodyCache.has(name)) {
@@ -358,10 +342,17 @@ export class ArchetypeLoader {
     return { ...archetype };
   }
 
-  /** List all known archetypes (frontmatter only, no body loading). */
-  listArchetypes(): AgentArchetype[] {
+  /**
+   * List all known archetypes, unusable files included with their issues.
+   * Frontmatter only by default; `withPrompts` adds each file's prompt text as
+   * written (its `@` references are not read).
+   */
+  listArchetypes(options: { readonly withPrompts?: boolean } = {}): AgentArchetype[] {
     this.scan();
-    return Array.from(this.cache.values()).map((a) => ({ ...a }));
+    return Array.from(this.cache.values()).map((a) => {
+      const body = options.withPrompts && a.systemPrompt === undefined ? this.bodyCache.get(a.name) : undefined;
+      return body === undefined ? { ...a } : { ...a, systemPrompt: body };
+    });
   }
 
   /** Merge archetype config with runtime overrides.
@@ -386,11 +377,26 @@ export class ArchetypeLoader {
     };
   }
 
-  /** Clear all cached archetypes and force re-scan on next access.
-   *  Primarily for testing. */
+  /** Forget the last scan so the next access reads the directory again. */
   clear(): void {
     this.cache.clear();
     this.bodyCache.clear();
-    this.scanned = false;
+    this.signature = null;
   }
+}
+
+const sharedLoaders = new Map<string, ArchetypeLoader>();
+
+/**
+ * The process's one loader for an agents directory. The runtime services and
+ * `/teamwork` both read through it, so a listing and a spawn always agree.
+ */
+export function archetypeLoaderFor(directory: string): ArchetypeLoader {
+  const key = resolve(directory);
+  let loader = sharedLoaders.get(key);
+  if (!loader) {
+    loader = new ArchetypeLoader(key);
+    sharedLoaders.set(key, loader);
+  }
+  return loader;
 }

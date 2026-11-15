@@ -56,12 +56,12 @@ export class AgentSession {
   /** Keeps journal lines in order while their credential spans are read. */
   private readonly lineWriter = new AtRestLineWriter(AGENT_JOURNAL_CREDENTIAL_SITE);
   private disposal: Promise<void> | undefined;
+  /**
+   * Journal lines that could not be written (a full disk, a permission error).
+   * The run continues; a later history lookup finds no final conversation entry
+   * and reports the journal as incomplete instead of "no history".
+   */
   private lostWrites = 0;
-
-  /** Journal lines that could not be written (a full disk, a permission error). The run continues; its history does not. */
-  get lostWriteCount(): number {
-    return this.lostWrites;
-  }
 
   constructor(
     agentId: string,

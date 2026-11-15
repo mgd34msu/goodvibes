@@ -7,6 +7,7 @@ import { AgentCapacityError } from './capacity-error.js';
 import { bindContractActionSource, bindContractActionSignal, bindContractPlanConsumer } from './contract-binding.js';
 import type { AgentConstructionBinding } from './contract-binding.js';
 import { ArchetypeLoader } from '../../agents/archetypes.js';
+import { BUILTIN_AGENT_TEMPLATES } from '../../agents/builtin-templates.js';
 import { AgentOrchestrator } from '../../agents/orchestrator.js';
 import { AgentMessageBus } from '../../agents/message-bus.js';
 import type { ContractRunner, ContractStartOptions, OwnedStartedContract, StartedContract } from '../../contract/runner.js';
@@ -96,40 +97,10 @@ export const DEFAULT_CONVERSATION_SNAPSHOT_RETENTION = 20;
 /** Finished agent records kept by default; each holds its full output and usage, so a long-lived process cannot keep them all. */
 export const DEFAULT_TERMINAL_AGENT_RETENTION = 500;
 
-export const AGENT_TEMPLATES: Record<string, { description: string; defaultTools: string[] }> = {
-  orchestrator: {
-    description: 'Contract owner: represents a contract and carries its answer',
-    defaultTools: ['read', 'find', 'analyze', 'inspect', 'registry'],
-  },
-  planner: {
-    description: 'Read-only goal-decomposition agent (no write/edit/exec/delegate)',
-    defaultTools: ['read', 'find', 'analyze', 'inspect'],
-  },
-  engineer: {
-    description: 'Full-stack implementation agent',
-    defaultTools: ['read', 'write', 'edit', 'find', 'exec', 'analyze', 'inspect', 'fetch', 'registry'],
-  },
-  reviewer: {
-    description: 'Code review and quality assessment',
-    defaultTools: ['read', 'find', 'analyze', 'inspect', 'fetch', 'registry'],
-  },
-  tester: {
-    description: 'Test writing and execution',
-    defaultTools: ['read', 'write', 'find', 'exec', 'analyze', 'inspect'],
-  },
-  researcher: {
-    description: 'Codebase exploration and analysis',
-    defaultTools: ['read', 'find', 'analyze', 'inspect', 'fetch', 'registry'],
-  },
-  integrator: {
-    description: 'Cross-deliverable integration agent',
-    defaultTools: ['read', 'write', 'edit', 'find', 'exec', 'analyze', 'inspect', 'fetch', 'registry'],
-  },
-  general: {
-    description: 'General purpose agent',
-    defaultTools: ['read', 'write', 'edit', 'find', 'exec', 'analyze', 'inspect', 'fetch', 'registry'],
-  },
-};
+/** The built-in agent kinds, by name, from the one template table. */
+export const AGENT_TEMPLATES: Record<string, { description: string; defaultTools: string[] }> = Object.fromEntries(
+  BUILTIN_AGENT_TEMPLATES.map((template) => [template.name, { description: template.description, defaultTools: [...template.tools] }]),
+);
 
 
 /** Legacy starts remain valid; owned starts require an explicit real receipt. */

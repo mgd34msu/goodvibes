@@ -193,6 +193,24 @@ describe('WorkProposalStore unanswered proposals', () => {
   });
 });
 
+describe('WorkProposalStore one proposal per conversation', () => {
+  test('a second request before the first is answered folds into one answerable proposal', () => {
+    const dropped: Array<[string, string]> = [];
+    const store = new WorkProposalStore({ onUnanswered: (record, reason) => { dropped.push([record.id, reason]); } });
+    const source = { userId: 'owner', channelId: 'topic', threadId: 'thread' };
+    const first = propose(store, makeInput({ ...source, task: 'fix the login bug', summary: 'fix the login bug', inputId: 'i-1' }));
+    const second = store.create(makeInput({ ...source, task: 'update the README', summary: 'update the README', inputId: 'i-2' }));
+    expect(dropped).toEqual([[first.id, 'folded']]);
+    expect(second.requestCount).toBe(2);
+    expect(second.task).toContain('fix the login bug');
+    expect(second.task).toContain('update the README');
+    expect(second.inputId).toBe('i-2');
+    store.markDelivered(second.id);
+    expect(store.listPending().map((record) => record.id)).toEqual([second.id]);
+    store.dispose();
+  });
+});
+
 describe('WorkProposalStore bounds', () => {
   test('the pending cap drops the oldest, never grows without limit', () => {
     let now = 1_000_000;
@@ -200,7 +218,7 @@ describe('WorkProposalStore bounds', () => {
     const created = [];
     for (let index = 0; index < 6; index += 1) {
       now += 1_000;
-      created.push(propose(store, makeInput({ summary: `job ${index}` })));
+      created.push(propose(store, makeInput({ summary: `job ${index}`, userId: `owner-${index}` })));
     }
     const pending = store.listPending();
     expect(pending).toHaveLength(3);
@@ -384,11 +402,11 @@ describe('WorkProposalStore live cap', () => {
     let now = 1_000_000;
     let cap = 5;
     const store = new WorkProposalStore({ maxPending: () => cap, now: () => now });
-    for (let index = 0; index < 5; index += 1) { now += 1_000; propose(store, makeInput({ summary: `job ${index}` })); }
+    for (let index = 0; index < 5; index += 1) { now += 1_000; propose(store, makeInput({ summary: `job ${index}`, userId: `owner-${index}` })); }
     expect(store.listPending()).toHaveLength(5);
     cap = 2;
     now += 1_000;
-    propose(store, makeInput({ summary: 'job 5' }));
+    propose(store, makeInput({ summary: 'job 5', userId: 'owner-5' }));
     expect(store.listPending().map((record) => record.summary)).toEqual(['job 5', 'job 4']);
     store.dispose();
   });

@@ -102,10 +102,9 @@ describe('exact pending proposal is bound before reading', () => {
       if (kind === 'steer') expect((h.spawns[0] as unknown[])[1]).toBe(h.input.text);
     } finally { h.store.dispose(); }
   });
-  for (const mismatch of ['none', 'owner', 'channel', 'thread', 'ambiguous']) test(`${mismatch} does not even transmit a reply`, async () => {
+  for (const mismatch of ['none', 'owner', 'channel', 'thread']) test(`${mismatch} does not even transmit a reply`, async () => {
     const h = harness(); answer = 'approve';
     if (mismatch !== 'none') h.proposal();
-    if (mismatch === 'ambiguous') h.proposal();
     const input = { ...h.input, ...(mismatch === 'owner' ? { userId: 'other' } : mismatch === 'channel' ? { channelId: 'other' } : mismatch === 'thread' ? { threadId: 'other' } : {}) };
     try { expect(await tryResolveWorkProposalReplyFromChannel(input, h.replyDeps)).toEqual({ consumed: false }); expect(calls).toEqual([]); expect(h.spawns).toEqual([]); }
     finally { h.store.dispose(); }

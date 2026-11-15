@@ -14,6 +14,7 @@ import {
   describeLocalState,
   DEFAULT_WORKTREE_RETENTION_MS,
   DEFAULT_KEPT_WORKTREE_NOTICE_BYTES,
+  evaluateUnmarkedWorktree,
   evaluateWorktree,
   formatAge,
   formatBytes,
@@ -665,10 +666,11 @@ export class WorktreeRegistry {
    * after the retention period with the branch kept, and anything with
    * uncommitted changes, a running owner or unreadable git state is left
    * alone, as is one with ignored files (removal would delete them). A
-   * worktree is only considered when it carries the marker written when this
-   * product created it, and is not marked kept, paused or attached to a
-   * session or task; a directory that merely sits under `.goodvibes` is never
-   * touched. Each removal is re-decided under the register lock, which is
+   * worktree in one of the product's own shapes that carries no created-by
+   * marker was made before the marker existed and is removed, whatever it
+   * holds, once no running owner holds it. Nothing marked kept, paused or
+   * attached to a session or task is swept, and a directory that merely sits
+   * under `.goodvibes` is never touched. Each removal is re-decided under the register lock, which is
    * released before the removal itself so a slow removal does not stall other
    * register writers.
    *
@@ -691,7 +693,7 @@ export class WorktreeRegistry {
     for (const row of rows) {
       if (row.kind === 'manual' || !isProductWorktreePath(row.path, this.workingDirectory)) continue;
       if (onlyPaths && !onlyPaths.has(row.path)) continue;
-      const decide = () => evaluateWorktree({ path: row.path, rootDir: this.workingDirectory, registeredAt: row.updatedAt, owner: owner(row.path), now, retentionMs });
+      const decide = () => this.evaluateRow(row, owner(row.path), now, retentionMs);
       const keepReason = (reason: WorktreeKeepReason) => report.kept.push({ path: row.path, branch: row.branch, reason });
       const guarded = sweepProtection(row);
       if (guarded) { keepReason(guarded); continue; }
@@ -718,10 +720,18 @@ export class WorktreeRegistry {
         lock?.release();
       }
       try {
-        await this.git.worktreeRemove(row.path);
+        if (evaluation.action === 'remove-unmarked') {
+          // The owner's rule for worktrees from before the marker: removed with what they hold, so git's dirty-tree refusal is overridden.
+          if (!(await runGit(this.workingDirectory, ['worktree', 'remove', '--force', row.path])).ok) throw new Error('git worktree remove --force failed');
+        } else {
+          await this.git.worktreeRemove(row.path);
+        }
         const branch = evaluation.assessment.kind === 'nothing-unique' || evaluation.assessment.kind === 'unmerged' ? evaluation.assessment.branch : null;
         let branchDeleted = false;
-        if (evaluation.action === 'remove-all' && branch) {
+        if (evaluation.action === 'remove-unmarked') {
+          // `-d` keeps a branch with commits its base lacks, so only the uncommitted state is lost, as the rule says.
+          if (branch) branchDeleted = (await runGit(this.workingDirectory, ['branch', '-d', branch])).ok;
+        } else if (evaluation.action === 'remove-all' && branch) {
           // `-d` refuses a branch that is not merged, so a commit the base lacks can never be dropped here.
           branchDeleted = (await runGit(this.workingDirectory, ['branch', '-d', branch])).ok;
         } else if (branch?.startsWith('contract-input/')) {
@@ -729,9 +739,11 @@ export class WorktreeRegistry {
           branchDeleted = (await runGit(this.workingDirectory, ['branch', '-D', branch])).ok;
         }
         await this.forgetRemoved(storePath, row.path);
-        const note = evaluation.action === 'prune-directory' && !branchDeleted
-          ? `directory pruned after retention; branch ${branch ?? '(none)'} kept so its commits stay reachable`
-          : branchDeleted ? 'removed with its branch' : `removed; branch ${branch ?? '(none)'} kept`;
+        const note = evaluation.action === 'remove-unmarked'
+          ? `${evaluation.reason.detail}${branchDeleted ? '; its branch was merged and is deleted' : ''}`
+          : evaluation.action === 'prune-directory' && !branchDeleted
+            ? `directory pruned after retention; branch ${branch ?? '(none)'} kept so its commits stay reachable`
+            : branchDeleted ? 'removed with its branch' : `removed; branch ${branch ?? '(none)'} kept`;
         report.removed.push({ path: row.path, branch, branchDeleted, pruned: evaluation.action === 'prune-directory', note });
         logger.info('worktree retention: removed a worktree', { path: row.path, branch, note });
       } catch (error) {
@@ -743,6 +755,12 @@ export class WorktreeRegistry {
       }
     }
     return report;
+  }
+
+  /** The retention decision for one product worktree: the marker says which rule applies. */
+  private evaluateRow(row: WorktreeStatusRecord, owner: WorktreeOwnerInfo, now: number, retentionMs: number) {
+    const input = { path: row.path, rootDir: this.workingDirectory, registeredAt: row.updatedAt, owner, now };
+    return isMarkedProductWorktree(row.path) ? evaluateWorktree({ ...input, retentionMs }) : evaluateUnmarkedWorktree(input);
   }
 
   /** Drop the register entry of a worktree whose directory is gone. Best effort: the next list() reaps it otherwise. */
@@ -802,7 +820,7 @@ export class WorktreeRegistry {
     const infos: KeptWorktreeInfo[] = [];
     for (const row of rows) {
       if (row.kind === 'manual' || !isProductWorktreePath(row.path, this.workingDirectory)) continue;
-      const evaluation = await evaluateWorktree({ path: row.path, rootDir: this.workingDirectory, registeredAt: row.updatedAt, owner: owner(row.path), now, retentionMs });
+      const evaluation = await this.evaluateRow(row, owner(row.path), now, retentionMs);
       const guarded = sweepProtection(row);
       const sizeBytes = await worktreeSizeBytes(row.path);
       infos.push({
@@ -1086,16 +1104,14 @@ export class WorktreeRegistry {
 
 /**
  * Why the automatic sweep must leave a worktree alone regardless of what it
- * holds, or null. Only a worktree this product created (its marker, written
- * when it was added) is ever swept, and not one the user kept or paused or
- * attached to a session or task: `list()` registers every worktree git knows,
- * so a register row alone says nothing about who made it.
+ * holds, or null: the user kept or paused it, or attached it to a session or
+ * task. Which retention rule applies otherwise is the created-by marker's
+ * question (see `evaluateRow`).
  */
 function sweepProtection(row: Pick<WorktreeStatusRecord, 'path' | 'state' | 'sessionId' | 'taskId'>): WorktreeKeepReason | null {
   if (row.state === 'kept') return { why: 'protected', detail: 'marked kept; only /worktree discard removes it' };
   if (row.state === 'paused') return { why: 'protected', detail: 'paused; resume or discard it explicitly' };
   if (row.sessionId || row.taskId) return { why: 'protected', detail: `attached to ${row.sessionId ? `session ${row.sessionId}` : `task ${row.taskId}`}; detach or discard it explicitly` };
-  if (!isMarkedProductWorktree(row.path)) return { why: 'protected', detail: 'not recorded as created by this version of the product; never removed automatically' };
   return null;
 }
 

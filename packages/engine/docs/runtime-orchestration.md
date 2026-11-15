@@ -321,10 +321,12 @@ waits.
   untracked) or with files git ignores (`.env`, local databases, build output,
   which removal would delete and no commit holds) is never removed
   automatically, at any age, and neither is one whose git state cannot be read,
-  one whose owner is still running, one marked kept or paused, one attached to
-  a session or task, or any worktree that does not carry the record the product
-  writes when it creates one (worktrees made by hand or by an earlier version
-  are left alone). `/worktree
+  one whose owner is still running, one marked kept or paused, or one attached
+  to a session or task. A worktree in one of the product's own locations that
+  does not carry the record the product writes when it creates one was made by
+  a version before that record existed: it is removed once no running owner
+  holds it, uncommitted changes and ignored files included, and its branch is
+  kept unless every commit on it is already in its base. `/worktree
   review` and `/worktree inspect` show each worktree's age, size on disk and
   why it is kept, with the days left before pruning. When kept worktrees total
   more than 1 GB the daemon prints one line at startup naming the count and

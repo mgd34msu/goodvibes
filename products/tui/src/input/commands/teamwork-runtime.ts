@@ -1,10 +1,9 @@
 import type { CommandRegistry, CommandContext } from '../command-registry.ts';
 import { join } from 'node:path';
 import { AGENT_TEMPLATES } from '@goodvibes-jev/engine/platform/platform/tools';
-import { captureArchetypeListing, readArchetypeFamilies, type AgentArchetype, type ArchetypeFamily, type ArchetypeFamilyReading } from '@goodvibes-jev/engine/platform/platform/agents';
+import { readArchetypeListing, readArchetypeFamilies, type AgentArchetype, type ArchetypeFamily, type ArchetypeFamilyReading } from '@goodvibes-jev/engine/platform/platform/agents';
 import { requireOpsApi, requireReadModels, requireShellPaths } from './runtime-services.ts';
 import { beginCommandReading } from './command-reading-lifetime.ts';
-import { assertJudgmentInput, retainStrictJudgmentJson } from '@goodvibes-jev/engine/platform/platform/gate';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 
 type TeamworkModeId =
@@ -178,29 +177,23 @@ export function registerTeamworkRuntimeCommands(registry: CommandRegistry): void
     async handler(args, ctx) {
       ctx.teamworkReading?.cancel();
       let submission: ReturnType<typeof beginCommandReading> | undefined;
-      let observation: (() => void) | undefined;
+      // One read of the agents directory through the loader spawns use, one family reading, then print.
       const listArchetypeModes = async () => {
         submission = beginCommandReading(ctx, args, 'teamworkReading');
-        const owner = submission;
-        const source = captureArchetypeListing(join(requireShellPaths(ctx).workingDirectory, '.goodvibes', 'agents'));
-        const assertSource = () => { owner.assertCurrent(); source.assertCurrent(); };
-        const families = await readArchetypeFamilies(source.archetypes, { signal: owner.signal, assertCurrent: assertSource });
-        observation = () => { assertSource(); families.assertCurrent(); };
-        observation();
-        return source.archetypes.map((archetype, index) => {
+        const archetypes = readArchetypeListing(join(requireShellPaths(ctx).workingDirectory, '.goodvibes', 'agents'));
+        const families = await readArchetypeFamilies(archetypes, { signal: submission.signal });
+        submission.signal.throwIfAborted();
+        return archetypes.map((archetype, index) => {
           const reading = families.readings[index];
           if (!reading) throw new Error('Incomplete archetype listing reading.');
           return buildArchetypeMode(archetype, reading);
         }).sort((a, b) => a.id.localeCompare(b.id));
       };
       try {
-        const original = retainStrictJudgmentJson(args);
-        assertJudgmentInput(original.snapshot);
         const sub = args[0]?.toLowerCase() ?? 'review';
 
         if (sub === 'review') {
           const snapshot = buildTeamworkReviewSnapshot(ctx, await listArchetypeModes());
-          observation?.();
           ctx.print([
             'Teamwork Review',
             `  modes: ${TEAMWORK_MODES.length}`,
@@ -288,7 +281,6 @@ export function registerTeamworkRuntimeCommands(registry: CommandRegistry): void
 
         if (sub === 'templates') {
           const archetypes = await listArchetypeModes();
-          observation?.();
           ctx.print([
             'Teamwork Templates',
             ...Object.entries(AGENT_TEMPLATES).map(([name, template]) => (
@@ -303,7 +295,6 @@ export function registerTeamworkRuntimeCommands(registry: CommandRegistry): void
 
         if (sub === 'archetypes') {
           const archetypes = await listArchetypeModes();
-          observation?.();
           ctx.print([
             'Teamwork Archetypes',
             ...archetypes.map((entry) => `  ${entry.id.padEnd(18)} ${familyLabel(entry).padEnd(10)} ${entry.source.padEnd(7)} ${protocolLabel(entry)}${entry.validationIssues.length > 0 ? '  issues' : ''}`),
@@ -313,7 +304,6 @@ export function registerTeamworkRuntimeCommands(registry: CommandRegistry): void
 
         if (sub === 'validate') {
           const archetypes = await listArchetypeModes();
-          observation?.();
           const invalid = archetypes.filter((entry) => entry.validationIssues.length > 0);
           ctx.print(invalid.length > 0
             ? [
@@ -334,7 +324,6 @@ export function registerTeamworkRuntimeCommands(registry: CommandRegistry): void
             return;
           }
           const mode = (await listArchetypeModes()).find((entry) => entry.id === archetypeName);
-          observation?.();
           if (!mode) {
             ctx.print(`Unknown archetype: ${archetypeName}`);
             return;
@@ -363,7 +352,6 @@ export function registerTeamworkRuntimeCommands(registry: CommandRegistry): void
             return;
           }
           const mode = (await listArchetypeModes()).find((entry) => entry.id === archetypeName);
-          observation?.();
           if (!mode) {
             ctx.print(`Unknown archetype: ${archetypeName}`);
             return;
@@ -375,7 +363,6 @@ export function registerTeamworkRuntimeCommands(registry: CommandRegistry): void
             return;
           }
           try {
-            observation?.();
             const taskId = createResolvedModeTask(mode, title, ctx);
             ctx.print(`Created teamwork task ${taskId} using archetype ${mode.id}. It is a queued record only: nothing starts it automatically, so it stays queued until an agent claims it.`);
           } catch (error) {

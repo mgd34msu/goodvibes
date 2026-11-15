@@ -140,8 +140,7 @@ describe('worktree retention', () => {
     const registry = new WorktreeRegistry(root);
     const report = await registry.sweepRetention({ now: () => ENDED_AT + 400 * DAY, owner: ended });
     expect(report.removed).toEqual([]);
-    // The marker lives in the administrative directory that is now unreachable, so the worktree is not provably the product's.
-    expect(report.kept[0]?.reason.why).toBe('protected');
+    expect(report.kept[0]?.reason.why).toBe('unreadable');
     expect(existsSync(path)).toBe(true);
   });
 
@@ -205,14 +204,12 @@ describe('worktree retention', () => {
     expect(readFileSync(join(unmerged.path, '.env'), 'utf8')).toBe('SECRET=2\n');
   });
 
-  test('a worktree marked kept or paused, attached to a session or task, or not made by the product is never swept', async () => {
+  test('a worktree marked kept or paused, or attached to a session or task, is never swept', async () => {
     const root = repo();
     const kept = addContractWorktree(root, 'c2c2c2c2');
     const paused = addContractWorktree(root, 'd2d2d2d2');
     const attached = addContractWorktree(root, 'e2e2e2e2');
-    const foreign = addContractWorktree(root, 'f2f2f2f2');
     const swept = addContractWorktree(root, 'a3a3a3a3');
-    rmSync(join(git(foreign.path, 'rev-parse', '--absolute-git-dir'), 'goodvibes-created'));
     const registry = new WorktreeRegistry(root);
     await registry.list();
     registry.setState(kept.path, 'kept');
@@ -220,20 +217,24 @@ describe('worktree retention', () => {
     registry.attach(attached.path, { sessionId: 'session-1' });
     const report = await registry.sweepRetention({ now: () => ENDED_AT + 400 * DAY, owner: ended });
     expect(report.removed.map((entry) => entry.path)).toEqual([swept.path]);
-    for (const survivor of [kept, paused, attached, foreign]) expect(existsSync(survivor.path)).toBe(true);
-    expect(report.kept.filter((entry) => entry.reason.why === 'protected')).toHaveLength(4);
+    for (const survivor of [kept, paused, attached]) expect(existsSync(survivor.path)).toBe(true);
+    expect(report.kept.filter((entry) => entry.reason.why === 'protected')).toHaveLength(3);
   });
 
-  test('a worktree the product adds is recorded as its own, and one added by hand is not', async () => {
+  test('a worktree from before the created-by record is removed with its uncommitted changes; its unmerged branch stays', async () => {
     const root = repo();
     const made = join(root, '.goodvibes', '.worktrees', 'contract', 'a4a4a4a4');
     await new GitService(root).worktreeAdd(made, 'contract/a4a4a4a4', 'main');
     const registry = new WorktreeRegistry(root);
-    const handMade = join(root, '.goodvibes', '.worktrees', 'contract', 'b4b4b4b4');
-    git(root, 'worktree', 'add', handMade, '-b', 'contract/b4b4b4b4', 'main');
-    const report = await registry.releaseEnded([{ path: made, baseBranch: 'main' }, { path: handMade, baseBranch: 'main' }], { now: () => ENDED_AT });
-    expect(report.removed.map((entry) => entry.path)).toEqual([made]);
-    expect(existsSync(handMade)).toBe(true);
+    const older = join(root, '.goodvibes', '.worktrees', 'contract', 'b4b4b4b4');
+    git(root, 'worktree', 'add', older, '-b', 'contract/b4b4b4b4', 'main');
+    commitIn(older, 'kept-commit.txt');
+    writeFileSync(join(older, 'unsaved.txt'), 'draft\n');
+    const report = await registry.releaseEnded([{ path: made, baseBranch: 'main' }, { path: older, baseBranch: 'main' }], { now: () => ENDED_AT });
+    expect(report.removed.map((entry) => entry.path).toSorted()).toEqual([made, older]);
+    expect(existsSync(older)).toBe(false);
+    expect(report.removed.find((entry) => entry.path === older)?.note).toContain('uncommitted change');
+    expect(git(root, 'branch', '--list', 'contract/b4b4b4b4')).toContain('contract/b4b4b4b4');
   });
 
   test('the register is not held while a worktree is being removed', async () => {

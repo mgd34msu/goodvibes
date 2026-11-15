@@ -42,6 +42,8 @@ import type { ChannelIngressPolicyInput, ChannelPolicyDecision, ChannelPolicyMan
 import { logger } from '../utils/logger.js';
 import { JudgmentInputError, judgmentInputProblem, type JudgmentInputProblem } from '../gate/judgment-input.js';
 import { cardShapeKinds, detectCardShapes, findCardNumberShapes, renderCardShapeRefusal } from '../security/card-shapes.js';
+import { isSecurityCodeAwaited } from '../payments/security-code-requests.js';
+import { readsAsSecurityCode } from '../payments/entry-surface.js';
 import {
   deliverProposalNotice,
   resolveOriginBinding,
@@ -107,7 +109,22 @@ export async function refuseCardShapedIngress(
   const problem = pans.length === 0 ? judgmentInputProblem(text) : undefined;
   if (problem !== undefined) return refuseProtectedInput(deps, input, problem);
   const findings = pans.length > 0 ? pans : await detectCardShapes(text);
-  if (findings.length === 0) return null;
+  if (findings.length === 0) {
+    // While a purchase waits for its security code, a short number typed here
+    // is most likely that code: it is refused and the owner told to delete it.
+    if (!isSecurityCodeAwaited() || !await readsAsSecurityCode(text)) return null;
+    const binding = resolveOriginBinding(deps, {
+      surface: input.surface,
+      ...(input.userId !== undefined ? { userId: input.userId } : {}),
+      ...(input.channelId !== undefined ? { channelId: input.channelId } : {}),
+      ...(input.threadId !== undefined ? { threadId: input.threadId } : {}),
+    });
+    const outcome = await deliverProposalNotice(deps, binding,
+      'That looks like your card security code. Do not send it here: delete that message from this chat. '
+      + 'Type the code in the terminal app with /payments pending, or in the local web UI.');
+    logger.warn('Refused a likely card security code on a remote channel', { surface: input.surface, refusalDelivered: outcome.delivered });
+    return { allowed: false, reason: `${CARD_SHAPES_REFUSED_REASON}:security-code`, policy: deps.channelPolicy.getPolicy(input.surface) };
+  }
 
   const kinds = cardShapeKinds(findings);
 

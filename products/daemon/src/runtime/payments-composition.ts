@@ -18,7 +18,7 @@
 import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import { controlPlaneStorePath } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import type { GatewayMethodCatalog } from '@goodvibes-jev/engine/platform/platform/control-plane';
-import { createJevMerchantJudge, readCvvHandling, PaymentReplyInbox, reportOrderConfirmation, mailboxAddress } from '@goodvibes-jev/engine/platform/platform/payments';
+import { createJevMerchantJudge, readCvvHandling, PaymentReplyInbox, reportOrderConfirmation, mailboxAddress, SecurityCodeRequests } from '@goodvibes-jev/engine/platform/platform/payments';
 import type { BudgetLedger, PaymentsConfigReader } from '@goodvibes-jev/engine/platform/platform/payments';
 import { getProcessUntrustedContentLedger } from '@goodvibes-jev/engine/platform/platform/security';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
@@ -76,12 +76,13 @@ const REPORTED_MAIL_MEMORY = 512;
 /**
  * Reads each message on the owner's mailbox against the purchase ledger and, when
  * it confirms one purchase, sends the owner a report of that purchase through the
- * payment notifier. Messages are handled one at a time. Nothing here can fail the
- * mailbox poll: a refusal (Classic operation has no decision models) or a send
- * failure is logged and the message simply gets no report.
+ * payment notifier. Messages are handled one at a time, each with one reading of
+ * which recent purchase it is about. Nothing here can fail the mailbox poll: a
+ * refusal (Classic operation has no decision models) or a send failure is logged,
+ * and the message is forgotten so the mailbox offering it again tries again.
  */
 export function createOrderMailObserver(deps: {
-  readonly purchases: Pick<DaemonPurchaseLedger, 'list'>;
+  readonly purchases: Pick<DaemonPurchaseLedger, 'list'> & Partial<Pick<DaemonPurchaseLedger, 'recordRefund'>>;
   readonly notifier: Pick<PaymentNotifier, 'deliver'>;
 }): OwnerMailHandler {
   const seen = new Set<string>();
@@ -103,11 +104,13 @@ export function createOrderMailObserver(deps: {
           const deliveries = await deps.notifier.deliver({ kind: 'notice', message });
           if (!deliveries.some(delivery => delivery.delivered)) logger.warn('A purchase confirmation report reached no channel', { channels: deliveries.length });
         },
+        ...(deps.purchases.recordRefund ? { recordRefund: deps.purchases.recordRefund.bind(deps.purchases) } : {}),
       });
       if (outcome.kind === 'not-reported' && outcome.reason === 'ambiguous') {
         logger.info('A store mail reads as about more than one purchase; no confirmation report was sent');
       }
     }).catch((error: unknown) => {
+      seen.delete(mail.id);
       // Fixed text and the error name only: the underlying message can carry mail text.
       logger.warn('A store mail could not be checked against purchases', { error: error instanceof Error ? error.name : 'unknown' });
     });
@@ -203,6 +206,8 @@ export function createPaymentsServices(options: PaymentsCompositionOptions): Pay
   const declareNativeData = nativeDataWriter?.declare.bind(nativeDataWriter);
   const config = livePaymentsConfig(options.configManager);
   const paymentReplies = new PaymentReplyInbox();
+  // In memory only: a typed security code lives until the one card entry it is for.
+  const securityCodes = new SecurityCodeRequests();
   const cards = new DaemonCardStore({
     filePath: controlPlaneStorePath(options.shellPaths, GOODVIBES_DAEMON_SURFACE_ROOT, 'payments-cards.json'),
     secrets: daemonScopedSecrets(options.secretsManager),
@@ -231,6 +236,7 @@ export function createPaymentsServices(options: PaymentsCompositionOptions): Pay
     addresses: configBackedAddressStore(config, options.configManager.preparePostalAddress?.bind(options.configManager)),
     notifier,
     replies: paymentReplies,
+    securityCodes,
     ...(options.paymentContinuationOwner ? { restoreWindow: createNativeCheckoutWindowRestorer({
       ...options.paymentContinuationOwner, catalog: options.gatewayMethods, config,
       seam: options.checkoutSeam, replies: paymentReplies, router: options.channelDeliveryRouter,
@@ -275,6 +281,7 @@ export function createPaymentsServices(options: PaymentsCompositionOptions): Pay
     closing = new Promise<void>((done, failed) => { resolve = done; reject = failed; });
     const errors: unknown[] = [], jobs: Promise<void>[] = [];
     detachOwnerMail?.();
+    securityCodes.close();
     // Retire both owners synchronously. Attempt both even if one close fails.
     try { jobs.push(registration.close()); } catch (error) { errors.push(error); }
     try { jobs.push(paymentReplies.close()); } catch (error) { errors.push(error); }

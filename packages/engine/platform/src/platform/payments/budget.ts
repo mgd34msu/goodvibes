@@ -244,11 +244,6 @@ export class BudgetLedger {
     return expired;
   }
 
-  /** Money coming back is recorded and credits nothing. See docs/payments.md §9.7.3. */
-  recordRefund(purchaseId: string): boolean {
-    return this.spend.some((record) => record.purchaseId === purchaseId);
-  }
-
   state(): BudgetStateSnapshot {
     return { spend: [...this.spend], reservations: [...this.reservations],
       ...(this.reconciliations.length === 0 ? {} : { reconciliations: [...this.reconciliations] }) };

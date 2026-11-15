@@ -268,6 +268,9 @@ for (const [text, expectCvv, expectRefused] of [
   ['my card is 4111 1111 1111 1111 exp 09/28', false, true],
   ['order 20931883210042 ships 12/05, meeting at 10/14', false, false],
   ['it\'s 482', true, true],
+  // The pre-filter takes any script's digits and needs no word boundary.
+  ['cvv482', true, true],
+  ['４８２', true, true],
 ] as const) {
   const decision = await evaluateCardEntry({ surface: 'telegram', text, expectingCvv: expectCvv });
   const refused = decision.reason !== null;

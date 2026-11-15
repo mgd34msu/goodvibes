@@ -422,8 +422,8 @@ for (const shape of shapes()) for (const phase of ['before-card', 'before-submit
     expect(changed).toBe(true); expect(result).toMatchObject({ kind: 'refused', code: 'total-changed' });
     expect(merchant.submissions).toEqual([]); expect(harness.recorded).toEqual([]);
     expect(harness.ledger.state().reservations).toEqual([]); expect(await harness.journal.list()).toEqual([]);
-    if (phase === 'before-card') expect(harness.driver.fillLog).toEqual([]);
-    else expect(harness.redactor.hasLiveMaterial('session-1', 'page-1')).toBe(true);
+    // The terms are read once, after the card: the page still holds it, so redaction stays armed.
+    expect(harness.redactor.hasLiveMaterial('session-1', 'page-1')).toBe(true);
   });
 
 for (const shape of shapes()) test(`new recurring terms in the live ${shape.name} page cannot reuse an earlier one-off notice`, async () => {
@@ -433,7 +433,7 @@ for (const shape of shapes()) test(`new recurring terms in the live ${shape.name
     return null;
   };
   expect(await runOn(harness, merchant)).toMatchObject({ kind: 'refused', code: 'total-changed' });
-  expect(harness.driver.fillLog).toEqual([]); expect(merchant.submissions).toEqual([]);
+  expect(merchant.submissions).toEqual([]);
   expect(harness.ledger.state().reservations).toEqual([]); expect(await harness.journal.list()).toEqual([]);
 });
 

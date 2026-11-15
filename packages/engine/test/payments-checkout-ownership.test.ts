@@ -41,6 +41,7 @@ function fixture(requestedMax?: string) {
   owners.push(() => { active = false; });
   let onMerchant = async () => {}, onMetadata = async () => {}, onChoose = async () => {}, onSubmit = async () => {};
   let onTerms = async (_expected: CheckoutTerms) => true;
+  let onPage = async (_expected: CheckoutTerms) => true;
   const terms: CheckoutTerms[] = [];
   const effects: string[] = [], records: PurchaseRecord[] = [], notices: { kind: string; message: string }[] = [];
   let merchantCalls = 0;
@@ -67,6 +68,7 @@ function fixture(requestedMax?: string) {
     },
     driver: {
       identity: () => ({ sessionId: 'session', pageId: page }), async url() { return 'https://www.bestbuy.com/checkout'; },
+      async checkPage(expected, owner) { owner.assertCurrent(); const result = await onPage(expected); owner.assertCurrent(); return result; },
       async verifyTerms(expected, owner) {
         owner.assertCurrent(); terms.push(expected);
         const result = await onTerms(expected); owner.assertCurrent();
@@ -91,7 +93,8 @@ function fixture(requestedMax?: string) {
     setLiveTotal: (total: number) => { liveTotal = total; },
     onMerchant: (work: () => Promise<void>) => { onMerchant = work; }, onMetadata: (work: () => Promise<void>) => { onMetadata = work; },
     onChoose: (work: () => Promise<void>) => { onChoose = work; }, onSubmit: (work: () => Promise<void>) => { onSubmit = work; },
-    onTerms: (work: (expected: CheckoutTerms) => Promise<boolean>) => { onTerms = work; } };
+    onTerms: (work: (expected: CheckoutTerms) => Promise<boolean>) => { onTerms = work; },
+    onPage: (work: (expected: CheckoutTerms) => Promise<boolean>) => { onPage = work; } };
 }
 
 for (const mode of ['safe-owner', 'safe-jev', 'yolo'] as const)
@@ -160,7 +163,6 @@ test.each(['approve', 'deny'] as const)('repricing across the original request m
     if (++windows === 1) { expect(input.kind).toBe('veto'); f.setLiveTotal(2_200); return { answer: 'acknowledge', channel: 'operator' }; }
     expect(windows).toBe(2); expect(input.kind).toBe('approval');
     expect(f.ledger.snapshot(f.deps.limits, f.deps.now(), 'UTC').item.remaining).toBeGreaterThan(0);
-    expect(f.effects).not.toContain('card-read');
     return { answer, channel: 'operator' };
   };
   const result = await f.run();
@@ -175,8 +177,10 @@ test.each(['approve', 'deny'] as const)('repricing across the original request m
 });
 
 test.each(['before-card', 'before-submit'] as const)('changed checkout terms %s release the hold and never submit', async phase => {
-  const f = fixture(); let calls = 0;
-  f.onTerms(async expected => { calls++; expect(expected.totalMinorUnits).toBe(1_100); return phase === 'before-submit' && calls === 1; });
+  const f = fixture();
+  // Before the card only code checks the page; the terms are read once, after it.
+  if (phase === 'before-card') f.onPage(async () => false);
+  else f.onTerms(async expected => { expect(expected.totalMinorUnits).toBe(1_100); return false; });
   const result = await f.run();
   expect(result).toMatchObject({ kind: 'refused', code: 'total-changed' });
   expect(f.effects.some(effect => effect.startsWith('submit:'))).toBe(false); expect(f.records).toEqual([]);
@@ -220,7 +224,7 @@ test('repricing keeps the original clean source evidence instead of adopting a l
     expect(windows).toBe(2); return { answer: 'object', channel: 'operator' };
   };
   expect((await f.run()).kind).toBe('cancelled'); expect(windows).toBe(2);
-  expect(f.notices).toHaveLength(2); expect(f.effects).not.toContain('card-read'); expect(f.records).toEqual([]);
+  expect(f.notices).toHaveLength(2); expect(f.records).toEqual([]);
   expect(f.ledger.state().reservations).toEqual([]); expect(await f.journal.list()).toEqual([]);
 });
 
@@ -240,7 +244,7 @@ test('fresh quote capability cannot be replaced while the approval window is pen
 test('an unavailable fresh quote reader cannot release the window into a purchase', async () => {
   const f = fixture(); f.onTerms(async () => { throw new Error('Fresh page unavailable'); });
   await expect(f.run()).rejects.toThrow('Fresh page unavailable');
-  expect(f.effects).not.toContain('card-read'); expect(f.records).toEqual([]);
+  expect(f.effects.some(effect => effect.startsWith('submit:'))).toBe(false); expect(f.records).toEqual([]);
   expect(f.ledger.state().reservations).toEqual([]); expect(await f.journal.list()).toEqual([]);
 });
 
@@ -555,6 +559,9 @@ for (const phase of ['before-card', 'after-card', 'before-dispatch'] as const)
         secondWindow.release(); await answered.wait;
         return { answer, channel: 'operator' };
       };
+      // Before the card only code checks the page: here it finds the checkout
+      // changed once, so the new price is read before any card entry.
+      if (phase === 'before-card') { let checks = 0; f.onPage(async () => ++checks > 1); }
       if (phase === 'after-card') {
         const fill = f.deps.driver.fillSecrets.bind(f.deps.driver); let changed = false;
         f.deps.driver.fillSecrets = async (fields, owner) => {
@@ -603,7 +610,7 @@ test('a failed quote check without a verified changed price cannot keep renewing
   const f = fixture(); f.onTerms(async () => false);
   f.deps.driver.readCurrentQuote = async () => f.reading;
   expect(await f.run()).toMatchObject({ kind: 'refused', code: 'total-changed' });
-  expect(f.notices).toHaveLength(1); expect(f.effects).not.toContain('card-read');
+  expect(f.notices).toHaveLength(1); expect(f.effects.some(effect => effect.startsWith('submit:'))).toBe(false);
   expect(f.ledger.state().reservations).toEqual([]); expect(await f.journal.list()).toEqual([]);
 });
 
@@ -614,7 +621,7 @@ test('repricing retains the original page even after releasing the earlier quote
     return { ...f.reading, lines: [{ label: 'Original item', quantity: '1', unitPrice: '$20.00' }], tax: '$2.00', statedTotal: '$22.00' };
   };
   await expect(f.run()).rejects.toBeInstanceOf(CheckoutOwnershipError);
-  expect(f.notices).toHaveLength(1); expect(f.effects).not.toContain('card-read');
+  expect(f.notices).toHaveLength(1); expect(f.effects.some(effect => effect.startsWith('submit:'))).toBe(false);
   expect(f.ledger.state().reservations).toEqual([]); expect(await f.journal.list()).toEqual([]);
 });
 
@@ -676,7 +683,7 @@ test('a cheaper replacement also voids the earlier answer and opens its own veto
   };
   expect(await f.run()).toMatchObject({ kind: 'cancelled' });
   expect(f.notices.map(notice => notice.kind)).toEqual(['approval', 'veto']); expect(f.notices[1]?.message).toContain('5.50');
-  expect(f.records).toEqual([]); expect(f.effects).not.toContain('card-read');
+  expect(f.records).toEqual([]); expect(f.effects.some(effect => effect.startsWith('submit:'))).toBe(false);
   expect(f.ledger.state().reservations).toEqual([]); expect(await f.journal.list()).toEqual([]);
 });
 
@@ -688,7 +695,7 @@ test('the original checkout owns its page while repricing even with no budget re
     return null;
   };
   expect(await f.run()).toMatchObject({ kind: 'refused', code: 'total-changed' });
-  expect(f.notices).toHaveLength(1); expect(f.effects).not.toContain('card-read');
+  expect(f.notices).toHaveLength(1); expect(f.effects.some(effect => effect.startsWith('submit:'))).toBe(false);
   expect(f.ledger.state().reservations).toEqual([]);
   // The failed original operation eventually releases its own page claim.
   const next = f.deps.registry.claimPage('session', 'page'); next.release();
@@ -710,7 +717,7 @@ test('a replacement quote cannot adopt a later stored address after the original
   f.deps.driver.readCurrentQuote = async () => ({ ...f.reading,
     lines: [{ label: 'Original item', quantity: '1', unitPrice: '$20.00' }], tax: '$2.00', statedTotal: '$22.00' });
   await expect(f.run()).rejects.toBeInstanceOf(CheckoutOwnershipError);
-  expect(preparations).toBe(1); expect(f.notices).toHaveLength(1); expect(f.effects).not.toContain('card-read');
+  expect(preparations).toBe(1); expect(f.notices).toHaveLength(1); expect(f.effects.some(effect => effect.startsWith('submit:'))).toBe(false);
   expect(f.records).toEqual([]); expect(f.ledger.state().reservations).toEqual([]); expect(await f.journal.list()).toEqual([]);
 });
 
@@ -836,7 +843,7 @@ test('a resumed approval window whose deadline passed unanswered is denied, subm
   expect(f.records).toEqual([]); expect(f.ledger.state().reservations).toEqual([]); expect(await f.journal.list()).toEqual([]);
 });
 
-test('a resumed window answered while its host was stopping is still checked against the live quote before any card entry', async () => {
+test('a resumed window answered while its host was stopping is still checked against the live quote before any submit', async () => {
   const f = await resumedFixture('5.00');
   f.setLiveTotal(1_200);
   f.resume.prepare = owner => { owner.assertCurrent?.(); return { deliveries: Promise.resolve(f.checkpoint.record.windowDeliveries ?? []),
@@ -844,7 +851,7 @@ test('a resumed window answered while its host was stopping is still checked aga
     async awaitAnswer() { return { answer: 'approve' as const, channel: 'operator' as const }; }, cancel() {} }; };
   const result = await f.run().catch((error: unknown) => error);
   expect(result).toMatchObject({ kind: 'refused', code: 'total-changed' });
-  expect(f.effects.filter(effect => effect.startsWith('submit') || effect.startsWith('secret'))).toEqual([]);
+  expect(f.effects.filter(effect => effect.startsWith('submit'))).toEqual([]);
   expect(f.records).toEqual([]);
 });
 
@@ -946,4 +953,25 @@ test.each(['notice', 'submit-pending', 'submitted'] as const)('a changed origina
     expect(reserve).not.toHaveBeenCalled(); expect(f.ledger.state().reservations).toEqual(held);
     expect(await f.journal.list()).toEqual([changed]);
   } finally { reserve.mockRestore(); }
+});
+
+test.each(['approve', 'silence'] as const)('a veto reply that is not a go-ahead holds the purchase for an explicit yes: %s', async answer => {
+  const f = fixture(); let windows = 0;
+  f.deps.notifier.awaitAnswer = async input => {
+    windows++;
+    if (windows === 1) { expect(input.kind).toBe('veto'); return { answer: 'not-understood', channel: 'telegram' }; }
+    expect(input.kind).toBe('approval');
+    return answer === 'approve' ? { answer: 'approve', channel: 'telegram' } : null;
+  };
+  const result = await f.run();
+  expect(windows).toBe(2);
+  expect(f.notices[1]?.message).toContain('I did not take your reply as a go-ahead');
+  if (answer === 'approve') {
+    expect(result.kind).toBe('purchased');
+    expect(f.records[0]?.windowOutcome).toBe('held-reply-not-understood:approved');
+  } else {
+    expect(result).toMatchObject({ kind: 'refused', code: 'held-reply-not-understood' });
+    expect(f.effects.some(effect => effect.startsWith('submit:'))).toBe(false);
+    expect(f.ledger.state().reservations).toEqual([]); expect(await f.journal.list()).toEqual([]);
+  }
 });

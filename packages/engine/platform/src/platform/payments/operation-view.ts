@@ -39,7 +39,7 @@ type OperationRefusalCode = 'recovery-unavailable';
 const REFUSAL_MESSAGES: Readonly<Record<RefusalCode | ExecutionRefusalCode | OperationRefusalCode, string>> = {
   'disabled': 'Payments are disabled, or this daemon is part of a cluster and payments run only on a single, unclustered daemon.',
   'recovery-unavailable': 'The original checkout could not be restored. Check its paired owner, payment settings, original browser and reply channel before starting a new checkout.',
-  'no-card': 'No usable payment card is configured, or payments.cvvHandling is set to prompt and there is no purchase-time prompt to type the code yet. Check the card in payment settings, and set payments.cvvHandling to stored to let purchases go ahead.',
+  'no-card': 'No usable payment card is configured, or payments.cvvHandling is set to prompt on a host with no way to ask for the code. Check the card in payment settings, or set payments.cvvHandling to stored.',
   'no-shipping-address': 'The stored address is incomplete, unavailable or changed. Check payment address settings.',
   'no-billing-address': 'No complete billing address is stored. Set it in payment address settings, then start the purchase again.',
   'not-owner-request': 'The checkout did not have a direct request from its owner.',
@@ -71,6 +71,10 @@ const REFUSAL_MESSAGES: Readonly<Record<RefusalCode | ExecutionRefusalCode | Ope
   'owner-changed': 'The stored address, payment settings, pairing or checkout page changed while the purchase was running. Nothing was submitted. Review them, then start the purchase again.',
   'notice-unavailable': 'The purchase notice could not be prepared or sent. Nothing was submitted. Check the payment notification channels, then start the purchase again.',
   'budget-held': 'Another purchase in progress is holding the budget this one needs. Nothing was submitted. Wait for that purchase to finish, then start this one again.',
+  'cart-unconfirmed': 'A cart line could not be confirmed as the item you asked for. Nothing was bought. Check the cart, or name the item more exactly, then start the purchase again.',
+  'recurring-unconfirmed': 'The checkout could not be confirmed as a single payment. Nothing was bought. Start the purchase again with an order summary that holds only this order.',
+  'held-reply-not-understood': 'Your reply to the purchase notice was not taken as a go-ahead, and the follow-up approval got no yes. Nothing was bought.',
+  'security-code-not-given': 'The card security code was not typed before the deadline, so nothing was bought. Start the purchase again and type the code with /payments pending when asked.',
 };
 /** Outcomes recorded with a `failed` state: processing stopped before a final
  * result and before any submission, for the reason named. */

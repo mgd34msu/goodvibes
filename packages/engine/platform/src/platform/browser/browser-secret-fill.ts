@@ -196,6 +196,26 @@ async function typeOrRefuse(
  * the fields we recognise leaves whatever a hostile page invented, so this
  * refuses rather than producing a file that looks redacted and is not.
  */
+/**
+ * The free-text rule, the same one screenshots follow. While a page holds live
+ * card material, its free text (rendered words, raw html and attributes) is not
+ * returned at all: a hostile page can re-encode what was typed in more ways
+ * than any pattern can list. What the daemon's own checkout reading needs
+ * comes through `observeCheckoutTerms`; form controls still come through a
+ * snapshot, redacted by field and by value.
+ */
+export function assertPageTextAllowed(
+  guard: CardFieldGuard | null,
+  sessionId: string,
+  pageId: string,
+): void {
+  if (guard?.hasLiveMaterial(sessionId, pageId) !== true) return;
+  throw new BrowserSessionError(
+    'Refused: this page holds payment material, so its text is not read back while the card is on it.',
+    'Finish or close the checkout first, or take a snapshot to see its form controls.',
+  );
+}
+
 export function assertCaptureAllowed(
   guard: CardFieldGuard | null,
   sessionId: string,

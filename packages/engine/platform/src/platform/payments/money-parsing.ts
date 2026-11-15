@@ -97,10 +97,10 @@ const CURRENCY_ORNAMENT = /[\p{Sc}\s   ]/gu;
  * holds more than one number, is negative, uses a separator layout that could
  * mean two different values, or exceeds the parse ceiling.
  *
- * A leading minus is refused rather than negated: a negative line item on a
- * checkout is a discount or a credit, and treating one as a normal amount that
- * happens to reduce the total is how a page talks a budget check into passing.
- * Discounts reach us as a lower item price, which is the only form we act on.
+ * A leading minus is refused rather than negated: a negative amount where a
+ * charge belongs is a discount or a credit, and treating one as a normal amount
+ * that happens to reduce the total is how a page talks a budget check into
+ * passing. Discounts have their own lines, read by `parseDiscountMinorUnits`.
  */
 export function parseMinorUnits(raw: string, currency: CurrencyCode | string): MinorUnits | null {
   if (typeof raw !== 'string') return null;
@@ -173,6 +173,29 @@ export function parseMinorUnits(raw: string, currency: CurrencyCode | string): M
   if (!Number.isSafeInteger(total)) return null;
   if (total > MAX_PARSEABLE_MINOR_UNITS) return null;
   return total;
+}
+
+/**
+ * Read one discount, credit or promotion line off a page as the amount it
+ * takes off, or refuse.
+ *
+ * Pages write a reduction as "-5.00", "−$5.00", "($5.00)" or a bare "5.00" on
+ * a line labelled as a discount; all four mean five off. The sign, when there
+ * is one, is taken off here and the rest goes through `parseMinorUnits`'
+ * grammar unchanged, so the same ambiguity rules apply. The result is the
+ * magnitude: a discount line can only lower what is charged, never raise it.
+ */
+export function parseDiscountMinorUnits(raw: string, currency: CurrencyCode | string): MinorUnits | null {
+  if (typeof raw !== 'string') return null;
+  let text = raw.trim();
+  if (text.startsWith('(') && text.endsWith(')')) text = text.slice(1, -1).trim();
+  else {
+    // One minus sign, before the number: "-5.00", "−$5.00", "$-5.00", "USD -5.00".
+    const signs = text.match(/[-−–]/g)?.length ?? 0;
+    if (signs === 1 && text.search(/[-−–]/) < text.search(/\d/)) text = text.replace(/[-−–]/, '');
+  }
+  if (/[-−–()]/.test(text)) return null;
+  return parseMinorUnits(text, currency);
 }
 
 /**

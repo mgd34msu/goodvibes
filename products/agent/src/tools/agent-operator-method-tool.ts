@@ -55,7 +55,7 @@ const READ_ONLY_HTTP_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 // these, and a model-supplied string must not stand in for it. Refused here with the way the owner does it.
 const OWNER_ONLY_PAYMENT_METHOD_IDS = new Set([
   'payments.purchase.approve', 'payments.purchase.deny', 'payments.purchase.cancel',
-  'payments.purchase.reconcile', 'payments.checkout.begin',
+  'payments.purchase.reconcile', 'payments.checkout.begin', 'payments.purchase.securityCode',
 ]);
 // The profile tool owns these reads and its disclosure rules; the generic path has none of them.
 const PROFILE_TOOL_ONLY_METHOD_IDS = new Set(['profile.read', 'profile.person', 'profile.get']);

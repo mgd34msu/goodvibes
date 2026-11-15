@@ -444,9 +444,9 @@ describe('registerPaymentsGatewayMethods wiring', () => {
     await registerPaymentsGatewayMethods(catalog, service as never);
     expect(catalog.hasHandler('payments.checkout.begin')).toBe(true);
 
-    // The settlement itself succeeded (record closed); only the notice
-    // failed, and honestly so, which the audit envelope records.
-    expect(await journal.list()).toHaveLength(0);
+    // The notice never landed, so the record is kept for a later sweep to
+    // settle and tell; the verbs attach regardless.
+    expect(await journal.list()).toHaveLength(1);
   });
 
   test('a timed-out notice is reported as failed in the audit envelope', async () => {
@@ -455,9 +455,11 @@ describe('registerPaymentsGatewayMethods wiring', () => {
     const service = buildService([], { journal, deliverNever: true, recoveryIoTimeoutMs: 50 });
 
     const { settlements } = await service.recoverInterruptedCheckouts();
-    expect(settlements[0]!.action).toBe('released');
+    // Told first, settled second: an untold record is held, not closed.
+    expect(settlements[0]!.action).toBe('held');
     expect(settlements[0]!.notice).toBe('failed');
     expect(settlements[0]!.notified).toBe(false);
+    expect(await journal.list()).toHaveLength(1);
   });
 
   test('the possibly-submitted crash-between-record-and-flush case closes on the next boot', async () => {

@@ -37,7 +37,8 @@ export function shippingCandidates(options: Offered, currency: string): { id: st
   return options.map(([label, costMinorUnits], index) => ({ id: shippingOptionId(index), content: { label, cost_minor_units: costMinorUnits, currency } }));
 }
 
-const CONTEXT = { checkout: 'The delivery options an online checkout offers for one order.' };
+/** The context every tier selector is asked and calibrated with; shipping.ts sends this same object. */
+export const CHECKOUT_CONTEXT = { checkout: 'The delivery options an online checkout offers for one order.' };
 const THREE: Offered = [['Standard (5-7 business days)', 499], ['Expedited (2-3 business days)', 1299], ['Next Day Air', 2499]];
 const SIGNATURE: Offered = [['Standard delivery', 399], ['Standard delivery with signature required', 899], ['Express 1-2 days', 1499]];
 const INSURED: Offered = [['Ground shipping', 0], ['Ground shipping + package insurance', 350]];
@@ -56,10 +57,10 @@ export const shippingStandard = defineSelector({
   band: BAND,
   fitBand: FIT_BAND,
   fixtures: [
-    { name: 'three speeds', context: CONTEXT, candidates: shippingCandidates(THREE, 'USD'), expect: 'o0' },
-    { name: 'a signature option priced between standard and express', context: CONTEXT, candidates: shippingCandidates(SIGNATURE, 'USD'), expect: 'o0' },
-    { name: 'free ground and insured ground', context: CONTEXT, candidates: shippingCandidates(INSURED, 'USD'), expect: 'o0' },
-    { name: 'economy is the ordinary speed', context: CONTEXT, candidates: shippingCandidates(PRIORITY, 'USD'), expect: 'o0' },
+    { name: 'three speeds', context: CHECKOUT_CONTEXT, candidates: shippingCandidates(THREE, 'USD'), expect: 'o0' },
+    { name: 'a signature option priced between standard and express', context: CHECKOUT_CONTEXT, candidates: shippingCandidates(SIGNATURE, 'USD'), expect: 'o0' },
+    { name: 'free ground and insured ground', context: CHECKOUT_CONTEXT, candidates: shippingCandidates(INSURED, 'USD'), expect: 'o0' },
+    { name: 'economy is the ordinary speed', context: CHECKOUT_CONTEXT, candidates: shippingCandidates(PRIORITY, 'USD'), expect: 'o0' },
   ],
 });
 
@@ -73,10 +74,10 @@ export const shippingFastest = defineSelector({
   band: BAND,
   fitBand: FIT_BAND,
   fixtures: [
-    { name: 'three speeds', context: CONTEXT, candidates: shippingCandidates(THREE, 'USD'), expect: 'o2' },
-    { name: 'express beats a pricier-than-standard signature', context: CONTEXT, candidates: shippingCandidates(SIGNATURE, 'USD'), expect: 'o2' },
-    { name: 'only an add-on, no faster option', context: CONTEXT, candidates: shippingCandidates(INSURED, 'USD'), expect: NONE },
-    { name: 'overnight listed before two-day', context: CONTEXT, candidates: shippingCandidates(PRIORITY, 'USD'), expect: 'o2' },
+    { name: 'three speeds', context: CHECKOUT_CONTEXT, candidates: shippingCandidates(THREE, 'USD'), expect: 'o2' },
+    { name: 'express beats a pricier-than-standard signature', context: CHECKOUT_CONTEXT, candidates: shippingCandidates(SIGNATURE, 'USD'), expect: 'o2' },
+    { name: 'only an add-on, no faster option', context: CHECKOUT_CONTEXT, candidates: shippingCandidates(INSURED, 'USD'), expect: NONE },
+    { name: 'overnight listed before two-day', context: CHECKOUT_CONTEXT, candidates: shippingCandidates(PRIORITY, 'USD'), expect: 'o2' },
   ],
 });
 

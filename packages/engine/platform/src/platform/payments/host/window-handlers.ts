@@ -5,7 +5,8 @@ import { assertConfirmed, HandlerError, type HandlerContextEnvelope, type TypedH
 import type { PaymentReplyInbox } from '../reply-inbox.js';
 import type { CheckoutOperations } from './checkout-operations.js';
 import { PaymentOperationStoreError } from './operation-store.js';
-interface PaymentWindowHandlerDeps { readonly replies?: PaymentReplyInbox | undefined }
+import { SecurityCodeRequestError, type SecurityCodeRequests } from '../security-code-requests.js';
+interface PaymentWindowHandlerDeps { readonly replies?: PaymentReplyInbox | undefined; readonly securityCodes?: SecurityCodeRequests | undefined }
 
 function scope(scopes: readonly string[], required: string): boolean { return scopes.includes('*') || scopes.includes(required); }
 function authorizedFor(context: HandlerContextEnvelope, required: string): boolean {
@@ -40,9 +41,11 @@ export function purchaseWindowStatusHandler(deps: PaymentWindowHandlerDeps, oper
     if (!replies) throw unavailable();
     try {
       const { operations: rows, unreadable } = operations.statusReport(purchaseId);
-      // Present only when something could not be read, so a reader that knows
-      // nothing of the field still decodes every healthy response.
-      return { windows: replies.inspect(purchaseId), operations: rows, ...(unreadable.length ? { unreadable } : {}) };
+      const securityCodes = deps.securityCodes?.inspect(purchaseId) ?? [];
+      // Each optional list is present only when it has entries, so a reader
+      // that knows nothing of the field still decodes every ordinary response.
+      return { windows: replies.inspect(purchaseId), operations: rows, ...(unreadable.length ? { unreadable } : {}),
+        ...(securityCodes.length ? { securityCodes } : {}) };
     }
     catch (error) {
       throw new HandlerError(error instanceof PaymentOperationStoreError ? error.message
@@ -65,21 +68,9 @@ export function purchaseWindowAnswerHandler(deps: PaymentWindowHandlerDeps, acti
     const windowId = operationId === undefined ? field(input['windowId'], 'windowId') : undefined;
     const replies = deps.replies;
     if (operationId === undefined ? !replies : !operations) throw unavailable();
-    const authority = context.nativeExecutionAuthority;
-    const expected = (() => { try { return authority?.current(); } catch { throw forbidden(); } })();
-    if (!expected || !authority || expected.kind !== 'pairing-token' || !context.admin
-      || context.principalKind !== 'token' || context.principalId !== expected.principalId
-      || !scope(context.scopes, 'write:payments') || !scope(expected.scopes, 'write:payments')
-      || !authorizedFor(context, 'write:payments')) throw forbidden();
-    const signal = context.signal;
-    const authorized = context.isAuthorized;
-    const original = snapshotContext(context);
-    const paired = structuredClone(expected);
+    const { authority, expected, current: paired } = pairedOwner(context);
     const current = (): void => {
-      signal?.throwIfAborted();
-      if (context.signal !== signal || context.isAuthorized !== authorized || context.nativeExecutionAuthority !== authority
-        || !isDeepStrictEqual(snapshotContext(context), original)
-        || !isDeepStrictEqual(authority.current(), paired) || authorized?.(['write:payments']) !== true) throw forbidden();
+      paired();
       if (action === 'approve') requireDecisionFeature('automated checkout cart and merchant interpretation');
     };
     if (action === 'approve') requireDecisionFeature('automated checkout cart and merchant interpretation');
@@ -107,6 +98,62 @@ export function purchaseWindowAnswerHandler(deps: PaymentWindowHandlerDeps, acti
       }
       // Neither pairing failures nor underlying callbacks may echo private data.
       throw new HandlerError('The purchase window could not be answered. Refresh its status before trying again.', 'FAILED_PRECONDITION', 409);
+    }
+  };
+}
+
+/**
+ * The current paired admin owner with write:payments, checked once here and
+ * re-checked by `current` before the answer takes effect. Transport-created
+ * pairing authority decides; nothing in the request body can.
+ */
+function pairedOwner(context: HandlerContextEnvelope) {
+  const authority = context.nativeExecutionAuthority;
+  const expected = (() => { try { return authority?.current(); } catch { throw forbidden(); } })();
+  if (!expected || !authority || expected.kind !== 'pairing-token' || !context.admin
+    || context.principalKind !== 'token' || context.principalId !== expected.principalId
+    || !scope(context.scopes, 'write:payments') || !scope(expected.scopes, 'write:payments')
+    || !authorizedFor(context, 'write:payments')) throw forbidden();
+  const signal = context.signal;
+  const authorized = context.isAuthorized;
+  const original = snapshotContext(context);
+  const paired = structuredClone(expected);
+  const current = (): void => {
+    signal?.throwIfAborted();
+    if (context.signal !== signal || context.isAuthorized !== authorized || context.nativeExecutionAuthority !== authority
+      || !isDeepStrictEqual(snapshotContext(context), original)
+      || !isDeepStrictEqual(authority.current(), paired) || authorized?.(['write:payments']) !== true) throw forbidden();
+  };
+  return { authority, expected, current };
+}
+
+/**
+ * The owner's typed card security code for the one purchase waiting on it
+ * (`payments.cvvHandling: 'prompt'`). The code is handed to that purchase in
+ * memory and never logged, stored or echoed; a refusal never quotes it.
+ */
+export function purchaseSecurityCodeHandler(deps: PaymentWindowHandlerDeps): TypedHandler<unknown, unknown> {
+  return async ({ body, context }) => {
+    assertConfirmed(body, context);
+    const input = record(body);
+    const purchaseId = field(input['purchaseId'], 'purchaseId');
+    const windowId = field(input['windowId'], 'windowId');
+    const code = typeof input['code'] === 'string' && input['code'].length <= 16 ? input['code'] : '';
+    const codes = deps.securityCodes;
+    if (!codes) throw new HandlerError('This payment host does not ask for security codes; payments.cvvHandling prompt needs the daemon the terminal app is paired with.', 'FAILED_PRECONDITION', 409);
+    const { authority, expected, current } = pairedOwner(context);
+    try {
+      current();
+      return await authority.withCurrent(expected, assertPaired => {
+        assertPaired(); current();
+        return codes.supply({ purchaseId, windowId, code });
+      });
+    } catch (error) {
+      if (error instanceof HandlerError) throw error;
+      if (error instanceof SecurityCodeRequestError) {
+        throw new HandlerError(error.message, error.kind === 'invalid' ? 'INVALID_ARGUMENT' : 'FAILED_PRECONDITION', error.kind === 'invalid' ? 400 : 409);
+      }
+      throw new HandlerError('The security code could not be handed to the purchase. Refresh its status before trying again.', 'FAILED_PRECONDITION', 409);
     }
   };
 }

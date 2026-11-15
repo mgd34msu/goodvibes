@@ -12,7 +12,7 @@
  *   0d RECOURSE           who takes the card, and what silence will mean
  *   1  EXTRACT            page strings → integers WE parsed
  *   2  CART               what is in it is what the owner asked for, nothing added
- *   3  RECURRING          a subscription is refused outright
+ *   3  RECURRING          a subscription, or a charge not confirmed one-off, is refused
  *   4  DECIDE             budget, ceiling, overage pool, shipping ladder
  *   5  RESERVE            money is held before any window opens
  *   6  NOTICE + WINDOW    one message for this exact quote and final total
@@ -85,7 +85,8 @@ import {
   type MerchantVerdict,
 } from './merchant-recourse.js';
 import type { MarketplaceListing } from './marketplace-listing.js';
-import { renderCancellationReport, renderPurchaseNotice, renderPurchaseReport } from './message.js';
+import { renderCancellationReport, renderPurchaseNotice, renderPurchaseReport, renderSecurityCodeRequest } from './message.js';
+import type { SecurityCodeRequests, TypedSecurityCode } from './security-code-requests.js';
 import { validateLinkTarget } from '../security/link-validation.js';
 import { registrableDomain } from '../security/public-suffix.js';
 import {
@@ -203,6 +204,8 @@ export interface CheckoutFlowDeps extends CheckoutOperationOwnership {
   readonly ledger: BudgetLedger;
   readonly purchases: PurchaseLedger;
   readonly notifier: PaymentNotifier;
+  /** Where the owner's typed security code arrives under `payments.cvvHandling: 'prompt'`. */
+  readonly securityCodes?: SecurityCodeRequests | undefined;
   readonly untrusted: UntrustedContentLedger;
   /** Host-only original source facts, never read from PurchaseRequest. */
   readonly taintEvidence?: RetainedTaintEvidence | undefined;
@@ -299,7 +302,7 @@ export async function runCheckout(
     gates: GateInput; limits: BudgetLimits; merchantPolicy: MerchantPolicy | undefined;
   };
   const owner = captureCheckoutOwnership(deps);
-  const driverCurrent = captureMutationDescriptors(deps.driver, ['identity', 'verifyTerms', 'readCurrentQuote', 'url', 'fill', 'fillSecrets', 'choose', 'submitOrder']);
+  const driverCurrent = captureMutationDescriptors(deps.driver, ['identity', 'checkPage', 'verifyTerms', 'readCurrentQuote', 'url', 'fill', 'fillSecrets', 'choose', 'submitOrder']);
   const current = () => {
     owner.assertCurrent();
     try { driverCurrent(); } catch { throw new CheckoutOwnershipError(); }
@@ -417,6 +420,10 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
   termsReader = verifyTerms;
   const readCurrentQuote = driver.readCurrentQuote;
   quoteReader = readCurrentQuote; quoteReaderCaptured = true;
+  // The code-only page, domain and control check that runs before the card.
+  const checkPage = driver.checkPage;
+  const pageStillCheckout = async (terms: CheckoutTerms, current: () => void): Promise<boolean> =>
+    typeof checkPage === 'function' ? await checkPage.call(driver, terms, { signal, assertCurrent: current }) : true;
   // Capture the original financial reader before any asynchronous work. Other
   // purchases may append legitimately; availability, rather than unchanged
   // whole-ledger content, is the restriction on this purchase's next submit.
@@ -501,7 +508,7 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
   try { cartCheck = await assertCartMatchesRequest(checkout.lines, request.requestedLines, ownership); }
   catch (error) { const unreadable = unreadablePageText(error); if (unreadable) return unreadable; throw error; }
   current();
-  if (!cartCheck.ok) return refused('cart-mismatch', cartCheck.reason ?? 'Refused: the cart does not match the request.');
+  if (!cartCheck.ok) return refused(cartCheck.code ?? 'cart-mismatch', cartCheck.reason ?? 'Refused: the cart does not match the request.');
 
   // ── 3. A recurring charge is refused outright ───────────────────────────
   let recurring: Awaited<ReturnType<typeof detectRecurringCharge>>;
@@ -509,7 +516,7 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
   catch (error) { const unreadable = unreadablePageText(error); if (unreadable) return unreadable; throw error; }
   current();
   if (recurring.recurring) {
-    return refused('recurring-charge', recurring.reason ?? 'Refused: this checkout sets up a recurring charge.');
+    return refused(recurring.code ?? 'recurring-charge', recurring.reason ?? 'Refused: this checkout sets up a recurring charge.');
   }
 
   // ── 4. The decision, on OUR integers ────────────────────────────────────
@@ -520,9 +527,12 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
   current();
   const pools = lifecycle.resumedHold ? lifecycle.resumedHold.snapshot(deps.limits, now(), deps.timezone)
     : ledger.snapshot(deps.limits, now(), deps.timezone);
+  // Discounts come off the items: the budget draw is the reduced total, and
+  // a discount can only lower what is held.
+  const netItemMinorUnits = checkout.itemMinorUnits - checkout.discountMinorUnits;
   const decision = decidePurchase({
     quoted: {
-      itemMinorUnits: checkout.itemMinorUnits,
+      itemMinorUnits: netItemMinorUnits,
       taxMinorUnits: checkout.taxMinorUnits,
       mandatoryFeesMinorUnits: checkout.feesMinorUnits,
       currency: checkout.currency,
@@ -543,6 +553,7 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
     submitTarget: controls.placeOrderTarget,
     merchantDomain, currency: checkout.currency, lines: checkout.lines,
     taxMinorUnits: checkout.taxMinorUnits, feesMinorUnits: checkout.feesMinorUnits, feeLabels: checkout.feeLabels,
+    ...(checkout.discounts.length > 0 ? { discounts: checkout.discounts } : {}),
     shippingLabel: shipping.option.rawLabel, shippingMinorUnits: shipping.costMinorUnits, totalMinorUnits: draw.totalMinorUnits,
   }) as unknown as CheckoutTerms;
   if (resumption && (!resumption.checkpoint.terms || !isDeepStrictEqual(resumption.checkpoint.terms, expectedTerms)
@@ -729,6 +740,7 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
     merchantDomain,
     item: request.item,
     itemMinorUnits: checkout.itemMinorUnits,
+    discounts: checkout.discounts,
     taxMinorUnits: checkout.taxMinorUnits,
     feesMinorUnits: checkout.feesMinorUnits,
     shippingMinorUnits: shipping.costMinorUnits,
@@ -769,12 +781,77 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
     await release(); addressCurrent(); return { kind: 'reprice', reading };
   }
   if (resumption) {
-    const sameQuote = await verifyTerms.call(driver, expectedTerms, { signal, assertCurrent: addressCurrent });
+    // The restored window is re-armed only on the same checkout page and control;
+    // the terms themselves are read once, after the card, before the click.
+    const samePage = await pageStillCheckout(expectedTerms, addressCurrent);
     addressCurrent();
-    if (!sameQuote) return reprice();
+    if (!samePage) return reprice();
   }
   let windowOutcome: string;
   let answeredBy: string | null = null;
+
+  /**
+   * Send one notice, persist its delivery report and deadline, and wait for
+   * the answer. Returns the deliveries and the answer (null on silence), or
+   * `answer: undefined` when nothing was delivered and so nothing was armed.
+   * Which state each result moves its window to is the caller's: the two
+   * windows' silence rules are opposite and stay in their own state machines.
+   */
+  type WindowAnswer = Awaited<ReturnType<PaymentNotifier['awaitAnswer']>>;
+  const runWindow = async (kind: 'approval' | 'veto', message: string, minutes: number, restored: boolean)
+    : Promise<{ readonly done: CheckoutOutcome } | { readonly deliveries: readonly ChannelDelivery[]; readonly answer: WindowAnswer | undefined }> => {
+    if (!addressStillCurrent()) { await releaseUnlessStopped(); return { done: refused('no-shipping-address', 'The stored address changed before the purchase notice.') }; }
+    let reception: PaymentNoticeWindow | undefined;
+    let restoredDeadline: Promise<number> | undefined;
+    try {
+      let deliveries: readonly ChannelDelivery[];
+      try {
+        if (restored && resumption) {
+          const prepared = resumption.prepare({ signal, assertCurrent: addressCurrent });
+          reception = Object.freeze({ deliveries: prepared.deliveries, awaitAnswer: prepared.awaitAnswer.bind(prepared), cancel: prepared.cancel.bind(prepared) });
+          restoredDeadline = prepared.deadlineMs;
+        } else reception = notifier.prepareWindow?.({ purchaseId: request.purchaseId, kind, notice: message, assertCurrent: addressCurrent, signal });
+        deliveries = await (reception?.deliveries ?? notifier.deliver({ kind, message, assertCurrent: addressCurrent, signal }));
+        addressCurrent();
+      }
+      catch (error) {
+        await releaseUnlessStopped();
+        if (error instanceof PaymentReplyWindowError && (error.kind === 'source-unavailable' || error.kind === 'history-unavailable')) throw error;
+        if (error instanceof JudgmentError || error instanceof JudgmentPortMissingError || error instanceof DecisionModelsDisabledError) throw error;
+        return { done: noticeRefusal(error) };
+      }
+      const deadlineMs = restoredDeadline ? await restoredDeadline : windowDeadlineMs(now(), minutes);
+      addressCurrent();
+      if (typeof deadlineMs !== 'number' || !Number.isSafeInteger(deadlineMs) || deadlineMs < 0) throw new CheckoutOwnershipError();
+      // Persisted so a restart can apply the delivery-keyed recovery rules.
+      const checkpoint = await registry.advance(request.purchaseId, 'awaiting-window', { windowDeliveries: deliveries, windowDeadlineMs: deadlineMs, windowKind: kind, windowNotice: message }, now());
+      addressCurrent();
+      if (!deliveries.some((entry) => entry.delivered)) return { deliveries, answer: undefined };
+      await deps.retainWindowCheckpoint?.({ record: checkpoint, reading, terms: expectedTerms });
+      addressCurrent();
+      let answer: WindowAnswer;
+      try {
+        answer = await (reception ? reception.awaitAnswer(deadlineMs)
+          : notifier.awaitAnswer({ purchaseId: request.purchaseId, kind, notice: message, deadlineMs, signal }));
+        addressCurrent();
+      } catch (error) { await releaseUnlessStopped(); throw error; }
+      return { deliveries, answer };
+    } finally { reception?.cancel(); }
+  };
+
+  /** The approval window's state machine over one run of `runWindow`. SILENCE DENIES. */
+  const awaitApproval = async (message: string, restored: boolean): Promise<{ readonly done: CheckoutOutcome } | { readonly state: ApprovalState }> => {
+    const run = await runWindow('approval', message, deps.approvalMinutes, restored);
+    if ('done' in run) return run;
+    let state = advanceApproval('pending-dispatch', { kind: 'dispatched', deliveries: run.deliveries });
+    if (state !== 'awaiting-approval' || run.answer === undefined) return { state };
+    if (run.answer === null) return { state: advanceApproval(state, { kind: 'deadline' }) };
+    answeredBy = run.answer.channel;
+    state = advanceApproval(state, run.answer.answer === 'approve'
+      ? { kind: 'approve', channel: run.answer.channel }
+      : { kind: 'deny', channel: run.answer.channel });
+    return { state };
+  };
 
   if (windowKind === 'approval') {
     // Silence DENIES. Undeliverable DENIES. Either because it is over budget,
@@ -785,56 +862,9 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
       expiresInMinutes: deps.approvalMinutes,
       merchantReason: merchantVerdict.reason,
     });
-    if (!addressStillCurrent()) { await releaseUnlessStopped(); return refused('no-shipping-address', 'The stored address changed before the purchase notice.'); }
-    let reception: PaymentNoticeWindow | undefined;
-    let restoredDeadline: Promise<number> | undefined;
-    let state: ApprovalState;
-    try {
-      let deliveries: readonly ChannelDelivery[];
-      try {
-        if (resumption) {
-          const restored = resumption.prepare({ signal, assertCurrent: addressCurrent });
-          reception = Object.freeze({ deliveries: restored.deliveries, awaitAnswer: restored.awaitAnswer.bind(restored), cancel: restored.cancel.bind(restored) });
-          restoredDeadline = restored.deadlineMs;
-        } else reception = notifier.prepareWindow?.({ purchaseId: request.purchaseId, kind: 'approval', notice: message, assertCurrent: addressCurrent, signal });
-        deliveries = await (reception?.deliveries ?? notifier.deliver({ kind: 'approval', message, assertCurrent: addressCurrent, signal }));
-        addressCurrent();
-      }
-      catch (error) {
-        await releaseUnlessStopped();
-        if (error instanceof PaymentReplyWindowError && (error.kind === 'source-unavailable' || error.kind === 'history-unavailable')) throw error;
-        if (error instanceof JudgmentError || error instanceof JudgmentPortMissingError || error instanceof DecisionModelsDisabledError) throw error;
-        return noticeRefusal(error);
-      }
-      const deadlineMs = resumption ? await restoredDeadline : windowDeadlineMs(now(), deps.approvalMinutes);
-      addressCurrent();
-      if (typeof deadlineMs !== 'number' || !Number.isSafeInteger(deadlineMs) || deadlineMs < 0) throw new CheckoutOwnershipError();
-      // Persisted so a restart can apply the delivery-keyed recovery rules.
-      const checkpoint = await registry.advance(request.purchaseId, 'awaiting-window', { windowDeliveries: deliveries, windowDeadlineMs: deadlineMs, windowKind, windowNotice: message }, now());
-      addressCurrent();
-      state = advanceApproval('pending-dispatch', { kind: 'dispatched', deliveries });
-      if (state === 'awaiting-approval') {
-        await deps.retainWindowCheckpoint?.({ record: checkpoint, reading, terms: expectedTerms });
-        addressCurrent();
-        let answer: Awaited<ReturnType<PaymentNotifier['awaitAnswer']>>;
-        try {
-          answer = await (reception ? reception.awaitAnswer(deadlineMs)
-            : notifier.awaitAnswer({ purchaseId: request.purchaseId, kind: 'approval', notice: message, deadlineMs, signal }));
-          addressCurrent();
-        } catch (error) { await releaseUnlessStopped(); throw error; }
-        if (answer === null) {
-          state = advanceApproval(state, { kind: 'deadline' });
-        } else {
-          answeredBy = answer.channel;
-          state = advanceApproval(
-            state,
-            answer.answer === 'approve'
-              ? { kind: 'approve', channel: answer.channel }
-              : { kind: 'deny', channel: answer.channel },
-          );
-        }
-      }
-    } finally { reception?.cancel(); }
+    const approval = await awaitApproval(message, resumption !== undefined);
+    if ('done' in approval) return approval.done;
+    const state = approval.state;
     windowOutcome = state;
     if (state !== 'approved') {
       await release();
@@ -891,56 +921,21 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
       expiresInMinutes: deps.vetoMinutes,
       merchantReason: merchantVerdict.reason,
     });
-    if (!addressStillCurrent()) { await releaseUnlessStopped(); return refused('no-shipping-address', 'The stored address changed before the purchase notice.'); }
-    let reception: PaymentNoticeWindow | undefined;
-    let restoredDeadline: Promise<number> | undefined;
-    let state: VetoState;
-    try {
-      let deliveries: readonly ChannelDelivery[];
-      try {
-        if (resumption) {
-          const restored = resumption.prepare({ signal, assertCurrent: addressCurrent });
-          reception = Object.freeze({ deliveries: restored.deliveries, awaitAnswer: restored.awaitAnswer.bind(restored), cancel: restored.cancel.bind(restored) });
-          restoredDeadline = restored.deadlineMs;
-        } else reception = notifier.prepareWindow?.({ purchaseId: request.purchaseId, kind: 'veto', notice: message, assertCurrent: addressCurrent, signal });
-        deliveries = await (reception?.deliveries ?? notifier.deliver({ kind: 'veto', message, assertCurrent: addressCurrent, signal }));
-        addressCurrent();
+    const run = await runWindow('veto', message, deps.vetoMinutes, resumption !== undefined);
+    if ('done' in run) return run.done;
+    let state: VetoState = advanceVeto('pending-dispatch', { kind: 'dispatched', deliveries: run.deliveries });
+    if (state === 'open' && run.answer !== undefined) {
+      if (run.answer === null) {
+        state = advanceVeto(state, { kind: 'deadline' });
+      } else {
+        answeredBy = run.answer.channel;
+        state = advanceVeto(state, run.answer.answer === 'object' || run.answer.answer === 'deny'
+          ? { kind: 'object', channel: run.answer.channel }
+          : run.answer.answer === 'not-understood'
+            ? { kind: 'not-understood', channel: run.answer.channel }
+            : { kind: 'acknowledge', channel: run.answer.channel });
       }
-      catch (error) {
-        await releaseUnlessStopped();
-        if (error instanceof PaymentReplyWindowError && (error.kind === 'source-unavailable' || error.kind === 'history-unavailable')) throw error;
-        if (error instanceof JudgmentError || error instanceof JudgmentPortMissingError || error instanceof DecisionModelsDisabledError) throw error;
-        return noticeRefusal(error);
-      }
-      const deadlineMs = resumption ? await restoredDeadline : windowDeadlineMs(now(), deps.vetoMinutes);
-      addressCurrent();
-      if (typeof deadlineMs !== 'number' || !Number.isSafeInteger(deadlineMs) || deadlineMs < 0) throw new CheckoutOwnershipError();
-      // Persisted so a restart can apply the delivery-keyed recovery rules.
-      const checkpoint = await registry.advance(request.purchaseId, 'awaiting-window', { windowDeliveries: deliveries, windowDeadlineMs: deadlineMs, windowKind, windowNotice: message }, now());
-      addressCurrent();
-      state = advanceVeto('pending-dispatch', { kind: 'dispatched', deliveries });
-      if (state === 'open') {
-        await deps.retainWindowCheckpoint?.({ record: checkpoint, reading, terms: expectedTerms });
-        addressCurrent();
-        let answer: Awaited<ReturnType<PaymentNotifier['awaitAnswer']>>;
-        try {
-          answer = await (reception ? reception.awaitAnswer(deadlineMs)
-            : notifier.awaitAnswer({ purchaseId: request.purchaseId, kind: 'veto', notice: message, deadlineMs, signal }));
-          addressCurrent();
-        } catch (error) { await releaseUnlessStopped(); throw error; }
-        if (answer === null) {
-          state = advanceVeto(state, { kind: 'deadline' });
-        } else {
-          answeredBy = answer.channel;
-          state = advanceVeto(
-            state,
-            answer.answer === 'object'
-              ? { kind: 'object', channel: answer.channel }
-              : { kind: 'acknowledge', channel: answer.channel },
-          );
-        }
-      }
-    } finally { reception?.cancel(); }
+    }
     windowOutcome = state;
     if (state === 'cancelled') {
       await release();
@@ -951,6 +946,24 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
         reason: 'You said stop, so nothing was charged.',
         report: renderCancellationReport(facts),
       };
+    }
+    if (state === 'held-reply-not-understood') {
+      // The owner answered in time with something that was not a go-ahead.
+      // That is never silence: the timer is stopped and the same purchase is
+      // put to them as an explicit approval, where silence means no.
+      const followUp = 'I did not take your reply as a go-ahead, so nothing is bought unless you say yes.\n\n'
+        + renderPurchaseNotice({ facts, mode: 'approval', expiresInMinutes: deps.approvalMinutes, merchantReason: merchantVerdict.reason });
+      const approval = await awaitApproval(followUp, false);
+      if ('done' in approval) return approval.done;
+      windowOutcome = `${state}:${approval.state}`;
+      if (approval.state !== 'approved') {
+        await release();
+        return refused('held-reply-not-understood', approval.state === 'denied-explicit'
+          ? 'Refused: you said no.'
+          : approval.state === 'denied-undeliverable'
+            ? 'Refused: I did not take your reply as a go-ahead and could not reach you to ask again. Nothing was bought.'
+            : 'Refused: I did not take your reply as a go-ahead, and no yes came before the approval window closed. Nothing was bought.');
+      }
     }
   }
 
@@ -995,10 +1008,43 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
     }
   }
 
+  // ── 8b. Under 'prompt', the owner types the security code now ──────────
+  //
+  // The code is never stored. The purchase is approved and everything but the
+  // card is on the page; the owner is told where to type it (never in a chat)
+  // and the purchase waits as long as an approval window. No code, no purchase.
+  let typedCode: TypedSecurityCode | undefined;
+  if (deps.gates.securityCodePrompt === true) {
+    const codes = deps.securityCodes;
+    if (!codes) {
+      await releaseUnlessStopped();
+      return refused('no-card', 'Refused: payments.cvvHandling is set to prompt and this payment host has no way to ask you for the security code. Nothing was submitted. Set payments.cvvHandling to stored, or buy through the daemon your terminal app is paired with.');
+    }
+    const asked = renderSecurityCodeRequest({ item: request.item, merchantDomain, totalMinorUnits: draw.totalMinorUnits, currency: checkout.currency, cardLast4 }, deps.approvalMinutes);
+    const deadlineMs = windowDeadlineMs(now(), deps.approvalMinutes);
+    const waiting = codes.request({ purchaseId: request.purchaseId, merchantDomain, cardLast4, deadlineMs, now, signal });
+    try {
+      await notifier.deliver({ kind: 'notice', message: asked, signal, assertCurrent: addressCurrent });
+    } catch {
+      // The open request is still listed by payments.purchase.status, where the terminal apps show it.
+    }
+    const typed = await waiting;
+    signal?.throwIfAborted();
+    addressCurrent();
+    if (typed === null) {
+      await releaseUnlessStopped();
+      return refused('security-code-not-given', `Refused: the card security code was not typed within ${deps.approvalMinutes} minutes, so nothing was bought. `
+        + 'Start the purchase again and type the code with /payments pending when asked.');
+    }
+    typedCode = typed;
+  }
+
   if (!addressStillCurrent()) { await releaseUnlessStopped(); return refused('no-shipping-address', 'The stored address changed before payment entry. Nothing was submitted.'); }
-  // Shipping selection and address entry can change tax, fees and the cart.
-  // The notice approves exactly its earlier parsed quote, never a larger limit.
-  const beforeCard = await verifyTerms.call(driver, expectedTerms, { signal, assertCurrent: addressCurrent });
+  // Before the card: code checks the page is still this merchant's checkout
+  // with the quote's submit control. Whether shipping selection and address
+  // entry changed tax, fees or the cart is read once, after the card is typed,
+  // and that one reading is what the click is bound to.
+  const beforeCard = await pageStillCheckout(expectedTerms, addressCurrent);
   addressCurrent();
   if (beforeCard !== true) return reprice();
   purchaseEvidence.assertCurrent();
@@ -1006,6 +1052,8 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
   lifecycle.armed = true;
   await registry.advance(request.purchaseId, 'arming-payment', {}, now());
   addressCurrent();
+  // A typed code completes this one read of the card and goes with the fill.
+  const cardsForFill: CardMaterialStore = typedCode === undefined ? deps.cards : typedCode.withCard(deps.cards);
   let fill: Awaited<ReturnType<typeof fillCard>>;
   try {
     fill = await fillCard(
@@ -1016,9 +1064,10 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
         expirySeparator: controls.expirySeparator,
         twoDigitYear: controls.twoDigitYear,
       },
-      { registry, cards: deps.cards, redactor: deps.redactor, driver, signal, assertCurrent: addressCurrent },
+      { registry, cards: cardsForFill, redactor: deps.redactor, driver, signal, assertCurrent: addressCurrent },
     );
   } catch (error) { await release(); throw error; }
+  finally { typedCode = undefined; }
   addressCurrent();
   if (!fill.ok) {
     await release();
@@ -1029,9 +1078,10 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
     );
   }
 
-  // Card entry may itself refresh the checkout. Re-read before journalling a
-  // possible submission; the driver's retained observation also guards the
-  // actual click after journal flush and all other asynchronous browser checks.
+  // The one terms reading: the full page against the notified quote, after
+  // the card (card entry can itself refresh the checkout) and before the
+  // journal. The driver keeps this reading's observation and the engine
+  // re-reads it once, immediately before it dispatches the click.
   const beforeSubmit = await verifyTerms.call(driver, expectedTerms, { signal, assertCurrent: addressCurrent });
   addressCurrent();
   if (beforeSubmit !== true) return reprice();
@@ -1123,7 +1173,8 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
     merchantDomain,
     item: request.item,
     currency: checkout.currency,
-    itemMinorUnits: checkout.itemMinorUnits,
+    // What was paid for the items, after discounts, so the parts add up to the total.
+    itemMinorUnits: netItemMinorUnits,
     taxMinorUnits: checkout.taxMinorUnits,
     feesMinorUnits: checkout.feesMinorUnits,
     shippingMinorUnits: shipping.costMinorUnits,

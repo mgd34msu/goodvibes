@@ -259,6 +259,8 @@ export type { PaymentsConfigReader } from './payments-config.js';
 export { createJevMerchantJudge, judgeMerchant } from './merchant-judge-model.js';
 
 export { PaymentReplyInbox, PaymentReplyInboxClosedError, PaymentReplyWindowError } from './reply-inbox.js';
+export { SecurityCodeRequests, SecurityCodeRequestError, isSecurityCodeAwaited, normalizeSecurityCode } from './security-code-requests.js';
+export type { SecurityCodeRequestView } from './security-code-requests.js';
 export type { CheckoutWindowCheckpoint, CheckoutWindowResumption } from './checkout-window-checkpoint.js';
 export type { PaymentReplyOffer, PaymentReplyCorrelation, PaymentWindowView, PaymentWindowAnswer } from './reply-inbox.js';
 export type { PaymentPurchaseStatus, PaymentUnreadableOperation } from './window-view.js';

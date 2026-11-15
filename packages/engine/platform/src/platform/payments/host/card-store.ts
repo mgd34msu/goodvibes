@@ -26,10 +26,11 @@
  * on BOTH sides: it is not written at create time, and it is not supplied at
  * read time whatever is already in the store, so flipping the setting takes
  * effect on the cards that already exist instead of only on the next one. Under
- * 'prompt' a card reports `materialComplete: false` and `read()` answers null,
- * which is exactly what that flag is for, the descriptor for
- * `payments.cards.list` names 'CVV not set' as the case a surface renders from
- * it. The stored bytes are not purged; see `suppliesStoredCvv`.
+ * 'prompt' a card reports `materialComplete: false`, and `read()` answers null
+ * unless the caller passes the code the owner typed for this purchase
+ * (`securityCode`), which is used for that one read. A purchase checks
+ * `materialCompleteExceptCvv` instead and asks the owner for the code at
+ * payment time. The stored bytes are not purged; see `suppliesStoredCvv`.
  *
  * ── A damaged card file is refused, never read as empty ───────────────────
  *
@@ -309,6 +310,20 @@ export class DaemonCardStore implements CardMaterialStore {
   }
 
   /**
+   * Whether every field but the security code is stored: what a purchase needs
+   * under `payments.cvvHandling: 'prompt'`, where the owner types the code at
+   * payment time.
+   */
+  async materialCompleteExceptCvv(cardId: string): Promise<boolean> {
+    if ((await this.metadata(cardId)) === null) return false;
+    for (const field of CARD_MATERIAL_FIELDS) {
+      if (field === 'cvv') continue;
+      if (await this.fieldValue(cardId, field) === null) return false;
+    }
+    return true;
+  }
+
+  /**
    * The material. In-process callers only, and all-or-nothing.
    *
    * Never logged, never cached beyond the call, and never part of a thrown
@@ -318,11 +333,14 @@ export class DaemonCardStore implements CardMaterialStore {
    * deliberate: a damaged card file means this store cannot tell whether the
    * card is configured at all, and null would claim it had checked.
    */
-  async read(cardId: string): Promise<CardMaterial | null> {
+  async read(cardId: string, options: { readonly securityCode?: string | undefined } = {}): Promise<CardMaterial | null> {
     if ((await this.metadata(cardId)) === null) return null;
     const values: Partial<Record<CardMaterialField, string>> = {};
     for (const field of CARD_MATERIAL_FIELDS) {
-      const value = await this.fieldValue(cardId, field);
+      // A code the owner typed for this purchase is used for this one read and kept nowhere.
+      const value = field === 'cvv' && options.securityCode !== undefined && options.securityCode.length > 0
+        ? options.securityCode
+        : await this.fieldValue(cardId, field);
       if (value === null) return null;
       values[field] = value;
     }

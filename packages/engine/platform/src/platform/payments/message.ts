@@ -66,6 +66,8 @@ export interface PurchaseFacts {
   readonly merchantDomain: string;
   readonly item: OwnerSuppliedText;
   readonly itemMinorUnits: MinorUnits;
+  /** Reduction lines the checkout showed, each the amount it took off the items. */
+  readonly discounts?: readonly { readonly label: string; readonly amountMinorUnits: MinorUnits }[] | undefined;
   readonly taxMinorUnits: MinorUnits;
   readonly feesMinorUnits: MinorUnits;
   readonly shippingMinorUnits: MinorUnits;
@@ -165,6 +167,9 @@ export function renderVetoMessage(facts: PurchaseFacts, expiresInMinutes: number
 function amountLines(facts: PurchaseFacts): string[] {
   const lines = [
     `  Item:     ${formatMinorUnits(facts.itemMinorUnits, facts.currency)}`,
+    // The merchant named each reduction, so its label is neutralised like any page text.
+    ...(facts.discounts ?? []).map((discount) =>
+      `  Discount: -${formatMinorUnits(discount.amountMinorUnits, facts.currency)} (${sanitizeNoticeField(discount.label, 40)})`),
     `  Tax:      ${formatMinorUnits(facts.taxMinorUnits, facts.currency)}`,
   ];
   if (facts.feesMinorUnits > 0) {
@@ -328,6 +333,44 @@ export function renderPurchaseReport(input: {
  * happened; our ledger already knows that. All it can do is add a reference
  * number to a message the owner was going to get anyway.
  */
+/**
+ * The ask for the card's security code under `payments.cvvHandling: 'prompt'`,
+ * sent to the notice channels once a purchase is approved and reaches payment.
+ * It says where to type the code, and never asks for it in the chat itself.
+ */
+export function renderSecurityCodeRequest(facts: Pick<PurchaseFacts, 'item' | 'merchantDomain' | 'totalMinorUnits' | 'currency' | 'cardLast4'>, expiresInMinutes: number): string {
+  return [
+    `Ready to pay, waiting for the card security code.`,
+    ``,
+    `  ${renderItem(facts.item)}`,
+    `  from ${renderMerchant(facts.merchantDomain)}`,
+    `  TOTAL: ${formatMinorUnits(facts.totalMinorUnits, facts.currency)}, card ending ${sanitizeNoticeField(facts.cardLast4, 8)}`,
+    ``,
+    `Type the code in the terminal app with /payments pending, or in the local web UI. Do not send it in this chat.`,
+    `If it is not typed in ${expiresInMinutes} minutes I will NOT buy it.`,
+  ].join('\n');
+}
+
+/**
+ * The note when a shop's mail says a purchase was refunded. Built from our own
+ * record, never the mail's text; the refund is recorded on the purchase and
+ * credits no budget pool.
+ */
+export function renderRefundReport(input: {
+  readonly facts: Pick<PurchaseFacts, 'item' | 'totalMinorUnits' | 'currency' | 'cardLast4'>;
+  readonly senderDomain: string;
+}): string {
+  return [
+    `${renderMerchant(input.senderDomain)} says this order was refunded.`,
+    ``,
+    `  ${renderItem(input.facts.item)}`,
+    `  ${formatMinorUnits(input.facts.totalMinorUnits, input.facts.currency)} on the card ending `
+      + `${sanitizeNoticeField(input.facts.cardLast4, 8)}`,
+    ``,
+    `I recorded the refund on the purchase. Check your card statement for the credit; a refund does not add back to any budget.`,
+  ].join('\n');
+}
+
 export function renderConfirmationReport(input: {
   /** Only what the report prints; a stored purchase row carries all four. */
   readonly facts: Pick<PurchaseFacts, 'item' | 'totalMinorUnits' | 'currency' | 'cardLast4'>;

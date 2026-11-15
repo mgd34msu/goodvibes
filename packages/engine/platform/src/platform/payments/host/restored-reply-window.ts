@@ -3,7 +3,7 @@
 import { isDeepStrictEqual } from 'node:util';
 import type { CheckoutWindowCheckpoint } from '../checkout-window-checkpoint.js';
 import { CheckoutOwnershipError } from '../checkout-ownership.js';
-import { createChannelPaymentNotifier, readPaymentReply, type PaymentNoticeTarget, type PaymentNoticeRouter, type PaymentAnswer } from '../notice-delivery.js';
+import { createChannelPaymentNotifier, readPaymentReply, type PaymentNoticeTarget, type PaymentNoticeRouter, type PaymentReplyReading } from '../notice-delivery.js';
 import { capturePaymentReplyHistory, paymentReplyWindowReceiveCovered, type PaymentReplyHistory, type PaymentReplyHistoryEntry, type PaymentReplyHistoryWindow, type PaymentReplyReceiveSpan } from '../reply-history.js';
 import { PaymentReplyWindowError, type PaymentReplyInbox } from '../reply-inbox.js';
 import type { ChannelDeliveryReceipt } from '../../channels/delivery/types.js';
@@ -41,7 +41,7 @@ export function prepareRestoredPaymentReplyWindow(input: RestoreReplyWindowInput
   const retiredOwner = new AbortController(), signal = AbortSignal.any([input.signal, retiredOwner.signal]);
   const kind = checkpoint.record.windowKind, notice = checkpoint.record.windowNotice;
   if (!kind || notice === undefined || !recipients.length) throw new CheckoutOwnershipError();
-  let reception: PaymentNoticeWindow | undefined, retired = false, historicalAnswer: PaymentAnswer | null | undefined;
+  let reception: PaymentNoticeWindow | undefined, retired = false, historicalAnswer: PaymentReplyReading | null | undefined;
   let resumedDeadline = checkpoint.record.windowDeadlineMs ?? Number.NaN;
   const current = () => { signal.throwIfAborted(); input.assertCurrent(); if (retired) throw new CheckoutOwnershipError(); };
   const now = () => {
@@ -70,11 +70,11 @@ export function prepareRestoredPaymentReplyWindow(input: RestoreReplyWindowInput
       return window;
     };
     let original = await history(); sourceCurrent();
-    const interpreted = new Map<string, PaymentAnswer | null>();
+    const interpreted = new Map<string, PaymentReplyReading | null>();
     const uncertainReceipts = new Set<ChannelDeliveryReceipt>();
-    const readAnswers = async (window: PaymentReplyHistoryWindow | undefined, positiveAllowed: boolean): Promise<PaymentAnswer | undefined> => {
+    const readAnswers = async (window: PaymentReplyHistoryWindow | undefined, positiveAllowed: boolean): Promise<PaymentReplyReading | undefined> => {
       if (!window) return undefined;
-      let positive: PaymentAnswer | undefined;
+      let positive: PaymentReplyReading | undefined;
       for (const entry of [...window.entries].sort((a, b) => Number(a.updateId) - Number(b.updateId))) {
         const matching = recipients.filter(({ receipt }) => matchesEntry(receipt, entry));
         const onTime = matching.filter(({ receipt }) => entry.receivedAtMs < cutoff(window, receipt) || entry.sentAtMs + 1000 <= cutoff(window, receipt));
@@ -84,12 +84,14 @@ export function prepareRestoredPaymentReplyWindow(input: RestoreReplyWindowInput
         const id = JSON.stringify([entry.accountId, entry.updateId]);
         let answer = interpreted.get(id);
         if (!interpreted.has(id)) {
-          answer = await readPaymentReply(entry.text, kind, notice, signal, sourceCurrent); sourceCurrent();
+          // Every history entry read here matched a delivered notice's receipt: it is addressed.
+          answer = await readPaymentReply(entry.text, kind, notice, signal, sourceCurrent, { addressed: true }); sourceCurrent();
           interpreted.set(id, answer ?? null);
         }
         // A correctly addressed original objection stops the purchase without
         // needing proof that no other reply was lost during downtime.
-        if (answer === 'deny' || answer === 'object') return answer;
+        // A reply that was not a go-ahead holds the purchase the same way.
+        if (answer === 'deny' || answer === 'object' || answer === 'not-understood') return answer;
         if (positiveAllowed && onTime.length === 1 && (answer === 'approve' || answer === 'acknowledge')) {
           const recipient = onTime[0];
           if (recipient && !alreadyCovered(window, recipient.receipt) && originalSpan(window, recipient.receipt)?.acceptPositive !== false) positive ??= answer;

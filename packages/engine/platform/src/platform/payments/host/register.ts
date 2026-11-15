@@ -91,7 +91,7 @@ import { logger } from '../../utils/logger.js';
 import { HandlerError, registerCatalogHandlers } from './handler-plumbing.js';
 import type { TypedHandler, Unregister } from './handler-plumbing.js';
 import { CheckoutServiceHolder, checkoutApproveHandler, checkoutBeginHandler, checkoutFillCardHandler } from './checkout-handlers.js';
-import { purchaseWindowStatusHandler, purchaseWindowAnswerHandler } from './window-handlers.js';
+import { purchaseWindowStatusHandler, purchaseWindowAnswerHandler, purchaseSecurityCodeHandler } from './window-handlers.js';
 import { purchaseReconciliationHandler } from './reconciliation-handler.js';
 import type { CheckoutComposition } from './checkout-handlers.js';
 import { CardStoreUnreadableError } from './card-store.js';
@@ -116,6 +116,7 @@ export const ATTACHED_PAYMENTS_METHOD_IDS: readonly string[] = [
   'payments.purchase.deny',
   'payments.purchase.cancel',
   'payments.purchase.reconcile',
+  'payments.purchase.securityCode',
 ];
 
 /**
@@ -552,6 +553,7 @@ export function registerPaymentsMethods(
       { id: 'payments.checkout.fillCard', handler: checkoutFillCardHandler(deps, checkoutServiceHolder) as TypedHandler<unknown, unknown> },
       { id: 'payments.purchase.status', handler: purchaseWindowStatusHandler(deps.checkout, checkoutServiceHolder.operations) },
       { id: 'payments.purchase.reconcile', handler: purchaseReconciliationHandler(checkoutServiceHolder.reconciliations), options: { confirm: true } },
+      { id: 'payments.purchase.securityCode', handler: purchaseSecurityCodeHandler(deps.checkout), options: { confirm: true } },
       ...(['approve', 'deny', 'cancel'] as const).map(action => ({
         id: `payments.purchase.${action}`, handler: purchaseWindowAnswerHandler(deps.checkout, action, checkoutServiceHolder.operations), options: { confirm: true },
       })),

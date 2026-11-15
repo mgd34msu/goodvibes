@@ -7,6 +7,23 @@ export interface PaymentPurchaseStatus {
   readonly operations: readonly PaymentOperationView[];
   /** Purchases whose status record could not be read; their evidence still has to be inspected. Empty when every record read. */
   readonly unreadable: readonly PaymentUnreadableOperation[];
+  /** Approved purchases waiting for the owner to type the card security code (`payments.cvvHandling: 'prompt'`). */
+  readonly securityCodes: readonly PaymentSecurityCodeRequestView[];
+}
+
+/** One purchase waiting for its card security code. Never carries a code. */
+export interface PaymentSecurityCodeRequestView {
+  readonly purchaseId: string;
+  readonly windowId: string;
+  readonly merchantDomain: string;
+  readonly cardLast4: string;
+  readonly deadlineMs: number;
+}
+
+export interface PaymentSecurityCodeAcceptance {
+  readonly purchaseId: string;
+  readonly windowId: string;
+  readonly accepted: true;
 }
 
 /** One purchase the daemon could not read a status record for, with what to do about it. */
@@ -43,12 +60,21 @@ function reference(value: unknown): string {
 
 /** Shared browser/terminal decoder: no stores, native runtime or model calls. */
 export function readPaymentWindowStatus(value: unknown): PaymentPurchaseStatus {
-  // `unreadable` is sent only when a record could not be read.
-  const response = value !== null && typeof value === 'object' && !Array.isArray(value) && 'unreadable' in value
-    ? object(value, ['windows', 'operations', 'unreadable']) : object(value, ['windows', 'operations']);
+  // `unreadable` and `securityCodes` are sent only when they have entries.
+  const present = value !== null && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  const response = object(value, ['windows', 'operations', ...(['unreadable', 'securityCodes'] as const).filter(key => key in present)]);
   const windows = response['windows'];
   const operations = response['operations'];
   const unreadable = response['unreadable'] ?? [];
+  const securityCodes = response['securityCodes'] ?? [];
+  if (!Array.isArray(securityCodes) || securityCodes.length > 256) return failure();
+  const capturedSecurityCodes = securityCodes.map((entry: unknown): PaymentSecurityCodeRequestView => {
+    const row = object(entry, ['purchaseId', 'windowId', 'merchantDomain', 'cardLast4', 'deadlineMs']);
+    if (typeof row['merchantDomain'] !== 'string' || row['merchantDomain'].length > 256 || typeof row['cardLast4'] !== 'string' || row['cardLast4'].length > 8
+      || typeof row['deadlineMs'] !== 'number' || !Number.isFinite(row['deadlineMs'])) return failure();
+    return Object.freeze({ purchaseId: reference(row['purchaseId']), windowId: reference(row['windowId']),
+      merchantDomain: row['merchantDomain'], cardLast4: row['cardLast4'], deadlineMs: row['deadlineMs'] });
+  });
   if (!Array.isArray(unreadable) || unreadable.length > 356) return failure();
   const capturedUnreadable = unreadable.map((entry: unknown): PaymentUnreadableOperation => {
     const row = object(entry, ['purchaseId', 'reason']);
@@ -64,7 +90,8 @@ export function readPaymentWindowStatus(value: unknown): PaymentPurchaseStatus {
     return operation;
   });
   const ids = new Set<string>(), windowIds = new Set<string>();
-  return Object.freeze({ operations: Object.freeze(capturedOperations), unreadable: Object.freeze(capturedUnreadable), windows: Object.freeze(windows.map((entry: unknown): PaymentWindowView => {
+  return Object.freeze({ operations: Object.freeze(capturedOperations), unreadable: Object.freeze(capturedUnreadable),
+    securityCodes: Object.freeze(capturedSecurityCodes), windows: Object.freeze(windows.map((entry: unknown): PaymentWindowView => {
     const row = object(entry, ['purchaseId', 'windowId', 'kind', 'notice', 'deadlineMs']);
     const purchaseId = reference(row['purchaseId']), windowId = reference(row['windowId']);
     if (ids.has(purchaseId) || windowIds.has(windowId)) return failure();
@@ -81,4 +108,10 @@ export function readPaymentWindowAnswer(value: unknown): PaymentWindowAnswer {
   const answer = row['answer'];
   if (row['accepted'] !== true || (answer !== 'approve' && answer !== 'deny' && answer !== 'acknowledge' && answer !== 'object')) return failure();
   return Object.freeze({ purchaseId, windowId, accepted: true, answer });
+}
+
+export function readPaymentSecurityCodeAcceptance(value: unknown): PaymentSecurityCodeAcceptance {
+  const row = object(value, ['purchaseId', 'windowId', 'accepted']);
+  if (row['accepted'] !== true) return failure();
+  return Object.freeze({ purchaseId: reference(row['purchaseId']), windowId: reference(row['windowId']), accepted: true });
 }

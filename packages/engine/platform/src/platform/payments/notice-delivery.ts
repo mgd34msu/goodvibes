@@ -109,7 +109,7 @@ export interface PaymentReplySource {
     readonly requireDeliveryReceipt?: boolean | undefined;
     readonly deliveries?: readonly ChannelDelivery[] | undefined;
   }): Promise<{
-    readonly answer: 'approve' | 'deny' | 'acknowledge' | 'object';
+    readonly answer: 'approve' | 'deny' | 'acknowledge' | 'object' | 'not-understood';
     readonly channel: PaymentAnswerChannel;
   } | null>;
 }
@@ -140,14 +140,27 @@ import type { PaymentAnswer } from './window-view.js';
 export type { PaymentAnswer } from './window-view.js';
 
 /**
+ * What a reply to a purchase notice was read as. `not-understood` is a veto
+ * window's answer only: the owner replied in time with something that was not
+ * a go-ahead, so the purchase is held and asked about again explicitly.
+ */
+export type PaymentReplyReading = PaymentAnswer | 'not-understood';
+
+/**
  * Read an inbound reply as an answer to the notice it follows, or as nothing.
  *
  * Read by Jev, once per window kind (`engine.payments.approval-reply`,
  * `engine.payments.veto-reply`), because the same words settle the two
  * windows differently: "go" is an approval on one and an acknowledgement on
- * the other. An answer is taken only when the reading acts; `unclear`, and
- * any reading short of act, is no answer at all, which leaves the window's
- * own silence rule to decide, the rule the owner set.
+ * the other. An answer is taken only when the reading acts.
+ *
+ * Short of that, the windows differ. On an approval window anything else is no
+ * answer, and silence already means no. On a veto window, where silence spends,
+ * one rule decides: a reply addressed to the notice (`addressed`, its receipt
+ * matched) or whose best reading is an objection at any confidence, and that is
+ * not a confident go-ahead, is `not-understood`; the window's timer stops and
+ * the owner is asked for an explicit yes. Unaddressed chat that reads as
+ * neither stays no answer.
  */
 export async function readPaymentReply(
   reply: string,
@@ -155,7 +168,8 @@ export async function readPaymentReply(
   notice: string,
   signal?: AbortSignal,
   assertCurrent?: () => void,
-): Promise<PaymentAnswer | null> {
+  options: { readonly addressed?: boolean | undefined } = {},
+): Promise<PaymentReplyReading | null> {
   requireDecisionFeature('interpreting a purchase approval or veto reply');
   const current = () => { signal?.throwIfAborted(); assertCurrent?.(); };
   current();
@@ -170,7 +184,9 @@ export async function readPaymentReply(
   }
   const read = await vetoReply.read(port, notice, reply, { site: PAYMENT_REPLY_SITE, beforeAttempt: current, ...(signal === undefined ? {} : { signal }) });
   current();
-  const answer = read.reading.outcome === 'act' && read.reading.choice !== 'unclear' ? read.reading.choice : null;
+  const acting = read.reading.outcome === 'act' && read.reading.choice !== 'unclear' ? read.reading.choice : null;
+  const answer: PaymentReplyReading | null = acting
+    ?? (read.reading.choice === 'object' || options.addressed === true ? 'not-understood' : null);
   read.recordAction(answer ?? 'no answer');
   return answer;
 }

@@ -51,6 +51,8 @@ const CARD_FIELDS = new Set([
   'cc-number', 'cc-csc', 'cc-exp', 'cc-exp-month', 'cc-exp-year', 'cc-name',
 ]);
 const CARD_CREATE = 'payments.cards.create';
+/** Carries the owner's typed card security code in `code`. */
+const SECURITY_CODE = 'payments.purchase.securityCode';
 const CREDENTIAL_SET = 'credentials.set';
 const OPERATION_FIELDS = ['method', 'operation', 'tool', 'name'] as const;
 
@@ -377,9 +379,10 @@ function snapshotProblem(value: unknown, toolName: string, cardOnly = false, evi
       const fields: Record<string, unknown> = Object.fromEntries(Object.entries(descriptors)
         .filter(([key, descriptor]) => array ? key !== 'length' : descriptor.enumerable)
         .map(([key, descriptor]) => [key, descriptor.value as unknown]));
-      const selected = OPERATION_FIELDS.map((field) => fields[field]).find((field) => field === CARD_CREATE || field === CREDENTIAL_SET);
+      const selected = OPERATION_FIELDS.map((field) => fields[field]).find((field) => field === CARD_CREATE || field === SECURITY_CODE || field === CREDENTIAL_SET);
       const op = typeof selected === 'string' ? selected : operation;
       if (op === CARD_CREATE && CARD_FIELD_NAMES.some((field) => present(fields[field]) && !reference(fields[field]) && !fieldDeclaration(fields[field]))) return 'card-material';
+      if (op === SECURITY_CODE && present(fields['code'])) return 'card-material';
       const typedValue = fields['value'] ?? fields['text'];
       const targetField = fields['field'];
       if (present(typedValue) && !reference(typedValue)) {

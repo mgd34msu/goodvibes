@@ -91,6 +91,13 @@ export type VetoState =
   | 'proceeding-silent'
   | 'proceeding-undelivered'
   | 'cancelled'
+  /**
+   * The owner answered the notice in time with something that was not a
+   * go-ahead: an addressed reply that was not a confident acknowledgement, or
+   * a reply whose best reading was an objection. The timer stops; nothing is
+   * bought unless the owner says yes to an explicit approval question.
+   */
+  | 'held-reply-not-understood'
   | 'void';
 
 /** Every terminal state settles its reservation exactly one way. */
@@ -113,6 +120,8 @@ const VETO_SETTLEMENT: Readonly<Record<VetoState, Settlement>> = {
   'proceeding-silent': 'hold',
   'proceeding-undelivered': 'hold',
   cancelled: 'release',
+  // Held until the explicit approval question settles it.
+  'held-reply-not-understood': 'hold',
   void: 'release',
 };
 
@@ -150,6 +159,7 @@ export type VetoEvent =
   | { readonly kind: 'undeliverable' }
   | { readonly kind: 'acknowledge'; readonly channel: PaymentAnswerChannel }
   | { readonly kind: 'object'; readonly channel: PaymentAnswerChannel }
+  | { readonly kind: 'not-understood'; readonly channel: PaymentAnswerChannel }
   | { readonly kind: 'deadline' }
   | { readonly kind: 'total-changed' };
 
@@ -204,6 +214,9 @@ export function advanceVeto(state: VetoState, event: VetoEvent): VetoState {
       return state === 'open' ? 'proceeding-acknowledged' : state;
     case 'object':
       return 'cancelled';
+    case 'not-understood':
+      // An on-time answer that is not a go-ahead is never silence.
+      return state === 'open' ? 'held-reply-not-understood' : state;
     case 'deadline':
       return 'proceeding-silent';
     case 'total-changed':

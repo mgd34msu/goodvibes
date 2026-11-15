@@ -329,3 +329,28 @@ describe('enforcement reads the new form', () => {
     expect(limits.dailyOverageMinorUnits).toBe(0);
   });
 });
+
+describe('discount lines on a checkout', () => {
+  test('a promotion is read as its own line and subtracted, so the page total agrees', async () => {
+    const { extractCheckout } = await import('../platform/src/platform/payments/checkout-extraction.ts');
+    const { parseCurrencyCode } = await import('../platform/src/platform/payments/types.ts');
+    const usd = parseCurrencyCode('USD'); if (!usd) throw new Error('Invalid fixture currency');
+    const reading = { lines: [{ label: 'Cable', quantity: '1', unitPrice: '$10.00' }], tax: null, fees: [],
+      shippingOptions: [{ label: 'Standard', cost: '$4.99' }], statedTotal: '$9.99', currency: 'USD', orderSummaryText: 'Cable' };
+    expect(extractCheckout(reading, usd)).toMatchObject({ ok: false, field: 'statedTotal' });
+    for (const amount of ['-$5.00', '−5.00', '($5.00)', '5.00', 'USD -5.00']) {
+      const result = extractCheckout({ ...reading, discounts: [{ label: 'SPRING5', amount }] }, usd);
+      expect(result).toMatchObject({ ok: true, checkout: { discountMinorUnits: 500, subtotalMinorUnits: 500 } });
+    }
+  });
+
+  test('a discount larger than the items is refused rather than becoming a credit', async () => {
+    const { extractCheckout } = await import('../platform/src/platform/payments/checkout-extraction.ts');
+    const { parseCurrencyCode } = await import('../platform/src/platform/payments/types.ts');
+    const usd = parseCurrencyCode('USD'); if (!usd) throw new Error('Invalid fixture currency');
+    const result = extractCheckout({ lines: [{ label: 'Cable', quantity: '1', unitPrice: '$10.00' }], tax: null, fees: [],
+      discounts: [{ label: 'Gift card', amount: '-$12.00' }], shippingOptions: [{ label: 'Standard', cost: '$0.00' }],
+      statedTotal: null, currency: 'USD', orderSummaryText: 'Cable' }, usd);
+    expect(result).toMatchObject({ ok: false, field: 'discounts' });
+  });
+});

@@ -160,6 +160,9 @@ describe('the payments module never emits card material', () => {
         // expiry, ... cvv"), and holds no material itself, it delegates to
         // fill-card.ts. Held to the same stricter rule below regardless.
         || file === 'payments-gateway-service.ts'
+        // Holds the security code the owner typed under 'prompt' until the one
+        // card read it completes; never logs, stores or returns it.
+        || file === 'security-code-requests.ts'
       ) continue;
       const text = await Bun.file(`${dir}${file}`).text();
       const code = text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
@@ -244,7 +247,7 @@ describe('the prompt trade-off is stated where the switch is flipped', () => {
     );
     // Surfaces render this string rather than writing their own, so the wording
     // cannot drift between the TUI, the agent and the webui.
-    expect(CVV_PROMPT_TRADEOFF_WARNING).toContain('disables unattended purchasing');
+    expect(CVV_PROMPT_TRADEOFF_WARNING).toContain('stops unattended purchasing');
     expect(CVV_PROMPT_TRADEOFF_WARNING).toContain('within budget');
   });
 

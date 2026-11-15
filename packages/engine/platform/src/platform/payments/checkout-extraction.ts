@@ -38,7 +38,7 @@
  * stop at rather than reconcile with.
  */
 import { sanitizeNoticeField } from '../security/notice-text.js';
-import { parseMinorUnits, parseQuantity } from './money-parsing.js';
+import { parseDiscountMinorUnits, parseMinorUnits, parseQuantity } from './money-parsing.js';
 import { parseCurrencyCode } from './types.js';
 import type { CartLine } from './cart.js';
 import type { CurrencyCode, MinorUnits, ShippingOption } from './types.js';
@@ -58,6 +58,12 @@ export interface RawCheckoutReading {
   }[];
   readonly tax: string | null;
   readonly fees: readonly { readonly label: string; readonly amount: string }[];
+  /**
+   * Order-level reductions the page shows as their own lines: a promotion
+   * code, a credit, a gift-card balance, a delivery charge cancelled by a
+   * matching credit. Each amount is what it takes off, signed or not.
+   */
+  readonly discounts?: readonly { readonly label: string; readonly amount: string }[] | undefined;
   readonly shippingOptions: readonly { readonly label: string; readonly cost: string }[];
   /** The page's own stated grand total. Used to contradict us, never to inform us. */
   readonly statedTotal: string | null;
@@ -81,10 +87,20 @@ export interface ExtractedCheckout {
   readonly taxMinorUnits: MinorUnits;
   readonly feesMinorUnits: MinorUnits;
   readonly feeLabels: readonly string[];
+  /** Each reduction line, as the positive amount it takes off. */
+  readonly discounts: readonly CheckoutDiscount[];
+  /** The sum of `discounts`; never more than `itemMinorUnits`. */
+  readonly discountMinorUnits: MinorUnits;
   readonly shippingOptions: readonly ShippingOption[];
-  /** Item + tax + fees. Delivery is added once a tier is chosen. */
+  /** Item - discounts + tax + fees. Delivery is added once a tier is chosen. */
   readonly subtotalMinorUnits: MinorUnits;
   readonly orderSummaryText: string;
+}
+
+/** One reduction line on a checkout. */
+export interface CheckoutDiscount {
+  readonly label: string;
+  readonly amountMinorUnits: MinorUnits;
 }
 
 export type ExtractionResult =
@@ -169,6 +185,24 @@ export function extractCheckout(
     feeLabels.push(sanitizeNoticeField(fee.label, 60));
   }
 
+  // A reduction can only lower what is held: it is subtracted from the items
+  // it applies to and never turns a charge into a credit. One larger than the
+  // items is not something the parts of this checkout can account for.
+  const discounts: CheckoutDiscount[] = [];
+  let discountMinorUnits = 0;
+  for (const [index, discount] of (raw.discounts ?? []).entries()) {
+    const amount = parseDiscountMinorUnits(discount.amount, currency);
+    if (amount === null) {
+      return fail(`discounts[${String(index)}]`, 'Refused: I cannot read a discount line on this checkout as an exact amount.');
+    }
+    if (amount === 0) continue;
+    discountMinorUnits += amount;
+    discounts.push({ label: sanitizeNoticeField(discount.label, 60), amountMinorUnits: amount });
+  }
+  if (discountMinorUnits > itemMinorUnits) {
+    return fail('discounts', 'Refused: the discounts on this checkout come to more than its items, which I cannot account for, so nothing is bought.');
+  }
+
   const shippingOptions: ShippingOption[] = [];
   for (const [index, option] of raw.shippingOptions.entries()) {
     const cost = parseMinorUnits(option.cost, currency);
@@ -191,7 +225,7 @@ export function extractCheckout(
     );
   }
 
-  const subtotalMinorUnits = itemMinorUnits + taxMinorUnits + feesMinorUnits;
+  const subtotalMinorUnits = itemMinorUnits - discountMinorUnits + taxMinorUnits + feesMinorUnits;
   if (!Number.isSafeInteger(subtotalMinorUnits)) return fail('subtotal', 'Refused: the checkout subtotal exceeds exact integer accounting.');
   if (shippingOptions.some(option => !Number.isSafeInteger(subtotalMinorUnits + option.costMinorUnits))) {
     return fail('shippingOptions', 'Refused: a complete checkout total exceeds exact integer accounting.');
@@ -213,8 +247,8 @@ export function extractCheckout(
     if (stated !== ours) {
       return fail(
         'statedTotal',
-        'Refused: this checkout\'s own total does not equal its line items plus tax, fees and '
-        + 'delivery. One of the two readings is wrong and I cannot tell which, so nothing is bought.',
+        'Refused: this checkout\'s own total does not equal its line items less discounts, plus tax, '
+        + 'fees and delivery. One of the two readings is wrong and I cannot tell which, so nothing is bought.',
       );
     }
   }
@@ -228,6 +262,8 @@ export function extractCheckout(
       taxMinorUnits,
       feesMinorUnits,
       feeLabels,
+      discounts,
+      discountMinorUnits,
       shippingOptions,
       subtotalMinorUnits,
       // Kept raw: `detectRecurringCharge` has Jev read it, and none of it is

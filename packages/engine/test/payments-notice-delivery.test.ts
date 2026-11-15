@@ -264,10 +264,21 @@ describe('reading a reply as an answer', () => {
     expect(readings.requests[0]?.state).toEqual({ proposal: NOTICE, reply: 'go ahead' });
   });
 
-  test('an unclear reading is NO answer, so the window\'s own silence rule decides', async () => {
+  test('unaddressed chat that reads as neither is NO answer, so the window\'s own silence rule decides', async () => {
     // Not guessed into an approval. On the veto path a guess buys something.
     expect(await readPaymentReply('what is this', 'veto', NOTICE)).toBe(null);
     expect(await readPaymentReply('hmm, maybe later?', 'approval', NOTICE)).toBe(null);
+  });
+
+  test('a veto reply addressed to the notice, or leaning to stop, that is not a confident go-ahead is never silence', async () => {
+    expect(await readPaymentReply('what is this', 'veto', NOTICE, undefined, undefined, { addressed: true })).toBe('not-understood');
+    const leaning = fakePort((_name, question) => choiceAnswer(question, 'object', 0.5));
+    const previous = installJudgmentPort(leaning.port);
+    try {
+      expect(await readPaymentReply('hmm, maybe not', 'veto', NOTICE)).toBe('not-understood');
+    } finally {
+      installJudgmentPort(previous);
+    }
   });
 
   test('an empty reply is not read', async () => {

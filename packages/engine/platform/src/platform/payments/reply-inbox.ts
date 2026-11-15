@@ -20,7 +20,7 @@
  * Null means silence and nothing else (payment-ports.ts). A failed reading or
  * unconfirmed receive span fails the wait; neither is silence.
  */
-import type { PaymentReplySource, PaymentAnswer, PreparedPaymentReply } from './notice-delivery.js';
+import type { PaymentReplySource, PaymentAnswer, PaymentReplyReading, PreparedPaymentReply } from './notice-delivery.js';
 import { readPaymentReply } from './notice-delivery.js';
 import { parseCommandAuthorityChannel, type CommandAuthorityChannel, type PaymentAnswerChannel } from './types.js';
 import { JudgmentError } from '@goodvibes-jev/judgment';
@@ -59,7 +59,7 @@ interface Waiter {
   receiptSources: readonly { readonly window: PaymentReplyReceiveSpan; readonly source: PaymentReplySourceGuard }[];
   coverage?: Promise<() => void>;
   expire(): void;
-  settle(answer: { readonly answer: PaymentAnswer; readonly channel: PaymentAnswerChannel } | null): void;
+  settle(answer: { readonly answer: PaymentReplyReading; readonly channel: PaymentAnswerChannel } | null): void;
   cancel(error: Error): void;
 }
 const receiptKey = (receipt: ChannelDeliveryReceipt) => JSON.stringify([receipt.surfaceKind, receipt.accountId,
@@ -89,7 +89,7 @@ export class PaymentReplyInboxClosedError extends Error {
 
 export type PaymentReplyOffer =
   | { readonly consumed: false; readonly reason: 'no-window' | 'several-windows' | 'not-an-answer' | 'decision-model-required' | 'recorded' }
-  | { readonly consumed: true; readonly answer: PaymentAnswer };
+  | { readonly consumed: true; readonly answer: PaymentReplyReading };
 
 /** Host-read ingress facts. Account custody is checked by the original
  * transport owner before and after the semantic reading, never by JSON IDs. */
@@ -576,7 +576,9 @@ export class PaymentReplyInbox implements PaymentReplySource {
         else waiter.expire();
         return { consumed: false, reason: recorded ? 'recorded' : 'no-window' };
       }
-      const answer = await readPaymentReply(text, waiter.kind, waiter.notice, waiter.abort.signal, context?.assertCurrent?.bind(context));
+      // Addressed: the reply names this window's notice (its provider receipt matched).
+      const addressed = context !== undefined && receipt !== undefined && matchesReceipt(receipt, context);
+      const answer = await readPaymentReply(text, waiter.kind, waiter.notice, waiter.abort.signal, context?.assertCurrent?.bind(context), { addressed });
       context?.assertCurrent?.();
       // A late result cannot revive this window, nor a later wait reusing its ID.
       if (!this.current(waiter)) return { consumed: false, reason: recorded ? 'recorded' : 'no-window' };

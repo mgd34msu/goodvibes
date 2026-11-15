@@ -205,4 +205,12 @@ export type ExecutionRefusalCode =
   /** Another purchase in flight holds the budget this one needs. */
   | 'budget-held'
   /** The click was made and no answer was seen: the order may or may not have been placed. */
-  | 'submit-outcome-unknown';
+  | 'submit-outcome-unknown'
+  /** The reading could not settle whether a cart line is the item the owner asked for. */
+  | 'cart-unconfirmed'
+  /** The reading could not confirm the checkout is a single payment; nothing indicated it repeats. */
+  | 'recurring-unconfirmed'
+  /** The owner answered a veto notice with something that was not a go-ahead, and the follow-up ask got no yes. */
+  | 'held-reply-not-understood'
+  /** Under `payments.cvvHandling: 'prompt'`, the security code was not typed before the deadline. */
+  | 'security-code-not-given';

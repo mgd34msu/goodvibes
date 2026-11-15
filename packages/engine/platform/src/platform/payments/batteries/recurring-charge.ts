@@ -16,7 +16,8 @@
  *
  * Band: high stakes. A wrong no enrols the owner in a charge nothing here
  * watches; a wrong yes costs one manual purchase. Code refuses on anything
- * but a confident no (cart.ts).
+ * but a confident no (cart.ts) and records which it was: a confident yes is a
+ * recurring charge, anything else a charge it could not confirm as one-off.
  */
 import { defineBattery, JudgmentError, STAKES_BANDS, yesNo } from '@goodvibes-jev/judgment';
 import { assertJudgmentInput } from '../../gate/judgment-input.js';

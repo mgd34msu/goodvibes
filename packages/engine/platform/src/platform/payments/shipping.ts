@@ -44,7 +44,7 @@ import { captureJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { mapLimit } from '@goodvibes-jev/judgment';
 import { captureCheckoutOwnership, type CheckoutOperationOwnership } from './checkout-ownership.js';
 import type { JsonValue, Selection, Selector } from '@goodvibes-jev/judgment';
-import { fastContext, shippingCandidates, shippingFast, shippingFastest, shippingOptionId, shippingStandard } from './batteries/shipping-tier.js';
+import { CHECKOUT_CONTEXT, fastContext, shippingCandidates, shippingFast, shippingFastest, shippingOptionId, shippingStandard } from './batteries/shipping-tier.js';
 import type { MinorUnits, ShippingOption, ShippingStepDown, ShippingTier } from './types.js';
 import { SHIPPING_TIERS } from './types.js';
 
@@ -65,7 +65,6 @@ function actedPick(selection: Selection, offered: readonly { readonly id: string
   return index === -1 ? 'unread' : index;
 }
 
-const CHECKOUT_CONTEXT = { checkout: 'The delivery options an online checkout offers for one order.' };
 
 async function pick(
   selector: Selector,

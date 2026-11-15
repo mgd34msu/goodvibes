@@ -136,6 +136,22 @@ export function readCheckoutReadingInput(params: Record<string, unknown>): Readi
     fees.push({ label, amount });
   }
 
+  const rawDiscounts = params['discounts'] ?? [];
+  if (!Array.isArray(rawDiscounts)) return reject('discounts', 'discounts must be an array.');
+  if (rawDiscounts.length > MAX_FEES) {
+    return reject('discounts', `Refused: this checkout reports more than ${String(MAX_FEES)} discount lines.`);
+  }
+  const discounts: { label: string; amount: string }[] = [];
+  for (const [index, entry] of rawDiscounts.entries()) {
+    const record = readRecord(entry);
+    if (record === null) return reject(`discounts[${String(index)}]`, 'Each discount must be an object.');
+    const label = readString(record['label']);
+    const amount = readString(record['amount']);
+    if (label === null) return reject(`discounts[${String(index)}].label`, 'Each discount needs a label string.');
+    if (amount === null) return reject(`discounts[${String(index)}].amount`, 'Each discount needs an amount string.');
+    discounts.push({ label, amount });
+  }
+
   const rawShipping = params['shippingOptions'];
   if (!Array.isArray(rawShipping)) {
     return reject('shippingOptions', 'shippingOptions must be an array of the delivery choices offered.');
@@ -189,6 +205,6 @@ export function readCheckoutReadingInput(params: Record<string, unknown>): Readi
 
   return {
     ok: true,
-    reading: { lines, tax, fees, shippingOptions, statedTotal, currency, orderSummaryText },
+    reading: { lines, tax, fees, ...(discounts.length > 0 ? { discounts } : {}), shippingOptions, statedTotal, currency, orderSummaryText },
   };
 }

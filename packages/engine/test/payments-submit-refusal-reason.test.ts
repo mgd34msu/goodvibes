@@ -26,8 +26,8 @@ test('a submit refused by its own final verification keeps that reason, not an a
     async observeCheckoutTerms(_target, owner) {
       owner.assertCurrent();
       return { state: observation, assertCurrent: async () => {
-        // After verification: passes just before the click, then the page cannot be read at dispatch.
-        if (armed && ++checks > 1) throw new Error('page unreadable');
+        // After verification the page is re-read once, immediately before dispatch, and cannot be read.
+        if (armed && ++checks > 0) throw new Error('page unreadable');
       } };
     },
   };

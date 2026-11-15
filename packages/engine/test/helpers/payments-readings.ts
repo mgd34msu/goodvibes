@@ -154,8 +154,13 @@ export function paymentsPort(overrides: PaymentsAnswers = {}): { port: JudgmentP
       case 'engine.payments.veto-reply':
         return choiceAnswer(question, answers.vetoReply(String(s['reply']), String(s['proposal'])), 0.95);
       case 'engine.payments.order-mail': {
-        const view = state as unknown as { mail: { subject: string; body: string }; purchase: { item: string; placed_at: string } };
-        return noulAnswer(probability(answers.orderMail(view.mail, view.purchase)));
+        const mail = context['mail'] as { subject: string; body: string };
+        const about = candidates.map((candidate) => answers.orderMail(mail, candidate.content as { item: string; placed_at: string }));
+        if (name === 'pick') {
+          const first = about.findIndex((verdict) => verdict === true);
+          return choiceAnswer(question, first === -1 ? 'none' : candidates[first]!.id, about.some((verdict) => verdict === 'unsure') ? 0.4 : 0.95);
+        }
+        return noulAnswer(probability(about[Number(name.slice('fits_'.length))] ?? false));
       }
       case 'engine.payments.order-number':
       case 'engine.payments.tracking-reference': {

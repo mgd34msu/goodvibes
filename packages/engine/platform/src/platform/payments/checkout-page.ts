@@ -37,6 +37,8 @@ export interface CheckoutTerms {
   readonly taxMinorUnits: MinorUnits;
   readonly feesMinorUnits: MinorUnits;
   readonly feeLabels: readonly string[];
+  /** Each reduction line and the amount it takes off; absent when the checkout shows none. */
+  readonly discounts?: readonly { readonly label: string; readonly amountMinorUnits: MinorUnits }[] | undefined;
   readonly shippingLabel: string;
   readonly shippingMinorUnits: MinorUnits;
   readonly totalMinorUnits: MinorUnits;
@@ -51,7 +53,14 @@ export interface PageIdentity {
 export interface CheckoutPageDriver {
   identity(): PageIdentity;
 
-  /** Automated checkout requires a fresh full-page quote check. Fill-only ports may omit it. */
+  /**
+   * Code-only check that the page is still the merchant's checkout with the
+   * quote's submit control: no model reading. Run before the card is typed;
+   * a port without it relies on `verifyTerms` after the card alone.
+   */
+  checkPage?(expected: CheckoutTerms, ownership: { readonly assertCurrent: () => void; readonly signal?: AbortSignal | undefined }): Promise<boolean>;
+
+  /** Automated checkout requires one fresh full-page quote reading after the card is typed; it binds the click. Fill-only ports may omit it. */
   verifyTerms?(expected: CheckoutTerms, ownership: { readonly assertCurrent: () => void; readonly signal?: AbortSignal | undefined }): Promise<boolean>;
 
   /** Read a verified replacement price for the same purchase and controls.

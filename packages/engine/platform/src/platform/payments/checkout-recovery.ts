@@ -54,10 +54,11 @@ export interface InterruptedCheckoutRecovery {
   readonly merchantDomain: string;
   readonly verdict: InterruptedVerdict;
   /**
-   * `released`: nothing was submitted, the budget hold is released and the
-   * record closed. `held`: the record is kept, either because the submit
-   * outcome is unknowable or because a `submitted` entry's purchase record
-   * could not be verified on the ledger. `closed`: the order was submitted,
+   * `released`: nothing was submitted, the owner was told, the budget hold is
+   * released and the record closed. `held`: the record is kept, because the
+   * submit outcome is unknowable, because a `submitted` entry's purchase record
+   * could not be verified on the ledger, or because the owner's notice did not
+   * land yet (`notice: 'failed'`), so a later sweep settles and tells it. `closed`: the order was submitted,
    * its purchase record was verified, and only the journal entry needed
    * closing. `failed`: settling this one record threw; the message carries
    * a fixed failure description and the rest of the sweep continued.
@@ -85,9 +86,20 @@ export interface InterruptedCheckoutRecovery {
   readonly armingPageCleanup?: 'done' | 'failed' | 'unavailable' | undefined;
 }
 
+/**
+ * When a sweep could not tell the owner about a record, the record is kept and
+ * the sweep runs again after each of these waits (then at the next start).
+ * Each later sweep reads the journal once and sends only the notices still owed.
+ */
+const NOTICE_RETRY_DELAYS_MS: readonly number[] = [60_000, 5 * 60_000, 15 * 60_000, 30 * 60_000, 60 * 60_000];
+
 export class CheckoutRecovery {
   private readonly work = new OwnedWork();
   private readonly abort = new AbortController();
+  private retryTimer: ReturnType<typeof setTimeout> | undefined;
+  /** Settlement failures whose record's notice already landed this sweep; the owner is not told twice. */
+  private readonly announced = new WeakSet<object>();
+  private retryAttempt = 0;
   private closed = false;
   private closing: Promise<void> | undefined;
   private sweep: Promise<CheckoutRecoverySweep> | undefined;
@@ -100,6 +112,7 @@ export class CheckoutRecovery {
     let resolve!: () => void, reject!: (error: unknown) => void;
     this.closing = new Promise<void>((done, failed) => { resolve = done; reject = failed; });
     this.closed = true;
+    if (this.retryTimer !== undefined) { clearTimeout(this.retryTimer); this.retryTimer = undefined; }
     this.abort.abort(new CheckoutOwnershipError());
     void this.work.join().then(() => {
       if (this.retirementErrors.length) reject(new AggregateError(this.retirementErrors, 'Checkout recovery ownership did not retire cleanly'));
@@ -135,8 +148,41 @@ export class CheckoutRecovery {
     this.sweep = pending;
     void this.work.run(() => this.recover()).then(resolve, reject);
     const settled = () => { if (this.sweep === pending) this.sweep = undefined; };
-    void pending.then(settled, settled);
+    void pending.then((sweep) => { settled(); this.scheduleNoticeRetry(sweep); }, settled);
     return pending;
+  }
+
+  /**
+   * A record whose notice did not land was kept, so the owner can still be
+   * told before it closes. Sweep again later, a bounded number of times; the
+   * next start sweeps too.
+   */
+  private scheduleNoticeRetry(sweep: CheckoutRecoverySweep): void {
+    if (this.closed || this.retryTimer !== undefined) return;
+    // Only records kept for their notice are worth another sweep soon.
+    if (!sweep.settlements.some((settlement) => settlement.notice === 'failed' && settlement.action === 'held')) { this.retryAttempt = 0; return; }
+    const delay = NOTICE_RETRY_DELAYS_MS[this.retryAttempt];
+    if (delay === undefined) {
+      logger.warn('Interrupted purchases still owe the owner a notice; the next daemon start will try again', {
+        owed: sweep.settlements.filter((settlement) => settlement.notice === 'failed').length,
+      });
+      return;
+    }
+    this.retryAttempt += 1;
+    this.retryTimer = setTimeout(() => {
+      this.retryTimer = undefined;
+      if (this.closed) return;
+      if (!this.work.idle) { this.retryAttempt -= 1; this.scheduleNoticeRetry(sweep); return; }
+      this.recoverInterruptedCheckouts().then((next) => {
+        logger.info('Interrupted purchase notices retried', {
+          delivered: next.settlements.filter((settlement) => settlement.notice === 'delivered').length,
+          owed: next.settlements.filter((settlement) => settlement.notice === 'failed').length,
+        });
+      }, (error: unknown) => {
+        logger.warn('Interrupted purchase notices could not be retried', { error: error instanceof Error ? error.name : 'unknown' });
+      });
+    }, delay);
+    (this.retryTimer as { unref?: () => void }).unref?.();
   }
 
   /**
@@ -155,8 +201,11 @@ export class CheckoutRecovery {
    * restart; the delivery-keyed rules in `recoverInterruptedWindow` apply
    * once deliveries are persisted.
    *
-   * A kept record notifies the owner at most once, ever: the first delivered
-   * notice stamps `recoveryNotifiedAtMs` back through the journal. One
+   * A record is closed only after the owner was told: when the notice does not
+   * land, the record and its hold stay for the next sweep, which runs again a
+   * few times on a backoff and at the next start. A kept record notifies the
+   * owner at most once: the first delivered notice stamps
+   * `recoveryNotifiedAtMs` back through the journal. One
    * record's failure never abandons the rest; it is reported in the results
    * as `action: 'failed'`. Recovery also cannot clear card material from a
    * browser page that outlived the process (attach-based compositions): the
@@ -232,13 +281,16 @@ export class CheckoutRecovery {
     const message = `Recovery failed for this purchase (${reason}). Its remaining payment evidence requires inspection.`;
     let notified = false;
     let notice: InterruptedCheckoutRecovery['notice'] = 'failed';
+    const announced = typeof error === 'object' && error !== null && this.announced.has(error);
     if (record.recoveryNotifiedAtMs !== undefined) {
       notice = 'already-notified';
-    } else if (!(error instanceof CheckoutOwnershipError) && !this.closed && this.deps.isPaymentsLeader() && !this.abort.signal.aborted) {
+    } else if (announced || (!(error instanceof CheckoutOwnershipError) && !this.closed && this.deps.isPaymentsLeader() && !this.abort.signal.aborted)) {
       // An ownership error means the record changed hands or was rewritten since this sweep read it;
-      // telling the owner about a snapshot that is no longer the record would be wrong.
+      // telling the owner about a snapshot that is no longer the record would be wrong. A record
+      // whose notice already landed this sweep is not announced again, only stamped.
       const stillOurs = () => this.current();
-      try {
+      if (announced) notified = true;
+      else try {
         const deliveries = await this.io(
           () => this.deps.notifier.deliver({ kind: 'notice', message, signal: this.abort.signal, assertCurrent: stillOurs }),
           'The recovery failure notice delivery', stillOurs, io,
@@ -271,6 +323,14 @@ export class CheckoutRecovery {
     };
   }
 
+  /**
+   * Tell first, settle second. A record this sweep would close (nothing was
+   * submitted, or the submitted purchase is verified on the ledger) is closed
+   * only after the owner's notice landed or an earlier boot already delivered
+   * it; when the send fails the record and its hold stay exactly as they were,
+   * so the next sweep settles it and tells the owner then. A record that is
+   * kept anyway is stamped once its notice lands, so it is told about once.
+   */
   private async settleInterrupted(
     record: InFlightCheckout,
     verdict: InterruptedVerdict,
@@ -283,15 +343,15 @@ export class CheckoutRecovery {
     let message: string;
     let windowRecovery: WindowRecovery | undefined;
     let armingPageCleanup: InterruptedCheckoutRecovery['armingPageCleanup'];
+    let settle: (() => Promise<void>) | undefined;
 
     if (verdict === 'not-submitted') {
       current();
-      if (record.reservationId !== null) {
-        // In-memory reservations do not survive the restart; releasing is the
-        // honest no-op then, and the real release when recovery runs in-process.
-        reservationReleased = this.deps.ledger.release(record.reservationId);
-      }
-      message = describeInterruption(record, verdict, { reservationReleased });
+      // The release follows the notice; the sentence names the hold as it
+      // stands, which is what the release will give back.
+      const holdId = record.reservationId;
+      const holdPresent = holdId !== null && this.deps.ledger.state().reservations.some((entry) => entry.id === holdId);
+      message = describeInterruption(record, verdict, { reservationReleased: holdPresent });
       if (record.phase === 'awaiting-window') {
         message += ` ${this.settleWindowSentence(record, now, (recovery) => { windowRecovery = recovery; })}`;
       }
@@ -303,46 +363,45 @@ export class CheckoutRecovery {
           : ' This checkout was typing card details when it stopped; I cannot reach that page from'
             + ' here, so if the browser window is still open, close it or clear the form yourself.';
       }
-      current();
-      await this.deps.registry.close(record.purchaseId);
-      current();
       action = 'released';
-    } else if (verdict === 'possibly-submitted') {
-      // The crash-between-record-and-flush case: the purchase record may
-      // already be on the ledger even though the journal never saw the
-      // submitted flush. When the lookup proves it, the order completed;
-      // close honestly instead of holding forever. Anything less certain
-      // stays deliberately untouched, because releasing the hold or the
-      // record is what makes a restart buy the thing twice.
-      const verified = await this.verifyPurchaseRecord(record.purchaseId, current, io);
-      current();
-      message = describeInterruption(record, verdict, { recordVerified: verified });
-      if (verified === true) {
-        this.settleRecordedBudget(record, current);
+      settle = async () => {
+        current();
+        // In-memory reservations do not survive the restart; releasing is the
+        // honest no-op then, and the real release when recovery runs in-process.
+        if (holdId !== null) reservationReleased = this.deps.ledger.release(holdId);
+        current();
         await this.deps.registry.close(record.purchaseId);
         current();
-        action = 'closed';
-      } else {
-        action = 'held';
-      }
+      };
     } else {
-      // `submitted` is only closed once the purchase record is verified on
-      // the ledger. Journals written under the old flush ordering can carry
-      // `submitted` entries whose crash landed before the record was written.
+      // `possibly-submitted` is the crash-between-record-and-flush case: the
+      // purchase record may already be on the ledger even though the journal
+      // never saw the submitted flush. `submitted` is only closed once the
+      // purchase record is verified on the ledger too: journals written under
+      // the old flush ordering can carry `submitted` entries whose crash landed
+      // before the record was written. When the lookup proves it, the order
+      // completed and the record closes honestly instead of holding forever.
+      // Anything less certain stays deliberately untouched, because releasing
+      // the hold or the record is what makes a restart buy the thing twice.
       const verified = await this.verifyPurchaseRecord(record.purchaseId, current, io);
       current();
       message = describeInterruption(record, verdict, { recordVerified: verified });
       if (verified === true) {
-        this.settleRecordedBudget(record, current);
-        await this.deps.registry.close(record.purchaseId);
-        current();
         action = 'closed';
+        settle = async () => {
+          this.settleRecordedBudget(record, current);
+          await this.deps.registry.close(record.purchaseId);
+          current();
+        };
       } else {
         action = 'held';
       }
     }
 
     let notified = false;
+    // True when no notice channel is configured at all: there is nothing a
+    // later sweep could deliver on, and the operation status is the record.
+    let noChannels = false;
     let notice: InterruptedCheckoutRecovery['notice'];
     if (record.recoveryNotifiedAtMs !== undefined) {
       notice = 'already-notified';
@@ -354,16 +413,26 @@ export class CheckoutRecovery {
         );
         current();
         notified = deliveries.some((delivery) => delivery.delivered);
+        noChannels = deliveries.length === 0;
       } catch {
         notified = false;
       }
       notice = notified ? 'delivered' : 'failed';
-      if (notified && action === 'held') {
-        current();
-        // Stamp kept records so the next boot does not repeat the notice.
-        await this.deps.journal.put({ ...record, recoveryNotifiedAtMs: now() });
-        current();
+    }
+    if (settle !== undefined && (notice !== 'failed' || noChannels)) {
+      try { await settle(); }
+      catch (error) {
+        if (notified && typeof error === 'object' && error !== null) this.announced.add(error);
+        throw error;
       }
+    } else if (settle !== undefined) {
+      // Not settled: the owner has not been told. The record stays for the next sweep.
+      action = 'held';
+    } else if (notified) {
+      current();
+      // Stamp kept records so the next boot does not repeat the notice.
+      await this.deps.journal.put({ ...record, recoveryNotifiedAtMs: now() });
+      current();
     }
     current();
     return {

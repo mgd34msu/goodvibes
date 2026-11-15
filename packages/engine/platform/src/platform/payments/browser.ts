@@ -10,8 +10,8 @@ export {
 } from './entry-policy.js';
 export { PAYMENTS_SYNTHETIC_CONFIG_KEYS } from '../config/payment-config-keys.js';
 export { minorUnitExponent } from './money-parsing.js';
-export { readPaymentWindowStatus, readPaymentWindowAnswer } from './window-view.js';
-export type { PaymentWindowView, PaymentWindowAnswer, PaymentPurchaseStatus, PaymentUnreadableOperation } from './window-view.js';
+export { readPaymentWindowStatus, readPaymentWindowAnswer, readPaymentSecurityCodeAcceptance } from './window-view.js';
+export type { PaymentWindowView, PaymentWindowAnswer, PaymentPurchaseStatus, PaymentUnreadableOperation, PaymentSecurityCodeRequestView, PaymentSecurityCodeAcceptance } from './window-view.js';
 
 /**
  * What every surface must show at the moment someone selects
@@ -26,10 +26,11 @@ export type { PaymentWindowView, PaymentWindowAnswer, PaymentPurchaseStatus, Pay
  * of choosing the other value.
  */
 export const CVV_PROMPT_TRADEOFF_WARNING =
-  'Choosing "prompt" disables unattended purchasing. The card verification value will not be '
-  + 'stored, and there is not yet a place to type it at purchase time, so every purchase is '
-  + 'refused as having no usable card, including purchases that are within budget and would '
-  + 'otherwise have gone ahead on their own. Choose it only to keep purchasing off for the card.';
+  'Choosing "prompt" stops unattended purchasing. The card verification value will not be '
+  + 'stored: when a purchase is approved and reaches payment, you are asked to type the code in '
+  + 'the terminal app (/payments pending) or the local web UI, and the purchase waits for it as long '
+  + 'as an approval window. If it is not typed in time, nothing is bought, including purchases that '
+  + 'are within budget and would otherwise have gone ahead on their own. Never send the code in a chat.';
 
 
 export { readPaymentOperation, readPaymentOperationCancellation, paymentOperationDescription, isLivePaymentOperation, canReconcilePaymentOperation, PAYMENT_PURCHASE_RECONCILE_HTTP } from './operation-view.js';

@@ -141,11 +141,24 @@ const PAYMENT_OPERATION_SCHEMA = objectSchema({
 }, ['purchaseId', 'operationId', 'state', 'phase', 'createdAtMs', 'updatedAtMs', 'outcome', 'totalMinorUnits', 'currency']);
 /** A purchase whose status record could not be read. Present only when one exists. */
 const PAYMENT_UNREADABLE_OPERATION_SCHEMA = objectSchema({ purchaseId: STRING_SCHEMA, reason: STRING_SCHEMA }, ['purchaseId', 'reason']);
+/** A purchase waiting for the owner to type its card security code. Never carries a code. */
+const PAYMENT_SECURITY_CODE_REQUEST_SCHEMA = objectSchema({
+  purchaseId: STRING_SCHEMA, windowId: STRING_SCHEMA, merchantDomain: STRING_SCHEMA, cardLast4: STRING_SCHEMA, deadlineMs: NUMBER_SCHEMA,
+}, ['purchaseId', 'windowId', 'merchantDomain', 'cardLast4', 'deadlineMs']);
 export const PAYMENTS_PURCHASE_STATUS_OUTPUT_SCHEMA = objectSchema({
   windows: { ...arraySchema(PAYMENT_WINDOW_SCHEMA), maxItems: 256 },
   operations: { ...arraySchema(PAYMENT_OPERATION_SCHEMA), maxItems: 356 },
   unreadable: { ...arraySchema(PAYMENT_UNREADABLE_OPERATION_SCHEMA), maxItems: 356 },
+  securityCodes: { ...arraySchema(PAYMENT_SECURITY_CODE_REQUEST_SCHEMA), maxItems: 256 },
 }, ['windows', 'operations']);
+export const PAYMENTS_PURCHASE_SECURITY_CODE_INPUT_SCHEMA = objectSchema({
+  purchaseId: STRING_SCHEMA, windowId: STRING_SCHEMA,
+  code: { ...STRING_SCHEMA, maxLength: 16, description: 'The three or four digits of the card security code, typed by the owner for this one purchase. Never stored.' },
+  confirm: BOOLEAN_SCHEMA,
+}, ['purchaseId', 'windowId', 'code', 'confirm']);
+export const PAYMENTS_PURCHASE_SECURITY_CODE_OUTPUT_SCHEMA = objectSchema({
+  purchaseId: STRING_SCHEMA, windowId: STRING_SCHEMA, accepted: { const: true, type: 'boolean' },
+}, ['purchaseId', 'windowId', 'accepted']);
 export const PAYMENTS_PURCHASE_ANSWER_INPUT_SCHEMA = objectSchema({
   purchaseId: STRING_SCHEMA, windowId: STRING_SCHEMA, confirm: BOOLEAN_SCHEMA,
 }, ['purchaseId', 'windowId', 'confirm']);
@@ -316,6 +329,12 @@ const CHECKOUT_FEE_SCHEMA = objectSchema(
   ['label', 'amount'],
 );
 
+/** A promotion, credit or gift-card line; `amount` is what it takes off, as the page shows it. */
+const CHECKOUT_DISCOUNT_SCHEMA = objectSchema(
+  { label: STRING_SCHEMA, amount: STRING_SCHEMA },
+  ['label', 'amount'],
+);
+
 const CHECKOUT_SHIPPING_OPTION_SCHEMA = objectSchema(
   { label: STRING_SCHEMA, cost: STRING_SCHEMA },
   ['label', 'cost'],
@@ -368,6 +387,7 @@ export const PAYMENTS_CHECKOUT_BEGIN_INPUT_SCHEMA = objectSchema(
     lines: { ...arraySchema(CHECKOUT_LINE_SCHEMA), minItems: 1 },
     tax: STRING_SCHEMA,
     fees: arraySchema(CHECKOUT_FEE_SCHEMA),
+    discounts: arraySchema(CHECKOUT_DISCOUNT_SCHEMA),
     shippingOptions: { ...arraySchema(CHECKOUT_SHIPPING_OPTION_SCHEMA), minItems: 1 },
     statedTotal: STRING_SCHEMA,
     currency: STRING_SCHEMA,

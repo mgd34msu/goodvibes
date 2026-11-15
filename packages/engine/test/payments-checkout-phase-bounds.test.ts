@@ -23,7 +23,8 @@ test('a page whose price keeps changing stops after a bounded number of new noti
     purchases: { async record() { effects.push('purchase-record'); } },
     driver: {
       identity: () => ({ sessionId: 'session', pageId: 'page' }),
-      // Every verification finds the quote changed, and every re-read flips the price.
+      // Every page check finds the checkout changed, and every re-read flips the price.
+      async checkPage() { return false; },
       async verifyTerms() { return false; },
       async readCurrentQuote() { return reading(++quotes % 2 ? '$11.00' : '$10.00'); },
       async url() { return 'https://www.bestbuy.com/checkout'; },

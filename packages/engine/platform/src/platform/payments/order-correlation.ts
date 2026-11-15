@@ -1,5 +1,4 @@
 import { requireDecisionFeature } from '../runtime/decision-policy.js';
-import { requireActingReading } from '../types/judgment-held.js';
 /**
  * order-correlation.ts, recognising the store's confirmation when it arrives.
  *
@@ -44,11 +43,14 @@ import { requireActingReading } from '../types/judgment-held.js';
  * domain does not, however similar it looks. Mail that arrived before the
  * purchase cannot be its confirmation, whatever it says.
  *
- * Whether a same-domain mail is ABOUT a given purchase (its confirmation,
- * receipt, shipping or delivery update) is read by Jev per candidate
- * (`engine.payments.order-mail`), from the mail and our record of the
- * purchase. It replaces a six-hour window, which matched a promotion from the
- * same shop minutes later and missed a shipping notice the next day.
+ * Whether a same-domain mail is ABOUT one of the purchases there (its
+ * confirmation, receipt, shipping or delivery update) is read by Jev once per
+ * mail (`engine.payments.order-mail`), as one selection over the recent
+ * purchases at that shop. It replaces a six-hour window, which matched a
+ * promotion from the same shop minutes later and missed a shipping notice the
+ * next day, and a reading per past purchase, whose cost grew with every order
+ * ever placed at the shop. Only purchases from the last RECENT_PURCHASE_DAYS
+ * days are candidates, newest first, at most MAX_PURCHASE_CANDIDATES of them.
  *
  * ══ Which OUTCOMES are eligible, and why a match never rewrites one ═══════
  *
@@ -81,19 +83,22 @@ import { requireActingReading } from '../types/judgment-held.js';
  * reading here sees them.
  */
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
-import { mapLimit, type Selector } from '@goodvibes-jev/judgment';
+import type { Selector } from '@goodvibes-jev/judgment';
 import { redactCardShapes } from '../security/card-shapes.js';
 import { registrableDomain } from '../security/public-suffix.js';
 import { sanitizeNoticeField } from '../security/notice-text.js';
 import {
   clipMail,
   identifierCandidates,
+  identifierContext,
   orderMail,
   orderNumber,
+  refundMail,
   SHIP_DATE_ROLE,
   shipDate,
   trackingReference,
-  type OrderMailView,
+  type OrderMailCandidate,
+  type OrderMailContext,
 } from './batteries/confirmation.js';
 import type { PurchaseRecord } from './checkout-flow.js';
 
@@ -101,10 +106,11 @@ import type { PurchaseRecord } from './checkout-flow.js';
 export const ORDER_MAIL_SITE = 'payments.order-mail';
 export const CONFIRMATION_FACTS_SITE = 'payments.confirmation-facts';
 
-/** How many candidate purchases are read at once. */
-const ORDER_MAIL_CONCURRENCY = 4;
-/** Most identifier candidates one selection offers (the choice limit, less the none option). */
-const MAX_CANDIDATES_PER_PICK = 254;
+/** How far back a purchase can still be the subject of a shop's mail: past any delivery horizon. */
+export const RECENT_PURCHASE_DAYS = 60;
+const RECENT_PURCHASE_MS = RECENT_PURCHASE_DAYS * 24 * 60 * 60 * 1000;
+/** Most purchases one order-mail selection offers, newest first. */
+const MAX_PURCHASE_CANDIDATES = 20;
 
 const CORRELATABLE_OUTCOMES: ReadonlySet<string> = new Set(['purchased', 'submitted-unverified']);
 
@@ -129,32 +135,23 @@ export function senderRegistrableDomain(address: string): string | null {
   return registrableDomain(address.slice(at + 1).trim().toLowerCase());
 }
 
-/** The mail with card-shaped spans redacted, clipped for a reading. */
-async function redactedMail(mail: InboundMailFacts): Promise<{ subject: string; body: string }> {
+/** The mail with card-shaped spans redacted, and its body cut to what one reading takes. */
+async function redactedMail(mail: Pick<InboundMailFacts, 'subject' | 'body'>): Promise<{ subject: string; body: string; clipped: boolean }> {
   const [subject, body] = await Promise.all([redactCardShapes(mail.subject), redactCardShapes(mail.body)]);
-  return { subject, body: clipMail(body) };
+  const clipped = clipMail(body);
+  return { subject, body: clipped.text, clipped: clipped.clipped };
 }
 
-function orderMailView(mail: { subject: string; body: string }, receivedAtMs: number, record: PurchaseRecord): OrderMailView {
+function purchaseCandidate(record: PurchaseRecord, index: number): OrderMailCandidate {
   return {
-    mail: { subject: mail.subject, body: mail.body, received_at: new Date(receivedAtMs).toISOString() },
-    purchase: {
-      merchant: record.merchantDomain,
+    id: `p${index}`,
+    content: {
       item: record.item,
       total: `${record.totalMinorUnits} minor units of ${record.currency}`,
       placed_at: record.atUtc,
       outcome: record.outcome,
     },
   };
-}
-
-/** Whether the mail reads as about this purchase; only a reading that acts counts. */
-async function isAboutPurchase(mail: { subject: string; body: string }, receivedAtMs: number, record: PurchaseRecord): Promise<boolean> {
-  const run = await orderMail.run(judgmentPort(ORDER_MAIL_SITE), orderMailView(mail, receivedAtMs, record), { site: ORDER_MAIL_SITE });
-  const reading = run.readings.about_order;
-  const about = reading.verdict === 'yes' && reading.outcome === 'act';
-  run.recordAction(about ? `about purchase ${record.purchaseId}` : `not about purchase ${record.purchaseId}`);
-  return about;
 }
 
 /**
@@ -181,34 +178,46 @@ export async function correlatePurchaseMail(
     const purchasedAtMs = Date.parse(record.atUtc);
     if (Number.isNaN(purchasedAtMs)) return false;
     // Strictly after the purchase: mail that predates the charge cannot be its
-    // confirmation, however close it lands.
-    return mail.receivedAtMs >= purchasedAtMs;
-  });
+    // confirmation, however close it lands. A purchase older than any delivery
+    // horizon is not what a shop's mail today is about.
+    return mail.receivedAtMs >= purchasedAtMs && mail.receivedAtMs - purchasedAtMs <= RECENT_PURCHASE_MS;
+  }).sort((a, b) => Date.parse(b.atUtc) - Date.parse(a.atUtc)).slice(0, MAX_PURCHASE_CANDIDATES);
   if (eligible.length === 0) {
     return {
       kind: 'unrelated',
-      reason: `Nothing was bought at ${senderDomain} before this mail arrived.`,
+      reason: `Nothing was bought at ${senderDomain} in the ${RECENT_PURCHASE_DAYS} days before this mail arrived.`,
     };
   }
 
   const redacted = await redactedMail(mail);
-  const about = await mapLimit(eligible, ORDER_MAIL_CONCURRENCY, (record) => isAboutPurchase(redacted, mail.receivedAtMs, record));
-  const candidates = eligible.filter((_, index) => about[index] === true);
-
-  if (candidates.length === 0) {
+  const context: OrderMailContext = {
+    merchant: senderDomain,
+    mail: { subject: redacted.subject, body: redacted.body, received_at: new Date(mail.receivedAtMs).toISOString() },
+  };
+  const candidates = eligible.map(purchaseCandidate);
+  const selection = await orderMail.select(judgmentPort(ORDER_MAIL_SITE), context, candidates, { site: ORDER_MAIL_SITE });
+  // The mail fits two purchases when two fit readings act on yes; naming one
+  // of them in a message about money would be a guess.
+  const fitting = eligible.filter((_, index) => {
+    const fit = selection.fits[candidates[index]?.id ?? ''];
+    return fit?.verdict === 'yes' && fit.outcome === 'act';
+  });
+  if (fitting.length > 1) {
+    selection.recordAction('about more than one purchase');
+    return { kind: 'ambiguous', candidates: fitting, senderDomain };
+  }
+  const chosen = selection.outcome === 'act' && selection.chosen !== undefined
+    ? eligible[candidates.findIndex((candidate) => candidate.id === selection.chosen)]
+    : undefined;
+  if (chosen === undefined) {
+    selection.recordAction('not about a recorded purchase');
     return {
       kind: 'unrelated',
       reason: `This mail from ${senderDomain} is not about anything bought there.`,
     };
   }
-  if (candidates.length > 1) {
-    return { kind: 'ambiguous', candidates, senderDomain };
-  }
-  const [record] = candidates;
-  if (record === undefined) {
-    return { kind: 'unrelated', reason: 'The matching purchase disappeared mid-lookup.' };
-  }
-  return { kind: 'matched', record, senderDomain };
+  selection.recordAction(`about purchase ${chosen.purchaseId}`);
+  return { kind: 'matched', record: chosen, senderDomain };
 }
 
 /**
@@ -241,9 +250,9 @@ export interface ConfirmationFacts {
 }
 
 /**
- * The candidate `selector` picks, or null. Candidates beyond one choice's
- * limit are offered in groups, and the groups' picks offered again, so every
- * token is considered however long the mail is.
+ * The candidate `selector` picks, or null. A pick that does not act is no
+ * pick: the report goes out without that identifier rather than not at all.
+ * The selector itself offers a long candidate list in groups.
  */
 async function pickIdentifier(
   selector: Selector,
@@ -251,25 +260,12 @@ async function pickIdentifier(
   context: { readonly subject: string; readonly source: string },
 ): Promise<string | null> {
   if (candidates.length === 0) return null;
-  const port = judgmentPort(CONFIRMATION_FACTS_SITE);
-  let pool = [...candidates];
-  while (pool.length > 0) {
-    const groups: (typeof pool)[] = [];
-    for (let start = 0; start < pool.length; start += MAX_CANDIDATES_PER_PICK) groups.push(pool.slice(start, start + MAX_CANDIDATES_PER_PICK));
-    const picks = await Promise.all(groups.map(async (group) => {
-      const selection = await selector.select(port, context, group, { site: CONFIRMATION_FACTS_SITE });
-      requireActingReading(selection);
-      const chosen = selection.outcome === 'act' && selection.chosen !== undefined
-        ? group.find((candidate) => candidate.id === selection.chosen)
-        : undefined;
-      selection.recordAction(chosen === undefined ? 'none' : 'picked');
-      return chosen;
-    }));
-    const winners = picks.filter((pick): pick is (typeof pool)[number] => pick !== undefined);
-    if (groups.length === 1) return winners[0]?.content.token ?? null;
-    pool = winners;
-  }
-  return null;
+  const selection = await selector.select(judgmentPort(CONFIRMATION_FACTS_SITE), context, candidates, { site: CONFIRMATION_FACTS_SITE });
+  const chosen = selection.outcome === 'act' && selection.chosen !== undefined
+    ? candidates.find((candidate) => candidate.id === selection.chosen)
+    : undefined;
+  selection.recordAction(chosen === undefined ? 'none' : 'picked');
+  return chosen?.content.token ?? null;
 }
 
 /** YYYY-MM-DD of a millisecond time, in UTC. */
@@ -285,9 +281,13 @@ const utcDay = (ms: number): string => new Date(ms).toISOString().slice(0, 10);
  */
 export async function extractConfirmationFacts(mail: Pick<InboundMailFacts, 'subject' | 'body' | 'receivedAtMs'>): Promise<ConfirmationFacts> {
   requireDecisionFeature('semantic purchase confirmation extraction');
-  const { subject, body } = await redactedMail({ ...mail, senderAddress: '' });
+  const { subject, body, clipped } = await redactedMail(mail);
+  // A body longer than one reading takes may hold its references past the
+  // cut; the report goes out with our own record and no identifiers rather
+  // than with a reference read from part of the mail.
+  if (clipped) return { orderNumber: null, shipDate: null, trackingReference: null };
   const candidates = identifierCandidates(body);
-  const context = { subject, body, source: 'a shop\'s mail about an order' };
+  const context = identifierContext(subject);
   const [order, tracking, date] = await Promise.all([
     pickIdentifier(orderNumber, candidates, context),
     pickIdentifier(trackingReference, candidates, context),
@@ -295,7 +295,8 @@ export async function extractConfirmationFacts(mail: Pick<InboundMailFacts, 'sub
   ]);
   const clean = (value: string | null, max: number): string | null => {
     if (value === null) return null;
-    if (value.length > max) throw new Error('Confirmation identifier exceeds the supported length.');
+    // A token longer than any real reference is left out, not allowed to sink the report.
+    if (value.length > max) return null;
     const neutralised = sanitizeNoticeField(value, max);
     return neutralised.length === 0 ? null : neutralised;
   };
@@ -306,4 +307,24 @@ export async function extractConfirmationFacts(mail: Pick<InboundMailFacts, 'sub
     shipDate: clean(shipDateValue, 40),
     trackingReference: clean(tracking, 60),
   };
+}
+
+/** The decision site the refund reading is logged under. */
+export const REFUND_MAIL_SITE = 'payments.refund-mail';
+
+/**
+ * Whether a mail already matched to `record` says that purchase was refunded.
+ * Only a reading that acts on yes counts.
+ */
+export async function readRefundMail(mail: Pick<InboundMailFacts, 'subject' | 'body'>, record: PurchaseRecord): Promise<boolean> {
+  requireDecisionFeature('semantic purchase refund recognition');
+  const { subject, body } = await redactedMail(mail);
+  const run = await refundMail.run(judgmentPort(REFUND_MAIL_SITE), {
+    mail: { subject, body },
+    purchase: { item: record.item, total: `${record.totalMinorUnits} minor units of ${record.currency}` },
+  }, { site: REFUND_MAIL_SITE });
+  const reading = run.readings.refunded;
+  const refunded = reading.verdict === 'yes' && reading.outcome === 'act';
+  run.recordAction(refunded ? `refund of purchase ${record.purchaseId}` : 'not a refund');
+  return refunded;
 }

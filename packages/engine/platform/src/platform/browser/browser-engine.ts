@@ -16,7 +16,7 @@ import { BrowserControlSnapshotError } from './browser-control-snapshot-data.js'
 import { describeProvisionWork } from './browser-provisioning.js';
 import { captureCredentialPage, captureNativeSnapshotControls, restoreControlSnapshot, retainBrowserMethods, resolveRef, snapshotCredentialEvidence, snapshotHasPasswordInput, snapshotWithheldFrames, SnapshotStore, StaleElementError, takeSnapshot, type BrowserControlAdmission } from './browser-snapshot.js';
 import { containsIssuerCredential } from '../utils/redaction.js';
-import { assertCaptureAllowed, fillSecretsIntoPage, type SecretFillKind } from './browser-secret-fill.js';
+import { assertCaptureAllowed, assertPageTextAllowed, fillSecretsIntoPage, type SecretFillKind } from './browser-secret-fill.js';
 import type {
   BrowserProvisionReport,
   BrowserSnapshot,
@@ -1066,6 +1066,7 @@ export class BrowserEngine {
   async readText(target: BrowserTarget, args: { readonly maxChars?: number | undefined } = {}): Promise<Record<string, unknown>> {
     target = { ...target }; args = { ...args };
     return this.withTarget(target, async ({ sessionId, pageId, page, current, signal }) => {
+      assertPageTextAllowed(this.cardGuard, sessionId, pageId);
       const limit = Math.max(200, Math.min(200_000, args.maxChars ?? DEFAULT_TEXT_LIMIT));
       await this.requireReadableAddress(sessionId, pageId, page.url()); current();
       const read = <T>(run: () => Promise<T>) => boundedBrowserCall({
@@ -1317,6 +1318,7 @@ export class BrowserEngine {
     args = { ...args, ...(args.fields ? { fields: [...args.fields] } : {}) }; target = { ...target }; ownership = ownership && { ...ownership };
     const work = new BrowserControlIdentityWork(ownership);
     return this.withTarget(target, async ({ sessionId, pageId, page }) => {
+      assertPageTextAllowed(this.cardGuard, sessionId, pageId);
       await this.requireReadableAddress(sessionId, pageId, page.url());
       const scope = this.refScope(sessionId, pageId, page, work, ownership);
       const fields = args.fields && args.fields.length > 0 ? args.fields : (['text'] as const);

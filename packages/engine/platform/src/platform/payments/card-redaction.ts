@@ -27,11 +27,23 @@
  * Its gap: a hostile page can name its card input `q` and its search box
  * `cc-number`, and the classification is then worthless.
  *
- * **Value-based.** While material is live on a page, the exact strings that were
- * typed are known, and any page-derived text leaving the engine has them
- * removed, from a value, a name, an attribute, body text, an error message,
- * anywhere. This catches the page that echoes the number into a heading, copies
- * it into a data attribute, or renames its fields to defeat the classifier.
+ * **No free text while material is live.** This is the layer the fact rests
+ * on. While a page holds material this redactor armed, the engine returns none
+ * of its free text: `readText` and `extract` refuse with "this page holds
+ * payment material; finish or close the checkout first", the same rule
+ * screenshots follow (`assertPageTextAllowed` / `assertCaptureAllowed` in
+ * browser/browser-secret-fill.ts). The daemon's own checkout reading
+ * (`observeCheckoutTerms`) and form controls in a snapshot are what still
+ * cross out, and both pass through the two layers below.
+ *
+ * **Value-based, the second line.** While material is live on a page, the
+ * exact strings that were typed are known, and page-derived text leaving the
+ * engine has them removed, from a value, a name, an attribute, an error
+ * message. It catches an ordinary input mask (groups of four, spaces, dashes)
+ * and a page that echoes the number verbatim. It does not hold against a page
+ * that re-encodes what was typed (a code split by other characters, reversed,
+ * spread over two attributes), which is why free text is refused rather than
+ * scanned.
  *
  * Its gap: it only works when a redactor is installed. So the fill refuses to
  * run at all against a browser engine that has none, see

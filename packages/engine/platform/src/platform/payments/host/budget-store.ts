@@ -247,7 +247,12 @@ export class DurableBudgetLedger extends BudgetLedger {
 
   override state(): BudgetStateSnapshot { this.assertAvailable(); return super.state(); }
 
-  override flush(assertCurrent?: () => void): void { this.assertAvailable(); this.writeToDisk(assertCurrent); }
+  /** Every mutation writes as it happens or leaves its write owed, so durable means nothing is owed:
+   * one write only when an earlier one failed, none after a commit that already landed. */
+  override flush(assertCurrent?: () => void): void {
+    this.assertAvailable(); assertCurrent?.();
+    if (this.persistPending) this.writeToDisk(assertCurrent);
+  }
 
   override settleReconciliation(receipt: CheckoutBudgetSettlement, owner?: CheckoutBudgetSettlementOwner): void {
     this.assertAvailable();

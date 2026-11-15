@@ -92,7 +92,7 @@ export const paymentsConfigSettings: ConfigSetting[] = [
     default: 'stored',
     enumValues: ['stored', 'prompt'],
     description:
-      "How the card verification value is handled at checkout. 'stored' (DEFAULT) keeps it in the daemon secret store beside the card number, encrypted at rest, so a purchase within budget completes while you are away, which is what autonomous action requires. Choosing 'prompt' stores nothing, and there is not yet a place to type the code at purchase time, so while it is selected every purchase is refused as having no usable card; it is for owners who want purchasing off for the card, not a working stop-and-ask mode. Surfaces show CVV_PROMPT_TRADEOFF_WARNING at the moment you select it. Provisioning a virtual card with a hard issuer cap bounds what any leak of stored card material could cost; a real card number does not.",
+      "How the card verification value is handled at checkout. 'stored' (DEFAULT) keeps it in the daemon secret store beside the card number, encrypted at rest, so a purchase within budget completes while you are away, which is what autonomous action requires. Choosing 'prompt' stores nothing: when a purchase is approved and reaches payment, it stops and asks you to type the code in the terminal app (/payments pending) or the local web UI, waiting as long as an approval window, and nothing is bought if the code is not typed in time. So nothing completes while you are away. Never send the code in a chat; a likely code typed on a remote channel while one is awaited is refused there. Surfaces show CVV_PROMPT_TRADEOFF_WARNING at the moment you select it. Provisioning a virtual card with a hard issuer cap bounds what any leak of stored card material could cost; a real card number does not.",
   },
 
   // ── Budgets ────────────────────────────────────────────────────────────
@@ -187,7 +187,7 @@ export const paymentsConfigSettings: ConfigSetting[] = [
     type: 'string',
     default: '',
     description:
-      'State, province or region. Part of the billing address the card issuer checks against (address verification). Stored in daemon-owned config rather than the secret store because surfaces must display and edit it, but note it sits beside stored card material, so anyone holding both has everything a card-not-present charge needs. A virtual card with a hard issuer cap is what bounds that. When left empty, the matching address field of the owner profile is used once it has been verified.',
+      'State, province or region; leave empty where the country has none (it is required only for countries whose addresses use one, such as US, CA, AU, IN). Part of the billing address the card issuer checks against (address verification). Stored in daemon-owned config rather than the secret store because surfaces must display and edit it, but note it sits beside stored card material, so anyone holding both has everything a card-not-present charge needs. A virtual card with a hard issuer cap is what bounds that. When left empty, the matching address field of the owner profile is used once it has been verified.',
   },
   {
     key: 'payments.billingAddress.postalCode',
@@ -236,7 +236,7 @@ export const paymentsConfigSettings: ConfigSetting[] = [
     type: 'string',
     default: '',
     description:
-      'State, province or region. Where purchases are delivered. A purchase is REFUSED while the shipping address is incomplete, there is nowhere to send it, and guessing an address is not a thing this should do. When left empty, the matching address field of the owner profile is used once it has been verified.',
+      'State, province or region; leave empty where the country has none (it is required only for countries whose addresses use one, such as US, CA, AU, IN). Where purchases are delivered. A purchase is REFUSED while the shipping address is incomplete, there is nowhere to send it, and guessing an address is not a thing this should do. When left empty, the matching address field of the owner profile is used once it has been verified.',
   },
   {
     key: 'payments.shippingAddress.postalCode',

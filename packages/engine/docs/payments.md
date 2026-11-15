@@ -1,7 +1,9 @@
 # Payments: design
 
 **Status:** partially implemented. This document is the design of record.
-Current checkout checks the live quote before card entry and submission. A verified
+Before card entry, code checks the checkout is still the merchant's page with
+the quote's submit control; after the card is typed, the live quote is read once
+against what the owner was shown, and that reading is bound to the click. A verified
 replacement price for the same purchase re-enters the budget decision and opens a
 new window (§8.4). Native startup can restore an eligible original payment window
 and retain its replies. Complete downtime/backlog coverage remains unfinished;
@@ -963,7 +965,11 @@ nothing submitted rather than sending the owner notice after notice. There
 is no retry after a click may have reached the merchant; that outcome retains
 the protected hold and requires reconciliation.
 
-Custom automated-checkout adapters must implement `CheckoutPageDriver.verifyTerms`.
+Custom automated-checkout adapters must implement `CheckoutPageDriver.verifyTerms`,
+the one model reading of the live terms, made after the card is typed and bound
+to the click. They may implement `checkPage`, the code-only check before the card
+that the page is still the merchant's checkout with the same submit control; an
+adapter without it relies on `verifyTerms` alone.
 To support repricing they also implement `readCurrentQuote`, returning a complete
 verified reading for the original purchase. An adapter without that capability
 stops on a changed quote. Returning a replacement reading never permits submit;
@@ -982,6 +988,14 @@ One word cancels. On cancellation the daemon stops before payment, releases the
 reservation, deterministically abandons the checkout rather than leaving it half
 driven, and **reports what it stopped**, merchant, total, item, and the state it
 left the cart in. It never silently abandons a cart.
+
+A reply that is neither a confident go-ahead nor a confident objection is
+never silence on a veto window. A reply addressed to the notice, or one whose
+best reading is an objection at any confidence, stops the veto timer: the same
+purchase is put to the owner as an explicit approval ("I did not take your reply
+as a go-ahead"), where silence means no, and a purchase that gets no yes ends
+`held-reply-not-understood`. Only unaddressed chat that reads as neither is left
+as no answer.
 
 ### 8.6 What each window is built on, and what happens across a restart
 
@@ -1127,10 +1141,13 @@ registration retains eligible awaiting-window leases before running
 is handed to the browser service, so no new checkout can start
 while the sweep reads the journal, and a record live in the current process
 is never treated as interrupted. Recovery settles every remaining record by
-its phase verdict. A checkout that had not submitted releases its budget
-hold, closes its record, and tells the owner what happened, with the message
-following the actual release result (a hold that did not survive the restart
-is reported as no longer held, not as released). A checkout that stopped at
+its phase verdict, telling the owner before closing anything. A checkout that
+had not submitted tells the owner what happened, then releases its budget hold
+and closes its record (a hold that did not survive the restart is reported as
+no longer held, not as released). When that notice does not land on any
+configured channel, the record and its hold are kept and the sweep runs again
+after one, five, fifteen, thirty and sixty minutes, then at the next start, so
+an interrupted purchase is never closed without the owner hearing of it. A checkout that stopped at
 the point of submitting keeps its hold and its record, so a restart cannot
 buy the same thing twice. A `submitted` record is closed only after its
 purchase record is verified on the ledger; the submit flush is ordered after
@@ -1748,12 +1765,18 @@ interface PurchaseFacts {
 - **Amounts** are integer minor units parsed from the page and **re-rendered by
   our own formatter**. A page string never passes through. A value that does not
   parse to a plain integer, or that is negative, or whose currency is not a
-  validated ISO-4217 code, refuses rather than rendering.
+  validated ISO-4217 code, refuses rather than rendering. Discount, credit and
+  promotion lines are read as their own lines (`discounts`), each the amount it
+  takes off, shown as `Discount:` lines, subtracted from the items and checked
+  in the terms reading; the budget draw is the reduced total, and a discount
+  larger than the items refuses rather than becoming a credit.
 - The message shows the pools so an inflated total is visible next to the budget
   it is eating.
 - **Destination** is the owner's own stored shipping address, rendered by
-  `renderDestination`, never anything the checkout page supplied. It is `null`
-  when no shipping address is on the order.
+  `renderDestination` with its second line (the flat or unit), never anything the
+  checkout page supplied. It is `null` when no shipping address is on the order.
+  A region (state, province) is required only for countries whose addresses use
+  one (`countryUsesRegion` in address.ts); elsewhere it may be left empty.
 
 Tested adversarially: the same purchase is driven with injected content in every
 page field the driver reads, and the rendered message must be byte-identical to
@@ -1832,7 +1855,7 @@ interface PurchaseRecord {
   outcome: string;             // e.g. 'purchased', 'submitted-unverified', or a refusal code
   refusalReason: string | null;
   merchantOrderId: string | null;
-  refundedAt: string | null;   // never set today: refunds are not recorded yet; see §9.7.3
+  refundedAt: string | null;   // set when the shop's mail says the purchase was refunded; see §9.7.3
   merchantRecognised: boolean; // the §9.1.1 verdict, so the ledger can reconstruct why one
                                 // purchase asked and another did not
   merchantQualifier: string | null;
@@ -1889,12 +1912,15 @@ at `www.example.com`, a different registrable domain never does, and a
 message claiming a merchant we never bought from correlates to nothing. Mail
 that arrived before the purchase never correlates to it.
 
-Whether a same-merchant mail is about a given purchase (its confirmation,
-receipt, shipping or delivery update) is a semantic reading by Jev
-(`engine.payments.order-mail`) over the mail and our record of that purchase.
-There is no time window: a shipping notice the next day correlates when the
-reading says it is about the purchase, and a promotion from the same shop does
-not. The reading needs decision models; with Classic operation selected
+Which purchase a same-merchant mail is about, if any (its confirmation,
+receipt, shipping or delivery update), is one semantic reading by Jev per mail
+(`engine.payments.order-mail`), a selection over the purchases made there in the
+last 60 days (newest 20). A mail that fits two purchases names neither. A
+shipping notice the next day correlates when the reading says it is about the
+purchase, and a promotion from the same shop does not. An order number or
+tracking reference whose reading does not settle is left out of the report;
+the report still goes out. A body longer than one reading takes is matched on
+its first 160,000 characters and reported without identifiers. The reading needs decision models; with Classic operation selected
 `correlatePurchaseMail` refuses with a decision-features-disabled error and
 nothing is correlated.
 
@@ -1969,13 +1995,19 @@ That last row is the one that makes this decision safe to live with, so it is a
 real test over real payloads rather than a smoke test.
 
 **`payments.cvvHandling` still ships as a real setting**, defaulting to
-`'stored'`. The alternative value `'prompt'` stores nothing, and there is not yet
-a place to type the code at purchase time, so every purchase is refused with
-a message naming `payments.cvvHandling`. Choosing it **disables purchasing for the card**, and the surface says so
-at the moment of selection, `CVV_PROMPT_TRADEOFF_WARNING` in
-`platform/payments/index.ts` is the shared string every surface renders, because
-a trade-off that large belongs in front of whoever flips the switch, not buried
-in a document.
+`'stored'`. The alternative value `'prompt'` stores nothing. A purchase that has
+passed every check and been approved stops before the card is typed and asks the
+owner for the code: the notice channels are told where to type it, and the
+terminal apps' `/payments pending` lists the purchase as "Security code needed"
+and takes the code through the masked composer line, sending it once over the
+paired admin method `payments.purchase.securityCode`. The purchase waits as long
+as an approval window (`windows.approvalMinutes`); with no code by then nothing is
+bought (`security-code-not-given`). The code is used for that one card entry and
+kept nowhere. While a code is awaited, a short number sent on a remote channel is
+read as a possible code and refused there, with the owner told to delete it.
+Choosing `'prompt'` **ends unattended purchasing for the card**, and the surface
+says so at the moment of selection: `CVV_PROMPT_TRADEOFF_WARNING` in
+`platform/payments/index.ts` is the shared string every surface renders.
 
 ### 9.6 3-D Secure, SCA and CAPTCHA pause cleanly
 
@@ -2082,16 +2114,22 @@ language in the order summary, a subscription line item, a trial-then-charge
 term, or a stored-payment-method consent checkbox. A checkout it cannot classify
 with confidence is refused rather than attempted, a false refusal costs one
 manual purchase, a false accept costs a recurring charge nobody is watching.
+The refusal says which it was: a confident finding of a repeating charge is
+`recurring-charge`; a reading that could not confirm a single payment, with
+nothing showing a subscription, is `recurring-unconfirmed`. A cart line the
+reading could not tie to a requested item is likewise `cart-unconfirmed`, not a
+claim that the shop added something (`cart-mismatch`).
 
 ### 9.7.3 Money coming back does not credit a pool
 
 Refunds, cancellations and chargebacks **do not credit any pool.**
 
-*Not recorded yet.* No operation records a refund against a purchase: the ledger's
-`refundedAt` stays empty and the purchase list does not show a returned order as
-such. Statement reconciliation has to account for refunds by hand until a
-refund-recording operation exists. The rule below is what that operation must
-do, not something the daemon does today.
+*Recorded from the shop's mail.* When a mail on the owner's mailbox is matched
+to a purchase and says that purchase was refunded (a refund issued, a return
+credited, an order cancelled with the charge reversed), the daemon writes the
+mail's arrival time as `refundedAt` on that purchase and tells the owner. A
+refund the shop never mails about is not seen; reconcile it against the card
+statement.
 
 Crediting would be surprising in the direction that spends money: a refund
 landing on day 5 for something bought on day 1 would silently hand back day 5's
@@ -2099,10 +2137,9 @@ budget, so a returned item becomes permission to buy another one that day
 without the owner deciding that. The pools are a rate limit on outward spending,
 not a running balance of net worth.
 
-They are to be recorded, with the original `purchaseId`, because the ledger's job
-is to reconcile against a card statement and a statement contains refunds. A
-purchase whose money came back is then marked as such and shown that way in the
-purchase list.
+They are recorded on the original purchase because the ledger's job is to
+reconcile against a card statement and a statement contains refunds: the
+purchase list shows `refundedAt` on a purchase whose money came back.
 
 ---
 
@@ -2387,8 +2424,8 @@ code.
    because it is required for autonomous action, as described in §9.5.
    `payments.cvvHandling`
    still ships as a real setting defaulting to `'stored'`; selecting `'prompt'`
-   disables unattended purchasing and the surface says so at the moment of
-   selection.
+   ends unattended purchasing (each approved purchase waits for the owner to type
+   the code) and the surface says so at the moment of selection.
 2. **`windows.approvalMinutes` defaults to 60 (§8).** Denial is the recoverable
    outcome, so too-short costs friction and too-long costs price drift on a held
    cart. An hour survives a meeting or a commute.

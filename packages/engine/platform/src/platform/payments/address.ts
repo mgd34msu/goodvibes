@@ -56,16 +56,50 @@ export type AddressFieldName =
 
 /**
  * Every field except `line2`, which is genuinely optional, plenty of addresses
- * have no second line, and requiring one would refuse a valid address.
+ * have no second line, and requiring one would refuse a valid address, and
+ * `region`, which only some countries use (see `countryUsesRegion`).
  */
 const REQUIRED_FIELDS: readonly AddressFieldName[] = [
   'name',
   'line1',
   'city',
-  'region',
   'postalCode',
   'country',
 ];
+
+/**
+ * Countries whose postal addresses carry a state, province, prefecture or
+ * similar region that carriers and checkouts expect. Elsewhere (Singapore,
+ * the United Kingdom, the Netherlands, New Zealand and most of the world) a
+ * region does not exist, so demanding one would make the owner invent a value
+ * that is then typed into the merchant's form.
+ */
+const REGION_COUNTRIES: ReadonlySet<string> = new Set([
+  'AE', 'AR', 'AU', 'BR', 'CA', 'CN', 'ES', 'ID', 'IN', 'IT', 'JP', 'KR', 'MX', 'MY', 'US',
+]);
+
+/** Spelled-out names owners commonly store for the region countries above. */
+const REGION_COUNTRY_NAMES: Readonly<Record<string, string>> = {
+  'united arab emirates': 'AE', argentina: 'AR', australia: 'AU', brazil: 'BR', brasil: 'BR', canada: 'CA',
+  china: 'CN', spain: 'ES', 'españa': 'ES', indonesia: 'ID', india: 'IN', italy: 'IT', italia: 'IT',
+  japan: 'JP', 'south korea': 'KR', korea: 'KR', 'republic of korea': 'KR', mexico: 'MX', 'méxico': 'MX',
+  malaysia: 'MY', 'united states': 'US', 'united states of america': 'US', usa: 'US', 'u.s.a.': 'US', 'u.s.': 'US',
+};
+
+/** Whether an address in `country` (an ISO code or a common name) needs a region. */
+export function countryUsesRegion(country: string): boolean {
+  const value = country.trim();
+  if (value.length === 0) return false;
+  if (REGION_COUNTRIES.has(value.toUpperCase())) return true;
+  return REGION_COUNTRY_NAMES[value.toLowerCase()] !== undefined;
+}
+
+/** The fields this stored address must have, given its country. */
+function requiredFieldsFor(address: PostalAddress): readonly AddressFieldName[] {
+  return countryUsesRegion(addressFieldValue(address, 'country'))
+    ? [...REQUIRED_FIELDS.slice(0, 3), 'region', ...REQUIRED_FIELDS.slice(3)]
+    : REQUIRED_FIELDS;
+}
 
 /** Where one address field goes on the page the model is looking at. */
 export interface AddressFieldTarget {
@@ -96,7 +130,7 @@ export interface AddressCheck {
   readonly reason: string | null;
 }
 
-/** One field's stored value. `line2` is the only one allowed to be empty. */
+/** One field's stored value. `line2`, and `region` outside the countries that use one, may be empty. */
 export function addressFieldValue(address: PostalAddress, field: AddressFieldName): string {
   return address[field] ?? '';
 }
@@ -117,7 +151,7 @@ export function checkAddress(address: PostalAddress | null, kind: AddressKind): 
         + `Set it in the TUI, the agent or the webui under payments.${kind}Address before asking me to buy something.`,
     };
   }
-  const missing = REQUIRED_FIELDS.filter((field) => addressFieldValue(address, field).trim().length === 0);
+  const missing = requiredFieldsFor(address).filter((field) => addressFieldValue(address, field).trim().length === 0);
   if (missing.length === 0) return { ok: true, missing: [], reason: null };
   return {
     ok: false,
@@ -177,9 +211,10 @@ export async function fillAddresses(
     const address = resolved.get(entry.kind);
     if (address === undefined) continue;
     const value = addressFieldValue(address, entry.field);
-    // line2 is the one field allowed to be empty, and an empty fill would
-    // clear whatever the page had rather than leaving it alone.
-    if (value.trim().length === 0 && entry.field === 'line2') continue;
+    // line2 and a region the country does not use are the fields allowed to
+    // be empty, and an empty fill would clear whatever the page had rather
+    // than leaving it alone.
+    if (value.trim().length === 0 && (entry.field === 'line2' || entry.field === 'region')) continue;
     try {
       current();
       await deps.fill(entry.target, value);
@@ -215,11 +250,14 @@ export function renderDestination(address: PostalAddress | null): string | null 
   const parts = [
     addressFieldValue(address, 'name'),
     addressFieldValue(address, 'line1'),
+    // The flat or unit number is the part most likely to be wrong, so the
+    // owner sees it in the notice.
+    addressFieldValue(address, 'line2'),
     addressFieldValue(address, 'city'),
     addressFieldValue(address, 'region'),
     addressFieldValue(address, 'postalCode'),
     addressFieldValue(address, 'country'),
   ].filter((part) => part.trim().length > 0);
   if (parts.length === 0) return null;
-  return sanitizeOwnerNoticeField(parts.join(', '), 160);
+  return sanitizeOwnerNoticeField(parts.join(', '), 200);
 }

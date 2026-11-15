@@ -1,5 +1,6 @@
-import { readPaymentWindowStatus, readPaymentWindowAnswer, readPaymentOperation, readPaymentOperationCancellation, paymentOperationDescription, isLivePaymentOperation, canReconcilePaymentOperation,
-  type PaymentWindowView, type PaymentOperationView } from '@goodvibes-jev/engine/platform/platform/payments/browser';
+import { readPaymentWindowStatus, readPaymentWindowAnswer, readPaymentSecurityCodeAcceptance, readPaymentOperation, readPaymentOperationCancellation, paymentOperationDescription, isLivePaymentOperation, canReconcilePaymentOperation,
+  type PaymentWindowView, type PaymentOperationView, type PaymentSecurityCodeRequestView } from '@goodvibes-jev/engine/platform/platform/payments/browser';
+import type { ConcealedInputRequest } from './concealed-input.js';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { OwnedSelectionObservation } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 import { RetainedOperatorConnection, type RetainedOperatorConnectionPolicy, type SelectedOperatorConnection } from './retained-operator-connection.js';
@@ -11,6 +12,8 @@ export interface PaymentWindowCommandContext {
   readonly print: (message: string) => void;
   readonly renderRequest: () => void;
   readonly openSelection?: OpenSelection;
+  /** One masked composer line; the card security code is typed only through this. */
+  readonly beginConcealedInput?: ((request: ConcealedInputRequest) => void) | undefined;
 }
 export interface PaymentWindowCommandPolicy<Context> {
   readonly isOwner: (context: Context) => boolean;
@@ -130,6 +133,40 @@ export function createPaymentWindowCommand<Context extends PaymentWindowCommandC
         finish();
       } catch { fail('answer'); }
     };
+    const supplyCode = async (request: PaymentSecurityCodeRequestView, code: string) => {
+      try {
+        loading('Handing the security code to the purchase — Escape closes this view');
+        await authenticate();
+        const result = await mutate(() => connection.run(async (operator, signal) => readPaymentSecurityCodeAcceptance(await operator.invoke(
+          'payments.purchase.securityCode',
+          { purchaseId: request.purchaseId, windowId: request.windowId, code, confirm: true },
+          { signal, headers: { 'x-goodvibes-explicit-user-request': 'true' } },
+        ))));
+        if (result.purchaseId !== request.purchaseId || result.windowId !== request.windowId) throw new Error('Mismatched acknowledgement.');
+        report('[payments] Security code accepted; the purchase continues. Watch /payments pending for its outcome.');
+        finish();
+      } catch {
+        // Never echo the transport error: the request carried the code.
+        report('[payments] Could not confirm the security code was accepted. Refresh /payments pending; if the request is still open, type the code again.');
+        finish();
+      }
+    };
+    const askCode = (request: PaymentSecurityCodeRequestView) => {
+      const begin = context.beginConcealedInput;
+      if (!begin) {
+        report('[payments] Masked entry is unavailable on this surface, so the security code cannot be typed here. Use the terminal app or the local web UI.');
+        finish();
+        return;
+      }
+      // The chosen picker has closed, so the composer takes the masked line;
+      // the plaintext reaches only this callback and is sent once.
+      report(`[payments] Type the security code for the card ending ${text(request.cardLast4)} (${text(request.merchantDomain)}), then Enter. Escape cancels.`);
+      begin.call(context, {
+        label: 'Card security code',
+        onSubmit: (value: string) => { void supplyCode(request, value); },
+        onCancel: () => { report('[payments] No code sent. The purchase waits until its deadline; reopen /payments pending to type it.'); finish(); },
+      });
+    };
     const choose = (window: PaymentWindowView) => {
       const notice = detail(window);
       const choices: SelectionItem[] = window.kind === 'approval'
@@ -199,17 +236,22 @@ export function createPaymentWindowCommand<Context extends PaymentWindowCommandC
       try {
         loading('Reading purchase windows — Escape cancels');
         await authenticate();
-        const { windows, operations, unreadable } = await connection.run(async (operator, signal) => readPaymentWindowStatus(await operator.invoke('payments.purchase.status', {}, { signal })));
-        if (windows.length === 0 && operations.length === 0 && unreadable.length === 0) { report('[payments] No purchase operations or windows on the selected host.'); finish(); return; }
+        const { windows, operations, unreadable, securityCodes } = await connection.run(async (operator, signal) => readPaymentWindowStatus(await operator.invoke('payments.purchase.status', {}, { signal })));
+        if (windows.length === 0 && operations.length === 0 && unreadable.length === 0 && securityCodes.length === 0) { report('[payments] No purchase operations or windows on the selected host.'); finish(); return; }
+        const byCodeId = new Map(securityCodes.map((request, index) => [`code-${index}`, request]));
         const byId = new Map(windows.map((window, index) => [`window-${index}`, window]));
         const byOperationId = new Map(operations.map((operation, index) => [`operation-${index}`, operation]));
-        const items: SelectionItem[] = [...byId].map(([id, window]) => ({ id, label: `${window.kind === 'approval' ? 'Approval' : 'Veto'}: ${text(window.purchaseId)}`, detail: detail(window) }));
+        const items: SelectionItem[] = [...byCodeId].map(([id, request]) => ({ id, label: `Security code needed: ${text(request.purchaseId)}`,
+          detail: `${text(request.merchantDomain)}, card ending ${text(request.cardLast4)}. The purchase is approved and waits for the code until ${new Date(request.deadlineMs).toLocaleString()}.` }));
+        items.push(...[...byId].map(([id, window]) => ({ id, label: `${window.kind === 'approval' ? 'Approval' : 'Veto'}: ${text(window.purchaseId)}`, detail: detail(window) })));
         for (const [id, operation] of byOperationId) items.push({ id, label: `${operation.state}: ${text(operation.purchaseId)}`, detail: paymentOperationDescription(operation) });
         // Named so its evidence is inspected; there is nothing to answer or stop on it from here.
         for (const [index, row] of unreadable.entries()) items.push({ id: `unreadable-${index}`, label: `unreadable: ${text(row.purchaseId)}`, detail: text(row.reason) });
         items.push({ id: 'refresh', label: 'Refresh purchases', detail: 'Read current operations and windows from this same paired host.' });
         show('Purchases', items, result => {
           if (result.item.id === 'refresh') { void refresh(); return; }
+          const codeRequest = byCodeId.get(result.item.id);
+          if (codeRequest) { askCode(codeRequest); return; }
           const operation = byOperationId.get(result.item.id);
           if (operation) { chooseOperation(operation); return; }
           const window = byId.get(result.item.id);

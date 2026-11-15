@@ -51,6 +51,7 @@ import type { PaymentNotifier } from '../payment-ports.js';
 import type { PaymentReplyInbox } from '../reply-inbox.js';
 import { PaymentsGatewayServiceImpl } from '../payments-gateway-service.js';
 import { readCvvHandling, readPaymentsEnabled, readPaymentsServiceConfig } from '../payments-config.js';
+import type { SecurityCodeRequests } from '../security-code-requests.js';
 import { SHIPPING_TIERS } from '../types.js';
 import type { ShippingTier } from '../types.js';
 import type { UntrustedContentLedger } from '../../security/untrusted-content.js';
@@ -83,6 +84,12 @@ export interface CheckoutComposition {
   readonly notifier: PaymentNotifier;
   /** The exact daemon-owned inbox also borrowed by channel reply ingress. */
   readonly replies?: PaymentReplyInbox | undefined;
+  /**
+   * Where a purchase under `payments.cvvHandling: 'prompt'` waits for the code
+   * the owner types (`payments.purchase.securityCode`). Absent, prompt mode
+   * refuses purchases on this host and says why.
+   */
+  readonly securityCodes?: SecurityCodeRequests | undefined;
   readonly merchantJudge: MerchantJudgePort;
   /** The process-wide ledger; see routes/browser-composition.ts's header for why it must be shared, not private. */
   readonly untrusted: UntrustedContentLedger;
@@ -318,13 +325,13 @@ function fillCardResultView(result: Awaited<ReturnType<PaymentsGatewayServiceImp
  * `PaymentsGatewayServiceImpl`, because `GateInput` is a plain synchronous
  * record and this daemon's card-material check is async.
  */
-async function hasUsableCard(cards: DaemonCardStore, cardId: string, owner: CheckoutOperationOwnership): Promise<boolean> {
+async function hasUsableCard(cards: DaemonCardStore, cardId: string, owner: CheckoutOperationOwnership, securityCodePrompt = false): Promise<boolean> {
   owner.assertCurrent?.();
   if (cardId.length === 0) return false;
   const metadata = await cards.metadata(cardId);
   owner.assertCurrent?.();
   if (metadata === null) return false;
-  const complete = await cards.materialComplete(cardId);
+  const complete = securityCodePrompt ? await cards.materialCompleteExceptCvv(cardId) : await cards.materialComplete(cardId);
   owner.assertCurrent?.();
   return complete;
 }
@@ -362,6 +369,7 @@ function buildCheckoutService(
     untrusted: deps.checkout.untrusted,
     journal,
     merchantJudge: deps.checkout.merchantJudge,
+    ...(deps.checkout.securityCodes ? { securityCodes: deps.checkout.securityCodes } : {}),
     driverFor: seam.driverFor,
     cardFieldGuard: seam.cardFieldGuard,
     gates: () => ({
@@ -481,18 +489,22 @@ export class CheckoutServiceHolder {
   }
 
   private async checkoutGates(input: BeginCheckoutInput, owner: DetachedCheckoutOwner): Promise<GateInput> {
+    // Under 'prompt' the code is typed by the owner at payment time, so the
+    // card is usable when everything else is stored and this host can ask.
+    const securityCodePrompt = readCvvHandling(this.deps.config) === 'prompt' && this.deps.checkout.securityCodes !== undefined;
     const [usableCard, shippingAddress] = await mapLimit([
-      () => hasUsableCard(this.deps.cards, input.cardId, owner),
+      () => hasUsableCard(this.deps.cards, input.cardId, owner, securityCodePrompt),
       () => hasShippingAddress(this.deps.checkout.addresses, owner),
     ], 2, read => read());
     owner.assertCurrent();
     if (typeof usableCard !== 'boolean' || typeof shippingAddress !== 'boolean') throw new CheckoutOwnershipError();
-    const cardWithheldByCvvPrompt = !usableCard && readCvvHandling(this.deps.config) === 'prompt'
+    const cardWithheldByCvvPrompt = !usableCard && !securityCodePrompt && readCvvHandling(this.deps.config) === 'prompt'
       && input.cardId.length > 0 && (await this.deps.cards.metadata(input.cardId)) !== null;
     owner.assertCurrent();
     return {
       enabled: readPaymentsEnabled(this.deps.config), isPaymentsLeader: this.deps.isPaymentsLeader(),
       hasUsableCard: usableCard, hasShippingAddress: shippingAddress, isOwnerDirectRequest: true,
+      ...(securityCodePrompt ? { securityCodePrompt } : {}),
       ...(cardWithheldByCvvPrompt ? { cardWithheldByCvvPrompt } : {}),
     };
   }

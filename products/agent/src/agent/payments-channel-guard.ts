@@ -132,7 +132,10 @@ export async function screenOutboundForCardMaterial(input: {
     // expectingCvv is deliberately NOT set: a bare three-digit outbound message
     // is meaningless out of context, and refusing every "123" the agent ever
     // sends would make the channel unusable. A CVV typed as part of real card
-    // entry arrives alongside a PAN or an expiry, which do match.
+    // entry arrives alongside a PAN or an expiry, which do match. The inbound
+    // side is where a code is expected: while a purchase waits for its security
+    // code, the daemon's remote-channel screen reads short numbers as one
+    // (daemon/surface-card-gate.ts) and tells the owner to delete it.
     const decision = await evaluateCardEntry({ surface: input.surface, text: part });
     assertCurrent();
     for (const shape of decision.matched) matched.add(shape);

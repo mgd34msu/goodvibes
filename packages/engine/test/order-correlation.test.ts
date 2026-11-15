@@ -110,6 +110,13 @@ describe('correlatePurchaseMail includes submitted-unverified records', () => {
     expect(result.candidates.map((r) => r.purchaseId).sort()).toEqual(['p1', 'p2']);
   });
 
+  test('one mail costs one order-mail reading however many purchases were made at the shop', async () => {
+    const history = Array.from({ length: 40 }, (_, index): PurchaseRecord => ({ ...BASE, purchaseId: `p${index}`, item: `item ${index}`,
+      atUtc: new Date(1_700_000_000_000 - index * 60_000).toISOString() }));
+    await correlatePurchaseMail({ ...MAIL, subject: 'Weekend deals', body: 'Up to 40% off TVs.' }, history);
+    expect(readings.requests.filter((request) => request.context?.battery === 'engine.payments.order-mail')).toHaveLength(1);
+  });
+
   test('a different registrable domain does not match, however similar it looks', async () => {
     const record: PurchaseRecord = { ...BASE, merchantDomain: 'bestbuy.com', outcome: 'submitted-unverified' };
     const result = await correlatePurchaseMail({ ...MAIL, senderAddress: 'orders@bestbuy.com.evil.test' }, [record]);

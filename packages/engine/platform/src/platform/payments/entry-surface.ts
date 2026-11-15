@@ -20,8 +20,29 @@ export type { CardEntrySurface } from './entry-policy.js';
 /** The decision site the security-code reply reading is logged under. */
 export const SECURITY_CODE_REPLY_SITE = 'payments.security-code-reply';
 
-/** A bare 3 or 4 digit run: something that could be a security code at all. */
-const SHORT_DIGIT_RUN = /\b\d{3,4}\b/;
+/**
+ * A 3 or 4 digit run in any script, with no word boundary required: something
+ * that could be a security code at all. The same digit class `maskDigits`
+ * masks, so "cvv482", "４８２" and "٤٨٢" are asked about too.
+ */
+const SHORT_DIGIT_RUN = /\p{Nd}{3,4}/u;
+
+/**
+ * Whether a reply gives the security code that was just asked for. Asked only
+ * when a short digit run is present; the reading sees the reply with every
+ * digit masked, and anything but a confident no counts as the code. With
+ * decision models off, the short run alone counts.
+ */
+export async function readsAsSecurityCode(text: string): Promise<boolean> {
+  if (!SHORT_DIGIT_RUN.test(text)) return false;
+  return decisionOrClassic(async () => {
+    const run = await securityCodeReply.run(judgmentPort(SECURITY_CODE_REPLY_SITE), maskDigits(text), { site: SECURITY_CODE_REPLY_SITE });
+    const reading = run.readings.gives_code;
+    const result = !(reading.verdict === 'no' && reading.outcome === 'act');
+    run.recordAction(result ? 'treated as the security code' : 'not the security code');
+    return result;
+  }, () => true);
+}
 
 const SHAPE_NAMES: Readonly<Record<CardShapeKind, 'card-number' | 'expiry' | 'cvv'>> = {
   pan: 'card-number',
@@ -60,16 +81,7 @@ export interface CardDetailScan {
  */
 export async function scanForCardDetails(text: string, options: { readonly expectingCvv?: boolean } = {}): Promise<CardDetailScan> {
   const found = new Set(cardShapeKinds(await detectCardShapes(text)).map((kind) => SHAPE_NAMES[kind]));
-  if (options.expectingCvv === true && !found.has('cvv') && SHORT_DIGIT_RUN.test(text)) {
-    const givesCode = await decisionOrClassic(async () => {
-      const run = await securityCodeReply.run(judgmentPort(SECURITY_CODE_REPLY_SITE), maskDigits(text), { site: SECURITY_CODE_REPLY_SITE });
-      const reading = run.readings.gives_code;
-      const result = !(reading.verdict === 'no' && reading.outcome === 'act');
-      run.recordAction(result ? 'treated as the security code' : 'not the security code');
-      return result;
-    }, () => true); // Host is expecting a code: conservatively protect the short digit run.
-    if (givesCode) found.add('cvv');
-  }
+  if (options.expectingCvv === true && !found.has('cvv') && await readsAsSecurityCode(text)) found.add('cvv');
   const order: readonly ('card-number' | 'expiry' | 'cvv')[] = ['card-number', 'expiry', 'cvv'];
   const matched = order.filter((kind) => found.has(kind));
   return { looksLikeCardDetails: matched.length > 0, matched };

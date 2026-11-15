@@ -29,6 +29,7 @@
  * constructed per call, which is also what makes "refuse a fill with no
  * decision in flight" enforceable across two independent invocations.
  */
+import type { SecurityCodeRequests } from './security-code-requests.js';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { BudgetLedger, type BudgetLimits } from './budget.js';
 import { requireDecisionFeature } from '../runtime/decision-policy.js';
@@ -104,6 +105,8 @@ export interface PaymentsServiceDeps {
   readonly journal: CheckoutJournal;
   /** Judges merchant recourse from the validated domain alone. */
   readonly merchantJudge: MerchantJudgePort;
+  /** Where a purchase under `payments.cvvHandling: 'prompt'` waits for the owner's code. */
+  readonly securityCodes?: SecurityCodeRequests | undefined;
   /** Resolves the driver for an open browser session and page. */
   readonly driverFor: (sessionId: string, pageId: string) => CheckoutPageDriver;
   /**
@@ -360,6 +363,7 @@ export class PaymentsGatewayServiceImpl {
       ledger: this.deps.ledger,
       purchases: this.deps.purchases,
       notifier: this.deps.notifier,
+      ...(this.deps.securityCodes ? { securityCodes: this.deps.securityCodes } : {}),
       untrusted: this.deps.untrusted,
       taintEvidence,
       merchantJudge: this.deps.merchantJudge,

@@ -40,14 +40,16 @@ export function captureCheckoutWindowCheckpoint(value: unknown): CheckoutWindowC
     || record.windowDeliveries === undefined || !reading.ok
     || !isDeepStrictEqual(captureOwnedJson(reading.reading), input.reading)) throw new Error('The payment window checkpoint is unavailable');
   const extracted = extractCheckout(reading.reading, record.currency);
-  if (!extracted.ok || extracted.checkout.itemMinorUnits !== record.draw.itemMinorUnits
+  if (!extracted.ok || extracted.checkout.itemMinorUnits - extracted.checkout.discountMinorUnits !== record.draw.itemMinorUnits
     || record.draw.itemMinorUnits + record.draw.overageMinorUnits + record.draw.toleranceMinorUnits !== record.totalMinorUnits
-    || !extracted.checkout.shippingOptions.some(option => extracted.checkout.itemMinorUnits + extracted.checkout.taxMinorUnits
-      + extracted.checkout.feesMinorUnits + option.costMinorUnits === record.totalMinorUnits)) throw new Error('The payment window checkpoint is unavailable');
+    || !extracted.checkout.shippingOptions.some(option => extracted.checkout.subtotalMinorUnits + option.costMinorUnits === record.totalMinorUnits))
+    throw new Error('The payment window checkpoint is unavailable');
   const terms = 'terms' in input ? input.terms : undefined;
   if (Object.hasOwn(input, 'terms')) {
+    // `discounts` is absent from checkpoints saved before discount lines were read.
     const keys = ['submitTarget', 'merchantDomain', 'currency', 'lines', 'taxMinorUnits', 'feesMinorUnits', 'feeLabels', 'shippingLabel', 'shippingMinorUnits', 'totalMinorUnits'];
-    if (!terms || typeof terms !== 'object' || Array.isArray(terms) || Object.keys(terms).length !== keys.length
+    const withDiscounts = !!terms && typeof terms === 'object' && Object.hasOwn(terms, 'discounts');
+    if (!terms || typeof terms !== 'object' || Array.isArray(terms) || Object.keys(terms).length !== keys.length + (withDiscounts ? 1 : 0)
       || keys.some(key => !Object.hasOwn(terms, key))) throw new Error('The payment window checkpoint is unavailable');
     const selected = terms as Record<string, unknown>, checkout = extracted.checkout;
     if (typeof selected['submitTarget'] !== 'string' || !selected['submitTarget'].trim()
@@ -55,6 +57,7 @@ export function captureCheckoutWindowCheckpoint(value: unknown): CheckoutWindowC
       || selected['taxMinorUnits'] !== checkout.taxMinorUnits || selected['feesMinorUnits'] !== checkout.feesMinorUnits
       || selected['totalMinorUnits'] !== record.totalMinorUnits || !isDeepStrictEqual(selected['lines'], checkout.lines)
       || !isDeepStrictEqual(selected['feeLabels'], checkout.feeLabels)
+      || (withDiscounts && !isDeepStrictEqual(selected['discounts'], checkout.discounts))
       || !checkout.shippingOptions.some(option => option.rawLabel === selected['shippingLabel'] && option.costMinorUnits === selected['shippingMinorUnits']
         && checkout.subtotalMinorUnits + option.costMinorUnits === record.totalMinorUnits)) throw new Error('The payment window checkpoint is unavailable');
   }

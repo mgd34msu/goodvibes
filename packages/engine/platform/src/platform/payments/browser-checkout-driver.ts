@@ -279,12 +279,18 @@ class BrowserCheckoutPageDriver implements CheckoutPageDriver {
 
   private invalidateTerms(): void { this.#termsOwner = null; this.#quote = null; }
 
-  private async observeTerms(expected: CheckoutTerms, ownership: { readonly assertCurrent: () => void; readonly signal?: AbortSignal | undefined }) {
+  /**
+   * One observation of the live checkout and the code-only facts about it: the
+   * page is on the merchant's registrable domain over https and the submit
+   * control is the one the quote named. Null when either fact fails. No model
+   * is asked here.
+   */
+  private async observePage(expected: CheckoutTerms, ownership: { readonly assertCurrent: () => void; readonly signal?: AbortSignal | undefined }) {
     this.#quote = null;
     const token = {};
     this.#termsOwner = token;
     const retained = captureOwnedJson(expected) as unknown as CheckoutTerms;
-    const owner = captureJudgmentPort('payments.current-checkout-terms', this.ownership(ownership));
+    const owner = this.ownership(ownership);
     const engine = await this.engine(); owner.assertCurrent();
     const observe = engine.observeCheckoutTerms;
     if (typeof observe !== 'function') throw new CheckoutDriverRefusal('Fresh checkout terms cannot be read by this browser.', 'Use the current browser checkout seam.');
@@ -305,21 +311,45 @@ class BrowserCheckoutPageDriver implements CheckoutPageDriver {
       signal?.throwIfAborted();
       if (this.#termsOwner !== token || engine.observeCheckoutTerms !== observe || observation.assertCurrent !== assertObservation || observation.signal !== observationSignal) throw new CheckoutDriverRefusal('The original checkout observation was replaced.', 'Read the checkout again.');
     };
+    /** Re-reads the observed page; run once after a reading and once immediately before dispatch. */
     const current = async (): Promise<void> => {
       assertActive();
       await assertObservation.call(observation); assertActive();
     };
-    const base = owner.port;
+    return { retained, engine, state, signal, current, assertActive, ownership: owner };
+  }
+
+  /** The observation with a judgment port whose every attempt is bound to it by synchronous checks. */
+  private async observeTerms(expected: CheckoutTerms, ownership: { readonly assertCurrent: () => void; readonly signal?: AbortSignal | undefined }) {
+    const observed = await this.observePage(expected, ownership);
+    if (!observed) return null;
+    const { assertActive } = observed;
+    const base = captureJudgmentPort('payments.current-checkout-terms', observed.ownership).port;
+    // The page itself is re-read once, after the answer (verifyTerms); every
+    // attempt in between only checks, synchronously, that this observation
+    // is still the one in force.
     const port: JudgmentPort = { ...base, async ask(request) {
-      await current();
+      assertActive();
       const result = await base.ask({ ...request,
         beforeAttempt: () => { assertActive(); assertSynchronousJudgmentGuard(() => request.beforeAttempt?.()); assertActive(); },
-        beforeAsyncAttempt: async () => { await current(); const checked = await request.beforeAsyncAttempt?.(); assertActive(); return checked; },
+        beforeAsyncAttempt: async () => { assertActive(); const checked = await request.beforeAsyncAttempt?.(); assertActive(); return checked; },
         assertLogCurrent: () => { assertActive(); assertSynchronousJudgmentGuard(() => request.assertLogCurrent?.(), 'retention'); assertActive(); },
       });
-      await current(); checkAnswers(request.questions, result.answers); return result;
+      assertActive(); checkAnswers(request.questions, result.answers); return result;
     } };
-    return { retained, engine, state, port, signal, current, assertActive };
+    return { ...observed, port };
+  }
+
+  /**
+   * The code-only check before the card is typed: the page is still the
+   * merchant's checkout and the submit control is the one the owner's quote
+   * named. The terms are read once, by `verifyTerms`, after the card is on the
+   * page, and that reading is what the click is bound to.
+   */
+  async checkPage(expected: CheckoutTerms, ownership: { readonly assertCurrent: () => void; readonly signal?: AbortSignal | undefined }): Promise<boolean> {
+    const observed = await this.observePage(expected, ownership);
+    this.invalidateTerms();
+    return observed !== null;
   }
 
   async verifyTerms(expected: CheckoutTerms, ownership: { readonly assertCurrent: () => void; readonly signal?: AbortSignal | undefined }): Promise<boolean> {
@@ -328,7 +358,7 @@ class BrowserCheckoutPageDriver implements CheckoutPageDriver {
     const { retained, engine, state, port, signal, current, assertActive } = observed;
     let run: Awaited<ReturnType<typeof checkoutTerms.run>>;
     try {
-      run = await checkoutTerms.run(port, toJson(checkoutTermsView(retained, state)) as EntryType, { site: 'payments.current-checkout-terms', signal });
+      run = await checkoutTerms.run(port, toJson(checkoutTermsView(retained, state)) as EntryType, { site: 'payments.current-checkout-terms', ...(signal === undefined ? {} : { signal }) });
     } catch (error) {
       // Live page text the reading will not take (a barcode or order number shaped like a card
       // number) leaves the quote unestablished, the same answer as a page that does not match.
@@ -483,8 +513,8 @@ class BrowserCheckoutPageDriver implements CheckoutPageDriver {
       const engine = await this.engine();
       owner.assertCurrent();
       if (engine !== quote.engine) throw new CheckoutSubmitRefused('The original checkout browser was replaced.');
-      try { await quote.current(); owner.assertCurrent(); }
-      catch (error) { if (error instanceof Error && error.name === 'StaleElementError') throw new CheckoutQuoteChanged(); throw error; }
+      // The page the reading was bound to is re-read once, by the engine,
+      // immediately before it dispatches the click (beforeDispatch).
       const current = { ...owner, assertCurrent: () => {
         try { owner.assertCurrent(); } catch { throw new CheckoutSubmitRefused('The original purchase owner or stored address changed before submission.'); }
       }, beforeDispatch: async () => {

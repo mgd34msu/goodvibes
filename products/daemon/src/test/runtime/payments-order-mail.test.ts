@@ -78,7 +78,7 @@ test('detaching a replaced handler leaves the current one attached', () => {
   expect(seen).toEqual(['m1']);
 });
 
-/** Reads every yes/no question as yes and every choice as \"none\" when it has one, so a mail about a purchase is read as confirming it. */
+/** Reads every yes/no question as yes, the order-mail pick as the first purchase, and every other choice as \"none\" when it has one, so a mail about a purchase is read as confirming it. */
 function confirmingPort(): NonNullable<Parameters<typeof installJudgmentPort>[0]> {
   return {
     model: 'jev-1.13.0',
@@ -86,7 +86,8 @@ function confirmingPort(): NonNullable<Parameters<typeof installJudgmentPort>[0]
       const answers = Object.fromEntries(Object.entries(request.questions).map(([name, question]) => {
         if (question.type === 'noul') return [name, { type: 'noul', noul: 0.97 }];
         if (question.type !== 'choice') throw new Error('Unexpected fixture question');
-        const keys = Object.keys(question.criteria), chosen = keys.includes('none') ? 'none' : keys[0];
+        const keys = Object.keys(question.criteria);
+        const chosen = request.context?.battery === 'engine.payments.order-mail' ? keys[0] : keys.includes('none') ? 'none' : keys[0];
         if (!chosen) throw new Error('Unexpected fixture choice');
         return [name, { type: 'choice', choice: chosen, confidence: 0.95,
           probabilities: Object.fromEntries(keys.map(key => [key, key === chosen ? 0.95 : 0.05 / Math.max(1, keys.length - 1)])) }];

@@ -167,7 +167,10 @@ export async function readRepricedCheckout(input: {
   }
   // The earlier summary was already read as a one-off purchase and the same-purchase check above
   // refuses a new subscription; the whole observation is far longer than a summary can be.
+  // Discount lines are carried from the notified reading; a page that dropped
+  // or changed one no longer adds up to its own total and is refused below.
   const next: RawCheckoutReading = { lines, tax: tax.literal, shippingOptions, fees,
+    ...(reading.discounts?.length ? { discounts: reading.discounts } : {}),
     statedTotal: total.literal, currency: previous.currency, orderSummaryText: reading.orderSummaryText };
   const extracted = extractCheckout(next, previous.currency); if (!extracted.ok) return null;
   const selected = extracted.checkout.shippingOptions.find(option => option.rawLabel === previous.shippingLabel);
@@ -176,7 +179,7 @@ export async function readRepricedCheckout(input: {
   if (!Number.isSafeInteger(payable) || payable !== parseMinorUnits(total.literal, previous.currency)) return null;
   const expected: CheckoutTerms = { ...previous, lines: extracted.checkout.lines,
     taxMinorUnits: extracted.checkout.taxMinorUnits, feesMinorUnits: extracted.checkout.feesMinorUnits,
-    feeLabels: extracted.checkout.feeLabels, shippingMinorUnits: selected.costMinorUnits, totalMinorUnits: payable };
+    feeLabels: extracted.checkout.feeLabels, ...(extracted.checkout.discounts.length > 0 ? { discounts: extracted.checkout.discounts } : { discounts: undefined }), shippingMinorUnits: selected.costMinorUnits, totalMinorUnits: payable };
   await assertCurrent();
   const verified = await checkoutTerms.run(port, toJson(checkoutTermsView(expected, current)) as EntryType, options);
   await assertCurrent();

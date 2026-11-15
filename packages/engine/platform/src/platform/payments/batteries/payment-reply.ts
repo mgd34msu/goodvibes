@@ -11,9 +11,12 @@
  * go ahead unless the owner objects (silence proceeds). The proposal each
  * reply is read against is the notice the owner was sent.
  *
- * Code (notice-delivery.ts) takes an answer only when the reading acts; any
- * other reading, and every `unclear` one, is no answer, so the window's own
- * silence rule decides.
+ * Code (notice-delivery.ts) takes an answer only when the reading acts. On an
+ * approval window any other reading is no answer, and silence there already
+ * means no. On a veto window, where silence spends, a reply addressed to the
+ * notice or whose best reading is `object` at any confidence, and that is not a
+ * confident `acknowledge`, stops the timer and becomes an explicit approval
+ * question; only unaddressed chat that reads as neither is left as no answer.
  *
  * Bands, per option: the reading that lets money move (approve on an
  * approval window, acknowledge on a veto window) is read at high stakes; the

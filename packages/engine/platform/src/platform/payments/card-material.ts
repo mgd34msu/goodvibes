@@ -67,9 +67,11 @@ export interface CardMaterialStore {
    * The material itself. In-process callers only.
    *
    * Implementations must not log the return value, cache it beyond the call, or
-   * include it in any error they throw.
+   * include it in any error they throw. `securityCode` is the code the owner
+   * typed for this one purchase under `payments.cvvHandling: 'prompt'`; it is
+   * used in place of a stored code and kept nowhere.
    */
-  read(cardId: string): Promise<CardMaterial | null>;
+  read(cardId: string, options?: { readonly securityCode?: string | undefined }): Promise<CardMaterial | null>;
 }
 
 /**

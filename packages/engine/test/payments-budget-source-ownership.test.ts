@@ -65,7 +65,8 @@ test('a native format publisher cannot replace the budget source between the own
     armed = false; writeFileSync(replacement, original); renameSync(replacement, f.path);
   });
   armed = true;
-  expect(() => ledger.flush()).toThrow(PaymentBudgetUnavailableError);
+  expect(() => ledger.reserve({ id: 'second-checkout', itemMinorUnits: 2000, overageMinorUnits: 0, toleranceMinorUnits: 0,
+    limits, nowMs: NOW, timezone: 'UTC', retainUntilSettled: true })).toThrow(PaymentBudgetUnavailableError);
   expect(readFileSync(f.path)).toEqual(original);
 });
 

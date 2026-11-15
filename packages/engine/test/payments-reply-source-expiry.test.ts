@@ -262,7 +262,7 @@ test.each([undefined, 4500] as const)('a reply with missing or deadline-overlapp
   expect(f.inbox.pending).toBe(0);
 });
 
-test('a provably on-time reply that turns out not to be an answer leaves the window unsettled, never silent', async () => {
+test('a provably on-time reply that is not a go-ahead holds the veto purchase for an explicit yes, never silent', async () => {
   const account = source(), f = await window(account, '123', 5000); await account.ready();
   const fake = paymentsPort({ vetoReply: () => 'unclear' }), entered = deferred(), release = deferred();
   const previous = installJudgmentPort({ model: fake.port.model, async ask(request) { entered.resolve(); await release.promise; return fake.port.ask(request); } });
@@ -272,7 +272,7 @@ test('a provably on-time reply that turns out not to be an answer leaves the win
   await new Promise<void>(resolve => setImmediate(resolve));
   expect(f.inbox.pending).toBe(1);
   release.resolve(); await offering;
-  expect(await observed).toMatchObject({ kind: 'unsettled-reply' });
+  expect(await observed).toMatchObject({ answer: 'not-understood', channel: 'telegram' });
 });
 
 test('decision-model exhaustion survives a queued reply and cannot be converted to quiet expiry', async () => {

@@ -70,7 +70,8 @@ export interface PaymentNotifier {
     readonly deadlineMs: number;
     readonly signal?: AbortSignal | undefined;
   }): Promise<{
-    readonly answer: 'approve' | 'deny' | 'acknowledge' | 'object';
+    /** `not-understood` (veto windows only): an on-time reply that was not a go-ahead; see `readPaymentReply`. */
+    readonly answer: 'approve' | 'deny' | 'acknowledge' | 'object' | 'not-understood';
     readonly channel: PaymentAnswerChannel;
   } | null>;
 }

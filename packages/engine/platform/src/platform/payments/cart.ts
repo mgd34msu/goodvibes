@@ -64,27 +64,41 @@ export interface RequestedLine {
 
 export interface CartCheck {
   readonly ok: boolean;
+  /**
+   * `cart-mismatch` when a reading settled that a line is not what the owner
+   * asked for (or a quantity is off); `cart-unconfirmed` when a reading could
+   * not settle it either way. Null when the cart matches.
+   */
+  readonly code: 'cart-mismatch' | 'cart-unconfirmed' | null;
   /** Lines present in the cart that the owner did not ask for. */
   readonly unexpected: readonly CartLine[];
+  /** Lines the reading could not tie to a requested item or rule out. */
+  readonly unconfirmed: readonly CartLine[];
   /** Lines the owner asked for that are missing. */
   readonly missing: readonly RequestedLine[];
   readonly reason: string | null;
 }
 
+/** What the reading settled about one cart line. */
+type LineMatch = { readonly kind: 'matched'; readonly index: number } | { readonly kind: 'not-matched' } | { readonly kind: 'unsettled' };
+
 /**
- * Which requested item this cart line is, or null. A line is that item only
- * when the reading acts; anything less is a line the owner did not ask for.
+ * Which requested item this cart line is. A line is that item only when the
+ * reading acts on it; a reading that acts on "none" settles that it is not a
+ * requested item; anything short of acting settles nothing.
  */
-async function requestedIndexOf(line: CartLine, requested: readonly RequestedLine[], options: CheckoutOperationOwnership): Promise<number | null> {
+async function requestedIndexOf(line: CartLine, requested: readonly RequestedLine[], options: CheckoutOperationOwnership): Promise<LineMatch> {
   const owner = captureJudgmentPort(CART_LINE_SITE, options);
   const candidates = requested.map((entry, index) => ({ id: requestedLineId(index), content: { requested_item: entry.label } }));
   const selection = await cartLine.select(owner.port, { cart_line: line.label }, candidates, { site: CART_LINE_SITE, signal: owner.signal });
   owner.assertCurrent();
-  const index = selection.outcome === 'act' && selection.chosen !== undefined
-    ? candidates.findIndex((candidate) => candidate.id === selection.chosen)
-    : -1;
+  if (selection.outcome !== 'act') {
+    selection.recordAction('unsettled');
+    return { kind: 'unsettled' };
+  }
+  const index = selection.chosen === undefined ? -1 : candidates.findIndex((candidate) => candidate.id === selection.chosen);
   selection.recordAction(index === -1 ? 'not a requested item' : `requested item ${index}`);
-  return index === -1 ? null : index;
+  return index === -1 ? { kind: 'not-matched' } : { kind: 'matched', index };
 }
 
 /**
@@ -105,31 +119,55 @@ export async function assertCartMatchesRequest(
   cart = captured.cart; requested = captured.requested;
   if (requested.some(line => !Number.isSafeInteger(line.quantity) || line.quantity <= 0)
     || cart.some(line => !Number.isSafeInteger(line.quantity) || line.quantity <= 0)) {
-    return { ok: false, unexpected: [...cart], missing: [...requested], reason: 'Refused: cart and requested quantities must be positive whole counts.' };
+    return { ok: false, code: 'cart-mismatch', unexpected: [...cart], unconfirmed: [], missing: [...requested], reason: 'Refused: cart and requested quantities must be positive whole counts.' };
   }
-  const matches = requested.length === 0
-    ? cart.map(() => null)
+  const matches: readonly LineMatch[] = requested.length === 0
+    ? cart.map((): LineMatch => ({ kind: 'not-matched' }))
     : await mapLimit(cart, CART_LINE_CONCURRENCY, (line) => requestedIndexOf(line, requested, owner));
   owner.assertCurrent();
 
   const unexpected: CartLine[] = [];
+  const unconfirmed: CartLine[] = [];
   const quantities = new Map<number, number>();
   cart.forEach((line, position) => {
-    const index = matches[position] ?? null;
-    const match = index === null ? undefined : requested[index];
-    if (index === null || match === undefined) {
+    const found = matches[position] ?? { kind: 'unsettled' };
+    if (found.kind === 'unsettled') {
+      unconfirmed.push(line);
+      return;
+    }
+    const match = found.kind === 'matched' ? requested[found.index] : undefined;
+    if (found.kind !== 'matched' || match === undefined) {
       unexpected.push(line);
       return;
     }
-    const total = (quantities.get(index) ?? 0) + line.quantity;
+    const total = (quantities.get(found.index) ?? 0) + line.quantity;
     if (!Number.isSafeInteger(total) || total > match.quantity) unexpected.push(line);
-    quantities.set(index, total);
+    quantities.set(found.index, total);
   });
 
   const missing = requested.filter((line, index) => quantities.get(index) !== line.quantity);
 
-  if (unexpected.length === 0 && missing.length === 0) {
-    return { ok: true, unexpected: [], missing: [], reason: null };
+  if (unexpected.length === 0 && unconfirmed.length === 0 && missing.length === 0) {
+    return { ok: true, code: null, unexpected: [], unconfirmed: [], missing: [], reason: null };
+  }
+
+  // An unsettled reading is not a finding about the merchant. When it is the
+  // only problem (a missing quantity may be that very line), the refusal says
+  // what is true: the line could not be confirmed, not that the shop added it.
+  if (unexpected.length === 0 && unconfirmed.length > 0) {
+    const asked = requested.length === 1
+      ? sanitizeNoticeField(requested[0]?.label ?? '', 60)
+      : `one of the items you asked for (${requested.map((line) => sanitizeNoticeField(line.label, 60)).join(', ')})`;
+    const labels = unconfirmed.map((line) => `'${sanitizeNoticeField(line.label, 60)}'`).join(', ');
+    return {
+      ok: false,
+      code: 'cart-unconfirmed',
+      unexpected: [],
+      unconfirmed,
+      missing,
+      reason: `Refused before paying: I could not confirm that ${labels} ${unconfirmed.length === 1 ? 'is' : 'are'} ${asked}. `
+        + 'Nothing was bought. Check the cart, or name the item more exactly, then ask me again.',
+    };
   }
 
   const parts: string[] = [];
@@ -147,9 +185,14 @@ export async function assertCartMatchesRequest(
     // a guarantee.
     parts.push(`it does not have the requested quantity of ${missing.map((line) => sanitizeNoticeField(line.label, 60)).join(', ')}`);
   }
+  if (unconfirmed.length > 0) {
+    parts.push(`I could not confirm ${unconfirmed.map((line) => sanitizeNoticeField(line.label, 60)).join(', ')} either`);
+  }
   return {
     ok: false,
+    code: 'cart-mismatch',
     unexpected,
+    unconfirmed,
     missing,
     reason:
       `Refused before paying: ${parts.join(', and ')}. `
@@ -158,7 +201,15 @@ export async function assertCartMatchesRequest(
 }
 
 export interface RecurringCheck {
+  /** True unless the reading confidently settled a single payment. */
   readonly recurring: boolean;
+  /**
+   * `one-off`: a confident no. `recurring`: a confident yes. `not-confirmed-one-off`:
+   * anything else; nothing showed a repeating charge, the reading just could not
+   * confirm a single payment. Both refusals stop the purchase.
+   */
+  readonly outcome: 'one-off' | 'recurring' | 'not-confirmed-one-off';
+  readonly code: 'recurring-charge' | 'recurring-unconfirmed' | null;
   readonly reason: string | null;
 }
 
@@ -169,7 +220,8 @@ export interface RecurringCheck {
  * here only to decide whether to REFUSE. Untrusted content can always talk us
  * out of an action; the rule it may never do is talk us into one. Reading it to
  * find a reason to stop is the safe direction of that asymmetry, and it is why
- * anything but a confident no refuses.
+ * anything but a confident no refuses. The refusal says which it was: a
+ * confident yes, or a reading that could not confirm a single payment.
  */
 export async function detectRecurringCharge(orderSummaryText: string, options: CheckoutOperationOwnership = {}): Promise<RecurringCheck> {
   requireDecisionFeature('checkout recurring-charge interpretation');
@@ -178,15 +230,29 @@ export async function detectRecurringCharge(orderSummaryText: string, options: C
   const run = await recurringCharge.run(owner.port, state, { site: RECURRING_CHARGE_SITE, signal: owner.signal });
   owner.assertCurrent();
   const reading = run.readings.recurring;
-  const oneOff = reading.verdict === 'no' && reading.outcome === 'act';
-  run.recordAction(oneOff ? 'one-off charge' : 'refused as recurring');
-  if (oneOff) return { recurring: false, reason: null };
+  const outcome: RecurringCheck['outcome'] = reading.outcome !== 'act' ? 'not-confirmed-one-off'
+    : reading.verdict === 'no' ? 'one-off' : reading.verdict === 'yes' ? 'recurring' : 'not-confirmed-one-off';
+  run.recordAction(outcome === 'one-off' ? 'one-off charge' : outcome === 'recurring' ? 'refused as recurring' : 'refused as not confirmed one-off');
+  if (outcome === 'one-off') return { recurring: false, outcome, code: null, reason: null };
+  if (outcome === 'recurring') {
+    return {
+      recurring: true,
+      outcome,
+      code: 'recurring-charge',
+      reason:
+        'Refused: this checkout looks like it sets up a charge that repeats, a subscription, a renewal, '
+        + 'a trial that turns into a paid plan or a card kept for later charges. A daily budget cannot '
+        + 'describe something that renews on its own, and I have no way to stop the next one. Buy this '
+        + 'one yourself if you want it.',
+    };
+  }
   return {
     recurring: true,
+    outcome,
+    code: 'recurring-unconfirmed',
     reason:
-      'Refused: this checkout looks like it sets up a charge that repeats, a subscription, a renewal, '
-      + 'a trial that turns into a paid plan or a card kept for later charges. A daily budget cannot '
-      + 'describe something that renews on its own, and I have no way to stop the next one. Buy this '
-      + 'one yourself if you want it.',
+      `Refused: I could not confirm this is a single payment, so I did not buy it; the summary I read was ${String(orderSummaryText.length)} characters. `
+      + 'Nothing indicated a subscription. Start the purchase again with an order summary that holds only this order, '
+      + 'without adverts or account offers, or buy this one yourself.',
   };
 }

@@ -51,6 +51,8 @@ import {
   PAYMENTS_PURCHASE_CANCEL_OUTPUT_SCHEMA,
   PAYMENTS_PURCHASE_RECONCILE_INPUT_SCHEMA,
   PAYMENTS_PURCHASE_RECONCILE_OUTPUT_SCHEMA,
+  PAYMENTS_PURCHASE_SECURITY_CODE_INPUT_SCHEMA,
+  PAYMENTS_PURCHASE_SECURITY_CODE_OUTPUT_SCHEMA,
 } from './operator-contract-schemas-payments.js';
 
 export const builtinGatewayPaymentsMethodDescriptors: readonly GatewayMethodDescriptor[] = [
@@ -62,8 +64,15 @@ export const builtinGatewayPaymentsMethodDescriptors: readonly GatewayMethodDesc
     inputSchema: PAYMENTS_PURCHASE_RECONCILE_INPUT_SCHEMA, outputSchema: PAYMENTS_PURCHASE_RECONCILE_OUTPUT_SCHEMA,
   }),
   methodDescriptor({
+    id: 'payments.purchase.securityCode', title: 'Type the Card Security Code', category: 'payments',
+    scopes: ['write:payments'], access: 'admin', dangerous: true,
+    description: 'Under payments.cvvHandling prompt, hand the card security code the owner typed to the one approved purchase waiting for it, by its exact purchaseId and windowId from payments.purchase.status. Requires an explicit owner action, confirm: true and current paired admin authority with write:payments. The code is used for that purchase\'s card entry and kept nowhere. A closed or replaced request refuses; this never submits directly or overrides any budget, merchant, page or address check.',
+    http: { method: 'POST', path: '/api/payments/purchase/security-code' },
+    inputSchema: PAYMENTS_PURCHASE_SECURITY_CODE_INPUT_SCHEMA, outputSchema: PAYMENTS_PURCHASE_SECURITY_CODE_OUTPUT_SCHEMA,
+  }),
+  methodDescriptor({
     id: 'payments.purchase.status', title: 'Purchase Operations and Windows', category: 'payments', scopes: ['read:payments'],
-    description: 'Read durable checkout operation status and actual live approval/veto windows. Optionally select one purchase, including after reconnect or restart. An accepted operation is not a completed purchase; uncertain submissions must be checked with the merchant and are never automatically retried. Reading does not extend a deadline or resume execution. Complete purchase records are available through payments.purchases.list.',
+    description: 'Read durable checkout operation status and actual live approval/veto windows, and any approved purchase waiting for its card security code (securityCodes, under payments.cvvHandling prompt). Optionally select one purchase, including after reconnect or restart. An accepted operation is not a completed purchase; uncertain submissions must be checked with the merchant and are never automatically retried. Reading does not extend a deadline or resume execution. Complete purchase records are available through payments.purchases.list.',
     http: { method: 'GET', path: '/api/payments/purchase/status' },
     inputSchema: PAYMENTS_PURCHASE_STATUS_INPUT_SCHEMA, outputSchema: PAYMENTS_PURCHASE_STATUS_OUTPUT_SCHEMA,
   }),
@@ -176,7 +185,7 @@ export const builtinGatewayPaymentsMethodDescriptors: readonly GatewayMethodDesc
     id: 'payments.purchases.list',
     title: 'List Purchases',
     description:
-      'The purchase audit ledger: what was bought, from which merchant registrable domain, how much (item, tax, fees and delivery separately), which budget pool each part drew on, which delivery tier was requested and which was actually used, whether the shipping ladder stepped it down, which window ran and how it ended, which command-authority channel answered, and the outcome. Reconcilable against a card statement. Never contains a card number, expiry or CVV. Refunds are not recorded yet: a returned order still reads as a purchase and `refundedAt` stays empty, so reconcile refunds against the card statement by hand. When refunds are recorded they will credit no pool, a refund on day five refilling day five would be permission to buy again that nobody granted.',
+      'The purchase audit ledger: what was bought, from which merchant registrable domain, how much (item, tax, fees and delivery separately), which budget pool each part drew on, which delivery tier was requested and which was actually used, whether the shipping ladder stepped it down, which window ran and how it ended, which command-authority channel answered, and the outcome. Reconcilable against a card statement. Never contains a card number, expiry or CVV. When the shop mails that a purchase was refunded, the time is recorded as `refundedAt` on that purchase and the owner is told; check the card statement for the credit. A refund credits no pool: a refund on day five refilling day five would be permission to buy again that nobody granted.',
     category: 'payments',
     scopes: ['read:payments'],
     http: { method: 'GET', path: '/api/payments/purchases' },

@@ -17,11 +17,18 @@ import type { RefusalCode } from './types.js';
 export interface GateInput {
   /** `payments.enabled`. */
   readonly enabled: boolean;
-  /** A card is configured and its material is present in the secret store. */
-  readonly hasUsableCard: boolean;
   /**
-   * The named card is configured, but `payments.cvvHandling` is 'prompt', so its
-   * code is not supplied. Only changes the refusal text when `hasUsableCard` is false.
+   * A card is configured and its material is present in the secret store; under
+   * `payments.cvvHandling: 'prompt'`, every field but the security code is, and
+   * the owner can be asked for the code at payment time (`securityCodePrompt`).
+   */
+  readonly hasUsableCard: boolean;
+  /** `payments.cvvHandling` is 'prompt': the flow asks the owner for the code before typing the card. */
+  readonly securityCodePrompt?: boolean;
+  /**
+   * The named card is configured and `payments.cvvHandling` is 'prompt', but
+   * this host has no way to ask for the code. Only changes the refusal text
+   * when `hasUsableCard` is false.
    */
   readonly cardWithheldByCvvPrompt?: boolean;
   /** A shipping address is configured. */
@@ -89,8 +96,9 @@ export function checkPaymentGates(input: GateInput): GateRefusal | null {
       code: 'no-card',
       reason:
         'Refused: payments.cvvHandling is set to prompt, so the card verification value is not '
-        + 'stored, and there is no purchase-time prompt to type it yet. Set payments.cvvHandling to '
-        + 'stored, then add the card again if it was created under prompt, to let purchases go ahead.',
+        + 'stored, and this payment host has no way to ask you for it when a purchase reaches payment. '
+        + 'Set payments.cvvHandling to stored (add the card again if it was created under prompt), '
+        + 'or buy through the daemon your terminal app is paired with, where /payments pending asks for the code.',
     };
   }
   if (!input.hasUsableCard) {

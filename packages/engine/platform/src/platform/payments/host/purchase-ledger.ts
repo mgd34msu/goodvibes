@@ -191,6 +191,42 @@ export class DaemonPurchaseLedger implements PurchaseLedger {
     } finally { release?.(); }
   }
 
+  /**
+   * Record when the shop said this purchase was refunded, on its row. False
+   * when there is no such purchase or a refund is already recorded. Credits
+   * no budget pool.
+   */
+  async recordRefund(purchaseId: string, refundedAt: string): Promise<boolean> {
+    if (!Number.isFinite(Date.parse(refundedAt))) throw new PaymentPurchaseLedgerError('invalid-record');
+    let release: (() => void) | undefined;
+    try {
+      release = await acquireCrossProcessLock(`${this.filePath}.mutation.lock`, { strictOwnership: true, totalTimeoutMs: 10_000 });
+      const previous = this.read();
+      const current = previous.byId.get(purchaseId);
+      if (!current || current.refundedAt !== null) return false;
+      const updated = capturePurchaseRecord({ ...current, refundedAt });
+      if (!updated) throw new PaymentPurchaseLedgerError('invalid-record');
+      const index = previous.rows.lastIndexOf(current);
+      const rows = Object.freeze(previous.rows.map((row, at) => at === index ? updated as StoredPurchase : row));
+      const envelope = { ...previous.envelope, version: PURCHASES_FILE_VERSION, purchases: rows };
+      const contents = `${JSON.stringify(envelope, null, 2)}\n`;
+      atomicWriteFileSync(this.filePath, contents, { mode: 0o600, mkdirp: true,
+        assertCurrent: () => this.assertFileCurrent(previous.observation) });
+      const observation = readFileObservation(this.filePath);
+      if (!observation.bytes.equals(Buffer.from(contents, 'utf8'))) throw new Error();
+      const byId = new Map(previous.byId); byId.set(purchaseId, updated as StoredPurchase);
+      this.cached = { observation, envelope, rows, byId };
+      return true;
+    } catch (error) {
+      if (error instanceof PaymentPurchaseLedgerError) throw error;
+      this.unavailable = true;
+      throw new PaymentPurchaseLedgerError('write-uncertain');
+    } finally {
+      try { release?.(); }
+      catch { this.unavailable = true; throw new PaymentPurchaseLedgerError('write-uncertain'); }
+    }
+  }
+
   /** Exact recorded submission lookup used by real boot recovery. */
   async has(purchaseId: string): Promise<boolean> {
     const row = this.read().byId.get(purchaseId);

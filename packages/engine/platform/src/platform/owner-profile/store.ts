@@ -6,7 +6,7 @@
 import { watch, type FSWatcher } from 'node:fs';
 import { readProfileDelegation, restrictProfileMutationOptions, type ProfileMutationOptions } from './delegation.js';
 import { consumeProfileMutationAdmission } from '../control-plane/routes/native-profile-mutation.js';
-import { captureFileMutation, captureMutationDescriptors } from '../utils/file-mutation.js';
+import { captureMutationDescriptors } from '../utils/file-mutation.js';
 import { readProfilePerson, reuseProfilePerson, type ProfilePersonReadingOptions } from './person-reading.js';
 import { basename, dirname } from 'node:path';
 import { summarizeError } from '../utils/error-display.js';
@@ -636,19 +636,21 @@ export class OwnerProfileStore {
     const optionsCurrent = captureMutationDescriptors(storeOptions, ['persistIo', 'now', 'ledger']);
     const persistIo = storeOptions.persistIo;
     const ioCurrent = persistIo && captureMutationDescriptors(persistIo, ['mkdir', 'writeFile', 'rename', 'remove']);
-    const physical = captureFileMutation(filePath);
+    // A foreign edit of the profile file is this store's own fact: commit compares
+    // the file's stat to the last one seen, replays or refuses, and compares
+    // again immediately before the rename.
     const authority = () => {
       options.signal?.throwIfAborted(); options.assertCurrent?.(); delegation?.assertCurrent(); ownerCurrent(); optionsCurrent(); ioCurrent?.();
       if (this.filePath !== filePath || this.options !== storeOptions || this.options.persistIo !== persistIo) {
         throw new Error('Profile mutation owner changed.');
       }
     };
-    return { withPublication: options.withPublication, assertCurrent() { authority(); physical.assertCurrent(); },
-      onWriteIntent() { authority(); physical.assertCurrent(); options.onWriteIntent?.(); authority(); physical.assertCurrent(); },
+    return { withPublication: options.withPublication, assertCurrent() { authority(); },
+      onWriteIntent() { authority(); options.onWriteIntent?.(); authority(); },
       onEffect(published?: boolean) {
         options.signal?.throwIfAborted(); options.onEffect?.(published);
         delegation?.assertCurrent();
-        authority(); physical.onEffect(published);
+        authority();
       } };
   }
 

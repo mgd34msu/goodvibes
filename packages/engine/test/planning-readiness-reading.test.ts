@@ -8,7 +8,8 @@ import { join } from 'node:path';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { fieldKind } from '../platform/src/platform/utils/batteries/field-kind.ts';
+// The field-name reading no longer exists (the activity log masks locally); a request naming it is unexpected.
+const fieldKind = { name: 'engine.redaction.field-kind', items: { kind: { question: {} as Record<string, unknown> } } };
 import { KnowledgeStore, ProjectPlanningService, evaluateProjectPlanningReadiness, type ProjectPlanningStateUpsertInput } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import { JudgmentInputError, snapshotJudgmentInput } from '../platform/src/platform/gate/judgment-input.js';
 import { loadSqlJsEngine, SQLiteStore, type SqlDatabase } from '../platform/src/platform/state/sqlite-store.js';

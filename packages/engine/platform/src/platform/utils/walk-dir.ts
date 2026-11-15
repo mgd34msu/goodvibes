@@ -131,87 +131,65 @@ export class DirectoryWalk {
       options.beforeAttempt?.();
       if (options.shouldContinue?.() === false) throw new WalkStopped();
     };
-    // Local metadata steps need the current invocation/token, not a replay of
-    // every previously authorized file. Full readset checks fence the
-    // traversal’s entry and exit instead.
+    // Resolved promises keep running in the microtask queue: a long scan gives
+    // stdin and timers a turn about every 4 ms.
     let yieldAt = performance.now() + 4;
-    const checkCurrent = async (): Promise<void> => {
-      assertCurrent();
-      // Resolved promises keep running in the microtask queue. Concurrent
-      // scans with owner checks must also give stdin and timers a turn.
-      if (performance.now() >= yieldAt) {
-        await new Promise<void>(resolve => setImmediate(resolve));
-        yieldAt = performance.now() + 4;
-        assertCurrent();
-      }
+    const yieldTurn = async (): Promise<void> => {
+      if (performance.now() < yieldAt) return;
+      await new Promise<void>(resolve => setImmediate(resolve));
+      yieldAt = performance.now() + 4;
     };
+    const checkCurrent = async (): Promise<void> => { await yieldTurn(); assertCurrent(); };
     const checkReadAccess = async (): Promise<void> => {
       assertCurrent();
       await options.beforeAsyncAttempt?.();
       assertCurrent();
     };
-    const readingOptions: CallOptions = {
-      ...options, beforeAttempt: assertCurrent, beforeAsyncAttempt: checkReadAccess,
-      site: options.site ?? 'utils.walk-directory',
-    };
+    // The directory-selection step runs inside a visit that already checked the caller.
+    const readingOptions: CallOptions = { site: options.site ?? 'utils.walk-directory' };
 
-    async function stablePath(path: string): Promise<boolean> {
-      if (options.followSymlinks) return true;
+    /**
+     * The per-directory real-path anchor of a no-follow walk: a directory
+     * listed as a directory must still resolve under the initial real root, so
+     * a directory swapped for a symlink between listing and reading cannot take
+     * the walk outside it. One `realpath` per directory; files are trusted by
+     * the listing's entry type and never resolved one by one.
+     */
+    async function anchored(dir: string): Promise<boolean> {
       let actual: string;
-      try { actual = await realpath(path); } catch (err) {
-        await checkCurrent();
-        logger.warn('walkDir skipped unreadable path', { path, error: summarizeError(err) });
+      try { actual = await realpath(dir); } catch (err) {
+        logger.warn('walkDir skipped unreadable directory', { path: dir, error: summarizeError(err) });
         return false;
       }
-      await checkCurrent();
       owner.realRoot ??= actual;
-      // lstat(path) alone follows symlinks in its ancestors. Anchor the whole
-      // path to the initial real root so an awaited reading cannot escape it.
-      if (actual !== resolve(owner.realRoot, relative(root, path))) {
+      if (actual !== resolve(owner.realRoot, relative(root, dir))) {
         throw new Error('Directory walk path changed during reading');
       }
       return true;
     }
 
     async function* visit(dir: string, ancestors = new Set<string>()): AsyncGenerator<string> {
+      // The caller's currency check runs once per directory, not per file.
       await checkCurrent();
       options.assertPath?.(dir);
       let descendants = ancestors;
       if (options.followSymlinks) {
         let actual: string;
         try { actual = await realpath(dir); } catch (err) {
-          await checkCurrent();
           logger.warn('walkDir skipped unreadable directory', { path: dir, error: summarizeError(err) });
           return;
         }
-        await checkCurrent();
         options.assertPath?.(actual);
         if (ancestors.has(actual)) return;
         descendants = new Set([...ancestors, actual]);
-      }
+      } else if (!await anchored(dir)) return;
       let entries: Dirent[];
-      try {
-        // Recheck after every suspended reading: a directory may have become a
-        // symlink. No-follow walks must never gain authority by that replacement.
-        const info = await lstat(dir);
-        if (dir !== root && !info.isDirectory() && !options.followSymlinks) return;
-        // The check below is outside the filesystem-error catch.
-      } catch (err) {
-        await checkCurrent();
-        logger.warn('walkDir skipped unreadable directory', { path: dir, error: summarizeError(err) });
-        return;
-      }
-      // Establish the initial root only after its existence has been checked.
-      if (!await stablePath(dir)) return;
       try {
         entries = await readdir(dir, { withFileTypes: true });
       } catch (err) {
-        await checkCurrent();
         logger.warn('walkDir skipped unreadable directory', { path: dir, error: summarizeError(err) });
         return;
       }
-      await checkCurrent();
-      if (!await stablePath(dir)) return;
       // The leading-dot convention is explicit policy, not a meaning guess.
       const visible = entries.filter(entry => {
         if (!options.includeHidden && entry.name.startsWith('.')) return false;
@@ -234,11 +212,9 @@ export class DirectoryWalk {
           try {
             info = await stat(join(dir, entry.name));
           } catch (err) {
-            await checkCurrent();
             logger.warn('walkDir skipped unreadable file', { path: join(dir, entry.name), error: summarizeError(err) });
             continue;
           }
-          await checkCurrent();
           // Caller selection failures are not suppressible filesystem errors.
           if (info.isDirectory() && options.selectDirectory?.(join(dir, entry.name)) !== false) directories.push(entry);
           else if (info.isFile() && options.selectFile?.(join(dir, entry.name)) !== false) files.push(entry);
@@ -248,11 +224,12 @@ export class DirectoryWalk {
         name: entry.name, relativePath: relative(root, join(dir, entry.name)).split(sep).join('/'),
       }));
       await owner.readDirectories(candidates, readingOptions);
-      await checkCurrent();
       const fileNames = new Set(files.map(entry => entry.name));
       const directoryNames = new Set(directories.map(entry => entry.name));
+      let seen = 0;
       for (const entry of visible) {
-        await checkCurrent();
+        if ((++seen & 255) === 0) await yieldTurn();
+        if (options.shouldContinue?.() === false) throw new WalkStopped();
         const fullPath = join(dir, entry.name);
         options.assertPath?.(fullPath);
         if (directoryNames.has(entry.name)) {
@@ -260,29 +237,25 @@ export class DirectoryWalk {
             && options.selectDirectory?.(fullPath) !== true) {
             let entryCount: number | undefined;
             try { entryCount = (await readdir(fullPath)).length; } catch { entryCount = undefined; }
-            await checkCurrent();
             options.onSkippedProductWorktrees?.(fullPath, entryCount);
             continue;
           }
           const identity = relative(root, fullPath).split(sep).join('/');
           if (!skipped.get(identity) || options.selectDirectory?.(fullPath) === true) yield* visit(fullPath, descendants);
         } else if (fileNames.has(entry.name)) {
-          try {
-            const info = options.followSymlinks ? await stat(fullPath) : await lstat(fullPath);
-            if (!info.isFile() || (maxFileSize !== undefined && info.size > maxFileSize)) continue;
-          } catch (err) {
-            await checkCurrent();
-            logger.warn('walkDir skipped unreadable file', { path: fullPath, error: summarizeError(err) });
-            continue;
+          // A size limit needs the size: the one per-file stat the walk makes.
+          if (maxFileSize !== undefined) {
+            try {
+              const info = options.followSymlinks ? await stat(fullPath) : await lstat(fullPath);
+              if (!info.isFile() || info.size > maxFileSize) continue;
+            } catch (err) {
+              logger.warn('walkDir skipped unreadable file', { path: fullPath, error: summarizeError(err) });
+              continue;
+            }
           }
-          await checkCurrent();
-          options.assertPath?.(fullPath);
-          if (!await stablePath(fullPath)) continue;
           yield fullPath;
         }
       }
-      // Selection may reject every entry; still fence completion of the level.
-      await checkCurrent();
     }
 
     try {

@@ -5,7 +5,7 @@ import { logger } from '../utils/logger.js';
 import type { RuntimeEventBus } from '../runtime/events/index.js';
 import { classifyHostTrustTier, extractHostname, emitSsrfDeny } from '../tools/fetch/trust-tiers.js';
 import { sanitizeUrlForLog } from '../utils/fetch-with-timeout.js';
-import { postToPublicWebhook } from '../utils/url-safety.js';
+import { ownerDeliveryTargetProblem, postToPublicWebhook } from '../utils/url-safety.js';
 import { isNotifySuppressed } from '../utils/notify.js';
 import { HttpStatusError } from '@goodvibes-jev/engine/errors';
 import { assertDeliveryCurrent, type DeliveryLifetime } from '../utils/delivery-lifetime.js';
@@ -82,9 +82,11 @@ export class WebhookNotifier implements NotificationDeadLetterSource {
    * leave this unset so `bun test` never fires a real webhook.
    */
   private readonly force: boolean;
+  private readonly privateDeliveryHosts: () => readonly string[];
 
   constructor(urls: string[] = [], options: WebhookNotifierOptions = {}) {
     this.urls = validateWebhookUrls(urls);
+    this.privateDeliveryHosts = options.privateDeliveryHosts ?? ((): readonly string[] => []);
     this.metadataOnly = options.metadataOnly;
     this.timeoutMs = normalizeWebhookTimeoutMs(options.timeoutMs);
     this.maxConcurrent = normalizePositiveInteger(options.maxConcurrent, 8, 1, 32);
@@ -110,8 +112,19 @@ export class WebhookNotifier implements NotificationDeadLetterSource {
   // -------------------------------------------------------------------------
 
   /** Add a webhook URL. Ignores duplicates. Throws on invalid URL. */
+  /**
+   * Why delivery would refuse `url` as written (an unapproved host on a
+   * private network names `network.privateDeliveryHosts`), or undefined. For
+   * the command that adds a URL to refuse it then, not at every delivery.
+   */
+  targetProblem(url: string): string | undefined {
+    return ownerDeliveryTargetProblem(url, { allowHttp: true, approvedPrivateHosts: this.privateDeliveryHosts() });
+  }
+
   addUrl(url: string): void {
     new URL(url); // throws TypeError if url is invalid
+    const problem = this.targetProblem(url);
+    if (problem !== undefined) throw new Error(problem);
     if (!this.urls.includes(url)) {
       this.urls.push(url);
       logger.info('WebhookNotifier: added URL', { url: sanitizeUrlForLog(url) });
@@ -397,7 +410,7 @@ export class WebhookNotifier implements NotificationDeadLetterSource {
         assertDeliveryCurrent(lifetime);
         const res = await postToPublicWebhook(url, {
           method: 'POST', headers, body, signal: controller.signal,
-        }, { ...lifetime, allowHttp: true, assertCurrent: () => { assertDeliveryCurrent(lifetime); this.assertOpen(controller.signal);
+        }, { ...lifetime, allowHttp: true, approvedPrivateHosts: this.privateDeliveryHosts(), assertCurrent: () => { assertDeliveryCurrent(lifetime); this.assertOpen(controller.signal);
           if (!envelope.isCurrent(prepared.revision)) throw new WebhookPolicyError('privacy'); } });
         // Own both successful and failed response cleanup. Never retain body
         // text: a remote response can echo previously permitted private content.
@@ -433,6 +446,12 @@ export interface WebhookNotifierOptions {
   delivery?: Partial<DeliveryQueueConfig> | undefined;
   /** Source of the integrations.delivery.* settings. */
   configManager?: Pick<ConfigManager, 'get'> | null | undefined;
+  /**
+   * The owner's approved hosts on their own network (`network.privateDeliveryHosts`),
+   * read at each use. Notification URLs are configured by the owner, so a
+   * listed host (a self-hosted ntfy, Home Assistant) may resolve to a private address.
+   */
+  privateDeliveryHosts?: (() => readonly string[]) | undefined;
   /**
    * Bypass test suppression for every delivery from this instance. Only
    * tests that exercise the real HTTP delivery layer itself should set this

@@ -12,7 +12,8 @@ import {
 } from '../platform/src/platform/state/index.js';
 import { ConfigManager } from '../platform/src/platform/config/manager.js';
 import { useMemoryReadings } from './_helpers/memory-readings.ts';
-import { fieldKind } from '../platform/src/platform/utils/batteries/field-kind.js';
+// The field-name reading no longer exists (the activity log masks locally); a request naming it is unexpected.
+const fieldKind = { name: 'engine.redaction.field-kind', items: { kind: { question: {} as Record<string, unknown> } } };
 
 function memoryRequests(readings: Pick<ReturnType<typeof useMemoryReadings>, 'requests'>, battery: 'engine.state.memory-search' | 'engine.state.memory-review-priority') {
   for (const request of readings.requests) {

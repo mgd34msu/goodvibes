@@ -13,7 +13,7 @@ import applicability from '../fixtures/e2e-judgments/completion-applicability.js
 import ambientDraftGate from '../fixtures/e2e-judgments/ambient-draft-gate.json';
 import tuiCompletionTools from '../fixtures/e2e-judgments/tui-completion-tools.json';
 import { checkAnswers, type Questions } from '@goodvibes-jev/judgment';
-import { fieldKind, redactionCredential, residualCredential } from '@goodvibes-jev/engine/platform/platform/utils';
+import { redactionCredential, residualCredential } from '@goodvibes-jev/engine/platform/platform/utils';
 import { noticeSeverity } from '@goodvibes-jev/engine/terminal-shell';
 
 /** Keep recorded old envelopes intact; derive this adapter's current subjects. */
@@ -29,7 +29,8 @@ function currentTargets<T extends { questions: Record<string, { instructions: { 
 }
 
 const diagnosticQuestions: Readonly<Record<string, Questions>> = {
-  'diagnostic-field-kind': { kind: fieldKind.items.kind.question },
+  // The field-name reading no longer exists (the activity log masks locally); its recorded readings are kept as recorded.
+  'diagnostic-field-kind': diagnostics.contracts.find(contract => contract.kind === 'diagnostic-field-kind')?.questions as unknown as Questions,
   'diagnostic-residual': { credentialRemains: residualCredential.items.credentialRemains.question },
   'diagnostic-credential': {
     lineHasCredential: redactionCredential.items.lineHasCredential.question,

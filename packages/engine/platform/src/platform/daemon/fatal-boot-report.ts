@@ -6,7 +6,7 @@
 import { writeSync } from 'node:fs';
 import { summarizeError } from '../utils/error-display.js';
 import { flushActivityLogSync, logger } from '../utils/logger.js';
-import { redactSensitiveData } from '../utils/redaction.js';
+import { redactDiagnosticText } from '../utils/redaction.js';
 
 /** stdout and stderr, as the file descriptors they actually are. */
 const STDOUT_FD = 1;
@@ -54,33 +54,90 @@ export function writeExitingStdoutLine(line: string): void {
   writeLineToFd(STDOUT_FD, line);
 }
 
+/** An own data property; an accessor is never run on the fatal path. */
+function ownValue(value: unknown, key: string): unknown {
+  if (value === null || typeof value !== 'object') return undefined;
+  try {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    return descriptor && 'value' in descriptor ? descriptor.value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** How deep a `cause` chain is followed, and how many errors of an aggregate are named. */
+const MAX_CAUSE_DEPTH = 4;
+const MAX_AGGREGATE_ERRORS = 3;
+
+interface FailureDescription {
+  /** Each error of the chain, outermost first, joined by ": ". */
+  readonly summary: string;
+  /** Name and errno-style code of the innermost error that has them. */
+  readonly name?: string;
+  readonly code?: string;
+  /** The innermost stack: where the failure actually happened. */
+  readonly stack?: string;
+}
+
+/**
+ * Follow the failure's `cause` chain, so "Daemon host server startup failed"
+ * reaches the busy port that caused it. An aggregate names its first errors.
+ */
+function describeFailure(error: unknown): FailureDescription {
+  const parts: string[] = [];
+  let name: string | undefined;
+  let code: string | undefined;
+  let stack: string | undefined;
+  let current: unknown = error;
+  for (let depth = 0; depth < MAX_CAUSE_DEPTH && current !== undefined; depth++) {
+    let part = summarizeError(current);
+    const errors = ownValue(current, 'errors');
+    if (Array.isArray(errors) && errors.length > 0) {
+      const named = errors.slice(0, MAX_AGGREGATE_ERRORS).map((inner: unknown) => summarizeError(inner));
+      part += ` (${named.join('; ')}${errors.length > MAX_AGGREGATE_ERRORS ? `; and ${errors.length - MAX_AGGREGATE_ERRORS} more` : ''})`;
+    }
+    parts.push(part);
+    if (current instanceof Error && current.name !== 'Error') name = current.name;
+    const ownCode = ownValue(current, 'code');
+    if (typeof ownCode === 'string' || typeof ownCode === 'number') code = String(ownCode);
+    const ownStack = ownValue(current, 'stack');
+    if (typeof ownStack === 'string') stack = ownStack;
+    current = ownValue(current, 'cause');
+  }
+  return {
+    summary: parts.join(': '),
+    ...(name === undefined ? {} : { name }),
+    ...(code === undefined ? {} : { code }),
+    ...(stack === undefined ? {} : { stack }),
+  };
+}
+
 /**
  * Report a fatal boot failure everywhere it can be found, then leave the exit
  * to the caller.
  *
- * The stream write happens FIRST and synchronously. The activity log is
- * attempted after, because it is the part that can fail, it needs a
+ * The line names every error of the failure's `cause` chain (the phase that
+ * failed and the reason it failed, such as a port already in use), masked for
+ * credentials. The stream write happens FIRST and synchronously. The activity
+ * log is attempted after, because it is the part that can fail, it needs a
  * configured destination, a writable directory, and a flush, and the
  * guarantee this function makes is the stream line, not the log line.
  */
 export function reportFatalBootFailure(error: unknown, context = 'goodvibes daemon host'): void {
-  const safeContext = context === 'goodvibes daemon host' ? context : redactSensitiveData(context);
-  const summary = summarizeError(error);
-  let stack: string | undefined;
-  if (error instanceof Error) {
-    try {
-      const descriptor = Object.getOwnPropertyDescriptor(error, 'stack');
-      if (descriptor && 'value' in descriptor && typeof descriptor.value === 'string') {
-        stack = redactSensitiveData(descriptor.value);
-      }
-    } catch {
-      // A borrowed stack must not invoke an accessor on the fatal path.
-    }
-  }
+  // Local masking: the report is read on this machine, so paths stay readable.
+  const safeContext = context === 'goodvibes daemon host' ? context : redactDiagnosticText(context, { anonymize: false });
+  let described: FailureDescription;
+  try { described = describeFailure(error); } catch { described = { summary: 'Unexpected error' }; }
+  const summary = redactDiagnosticText(described.summary, { anonymize: false });
+  const stack = described.stack === undefined ? undefined : redactDiagnosticText(described.stack, { anonymize: false });
   writeFatalLine(`${safeContext} failed: ${summary}`);
   if (stack) writeFatalLine(stack);
   try {
-    logger.error(`${safeContext} failed`, { error: summary });
+    logger.error(`${safeContext} failed`, {
+      error: summary,
+      ...(described.name === undefined ? {} : { name: described.name }),
+      ...(described.code === undefined ? {} : { code: described.code }),
+    });
     flushActivityLogSync();
   } catch {
     // The reason is already on stderr, which is the guarantee. A log that

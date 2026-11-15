@@ -27,7 +27,8 @@ import { buildContractPlannerRequest } from '../platform/src/platform/contract/p
 import { shapeOf } from './contract/plan-support.js';
 import { knowledgeScopeSelection } from '../platform/src/platform/knowledge/batteries/scope-selection.js';
 import { authoredErrorReadingsPort, errorText, type AuthoredFailure } from './_helpers/authored-error-readings.js';
-import { fieldKind } from '../platform/src/platform/utils/batteries/field-kind.js';
+// The field-name reading no longer exists (the activity log masks locally); a request naming it is unexpected.
+const fieldKind = { name: 'engine.redaction.field-kind', items: { kind: { question: {} as Record<string, unknown> } } };
 import { redactionCredential, residualCredential } from '../platform/src/platform/utils/batteries/redaction.js';
 
 const roots: string[] = [];
@@ -111,7 +112,6 @@ function readings(probability = 0.99, extraFailures: readonly AuthoredFailure[] 
       connection_failure: failureReading.items.connection_failure.question,
       before_response: failureReading.items.before_response.question,
     }],
-    [fieldKind.name, { kind: fieldKind.items.kind.question }],
     [redactionCredential.name, {
       lineHasCredential: redactionCredential.items.lineHasCredential.question,
       spanIsCredential: redactionCredential.items.spanIsCredential.question,

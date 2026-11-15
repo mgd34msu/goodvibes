@@ -2,7 +2,7 @@ import { mockFetch } from '../helpers/typed-fetch-mock.ts';
 import { afterEach, describe, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort, choiceAnswer, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { redactSensitiveDataAsync, redactionCredential, residualCredential, fieldKind } from '@goodvibes-jev/engine/platform/platform/utils';
+import { redactSensitiveDataAsync, redactionCredential, residualCredential } from '@goodvibes-jev/engine/platform/platform/utils';
 import { isDeepStrictEqual } from 'node:util';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -14,6 +14,8 @@ import { handleRoutinesCommand } from '../../cli/routines-command.ts';
 import { parseGoodVibesCli } from '../../cli/parser.ts';
 import { createShellPathService } from '@/runtime/index.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
+// The field-name reading no longer exists (the activity log masks locally); a request naming it is unexpected.
+const fieldKind = { name: 'engine.redaction.field-kind', items: { kind: { question: {} as never } } };
 
 async function withPublicTransportError<T>(message: string, run: () => Promise<T>): Promise<T> {
   const found = { phase: 'source', target: 'span-1', parts: [

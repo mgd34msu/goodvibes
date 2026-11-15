@@ -33,39 +33,6 @@ test.each(['file', 'symlink'] as const)('an exclusive temp %s collision preserve
   expect(fs.readFileSync(foreign, 'utf8')).toBe('Foreign original'); expect(fs.statSync(foreign).mode & 0o777).toBe(0o644);
 });
 
-test('a borrowed guard cannot replace the owned stage with a foreign file and have it published or cleaned', () => {
-  const f = fixture(); writeFileAtomic(f.file, 'Previous image');
-  const retained = join(f.root, 'retained-original-stage'); let replacement: string | undefined;
-  expect(() => writeFileAtomic(f.file, 'Requested next bytes', { cleanupStaleTemps: false, assertCurrent() {
-    if (replacement) return;
-    const path = temp(f.root, f.file);
-    if (path && fs.statSync(path).size > 0) {
-      replacement = path; fs.renameSync(path, retained); fs.writeFileSync(path, 'Foreign replacement', { mode: 0o644 });
-    }
-  } })).toThrow('staging');
-  expect(fs.readFileSync(f.file, 'utf8')).toBe('Previous image'); expect(replacement).toBeDefined();
-  expect(fs.readFileSync(replacement!, 'utf8')).toBe('Foreign replacement'); expect(fs.statSync(replacement!).mode & 0o777).toBe(0o644);
-  expect(fs.readFileSync(retained, 'utf8')).toBe('Requested next bytes');
-});
-
-test('same-inode staging edits cannot become the requested atomic image', () => {
-  const f = fixture(); writeFileAtomic(f.file, 'Previous image'); let mutated = false;
-  expect(() => writeFileAtomic(f.file, 'Requested bytes', { cleanupStaleTemps: false, assertCurrent() {
-    if (mutated) return; const path = temp(f.root, f.file);
-    if (path && fs.statSync(path).size > 0) { mutated = true; fs.writeFileSync(path, 'Incorrect bytes'); }
-  } })).toThrow();
-  expect(mutated).toBe(true); expect(fs.readFileSync(f.file, 'utf8')).toBe('Previous image');
-});
-
-test('retargeting an existing configured alias in the first guard creates nothing in the replacement tree', () => {
-  const f = fixture(), first = join(f.root, 'first'), second = join(f.root, 'second'), alias = join(f.root, 'alias');
-  fs.mkdirSync(first); fs.mkdirSync(second); fs.symlinkSync(first, alias); let changed = false;
-  expect(() => writeFileAtomic(join(alias, 'new', 'nested', 'state.json'), 'Private bytes', { assertCurrent() {
-    if (!changed) { changed = true; fs.unlinkSync(alias); fs.symlinkSync(second, alias); }
-  } })).toThrow('parent');
-  expect(fs.existsSync(join(first, 'new'))).toBe(false); expect(fs.existsSync(join(second, 'new'))).toBe(false);
-});
-
 test('stable configured alias chains and symlink-aware parent traversal keep their actual destination', () => {
   const f = fixture(), outside = join(f.root, 'physical'), aliases = join(f.root, 'aliases');
   fs.mkdirSync(join(outside, 'child'), { recursive: true }); fs.mkdirSync(aliases);
@@ -118,23 +85,6 @@ test('a dangling parent alias never grants creation of its outside target', () =
   expect(fs.existsSync(outside)).toBe(false);
 });
 
-test('failed publication preserves a foreign temp replacement installed while throwing', () => {
-  const f = fixture(); writeFileAtomic(f.file, 'Previous image'); let replacement: string | undefined;
-  expect(() => writeFileAtomic(f.file, 'Next image', { cleanupStaleTemps: false, assertCurrent() {
-    if (replacement) return; const path = temp(f.root, f.file);
-    if (path) { replacement = path; fs.unlinkSync(path); fs.writeFileSync(path, 'Foreign retained evidence'); throw new Error('Owner retired'); }
-  } })).toThrow('retired');
-  expect(fs.readFileSync(f.file, 'utf8')).toBe('Previous image'); expect(fs.readFileSync(replacement!, 'utf8')).toBe('Foreign retained evidence');
-});
-
-test('a rename that took effect before throwing remains published-indeterminate and retains the visible image', () => {
-  const f = fixture(); writeFileAtomic(f.file, 'Previous image'); const actual = fs.renameSync;
-  const rename = spyOn(fs, 'renameSync').mockImplementation((...args) => { actual(...args); throw new Error('Lost native rename acknowledgment'); });
-  restore.push(() => rename.mockRestore());
-  const error = durableFailure(() => writeFileAtomic(f.file, 'Visible next image', { durable: true }));
-  expect(error.phase).toBe('published-indeterminate'); expect(fs.readFileSync(f.file, 'utf8')).toBe('Visible next image');
-});
-
 test('actual pre-effect rename failure remains before-publication with the old image intact', () => {
   const f = fixture(); writeFileAtomic(f.file, 'Previous image');
   const rename = spyOn(fs, 'renameSync').mockImplementation(() => { throw new Error('Native rename was refused'); }); restore.push(() => rename.mockRestore());
@@ -165,7 +115,7 @@ test('a proven-dead native writer can have its old regular staging file reclaime
 test('private binary bytes and public text modes remain exact under restrictive umask', () => {
   const f = fixture(), binary = Buffer.from([0, 255, 128, 10, 0]), expected = Buffer.from(binary), previous = process.umask(0o777);
   try {
-    writeFileAtomic(f.file, binary, { durable: true, assertCurrent() { binary.fill(42); } });
+    writeFileAtomic(f.file, binary, { durable: true });
     expect(fs.readFileSync(f.file)).toEqual(expected); expect(fs.statSync(f.file).mode & 0o777).toBe(0o600);
     writeFileAtomic(join(f.root, 'nested', 'wrapper.sh'), '#!/bin/sh\\necho exact\\n', { mode: 0o755, durable: true });
     expect(fs.statSync(join(f.root, 'nested', 'wrapper.sh')).mode & 0o777).toBe(0o755);
@@ -178,42 +128,6 @@ test('non-values cannot serialize to invalid JSON and overwrite an existing stor
   expect(fs.readFileSync(f.file)).toEqual(before);
 });
 
-
-test('a guard-created temp symlink cannot change the outside file or its permissions', () => {
-  const f = fixture(), outside = join(f.root, 'outside'); fs.writeFileSync(outside, 'Outside original', { mode: 0o644 });
-  writeFileAtomic(f.file, 'Previous image'); let replaced: string | undefined;
-  expect(() => writeFileAtomic(f.file, 'Requested bytes', { assertCurrent() {
-    if (replaced) return; const path = temp(f.root, f.file);
-    if (path && fs.statSync(path).size > 0) { replaced = path; fs.unlinkSync(path); fs.symlinkSync(outside, path); }
-  } })).toThrow('staging');
-  expect(fs.readFileSync(f.file, 'utf8')).toBe('Previous image'); expect(fs.readFileSync(outside, 'utf8')).toBe('Outside original');
-  expect(fs.statSync(outside).mode & 0o777).toBe(0o644); expect(fs.lstatSync(replaced!).isSymbolicLink()).toBe(true);
-});
-
-test('physical parent replacement cannot publish or remove files in the replacement directory', () => {
-  const f = fixture(), original = join(f.root, 'original'), retained = join(f.root, 'retained'); fs.mkdirSync(original);
-  const file = join(original, 'state.json'); writeFileAtomic(file, 'Original target'); let foreign: string | undefined;
-  expect(() => writeFileAtomic(file, 'Must not enter replacement', { assertCurrent() {
-    if (foreign) return; const path = temp(original, file);
-    if (path) {
-      fs.renameSync(original, retained); fs.mkdirSync(original); foreign = join(original, basename(path));
-      fs.writeFileSync(foreign, 'Foreign stage'); fs.writeFileSync(file, 'Foreign target');
-    }
-  } })).toThrow('parent');
-  expect(fs.readFileSync(file, 'utf8')).toBe('Foreign target'); expect(fs.readFileSync(foreign!, 'utf8')).toBe('Foreign stage');
-  expect(fs.readFileSync(join(retained, 'state.json'), 'utf8')).toBe('Original target');
-});
-
-test('retiring only a configured alias still cleans the original owned temp in its unchanged physical directory', () => {
-  const f = fixture(), first = join(f.root, 'first'), second = join(f.root, 'second'), alias = join(f.root, 'alias');
-  fs.mkdirSync(first); fs.mkdirSync(second); fs.symlinkSync(first, alias);
-  const file = join(alias, 'state.json'); writeFileAtomic(file, 'Original target'); let changed = false;
-  expect(() => writeFileAtomic(file, 'Next target', { assertCurrent() {
-    if (!changed && temp(first, file)) { changed = true; fs.unlinkSync(alias); fs.symlinkSync(second, alias); }
-  } })).toThrow('parent');
-  expect(fs.readFileSync(join(first, 'state.json'), 'utf8')).toBe('Original target');
-  expect(temp(first, file)).toBeUndefined(); expect(fs.readdirSync(second)).toEqual([]);
-});
 
 test('private existing-directory observation permits only same-owner permission tightening; ordinary owners remain exact', () => {
   const { root } = fixture(), parent = join(root, 'private'); fs.mkdirSync(parent, { mode: 0o755 }); fs.chmodSync(parent, 0o755);

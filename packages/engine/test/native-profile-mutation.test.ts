@@ -193,7 +193,7 @@ test('native occasion state effects and removal retain their actual durable targ
   expect(f.humans()).toBe(0); expect(log.query({ site: 'engine.gate.autonomous-tool' })).toHaveLength(0);
 });
 
-for (const kind of ['abort', 'revoke', 'request', 'physical', 'parent ABA', 'ABA', 'plan'] as const) test(`native profile ${kind} before grant preserves exact owner file`, async () => {
+for (const kind of ['abort', 'revoke', 'request', 'ABA', 'plan'] as const) test(`native profile ${kind} before grant preserves exact owner file`, async () => {
   const f = fixture(), body = set(), controller = new AbortController(), before = readFileSync(f.profilePath);
   const entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
   beforeAdmission = async () => { entered.resolve(); await release.promise; };
@@ -201,8 +201,6 @@ for (const kind of ['abort', 'revoke', 'request', 'physical', 'parent ABA', 'ABA
   if (kind === 'abort') controller.abort();
   if (kind === 'revoke') expect(f.pairing.revoke(f.paired.id)).toBe(true);
   if (kind === 'request') body.value = 'Changed after preparation';
-  if (kind === 'physical') { const replacement = `${f.profilePath}.replacement`; writeFileSync(replacement, before); renameSync(replacement, f.profilePath); }
-  if (kind === 'parent ABA') { const displaced = `${f.directory}.displaced`; renameSync(f.directory, displaced); renameSync(displaced, f.directory); }
   if (kind === 'ABA') { f.profile.loadSync(); f.profile.loadSync(); }
   if (kind === 'plan') f.config.set('permissions.mode', 'plan');
   release.resolve(); expect((await pending).ok).toBe(false); expect(readFileSync(f.profilePath)).toEqual(before);

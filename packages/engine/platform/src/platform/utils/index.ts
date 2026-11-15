@@ -28,7 +28,6 @@ export * from './terminal-width.js';
 export * from './url-safety.js';
 export * from './walk-dir.js';
 export type { WalkDirectoryCandidate } from './directory-reading.js';
-export { fieldKind } from './batteries/field-kind.js';
 export { redactionCredential, residualCredential } from './batteries/redaction.js';
 
 export { requireDefined } from './required-value.js';

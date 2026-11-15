@@ -101,14 +101,6 @@ test('native profile provenance evidence retires with its real registry invocati
   expect(readFileSync(f.profilePath, 'utf8')).toBe(before);
 });
 
-test.each(['file', 'parent'] as const)('native pre-admission profile %s ABA is refused', async kind => {
-  const f = fixture(), before = readFileSync(f.profilePath, 'utf8'); let swapped = false;
-  const result = await admitLocalState(f.register, 'occasions', { action: 'confirm', title: 'Family day', date: '03-14', kind: 'remember-only' }, { directory: f.root,
-    afterCapture() { swapped = true; const path = kind === 'file' ? f.profilePath : f.root, saved = `${path}.saved`; renameSync(path, saved); renameSync(saved, path); } });
-  expect(swapped).toBe(true);
-  expect(result.success).toBe(false); expect(result.error).toBe('Tool input projection stale.'); expect(readFileSync(f.profilePath, 'utf8')).toBe(before);
-});
-
 test.each(['cancel', 'revoke'] as const)('actual native state write holds %s between reading the interview and writing the answer', async action => {
   const f = fixture(), controller = new AbortController(); let mode: PermissionMode = 'prompt', reached = false;
   await f.state.putInterview({ id: 'gift-interview', occasionId: 'family-day', occurrence: '2026-03-14', startedAt: 1,

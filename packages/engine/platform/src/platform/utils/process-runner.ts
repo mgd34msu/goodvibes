@@ -9,12 +9,6 @@ export interface RunOptions {
   stdin?: string;
   timeoutMs: number;
   signal?: AbortSignal;
-  /**
-   * Start the child with only the variables a command needs to run (`PATH`,
-   * `HOME`, locale, `TZ`, `USER`) plus `env`, not the daemon's whole
-   * environment, which holds provider keys.
-   */
-  minimalEnv?: boolean;
   /** Join all I/O and the owned POSIX group, including on normal leader exit. */
   ownedProcessGroup?: boolean;
 }
@@ -184,7 +178,7 @@ async function runOwnedProcess(options: RunOptions): Promise<RunResult> {
   }
   const child = getBunSpawn()(options.args, {
     ...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
-    env: { ...(options.minimalEnv ? minimalProcessEnv() : process.env), ...(options.env ?? {}) },
+    env: { ...process.env, ...(options.env ?? {}) },
     stdin: options.stdin !== undefined ? 'pipe' : 'ignore',
     stdout: 'pipe',
     stderr: 'pipe',
@@ -239,17 +233,6 @@ async function runOwnedProcess(options: RunOptions): Promise<RunResult> {
   return { stdout, stderr, exitCode, timedOut: interrupted === 'timeout' };
 }
 
-const MINIMAL_ENV_KEYS = ['PATH', 'HOME', 'USER', 'LANG', 'LC_ALL', 'TZ', 'TMPDIR'] as const;
-
-function minimalProcessEnv(): Record<string, string> {
-  const env: Record<string, string> = {};
-  for (const key of MINIMAL_ENV_KEYS) {
-    const value = process.env[key];
-    if (value !== undefined) env[key] = value;
-  }
-  return env;
-}
-
 /**
  * Capture a command's output/status. Nonzero command exits are returned; spawn
  * and I/O failures reject. The deadline covers stdin, exit and output draining.
@@ -266,7 +249,7 @@ export async function runProcess(options: RunOptions): Promise<RunResult> {
   const spawn = getBunSpawn();
   const child = spawn(options.args, {
     ...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
-    env: { ...(options.minimalEnv ? minimalProcessEnv() : process.env), ...(options.env ?? {}) },
+    env: { ...process.env, ...(options.env ?? {}) },
     stdin: options.stdin !== undefined ? 'pipe' : 'ignore',
     stdout: 'pipe',
     stderr: 'pipe',

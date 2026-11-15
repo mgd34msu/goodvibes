@@ -276,12 +276,18 @@ export function clampLimit(limit: number | undefined, fallback: number): number 
   return Math.max(1, Math.min(500, Math.floor(limit ?? fallback)));
 }
 
+/**
+ * The safe view carries no free text: a record's message, an error's message,
+ * summary and hint, and span and event names may hold a prompt or a failure's
+ * contents, so they are withheld; the raw view (an explicit opt-in) carries
+ * them. Structural fields keep their values. Local and deterministic: no model
+ * request, and the same record reads the same on every call.
+ */
+const withheldText = (value: string): string => value.length === 0 ? value : '[REDACTED_TEXT]';
+
 export function sanitizeRecord(record: TelemetryRecord, view: TelemetryViewMode): TelemetryRecord {
   if (view === 'raw') return structuredClone(record);
-  const safeText = (value: string): string => {
-    const projected = redactStructuredData(value);
-    return typeof projected === 'string' ? projected : '[REDACTED]';
-  };
+  const safeText = withheldText;
   return {
     ...record,
     message: safeText(record.message),
@@ -298,21 +304,17 @@ export function sanitizeRecord(record: TelemetryRecord, view: TelemetryViewMode)
 
 export function sanitizeSpan(span: ReadableSpan, view: TelemetryViewMode): ReadableSpan {
   if (view === 'raw') return structuredClone(span);
-  const safeText = (value: string): string => {
-    const projected = redactStructuredData(value);
-    return typeof projected === 'string' ? projected : '[REDACTED]';
-  };
   return {
     ...span,
-    name: safeText(span.name),
+    name: withheldText(span.name),
     status: {
       ...span.status,
-      ...(span.status.message !== undefined ? { message: safeText(span.status.message) } : {}),
+      ...(span.status.message !== undefined ? { message: withheldText(span.status.message) } : {}),
     },
     attributes: redactStructuredData(span.attributes) as SpanAttributes,
     events: span.events.map((event) => ({
       ...event,
-      name: safeText(event.name),
+      name: withheldText(event.name),
       ...(event.attributes ? { attributes: redactStructuredData(event.attributes) as Record<string, AttributeValue> } : {}),
     })),
   };

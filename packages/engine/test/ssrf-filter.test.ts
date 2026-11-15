@@ -117,9 +117,18 @@ describe('HTTP hook redirects', () => {
 });
 
 describe('WebhookNotifier SSRF filter', () => {
+  test('adding an unapproved private URL is refused with the setting that admits it', () => {
+    const notifier = new WebhookNotifier();
+    expect(() => notifier.addUrl('http://10.0.0.1/webhook')).toThrow(/network\.privateDeliveryHosts/);
+    expect(notifier.getUrls()).toEqual([]);
+    const approved = new WebhookNotifier([], { privateDeliveryHosts: () => ['10.0.0.1'] });
+    approved.addUrl('http://10.0.0.1/webhook');
+    expect(approved.getUrls()).toEqual(['http://10.0.0.1/webhook']);
+  });
+
   test('localhost webhook URL throws on postOne', async () => {
     const notifier = new WebhookNotifier();
-    notifier.addUrl('http://localhost:19999/webhook');
+    notifier.setUrls(['http://localhost:19999/webhook']);
 
     const results = await notifier.test();
     expect(results.length).toBe(1);
@@ -129,7 +138,7 @@ describe('WebhookNotifier SSRF filter', () => {
 
   test('private IP webhook URL throws on postOne', async () => {
     const notifier = new WebhookNotifier();
-    notifier.addUrl('http://10.0.0.1/webhook');
+    notifier.setUrls(['http://10.0.0.1/webhook']);
 
     const results = await notifier.test();
     expect(results.length).toBe(1);
@@ -139,7 +148,7 @@ describe('WebhookNotifier SSRF filter', () => {
 
   test('send returns observable delivery failures', async () => {
     const notifier = new WebhookNotifier();
-    notifier.addUrl('http://10.0.0.1/webhook');
+    notifier.setUrls(['http://10.0.0.1/webhook']);
 
     const result = await notifier.send('hello');
     expect(result).toMatchObject({

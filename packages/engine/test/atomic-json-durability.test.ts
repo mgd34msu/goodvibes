@@ -21,17 +21,17 @@ function sameInode(a: fs.Stats, b: fs.Stats) { return a.dev === b.dev && a.ino =
 
 // Keep the original file-only repro as a compatibility assertion: strict
 // durability is explicit, not an unbounded change to all historical writers.
-test('historical atomic JSON defaults still fsync the file only', () => {
-  const { file } = fixture(); const calls: string[] = []; const actual = fs.fsyncSync;
-  const sync = spyOn(fs, 'fsyncSync').mockImplementation(fd => {
-    calls.push(fs.fstatSync(fd).isDirectory() ? 'directory' : 'file'); actual(fd);
-  });
-  try { writeJsonFileAtomic(file, { value: 'default' }); } finally { sync.mockRestore(); }
-  expect(calls).toEqual(['file']);
+test('a plain atomic JSON write syncs the file data once and no directory', () => {
+  const { file } = fixture(); const fsyncs: string[] = []; let datasyncs = 0;
+  const actualSync = fs.fsyncSync, actualData = fs.fdatasyncSync;
+  const sync = spyOn(fs, 'fsyncSync').mockImplementation(fd => { fsyncs.push(fs.fstatSync(fd).isDirectory() ? 'directory' : 'file'); actualSync(fd); });
+  const data = spyOn(fs, 'fdatasyncSync').mockImplementation(fd => { datasyncs++; actualData(fd); });
+  try { writeJsonFileAtomic(file, { value: 'default' }); } finally { sync.mockRestore(); data.mockRestore(); }
+  expect(fsyncs).toEqual([]); expect(datasyncs).toBe(1);
 });
 
 describe('strict atomic JSON durability', () => {
-  test('strict publication fsyncs temp, renames, then confirms file and every ancestor through root', () => {
+  test('strict publication fsyncs the file, renames, then syncs the parent and the directory holding the parent it created', () => {
     const { file } = fixture(); const calls: string[] = []; const actualSync = fs.fsyncSync, actualRename = fs.renameSync;
     const sync = spyOn(fs, 'fsyncSync').mockImplementation(fd => {
       const identity = fs.fstatSync(fd);
@@ -47,9 +47,9 @@ describe('strict atomic JSON durability', () => {
     const rename = spyOn(fs, 'renameSync').mockImplementation((...args) => { calls.push('rename'); actualRename(...args); });
     try { writeJsonFileAtomic(file, { value: 'strict' }, { durable: true }); }
     finally { sync.mockRestore(); rename.mockRestore(); }
-    const expected = ['file', 'rename', 'file'];
-    for (let path = dirname(file);; path = dirname(path)) { expected.push(path); if (dirname(path) === path) break; }
-    expect(calls).toEqual(expected);
+    // The file's directory, then the directory holding each directory the write created.
+    const nested = dirname(file), created = dirname(nested);
+    expect(calls).toEqual(['file', 'rename', nested, dirname(created), created]);
   });
 
   test('failure before rename reports before-publication and leaves the old image untouched', () => {
@@ -147,7 +147,7 @@ describe('paired owner durable publication', () => {
     let restarted: PairingTokenManager;
     try {
       expect(failure(() => manager.revoke(revoked.id)).phase).toBe('published-indeterminate');
-      expect(calls).toEqual(['file', 'file', 'directory']);
+      expect(calls).toEqual(['file', 'directory']);
       expect(JSON.parse(fs.readFileSync(file, 'utf8')).tokens.map((token: { id: string }) => token.id)).toEqual([survivor.id]);
       expect(manager.authenticateNative(survivor.token)).toBeNull();
       restarted = new PairingTokenManager(file);

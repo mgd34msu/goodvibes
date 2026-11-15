@@ -168,7 +168,9 @@ export function readMarkdownDisclosure(filePath: string): MarkdownDisclosure {
 export function materializeMarkdownBody(filePath: string, body?: string): string {
   const resolvedPath = resolve(filePath);
   const sourceBody = body ?? readMarkdownDisclosure(resolvedPath).body;
-  return resolveMarkdownIncludes(resolvedPath, sourceBody, new Set<string>(), dirname(resolvedPath), 0, { expanded: 0, chars: 0 });
+  let root: string;
+  try { root = realpathSync(dirname(resolvedPath)); } catch { root = dirname(resolvedPath); }
+  return resolveMarkdownIncludes(resolvedPath, sourceBody, new Set<string>(), root, 0, { expanded: 0, chars: 0 });
 }
 
 // Nesting and total expansions are bounded: without the bounds a few small
@@ -179,6 +181,12 @@ const MAX_INCLUDE_EXPANSIONS = 200;
 // file included many times multiply into hundreds of megabytes.
 const MAX_INCLUDE_CHARS = 1_000_000;
 
+function includeSkipped(includeTarget: string): string {
+  const file = includeTarget.split('#')[0];
+  return `[include skipped: ${file} exceeds the include limit (${MAX_INCLUDE_DEPTH} levels, ${MAX_INCLUDE_EXPANSIONS} includes, `
+    + `${MAX_INCLUDE_CHARS.toLocaleString('en-US')} characters); read ${file} directly if it is needed]`;
+}
+
 function isFile(path: string): boolean {
   try {
     return statSync(path).isFile();
@@ -187,9 +195,10 @@ function isFile(path: string): boolean {
   }
 }
 
+/** `root` is already a real path, resolved once per materialization. */
 function isInsideDirectory(root: string, candidate: string): boolean {
   try {
-    const rel = relative(realpathSync(root), realpathSync(candidate));
+    const rel = relative(root, realpathSync(candidate));
     return rel === '' || !(rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel));
   } catch {
     return false;
@@ -241,12 +250,12 @@ function resolveMarkdownIncludes(
     }
 
     if (depth >= MAX_INCLUDE_DEPTH || budget.expanded >= MAX_INCLUDE_EXPANSIONS) {
-      result.push(`[include skipped: ${includeTarget.split('#')[0]} exceeds the include limit]`);
+      result.push(includeSkipped(includeTarget));
       continue;
     }
     const included = readMarkdownDisclosure(includePath);
     if (budget.chars + included.body.length > MAX_INCLUDE_CHARS) {
-      result.push(`[include skipped: ${includeTarget.split('#')[0]} exceeds the include limit]`);
+      result.push(includeSkipped(includeTarget));
       continue;
     }
     budget.expanded += 1;

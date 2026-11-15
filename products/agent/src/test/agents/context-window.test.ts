@@ -1,6 +1,6 @@
 import { fakePort, choiceAnswer, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { fieldKind, redactionCredential, residualCredential } from '@goodvibes-jev/engine/platform/platform/utils';
+import { redactionCredential, residualCredential } from '@goodvibes-jev/engine/platform/platform/utils';
 import { authoredPrivacyAnswer, errorText } from '../helpers/authored-diagnostic-readings.ts';
 /**
  * Agent context window awareness tests.
@@ -15,6 +15,8 @@ import { AgentOrchestrator } from '@goodvibes-jev/engine/platform/platform/agent
 import type { AgentRecord } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { LLMProvider, ChatRequest, ChatResponse } from '@goodvibes-jev/engine/platform/platform/providers';
 import { getTestAgentOrchestrator, getTestProviderRegistry, resetTestRuntimeServices } from '../helpers/runtime-services.ts';
+// The field-name reading no longer exists (the activity log masks locally); a request naming it is unexpected.
+const fieldKind = { name: 'engine.redaction.field-kind', items: { kind: { question: {} as never } } };
 
 // ---------------------------------------------------------------------------
 // Helpers

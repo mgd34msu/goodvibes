@@ -1,7 +1,6 @@
 import { appendFileSync, mkdirSync, existsSync, statSync, renameSync } from 'fs';
 import { dirname, join } from 'path';
-import { FieldKindReader } from './field-kind-reading.js';
-import { assertJudgmentInput } from '../gate/judgment-input.js';
+import { redactDiagnosticValue } from './redaction.js';
 
 /** Maximum buffered entries before a flush is triggered. */
 const LOG_BUFFER_MAX = 10;
@@ -34,7 +33,6 @@ const MAX_BUFFERED_ENTRIES = 1_000;
  * permanently broken destination is recognised within a second.
  */
 const MAX_CONSECUTIVE_FLUSH_FAILURES = 3;
-const REDACTED = '[REDACTED]';
 
 /** Options for configuring the activity logger. */
 /** Options for {@link ActivityLogger.flushSync}. */
@@ -131,7 +129,6 @@ export class ActivityLogger {
   private consecutiveFailures = 0;
   /** Entries lost to the buffer cap, reported in the log once one lands. */
   private droppedEntries = 0;
-  private fieldReader = new FieldKindReader();
 
   /**
    * True once a destination has been named. Until then every info/warn/error
@@ -166,7 +163,6 @@ export class ActivityLogger {
   }
 
   configure(logDir: string, options: ActivityLoggerOptions = {}): void {
-    if (this.disposed) this.fieldReader = new FieldKindReader();
     if (!existsSync(logDir)) {
       mkdirSync(logDir, { recursive: true });
     }
@@ -203,7 +199,6 @@ export class ActivityLogger {
    * the process.
    */
   dispose(): void {
-    this.fieldReader.dispose();
     // recreateDestination: false, the difference between a live logger and a
     // disposed one. A live logger whose directory was moved underneath it
     // rebuilds it and retries, which is right and is asserted by
@@ -367,7 +362,7 @@ export class ActivityLogger {
     const timestamp = new Date().toISOString();
     let entry = `[${timestamp}] [${level}] ${message}\n`;
     if (data) {
-      entry += '```json\n' + JSON.stringify(redactLogData(data, this.fieldReader), null, 2) + '\n```\n';
+      entry += '```json\n' + JSON.stringify(redactDiagnosticValue(data), null, 2) + '\n```\n';
     }
     this.buffer.push(entry);
     this.enforceBufferCap();
@@ -420,23 +415,4 @@ export function ensureActivityLoggerConfigured(
   if (logger.isConfigured) return false;
   logger.configure(logDir, options);
   return true;
-}
-
-function redactLogData(value: unknown, reader: FieldKindReader, seen = new WeakSet<object>()): unknown {
-  if (value === null || typeof value !== 'object') return value;
-  if (seen.has(value)) return '[Circular]';
-  seen.add(value);
-  if (Array.isArray(value)) {
-    return value.map((item) => redactLogData(item, reader, seen));
-  }
-  const out: Record<string, unknown> = {};
-  for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {
-    try { assertJudgmentInput({ field: key }); }
-    catch { out['[REDACTED_FIELD]'] = REDACTED; continue; }
-    const kind = reader.read(key);
-    out[key] = kind === undefined || kind === 'secret' ? REDACTED
-      : kind === 'owner_profile' ? '[REDACTED_PROFILE]'
-        : kind === 'content' && (nested === null || typeof nested !== 'object') ? '[REDACTED_TEXT]' : redactLogData(nested, reader, seen);
-  }
-  return out;
 }

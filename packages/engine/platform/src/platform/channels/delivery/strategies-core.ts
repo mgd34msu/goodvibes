@@ -8,7 +8,7 @@ import { ServiceRegistry } from '../../config/service-registry.js';
 import { resolveSecretInput } from '../../config/secret-refs.js';
 import { ControlPlaneGateway } from '../../control-plane/gateway.js';
 import { DiscordIntegration, HomeAssistantIntegration, NtfyIntegration, SlackIntegration, resolveNtfyDefaultPriority } from '../../integrations/index.js';
-import { postToPublicWebhook, validatePublicWebhookUrl } from '../../utils/url-safety.js';
+import { ownerDeliveryTargetProblem, postToPublicWebhook, validatePublicWebhookUrl } from '../../utils/url-safety.js';
 import type { HostResolver } from '../../tools/fetch/pinned-request.js';
 import { resolveReachableBaseUrl } from '../../utils/reachable-base-url.js';
 import { resolveHomeAssistantAccessToken, resolveHomeAssistantEventType } from '../builtin/homeassistant.js';
@@ -64,8 +64,16 @@ export function createWebhookDeliveryStrategy(
   configManager: ConfigManager,
   artifactStore: ArtifactStore,
   secretsManager: Pick<SecretsManager, 'get' | 'getGlobalHome'>,
-  /** Resolves the target host before delivery; the system resolver when absent (utils/url-safety.ts). */
-  options: { readonly resolveHost?: HostResolver | undefined } = {},
+  options: {
+    /** Resolves the target host before delivery; the system resolver when absent (utils/url-safety.ts). */
+    readonly resolveHost?: HostResolver | undefined;
+    /**
+     * The owner's approved hosts on their own network (`network.privateDeliveryHosts`),
+     * applied to the targets the owner configured (the delivery target and
+     * `surfaces.webhook.defaultTarget`), never to a binding's callback URL.
+     */
+    readonly privateDeliveryHosts?: (() => readonly string[]) | undefined;
+  } = {},
 ): ChannelDeliveryStrategy {
   return {
     id: 'channel-delivery:webhook',
@@ -76,6 +84,8 @@ export function createWebhookDeliveryStrategy(
     },
     async deliver(request) {
       const attachments = await resolveAttachments(request, artifactStore, configManager, 128 * 1024);
+      // A binding's callback URL was supplied by the outside party that bound it.
+      const outsideAddress = request.target.address === undefined && typeof request.binding?.metadata.callbackUrl === 'string';
       const address = request.target.address
         ?? (typeof request.binding?.metadata.callbackUrl === 'string' ? request.binding.metadata.callbackUrl : undefined)
         // The default target is declared secret-bearing (it can carry its own
@@ -87,11 +97,17 @@ export function createWebhookDeliveryStrategy(
         })
         ?? '';
       if (!address) throw new Error('Missing webhook delivery target');
-      const validation = validatePublicWebhookUrl(address);
-      if (!validation.ok) throw new Error(validation.error);
+      const approvedPrivateHosts = outsideAddress ? undefined : options.privateDeliveryHosts?.() ?? [];
+      if (approvedPrivateHosts === undefined) {
+        const validation = validatePublicWebhookUrl(address);
+        if (!validation.ok) throw new Error(validation.error);
+      } else {
+        const problem = ownerDeliveryTargetProblem(address, { approvedPrivateHosts });
+        if (problem !== undefined) throw new Error(problem);
+      }
       const timeoutMs = Number(configManager.get('surfaces.webhook.timeoutMs') ?? DEFAULT_CONFIG.surfaces.webhook.timeoutMs);
       // Resolved, every answer checked, pinned to a checked address (utils/url-safety.ts).
-      const response = await postToPublicWebhook(validation.url, {
+      const response = await postToPublicWebhook(address, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -107,7 +123,7 @@ export function createWebhookDeliveryStrategy(
           attachments,
           artifacts: attachments,
         }),
-      }, { ...options, assertCurrent: request.assertCurrent, withPublication: request.withPublication });
+      }, { resolveHost: options.resolveHost, approvedPrivateHosts, assertCurrent: request.assertCurrent, withPublication: request.withPublication });
       if (!response.ok) {
         throw new HttpStatusError(`HTTP ${response.status}: ${await response.text().catch(() => '')}`, { status: response.status });
       }

@@ -1,5 +1,4 @@
 import { expect } from 'bun:test';
-import { fieldKind } from '@goodvibes-jev/engine/platform/platform/utils';
 
 interface ObservedRequest {
   readonly state: unknown;
@@ -41,7 +40,6 @@ export function isFieldNamePrivacyRequest(request: ObservedRequest): boolean {
   expect(record(kind.criteria)).toBe(true);
   if (!record(kind.criteria)) throw new Error('Invalid native field-name reading criteria.');
   expect(Object.keys(kind.criteria).sort()).toEqual(['content', 'other', 'owner_profile', 'secret']);
-  expect<unknown>(kind).toEqual(fieldKind.items.kind.question);
   expect(record(request.state)).toBe(true);
   if (!record(request.state)) throw new Error('Invalid native field-name reading source.');
   expect(Object.keys(request.state)).toEqual(['field']);

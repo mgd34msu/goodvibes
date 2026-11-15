@@ -9,7 +9,7 @@ describe('activity log diagnostic fields', () => {
   beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'gv-log-fields-')); });
   afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
 
-  test('keeps the path, syscall and delay of a failed operation and still withholds text and secrets', () => {
+  test('keeps the path, syscall, delay and error text of a failed operation and withholds secrets', () => {
     const log = new ActivityLogger();
     log.configure(dir);
     log.error('[x] could not persist', {
@@ -21,8 +21,9 @@ describe('activity log diagnostic fields', () => {
     expect(text).toContain('"syscall": "rename"');
     expect(text).toContain('"command": "xdg-open"');
     expect(text).toContain('"delayMs": 250');
-    expect(text).toContain('"error": "[REDACTED_TEXT]"');
-    expect(text).toContain('"mystery": "[REDACTED]"');
+    expect(text).toContain('"error": "boom"');
+    expect(text).toContain('"mystery": "value"');
+    expect(text).toContain('"token": "[REDACTED]"');
     expect(text).not.toContain('hunter2zzz');
     log.dispose();
   });

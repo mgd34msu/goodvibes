@@ -100,9 +100,9 @@ describe('url and webhook runs', () => {
     } });
     try {
       const { registry } = make();
-      registry.registerWatcher({ id: 'w1', label: 'W1', kind: 'webhook', source, metadata: { url: `http://127.0.0.1:${server.port}/` } });
-      const record = await registry.runWatcherNow('w1');
-      expect(record?.state).toBe('failed');
+      // Refused when it is registered, naming the setting that would admit the owner's own host.
+      expect(() => registry.registerWatcher({ id: 'w1', label: 'W1', kind: 'webhook', source, metadata: { url: `http://127.0.0.1:${server.port}/` } }))
+        .toThrow(/network\.privateDeliveryHosts/);
       expect(connections).toBe(0);
     } finally {
       server.stop(true);

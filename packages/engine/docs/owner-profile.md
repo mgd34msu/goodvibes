@@ -1177,6 +1177,7 @@ same turn.**
   | `platform/runtime/at-rest-persistence.ts` | `redactSensitiveData` | what a turn writes to disk |
   | `platform/runtime/telemetry/api-helpers.ts` | `redactStructuredData` | telemetry payloads, attributes, span attributes |
   | `platform/utils/error-display.ts` | `redactSensitiveData` | `redactedErrorMessage`, so a thrown value carrying a profile string does not surface it |
+  | `platform/utils/logger.ts` | `redactDiagnosticValue` | the activity log: profile values and profile-named fields are masked, everything else is kept |
 
   The profile store supplies its closed-tier values through a registered reader
   rather than an import, so `redaction.ts` keeps no dependency on the profile

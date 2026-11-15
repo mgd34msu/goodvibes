@@ -441,18 +441,21 @@ export class OccasionStateStore {
   }
 
   private async persist(snapshot: OccasionStateSnapshot, assertCurrent: () => void = UNRESTRICTED_OPERATION): Promise<void> {
-    const physical = this.filePath === ':memory:' || assertCurrent === UNRESTRICTED_OPERATION ? undefined : captureFileMutation(this.filePath);
-    const current = () => { assertCurrent(); physical?.assertCurrent(); };
-    await this.writes.run(() => this.store.persist({
-      version: 1,
-      acknowledgements: [...snapshot.acknowledgements],
-      gifts: [...snapshot.gifts],
-      openItems: [...snapshot.openItems],
-      interviews: [...snapshot.interviews],
-      mirrors: [...snapshot.mirrors],
-      attributions: [...snapshot.attributions],
-      lastSweep: snapshot.lastSweep,
-    }, { assertCurrent: current, onEffect: published => { assertCurrent(); physical?.onEffect(published); } }));
+    await this.writes.run(() => {
+      // Captured when this write's turn comes, so this store's own earlier write is not taken for a foreign one.
+      const physical = this.filePath === ':memory:' || assertCurrent === UNRESTRICTED_OPERATION ? undefined : captureFileMutation(this.filePath);
+      return this.store.persist({
+        version: 1,
+        acknowledgements: [...snapshot.acknowledgements],
+        gifts: [...snapshot.gifts],
+        openItems: [...snapshot.openItems],
+        interviews: [...snapshot.interviews],
+        mirrors: [...snapshot.mirrors],
+        attributions: [...snapshot.attributions],
+        lastSweep: snapshot.lastSweep,
+      }, { assertCurrent, beforePublish: () => physical?.assertCurrent(),
+        onEffect: published => { assertCurrent(); physical?.onEffect(published); } });
+    });
   }
 
   /**
@@ -468,9 +471,10 @@ export class OccasionStateStore {
       // The file is observed when this write's turn comes, so a write queued
       // behind another of this store's own writes is not mistaken for a foreign
       // change by the one before it.
+      // Only a foreign write to this store's own file stops the write; it is
+      // compared once, just before the rename (one lstat).
       const physical = this.filePath === ':memory:' || assertCurrent === UNRESTRICTED_OPERATION ? undefined : captureFileMutation(this.filePath);
-      const current = () => { assertCurrent(); physical?.assertCurrent(); };
-      current();
+      assertCurrent();
       const receipts = occasionStateReceipts(assertCurrent);
       receipts?.onStateWriteIntent?.();
       const previous = this.snapshot!;
@@ -486,10 +490,10 @@ export class OccasionStateStore {
       const result = mutate(snapshot);
       if (options.publish?.(result) === false) { value = result; return; }
       Object.freeze(snapshot);
-      await this.store.persist(snapshot, { assertCurrent: current, withPublication: receipts?.withPublication,
+      await this.store.persist(snapshot, { assertCurrent, withPublication: receipts?.withPublication,
         synchronousPublish: receipts?.withPublication !== undefined, onEffect: published => {
         receipts?.onStateEffect?.(published); physical?.onEffect(published);
-      }, beforePublish: current, afterPublish: () => {
+      }, beforePublish: () => { assertCurrent(); physical?.assertCurrent(); }, afterPublish: () => {
         this.snapshot = snapshot; this.publication += 1; options.afterPublish?.();
       } });
       value = result;

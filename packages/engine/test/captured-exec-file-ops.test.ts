@@ -10,7 +10,8 @@ import { captureContractInput, contractInputPath, materializeContractInput } fro
 import type { Contract } from '../platform/src/platform/contract/types.js';
 import { executeCapturedFileOperations } from '../platform/src/platform/tools/exec/captured-exec-file-ops.js';
 import type { ExecFileOp } from '../platform/src/platform/tools/exec/schema.js';
-import { fieldKind } from '../platform/src/platform/utils/batteries/field-kind.js';
+// The field-name reading no longer exists (the activity log masks locally); a request naming it is unexpected.
+const fieldKind = { name: 'engine.redaction.field-kind', items: { kind: { question: {} as Record<string, unknown> } } };
 import { residualCredential } from '../platform/src/platform/utils/batteries/redaction.js';
 import { captureRedactionSource } from '../platform/src/platform/utils/redaction.js';
 

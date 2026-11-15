@@ -14,19 +14,20 @@ function fixture() {
   return { logger, text() { logger.flushSync(); return readFileSync(join(root, 'activity.md'), 'utf8'); } };
 }
 
-test('repeated logging retains declared diagnostics and masks protected or unknown values without Jev', () => {
+test('repeated logging keeps error text and values, withholds secret and profile fields, without Jev', () => {
   let calls = 0;
   const previous = installJudgmentPort({ model: 'synthetic-unavailable', async ask() { calls++; throw new Error('No field-name request is allowed'); } });
   try {
     const { logger, text } = fixture();
     for (let i = 0; i < 70; i++) logger.warn('request failed', {
-      error: 'private-diagnostic-output', tokenCount: 42, durationMs: 3, requestId: 'request-1',
-      unlockPassphrase: 'private-password', shippingAddress: 'private-address', opaque: 'private-unknown',
+      error: 'connect ECONNREFUSED 127.0.0.1:11434 using ghp_abcdefghijklmnopqrstuvwxyz0123456789', tokenCount: 42, durationMs: 3, requestId: 'request-1',
+      unlockPassphrase: 'private-password', botToken: 'private-bot-token', shippingAddress: 'private-address', opaque: 'ordinary-unknown',
     });
     const written = text();
-    for (const value of ['private-diagnostic-output', 'private-password', 'private-address', 'private-unknown']) expect(written).not.toContain(value);
+    for (const value of ['private-password', 'private-bot-token', 'private-address', 'ghp_abcdefghijklmnopqrstuvwxyz0123456789']) expect(written).not.toContain(value);
+    expect(written).toContain('connect ECONNREFUSED 127.0.0.1:11434'); expect(written).toContain('"opaque": "ordinary-unknown"');
     expect(written).toContain('"tokenCount": 42'); expect(written).toContain('"requestId": "request-1"');
-    expect(written).toContain('[REDACTED_TEXT]'); expect(written).toContain('[REDACTED_PROFILE]');
+    expect(written).toContain('[REDACTED_PROFILE]');
     expect(calls).toBe(0);
   } finally { installJudgmentPort(previous); }
 });

@@ -5,7 +5,7 @@ import type { RuntimeEventBus } from '../runtime/events/index.js';
 import type { WatcherKind, WatcherRecord, WatcherSourceStatus, WatcherState } from '../runtime/store/domains/watchers.js';
 import type { AutomationSourceRecord } from '../automation/sources.js';
 import type { WatcherSourceKind } from '../../events/watchers.js';
-import { readFailureTransience } from '../integrations/delivery.js';
+import { GoodVibesError, RefusalError, classifyFailure, refusal } from '@goodvibes-jev/engine/errors';
 import { summarizeError } from '../utils/error-display.js';
 import { defineLifecycle } from '../utils/lifecycle-machine.js';
 import { logger } from '../utils/logger.js';
@@ -21,7 +21,8 @@ import {
   resolveWatcherStorePath,
   saveWatcherSnapshotToPathSafe,
 } from './store.js';
-import { postToPublicWebhook } from '../utils/url-safety.js';
+import type { AtomicWriteOutcome } from '../utils/atomic-json-store.js';
+import { ownerDeliveryTargetProblem, postToPublicWebhook, PRIVATE_DELIVERY_HOSTS_SETTING } from '../utils/url-safety.js';
 import type { FeatureFlagReader } from '../runtime/feature-flags/index.js';
 import { isFeatureGateEnabled, requireFeatureGate } from '../runtime/feature-flags/index.js';
 
@@ -60,6 +61,13 @@ export interface WatcherRegistryOptions {
    * request (public hosts only, resolved addresses checked, redirects not followed).
    */
   readonly fetchUrl?: ((url: string, init: RequestInit) => Promise<Response>) | undefined;
+  /**
+   * The owner's approved hosts on their own network (`network.privateDeliveryHosts`),
+   * read at each use. A watcher URL is configured by the owner, so a listed
+   * host may resolve to a private address; any other private target is
+   * refused when the watcher is registered, naming the setting.
+   */
+  readonly privateDeliveryHosts?: (() => readonly string[]) | undefined;
   /** How long one url/webhook run may take, request and body together. */
   readonly runTimeoutMs?: number | undefined;
   /**
@@ -68,8 +76,13 @@ export interface WatcherRegistryOptions {
    * such a value is sent as written.
    */
   readonly resolveHeaderValue?: ((value: string) => Promise<string | null>) | undefined;
-  /** Reads whether a failure can clear on the next run. Defaults to the platform reading. */
-  readonly readTransience?: ((error: unknown, site: string) => Promise<{ readonly failureClass: string }>) | undefined;
+}
+
+/** The last snapshot save that failed, while no later save has succeeded. */
+export interface WatcherSnapshotSaveFailure {
+  readonly filePath: string;
+  readonly code?: string | undefined;
+  readonly error: string;
 }
 
 /**
@@ -107,9 +120,68 @@ const DEFAULT_RUN_TIMEOUT_MS = 30_000;
 /** The shipped `watchers.recoveryWindowMinutes` default, for hosts that pass none. */
 const DEFAULT_RECOVERY_WINDOW_MINUTES = 10;
 
+/**
+ * How long a successful run that changed no state may wait to be saved.
+ * Every such run in the window shares one snapshot write; a run that changed
+ * the state or cleared an error is saved at once.
+ */
+const HEARTBEAT_SAVE_DELAY_MS = 30_000;
+
+type WatcherRun = () => Promise<string | void> | string | void;
+
 interface RegisteredWatcher {
   readonly record: WatcherRecord;
-  readonly run: () => Promise<string | void> | string | void;
+  /** Absent only while a restored watcher waits for its owner to register it again. */
+  readonly run: WatcherRun | undefined;
+  /** The run came from the registering component, not from the record. */
+  readonly ownerRun: boolean;
+}
+
+const LIVE_STATES: ReadonlySet<WatcherState> = new Set(['running', 'starting', 'degraded']);
+
+/**
+ * Why a watcher with no run of its own cannot be registered: what its kind
+ * needs, and what can be created without a component that owns the work.
+ */
+function nothingToRunRefusal(record: WatcherRecord): RefusalError {
+  const accepted = "kind 'webhook' or 'polling' with a url, 'filesystem' with a path, or 'manual'";
+  const needs: Record<WatcherKind, string> = {
+    filesystem: 'A filesystem watcher needs a path to watch',
+    webhook: 'A webhook watcher needs a url to call',
+    polling: 'A polling watcher needs a url to request',
+    manual: 'A manual watcher needs nothing',
+    socket: `A socket watcher has no built-in check, so nothing would observe ${typeof record.metadata.address === 'string' ? record.metadata.address : 'the connection'}`,
+    integration: 'An integration watcher has no built-in check, so nothing would observe the integration',
+  };
+  const ownerKind = record.kind === 'socket' || record.kind === 'integration';
+  return new RefusalError(refusal({
+    code: 'WATCHER_NOTHING_TO_RUN',
+    state: `watcher "${record.id}" was not registered`,
+    reason: `${needs[record.kind]}.`,
+    next: ownerKind
+      ? [`Register it from the component that owns the ${record.kind}, or create ${accepted}`]
+      : [`Send the ${record.kind === 'filesystem' ? 'path' : 'url'}, or create ${accepted}`],
+    status: 400,
+  }));
+}
+
+/** The URL a webhook or polling watcher requests, or '' when it has none. */
+function watchedUrl(record: WatcherRecord): string {
+  if (record.kind !== 'webhook' && record.kind !== 'polling') return '';
+  const merged = { ...(record.source.metadata ?? {}), ...(record.metadata ?? {}) };
+  const text = (key: string): string => (typeof merged[key] === 'string' ? (merged[key] as string).trim() : '');
+  return text('url') || (record.kind === 'polling' ? text('endpoint') : '');
+}
+
+/** A watcher whose URL delivery would refuse is refused when it is registered, with the setting that admits it. */
+function targetRefusal(record: WatcherRecord, problem: string): RefusalError {
+  return new RefusalError(refusal({
+    code: 'WATCHER_TARGET_NOT_ALLOWED',
+    state: `watcher "${record.id}" was not registered`,
+    reason: problem,
+    next: [`Use a public https URL, or approve the host on your own network in ${PRIVATE_DELIVERY_HOSTS_SETTING}`],
+    status: 400,
+  }));
 }
 
 function now(): number {
@@ -205,25 +277,39 @@ export class WatcherRegistry {
   private loaded = false;
   /**
    * Restored watchers whose work lives in a closure only their owner can
-   * supply. They are not armed, and do not report a heartbeat, until the owner
-   * registers them again.
+   * supply, with the time they were restored. They are not armed, and do not
+   * report a heartbeat, until the owner registers them again.
    */
-  private readonly awaitingRegistration = new Set<string>();
+  private readonly awaitingRegistration = new Map<string, number>();
   private readonly fetchUrl: (url: string, init: RequestInit) => Promise<Response>;
+  /** True when requests go through the guarded default transport, whose rules registration applies. */
+  private readonly guardedFetch: boolean;
+  private readonly privateDeliveryHosts: () => readonly string[];
   private readonly runTimeoutMs: number;
   private readonly resolveHeaderValue: ((value: string) => Promise<string | null>) | undefined;
-  private readonly readTransience: (error: unknown, site: string) => Promise<{ readonly failureClass: string }>;
+  private pendingSave: ReturnType<typeof setTimeout> | null = null;
+  private saveFailure: WatcherSnapshotSaveFailure | undefined;
 
   constructor(options: WatcherRegistryOptions = {}) {
     this.storePath = resolveWatcherStorePath(options.storePath);
     this.featureFlags = options.featureFlags ?? null;
     this.readRecoveryWindowMinutes = options.recoveryWindowMinutes
       ?? ((): number => DEFAULT_RECOVERY_WINDOW_MINUTES);
+    this.privateDeliveryHosts = options.privateDeliveryHosts ?? ((): readonly string[] => []);
+    this.guardedFetch = options.fetchUrl === undefined;
     this.fetchUrl = options.fetchUrl
-      ?? ((url, init) => postToPublicWebhook(url, init, { allowHttp: true }));
+      ?? ((url, init) => postToPublicWebhook(url, init, { allowHttp: true, approvedPrivateHosts: this.privateDeliveryHosts() }));
     this.runTimeoutMs = options.runTimeoutMs ?? DEFAULT_RUN_TIMEOUT_MS;
     this.resolveHeaderValue = options.resolveHeaderValue;
-    this.readTransience = options.readTransience ?? readFailureTransience;
+  }
+
+  /**
+   * The snapshot save that failed last, while none has succeeded since: the
+   * watchers in memory work, but a restart would not bring back what the
+   * failed save held.
+   */
+  snapshotSaveFailure(): WatcherSnapshotSaveFailure | undefined {
+    return this.saveFailure;
   }
 
   /**
@@ -281,13 +367,12 @@ export class WatcherRegistry {
   registerWatcher(input: RegisterWatcherInput): WatcherRecord {
     this.requireEnabled('register watcher');
     this.ensureLoaded();
-    const existing = this.watchers.get(input.id)?.record;
-    const wasRunning = existing?.state === 'running' || existing?.state === 'starting' || existing?.state === 'degraded';
-    const timer = this.timers.get(input.id);
-    if (timer) {
-      clearInterval(timer);
-      this.timers.delete(input.id);
-    }
+    const previous = this.watchers.get(input.id);
+    const existing = previous?.record;
+    const wasRunning = existing !== undefined && LIVE_STATES.has(existing.state);
+    // An owner that brings its work ends the wait, and the wait's reason with it.
+    const ownerReturned = input.run !== undefined && this.awaitingRegistration.has(input.id);
+    if (ownerReturned) this.awaitingRegistration.delete(input.id);
     const record = this.normalizeRecord({
       id: input.id,
       kind: input.kind ?? existing?.kind ?? 'polling',
@@ -300,24 +385,34 @@ export class WatcherRegistry {
       lastError: existing?.lastError,
       sourceLagMs: existing?.sourceLagMs,
       sourceStatus: existing?.sourceStatus,
-      degradedReason: existing?.degradedReason,
+      degradedReason: ownerReturned ? undefined : existing?.degradedReason,
       metadata: {
         ...(existing?.metadata ?? {}),
         ...(input.metadata ?? {}),
       },
     });
-    this.watchers.set(record.id, {
-      record,
-      run: input.run ?? this.buildRunStrategy(record),
-    });
-    // Only a registration that brings the work ends the wait; an update without
-    // a run (the PATCH route) must not turn the stand-in on.
-    if (input.run !== undefined || this.hasStandaloneStrategy(record)) this.awaitingRegistration.delete(record.id);
-    this.persist();
-    this.runtimeDispatch?.syncWatcher(record, 'watchers.register');
-    if (wasRunning && !this.awaitingRegistration.has(record.id)) {
+    // An update without a run (the PATCH route) keeps the owner's work.
+    const ownerRun = input.run !== undefined || previous?.ownerRun === true;
+    const run = input.run ?? (previous?.ownerRun === true ? previous.run : this.buildRunStrategy(record));
+    // A restored watcher still waiting for its owner may be edited; anything
+    // else with nothing to run would report heartbeats that observed nothing.
+    if (run === undefined && !this.awaitingRegistration.has(record.id)) throw nothingToRunRefusal(record);
+    if (!ownerRun && this.guardedFetch) {
+      const url = watchedUrl(record);
+      const problem = url ? ownerDeliveryTargetProblem(url, { allowHttp: true, approvedPrivateHosts: this.privateDeliveryHosts() }) : undefined;
+      if (problem !== undefined) throw targetRefusal(record, problem);
+    }
+    const timer = this.timers.get(input.id);
+    if (timer) {
+      clearInterval(timer);
+      this.timers.delete(input.id);
+    }
+    this.watchers.set(record.id, { record, run, ownerRun });
+    if (wasRunning && run !== undefined) {
       return this.startWatcher(record.id) ?? record;
     }
+    this.persistNow();
+    this.runtimeDispatch?.syncWatcher(record, 'watchers.register');
     return record;
   }
 
@@ -375,7 +470,7 @@ export class WatcherRegistry {
       sourceLagMs: 0,
     });
     this.watchers.set(id, { ...watcher, record: started });
-    this.persist();
+    this.persistNow();
     this.runtimeDispatch?.syncWatcher(started, 'watchers.start');
     if (this.runtimeBus) {
       emitWatcherStarted(this.runtimeBus, {
@@ -414,11 +509,15 @@ export class WatcherRegistry {
    * again when it restarts, and a clean shutdown must not depend on a feature
    * gate being on. This releases process resources and nothing else.
    *
+   * A heartbeat save still waiting is written now, so the last runs are not
+   * lost to the shutdown.
+   *
    * Idempotent.
    */
   dispose(): void {
     for (const timer of this.timers.values()) clearInterval(timer);
     this.timers.clear();
+    if (this.pendingSave !== null) this.persistNow();
   }
 
   stopWatcher(id: string, reason = 'stopped'): WatcherRecord | null {
@@ -436,7 +535,7 @@ export class WatcherRegistry {
       sourceStatus: 'unknown',
     });
     this.watchers.set(id, { ...watcher, record: stopped });
-    this.persist();
+    this.persistNow();
     this.runtimeDispatch?.syncWatcher(stopped, 'watchers.stop');
     if (this.runtimeBus) {
       emitWatcherStopped(this.runtimeBus, {
@@ -470,7 +569,8 @@ export class WatcherRegistry {
     this.stopWatcher(id, 'removed');
     const removed = this.watchers.delete(id);
     if (removed) {
-      this.persist();
+      this.awaitingRegistration.delete(id);
+      this.persistNow();
       this.runtimeDispatch?.removeWatcher(id, 'watchers.remove');
     }
     return removed;
@@ -480,28 +580,23 @@ export class WatcherRegistry {
     if (!this.isEnabled()) return;
     if (this.loaded) return;
     const snapshot = loadWatcherSnapshotFromPath(this.storePath);
+    const restoredAt = now();
+    const restored: string[] = [];
     if (snapshot) {
       // A watcher registered in this process keeps its closure; the snapshot only adds the rest.
       for (const record of snapshot.watchers) {
         if (this.watchers.has(record.id)) continue;
-        const normalized = this.normalizeRecord(record);
-        this.watchers.set(normalized.id, {
-          record: normalized,
-          run: this.buildRunStrategy(normalized),
-        });
-        if (!this.hasStandaloneStrategy(normalized)) this.awaitingRegistration.add(normalized.id);
+        const run = this.buildRunStrategy(record);
+        if (run === undefined) this.awaitingRegistration.set(record.id, restoredAt);
+        this.watchers.set(record.id, { record, run, ownerRun: false });
+        restored.push(record.id);
       }
     }
     this.loaded = true;
     const recoveryWindowMs = this.recoveryWindowMs();
-    const restoredAt = now();
     for (const watcher of this.watchers.values()) {
       const normalized = this.normalizeRecord(watcher.record);
-      this.watchers.set(normalized.id, {
-        ...watcher,
-        record: normalized,
-        run: watcher.run ?? this.buildRunStrategy(normalized),
-      });
+      this.watchers.set(normalized.id, { ...watcher, record: normalized });
       if (
         (normalized.state === 'running' || normalized.state === 'degraded' || normalized.state === 'starting')
         && normalized.kind !== 'manual'
@@ -522,20 +617,12 @@ export class WatcherRegistry {
         this.catchUpAfterRestart(normalized, restoredAt, recoveryWindowMs);
       }
     }
-  }
-
-  /**
-   * Whether the record carries what its run needs (an inline result, a path or
-   * a url). Without it the work is a closure only the registering owner holds.
-   */
-  private hasStandaloneStrategy(record: WatcherRecord): boolean {
-    const merged = { ...(record.source.metadata ?? {}), ...(record.metadata ?? {}) };
-    if (typeof merged.run === 'string' && merged.run.trim().length > 0) return true;
-    if (record.kind === 'filesystem') return true;
-    if (record.kind === 'webhook') return true;
-    if (record.kind === 'manual') return true;
-    if (record.kind === 'integration' || record.kind === 'socket') return false;
-    return typeof merged.url === 'string' || typeof merged.endpoint === 'string';
+    // Restored records reach the runtime store once here; every later change
+    // dispatches only the record it changed.
+    for (const id of restored) {
+      const watcher = this.watchers.get(id);
+      if (watcher) this.runtimeDispatch?.syncWatcher(watcher.record, 'watchers.restore');
+    }
   }
 
   /**
@@ -572,6 +659,17 @@ export class WatcherRegistry {
   }
 
   private normalizeRecord(record: WatcherRecord): WatcherRecord {
+    const awaitingSince = this.awaitingRegistration.get(record.id);
+    if (awaitingSince !== undefined) {
+      // Nothing runs, so there is no heartbeat to judge: the record says what it waits for.
+      const { sourceLagMs: _lag, ...rest } = record;
+      return {
+        ...rest,
+        state: LIVE_STATES.has(record.state) ? 'degraded' : record.state,
+        sourceStatus: 'unknown',
+        degradedReason: `awaiting its owner since ${new Date(awaitingSince).toISOString()}: restored from disk, it runs only when the component that registered it registers it again`,
+      };
+    }
     const freshness = sourceStatusFor(record);
     const state = freshness.nextState ?? record.state;
     return {
@@ -589,8 +687,18 @@ export class WatcherRegistry {
    * the state and the way out instead.
    */
   private refuseWhileAwaitingOwner(id: string, operation: 'start' | 'run'): void {
-    if (!this.awaitingRegistration.has(id)) return;
-    throw new Error(`Cannot ${operation} watcher "${id}": it was restored from disk and its work is held by the component that registered it. It runs again once that component registers it; until then it reports no heartbeat.`);
+    const since = this.awaitingRegistration.get(id);
+    if (since === undefined) return;
+    throw new RefusalError(refusal({
+      code: 'WATCHER_AWAITING_OWNER',
+      state: `watcher "${id}" was restored from disk at ${new Date(since).toISOString()} and waits for the component that registered it`,
+      reason: `Cannot ${operation} watcher "${id}": its work is held by the component that registered it, and that component has not registered it again.`,
+      next: [
+        'It runs again when that component starts and registers it',
+        `If nothing registers it any more, remove it with watchers.delete (DELETE /api/watchers/${encodeURIComponent(id)})`,
+      ],
+      status: 409,
+    }));
   }
 
   private async runWatcher(id: string): Promise<void> {
@@ -599,10 +707,11 @@ export class WatcherRegistry {
     // No timer is armed for such a watcher, but a pending interval or a stale caller must not run the stand-in either.
     if (this.awaitingRegistration.has(id)) return;
     const watcher = this.watchers.get(id);
-    if (!watcher) return;
+    if (!watcher?.run) return;
+    const run = watcher.run;
     this.inFlight.add(id);
     try {
-      const checkpoint = await watcher.run();
+      const checkpoint = await run();
       // Re-read: the watcher may have been stopped, removed or re-registered while it ran.
       const current = this.watchers.get(id);
       // A manual run of a stopped watcher records its result but does not start it: no timer would drive it.
@@ -622,7 +731,13 @@ export class WatcherRegistry {
         degradedReason: undefined,
       });
       this.watchers.set(id, { ...current, record: updated });
-      this.persist();
+      // Only the heartbeat and checkpoint moved: the save can wait and share a
+      // write (dispose flushes it). A change of state or a cleared error is saved now.
+      if (updated.state === current.record.state && current.record.lastError === undefined) {
+        this.persistSoon();
+      } else {
+        this.persistNow();
+      }
       this.runtimeDispatch?.syncWatcher(updated, 'watchers.heartbeat');
       if (this.runtimeBus) {
         emitWatcherHeartbeat(this.runtimeBus, {
@@ -662,24 +777,13 @@ export class WatcherRegistry {
         degradedReason: summarizeError(error),
       });
       this.watchers.set(id, { ...current, record: failed });
-      this.persist();
+      this.persistNow();
       this.runtimeDispatch?.syncWatcher(failed, 'watchers.failed');
       if (this.runtimeBus) {
-        // Whether the next interval's run can clear this failure is read from
-        // the error, not asserted for every failure. The reading may reach a
-        // model: when it cannot be made the failure is still published, as retryable.
-        let retryable = true;
-        try {
-          retryable = (await this.readTransience(error, 'watchers.run')).failureClass === 'retryable';
-        } catch (readingError) {
-          logger.warn('Watcher failure transience could not be read; publishing it as retryable', {
-            watcherId: id,
-            error: summarizeError(readingError),
-          });
-        }
-        // The watcher may have been stopped or removed during the reading; a
-        // failure event after its stop event would end the stream on the wrong state.
-        if (this.watchers.get(id)?.record.state !== 'failed') return;
+        // Whether the next interval's run can clear this failure comes from the
+        // error's status, errno code or class. With none of them it is
+        // retryable: the next interval runs the watcher again either way.
+        const retryable = classifyFailure(error)?.retryable ?? true;
         emitWatcherFailed(this.runtimeBus, {
           sessionId: 'watchers',
           source: 'watcher-registry',
@@ -696,20 +800,19 @@ export class WatcherRegistry {
     }
   }
 
-  private buildRunStrategy(record: WatcherRecord): () => Promise<string | void> | string | void {
-    const metadata = record.metadata ?? {};
-    const sourceMetadata = record.source.metadata ?? {};
-    const merged = { ...sourceMetadata, ...metadata };
-
-    if (typeof merged.run === 'string' && merged.run.trim().length > 0) {
-      return () => merged.run as string;
-    }
+  /**
+   * The run a record carries on its own: a path to look at, a url to request,
+   * or a manual trigger. Undefined when the work is a closure only the
+   * registering component holds.
+   */
+  private buildRunStrategy(record: WatcherRecord): WatcherRun | undefined {
+    const merged = { ...(record.source.metadata ?? {}), ...(record.metadata ?? {}) };
+    const text = (key: string): string => (typeof merged[key] === 'string' ? (merged[key] as string).trim() : '');
 
     if (record.kind === 'filesystem') {
-      const path = typeof merged.path === 'string' ? merged.path : typeof merged.filePath === 'string' ? merged.filePath : '';
+      const path = text('path') || text('filePath');
+      if (!path) return undefined;
       return () => {
-        // A watcher with nothing to look at is a failed watcher, not a quiet one.
-        if (!path) throw new Error('Filesystem watcher has no path to watch. Re-register it with a path.');
         // A missing file is a checkpoint change, so a file that appears or is removed is seen as an event.
         if (!existsSync(path)) return `${path}:missing`;
         const stat = statSync(path);
@@ -717,29 +820,15 @@ export class WatcherRegistry {
       };
     }
 
-    if (record.kind === 'webhook') {
-      const url = typeof merged.url === 'string' ? merged.url : '';
-      return () => {
-        if (!url) throw new Error('Webhook watcher has no url to call. Re-register it with a url.');
-        return this.pollUrl(url, merged);
-      };
-    }
-
-    if (record.kind === 'integration') {
-      return () => `integration:${record.source.id}:${record.label}`;
-    }
-
-    if (record.kind === 'socket') {
-      return () => `socket:${typeof merged.address === 'string' ? merged.address : record.label}`;
+    if (record.kind === 'webhook' || record.kind === 'polling') {
+      const url = watchedUrl(record);
+      return url ? () => this.pollUrl(url, merged) : undefined;
     }
 
     // A manual run has no source to bracket: a timestamp would "advance" on every run.
     if (record.kind === 'manual') return () => undefined;
 
-    const url = typeof merged.url === 'string' ? merged.url : typeof merged.endpoint === 'string' ? merged.endpoint : '';
-    if (url) return () => this.pollUrl(url, merged);
-
-    return () => undefined;
+    return undefined;
   }
 
   /**
@@ -761,37 +850,59 @@ export class WatcherRegistry {
         headers[name] = resolved;
       }
     }
-    const response = await this.fetchUrl(url, {
-      method: typeof merged.method === 'string' ? merged.method.toUpperCase() : 'GET',
-      ...(headers !== undefined ? { headers } : {}),
-      signal: AbortSignal.timeout(this.runTimeoutMs),
-    });
-    if (!response.ok) {
-      await response.body?.cancel().catch(() => undefined);
-      throw new Error(`Watched url answered HTTP ${response.status}`);
+    try {
+      const response = await this.fetchUrl(url, {
+        method: typeof merged.method === 'string' ? merged.method.toUpperCase() : 'GET',
+        ...(headers !== undefined ? { headers } : {}),
+        signal: AbortSignal.timeout(this.runTimeoutMs),
+      });
+      if (!response.ok) {
+        await response.body?.cancel().catch(() => undefined);
+        // The status travels on the error so whether a retry can clear it is a table lookup.
+        throw new GoodVibesError(`Watched url answered HTTP ${response.status}`, { status: response.status });
+      }
+      const text = await response.text();
+      return `${response.status}:${text.slice(0, 120)}`;
+    } catch (error) {
+      if (error instanceof Error && error.name === 'TimeoutError') {
+        throw new GoodVibesError(`Watched url did not answer within ${Math.round(this.runTimeoutMs / 1000)} s`, { category: 'timeout', cause: error });
+      }
+      throw error;
     }
-    const text = await response.text();
-    return `${response.status}:${text.slice(0, 120)}`;
   }
 
   /**
-   * Write the snapshot and refresh the runtime store's copy of every record.
+   * Write the snapshot now, replacing any heartbeat save still waiting.
    *
-   * Mutations and heartbeat completions persist, including timer callbacks
-   * with nothing above them. This must not throw: a failed snapshot write is
-   * logged loudly with the path and errno by the store and then dropped, the
-   * in-memory registry carries on as the source of truth, and the next persist
-   * retries. Watcher state rebuilds from live registrations on any load, so
-   * losing a snapshot costs nothing that killing the process would not cost a
-   * great deal more.
+   * This must not throw: a failed write is logged with the path and errno by
+   * the store, kept as {@link snapshotSaveFailure} for the caller that changed
+   * something to report, and the next save retries. The in-memory registry
+   * stays the source of truth. The runtime store is not touched here: each
+   * caller dispatches the one record it changed.
    */
-  private persist(): void {
-    saveWatcherSnapshotToPathSafe(
+  private persistNow(): AtomicWriteOutcome {
+    if (this.pendingSave !== null) {
+      clearTimeout(this.pendingSave);
+      this.pendingSave = null;
+    }
+    const outcome = saveWatcherSnapshotToPathSafe(
       sortWatchers([...this.watchers.values()].map((entry) => entry.record)),
       this.storePath,
     );
-    for (const watcher of this.watchers.values()) {
-      this.runtimeDispatch?.syncWatcher(watcher.record, 'watchers.persist');
-    }
+    this.saveFailure = outcome.ok
+      ? undefined
+      : { filePath: outcome.filePath, ...(outcome.code !== undefined ? { code: outcome.code } : {}), error: outcome.error?.message ?? 'the snapshot write failed' };
+    return outcome;
+  }
+
+  /** One snapshot write for every heartbeat that lands within the delay. */
+  private persistSoon(): void {
+    if (this.pendingSave !== null) return;
+    const timer = setTimeout(() => {
+      this.pendingSave = null;
+      this.persistNow();
+    }, HEARTBEAT_SAVE_DELAY_MS);
+    timer.unref?.();
+    this.pendingSave = timer;
   }
 }

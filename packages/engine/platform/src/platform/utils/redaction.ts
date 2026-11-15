@@ -1,23 +1,12 @@
-import { FieldKindReader } from './field-kind-reading.js';
+import { declaredFieldKind, FieldKindReader, withheldFieldKind, type FieldKind } from './field-kind-reading.js';
 import { isClassicOperation } from '../runtime/decision-policy.js';
-import type { FieldKind } from './batteries/field-kind.js';
 import { assertRedactionCurrent, ProfileDistinctiveReader, readCredentialProjection, readResidualProjection, type ProfileRedactionRole } from './redaction-reading.js';
 import { captureJudgmentPort, type JudgmentPortCapture, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
 import { assertJudgmentInput, captureOwnedJson, retainOwnedJson, judgmentInputProblem, snapshotJudgmentEvidence, snapshotJudgmentInput } from '../gate/judgment-input.js';
 import { captureStructuredCredentialReferenceConfigValue } from '../config/structured-credential-config.js';
 import { redactionCredential, exportCredential, residualCredential, profileDistinctive, type RedactionPart } from './batteries/redaction.js';
 
-const fieldKinds = new FieldKindReader();
 const profileRoles = new ProfileDistinctiveReader();
-const settledText = new Map<string, { readonly value: string; readonly assertCurrent: () => void }>();
-const pendingText = new Set<string>();
-/**
- * Most background readings the synchronous redactor keeps in flight. It is a
- * cache warmer for callers that cannot await: past this, a new text is masked
- * locally and not read, so a loop over many distinct messages cannot start one
- * concurrent model request each.
- */
-const MAX_BACKGROUND_REDACTIONS = 4;
 
 /**
  * Issuer-reserved credential formats: GitHub, GitLab, Slack and AWS reserve
@@ -356,14 +345,6 @@ function boundedPattern(value: string): RegExp {
   return new RegExp(`(?<![\\p{L}\\p{N}])${escapeRegExp(value)}(?![\\p{L}\\p{N}])`, 'giu');
 }
 
-function redactTextValue(value: string, key?: string): string {
-  const kind = key === undefined ? undefined : readProtectedFieldKind(key);
-  if (kind === undefined || kind === 'secret') return '[REDACTED]';
-  if (kind === 'owner_profile') return '[REDACTED_PROFILE]';
-  if (kind === 'content') return '[REDACTED_TEXT]';
-  return redactSensitiveData(value);
-}
-
 function applyPatterns(
   text: string,
   patterns: ReadonlyArray<{ pattern: RegExp; replacement: string }>,
@@ -391,33 +372,13 @@ function applyPatterns(
  * halves are wanted there: the reader is not the owner, so the owner's username
  * is not theirs to have.
  *
- * Synchronous, so it cannot wait for a semantic reading. The first call for a
- * text returns only the redaction markers (or `[REDACTED]`) and starts a bounded
- * background reading; once that settles, later calls for the same text return the
- * cleared text. Use {@link redactSensitiveDataAsync} where the answer must not
- * depend on call order.
+ * Local and deterministic ({@link redactDiagnosticText}): the same text gives
+ * the same result on every call, and no model request is started. Callers that
+ * want the semantic credential reading as well await
+ * {@link redactSensitiveDataAsync}.
  */
 export function redactSensitiveData(text: string): string {
-  if (text.length === 0) return text;
-  if (isClassicOperation()) return redactClassicText(text);
-  const settled = settledText.get(text);
-  if (settled !== undefined) {
-    try { settled.assertCurrent(); return settled.value; }
-    catch { settledText.delete(text); }
-  }
-  if (!pendingText.has(text) && pendingText.size < MAX_BACKGROUND_REDACTIONS) {
-    pendingText.add(text);
-    void redactSensitiveDataAsync(text).finally(() => { pendingText.delete(text); });
-  }
-  try {
-    const source = captureRedactionSource();
-    const protectedText = applyPatterns(text, [...ISSUER_CREDENTIAL_PATTERNS, ...currentIdentityPatterns()]);
-    const spans = outgoingSpans(protectedText);
-    const masked = replaceSpans(protectedText, spans.map((span) => ({ ...span, replacement: span.marker })));
-    source.assertCurrent();
-    // A synchronous error/telemetry boundary cannot await a semantic proof.
-    return [...masked.matchAll(/\[REDACTED(?:_[A-Z]+)*\]/g)].map((match) => match[0]).join(' ') || '[REDACTED]';
-  } catch { return '[REDACTED]'; }
+  return redactDiagnosticText(text);
 }
 
 export interface RedactionOptions extends JudgmentReadingOptions {
@@ -545,48 +506,129 @@ export function redactSensitiveDataAsync(text: string, options: RedactionOptions
   return redactTextSource(text, options);
 }
 
-/** Conservative local egress masking. No semantic scores, cached Jev result or asynchronous background classification. */
-function redactClassicText(text: string, secrets: readonly string[] = []): string {
-  const source = captureRedactionSource();
-  let protectedText = applyPatterns(text, [...ISSUER_CREDENTIAL_PATTERNS, ...currentIdentityPatterns()]);
+/**
+ * Conservative local masking: issuer formats, registered profile values, the
+ * caller's own secrets, candidate shapes and values of credential-named
+ * assignments. Synchronous, so nothing it reads can change while it runs.
+ * `anonymize` also replaces the account's home directory and user name, which
+ * text leaving the machine wants and text kept on it does not.
+ */
+function redactClassicText(text: string, secrets: readonly string[] = [], anonymize = true): string {
+  let protectedText = applyPatterns(text, anonymize ? [...ISSUER_CREDENTIAL_PATTERNS, ...currentIdentityPatterns()] : ISSUER_CREDENTIAL_PATTERNS);
   const profile = profileValueReader?.();
   const values = [...secrets, ...(profile?.guarded ?? []), ...(profile?.absolute ?? []), ...(profile?.guardedFields?.map(field => field.value) ?? [])];
   for (const secret of values.filter(value => value.length > 0).sort((a, b) => b.length - a.length))
     protectedText = protectedText.split(secret).join('[REDACTED]');
-  const result = replaceSpans(protectedText, outgoingSpans(protectedText)
-    .filter(span => span.field === undefined || judgmentInputProblem({ [span.field]: span.value }) !== undefined)
-    .map(span => ({ ...span, replacement: span.marker })));
-  source.assertCurrent();
+  const result = replaceSpans(protectedText, localSpans(protectedText, 0).map(span => ({ ...span, replacement: span.marker })));
   return judgmentInputProblem(result) === undefined ? result : '[REDACTED]';
 }
 
 /**
- * Deterministic local masking for a message that is shown or stored when no
- * semantic reading ran (no judgment port, classic mode, or a message the port
- * must not see). Keeps the message readable and masks credential material; it
- * never starts a background reading. A failure to mask yields `[REDACTED]`.
+ * Spans the local pass masks: every candidate token, and the value of an
+ * assignment whose field is credential-named. The value of an ordinary
+ * assignment (`Auth failed: Bearer sk-...`) is kept, with the candidate tokens
+ * inside it masked.
  */
-export function redactDiagnosticText(text: string): string {
+function localSpans(text: string, offset: number, depth = 0): OutgoingSpan[] {
+  return outgoingSpans(text).flatMap((span): OutgoingSpan[] => {
+    const shifted = { ...span, start: span.start + offset, end: span.end + offset };
+    if (span.field === undefined || withheldFieldKind(span.field) === 'secret'
+      || judgmentInputProblem({ [span.field]: span.value }) !== undefined) return [shifted];
+    return depth < 4 ? localSpans(span.value, shifted.start, depth + 1) : [shifted];
+  });
+}
+
+/**
+ * The one local masking pass for a message that is shown or stored: the same
+ * text gives the same result every time, no model request is made, and the
+ * message stays readable with credential material masked. `anonymize: false`
+ * keeps paths and the user name, for records that stay on the owner's machine.
+ * A failure to mask yields `[REDACTED]`.
+ */
+export function redactDiagnosticText(text: string, options: { readonly anonymize?: boolean } = {}): string {
   if (text.length === 0) return text;
-  try { return redactClassicText(text); } catch { return '[REDACTED]'; }
+  try { return redactClassicText(text, [], options.anonymize !== false); } catch { return '[REDACTED]'; }
+}
+
+/**
+ * Mask a structured value by value class. Numbers, booleans and null are kept;
+ * text is masked by {@link redactClassicText}; a field whose name declares
+ * credential material (or that the input screen names a credential field) is
+ * withheld whole, and an owner-profile field becomes `[REDACTED_PROFILE]`.
+ * Errors become their name and masked message. Accessors are never invoked.
+ * Never asks a model.
+ *
+ * `strictNames` is for telemetry and other egress, which carries no
+ * conversation text: text under a free-text field name (`prompt`, `response`,
+ * `content`, ...) becomes `[REDACTED_TEXT]` and anything but a number or
+ * boolean under a name with no declared role becomes `[REDACTED]`;
+ * identifiers, models, statuses and counts under their declared names keep
+ * their values.
+ */
+function maskStructuredValue(value: unknown, secrets: readonly string[], anonymize: boolean, strictNames = false): unknown {
+  const seen = new WeakSet<object>();
+  const text = (entry: string) => entry.length === 0 ? entry : redactClassicText(entry, secrets, anonymize);
+  const field = (key: string, descriptor: PropertyDescriptor): unknown => {
+    if (!('value' in descriptor)) return '[REDACTED]';
+    const child: unknown = descriptor.value;
+    const kind = declaredFieldKind(key);
+    if (kind === 'owner_profile') return '[REDACTED_PROFILE]';
+    if (kind === 'secret') return child === null || child === undefined || typeof child === 'boolean' || child === '' ? child : protectedFieldValue(child);
+    if (strictNames) {
+      if (kind === 'content' && typeof child === 'string' && child.length > 0) return '[REDACTED_TEXT]';
+      if (kind === undefined && child !== null && child !== undefined && typeof child !== 'number' && typeof child !== 'boolean') return '[REDACTED]';
+    }
+    // The input screen's own credential and card field rules, for a name this table does not declare.
+    if (typeof child === 'string' && child.length > 0 && judgmentInputProblem({ [key]: child }) !== undefined) return '[REDACTED]';
+    return visit(child);
+  };
+  const visit = (entry: unknown): unknown => {
+    if (typeof entry === 'string') return text(entry);
+    if (typeof entry === 'bigint') return entry.toString();
+    if (typeof entry === 'function' || typeof entry === 'symbol') return undefined;
+    if (entry === null || typeof entry !== 'object') return entry;
+    if (seen.has(entry)) return '[Circular]';
+    seen.add(entry);
+    try {
+      if (entry instanceof Error) return text(`${entry.name}: ${entry.message}`);
+      if (entry instanceof Date) return Number.isNaN(entry.getTime()) ? 'Invalid Date' : entry.toISOString();
+      const descriptors = Object.getOwnPropertyDescriptors(entry);
+      if (Array.isArray(entry)) {
+        const items: unknown[] = [];
+        for (let index = 0; index < entry.length; index++) {
+          const descriptor = descriptors[String(index)];
+          items.push(descriptor === undefined ? undefined : !('value' in descriptor) ? '[REDACTED]' : visit(descriptor.value));
+        }
+        return items;
+      }
+      const result: Record<string, unknown> = {};
+      for (const [key, descriptor] of Object.entries(descriptors)) {
+        if (!descriptor.enumerable) continue;
+        // A name that itself carries credential material is written masked, and
+        // its value withheld; masked names that collide keep separate slots.
+        const safeKey = text(key);
+        let outputKey = safeKey, suffix = 1;
+        while (Object.hasOwn(result, outputKey)) outputKey = `${safeKey} [${suffix++}]`;
+        Object.defineProperty(result, outputKey, { value: safeKey === key ? field(key, descriptor) : '[REDACTED]',
+          enumerable: true, writable: true, configurable: true });
+      }
+      return result;
+    } finally { seen.delete(entry); }
+  };
+  return visit(value);
+}
+
+/**
+ * {@link maskStructuredValue} for a record kept on this machine (the activity
+ * log): text keeps its paths and the user name.
+ */
+export function redactDiagnosticValue(value: unknown): unknown {
+  try { return maskStructuredValue(value, [], false); } catch { return '[REDACTED]'; }
 }
 
 function redactClassicStructure(value: unknown, options: StructuredRedactionOptions): unknown {
   options.signal?.throwIfAborted();
-  const snapshot = captureOwnedJson(value);
-  const visit = (entry: unknown): unknown => {
-    if (typeof entry === 'string') return redactClassicText(entry, options.secretValues);
-    if (Array.isArray(entry)) return entry.map(visit);
-    if (!entry || typeof entry !== 'object') return entry;
-    const result: Record<string, unknown> = Object.create(null);
-    for (const [key, child] of Object.entries(entry)) {
-      const safeKey = redactClassicText(key, options.secretValues);
-      const protectedField = judgmentInputProblem({ [key]: child }) !== undefined;
-      result[safeKey] = protectedField ? '[REDACTED]' : visit(child);
-    }
-    return result;
-  };
-  const result = visit(snapshot);
+  const result = maskStructuredValue(captureOwnedJson(value), options.secretValues ?? [], true);
   options.assertCurrent?.();
   return result;
 }
@@ -692,13 +734,6 @@ async function redactTextSource(text: string, options: RedactionOptions,
     assertCurrent(); kinds.assertCurrent();
     const result = output.join('\n');
     retainCurrent?.(() => { assertCurrent(); kinds.assertCurrent(); });
-    if (purpose === 'redaction' && operationFields === undefined) {
-      if (settledText.size >= 128) {
-        const oldest = settledText.keys().next();
-        if (!oldest.done) settledText.delete(oldest.value);
-      }
-      settledText.set(text, { value: result, assertCurrent: () => { assertCurrent(); kinds.assertCurrent(); } });
-    }
     return result;
   } catch { return '[REDACTED]'; }
   finally { if (operationFields === undefined) kinds.dispose(); }
@@ -719,9 +754,13 @@ export function redactIssuerCredentials(text: string): string {
   return applyPatterns(text, ISSUER_CREDENTIAL_PATTERNS);
 }
 
+/**
+ * Local, deterministic structured masking for telemetry and other egress (see
+ * {@link maskStructuredValue}): identifiers, models, statuses and counts keep
+ * their values; conversation text under a free-text field name is withheld.
+ */
 export function redactStructuredData(value: unknown): unknown {
-  if (isClassicOperation()) return redactClassicStructure(value, {});
-  return redactStructuredDataInternal(value, undefined, new WeakSet<object>());
+  try { return maskStructuredValue(value, [], true, true); } catch { return '[REDACTED]'; }
 }
 
 /** Shared asynchronous egress recursion. Field values never enter field-role readings. */
@@ -925,62 +964,7 @@ export async function redactStructuredDataAsync(value: unknown, options: Structu
   finally { fields.dispose(); }
 }
 
-function redactStructuredDataInternal(
-  value: unknown,
-  key: string | undefined,
-  seen: WeakSet<object>,
-): unknown {
-  if (typeof value === 'string') {
-    return redactTextValue(value, key);
-  }
-  if (typeof value === 'number' || typeof value === 'boolean' || value === null || value === undefined) {
-    return value;
-  }
-  if (typeof value === 'object') {
-    if (seen.has(value)) return '[Circular]';
-    seen.add(value);
-    if (Array.isArray(value)) {
-      const descriptors = Object.getOwnPropertyDescriptors(value);
-      const result: unknown[] = [];
-      for (let index = 0; index < value.length; index++) {
-        const descriptor = descriptors[String(index)];
-        result.push(descriptor === undefined ? undefined : !('value' in descriptor) ? '[REDACTED]'
-          : redactStructuredDataInternal(descriptor.value, key, seen));
-      }
-      seen.delete(value);
-      return result;
-    }
-    const output: Record<string, unknown> = {};
-    for (const [entryKey, descriptor] of Object.entries(Object.getOwnPropertyDescriptors(value))) {
-      let safeKey = applyPatterns(entryKey, [...ISSUER_CREDENTIAL_PATTERNS, ...currentIdentityPatterns()]);
-      if (safeKey === entryKey && outgoingSpans(entryKey).length > 0) safeKey = redactSensitiveData(entryKey);
-      let outputKey = safeKey, suffix = 1;
-      while (Object.hasOwn(output, outputKey)) outputKey = `${safeKey} [${suffix++}]`;
-      const kind = safeKey === entryKey ? readProtectedFieldKind(entryKey) : undefined;
-      if (kind === undefined || kind === 'secret' || !('value' in descriptor)) {
-        Object.defineProperty(output, outputKey, { value: '[REDACTED]', enumerable: true });
-        continue;
-      }
-      // A profile-shaped key is redacted whatever it holds, including an object:
-      // a structured postal address is exactly the shape whose parts would
-      // otherwise each be walked and each pass the string checks individually.
-      if (kind === 'owner_profile') {
-        Object.defineProperty(output, outputKey, { value: '[REDACTED_PROFILE]', enumerable: true });
-        continue;
-      }
-      Object.defineProperty(output, outputKey, { value: redactStructuredDataInternal(descriptor.value, entryKey, seen), enumerable: true });
-    }
-    seen.delete(value);
-    return output;
-  }
-  return '[REDACTED]';
-}
-
+/** Whether a telemetry attribute's whole value is withheld (credential or owner-profile field name). */
 export function isSensitiveTelemetryKey(key: string): boolean {
-  return readProtectedFieldKind(key) !== 'other';
-}
-
-function readProtectedFieldKind(key: string) {
-  if (redactIssuerCredentials(key) !== key) return undefined;
-  return fieldKinds.read(key);
+  return withheldFieldKind(key) !== undefined;
 }

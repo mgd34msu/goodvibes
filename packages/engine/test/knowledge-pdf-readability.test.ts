@@ -8,7 +8,8 @@ import { KnowledgeExtractionJudgmentHoldError } from '../platform/src/platform/k
 import { JudgmentInputError } from '../platform/src/platform/gate/judgment-input.js';
 import { extractionReadability, pdfTextDecoding } from '../platform/src/platform/knowledge/batteries/extraction-readability.js';
 import { createCompressedPdfBuffer } from './_helpers/homegraph-service-fixtures.js';
-import { fieldKind } from '../platform/src/platform/utils/batteries/field-kind.js';
+// The field-name reading no longer exists (the activity log masks locally); a request naming it is unexpected.
+const fieldKind = { name: 'engine.redaction.field-kind', items: { kind: { question: {} as Record<string, unknown> } } };
 import { redactionCredential } from '../platform/src/platform/utils/batteries/redaction.js';
 
 let previous: JudgmentPort | undefined;
@@ -43,7 +44,7 @@ function extractionRequests(fake: ReturnType<typeof textPort>) {
       continue;
     }
     expect(request.context?.battery).toBe(fieldKind.name);
-    expect(request.questions).toEqual({ kind: fieldKind.items.kind.question });
+    expect(request.questions as unknown).toEqual({ kind: fieldKind.items.kind.question });
     expect(request.state).toEqual({ field: 'error' });
   }
   return fake.requests.filter(request => request.context?.battery === extractionReadability.name || request.context?.battery === pdfTextDecoding.name);

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { validatePublicWebhookUrl } from '@goodvibes-jev/engine/platform/platform/utils';
-import { postToPublicWebhook } from '../platform/src/platform/utils/url-safety.ts';
+import { ownerDeliveryTargetProblem, postToPublicWebhook } from '../platform/src/platform/utils/url-safety.ts';
 import type { HostResolver } from '../platform/src/platform/tools/fetch/pinned-request.ts';
 
 describe('validatePublicWebhookUrl', () => {
@@ -100,5 +100,31 @@ describe('postToPublicWebhook', () => {
     expect(sent).toEqual([{ url: 'http://203.0.113.31/h', host: 'hooks.example', redirect: 'manual' }]);
     await expect(postToPublicWebhook('http://hooks.internal.example/h', { method: 'POST' }, { resolveHost, allowHttp: true })).rejects.toThrow(/private address/);
     expect(sent).toHaveLength(1);
+  });
+});
+
+describe('owner-approved hosts on the owner\'s own network', () => {
+  test('an approved host delivers, an unapproved one is refused naming the setting, metadata never', async () => {
+    stub(() => new Response('ok'));
+    const approvedPrivateHosts = ['hooks.internal.example', '192.168.1.20', 'metadata.google.internal'];
+    expect((await postToPublicWebhook('http://hooks.internal.example/h', { method: 'POST' }, { resolveHost, allowHttp: true, approvedPrivateHosts })).status).toBe(200);
+    expect((await postToPublicWebhook('http://192.168.1.20:8080/h', { method: 'POST' }, { resolveHost, allowHttp: true, approvedPrivateHosts })).status).toBe(200);
+    expect(sent.map(entry => entry.url)).toEqual(['http://10.0.0.8/h', 'http://192.168.1.20:8080/h']);
+    await expect(postToPublicWebhook('https://metadata.google.internal/x', { method: 'POST' }, { resolveHost, approvedPrivateHosts })).rejects.toThrow(/metadata address/);
+    await expect(postToPublicWebhook('http://10.0.0.5/h', { method: 'POST' }, { resolveHost, allowHttp: true, approvedPrivateHosts: [] }))
+      .rejects.toThrow(/network\.privateDeliveryHosts/);
+    expect(sent).toHaveLength(2);
+  });
+
+  test('an address supplied by an outside party carries no approval', async () => {
+    stub(() => new Response('ok'));
+    await expect(postToPublicWebhook('https://hooks.internal.example/h', { method: 'POST' }, { resolveHost })).rejects.toThrow(/private address/);
+    expect(sent).toEqual([]);
+  });
+
+  test('configuration refuses an unapproved private target as written, with the setting', () => {
+    expect(ownerDeliveryTargetProblem('http://10.0.0.5/ntfy', { allowHttp: true, approvedPrivateHosts: [] })).toMatch(/network\.privateDeliveryHosts/);
+    expect(ownerDeliveryTargetProblem('http://10.0.0.5/ntfy', { allowHttp: true, approvedPrivateHosts: ['10.0.0.5'] })).toBeUndefined();
+    expect(ownerDeliveryTargetProblem('http://169.254.169.254/', { allowHttp: true, approvedPrivateHosts: ['169.254.169.254'] })).toMatch(/not allowed/);
   });
 });

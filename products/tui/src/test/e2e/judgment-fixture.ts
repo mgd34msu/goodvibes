@@ -1,4 +1,4 @@
-import { fieldKind, redactionCredential, residualCredential } from '@goodvibes-jev/engine/platform/platform/utils';
+import { redactionCredential, residualCredential } from '@goodvibes-jev/engine/platform/platform/utils';
 import modelIdentity from '../fixtures/e2e-judgments/model-identity.json';
 import modelTier from '../fixtures/e2e-judgments/model-tier.json';
 import unavailableModelRoutes from '../fixtures/e2e-judgments/unavailable-model-routes.json';
@@ -7,6 +7,8 @@ import planningGoals from '../fixtures/e2e-judgments/planning-goals.json';
 import headlessCompletion from '../fixtures/e2e-judgments/headless-completion.json';
 import completionApplicability from '../fixtures/e2e-judgments/completion-applicability.json';
 import tuiCompletionTools from '../fixtures/e2e-judgments/tui-completion-tools.json';
+// The field-name reading no longer exists (the activity log masks locally); a request naming it is unexpected.
+const fieldKind = { name: 'engine.redaction.field-kind', items: { kind: { question: {} as never } } };
 
 // Native TUI startup may finish after the original turn-entry snapshot; these recorded
 // system notices are the only alternate complete transcripts a completion check may carry.

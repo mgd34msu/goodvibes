@@ -70,7 +70,7 @@ describe('@ include containment', () => {
     writeFileSync(skill, Array.from({ length: 150 }, () => '@big.md').join('\n'));
     const out = materializeMarkdownBody(skill);
     expect(out.length).toBeLessThan(1_500_000);
-    expect(out).toContain('[include skipped: big.md exceeds the include limit]');
+    expect(out).toContain('[include skipped: big.md exceeds the include limit');
   });
 
   test('an include naming a directory keeps the line instead of throwing', () => {

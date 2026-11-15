@@ -1,5 +1,5 @@
 import { lstatSync, readFileSync, type BigIntStats } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { resolve } from 'node:path';
 import { types as nodeTypes } from 'node:util';
 
 /** A native producer can add a publication restriction, never grant authority. */
@@ -62,47 +62,29 @@ export function captureMutationDescriptors(subject: object, keys: readonly strin
   };
 }
 
-/** Private filesystem lifetime restriction. It never authorizes an operation. */
+/**
+ * Detects a foreign write to one file between capture and publication by
+ * comparing that file's own identity (device, inode, size, modification time):
+ * one `lstat` per check, no read, no parent directories. Another store saving
+ * in the same directory does not disturb it. `onEffect(true)` after this
+ * writer's own publication adopts the new identity. It never authorizes an
+ * operation.
+ */
 export function captureFileMutation(path: string): { readonly assertCurrent: () => void; readonly onEffect: (published?: boolean) => void } {
   const target = resolve(path);
-  const file = () => {
+  const identity = (): string | null => {
     const stat = lstatSync(target, { bigint: true, throwIfNoEntry: false });
     if (!stat) return null;
-    if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1n) throw new Error('File mutation target is not a private regular file.');
-    const revision = (value: BigIntStats) => `${value.dev}:${value.ino}:${value.mode}:${value.uid}:${value.gid}:${value.nlink}:${value.size}:${value.mtimeNs}:${value.ctimeNs}`;
-    const bytes = readFileSync(target);
-    const after = lstatSync(target, { bigint: true, throwIfNoEntry: false });
-    if (!after || revision(stat) !== revision(after)) throw new Error('File mutation source changed while reading.');
-    return { revision: revision(after), bytes };
+    if (!stat.isFile()) throw new Error(`File mutation target is not a regular file: ${target}`);
+    return `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeNs}`;
   };
-  const sameFile = (current: ReturnType<typeof file>, expected: ReturnType<typeof file>) => current === null || expected === null
-    ? current === expected : current.revision === expected.revision && current.bytes.equals(expected.bytes);
-  const ancestry = () => {
-    const parents: Array<{ readonly path: string; readonly identity: string | null; readonly revision: string | null }> = [];
-    let first = true;
-    for (let current = dirname(target); ; current = dirname(current)) {
-      const stat = lstatSync(current, { bigint: true, throwIfNoEntry: false });
-      if (stat && (!stat.isDirectory() || stat.isSymbolicLink())) throw new Error('File mutation ancestry changed.');
-      parents.push({ path: current, identity: stat ? `${stat.dev}:${stat.ino}` : null,
-        revision: stat ? `${stat.dev}:${stat.ino}${first ? `:${stat.ctimeNs}` : ''}` : null });
-      if (stat) first = false;
-      if (current === dirname(current)) break;
-    }
-    return parents;
-  };
-  let expectedFile = file(), expectedParents = ancestry();
+  let expected = identity();
   return {
     assertCurrent() {
-      if (!sameFile(file(), expectedFile) || JSON.stringify(ancestry()) !== JSON.stringify(expectedParents)) throw new Error('File mutation source changed.');
+      if (identity() !== expected) throw new Error(`The file changed on disk while this write was in progress, so nothing was written: ${target}. Read it again and retry.`);
     },
     onEffect(published = false) {
-      if (!published && !sameFile(file(), expectedFile)) throw new Error('File mutation source changed.');
-      const currentParents = ancestry();
-      if (currentParents.length !== expectedParents.length || expectedParents.some((parent, index) => {
-        const current = currentParents[index];
-        return !current || current.path !== parent.path || (parent.identity !== null && parent.identity !== current.identity);
-      })) throw new Error('File mutation ancestry changed.');
-      expectedFile = file(); expectedParents = currentParents;
+      if (published) expected = identity();
     },
   };
 }

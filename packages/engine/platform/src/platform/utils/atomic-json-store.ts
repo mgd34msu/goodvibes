@@ -18,44 +18,36 @@
  *
  * The two mechanics:
  *
- *   1. {@link writeFileAtomic} / {@link writeJsonFileAtomic}, write to a
- *      sibling temp file in the same directory as the target (so the later
- *      rename stays on one filesystem), fsync the descriptor before closing
- *      it, chmod it to the exact requested mode (so the result does not depend
- *      on the process umask), then `renameSync` it over the target.
- *      `rename(2)` is atomic on POSIX: a concurrent reader, and a process
- *      that dies mid-write, can only ever observe the previous complete file
- *      or the new complete one, never a torn write. `durable: true` additionally
- *      flushes the original file and complete canonical/alias ancestry before
- *      returning success. A guard or effect observer additionally retains the exact
- *      visible image; unobserved replacing writes remain last-writer-wins.
- *      The historical default retains rename-only behavior.
+ *   1. {@link writeFileAtomic} / {@link writeJsonFileAtomic}: write a uniquely
+ *      named sibling temp file (same directory, so the rename stays on one
+ *      filesystem), set its exact mode (independent of the umask), sync its
+ *      data, then `rename(2)` it over the target. A concurrent reader, and a
+ *      process that dies mid-write, sees the previous complete file or the new
+ *      complete one, never a torn write. The data sync before the rename is
+ *      what keeps a power loss from leaving an empty file under the old name.
+ *      `durable: true` also syncs the parent directory (and any directory the
+ *      write created) after the rename, so the new name itself survives a
+ *      power loss before success is returned.
  *
- *      The temp name is unique per WRITE, not per process
- *      ({@link createAtomicTempPath}: `<name>.tmp-<pid>-<seq>-<random>`), and
- *      the pre-write sweep of leftovers only reaps temp files older than
- *      {@link STALE_TEMP_FILE_MIN_AGE_MS}. Both halves fix one crash: this
- *      module used to name the temp file `<name>.tmp-<pid>` and sweep every
- *      `<name>.tmp-*` it found, on the reasoning that a temp file for this
- *      store could only be a dead process's leftover. It could also be a
- *      SECOND LIVE WRITER's file, another process writing the same shared
- *      store, or the same process writing the same store from a worker
- *      thread. Writer B's sweep (or, with a shared name, writer B's rename)
- *      then deleted writer A's temp file out from under it, and writer A's
- *      next `chmodSync` died with
- *      `ENOENT: no such file or directory, chmod '…/watchers.json.tmp-905081'`
- *     , a real crash that killed a running agent. With a per-write name,
- *      writer A and writer B never share a path; with an age-gated sweep, a
- *      temp file young enough to belong to a write still in progress is left
- *      alone. Reclamation additionally requires a recognized native PID that
- *      no longer exists; age alone cannot identify a crashed writer.
+ *      The parent directory is created once per process and then trusted.
+ *      A caller that passes `assertCurrent` or `onEffect` gets exactly one
+ *      check of its guard and of the parent directory's identity, immediately
+ *      before the rename; nothing else re-proves the path. Another process of
+ *      the same user could write the store file directly, so per-syscall
+ *      ancestry checks would buy nothing.
+ *
+ *      The temp name is unique per WRITE ({@link createAtomicTempPath}:
+ *      `<name>.tmp-<pid>-<seq>-<random>`), so two live writers of one store
+ *      never share or delete each other's temp file. A temp file left by a
+ *      writer that died is reaped the first time this process writes that
+ *      store (one directory listing per store per process), and only when its
+ *      writer pid is gone and the file is older than
+ *      {@link STALE_TEMP_FILE_MIN_AGE_MS}.
  *
  *      There is deliberately NO in-process write lock. Every step above is a
  *      synchronous `node:fs` call with no await between them, so two writes of
- *      one store cannot interleave on one thread, and a JavaScript lock
- *      cannot span worker threads or separate processes, which is where the
- *      real concurrency lives. Ordering is settled by `rename(2)` instead:
- *      whichever writer renames last wins, whole.
+ *      one store cannot interleave on one thread; ordering between processes
+ *      is settled by `rename(2)`: whichever writer renames last wins, whole.
  *
  *      A write that fails still throws, because most stores must not report a
  *      save that did not happen. Callers whose failure policy is genuinely
@@ -63,7 +55,8 @@
  *      {@link writeJsonFileAtomicSafe}, which logs the path and errno loudly
  *      and returns an {@link AtomicWriteOutcome} instead of throwing.
  *
- *   2. {@link readJsonFileOrQuarantine}, a file this reader cannot trust
+ *   2. {@link readJsonFileOrQuarantine}: one open and one read. Only a file
+ *      this reader cannot trust
  *      (unparseable JSON, a torn or zero-tailed write, the wrong shape) is
  *      exclusively linked to `<name>.corrupt-<ISO>-<8char>` with a sibling `.why`
  *      receipt, logged loudly at error level, and reported to the caller as
@@ -80,7 +73,6 @@ import {
   closeSync,
   constants,
   fchmodSync,
-  existsSync,
   fdatasyncSync,
   fstatSync,
   fsyncSync,
@@ -399,158 +391,117 @@ export function prepareAtomicPublicationDirectory(directory: string, options: Pi
   return Object.freeze(prepareAtomicDirectory(absolute, () => check(guard?.()), notify ? () => check(notify(false)) : undefined, options.mkdirp !== false));
 }
 
-function ownsAtomicFile(stat: BigIntStats | undefined, original: BigIntStats | undefined): boolean {
-  return !!stat && !!original && stat.isFile() && !stat.isSymbolicLink() && stat.nlink === 1n
-    && stat.dev === original.dev && stat.ino === original.ino && stat.uid === original.uid && stat.gid === original.gid && stat.birthtimeNs === original.birthtimeNs;
+/** Parent directories this process already created or found, so a write does not ask again. */
+const knownAtomicParents = new Set<string>();
+/** Store files whose dead writers' temp files this process already reaped. */
+const reapedAtomicTargets = new Set<string>();
+
+function completeSynchronously(value: unknown, message: string): void {
+  if (value === undefined) return;
+  if (nodeTypes.isPromise(value)) Reflect.apply(Promise.prototype.then, value, [undefined, () => {}]);
+  throw new Error(message);
 }
+
+function directoryIdentity(path: string): string {
+  const stat = statSync(path, { bigint: true });
+  if (!stat.isDirectory()) throw Object.assign(new Error(`Atomic file parent is not a directory: ${path}`), { code: 'ENOTDIR' });
+  return `${stat.dev}:${stat.ino}`;
+}
+
+/** Make the parent once per process. Returns the directories this call created, outermost first. */
+function ensureAtomicParent(dir: string, mkdirp: boolean, beforeCreate: (() => void) | undefined): string[] {
+  if (knownAtomicParents.has(dir)) return [];
+  let created: string[] = [];
+  const existing = statSync(dir, { throwIfNoEntry: false });
+  if (existing === undefined) {
+    if (!mkdirp) throw Object.assign(new Error(`Atomic publication parent does not exist: ${dir}`), { code: 'ENOENT' });
+    beforeCreate?.();
+    const first = mkdirSync(dir, { recursive: true });
+    if (first !== undefined) {
+      for (let path = dir; ; path = dirname(path)) { created.unshift(path); if (path === first || dirname(path) === path) break; }
+      // A restrictive umask must not leave the creator unable to finish its own nested write.
+      for (const path of created) {
+        const directoryMode = statSync(path).mode & 0o7777;
+        if ((directoryMode & 0o700) !== 0o700) chmodSync(path, directoryMode | 0o700);
+      }
+    }
+  } else if (!existing.isDirectory()) {
+    throw Object.assign(new Error(`Atomic file parent is not a directory: ${dir}`), { code: 'ENOTDIR' });
+  }
+  knownAtomicParents.add(dir);
+  return created;
+}
+
+function syncDirectory(path: string): void {
+  const fd = openSync(path, constants.O_RDONLY | constants.O_DIRECTORY);
+  try { fsyncSync(fd); } finally { closeSync(fd); }
+}
+
 /**
  * Write `contents` to `filePath` atomically, creating parent directories as
  * needed. See the module docstring for the mechanics and why they matter.
  */
 export function writeFileAtomic(filePath: string, contents: string | Uint8Array, options: AtomicWriteOptions = {}): void {
-  const input = typeof contents === 'string' ? contents : Buffer.from(contents);
-  const expectedLength = typeof input === 'string' ? Buffer.byteLength(input, 'utf8') : input.byteLength;
-  const guard = options.assertCurrent?.bind(options), onEffect = options.onEffect?.bind(options), mode = options.mode ?? DEFAULT_STORE_FILE_MODE;
-  const replaceExisting = options.replaceExisting !== false;
-  const durable = options.durable === true, sweep = options.cleanupStaleTemps !== false, mkdirp = options.mkdirp !== false;
+  const bytes = typeof contents === 'string' ? Buffer.from(contents, 'utf8') : contents;
+  const guard = options.assertCurrent?.bind(options), onEffect = options.onEffect?.bind(options);
+  const mode = options.mode ?? DEFAULT_STORE_FILE_MODE, replaceExisting = options.replaceExisting !== false;
+  const durable = options.durable === true, mkdirp = options.mkdirp !== false;
   const absolute = isAbsolute(filePath) ? filePath : `${process.cwd()}${sep}${filePath}`;
-  const leaf = basename(absolute);
-  let parent: AtomicDirectoryOwner | undefined, tmpPath: string | undefined, target: string | undefined;
-  let fd: number | undefined, original: BigIntStats | undefined, prepared: BigIntStats | undefined, publishedImage: BigIntStats | undefined;
-  let published = false, attempted = false, publicationNotified = false;
-  const effect = (isPublished = false) => {
-    if (isPublished) { if (publicationNotified) return; publicationNotified = true; }
-    const returned: unknown = onEffect?.(isPublished);
-    if (returned !== undefined) {
-      if (nodeTypes.isPromise(returned)) Reflect.apply(Promise.prototype.then, returned, [undefined, () => {}]);
-      throw new Error('Atomic file effect notification must complete synchronously');
-    }
-  };
-  const current = () => {
-    const result: unknown = guard?.();
-    if (result !== undefined) {
-      if (nodeTypes.isPromise(result)) Reflect.apply(Promise.prototype.then, result, [undefined, () => {}]);
-      throw new Error('Atomic file operation currentness is unavailable.');
-    }
-    parent?.assertCurrent();
-  };
-  const assertTemporary = () => {
-    parent?.assertCurrent();
-    if (fd === undefined || !tmpPath || !original) throw new Error('Atomic staging ownership is unavailable');
-    const descriptor = fstatSync(fd, { bigint: true }), selected = lstatSync(tmpPath, { bigint: true, throwIfNoEntry: false });
-    if (!ownsAtomicFile(descriptor, original) || !ownsAtomicFile(selected, original)
-      || (prepared !== undefined && (atomicFileStamp(descriptor) !== atomicFileStamp(prepared) || !selected || atomicFileStamp(selected) !== atomicFileStamp(prepared)))) throw new Error('Atomic staging source changed');
-  };
-  const observePublished = (): BigIntStats => {
-    parent?.assertCurrent();
-    if (fd === undefined || !target || !original) throw new Error('Atomic published ownership is unavailable');
-    const descriptor = fstatSync(fd, { bigint: true }), selected = lstatSync(target, { bigint: true });
-    if (!ownsAtomicFile(descriptor, original) || !ownsAtomicFile(selected, original)
-      || atomicFileStamp(descriptor) !== atomicFileStamp(selected)) throw new Error('Atomic publication is not the original staged image');
-    return descriptor;
-  };
-  const assertPublished = () => {
-    if (!publishedImage || atomicFileStamp(observePublished()) !== atomicFileStamp(publishedImage)) throw new Error('Atomic published image changed');
-  };
-  const cleanup = () => {
-    if (!parent || !tmpPath || !original || published) return;
-    try { parent.assertPhysicalCurrent(); if (ownsAtomicFile(lstatSync(tmpPath, { bigint: true, throwIfNoEntry: false }), original)) unlinkSync(tmpPath); }
-    catch { /* Preserve unknown/foreign paths. Cleanup never supplies authority. */ }
-  };
+  const leaf = basename(absolute), dir = dirname(absolute);
+  const check = () => completeSynchronously(guard?.(), 'Atomic file operation currentness is unavailable.');
+  const notify = (published: boolean) => completeSynchronously(onEffect?.(published), 'Atomic file effect notification must complete synchronously');
+  // tmpPath is set only once this write created the file, so a failure never removes another writer's file.
+  let tmpPath: string | undefined, fd: number | undefined, published = false;
   try {
     if (!leaf || leaf === '.' || leaf === '..' || absolute.endsWith(sep) || absolute.includes('\0')) throw new Error('Atomic publication requires a file target');
-    parent = prepareAtomicDirectory(dirname(absolute), current, onEffect ? () => effect() : undefined, mkdirp, replaceExisting && !guard && !onEffect); current();
-    target = join(parent.canonical, leaf);
-    if (sweep) cleanupStaleTempFiles(parent.canonical, target, current, onEffect ? () => { parent?.assertCurrent(); effect(); parent?.assertCurrent(); } : undefined);
-    tmpPath = createAtomicTempPath(target); current();
-    fd = openSync(tmpPath, constants.O_RDWR | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW | constants.O_NONBLOCK, DEFAULT_STORE_FILE_MODE);
-    original = fstatSync(fd, { bigint: true });
-    if (onEffect) { assertTemporary(); effect(); assertTemporary(); }
-    current(); assertTemporary();
-    fchmodSync(fd, mode); current(); assertTemporary();
-    const written = typeof input === 'string' ? writeSync(fd, input, null, 'utf8') : writeSync(fd, input, 0, input.byteLength, null);
-    if (written !== expectedLength) throw new Error('Incomplete atomic file write');
-    prepared = fstatSync(fd, { bigint: true });
-    if (prepared.size !== BigInt(expectedLength)) throw new Error('Atomic staging size changed');
-    current(); assertTemporary(); fsyncSync(fd);
-    current(); assertTemporary();
-    // The prepared nanosecond file stamp detects edits by a borrowed guard;
-    // publication does not need to read back or hash the completed file.
-    // No borrowed callback or async gap is allowed between the identity proof
-    // and the native rename into the retained original physical parent.
-    attempted = true;
-    if (replaceExisting) { renameSync(tmpPath, target); published = true; }
+    check();
+    const created = ensureAtomicParent(dir, mkdirp, onEffect ? () => notify(false) : undefined);
+    const parentIdentity = guard || onEffect ? directoryIdentity(dir) : undefined;
+    if (options.cleanupStaleTemps !== false && !reapedAtomicTargets.has(absolute)) {
+      reapedAtomicTargets.add(absolute);
+      cleanupStaleTempFiles(dir, absolute, () => {}, undefined);
+    }
+    const staging = createAtomicTempPath(absolute);
+    const flags = constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW;
+    try { fd = openSync(staging, flags, DEFAULT_STORE_FILE_MODE); }
+    catch (error) {
+      // The parent was removed since this process first saw it: make it once more.
+      if (!mkdirp || !atomicMissing(error)) throw error;
+      knownAtomicParents.delete(dir);
+      created.push(...ensureAtomicParent(dir, mkdirp, undefined));
+      fd = openSync(staging, flags, DEFAULT_STORE_FILE_MODE);
+    }
+    tmpPath = staging;
+    if (onEffect) notify(false);
+    fchmodSync(fd, mode);
+    const written = writeSync(fd, bytes, 0, bytes.byteLength, 0);
+    if (written !== bytes.byteLength) throw new Error(`Incomplete atomic file write: ${written} of ${bytes.byteLength} bytes`);
+    if (durable) fsyncSync(fd); else fdatasyncSync(fd);
+    const done = fd; fd = undefined; closeSync(done);
+    // The one currentness check: the caller's guard and the parent it resolved, just before publication.
+    if (parentIdentity !== undefined) {
+      check();
+      if (directoryIdentity(dir) !== parentIdentity) throw new Error(`Atomic file parent changed before publication: ${dir}`);
+    }
+    if (replaceExisting) { renameSync(tmpPath, absolute); published = true; }
     else {
-      // Linking a complete same-directory stage is atomic no-replace across
-      // processes. EEXIST (including a symlink) never replaces a foreign leaf.
-      linkSync(tmpPath, target); published = true;
-      const samePrepared = (stat: BigIntStats): boolean => !!prepared && stat.isFile() && !stat.isSymbolicLink()
-        && stat.dev === prepared.dev && stat.ino === prepared.ino && stat.mode === prepared.mode
-        && stat.uid === prepared.uid && stat.gid === prepared.gid && stat.birthtimeNs === prepared.birthtimeNs
-        && stat.size === prepared.size && stat.mtimeNs === prepared.mtimeNs;
-      const linked = fstatSync(fd, { bigint: true });
-      if (!samePrepared(linked) || linked.nlink !== 2n
-        || atomicFileStamp(lstatSync(tmpPath, { bigint: true })) !== atomicFileStamp(linked)
-        || atomicFileStamp(lstatSync(target, { bigint: true })) !== atomicFileStamp(linked)) throw new Error('Exclusive atomic publication changed');
-      parent.assertCurrent(); unlinkSync(tmpPath);
-      const transferred = fstatSync(fd, { bigint: true });
-      if (!samePrepared(transferred) || transferred.nlink !== 1n
-        || atomicFileStamp(lstatSync(target, { bigint: true })) !== atomicFileStamp(transferred)) throw new Error('Exclusive atomic publication changed');
-      // No observer is acknowledged until the exact original stage has become
-      // the single-link destination. Failed transfer preserves its evidence.
+      // A same-directory hard link publishes the complete file only when the name is free (EEXIST otherwise).
+      linkSync(tmpPath, absolute); published = true;
+      unlinkSync(tmpPath);
     }
-    if (!onEffect && (!durable || (replaceExisting && !guard))) {
-      // A plain atomic write promises complete publication, with the latest
-      // concurrent writer winning. A later valid rename may already replace
-      // our image; it cannot undo this completed rename. Flush only our original
-      // FD and retained physical parents, never open/adopt the replacing leaf.
-      // Guarded, observed and exclusive durable publications retain their exact image.
-      if (durable) {
-        parent.assertCurrent(); fsyncSync(fd); parent.assertCurrent();
-        for (const directory of parent.ancestryDirectories) {
-          parent.assertCurrent(); const expected = atomicDirectoryStamp(lstatSync(directory, { bigint: true }));
-          const owner = openSync(directory, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
-          try {
-            parent.assertCurrent();
-            if (atomicDirectoryStamp(fstatSync(owner, { bigint: true })) !== expected || atomicDirectoryStamp(lstatSync(directory, { bigint: true })) !== expected) throw new Error('Atomic durability parent changed');
-            fsyncSync(owner); parent.assertCurrent();
-            if (atomicDirectoryStamp(fstatSync(owner, { bigint: true })) !== expected || atomicDirectoryStamp(lstatSync(directory, { bigint: true })) !== expected) throw new Error('Atomic durability parent changed during sync');
-          } finally { closeSync(owner); }
-        }
-      }
-      parent.assertCurrent();
-      const completedFd = fd; fd = undefined; closeSync(completedFd);
-      return;
-    }
-    // rename changes ctime. Capture the new exact descriptor/path stamp before
-    // any borrowed observer may advance its own source receipt.
-    publishedImage = observePublished();
-    if (onEffect) { effect(true); assertPublished(); }
+    tmpPath = undefined;
+    // The rename happened: the observer hears of it even if the durability sync below fails.
+    if (onEffect) notify(true);
     if (durable) {
-      try { confirmFileDurable(absolute); }
-      catch (error) {
-        if (error instanceof AtomicWriteDurabilityError && error.filePath !== filePath) throw new AtomicWriteDurabilityError(filePath, error.phase, error.cause);
-        throw error;
-      }
+      try {
+        syncDirectory(dir);
+        for (const path of created) syncDirectory(dirname(path));
+      } catch (error) { throw new AtomicWriteDurabilityError(filePath, 'published-indeterminate', error); }
     }
-    assertPublished();
-    const completedFd = fd; fd = undefined; closeSync(completedFd);
   } catch (error) {
-    if (!published && attempted) {
-      // A thrown publication is only pre-publication when the exact original stage
-      // still exists under the original parent. Otherwise retain uncertainty.
-      try { assertTemporary(); } catch { published = true; }
-      if (onEffect && published && !publicationNotified && target && parent) {
-        try {
-          publishedImage = observePublished();
-          effect(true); assertPublished();
-        } catch { /* Uncertain/foreign publication cannot supply an effect receipt. */ }
-      }
-    }
-    if (fd !== undefined) { try { closeSync(fd); } catch { /* The original error remains the diagnostic. */ } fd = undefined; }
-    cleanup();
-    if (durable) {
-      if (error instanceof AtomicWriteDurabilityError) throw error;
+    if (fd !== undefined) { try { closeSync(fd); } catch { /* the original error is the diagnostic */ } }
+    if (tmpPath !== undefined && !published) { try { unlinkSync(tmpPath); } catch { /* nothing was published */ } }
+    if (durable && !(error instanceof AtomicWriteDurabilityError)) {
       throw new AtomicWriteDurabilityError(filePath, published ? 'published-indeterminate' : 'before-publication', error);
     }
     throw error;
@@ -820,22 +771,51 @@ export async function readCapturedQuarantineSourceAsync(filePath: string, source
     original.pendingReads--; if (original.closed) { original.bytes = undefined; if (!original.fdClosed && original.pendingReads === 0) { original.fdClosed = true; closeSync(original.fd); } }
   }
 }
-/** Invalid parsed contents are preserved before returning null. Original-read
- * failures and stale source observations propagate without moving a new file. */
+type StoreParse<T> = { readonly ok: true; readonly value: T } | { readonly ok: false; readonly reason: string };
+
+function parseStoreBytes<T>(bytes: Uint8Array, validate: (parsed: unknown) => T): StoreParse<T> {
+  let raw: string;
+  try { raw = new TextDecoder('utf8', { fatal: true }).decode(bytes); }
+  catch { return { ok: false, reason: 'store source is not valid UTF-8' }; }
+  let parsed: unknown;
+  try { parsed = JSON.parse(raw) as unknown; }
+  catch { return { ok: false, reason: 'store JSON could not be parsed' }; }
+  let value: T;
+  try { value = validate(parsed); }
+  catch { return { ok: false, reason: 'store shape validation failed' }; }
+  if (nodeTypes.isPromise(value)) { nativeQuarantineApply(nativeQuarantineThen, value, [undefined, () => {}]); throw new TypeError('Store validation must complete synchronously.'); }
+  return { ok: true, value };
+}
+
+/**
+ * Read a JSON store: one open (refusing a symlinked store file) and one read.
+ * Returns null when there is no file. A file this reader cannot trust is read
+ * again through a retained descriptor; if it is still unreadable, that exact
+ * file is preserved as `<name>.corrupt-*` (see {@link quarantineCorruptFile})
+ * and null is returned so the caller rebuilds. A file another writer fixed in
+ * between is returned instead. Read failures other than absence propagate.
+ */
 export function readJsonFileOrQuarantine<T>(filePath: string, options: QuarantineLoadOptions<T>): T | null {
-  const label = options.label, recovery = options.recovery, validate = options.validate.bind(options);
+  const validate = options.validate.bind(options);
+  let fd: number;
+  try { fd = openSync(absoluteQuarantinePath(filePath), constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK); }
+  catch (error) { if (atomicMissing(error)) return null; throw error; }
+  let bytes: Buffer;
+  try { bytes = readFileSync(fd); } finally { closeSync(fd); }
+  const first = parseStoreBytes(bytes, validate);
+  if (first.ok) return first.value;
+  // Only an untrusted file pays for the retained source the quarantine needs.
   const source = captureQuarantineSource(filePath); if (!source) return null;
   try {
-    let raw: string;
-    try { raw = source.read(); } catch (error) { if (!(error instanceof QuarantineEncodingError)) throw error; source.assertCurrent(); quarantineCorruptFile(filePath, { source, label, reason: 'store source is not valid UTF-8', recovery }); return null; }
-    let parsed: unknown;
-    try { parsed = JSON.parse(raw) as unknown; }
-    catch { source.assertCurrent(); quarantineCorruptFile(filePath, { source, label, reason: 'store JSON could not be parsed', recovery }); return null; }
-    let result: T;
-    try { result = validate(parsed); }
-    catch { source.assertCurrent(); quarantineCorruptFile(filePath, { source, label, reason: 'store shape validation failed', recovery }); return null; }
-    if (nodeTypes.isPromise(result)) { nativeQuarantineApply(nativeQuarantineThen, result, [undefined, () => {}]); throw new TypeError('Store validation must complete synchronously.'); }
-    source.assertCurrent(); return result;
+    const native = originalQuarantineSource(source);
+    let again: Buffer;
+    try { source.read(); again = native.bytes!; }
+    catch (error) { if (!(error instanceof QuarantineEncodingError)) throw error; again = native.bytes!; }
+    const second = parseStoreBytes(again, validate);
+    if (second.ok) return second.value;
+    source.assertCurrent();
+    quarantineCorruptFile(filePath, { source, label: options.label, reason: second.reason, recovery: options.recovery });
+    return null;
   } finally { source.close(); }
 }
 export interface QuarantineOptions {

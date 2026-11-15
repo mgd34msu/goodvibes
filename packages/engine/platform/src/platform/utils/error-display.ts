@@ -124,9 +124,8 @@ function inferSource(error: unknown, override: PlatformErrorSource | undefined, 
  * fields, structured result/error fields, or diagnostic context, use
  * `summarizeError` or the structured `normalizeError` for those.
  *
- * Outside classic mode the first call for a message returns only redaction
- * markers; the message appears on a later call once its reading has settled
- * (see `redactSensitiveData`).
+ * The masking is local and deterministic (see `redactSensitiveData`): the
+ * message reads the same the first time it is shown and every time after.
  */
 export function redactedErrorMessage(error: unknown): string {
   return redactSensitiveData(extractErrorMessage(error));

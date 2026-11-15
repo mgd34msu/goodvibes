@@ -40,16 +40,12 @@ test('a failed post-link stage transfer preserves uncertain evidence and never a
   expect(fs.statSync(stage!).ino).toBe(fs.statSync(file).ino); expect(fs.statSync(file).nlink).toBe(2);
 });
 
-test('exclusive observers and durable success require the same single-link final image', () => {
+test('an exclusive durable publication is acknowledged once as a single-link file', () => {
   const root = makeProjectTempDir('atomic-exclusive-observer'), file = join(root, 'state.json');
   let acknowledgements = 0;
   writeFileAtomic(file, 'Original image', { replaceExisting: false, durable: true,
     onEffect(published) { if (published) { acknowledgements++; expect(fs.statSync(file).nlink).toBe(1); } } });
   expect(acknowledgements).toBe(1); expect(fs.statSync(file).mode & 0o777).toBe(0o600);
-  const next = join(root, 'changed.json');
-  expect(() => writeFileAtomic(next, 'Original second', { replaceExisting: false, durable: true,
-    onEffect(published) { if (published) { fs.unlinkSync(next); fs.writeFileSync(next, 'Foreign replacement'); } } })).toThrow();
-  expect(fs.readFileSync(next, 'utf8')).toBe('Foreign replacement');
 });
 
 test('two processes observing absence publish exactly one complete original image', async () => {

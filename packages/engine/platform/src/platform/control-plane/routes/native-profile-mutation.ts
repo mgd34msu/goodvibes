@@ -12,7 +12,7 @@ import { requestsNativeAdmission, retainNativeMutationRequest, runNativeMutation
 import { bindProfileDelegationToInvocation, captureNativeProfileDelegation, profileDelegationForInvocation, profileMutationOptionsForInvocation, readProfileAdmittedInvocation, readProfileDelegation, type ProfileMutationOptions, type RecordedProfileDelegation, type RecordedProfileMutation } from '../../owner-profile/delegation.js';
 import type { OccasionMutationOptions } from '../../occasions/operation.js';
 import { readStoppedNativeNudge } from '../../occasions/push.js';
-import { captureFileMutation, captureMutationDescriptors } from '../../utils/file-mutation.js';
+import { captureMutationDescriptors } from '../../utils/file-mutation.js';
 import { GatewayVerbError } from './gateway-verb-error.js';
 import { readInvocationParams } from './invocation-params.js';
 
@@ -66,17 +66,15 @@ export function nativeProfileMutation(catalog: GatewayMethodCatalog, method: str
         const requestCurrent = retainNativeMutationRequest({ body: invocation.body ?? null, query: invocation.query ?? null });
         const targetCurrent = captureMutationDescriptors(target, ['profilePath', 'captureProfileRead', 'assertOwnerCurrent', 'projectProfileMutation']);
         const profileRead = target.captureProfileRead();
-        const profileFile = captureFileMutation(target.profilePath);
         let publishing = false;
         const current = () => {
           if (targets.get(catalog)?.get(method) !== target) throw new Error('Native profile target changed.');
           requestCurrent(); targetCurrent(); target.assertOwnerCurrent(); retained.signal?.throwIfAborted(); retained.assertCurrent?.();
           if (!publishing) profileRead.assertCurrent();
-          profileFile.assertCurrent();
         };
         const lifetime: ProfileMutationOptions = { ...retained, delegation, assertCurrent: current,
           onWriteIntent: () => { current(); retained.onWriteIntent?.(); publishing = true; current(); },
-          onEffect: published => { retained.onEffect?.(published); profileFile.onEffect(published); requestCurrent(); targetCurrent(); target.assertOwnerCurrent(); },
+          onEffect: published => { retained.onEffect?.(published); requestCurrent(); targetCurrent(); target.assertOwnerCurrent(); },
         };
         const admittedMutation = captureProfileMutationAdmission(delegation, invocation, method, target, lifetime);
         mutationOptions.set(invocation, { ...lifetime, admittedMutation });
@@ -96,10 +94,10 @@ export function nativeProfileMutation(catalog: GatewayMethodCatalog, method: str
     const descriptor = catalog.get(method);
     const invocationCurrent = captureMutationDescriptors(invocation, ['body', 'query', 'context', 'signal', 'isAuthorized', 'nativeExecutionAuthority']);
     const ownerCurrent = captureMutationDescriptors(target, ['profilePath', 'statePath', 'captureProfileRead', 'captureStateRead', 'assertOwnerCurrent', 'projectProfileMutation']);
+    // Foreign edits of the profile and occasions files are detected by their own
+    // stores, each comparing only its own file just before its rename.
     const profileRead = target.captureProfileRead();
-    const profileFile = captureFileMutation(target.profilePath);
     const stateRead = target.captureStateRead?.();
-    const stateFile = target.statePath ? captureFileMutation(target.statePath) : undefined;
     let profileIntent = false, stateIntent = false;
     const assertTargetCurrent = () => {
       if (targets.get(catalog)?.get(method) !== target) throw new Error('Native profile target changed.');
@@ -107,7 +105,6 @@ export function nativeProfileMutation(catalog: GatewayMethodCatalog, method: str
       if (catalog.get(method) !== descriptor) throw new Error('Native profile method changed.');
       if (!profileIntent) profileRead.assertCurrent();
       if (!stateIntent) stateRead?.assertCurrent();
-      profileFile.assertCurrent(); stateFile?.assertCurrent();
     };
     return runNativeMutation({ host, method, invocation, body: { admission: 'autonomous', body: invocation.body ?? null, query: invocation.query ?? null },
       context: { ...normalizeContext(invocation.context), signal: invocation.signal,
@@ -119,9 +116,9 @@ export function nativeProfileMutation(catalog: GatewayMethodCatalog, method: str
         bindProfileDelegationToInvocation(delegation, invocation);
         const lifetime: NativeProfileOptions = { assertCurrent, delegation, withPublication,
           onWriteIntent: () => { assertCurrent(); profileIntent = true; },
-          onEffect: published => { sourceCurrent(); invocationCurrent(); target.assertOwnerCurrent(); profileFile.onEffect(published); stateFile?.onEffect(); },
+          onEffect: () => { sourceCurrent(); invocationCurrent(); target.assertOwnerCurrent(); },
           onStateWriteIntent: () => { assertCurrent(); stateIntent = true; },
-          onStateEffect: published => { sourceCurrent(); invocationCurrent(); target.assertOwnerCurrent(); stateFile?.onEffect(published); profileFile.onEffect(); },
+          onStateEffect: () => { sourceCurrent(); invocationCurrent(); target.assertOwnerCurrent(); },
           ...(method === 'occasions.sweep' ? { withNudgeDelivery: async (request: Parameters<NativeNudgeDelivery>[0], operation: Parameters<NativeNudgeDelivery>[1]) => {
             assertCurrent();
             const deliveryCurrent = retainNativeMutationRequest(request);

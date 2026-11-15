@@ -129,13 +129,12 @@ describe('canonical redaction source admission', () => {
     expect(output).not.toContain(tail); expect(JSON.stringify(port.requests)).not.toContain(tail);
   });
 
-  test('sync boundaries reuse a current settled reading and retire it on port replacement', async () => {
-    publicReadings();
-    expect(await redactSensitiveDataAsync('Network failure')).toBe('Network failure');
+  test('the synchronous boundary is local and the same on every call, with no reading', () => {
+    const port = publicReadings();
     expect(redactSensitiveData('Network failure')).toBe('Network failure');
-    installJudgmentPort(undefined);
-    expect(redactSensitiveData('Network failure')).toBe('[REDACTED]');
-    await settle();
+    expect(redactSensitiveData('Network failure')).toBe('Network failure');
+    expect(redactSensitiveData('token=ghp_abcdefghijklmnopqrstuvwxyz0123456789')).not.toContain('ghp_');
+    expect(port.requests).toHaveLength(0);
   });
 
   test('non-cooperating cancellation cannot publish a late ordinary reading', async () => {

@@ -58,14 +58,14 @@ The live file rotates once it reaches 10 MB. It is renamed to `activity.md.1` (a
 
 If the log directory disappears while the process is running, the logger recreates it and retries the write. If the destination still cannot be written after 3 consecutive flush failures, the logger reports that once to `stderr` and then stops accepting entries for that destination rather than retrying (and failing) on every flush forever.
 
-Log data is redacted by declared field name, not by guessing from the name or reading the value. Every field name belongs to one of four kinds, declared in `platform/src/platform/utils/field-kind-reading.ts`:
+Log data keeps its values, masked by what they hold (`redactDiagnosticValue` in `platform/src/platform/utils/redaction.ts`). No model is asked and the same entry is written the same way every time:
 
-- `secret`: the value is written as `[REDACTED]` (`password`, `token`, `apiKey`, `authorization`, `cookie`, ...).
-- `owner_profile`: the value is written as `[REDACTED_PROFILE]` (addresses, phone numbers, quiet hours).
-- `content`: free-form text such as `error`, `message`, `stdout`, `stderr` and `summary`. A scalar value is written as `[REDACTED_TEXT]`; an object is searched field by field.
-- `other`: counts, durations, identifiers, statuses and file or process facts (`attempt`, `durationMs`, `sessionId`, `code`, `path`, `syscall`, `command`). The value is written as is.
+- Numbers, booleans and `null` are written as they are.
+- Text (an `error`, a `reason`, a `url`, a `message`) is written with credential material masked: issuer token formats (`ghp_`, `xoxb-`, `AKIA`, ...), `sk-`/`key-` tokens, the token after `Bearer`, values of credential-named assignments (`password=...`), loaded owner-profile values and card numbers. Paths and the user name are kept, because the log stays on this machine.
+- A field whose name declares credential material (`password`, `apiKey`, `authorization`, `cookie`, a name ending in `token` or `secret` such as `botToken`, card fields) is written as `[REDACTED]`; an owner-profile field (addresses, phone numbers, quiet hours) as `[REDACTED_PROFILE]`. The names are declared in `platform/src/platform/utils/field-kind-reading.ts`.
+- An `Error` value is written as its name and masked message.
 
-A name that is not declared is withheld as `[REDACTED]`, so a new diagnostic field appears in `activity.md` only after its name is added to the declared list under the kind that matches what it holds. Put the failure reason in a declared field such as `code` or `syscall`, and never put secrets or personal data in an `other` field.
+Never put a secret under an ordinary field name: only its credential-shaped parts would be masked.
 
 ---
 

@@ -10,7 +10,6 @@ import { createRuntimeStore } from '../platform/src/platform/runtime/store/index
 import { TelemetryApiService, TelemetryRawViewDisabledError } from '../platform/src/platform/runtime/telemetry/api.js';
 import { sanitizeRecord, sanitizeSpan } from '../platform/src/platform/runtime/telemetry/api-helpers.js';
 import { setTelemetryIncludeRawPrompts } from '../platform/src/platform/runtime/telemetry/redaction-config.js';
-import { fieldKind, type FieldKind } from '../platform/src/platform/utils/batteries/field-kind.js';
 import { isSensitiveTelemetryKey } from '../platform/src/platform/utils/redaction.js';
 
 const prompt = 'PRIVATE_PROMPT_OPT_IN_SENTINEL';
@@ -23,37 +22,19 @@ const principal = (scopes: readonly string[], admin = false): AuthenticatedPrinc
 });
 const sensitive = principal(['read:telemetry', 'read:telemetry-sensitive']);
 const admin = principal(['read:telemetry'], true);
-const fieldRoles: Readonly<Record<string, FieldKind>> = {
-  domain: 'other', eventType: 'other', source: 'other', traceId: 'other', sessionId: 'other',
-  type: 'other', turnId: 'other', stopReason: 'other',
-  prompt: 'content', error: 'content', message: 'content', summary: 'content', hint: 'content', name: 'content',
-};
+const telemetryFields = ['domain', 'eventType', 'source', 'traceId', 'sessionId', 'type', 'turnId', 'stopReason',
+  'prompt', 'error', 'message', 'summary', 'hint', 'name'];
 let previousPort: ReturnType<typeof installJudgmentPort>;
 let fieldRequests: ReturnType<typeof fakePort>['requests'] = [];
 
 beforeEach(async () => {
-  const fixture = fakePort((name, question, state) => {
-    const field = state !== null && typeof state === 'object' && 'field' in state ? state.field : undefined;
-    if (name !== 'kind' || typeof field !== 'string' || JSON.stringify(state) !== JSON.stringify({ field })) {
-      throw new Error('Unscripted telemetry field fixture');
-    }
-    const role = Object.hasOwn(fieldRoles, field) ? fieldRoles[field] : undefined;
-    if (role === undefined) throw new Error('Unscripted telemetry field fixture');
-    return choiceAnswer(question, role, 0.99);
-  });
+  // Telemetry masking is local: any model request is a failure.
+  const fixture = fakePort(() => { throw new Error('Telemetry masking must not ask a model'); });
   fieldRequests = fixture.requests;
-  previousPort = installJudgmentPort({ model: fixture.port.model, ask(request) {
-    if (request.context?.battery !== fieldKind.name || request.model !== fieldKind.model
-      || JSON.stringify(request.questions) !== JSON.stringify({ kind: fieldKind.items.kind.question })) {
-      throw new Error('Unscripted telemetry privacy contract');
-    }
-    return fixture.port.ask(request);
-  } });
-  for (const field of Object.keys(fieldRoles)) isSensitiveTelemetryKey(field);
+  previousPort = installJudgmentPort(fixture.port);
   await flush();
-  for (const [field, role] of Object.entries(fieldRoles)) {
-    expect(isSensitiveTelemetryKey(field)).toBe(role !== 'other');
-  }
+  for (const field of telemetryFields) expect(isSensitiveTelemetryKey(field)).toBe(false);
+  expect(isSensitiveTelemetryKey('apiKey')).toBe(true);
 });
 
 afterEach(() => {

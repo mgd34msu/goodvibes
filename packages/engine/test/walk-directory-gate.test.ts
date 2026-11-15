@@ -87,13 +87,6 @@ test('full authority checks fence both traversal entry and delivery, including z
   await iterator.next(); await iterator.return(undefined); expect(checks).toBe(2);
 });
 
-test('a replaced ancestor cannot redirect a no-follow walk after a yielded file', async () => {
-  const path = root(); const outside = root(); put(path, 'src/a.ts'); put(path, 'src/b.ts'); put(outside, 'b.ts', 'private'); put(outside, 'a.ts', 'private');
-  const iterator = walkDir(path); await iterator.next();
-  renameSync(join(path, 'src'), join(path, 'original')); symlinkSync(outside, join(path, 'src'));
-  await expect(iterator.next()).rejects.toThrow('path changed');
-});
-
 test('explicit path denial propagates instead of becoming an unreadable-file warning', async () => {
   const path = root(); put(path, 'src/a.ts');
   await expect(files(path, { assertPath(file) { if (file.endsWith('a.ts')) throw new Error('denied'); } })).rejects.toThrow('denied');

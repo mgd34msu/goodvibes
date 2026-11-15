@@ -31,6 +31,7 @@ import {
   readDotPath,
   readSharedTierFile,
   removeSharedKey,
+  writeTierDotPath,
 } from './shared-config-tier.js';
 import {
   deleteRawDotPath,
@@ -46,7 +47,11 @@ import { DEFAULT_CONFIG_SNAPSHOT, cloneDefaultConfig, coerceSchemaValue, ensureS
 import { resolveWithProfileFallback, type ConfigProfileFallbackReader } from './profile-fallback.js';
 import { ingestManagerSettings, toConfigLoadFailure, UnknownSettingFormsQueue, type IngestionNoticeSink, type SettingsIngestionNotice } from './manager-ingestion.js';
 import { persistCategoryKeyRemoval, persistCategoryPatch, type CategoryIoDeps } from './manager-category-io.js';
-import { isSecretBearingConfigKey } from './secret-bearing-config-keys.js';
+import { isSecretReferenceValue } from './secret-bearing-config-keys.js';
+import { configKeyFacts } from './config-key-facts.js';
+import { withSyncFileLock } from './sync-file-lock.js';
+import { refusal as buildRefusal, type Refusal } from '@goodvibes-jev/engine/errors';
+import type { ToolDecision } from '../types/tools.js';
 import { HostSettings, type HostBooleanSetting, type HostBooleanSettingHandle, type HostSettingValues } from './host-settings.js';
 import { HostSettingsReadError, hostSettingsFileExists, readHostSettingValues, readHostSettingsFile, recoverHostSettingsWriteFailure } from './manager-host-settings.js';
 import { ConfigRuntimeState, captureRuntimeValue } from './manager-runtime-state.js';
@@ -204,6 +209,49 @@ export type { ConfigKeyTier, ConfigKeySource } from './manager-key-source.js';
 
 export interface ConfigSetOptions {
   bypassManagedLock?: boolean | undefined;
+}
+
+/** One setting in a {@link ConfigManager.setMany} update. */
+export interface ConfigChange {
+  readonly key: ConfigKey;
+  readonly value: unknown;
+}
+
+/** Who asked for a settings write; decides whether a change that loosens security is admitted. */
+export type WriteOrigin =
+  /** A person at a command surface: a settings screen, `/config set`, a CLI command. */
+  | { readonly kind: 'owner'; readonly surface: string }
+  /**
+   * An agent's tool call. `decision` is the gate's decision on that call; a
+   * change that loosens security is admitted only when the owner, the owner's
+   * standing rule or the mode settled it, never on Jev's reading alone.
+   */
+  | { readonly kind: 'agent'; readonly surface: string; readonly decision?: ToolDecision | undefined }
+  /** The program itself: a migration, a product default, a command that applies a fixed set of values. */
+  | { readonly kind: 'system'; readonly purpose: string };
+
+/**
+ * The outcome of {@link ConfigManager.setMany}. `saved` names every key that
+ * reached its settings file; on a refusal it is empty unless a later file
+ * could not be written after an earlier one was.
+ */
+export type SetResult =
+  | { readonly ok: true; readonly revision: number; readonly saved: readonly ConfigKey[] }
+  | { readonly ok: false; readonly refusal: Refusal; readonly saved: readonly ConfigKey[] };
+
+type SetTier = 'daemon' | 'shared' | 'project' | 'global';
+const SET_TIER_ORDER: readonly SetTier[] = ['daemon', 'shared', 'project', 'global'];
+const SET_TIER_LABEL: Readonly<Record<SetTier, string>> = {
+  daemon: "daemon's", shared: 'shared', project: 'project', global: "this surface's",
+};
+interface AdmittedChange { readonly key: ConfigKey; readonly value: unknown; tier: SetTier }
+
+const SCHEMA_BY_KEY: ReadonlyMap<string, ConfigSetting> = new Map(CONFIG_SCHEMA.map(setting => [setting.key, setting]));
+
+/** An agent's loosening change stands only on the owner's word, the owner's rule, or the mode. */
+function ownerSettled(decision: ToolDecision | undefined): boolean {
+  return decision?.state === 'allowed'
+    && (decision.decidedBy === 'owner' || decision.decidedBy === 'rule' || decision.decidedBy === 'mode');
 }
 
 /**
@@ -1307,55 +1355,193 @@ export class ConfigManager {
   }
 
   /**
-   * Atomically update non-credential daemon settings in their one owned file.
-   * Every value and managed lock is checked before persistence. Live values and
-   * notifications are published only after the whole file has been replaced.
-   * This is not a transaction across config tiers or concurrent processes.
+   * Update daemon-owned, non-credential settings in the daemon's one settings
+   * file, through {@link setMany}: one admission, one write, one revision.
+   * Throws a ConfigError naming the setting and the reason; never echoes a value.
    */
-  setDaemonValues(patch: DaemonConfigPatch): void {
+  setDaemonValues(patch: DaemonConfigPatch, by: WriteOrigin = { kind: 'owner', surface: 'daemon' }): void {
     this.requireWritable();
-    this.invalidateLifetimes();
     if (!this.daemonTierPath) throw new ConfigError('A daemon settings file is required for this update.');
-    const prepared = Object.entries(patch).filter(([, value]) => value !== undefined).map(([rawKey, value]) => {
-      const schema = CONFIG_SCHEMA.find((setting) => setting.key === rawKey);
-      if (!schema || !isDaemonOwnedConfigKey(rawKey) || isSecretBearingConfigKey(rawKey)) {
+    const changes: ConfigChange[] = [];
+    for (const [key, value] of Object.entries(patch)) {
+      if (value === undefined) continue;
+      const facts = configKeyFacts(key);
+      if (!facts.inSchema || facts.owner !== 'daemon' || facts.secret || facts.cardMaterial) {
         throw new ConfigError('The update contains an unsupported daemon setting.');
       }
-      const key = schema.key;
-      let next: unknown;
-      try {
-        next = JSON.parse(JSON.stringify(coerceSchemaValue(key, schema, value)));
-        const validType = schema.type === 'enum'
-          ? typeof next === 'string' && schema.enumValues?.includes(next)
-          : schema.type === 'object'
-            ? next !== null && typeof next === 'object'
-            : typeof next === schema.type && (schema.type !== 'number' || (typeof next === 'number' && Number.isFinite(next)));
-        if (!validType || (schema.validate && !schema.validate(next))) throw new Error('invalid');
-      } catch {
-        throw new ConfigError(`Invalid value for daemon setting ${key}.`);
-      }
-      if (getManagedSettingLock(key, this.configDir)) {
-        throw new ConfigError(`Setting ${key} is managed and cannot be changed.`);
-      }
-      return { key, next, previous: readDotPath(this.#config, key).value };
+      changes.push({ key: key as ConfigKey, value });
+    }
+    const result = this.setMany(changes, by);
+    if (!result.ok) throw new ConfigError(result.refusal.reason);
+  }
+
+  /**
+   * Set several settings as one update: every change is admitted before
+   * anything is written, each settings file the changes land in is written
+   * once, and the configuration revision moves once. A refusal names the
+   * setting, the reason and the next step, and never echoes a value.
+   *
+   * Admission reads the key's facts (config-key-facts.ts): card material is
+   * refused, a credential is accepted only as a `goodvibes://secrets/…`
+   * reference, and a change that loosens security from an agent stands only
+   * when the owner, the owner's rule or the mode settled the call.
+   *
+   * Changes landing in different files (daemon, shared, project, this
+   * surface's) are written one file after another; if a later file cannot be
+   * written, what reached disk is published and named in `saved`.
+   */
+  setMany(changes: readonly ConfigChange[], by: WriteOrigin, options: ConfigSetOptions = {}): SetResult {
+    const refuse = (init: { code: string; reason: string; next: readonly string[]; retryable?: boolean; status?: number },
+      saved: readonly ConfigKey[] = []): SetResult => ({
+      ok: false, saved,
+      refusal: buildRefusal({ ...init, state: saved.length > 0 ? `saved ${saved.join(', ')}; the rest was not saved` : 'nothing was saved' }),
     });
-    if (prepared.length === 0) return;
-    const staged = this.runtimeState.fork();
-    for (const { key, next } of prepared) {
-      writeRawDotPath(staged.nonRuntime as unknown as Record<string, unknown>, key, structuredClone(next));
-      staged.retire(key);
-      staged.mark(key, 'daemon');
+    if (this.readOnly) {
+      return refuse({ code: 'CONFIG_READ_ONLY', reason: 'Settings are read-only in this process.', next: ['Change the setting from a terminal app or the daemon, which own their settings files.'], status: 409 });
     }
-    const effective = staged.compose();
-    try {
-      const raw = readDaemonTierFile(this.daemonTierPath);
-      for (const { key, next } of prepared) writeRawDotPath(raw, key, next);
-      writeJsonFileAtomic(this.daemonTierPath, raw);
-    } catch {
-      throw new ConfigError('Could not persist daemon settings; the update was not applied.');
+    if (changes.length === 0) return { ok: true, revision: this.#permissionIncarnation, saved: [] };
+    const keys = new Set<string>();
+    for (const change of changes) {
+      if (keys.has(change.key)) {
+        return refuse({ code: 'CONFIG_INVALID', reason: `${change.key} appears more than once in one update.`, next: ['Send each setting once.'], status: 400 });
+      }
+      keys.add(change.key);
     }
-    this.publishState(staged, effective);
-    for (const { key, previous } of prepared) this.notifyPersistedChange(key, previous);
+    // Choosing a mode retires the legacy auto-approve override in the same write.
+    const batch: readonly ConfigChange[] = keys.has('permissions.mode') && !keys.has('behavior.autoApprove') && this.get('behavior.autoApprove')
+      ? [{ key: 'behavior.autoApprove', value: false }, ...changes] : changes;
+
+    const invalid = (key: string, detail: string): SetResult =>
+      refuse({ code: 'CONFIG_INVALID', reason: `Invalid value for ${key} (${detail}).`, next: [`Check ${key} against the settings list and send a valid value.`], status: 400 });
+    const admitted: AdmittedChange[] = [];
+    const projected = structuredClone(this.#config) as unknown as Record<string, unknown>;
+    for (const change of batch) {
+      const key = change.key;
+      const facts = configKeyFacts(key);
+      if (facts.cardMaterial) {
+        return refuse({ code: 'CONFIG_CARD_MATERIAL', reason: `${key} is card material, which is kept only in the daemon's card store, never in a settings file.`, next: ['Enter the card with /payments card in a terminal app.'], status: 400 });
+      }
+      const schema = this.hostSettings.schema(key) ?? SCHEMA_BY_KEY.get(key);
+      let value: unknown;
+      try {
+        const encoded = JSON.stringify(coerceSchemaValue(key, schema, change.value));
+        if (encoded === undefined) return invalid(key, 'needs a value');
+        value = JSON.parse(encoded);
+      } catch {
+        return invalid(key, 'not a value a settings file can hold');
+      }
+      if (schema?.validate && !schema.validate(value)) return invalid(key, schema.validationHint ?? 'rejected by its schema');
+      if (schema?.type === 'enum' && schema.enumValues && !schema.enumValues.includes(value as string)) {
+        return invalid(key, `allowed: ${schema.enumValues.join(', ')}`);
+      }
+      const typeRefusal = schema && schema.type !== 'enum' ? schemaTypeRefusal(schema, value) : null;
+      if (typeRefusal) return invalid(key, typeRefusal);
+      if (!options.bypassManagedLock) {
+        const lock = getManagedSettingLock(key, this.configDir);
+        if (lock) {
+          return refuse({ code: 'CONFIG_MANAGED', reason: `${key} is managed by ${lock.source} and cannot be changed: ${lock.reason}`, next: [`Change it where ${lock.source} sets it.`], status: 403 });
+        }
+      }
+      try { this.#resolvePath(key); }
+      catch { return invalid(key, 'no such setting; check the spelling against the settings list'); }
+      if (facts.secret && typeof value === 'string' && value.trim() !== '' && !isSecretReferenceValue(value)) {
+        return refuse({ code: 'CONFIG_SECRET_LITERAL', reason: `${key} holds a credential, and a settings file keeps only a reference to it.`,
+          next: ['Save the credential with /secrets set, then set the setting to its goodvibes://secrets/ reference.'], status: 400 });
+      }
+      if (by.kind === 'agent' && facts.loosens?.(readDotPath(this.#config, key).value, value) && !ownerSettled(by.decision)) {
+        return refuse({ code: 'OWNER_ONLY', reason: `Changing ${key} would ${facts.loosening ?? 'loosen security'}, which only the owner decides.`,
+          next: ['Ask the owner to make this change, or to approve it when asked.'], status: 403 });
+      }
+      writeRawDotPath(projected, key, structuredClone(value));
+      admitted.push({ key, value, tier: 'global' });
+    }
+
+    // Checks across settings see the whole update, so a set of values that is
+    // valid together is not refused one key at a time.
+    for (const change of admitted) {
+      const { key, value } = change;
+      const crossRefusal = SCHEMA_BY_KEY.has(key) || this.hostSettings.has(key)
+        ? memoryTierOrderRefusal(key, value, projected) ?? memoryBudgetRefusal(key, value, projected)
+        : nonSchemaKeyRefusal(key, value, this.#config);
+      if (crossRefusal) return invalid(key, crossRefusal);
+      try {
+        if (this.hostSettings.has(key) && this.hostSettingHasProjectValue(key)) change.tier = 'project';
+        else if (this.daemonTierPath !== null && isDaemonOwnedConfigKey(key)) change.tier = 'daemon';
+        else if (this.sharedTierPath !== null && isSharedConfigKey(key)) change.tier = 'shared';
+        else if (this.projectOverridesKey(key)) change.tier = 'project';
+        else this.refuseBehindStricterProjectValue(key, value);
+      } catch (error) {
+        return refuse({ code: 'CONFIG_HELD', reason: error instanceof Error ? error.message : `${key} cannot be written now.`,
+          next: ['Remove the key from the project settings file, then set it again.'], status: 409 });
+      }
+    }
+
+    try { this.invalidateLifetimes(); }
+    catch (error) {
+      return error instanceof OwnerLockBusyError
+        ? refuse({ code: 'CONFIG_BUSY', reason: 'Another process is saving settings right now.', next: ['Try again in a moment.'], retryable: true, status: 409 })
+        : refuse({ code: 'CONFIG_WRITE_FAILED', reason: 'Could not record the settings change; the update was not applied.', next: ['Check that the settings directory is writable, then try again.'], status: 500 });
+    }
+
+    const previousHost = admitted.some(change => this.hostSettings.has(change.key)) ? this.hostSettings.snapshot(this.#config) : null;
+    const previous = new Map(admitted.map(change => [change.key, readDotPath(this.#config, change.key).value] as const));
+    const written: AdmittedChange[] = [];
+    let failedTier: SetTier | undefined;
+    for (const tier of SET_TIER_ORDER) {
+      const group = admitted.filter(change => change.tier === tier);
+      if (group.length === 0) continue;
+      try { this.#writeSettingsFile(tier, group); }
+      catch { failedTier = tier; break; }
+      written.push(...group);
+    }
+
+    if (written.length > 0) {
+      const staged = this.runtimeState.fork();
+      for (const change of written) {
+        writeRawDotPath(staged.nonRuntime as unknown as Record<string, unknown>, change.key, structuredClone(change.value));
+        staged.retire(change.key);
+        staged.mark(change.key, change.tier);
+      }
+      this.publishState(staged, staged.compose());
+    }
+    const saved = written.map(change => change.key);
+    let hostRefreshFailed = false;
+    if (previousHost) {
+      try { this.refreshHostSettings(previousHost, true); }
+      catch { hostRefreshFailed = true; }
+    }
+    for (const change of written) {
+      if (!this.hostSettings.has(change.key)) this.notifyPersistedChange(change.key, previous.get(change.key));
+    }
+    if (failedTier !== undefined) {
+      const unsaved = admitted.filter(change => !written.includes(change)).map(change => change.key);
+      return refuse({ code: 'CONFIG_WRITE_FAILED',
+        reason: `Could not save the ${SET_TIER_LABEL[failedTier]} settings file; ${unsaved.join(', ')} ${unsaved.length === 1 ? 'was' : 'were'} not applied.`,
+        next: ['Check that the settings directory is writable, then send the unsaved settings again.'], status: 500 }, saved);
+    }
+    if (hostRefreshFailed) {
+      return refuse({ code: 'CONFIG_HOST_READ_FAILED', reason: 'The settings were saved, but this surface could not read its own settings back; its registered settings use their restrictive defaults.',
+        next: ['Check the settings file named in the startup notice, then reload settings.'], status: 500 }, saved);
+    }
+    return { ok: true, revision: this.#permissionIncarnation, saved };
+  }
+
+  /** Write one settings file with every change of one update that lands in it. */
+  #writeSettingsFile(tier: SetTier, changes: readonly AdmittedChange[]): void {
+    if (tier === 'daemon' || tier === 'shared') {
+      const path = tier === 'daemon' ? this.daemonTierPath! : this.sharedTierPath!;
+      // Every surface writes these files: the read and the rename are one step.
+      withSyncFileLock(path, () => {
+        const raw = tier === 'daemon' ? readDaemonTierFile(path) : readSharedTierFile(path);
+        for (const change of changes) writeTierDotPath(raw, change.key, structuredClone(change.value));
+        writeJsonFileAtomic(path, raw);
+      });
+      return;
+    }
+    const path = tier === 'project' ? this.projectConfigPath! : this.configPath;
+    const raw = readRawSettingsFile(path);
+    for (const change of changes) writeRawDotPath(raw, change.key, structuredClone(change.value));
+    writeJsonFileAtomic(path, raw);
   }
 
   /**

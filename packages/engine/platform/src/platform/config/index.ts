@@ -17,6 +17,9 @@ export type { PreparedConfigMutation, PreparedConfigMutationTransition, Prepared
   PreparedConfigMutationReceipt } from './prepared-mutation.js';
 export type { HostBooleanSetting, HostBooleanSettingHandle, HostBooleanSettingResolved } from './host-settings.js';
 export type { DeepReadonly, ConfigKeyTier, ConfigKeySource, DaemonConfigPatch } from './manager.js';
+export type { ConfigChange, SetResult, WriteOrigin } from './manager.js';
+export { configKeyFacts, isProtectedConfigValue, isProjectRestrictedKey } from './config-key-facts.js';
+export type { ConfigKeyFacts } from './config-key-facts.js';
 export { SHARED_CONFIG_KEYS, isSharedConfigKey } from './shared-config-tier.js';
 export {
   DAEMON_OWNED_CONFIG_KEYS,

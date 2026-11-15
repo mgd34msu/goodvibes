@@ -31,6 +31,35 @@ export interface ConfigSettingDefinition {
 }
 
 /**
+ * What the program knows about a config key without asking anyone: who owns
+ * it, whether a repository's project file may set it, whether its value is a
+ * credential or card material, and whether a change to it loosens security.
+ * `configKeyFacts(key)` (config-key-facts.ts) answers it from declarations;
+ * every consumer reads these fields instead of keeping its own key list or
+ * asking a model about a key's name or value.
+ */
+export interface ConfigKeyFacts {
+  /** The runtime that owns, and therefore writes, the key (config-ownership.ts). */
+  readonly owner: 'daemon' | 'client' | 'user';
+  /** False when a project settings file, which is repository content, may not set the key at all. */
+  readonly projectSettable: boolean;
+  /** The value is credential material: a settings file holds only a `goodvibes://secrets/…` reference to it. */
+  readonly secret: boolean;
+  /** The value is payment card material: it is kept only in the daemon's card store, never in a settings file. */
+  readonly cardMaterial: boolean;
+  /** The key has a row in the config schema. A key without one is unknown to the program. */
+  readonly inSchema: boolean;
+  /**
+   * Present on a key a change can loosen security through: true when going
+   * from `prev` to `next` does. Where the direction cannot be told from the
+   * values (a host, a policy source), any change counts as loosening.
+   */
+  readonly loosens?: (prev: unknown, next: unknown) => boolean;
+  /** What a loosening change does, as a verb phrase ("turn the sandbox off") a refusal or an owner question can use. */
+  readonly loosening?: string;
+}
+
+/**
  * Returns validate + validationHint for `provider.reasoningEffort`.
  *
  * Not an enum: which reasoning levels exist is per model, and the former

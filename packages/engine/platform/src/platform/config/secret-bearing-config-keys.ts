@@ -123,11 +123,13 @@ const SECRET_BEARING_SET = new Set<string>(SECRET_BEARING_CONFIG_PATHS);
 
 /**
  * True when this config key's value is credential material: exact membership
- * in the declared list. A key the list does not name is not guessed at from
- * its spelling here; a site that must decide about an undeclared key reads it
- * through `readCredentialKey` (credential-key-reading.ts), and the pre-commit
- * credential-scope check compares the stored readings of every schema key
- * against this list.
+ * in the declared list. This list is what `configKeyFacts(key).secret`
+ * (config-key-facts.ts) reports, so a writer, a masker and a settings screen
+ * all read the same answer. A key the list does not name is not guessed at
+ * from its spelling: a schema key it omits is not a credential, and a key the
+ * schema does not know is kept out of view (`isProtectedConfigValue`). The
+ * pre-commit credential-scope check compares the stored readings of every
+ * schema key against this list.
  */
 export function isSecretBearingConfigKey(key: string): boolean {
   return SECRET_BEARING_SET.has(key);

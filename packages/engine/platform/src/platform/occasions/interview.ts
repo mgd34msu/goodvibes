@@ -28,15 +28,20 @@ import type { ProfileLine } from '../owner-profile/types.js';
 import type { IsoDate } from './dates.js';
 import type { GiftRecord, Interview, InterviewStep, Occasion } from './types.js';
 
-/** Choose from every supplied line; none is a settled reading, never a keyword fallback. */
+/** Choose from every supplied line; none (or an unsettled choice) opens without one, never a keyword fallback. */
 export async function interestLine(lines: readonly ProfileLine[], context: { readonly title?: string; readonly person?: string } = {}, work = new OccasionReadingWork()): Promise<string> {
   const source = work.snapshot({ lines, context });
   if (source.lines.length === 0) return '';
   const candidates = source.lines.map((line, index) => ({ id: `line_${index}`, content: occasionEntry(line) }));
   const result = await work.wait(() => occasionInterest.select(work.port, occasionEntry(source.context), candidates, { ...(work.signal ? { signal: work.signal } : {}), site: 'engine.occasions.interest-line' }));
-  if (result.outcome !== 'act') throw new OccasionReadingHeldError();
   const index = candidates.findIndex(candidate => candidate.id === result.chosen);
   if (result.chosen !== undefined && index < 0) throw new OccasionReadingHeldError();
+  // An unsettled choice opens with the plain first question instead of failing the interview.
+  if (result.outcome !== 'act') {
+    result.recordAction('interest line unsettled; opened without one');
+    work.assertCurrent();
+    return '';
+  }
   result.recordAction(index < 0 ? 'no grounded interest line' : 'selected an offered interest line');
   work.assertCurrent();
   return index < 0 ? '' : source.lines[index]!.text.replace(/^\s*(?:[-*+]|\d+[.)])\s+/, '').trim();

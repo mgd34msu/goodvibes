@@ -7,7 +7,7 @@ import { watch, type FSWatcher } from 'node:fs';
 import { readProfileDelegation, restrictProfileMutationOptions, type ProfileMutationOptions } from './delegation.js';
 import { consumeProfileMutationAdmission } from '../control-plane/routes/native-profile-mutation.js';
 import { captureFileMutation, captureMutationDescriptors } from '../utils/file-mutation.js';
-import { readProfilePerson, type ProfilePersonReadingOptions } from './person-reading.js';
+import { readProfilePerson, reuseProfilePerson, type ProfilePersonReadingOptions } from './person-reading.js';
 import { basename, dirname } from 'node:path';
 import { summarizeError } from '../utils/error-display.js';
 import { logger } from '../utils/logger.js';
@@ -54,6 +54,9 @@ import type {
 /** Default poll interval where `fs.watch` is unavailable. Off the read path. */
 export const DEFAULT_PROFILE_RELOAD_THROTTLE_MS = 2000;
 
+/** Distinct names whose person reading is kept for one profile revision. */
+const MAX_KEPT_PERSON_READINGS = 64;
+
 /** Collapse the burst of events one save produces into a single reload. */
 const WATCH_DEBOUNCE_MS = 25;
 
@@ -67,6 +70,8 @@ export class OwnerProfileStore {
   /** The whole model. Replaced wholesale, never mutated in place. */
   private projection: ProfileProjection | null = null;
   private readEpoch = 0;
+  /** Person readings taken from `projection`; a new projection (any load or commit) starts empty. */
+  private personReadings: { readonly projection: ProfileProjection; readonly byName: Map<string, readonly ProfileLine[]> } | null = null;
   /** Loads and own commits each hold one independent source-change claim. */
   private pendingSourceChanges = 0;
 
@@ -381,13 +386,28 @@ export class OwnerProfileStore {
 
   /**
    * Read lines about one named person semantically. Closed People prose never
-   * becomes generic context. The reading grants no disclosure authority, and
-   * unsettled/missing/stale readings reject rather than returning a guess.
+   * becomes generic context. The reading grants no disclosure authority; a line
+   * the model does not settle on is left out, and a missing or stale reading
+   * rejects rather than returning a guess.
+   *
+   * One model request covers the whole People section, and the answer is kept
+   * for this profile revision: asking about the same name again (the gift
+   * interview after a lookup, a repeated lookup) costs no request.
    */
   async person(name: string, options: ProfilePersonReadingOptions = {}): Promise<readonly ProfileLine[]> {
     const lease = this.captureRead();
     lease.assertCurrent();
-    return readProfilePerson(name, this.sectionByHeading('People')?.prose ?? [], options, lease.assertCurrent);
+    const projection = this.projection;
+    const kept = projection !== null && this.personReadings?.projection === projection ? this.personReadings.byName.get(name) : undefined;
+    if (kept !== undefined) return reuseProfilePerson(kept, options, lease.assertCurrent);
+    const lines = await readProfilePerson(name, this.sectionByHeading('People')?.prose ?? [], options, lease.assertCurrent);
+    if (projection !== null && this.projection === projection) {
+      if (this.personReadings?.projection !== projection || this.personReadings.byName.size >= MAX_KEPT_PERSON_READINGS) {
+        this.personReadings = { projection, byName: new Map() };
+      }
+      this.personReadings.byName.set(name, lines);
+    }
+    return lines;
   }
 
   /**

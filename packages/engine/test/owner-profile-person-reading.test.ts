@@ -34,9 +34,9 @@ function fixture(people = '- Jo is my sister.\n- She spends Saturdays at the pot
   return { store, path, text };
 }
 function recorded(probability?: number) {
-  return fakePort((_name, _question, raw) => {
-    const state = raw as { line: string };
-    return noulAnswer(probability ?? (state.line === '- Dave works with Jo.' ? 0.01 : 0.99));
+  return fakePort((_name, question) => {
+    const line = (question as unknown as { instructions: { line: string } }).instructions.line;
+    return noulAnswer(probability ?? (line === '- Dave works with Jo.' ? 0.01 : 0.99));
   });
 }
 function deferred() { let resolve!: () => void; const promise = new Promise<void>(yes => { resolve = yes; }); return { promise, resolve }; }
@@ -64,17 +64,32 @@ function gateway(store: OwnerProfileStore, afterRead?: () => void, retainBeforeR
   const fake = recorded(); installJudgmentPort(fake.port); const { store } = fixture();
   const lines = await store.person('Jo');
   expect(lines.map(line => line.text)).toEqual(['- Jo is my sister.', '- She spends Saturdays at the pottery wheel.']);
-  expect(contentRequests(fake)).toHaveLength(3);
+  expect(contentRequests(fake)).toHaveLength(1);
   expect(contentRequests(fake).every(request => request.context?.battery === 'engine.owner-profile.person-line')).toBe(true);
-  const sent = JSON.stringify(contentRequests(fake).map(request => request.state));
+  const sent = JSON.stringify(contentRequests(fake).map(request => [request.state, request.questions]));
   expect(sent).toContain('Dave works with Jo'); expect(sent).not.toContain('03-14'); expect(sent).not.toContain('Avery Chen');
   expect(store.get('identity.name')?.value).toBe('Avery Chen'); expect(store.section('People')).toBeUndefined();
+});
+ test('a forty-line People section is one request, and the same name again on the same profile is none', async () => {
+  const people = Array.from({ length: 39 }, (_, index) => `- Friend ${index} from the climbing club.`);
+  const fake = fakePort((_name, question) => {
+    const line = (question as unknown as { instructions: { line: string } }).instructions.line;
+    // One unrelated line the model will not settle on must not cost Jo's lines.
+    return noulAnswer(line === people[7] ? 0.5 : line === '- Jo is my sister.' ? 0.99 : 0.01);
+  });
+  installJudgmentPort(fake.port); const { store } = fixture(['- Jo is my sister.', ...people].join('\n'));
+  expect((await store.person('Jo')).map(line => line.text)).toEqual(['- Jo is my sister.']);
+  expect(contentRequests(fake)).toHaveLength(1);
+  expect((await store.person('Jo')).map(line => line.text)).toEqual(['- Jo is my sister.']);
+  expect(contentRequests(fake)).toHaveLength(1);
+  store.loadSync(); await store.person('Jo');
+  expect(contentRequests(fake)).toHaveLength(2);
 });
  test('settled no returns no lines; uncertainty and missing port never fall back to text matching', async () => {
   const { store } = fixture();
   await expect(store.person('Jo')).rejects.toThrow('No judgment port is installed');
   installJudgmentPort(recorded(0.01).port); expect(await store.person('Jo')).toEqual([]);
-  installJudgmentPort(recorded(0.5).port); await expect(store.person('Jo')).rejects.toThrow('unavailable, unsettled or no longer current');
+  store.loadSync(); installJudgmentPort(recorded(0.5).port); expect(await store.person('Jo')).toEqual([]);
 });
  test('punctuation is a negative structural guard and cannot enumerate People', async () => {
   const { store } = fixture();
@@ -97,7 +112,7 @@ function gateway(store: OwnerProfileStore, afterRead?: () => void, retainBeforeR
   const h = fixture(), b = blocked(); const pending = h.store.person('Jo'); void pending.catch(() => {});
   await b.entered.promise;
   Object.assign(h.store.read().sections.find(section => section.heading === 'People')!.prose[0]!, { text: '- Different person.' });
-  b.release.resolve(); await expect(pending).rejects.toThrow('unavailable, unsettled or no longer current');
+  b.release.resolve(); await expect(pending).rejects.toThrow('unavailable or no longer current');
 });
  test('caller abort interrupts a non-cooperating port', async () => {
   const { store } = fixture(), b = blocked(), controller = new AbortController();
@@ -115,7 +130,7 @@ function gateway(store: OwnerProfileStore, afterRead?: () => void, retainBeforeR
   installJudgmentPort({ ...fake.port, async ask(request) { const response = await fake.port.ask(request); return { ...response, answers: {} as typeof response.answers }; } });
   await expect(store.person('Jo')).rejects.toThrow('no answer for question');
   installJudgmentPort({ ...fake.port, async ask(request) { return { ...await fake.port.ask(request), requestedModel: 'different-model' }; } });
-  await expect(store.person('Jo')).rejects.toThrow('unavailable, unsettled or no longer current');
+  await expect(store.person('Jo')).rejects.toThrow('unavailable or no longer current');
 });
  test('gateway retains the source restriction after the store promise settles', async () => {
   const h = fixture(); installJudgmentPort(recorded().port);

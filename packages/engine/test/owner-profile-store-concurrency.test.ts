@@ -8,15 +8,12 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { mkdtempSync, promises as fsp, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { OwnerProfileStore } from '../platform/src/platform/owner-profile/store.ts';
 import type { ProfilePersistIo } from '../platform/src/platform/owner-profile/writer.ts';
 import { installOwnerProfileConsumers, memoizedRedactionValues } from '../platform/src/platform/owner-profile/consumers.ts';
 import { openTierContextBlock, registerOpenTierContextBlock } from '../platform/src/platform/owner-profile/context-block.ts';
 import { registerSignupBaseAddressFallback } from '../platform/src/platform/google/account-registry.ts';
 import { registerProfileRedactionValues } from '../platform/src/platform/utils/redaction.ts';
-import { MAX_PEOPLE_LINES_PER_READING, ProfilePersonReadingHeldError } from '../platform/src/platform/owner-profile/person-reading.ts';
 import { parseProfileDocument } from '../platform/src/platform/owner-profile/document.ts';
 import { useSecurityReadings } from './helpers/security-readings.ts';
 import { resetProcessUntrustedContentLedgerForTests } from '../platform/src/platform/security/untrusted-content.ts';
@@ -180,22 +177,6 @@ describe('two installs of the process-wide consumers', () => {
     expect(openTierContextBlock()).toContain('Lansing');
     disposeSecond();
     expect(openTierContextBlock()).toBe('');
-  });
-});
-
-describe('a named-person reading over a long People section', () => {
-  let previous: ReturnType<typeof installJudgmentPort>;
-  beforeEach(() => { previous = installJudgmentPort(undefined); });
-  afterEach(() => { installJudgmentPort(previous); });
-
-  test('is refused before any model request past the line limit', async () => {
-    const fake = fakePort(() => noulAnswer(0.99));
-    installJudgmentPort(fake.port);
-    const people = Array.from({ length: MAX_PEOPLE_LINES_PER_READING + 1 }, (_, index) => `- Person ${index}, friend`).join('\n');
-    const store = new OwnerProfileStore({ path: tempProfile(`## People\n${people}\n`) });
-    store.loadSync();
-    await expect(store.person('Person 3')).rejects.toBeInstanceOf(ProfilePersonReadingHeldError);
-    expect(fake.requests).toHaveLength(0);
   });
 });
 

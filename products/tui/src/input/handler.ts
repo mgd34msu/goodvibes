@@ -5,11 +5,8 @@ import {
   projectFeedContextStable,
   projectFeedContextClosures,
 } from '@goodvibes-jev/engine/terminal-shell/input-feed-context';
-import '@goodvibes-jev/engine/terminal-shell/composer-controller';
 import { resolveFooterTarget } from '../renderer/footer-targets.ts';
 import { SurfacePointer } from './surface-pointer.ts';
-import 'node:fs';
-import 'node:path';
 import { InputTokenizer, type InputToken } from '@goodvibes-jev/engine/platform/platform/core';
 import { createOAuthLocalListener } from '@goodvibes-jev/engine/platform/platform/config';
 import {
@@ -54,9 +51,6 @@ import {
   verifyOnboardingRuntimePostureForHandler,
 } from './handler-onboarding.ts';
 import type { OnboardingRuntimePosture } from './handler-types.ts';
-import '@goodvibes-jev/engine/platform/platform/config';
-import '@goodvibes-jev/engine/platform/platform/utils';
-import '@/runtime/index.ts';
 import { SelectionManager } from '@goodvibes-jev/engine/terminal-shell';
 import type { InfiniteBuffer } from '@goodvibes-jev/engine/terminal-shell';
 import type { CommandRegistry, CommandContext } from './command-registry.ts';
@@ -78,36 +72,15 @@ import { SessionPickerModal, getSharedHostedSessionRoster } from './session-pick
 import { ConfigModal } from './config-modal.ts';
 import { ProfilePickerModal } from '@goodvibes-jev/engine/terminal-shell/profile-picker-state';
 import { OnboardingWizardController, type OnboardingWizardAction, type OnboardingWizardMode } from './onboarding/onboarding-wizard.ts';
-import '../runtime/onboarding/index.ts';
 import type { OnboardingApplyRequest, OnboardingVerificationItem } from '../runtime/onboarding/index.ts';
-import {
-  cleanupMarkerRegistry,
-  expandPrompt,
-  findMarkerAtPos,
-  handleBlockCopy,
-  handleBlockSave,
-  handleBlockToggle,
-  handleBookmark,
-  handleClipboardPaste,
-  type ClipboardPasteSource,
-  handleCopy,
-  handleCtrlC,
-  handleDiffApply,
-  registerPaste,
-} from './handler-content-actions.ts';
+import { handleClipboardPaste, type ClipboardPasteSource } from './handler-content-actions.ts';
 import { pasteFromClipboard, pasteImageFromClipboard } from '../utils/clipboard.ts';
-import './handler-feed-routes.ts';
 import { saveUndoState, shouldCoalesceUndo } from './handler-prompt-buffer.ts';
 import { KillRing } from './kill-ring.ts';
 import { beginConcealedInputFor, submitConcealedInputFor, cancelConcealedInputFor, type ConcealedInputRequest } from './concealed-input.ts';
 import { clearModalStack, handleEscape, modalOpened } from './handler-modal-stack.ts';
 import { SelectionModalQueue, attachSelectionModalQueue } from './selection-modal-queue.ts';
-import './handler-modal-token-routes.ts';
 import { type OnboardingWizardSnapshot, type OpenOnboardingWizardOptions } from './handler-ui-state.ts';
-import './handler-modal-routes.ts';
-import './handler-command-route.ts';
-import './handler-picker-routes.ts';
-import './handler-shortcuts.ts';
 import { feedInputTokens } from './handler-feed.ts';
 import type { InputHandlerLike } from './handler-types.ts';
 import { buildInitialFeedContext } from './feed-context-factory.ts';
@@ -133,20 +106,8 @@ export class InputHandler extends TerminalInputHandlerState implements InputHand
     this.draft = value;
   }
 
-  /**
-   * Active concealed-input request, or null. When set, the composer masks its
-   * echo (see getWrappedPromptInfo) and diverts submission to the request's
-   * onSubmit (see submitConcealedInput) instead of the normal chat/command path,
-   * so the plaintext never reaches input history or the transcript.
-   */
-
   /** Max visible rows for the input area. Content beyond this scrolls internally. */
   public static readonly MAX_INPUT_ROWS = 8;
-  /** Internal scroll offset for the input area when content exceeds MAX_INPUT_ROWS. */
-
-  /** True when the user has entered slash-command mode (prompt starts with '/'). */
-
-  /** True when the process indicator bar has keyboard focus. */
 
   public tokenizer = new InputTokenizer();
 
@@ -171,7 +132,6 @@ export class InputHandler extends TerminalInputHandlerState implements InputHand
   public sessionView: import('./handler-session-view-route.ts').SessionViewControls | null = null;
   /** The main transcript's scroll, for Esc while scrolled back (handler-modal-stack.ts); null until the shell wires it. */
   public transcriptScroll: import('./handler-modal-stack.ts').TranscriptScrollControls | null = null;
-  /** Screen rows above the transcript, set each frame by the shell: the header, the chips, the gap under them. */
 
   public settingsModal = new SettingsModal();
   public configModal = new ConfigModal();
@@ -179,17 +139,12 @@ export class InputHandler extends TerminalInputHandlerState implements InputHand
   public onboardingWizard = new OnboardingWizardController();
   public onboardingModelPickerCancelSnapshot: OnboardingWizardSnapshot | null = null;
   public onboardingHydrationSerial = 0;
-  public onboardingApplyPending = false;
+  /** The onboarding operation running now, by name, so another key press can say what it waits for; null when none. */
+  public onboardingOperation: string | null = null;
   public onboardingOpenAiListenerSerial = 0;
-
-  /**
-   * Modal navigation stack. Each element is the name of an open modal.
-   * Used to support back-navigation via Escape.
-   */
 
   public sessionPickerModal: SessionPickerModal;
   public profilePickerModal: ProfilePickerModal;
-  /** True when the help overlay is visible. */
 
   public filePicker: FilePickerModal;
 
@@ -213,15 +168,12 @@ export class InputHandler extends TerminalInputHandlerState implements InputHand
   public syncFeedSelectionCallback: ((callback: SelectionModalCallback | null) => void) | null = null;
   /** FIFO queue for overlapping openSelection() calls, see selection-modal-queue.ts. */
   private selectionQueue!: SelectionModalQueue;
-  /** Time of last [COPIED] block feedback, for brief display. */
 
   public readonly surfacePointer = new SurfacePointer();
 
   /** Clickable footer screen rows (set by the shell each frame) and what opens them. */
   public footerTargets: ReadonlyMap<number, import('../renderer/footer-targets.ts').FooterTarget> = new Map();
   public onFooterTarget: ((target: import('../renderer/footer-targets.ts').FooterTarget) => void) | null = null;
-
-  /** Pasted images: maps marker IDs to base64 image data. */
 
   // ── Undo / Redo ────────────────────────────────────────────────────────────
 
@@ -234,15 +186,6 @@ export class InputHandler extends TerminalInputHandlerState implements InputHand
 
   // ── Kill ring ───────────────────────────────────────────────────────────────
   public killRing = new KillRing();
-
-  // ── Path completion (Tab on path-like token) ───────────────────────────────
-  /** Current list of path completions cycling on repeated Tab presses. */
-
-  /** Index into pathCompletions for Tab cycling. */
-
-  /** The raw prefix that triggered path completion (e.g. 'src/in'). */
-
-  /** Start offset in prompt where the path token begins. */
 
   constructor(
     public requestRender: () => void,
@@ -289,7 +232,6 @@ export class InputHandler extends TerminalInputHandlerState implements InputHand
       },
       {
         ...projectFeedContextClosures(this),
-        handleDiffApply: () => this.handleDiffApply(),
         handleUndo: () => {
           this.handleUndo();
         },
@@ -407,8 +349,8 @@ export class InputHandler extends TerminalInputHandlerState implements InputHand
   public handleBlockToggle(): void {
     handleBlockToggleForHandler(this);
   }
-  public handleDiffApply(): boolean {
-    return handleDiffApplyForHandler(this);
+  public handleDiffApply(): void {
+    handleDiffApplyForHandler(this);
   }
   public handleCtrlC(): void {
     handleCtrlCForHandler(this);
@@ -538,31 +480,6 @@ export class InputHandler extends TerminalInputHandlerState implements InputHand
    */
   public clipboardSource: ClipboardPasteSource = { pasteImageFromClipboard, pasteFromClipboard };
 
-  /** Content width for wrapping, set by main.ts via setContentWidth(). */
-
-  /** Set the content width used for wrapping calculations. Call from main.ts. */
-
-  /**
-   * Move cursor up or down by one WRAPPED line.
-   * Uses the segment table to navigate visual lines, not raw \n lines.
-   * Returns true if the cursor moved, false if at boundary.
-   */
-
-  /**
-   * Ensure the cursor's wrapped line is visible within the input scroll window.
-   */
-
-  /**
-   * Get the number of visible prompt lines (capped at MAX_INPUT_ROWS),
-   * accounting for word-wrapping within the content width.
-   */
-
-  /**
-   * Word-wrap the prompt and compute cursor display coordinates.
-   * Returns wrapped lines, the cursor's position in wrapped coordinates,
-   * and the visible slice respecting inputScrollTop.
-   */
-
   /** Begin one line of concealed (masked) composer input. See concealed-input.ts. */
   public beginConcealedInput(request: ConcealedInputRequest): void {
     this.hostPairing?.cancelForTakeover();
@@ -613,33 +530,4 @@ export class InputHandler extends TerminalInputHandlerState implements InputHand
     this.lastUndoMs = now;
     this.lastUndoKind = 'text';
   }
-
-  /**
-   * handleUndo - Ctrl+Z: pop from undo stack, push current to redo stack.
-   */
-
-  /**
-   * handleRedo - Ctrl+Shift+Z: pop from redo stack, push current to undo stack.
-   */
-
-  // ── Path completion methods ─────────────────────────────────────────────
-
-  /**
-   * findPathToken - Scan backward from cursor to find a path-like token.
-   * Detects:
-   *   - !@<partial>  (inject mode)
-   *   - @<partial>   (normal file ref)
-   *   - plain word containing '/'
-   * Returns { start, prefix } or null if no path token found.
-   */
-  /**
-   * handlePathCompletion - Tab on a path-like token: fuzzy-complete from filePicker.allFiles.
-   * Repeated Tab cycles through matches.
-   * Returns true if path completion was performed.
-   */
-
-  /**
-   * Word-wrap a single line to fit within maxW columns.
-   * Breaks at spaces; words wider than maxW are force-broken.
-   */
 }

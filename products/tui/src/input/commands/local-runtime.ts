@@ -1,17 +1,10 @@
 import { createSecretsCommand } from '@goodvibes-jev/engine/terminal-shell/secrets-command';
 import { createLocalCommandActions } from '@goodvibes-jev/engine/terminal-shell/local-command-actions';
 import { handleBookmarks } from '@goodvibes-jev/engine/terminal-shell/bookmark-command';
-import 'path';
-import 'node:fs';
-import 'node:fs/promises';
 import type { CommandRegistry, CommandContext } from '../command-registry.ts';
 import type { SelectionItem } from '../selection-modal.ts';
 
-import '@goodvibes-jev/engine/platform/platform/providers';
-import '@goodvibes-jev/engine/platform/platform/utils';
-import '@goodvibes-jev/engine/platform/platform/config';
 import { openCommandView, requireBookmarkManager, requireProviderApi, requireSecretsManager } from './runtime-services.ts';
-import '@goodvibes-jev/engine/platform/platform/utils';
 
 const localActions = createLocalCommandActions<CommandContext>(requireProviderApi, {
   hidden: false,

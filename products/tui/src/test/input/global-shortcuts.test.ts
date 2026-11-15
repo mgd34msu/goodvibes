@@ -44,7 +44,6 @@ function buildState(overrides: Partial<GlobalShortcutRouteState> = {}): GlobalSh
     handleBlockCopy: mock(() => {}),
     handleBookmark: mock(() => {}),
     handleBlockSave: mock(() => {}),
-    handleDiffApply: mock(() => false),
     handleUndo: mock(() => {}),
     handleRedo: mock(() => {}),
     handlePaste: mock(() => {}),

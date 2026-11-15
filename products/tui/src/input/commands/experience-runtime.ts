@@ -3,9 +3,6 @@ import {
   COMMON_APPROVAL_SUMMARIES,
   createVoiceExperienceCommand,
 } from '@goodvibes-jev/engine/terminal-shell/experience-commands';
-import '@goodvibes-jev/engine/terminal-shell/voice-settings-review';
-import 'node:fs';
-import 'node:path';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { requireShellPaths } from './runtime-services.ts';
 import {

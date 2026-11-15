@@ -184,6 +184,7 @@ function parseOperationalTokenInput(body: Record<string, unknown>): CloudflareOp
     ...(typeof body['persistConfig'] === 'boolean' ? { persistConfig: body['persistConfig'] } : {}),
     ...(typeof body['storeApiToken'] === 'boolean' ? { storeApiToken: body['storeApiToken'] } : {}),
     ...(typeof body['returnGeneratedToken'] === 'boolean' ? { returnGeneratedToken: body['returnGeneratedToken'] } : {}),
+    ...(typeof body['reuse'] === 'boolean' ? { reuse: body['reuse'] } : {}),
   };
 }
 
@@ -209,6 +210,7 @@ function parseDisableInput(body: Record<string, unknown>): CloudflareDisableInpu
   return {
     ...parseValidateInput(body),
     ...(typeof body['workerName'] === 'string' ? { workerName: body['workerName'] } : {}),
+    ...(typeof body['bootstrapToken'] === 'string' ? { bootstrapToken: body['bootstrapToken'] } : {}),
     ...(typeof body['disableWorkerSubdomain'] === 'boolean' ? { disableWorkerSubdomain: body['disableWorkerSubdomain'] } : {}),
     ...(typeof body['disableCron'] === 'boolean' ? { disableCron: body['disableCron'] } : {}),
     ...(typeof body['persistConfig'] === 'boolean' ? { persistConfig: body['persistConfig'] } : {}),

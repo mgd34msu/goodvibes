@@ -9,9 +9,6 @@
 // ---------------------------------------------------------------------------
 
 import { describe, test, expect } from 'bun:test';
-import { readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { makeProjectTempDir } from '../helpers/project-temp.ts';
 import { ConversationManager } from '../../core/conversation';
 import {
   describeBlockForReceipt,
@@ -131,48 +128,21 @@ describe('handleDiffApply', () => {
       '--- a/f.txt', '+++ b/f.txt', '@@ -1,1 +1,1 @@', '-a', '+b', '@@ -9,1 +9,1 @@', '-c', '+d',
     ].join('\n') }]);
     cm.getDisplayBlocks();
+    const diffBlock = cm.getBlockRegistry().find((block) => block.type === 'diff');
+    expect(diffBlock?.unsupported).toContain('2 separate hunks');
     const logged: string[] = [];
     const manager = {
-      getDiffAtLine: (line: number) => cm.getDiffAtLine(line),
+      getBlockRegistry: () => cm.getBlockRegistry(),
       log: (message: string) => { logged.push(message); },
     } as unknown as ConversationManager;
     let asked = false;
     const ctx = {
       requestPermission: async () => { asked = true; return { approved: true }; },
+      extensions: { toolRegistry: {} },
     } as unknown as Parameters<typeof handleDiffApply>[2];
 
-    expect(cm.getDiffAtLine(0)?.unsupported).toContain('2 separate hunks');
-    expect(handleDiffApply(manager, () => 0, ctx, () => {}, () => 'c', 'write' as never)).toBe(true);
+    handleDiffApply(manager, () => diffBlock!.startLine, ctx, () => {}, () => 'c', 'write' as never);
     expect(asked).toBe(false);
     expect(logged[0]).toContain('2 separate hunks');
-  });
-
-  test('writes the approved text literally, including replacement-pattern sequences', async () => {
-    const dir = makeProjectTempDir('diff-apply');
-    try {
-      writeFileSync(join(dir, 'f.txt'), 'before\nOLD\nafter\n');
-      const logged: string[] = [];
-      const diff = { filePath: 'f.txt', original: 'OLD', updated: "a$&b$$c$'d$`e" };
-      const manager = {
-        getDiffAtLine: () => diff,
-        log: (message: string) => { logged.push(message); },
-      } as unknown as ConversationManager;
-      let done!: () => void;
-      const finished = new Promise<void>((resolve) => { done = resolve; });
-      const ctx = {
-        workspace: { shellPaths: { workingDirectory: dir } },
-        platform: { configManager: { getWorkingDirectory: () => dir } },
-        requestPermission: async () => ({ approved: true }),
-      } as unknown as Parameters<typeof handleDiffApply>[2];
-
-      const started = handleDiffApply(manager, () => 0, ctx, () => done(), () => 'call-1', 'write' as never);
-      expect(started).toBe(true);
-      await finished;
-
-      expect(readFileSync(join(dir, 'f.txt'), 'utf8')).toBe("before\na$&b$$c$'d$`e\nafter\n");
-      expect(logged.some((line) => line.includes('Applied diff to f.txt'))).toBe(true);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
   });
 });

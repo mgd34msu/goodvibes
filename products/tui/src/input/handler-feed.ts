@@ -150,7 +150,6 @@ export interface InputFeedContext {
   readonly handleBlockCopy: () => void;
   readonly handleBookmark: () => void;
   readonly handleBlockSave: () => void;
-  readonly handleDiffApply: () => boolean;
   readonly handleUndo: () => void;
   readonly handleRedo: () => void;
   readonly handlePaste: () => void;
@@ -226,7 +225,6 @@ export const feedInputTokens = createFeedInputTokens<InputFeedContext>({
   shortcut: (context, token, { viewportHeight }) => {
     const shortcutState = {
       ...captureShortcutFeedState(context),
-      handleDiffApply: context.handleDiffApply,
       killRing: context.killRing,
     };
     const handled = handleGlobalShortcutToken(shortcutState, token, viewportHeight);

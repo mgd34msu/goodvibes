@@ -123,7 +123,7 @@ export const builtinGatewayCloudflareMethodDescriptors: readonly GatewayMethodDe
   methodDescriptor({
     id: 'cloudflare.token.create',
     title: 'Create Cloudflare Operational Token',
-    description: 'Use a temporary bootstrap token (required, used once, never stored) to create a narrower operational token with the permissions `cloudflare.token.requirements.get` lists. With `storeApiToken` the operational token is saved as a `goodvibes://` secret and its reference is returned; the plaintext token comes back only when `returnGeneratedToken` is true. Answered 201. Creates a credential in the Cloudflare account.',
+    description: 'Use a temporary bootstrap token (required, used once, never stored) to create a narrower operational token with the permissions `cloudflare.token.requirements.get` lists. With `storeApiToken` the operational token is saved as a `goodvibes://` secret and its reference is returned; the plaintext token comes back only when `returnGeneratedToken` is true. When this daemon already holds the operational token it made for the same account, zone and components, that token is returned with `reused` true and nothing is created (`reuse: false` makes a new one). A new token revokes the one it replaces; `replaced` says whether that worked. Answered 201. Creates a credential in the Cloudflare account unless one is reused.',
     category: 'cloudflare',
     scopes: ['write:cloudflare'],
     access: 'admin',
@@ -141,12 +141,15 @@ export const builtinGatewayCloudflareMethodDescriptors: readonly GatewayMethodDe
       persistConfig: BOOLEAN_SCHEMA,
       storeApiToken: BOOLEAN_SCHEMA,
       returnGeneratedToken: BOOLEAN_SCHEMA,
+      reuse: BOOLEAN_SCHEMA,
     }, ['bootstrapToken']),
     outputSchema: objectSchema({
       ok: BOOLEAN_SCHEMA,
       tokenId: STRING_SCHEMA,
       tokenName: STRING_SCHEMA,
       tokenSource: STRING_SCHEMA,
+      reused: BOOLEAN_SCHEMA,
+      replaced: objectSchema({ tokenId: STRING_SCHEMA, revoked: BOOLEAN_SCHEMA, reason: STRING_SCHEMA }, ['tokenId', 'revoked']),
       apiTokenRef: STRING_SCHEMA,
       generatedToken: STRING_SCHEMA,
       accountId: STRING_SCHEMA,
@@ -249,7 +252,7 @@ export const builtinGatewayCloudflareMethodDescriptors: readonly GatewayMethodDe
   methodDescriptor({
     id: 'cloudflare.disable',
     title: 'Disable Cloudflare Worker',
-    description: 'Switch the Cloudflare integration off. Always disables it locally (`cloudflare.enabled` false and the batch queue back to `local`; `persistConfig` defaults to true) and stops this daemon\'s tunnel connector, so the daemon stops using the worker. When an API token and account are available it also removes the worker\'s daemon credential (the script secret and its Secrets Store copy), its cron trigger (`disableCron`, default true) and its workers.dev route (`disableWorkerSubdomain`, default true; pass false to keep the route). `remote` is `disabled` only when every Cloudflare step succeeded; otherwise it is `not-disabled`, the deployed worker may keep calling the daemon until it is disabled in the Cloudflare dashboard, and `steps` says which. The worker and the account\'s other resources stay in place; each one still deployed is listed as a `still-deployed` step.',
+    description: 'Switch the Cloudflare integration off. Always disables it locally (`cloudflare.enabled` false and the batch queue back to `local`; `persistConfig` defaults to true) and stops this daemon\'s tunnel connector, so the daemon stops using the worker. When an API token and account are available it also removes the worker\'s daemon credential (the script secret and its Secrets Store copy), its cron trigger (`disableCron`, default true) and its workers.dev route (`disableWorkerSubdomain`, default true; pass false to keep the route). `remote` is `disabled` only when every Cloudflare step succeeded; otherwise it is `not-disabled`, the deployed worker may keep calling the daemon until it is disabled in the Cloudflare dashboard, and `steps` says which. The worker and the account\'s other resources stay in place; each one still deployed is listed as a `still-deployed` step. With `bootstrapToken` (a token allowed to edit API tokens) it also revokes the operational token this daemon created; without it a `revoke-operational-token` step says that token is still live.',
     category: 'cloudflare',
     scopes: ['write:cloudflare'],
     access: 'admin',
@@ -257,6 +260,7 @@ export const builtinGatewayCloudflareMethodDescriptors: readonly GatewayMethodDe
     http: { method: 'POST', path: '/api/cloudflare/disable' },
     inputSchema: bodyEnvelopeSchema({
       ...CREDENTIAL_PROPERTIES,
+      bootstrapToken: STRING_SCHEMA,
       workerName: STRING_SCHEMA,
       disableWorkerSubdomain: BOOLEAN_SCHEMA,
       disableCron: BOOLEAN_SCHEMA,

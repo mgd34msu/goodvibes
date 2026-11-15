@@ -32,7 +32,7 @@ describe('onboarding apply', () => {
       close() {},
     };
     const handler = {
-      onboardingApplyPending: false,
+      onboardingOperation: null,
       onboardingWizard: wizard,
       modalStack: [] as string[],
       modalReturnFocus: 'prompt',

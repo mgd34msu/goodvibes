@@ -3,37 +3,20 @@ import { describeBlockForReceipt } from '@goodvibes-jev/engine/terminal-shell/bl
 export { describeBlockForReceipt } from '@goodvibes-jev/engine/terminal-shell/block-description';
 export * from '@goodvibes-jev/engine/terminal-shell/input-content';
 import { activeTokens } from '../renderer/theme.ts';
-import { readFileSync, writeFileSync } from 'node:fs';
-import '../utils/clipboard.ts';
-
-import { applyDiffContent, type ConversationManager } from '../core/conversation';
+import { blockAt, isProposedDiff } from '@goodvibes-jev/engine/terminal-shell/conversation-event-navigation';
+import type { ConversationManager } from '../core/conversation';
 import type { PermissionCategory } from '@goodvibes-jev/engine/platform/platform/permissions';
-
+import { analyzePermissionRequest } from '@goodvibes-jev/engine/platform/platform/permissions';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { CommandContext } from './command-registry.ts';
 
-import { resolveAndValidatePath } from '@goodvibes-jev/engine/platform/platform/utils';
-import { analyzePermissionRequest } from '@goodvibes-jev/engine/platform/platform/permissions';
-
-
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-
-/** Expand folded text before either Main submission or an agent steer. */
-
 /**
- * describeBlockForReceipt - Honest, human-readable name for a block, used by
- * every anchor-based action's receipt (Ctrl+Y/B/S/A, Tab, block-actions menu)
- * so the transcript always says exactly what was acted on, never just an
- * internal collapseKey or a bare "done".
+ * Apply the diff under the anchor line (block actions, "Apply diff"). Only a
+ * diff a tool showed without writing it qualifies: an edit or write call's
+ * diff is the change already made. The write runs through the edit tool, so
+ * its matching, change tracking and undo snapshot are the ones every edit
+ * gets; the approval card and the edit are for the same call.
  */
-
-/**
- * handleBlockCopy - Ctrl+Y: copy the content of the block the user is
- * actually looking at. `getAnchorLine` resolves to the viewport's
- * bottom-most visible line (see getViewportBottomLine in
- * conversation-layout.ts), not the raw scroll position, the top of the
- * viewport is off-screen-above once the transcript is longer than one page.
- */
-
 export function handleDiffApply(
   conversationManager: ConversationManager | null,
   getAnchorLine: () => number,
@@ -41,59 +24,60 @@ export function handleDiffApply(
   requestRender: () => void,
   getCallId: () => string,
   category: PermissionCategory,
-): boolean {
-  if (!conversationManager) return false;
-  const lineIndex = getAnchorLine();
-  const diff = conversationManager.getDiffAtLine(lineIndex);
-  if (!diff || !diff.filePath) return false;
-  if (diff.unsupported) {
-    conversationManager.log(`[Diff apply refused: ${diff.unsupported}]`, { fg: activeTokens().error });
+): void {
+  if (!conversationManager) return;
+  const say = (text: string, ok = false): void => {
+    conversationManager.log(text, { fg: ok ? activeTokens().success : activeTokens().error });
     requestRender();
-    return true;
+  };
+  const block = blockAt(conversationManager.getBlockRegistry(), getAnchorLine(), 'diff');
+  if (!block || !block.filePath) {
+    say('[Apply diff: no diff is under the cursor line. Scroll until the diff is at the bottom of the view, then press Enter on it.]');
+    return;
   }
-  const projectRoot =
-    commandContext?.workspace.shellPaths?.workingDirectory ?? commandContext?.platform.configManager.getWorkingDirectory();
-
-  commandContext
-    ?.requestPermission?.({
-      callId: getCallId(),
-      tool: 'edit',
-      args: { path: diff.filePath, original: diff.original, updated: diff.updated },
-      category,
-      analysis: analyzePermissionRequest('edit', { path: diff.filePath, original: diff.original, updated: diff.updated }, category),
-    })
-    .then(({ approved }) => {
-      if (!approved) return;
-      if (!projectRoot) {
-        conversationManager.log('[Diff apply failed: missing working directory]', { fg: activeTokens().error });
+  const path = block.filePath;
+  if (!isProposedDiff(block)) {
+    say(`[Apply diff: ${path} already holds this change; ${block.toolName ?? 'the tool'} wrote it. Nothing was applied.]`);
+    return;
+  }
+  if (block.unsupported) {
+    say(`[Apply diff refused: ${block.unsupported}]`);
+    return;
+  }
+  const original = block.diffOriginal ?? '';
+  const updated = block.diffUpdated ?? '';
+  if (original === '') {
+    say(`[Apply diff refused: the diff creates ${path} rather than changing text in it; apply supports changes to existing text.]`);
+    return;
+  }
+  const requestPermission = commandContext?.requestPermission;
+  const toolRegistry = commandContext?.extensions.toolRegistry;
+  if (!requestPermission || !toolRegistry) {
+    say('[Cannot apply the diff: this session has no approval surface or edit tool. Nothing was written.]');
+    return;
+  }
+  const callId = getCallId();
+  const args = { edits: [{ path, find: original, replace: updated }] };
+  void (async () => {
+    try {
+      const { approved } = await requestPermission({
+        callId,
+        tool: 'edit',
+        args,
+        category,
+        analysis: analyzePermissionRequest('edit', { path, original, updated }, category),
+      });
+      if (!approved) {
+        say(`[Apply diff to ${path} denied; the file is unchanged.]`);
         return;
       }
-      let resolvedPath: string;
-      try {
-        resolvedPath = resolveAndValidatePath(diff.filePath!, projectRoot);
-      } catch (err) {
-        conversationManager.log(`[Diff apply failed: ${err instanceof Error ? err.message : err}]`, { fg: activeTokens().error });
-        return;
-      }
-      try {
-        const applied = applyDiffContent(readFileSync(resolvedPath, 'utf-8'), diff.original, diff.updated);
-        if (applied.ok) {
-          writeFileSync(resolvedPath, applied.content, 'utf-8');
-          conversationManager.log(`[Applied diff to ${diff.filePath}]`, { fg: activeTokens().success });
-        } else {
-          conversationManager.log(`[Diff apply failed: ${applied.error} in ${diff.filePath}]`, { fg: activeTokens().error });
-        }
-      } catch (err) {
-        const msg = summarizeError(err);
-        conversationManager.log(`[Diff apply error: ${msg}]`, { fg: activeTokens().error });
-      }
-      requestRender();
-    })
-    .catch((err) => {
-      conversationManager.log(`[Diff apply error: ${summarizeError(err)}]`, { fg: activeTokens().error });
-      requestRender();
-    });
-  return true;
+      const result = await toolRegistry.execute(callId, 'edit', args);
+      if (result.success) say(`[Applied diff to ${path} with the edit tool.]`, true);
+      else say(`[Diff not applied to ${path}: ${result.error ?? 'the edit tool refused it'}]`);
+    } catch (error) {
+      say(`[Diff not applied to ${path}: ${summarizeError(error)}]`);
+    }
+  })();
 }
 
 export const { handleCopy, handleBlockCopy, handleBookmark, handleBlockSave, handleBlockToggle } = createBlockContentActions({

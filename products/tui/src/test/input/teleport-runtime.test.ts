@@ -10,7 +10,7 @@ afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: tru
 
 const bundle = { sessionId: 'sess-1', exportedAt: 1_700_000_000_000, activeConnectionIds: ['c1'], pools: [], contracts: [{}], artifacts: [] };
 
-function harness() {
+function harness(held: readonly string[] = []) {
   const dir = makeProjectTempDir('teleport');
   dirs.push(dir);
   const printed: string[] = [];
@@ -22,7 +22,14 @@ function harness() {
       peer: {
         runners: {
           exportSessionBundle: async (path: string) => { calls.push(`export ${path}`); return { path, bundle }; },
-          importSessionBundle: async (path: string) => { calls.push(`import ${path}`); return bundle; },
+          importSessionBundle: async (path: string, options?: { replace?: boolean }) => {
+            if (held.length > 0 && !options?.replace) throw new Error(`Not imported: ${path} would replace ${held.join(', ')}.`);
+            calls.push(`import ${path}`);
+            return bundle;
+          },
+          describeSessionBundleImport: (value: unknown) => (value && typeof value === 'object' && 'pools' in value
+            ? { ok: true, bundle: value, replaces: held }
+            : { ok: false, problem: 'it has no valid pools (array)' }),
         },
       },
     },
@@ -32,33 +39,28 @@ function harness() {
   return { dir, printed, calls, run: (args: string[]) => registry.get('teleport')!.handler(args, ctx) };
 }
 
-describe('/teleport', () => {
-  test('export hands the resolved path to the runner registry and reports the session', async () => {
+describe('/teleport (an alias of /remote session)', () => {
+  test('export hands the resolved path to the runner registry and says what the bundle holds', async () => {
     const h = harness();
     await h.run(['export', 'out.json']);
     expect(h.calls).toEqual([`export ${join(h.dir, 'out.json')}`]);
-    expect(h.printed[0]).toContain('session sess-1');
+    expect(h.printed[0]).toContain('does not hold the conversation');
   });
 
-  test('import reports the imported session and contract count', async () => {
+  test('inspect of a file that is not a bundle answers in a sentence, changing nothing', async () => {
     const h = harness();
-    await h.run(['import', 'in.json']);
-    expect(h.calls).toEqual([`import ${join(h.dir, 'in.json')}`]);
-    expect(h.printed[0]).toContain('Imported teleport bundle sess-1 with 1 contracts');
-  });
-
-  test('inspect reads the bundle file without touching the runner registry', async () => {
-    const h = harness();
-    writeFileSync(join(h.dir, 'b.json'), JSON.stringify(bundle));
+    writeFileSync(join(h.dir, 'b.json'), '{}');
     await h.run(['inspect', 'b.json']);
     expect(h.calls).toEqual([]);
-    expect(h.printed[0]).toContain('session: sess-1');
+    expect(h.printed[0]).toContain('no valid pools');
   });
 
-  test('a missing path prints usage and does nothing', async () => {
-    const h = harness();
-    await h.run(['export']);
+  test('an import that would replace what is held needs --yes', async () => {
+    const h = harness(['pool p1']);
+    await h.run(['import', 'in.json']);
     expect(h.calls).toEqual([]);
-    expect(h.printed[0]).toContain('Usage: /teleport');
+    expect(h.printed[0]).toContain('would replace pool p1');
+    await h.run(['import', 'in.json', '--yes']);
+    expect(h.calls).toEqual([`import ${join(h.dir, 'in.json')}`]);
   });
 });

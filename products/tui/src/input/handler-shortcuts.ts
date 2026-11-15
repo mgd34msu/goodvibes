@@ -10,14 +10,12 @@ import { nextPermissionMode, permissionModeLabel, type PermissionModeValue } fro
 
 export type GlobalShortcutRouteState = GlobalShortcutState & {
   commandContext?: CommandContext;
-  handleDiffApply: () => boolean;
   killRing: KillRing;
 };
 export function handleGlobalShortcutToken(state: GlobalShortcutRouteState, token: InputToken, viewportHeight: number): boolean {
   return routeShortcut(state, token, viewportHeight, {
     modifiedPageScroll: false,
     killRing: (current) => current.killRing,
-    applyDiff: (current) => current.handleDiffApply(),
     rawKey(state, token) {
       // Bare F2 opens the Agents modal (hardcoded, like pageup/pagedown/escape;
       // F2 inside the Agents modal closes it, see input/agents-modal.ts).

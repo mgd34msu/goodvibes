@@ -39,6 +39,64 @@ import type { OnboardingWizardControllerLike, MutableModelSelectionMap, Onboardi
 export type { OnboardingWizardControllerLike, OnboardingWizardAcknowledgementFieldDefinition, OnboardingWizardAction, OnboardingWizardActionFieldDefinition, OnboardingWizardApplyFeedback, OnboardingWizardApplyFeedbackSeverity, OnboardingWizardChecklistFieldDefinition, OnboardingWizardExternalSurfaceStepId, OnboardingWizardFieldDefinition, OnboardingWizardFieldKind, OnboardingWizardFieldWindow, OnboardingWizardMaskedFieldDefinition, OnboardingWizardMode, OnboardingWizardModelPickerFieldDefinition, OnboardingWizardModelSelection, OnboardingWizardRadioFieldDefinition, OnboardingWizardRadioOption, OnboardingWizardRuntimeHydration, OnboardingWizardSnapshot, OnboardingWizardStatusFieldDefinition, OnboardingWizardStepDefinition, OnboardingWizardStepId, OnboardingWizardTextFieldDefinition } from './onboarding-wizard-types.ts';
 export { getOnboardingWizardBodyRows, getOnboardingWizardVisibleFieldCount } from './onboarding-wizard-helpers.ts';
 
+/**
+ * The wizard's typed text. A value typed into a masked field (a key, a token, a
+ * password) is held in a map of its own, decided when it is typed, while the
+ * field is on screen. Iteration (entries, keys, values, size), which saving
+ * progress and snapshots read, sees only the other fields, so a secret never
+ * reaches the progress file, whichever fields are on screen when it is saved.
+ */
+export class WizardTextState extends Map<string, string> {
+  private readonly masked = new Map<string, string>();
+  private readonly maskedIds = new Set<string>();
+
+  /** Record that `fieldId` is masked; a value already typed into it moves to the masked map. */
+  markMasked(fieldId: string): void {
+    if (this.maskedIds.has(fieldId)) return;
+    this.maskedIds.add(fieldId);
+    const typed = super.get(fieldId);
+    if (typed === undefined) return;
+    super.delete(fieldId);
+    this.masked.set(fieldId, typed);
+  }
+
+  override set(fieldId: string, value: string): this {
+    if (this.maskedIds?.has(fieldId)) {
+      this.masked.set(fieldId, value);
+      return this;
+    }
+    return super.set(fieldId, value);
+  }
+
+  override get(fieldId: string): string | undefined {
+    return this.masked?.get(fieldId) ?? super.get(fieldId);
+  }
+
+  override has(fieldId: string): boolean {
+    return (this.masked?.has(fieldId) ?? false) || super.has(fieldId);
+  }
+
+  override delete(fieldId: string): boolean {
+    const masked = this.masked.delete(fieldId);
+    return super.delete(fieldId) || masked;
+  }
+
+  override clear(): void {
+    this.masked.clear();
+    super.clear();
+  }
+
+  /** Drop every value typed into a masked field. */
+  clearMasked(): void {
+    this.masked.clear();
+  }
+
+  /** Every typed value, masked ones included: for the in-memory snapshot only, never for a file. */
+  allEntries(): [string, string][] {
+    return [...super.entries(), ...this.masked.entries()];
+  }
+}
+
 export class OnboardingWizardController implements OnboardingWizardControllerLike {
   public active = false;
   public mode: OnboardingWizardMode = 'new';
@@ -53,7 +111,7 @@ export class OnboardingWizardController implements OnboardingWizardControllerLik
   public readonly toggleState = new Map<string, boolean>();
   public readonly touchedActionFields = new Set<string>();
   public readonly radioState = new Map<string, string>();
-  public readonly textState = new Map<string, string>();
+  public readonly textState = new WizardTextState();
   public readonly modelSelectionState: MutableModelSelectionMap = new Map();
   public editingFieldId: string | null = null;
   public editBuffer = '';
@@ -70,6 +128,9 @@ export class OnboardingWizardController implements OnboardingWizardControllerLik
 
   public get steps(): readonly OnboardingWizardStepDefinition[] {
     const steps = buildOnboardingWizardSteps(this);
+    for (const step of steps) {
+      for (const field of step.fields) if (field.kind === 'masked') this.textState.markMasked(field.id);
+    }
     this.ensureNavigationStateLength(steps.length);
     return steps;
   }
@@ -174,7 +235,8 @@ export class OnboardingWizardController implements OnboardingWizardControllerLik
       pendingAction: this.pendingAction,
       toggleState: [...this.toggleState.entries()],
       radioState: [...this.radioState.entries()],
-      textState: [...this.textState.entries()],
+      // In memory only (a model-picker round trip restores it), so typed secrets survive it.
+      textState: this.textState.allEntries(),
       modelSelectionState: [...this.modelSelectionState.entries()].map(([target, selection]) => [target, cloneSelection(selection)] as const),
       touchedActionFields: [...this.touchedActionFields],
       editingFieldId: this.editingFieldId,
@@ -643,15 +705,14 @@ export class OnboardingWizardController implements OnboardingWizardControllerLik
   }
 
   public markApplied(): void {
-    // The secrets are stored now; keep none of them in memory or in captureSnapshot().
-    // Dropping the entry (not blanking it) makes the field read as untouched again.
+    // The secrets are stored now; keep none of them in memory. Dropping the entry
+    // (not blanking it) makes the field read as untouched again.
     for (const step of this.steps) {
       for (const field of step.fields) {
-        if (field.kind !== 'masked') continue;
-        this.textState.delete(field.id);
-        this.baselineTextState.delete(field.id);
+        if (field.kind === 'masked') this.baselineTextState.delete(field.id);
       }
     }
+    this.textState.clearMasked();
     this.baselineToggleState.clear();
     for (const [key, value] of this.toggleState) this.baselineToggleState.set(key, value);
     this.baselineRadioState.clear();

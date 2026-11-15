@@ -1,5 +1,5 @@
 import { acquireProcessLock, withProcessLock, withProcessLockSync, type HeldProcessLock } from '../../utils/process-lock.js';
-import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, statSync, unlinkSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, realpathSync, renameSync, statSync, unlinkSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { GitService } from '../../git/service.js';
 import { isMarkedProductWorktree } from '../../git/product-worktree-marker.js';
@@ -536,9 +536,8 @@ export function summarizeWorktreeOwnership(records: readonly ManagedWorktreeMeta
   });
 }
 
-/** Atomically publish the registry while its writer lock is held. */
+/** Atomically publish the registry while its writer lock is held; taking that lock created the parent directory. */
 function writeStore(store: WorktreeStore, storePath: string): void {
-  mkdirSync(dirname(storePath), { recursive: true });
   writeJsonFileAtomic(storePath, store, { durable: false });
 }
 
@@ -566,36 +565,51 @@ export class WorktreeRegistry {
   }
 
   /**
-   * List live worktrees, reconciling the register against `git worktree list`.
-   *
-   * This is also the register's recurring housekeeping point: surfaces poll it,
-   * so reaping here is not startup-only. It reclaims records whose worktree is
-   * gone, ages out and count-caps `kept` tombstones, and sweeps expired
-   * preserved-aside register files, disclosing every count.
+   * List live worktrees: `git worktree list` joined with the register. A read:
+   * it takes no lock and writes nothing, so two surfaces listing at once never
+   * contend. A worktree git knows and the register does not is shown as
+   * `active`; `reconcile` records it.
    */
   public async list(): Promise<WorktreeStatusRecord[]> {
+    const listed = await this.git.worktreeList();
+    const store = readStore(getStorePath(this.workingDirectory, this.surfaceRoot), false);
+    return this.joinListing(listed, store).sort((a, b) => a.path.localeCompare(b.path));
+  }
+
+  private joinListing(listed: Awaited<ReturnType<GitService['worktreeList']>>, store: WorktreeStore): WorktreeStatusRecord[] {
+    return listed.map((entry) => {
+      const path = normalizePath(entry.path, this.workingDirectory);
+      const meta = store.records[path];
+      const classified = classifyWorktreePath(path, this.workingDirectory);
+      return {
+        path,
+        branch: entry.branch,
+        head: entry.head,
+        kind: meta?.kind ?? classified.kind,
+        state: meta?.state ?? 'active',
+        ...(meta?.ownerId ?? classified.ownerId ? { ownerId: meta?.ownerId ?? classified.ownerId } : {}),
+        ...(meta?.sessionId ? { sessionId: meta.sessionId } : {}),
+        ...(meta?.taskId ? { taskId: meta.taskId } : {}),
+        ...(meta?.setup ? { setup: meta.setup } : {}),
+        updatedAt: meta?.updatedAt ?? Date.now(),
+      };
+    });
+  }
+
+  /**
+   * Reconcile the register against `git worktree list` and return the listing.
+   * The register's housekeeping point, run by the retention sweep (startup and
+   * contract end): it records every worktree git knows, reclaims records
+   * whose worktree is gone, ages out and count-caps `kept` tombstones, and
+   * sweeps expired preserved-aside register files, disclosing every count.
+   */
+  public async reconcile(): Promise<WorktreeStatusRecord[]> {
     const beforeScan = readStore(getStorePath(this.workingDirectory, this.surfaceRoot), false);
     const listed = await this.git.worktreeList();
     return withProcessLock(registerLockPath(getStorePath(this.workingDirectory, this.surfaceRoot)), () => {
       const store = readStore(getStorePath(this.workingDirectory, this.surfaceRoot), true, true);
       const present = new Set(listed.map((entry) => normalizePath(entry.path, this.workingDirectory)));
-      const records: WorktreeStatusRecord[] = listed.map((entry) => {
-        const path = normalizePath(entry.path, this.workingDirectory);
-        const meta = store.records[path]!;
-        const classified = classifyWorktreePath(path, this.workingDirectory);
-        return {
-          path,
-          branch: entry.branch,
-          head: entry.head,
-          kind: meta?.kind ?? classified.kind,
-          state: meta?.state ?? 'active',
-          ...(meta?.ownerId ?? classified.ownerId ? { ownerId: meta?.ownerId ?? classified.ownerId } : {}),
-          ...(meta?.sessionId ? { sessionId: meta.sessionId } : {}),
-          ...(meta?.taskId ? { taskId: meta.taskId } : {}),
-          ...(meta?.setup ? { setup: meta.setup } : {}),
-          updatedAt: meta?.updatedAt ?? Date.now(),
-        };
-      });
+      const records = this.joinListing(listed, store);
       const nextRecords: Record<string, ManagedWorktreeMeta> = {};
       for (const record of records) {
         nextRecords[record.path] = {
@@ -684,7 +698,7 @@ export class WorktreeRegistry {
     const report: { removed: SweptWorktree[]; kept: KeptWorktree[]; failed: Array<{ path: string; error: string }> } = { removed: [], kept: [], failed: [] };
     let rows: WorktreeStatusRecord[];
     try {
-      rows = await this.list();
+      rows = await this.reconcile();
     } catch (error) {
       logger.warn('worktree retention: the register could not be read; nothing was removed', { error: summarizeError(error) });
       return report;
@@ -810,28 +824,39 @@ export class WorktreeRegistry {
   /**
    * The product's worktrees with why each is still on disk: age, size, and
    * the reason (running, uncommitted changes, unmerged commits with the days
-   * left before pruning). Read-only.
+   * left before pruning). Read-only. Pass the `rows` a caller already listed
+   * to skip a second listing, and `only` to describe one path; worktrees are
+   * evaluated and measured side by side, a few at a time.
    */
-  public async describeKept(options: Pick<WorktreeRetentionOptions, 'now' | 'retentionMs' | 'owner'> = {}): Promise<KeptWorktreeInfo[]> {
+  public async describeKept(options: Pick<WorktreeRetentionOptions, 'now' | 'retentionMs' | 'owner'> & {
+    readonly rows?: readonly WorktreeStatusRecord[] | undefined;
+    readonly only?: string | undefined;
+  } = {}): Promise<KeptWorktreeInfo[]> {
     const now = (options.now ?? Date.now)();
     const retentionMs = options.retentionMs ?? DEFAULT_WORKTREE_RETENTION_MS;
     const owner = options.owner ?? await this.defaultOwnerResolver();
-    const rows = await this.list();
-    const infos: KeptWorktreeInfo[] = [];
-    for (const row of rows) {
-      if (row.kind === 'manual' || !isProductWorktreePath(row.path, this.workingDirectory)) continue;
-      const evaluation = await this.evaluateRow(row, owner(row.path), now, retentionMs);
+    const only = options.only !== undefined ? normalizePath(options.only, this.workingDirectory) : undefined;
+    const rows = (options.rows ?? await this.list()).filter((row) =>
+      row.kind !== 'manual' && isProductWorktreePath(row.path, this.workingDirectory) && (only === undefined || row.path === only));
+    const describe = async (row: WorktreeStatusRecord): Promise<KeptWorktreeInfo> => {
+      const [evaluation, sizeBytes] = await Promise.all([
+        this.evaluateRow(row, owner(row.path), now, retentionMs),
+        worktreeSizeBytes(row.path),
+      ]);
       const guarded = sweepProtection(row);
-      const sizeBytes = await worktreeSizeBytes(row.path);
-      infos.push({
+      return {
         path: row.path,
         branch: row.branch,
         ageMs: Math.max(0, now - evaluation.sinceMs),
         ...(sizeBytes !== undefined ? { sizeBytes } : {}),
         reason: guarded ?? evaluation.reason,
         willBeRemoved: guarded === null && evaluation.action !== 'keep',
-        summary: `age ${formatAge(Math.max(0, now - evaluation.sinceMs))}, ${sizeBytes !== undefined ? formatBytes(sizeBytes) : 'size unknown'}: ${(guarded ?? evaluation.reason).detail}`,
-      });
+        summary: `age ${formatAge(Math.max(0, now - evaluation.sinceMs))}, ${sizeBytes !== undefined ? formatBytes(sizeBytes) : 'size unknown (it could not be measured)'}: ${(guarded ?? evaluation.reason).detail}`,
+      };
+    };
+    const infos: KeptWorktreeInfo[] = [];
+    for (let start = 0; start < rows.length; start += DESCRIBE_CONCURRENCY) {
+      infos.push(...await Promise.all(rows.slice(start, start + DESCRIBE_CONCURRENCY).map(describe)));
     }
     return infos;
   }
@@ -880,17 +905,21 @@ export class WorktreeRegistry {
   }
 
   public setState(path: string, state: ManagedWorktreeState): void {
+    const normalized = normalizePath(path, this.workingDirectory);
+    // Listing records nothing, so a worktree git knows may not be registered yet; git is asked before the lock is taken.
+    let gitKnows: boolean | undefined;
+    if (!readStore(getStorePath(this.workingDirectory, this.surfaceRoot), false).records[normalized]) gitKnows = this.gitListsWorktreeSync(normalized);
     withRegistryWriteLock(getStorePath(this.workingDirectory, this.surfaceRoot), () => {
       const store = readStore(getStorePath(this.workingDirectory, this.surfaceRoot), true, true);
-      const normalized = normalizePath(path, this.workingDirectory);
-      const existing = store.records[normalized];
+      const classified = classifyWorktreePath(normalized, this.workingDirectory);
       // A typo must not create a record (a `kept` one would linger as a
-      // tombstone for months). `list()` registers every worktree git knows.
+      // tombstone for months): only a path git lists as a worktree is added.
+      const existing: ManagedWorktreeMeta | undefined = store.records[normalized]
+        ?? (gitKnows ? { path: normalized, kind: classified.kind, state: 'active', updatedAt: Date.now() } : undefined);
       if (!existing) {
-        throw new Error(`No worktree is registered at ${normalized}; nothing was changed. List worktrees to register the ones git knows about, then retry with one of those paths.`);
+        throw new Error(`No worktree exists at ${normalized}; nothing was changed. /worktree review lists the worktrees git knows about; retry with one of those paths.`);
       }
       worktreeStateLifecycle.assert(existing.state, state);
-      const classified = classifyWorktreePath(normalized, this.workingDirectory);
       store.records[normalized] = {
         path: normalized,
         kind: existing.kind,
@@ -1101,6 +1130,9 @@ export class WorktreeRegistry {
     return new GitService(worktreePath);
   }
 }
+
+/** Worktrees evaluated and measured at once by describeKept: each spawns git and `du` over a full checkout. */
+const DESCRIBE_CONCURRENCY = 4;
 
 /**
  * Why the automatic sweep must leave a worktree alone regardless of what it

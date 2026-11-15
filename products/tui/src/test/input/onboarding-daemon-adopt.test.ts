@@ -20,7 +20,7 @@ function harness(restart: () => Promise<unknown>, blockers: readonly string[] = 
     'network.adopt-daemon-token': 'pasted-token',
   };
   const handler = {
-    onboardingApplyPending: false,
+    onboardingOperation: null,
     onboardingWizard: {
       getStringFieldValue: (id: string, fallback: string) => String(fields[id] ?? fallback),
       getPortFieldValue: (id: string, fallback: number) => Number(fields[id] ?? fallback),

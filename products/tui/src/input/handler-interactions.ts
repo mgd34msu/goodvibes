@@ -1,6 +1,4 @@
 import { createHandlerContentBindings, applyEscapeResult } from '@goodvibes-jev/engine/terminal-shell/handler-content-bindings';
-import '@goodvibes-jev/engine/terminal-shell/input-content';
-import '../renderer/theme.ts';
 import { buildProviderAccountSnapshot } from '@/runtime/index.ts';
 import { enrichProviderAccountsSnapshot } from '../runtime/onboarding/provider-key-capture.ts';
 import type { OnboardingWizardMode } from './onboarding/onboarding-wizard.ts';
@@ -91,55 +89,6 @@ export async function hydrateOnboardingWizardFromRuntimeForHandler(handler: Inpu
 }
 
 /**
- * handlePasteForHandler - Shared paste path for Ctrl+V and middle-click.
- *
- * Tries the clipboard's image first, then its text. The clipboard itself comes
- * from `handler.clipboardSource`, so tests can hand in a clipboard without
- * touching the real one.
- *
- * The prompt is edited on the HANDLER here, not on the shortcut route state
- * that dispatched the key. feedInputTokens snapshots the prompt before
- * dispatching and would write that snapshot back over this edit, erasing the
- * paste, it does not, because it only restores a field the action left
- * untouched (see the promptBefore guard in handler-feed.ts). That guard is the
- * only reason Ctrl+V works, so it is pinned by test.
- */
-
-/**
- * expandPrompt - Replaces paste markers with actual content.
- * If image markers are present, returns ContentPart[] for multimodal delivery.
- * Otherwise returns a plain string.
- */
-
-/**
- * getImageAttachments - Returns a copy of the current image registry.
- * Callers can use this to attach images when building LLM messages.
- */
-
-/**
- * findMarkerAtPos - Returns the start/end of an atomic marker if pos is inside one.
- * Used to make backspace/delete/arrow treat markers as single units.
- */
-/**
- * cleanupMarkerRegistry - If the given marker text is an IMAGE marker,
- * parses its ID and removes it from imageRegistry.
- */
-
-/**
- * handleBlockCopy - Ctrl+Y: Copy the content of the block the user is
- * looking at (the viewport's bottom-most visible block, see
- * InputHandler.getBlockAnchorLine).
- */
-
-/**
- * handleBookmark - Ctrl+B: Toggle bookmark on the block the user is looking at.
- */
-
-/**
- * handleBlockSave - Ctrl+S: Save the block the user is looking at to a file.
- */
-
-/**
  * executeBlockAction - Execute a block action ID on the block the
  * BlockActionsMenu was opened for. Called when the user selects an action
  * from the menu.
@@ -161,18 +110,9 @@ export function executeBlockActionForHandler(handler: InputHandler, actionId: st
   }
 }
 
-/**
- * handleBlockToggle - Tab (non-command mode): Toggle collapse of the block
- * the user is looking at.
- */
-
-/**
- * handleDiffApply - Ctrl+A when a diff block is the one the user is
- * looking at: request approval and apply the diff. Returns true if a diff
- * was found and applied (so caller can skip default Ctrl+A).
- */
-export function handleDiffApplyForHandler(handler: InputHandler): boolean {
-  return handleDiffApply(
+/** Apply the diff under the anchor line (block actions, "Apply diff"). */
+export function handleDiffApplyForHandler(handler: InputHandler): void {
+  handleDiffApply(
     handler.conversationManager,
     () => handler.getBlockAnchorLine(),
     handler.commandContext,
@@ -182,18 +122,6 @@ export function handleDiffApplyForHandler(handler: InputHandler): boolean {
   );
 }
 
-/**
- * Handle Ctrl+C:
- * - If prompt has text: clear it
- * - If prompt is empty and LLM is thinking: cancel generation
- * - If prompt is empty and idle: show exit notice (double = exit)
- */
-
-/**
- * Handle Escape:
- * - If prompt has text: clear it
- * - If prompt is empty: cancel generation (double-tap not needed)
- */
 /**
  * Record that a modal has been opened and push it onto the navigation stack.
  * Call this EVERY time a modal opens (except inside openModal()).

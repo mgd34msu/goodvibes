@@ -1,5 +1,4 @@
 import { taskDetailLines } from '@goodvibes-jev/engine/terminal-shell/task-presentation';
-import '@goodvibes-jev/engine/terminal-shell/task-presentation';
 /**
  * tasks-runtime.ts, `/tasks`.
  *
@@ -26,9 +25,7 @@ import type { CommandContext } from '../command-registry.ts';
 
 import { reviewWorktreeAttachments } from '@/runtime/index.ts';
 import { requireOperatorClient, requireOpsApi, requireShellPaths } from './runtime-services.ts';
-import '@goodvibes-jev/engine/platform/platform/runtime/client';
 import { createDaemonVerbCaller } from '../../runtime/client/operator-endpoint.ts';
-import '@goodvibes-jev/engine/platform/platform/utils';
 
 import { createTasksRuntimeCommands } from '@goodvibes-jev/engine/terminal-shell/tasks-runtime-commands';
 export const { registerTasksRuntimeCommands } = createTasksRuntimeCommands<CommandContext>({

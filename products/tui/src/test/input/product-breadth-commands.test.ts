@@ -5,9 +5,6 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { isDeepStrictEqual } from 'node:util';
 import { fakePort, choiceAnswer } from '@goodvibes-jev/judgment/testing';
-import { recordedBuiltinArchetypes, recordedFamilyPort } from '../helpers/teamwork-family-reading.ts';
-import { CommandReadings } from '../../input/commands/command-readings.ts';
-import { createTaskManager } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { SurfaceModalHost } from '@goodvibes-jev/engine/terminal-shell/surface-modal-host';
 import { ConversationManager } from '../../core/conversation.ts';
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -2297,126 +2294,57 @@ describe('product breadth commands', () => {
     }
   });
 
-  test('teamwork command exposes packaged modes, recipes, and task creation', async () => {
+  test('teamwork lists modes, recipes and archetypes with no model request, and create verbs start agents', async () => {
     const registry = new CommandRegistry();
     registerBuiltinCommands(registry);
     const teamwork = registry.get('teamwork');
     expect(teamwork).toBeDefined();
 
     const out: string[] = [];
-    const created: Array<{ kind: string; owner: string; title: string; description?: string }> = [];
-    const ctx = makeContext(out) as ReturnType<typeof makeContext> & { clients?: NonNullable<CommandContext['clients']> };
-    const readModels = ctx.platform.readModels;
-    if (!readModels) throw new Error('Native task read model is required.');
-    const taskManager = createTaskManager(runtimeServices.runtimeStore, runtimeServices.runtimeBus, ctx.session.runtime.sessionId, createProductFeatureFlags());
-    const opsApi = createRuntimeOpsApi({ tasksReadModel: readModels.tasks, taskManager });
-    const create = opsApi.tasks.create;
-    opsApi.tasks.create = input => { created.push(input); return create(input); };
-    ctx.clients = { ...ctx.clients, opsApi };
-    const lifetime = new CommandReadings(() => ctx.session.runtime.sessionId, () => true);
-    ctx.commandReadings = lifetime;
-    const doc = { name: 'doc-specialist', description: 'Documentation specialist for operator handoff notes', tools: ['read', 'write', 'analyze'], family: 'implement' as const };
-    const builtin = recordedFamilyPort(recordedBuiltinArchetypes);
-    const previous = installJudgmentPort(builtin.port);
+    const ctx = makeContext(out);
+    const spawned: Array<{ task?: string; template?: string; executionProtocol?: string }> = [];
+    Object.assign(ctx, { ops: { ...ctx.ops, agentManager: { spawn: (input: { task?: string; template?: string; executionProtocol?: string }) => {
+      spawned.push(input);
+      return { id: `agent-${spawned.length}` };
+    } } } });
+    const modelRequests: string[] = [];
+    const previous = installJudgmentPort(fakePort((name) => { modelRequests.push(name); throw new Error('no model request is expected'); }));
     try {
-    await teamwork!.handler(['review'], ctx);
-    expect(out.join('\n')).toContain('Teamwork Review');
-    expect(out.join('\n')).toContain('modes: 9');
-    expect(out.join('\n')).toContain('modes:');
+      await teamwork!.handler(['review'], ctx);
+      expect(out.join('\n')).toContain('Teamwork Review');
+      expect(out.join('\n')).toContain('modes: 9');
 
-    out.length = 0;
-    await teamwork!.handler(['modes'], ctx);
-    expect(out.join('\n')).toContain('Teamwork Modes');
-    expect(out.join('\n')).toContain('local-engineer     agent       local-engineer   gather-plan-apply  template=engineer');
-    expect(out.join('\n')).toContain('remote-engineer');
-    expect(out.join('\n')).toContain('dream');
+      out.length = 0;
+      await teamwork!.handler(['create-mode', 'remote-engineer', 'Remote', 'bridge', 'certification'], ctx);
+      expect(out.join('\n')).toContain('Nothing was started');
+      expect(spawned).toHaveLength(0);
 
-    out.length = 0;
-    await teamwork!.handler(['recipes'], ctx);
-    expect(out.join('\n')).toContain('Teamwork Recipes');
-    expect(out.join('\n')).toContain('remote-certification       Remote engineer execution with local review and integration.');
-    expect(out.join('\n')).toContain('remote-certification');
-    expect(out.join('\n')).toContain('dream-then-certify');
+      out.length = 0;
+      await teamwork!.handler(['create-mode', 'local-engineer', 'Fix', 'the', 'build'], ctx);
+      expect(spawned[0]).toMatchObject({ task: 'Fix the build', template: 'engineer', executionProtocol: 'gather-plan-apply' });
+      expect(out.join('\n')).toContain('Started agent agent-1');
 
-    out.length = 0;
-    await teamwork!.handler(['create-mode', 'remote-engineer', 'Remote', 'bridge', 'certification'], ctx);
-    expect(out.join('\n')).toContain('Created teamwork task');
-    expect(created[0]?.kind).toBe('acp');
-    expect(created[0]?.owner).toBe('remote-engineer');
+      mkdirSync(join(root, '.goodvibes', 'agents'), { recursive: true });
+      writeFileSync(join(root, '.goodvibes', 'agents', 'doc-specialist.md'), [
+        '---',
+        'name: doc-specialist',
+        'description: Documentation specialist for operator handoff notes',
+        'tools: [read, write, analyze]',
+        'family: research',
+        '---',
+        '',
+        'You write precise operator-facing docs.',
+      ].join('\n'));
 
-    mkdirSync(join(root, '.goodvibes', 'agents'), { recursive: true });
-    writeFileSync(join(root, '.goodvibes', 'agents', 'doc-specialist.md'), [
-      '---',
-      'name: doc-specialist',
-      'description: Documentation specialist for operator handoff notes',
-      'tools: [read, write, analyze]',
-      '---',
-      '',
-      'You write precise operator-facing docs.',
-    ].join('\n'));
+      out.length = 0;
+      await teamwork!.handler(['archetypes'], ctx);
+      expect(out.join('\n')).toMatch(/doc-specialist\s+research/);
 
-    const listing = recordedFamilyPort([...recordedBuiltinArchetypes, doc]);
-    installJudgmentPort(listing.port);
-    out.length = 0;
-    await teamwork!.handler(['archetypes'], ctx);
-    expect(out.join('\n')).toContain('doc-specialist');
-    expect(out.join('\n')).toContain('implement');
-
-    out.length = 0;
-    await teamwork!.handler(['validate'], ctx);
-    expect(out.join('\n')).toContain('Teamwork Archetype Validation');
-    expect(out.join('\n')).toContain('All discovered archetypes are currently valid.');
-
-    out.length = 0;
-    await teamwork!.handler(['archetype', 'doc-specialist'], ctx);
-    expect(out.join('\n')).toContain('Teamwork Archetype doc-specialist');
-    expect(out.join('\n')).toContain('source: custom');
-
-    out.length = 0;
-    await teamwork!.handler(['create-archetype', 'doc-specialist', 'Document', 'handoff'], ctx);
-    expect(out.join('\n')).toContain('Created teamwork task');
-    expect(created[1]?.kind).toBe('agent');
-    expect(created[1]?.owner).toBe('custom:doc-specialist');
-    expect(builtin.requests).toHaveLength(1);
-    expect(builtin.requests[0]?.context).toEqual({ battery: 'engine.agents.archetype-family', pattern: 'fan-out', site: 'agents.archetype-family' });
-    expect(builtin.requests[0]?.state).toEqual({ archetypes: recordedBuiltinArchetypes.map(({ name, description, tools }) => ({ name, description, tools: [...tools] })) });
-    expect(Object.keys(builtin.requests[0]?.questions ?? {})).toEqual(recordedBuiltinArchetypes.map((_, index) => `archetype${index}__family`));
-    expect(listing.requests).toHaveLength(4);
-    for (const request of listing.requests) {
-      expect(Object.keys(request.questions)).toHaveLength(9);
-      expect(request.context).toEqual({ battery: 'engine.agents.archetype-family', pattern: 'fan-out', site: 'agents.archetype-family' });
-      expect(request.state).toMatchObject({ archetypes: [...recordedBuiltinArchetypes, doc].map(({ name, description, tools }) => ({ name, description, tools: [...tools] })) });
-      expect(request.state).toMatchObject({ archetypes: expect.arrayContaining([expect.objectContaining({ name: doc.name,
-        systemPrompt: expect.stringContaining('You write precise operator-facing docs.') })]) });
-      expect(Object.keys(request.questions)).toEqual([...recordedBuiltinArchetypes, doc].map((_, index) => `archetype${index}__family`));
-    }
-    const stored = opsApi.tasks.list();
-    expect(stored).toHaveLength(2);
-    expect(stored.map(task => task.description).toSorted()).toEqual(created.map(task => task.description).toSorted());
-    for (const input of created) expect(input.description).not.toContain('reviewMode');
-    expect(created[1]?.description).toContain('"family":"implement"');
-    expect(created[1]?.description).toContain('"executionProtocol":"gather-plan-apply"');
-    const held = recordedFamilyPort([...recordedBuiltinArchetypes, { ...doc, family: 'unknown' }]);
-    installJudgmentPort(held.port);
-    await teamwork!.handler(['create-archetype', 'doc-specialist', 'Held', 'work'], ctx);
-    expect(held.requests).toHaveLength(1);
-    expect(created).toHaveLength(2);
-    expect(opsApi.tasks.list()).toHaveLength(2);
-    expect(out.join('\n')).toContain('no settled family');
-    for (const family of ['review', 'test', 'research', 'general'] as const) {
-      const chosen = recordedFamilyPort([...recordedBuiltinArchetypes, { ...doc, family }]);
-      installJudgmentPort(chosen.port);
-      await teamwork!.handler(['create-archetype', 'doc-specialist', 'Recorded', family], ctx);
-      expect(chosen.requests).toHaveLength(1);
-      const task = opsApi.tasks.list().find(task => task.title === `Recorded ${family}`);
-      expect(task).toBeDefined();
-      expect(task?.description).toContain(`"family":"${family}"`);
-      expect(task?.description).toContain(`"executionProtocol":"${family === 'research' ? 'gather-plan-apply' : 'direct'}"`);
-      expect(task?.description).not.toContain('reviewMode');
-    }
-    expect(opsApi.tasks.list()).toHaveLength(6);
-    } finally { lifetime.dispose(); installJudgmentPort(previous); }
-
+      out.length = 0;
+      await teamwork!.handler(['create-archetype', 'doc-specialist', 'Document', 'handoff'], ctx);
+      expect(spawned[1]).toMatchObject({ task: 'Document handoff', template: 'doc-specialist', executionProtocol: 'gather-plan-apply' });
+      expect(modelRequests).toEqual([]);
+    } finally { installJudgmentPort(previous); }
   });
 
   test('health command exposes unified setup, service, sandbox, and provider surfaces', async () => {

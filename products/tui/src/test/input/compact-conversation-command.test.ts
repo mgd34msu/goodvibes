@@ -64,6 +64,7 @@ function makeContext(opts: {
         getEntries: () => [],
         getCompactionCount: () => 1,
         getOriginalTask: () => opts.originalTask,
+        addCompactionEntry: () => {},
       },
       wrfcController: { listChains: () => [] },
     },
@@ -135,11 +136,12 @@ describe('compactConversation: originalTask wiring ("Original task" mislabel bug
 describe('compactConversation: small-window compaction rewrites the transcript in place', () => {
   function smallWindowContext(busy: boolean, replaced: unknown[]): CommandContext {
     const context = makeContext({ exportedAgents: [], originalTask: null, capturedCtx: { value: null } }) as unknown as {
-      session: { conversationManager: { replaceMessagesForLLM: (messages: unknown) => void } };
+      session: { conversationManager: { getMessagesForLLM: () => unknown[]; replaceMessagesForLLM: (messages: unknown) => void } };
       provider: { providerRegistry: { getKnownContextWindowForModel: () => number } };
       isGenerating: () => boolean;
     };
     context.provider.providerRegistry.getKnownContextWindowForModel = () => 8_000;
+    context.session.conversationManager.getMessagesForLLM = () => Array.from({ length: 12 }, (_, index) => ({ role: 'user', content: `message ${index}` }));
     context.session.conversationManager.replaceMessagesForLLM = (messages) => { replaced.push(messages); };
     context.isGenerating = () => busy;
     return context as unknown as CommandContext;
@@ -151,10 +153,12 @@ describe('compactConversation: small-window compaction rewrites the transcript i
     expect(replaced).toEqual([]);
   });
 
-  test('compacts when no turn is running', async () => {
+  test('says how many messages were dropped without a summary, and records the drop', async () => {
     const replaced: unknown[] = [];
-    await compactConversation(smallWindowContext(false, replaced));
+    const result = await compactConversation(smallWindowContext(false, replaced));
     expect(replaced).toHaveLength(1);
+    expect(result).toMatchObject({ kind: 'dropped', dropped: 2, kept: 10 });
+    if (result.kind === 'dropped') expect(result.event.sessionId).toBe('session-1');
   });
 });
 

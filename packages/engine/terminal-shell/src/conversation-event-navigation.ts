@@ -48,6 +48,34 @@ export function wrapToLine(lines: readonly number[], currentLine: number, direct
   return [...lines].reverse().find((line) => line < currentLine) ?? lines[lines.length - 1]!;
 }
 
+/** The block whose lines contain `lineIndex` (optionally only blocks of `typeFilter`); null when that line is in no such block. */
+export function blockAt<B extends { readonly type: string; readonly startLine: number; readonly lineCount: number }>(
+  blocks: readonly B[],
+  lineIndex: number,
+  typeFilter?: string,
+): B | null {
+  for (const block of blocks) {
+    if (typeFilter !== undefined && block.type !== typeFilter) continue;
+    if (lineIndex >= block.startLine && lineIndex < block.startLine + block.lineCount) return block;
+  }
+  return null;
+}
+
+/** Tool families whose diff records a write that already happened. */
+const WRITING_TOOL_FAMILIES = new Set(['edit', 'write']);
+
+/**
+ * True for a diff a tool showed without writing it (a `git diff`, a proposed
+ * patch). An edit or write call's diff is the change it already made, so
+ * applying it again would either fail or repeat an old edit.
+ */
+export function isProposedDiff(block: { readonly type: string; readonly filePath?: string | undefined; readonly toolName?: string | undefined }): boolean {
+  if (block.type !== 'diff' || !block.filePath) return false;
+  const name = block.toolName ?? '';
+  const family = (name.includes('__') ? name.split('__').pop()! : name).toLowerCase();
+  return !WRITING_TOOL_FAMILIES.has(family);
+}
+
 /** The block containing `lineIndex`, else the one starting nearest it (optionally only blocks of `typeFilter`). */
 export function nearestBlock<B extends { readonly type: string; readonly startLine: number; readonly lineCount: number }>(
   blocks: readonly B[],

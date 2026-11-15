@@ -13,13 +13,15 @@ import { IS_WORKSPACE_DISTRIBUTION, WORKSPACE_UPDATE_GUIDANCE } from '../../runt
  * release; an explicitly configured installer-owned WebUI keeps its served
  * path. Apply/rollback preserve earlier programs and check saved-data readers
  * before changing live files. Running programs use the replacement on restart.
- * `/update review` and `bundle` inspect/export this installation's posture.
+ * `/update review` prints this install's update state (installed and latest
+ * version, install kind, rollback copy) and `bundle export` saves it to a file.
  */
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import {
   captureUpdateFileIo,
+  PREVIOUS_FILE_SUFFIX,
   UpdateTransactionError,
   realUpdateFileIo,
   type UpdateFileIo,
@@ -232,94 +234,116 @@ export function rollbackUpdate(options: RollbackUpdateOptions): void {
   options.print(formatSuiteUpdateReport(result, 'restored', result.programs.includes('goodvibes-daemon') && service.managed ? [`Daemon restart: ${service.restartCommand}`] : []));
 }
 
-interface UpdateBundle {
-  readonly version: 1;
+/** What `/update review` prints and `/update bundle export` saves, built once for both. */
+interface UpdateReview {
+  readonly version: 2;
   readonly exportedAt: number;
   readonly appVersion: string;
   readonly installKind: InstallKind;
+  /** The newest published release, or why it could not be read. */
+  readonly latest: { readonly tag: string; readonly isCurrent: boolean } | { readonly unknown: string };
+  /** Where updates come from: the project's published releases. */
+  readonly channel: string;
+  /** True when a previous program is kept beside this one, so /update rollback has something to restore. */
+  readonly rollbackRetained: boolean;
   readonly subscriptionProviders: readonly string[];
   readonly sandboxProfile: string;
-  readonly notes: readonly string[];
 }
 
-/** Parse an update bundle file, refusing anything that is not one rather than printing "undefined" fields. */
-function parseUpdateBundle(text: string): UpdateBundle {
-  const value: unknown = JSON.parse(text);
-  const record = typeof value === 'object' && value !== null ? value as Record<string, unknown> : undefined;
-  const isStrings = (candidate: unknown): candidate is readonly string[] =>
-    Array.isArray(candidate) && candidate.every((entry) => typeof entry === 'string');
-  if (
-    !record
-    || record.version !== 1
-    || typeof record.appVersion !== 'string'
-    || typeof record.installKind !== 'string'
-    || typeof record.sandboxProfile !== 'string'
-    || !isStrings(record.subscriptionProviders)
-    || !isStrings(record.notes)
-  ) {
-    throw new Error('the file is not an update bundle made by /update bundle export');
+function buildUpdateReview(ctx: CommandContext, latest: UpdateReview['latest']): UpdateReview {
+  const subscriptions = requireSubscriptionManager(ctx);
+  const builtinProviders = listBuiltinSubscriptionProviders().map((entry) => entry.provider);
+  const config = ctx.platform.configManager;
+  return {
+    version: 2,
+    exportedAt: Date.now(),
+    appVersion: VERSION,
+    installKind: detectInstallKind(process.execPath),
+    latest,
+    channel: REPO_RELEASES_LATEST_URL,
+    rollbackRetained: existsSync(`${process.execPath}${PREVIOUS_FILE_SUFFIX}`),
+    subscriptionProviders: [...new Set([...builtinProviders, ...subscriptions.list().map((entry) => entry.provider)])],
+    sandboxProfile: [config.get('sandbox.replIsolation'), config.get('sandbox.mcpIsolation'), config.get('sandbox.vmBackend')].map(String).join('/'),
+  };
+}
+
+/** The newest published release, read once; a failed read is named, not guessed. */
+async function readLatestRelease(): Promise<UpdateReview['latest']> {
+  try {
+    const result = await checkForUpdate(fetch as UpdateFetchLike, VERSION);
+    return { tag: result.latestTag, isCurrent: result.isCurrent };
+  } catch (error) {
+    return { unknown: error instanceof Error ? error.message : String(error) };
   }
-  return record as unknown as UpdateBundle;
 }
 
-function inspectUpdateBundle(bundle: UpdateBundle): string {
+function formatUpdateReview(review: UpdateReview, title: string): string {
+  const latest = 'tag' in review.latest
+    ? `${review.latest.tag}${review.latest.isCurrent ? ' (this is current)' : ' (newer than this one: /update apply installs it)'}`
+    : `unknown (${review.latest.unknown})`;
   return [
-    'Update Bundle Review',
-    `  appVersion: ${bundle.appVersion}`,
-    `  installKind: ${bundle.installKind}`,
-    `  subscriptionProviders: ${bundle.subscriptionProviders.length}`,
-    `  sandboxProfile: ${bundle.sandboxProfile}`,
-    `  notes: ${bundle.notes.length}`,
+    title,
+    `  installed version: ${review.appVersion}`,
+    `  latest release: ${latest}`,
+    `  channel: ${review.channel}`,
+    `  install kind: ${review.installKind}`,
+    `  rollback copy: ${review.rollbackRetained ? 'kept beside this program; /update rollback restores it' : 'none kept (an /update apply keeps one)'}`,
+    `  subscription providers: ${review.subscriptionProviders.length}${review.subscriptionProviders.length > 0 ? ` (${review.subscriptionProviders.join(', ')})` : ''}; sign-ins survive an update`,
+    `  sandbox profile: ${review.sandboxProfile}`,
   ].join('\n');
 }
 
-/** `/update bundle export|inspect <path>`; always handled, so unknown modes get usage. */
-export function handleUpdateBundleSubcommand(args: readonly string[], ctx: CommandContext): true {
+/** Parse a saved update review, refusing anything that is not one rather than printing "undefined" fields. */
+function parseUpdateReview(text: string): UpdateReview {
+  const value: unknown = JSON.parse(text);
+  const record = typeof value === 'object' && value !== null ? value as Record<string, unknown> : undefined;
+  const latest = record?.latest as Record<string, unknown> | undefined;
+  if (
+    !record
+    || record.version !== 2
+    || typeof record.appVersion !== 'string'
+    || typeof record.installKind !== 'string'
+    || typeof record.channel !== 'string'
+    || typeof record.rollbackRetained !== 'boolean'
+    || typeof record.sandboxProfile !== 'string'
+    || !Array.isArray(record.subscriptionProviders)
+    || !latest || (typeof latest.tag !== 'string' && typeof latest.unknown !== 'string')
+  ) {
+    throw new Error('the file is not an update review saved by /update bundle export');
+  }
+  return record as unknown as UpdateReview;
+}
+
+/** `/update bundle export|inspect <path>`: save this install's update review to a file, or read one back. */
+export async function handleUpdateBundleSubcommand(args: readonly string[], ctx: CommandContext): Promise<true> {
   const shellPaths = requireShellPaths(ctx);
   const mode = args[1];
-  const pathArg = args[2];
+  const pathArg = args.slice(2).find((arg) => arg !== '--yes');
   if (mode !== 'export' && mode !== 'inspect') {
-    ctx.print('Usage: /update bundle export <path> | /update bundle inspect <path>');
+    ctx.print('Usage: /update bundle export <path> [--yes] | /update bundle inspect <path>');
     return true;
   }
   if (!pathArg) {
-    ctx.print(`Usage: /update bundle ${mode} <path>`);
+    ctx.print(`Usage: /update bundle ${mode} <path>${mode === 'export' ? ' [--yes]' : ''}`);
     return true;
   }
   const targetPath = shellPaths.resolveWorkspacePath(pathArg);
   if (mode === 'export') {
-    const subscriptions = requireSubscriptionManager(ctx);
-    const builtinProviders = listBuiltinSubscriptionProviders().map((entry) => entry.provider);
-    const activeSubscriptions = subscriptions.list().map((entry) => entry.provider);
-    const sandboxProfile = [
-      `${ctx.platform.configManager.get('sandbox.replIsolation')}`,
-      `${ctx.platform.configManager.get('sandbox.mcpIsolation')}`,
-      `${ctx.platform.configManager.get('sandbox.vmBackend')}`,
-    ].join('/');
-    const bundle: UpdateBundle = {
-      version: 1,
-      exportedAt: Date.now(),
-      appVersion: VERSION,
-      installKind: detectInstallKind(process.execPath),
-      subscriptionProviders: [...new Set([...builtinProviders, ...activeSubscriptions])],
-      sandboxProfile,
-      notes: [
-        'installKind reflects how THIS running process was launched, detected from process.execPath.',
-        'OAuth-backed provider subscriptions survive updates and continue to apply to supported provider surfaces.',
-      ],
-    };
+    // The review holds no secret; --yes guards only against replacing a file that is already there.
+    if (existsSync(targetPath) && !args.includes('--yes')) {
+      ctx.print(`Not saved: ${targetPath} already exists. Nothing was changed; run /update bundle export ${pathArg} --yes to replace it.`);
+      return true;
+    }
+    const review = buildUpdateReview(ctx, await readLatestRelease());
     mkdirSync(dirname(targetPath), { recursive: true });
-    writeFileSync(targetPath, JSON.stringify(bundle, null, 2) + '\n', 'utf-8');
-    ctx.print(`Update bundle exported to ${targetPath}`);
+    writeFileSync(targetPath, JSON.stringify(review, null, 2) + '\n', 'utf-8');
+    ctx.print(`Update review saved to ${targetPath}. It records this install's update state for support or before an upgrade; it is not an update and nothing applies it.`);
     return true;
   }
-  if (mode === 'inspect') {
-    try {
-      ctx.print(inspectUpdateBundle(parseUpdateBundle(readFileSync(targetPath, 'utf-8'))));
-    } catch (error) {
-      ctx.print(`Cannot inspect ${targetPath}: ${error instanceof Error ? error.message : String(error)}`);
-    }
-    return true;
+  try {
+    ctx.print(formatUpdateReview(parseUpdateReview(readFileSync(targetPath, 'utf-8')), `Update Review (saved ${targetPath})`));
+  } catch (error) {
+    ctx.print(`Cannot inspect ${targetPath}: ${error instanceof Error ? error.message : String(error)}`);
   }
   return true;
 }
@@ -331,8 +355,8 @@ export function registerUpdateCommand(registry: CommandRegistry): void {
 const selfUpdateCommand = createSelfUpdateCommand<CommandContext>({
   description:
     'Check for a newer GoodVibes release and, for binary installs, download/verify/apply it or roll back to the kept previous version',
-  usage: '[check|apply|rollback|review|bundle export <path>|bundle inspect <path>]',
-  help: 'Usage: /update [check|apply|rollback|review|bundle export <path>|bundle inspect <path>]',
+  usage: '[check|apply|rollback|review|bundle export <path> [--yes]|bundle inspect <path>]',
+  help: 'Usage: /update [check|apply|rollback|review|bundle export <path> [--yes]|bundle inspect <path>]',
   version: VERSION,
   workspaceDistribution: IS_WORKSPACE_DISTRIBUTION,
   workspaceGuidance: WORKSPACE_UPDATE_GUIDANCE,
@@ -345,26 +369,10 @@ const selfUpdateCommand = createSelfUpdateCommand<CommandContext>({
   extra: async (args, ctx) => {
     const sub = args[0] ?? 'check';
     if (sub === 'review') {
-      const installKind = detectInstallKind(process.execPath);
-      const subscriptions = requireSubscriptionManager(ctx);
-      const builtinProviders = listBuiltinSubscriptionProviders().map((entry) => entry.provider);
-      const activeSubscriptions = subscriptions.list().map((entry) => entry.provider);
-      const sandboxProfile = [
-        `${ctx.platform.configManager.get('sandbox.replIsolation')}`,
-        `${ctx.platform.configManager.get('sandbox.mcpIsolation')}`,
-        `${ctx.platform.configManager.get('sandbox.vmBackend')}`,
-      ].join('/');
-      ctx.print(
-        [
-          'Update Review',
-          `  version: ${VERSION}`,
-          `  install kind: ${installKind}`,
-          `  built-in subscription providers: ${builtinProviders.length}${builtinProviders.length > 0 ? ` (${builtinProviders.join(', ')})` : ''}`,
-          `  active subscriptions: ${activeSubscriptions.length}${activeSubscriptions.length > 0 ? ` (${activeSubscriptions.join(', ')})` : ''}`,
-          `  sandbox profile: ${sandboxProfile}`,
-          '  use /update check to look for a newer release, /update apply to install it, /update rollback to return to the kept previous version',
-        ].join('\n'),
-      );
+      ctx.print([
+        formatUpdateReview(buildUpdateReview(ctx, await readLatestRelease()), 'Update Review'),
+        '  use /update check to look for a newer release, /update apply to install it, /update rollback to return to the kept previous version',
+      ].join('\n'));
       return true;
     }
     if (sub === 'bundle') return handleUpdateBundleSubcommand(args, ctx);

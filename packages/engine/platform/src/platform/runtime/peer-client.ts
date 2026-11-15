@@ -154,7 +154,9 @@ export interface PeerClientRunnersDomain {
   importArtifact(path: string): ReturnType<RemoteRunnerRegistry['importArtifact']>;
   buildReviewSummary(artifactId: string): string | null;
   exportSessionBundle(path?: string): ReturnType<RemoteRunnerRegistry['exportSessionBundle']>;
-  importSessionBundle(path: string): ReturnType<RemoteRunnerRegistry['importSessionBundle']>;
+  importSessionBundle(path: string, options?: { readonly replace?: boolean | undefined }): ReturnType<RemoteRunnerRegistry['importSessionBundle']>;
+  /** Validate a parsed session bundle and name what importing it would replace; writes nothing. */
+  describeSessionBundleImport(value: unknown): ReturnType<RemoteRunnerRegistry['describeSessionBundleImport']>;
 }
 
 export interface PeerClient {
@@ -407,8 +409,11 @@ export function createPeerClient(deps: PeerClientDependencies): PeerClient {
       exportSessionBundle(path?: string) {
         return resolved.remoteRunnerRegistry.exportSessionBundle(resolved.runtimeStore, path);
       },
-      importSessionBundle(path: string) {
-        return resolved.remoteRunnerRegistry.importSessionBundle(path);
+      importSessionBundle(path: string, options?: { readonly replace?: boolean | undefined }) {
+        return resolved.remoteRunnerRegistry.importSessionBundle(path, options);
+      },
+      describeSessionBundleImport(value: unknown) {
+        return resolved.remoteRunnerRegistry.describeSessionBundleImport(value);
       },
     },
     getSnapshot(): PeerClientSnapshot {

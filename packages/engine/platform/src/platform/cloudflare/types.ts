@@ -264,6 +264,12 @@ export interface CloudflareOperationalTokenInput extends CloudflareTokenRequirem
   readonly persistConfig?: boolean | undefined;
   readonly storeApiToken?: boolean | undefined;
   readonly returnGeneratedToken?: boolean | undefined;
+  /**
+   * Default true: the stored operational token this daemon made for the same
+   * account, zone and components is returned instead of a new one. False
+   * always makes a new token (and revokes the one it replaces).
+   */
+  readonly reuse?: boolean | undefined;
 }
 
 export interface CloudflareOperationalTokenResult {
@@ -271,6 +277,10 @@ export interface CloudflareOperationalTokenResult {
   readonly tokenId?: string | undefined;
   readonly tokenName: string;
   readonly tokenSource: 'bootstrap';
+  /** True when the stored token was returned and nothing was created in Cloudflare. */
+  readonly reused?: boolean | undefined;
+  /** The token this one replaced: revoked, or why it could not be. */
+  readonly replaced?: { readonly tokenId: string; readonly revoked: boolean; readonly reason?: string | undefined } | undefined;
   readonly apiTokenRef?: string | undefined;
   readonly generatedToken?: string | undefined;
   readonly accountId: string;
@@ -327,6 +337,12 @@ export interface CloudflareDisableInput {
   readonly accountId?: string | undefined;
   readonly apiToken?: string | undefined;
   readonly apiTokenRef?: string | undefined;
+  /**
+   * A token allowed to edit API tokens (the bootstrap kind). With it, disable
+   * revokes the operational token this daemon created; without it that token
+   * stays live and a step says so.
+   */
+  readonly bootstrapToken?: string | undefined;
   readonly workerName?: string | undefined;
   /** Default true: the Worker's public workers.dev route is turned off. */
   readonly disableWorkerSubdomain?: boolean | undefined;
@@ -496,6 +512,7 @@ export interface CloudflareApiClient {
         readonly expires_on?: string | undefined;
       }): Promise<CloudflareTokenCreateResponseLike>;
       get?(tokenId: string): Promise<CloudflareTokenCreateResponseLike>;
+      delete?(tokenId: string): Promise<unknown>;
       verify(): Promise<CloudflareTokenVerifyResponseLike>;
       readonly permissionGroups: {
         list(params?: { readonly name?: string; readonly scope?: string }): AsyncIterable<CloudflarePermissionGroupLike>;

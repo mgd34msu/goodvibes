@@ -5,7 +5,7 @@ export { syncFeedContextMutableFields } from '@goodvibes-jev/engine/terminal-she
 export type { FeedContextMutableInit };
 /** Product-only ports stay bound here; allocation and scalar synchronization are platform owned. */
 export type FeedContextStableRefs = Pick<InputFeedContext, FeedContextStableKeys | "configModal" | "onboardingWizard" | "killRing">;
-export type FeedContextClosures = Pick<InputFeedContext, FeedContextClosureKeys | "handleDiffApply" | "saveUndoStateForText" | "breakUndoCoalesce" | "footerTargetAt" | "openFooterTarget" | "onOnboardingAction" | "onStepChange">;
+export type FeedContextClosures = Pick<InputFeedContext, FeedContextClosureKeys | "saveUndoStateForText" | "breakUndoCoalesce" | "footerTargetAt" | "openFooterTarget" | "onOnboardingAction" | "onStepChange">;
 export function buildInitialFeedContext(mutable: FeedContextMutableInit, stable: FeedContextStableRefs, closures: FeedContextClosures): InputFeedContext {
   return buildContext(mutable, stable, closures);
 }

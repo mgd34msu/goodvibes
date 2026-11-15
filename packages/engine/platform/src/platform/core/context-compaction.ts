@@ -259,6 +259,36 @@ export function compactSmallWindow(
   return [summaryMsg, summaryReply, ...recentMessages];
 }
 
+/** The section id a small-window compaction records: messages were dropped, not summarised. */
+export const SMALL_WINDOW_DROP_SECTION = 'small-window-drop';
+
+/**
+ * Record a small-window compaction in the event log, so compaction history
+ * shows that the oldest messages were dropped (not summarised) and how many.
+ */
+export function recordSmallWindowCompaction(
+  before: ProviderMessage[],
+  after: ProviderMessage[],
+  meta: { readonly modelId: string; readonly trigger: 'auto' | 'manual'; readonly sessionId?: string | undefined },
+): CompactionEvent {
+  const event: CompactionEvent = {
+    timestamp: Date.now(),
+    messagesBeforeCompaction: before.length,
+    messagesAfterCompaction: after.length,
+    tokensBeforeEstimate: estimateConversationTokens(before),
+    tokensAfterEstimate: estimateConversationTokens(after),
+    modelId: meta.modelId,
+    trigger: meta.trigger,
+    ...(meta.sessionId !== undefined ? { sessionId: meta.sessionId } : {}),
+    sectionsIncluded: [SMALL_WINDOW_DROP_SECTION],
+    validationPassed: true,
+    instructionsReinjected: false,
+  };
+  compactionEvents.push(event);
+  if (compactionEvents.length > 50) compactionEvents.shift();
+  return event;
+}
+
 // ---------------------------------------------------------------------------
 // LLM extraction helper
 // ---------------------------------------------------------------------------

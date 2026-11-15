@@ -8,6 +8,7 @@ import type {
 } from './config-modal-types.ts';
 import type { ModalSectionStyle } from './config-modal-types.ts';
 import { truncateDisplay, wrapText } from '../utils/terminal-width.ts';
+import { actionKeyLabel, actionKeyText, chordHint } from './config-modal-keys.ts';
 
 export type {
   ConfigModalAction,
@@ -77,6 +78,7 @@ const DEFAULT_LABEL_WRAP_WIDTH = 70;
  */
 const FILTER_NO_MATCH_ROW_ID = '__config_modal_filter_no_match__';
 
+
 /**
  * ConfigModal, the single, generic, named config-modal host. One instance
  * lives on the InputHandler (like `settingsModal`); it renders whatever
@@ -99,11 +101,20 @@ export class ConfigModal {
   private statusMessage = '';
   /** Pending destructive confirm: the action key awaiting a second press. */
   private pendingConfirmKey: string | null = null;
+  /** True after the leader chord (Ctrl+G): the next typed key is an action key, not search text. */
+  private leaderArmed = false;
+  /**
+   * One `buildView()` per render and per key: inside a pass every read of the
+   * live view (structure sync, value overlay, selected row, hints, counts)
+   * shares the view built first. A surface's view may read stores from disk.
+   */
+  private inPass = false;
+  private passView: ConfigModalView | null | undefined = undefined;
 
   /**
    * The always-live search row. Every printable key the modal receives is
-   * typed here, except a key the surface claims as an action, which fires
-   * the action while the query is empty (handleConfigModalToken). The query
+   * typed here; actions fire from Enter or a Ctrl/Alt chord
+   * (handleConfigModalToken), so a search never fires one. The query
    * is the TEXT-CAPTURE buffer itself (a multi-char paste token appends in
    * one shot). Filtering only ever narrows the ACTIVE tab's rows and is reset
    * on tab switch (a query typed against one tab's rows has no defined
@@ -146,6 +157,7 @@ export class ConfigModal {
     this.active = true;
     this.statusMessage = '';
     this.pendingConfirmKey = null;
+    this.leaderArmed = false;
     this.scrollOffset = 0;
     this.filterQuery = '';
     this.interactedSinceOpen = false;
@@ -172,6 +184,7 @@ export class ConfigModal {
     this.frozenView = null;
     this.statusMessage = '';
     this.pendingConfirmKey = null;
+    this.leaderArmed = false;
     this.filterQuery = '';
   }
 
@@ -265,9 +278,39 @@ export class ConfigModal {
    * Esc closes the modal. Returns false when nothing was armed.
    */
   cancelPendingConfirm(): boolean {
+    if (this.leaderArmed) {
+      this.disarmLeader();
+      return true;
+    }
     if (this.pendingConfirmKey === null) return false;
     this._clearConfirm();
     return true;
+  }
+
+  /** The leader chord was pressed: the next typed key names an action. */
+  armLeader(): void {
+    this.leaderArmed = true;
+    this.statusMessage = 'Press an action key (Esc cancels).';
+  }
+
+  /** True once (and disarms) when the leader is armed: the caller treats this key as an action key. */
+  takeLeader(): boolean {
+    if (!this.leaderArmed) return false;
+    this.leaderArmed = false;
+    if (this.statusMessage === 'Press an action key (Esc cancels).') this.statusMessage = '';
+    return true;
+  }
+
+  /** Drop an armed leader without firing anything. */
+  disarmLeader(): void {
+    if (!this.leaderArmed) return;
+    this.leaderArmed = false;
+    this.statusMessage = '';
+  }
+
+  /** Say that a key names no action here, so a leader press is never silently swallowed. */
+  noteUnboundAction(key: string): void {
+    this.statusMessage = `No action on ${actionKeyText(key)} here.`;
   }
 
   // ── Navigation (each is an interaction boundary) ────────────────────────────
@@ -346,17 +389,21 @@ export class ConfigModal {
    * This is an interaction boundary (syncs structure first).
    */
   fireAction(key: string, ctx: Omit<ConfigModalActionContext, 'row' | 'tabId' | 'setStatus' | 'close' | 'requestRender' | 'jumpToRow'>): boolean {
-    this.syncStructure();
-    const action = this.resolveAction(key);
-    if (!action) return false;
+    const resolved = this._pass(() => {
+      this.syncStructure();
+      const action = this.resolveAction(key);
+      return action ? { action, row: this.getSelectedRow() } : null;
+    });
+    if (!resolved) return false;
+    const { action, row } = resolved;
     if (action.confirm && this.pendingConfirmKey !== key) {
       this.pendingConfirmKey = key;
-      this.statusMessage = `Press ${key} again to ${action.label}.`;
+      this.statusMessage = `Press ${actionKeyText(key)} again to ${action.label}.`;
       return true;
     }
     this._clearConfirm();
     const fullCtx: ConfigModalActionContext = {
-      row: this.getSelectedRow(),
+      row,
       tabId: this.activeTabId,
       print: ctx.print,
       executeCommand: ctx.executeCommand,
@@ -432,6 +479,10 @@ export class ConfigModal {
    * ever reaches the renderer.
    */
   getRenderModel(labelWrapWidth: number = DEFAULT_LABEL_WRAP_WIDTH): ConfigModalRenderModel {
+    return this._pass(() => this._renderModel(labelWrapWidth));
+  }
+
+  private _renderModel(labelWrapWidth: number): ConfigModalRenderModel {
     // Pre-first-interaction: async onOpen loads may restructure freely (the
     // user hasn't engaged a cursor yet), sync so "Loading…" is replaced by
     // real content on the load's own requestRender, not the next keypress.
@@ -491,8 +542,7 @@ export class ConfigModal {
     const hints = [
       ...(frozen.hints ?? []),
       ...(frozenTab?.hints ?? []),
-      ...this._actionHints(),
-    ];
+    ].map(chordHint).concat(this._actionHints());
     const unfilteredTab = this._readView()?.tabs.find((t) => t.id === this.activeTabId);
     const countSelectable = (rows: readonly ConfigModalRow[] | undefined): number =>
       (rows ?? []).filter((r) => r.selectable !== false && r.header !== true).length;
@@ -583,7 +633,26 @@ export class ConfigModal {
   /** Native read-only facts opt in; ordinary selectable/legacy rows stay unchanged. */
   private _readView(surface: ConfigModalSurface | null = this.surface): ConfigModalView | null {
     if (!surface) return null;
-    const view = surface.buildView();
+    const shared = this.inPass && surface === this.surface;
+    if (shared && this.passView !== undefined) return this.passView;
+    const view = this._expandView(surface.buildView());
+    if (shared) this.passView = view;
+    return view;
+  }
+
+  /** Run `body` as one pass: the live view is built at most once inside it. */
+  private _pass<T>(body: () => T): T {
+    if (this.inPass) return body();
+    this.inPass = true;
+    try {
+      return body();
+    } finally {
+      this.inPass = false;
+      this.passView = undefined;
+    }
+  }
+
+  private _expandView(view: ConfigModalView): ConfigModalView {
     if (!view.scrollInformationalLines) return view;
     return { ...view, tabs: view.tabs.map(tab => ({ ...tab, rows: tab.rows.flatMap(row =>
       row.selectable === false && !row.header
@@ -628,7 +697,7 @@ export class ConfigModal {
     const out: string[] = [];
     for (const a of actions) {
       if (a.enabledFor && !a.enabledFor(row, this.activeTabId)) continue;
-      out.push(`${a.key} ${a.label}`);
+      out.push(`${actionKeyLabel(a.key)} ${a.label}`);
     }
     return out;
   }

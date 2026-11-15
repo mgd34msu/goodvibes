@@ -156,6 +156,7 @@ async function makeContext(store = createRuntimeStore()) {
           buildReviewSummary: (artifactId: string) => remoteRuntime.buildReviewSummary(artifactId),
           exportSessionBundle: (path?: string) => remoteRuntime.exportSessionBundle(path ?? ''),
           importSessionBundle: (path: string) => remoteRuntime.importSessionBundle(path),
+          describeSessionBundleImport: () => ({ ok: false, problem: 'not used here' }),
         },
       } as never,
     },

@@ -29,6 +29,8 @@ export interface AgentArchetype {
   provider?: string | undefined;
   /** System prompt injected at agent start (optional). */
   systemPrompt?: string | undefined;
+  /** The `family:` front matter field of a custom file (implement, review, test, research, general). */
+  family?: string | undefined;
   /** True if loaded from a markdown file, false if built-in. */
   isCustom: boolean;
   /** Where this archetype came from. */
@@ -84,6 +86,7 @@ interface Frontmatter {
   readonly model?: string | undefined;
   readonly provider?: string | undefined;
   readonly systemPrompt?: string | undefined;
+  readonly family?: string | undefined;
 }
 
 /**
@@ -128,6 +131,7 @@ function readFrontmatter(raw: string): { ok: true; fields: Frontmatter } | { ok:
     model: text('model'),
     provider: text('provider'),
     systemPrompt: text('system_prompt'),
+    family: text('family'),
   };
   return issues.length > 0 ? { ok: false, issues } : { ok: true, fields };
 }
@@ -258,6 +262,7 @@ export class ArchetypeLoader {
         tools: fm.tools ?? [],
         model: fm.model?.trim() || undefined,
         provider: fm.provider?.trim() || undefined,
+        family: fm.family?.trim() || undefined,
         // systemPrompt intentionally omitted here, lazy loaded
         isCustom: true,
         origin: 'local-markdown',

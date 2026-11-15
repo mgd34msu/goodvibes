@@ -21,6 +21,7 @@ import { CONFIG_KEYS } from '@goodvibes-jev/engine/platform/platform/config';
 import type { CommandRegistry } from '../command-registry.ts';
 import { requireShellPaths } from './runtime-services.ts';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { describeSetupTransferChanges, isSecurityBearingChange } from './local-setup-transfer.ts';
 
 /** Read a settings sync bundle, refusing in words (never a stack) a file that is unreadable, not JSON, or not shaped like a bundle. */
 function readSettingsSyncBundle(sourcePath: string): SettingsSyncBundle {
@@ -52,6 +53,28 @@ export function registerSettingsSyncRuntimeCommands(registry: CommandRegistry): 
     aliases: ['settingssync'],
     description: 'Open the settings sync modal (bare); review posture, export/import bundles, or resolve conflicts by subcommand',
     usage: '[panel|report|review|show <key>|staged|conflicts|resolve <key> <local|synced>|failures|rollback-history|export <path>|inspect <path>|pull <path>|push <path>|lock <key> <source> <reason...>|unlock <key>]: bare opens the modal',
+    confirm(args, ctx) {
+      // A pulled bundle asks once, the way /managed apply and /setup transfer import do,
+      // only when it changes a key that can loosen security or holds a credential.
+      if ((args[0] ?? '').toLowerCase() !== 'pull' || !args[1]) return undefined;
+      let bundle: SettingsSyncBundle;
+      try {
+        bundle = readSettingsSyncBundle(requireShellPaths(ctx).resolveWorkspacePath(args[1]));
+      } catch {
+        return undefined; // the handler refuses the file in words
+      }
+      const config = ctx.platform.configManager;
+      const changes = Object.entries(bundle.settings)
+        .filter(([key]) => CONFIG_KEYS.has(key as ConfigKey))
+        .map(([key, next]) => ({ key, previous: config.get(key as ConfigKey), next }))
+        .filter((change) => JSON.stringify(change.previous) !== JSON.stringify(change.next));
+      if (!changes.some(isSecurityBearingChange)) return undefined;
+      return {
+        title: 'Pull synced settings that change security?',
+        detail: [...describeSetupTransferChanges(changes), 'A key a managed lock owns is skipped; /settings-sync rollback-history lists what changed.'].join('\n'),
+        confirmLabel: 'Pull',
+      };
+    },
     handler(args, ctx) {
       const shellPaths = requireShellPaths(ctx);
       const controlPlaneConfigDir = ctx.platform.configManager.getControlPlaneConfigDir();

@@ -2,11 +2,12 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { getDefaultAcpAgentCommand } from '@goodvibes-jev/engine/platform/platform/acp';
 import { resolveDaemonEnabled } from '@goodvibes-jev/engine/platform/platform/config';
-import type { CommandContext, RemoteCommandService } from '../command-registry.ts';
-import type { RemoteSessionBundle } from '@/runtime/index.ts';
+import type { CommandContext } from '../command-registry.ts';
+import type { PeerClient, RemoteSessionBundle } from '@/runtime/index.ts';
 import { requireShellPaths } from './runtime-services.ts';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 
-type RemoteRegistryLike = Pick<RemoteCommandService, 'listContracts' | 'exportSessionBundle' | 'importSessionBundle'>;
+type RemoteRegistryLike = Pick<PeerClient['runners'], 'listContracts' | 'exportSessionBundle' | 'importSessionBundle' | 'describeSessionBundleImport'>;
 
 /** The command `/remote dispatch` spawns, or why there is none. */
 function acpAgentCommand(): { command: string[] } | { error: string } {
@@ -27,16 +28,73 @@ type ActiveConnectionLike = {
   label: string;
 };
 
-export function inspectRemoteSessionBundle(bundle: RemoteSessionBundle): string {
+/** What a session bundle holds, and what importing it here would replace. */
+export function inspectRemoteSessionBundle(bundle: RemoteSessionBundle, replaces: readonly string[] = []): string {
+  const exportedAt = typeof bundle.exportedAt === 'number' && Number.isFinite(bundle.exportedAt) ? new Date(bundle.exportedAt).toISOString() : 'unknown';
   return [
     'Remote Session Bundle Review',
-    `  session: ${bundle.sessionId}`,
-    `  exportedAt: ${new Date(bundle.exportedAt).toISOString()}`,
-    `  active connections: ${bundle.activeConnectionIds.length}`,
+    `  session: ${typeof bundle.sessionId === 'string' ? bundle.sessionId : 'unknown'}`,
+    `  exportedAt: ${exportedAt}`,
+    `  active connections: ${Array.isArray(bundle.activeConnectionIds) ? bundle.activeConnectionIds.length : 0}`,
     `  pools: ${bundle.pools.length}`,
     `  contracts: ${bundle.contracts.length}`,
     `  artifacts: ${bundle.artifacts.length}`,
+    '  holds runner pools, runner contracts and artifacts; it does not hold the conversation',
+    replaces.length > 0
+      ? `  importing it replaces: ${replaces.join(', ')} (import asks for --yes)`
+      : '  importing it replaces nothing held here',
   ].join('\n');
+}
+
+/**
+ * `/remote session` and its alias `/teleport`: export, inspect or import a
+ * session bundle. Inspect validates exactly as import does and changes
+ * nothing; an import that would replace a pool, contract or artifact held
+ * here needs --yes.
+ */
+export async function handleRemoteSessionCommand(
+  args: readonly string[],
+  ctx: CommandContext,
+  remoteRegistry: Pick<RemoteRegistryLike, 'exportSessionBundle' | 'importSessionBundle' | 'describeSessionBundleImport'>,
+  command: string,
+): Promise<void> {
+  const usage = `Usage: ${command} <export|inspect|import> <path> (import: --yes to replace what is held here)`;
+  const mode = args[0]?.toLowerCase();
+  const pathArg = args.slice(1).find((arg) => arg !== '--yes');
+  if (!mode || !pathArg) {
+    ctx.print(usage);
+    return;
+  }
+  const targetPath = requireShellPaths(ctx).resolveWorkspacePath(pathArg);
+  if (mode === 'export') {
+    const exported = await remoteRegistry.exportSessionBundle(targetPath);
+    ctx.print(`Exported the remote session bundle for ${exported.bundle.sessionId} to ${exported.path}: ${exported.bundle.pools.length} runner pool(s), ${exported.bundle.contracts.length} runner contract(s) and ${exported.bundle.artifacts.length} artifact(s). It does not hold the conversation.`);
+    return;
+  }
+  if (mode === 'inspect') {
+    let value: unknown;
+    try {
+      value = JSON.parse(readFileSync(targetPath, 'utf-8'));
+    } catch (error) {
+      ctx.print(`Cannot inspect ${targetPath}: ${error instanceof SyntaxError ? 'it is not valid JSON' : summarizeError(error)}. Nothing was changed.`);
+      return;
+    }
+    const described = remoteRegistry.describeSessionBundleImport(value);
+    ctx.print(described.ok
+      ? inspectRemoteSessionBundle(described.bundle, described.replaces)
+      : `Cannot use ${targetPath} as a remote session bundle: ${described.problem}. Nothing was changed; inspect a file written by ${command} export.`);
+    return;
+  }
+  if (mode === 'import') {
+    try {
+      const bundle = await remoteRegistry.importSessionBundle(targetPath, { replace: args.includes('--yes') });
+      ctx.print(`Imported the remote session bundle ${bundle.sessionId}: ${bundle.pools.length} runner pool(s), ${bundle.contracts.length} runner contract(s), ${bundle.artifacts.length} artifact(s).`);
+    } catch (error) {
+      ctx.print(summarizeError(error));
+    }
+    return;
+  }
+  ctx.print(usage);
 }
 
 export async function handleRemoteSetupCommand(
@@ -191,30 +249,7 @@ export async function handleRemoteSetupCommand(
   }
 
   if (subcommand === 'session') {
-    const mode = args[1]?.toLowerCase();
-    const pathArg = args[2];
-    if (!mode || !pathArg) {
-      ctx.print('Usage: /remote session <export|inspect|import> <path>');
-      return true;
-    }
-    const shellPaths = requireShellPaths(ctx);
-    const targetPath = shellPaths.resolveWorkspacePath(pathArg);
-    if (mode === 'export') {
-      const exported = await remoteRegistry.exportSessionBundle(targetPath);
-      ctx.print(`Exported remote session bundle ${exported.bundle.sessionId} to ${exported.path}`);
-      return true;
-    }
-    if (mode === 'inspect') {
-      const bundle = JSON.parse(readFileSync(targetPath, 'utf-8')) as RemoteSessionBundle;
-      ctx.print(inspectRemoteSessionBundle(bundle));
-      return true;
-    }
-    if (mode === 'import') {
-      const bundle = await remoteRegistry.importSessionBundle(targetPath);
-      ctx.print(`Imported remote session bundle ${bundle.sessionId} with ${bundle.contracts.length} contracts.`);
-      return true;
-    }
-    ctx.print('Usage: /remote session <export|inspect|import> <path>');
+    await handleRemoteSessionCommand(args.slice(1), ctx, remoteRegistry, '/remote session');
     return true;
   }
 

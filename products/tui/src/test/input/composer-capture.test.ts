@@ -29,11 +29,11 @@ describe('applyComposerCapture', () => {
     expect(h.messages[0]).toContain('remember the API key');
   });
 
-  test('#note without leading space still captures', () => {
+  test('a # with no space after it is sent as a prompt (an issue number)', () => {
     const h = harness();
-    const r = applyComposerCapture('#quick note', h.deps);
-    expect(r.captured).toBe(true);
-    expect(h.added).toEqual(['quick note']);
+    const r = applyComposerCapture('#482 is failing again', h.deps);
+    expect(r).toEqual({ text: '#482 is failing again', captured: false });
+    expect(h.added).toEqual([]);
   });
 
   test('## markdown heading is left alone (sent as prompt)', () => {

@@ -22,10 +22,11 @@
  * daemon that has not wired a verb returns) throws `GoodVibesError` and
  * `describeOperatorRpcError` renders it.
  *
- * Auth is the loopback file-token bootstrap: the token
- * is read (or minted) from the daemon's own state directory. A daemon on
- * another machine is reached by the network-adopt path, which writes that
- * daemon's bearer into the same file, so this resolution covers both.
+ * Auth for the daemon on this machine is the loopback file-token bootstrap: the
+ * token is read (or minted) from the daemon's own state directory. A daemon this
+ * terminal was pointed at (`daemon.connectedHost.url`) is dialled with the
+ * bearer setup stored for that address in the terminal's own state
+ * (connected-daemon-credentials.ts); the local daemon's record is left alone.
  * `GOODVIBES_DAEMON_TOKEN`, when set, wins here, once, for every caller, as it
  * does for the daemon itself (`resolveDaemonEndpoint`).
  */
@@ -37,6 +38,7 @@ import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/conf
 import { readConnectedDaemonOrigin, resolveDaemonEnabled } from '@goodvibes-jev/engine/platform/platform/config';
 import { resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/platform/platform/config';
 import { getOrCreateCompanionToken } from '@goodvibes-jev/engine/platform/platform/pairing';
+import { readConnectedDaemonToken } from './connected-daemon-credentials.ts';
 import { operatorTokenPath } from '@goodvibes-jev/engine/platform/platform/workspace';
 import type { DaemonVerbCaller } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 
@@ -162,6 +164,15 @@ export function resolveDaemonEndpoint(deps: {
   // shell paths are not wired (a disabled-daemon path) must still get the honest
   // unavailable reason above, never a "shell paths not wired" throw.
   const homeDirectory = typeof deps.homeDirectory === 'function' ? deps.homeDirectory() : deps.homeDirectory;
+  // A daemon this terminal was pointed at is dialled with the bearer stored for that address; the
+  // address and its token come from one record, so they cannot disagree.
+  const connected = readConnectedDaemonOrigin((key) => configManager.get(key));
+  if (connected) {
+    const stored = daemonTokenOverride() ?? readConnectedDaemonToken(homeDirectory, connected.baseUrl);
+    return stored
+      ? { available: true, baseUrl, token: stored }
+      : { available: false, reason: `no access token is stored for the daemon at ${connected.baseUrl}: connect to it again from setup (/setup, Network step) with its token.` };
+  }
   let token: string | null;
   try {
     token = resolveDaemonBearer(homeDirectory, deps.mode ?? 'mint');

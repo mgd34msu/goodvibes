@@ -4,13 +4,12 @@
  * = 'adopt' fields. Extracted from handler-onboarding.ts to keep that file
  * under the architecture line cap.
  */
-import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/platform/platform/config';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-import { resolveDaemonCompanionToken } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { adoptedDaemonUrl } from './onboarding/onboarding-wizard-helpers.ts';
+import { readConnectedDaemonToken, writeConnectedDaemonToken } from '../runtime/client/connected-daemon-credentials.ts';
+import { beginOnboardingOperation, endOnboardingOperation } from './onboarding-operation.ts';
 import {
   buildManagedDaemonServiceManager,
   detectLegacyUnit,
@@ -25,17 +24,17 @@ import {
   isRuntimeEndpointActive,
   runtimePortDiagnostic,
 } from './onboarding/onboarding-runtime-status.ts';
-import { GOODVIBES_TUI_SURFACE_ROOT } from '../config/surface.ts';
 import { runDaemonConfigMigration } from '../config/run-daemon-config-migration.ts';
 
 /**
  * Immediately (not deferred to the final wizard Apply):
- *   1. Installs the pasted token into <homeDirectory>/.goodvibes/daemon/operator-tokens.json
- *      via `resolveDaemonCompanionToken`, the same durable-persistence logic
- *      the `GOODVIBES_DAEMON_TOKEN` non-interactive override uses.
+ *   1. Stores the pasted token for that host/port in the terminal's own
+ *      endpoint-keyed credentials (connected-daemon-credentials.ts). The daemon
+ *      home's operator-tokens.json, the local daemon's own record, is not touched.
  *   2. Points this terminal at the pasted host/port (`daemon.connectedHost.url`),
  *      leaving the control-plane bind settings, which describe only how a
- *      daemon on this machine listens, as they are.
+ *      daemon on this machine listens, as they are. The dial address and its
+ *      token are read together from these two, so they cannot disagree.
  *   3. Restarts the external-services controller and reports back, honestly,
  *      whether the daemon at that host/port was actually adopted, reusing
  *      the same `onboarding-runtime-status.ts` helpers the normal
@@ -48,7 +47,10 @@ import { runDaemonConfigMigration } from '../config/run-daemon-config-migration.
  * out-of-band result.
  */
 export async function handleConnectExistingDaemonForHandler(handler: InputHandler): Promise<void> {
-  if (handler.onboardingApplyPending) return;
+  if (handler.onboardingOperation !== null) {
+    beginOnboardingOperation(handler, 'Connect to existing daemon');
+    return;
+  }
   // An invalid host or port must stop here: the getters below would otherwise fall back to
   // 127.0.0.1 / 3421 and adopt an endpoint the user never typed.
   const fieldErrors = handler.onboardingWizard.getBlockingFieldLabels().filter(label => label.includes('Existing daemon host') || label.includes('Existing daemon port'));
@@ -70,38 +72,37 @@ export async function handleConnectExistingDaemonForHandler(handler: InputHandle
     return;
   }
 
-  handler.onboardingApplyPending = true;
+  handler.onboardingOperation = 'Connect to existing daemon';
   handler.requestRender();
   const configManager = handler.uiServices.platform.configManager;
-  const daemonHomeDir = resolveGoodVibesDaemonHome(handler.uiServices.environment.homeDirectory);
-  const tokenFile = join(daemonHomeDir, 'operator-tokens.json');
-  // What the attempt changes is written before the daemon is known to be reachable,
-  // so a failed attempt puts it back instead of leaving the TUI on a dead endpoint.
+  const homeDirectory = handler.uiServices.environment.homeDirectory;
+  const url = adoptedDaemonUrl(host, port);
+  // A failed attempt puts back this terminal's own address and the token it held
+  // for that address; nothing shared with the local daemon was changed.
   const previous = {
     url: configManager.get('daemon.connectedHost.url'),
-    tokenFile: existsSync(tokenFile) ? readFileSync(tokenFile) : undefined,
+    token: readConnectedDaemonToken(homeDirectory, url),
   };
   const restorePrevious = async (): Promise<string> => {
     try {
       configManager.setDynamic('daemon.connectedHost.url', previous.url);
-      if (previous.tokenFile === undefined) rmSync(tokenFile, { force: true });
-      else writeFileSync(tokenFile, previous.tokenFile, { mode: 0o600 });
+      writeConnectedDaemonToken(homeDirectory, url, previous.token);
     } catch (restoreError) {
-      return `The previous daemon address and token could not be restored (${summarizeError(restoreError)}); check daemon.connectedHost.url and operator-tokens.json.`;
+      return `The previous daemon address could not be restored (${summarizeError(restoreError)}); check daemon.connectedHost.url.`;
     }
     // The failed attempt's restart already moved the live connection to the new endpoint, so it has to move back too.
     try {
       await externalServices.restart();
-      return 'The previous daemon address and token were restored and the connection was restarted on them.';
+      return 'The previous daemon address was restored and the connection was restarted on it.';
     } catch (restartError) {
-      return `The previous daemon address and token were restored, but restarting the connection on them failed (${summarizeError(restartError)}); the live connection may still be on the failed endpoint until the TUI restarts.`;
+      return `The previous daemon address was restored, but restarting the connection on it failed (${summarizeError(restartError)}); the live connection may still be on the failed endpoint until the TUI restarts.`;
     }
   };
   try {
-    resolveDaemonCompanionToken(daemonHomeDir, GOODVIBES_TUI_SURFACE_ROOT, token);
+    writeConnectedDaemonToken(homeDirectory, url, token);
     // The dial target is this terminal's own setting; the daemon-owned bind
     // settings (controlPlane.*) are not this terminal's to move.
-    configManager.setDynamic('daemon.connectedHost.url', adoptedDaemonUrl(host, port));
+    configManager.setDynamic('daemon.connectedHost.url', url);
 
     const state = await externalServices.restart();
     const binding = { label: 'GoodVibes daemon', host, port };
@@ -123,7 +124,7 @@ export async function handleConnectExistingDaemonForHandler(handler: InputHandle
   } catch (error) {
     handler.commandContext?.print?.(`Connect to existing daemon failed: ${summarizeError(error)}\n  ${await restorePrevious()}`);
   } finally {
-    handler.onboardingApplyPending = false;
+    endOnboardingOperation(handler);
     handler.requestRender();
   }
 }
@@ -160,9 +161,7 @@ export async function handleConnectExistingDaemonForHandler(handler: InputHandle
  * (`confirm: true`).
  */
 export async function handleMigrateLegacyDaemonServiceForHandler(handler: InputHandler, confirm: boolean): Promise<void> {
-  if (handler.onboardingApplyPending) return;
-
-  handler.onboardingApplyPending = true;
+  if (!beginOnboardingOperation(handler, 'Migrate install-script daemon service')) return;
   handler.requestRender();
   try {
     const homeDirectory = handler.uiServices.environment.homeDirectory;
@@ -189,7 +188,7 @@ export async function handleMigrateLegacyDaemonServiceForHandler(handler: InputH
   } catch (error) {
     handler.commandContext?.print?.(`Migrate install-script daemon service failed: ${summarizeError(error)}`);
   } finally {
-    handler.onboardingApplyPending = false;
+    endOnboardingOperation(handler);
     handler.requestRender();
   }
 }

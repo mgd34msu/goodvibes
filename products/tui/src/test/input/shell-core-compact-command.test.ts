@@ -63,7 +63,7 @@ describe('/compact handler: capacity-% plumbing', () => {
     expect(preview).toContain('200,000');
   });
 
-  test('when compaction produces no new event, the handler still completes with an honest fallback message', async () => {
+  test('when compaction produces no new event, the handler says nothing was compacted', async () => {
     const registry = new CommandRegistry();
     registerShellCoreCommands(registry);
     const printed: string[] = [];
@@ -72,8 +72,7 @@ describe('/compact handler: capacity-% plumbing', () => {
     await registry.execute('compact', [], context);
 
     // The mocked conversationManager.compact() never touches the platform's real
-    // compaction-event log, so compactConversation() correctly reports "no
-    // new event" and the handler falls back to the plain complete message.
-    expect(printed.some((line) => line.includes('[Context] Compact complete.'))).toBe(true);
+    // compaction-event log, so the handler says nothing was compacted.
+    expect(printed.some((line) => line.includes('[Context] Nothing was compacted'))).toBe(true);
   });
 });

@@ -9,6 +9,7 @@ import { OnboardingWizardController, type OnboardingWizardAction, type Onboardin
 import { handleCloudflareOnboardingActionForHandler, maybeProvisionCloudflareOnFinalApplyForHandler } from './handler-onboarding-cloudflare.ts';
 import { applyOnboardingRequest, deleteWizardProgress, verifyOnboardingRequest, writeOnboardingCheckMarker, writeWizardProgress } from '../runtime/onboarding/index.ts';
 import type { OnboardingApplyRequest, OnboardingVerificationItem } from '../runtime/onboarding/index.ts';
+import { beginOnboardingOperation, endOnboardingOperation } from './onboarding-operation.ts';
 import {
   dedupeOnboardingVerificationItems,
   extractAuthorizationCode,
@@ -245,7 +246,10 @@ export async function handleOnboardingActionForHandler(handler: InputHandler, ac
       return;
     }
     if (action === 'apply-and-continue') {
-      if (handler.onboardingApplyPending) return;
+      if (handler.onboardingOperation !== null) {
+        if (beginOnboardingOperation(handler, 'Continue')) endOnboardingOperation(handler);
+        return;
+      }
       continueOnboardingSection(handler);
       return;
     }
@@ -262,7 +266,10 @@ export async function handleOnboardingActionForHandler(handler: InputHandler, ac
       return;
     }
     if (action !== 'apply') return;
-    if (handler.onboardingApplyPending) return;
+    if (handler.onboardingOperation !== null) {
+      beginOnboardingOperation(handler, 'Apply');
+      return;
+    }
     const blockers = handler.onboardingWizard.getBlockingFieldLabels();
     if (blockers.length > 0) {
       showOnboardingApplyFeedbackForHandler(handler, {
@@ -275,6 +282,17 @@ export async function handleOnboardingActionForHandler(handler: InputHandler, ac
     }
 
     const request = handler.onboardingWizard.buildApplyRequest();
+    // A network bind with no local auth cannot be made safe after the fact: refuse it here, before anything is saved.
+    const exposure = unsafeNetworkBind(handler, request);
+    if (exposure) {
+      showOnboardingApplyFeedbackForHandler(handler, {
+        severity: 'error',
+        title: 'Cannot apply a network bind without local auth',
+        summary: 'Nothing was saved.',
+        messages: [exposure],
+      });
+      return;
+    }
     handler.onboardingWizard.clearApplyFeedback();
     const deps = {
       config: handler.uiServices.platform.configManager,
@@ -284,9 +302,11 @@ export async function handleOnboardingActionForHandler(handler: InputHandler, ac
       acknowledgementScope: 'project' as const,
     };
     let appliedErrors: string[] = [];
+    // Checks that failed after the settings were saved: reported, never a reason to stop half way.
+    let failedChecks: string[] = [];
     let verificationItems: readonly OnboardingVerificationItem[] = [];
     let runtimeWarnings: readonly OnboardingVerificationItem[] = [];
-    handler.onboardingApplyPending = true;
+    handler.onboardingOperation = 'Apply';
     try {
       const applied = await applyOnboardingRequest(deps, request);
       if (applied.errors.length > 0) {
@@ -294,9 +314,9 @@ export async function handleOnboardingActionForHandler(handler: InputHandler, ac
       } else {
         const verification = await verifyOnboardingRequest(deps, request);
         verificationItems = verification.items;
-        appliedErrors = verification.items
+        failedChecks = verification.items
           .filter((item) => item.status === 'fail')
-          .map((item) => `verify ${item.id}: ${item.message}`);
+          .map((item) => `${item.id}: ${item.message}`);
       }
 
       if (appliedErrors.length === 0) {
@@ -316,8 +336,13 @@ export async function handleOnboardingActionForHandler(handler: InputHandler, ac
         // check is a warning about the runtime, never "could not persist".
         try {
           const activationVerification = await handler.restartOnboardingExternalServicesIfNeeded(request);
-          runtimeWarnings = dedupeOnboardingVerificationItems([...activationVerification, ...handler.verifyOnboardingRuntimePosture(request)]
-            .map((item): OnboardingVerificationItem => item.status === 'fail'
+          const runtimeItems = [...activationVerification, ...handler.verifyOnboardingRuntimePosture(request)];
+          // A network bind left without local auth is a failure, never advice; the rest is advice about the runtime.
+          failedChecks = [...failedChecks, ...runtimeItems
+            .filter((item) => item.status === 'fail' && item.id === 'runtime:remote-auth-gate')
+            .map((item) => `${item.id}: ${item.message}`)];
+          runtimeWarnings = dedupeOnboardingVerificationItems(runtimeItems
+            .map((item): OnboardingVerificationItem => item.status === 'fail' && item.id !== 'runtime:remote-auth-gate'
               ? { ...item, status: 'warn' }
               : item));
         } catch (followUpError) {
@@ -341,7 +366,7 @@ export async function handleOnboardingActionForHandler(handler: InputHandler, ac
       });
       return;
     } finally {
-      handler.onboardingApplyPending = false;
+      endOnboardingOperation(handler);
       handler.requestRender();
     }
 
@@ -367,8 +392,27 @@ export async function handleOnboardingActionForHandler(handler: InputHandler, ac
       handler.modalReturnFocus = 'prompt';
     }
     handler.commandContext?.print?.(formatOnboardingApplyCompletionMessage(verificationItems));
+    if (failedChecks.length > 0) {
+      handler.commandContext?.print?.([
+        `Setup saved your settings, but ${failedChecks.length} check(s) of them failed; the session and services use the new settings:`,
+        ...failedChecks.map((check) => `  ${check}`),
+        'Fix each one (rerun setup with /setup to see it), then apply again.',
+      ].join('\n'));
+    }
     handler.requestRender();
   }
+
+/**
+ * Why the request would expose a surface on the network with no local auth to
+ * guard it, or null. Local auth counts when a user exists already or the request
+ * creates one.
+ */
+function unsafeNetworkBind(handler: InputHandler, request: OnboardingApplyRequest): string | null {
+  if (!handler.getOnboardingRuntimePosture(request).remoteExposure) return null;
+  if (handler.uiServices.platform.localUserAuthManager.inspect().users.length > 0) return null;
+  if (request.operations.some((operation) => operation.kind === 'ensure-auth-user')) return null;
+  return 'A control plane, HTTP listener or web surface is set to listen beyond this machine, and no local user exists to sign in. Add a local user in the Auth step, or set the host to loopback, then apply.';
+}
 
 
 export async function refreshOnboardingHydrationForHandler(handler: InputHandler, options: {
@@ -412,8 +456,7 @@ function printSignInCompleted(handler: InputHandler, record: { readonly tokenTyp
 }
 
 export async function handleOpenAiSubscriptionStartForHandler(handler: InputHandler): Promise<void> {
-    if (handler.onboardingApplyPending) return;
-    handler.onboardingApplyPending = true;
+    if (!beginOnboardingOperation(handler, 'OpenAI sign-in')) return;
     let listener: Awaited<ReturnType<typeof createOAuthLocalListener>> | null = null;
     try {
       const oauth = openAiSubscriptionOAuth();
@@ -462,7 +505,7 @@ export async function handleOpenAiSubscriptionStartForHandler(handler: InputHand
       ].join('\n'));
       handler.requestRender();
     } finally {
-      handler.onboardingApplyPending = false;
+      endOnboardingOperation(handler);
     }
   }
 
@@ -494,7 +537,10 @@ export async function completeOpenAiSubscriptionFromListenerForHandler(
   }
 
 export async function handleOpenAiSubscriptionFinishForHandler(handler: InputHandler): Promise<void> {
-    if (handler.onboardingApplyPending) return;
+    if (handler.onboardingOperation !== null) {
+      beginOnboardingOperation(handler, 'Finish OpenAI sign-in');
+      return;
+    }
     const code = extractAuthorizationCode(handler.onboardingWizard.getTextFieldValue('providers.openai-callback-code'));
     if (!code) {
       handler.commandContext?.print?.('OpenAI subscription sign-in needs a callback code or URL.');
@@ -502,7 +548,7 @@ export async function handleOpenAiSubscriptionFinishForHandler(handler: InputHan
       return;
     }
 
-    handler.onboardingApplyPending = true;
+    handler.onboardingOperation = 'Finish OpenAI sign-in';
     try {
       const manager = handler.uiServices.platform.subscriptionManager;
       if (!manager.getPending('openai')) {
@@ -520,7 +566,7 @@ export async function handleOpenAiSubscriptionFinishForHandler(handler: InputHan
       ].join('\n'));
       handler.requestRender();
     } finally {
-      handler.onboardingApplyPending = false;
+      endOnboardingOperation(handler);
     }
   }
 
@@ -528,8 +574,8 @@ export async function handleOpenAiSubscriptionFinishForHandler(handler: InputHan
  * Persist the current wizard field state to onboarding-progress.json.
  *
  * Called after each step navigation so the user can resume a partially
- * completed wizard after a restart. Masked fields (kind === 'masked') are
- * excluded from the persisted textState to avoid writing secrets to disk.
+ * completed wizard after a restart. Values typed into masked fields are held
+ * apart from the text state as they are typed, so none reaches the file.
  *
  * This is a best-effort write: if it fails the wizard continues normally.
  */
@@ -537,22 +583,13 @@ export function saveWizardProgressForHandler(handler: InputHandler): void {
   const wizard = handler.onboardingWizard;
   if (!wizard.active) return;
   try {
-    // Exclude masked fields to avoid persisting secrets.
-    const maskedFieldIds = new Set<string>();
-    for (const step of wizard.steps) {
-      for (const field of step.fields) {
-        if (field.kind === 'masked') maskedFieldIds.add(field.id);
-      }
-    }
-    const safeTextState = [...wizard.textState.entries()]
-      .filter(([id]) => !maskedFieldIds.has(id)) as Array<[string, string]>;
-
+    // The text state iterates only unmasked fields: masked values are held apart as they are typed.
     writeWizardProgress(handler.uiServices.environment.shellPaths, {
       mode: wizard.mode,
       stepIndex: wizard.stepIndex,
       toggleState: [...wizard.toggleState.entries()],
       radioState: [...wizard.radioState.entries()],
-      textState: safeTextState,
+      textState: [...wizard.textState.entries()],
     });
   } catch {
     // Best-effort: never block wizard interaction on a progress write failure.

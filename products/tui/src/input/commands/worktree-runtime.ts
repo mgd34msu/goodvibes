@@ -3,6 +3,7 @@ import type { ManagedWorktreeMeta, WorktreeRegistry } from '@/runtime/index.ts';
 import type { CommandRegistry } from '../command-registry.ts';
 import { openCommandView, requireShellPaths } from './runtime-services.ts';
 import { describeOperatorRpcError, getOperatorRpc } from './operator-rpc.ts';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 
 /** Compact per-row setup-state tag for /worktree review, absent when setup has never run; failure stands out. */
 export function formatSetupTag(setup: ManagedWorktreeMeta['setup']): string {
@@ -30,17 +31,16 @@ export function formatSetupDetail(setup: ManagedWorktreeMeta['setup']): string[]
 
 type KeptWorktreeInfo = Awaited<ReturnType<WorktreeRegistry['describeKept']>>[number];
 
-/** Retention view of the product's own worktrees (age, size, why kept); empty when it cannot be read. */
-async function describeKeptWorktrees(runtime: WorktreeRegistry): Promise<KeptWorktreeInfo[]> {
+/** Retention view of the product's own worktrees (age, size, why kept), or why it could not be read. */
+async function describeKeptWorktrees(
+  runtime: WorktreeRegistry,
+  options: Parameters<WorktreeRegistry['describeKept']>[0],
+): Promise<{ readonly infos: KeptWorktreeInfo[]; readonly failure?: string }> {
   try {
-    return await runtime.describeKept();
-  } catch {
-    return [];
+    return { infos: await runtime.describeKept(options) };
+  } catch (error) {
+    return { infos: [], failure: `  retention details unavailable: ${summarizeError(error)}` };
   }
-}
-
-async function describeKeptWorktree(runtime: WorktreeRegistry, path: string): Promise<KeptWorktreeInfo | undefined> {
-  return (await describeKeptWorktrees(runtime)).find((info) => info.path === path);
 }
 
 export function registerWorktreeRuntimeCommands(registry: CommandRegistry): void {
@@ -80,7 +80,8 @@ export function registerWorktreeRuntimeCommands(registry: CommandRegistry): void
           record.sessionId ? `/worktree session ${record.sessionId}` : null,
           record.taskId ? `/worktree task ${record.taskId}` : null,
         ].filter((value): value is string => Boolean(value));
-        const kept = await describeKeptWorktree(runtime, record.path);
+        // Only this worktree is evaluated and measured, not every kept one.
+        const kept = await describeKeptWorktrees(runtime, { only: record.path });
         ctx.print([
           'Worktree Inspect',
           `  path: ${record.path}`,
@@ -92,7 +93,8 @@ export function registerWorktreeRuntimeCommands(registry: CommandRegistry): void
           `  updated: ${new Date(record.updatedAt).toLocaleString()}`,
           ...formatSetupDetail(record.setup),
           ...(nextSteps.length > 0 ? ['  next:', ...nextSteps.map((step) => `    ${step}`)] : ['  next: /worktree review']),
-          ...(kept ? [`  kept: ${kept.summary}`] : []),
+          ...kept.infos.map((info) => `  kept: ${info.summary}`),
+          ...(kept.failure ? [kept.failure] : []),
         ].join('\n'));
         return;
       }
@@ -224,7 +226,8 @@ export function registerWorktreeRuntimeCommands(registry: CommandRegistry): void
       }
       const rows = await runtime.list();
       const summary = summarizeWorktreeOwnership(rows);
-      const keptInfo = new Map((await describeKeptWorktrees(runtime)).map((info) => [info.path, info]));
+      const kept = await describeKeptWorktrees(runtime, { rows });
+      const keptInfo = new Map(kept.infos.map((info) => [info.path, info]));
       ctx.print(rows.length > 0
         ? [
             'Worktree Review',
@@ -236,6 +239,7 @@ export function registerWorktreeRuntimeCommands(registry: CommandRegistry): void
               `  ${row.kind.padEnd(12)} ${row.state.padEnd(15)} ${row.branch.padEnd(22)} session=${(row.sessionId ?? '-').padEnd(12)} task=${(row.taskId ?? '-').padEnd(12)} ${row.path}${formatSetupTag(row.setup)}${keptInfo.has(row.path) ? `\n      ${keptInfo.get(row.path)!.summary}` : ''}`
             )),
             ...(keptInfo.size > 0 ? ['  Discard one you no longer need with /worktree discard <path>; the branch and any uncommitted state are preserved on it.'] : []),
+            ...(kept.failure ? [kept.failure] : []),
           ].join('\n')
         : 'Worktree Review\n  No worktrees discovered.');
     },

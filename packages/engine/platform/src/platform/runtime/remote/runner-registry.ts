@@ -483,19 +483,45 @@ export class RemoteRunnerRegistry {
     return { bundle, path };
   }
 
-  async importSessionBundle(path: string): Promise<RemoteSessionBundle> {
-    const value = await readImportFile(path, 'a remote session bundle');
+  /**
+   * Validate a parsed session bundle and say what importing it would replace,
+   * with no write: the look before an import, and the same check the import
+   * makes. `replaces` names the pools, runner contracts and artifacts this
+   * runtime already holds under the bundle's ids.
+   */
+  describeSessionBundleImport(value: unknown):
+    | { readonly ok: false; readonly problem: string }
+    | { readonly ok: true; readonly bundle: RemoteSessionBundle; readonly replaces: readonly string[] } {
     const problem = bundleProblem(value);
-    if (problem) {
-      throw new Error(`Cannot import a remote session bundle from ${path}: it has no valid ${problem}. Nothing was imported; import a file written by a remote session bundle export.`);
+    if (problem) return { ok: false, problem: `it has no valid ${problem}` };
+    const bundle = value as unknown as RemoteSessionBundle;
+    // Holding the same record under the id is no replacement.
+    const differs = (held: unknown, next: unknown): boolean => held !== undefined && JSON.stringify(held) !== JSON.stringify(next);
+    const replaces = [
+      ...bundle.pools.filter((pool) => differs(this.pools.get(pool.id), pool)).map((pool) => `pool ${pool.id}`),
+      ...bundle.contracts.filter((contract) => !this.agentManager.getStatus(contract.runnerId) && differs(this.contracts.get(contract.runnerId), contract)).map((contract) => `runner contract ${contract.runnerId}`),
+      ...bundle.artifacts.filter((artifact) => differs(this.artifacts.get(artifact.id), artifact)).map((artifact) => `artifact ${artifact.id}`),
+    ];
+    return { ok: true, bundle, replaces };
+  }
+
+  /** Import a session bundle; one that would replace what this runtime holds is refused unless `replace` is set. */
+  async importSessionBundle(path: string, options: { readonly replace?: boolean | undefined } = {}): Promise<RemoteSessionBundle> {
+    const value = await readImportFile(path, 'a remote session bundle');
+    const described = this.describeSessionBundleImport(value);
+    if (!described.ok) {
+      throw new Error(`Cannot import a remote session bundle from ${path}: ${described.problem}. Nothing was imported; import a file written by a remote session bundle export.`);
     }
-    const parsed = value as unknown as RemoteSessionBundle;
+    const parsed = described.bundle;
     if (parsed.artifacts.length > MAX_ARTIFACTS) {
       throw new Error(`Cannot import a remote session bundle from ${path}: it holds ${parsed.artifacts.length} artifacts and this runtime keeps at most ${MAX_ARTIFACTS}. Nothing was imported; export a smaller bundle.`);
     }
     const conflicts = parsed.contracts.map((contract) => this.importedCeilingConflict(contract)).filter((reason) => reason !== undefined);
     if (conflicts.length > 0) {
       throw new Error(`Cannot import a remote session bundle from ${path}: ${conflicts.join('; ')}. Nothing was imported; export the runners' current contracts, or import into a session that does not know these runners.`);
+    }
+    if (described.replaces.length > 0 && options.replace !== true) {
+      throw new Error(`Not imported: ${path} would replace ${described.replaces.join(', ')}. Nothing was changed; run the import again with --yes to replace them.`);
     }
     for (const pool of parsed.pools) {
       this.pools.set(pool.id, pool);

@@ -14,8 +14,6 @@ import {
 } from '../../renderer/compaction-preview.ts';
 import { buildCompactionHistoryText } from '../../renderer/compaction-history-modal.ts';
 import { ensureProviderKeyThenSelect } from '../provider-key-intake.ts';
-import '@goodvibes-jev/engine/platform/platform/utils';
-import '@goodvibes-jev/engine/platform/platform/utils';
 
 const coreActions = createShellCoreActions<CommandContext>(
   { requireProviderApi, requireKeybindingsManager, startFreshConversation },
@@ -184,12 +182,14 @@ export function registerShellCoreCommands(registry: CommandRegistry): void {
         ctx.print(error.message);
         return;
       }
-      if (result) {
-        // Post-compact notice: uses real CompactionEvent figures, plus an
-        // out-of-band quality-score grade line when one was computed ().
+      if (result.kind === 'summarised') {
+        // Post-compact notice: uses real CompactionEvent figures, plus the
+        // quality-score grade line when one was computed.
         ctx.print(buildCompactionAfterNotice({ event: result.event, pinnedMemoryCount, qualityScore: result.qualityScore }));
+      } else if (result.kind === 'dropped') {
+        ctx.print(`[Context] Dropped the ${result.dropped} oldest message(s) without a summary and kept the last ${result.kept}: this model's context window is too small to summarise them. Their tool results are gone; re-read any file you still need. /compact-history lists it.`);
       } else {
-        ctx.print('[Context] Compact complete.');
+        ctx.print(`[Context] Nothing was compacted: ${result.reason}.`);
       }
       ctx.renderRequest();
     },

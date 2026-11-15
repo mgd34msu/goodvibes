@@ -163,7 +163,10 @@ through the runner unless `outsideContract` is set; see [Contracts](#contracts).
 Agent archetypes describe named worker roles. Built-ins cover orchestrator,
 planner, engineer, reviewer, tester, researcher, integrator, and general.
 Project-level markdown files can add or override archetypes with frontmatter
-for name, description, tools, provider, model, and prompt content.
+for name, description, tools, provider, model, family, and prompt content.
+`family` (`implement`, `review`, `test`, `research` or `general`) says what kind
+of work the archetype does; `/teamwork` reads it as written (a built-in has its
+own), so no model is asked to classify an archetype's prompt.
 
 Templates provide reusable agent/task shapes for scheduler, workflow, and
 sub-agent orchestration flows. A contract picks a unit's template from its

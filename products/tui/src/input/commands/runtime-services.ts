@@ -53,7 +53,7 @@ export const {
 } = createCommandServiceAccessors<CommandContext>();
 export const { requireEcosystemCatalogPaths } = createCommandPathAccessors('tui');
 import type { CommandContext } from '../command-registry.ts';
-import { compactSmallWindow, getLastCompactionEvent, SMALL_WINDOW_THRESHOLD } from '@goodvibes-jev/engine/platform/platform/core';
+import { compactSmallWindow, getLastCompactionEvent, recordSmallWindowCompaction, SMALL_WINDOW_KEEP_RECENT, SMALL_WINDOW_THRESHOLD } from '@goodvibes-jev/engine/platform/platform/core';
 import type { CompactionContext, CompactionEvent } from '@goodvibes-jev/engine/platform/platform/core';
 import { recordCompactionQualityScore } from '../../renderer/compaction-quality.ts';
 import type { CompactionQualityScore } from '../../renderer/compaction-quality.ts';
@@ -109,12 +109,15 @@ export function openOnboardingWizard(
   openWizard(modeOrOptions);
 }
 
-/** Result of a manual /compact run: the platform's CompactionEvent, plus an
- * out-of-band quality score () when one could be computed. */
-export interface CompactionRunResult {
-  readonly event: CompactionEvent;
-  readonly qualityScore: CompactionQualityScore | null;
-}
+/**
+ * What a manual /compact did: summarised the conversation (the platform's
+ * CompactionEvent and the quality score when one was computed), dropped the
+ * oldest messages without a summary (small-window models), or nothing.
+ */
+export type CompactionRunResult =
+  | { readonly kind: 'summarised'; readonly event: CompactionEvent; readonly qualityScore: CompactionQualityScore | null }
+  | { readonly kind: 'dropped'; readonly event: CompactionEvent; readonly dropped: number; readonly kept: number }
+  | { readonly kind: 'unchanged'; readonly reason: string };
 
 /** Manual /compact refused because it would rewrite the transcript under a running turn. */
 export class CompactBusyError extends Error {
@@ -124,12 +127,8 @@ export class CompactBusyError extends Error {
   }
 }
 
-/**
- * Compact the conversation and return the CompactionEvent recorded by the platform
- * (plus an out-of-band quality score), or null if no event was recorded (e.g.
- * compaction was skipped or produced no change).
- */
-export async function compactConversation(context: CommandContext): Promise<CompactionRunResult | null> {
+/** Compact the conversation and say what happened (see CompactionRunResult). */
+export async function compactConversation(context: CommandContext): Promise<CompactionRunResult> {
   const conversationManager = context.session.conversationManager;
   const providerRegistry = context.provider.providerRegistry;
   // Resolve the live context window for the current model so manual /compact
@@ -145,9 +144,19 @@ export async function compactConversation(context: CommandContext): Promise<Comp
   if (contextWindow > 0 && contextWindow < SMALL_WINDOW_THRESHOLD) {
     // This branch replaces the transcript in place, so a running turn would lose what it appends.
     if (context.isGenerating?.()) throw new CompactBusyError();
-    const compacted = compactSmallWindow(conversationManager.getMessagesForLLM(), 10);
+    const before = conversationManager.getMessagesForLLM();
+    if (before.length <= SMALL_WINDOW_KEEP_RECENT) {
+      return { kind: 'unchanged', reason: `the conversation has ${before.length} message(s), and this model's small window keeps the last ${SMALL_WINDOW_KEEP_RECENT} as they are` };
+    }
+    const compacted = compactSmallWindow(before, SMALL_WINDOW_KEEP_RECENT);
     conversationManager.replaceMessagesForLLM(compacted);
-    return null;
+    const event = recordSmallWindowCompaction(before, compacted, {
+      modelId: context.session.runtime.model,
+      trigger: 'manual',
+      sessionId: context.session.runtime.sessionId,
+    });
+    context.session.sessionLineageTracker?.addCompactionEntry(`small window: dropped ${before.length - SMALL_WINDOW_KEEP_RECENT} earlier message(s) without a summary`);
+    return { kind: 'dropped', event, dropped: before.length - SMALL_WINDOW_KEEP_RECENT, kept: SMALL_WINDOW_KEEP_RECENT };
   }
 
   // The event log is shared by every session in the process: read this session's own events.
@@ -197,9 +206,14 @@ export async function compactConversation(context: CommandContext): Promise<Comp
     // that score, kept by this event's timestamp for /compact-history.
     const qualityScore = receipt?.quality ?? null;
     if (qualityScore) recordCompactionQualityScore(eventAfter.timestamp, qualityScore);
-    return { event: eventAfter, qualityScore };
+    return { kind: 'summarised', event: eventAfter, qualityScore };
   }
-  return null;
+  return {
+    kind: 'unchanged',
+    reason: receipt === undefined
+      ? 'the conversation has no messages'
+      : 'no compaction was recorded, so the conversation is as it was',
+  };
 }
 
 export function requireKnowledgeApi(context: CommandContext): KnowledgeApi {

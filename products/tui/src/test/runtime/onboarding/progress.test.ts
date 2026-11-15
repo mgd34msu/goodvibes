@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path';
 import { createShellPathService } from '@/runtime/index.ts';
 import { saveWizardProgressForHandler } from '../../../input/handler-onboarding.ts';
 import type { InputHandler } from '../../../input/handler.ts';
+import { WizardTextState } from '../../../input/onboarding/onboarding-wizard.ts';
 import {
   deleteWizardProgress,
   getWizardProgressPath,
@@ -327,28 +328,6 @@ describe('wizard progress persistence', () => {
     expect(payload?.textState).toEqual([['apiHost', 'localhost'], ['cloudflare.tunnel-token-ref', 'goodvibes://secrets/goodvibes/TUNNEL']]);
   });
 
-  test('a secret-named field is never persisted even when the caller did not declare it masked', () => {
-    writeWizardProgress(shellPaths, {
-      mode: 'new',
-      stepIndex: 0,
-      toggleState: [],
-      radioState: [],
-      textState: [
-        ['apiHost', 'localhost'],
-        ['cloudflare.operational-token', 'cf-secret-value'],
-        ['accounts.admin-password', 'hunter2hunter2'],
-        ['external-services.webhook.secret', 'whsec_value'],
-      ],
-      clock: () => 1,
-    });
-
-    const raw = readFileSync(getWizardProgressPath(shellPaths), 'utf-8');
-    expect(raw).not.toContain('cf-secret-value');
-    expect(raw).not.toContain('hunter2hunter2');
-    expect(raw).not.toContain('whsec_value');
-    expect(readWizardProgress(shellPaths).payload?.textState).toEqual([['apiHost', 'localhost']]);
-  });
-
   // ---------------------------------------------------------------------------
   // saveWizardProgressForHandler, masked-field security boundary
   // ---------------------------------------------------------------------------
@@ -361,10 +340,12 @@ describe('wizard progress persistence', () => {
     const PLAIN_FIELD_ID = 'providers.hostname';
     const PLAIN_VALUE = 'localhost';
 
-    const textState = new Map<string, string>([
-      [MASKED_FIELD_ID, SECRET_VALUE],
-      [PLAIN_FIELD_ID, PLAIN_VALUE],
-    ]);
+    // The secret was typed while its field was on screen; by the save the field
+    // has left the step list (a refreshed provider list no longer shows it).
+    const textState = new WizardTextState();
+    textState.markMasked(MASKED_FIELD_ID);
+    textState.set(MASKED_FIELD_ID, SECRET_VALUE);
+    textState.set(PLAIN_FIELD_ID, PLAIN_VALUE);
 
     const handler = {
       onboardingWizard: {
@@ -374,15 +355,7 @@ describe('wizard progress persistence', () => {
         toggleState: new Map<string, boolean>(),
         radioState: new Map<string, string>(),
         textState,
-        steps: [
-          {
-            id: 'provider-access',
-            fields: [
-              { id: MASKED_FIELD_ID, kind: 'masked' as const, label: 'API key', hint: '', defaultValue: '', placeholder: '' },
-              { id: PLAIN_FIELD_ID, kind: 'text' as const, label: 'Host', hint: '', defaultValue: '', placeholder: '' },
-            ],
-          },
-        ],
+        steps: [],
       },
       uiServices: {
         environment: {

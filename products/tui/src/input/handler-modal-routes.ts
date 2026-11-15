@@ -37,12 +37,11 @@ export const { handleSettingsModalToken } = createSettingsModalRoute<
     });
   },
 });
-import '@goodvibes-jev/engine/terminal-shell/runtime-setting-reset';
 export { handleSelectionModalToken, handleBookmarkModalToken } from '@goodvibes-jev/engine/terminal-shell/modal-input-routes';
 import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
-import '../providers/reasoning-effort-surface.ts';
 import type { CommandContext } from './command-registry.ts';
 import type { ConfigModal } from './config-modal.ts';
+import { CONFIG_MODAL_ACTION_LEADER } from './config-modal-keys.ts';
 import { openTtsProviderPicker, openTtsVoicePicker } from './tts-settings-actions.ts';
 import { openThemePicker } from './theme-settings-actions.ts';
 import { isTextBackspace } from './delete-key-policy.ts';
@@ -94,20 +93,28 @@ type ConfigModalRouteState = {
   handleEscape: () => void;
 };
 
+/** The action key a key token names: a named key (`enter`), or the character of a Ctrl/Alt chord. A bare character is never an action. */
+function configModalActionKey(token: Extract<InputToken, { type: 'key' }>): string {
+  const name = token.logicalName ?? '';
+  if ([...name].length !== 1) return name;
+  if (!token.ctrl && !token.meta) return '';
+  return token.shift ? name.toUpperCase() : name;
+}
+
 /**
- * Route a key to the generic config-modal host (MIGRATE-TO-MODAL
- * surfaces). The host owns the reserved navigation keys (Esc, up/down, tab,
- * left/right) and the always-live search row: a printable key the surface
- * claims as an action fires the action while the query is empty; every other
- * printable key (and any multi-char paste) is typed into the query, and
- * Backspace edits it. Other named keys (Enter, ctrl chords) go to the
- * surface's declarative action table (fireAction handles the two-press
- * confirm for destructive actions). Any unrecognised key is absorbed so the
- * modal stays modal.
+ * Route a key to the generic config-modal host. The host owns the reserved
+ * navigation keys (Esc, up/down, tab, left/right) and the always-live search
+ * row: every printable key (and any multi-char paste) is typed into the query,
+ * and Backspace edits it, so typing a search can never fire an action. Actions
+ * fire from a named key (Enter), from the Ctrl chord of the action's letter
+ * (Ctrl+D for `d`), or from the leader Ctrl+G followed by the key, which
+ * reaches every action (config-modal-keys.ts says which keys need it).
+ * fireAction asks for the second press of a destructive action. Any
+ * unrecognised key is absorbed so the modal stays modal.
  *
- * Esc pops exactly one level: an armed destructive confirm is cancelled
- * first; otherwise the modal closes through handleEscape. Esc never clears
- * the query as a separate step.
+ * Esc pops exactly one level: an armed leader or destructive confirm is
+ * cancelled first; otherwise the modal closes through handleEscape. Esc never
+ * clears the query as a separate step.
  */
 export function handleConfigModalToken(state: ConfigModalRouteState, token: InputToken): boolean {
   if (!state.configModal.active) return false;
@@ -118,7 +125,13 @@ export function handleConfigModalToken(state: ConfigModalRouteState, token: Inpu
   // without a keypress (batch refutation finding 3).
   state.configModal.noteInteraction();
 
+  let actionKey = '';
   if (token.type === 'key') {
+    if (token.logicalName === CONFIG_MODAL_ACTION_LEADER && token.ctrl && !token.shift && !token.meta) {
+      state.configModal.armLeader();
+      state.requestRender();
+      return true;
+    }
     if (token.logicalName === 'escape') {
       if (state.configModal.cancelPendingConfirm()) {
         state.requestRender();
@@ -127,6 +140,7 @@ export function handleConfigModalToken(state: ConfigModalRouteState, token: Inpu
       state.handleEscape();
       return true;
     }
+    state.configModal.disarmLeader();
     if (isTextBackspace(token.logicalName ?? '')) {
       state.configModal.backspaceFilter();
       state.requestRender();
@@ -151,14 +165,13 @@ export function handleConfigModalToken(state: ConfigModalRouteState, token: Inpu
         state.requestRender();
         return true;
     }
-    // Any other 'key' token (Enter, a ctrl chord) falls through to the
+    // Any other 'key' token (Enter, a Ctrl/Alt chord) falls through to the
     // action table below, whatever the query holds.
+    actionKey = configModalActionKey(token);
   } else if (token.type === 'text') {
-    const claimed =
-      state.configModal.getFilterQuery().length === 0 &&
-      [...token.value].length === 1 &&
-      state.configModal.resolveAction(token.value) !== null;
-    if (!claimed) {
+    if (state.configModal.takeLeader() && [...token.value].length === 1) {
+      actionKey = token.value;
+    } else {
       // The WHOLE token value lands in the query in one call, including a
       // multi-char paste token, never split into per-char dispatch.
       state.configModal.appendFilterText(token.value);
@@ -167,7 +180,6 @@ export function handleConfigModalToken(state: ConfigModalRouteState, token: Inpu
     }
   }
 
-  const actionKey = token.type === 'key' ? (token.logicalName ?? '') : token.type === 'text' ? token.value : '';
   const submitInput = state.commandContext?.submitInput;
   const fired =
     actionKey.length > 0 &&
@@ -183,8 +195,10 @@ export function handleConfigModalToken(state: ConfigModalRouteState, token: Inpu
   }
 
   // Unhandled key while a config modal is open: drop any pending confirm and
-  // absorb the key (the modal owns the keyboard while it is active).
+  // absorb the key (the modal owns the keyboard while it is active). A key
+  // pressed as an action that names none says so.
   state.configModal.clearConfirmOnMiss();
+  if (token.type === 'text') state.configModal.noteUnboundAction(actionKey);
   state.requestRender();
   return true;
 }

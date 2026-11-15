@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { ConfigKey } from '../config/schema.js';
 import { DEFAULT_CONFIG } from '../config/schema.js';
 import { summarizeError } from '../utils/error-display.js';
+import { logger } from '../utils/logger.js';
 import { createCloudflareApiClient } from './client.js';
 import { readCloudflareConfig } from './config.js';
 import { parseAccessCredentials, type CloudflareAccessCredentials } from './access-client.js';
@@ -19,6 +20,7 @@ import {
 import { discoverZones, resolveZone, selectDiscoveredZone, truncationWarning, tryDiscover } from './discovery.js';
 import { normalizeProvisionHostnames } from './hostnames.js';
 import { describeDeployedResources, openProvisionedStore, type CloudflareProvisionedPatch, type CloudflareProvisionedStore } from './provisioned.js';
+import { openOperationalTokenRecord, operationalTokenSignature, type CloudflareOperationalTokenRecordStore } from './operational-token-record.js';
 import { buildCloudflareControlPlaneStatus } from './status.js';
 import {
   configureDns,
@@ -216,6 +218,26 @@ export class CloudflareControlPlaneManager {
       );
     }
     const tokenApi = this.requireUserTokens(client);
+    const tokenRecord = this.operationalTokenRecord();
+    const previous = tokenRecord.read();
+    const signature = operationalTokenSignature(accountId, zone?.id, components);
+    // A retry, a second Create or a provision after a restart for the same selection uses the
+    // token already made: each new token is another live credential in the owner's account.
+    if (input.reuse !== false && input.storeApiToken !== false && !input.returnGeneratedToken
+      && previous && previous.signature === signature && previous.apiTokenRef === config.apiTokenRef
+      && (await this.resolveSecretRef(previous.apiTokenRef)).value) {
+      return {
+        ok: true,
+        tokenId: previous.tokenId,
+        tokenName: previous.tokenName,
+        tokenSource: 'bootstrap',
+        reused: true,
+        apiTokenRef: previous.apiTokenRef,
+        accountId,
+        ...(zone ? { zoneId: zone.id } : {}),
+        permissions: requirements,
+      };
+    }
     const permissionGroups = await resolvePermissionGroups(requirements, (params) => tokenApi.permissionGroups.list(params));
     const policies = buildTokenPolicies(accountId, zone?.id, permissionGroups);
     const tokenName = clean(input.tokenName) || 'GoodVibes Cloudflare Operational';
@@ -250,11 +272,25 @@ export class CloudflareControlPlaneManager {
       }
     }
 
+    // The stored token now holds the new value, so the one it replaced is of no use: revoke it.
+    let replaced: CloudflareOperationalTokenResult['replaced'];
+    if (apiTokenRef && token.id) {
+      if (previous && previous.tokenId !== token.id) {
+        replaced = await this.revokeOperationalToken(tokenApi, previous.tokenId);
+      }
+      try {
+        tokenRecord.write({ version: 1, accountId, tokenId: token.id, tokenName, apiTokenRef, ...(zone ? { zoneId: zone.id } : {}), signature, createdAt: Date.now() });
+      } catch (error: unknown) {
+        logger.warn('cloudflare: the operational token was stored but its record was not; the next creation cannot reuse or revoke it', { tokenId: token.id, error: summarizeError(error) });
+      }
+    }
+
     return {
       ok: true,
       ...(token.id ? { tokenId: token.id } : {}),
       tokenName,
       tokenSource: 'bootstrap',
+      ...(replaced ? { replaced } : {}),
       ...(apiTokenRef ? { apiTokenRef } : {}),
       ...(input.returnGeneratedToken ? { generatedToken: token.value } : {}),
       accountId,
@@ -1004,6 +1040,31 @@ export class CloudflareControlPlaneManager {
       steps.push({ name: 'cloudflare-api', status: 'skipped', message: 'No Cloudflare API token/account configured; only local config was disabled. The deployed Worker still holds the daemon credential and may keep calling the daemon until it is disabled in the Cloudflare dashboard.' });
     }
 
+    // The operational token this daemon made stays a live credential until it is revoked,
+    // which takes a token allowed to edit API tokens.
+    const tokenRecord = this.operationalTokenRecord();
+    const madeToken = tokenRecord.read();
+    if (madeToken) {
+      const bootstrapToken = clean(input.bootstrapToken);
+      const label = `operational token ${madeToken.tokenName} (${madeToken.tokenId})`;
+      if (!bootstrapToken) {
+        steps.push({ name: 'revoke-operational-token', status: 'skipped', message: `The ${label} is still live in Cloudflare. Disable again with a bootstrap token to revoke it, or delete it in the Cloudflare dashboard (My Profile > API Tokens).`, resourceId: madeToken.tokenId });
+      } else {
+        let outcome: { readonly revoked: boolean; readonly reason?: string | undefined };
+        try {
+          outcome = await this.revokeOperationalToken(this.requireUserTokens(await this.createClient(bootstrapToken)), madeToken.tokenId);
+        } catch (error: unknown) {
+          outcome = { revoked: false, reason: summarizeError(error) };
+        }
+        if (outcome.revoked) {
+          tokenRecord.clear();
+          steps.push({ name: 'revoke-operational-token', status: 'ok', message: `Revoked the ${label}; it no longer works anywhere.`, resourceId: madeToken.tokenId });
+        } else {
+          steps.push({ name: 'revoke-operational-token', status: 'warning', message: `Could not revoke the ${label}: ${outcome.reason ?? 'unknown reason'}. Delete it in the Cloudflare dashboard (My Profile > API Tokens).`, resourceId: madeToken.tokenId });
+        }
+      }
+    }
+
     if (this.options.tunnelConnector) {
       await this.options.tunnelConnector.stop();
       steps.push({ name: 'stop-tunnel-connector', status: 'ok', message: 'Stopped the tunnel connector; the daemon hostname no longer reaches this daemon.' });
@@ -1082,6 +1143,25 @@ export class CloudflareControlPlaneManager {
     // `CLOUDFLARE_API_TOKEN` at project scope, so which copy the daemon found
     // depended on its working directory. See config/credential-scope-registry.ts.
     await this.options.secretsManager.set(key, value, { scope: 'daemon', medium: 'secure' });
+  }
+
+  private operationalTokenRecord(): CloudflareOperationalTokenRecordStore {
+    const configManager = this.options.configManager;
+    return openOperationalTokenRecord(typeof configManager.getControlPlaneConfigDir === 'function' ? configManager.getControlPlaneConfigDir() : undefined);
+  }
+
+  /** Revoke one API token this daemon made; a failure is reported, never thrown, since the caller's own work succeeded. */
+  private async revokeOperationalToken(
+    tokenApi: NonNullable<CloudflareApiClient['user']>['tokens'],
+    tokenId: string,
+  ): Promise<{ readonly tokenId: string; readonly revoked: boolean; readonly reason?: string | undefined }> {
+    if (!tokenApi.delete) return { tokenId, revoked: false, reason: 'this Cloudflare client cannot delete API tokens' };
+    try {
+      await tokenApi.delete(tokenId);
+      return { tokenId, revoked: true };
+    } catch (error: unknown) {
+      return { tokenId, revoked: false, reason: summarizeError(error) };
+    }
   }
 
   private requireUserTokens(client: CloudflareApiClient): NonNullable<CloudflareApiClient['user']>['tokens'] {

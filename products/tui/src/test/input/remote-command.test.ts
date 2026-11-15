@@ -134,7 +134,8 @@ async function createRemoteCommandContext(
       importArtifact: (path: string) => remoteRunnerRegistry.importArtifact(path),
       buildReviewSummary: (artifactId: string) => remoteRunnerRegistry.buildReviewSummary(artifactId),
       exportSessionBundle: (path?: string) => remoteRunnerRegistry.exportSessionBundle(store, path),
-      importSessionBundle: (path: string) => remoteRunnerRegistry.importSessionBundle(path),
+      importSessionBundle: (path: string, options?: { readonly replace?: boolean | undefined }) => remoteRunnerRegistry.importSessionBundle(path, options),
+      describeSessionBundleImport: (value: unknown) => remoteRunnerRegistry.describeSessionBundleImport(value),
     },
   };
   const providerRegistry = {} as never;
@@ -546,15 +547,15 @@ describe('remote command', () => {
 
     const bundlePath = join(dir, 'teleport.json');
     await teleport!.handler(['export', bundlePath], ctx);
-    expect(out.join('\n')).toContain('Teleport bundle exported');
+    expect(out.join('\n')).toContain('Exported the remote session bundle');
 
     out.length = 0;
     await teleport!.handler(['inspect', bundlePath], ctx);
-    expect(out.join('\n')).toContain('Teleport Bundle Review');
+    expect(out.join('\n')).toContain('Remote Session Bundle Review');
 
     out.length = 0;
     await teleport!.handler(['import', bundlePath], ctx);
-    expect(out.join('\n')).toContain('Imported teleport bundle');
+    expect(out.join('\n')).toContain('Imported the remote session bundle');
   });
 });
 

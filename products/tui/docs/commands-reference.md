@@ -405,7 +405,7 @@ GoodVibes ships **163** built-in slash commands across **75** categories. Every 
 | `/install` | None | `[review\|bundle export <path>\|bundle inspect <path>]` | Review install posture and export portable install bundles |
 | `/login` | None | `[provider <name> start\|finish <code>\|service <daemon\|listener> <baseUrl> <username> [password] [secretKey]]` | Front-door login flow for provider subscriptions and local service sessions |
 | `/logout` | None | `provider <name>` | Front-door logout flow for provider subscription sessions and supported overrides |
-| `/update` | `/upgrade` | `[check\|apply\|rollback\|review\|bundle export <path>\|bundle inspect <path>]` | Check for a newer GoodVibes release and, for binary installs, download/verify/apply it or roll back to the kept previous version |
+| `/update` | `/upgrade` | `[check\|apply\|rollback\|review\|bundle export <path> [--yes]\|bundle inspect <path>]` | Check for a newer GoodVibes release and, for binary installs, download/verify/apply it or roll back to the kept previous version; `review` shows installed and latest version, install kind and rollback copy, `bundle export` saves that review to a file (`--yes` to replace an existing file) |
 
 ## Platform Services
 
@@ -476,7 +476,7 @@ GoodVibes ships **163** built-in slash commands across **75** categories. Every 
 | Command | Aliases | Usage | Description |
 | --- | --- | --- | --- |
 | `/remote` | None | `[list \| show [agentId] \| supervisor [runnerId] \| capabilities [runnerId] \| recover [runnerId] \| setup [export <path>] \| env [export <path>] \| tunnel [review\|export <path>] \| bootstrap [export <path>\|inspect <path>] \| session <export\|inspect\|import> <path> \| pool <list\|show\|create\|assign\|unassign> ... \| dispatch [template] <description> \| dispatch-pool <pool> [template] <description> \| contract [agentId] \| cancel <agentId> \| export <agentId> [path] \| artifact list \| artifact show <id> \| artifact export <id> [path] \| review <id> \| rerun-local <id> \| import <path>]` | Inspect, dispatch, and review self-hosted remote runners and artifacts |
-| `/teleport` | None | `[export <path>\|inspect <path>\|import <path>]` | Package, inspect, and import portable remote-session handoff bundles |
+| `/teleport` | None | `<export\|inspect\|import> <path> [--yes]` | The same as `/remote session`: export, inspect or import a remote session bundle (runner pools, runner contracts and artifacts; not the conversation). Inspect validates the file and says what an import would replace; an import that replaces something held here needs `--yes` |
 
 ## Scheduling
 
@@ -531,7 +531,7 @@ GoodVibes ships **163** built-in slash commands across **75** categories. Every 
 
 | Command | Aliases | Usage | Description |
 | --- | --- | --- | --- |
-| `/settings-sync` | `/settingssync` | `[panel\|report\|review\|show <key>\|staged\|conflicts\|resolve <key> <local\|synced>\|failures\|rollback-history\|export <path>\|inspect <path>\|pull <path>\|push <path>\|lock <key> <source> <reason...>\|unlock <key>]: bare opens the modal` | Open the settings sync modal (bare); review posture, export/import bundles, or resolve conflicts by subcommand |
+| `/settings-sync` | `/settingssync` | `[panel\|report\|review\|show <key>\|staged\|conflicts\|resolve <key> <local\|synced>\|failures\|rollback-history\|export <path>\|inspect <path>\|pull <path>\|push <path>\|lock <key> <source> <reason...>\|unlock <key>]: bare opens the modal` | Open the settings sync modal (bare); review posture, export/import bundles, or resolve conflicts by subcommand. `pull` shows the changes and asks first when the bundle changes a setting that can loosen security or holds a credential, as `/managed apply` and `/setup transfer import` do |
 
 ## Sharing
 
@@ -546,7 +546,7 @@ GoodVibes ships **163** built-in slash commands across **75** categories. Every 
 | `/clear` | `/cls`, `/reset` | None | Start a fresh conversation (the current one is saved as its own session) |
 | `/commands` | `/cmds` | None | Browse all commands in a scrollable list |
 | `/commit-all` | None | `[--yes]` | Show what committing the whole working tree would include; --yes commits it |
-| `/compact` | None | None | Summarize conversation to free context window |
+| `/compact` | None | None | Summarize conversation to free context window. It says what happened: summarised (with the figures), the oldest messages dropped without a summary on a model with a small context window (with the count, recorded in `/compact-history`), or nothing compacted and why |
 | `/compact-history` | `/compaction-history` | None | Show compaction history for this session |
 | `/debug` | None | None | Toggle debug mode |
 | `/effort` | `/e` | `[level]` | Show or set reasoning effort level |
@@ -585,7 +585,7 @@ GoodVibes ships **163** built-in slash commands across **75** categories. Every 
 
 | Command | Aliases | Usage | Description |
 | --- | --- | --- | --- |
-| `/teamwork` | `/teammates` | `[review\|modes\|mode <id>\|create-mode <id> <title...>\|recipes\|recipe <id>\|templates\|archetypes\|validate\|archetype <name>\|create-archetype <name> <title...>]` | Packaged task modes, teammate templates, and orchestration recipes |
+| `/teamwork` | `/teammates` | `[review\|modes\|mode <id>\|create-mode <id> <title...>\|recipes\|recipe <id> [title...]\|templates\|archetypes\|validate\|archetype <name>\|create-archetype <name> <title...>]` | Packaged task modes, teammate templates, and orchestration recipes. `create-mode` and `create-archetype` start the agent they describe; `recipe <id> <title>` runs the recipe's steps one after another, each with the previous step's result. An archetype's family comes from its `family:` front-matter field (implement, review, test, research, general); `validate` lists the files without one |
 
 ## Testing
 

@@ -79,11 +79,14 @@ class SubscriptionModalSurface implements ConfigModalSurface {
   private buildRows(): Row[] {
     const services = this.serviceRegistry.getAll();
     const builtin = listBuiltinSubscriptionProviders();
+    // Each reader is a read of the store file: read it twice per view, then index.
+    const subscriptions = new Map(this.manager.list().map((e) => [e.provider, e] as const));
+    const pendingLogins = new Map(this.manager.listPending().map((e) => [e.provider, e] as const));
     const providers = new Set<string>([
       ...builtin.map((p) => p.provider),
       ...Object.values(services).filter((s) => s.authType === 'oauth' && s.oauth).map((s) => s.providerId ?? s.name),
-      ...this.manager.list().map((e) => e.provider),
-      ...this.manager.listPending().map((e) => e.provider),
+      ...subscriptions.keys(),
+      ...pendingLogins.keys(),
     ]);
     return [...providers].sort((a, b) => a.localeCompare(b)).map((provider) => {
       const service = Object.values(services).find((s) => (s.providerId ?? s.name) === provider && s.authType === 'oauth' && s.oauth);
@@ -91,8 +94,8 @@ class SubscriptionModalSurface implements ConfigModalSurface {
       return {
         provider,
         hasOAuthConfig: Boolean(service?.oauth) || Boolean(builtinEntry),
-        subscription: this.manager.get(provider),
-        pending: this.manager.getPending(provider),
+        subscription: subscriptions.get(provider) ?? null,
+        pending: pendingLogins.get(provider) ?? null,
       } satisfies Row;
     });
   }

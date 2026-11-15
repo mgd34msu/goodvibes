@@ -1,11 +1,8 @@
 import { createCommandModeTokenHandler } from '@goodvibes-jev/engine/terminal-shell/command-mode-route';
 import { strictArgumentsRefusal, strictCommandArguments } from '@goodvibes-jev/engine/terminal-shell/command-arguments';
-import { activeTokens } from '../renderer/theme.ts';
-import { loadSkillByTrigger } from '@goodvibes-jev/engine/platform/platform/tools';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { CommandContext, CommandRegistry } from './command-registry.ts';
 import type { AutocompleteEngine } from './autocomplete.ts';
-import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
 import type { ConversationManager } from '../core/conversation';
 import { handleClipboardPaste, type ClipboardPasteSource } from './handler-content-actions.ts';
 

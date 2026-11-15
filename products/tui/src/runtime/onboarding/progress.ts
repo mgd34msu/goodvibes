@@ -90,20 +90,9 @@ export interface WriteWizardProgressOptions {
  * resume one step earlier, which costs nothing. The file is user-scoped so it survives across
  * project switches and is shared with the resume-prompt check at startup.
  *
- * Masked (password) fields are excluded from the serialised textState by the
- * caller. As a second line of defence this function also drops any entry whose
- * field id names a secret (see {@link isSecretFieldId}), so a secret in a field
- * that was never declared masked still never reaches the user-scope file.
+ * Values typed into masked fields never reach `textState` here: the wizard
+ * holds them apart from the text it iterates (WizardTextState).
  */
-/**
- * Whether a wizard field id names a secret by its last segment (`...-token`,
- * `...-password`). A reference to a secret (`...-token-ref`) or an id of one
- * (`...-token-id`) is not the secret and stays resumable.
- */
-export function isSecretFieldId(fieldId: string): boolean {
-  return /(?:^|[.-])(?:token|password|passphrase|secret|api-?key|credential)$/i.test(fieldId);
-}
-
 export function writeWizardProgress(
   shellPaths: OnboardingShellPaths,
   options: WriteWizardProgressOptions,
@@ -116,7 +105,7 @@ export function writeWizardProgress(
     stepIndex: options.stepIndex,
     toggleState: options.toggleState,
     radioState: options.radioState,
-    textState: options.textState.filter(([fieldId]) => !isSecretFieldId(fieldId)),
+    textState: options.textState,
   };
   // A file from a newer release is moved aside, not overwritten, so downgrading never destroys its state.
   setAsideNewerVersionFile(path, 1);

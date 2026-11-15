@@ -92,6 +92,10 @@ export interface CloudflareOperationalTokenResult {
   readonly tokenId?: string;
   readonly tokenName: string;
   readonly tokenSource: 'bootstrap';
+  /** True when the daemon returned the token it already made for this selection; nothing was created. */
+  readonly reused?: boolean;
+  /** The token a new one replaced: revoked, or why it could not be. */
+  readonly replaced?: { readonly tokenId: string; readonly revoked: boolean; readonly reason?: string };
   readonly apiTokenRef?: string;
   readonly generatedToken?: string;
   readonly accountId: string;
@@ -182,6 +186,8 @@ export interface CloudflareOperationalTokenRequest extends CloudflareTokenRequir
   readonly persistConfig?: boolean;
   readonly storeApiToken?: boolean;
   readonly returnGeneratedToken?: boolean;
+  /** Default true: reuse the token the daemon made for the same selection. */
+  readonly reuse?: boolean;
 }
 
 export interface CloudflareValidateRequest {
@@ -242,6 +248,8 @@ export interface CloudflareVerifyRequest {
 }
 
 export interface CloudflareDisableRequest extends CloudflareValidateRequest {
+  /** A token allowed to edit API tokens; with it disable revokes the operational token the daemon made. */
+  readonly bootstrapToken?: string;
   readonly workerName?: string;
   readonly disableWorkerSubdomain?: boolean;
   readonly disableCron?: boolean;

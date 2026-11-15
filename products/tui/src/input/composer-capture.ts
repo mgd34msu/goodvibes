@@ -6,79 +6,32 @@
  *                (pre-existing behavior).
  *   `# <text>`   captures <text> as a session-memory note and does NOT send a
  *                turn, a pure "jot this down" gesture. A single leading `#`
- *                on a single line only; `##...` (markdown headings) and
- *                multi-line text are left alone so they can be sent as an
- *                ordinary prompt.
+ *                followed by a space, on a single line only; `#482 ...` (an
+ *                issue number), `##...` (markdown headings) and multi-line
+ *                text are left alone so they are sent as an ordinary prompt.
  *
  * Both write through the existing session memory machinery
  * (SessionMemoryStore.add) and surface a visible confirmation naming what was
  * written and where.
  */
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-
-/** The provider-registry surface the `@model:` directive needs. */
-export interface AtModelRegistry {
-  setCurrentModel(reference: string): void;
-  getCurrentModel(): { id: string; provider: string; registryKey: string; displayName: string };
-}
-
-export interface AtModelDeps {
-  readonly providerRegistry: AtModelRegistry;
-  /** Session runtime whose model/provider labels follow an explicit switch. */
-  readonly runtime: { model: string; provider: string };
-  readonly configManager: { set(key: string, value: unknown): void };
-  /** Surfaces the switch confirmation / unknown-model message. */
-  readonly notify: (message: string) => void;
-}
-
 // Directives are only honoured at the start of the submission, so pasted text that
 // merely contains "@model:x" (a log, a diff) never changes the selected model.
 const LEADING_AT_MODEL_PATTERN = /^\s*@model:(\S+)/;
 
 /**
- * Apply every leading `@model:<id>` directive in a composer submission and
- * return the text with those directives stripped.
- *
- * The switch is a real, persisted selection (config `provider.model`), not a
- * per-turn override, so the runtime labels are updated alongside it and each
- * one is announced. An unknown id is reported as unknown rather than silently
- * dropped, the user asked for a specific backend and did not get it. A switch
- * whose persistence fails is rolled back so the registry, the runtime labels
- * and the config never disagree.
+ * Split the leading `@model:<id>` directives off a composer submission. The
+ * caller switches to each through `/model <id>`, the one switch path, so the
+ * label, the reasoning effort and the missing-key capture are the ones a
+ * `/model` switch gets.
  */
-export function applyAtModelDirective(input: string, deps: AtModelDeps): string {
+export function splitAtModelDirectives(input: string): { readonly models: readonly string[]; readonly text: string } {
+  const models: string[] = [];
   let text = input;
   for (let match = LEADING_AT_MODEL_PATTERN.exec(text); match !== null; match = LEADING_AT_MODEL_PATTERN.exec(text)) {
-    const modelId = match[1]!;
+    models.push(match[1]!);
     text = text.slice(match[0].length);
-    let previous: ReturnType<AtModelRegistry['getCurrentModel']> | undefined;
-    try { previous = deps.providerRegistry.getCurrentModel(); } catch { /* nothing selected yet: nothing to roll back to */ }
-    try {
-      deps.providerRegistry.setCurrentModel(modelId);
-    } catch {
-      deps.notify(`[Model] Unknown model: ${modelId}`);
-      continue;
-    }
-    try {
-      const def = deps.providerRegistry.getCurrentModel();
-      deps.runtime.model = def.id;
-      deps.runtime.provider = def.provider;
-      deps.configManager.set('provider.model', def.registryKey);
-      deps.notify(`[Model] Switched to ${def.displayName} (${def.provider}) via @model:`);
-    } catch (error) {
-      let kept = 'the previous model could not be restored';
-      if (previous) {
-        try {
-          deps.providerRegistry.setCurrentModel(previous.registryKey);
-          deps.runtime.model = previous.id;
-          deps.runtime.provider = previous.provider;
-          kept = `kept ${previous.displayName} (${previous.provider})`;
-        } catch { /* reported above as not restored */ }
-      }
-      deps.notify(`[Model] Could not switch to ${modelId}: ${summarizeError(error)}; ${kept}.`);
-    }
   }
-  return text.trim();
+  return { models, text: models.length > 0 ? text.trim() : input };
 }
 
 export interface ComposerCaptureDeps {
@@ -116,11 +69,11 @@ export function applyComposerCapture(input: string, deps: ComposerCaptureDeps): 
     return { text: memoryText, captured: true };
   }
 
-  // `#` (single, not `##`), capture a note to session memory; do not send. A note is
-  // one line: a pasted prompt that opens with a markdown heading or an issue
-  // reference spans several lines and is sent as the prompt it is.
+  // `# ` (a hash and a space), capture a note to session memory; do not send. A note
+  // is one line, and the space keeps `#482 is failing` (an issue number) and
+  // `##` headings as prompts.
   const leading = input.replace(/^\s+/, '');
-  if (leading.startsWith('#') && !leading.startsWith('##') && !leading.trimEnd().includes('\n')) {
+  if ((leading === '#' || leading.startsWith('# ')) && !leading.trimEnd().includes('\n')) {
     const noteText = leading.slice(1).trim();
     if (!noteText) {
       deps.notify('[Note] Usage: # <text to save as a session-memory note>');

@@ -143,9 +143,11 @@ export interface ConfigModalAction {
    * Trigger key: a single printable char ('r', 'd') or a named key ('enter').
    * Must not collide with the host-reserved nav keys (up/down/left/right/tab/
    * escape), those are consumed by the host before actions are consulted.
-   * The search row is always live: a printable key that matches an action
-   * fires the action only while the query is empty; otherwise it is typed
-   * into the query, see handleConfigModalToken.
+   * The search row is always live: a typed character always goes to the
+   * query, and a single-char action fires from its Ctrl chord (`d` is
+   * Ctrl+D) or from the leader Ctrl+G followed by the key; a sentence that
+   * names a key uses `actionKeyText` (config-modal-keys.ts) so it says the
+   * keys that work in every terminal.
    */
   readonly key: string;
   /** Action id passed to `onAction`. */
@@ -153,8 +155,8 @@ export interface ConfigModalAction {
   /** Short verb for the footer hint (e.g. "refresh", "delete user"). */
   readonly label: string;
   /**
-   * Destructive: require an explicit second press of the same key to fire
-   * (the host shows "press <key> again to <label>" between presses). Matches
+   * Destructive: require an explicit second press of the same chord to fire
+   * (the host shows "Press <keys> again to <label>" between presses). Matches
    * the session-picker delete-confirm precedent.
    */
   readonly confirm?: boolean;

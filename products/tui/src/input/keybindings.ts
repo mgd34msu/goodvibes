@@ -15,7 +15,7 @@ export type KeyAction =
   | 'bookmark'
   | 'block-save'
   | 'delete-word'
-  | 'apply-diff-line-start'
+  | 'line-start'
   | 'next-error-line-end'
   | 'kill-line'
   | 'clear-prompt'
@@ -38,7 +38,7 @@ export const ACTION_DESCRIPTIONS: Record<KeyAction, string> = { ...COMMON_ACTION
   'command-palette':       'Open the command palette (search & run any command)',
   'open-agents':           'Open the Agents view (same as F2)',
   'block-save':            'Save nearest block to file',
-  'apply-diff-line-start': 'Apply nearest diff / move to line start',
+  'line-start':            'Move to start of line',
   'clear-prompt':          'Clear the entire prompt (Alt+U; kill-to-start owns Ctrl+U)',
   'word-back':             'Move cursor to start of previous word (Alt+B)',
   'word-forward':          'Move cursor to end of next word (Alt+F)',
@@ -58,7 +58,7 @@ export const ACTION_DESCRIPTIONS: Record<KeyAction, string> = { ...COMMON_ACTION
 export const DEFAULT_KEYBINDINGS: Record<KeyAction, KeyCombo[]> = createKeybindingDefaults<KeyAction>([
   'copy-selection', 'clear-cancel', 'screen-clear', 'command-palette',
   'open-agents', 'history-search', 'search', 'block-copy',
-  'bookmark', 'block-save', 'delete-word', 'apply-diff-line-start',
+  'bookmark', 'block-save', 'delete-word', 'line-start',
   'next-error-line-end', 'kill-line', 'clear-prompt', 'undo',
   'redo', 'paste', 'word-back', 'word-forward',
   'kill-to-start', 'kill-word-forward', 'yank', 'yank-pop',
@@ -73,7 +73,7 @@ export const DEFAULT_KEYBINDINGS: Record<KeyAction, KeyCombo[]> = createKeybindi
 // Ctrl+O: the Agents modal (same as F2), where the old Fleet and Ops
   // consoles' content lives now. Routed globally in handleGlobalShortcutToken.
   'open-agents':           [{ key: 'o', ctrl: true }],
-  'apply-diff-line-start': [{ key: 'a', ctrl: true }],
+  'line-start':            [{ key: 'a', ctrl: true }],
 // Alt+K: kill to end of line. Ctrl+K was reassigned to the command palette
   // (the standard palette chord); Alt+K keeps kill-to-end available and is
   // otherwise unused in the default table.
@@ -117,6 +117,7 @@ export const DEFAULT_KEYBINDINGS: Record<KeyAction, KeyCombo[]> = createKeybindi
 
 export class KeybindingsManager extends PlatformKeybindingsManager<KeyAction> {
   constructor(options: KeybindingsManagerOptions) {
-    super(options, { surfaceRoot: 'tui', defaults: DEFAULT_KEYBINDINGS, descriptions: ACTION_DESCRIPTIONS, abbreviateNamedKeys: true });
+    // A file written before Ctrl+A had one meaning still names it by the old action.
+    super(options, { surfaceRoot: 'tui', defaults: DEFAULT_KEYBINDINGS, descriptions: ACTION_DESCRIPTIONS, aliases: { 'apply-diff-line-start': 'line-start' }, abbreviateNamedKeys: true });
   }
 }

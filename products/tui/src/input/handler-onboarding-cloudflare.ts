@@ -23,6 +23,7 @@ import {
   shouldShowCloudflareStep,
 } from './onboarding/onboarding-wizard-cloudflare.ts';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { beginOnboardingOperation, endOnboardingOperation } from './onboarding-operation.ts';
 
 type CloudflareOnboardingAction = Extract<OnboardingWizardAction,
   | 'cloudflare-token-requirements'
@@ -116,13 +117,22 @@ function formatCloudflareDiscovery(result: CloudflareDiscoverResult): string[] {
 
 function formatCloudflareTokenCreate(result: CloudflareOperationalTokenResult): string[] {
   return [
-    `token: ${result.tokenName}${result.tokenId ? ` (${result.tokenId})` : ''}`,
+    `token: ${result.tokenName}${result.tokenId ? ` (${result.tokenId})` : ''}${result.reused ? ', the one already made for this selection; nothing new was created' : ''}`,
     `account: ${result.accountId}`,
     `stored ref: ${result.apiTokenRef ?? 'not stored'}`,
     `permissions: ${result.permissions.length}`,
+    ...describeReplacedToken(result),
     'Delete or expire the temporary bootstrap token in Cloudflare after confirming the operational token works.',
-    'Each Create action makes a new operational token and does not revoke earlier ones; delete any you no longer use in Cloudflare.',
   ];
+}
+
+/** What happened to the token a new one replaced. */
+function describeReplacedToken(result: CloudflareOperationalTokenResult): string[] {
+  const replaced = result.replaced;
+  if (!replaced) return [];
+  return [replaced.revoked
+    ? `replaced token ${replaced.tokenId}: revoked`
+    : `replaced token ${replaced.tokenId}: still live (${replaced.reason ?? 'not revoked'}); delete it in the Cloudflare dashboard (My Profile > API Tokens)`];
 }
 
 // ok stays true when steps were skipped or verification failed, so completeness also needs an empty warning list.
@@ -178,36 +188,6 @@ function getCloudflareApiTokenRefFromWizard(handler: InputHandler): string {
   return wizard.runtimeSnapshot?.config.cloudflare.apiTokenRef ?? '';
 }
 
-interface MintedOperationalToken {
-  /** The inputs the token was made for; a different selection needs a different token. */
-  readonly signature: string;
-  readonly apiTokenRef: string;
-  readonly tokenName: string;
-  readonly tokenId: string | undefined;
-}
-
-// Per wizard session. Holds only the non-secret reference of the minted token, never the transient bootstrap token.
-const mintedOperationalTokens = new WeakMap<object, MintedOperationalToken>();
-
-function operationalTokenSignature(handler: InputHandler): string {
-  const wizard = handler.onboardingWizard;
-  // Explicit wizard values only: minting persists the zone into the runtime snapshot, so a
-  // snapshot fallback here would make the signature change right after the token is made.
-  return JSON.stringify({
-    source: getCloudflareSetupSource(wizard),
-    components: getCloudflareComponentSelection(wizard),
-    accountId: wizard.getStringFieldValue('cloudflare.account-id', ''),
-    zoneId: wizard.getStringFieldValue('cloudflare.zone-id', ''),
-    zoneName: wizard.getStringFieldValue('cloudflare.zone-name', ''),
-  });
-}
-
-function describeMintedToken(handler: InputHandler): string[] {
-  const minted = mintedOperationalTokens.get(handler.onboardingWizard);
-  if (!minted) return [];
-  return [`operational token in use: ${minted.tokenName}${minted.tokenId ? ` (${minted.tokenId})` : ''}`];
-}
-
 async function createCloudflareOperationalTokenForHandler(handler: InputHandler): Promise<CloudflareOperationalTokenResult> {
   const wizard = handler.onboardingWizard;
   const bootstrapToken = getCloudflareBootstrapTokenFromWizard(handler);
@@ -217,7 +197,9 @@ async function createCloudflareOperationalTokenForHandler(handler: InputHandler)
   const accountId = wizard.getStringFieldValue('cloudflare.account-id', wizard.runtimeSnapshot?.config.cloudflare.accountId ?? '');
   const zoneId = wizard.getStringFieldValue('cloudflare.zone-id', wizard.runtimeSnapshot?.config.cloudflare.zoneId ?? '');
   const zoneName = wizard.getStringFieldValue('cloudflare.zone-name', wizard.runtimeSnapshot?.config.cloudflare.zoneName ?? '');
-  const result = await getCloudflareDaemonClientForHandler(handler).createOperationalToken({
+  // The daemon returns the token it already made for the same account, zone and components
+  // (also after a restart), and revokes the one a new token replaces.
+  return getCloudflareDaemonClientForHandler(handler).createOperationalToken({
     components: getCloudflareComponentSelection(wizard),
     bootstrapToken,
     ...(accountId ? { accountId } : {}),
@@ -226,34 +208,29 @@ async function createCloudflareOperationalTokenForHandler(handler: InputHandler)
     storeApiToken: true,
     persistConfig: true,
   });
-  if (result.apiTokenRef) {
-    mintedOperationalTokens.set(wizard, {
-      signature: operationalTokenSignature(handler),
-      apiTokenRef: result.apiTokenRef,
-      tokenName: result.tokenName,
-      tokenId: result.tokenId,
-    });
-  }
-  return result;
 }
 
-async function buildCloudflareProvisionInputForHandler(handler: InputHandler): Promise<CloudflareProvisionRequest> {
+async function buildCloudflareProvisionInputForHandler(handler: InputHandler): Promise<{ readonly input: CloudflareProvisionRequest; readonly token?: CloudflareOperationalTokenResult }> {
   const input = buildCloudflareProvisionRequest(handler.onboardingWizard, { includeTransientSecrets: true });
   const setupSource = getCloudflareSetupSource(handler.onboardingWizard);
   if (setupSource === 'bootstrap-token' || setupSource === 'bootstrap-env') {
-    // Every token made is a live credential in the user's Cloudflare account that is never revoked,
-    // so a retry or the final apply reuses the one this session already made for the same selection.
-    const minted = mintedOperationalTokens.get(handler.onboardingWizard);
-    const apiTokenRef = minted && minted.signature === operationalTokenSignature(handler)
-      ? minted.apiTokenRef
-      : (await createCloudflareOperationalTokenForHandler(handler)).apiTokenRef;
-    if (apiTokenRef) {
+    const token = await createCloudflareOperationalTokenForHandler(handler);
+    if (token.apiTokenRef) {
       const withoutInlineToken = { ...input };
       delete withoutInlineToken.apiToken;
-      return { ...withoutInlineToken, apiTokenRef };
+      return { input: { ...withoutInlineToken, apiTokenRef: token.apiTokenRef }, token };
     }
+    return { input, token };
   }
-  return input;
+  return { input };
+}
+
+function describeTokenInUse(token: CloudflareOperationalTokenResult | undefined): string[] {
+  if (!token) return [];
+  return [
+    `operational token in use: ${token.tokenName}${token.tokenId ? ` (${token.tokenId})` : ''}${token.reused ? ' (reused)' : ' (new)'}`,
+    ...describeReplacedToken(token),
+  ];
 }
 
 function buildCloudflareDiscoveryInputForHandler(handler: InputHandler): Parameters<CloudflareDaemonClient['discover']>[0] {
@@ -290,8 +267,7 @@ export async function handleCloudflareOnboardingActionForHandler(
   handler: InputHandler,
   action: CloudflareOnboardingAction,
 ): Promise<void> {
-  if (handler.onboardingApplyPending) return;
-  handler.onboardingApplyPending = true;
+  if (!beginOnboardingOperation(handler, cloudflareActionName(action))) return;
   handler.onboardingWizard.clearApplyFeedback();
   handler.requestRender();
   try {
@@ -307,7 +283,7 @@ export async function handleCloudflareOnboardingActionForHandler(
 
     if (action === 'cloudflare-create-operational-token') {
       const result = await createCloudflareOperationalTokenForHandler(handler);
-      setCloudflareWizardStatusForHandler(handler, 'Cloudflare operational token created', formatCloudflareTokenCreate(result));
+      setCloudflareWizardStatusForHandler(handler, result.reused ? 'Cloudflare operational token already made' : 'Cloudflare operational token created', formatCloudflareTokenCreate(result));
       await handler.refreshOnboardingHydration({ preserveValues: true, targetStepId: 'cloudflare' });
       return;
     }
@@ -345,12 +321,12 @@ export async function handleCloudflareOnboardingActionForHandler(
     }
 
     if (action === 'cloudflare-provision') {
-      const input = await buildCloudflareProvisionInputForHandler(handler);
+      const { input, token } = await buildCloudflareProvisionInputForHandler(handler);
       const result = await client.provision(input);
       setCloudflareWizardStatusForHandler(
         handler,
         provisionClean(result) ? 'Cloudflare provisioning completed' : 'Cloudflare provisioning needs attention',
-        [...formatCloudflareProvision(result), ...describeMintedToken(handler)],
+        [...formatCloudflareProvision(result), ...describeTokenInUse(token)],
         provisionClean(result) ? 'info' : 'warning',
       );
       await handler.refreshOnboardingHydration({ preserveValues: true, targetStepId: 'cloudflare' });
@@ -375,6 +351,8 @@ export async function handleCloudflareOnboardingActionForHandler(
       const result = await client.disable({
         accountId: handler.onboardingWizard.getStringFieldValue('cloudflare.account-id', handler.onboardingWizard.runtimeSnapshot?.config.cloudflare.accountId ?? ''),
         apiTokenRef: getCloudflareApiTokenRefFromWizard(handler),
+        // With a bootstrap token at hand the daemon also revokes the operational token it made.
+        ...(getCloudflareBootstrapTokenFromWizard(handler) ? { bootstrapToken: getCloudflareBootstrapTokenFromWizard(handler) } : {}),
         workerName: handler.onboardingWizard.getStringFieldValue('cloudflare.worker-name', handler.onboardingWizard.runtimeSnapshot?.config.cloudflare.workerName ?? 'goodvibes-batch-worker'),
         persistConfig: true,
       });
@@ -389,8 +367,20 @@ export async function handleCloudflareOnboardingActionForHandler(
   } catch (error) {
     setCloudflareWizardStatusForHandler(handler, 'Cloudflare action failed', [normalizeCloudflareActionError(error)], 'error');
   } finally {
-    handler.onboardingApplyPending = false;
+    endOnboardingOperation(handler);
     handler.requestRender();
+  }
+}
+
+function cloudflareActionName(action: CloudflareOnboardingAction): string {
+  switch (action) {
+    case 'cloudflare-token-requirements': return 'Cloudflare token requirements';
+    case 'cloudflare-create-operational-token': return 'Cloudflare token creation';
+    case 'cloudflare-discover': return 'Cloudflare discovery';
+    case 'cloudflare-validate': return 'Cloudflare token check';
+    case 'cloudflare-provision': return 'Cloudflare provisioning';
+    case 'cloudflare-verify': return 'Cloudflare Worker check';
+    case 'cloudflare-disable': return 'Cloudflare disable';
   }
 }
 
@@ -418,11 +408,12 @@ export async function maybeProvisionCloudflareOnFinalApplyForHandler(handler: In
 
   try {
     const client = getCloudflareDaemonClientForHandler(handler);
-    const result = await client.provision(await buildCloudflareProvisionInputForHandler(handler));
+    const { input, token } = await buildCloudflareProvisionInputForHandler(handler);
+    const result = await client.provision(input);
     handler.onboardingWizard.textState.set('cloudflare.action-status', [
       provisionClean(result) ? 'Cloudflare provisioning completed during final apply.' : 'Cloudflare provisioning needs attention after final apply.',
       ...formatCloudflareProvision(result),
-      ...describeMintedToken(handler),
+      ...describeTokenInUse(token),
     ].join('\n'));
     return [{
       id: 'cloudflare:provision',

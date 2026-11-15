@@ -111,7 +111,6 @@ function makeShortcutState(ring: KillRing, overrides: Partial<GlobalShortcutRout
     handleBlockCopy: mock(() => {}),
     handleBookmark: mock(() => {}),
     handleBlockSave: mock(() => {}),
-    handleDiffApply: mock(() => false),
     handleUndo: mock(() => {}),
     handleRedo: mock(() => {}),
     handlePaste: mock(() => {}),

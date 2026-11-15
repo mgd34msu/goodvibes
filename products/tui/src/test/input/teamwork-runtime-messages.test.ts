@@ -8,16 +8,16 @@ function registry(): CommandRegistry {
   return commands;
 }
 
-test('create-mode says the task is a queued record that nothing starts', async () => {
+test('create-mode starts the agent the mode describes', async () => {
   const output: string[] = [];
+  const spawned: unknown[] = [];
   const ctx = {
-    clients: { opsApi: { tasks: { create: () => ({ id: 'task-1' }) } } },
+    ops: { agentManager: { spawn: (input: unknown) => { spawned.push(input); return { id: 'agent-1' }; } } },
     print: (line: string) => { output.push(line); },
   } as unknown as CommandContext;
   await registry().execute('teamwork', ['create-mode', 'local-engineer', 'Fix', 'the', 'build'], ctx);
-  expect(output).toHaveLength(1);
-  expect(output[0]).toContain('Created teamwork task task-1');
-  expect(output[0]).toContain('queued record only');
+  expect(spawned).toEqual([{ mode: 'spawn', task: 'Fix the build', template: 'engineer', executionProtocol: 'gather-plan-apply' }]);
+  expect(output[0]).toContain('Started agent agent-1');
 });
 
 test('a failure in a non-archetype subcommand reports its own cause', async () => {

@@ -42,7 +42,6 @@ export interface GlobalShortcutPolicy<State extends GlobalShortcutState> {
   readonly rawKey?: ((state: State, token: Extract<InputToken, { type: 'key' }>) => boolean | undefined) | undefined;
   readonly action?: ((state: State, action: string | null) => boolean | undefined) | undefined;
   readonly killRing?: ((state: State) => KillRing) | undefined;
-  readonly applyDiff?: ((state: State) => boolean) | undefined;
 }
 function applyPromptEdit(state: GlobalShortcutState, edit: PromptEdit | void): void {
   if (!edit) return;
@@ -138,9 +137,7 @@ export function handleGlobalShortcutToken<State extends GlobalShortcutState>(
       return true;
     }
 
-    case 'apply-diff-line-start':
     case 'line-start': {
-      if (action === 'apply-diff-line-start' && !state.commandMode && policy.applyDiff?.(state)) return true;
       const info = state.getWrappedPromptInfo(state.contentWidth);
       state.cursorPos = info.wrappedLines.length > 1 ? (info.segments[info.cursorWrappedLine]?.rawStart ?? 0) : 0;
       state.ensureInputCursorVisible();

@@ -102,7 +102,7 @@ import { wireTurnEventHandlers } from './core/turn-event-wiring.ts';
 import { createUserTurnOwner, type FailoverRetry } from './core/user-turn.ts';
 import { resolveContextStatusHint } from './renderer/context-status-hint.ts';
 import { isEffectiveDangerMode } from '@goodvibes-jev/engine/platform/platform/config';
-import { applyComposerCapture, applyAtModelDirective, shouldSendAfterCapture } from './input/composer-capture.ts';
+import { applyComposerCapture, splitAtModelDirectives, shouldSendAfterCapture } from './input/composer-capture.ts';
 import { makeComposerEditorOpener, makeFileEditorOpener } from './input/composer-editor.ts';
 import { evaluateSessionMaintenance } from '@/runtime/index.ts';
 import { createCancelGeneration, runOwnedTurnRetry } from './core/turn-cancellation.ts';
@@ -248,6 +248,8 @@ async function main() {
   const typeahead = createStartupTypeaheadGate(); // keys typed before a startup modal appeared never answer it
 
   let pendingPermission: PendingPermissionState | null = null;
+  /** True while $EDITOR owns the terminal: frames and terminal notifications are held until it exits. */
+  let externalEditorOpen = false;
   let inputEpoch = 0;
   let submissionStatus: string | null = null;
   let hostPairing: HostPairingController | null = null;
@@ -469,7 +471,7 @@ async function main() {
   const terminalNotifier = createTerminalNotifier({
     stdout,
     focusTracker: ctx.services.focusTracker,
-    isReleased: () => lifecycle.isTerminalRestored(),
+    isReleased: () => lifecycle.isTerminalRestored() || externalEditorOpen,
     configGet: (k: string) => readTuiConfigValue(configManager, k),
   });
 
@@ -534,23 +536,60 @@ async function main() {
     }
     transcript.toBottom(); // Re-lock on any user input
     conversation.dismissSplash(); // owner rule: any submission retires the splash for the run
-    let processedText = applyAtModelDirective(text, {
-      providerRegistry,
-      runtime,
-      configManager,
-      notify: (m) => systemMessageRouter.high(m),
-    });
-    // Composer capture markers: `!#` pins + sends; `#` saves a note without sending.
-    const capture = applyComposerCapture(processedText, {
+    const directives = splitAtModelDirectives(text);
+    if (directives.models.length > 0) {
+      void switchThenSubmit(directives.models, directives.text, content, options);
+      return;
+    }
+    submitCaptured(text, content, options);
+  };
+
+  // Composer capture markers: `!#` pins + sends; `# ` saves a note without sending.
+  const submitCaptured = (text: string, content: ContentPart[] | undefined, options: ProductInputContext): void => {
+    const capture = applyComposerCapture(text, {
       sessionMemoryStore: ctx.services.sessionMemoryStore,
       notify: (message) => systemMessageRouter.high(message),
     });
-    processedText = capture.text;
     if (shouldSendAfterCapture(capture, Boolean(content))) {
-      sendOwnerTurn(processedText, content, options.spokenOutput ? createSpokenTurnInputOptions() : undefined);
+      sendOwnerTurn(capture.text, content, options.spokenOutput ? createSpokenTurnInputOptions() : undefined);
     } else {
       render();
     }
+  };
+
+  /**
+   * `@model:<id> prompt`: switch through `/model <id>` (the one switch path), then
+   * send the rest. A switch that did not land (an unknown id, or a provider key
+   * still being entered) holds the prompt in the composer instead of sending it
+   * to a model the owner did not ask for.
+   */
+  const switchThenSubmit = async (models: readonly string[], rest: string, content: ContentPart[] | undefined, options: ProductInputContext): Promise<void> => {
+    for (const model of models) {
+      const before = runtime.model;
+      try {
+        await commandRegistry.execute('model', [model], commandContext);
+      } catch (error) {
+        systemMessageRouter.high(`[Model] Could not switch to ${model}: ${summarizeError(error)}`);
+      }
+      const current = (() => { try { return providerRegistry.getCurrentModel(); } catch { return null; } })();
+      const landed = runtime.model !== before || (current !== null && runtime.model === current.registryKey && (model === current.registryKey || model === current.id));
+      if (!landed) {
+        if (rest !== '' && input.prompt === '') {
+          input.prompt = rest;
+          input.cursorPos = rest.length;
+        }
+        systemMessageRouter.high(rest === ''
+          ? `[Model] Still on ${runtime.model}.`
+          : `[Model] Still on ${runtime.model}; your prompt was not sent and is back in the composer. Finish the switch (or pick another model), then press Enter.`);
+        render();
+        return;
+      }
+    }
+    if (rest === '' && !content) {
+      render();
+      return;
+    }
+    submitCaptured(rest, content, options);
   };
 
   /**
@@ -764,6 +803,7 @@ async function main() {
       compositor.resetDiff();
       render();
     },
+    setHeld: (held) => { externalEditorOpen = held; },
     cwd: workingDir,
     env: process.env,
     notify: (m) => systemMessageRouter.high(m),
@@ -775,6 +815,7 @@ async function main() {
       compositor.resetDiff();
       render();
     },
+    setHeld: (held) => { externalEditorOpen = held; },
     cwd: workingDir,
     env: process.env,
     notify: (m) => systemMessageRouter.high(m),
@@ -1128,8 +1169,8 @@ async function main() {
     (flush) => {
       setTimeout(flush, 16);
     },
-    () => lifecycle.isTerminalRestored(),
-  ); // coalescer; no frames after terminal restore
+    () => lifecycle.isTerminalRestored() || externalEditorOpen,
+  ); // coalescer; no frames after terminal restore or while an external editor owns the screen
   deferredRender.set(() => {
     renderRequested = true;
     renderScheduler.schedule();

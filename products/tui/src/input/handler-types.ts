@@ -126,7 +126,7 @@ export interface InputHandlerLike {
   onboardingWizard: OnboardingWizardController;
   onboardingModelPickerCancelSnapshot: OnboardingWizardSnapshot | null;
   onboardingHydrationSerial: number;
-  onboardingApplyPending: boolean;
+  onboardingOperation: string | null;
   onboardingOpenAiListenerSerial: number;
 
   // ── Methods: modal lifecycle ──────────────────────────────────────────────
@@ -138,7 +138,7 @@ export interface InputHandlerLike {
   handleBlockCopy(): void;
   handleBookmark(): void;
   handleBlockToggle(): void;
-  handleDiffApply(): boolean;
+  handleDiffApply(): void;
   /** The absolute history line of the bottom-most visible block, the block
    *  the user is actually looking at, used to anchor every one of the
    *  actions above instead of the (possibly off-screen-above) raw scrollTop. */

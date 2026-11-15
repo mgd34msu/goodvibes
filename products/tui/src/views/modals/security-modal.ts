@@ -113,7 +113,7 @@ class SecurityModalSurface implements ConfigModalSurface {
     const rows: ConfigModalRow[] = [];
 
     if (audit.results.length === 0 && audit.totalTokens > 0) {
-      rows.push(infoRow('unaudited', `${audit.totalTokens} token${audit.totalTokens === 1 ? ' is' : 's are'} registered and not audited yet: press r to audit now.`, WARN));
+      rows.push(infoRow('unaudited', `${audit.totalTokens} token${audit.totalTokens === 1 ? ' is' : 's are'} registered and not audited yet: press Ctrl+R to audit now.`, WARN));
       return { id: 'tokens', label: 'Tokens', header, rows, emptyText: '' };
     }
     if (audit.results.length === 0) {
@@ -135,7 +135,7 @@ class SecurityModalSurface implements ConfigModalSurface {
         ...(resultColor(result) ? { style: resultColor(result)! } : {}),
       });
     }
-    rows.push(infoRow('audit:when', `Last audit ${fmtIso(audit.lastAuditAt)}: press r to audit now`, { fg: MODAL_TONES.dim }));
+    rows.push(infoRow('audit:when', `Last audit ${fmtIso(audit.lastAuditAt)}: press Ctrl+R to audit now`, { fg: MODAL_TONES.dim }));
     return { id: 'tokens', label: 'Tokens', header, rows, hints: ['f preflight'] };
   }
 

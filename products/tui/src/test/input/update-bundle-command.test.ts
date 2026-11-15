@@ -8,7 +8,7 @@ import { makeProjectTempDir } from '../helpers/project-temp.ts';
 const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
 
-function run(args: string[], files: Record<string, string> = {}): string {
+async function run(args: string[], files: Record<string, string> = {}): Promise<string> {
   const dir = makeProjectTempDir('update-bundle');
   dirs.push(dir);
   for (const [name, text] of Object.entries(files)) writeFileSync(join(dir, name), text);
@@ -17,30 +17,34 @@ function run(args: string[], files: Record<string, string> = {}): string {
     workspace: { shellPaths: { resolveWorkspacePath: (path: string) => join(dir, path), workingDirectory: dir } },
     print: (text: string) => { printed.push(text); },
   } as unknown as CommandContext;
-  handleUpdateBundleSubcommand(args, ctx);
+  await handleUpdateBundleSubcommand(args, ctx);
   return printed.join('\n');
 }
 
 describe('/update bundle', () => {
-  test('a missing or unknown mode prints usage instead of failing', () => {
-    expect(run(['bundle'])).toContain('Usage: /update bundle');
-    expect(run(['bundle', 'foo'])).toContain('Usage: /update bundle');
+  test('a missing or unknown mode prints usage instead of failing', async () => {
+    expect(await run(['bundle'])).toContain('Usage: /update bundle');
+    expect(await run(['bundle', 'foo'])).toContain('Usage: /update bundle');
   });
 
-  test('inspect without a path prints usage for that mode', () => {
-    expect(run(['bundle', 'inspect'])).toContain('Usage: /update bundle inspect <path>');
+  test('inspect without a path prints usage for that mode', async () => {
+    expect(await run(['bundle', 'inspect'])).toContain('Usage: /update bundle inspect <path>');
   });
 
-  test('inspecting a file that is not an update bundle says so', () => {
-    const output = run(['bundle', 'inspect', 'other.json'], { 'other.json': JSON.stringify({ hello: 'world' }) });
-    expect(output).toContain('not an update bundle');
+  test('inspecting a file that is not an update review says so', async () => {
+    const output = await run(['bundle', 'inspect', 'other.json'], { 'other.json': JSON.stringify({ hello: 'world' }) });
+    expect(output).toContain('not an update review');
     expect(output).not.toContain('undefined');
   });
 
-  test('inspecting a well-formed bundle prints its review', () => {
-    const bundle = { version: 1, exportedAt: 1, appVersion: '3.3.0', installKind: 'binary', subscriptionProviders: ['a'], sandboxProfile: 'x/y/z', notes: ['n'] };
-    const output = run(['bundle', 'inspect', 'bundle.json'], { 'bundle.json': JSON.stringify(bundle) });
-    expect(output).toContain('Update Bundle Review');
-    expect(output).toContain('appVersion: 3.3.0');
+  test('inspecting a saved review prints the installed and latest versions and the rollback copy', async () => {
+    const review = {
+      version: 2, exportedAt: 1, appVersion: '3.3.0', installKind: 'binary', latest: { tag: 'v3.4.0', isCurrent: false },
+      channel: 'releases', rollbackRetained: true, subscriptionProviders: ['a'], sandboxProfile: 'x/y/z',
+    };
+    const output = await run(['bundle', 'inspect', 'review.json'], { 'review.json': JSON.stringify(review) });
+    expect(output).toContain('installed version: 3.3.0');
+    expect(output).toContain('latest release: v3.4.0');
+    expect(output).toContain('rollback copy: kept');
   });
 });

@@ -11,6 +11,11 @@
  * Progressive disclosure is preserved end to end: `list` returns index lines
  * (no bodies), `get` returns the one full skill a caller asked for.
  *
+ * A skill is addressed by the name `list` shows (case does not matter); with the
+ * filesystem store that is the one skill a session loads under that name, and each
+ * listed entry carries its `origin` and `path`. Only `create` requires a slug name,
+ * because it becomes a file name.
+ *
  * Errors are thrown as `SkillServiceError` carrying a stable `code` so an
  * adapter can map them to the right wire status without string-matching.
  */
@@ -22,19 +27,23 @@ import {
   type SkillFrontmatterValue,
   type SkillIndexEntry,
 } from './model.js';
-import { SkillAlreadyExistsError, type SkillStore } from './store.js';
+import { SkillAlreadyExistsError, SkillNotRewritableError, type SkillStore } from './store.js';
 
 /** Stable, adapter-mappable failure codes for skill operations. */
 export type SkillErrorCode = 'INVALID_ARGUMENT' | 'NOT_FOUND' | 'ALREADY_EXISTS';
 
-/** A skill-operation failure with a stable code (never a bare prose Error). */
+/** A skill-operation failure with a stable code (never a bare prose Error), the state it left, and what to do next. */
 export class SkillServiceError extends Error {
   readonly code: SkillErrorCode;
+  readonly state: string;
+  readonly next: readonly string[];
 
-  constructor(message: string, code: SkillErrorCode) {
-    super(message);
+  constructor(message: string, code: SkillErrorCode, next: readonly string[] = [], state = 'nothing was changed') {
+    super(next.length > 0 ? `${message}. ${next[0]}` : message);
     this.name = 'SkillServiceError';
     this.code = code;
+    this.state = state;
+    this.next = next;
   }
 }
 
@@ -57,7 +66,12 @@ export interface UpdateSkillInput {
 export interface DeleteSkillResult {
   readonly name: string;
   readonly deleted: boolean;
+  /** The file or skill folder that was removed, when the store keeps skills on disk. */
+  readonly path?: string | undefined;
 }
+
+const LIST_NEXT = 'Call skills.list for the skills that exist';
+const MAX_LOOKUP_NAME_LENGTH = 256;
 
 function requireValidName(name: unknown): string {
   if (typeof name !== 'string' || name.trim().length === 0) {
@@ -71,6 +85,22 @@ function requireValidName(name: unknown): string {
     );
   }
   return trimmed;
+}
+
+/** A name to look a skill up by: any listed name, which may come from a hand-written frontmatter. */
+function requireLookupName(name: unknown): string {
+  if (typeof name !== 'string' || name.trim().length === 0) {
+    throw new SkillServiceError('skill name is required', 'INVALID_ARGUMENT');
+  }
+  const trimmed = name.trim();
+  if (trimmed.length > MAX_LOOKUP_NAME_LENGTH || /[\u0000-\u001f]/.test(trimmed)) {
+    throw new SkillServiceError(`invalid skill name "${trimmed.slice(0, 64)}": at most ${MAX_LOOKUP_NAME_LENGTH} characters and no control characters`, 'INVALID_ARGUMENT', [LIST_NEXT]);
+  }
+  return trimmed;
+}
+
+function notFound(name: string): SkillServiceError {
+  return new SkillServiceError(`no skill named "${name}"`, 'NOT_FOUND', [LIST_NEXT]);
 }
 
 function requireDescription(description: unknown): string {
@@ -98,11 +128,12 @@ export class SkillService {
   }
 
   private serialized<T>(name: string, run: () => Promise<T>): Promise<T> {
-    const previous = this.writes.get(name) ?? Promise.resolve();
+    const key = name.toLowerCase();
+    const previous = this.writes.get(key) ?? Promise.resolve();
     const next = previous.then(run, run);
     const tail = next.catch(() => undefined);
-    this.writes.set(name, tail);
-    void tail.then(() => { if (this.writes.get(name) === tail) this.writes.delete(name); });
+    this.writes.set(key, tail);
+    void tail.then(() => { if (this.writes.get(key) === tail) this.writes.delete(key); });
     return next;
   }
 
@@ -113,11 +144,9 @@ export class SkillService {
 
   /** Read one skill in full, including its Markdown body. Throws NOT_FOUND when absent. */
   async get(name: string): Promise<Skill> {
-    const validName = requireValidName(name);
-    const skill = await this.store.get(validName);
-    if (!skill) {
-      throw new SkillServiceError(`no skill named "${validName}"`, 'NOT_FOUND');
-    }
+    const lookupName = requireLookupName(name);
+    const skill = await this.store.get(lookupName);
+    if (!skill) throw notFound(lookupName);
     return skill;
   }
 
@@ -139,7 +168,7 @@ export class SkillService {
         }, { ifAbsent: true });
       } catch (error) {
         if (error instanceof SkillAlreadyExistsError) {
-          throw new SkillServiceError(`a skill named "${name}" already exists`, 'ALREADY_EXISTS');
+          throw new SkillServiceError(error.message, 'ALREADY_EXISTS', ['Choose another name, or change the existing skill with skills.update']);
         }
         throw error;
       }
@@ -148,30 +177,36 @@ export class SkillService {
 
   /** Update an existing skill's description, body, and/or metadata. Throws NOT_FOUND when absent. */
   async update(name: string, patch: UpdateSkillInput): Promise<Skill> {
-    const validName = requireValidName(name);
+    const lookupName = requireLookupName(name);
     const patchedDescription = patch.description === undefined ? undefined : requireDescription(patch.description);
     if (patch.body !== undefined && typeof patch.body !== 'string') {
       throw new SkillServiceError('skill body must be a string', 'INVALID_ARGUMENT');
     }
     requireWritableContent(patchedDescription, patch.metadata);
-    return this.serialized(validName, async () => {
-      const existing = await this.store.get(validName);
-      if (!existing) {
-        throw new SkillServiceError(`no skill named "${validName}"`, 'NOT_FOUND');
+    return this.serialized(lookupName, async () => {
+      const existing = await this.store.get(lookupName);
+      if (!existing) throw notFound(lookupName);
+      try {
+        return await this.store.put({
+          name: existing.name,
+          description: patchedDescription ?? existing.description,
+          body: patch.body ?? existing.body,
+          metadata: patch.metadata ?? existing.metadata,
+        });
+      } catch (error) {
+        if (error instanceof SkillNotRewritableError) {
+          throw new SkillServiceError(error.message, 'INVALID_ARGUMENT', [`Change only the body, or edit ${error.path} directly`]);
+        }
+        throw error;
       }
-      return this.store.put({
-        name: validName,
-        description: patchedDescription ?? existing.description,
-        body: patch.body ?? existing.body,
-        metadata: patch.metadata ?? existing.metadata,
-      });
     });
   }
 
   /** Delete a skill. Returns { deleted:false } when no skill with that name existed. */
   async delete(name: string): Promise<DeleteSkillResult> {
-    const validName = requireValidName(name);
-    const deleted = await this.serialized(validName, () => this.store.delete(validName));
-    return { name: validName, deleted };
+    const lookupName = requireLookupName(name);
+    const removed = await this.serialized(lookupName, () => this.store.delete(lookupName));
+    if (!removed) return { name: lookupName, deleted: false };
+    return { name: removed.name, deleted: true, ...(removed.path !== undefined ? { path: removed.path } : {}) };
   }
 }

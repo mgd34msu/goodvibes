@@ -1,118 +1,31 @@
-import { parseMarkdownFrontmatter as parseFrontmatter } from '@goodvibes-jev/engine/terminal-shell/markdown-frontmatter';
-import { compareLocalLibraryRecords } from '@goodvibes-jev/engine/terminal-shell/skill-discovery';
 import { MODAL_TONES } from './modal-theme.ts';
 import { infoRow, headerRow } from './modal-surface-helpers.ts';
-import { readFileSync, readdirSync, mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join, sep } from 'node:path';
 import type { ConfigModalActionContext, ConfigModalRow, ConfigModalSurface, ConfigModalView } from '../../input/config-modal-types.ts';
-import type { SkillOrigin, SkillRecord } from '../skills-discovery.ts';
-import { listInstalledEcosystemEntries, type EcosystemCatalogPathOptions, type ShellPathService } from '@/runtime/index.ts';
+import { discoverSkills, type SkillOrigin, type SkillRecord } from '../skills-discovery.ts';
+import type { EcosystemCatalogPathOptions, ShellPathService } from '@/runtime/index.ts';
 
 // ---------------------------------------------------------------------------
-// Skills → config-modal surface (group-B port). Project-local and global
-// skill-pack discovery. Disk scans happen only in refresh() (never in
-// buildView), mirroring the earlier view's onActivate()-triggered load. Browse-only:
-// the earlier view never had a command-routable mutation verb (no /skills delete/remove
-// subcommand exists), so the only action is refresh/navigate. Selection-blind
-// port: the earlier view's selected-skill path/deps/includes detail is folded into
-// each row label.
-//
-// discoverSkills() in the earlier view was async; the sync re-implementation below
-// mirrors the same directory/frontmatter/marketplace-provenance conventions
-// (the two are independent implementations of the same on-disk contract).
+// Skills → config-modal surface. Browse-only: lists the skills a session loads,
+// read through the same discovery `/skills` uses (platform/skills underneath, so
+// the daemon's skills.list sees the same skills). The directories are read when
+// the modal opens and on refresh, never in buildView. Each row folds the skill's
+// origin, description, dependency and include counts and marketplace provenance
+// into its label.
 // ---------------------------------------------------------------------------
 
 export interface SkillsModalDeps {
   readonly shellPaths: Pick<ShellPathService, 'workingDirectory' | 'homeDirectory'>;
   readonly ecosystemPaths?: EcosystemCatalogPathOptions;
+  /** Reads the skills; defaults to the TUI's skill discovery. */
+  readonly discover?: (
+    shellPaths: Pick<ShellPathService, 'workingDirectory' | 'homeDirectory'>,
+    ecosystemPaths?: EcosystemCatalogPathOptions,
+  ) => Promise<SkillRecord[]>;
 }
 
-function getSkillDirectories(cwd: string, homeDir: string): Array<{ root: string; origin: SkillOrigin }> {
-  return [
-    { root: join(cwd, '.goodvibes', 'skills'), origin: 'project-local' },
-    { root: join(cwd, '.goodvibes', 'tui', 'skills'), origin: 'project-local' },
-    { root: join(homeDir, '.goodvibes', 'skills'), origin: 'global' },
-    { root: join(homeDir, '.goodvibes', 'tui', 'skills'), origin: 'global' },
-  ];
-}
-
-function readSkillFileSync(path: string, origin: SkillOrigin): SkillRecord | null {
-  let content = '';
-  try {
-    content = readFileSync(path, 'utf-8');
-  } catch {
-    return null;
-  }
-  const frontmatter = parseFrontmatter(content);
-  const body = content.replace(/^---\n[\s\S]*?\n---\n?/, '');
-  const name = frontmatter.name ?? path.split(/[\\/]/).pop()?.replace(/\.md$/, '') ?? 'skill';
-  const description = frontmatter.description ?? frontmatter.summary ?? '';
-  const dependencies = frontmatter.depends_on
-    ? frontmatter.depends_on
-        .split(',')
-        .map((item) => item.trim())
-        .filter(Boolean)
-    : [];
-  const includes: string[] = [];
-  const includeRegex = /^@([\w/-]+)/gm;
-  let match: RegExpExecArray | null;
-  while ((match = includeRegex.exec(body)) !== null) includes.push(match[1]);
-  return { name, description, path, origin, dependencies, includes, frontmatter };
-}
-
-function scanSkillDirectorySync(root: string, origin: SkillOrigin): SkillRecord[] {
-  let entries: string[] = [];
-  try {
-    entries = readdirSync(root);
-  } catch {
-    return [];
-  }
-  const records: SkillRecord[] = [];
-  for (const entry of entries.sort((a, b) => a.localeCompare(b))) {
-    if (entry.endsWith('.md')) {
-      const record = readSkillFileSync(join(root, entry), origin);
-      if (record) records.push(record);
-      continue;
-    }
-    const record = readSkillFileSync(join(root, entry, 'SKILL.md'), origin);
-    if (record) records.push(record);
-  }
-  return records;
-}
-
-function applyMarketplaceProvenance(records: SkillRecord[], ecosystemPaths: EcosystemCatalogPathOptions): SkillRecord[] {
-  let receipts: ReturnType<typeof listInstalledEcosystemEntries>;
-  try {
-    receipts = listInstalledEcosystemEntries('skill', ecosystemPaths);
-  } catch {
-    return records;
-  }
-  if (receipts.length === 0) return records;
-  return records.map((record) => {
-    const receipt = receipts.find(
-      (candidate) => record.path === candidate.targetPath || record.path.startsWith(`${candidate.targetPath}${sep}`),
-    );
-    if (!receipt) return record;
-    return { ...record, marketplaceProvenance: receipt.provenanceSummary };
-  });
-}
-
-function discoverSkillsSync(
-  shellPaths: Pick<ShellPathService, 'workingDirectory' | 'homeDirectory'>,
-  ecosystemPaths?: EcosystemCatalogPathOptions,
-): SkillRecord[] {
-  const seen = new Set<string>();
-  const records: SkillRecord[] = [];
-  for (const { root, origin } of getSkillDirectories(shellPaths.workingDirectory, shellPaths.homeDirectory)) {
-    for (const record of scanSkillDirectorySync(root, origin)) {
-      if (seen.has(record.name.toLowerCase())) continue;
-      seen.add(record.name.toLowerCase());
-      records.push(record);
-    }
-  }
-  const tagged = ecosystemPaths ? applyMarketplaceProvenance(records, ecosystemPaths) : records;
-  return tagged.sort(compareLocalLibraryRecords);
+/** The Skills surface plus a way to wait for the read the last open or refresh started. */
+export interface SkillsModalReadSurface extends ConfigModalSurface {
+  whenLoaded(): Promise<void>;
 }
 
 function originLabel(origin: SkillOrigin): string {
@@ -126,10 +39,14 @@ function originLabel(origin: SkillOrigin): string {
   }
 }
 
-class SkillsModalSurface implements ConfigModalSurface {
+class SkillsModalSurface implements SkillsModalReadSurface {
   readonly name = 'skills-modal';
   readonly title = 'Skills';
-  private cached: SkillRecord[] = [];
+  /** Null until the first read finishes. */
+  private cached: SkillRecord[] | null = null;
+  private loadError: string | null = null;
+  private generation = 0;
+  private pendingLoad: Promise<void> = Promise.resolve();
   private requestRender: () => void = () => {};
 
   constructor(private readonly deps: SkillsModalDeps) {}
@@ -141,12 +58,42 @@ class SkillsModalSurface implements ConfigModalSurface {
     this.refresh();
   }
 
+  onClose(): void {
+    this.requestRender = () => {};
+  }
+
+  whenLoaded(): Promise<void> {
+    return this.pendingLoad;
+  }
+
   private refresh(): void {
-    this.cached = discoverSkillsSync(this.deps.shellPaths, this.deps.ecosystemPaths);
+    const generation = ++this.generation;
+    const discover = this.deps.discover ?? discoverSkills;
+    this.pendingLoad = discover(this.deps.shellPaths, this.deps.ecosystemPaths).then(
+      (records) => {
+        if (generation !== this.generation) return;
+        this.cached = records;
+        this.loadError = null;
+        this.requestRender();
+      },
+      (error: unknown) => {
+        if (generation !== this.generation) return;
+        this.loadError = error instanceof Error ? error.message : String(error);
+        this.requestRender();
+      },
+    );
   }
 
   buildView(): ConfigModalView {
     const rows: ConfigModalRow[] = [];
+    if (this.loadError !== null) {
+      rows.push(infoRow('error:0', `Could not read the skill directories: ${this.loadError}`, { fg: MODAL_TONES.warn }));
+      rows.push(infoRow('error:next', 'Press r to read them again.', { fg: MODAL_TONES.dim }));
+      return { title: 'Skills', tabs: [{ id: 'skills', label: 'Skills', rows, emptyText: '' }] };
+    }
+    if (this.cached === null) {
+      return { title: 'Skills', tabs: [{ id: 'skills', label: 'Skills', rows, emptyText: 'Reading skill directories…' }] };
+    }
     if (this.cached.length === 0) {
       rows.push(infoRow('empty:0', 'No skills discovered.'));
       rows.push(headerRow('empty:title', 'Next steps'));
@@ -190,29 +137,19 @@ class SkillsModalSurface implements ConfigModalSurface {
   onAction(id: string, ctx: ConfigModalActionContext): void {
     if (id === 'refresh') {
       this.refresh();
-      ctx.setStatus('Rescanned skill directories.');
+      ctx.setStatus('Reading skill directories…');
     }
   }
 }
 
-export function createSkillsModalSurface(deps: SkillsModalDeps): ConfigModalSurface {
+export function createSkillsModalSurface(deps: SkillsModalDeps): SkillsModalReadSurface {
   return new SkillsModalSurface(deps);
 }
 
-/**
- * Deterministic golden fixture: a fresh tmp directory tree wired as both cwd and
- * homeDir and removed immediately (scanSkillDirectorySync catches missing dirs →
- * []), so refresh() finds no `.goodvibes/skills` directories and renders the
- * static empty-state copy. The random tmp path never appears in the output.
- *
- * This is production code (ships in the real binary), not test scratch, so
- * it stays rooted at the real OS temp dir rather than the test-only
- * makeProjectTempDir helper. Created and removed synchronously in the same
- * call, so the on-disk window is negligible.
- */
+/** Deterministic golden fixture: a surface whose skill read finds nothing, so it renders the empty-state copy. */
 export function skillsModalGoldenSurface(): ConfigModalSurface {
-  const root = mkdtempSync(join(tmpdir(), 'gv-skills-golden-'));
-  const surface = createSkillsModalSurface({ shellPaths: { workingDirectory: root, homeDirectory: root } });
-  rmSync(root, { recursive: true, force: true });
-  return surface;
+  return createSkillsModalSurface({
+    shellPaths: { workingDirectory: '/', homeDirectory: '/' },
+    discover: async () => [],
+  });
 }

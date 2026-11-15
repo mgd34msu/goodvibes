@@ -28,6 +28,8 @@
  * unsupported construct is surfaced as the raw string rather than guessed at.
  */
 
+import type { SkillOrigin } from './roots.js';
+
 /** A JSON-ish frontmatter value: a scalar string or a list of strings. */
 export type SkillFrontmatterValue = string | readonly string[];
 
@@ -46,6 +48,10 @@ export interface SkillFrontmatter {
 export interface SkillIndexEntry extends SkillFrontmatter {
   /** Millisecond epoch of the skill's last modification, when the store knows it. */
   readonly updatedAt?: number | undefined;
+  /** Where the skill was found, when it lives in a skill directory. */
+  readonly origin?: SkillOrigin | undefined;
+  /** The skill document's file (`<name>.md` or `<folder>/SKILL.md`), when it lives on disk. */
+  readonly path?: string | undefined;
 }
 
 /** A fully-disclosed skill: its index line plus the Markdown body. */
@@ -54,6 +60,7 @@ export interface Skill extends SkillIndexEntry {
 }
 
 const FRONTMATTER_FENCE = /^---[ \t]*\r?\n/;
+const CLOSING_FENCE = /\r?\n---[ \t]*(?:\r?\n|$)/;
 
 /**
  * Split a raw skill document into its frontmatter block text and body text.
@@ -67,7 +74,7 @@ function splitDocument(text: string): { frontmatter: string; body: string } {
     return { frontmatter: '', body: normalized };
   }
   const afterOpen = normalized.replace(FRONTMATTER_FENCE, '');
-  const closeMatch = afterOpen.match(/\r?\n---[ \t]*(?:\r?\n|$)/);
+  const closeMatch = afterOpen.match(CLOSING_FENCE);
   if (!closeMatch || closeMatch.index === undefined) {
     // Opened but never closed: the whole remainder is frontmatter, no body.
     return { frontmatter: afterOpen, body: '' };
@@ -182,11 +189,7 @@ export function serializeSkill(skill: Skill): string {
     lines.push(`${key}: ${serializeFrontmatterValue(value)}`);
   }
   lines.push('---', '');
-  // The parser drops one blank line after the closing fence, so a body that itself starts
-  // with a line break gets one extra separator to survive the round trip.
-  const separator = /^\r?\n/.test(skill.body) ? '\n' : '';
-  const body = skill.body.length > 0 ? `${separator}${skill.body}\n` : '';
-  return `${lines.join('\n')}${body}`;
+  return `${lines.join('\n')}${serializeBody(skill.body)}`;
 }
 
 /**
@@ -236,7 +239,74 @@ export function toSkillIndexEntry(skill: SkillIndexEntry): SkillIndexEntry {
     description: skill.description,
     metadata: skill.metadata,
     ...(skill.updatedAt !== undefined ? { updatedAt: skill.updatedAt } : {}),
+    ...(skill.origin !== undefined ? { origin: skill.origin } : {}),
+    ...(skill.path !== undefined ? { path: skill.path } : {}),
   };
+}
+
+/**
+ * Whether `text`, the start of a skill document, already holds the whole frontmatter:
+ * there is no opening fence, or the closing fence and its line break have been read.
+ * An index read stops reading the file as soon as this is true.
+ */
+export function frontmatterIsComplete(text: string): boolean {
+  const normalized = text.startsWith('\uFEFF') ? text.slice(1) : text;
+  if (!normalized.startsWith('---')) return normalized.length > 0;
+  const open = normalized.match(FRONTMATTER_FENCE);
+  if (!open) return normalized.includes('\n');
+  return /\r?\n---[ \t]*\r?\n/.test(normalized.slice(open[0].length - 1));
+}
+
+function serializeBody(body: string): string {
+  // The parser drops one blank line after the closing fence, so a body that itself starts
+  // with a line break gets one extra separator to survive the round trip.
+  const separator = /^\r?\n/.test(body) ? '\n' : '';
+  return body.length > 0 ? `${separator}${body}\n` : '';
+}
+
+/**
+ * The document `text` with its body replaced and its frontmatter kept byte for byte, or
+ * undefined when the document has no closed frontmatter block to keep.
+ */
+export function replaceSkillBody(text: string, body: string): string | undefined {
+  const bom = text.startsWith('\uFEFF') ? '\uFEFF' : '';
+  const normalized = text.slice(bom.length);
+  const open = normalized.match(FRONTMATTER_FENCE);
+  if (!open) return undefined;
+  const afterOpen = normalized.slice(open[0].length);
+  const close = afterOpen.match(CLOSING_FENCE);
+  if (!close || close.index === undefined) return undefined;
+  let head = normalized.slice(0, open[0].length + close.index + close[0].length);
+  if (!/\n$/.test(head)) head += '\n';
+  return `${bom}${head}${serializeBody(body)}`;
+}
+
+/**
+ * Why the frontmatter of `text` cannot be rewritten from its parsed form without losing
+ * something the author wrote (a comment, an indented or continued line, a block scalar,
+ * an empty value, a repeated key), or undefined when it can. Hand-written skills often use
+ * fuller YAML than the line format; their body can still be replaced, see `replaceSkillBody`.
+ */
+export function frontmatterRewriteProblem(text: string): string | undefined {
+  const { frontmatter } = splitDocument(text);
+  const seen = new Set<string>();
+  const lines = frontmatter.split(/\r?\n/);
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index]!;
+    if (line.trim().length === 0) continue;
+    const where = `frontmatter line ${index + 2}`;
+    if (line.trimStart().startsWith('#')) return `${where} is a comment`;
+    if (/^\s/.test(line)) return `${where} is indented (nested or multi-line YAML)`;
+    const colon = line.indexOf(':');
+    if (colon <= 0) return `${where} has no "key: value"`;
+    const key = line.slice(0, colon).trim();
+    const value = line.slice(colon + 1).trim();
+    if (value.length === 0) return `${where} ("${key}") has no value on its line`;
+    if (/^[|>][+-]?\d*$/.test(value)) return `${where} ("${key}") is a multi-line block`;
+    if (seen.has(key)) return `${where} repeats the key "${key}"`;
+    seen.add(key);
+  }
+  return undefined;
 }
 
 /** The allowed shape of a skill name: a filesystem- and URL-safe slug. */

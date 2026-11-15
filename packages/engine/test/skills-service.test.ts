@@ -7,7 +7,7 @@
  * stores.
  */
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -19,7 +19,9 @@ import {
   parseSkillIndex,
   serializeSkill,
   isValidSkillName,
+  resolveSkillRoots,
 } from '../platform/src/platform/skills/index.ts';
+import { createSkillDiscovery } from '../terminal-shell/src/skill-discovery.ts';
 
 describe('skill model', () => {
   const doc = [
@@ -109,7 +111,7 @@ function runServiceContract(name: string, makeService: () => SkillService): void
     test('delete means delete', async () => {
       const service = makeService();
       await service.create({ name: 'gone', description: 'd', body: '' });
-      expect(await service.delete('gone')).toEqual({ name: 'gone', deleted: true });
+      expect(await service.delete('gone')).toMatchObject({ name: 'gone', deleted: true });
       const miss = await service.get('gone').catch((e) => e);
       expect((miss as SkillServiceError).code).toBe('NOT_FOUND');
     });
@@ -164,4 +166,53 @@ describe('FileSystemSkillStore', () => {
 runServiceContract('FileSystemSkillStore', () => {
   const dir = mkdtempSync(join(tmpdir(), 'gv-skills-svc-'));
   return new SkillService(new FileSystemSkillStore(dir));
+});
+
+describe('one skill owner across the daemon and the terminal apps', () => {
+  let base: string;
+  let project: string;
+  let home: string;
+  beforeAll(() => {
+    base = mkdtempSync(join(tmpdir(), 'gv-skills-roots-'));
+    project = join(base, 'project');
+    home = join(base, 'home');
+    mkdirSync(join(home, '.goodvibes', 'skills'), { recursive: true });
+    mkdirSync(join(project, '.goodvibes', 'skills', 'b'), { recursive: true });
+    writeFileSync(join(home, '.goodvibes', 'skills', 'a.md'), '---\nname: a\ndescription: home flat\n---\nA body\n');
+    writeFileSync(join(project, '.goodvibes', 'skills', 'b', 'SKILL.md'), '---\n# kept as written\nname: b\ndescription: project folder\nallowed-tools:\n  - read\n---\nB body\n');
+    writeFileSync(join(project, '.goodvibes', 'skills', 'b', 'helper.sh'), 'echo hi\n');
+  });
+  afterAll(() => rmSync(base, { recursive: true, force: true }));
+
+  const service = () => new SkillService(new FileSystemSkillStore({
+    roots: resolveSkillRoots({ workingDirectory: project, homeDirectory: home }, 'tui'),
+    createIn: join(home, '.goodvibes', 'skills'),
+  }));
+
+  test('skills.list and terminal discovery return the same skills, with origin and path', async () => {
+    const listed = await service().list();
+    const discovered = await createSkillDiscovery('tui', (record) => record, false)({ workingDirectory: project, homeDirectory: home });
+    expect(listed.map((entry) => [entry.name, String(entry.origin), String(entry.path)])).toEqual([
+      ['b', 'project-local', join(project, '.goodvibes', 'skills', 'b', 'SKILL.md')],
+      ['a', 'global', join(home, '.goodvibes', 'skills', 'a.md')],
+    ]);
+    expect(discovered.map((record) => [record.name, record.origin, record.path])).toEqual(
+      listed.map((entry) => [entry.name, String(entry.origin), String(entry.path)]),
+    );
+  });
+
+  test('a body change keeps hand-written frontmatter; a frontmatter change that would lose it is refused', async () => {
+    const path = join(project, '.goodvibes', 'skills', 'b', 'SKILL.md');
+    const updated = await service().update('B', { body: 'new body' });
+    expect(updated.body).toBe('new body');
+    expect(readFileSync(path, 'utf8')).toBe('---\n# kept as written\nname: b\ndescription: project folder\nallowed-tools:\n  - read\n---\nnew body\n');
+    await expect(service().update('b', { description: 'changed' })).rejects.toMatchObject({ code: 'INVALID_ARGUMENT' });
+    expect(readFileSync(path, 'utf8')).toContain('description: project folder');
+  });
+
+  test('deleting a folder skill removes the folder and says what was removed', async () => {
+    const folder = join(project, '.goodvibes', 'skills', 'b');
+    expect(await service().delete('b')).toEqual({ name: 'b', deleted: true, path: join(folder, 'SKILL.md') });
+    expect(existsSync(folder)).toBe(false);
+  });
 });

@@ -100,7 +100,7 @@ import type { AsyncDisposalRegistry } from '../../runtime/async-disposal.js';
 import type { ProcessRegistry } from '../../runtime/fleet/types.js';
 import type { ConfigKey } from '../../config/schema.js';
 import type { RuntimeStore } from '../../runtime/store/index.js';
-import { FileSystemSkillStore, SkillService } from '../../skills/index.js';
+import { FileSystemSkillStore, SkillService, resolveSkillRoots } from '../../skills/index.js';
 import type {
   ApprovalSource,
   FleetNotice,
@@ -426,13 +426,13 @@ export function registerGatewayVerbGroups(catalog: GatewayMethodCatalog, deps: G
     }
   }
 
-  // The canonical skill service over a directory of Markdown documents under the
-  // daemon's own state directory. Constructed here (from the shellPaths this
-  // registrar already receives) rather than threaded through the runtime-services
-  // composition root, exactly like the push group below.
-  const skillService = new SkillService(
-    new FileSystemSkillStore(deps.shellPaths.resolveUserPath('skills')),
-  );
+  // The skill service reads the same skill roots, in the same order, that a session on
+  // this surface loads skills from; new skills are written to the shared ~/.goodvibes/skills.
+  // Without a working directory there are no project roots, only the home ones.
+  const skillService = new SkillService(new FileSystemSkillStore({
+    roots: resolveSkillRoots({ workingDirectory: deps.workingDirectory, homeDirectory: dirname(deps.shellPaths.resolveUserPath()) }, deps.surfaceRoot),
+    createIn: deps.shellPaths.resolveUserPath('skills'),
+  }));
   registerSkillsGatewayMethods(catalog, skillService);
 
   // The shared registered-workspace registry: which project roots the operator

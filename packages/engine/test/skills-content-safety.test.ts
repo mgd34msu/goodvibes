@@ -52,11 +52,15 @@ test('a valid description and metadata round trip exactly', async () => {
   expect(parseSkill(serializeSkill(got)).body).toBe(got.body);
 });
 
-test('the listed name is the file name even when the file names itself differently', async () => {
+test('a skill is listed and opened under the one name sessions load it by', async () => {
   const { dir, service } = fsService();
-  writeFileSync(join(dir, 'a.md'), '---\nname: evil\ndescription: d\n---\nbody\n');
-  expect((await service.list()).map(entry => entry.name)).toEqual(['a']);
-  expect((await service.get('a')).name).toBe('a');
+  writeFileSync(join(dir, 'a.md'), '---\nname: other\ndescription: d\n---\nbody\n');
+  expect((await service.list()).map(entry => entry.name)).toEqual(['other']);
+  expect((await service.get('other')).path).toBe(join(dir, 'a.md'));
+  await expect(service.get('a')).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  // Creating "a" must not replace the file that holds "other".
+  await expect(service.create({ name: 'a', description: 'd', body: '' })).rejects.toMatchObject({ code: 'ALREADY_EXISTS' });
+  expect((await service.get('other')).body).toBe('body');
 });
 
 for (const kind of ['filesystem', 'memory'] as const) {

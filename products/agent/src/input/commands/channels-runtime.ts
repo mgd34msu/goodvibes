@@ -4,7 +4,7 @@ import type { CommandContext } from '../command-registry.ts';
 import type { AgentWorkspaceChannelSetupGuide, AgentWorkspaceChannelStatus } from '../agent-workspace-channels.ts';
 import { buildAgentWorkspaceChannelTriage, formatAgentWorkspaceChannelTriage } from '../agent-workspace-channel-triage.ts';
 import { buildAgentWorkspaceChannelSetupGuide, buildAgentWorkspaceChannels } from '../agent-workspace-channels.ts';
-import { fetchConnectedHostReadOnlyRoute, formatConnectedHostRouteFailure } from '../connected-host-routes.ts';
+import { formatConnectedHostRouteFailure, readConnectedHostMethod } from '../connected-host-routes.ts';
 import {
   buildAgentChannelDeliveryPreview,
   deliverAgentChannelMessage,
@@ -364,13 +364,14 @@ function formatChannelSetup(surface: string, body: unknown): string {
   return lines.join('\n');
 }
 
-async function printReadOnlyChannelRoute(
+async function printReadOnlyChannelRead(
   context: CommandContext,
   title: string,
-  route: string,
+  methodId: string,
+  input: Record<string, unknown>,
   format: (body: unknown) => string,
 ): Promise<void> {
-  const result = await fetchConnectedHostReadOnlyRoute(context, route);
+  const result = await readConnectedHostMethod(context, methodId, input);
   if (!result.ok) {
     context.print(formatConnectedHostRouteFailure(title, result, 'read-only; no channel send/action route was called'));
     return;
@@ -483,17 +484,17 @@ export function registerChannelsRuntimeCommands(registry: CommandRegistry): void
       }
 
       if (subcommand === 'accounts') {
-        await printReadOnlyChannelRoute(ctx, 'Channel accounts', '/api/channels/accounts', formatChannelAccounts);
+        await printReadOnlyChannelRead(ctx, 'Channel accounts', 'channels.accounts.list', {}, formatChannelAccounts);
         return;
       }
 
       if (subcommand === 'policies') {
-        await printReadOnlyChannelRoute(ctx, 'Channel policies', '/api/channels/policies', formatChannelPolicies);
+        await printReadOnlyChannelRead(ctx, 'Channel policies', 'channels.policies.list', {}, formatChannelPolicies);
         return;
       }
 
       if (subcommand === 'status') {
-        await printReadOnlyChannelRoute(ctx, 'Channel status', '/api/channels/status', formatChannelStatus);
+        await printReadOnlyChannelRead(ctx, 'Channel status', 'channels.status', {}, formatChannelStatus);
         return;
       }
 
@@ -503,12 +504,11 @@ export function registerChannelsRuntimeCommands(registry: CommandRegistry): void
           ctx.print(`Usage: /channels ${subcommand} <id>`);
           return;
         }
-        const encoded = encodeURIComponent(channelId);
         if (subcommand === 'doctor') {
-          await printReadOnlyChannelRoute(ctx, 'Channel doctor', `/api/channels/doctor/${encoded}`, (body) => formatChannelDoctor(channelId, body));
+          await printReadOnlyChannelRead(ctx, 'Channel doctor', 'channels.doctor.get', { surface: channelId }, (body) => formatChannelDoctor(channelId, body));
           return;
         }
-        await printReadOnlyChannelRoute(ctx, 'Channel setup', `/api/channels/setup/${encoded}`, (body) => formatChannelSetup(channelId, body));
+        await printReadOnlyChannelRead(ctx, 'Channel setup', 'channels.setup.get', { surface: channelId }, (body) => formatChannelSetup(channelId, body));
         return;
       }
 

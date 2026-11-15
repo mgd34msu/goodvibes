@@ -200,7 +200,7 @@ describe('fitVerdictLabel', () => {
     expect(label.length).toBeGreaterThan(0);
   });
 
-  test('fits-ram mentions 7B and CPU RAM', () => {
+  test('fits-ram mentions 7B', () => {
     const label = fitVerdictLabel('fits-ram');
     expect(label).toContain('7B');
     expect(label.length).toBeGreaterThan(0);
@@ -384,13 +384,16 @@ describe('readHardwareProfileSync', () => {
     if (profile.cpuCores !== null) expect(profile.cpuCores).toBeGreaterThan(0);
   });
 
-  test('repeated calls keep the cached GPU list and CPU cores while free RAM is refreshed', () => {
-    const first = readHardwareProfileSync(injectedRam(8 * GB_BYTES, 4 * GB_BYTES));
-    const second = readHardwareProfileSync(injectedRam(8 * GB_BYTES, 2 * GB_BYTES));
+  test('repeated calls within a second read free RAM once and keep the cached GPU list and CPU cores', () => {
+    let reads = 0;
+    const counted = () => { reads += 1; return { totalRamBytes: 8 * GB_BYTES, availableRamBytes: 4 * GB_BYTES }; };
+    const first = readHardwareProfileSync(counted);
+    const second = readHardwareProfileSync(counted);
+    const third = readHardwareProfileSync(counted);
+    expect(reads).toBe(1);
+    expect(third).toBe(first);
     expect(second.gpus).toBe(first.gpus);
     expect(second.cpuCores).toBe(first.cpuCores);
-    expect(second.totalRamBytes).toBe(8 * GB_BYTES);
-    expect(second.availableRamBytes).toBe(2 * GB_BYTES);
   });
 
   test('an unchanged free-RAM reading returns the same object', () => {

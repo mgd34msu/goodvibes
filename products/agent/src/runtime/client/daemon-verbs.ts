@@ -47,20 +47,7 @@ import { resolveConnectedHostDialEnabled, captureRemoteSettingsImportPreconditio
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { DaemonReachability, DaemonVerbCaller } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 import { readConnectedHostOperatorToken, connectedHostTokenRequiredMessage } from '../connected-host-auth.ts';
-import { connectedHostBaseUrl } from '../../config/connected-host-dial.ts';
-
-/**
- * The connected host's dial address, derived the same way the spine derives it.
- *
- * The wildcard→loopback mapping this function used to carry alone now lives in
- * config/connected-host-dial.ts, so every other dial site gets it too.
- */
-function resolveConnectedHostBaseUrl(configManager: Pick<ConfigManager, 'get'>): string {
-  return connectedHostBaseUrl(
-    configManager.get('controlPlane.host'),
-    configManager.get('controlPlane.port'),
-  );
-}
+import { resolveConnectedHostBaseUrl } from '../../config/connected-host-dial.ts';
 
 export interface AgentDaemonVerbCallerOptions {
   readonly configManager: ConfigManager;

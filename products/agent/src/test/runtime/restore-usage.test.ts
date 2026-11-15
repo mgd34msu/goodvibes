@@ -10,6 +10,7 @@ import { RuntimeEventBus, ForensicsRegistry, createTaskManager } from '@/runtime
 import { getTestRuntimeServices, resetTestRuntimeServices } from '../helpers/runtime-services.ts';
 import { buildShellFooter } from '../../renderer/shell-surface.ts';
 import { SessionPickerModal } from '../../input/session-picker-modal.ts';
+import type { CommandContext } from '../../input/command-registry.ts';
 import { bindOrchestratorContextAccounting } from '../../runtime/context-accounting-source.ts';
 
 const cleanups: Array<() => void> = [];
@@ -46,7 +47,8 @@ async function fixture() {
     const picker = new SessionPickerModal(services.sessionManager);
     picker.open();
     picker.selectedIndex = picker.sessions.findIndex((session) => session.name === id);
-    expect(picker.loadSelected(conversation)).toBe(true);
+    const ctx = { session: { conversationManager: conversation, runtime } } as unknown as CommandContext;
+    expect(picker.loadSelected(ctx)).toBe(true);
   };
   const footer = () => buildShellFooter({
     width: 180, promptText: '', promptLineCount: 1, usage: { available: isConversationUsageAvailable(orchestrator.usage), up: orchestrator.usage.input, down: orchestrator.usage.output },

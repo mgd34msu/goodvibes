@@ -5,6 +5,7 @@ import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { rmSync, existsSync } from 'fs';
 import { ConversationManager } from '../../core/conversation.ts';
 import { SessionPickerModal } from '../../input/session-picker-modal.ts';
+import type { CommandContext } from '../../input/command-registry.ts';
 import { SessionManager } from '@goodvibes-jev/engine/platform/platform/sessions';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
@@ -107,7 +108,7 @@ describe('SessionPickerModal', () => {
     expect(sel).toEqual(expect.objectContaining({ name: 'b' }));
   });
 
-  test('loading without a command context restores the saved side branches', () => {
+  test('loading restores the saved side branches', () => {
     sm.save('branched', [{ role: 'user', content: 'main work' }], META, undefined, undefined, {
       branches: { alt: [{ role: 'user', content: 'branch work' }] },
       currentBranch: 'main',
@@ -117,7 +118,8 @@ describe('SessionPickerModal', () => {
     modal.selectedIndex = 0;
     const conversation = new ConversationManager(() => 80);
 
-    expect(modal.loadSelected(conversation)).toBe(true);
+    const ctx = { session: { conversationManager: conversation, runtime: { sessionId: 'live', model: 'm', provider: 'p' } } } as unknown as CommandContext;
+    expect(modal.loadSelected(ctx)).toBe(true);
 
     expect(conversation.branchState().branches.alt).toHaveLength(1);
   });

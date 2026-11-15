@@ -100,9 +100,6 @@ describe('McpWorkspace Agent policy', () => {
       'add',
       'docs',
       'npx',
-      '-y',
-      '@modelcontextprotocol/server-filesystem',
-      'docs',
       '--scope',
       'project',
       '--role',
@@ -110,6 +107,10 @@ describe('McpWorkspace Agent policy', () => {
       '--trust',
       'constrained',
       '--yes',
+      '--',
+      '-y',
+      '@modelcontextprotocol/server-filesystem',
+      'docs',
     ]);
 
     workspace.requestDelete('filesystem');

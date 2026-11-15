@@ -21,7 +21,16 @@ import {
   fitVerdictLabel,
   readHardwareProfileSync,
 } from '../core/hardware-profile.ts';
-import type { HardwareProfile } from '../core/hardware-profile.ts';
+import type { FitVerdict, HardwareProfile } from '../core/hardware-profile.ts';
+
+/** What a row may claim about this machine; `unknown` claims nothing. */
+const FIT_CLAIMS: Readonly<Record<FitVerdict, string>> = {
+  'fits-gpu': 'recommended for your hardware',
+  'fits-ram': 'recommended for your hardware',
+  tight: 'may run, tight',
+  'too-big': 'too large for this machine',
+  unknown: '',
+};
 
 /**
  * Sentinel provider ID used on synthetic local recommendation entries.
@@ -103,11 +112,10 @@ export function buildLocalFitRecommendations(
   return LOCAL_REC_SIZES.map((spec) => {
     const sizeBytes = estimateModelBytes(spec.params);
     const verdict = fitAssessment(sizeBytes, profile);
-    const fitHint = fitVerdictLabel(verdict, spec.sizeLabel);
-    // Plain-language detail: never imply the model is ready to use.
-    const detail = fitHint
-      ? `recommended for your hardware, not yet installed (${fitHint})`
-      : 'recommended for your hardware, not yet installed';
+    const fitHint = fitVerdictLabel(verdict, spec.sizeLabel, profile);
+    // The claim follows the verdict, and the detail never implies the model is ready to use.
+    const claim = FIT_CLAIMS[verdict];
+    const detail = `${claim ? `${claim}, ` : ''}not yet installed${fitHint ? ` (${fitHint})` : ''}`;
 
     const model: ModelDefinition = {
       id: spec.id,

@@ -241,12 +241,11 @@ describe('/routines command', () => {
     out.length = 0;
     await registry.execute('routines', ['review', 'inbox-sweep'], modelCtx);
     await registry.execute('routines', ['enable', 'inbox-sweep'], modelCtx);
-    const refused = out.join('\n');
-    expect(refused).toContain('Refused: marking a routine reviewed');
-    expect(refused).toContain('has not been reviewed');
     out.length = 0;
     await registry.execute('routines', ['show', 'inbox-sweep'], ctx);
-    expect(out.join('\n')).not.toMatch(/Enabled Agent routine/);
+    const shown = out.join('\n');
+    expect(shown).toContain('  enabled no');
+    expect(shown).not.toContain('  review Reviewed');
     out.length = 0;
     await registry.execute('routines', ['review', 'inbox-sweep'], ctx);
     expect(out.join('\n')).toContain('Reviewed Agent routine');

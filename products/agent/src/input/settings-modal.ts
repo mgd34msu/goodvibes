@@ -15,7 +15,7 @@ import { getAgentSettingsSchema, type AgentSettingKey } from '../config/settings
 import { getResolvedSettingLookup } from '@/runtime/index.ts';
 import type { ServiceInspectionQuery } from '@/runtime/index.ts';
 import { isSecretConfigKey } from '../config/secret-config.ts';
-import { agentDaemonConfigClient } from '../config/daemon-config-routing.ts';
+import { agentDaemonConfigClient, agentDaemonConfigClientInstalled, isDaemonOwnedConfigKey, openEffectiveConfigView } from '../config/daemon-config-routing.ts';
 import { routeSettingWriteToConnectedHost } from './settings-modal-daemon-writes.ts';
 import { isDeepStrictEqual } from 'node:util';
 import { modelPickerLaunchForKey, parseNumberEditBuffer } from './settings-modal-behavior.ts';
@@ -115,6 +115,8 @@ export class SettingsModal extends TerminalSettingsModalState<
   private readonly routedWriteKeys = new Set<string>();
   /** Values the connected host confirmed this session; the local store never holds them, so every rebuild of the rows re-applies them. */
   private readonly hostHeldValues = new Map<string, unknown>();
+  /** Host-owned keys whose value the connected host has not given this opening, with why; shown instead of this machine's copy. */
+  private readonly hostUnreadable = new Map<string, string>();
   /** The always-live search row: a non-empty query lists ranked matches from every category. */
 
   get searchFocused(): boolean {
@@ -154,6 +156,7 @@ export class SettingsModal extends TerminalSettingsModalState<
     this.secretWriteSession++;
     this.routedWriteKeys.clear();
     this.hostHeldValues.clear();
+    this.hostUnreadable.clear();
     this.unsubscribeHostSetting?.();
     this.unsubscribeHostSetting = null;
     this.requestHostSettingRender = options?.requestRender ?? null;
@@ -181,6 +184,7 @@ export class SettingsModal extends TerminalSettingsModalState<
     this.lastSettingEffectMessage = null;
     this.clearSearch();
     this.active = true;
+    this._readHostValues(configManager);
     const hostSubscriptions: Array<() => void> = [];
     for (const setting of configManager.getHostSettingsSchema?.() ?? []) {
       if (!isAgentHostSettingKey(setting.key)) continue;
@@ -233,6 +237,7 @@ export class SettingsModal extends TerminalSettingsModalState<
     this.secretWriteSession++;
     this.routedWriteKeys.clear();
     this.hostHeldValues.clear();
+    this.hostUnreadable.clear();
     this.unsubscribeHostSetting?.();
     this.unsubscribeHostSetting = null;
     this.requestHostSettingRender = null;
@@ -781,7 +786,64 @@ export class SettingsModal extends TerminalSettingsModalState<
       };
       uiEntries.sort((a, b) => (uiPriority[a.setting.key] ?? 99) - (uiPriority[b.setting.key] ?? 99));
     }
+    this._reapplyHostValues();
     if (this.searchQuery) this.searchResults = searchSettingEntries(this.searchQuery, this.groups, getSettingLabel);
+  }
+
+  /**
+   * Host-owned rows show the connected host's values: one snapshot per opening,
+   * the read `/settings get` makes. Until it answers, and for any key it could
+   * not give, the row says so instead of showing this machine's copy, which is
+   * normally the default.
+   */
+  private _readHostValues(configManager: ConfigManager): void {
+    if (!agentDaemonConfigClientInstalled()) return;
+    const keys = new Set<string>();
+    for (const entries of this.groups.values()) for (const entry of entries) if (isDaemonOwnedConfigKey(entry.setting.key)) keys.add(entry.setting.key);
+    for (const flag of this.flagEntries) if (isDaemonOwnedConfigKey(flag.feature.enablement.key)) keys.add(flag.feature.enablement.key);
+    for (const key of keys) this.hostUnreadable.set(key, 'reading from the connected host');
+    this._reapplyHostValues();
+    const opened = this.secretWriteSession;
+    void openEffectiveConfigView(configManager).then(
+      (view) => {
+        if (!this.active || opened !== this.secretWriteSession) return;
+        for (const key of keys) {
+          // A write made since opening already set what the host holds.
+          if (!this.hostUnreadable.has(key)) continue;
+          const entry = view.describe(key);
+          if (entry.status === 'ok') {
+            this.hostUnreadable.delete(key);
+            this.hostHeldValues.set(key, entry.value);
+          } else this.hostUnreadable.set(key, `host value unavailable: ${entry.error ?? entry.reason}`);
+        }
+        // Rebuilt rather than patched, so a row's source no longer says it is waiting.
+        this._loadGroups(configManager);
+        this._loadFlagEntries();
+        this.requestHostSettingRender?.();
+      },
+      (error: unknown) => {
+        if (!this.active || opened !== this.secretWriteSession) return;
+        for (const key of this.hostUnreadable.keys()) this.hostUnreadable.set(key, `host value unavailable: ${summarizeError(error)}`);
+        this._reapplyHostValues();
+        this.requestHostSettingRender?.();
+      },
+    );
+  }
+
+  /** Re-show what the host holds (and what it could not give) after rows were rebuilt from the local store. */
+  private _reapplyHostValues(): void {
+    for (const [key, value] of this.hostHeldValues) this._showRoutedValue(key, value);
+    for (const [key, reason] of this.hostUnreadable) {
+      for (const entries of this.groups.values()) {
+        for (const entry of entries) {
+          if (entry.setting.key !== key) continue;
+          entry.currentValue = undefined;
+          entry.isDefault = false;
+          entry.effectiveSource = 'unavailable';
+          entry.sourceLabel = reason;
+        }
+      }
+    }
   }
 
   /**
@@ -792,7 +854,7 @@ export class SettingsModal extends TerminalSettingsModalState<
    */
   private _loadFlagEntries(): void {
     this.flagEntries = buildFlagEntries(this.configManager, this.featureFlagManager);
-    for (const [key, value] of this.hostHeldValues) this._showRoutedValue(key, value);
+    this._reapplyHostValues();
   }
 
   private _loadMcpEntries(): void {
@@ -830,7 +892,7 @@ export class SettingsModal extends TerminalSettingsModalState<
         this._refreshHostEntry(entry);
       }
     }
-    for (const [key, value] of this.hostHeldValues) this._showRoutedValue(key, value);
+    this._reapplyHostValues();
   }
 
   /**
@@ -840,6 +902,7 @@ export class SettingsModal extends TerminalSettingsModalState<
    * than re-read locally.
    */
   private _applyRoutedValue(key: string, value: unknown): void {
+    this.hostUnreadable.delete(key);
     this.hostHeldValues.set(key, value);
     this._showRoutedValue(key, value);
   }
@@ -850,6 +913,7 @@ export class SettingsModal extends TerminalSettingsModalState<
         if (entry.setting.key !== key) continue;
         entry.currentValue = value;
         entry.isDefault = isDeepStrictEqual(value, entry.setting.default);
+        entry.sourceLabel = 'the connected host';
         delete entry.metadataUnavailable;
       }
     }

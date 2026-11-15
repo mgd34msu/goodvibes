@@ -1,12 +1,32 @@
+/**
+ * Read-only connected-host reads for commands and workspace views, as result
+ * values. The host, the credential, the deadline and what a failure means all
+ * come from the Agent's one connected-host client (`agent/connected-host-client.ts`),
+ * so `/channels accounts` and `/payments status` talk to the host as the same
+ * principal and a failure names which credential source was used.
+ */
 import { homedir } from 'node:os';
-import { readConnectedHostOperatorToken } from '../runtime/connected-host-auth.ts';
-import { connectedHostBaseUrl } from '../config/connected-host-dial.ts';
+import {
+  createConnectedHost,
+  isHostFailure,
+  resolveConnectedHost,
+  type ConnectedHostInvokeOptions,
+  type ConnectedHostSelection,
+  type ConnectedHostSource,
+  type ConnectedHostUnavailable,
+  type HostFailureKind,
+} from '../agent/connected-host-client.ts';
+import { operatorContractMethods } from '../agent/operator-contract-routes.ts';
 import type { CommandContext } from './command-registry.ts';
 
 export interface ConnectedHostConnection {
   readonly baseUrl: string;
   readonly token: string | null;
+  /** Where the credential was looked for: a file path, the pairing store or an environment variable. */
   readonly tokenPath: string;
+  readonly source?: ConnectedHostSource;
+  /** Why there is no usable credential, with the next step; present when `token` is null. */
+  readonly unavailable?: ConnectedHostUnavailable;
 }
 
 export interface ConnectedHostRouteSuccess {
@@ -18,94 +38,103 @@ export interface ConnectedHostRouteSuccess {
 export interface ConnectedHostRouteFailure {
   readonly ok: false;
   readonly route: string;
-  readonly kind: 'auth_required' | 'connected_host_unavailable' | 'connected_host_route_unavailable' | 'connected_host_error';
+  readonly kind: HostFailureKind;
   readonly baseUrl: string;
+  /** The cause, then the next step. */
   readonly message: string;
+  readonly source?: ConnectedHostSource;
 }
 
 export type ConnectedHostRouteResult = ConnectedHostRouteSuccess | ConnectedHostRouteFailure;
 
-export const CONNECTED_HOST_FAILURE_LABELS: Record<ConnectedHostRouteFailure['kind'], string> = {
+export const CONNECTED_HOST_FAILURE_LABELS: Record<HostFailureKind, string> = {
   auth_required: 'auth required',
   connected_host_unavailable: 'connected host unavailable',
+  connected_host_incompatible: 'connected host is a different version',
   connected_host_route_unavailable: 'connected host route unavailable',
   connected_host_error: 'connected host error',
+  cancelled: 'cancelled',
 };
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+function selectionFor(context: CommandContext): ConnectedHostSelection {
+  return {
+    configManager: context.platform.configManager,
+    homeDirectory: () => context.workspace?.shellPaths?.homeDirectory ?? homedir(),
+  };
 }
 
+/** The host and credential every connected-host feature uses, resolved by the one precedence. */
 export function resolveConnectedHostConnection(context: CommandContext): ConnectedHostConnection {
-  const baseUrl = connectedHostBaseUrl(
-    context.platform?.configManager?.get('controlPlane.host'),
-    context.platform?.configManager?.get('controlPlane.port'),
-  );
-  const homeDirectory = context.workspace?.shellPaths?.homeDirectory ?? process.env['GOODVIBES_AGENT_HOME'] ?? homedir();
-  const credential = readConnectedHostOperatorToken(homeDirectory, baseUrl);
-  return { baseUrl, token: credential.token, tokenPath: credential.path };
+  const resolved = resolveConnectedHost(selectionFor(context));
+  return {
+    baseUrl: resolved.baseUrl,
+    token: resolved.token,
+    tokenPath: resolved.credential,
+    ...(resolved.source === undefined ? {} : { source: resolved.source }),
+    ...(resolved.unavailable === undefined ? {} : { unavailable: resolved.unavailable }),
+  };
 }
 
-/** A host that accepts the connection but never answers must not hold a command forever. */
-export const CONNECTED_HOST_READ_TIMEOUT_MS = 15_000;
+/**
+ * Call one read-only operator method on the connected host. Never throws:
+ * every failure comes back with its kind, its cause and the next step.
+ */
+export async function readConnectedHostMethod(
+  context: CommandContext,
+  methodId: string,
+  input: Record<string, unknown> = {},
+  options: { readonly timeoutMs?: number } = {},
+): Promise<ConnectedHostRouteResult> {
+  // Display readers take each field defensively, so the answer is not walked against the schema.
+  const host = createConnectedHost(selectionFor(context), { validateResponses: false });
+  // Method ids here come from callers as strings; the client checks the id against the contract.
+  const invoke = host.invoke as unknown as (methodId: string, input: unknown, options?: ConnectedHostInvokeOptions) => Promise<unknown>;
+  try {
+    const body = await invoke(methodId, input, options.timeoutMs === undefined ? {} : { deadlineMs: options.timeoutMs });
+    return { ok: true, route: methodId, body };
+  } catch (error) {
+    if (!isHostFailure(error)) throw error;
+    const next = error.refusal.next[0];
+    return {
+      ok: false,
+      route: error.route,
+      kind: error.kind,
+      baseUrl: error.baseUrl,
+      message: `${error.refusal.reason}${next ? `; next: ${next}` : ''}`,
+      ...(error.source === undefined ? {} : { source: error.source }),
+    };
+  }
+}
 
+let getMethodByPath: Map<string, string> | null = null;
+
+/** The read method the contract serves on exactly this path (no path parameters). */
+function readMethodForPath(path: string): string | undefined {
+  if (!getMethodByPath) {
+    getMethodByPath = new Map();
+    for (const method of operatorContractMethods()) {
+      const template = method.http?.path;
+      if (method.http?.method?.toUpperCase() === 'GET' && template && !template.includes('{')) getMethodByPath.set(template, method.id);
+    }
+  }
+  return getMethodByPath.get(path);
+}
+
+/** A read named by its path; the path must be one the operator contract serves. */
 export async function fetchConnectedHostReadOnlyRoute(
   context: CommandContext,
   route: string,
   options: { readonly timeoutMs?: number } = {},
 ): Promise<ConnectedHostRouteResult> {
-  const timeoutMs = options.timeoutMs ?? CONNECTED_HOST_READ_TIMEOUT_MS;
-  const connection = resolveConnectedHostConnection(context);
-  if (!connection.token) {
-    return {
-      ok: false,
-      route,
-      kind: 'auth_required',
-      baseUrl: connection.baseUrl,
-      message: `No connected-host operator token found at ${connection.tokenPath}`,
-    };
-  }
-
-  try {
-    const response = await fetch(`${connection.baseUrl}${route}`, {
-      headers: { authorization: `Bearer ${connection.token}` },
-      signal: AbortSignal.timeout(timeoutMs),
-    });
-    const text = await response.text();
-    let body: unknown = text;
-    if (text.trim().length > 0) {
-      try {
-        body = JSON.parse(text) as unknown;
-      } catch {
-        body = text;
-      }
-    }
-    if (!response.ok) {
-      const detail = isRecord(body) && typeof body.error === 'string' ? body.error : text;
-      return {
-        ok: false,
-        route,
-        kind: response.status === 401 || response.status === 403
-          ? 'auth_required'
-          : response.status === 404
-            ? 'connected_host_route_unavailable'
-            : 'connected_host_error',
-        baseUrl: connection.baseUrl,
-        message: `HTTP ${response.status}${detail ? `: ${detail}` : ''}`,
-      };
-    }
-    return { ok: true, route, body };
-  } catch (error) {
-    return {
-      ok: false,
-      route,
-      kind: 'connected_host_unavailable',
-      baseUrl: connection.baseUrl,
-      message: error instanceof Error && error.name === 'TimeoutError'
-        ? `no answer within ${timeoutMs >= 1000 ? `${Math.round(timeoutMs / 1000)}s` : `${timeoutMs} ms`}`
-        : error instanceof Error ? error.message : String(error),
-    };
-  }
+  const methodId = readMethodForPath(route);
+  if (methodId) return readConnectedHostMethod(context, methodId, {}, options);
+  return {
+    ok: false,
+    route: `GET ${route}`,
+    kind: 'connected_host_route_unavailable',
+    baseUrl: resolveConnectedHostConnection(context).baseUrl,
+    message: `the operator contract this Agent was built with serves no read on ${route}; next: update the Agent`,
+  };
 }
 
 export function formatConnectedHostRouteFailure(
@@ -117,7 +146,7 @@ export function formatConnectedHostRouteFailure(
     `${title}: unavailable`,
     `  status: ${CONNECTED_HOST_FAILURE_LABELS[failure.kind]}`,
     `  kind: ${failure.kind}`,
-    `  connected host: ${failure.baseUrl}`,
+    `  connected host: ${failure.baseUrl}${failure.source ? ` (credential from ${failure.source})` : ''}`,
     `  route: ${failure.route}`,
     `  error: ${failure.message}`,
     `  policy: ${policy}`,

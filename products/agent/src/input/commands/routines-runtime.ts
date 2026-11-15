@@ -409,7 +409,7 @@ export async function runRoutinesRuntimeCommand(args: readonly string[], ctx: Co
         return;
       }
       if (sub === 'enable' && ctx.invokedByModel === true && routineRegistry.get(id)?.reviewState !== 'reviewed') {
-        ctx.print(`Refused: Agent routine ${id} has not been reviewed, and only the owner typing the command can enable an unreviewed routine.`);
+        ctx.print(`Not enabled: Agent routine ${id} has not been reviewed, and only the owner typing the command can enable an unreviewed routine. Next: ask the owner to run /routines show ${id}, then /routines review ${id}.`);
         return;
       }
       const routine = routineRegistry.setEnabled(id, sub === 'enable');
@@ -471,7 +471,7 @@ export async function runRoutinesRuntimeCommand(args: readonly string[], ctx: Co
         return;
       }
       if (ctx.invokedByModel === true) {
-        ctx.print('Refused: marking a routine reviewed is the owner\'s decision that its steps may reach the prompt, so it only counts when you type it yourself. This came from the model running a command, which is the route content that was just read would use.');
+        ctx.print(`Not reviewed: Agent routine ${id} is unchanged. Marking a routine reviewed is the owner's decision that its steps may run, and this request came from the model, the route content it just read could steer. Next: ask the owner to run /routines review ${id}.`);
         return;
       }
       const routine = routineRegistry.markReviewed(id);

@@ -46,11 +46,10 @@ export function registerOwnerProfileRuntimeCommands(registry: CommandRegistry): 
         workingDirectory: shellPaths.workingDirectory,
         homeDirectory: shellPaths.homeDirectory,
       };
-      // Stated rather than defaulted, because it is true of THIS call site for a
-      // concrete reason: ctx.print puts the output in the session transcript,
-      // which a later turn can compose from. The default is the same answer, so
-      // forgetting this line would be safe, saying it makes the reason legible.
-      const result = await handleOwnerProfileCommand(runtime, { outputEntersModelContext: true });
+      // Printed output is display only; it reaches the model only as the tool
+      // result of a model-run command, which is when the People section is
+      // shown as a count instead of a list.
+      const result = await handleOwnerProfileCommand(runtime, { outputEntersModelContext: ctx.invokedByModel === true });
       ctx.print(result.output);
     },
   });

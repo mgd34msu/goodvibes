@@ -24,11 +24,10 @@ describe('connected host read-only routes', () => {
     globalThis.fetch = ((_url: unknown, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
       init?.signal?.addEventListener('abort', () => reject(init.signal!.reason));
     })) as unknown as typeof fetch;
-    const result = await fetchConnectedHostReadOnlyRoute(context(), '/api/channels', { timeoutMs: 5 });
+    const result = await fetchConnectedHostReadOnlyRoute(context(), '/api/channels/status', { timeoutMs: 5 });
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.kind).toBe('connected_host_unavailable');
-      expect(result.message).toContain('no answer within');
     }
   });
 });

@@ -93,9 +93,7 @@ describe('session picker load', () => {
   test('does not clear the live conversation for a session it cannot read', () => {
     const f = fixture({ generating: false });
     const before = texts(f.conversation);
-    expect(picker(f, 'broken').loadSelected(f.conversation as never)).toBe(false);
-    expect(texts(f.conversation)).toBe(before);
-    expect(picker(f, 'broken').loadSelected(f.conversation as never, f.ctx)).toBe(false);
+    expect(picker(f, 'broken').loadSelected(f.ctx)).toBe(false);
     expect(texts(f.conversation)).toBe(before);
   });
 
@@ -103,7 +101,7 @@ describe('session picker load', () => {
     const f = fixture({ generating: true });
     const before = texts(f.conversation);
     const modal = picker(f, 'alpha');
-    expect(modal.loadSelected(f.conversation as never, f.ctx)).toBe(false);
+    expect(modal.loadSelected(f.ctx)).toBe(false);
     expect(modal.statusMessage).toContain('A turn is still running');
     expect(texts(f.conversation)).toBe(before);
     expect(f.loads).toEqual([]);
@@ -112,7 +110,7 @@ describe('session picker load', () => {
   test('loads and moves the session identity when idle', () => {
     const f = fixture({ generating: false });
     const modal = picker(f, 'alpha');
-    expect(modal.loadSelected(f.conversation as never, f.ctx)).toBe(true);
+    expect(modal.loadSelected(f.ctx)).toBe(true);
     expect(f.runtime.sessionId).toBe('alpha');
     expect(texts(f.conversation)).toContain('from alpha');
   });

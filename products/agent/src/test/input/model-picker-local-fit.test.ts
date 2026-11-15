@@ -70,7 +70,14 @@ describe('buildLocalFitRecommendations', () => {
     const verdict = fitAssessment(estimateModelBytes(7_000_000_000), COMFORTABLE_PROFILE);
     // On a 32 GB / 24 GB available machine, 7B (3.85 GB) fits in RAM
     expect(verdict).toBe('fits-ram');
-    expect(rec7b!.description).toContain('runs on CPU RAM');
+    expect(rec7b!.description).toContain('recommended for your hardware');
+  });
+
+  test('a size that does not fit is never called recommended', () => {
+    const recs = buildLocalFitRecommendations({ totalRamBytes: 4e9, availableRamBytes: 2e9, gpus: [], cpuCores: 4 });
+    const rec13b = recs.find((r) => r.id.includes('13b'));
+    expect(rec13b!.description).toContain('too large for this machine');
+    expect(rec13b!.description).not.toContain('recommended');
   });
 
   test('fit label for 7B on tight profile reflects tight/too-big verdict', () => {

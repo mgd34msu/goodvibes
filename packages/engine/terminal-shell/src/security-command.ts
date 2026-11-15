@@ -23,7 +23,6 @@ export function createSecurityCommand<Context extends { print(text: string): voi
     readonly hidden: boolean;
     readonly beforeRead: (args: string[], context: Context) => boolean;
     readonly policyUnavailable: string;
-    readonly emptyTokens: string;
     readonly tokenTitle: string;
     readonly separator: string;
   },
@@ -41,21 +40,12 @@ export function createSecurityCommand<Context extends { print(text: string): voi
         ctx.print(`Unknown /security subcommand: ${args[0]}\nUsage: /security [review | attack-paths | tokens]`);
         return;
       }
-      const audit = sources.tokens(ctx).auditAll(Date.now());
-      const securitySnapshot = sources.security(ctx);
-      const policySnapshot = sources.policy(ctx);
-      if (!policySnapshot) {
-        ctx.print(presentation.policyUnavailable);
-        return;
-      }
-      const attackPaths = buildMcpAttackPathReview({
-        servers: securitySnapshot.mcpServers,
-        recentDecisions: securitySnapshot.recentMcpDecisions,
-      });
-
+      // Each view reads only its own sources, so a session without policy
+      // state still lists tokens and attack paths.
       if (subcommand === 'tokens') {
+        const audit = sources.tokens(ctx).auditAll(Date.now());
         if (audit.results.length === 0) {
-          ctx.print(presentation.emptyTokens);
+          ctx.print('No paired-device tokens to audit: no device is paired with this machine (the list follows the hourly token audit).');
           return;
         }
         ctx.print(
@@ -70,6 +60,11 @@ export function createSecurityCommand<Context extends { print(text: string): voi
         return;
       }
 
+      const securitySnapshot = sources.security(ctx);
+      const attackPaths = buildMcpAttackPathReview({
+        servers: securitySnapshot.mcpServers,
+        recentDecisions: securitySnapshot.recentMcpDecisions,
+      });
       if (subcommand === 'attack-paths') {
         if (attackPaths.findings.length === 0) {
           ctx.print('No MCP attack-path findings are currently active.');
@@ -87,6 +82,12 @@ export function createSecurityCommand<Context extends { print(text: string): voi
         return;
       }
 
+      const policySnapshot = sources.policy(ctx);
+      if (!policySnapshot) {
+        ctx.print(presentation.policyUnavailable);
+        return;
+      }
+      const audit = sources.tokens(ctx).auditAll(Date.now());
       const plugins = sources.plugins(ctx);
       const subscriptions = sources.subscriptions(ctx);
       const builtinProviders = listBuiltinSubscriptionProviders();

@@ -210,7 +210,7 @@ describe('/security', () => {
     const never = () => { throw new Error('the review must not be read'); };
     const command = createSecurityCommand<{ print(text: string): void }>(
       { tokens: never, security: never, policy: never, plugins: never, subscriptions: never },
-      { hidden: false, beforeRead: () => false, policyUnavailable: '', emptyTokens: '', tokenTitle: '', separator: ': ' },
+      { hidden: false, beforeRead: () => false, policyUnavailable: '', tokenTitle: '', separator: ': ' },
     );
     void command.handler(['foo'], { print: (text) => printed.push(text) });
     expect(printed[0]).toContain('Usage: /security [review | attack-paths | tokens]');

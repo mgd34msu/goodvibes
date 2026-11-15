@@ -53,7 +53,7 @@ import '@goodvibes-jev/engine/terminal-shell';
 type SessionPickerRouteState = {
   sessionPickerModal: {
     active: boolean;
-    loadSelected: (conversationManager: CommandContext['session']['conversationManager'], context?: CommandContext) => void;
+    loadSelected: (context: CommandContext) => void;
     moveUp: () => void;
     moveDown: () => void;
     deleteSelected: () => void;
@@ -68,8 +68,7 @@ type SessionPickerRouteState = {
 export const handleSessionPickerToken = createSearchableModalTokenRoute<SessionPickerRouteState>({
   modal: (state) => state.sessionPickerModal,
   enter(state) {
-    const conversation = state.commandContext?.session.conversationManager;
-    if (conversation) state.sessionPickerModal.loadSelected(conversation, state.commandContext);
+    if (state.commandContext) state.sessionPickerModal.loadSelected(state.commandContext);
   },
 
   namedKey: sessionPickerDeleteNamedKey,

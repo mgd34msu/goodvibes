@@ -25,7 +25,9 @@ describe('modal stack navigation', () => {
         getSelected: () => selectedEntry,
         close: () => { state.processModal.active = false; },
         open: () => { state.processModal.active = true; },
-        stopSelected: () => false,
+        armStop: () => false,
+        cancelStop: () => {},
+        confirmStop: () => false,
         refresh: () => {},
       },
       liveTailModal: {
@@ -44,7 +46,7 @@ describe('modal stack navigation', () => {
     expect(openedEntry?.id).toBe('process-1');
   });
 
-  test('live tail stop-and-return unwinds through escape only after a stopped exec', () => {
+  test('live tail: k scrolls, x then y stops the process and goes back', () => {
     let killCount = 0;
     let escapeCount = 0;
     const state = {
@@ -65,9 +67,11 @@ describe('modal stack navigation', () => {
       handleEscape: () => { escapeCount += 1; },
     };
 
-    const handled = handleLiveTailToken(state, { type: 'text', value: 'k' });
-
-    expect(handled).toBe(true);
+    expect(handleLiveTailToken(state, { type: 'text', value: 'k' })).toBe(true);
+    expect(killCount).toBe(0);
+    handleLiveTailToken(state, { type: 'text', value: 'x' });
+    expect(killCount).toBe(0);
+    handleLiveTailToken(state, { type: 'text', value: 'y' });
     expect(killCount).toBe(1);
     expect(escapeCount).toBe(1);
   });
@@ -89,9 +93,8 @@ describe('modal stack navigation', () => {
       handleEscape: () => { escapeCount += 1; },
     };
 
-    const handled = handleLiveTailToken(state, { type: 'text', value: 'k' });
-
-    expect(handled).toBe(true);
+    handleLiveTailToken(state, { type: 'text', value: 'x' });
+    expect(handleLiveTailToken(state, { type: 'text', value: 'y' })).toBe(true);
     expect(escapeCount).toBe(0);
   });
 });

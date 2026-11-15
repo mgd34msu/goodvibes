@@ -43,14 +43,14 @@ describe('/schedule typed in the composer', () => {
   test('an unterminated quote is refused and nothing runs', async () => {
     const { executed, printed } = submit('/schedule remind --at 2026-06-01T09:00:00Z --message "call mom');
     await Promise.resolve();
-    expect(printed.join('\n')).toContain('Invalid schedule command quoting.');
+    expect(printed.join('\n')).toContain('Not run');
     expect(executed).toEqual([]);
   });
 
   test('an empty quoted word is refused rather than dropped so the next word shifts into its place', async () => {
     const { executed, printed } = submit('/schedule remind --message "" --at 2026-06-01T09:00:00Z');
     await Promise.resolve();
-    expect(printed.join('\n')).toContain('Invalid schedule command quoting.');
+    expect(printed.join('\n')).toContain('Not run');
     expect(executed).toEqual([]);
   });
 

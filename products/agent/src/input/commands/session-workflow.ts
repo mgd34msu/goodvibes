@@ -3,12 +3,7 @@ import { createSessionWorkflowCommands } from '@goodvibes-jev/engine/terminal-sh
 import '@goodvibes-jev/engine/terminal-shell/transcript-review';
 
 import '@goodvibes-jev/engine/terminal-shell/transcript-kinds';
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
-import { findSessionCandidates } from '@goodvibes-jev/engine/platform/platform/sessions';
-import { captureTranscriptSource, transcriptReadingCanceled } from './transcript-reading.ts';
-import 'node:crypto';
-import { readFileSync, statSync } from 'node:fs';
-import { isDeepStrictEqual } from 'node:util';
+import { resolveSessionTarget } from '@goodvibes-jev/engine/platform/platform/sessions';
 
 import type { CommandContext } from '../command-registry.ts';
 
@@ -16,115 +11,32 @@ import type { ConversationMessageSnapshot } from '../../core/conversation.ts';
 import { formatReturnContextForDisplay, getReturnContextMode, maybeAssistReturnContextSummary } from '@/runtime/index.ts';
 import { requireProviderApi, requireSessionManager } from './runtime-services.ts';
 import { logger, redactSensitiveDataAsync, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-import { captureOwnedJson, retainOwnedJson } from '@goodvibes-jev/engine/platform/platform/gate';
-import { TranscriptSourceChangedError } from '@goodvibes-jev/engine/platform/platform/core';
-import { captureJudgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
-import { activateClassicFallback, isClassicOperation } from '@goodvibes-jev/engine/platform/platform/runtime';
 import './confirmation.ts';
 import { readConversationMessageSnapshots } from '../../core/conversation-message-snapshot.ts';
-import { copySessionSidecars, restoreLoadedSession } from '../../core/session-resume-core.ts';
-import { checkSessionLiveness } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { copySessionSidecars } from '../../core/session-resume-core.ts';
+import { loadSavedSessionIntoLive } from './session-load.ts';
 
 function formatSessionFailure(action: string, error: unknown): string {
   return [`Failed to ${action}`, `  error ${summarizeError(error)}`].join('\n');
 }
 
+/**
+ * Format a loaded session, redact it once and print it. The export owns one
+ * fact, the messages it loaded; nothing else is re-read. For the current
+ * session (`.`) the live chat's revision is read before and after, and a chat
+ * that moved on meanwhile is said, since the saved copy may then lag it.
+ */
 async function printSessionExport(
   ctx: CommandContext,
   sessionId: string,
   title: string,
   messages: readonly ConversationMessageSnapshot[],
   format: string,
-  args: readonly string[],
-  filePath?: string,
+  current: boolean,
 ): Promise<void> {
-  const session = ctx.session;
-  const readingOptions = ctx.judgmentReadingOptions;
-  const signal = readingOptions?.signal,
-    ownerCurrent = readingOptions?.assertCurrent;
-  const source = captureTranscriptSource(ctx, signal);
-  const manager = requireSessionManager(ctx);
-  const input = retainOwnedJson({ sessionId, title, messages, format, args });
-  const fileBytes = filePath === undefined ? undefined : readFileSync(filePath);
-  const fileStat = filePath === undefined ? undefined : statSync(filePath, { bigint: true });
-  const methods: {
-    readonly key: 'print' | 'load';
-    readonly owner: object;
-    readonly prototype: object | null;
-    readonly descriptor?: PropertyDescriptor;
-  }[] = [];
-  for (const [target, key] of [
-    [ctx, 'print'],
-    [manager, 'load'],
-  ] as const) {
-    for (let owner: object | null = target; owner !== null; owner = Object.getPrototypeOf(owner)) {
-      const descriptor = Object.getOwnPropertyDescriptor(owner, key);
-      if (descriptor !== undefined && !('value' in descriptor)) throw new TranscriptSourceChangedError();
-      methods.push({ key, owner, prototype: Object.getPrototypeOf(owner), ...(descriptor === undefined ? {} : { descriptor }) });
-      if (descriptor !== undefined) break;
-    }
-  }
-  const print = ctx.print,
-    load = manager.load;
-  const saved = filePath === undefined ? captureOwnedJson(load.call(manager, sessionId)) : undefined;
-  const assertSource = () => {
-    source.assertPublishable();
-    try {
-      input.assertCurrent();
-      if (
-        ctx.session !== session ||
-        ctx.judgmentReadingOptions !== readingOptions ||
-        readingOptions?.signal !== signal ||
-        readingOptions?.assertCurrent !== ownerCurrent
-      )
-        throw new TranscriptSourceChangedError();
-      for (const entry of methods) {
-        if (
-          Object.getPrototypeOf(entry.owner) !== entry.prototype ||
-          !isDeepStrictEqual(Object.getOwnPropertyDescriptor(entry.owner, entry.key), entry.descriptor)
-        )
-          throw new TranscriptSourceChangedError();
-      }
-      if (filePath !== undefined && fileBytes !== undefined && fileStat !== undefined) {
-        const current = statSync(filePath, { bigint: true });
-        if (
-          current.dev !== fileStat.dev ||
-          current.ino !== fileStat.ino ||
-          current.size !== fileStat.size ||
-          current.mtimeNs !== fileStat.mtimeNs ||
-          current.ctimeNs !== fileStat.ctimeNs ||
-          !readFileSync(filePath).equals(fileBytes)
-        )
-          throw new TranscriptSourceChangedError();
-      } else if (!isDeepStrictEqual(captureOwnedJson(load.call(manager, sessionId)), saved)) {
-        throw new TranscriptSourceChangedError();
-      }
-    } catch {
-      throw new TranscriptSourceChangedError();
-    }
-  };
-  let readingOwner: ReturnType<typeof captureJudgmentPort> | undefined;
-  const assertCurrent = () => {
-    assertSource();
-    let result: unknown;
-    try {
-      result = ownerCurrent?.();
-    } catch {
-      throw new TranscriptSourceChangedError();
-    }
-    if (result !== undefined) {
-      drainOwned(result);
-      throw new TranscriptSourceChangedError();
-    }
-    if (!isClassicOperation()) readingOwner?.assertCurrent();
-    assertSource();
-  };
-  assertCurrent();
-  if (!isClassicOperation()) try {
-    readingOwner = captureJudgmentPort('agent.session-export', { signal, assertCurrent: assertSource });
-  } catch (error) {
-    if (!activateClassicFallback(error) && !(error instanceof JudgmentPortMissingError)) throw error;
-  }
+  const signal = ctx.judgmentReadingOptions?.signal;
+  const live = current ? ctx.session.conversationManager.revisionSource : undefined;
+  const liveRevision = live?.revision();
   const formatted = formatSessionExport(sessionId, title, messages, format, {
     role: (message) => message.role,
     content: conversationMessageContentText,
@@ -136,9 +48,11 @@ async function printSessionExport(
   // profile's closed-tier values, his address, his contact details, the People
   // section, so an exported session cannot become the copy of the dossier that
   // the file itself is careful not to be (docs/owner-profile.md §10, §11.3).
-  const redacted = await redactSensitiveDataAsync(formatted, { signal, assertCurrent, purpose: 'export' });
-  assertCurrent();
-  print.call(ctx, redacted);
+  const redacted = await redactSensitiveDataAsync(formatted, { ...(signal ? { signal } : {}), purpose: 'export' });
+  ctx.print(redacted);
+  if (live && live.revision() !== liveRevision) {
+    ctx.print('The chat changed while exporting: this transcript is the saved session from before the change. Run /session export . again for the newest messages.');
+  }
 }
 
 function conversationMessageContentText(message: ConversationMessageSnapshot): string {
@@ -213,8 +127,8 @@ export const { handleSessionWorkflowCommand } = createSessionWorkflowCommands<Co
         ctx.print('Usage: /session resume <session-id-or-name> [--force]');
         return true;
       }
-      const sessions = sm.list();
-      const candidates = findSessionCandidates(sessions, target);
+      // An exact id reads one meta line; only a title or prefix lists the directory.
+      const candidates = resolveSessionTarget(sm, target);
       if (candidates.length > 1) {
         ctx.print(`Ambiguous session: ${target}. Use an exact ID: ${candidates.map((session) => session.name).join(', ')}`);
         return true;
@@ -224,61 +138,37 @@ export const { handleSessionWorkflowCommand } = createSessionWorkflowCommands<Co
         ctx.print(`Session not found ${target}\nUse /session list to see available sessions.`);
         return true;
       }
-      // Another running Agent that marked this session as open would be forked by a resume here.
-      // A missing or stale marker, or this process's own, never blocks.
-      const surface = ctx.session.surface;
-      if (surface && !force) {
-        const liveness = checkSessionLiveness(surface, found.name);
-        if (liveness.live && liveness.pid !== process.pid) {
-          ctx.print(
-            `Session ${found.name} appears open in another terminal (pid ${liveness.pid}): resuming it here would fork its live state.\n`
-              + `Run \`/session resume ${found.name} --force\` to resume it anyway.`,
-          );
-          return true;
-        }
-      }
       try {
-        const { meta, messages, branches } = sm.load(found.name);
+        // The one load: refuses while a turn runs or while another terminal holds the
+        // session (unless --force), moves the liveness marker and the last-session pointer.
+        const loaded = loadSavedSessionIntoLive(ctx, sm, found.name, { force });
+        const { meta } = loaded;
         const providerApi = requireProviderApi(ctx);
-        const sourceSessionId = ctx.session.runtime.sessionId;
-        let model = meta.model;
-        let provider = meta.provider;
-        if (model) {
+        // The saved model is reselected after the conversation was replaced, so a refused
+        // resume never changes the model.
+        if (meta.model) {
           try {
-            const selected = await providerApi.selectModel(model);
-            model = selected.registryKey;
-            provider = selected.providerId;
+            const selected = await providerApi.selectModel(meta.model);
+            if (ctx.session.runtime.sessionId === found.name) {
+              ctx.session.runtime.model = selected.registryKey;
+              ctx.session.runtime.provider = selected.providerId;
+            }
           } catch {
-            /* The saved model may no longer exist locally. */
+            /* The saved model may no longer exist locally; the saved id stands. */
           }
         }
-        if (ctx.isGenerating?.() || ctx.session.runtime.sessionId !== sourceSessionId) {
-          throw new Error('The active session changed or a turn started while resuming. Try again when idle.');
-        }
-        const restoredAnchorCount = restoreLoadedSession(
-          found.name,
-          { meta, messages, ...(branches ? { branches } : {}) },
-          {
-            conversation: ctx.session.conversationManager,
-            runtime: ctx.session.runtime,
-            restoreTurnAnchors: ctx.session.restoreTurnAnchors,
-            surface: ctx.session.surface,
-          },
-        );
-        ctx.abandonHostedSession?.();
-        if (model) ctx.session.runtime.model = model;
-        if (provider) ctx.session.runtime.provider = provider;
-        ctx.session.writeLastSessionPointer?.(found.name);
-        ctx.session.announceSessionResumed?.(found.name, messages.length);
+        const restoredAnchorCount = loaded.restoredAnchorCount;
+        ctx.session.announceSessionResumed?.(found.name, loaded.messageCount);
         ctx.renderRequest();
         ctx.print(
           [
             'Resumed session',
             `  id ${found.name}`,
             `  name ${meta.title || '(untitled)'}`,
-            `  messages ${messages.length}`,
+            `  messages ${loaded.messageCount}`,
             `  model ${meta.model || ctx.session.runtime.model}`,
             ...(restoredAnchorCount > 0 ? [`  rewind points ${restoredAnchorCount} restored from before the resume`] : []),
+            ...loaded.notices.map((line) => `  ${line}`),
           ].join('\n'),
         );
         const returnContextMode = getReturnContextMode(ctx.platform.configManager);
@@ -328,23 +218,22 @@ export const { handleSessionWorkflowCommand } = createSessionWorkflowCommands<Co
       );
       if (!request) return true;
       const { target, format, sessionId, found } = request;
-      if (!found && target !== '.') {
-        try {
-          const { meta, messages } = sm.load(sessionId);
-          await printSessionExport(ctx, sessionId, meta.title, readConversationMessageSnapshots(messages), format, args);
-        } catch (error) {
-          if (transcriptReadingCanceled(error) || ctx.judgmentReadingOptions?.signal?.aborted) return true;
-          ctx.print(`Session not found ${sessionId}`);
-        }
+      const loadName = found ? found.name : sessionId;
+      let loaded: ReturnType<typeof sm.load>;
+      try {
+        loaded = sm.load(loadName);
+      } catch (error) {
+        ctx.print(found || target === '.' ? formatSessionFailure('export session', error) : `Session not found ${sessionId}\nUse /session list to see available sessions.`);
         return true;
       }
-      const loadName = found ? found.name : sessionId;
       try {
-        const { meta, messages } = sm.load(loadName);
-        await printSessionExport(ctx, loadName, meta.title, readConversationMessageSnapshots(messages), format, args, found?.filePath);
-      } catch (e) {
-        if (transcriptReadingCanceled(e) || ctx.judgmentReadingOptions?.signal?.aborted) return true;
-        ctx.print(formatSessionFailure('export session', e));
+        await printSessionExport(ctx, loadName, loaded.meta.title, readConversationMessageSnapshots(loaded.messages), format, target === '.');
+      } catch (error) {
+        if (ctx.judgmentReadingOptions?.signal?.aborted) {
+          ctx.print(`Export of session ${loadName} was cancelled; nothing was printed.`);
+          return true;
+        }
+        ctx.print(formatSessionFailure('export session', error));
       }
       return true;
     }

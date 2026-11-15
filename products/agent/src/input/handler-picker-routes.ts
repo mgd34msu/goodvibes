@@ -47,7 +47,9 @@ type ProcessRouteState = {
     getSelected: () => ProcessEntry | undefined;
     close: () => void;
     open: () => void;
-    stopSelected: () => boolean;
+    armStop: () => boolean;
+    cancelStop: () => void;
+    confirmStop: () => boolean;
     refresh: () => void;
   };
   liveTailModal: {
@@ -59,29 +61,41 @@ type ProcessRouteState = {
   /** Open a process's output full screen (shell/session-views.ts); false when it cannot be opened here. */
   openProcessView?: (processId: string) => boolean;
 };
+/**
+ * The process monitor's keys: arrows and j/k move, as in every list; Enter
+ * opens the output; x or Delete asks to stop the selected running process and
+ * only y then stops it. Any other key withdraws the request.
+ */
 export function handleProcessModalToken(state: ProcessRouteState, token: InputToken): boolean {
   if (!state.processModal.active) return false;
+  const modal = state.processModal;
 
   if (token.type === 'key') {
     if (token.logicalName === 'escape') {
       state.handleEscape();
       return true;
     }
-    if (token.logicalName === 'up') state.processModal.moveUp();
-    else if (token.logicalName === 'down') state.processModal.moveDown();
+    if (token.logicalName === 'delete') modal.armStop();
+    else if (token.logicalName === 'up') modal.moveUp();
+    else if (token.logicalName === 'down') modal.moveDown();
     else if (token.logicalName === 'enter') {
-      const entry = state.processModal.getSelected();
+      modal.cancelStop();
+      const entry = modal.getSelected();
       // The process opens full screen; the monitor closes behind it the way Esc closes it (one stack level).
       if (entry && state.openProcessView?.(entry.id)) state.handleEscape();
       else if (entry) {
         state.modalOpened('liveTail');
-        state.processModal.close();
+        modal.close();
         state.liveTailModal.open(entry);
       }
-    }
-  } else if (token.type === 'text' && token.value === 'k') {
-    const stopped = state.processModal.stopSelected();
-    if (stopped) state.processModal.refresh();
+    } else modal.cancelStop();
+  } else if (token.type === 'text') {
+    if (token.value === 'k') modal.moveUp();
+    else if (token.value === 'j') modal.moveDown();
+    else if (token.value === 'x') modal.armStop();
+    else if (token.value === 'y') {
+      if (modal.confirmStop()) modal.refresh();
+    } else modal.cancelStop();
   }
 
   state.requestRender();
@@ -101,23 +115,32 @@ type LiveTailRouteState = {
   requestRender: () => void;
   handleEscape: () => void;
 };
+/** Live tails whose process the owner asked to stop with x or Delete; y then stops it. */
+const liveTailStopRequested = new WeakSet<object>();
+/**
+ * The live tail's keys: arrows and j/k scroll; x or Delete asks to stop the
+ * process and only y then stops it and goes back; any other key withdraws the
+ * request.
+ */
 export function handleLiveTailToken(state: LiveTailRouteState, token: InputToken): boolean {
-  if (!state.liveTailModal.active) return false;
-
-  const stopAndReturn = (): void => {
-    if (state.liveTailModal.stopProcess()) state.handleEscape();
-  };
+  const modal = state.liveTailModal;
+  if (!modal.active) return false;
+  const requested = liveTailStopRequested.has(modal);
+  liveTailStopRequested.delete(modal);
 
   if (token.type === 'key') {
     if (token.logicalName === 'escape') {
       state.handleEscape();
       return true;
     }
-    if (token.logicalName === 'up') state.liveTailModal.scrollUp();
-    else if (token.logicalName === 'down') state.liveTailModal.scrollDown();
-    else if (token.logicalName === 'k') stopAndReturn();
-  } else if (token.type === 'text' && token.value === 'k') {
-    stopAndReturn();
+    if (token.logicalName === 'up') modal.scrollUp();
+    else if (token.logicalName === 'down') modal.scrollDown();
+    else if (token.logicalName === 'delete') liveTailStopRequested.add(modal);
+  } else if (token.type === 'text') {
+    if (token.value === 'k') modal.scrollUp();
+    else if (token.value === 'j') modal.scrollDown();
+    else if (token.value === 'x') liveTailStopRequested.add(modal);
+    else if (token.value === 'y' && requested && modal.stopProcess()) state.handleEscape();
   }
 
   state.requestRender();

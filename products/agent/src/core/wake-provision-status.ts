@@ -82,20 +82,6 @@ export function agentWakeCapabilities(options: { readonly vadReady: boolean }): 
   };
 }
 
-/** One artifact's line: what is on disk, verified by content. */
-
-/**
- * Blockers, in the platform's own words. A blocker means the detector must NOT start,
- * so the row's key and the written reason are both shown, a swallowed blocker is
- * a user staring at a feature that is on and doing nothing.
- */
-
-/** Limitations: the detector runs, with one row not in force, and says which. */
-
-/** The `/voice wake status` block. */
-
-/** The `/voice wake setup` receipt. */
-
 /** The one-line announcement printed before a (multi-megabyte) provision runs. */
 export const WAKE_SETUP_ANNOUNCEMENT = [
   'Wake-Word Setup',

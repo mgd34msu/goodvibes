@@ -105,11 +105,14 @@ describe('ProcessModal state', () => {
     expect(modal.selectedIndex).toBe(1);
   });
 
-  test('stopSelected() delegates only to ProcessManager', () => {
+  test('a process stops only after x asked and y confirmed', () => {
     const id = seedProcess('sleep 100');
     const modal = createProcessModal();
     modal.open();
-    expect(modal.stopSelected()).toBe(true);
+    expect(modal.confirmStop()).toBe(false);
+    expect(processes.get(id)?.status).toBe('running');
+    expect(modal.armStop()).toBe(true);
+    expect(modal.confirmStop()).toBe(true);
     expect(processes.get(id)?.status).toBe('done');
   });
 });
@@ -149,13 +152,12 @@ describe('renderProcessModal', () => {
     expect(layerText(layer)[row]).toContain('Task B');
   });
 
-  test('says Esc leaves the processes running and names the keys', () => {
+  test('no navigation key is offered as a stop key', () => {
     seedProcess('Task A');
     const modal = createProcessModal();
     modal.open();
     const text = layerTextBlock(renderProcessModal(modal, W, H));
-    expect(text).toContain('Esc closes this view; processes keep running.');
-    expect(text).toContain('k  stop process');
+    expect(text).not.toContain('k  stop');
     expect(text).not.toContain('[agent]');
   });
 });
@@ -190,7 +192,8 @@ describe('ProcessModal selection follows the process', () => {
     processes.get(a)!.done = true;
     modal.refresh();
     expect(modal.getSelected()?.id).toBe(b);
-    expect(modal.stopSelected()).toBe(true);
+    expect(modal.armStop()).toBe(true);
+    expect(modal.confirmStop()).toBe(true);
     expect(processes.get(b)!.done).toBe(true);
     expect(processes.get(c)!.done).toBe(false);
     modal.close();

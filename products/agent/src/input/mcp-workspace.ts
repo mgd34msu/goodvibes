@@ -165,13 +165,16 @@ export class McpWorkspace extends McpWorkspaceState<CommandContext, McpWorkspace
         return;
       }
       const server = formToServerConfig(this.form);
-      const args = ['add', server.name, server.command, ...(server.args ?? []), '--scope', this.form.scope];
+      // The form's own flags come first and the server's arguments after `--`,
+      // so an argument such as `--yes`, `--host` or `--scope` reaches the server
+      // instead of being read as an `/mcp add` flag.
+      const args = ['add', server.name, server.command, '--scope', this.form.scope];
       if (server.role) args.push('--role', server.role);
       if (server.trustMode) args.push('--trust', server.trustMode);
       for (const [key, value] of Object.entries(server.env ?? {})) args.push('--env', `${key}=${value}`);
       for (const path of server.allowedPaths ?? []) args.push('--path', path);
       for (const host of server.allowedHosts ?? []) args.push('--host', host);
-      args.push('--yes');
+      args.push('--yes', '--', ...(server.args ?? []));
       // The form stays open until the command reports success, so a failed save can be corrected.
       if (await this.dispatchMcpCommand(args, `MCP server ${server.name} add/update`)) {
         this.mode = 'browse';

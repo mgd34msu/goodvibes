@@ -30,10 +30,11 @@ export interface GpuInfo {
  *
  * Heuristic (documented):
  *   Quantized model size in bytes is estimated as: params * bytesPerWeight
- *   Default quant assumed Q4 => bytesPerWeight = 0.6 bytes/param
+ *   Default quant assumed Q4 => bytesPerWeight = 0.55 bytes/param
  *   (1-bit quants like Q1 => 0.125, Q2 => 0.25, Q4 => ~0.55, Q8 => 1.0, fp16 => 2.0)
  *
- *   fits-gpu  : modelSizeBytes <= 0.80 * max(gpus[].vramBytes)  (80% headroom for activations)
+ *   fits-gpu  : modelSizeBytes <= 0.80 * max(gpus[].vramBytes)  (80% headroom for activations;
+ *               on Apple Silicon the GPU's share of unified memory counts as VRAM)
  *   fits-ram  : modelSizeBytes <= 0.60 * availableRamBytes       (60% of free RAM to leave OS headroom)
  *   tight     : modelSizeBytes <= totalRamBytes                  (fits but will starve other processes)
  *   too-big   : modelSizeBytes > totalRamBytes
@@ -105,11 +106,13 @@ export const REPRESENTATIVE_7B_PARAMS = 7_000_000_000;
  * (the representative constant used for the cookbook and unknown-size models).
  * Returns an empty string when verdict is 'unknown' (no annotation shown).
  */
-export function fitVerdictLabel(verdict: FitVerdict, sizeDescriptor?: string): string {
+export function fitVerdictLabel(verdict: FitVerdict, sizeDescriptor?: string, profile?: Pick<HardwareProfile, 'gpus'>): string {
   const size = sizeDescriptor ?? '7B';
   switch (verdict) {
     case 'fits-gpu': return `a ${size} model fits in GPU memory here`;
-    case 'fits-ram': return `a ${size} model runs on CPU RAM here`;
+    // Only NVIDIA GPUs and Apple Silicon are probed: an empty list says the
+    // GPU was not detected, not that the machine has none.
+    case 'fits-ram': return `a ${size} model fits in system memory here${profile && profile.gpus.length === 0 ? ' (GPU not detected)' : ''}`;
     case 'tight':    return `a ${size} model is tight here, close other apps`;
     case 'too-big':  return `a ${size} model needs more memory than this machine has`;
     case 'unknown':  return '';
@@ -144,9 +147,12 @@ export function paramCountFromModel(model: { id: string; displayName?: string })
 
 // ---------------------------------------------------------------------------
 // Process-level cache: total RAM, CPU cores and GPUs are read once per process
-// (the GPU probe spawns at most one child); free RAM is read on each call.
+// (the GPU probe spawns at most one child); free RAM is read at most once a
+// second, since the render path asks on every frame.
 // ---------------------------------------------------------------------------
+const FREE_RAM_READ_INTERVAL_MS = 1000;
 let cachedProfile: HardwareProfile | null = null;
+let freeRamReadAt = 0;
 // True while the cached entry was built from live probes (not injected by a test), so free RAM may be refreshed.
 let cacheIsLive = false;
 let probeStarted = false;
@@ -164,7 +170,10 @@ let probeStarted = false;
 export function readHardwareProfileSync(readRam: () => Pick<HardwareProfile, 'totalRamBytes' | 'availableRamBytes'> = probeRam): HardwareProfile {
   if (cachedProfile !== null) {
     if (!cacheIsLive) return cachedProfile;
-    // Free RAM is a "now" figure and the read is cheap; GPUs and CPU cores stay cached.
+    // Free RAM is a "now" figure; GPUs and CPU cores stay cached.
+    const now = Date.now();
+    if (now - freeRamReadAt < FREE_RAM_READ_INTERVAL_MS) return cachedProfile;
+    freeRamReadAt = now;
     const { availableRamBytes } = readRam();
     if (availableRamBytes !== cachedProfile.availableRamBytes) cachedProfile = { ...cachedProfile, availableRamBytes };
     return cachedProfile;
@@ -174,8 +183,9 @@ export function readHardwareProfileSync(readRam: () => Pick<HardwareProfile, 'to
   // that subsequent renders are instant. startHardwareProbe() will upgrade
   // this entry with GPU data when the async probe completes.
   const { totalRamBytes, availableRamBytes } = readRam();
+  freeRamReadAt = Date.now();
   const cpuCores = probeCpuCores();
-  cachedProfile = { totalRamBytes, availableRamBytes, gpus: [], cpuCores };
+  cachedProfile = { totalRamBytes, availableRamBytes, gpus: unifiedMemoryGpu(totalRamBytes), cpuCores };
   cacheIsLive = true;
   return cachedProfile;
 }
@@ -207,6 +217,8 @@ export function readHardwareProfile(): HardwareProfile {
 export function startHardwareProbe(spawnProbe: typeof spawn = spawn): void {
   if (probeStarted) return;
   probeStarted = true;
+  // Apple Silicon's GPU is known from the platform (unified memory); nvidia-smi does not exist there.
+  if (isAppleSilicon()) return;
   try {
     const child = spawnProbe(
       'nvidia-smi',
@@ -240,6 +252,7 @@ export function _resetHardwareProfileCache(): void {
   cachedProfile = null;
   cacheIsLive = false;
   probeStarted = false;
+  freeRamReadAt = 0;
 }
 
 /**
@@ -354,6 +367,24 @@ export function parseNvidiaSmiOutput(raw: string): readonly GpuInfo[] {
     gpus.push({ name, vramBytes });
   }
   return gpus;
+}
+
+function isAppleSilicon(platform: string = process.platform, arch: string = process.arch): boolean {
+  return platform === 'darwin' && arch === 'arm64';
+}
+
+/**
+ * Apple Silicon shares one memory pool between CPU and GPU, and macOS lets the
+ * GPU wire about three quarters of it by default, so that share is the GPU's
+ * memory for the fit verdict. Elsewhere the GPU list comes from the probe.
+ */
+export function unifiedMemoryGpu(
+  totalRamBytes: number | null,
+  platform: string = process.platform,
+  arch: string = process.arch,
+): readonly GpuInfo[] {
+  if (!isAppleSilicon(platform, arch) || totalRamBytes === null) return [];
+  return [{ name: 'Apple Silicon (unified memory)', vramBytes: Math.floor(totalRamBytes * 0.75) }];
 }
 
 function probeCpuCores(): number | null {

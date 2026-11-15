@@ -70,7 +70,7 @@ export const handleCommandModeToken = createCommandModeTokenHandler<CommandConte
       // rather than closing the quote silently and shifting the words that follow.
       const strict = scheduleCommandArguments(raw.slice(1));
       if (!strict) {
-        context.print('Invalid schedule command quoting.');
+        context.print('Not run: the schedule command has an unclosed quote or an empty quoted word, so its words could land in the wrong fields. Close the quote or fill the empty word, then run it again.');
         state.requestRender();
         return undefined;
       }

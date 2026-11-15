@@ -2153,9 +2153,9 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
         };
       }>(fixture, { mode: 'model_routing', includeParameters: true });
       const recipes = routing.localCookbook.recipes;
-      // A 7B Q4 model is about 3.9 GB, under 60% of 48 GB free RAM and with no GPU, so it runs on CPU RAM.
+      // A 7B Q4 model is about 3.9 GB, under 60% of 48 GB free RAM and with no GPU, so it fits in system memory.
       for (const id of ['ollama', 'llama-cpp', 'vllm']) {
-        expect(recipes.find((r) => r.id === id)?.hardwareFit, id).toBe('a 7B model runs on CPU RAM here');
+        expect(recipes.find((r) => r.id === id)?.hardwareFit, id).toBe('a 7B model fits in system memory here');
       }
       // The generic local server has no stable size estimate, so it carries no label.
       expect(recipes.find((r) => r.id === 'openai-compatible-local')?.hardwareFit).toBeUndefined();

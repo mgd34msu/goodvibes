@@ -122,7 +122,6 @@ export function registerControlRoomRuntimeCommands(registry: CommandRegistry): v
         hidden: false,
         separator: '=',
         tokenTitle: 'Token Audit',
-        emptyTokens: 'Nothing registers tokens with the auditor in this build, so no credential is being audited.',
         policyUnavailable: 'Policy runtime state is not available in this runtime.',
         beforeRead(args, ctx) {
           if (args.length > 0) return false;

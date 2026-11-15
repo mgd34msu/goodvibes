@@ -1,5 +1,7 @@
 import { EmailConfigurationError } from '../../email/email-service.js';
-import { readErrorFailure } from '../../types/errors.js';
+import { EmailCredentialUnavailableError } from '../../email/email-config.js';
+import { ImapOpenError } from '../../email/imap-open.js';
+import { EmailInputError, SmtpReplyError } from '../../email/smtp-client.js';
 /**
  * routes/email-composition.ts, the daemon's own mailbox.
  *
@@ -16,10 +18,10 @@ import { readErrorFailure } from '../../types/errors.js';
  * Three layers, in order, so each is one idea:
  *
  *  1. `createServiceBackedGateway`, the mapping onto `EmailService`, and the
- *     one place its errors become honest statuses. `EmailService` throws
- *     plain-language `Error`s, "Email is not enabled", "Email config is
- *     invalid", an IMAP/SMTP refusal, and collapsing all of them into 500
- *     would report the operator's own unfinished setup as a server fault.
+ *     one place its errors become honest statuses. The mail layer throws
+ *     typed errors (unfinished setup, a bad field, a refused sign-in, a
+ *     missing folder, a send whose outcome is unknown); each is answered by
+ *     its type and code, never by reading its wording.
  *  2. `instrumentEmailGateway`, unfinished setup reported in the operator's
  *     own key names, and an operational log line per verb.
  *  3. `createDaemonEmailGatewayService`, which of those a given composition
@@ -92,11 +94,20 @@ export interface EmailCompositionDeps {
   readonly emailLog?: EmailGatewayLog | undefined;
 }
 
+/** SMTP reply codes that refuse the account's sign-in (RFC 4954). */
+const SMTP_AUTH_REFUSED = new Set([530, 534, 535]);
+
 /**
- * Not-configured and refused-credentials are the operator's to fix, so they
- * are 400/401 with the service's own wording rather than a bare 500.
+ * Each mail failure answered from its own type, by code; no wording is read.
+ *
+ * Setup that is unfinished, a field the caller got wrong, a refused sign-in
+ * and a missing folder are the caller's or the owner's to fix (4xx). A send
+ * whose final reply was lost is 409, not a 5xx, because every retry policy
+ * treats a 5xx as "try again" and that send may already have been delivered.
+ * Only a server that is down or unreachable is 503, the one answer a retry can
+ * fix.
  */
-async function translate(error: unknown): Promise<never> {
+function translate(error: unknown): never {
   const message = error instanceof Error ? error.message : String(error);
   if (error instanceof EmailConfigurationError && error.kind === 'disabled') {
     throw new GatewayVerbError(message, 'EMAIL_NOT_ENABLED', 400);
@@ -104,16 +115,51 @@ async function translate(error: unknown): Promise<never> {
   if (error instanceof EmailConfigurationError && error.kind === 'invalid') {
     throw new GatewayVerbError(message, 'EMAIL_NOT_CONFIGURED', 400);
   }
-  if (error instanceof SmtpDeliveryUnconfirmedError) {
-    throw new GatewayVerbError(message, 'EMAIL_DELIVERY_UNCONFIRMED', 502);
+  if (error instanceof EmailCredentialUnavailableError) {
+    throw new GatewayVerbError(message, 'EMAIL_NOT_CONFIGURED', 400);
   }
-  const failure = await readErrorFailure(error instanceof Error ? error : new Error(message), 'email.gateway.failure').catch(() => null);
-  if (failure?.category === 'authentication') {
-    throw new GatewayVerbError(
-      `${message} The stored mail password was refused; store a current one and retry.`,
-      'EMAIL_CREDENTIALS_REJECTED',
-      401,
-    );
+  if (error instanceof EmailInputError) {
+    throw new GatewayVerbError(`${message} Nothing was sent.`, 'INVALID_ARGUMENT', 400, error.field);
+  }
+  if (error instanceof SmtpDeliveryUnconfirmedError) {
+    throw new GatewayVerbError(message, 'EMAIL_DELIVERY_UNCONFIRMED', 409);
+  }
+  if (error instanceof SmtpReplyError) {
+    if (error.stage.startsWith('AUTH') && SMTP_AUTH_REFUSED.has(error.code)) {
+      throw new GatewayVerbError(
+        `${message} The mail server refused the stored password, so nothing was sent. Store a current one and send again.`,
+        'EMAIL_CREDENTIALS_REJECTED',
+        401,
+      );
+    }
+    if (error.stage === 'RCPT TO' && error.code >= 500) {
+      throw new GatewayVerbError(
+        `${message} The mail server refused this recipient, so nothing was sent. Check the address.`,
+        'EMAIL_RECIPIENT_REJECTED',
+        400,
+        'to',
+      );
+    }
+    if (error.code >= 400 && error.code < 500) {
+      throw new GatewayVerbError(
+        `${message} The mail server reported a temporary condition and nothing was sent; send again later.`,
+        'EMAIL_SERVER_UNAVAILABLE',
+        503,
+      );
+    }
+    throw new GatewayVerbError(`${message} Nothing was sent.`, 'EMAIL_REQUEST_FAILED', 502);
+  }
+  if (error instanceof ImapOpenError) {
+    const owner = error.notice.ownerMessage;
+    switch (error.reason) {
+      case 'authentication-rejected':
+        throw new GatewayVerbError(owner, 'EMAIL_CREDENTIALS_REJECTED', 401);
+      case 'mailbox-unavailable':
+        throw new GatewayVerbError(owner, 'EMAIL_MAILBOX_UNAVAILABLE', 409);
+      case 'server-unavailable':
+      case 'connection-failed':
+        throw new GatewayVerbError(owner, 'EMAIL_SERVER_UNAVAILABLE', 503);
+    }
   }
   throw new GatewayVerbError(message, 'EMAIL_REQUEST_FAILED', 502);
 }

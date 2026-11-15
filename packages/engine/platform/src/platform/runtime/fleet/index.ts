@@ -25,6 +25,7 @@ export type {
   FleetQueryFilter,
   ProcessKillOptions,
   ProcessRegistry,
+  SteerOptions,
   SteerResult,
 } from './types.js';
 export type { ProcessRegistryDeps, RegistryTimers } from './registry.js';

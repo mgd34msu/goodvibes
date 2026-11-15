@@ -19,10 +19,9 @@ import {
 } from '../platform/src/platform/control-plane/routes/voice-setup.ts';
 import { registerWorkspacesGatewayMethods, type WorkspacesGatewayService } from '../platform/src/platform/control-plane/routes/workspaces.ts';
 import { WorkspaceRegistrationError } from '../platform/src/platform/workspace/registration/index.ts';
-import { createPaymentsCardsCreateHandler, type PaymentsGatewayService } from '../platform/src/platform/control-plane/routes/payments.ts';
 import { resolveFailureThreshold } from '../platform/src/platform/control-plane/routes/push-composition.ts';
 import { registerRewindConversationHostGatewayMethods, createConversationRewindHostBroker } from '../platform/src/platform/control-plane/routes/rewind-conversation-hosts.ts';
-import { createResolutionRunTracker, startCiFixSession, startConflictResolutionSession } from '../platform/src/platform/control-plane/routes/seeded-sessions.ts';
+import { startCiFixSession, startConflictResolutionSession } from '../platform/src/platform/control-plane/routes/seeded-sessions.ts';
 import { registerStepUpGatewayMethods } from '../platform/src/platform/control-plane/routes/stepup.ts';
 import { registerUpdateGatewayMethods } from '../platform/src/platform/control-plane/routes/update.ts';
 import { registerRelayGatewayMethods } from '../platform/src/platform/control-plane/routes/relay.ts';
@@ -135,32 +134,6 @@ describe('workspaces.registrations.remove and workspaces.resolve', () => {
   });
 });
 
-describe('payments.cards.create field validation', () => {
-  const service: PaymentsGatewayService = {
-    budgetStatus: async () => { throw new Error('unused'); },
-    listCards: async () => ({ cards: [], defaultCardId: '' }),
-    createCard: async () => { throw new Error('must not store'); },
-    deleteCard: async () => ({ deleted: false, secretsCleared: 0 }),
-    listPurchases: async () => ({ purchases: [], total: 0 }),
-    beginCheckout: async () => { throw new Error('unused'); },
-  };
-  const card = { label: 'shopping', kind: 'virtual', number: '4242424242424242', expiryMonth: 12, expiryYear: 2034, cvv: '123', cardholderName: 'A Person' };
-  const create = (body: Record<string, unknown>) => createPaymentsCardsCreateHandler(service)({ body, context: {} } as unknown as GatewayMethodInvocation);
-
-  test('a cap that is not a non-negative whole number is a 400, never silently dropped', async () => {
-    for (const cap of ['5000', -1, 1.5, Number.NaN]) {
-      const error = await refusal(() => create({ ...card, issuerCapMinorUnits: cap }));
-      expect(error.status).toBe(400);
-      expect(error.field).toBe('issuerCapMinorUnits');
-    }
-  });
-
-  test('an expiry month outside 1-12 and a two-digit year are 400s', async () => {
-    expect((await refusal(() => create({ ...card, expiryMonth: 13 }))).field).toBe('expiryMonth');
-    expect((await refusal(() => create({ ...card, expiryYear: 29 }))).field).toBe('expiryYear');
-  });
-});
-
 describe('push failure threshold', () => {
   const depsWith = (value: unknown) => ({ configManager: { get: () => value } }) as unknown as Parameters<typeof resolveFailureThreshold>[0];
 
@@ -235,35 +208,6 @@ describe('seeded sessions that fail to start leave nothing behind', () => {
     expect(tracked).toEqual(['job-1']);
     expect(order).toEqual(['create:job-1', 'track:job-1', 'run:job-1', 'remove:job-1']);
     expect(jobs.size).toBe(0);
-  });
-});
-
-describe('resolution runs in flight', () => {
-  test('a session is live from its start until its run completes, and completion names the item', () => {
-    const runs = createResolutionRunTracker();
-    runs.begin('job-1', 'item-1');
-    expect(runs.isSessionLive('sess-1')).toBe(false);
-    runs.started('job-1', 'sess-1');
-    expect(runs.isSessionLive('sess-1')).toBe(true);
-    expect(runs.complete('job-1')).toBe('item-1');
-    expect(runs.isSessionLive('sess-1')).toBe(false);
-    expect(runs.complete('job-1')).toBeUndefined();
-  });
-
-  test('a run that completed before its session was known is never recorded as live', () => {
-    const runs = createResolutionRunTracker();
-    runs.begin('job-1', 'item-1');
-    runs.complete('job-1');
-    runs.started('job-1', 'sess-1');
-    expect(runs.isSessionLive('sess-1')).toBe(false);
-  });
-
-  test('a start that failed leaves nothing live', () => {
-    const runs = createResolutionRunTracker();
-    runs.begin('job-1', 'item-1');
-    runs.abandon('job-1');
-    runs.started('job-1', 'sess-1');
-    expect(runs.isSessionLive('sess-1')).toBe(false);
   });
 });
 

@@ -7,8 +7,6 @@ import { CheckoutRecovery } from '../platform/src/platform/payments/checkout-rec
 import { BudgetLedger } from '../platform/src/platform/payments/budget.js';
 import { CheckoutRegistry, MemoryCheckoutJournal, type CheckoutPhase, type InFlightCheckout } from '../platform/src/platform/payments/checkout-registry.js';
 import { UntrustedContentLedger } from '../platform/src/platform/security/untrusted-content.js';
-import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.ts';
-import { registerPaymentsGatewayMethods } from '../platform/src/platform/control-plane/routes/payments.js';
 import { unsafeOwnerSuppliedTextForTests } from '../platform/src/platform/payments/types.js';
 import type { CurrencyCode } from '../platform/src/platform/payments/types.js';
 
@@ -326,101 +324,9 @@ describe('recoverInterruptedCheckouts', () => {
   });
 });
 
-// ─── Registration wiring ────────────────────────────────────────────────────
+// ─── Boot recovery ──────────────────────────────────────────────────────────
 
-describe('registerPaymentsGatewayMethods wiring', () => {
-  const VERB = 'payments.checkout.begin';
-
-  function stubVerbs() {
-    return {
-      async budgetStatus() { return {} as never; },
-      async listCards() { return { cards: [], defaultCardId: '' } as never; },
-      async createCard() { return {} as never; },
-      async deleteCard() { return {} as never; },
-      async listPurchases() { return { purchases: [], total: 0 } as never; },
-      async beginCheckout() { return {} as never; },
-    };
-  }
-
-  test('no verb serves until a slow sweep completes; a begin mid-sweep finds no handler', async () => {
-    let releaseSweep!: () => void;
-    const gate = new Promise<void>((resolve) => { releaseSweep = resolve; });
-    const service = {
-      ...stubVerbs(),
-      recoverInterruptedCheckouts: async () => { await gate; return []; },
-    };
-    const catalog = new GatewayMethodCatalog();
-    const registration = registerPaymentsGatewayMethods(catalog, service as never);
-
-    // Mid-sweep: the descriptor exists but carries no handler, so an arriving
-    // begin is refused as not-invokable rather than racing the sweep.
-    expect(catalog.get(VERB)).toBeDefined();
-    expect(catalog.hasHandler(VERB)).toBe(false);
-
-    releaseSweep();
-    await registration;
-    expect(catalog.hasHandler(VERB)).toBe(true);
-  });
-
-  test('onRecoveryFailure catches a rejected sweep, and the verbs still attach', async () => {
-    const failures: unknown[] = [];
-    const service = {
-      ...stubVerbs(),
-      recoverInterruptedCheckouts: async () => { throw new Error('sweep rejected'); },
-    };
-    const catalog = new GatewayMethodCatalog();
-    await registerPaymentsGatewayMethods(catalog, service as never, {
-      onRecoveryFailure: (error) => failures.push(error),
-    });
-    expect(failures).toHaveLength(1);
-    expect((failures[0] as Error).message).toBe('sweep rejected');
-    expect(catalog.hasHandler(VERB)).toBe(true);
-  });
-
-  test('onRecoveryFailure catches a SYNCHRONOUS throw, and the verbs still attach', async () => {
-    const failures: unknown[] = [];
-    const service = {
-      ...stubVerbs(),
-      recoverInterruptedCheckouts: () => { throw new Error('sync throw'); },
-    };
-    const catalog = new GatewayMethodCatalog();
-    await registerPaymentsGatewayMethods(catalog, service as never, {
-      onRecoveryFailure: (error) => failures.push(error),
-    });
-    expect(failures).toHaveLength(1);
-    expect((failures[0] as Error).message).toBe('sync throw');
-    expect(catalog.hasHandler(VERB)).toBe(true);
-  });
-
-  test('a legacy double without the recovery method registers unchanged', async () => {
-    const failures: unknown[] = [];
-    const settled: unknown[] = [];
-    const catalog = new GatewayMethodCatalog();
-    await registerPaymentsGatewayMethods(catalog, stubVerbs() as never, {
-      onRecoveryFailure: (error) => failures.push(error),
-      onRecoverySettled: (results) => settled.push(results),
-    });
-    expect(catalog.hasHandler(VERB)).toBe(true);
-    expect(failures).toHaveLength(0);
-    expect(settled).toHaveLength(0);
-  });
-
-  test('settlements reach onRecoverySettled for the audit record', async () => {
-    const settled: unknown[][] = [];
-    const journal = new MemoryCheckoutJournal();
-    await journal.put(inFlight('deciding', { purchaseId: 'pur-audit' }));
-    const notices: { kind: string; message: string }[] = [];
-    const service = buildService([], { journal, notices });
-    const catalog = new GatewayMethodCatalog();
-    await registerPaymentsGatewayMethods(catalog, service as never, {
-      onRecoverySettled: (sweep) => {
-        settled.push([...(sweep as { settlements: readonly unknown[] }).settlements]);
-      },
-    });
-    expect(settled).toHaveLength(1);
-    expect((settled[0]![0] as { purchaseId: string }).purchaseId).toBe('pur-audit');
-  });
-
+describe('boot recovery', () => {
   test('a non-leader boot skips the sweep and reports the skip; a leader boot sweeps', async () => {
     const journal = new MemoryCheckoutJournal();
     await journal.put(inFlight('deciding', { purchaseId: 'pur-led' }));
@@ -446,13 +352,11 @@ describe('registerPaymentsGatewayMethods wiring', () => {
     const journal = new MemoryCheckoutJournal();
     await journal.put(inFlight('deciding', { purchaseId: 'pur-slow' }));
     const service = buildService([], { journal, deliverNever: true, recoveryIoTimeoutMs: 50 });
-    const catalog = new GatewayMethodCatalog();
 
-    await registerPaymentsGatewayMethods(catalog, service as never);
-    expect(catalog.hasHandler('payments.checkout.begin')).toBe(true);
+    await service.recoverInterruptedCheckouts();
 
     // The notice never landed, so the record is kept for a later sweep to
-    // settle and tell; the verbs attach regardless.
+    // settle and tell.
     expect(await journal.list()).toHaveLength(1);
   });
 

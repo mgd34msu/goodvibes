@@ -29,7 +29,8 @@ import {
   type ConversationRewindRequestKind,
 } from '../../rewind/conversation-host-broker.js';
 import { GatewayVerbError } from './gateway-verb-error.js';
-import { readInvocationParams } from './invocation-params.js';
+import { readInvocationParams, requireString } from './invocation-params.js';
+import { attachHandler } from './attach-handler.js';
 
 /** Build the broker the verbs and the rewind service share. */
 export function createConversationRewindHostBroker(
@@ -38,13 +39,6 @@ export function createConversationRewindHostBroker(
   return new ConversationRewindHostBroker(options);
 }
 
-function requireString(value: unknown, field: string): string {
-  const text = typeof value === 'string' ? value.trim() : '';
-  if (!text) {
-    throw new GatewayVerbError(`Missing required field: ${field}`, 'INVALID_ARGUMENT', 400, field);
-  }
-  return text;
-}
 
 function optionalNumber(value: unknown, field: string): number | undefined {
   if (value === undefined || value === null) return undefined;
@@ -62,30 +56,18 @@ function requireCount(value: unknown, field: string): number {
 }
 
 /**
- * Who registered each host, per broker. A host answers rewind questions with
- * counts and a snapshot id the daemon trusts, so only the principal that holds
- * a host may renew it, poll it, answer for it or release it, and a second
- * principal may not take its session over by registering without a hostId.
- * Kept here, not in the broker, because the broker has no notion of a caller.
+ * A host answers rewind questions with counts and a snapshot id the daemon
+ * trusts, so only the principal that registered it may renew it, poll it,
+ * answer for it or release it. The broker records who registered each host
+ * and refuses a second principal's claim on a hosted session itself.
  */
-const hostOwners = new WeakMap<ConversationRewindHostBroker, Map<string, string>>();
-
-function ownersOf(broker: ConversationRewindHostBroker): Map<string, string> {
-  let owners = hostOwners.get(broker);
-  if (!owners) {
-    owners = new Map();
-    hostOwners.set(broker, owners);
-  }
-  return owners;
-}
-
 function callerKey(invocation: GatewayMethodInvocation): string | undefined {
   const { principalId, principalKind } = invocation.context;
   return principalId ? `${principalKind ?? 'unknown'}:${principalId}` : undefined;
 }
 
 function assertHostOwner(broker: ConversationRewindHostBroker, hostId: string, invocation: GatewayMethodInvocation, what: string): void {
-  const owner = ownersOf(broker).get(hostId);
+  const owner = broker.hostPrincipal(hostId);
   if (owner !== undefined && owner !== callerKey(invocation)) {
     throw new GatewayVerbError(
       `Host ${JSON.stringify(hostId)} was registered by a different principal, so this caller cannot ${what} it. Register this surface's own host for the session instead.`,
@@ -99,13 +81,14 @@ function assertHostOwner(broker: ConversationRewindHostBroker, hostId: string, i
 /**
  * Every broker refusal is about the caller's input, a host id that is not the
  * host, a request that is no longer waiting, so each carries the field it is
- * about and a 409: the call was well-formed, the world had moved on. The code
+ * about and a 409: the call was well-formed, the world had moved on. A session
+ * another principal hosts is a 403: waiting does not make it this caller's. The code
  * is the broker's, so a surface told its session was taken over can stop
  * without reading the sentence.
  */
 function asVerbError(error: unknown): never {
   if (error instanceof ConversationRewindHostError) {
-    throw new GatewayVerbError(error.message, error.code, 409, error.field);
+    throw new GatewayVerbError(error.message, error.code, error.refusal === 'held-by-another-principal' ? 403 : 409, error.field);
   }
   throw error;
 }
@@ -149,7 +132,7 @@ function readAnswer(
   return {
     kind: 'rewind',
     droppedMessages: requireCount(params.droppedMessages, 'droppedMessages'),
-    undoSnapshotId: requireString(params.undoSnapshotId, 'undoSnapshotId'),
+    undoSnapshotId: requireString(params, 'undoSnapshotId'),
     ...(undoExpiresAfter ? { undoExpiresAfter } : {}),
   };
 }
@@ -157,29 +140,11 @@ function readAnswer(
 export function createConversationHostRegisterHandler(broker: ConversationRewindHostBroker): GatewayMethodHandler {
   return (invocation) => {
     const params = readInvocationParams(invocation);
-    const sessionId = requireString(params.sessionId, 'sessionId');
+    const sessionId = requireString(params, 'sessionId');
     const hostId = typeof params.hostId === 'string' ? params.hostId.trim() : '';
     const label = typeof params.label === 'string' ? params.label.trim() : '';
     const leaseMs = optionalNumber(params.leaseMs, 'leaseMs');
-    const owners = ownersOf(broker);
-    const held = broker.listHosts();
-    for (const hostIdKnown of [...owners.keys()]) {
-      if (!held.some((host) => host.hostId === hostIdKnown)) owners.delete(hostIdKnown);
-    }
-    if (hostId) {
-      assertHostOwner(broker, hostId, invocation, 'renew');
-    } else {
-      const current = held.find((host) => host.sessionId === sessionId);
-      const owner = current ? owners.get(current.hostId) : undefined;
-      if (current && owner !== undefined && owner !== callerKey(invocation)) {
-        throw new GatewayVerbError(
-          `Session ${JSON.stringify(sessionId)} is already served by ${JSON.stringify(current.label)}, registered by a different principal, so it was not replaced. Wait for its lease to lapse, or have that principal release it.`,
-          'FORBIDDEN',
-          403,
-          'sessionId',
-        );
-      }
-    }
+    if (hostId) assertHostOwner(broker, hostId, invocation, 'renew');
     try {
       const caller = callerKey(invocation);
       const host = broker.registerHost({
@@ -189,7 +154,6 @@ export function createConversationHostRegisterHandler(broker: ConversationRewind
         ...(label ? { label } : {}),
         ...(leaseMs === undefined ? {} : { leaseMs }),
       });
-      if (caller !== undefined) owners.set(host.hostId, caller);
       return {
         host,
         renewed: hostId.length > 0,
@@ -205,8 +169,8 @@ export function createConversationHostRegisterHandler(broker: ConversationRewind
 export function createConversationHostReleaseHandler(broker: ConversationRewindHostBroker): GatewayMethodHandler {
   return (invocation) => {
     const params = readInvocationParams(invocation);
-    const sessionId = requireString(params.sessionId, 'sessionId');
-    const hostId = requireString(params.hostId, 'hostId');
+    const sessionId = requireString(params, 'sessionId');
+    const hostId = requireString(params, 'hostId');
     assertHostOwner(broker, hostId, invocation, 'release');
     try {
       return { released: true, host: broker.releaseHost({ sessionId, hostId }) };
@@ -223,7 +187,7 @@ export function createConversationHostsListHandler(broker: ConversationRewindHos
 export function createConversationRequestsTakeHandler(broker: ConversationRewindHostBroker): GatewayMethodHandler {
   return async (invocation) => {
     const params = readInvocationParams(invocation);
-    const hostId = requireString(params.hostId, 'hostId');
+    const hostId = requireString(params, 'hostId');
     assertHostOwner(broker, hostId, invocation, 'poll');
     const waitMs = optionalNumber(params.waitMs, 'waitMs');
     const limit = optionalNumber(params.limit, 'limit');
@@ -243,8 +207,8 @@ export function createConversationRequestsTakeHandler(broker: ConversationRewind
 export function createConversationRequestsAnswerHandler(broker: ConversationRewindHostBroker): GatewayMethodHandler {
   return (invocation) => {
     const params = readInvocationParams(invocation);
-    const hostId = requireString(params.hostId, 'hostId');
-    const requestId = requireString(params.requestId, 'requestId');
+    const hostId = requireString(params, 'hostId');
+    const requestId = requireString(params, 'requestId');
     assertHostOwner(broker, hostId, invocation, 'answer for');
     // Which request this is, and whether this surface may answer it at all,
     // is settled before the payload is read, so a caller answering something
@@ -270,10 +234,7 @@ export function registerRewindConversationHostGatewayMethods(
   catalog: GatewayMethodCatalog,
   broker: ConversationRewindHostBroker,
 ): void {
-  const attach = (id: string, handler: GatewayMethodHandler): void => {
-    const descriptor = catalog.get(id);
-    if (descriptor) catalog.register(descriptor, handler, { replace: true });
-  };
+  const attach = (id: string, handler: GatewayMethodHandler): void => { attachHandler(catalog, id, handler); };
   attach('rewind.conversation.host.register', createConversationHostRegisterHandler(broker));
   attach('rewind.conversation.host.release', createConversationHostReleaseHandler(broker));
   attach('rewind.conversation.hosts.list', createConversationHostsListHandler(broker));

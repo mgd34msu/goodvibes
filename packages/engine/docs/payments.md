@@ -40,7 +40,7 @@ Concretely:
 | Layer | Owns |
 |---|---|
 | `packages/engine/platform/src/platform/payments/*` | Budget arithmetic, the decision order, both window state machines, the shipping ladder, message rendering, the audit ledger, the taint gate. All pure and injectable. |
-| `packages/engine/platform/src/platform/control-plane/` (`method-catalog-payments.ts`, `routes/payments.ts`) | The `payments.*` operator methods the daemon serves. |
+| `packages/engine/platform/src/platform/control-plane/method-catalog-payments.ts`, `packages/engine/platform/src/platform/payments/host/register.ts` | The `payments.*` operator methods and the one registrar that attaches their handlers in the daemon. |
 | `packages/engine/platform/src/platform/config/schema-domain-payments.ts` | The config schema, defaults, validation. |
 | TUI / agent / webui | Settings forms, the approval and veto prompts, the purchase list. No decision logic. |
 

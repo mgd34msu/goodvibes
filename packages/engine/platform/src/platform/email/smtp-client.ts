@@ -77,6 +77,38 @@ export class SmtpDeliveryUnconfirmedError extends Error {
   }
 }
 
+/**
+ * A message field the caller supplied cannot go on the wire as given. Thrown
+ * before anything is sent, so the send can be corrected and made again.
+ */
+export class EmailInputError extends Error {
+  /** The input field at fault, as the caller spells it (`to`, `subject`, `inReplyTo`). */
+  readonly field: string;
+  constructor(message: string, field: string) {
+    super(message);
+    this.name = 'EmailInputError';
+    this.field = field;
+  }
+}
+
+/**
+ * The SMTP server answered a step with a reply other than the one that step
+ * needs. `stage` names the step (never the line sent: during AUTH that is the
+ * encoded credential) and `code` is the server's reply code, so a caller
+ * decides by number: 535 at an AUTH stage is a refused sign-in, 5xx at
+ * RCPT TO a refused recipient, 4xx a temporary condition.
+ */
+export class SmtpReplyError extends Error {
+  readonly stage: string;
+  readonly code: number;
+  constructor(stage: string, code: number, lines: readonly string[]) {
+    super(`SMTP ${stage} failed: ${lines.join(' | ')}`);
+    this.name = 'SmtpReplyError';
+    this.stage = stage;
+    this.code = code;
+  }
+}
+
 /** What a completed send is afterwards identifiable by. */
 export interface SmtpSendResult {
   /**
@@ -115,32 +147,37 @@ const CONTROL_CHAR_RE = /[\x00-\x1f\x7f-\x9f]/;
  * Rejects: control characters (\r, \n, any C0 or C1), spaces, angle brackets,
  * comma-separated lists. Only a single bare address is accepted.
  *
- * @throws Error with a plain-language message on invalid input.
+ * @throws EmailInputError with a plain-language message on invalid input.
  */
 export function validateSmtpAddress(address: string, field: string): void {
   if (CONTROL_CHAR_RE.test(address)) {
-    throw new Error(
+    throw new EmailInputError(
       `Invalid ${field}: address must not contain control characters (CR, LF, etc.).`,
+      field,
     );
   }
   if (address.includes(' ') || address.includes('\t')) {
-    throw new Error(
+    throw new EmailInputError(
       `Invalid ${field}: address must be a single bare address with no spaces or tabs.`,
+      field,
     );
   }
   if (address.includes('<') || address.includes('>')) {
-    throw new Error(
+    throw new EmailInputError(
       `Invalid ${field}: address must be a single bare address without angle brackets.`,
+      field,
     );
   }
   if (address.includes(',')) {
-    throw new Error(
+    throw new EmailInputError(
       `Invalid ${field}: only one address is allowed per field (no comma-separated lists).`,
+      field,
     );
   }
   if (!address.includes('@')) {
-    throw new Error(
+    throw new EmailInputError(
       `Invalid ${field}: "${address}" does not look like an email address (missing @).`,
+      field,
     );
   }
 }
@@ -149,12 +186,13 @@ export function validateSmtpAddress(address: string, field: string): void {
  * Validate an SMTP message Subject header value.
  * Rejects control characters (\r, \n, etc.) that could split headers.
  *
- * @throws Error with a plain-language message on invalid input.
+ * @throws EmailInputError with a plain-language message on invalid input.
  */
 export function validateSmtpSubject(subject: string): void {
   if (CONTROL_CHAR_RE.test(subject)) {
-    throw new Error(
+    throw new EmailInputError(
       'Invalid subject: subject must not contain control characters (CR, LF, etc.).',
+      'subject',
     );
   }
 }
@@ -165,8 +203,9 @@ export function validateSmtpSubject(subject: string): void {
  */
 export function validateSmtpThreadHeader(value: string, field: 'inReplyTo' | 'references'): void {
   if (CONTROL_CHAR_RE.test(value)) {
-    throw new Error(
+    throw new EmailInputError(
       `Invalid ${field}: ${field} must not contain control characters (CR, LF, etc.).`,
+      field,
     );
   }
 }
@@ -200,7 +239,7 @@ function generateMessageId(fromAddress: string, smtpHostname: string, localPart?
   const fromDomain = at === -1 ? '' : fromAddress.slice(at + 1).trim();
   const domain = fromDomain.length > 0 ? fromDomain : smtpHostname;
   if (localPart !== undefined && !MESSAGE_ID_LOCAL_PART.test(localPart)) {
-    throw new Error('A chosen Message-ID must be 8 to 160 letters, digits, dots, underscores or hyphens.');
+    throw new EmailInputError('A chosen Message-ID must be 8 to 160 letters, digits, dots, underscores or hyphens.', 'clientSendId');
   }
   const unique = localPart ?? `${Date.now().toString(36)}.${randomBytes(12).toString('hex')}`;
   return `<${unique}@${domain}>`;
@@ -311,7 +350,7 @@ class SmtpSession {
     await this.send(line);
     const resp = await this.readResponse();
     if (resp.code !== expectCode) {
-      throw new Error(`SMTP ${label} failed: ${resp.lines.join(' | ')}`);
+      throw new SmtpReplyError(label, resp.code, resp.lines);
     }
     return resp;
   }
@@ -405,7 +444,7 @@ export class SmtpClient {
         } catch (error) {
           throw new SmtpDeliveryUnconfirmedError(error);
         }
-        if (dataResp.code !== 250) throw new Error(`SMTP DATA rejected: ${dataResp.lines.join(' | ')}`);
+        if (dataResp.code !== 250) throw new SmtpReplyError('message', dataResp.code, dataResp.lines);
         // The final response proves the server accepted this message.
         return { messageId, sentAt: new Date().toISOString() };
       });
@@ -431,7 +470,7 @@ export class SmtpClient {
   ): Promise<{ capabilities: readonly string[] }> {
     const greeting = await session.readResponse();
     if (greeting.code !== 220) {
-      throw new Error(`SMTP unexpected greeting: ${greeting.lines.join(' | ')}`);
+      throw new SmtpReplyError('greeting', greeting.code, greeting.lines);
     }
     assertDeliveryCurrent(lifetime);
     const ehlo = await session.cmd(`EHLO ${hostname}`, 250, 'EHLO');

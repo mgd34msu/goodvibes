@@ -16,10 +16,8 @@ export type {
   GatewayMethodHandler,
 } from '@goodvibes-jev/engine/platform/platform/control-plane';
 
-// The platform's own `payments.*` route module: the registrar and the service seam
-// it dispatches to. The engine's payment host implementation owns the extra
-// card, purchase and checkout handlers; product composition supplies its stores.
-export { registerPaymentsGatewayMethods } from '@goodvibes-jev/engine/platform/platform/control-plane';
+// The `payments.*` wire shapes. The engine's payment host is the one registrar;
+// product composition supplies its stores.
 export type { PaymentsGatewayService, PaymentPurchaseView } from '@goodvibes-jev/engine/platform/platform/control-plane';
 
 // The browser-checkout seam a daemon composition receives through

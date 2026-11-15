@@ -220,11 +220,14 @@ export const FLEET_OBSERVED_STEER_INPUT_SCHEMA = objectSchema({
   // The observed node id (e.g. `observed:3289628`).
   id: STRING_SCHEMA,
   text: STRING_SCHEMA,
+  // Press Enter after typing the text; absent or false types it only.
+  submit: BOOLEAN_SCHEMA,
 }, ['id', 'text']);
 
 export const FLEET_OBSERVED_STEER_OUTPUT_SCHEMA = objectSchema({
-  // queued:true, the three-send recipe reached the pane; queued:false carries
-  // the honest reason (no channel, or a send-keys failure).
+  // queued:true, the text (and Enter, when submitted) reached the pane;
+  // queued:false carries the honest reason (declined, no channel, or a
+  // send-keys failure) and nothing was sent.
   queued: BOOLEAN_SCHEMA,
   messageId: STRING_SCHEMA,
   reason: STRING_SCHEMA,

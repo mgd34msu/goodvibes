@@ -215,7 +215,6 @@ export type {
   DaemonBrowserGatewayService,
 } from './routes/browser-composition.js';
 
-export { registerPaymentsGatewayMethods } from './routes/payments.js';
 export type {
   PaymentsGatewayService,
   PaymentPurchaseView,

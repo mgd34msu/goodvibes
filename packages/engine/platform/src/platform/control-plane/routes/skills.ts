@@ -16,7 +16,8 @@
 import type { GatewayMethodCatalog } from '../method-catalog.js';
 import type { GatewayMethodHandler } from '../method-catalog-shared.js';
 import { GatewayVerbError } from './gateway-verb-error.js';
-import { readInvocationParams } from './invocation-params.js';
+import { readInvocationParams, requireString } from './invocation-params.js';
+import { attachHandler } from './attach-handler.js';
 import type { SkillFrontmatterValue } from '../../skills/index.js';
 import { SkillService, SkillServiceError } from '../../skills/index.js';
 
@@ -36,12 +37,6 @@ function rethrowAsVerbError(error: unknown): never {
   throw error;
 }
 
-function requireString(value: unknown, field: string): string {
-  if (typeof value !== 'string' || value.trim().length === 0) {
-    throw new GatewayVerbError(`${field} is required`, 'INVALID_ARGUMENT', 400, field);
-  }
-  return value;
-}
 
 /** Coerce an untyped wire value into the frontmatter metadata shape (string / string[] values only). */
 function readMetadata(value: unknown): Readonly<Record<string, SkillFrontmatterValue>> | undefined {
@@ -69,7 +64,7 @@ function createSkillsListHandler(service: SkillsGatewayService): GatewayMethodHa
 function createSkillsGetHandler(service: SkillsGatewayService): GatewayMethodHandler {
   return async (invocation) => {
     const params = readInvocationParams(invocation);
-    const name = requireString(params.name, 'name');
+    const name = requireString(params, 'name');
     try {
       return { skill: await service.get(name) };
     } catch (error) {
@@ -83,8 +78,8 @@ function createSkillsCreateHandler(service: SkillsGatewayService): GatewayMethod
     const params = readInvocationParams(invocation);
     try {
       const skill = await service.create({
-        name: requireString(params.name, 'name'),
-        description: requireString(params.description, 'description'),
+        name: requireString(params, 'name'),
+        description: requireString(params, 'description'),
         body: typeof params.body === 'string' ? params.body : '',
         metadata: readMetadata(params.metadata),
       });
@@ -98,7 +93,7 @@ function createSkillsCreateHandler(service: SkillsGatewayService): GatewayMethod
 function createSkillsUpdateHandler(service: SkillsGatewayService): GatewayMethodHandler {
   return async (invocation) => {
     const params = readInvocationParams(invocation);
-    const name = requireString(params.name, 'name');
+    const name = requireString(params, 'name');
     try {
       const skill = await service.update(name, {
         description: typeof params.description === 'string' ? params.description : undefined,
@@ -115,7 +110,7 @@ function createSkillsUpdateHandler(service: SkillsGatewayService): GatewayMethod
 function createSkillsDeleteHandler(service: SkillsGatewayService): GatewayMethodHandler {
   return async (invocation) => {
     const params = readInvocationParams(invocation);
-    const name = requireString(params.name, 'name');
+    const name = requireString(params, 'name');
     try {
       return await service.delete(name);
     } catch (error) {
@@ -126,19 +121,13 @@ function createSkillsDeleteHandler(service: SkillsGatewayService): GatewayMethod
 
 /**
  * Attach the skills.* handlers to the descriptors already registered (without a
- * handler) from ../method-catalog-skills.ts. A missing descriptor
- * (contract/registration drift) is a silent no-op rather than a throw,
- * construction must never fail because a wire verb failed to register; the
- * operator-contract gates catch a real drift.
+ * handler) from ../method-catalog-skills.ts. A missing descriptor is logged and
+ * skipped: construction never fails because a wire verb failed to register.
  */
 export function registerSkillsGatewayMethods(catalog: GatewayMethodCatalog, service: SkillsGatewayService): void {
-  const attach = (id: string, handler: GatewayMethodHandler): void => {
-    const descriptor = catalog.get(id);
-    if (descriptor) catalog.register(descriptor, handler, { replace: true });
-  };
-  attach('skills.list', createSkillsListHandler(service));
-  attach('skills.get', createSkillsGetHandler(service));
-  attach('skills.create', createSkillsCreateHandler(service));
-  attach('skills.update', createSkillsUpdateHandler(service));
-  attach('skills.delete', createSkillsDeleteHandler(service));
+  attachHandler(catalog, 'skills.list', createSkillsListHandler(service));
+  attachHandler(catalog, 'skills.get', createSkillsGetHandler(service));
+  attachHandler(catalog, 'skills.create', createSkillsCreateHandler(service));
+  attachHandler(catalog, 'skills.update', createSkillsUpdateHandler(service));
+  attachHandler(catalog, 'skills.delete', createSkillsDeleteHandler(service));
 }

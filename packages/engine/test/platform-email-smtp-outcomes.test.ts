@@ -137,3 +137,17 @@ describe('the SMTP TLS connections', () => {
     expect(tlsCalls[0]?.['rejectUnauthorized']).toBe(true);
   });
 });
+
+describe('the email verbs answer a send failure by its type', () => {
+  test('an unconfirmed send is not answered with a status a retry policy repeats', async () => {
+    const { createServiceBackedGateway } = await import('../platform/src/platform/control-plane/routes/email-composition.ts');
+    const { TRANSIENT_STATUS_CODES } = await import('../errors/src/failure-transience.ts');
+    const service = {
+      sendMail: async () => { throw new SmtpDeliveryUnconfirmedError(new Error('SMTP read timeout')); },
+    } as unknown as import('../platform/src/platform/email/email-service.ts').EmailService;
+    const gateway = createServiceBackedGateway(service);
+    const error = await gateway.send({ to: 'friend@example.test', subject: 's', body: 'b' }).catch((caught: unknown) => caught);
+    expect(error).toMatchObject({ code: 'EMAIL_DELIVERY_UNCONFIRMED' });
+    expect(TRANSIENT_STATUS_CODES).not.toContain((error as { status: number }).status);
+  });
+});

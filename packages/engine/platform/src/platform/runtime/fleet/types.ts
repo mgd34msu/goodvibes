@@ -405,6 +405,12 @@ export interface ProcessKillOptions {
   readonly cascade?: boolean | undefined;
 }
 
+/** How `ProcessRegistry.steer()` delivers text where the channel offers a choice. */
+export interface SteerOptions {
+  /** For an observed foreign session: press Enter after typing the text. Default false. */
+  readonly submit?: boolean | undefined;
+}
+
 /**
  * Result of `ProcessRegistry.steer()`.
  *
@@ -466,9 +472,11 @@ export interface ProcessRegistry {
    * round / turn top), never mid-token. Honest refusal (`queued: false`) for
    * anything that cannot take mid-run input: terminal nodes, non-agent kinds,
    * a contract or contract group (steer a unit instead), and any target when
-   * the registry has no `messageBus` dep configured.
+   * the registry has no `messageBus` dep configured. `options.submit` applies
+   * to an observed foreign session only: its text is typed into the pane and
+   * submitted with Enter only when it is true.
    */
-  steer(id: string, text: string): SteerResult;
+  steer(id: string, text: string, options?: SteerOptions): SteerResult;
   /** Stop the tick, detach runtime-bus taps, drop all listeners. Idempotent. */
   dispose(): void;
 }

@@ -23,7 +23,8 @@
  */
 import type { GatewayMethodCatalog } from '../method-catalog.js';
 import type { GatewayMethodHandler } from '../method-catalog-shared.js';
-import { readInvocationParams } from './invocation-params.js';
+import { readInvocationParams, requireString } from './invocation-params.js';
+import { attachHandler } from './attach-handler.js';
 import { GatewayVerbError } from './gateway-verb-error.js';
 import {
   DEVICE_CAPABILITY_CATALOG,
@@ -45,13 +46,6 @@ export interface DevicesGatewayService {
   readonly artifacts: Pick<DeviceCaptureArtifactStore, 'list' | 'read' | 'getPolicy' | 'pathFor'>;
 }
 
-function requireString(value: unknown, field: string): string {
-  const text = typeof value === 'string' ? value.trim() : '';
-  if (!text) {
-    throw new GatewayVerbError(`Missing required field: ${field}`, 'INVALID_ARGUMENT', 400, field);
-  }
-  return text;
-}
 
 function optionalRecord(value: unknown, field: string): Record<string, unknown> {
   if (value === undefined || value === null) return {};
@@ -100,9 +94,9 @@ function describeArtifact(
 export function createDevicesCapabilityRequestHandler(service: DevicesGatewayService): GatewayMethodHandler {
   return async (invocation) => {
     const params = readInvocationParams(invocation);
-    const nodeId = requireString(params.nodeId, 'nodeId');
-    const capabilityId = requireString(params.capabilityId, 'capabilityId');
-    const reason = requireString(params.reason, 'reason');
+    const nodeId = requireString(params, 'nodeId');
+    const capabilityId = requireString(params, 'capabilityId');
+    const reason = requireString(params, 'reason');
     const capabilityInput = optionalRecord(params.input, 'input');
     const timeoutMs = optionalPositiveNumber(params.timeoutMs, 'timeoutMs');
     const sessionId = typeof params.sessionId === 'string' ? params.sessionId.trim() : '';
@@ -171,7 +165,7 @@ const ARTIFACT_READ_REFUSALS: Readonly<Record<string, string>> = {
 export function createDevicesArtifactsReadHandler(service: DevicesGatewayService): GatewayMethodHandler {
   return async (invocation) => {
     const params = readInvocationParams(invocation);
-    const artifactId = requireString(params.artifactId, 'artifactId');
+    const artifactId = requireString(params, 'artifactId');
     const result = await service.artifacts.read(artifactId);
     if (!result.ok) {
       throw new GatewayVerbError(
@@ -338,10 +332,7 @@ export function createDevicesHousekeepingRunHandler(service: DevicesGatewayServi
 
 /** Attach the device handlers to their registered descriptors (missing = no-op). */
 export function registerDevicesGatewayMethods(catalog: GatewayMethodCatalog, service: DevicesGatewayService): void {
-  const attach = (id: string, handler: GatewayMethodHandler): void => {
-    const descriptor = catalog.get(id);
-    if (descriptor) catalog.register(descriptor, handler, { replace: true });
-  };
+  const attach = (id: string, handler: GatewayMethodHandler): void => { attachHandler(catalog, id, handler); };
   attach('devices.nodes.list', createDevicesNodesListHandler(service));
   attach('devices.capability.request', createDevicesCapabilityRequestHandler(service));
   attach('devices.artifacts.list', createDevicesArtifactsListHandler(service));

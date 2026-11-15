@@ -8,7 +8,8 @@
 import type { GatewayMethodCatalog } from '../method-catalog.js';
 import type { GatewayMethodHandler } from '../method-catalog-shared.js';
 import { GatewayVerbError } from './gateway-verb-error.js';
-import { readInvocationParams } from './invocation-params.js';
+import { readInvocationParams, requireString } from './invocation-params.js';
+import { attachHandler } from './attach-handler.js';
 import { CiWatchError, type CiWatchService } from '../../ci-watch/index.js';
 
 export type CiWatchGatewayService = Pick<
@@ -28,12 +29,6 @@ function rethrow(error: unknown): never {
   throw error;
 }
 
-function requireString(value: unknown, field: string): string {
-  if (typeof value !== 'string' || value.trim().length === 0) {
-    throw new GatewayVerbError(`${field} is required`, 'INVALID_ARGUMENT', 400, field);
-  }
-  return value;
-}
 
 function optionalString(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim().length > 0 ? value : undefined;
@@ -60,7 +55,7 @@ function createStatusHandler(service: CiWatchGatewayService): GatewayMethodHandl
     const prNumber = optionalNumber(params.prNumber, 'prNumber');
     try {
       const report = await service.status({
-        repo: requireString(params.repo, 'repo'),
+        repo: requireString(params, 'repo'),
         ...(optionalString(params.ref) ? { ref: optionalString(params.ref)! } : {}),
         ...(prNumber !== undefined ? { prNumber } : {}),
       });
@@ -81,10 +76,10 @@ function createCreateHandler(service: CiWatchGatewayService): GatewayMethodHandl
     const prNumber = optionalNumber(params.prNumber, 'prNumber');
     try {
       const watch = await service.createWatch({
-        repo: requireString(params.repo, 'repo'),
+        repo: requireString(params, 'repo'),
         ...(optionalString(params.ref) ? { ref: optionalString(params.ref)! } : {}),
         ...(prNumber !== undefined ? { prNumber } : {}),
-        deliveryChannel: requireString(params.deliveryChannel, 'deliveryChannel'),
+        deliveryChannel: requireString(params, 'deliveryChannel'),
         triggerFixSession: params.triggerFixSession === true,
       });
       return { watch };
@@ -97,7 +92,7 @@ function createCreateHandler(service: CiWatchGatewayService): GatewayMethodHandl
 function createDeleteHandler(service: CiWatchGatewayService): GatewayMethodHandler {
   return async (invocation) => {
     const params = readInvocationParams(invocation);
-    const watchId = requireString(params.watchId, 'watchId');
+    const watchId = requireString(params, 'watchId');
     try {
       return { watchId, deleted: await service.deleteWatch(watchId) };
     } catch (error) {
@@ -109,7 +104,7 @@ function createDeleteHandler(service: CiWatchGatewayService): GatewayMethodHandl
 function createRunHandler(service: CiWatchGatewayService): GatewayMethodHandler {
   return async (invocation) => {
     const params = readInvocationParams(invocation);
-    const watchId = requireString(params.watchId, 'watchId');
+    const watchId = requireString(params, 'watchId');
     try {
       const result = await service.checkWatch(watchId);
       return {
@@ -129,10 +124,7 @@ function createRunHandler(service: CiWatchGatewayService): GatewayMethodHandler 
 }
 
 export function registerCiGatewayMethods(catalog: GatewayMethodCatalog, service: CiWatchGatewayService): void {
-  const attach = (id: string, handler: GatewayMethodHandler): void => {
-    const descriptor = catalog.get(id);
-    if (descriptor) catalog.register(descriptor, handler, { replace: true });
-  };
+  const attach = (id: string, handler: GatewayMethodHandler): void => { attachHandler(catalog, id, handler); };
   attach('ci.status', createStatusHandler(service));
   attach('ci.watches.list', createListHandler(service));
   attach('ci.watches.create', createCreateHandler(service));

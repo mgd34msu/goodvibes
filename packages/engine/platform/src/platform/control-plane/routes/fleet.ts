@@ -37,7 +37,10 @@ import type { AttemptJudgment, AttemptPickResult, HeldMergeGroup } from '../../o
 import { AttemptError } from '../../orchestration/attempts.js';
 import { paginateItems } from '@goodvibes-jev/engine/daemon-api';
 import { GatewayVerbError } from './gateway-verb-error.js';
-import { readInvocationParams } from './invocation-params.js';
+import { readInvocationParams, requireString } from './invocation-params.js';
+import { summarizeError } from '../../utils/error-display.js';
+import { randomUUID } from 'node:crypto';
+import type { ApprovalRaiseService } from './approvals-raise.js';
 
 /**
  * `fleet.snapshot` payload cap: the registry's
@@ -210,26 +213,82 @@ export type FleetArchiveCapableRegistry = FleetQueryOnlyRegistry & Partial<Fleet
 /** Registry surface fleet.observed.steer needs, read one node, steer it. */
 export type FleetSteerCapableRegistry = Pick<ProcessRegistry, 'getNode' | 'steer'>;
 
+/** The approval broker slice a steer asks through: the same broker tool calls ask through. */
+export type FleetSteerApprovals = Pick<ApprovalRaiseService, 'raiseApproval'>;
+
+/** How long a steer waits for the owner's answer before it is refused unsent. */
+const STEER_APPROVAL_TIMEOUT_MS = 5 * 60_000;
+
 /**
  * fleet.observed.steer handler, the drill-in steer of an observed foreign
  * agent. Scoped to 'observed-external' rows by construction: an unknown id is a
  * 404, and steering a non-observed kind through this verb is refused (400) so it
- * can never become a back door to a native agent's steer path. The steer itself
- * rides the foreign session's own channel (registry dispatch → tmux send-keys).
+ * can never become a back door to a native agent's steer path.
+ *
+ * The foreign agent runs with its own permissions, outside this daemon's gate,
+ * so typing into it is put to the owner through the approval broker: one ask
+ * naming the session, its directory, the exact text and whether it is
+ * submitted. "Always" for that session is held in memory until the daemon
+ * stops. Without `submit: true` the text is typed and left for the person at
+ * the pane; no Enter is sent. With no approval broker composed, nothing is sent.
  */
-export function createFleetObservedSteerHandler(registry: FleetSteerCapableRegistry): GatewayMethodHandler {
-  return (invocation) => {
+export function createFleetObservedSteerHandler(
+  registry: FleetSteerCapableRegistry,
+  approvals?: FleetSteerApprovals,
+): GatewayMethodHandler {
+  const grantedSessions = new Set<string>();
+  return async (invocation) => {
     const params = readInvocationParams(invocation);
-    const id = typeof params.id === 'string' ? params.id.trim() : '';
+    const id = requireString(params, 'id');
     const text = typeof params.text === 'string' ? params.text : '';
-    if (!id) throw new GatewayVerbError('id is required', 'INVALID_ARGUMENT', 400, 'id');
-    if (!text) throw new GatewayVerbError('text is required', 'INVALID_ARGUMENT', 400, 'text');
+    if (!text) throw new GatewayVerbError('text is required: a non-empty string', 'INVALID_ARGUMENT', 400, 'text');
+    const submit = params.submit === true;
     const node = registry.getNode(id);
     if (!node) throw new GatewayVerbError(`No fleet node ${id} on this daemon.`, 'FLEET_NODE_NOT_FOUND', 404);
     if (node.kind !== 'observed-external') {
-      throw new GatewayVerbError('fleet.observed.steer steers only observed-external rows.', 'INVALID_ARGUMENT', 400);
+      throw new GatewayVerbError('fleet.observed.steer steers only observed-external rows.', 'INVALID_ARGUMENT', 400, 'id');
     }
-    const result = registry.steer(id, text);
+    if (!grantedSessions.has(id)) {
+      if (!approvals) {
+        return { queued: false, reason: 'nothing was sent: this daemon has no approval broker to ask the owner through' };
+      }
+      const directory = node.observed?.cwd ?? 'an unknown directory';
+      const raised = await approvals.raiseApproval({
+        request: {
+          callId: `fleet-steer-${randomUUID()}`,
+          tool: 'fleet.observed.steer',
+          args: { session: id, agent: node.label, directory, text, submit },
+          category: 'execute',
+          analysis: {
+            classification: 'fleet.observed.steer',
+            riskLevel: 'high',
+            summary: `Type into ${node.label} in ${directory}${submit ? ' and submit it' : ''}`,
+            reasons: [
+              `${node.label} was not started by GoodVibes and runs with its own permissions, outside this daemon's approvals.`,
+              submit
+                ? 'The text is submitted with Enter, which also answers any prompt waiting in that session.'
+                : 'The text is typed only; nothing is submitted until someone presses Enter there.',
+            ],
+            target: `${node.label} (${id}) in ${directory}`,
+            sideEffects: [submit ? 'types the text into the session and submits it' : 'types the text into the session without submitting it'],
+          },
+          rememberOptions: [{
+            tier: 'session',
+            label: `Always allow typing into this ${node.label} session`,
+            detail: `Until the daemon stops, steers to ${id} are not asked again.`,
+          }],
+        },
+        ...(invocation.signal ? { signal: invocation.signal } : {}),
+        metadata: { fleetNodeId: id, ...(invocation.context.principalId ? { requestedBy: invocation.context.principalId } : {}) },
+        timeoutMs: STEER_APPROVAL_TIMEOUT_MS,
+      });
+      const decision = await raised.decision;
+      if (!decision.approved) {
+        return { queued: false, reason: `nothing was sent: the owner did not approve typing into ${node.label}${decision.reason ? ` (${decision.reason})` : ''}` };
+      }
+      if (decision.rememberTier !== undefined || decision.remember === true) grantedSessions.add(id);
+    }
+    const result = registry.steer(id, text, { submit });
     return result.queued
       ? { queued: true, messageId: result.messageId }
       : { queued: false, reason: result.reason };
@@ -365,6 +424,8 @@ export interface FleetConflictsDeps {
    * retry (an abandoned session must stay replaceable).
    */
   readonly isSessionLive?: (sessionId: string) => boolean;
+  /** Attempt the item's integration merge again; absent, `fleet.conflicts.retry` is not registered. */
+  readonly retryIntegration?: (itemId: string) => Promise<'merged' | 'conflict' | 'not-conflicted'>;
   /**
    * Start the seeded resolution session INSIDE the kept tree (the CI
    * fix-session machinery): the seed carries the tree path, branch, and the
@@ -460,6 +521,37 @@ export function createFleetConflictsResolveHandler(deps: FleetConflictsDeps): Ga
   };
 }
 
+/**
+ * `fleet.conflicts.retry`: the merge attempted again, for a conflict fixed by
+ * hand or by a session whose own completion did not re-merge. The engine's
+ * answer is returned as given.
+ */
+export function createFleetConflictsRetryHandler(
+  deps: FleetConflictsDeps & Required<Pick<FleetConflictsDeps, 'retryIntegration'>>,
+): GatewayMethodHandler {
+  return async (invocation) => {
+    const itemId = requireString(readInvocationParams(invocation), 'itemId');
+    const conflict = collectConflicts(deps).find((candidate) => candidate.itemId === itemId);
+    if (conflict?.resolutionSessionId && deps.isSessionLive?.(conflict.resolutionSessionId)) {
+      throw new GatewayVerbError(
+        `Item ${itemId} is still being resolved in session ${conflict.resolutionSessionId}, so its merge was not retried. Wait for that session to finish; its success retries the merge itself.`,
+        'FAILED_PRECONDITION',
+        409,
+        'itemId',
+      );
+    }
+    try {
+      return { itemId, outcome: await deps.retryIntegration(itemId) };
+    } catch (error) {
+      throw new GatewayVerbError(
+        `The merge of item ${itemId} could not be attempted: ${summarizeError(error)}. The item is unchanged; read fleet.conflicts.list and retry.`,
+        'INTEGRATION_FAILED',
+        409,
+      );
+    }
+  };
+}
+
 export function createFleetAttemptsJudgeHandler(controller: FleetAttemptsController): GatewayMethodHandler {
   return async (invocation) => {
     const params = readInvocationParams(invocation);
@@ -502,6 +594,7 @@ export function registerFleetGatewayMethods(
   catalog: GatewayMethodCatalog,
   registry: FleetArchiveCapableRegistry & FleetSteerCapableRegistry,
   attempts?: FleetAttemptsController,
+  steerApprovals?: FleetSteerApprovals,
 ): void {
   const attach = (id: string, handler: GatewayMethodHandler): void => {
     const descriptor = catalog.get(id);
@@ -509,7 +602,7 @@ export function registerFleetGatewayMethods(
   };
   attach('fleet.snapshot', createFleetSnapshotHandler(registry));
   attach('fleet.list', createFleetListHandler(registry));
-  attach('fleet.observed.steer', createFleetObservedSteerHandler(registry));
+  attach('fleet.observed.steer', createFleetObservedSteerHandler(registry, steerApprovals));
   attach('fleet.archive', createFleetArchiveHandler(registry));
   attach('fleet.unarchive', createFleetUnarchiveHandler(registry));
   attach('fleet.archiveFinished', createFleetArchiveFinishedHandler(registry));

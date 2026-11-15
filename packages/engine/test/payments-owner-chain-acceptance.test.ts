@@ -41,7 +41,6 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.ts';
 import {
   createPaymentsCheckoutBeginHandler,
-  registerPaymentsGatewayMethods,
   type PaymentsGatewayService,
 } from '../platform/src/platform/control-plane/routes/payments.js';
 import { PaymentsGatewayServiceImpl } from '../platform/src/platform/payments/payments-gateway-service.js';
@@ -176,7 +175,7 @@ async function buildHarness(options: { readonly established?: boolean } = {}): P
 
   const service = impl as unknown as PaymentsGatewayService;
   const catalog = new GatewayMethodCatalog();
-  await registerPaymentsGatewayMethods(catalog, service);
+  catalog.register(catalog.get('payments.checkout.begin')!, createPaymentsCheckoutBeginHandler(service), { replace: true });
   return { catalog, service, sent, recorded, driver };
 }
 

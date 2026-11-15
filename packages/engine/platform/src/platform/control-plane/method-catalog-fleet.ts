@@ -199,9 +199,10 @@ export const builtinGatewayFleetMethodDescriptors: readonly GatewayMethodDescrip
   methodDescriptor({
     id: 'fleet.observed.steer',
     title: 'Steer an Observed Foreign Agent',
-    description: 'Drill-in steer of an externally-launched coding-agent session goodvibes only OBSERVES (a Claude Code / Codex process it did not spawn or host). The steer rides the foreign session\'s own control channel, for a tmux-hosted session, the exact three-send recipe (message text, then two Enters) targeted at its pane. queued:false with an honest reason when the row exposes no channel (no controlling terminal / no tmux pane) or a send fails. STOP is never offered on an observed row, observing and steering is not owning the lifecycle. Weighted as a drill-in capability (see the node\'s observed.steerDrillInOnly), never a bulk affordance.',
+    description: 'Type text into an externally-launched coding-agent session goodvibes only OBSERVES (a Claude Code / Codex process it did not spawn or host), over the session\'s own control channel (a tmux pane). That agent runs with its own permissions, so every steer is first put to the owner through the approval broker, naming the session, its directory, the exact text and whether it is submitted; "always" for that session holds until the daemon stops. The text is typed only; it is submitted with Enter only when submit is true. queued:false with an honest reason when the owner declines, the row exposes no channel, or a send fails; nothing was sent then. STOP is never offered on an observed row.',
     category: 'fleet',
     scopes: ['write:fleet'],
+    dangerous: true,
     transport: ['ws'],
     inputSchema: FLEET_OBSERVED_STEER_INPUT_SCHEMA,
     outputSchema: FLEET_OBSERVED_STEER_OUTPUT_SCHEMA,
@@ -219,12 +220,25 @@ export const builtinGatewayFleetMethodDescriptors: readonly GatewayMethodDescrip
   methodDescriptor({
     id: 'fleet.conflicts.resolve',
     title: 'Spawn a Conflict-Resolution Session',
-    description: 'The conflict row\'s one action: spawn a resolution session INSIDE the kept worktree, seeded with the structured conflict list and tree path (the same seeded-session machinery as the CI fix flow), and stamp the REAL session id back onto the item. When the resolution lands and the re-merge succeeds, the kept tree is reclaimed automatically. An item with no unresolved conflict is an honest 409.',
+    description: 'The conflict row\'s one action: spawn a resolution session INSIDE the kept worktree, seeded with the structured conflict list and tree path (the same seeded-session machinery as the CI fix flow), and stamp the REAL session id back onto the item. When the resolution session ends with success, the merge is retried automatically (also after a daemon restart) and a clean merge reclaims the kept tree; otherwise fleet.conflicts.retry retries it. An item with no unresolved conflict is an honest 409.',
     category: 'fleet',
     scopes: ['write:fleet'],
     transport: ['ws'],
     inputSchema: FLEET_CONFLICTS_RESOLVE_INPUT_SCHEMA,
     outputSchema: FLEET_CONFLICTS_RESOLVE_OUTPUT_SCHEMA,
+  }),
+  methodDescriptor({
+    id: 'fleet.conflicts.retry',
+    title: 'Retry a Conflicted Merge',
+    description: 'Attempt the integration merge of a conflicted item again, for a conflict resolved by hand in the kept worktree or by a resolution session that ended without a clean re-merge. Answers outcome merged (the kept tree is reclaimed), conflict (still conflicted; the row stays) or not-conflicted (nothing to retry). Refused with 409 while that item\'s resolution session is still running.',
+    category: 'fleet',
+    scopes: ['write:fleet'],
+    transport: ['ws'],
+    inputSchema: objectSchema({ itemId: STRING_SCHEMA }, ['itemId']),
+    outputSchema: objectSchema({
+      itemId: STRING_SCHEMA,
+      outcome: { type: 'string', enum: ['merged', 'conflict', 'not-conflicted'] },
+    }, ['itemId', 'outcome']),
   }),
   methodDescriptor({
     id: 'checkpoints.list',

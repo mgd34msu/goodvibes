@@ -230,18 +230,14 @@ export function createVoiceSetupService(deps: VoiceSetupServiceDeps): VoiceSetup
         configured = { set: [...receipt.set], skipped: [...receipt.skipped], superseded: [...receipt.superseded] };
         notes.push(...describeSupersededVoiceKeys(receipt));
         // The stamp is what lets a later install update these keys; without it
-        // they read as user-set and keep pointing at today's paths. Its writer
-        // only logs a failure, so read it back to know it landed.
+        // they read as user-set and keep pointing at today's paths.
         const written = Object.entries(receipt.installWrites);
         if (written.length > 0) {
           // No stamp on disk (the provisioner's own write failed, or it was never
           // written): start one from the pinned versions so the keys just set stay owned.
           const base = stamp ?? currentVoiceInstallStamp(result.platform);
-          if (base) {
-            writeVoiceInstallStamp(deps.managedVoiceRoot, { ...base, configWrites: { ...base.configWrites, ...receipt.installWrites } });
-          }
-          const recorded = readVoiceInstallStamp(deps.managedVoiceRoot)?.configWrites;
-          if (!recorded || written.some(([key, value]) => recorded[key] !== value)) {
+          const recorded = !!base && writeVoiceInstallStamp(deps.managedVoiceRoot, { ...base, configWrites: { ...base.configWrites, ...receipt.installWrites } });
+          if (!recorded) {
             notes.push(
               'The installer could not record which voice settings it set, so a later reinstall will treat '
               + `${written.map(([key]) => key).join(', ')} as your own choices and will not move them to new managed paths. `

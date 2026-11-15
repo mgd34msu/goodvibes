@@ -34,7 +34,7 @@ import {
 } from '../../lib/sessions-union';
 import { companionMessagesFromListResponse } from '../../lib/companion-chat';
 import { firstString } from '../../lib/object';
-import { formatError, isMethodUnavailableError, isSessionNotLocalError } from '../../lib/errors';
+import { errorCode, formatError, isMethodUnavailableError, isSessionNotLocalError } from '../../lib/errors';
 import { gatePresetLabel, type SettableGatePresetName } from '@goodvibes-jev/engine/platform/platform/gate/presets';
 import { outcomeLabel, type CompactionCheck, type CompactionReceipt } from '../../lib/compaction';
 import { useCompactionReceipts } from '../../hooks/useCompactionReceipts';
@@ -131,6 +131,7 @@ function useContextUsage(sessionId: string, check: CompactionCheck | null): stri
     void refetch();
   }, [check, refetch]);
   if (usage.isError && isSessionNotLocalError(usage.error)) return 'Unavailable here';
+  if (usage.isError && errorCode(usage.error) === 'CONTEXT_USAGE_UNAVAILABLE') return 'Not reported';
   if (!usage.data) return '';
   return formatSessionContextUsage(usage.data);
 }

@@ -95,13 +95,16 @@ export function readVoiceInstallStamp(managedRoot: string): VoiceInstallStamp | 
 }
 
 /** Persist the install stamp (best effort, a failed stamp write is logged, not fatal). */
-export function writeVoiceInstallStamp(managedRoot: string, stamp: VoiceInstallStamp): void {
+/** Write the install stamp; false when it could not be written (the failure is logged). */
+export function writeVoiceInstallStamp(managedRoot: string, stamp: VoiceInstallStamp): boolean {
   try {
     mkdirSync(managedRoot, { recursive: true });
     // Atomic: a torn stamp reads as absent, which would make every installer-written key look user-set.
     writeJsonFileAtomic(join(managedRoot, INSTALL_STAMP_FILE), stamp);
+    return true;
   } catch (error) {
     logger.warn('voice install stamp write failed', { managedRoot, error: summarizeError(error) });
+    return false;
   }
 }
 

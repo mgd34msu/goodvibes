@@ -8,7 +8,7 @@
  * drill-in capability, never a primary affordance (see ProcessObserved).
  */
 import type { ObservedAgentRow, ObservedAgentSource } from '../observed/source.js';
-import type { ProcessNode, ProcessState, SteerResult } from '../types.js';
+import type { ProcessNode, ProcessState, SteerOptions, SteerResult } from '../types.js';
 
 /** Observed node ids are namespaced by pid to avoid colliding with agent/process ids. */
 export function observedNodeId(pid: number): string {
@@ -82,7 +82,8 @@ export function steerObservedNode(
   source: Pick<ObservedAgentSource, 'steer'> | undefined,
   node: ProcessNode,
   text: string,
+  options?: SteerOptions,
 ): SteerResult {
   if (!source) return { queued: false, reason: 'no observed-agent source configured' };
-  return source.steer(node.raw as ObservedAgentRow, text);
+  return source.steer(node.raw as ObservedAgentRow, text, options);
 }

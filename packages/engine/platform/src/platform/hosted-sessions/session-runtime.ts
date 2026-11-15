@@ -21,7 +21,8 @@ import { registerDevicePhoneTool } from '../devices/device-phone-tool.js';
 import { ContextAccountingHolder } from '../tools/context-accounting/index.js';
 import { FeatureAnnouncementStore, featureAnnouncementsPath } from '../runtime/feature-announcements.js';
 import { createApprovalDerivedHandlers } from '../runtime/permissions/permission-composition.js';
-import type { SessionLiveTurnControls } from '../control-plane/routes/session-runtime.js';
+import { readSessionContextUsage, type SessionLiveTurnControls } from '../control-plane/routes/session-runtime.js';
+import { estimateConversationTokens } from '../core/context-compaction.js';
 import type { ModelDefinition } from '../providers/registry.js';
 import { withHostedSessionModel } from './model-route.js';
 import { HostedSessionUnavailableError } from './errors.js';
@@ -355,6 +356,12 @@ export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions)
           });
         }
       },
+      // The last request's input tokens once a turn has run; before that, the
+      // estimate of what the next request would send.
+      getContextUsage: () => readSessionContextUsage(
+        orchestrator.lastInputTokens > 0 ? orchestrator.lastInputTokens : estimateConversationTokens(conversation.getMessagesForLLM()),
+        providerRegistry,
+      ),
       cancelTurn: (expectedTurnId: string) => orchestrator.cancelTurn(expectedTurnId),
       cancelToolCall: (callId: string) => orchestrator.cancelToolCall(callId),
       listQueuedMessages: () => orchestrator.listQueuedMessages(),

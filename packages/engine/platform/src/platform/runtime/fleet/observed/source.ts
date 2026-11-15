@@ -16,7 +16,7 @@
  * measured across those refresh boundaries, so `active`/`quiet` reflects CPU
  * burned in the last refresh interval, not per-query noise.
  */
-import type { ObservedAgentKind, ObservedLiveness, ObservedSteerChannel, SteerResult } from '../types.js';
+import type { ObservedAgentKind, ObservedLiveness, ObservedSteerChannel, SteerOptions, SteerResult } from '../types.js';
 import {
   classifyObservedProcesses,
   defaultProcessTableReader,
@@ -162,19 +162,21 @@ export class ObservedAgentSource {
   }
 
   /**
-   * Steer a tmux-hosted foreign session with the exact three-send recipe: one
-   * send carries the literal message text, then two separate Enter sends. An
-   * honest refusal (queued:false) when the row exposes no tmux channel, when the
-   * session is no longer there, or when a send-keys call fails. STOP is never
-   * offered here, this is steer only.
+   * Type text into a tmux-hosted foreign session: one send carries the literal
+   * text and, only when `submit` is true, two separate Enter sends follow.
+   * Without submit the text waits in the pane for the person there, so a
+   * pending dialog where Enter means "yes" is never answered by this call. An
+   * honest refusal (queued:false) when the row exposes no tmux channel, when
+   * the session is no longer there, or when a send-keys call fails. STOP is
+   * never offered here, this is steer only.
    *
-   * The row is up to a refresh interval old, and text plus Enter typed into a
-   * pane whose agent has exited would run in whatever has the terminal now, so
-   * the process table and the pane list are read again first: the same process
+   * The row is up to a refresh interval old, and text typed into a pane whose
+   * agent has exited would land in whatever has the terminal now, so the
+   * process table and the pane list are read again first: the same process
    * must still be running on the same terminal, and that terminal must still be
    * the pane the row names.
    */
-  steer(row: ObservedAgentRow, text: string): SteerResult {
+  steer(row: ObservedAgentRow, text: string, options?: SteerOptions): SteerResult {
     if (row.steer.kind !== 'tmux') {
       return { queued: false, reason: `this session cannot be steered: ${row.steer.reason}` };
     }
@@ -188,8 +190,7 @@ export class ObservedAgentSource {
     }
     const sends: readonly (readonly string[])[] = [
       ['send-keys', '-t', pane, '-l', '--', text],
-      ['send-keys', '-t', pane, 'Enter'],
-      ['send-keys', '-t', pane, 'Enter'],
+      ...(options?.submit === true ? [['send-keys', '-t', pane, 'Enter'], ['send-keys', '-t', pane, 'Enter']] : []),
     ];
     for (const args of sends) {
       const result = this.steerRunner.run(args);

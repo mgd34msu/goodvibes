@@ -1,55 +1,18 @@
 /**
  * register.ts, the `payments.*` handlers this daemon attaches.
  *
- * ── The platform now owns most of these bodies ──────────────────────────────────
+ * This is the one registrar for `payments.*`: every verb's handler is attached
+ * here, over the `PaymentsGatewayService` built below, after the boot recovery
+ * sweep settles. `routes/payments.ts` holds the wire types only.
  *
- * `registerPaymentsGatewayMethods` (platform/control-plane, exported from the
- * barrel as of platform 2.0.18) ships real handler bodies for all seven `payments.*`
- * verbs, built over a `PaymentsGatewayService` seam. `budgetStatus`, `listCards`
- * and `deleteCard` are answered from that seam directly below and attached
- * through the platform's registrar; the local handler bodies that used to duplicate
- * them are gone.
- *
- * Two verbs stay LOCAL rather than going through the platform's own route handlers
- * for it, and both are deliberate, not oversights:
- *
- *  - `payments.cards.create`: the platform's `createPaymentsCardsCreateHandler`
- *    wraps the whole call to `service.createCard(...)` in one try/catch that
- *    replaces ANY thrown error, whatever its shape, with a fixed 500
- *    "Storing the card failed. Nothing was saved." This daemon's contract is
- *    narrower than the published input schema (a card number has to contain
- *    enough digits to be one, a CVV has to be three or four digits, an expiry
- *    month has to be 1-12, see the field readers below) and reports each of
- *    those with an honest 400 naming the field. Delegating create to the platform
- *    handler would still validate the fields, but every refusal would answer
- *    500 instead of 400, a real wire-behaviour regression, not merely an
- *    implementation detail. So this verb keeps its own thin wrapper, which does
- *    the narrowing and then calls the same `service.createCard` the platform
- *    handler would have, for the store write and the response shape.
- *  - `payments.purchases.list`: the platform's `createPaymentsPurchasesListHandler`
- *    only accepts `limit` when it arrives already typed as a JS number. A GET
- *    request's query string never is, `?limit=5` arrives as the string `"5"`,
- *    so every caller of the real REST route would silently lose the ability to
- *    bound the page size and always get the handler's own default. This
- *    daemon's contract reads a numeric-looking string the same way it reads a
- *    number (`optionalCount` below), so this verb also keeps its own thin
- *    wrapper, which does that reading and then calls `service.listPurchases`.
- *
- * `payments.checkout.begin` is attached too, over the platform's
- * browser-checkout seam (`platform/control-plane`'s
- * `composeDaemonBrowser`/`onBrowserCheckout`/`BrowserCheckoutSeam`). It does
- * NOT go through `registerPaymentsGatewayMethods`'s own route handler, for the
- * same reason `payments.cards.create`/`payments.purchases.list` do not: that
- * handler calls `service.beginCheckout(input)` with no invocation context at
- * all, and this composition's whole "approving a purchase is a distinct act"
- * ruling (see `registerPaymentsMethods` below) needs
- * `context.explicitUserRequest`, which only reaches a handler attached through
- * this daemon's own `registerCatalogHandlers`. So it is attached locally,
- * alongside `cardsCreate`/`purchasesList`, reading and shaping the SAME wire
- * shapes `routes/payments.ts` does, and calling into the ONE
- * `PaymentsGatewayServiceImpl` this registration shares for its whole life
- * (see checkout-handlers.ts's `CheckoutServiceHolder`). The card is typed by
- * the purchase the daemon runs; no verb types it.
+ * The handlers read their fields narrower than the published input schema
+ * where being a card demands it (enough digits to be a card number, a three or
+ * four digit CVV, a 1-12 month), each refused with a 400 naming the field;
+ * `purchases.list` reads a numeric-looking query string as the number it
+ * names. `payments.checkout.begin` and `payments.checkout.approve` need
+ * `context.explicitUserRequest` and the paired principal, which reach a
+ * handler attached through `registerCatalogHandlers`; the card is typed by the
+ * purchase the daemon runs, and no verb types it.
  *
  * `deps.checkout` (a `CheckoutComposition`, see below) is REQUIRED, not
  * optional: in the real daemon it is always supplied
@@ -64,7 +27,7 @@
  * ── Containment ───────────────────────────────────────────────────────────
  *
  * Every response below is BUILT from named fields rather than spread from a
- * store record, for the reason the platform's own route module gives: an allowlist
+ * store record: an allowlist
  * silently drops a field a later change adds, a denylist silently ships it, and
  * for anything on a card's code path that is the correct direction to fail.
  * No handler here reads card material, and no failure path forwards a message
@@ -76,7 +39,6 @@ import type { PaymentsConfigReader } from '../payments-config.js';
 import type { CardMetadata } from '../types.js';
 import type { GatewayMethodCatalog } from '../../control-plane/method-catalog.js';
 import type { GatewayMethodDescriptor } from '../../control-plane/method-catalog-shared.js';
-import { registerPaymentsGatewayMethods } from '../../control-plane/routes/payments.js';
 import type {
   PaymentPurchaseView,
   PaymentsGatewayService,
@@ -280,9 +242,7 @@ function purchaseView(row: StoredPurchase): PaymentPurchaseView {
   };
 }
 
-/** The generic platform routes do not carry the original invocation authority.
- * The local wrappers pass host-only ownership and gate facts to the shared
- * checkout service. These temporary generic handlers are replaced before ready. */
+/** Checkout runs through `checkoutBeginHandler`, which carries the invocation's authority; never through this service. */
 function checkoutNotWired(methodId: string): Error {
   return new Error(
     `${methodId} is served by this daemon's own local handler, never through this service. `
@@ -314,22 +274,15 @@ function budgetStatusHandler(deps: PaymentsHandlerDeps, service: PaymentsGateway
 }
 
 /**
- * The `PaymentsGatewayService` this daemon hands the platform's registrar.
- *
- * `createCard` and `listPurchases` are real, not stubs: `payments.cards.create`
- * and `payments.purchases.list` keep their own thin local wrappers (below) for
- * the field-shape validation and the string-tolerant query reading the platform's
- * generic route handlers do not do, and both wrappers call straight into these
- * same two methods for the store write and the response shape, so there is
- * exactly one place that talks to `DaemonCardStore.create` and to
- * `DaemonPurchaseLedger.list`.
+ * The store-facing half of the payment verbs: the one place that talks to
+ * `DaemonCardStore` and `DaemonPurchaseLedger`. Card views are built from named
+ * fields, and a failed card write never forwards the message of a call that had
+ * the card in its arguments.
  */
-function buildPaymentsGatewayService(deps: PaymentsHandlerDeps, holder: CheckoutServiceHolder): PaymentsGatewayService {
+function buildPaymentsGatewayService(deps: PaymentsHandlerDeps): PaymentsGatewayService {
   const now = deps.now ?? Date.now;
 
   return {
-    recoverInterruptedCheckouts: () => holder.recoverInterruptedCheckouts(),
-
     async budgetStatus() {
       const config = readPaymentsServiceConfig(deps.config);
       const nowMs = now();
@@ -411,14 +364,10 @@ export interface PaymentsRegistration {
 }
 
 /**
- * Attach the eight `payments.*` handlers to the descriptors the platform
- * catalog holds.
+ * Attach every `payments.*` handler to the descriptors the catalog holds.
  *
- * The platform's `registerPaymentsGatewayMethods` runs its boot recovery sweep
- * before attaching, so it returns a promise and attaches a beat after this
- * function returns. This module's five local handlers MUST attach after that,
- * or the platform's deferred attach would replace them, so they are chained on the
- * platform's promise and `ready` is how a caller observes the whole sequence.
+ * The boot recovery sweep runs first, so the handlers attach a beat after this
+ * function returns; `ready` is how a caller observes that.
  *
  * NOT gated on `payments.enabled`. That key defaults to false, and
  * `payments.cards.*` is how a surface CONFIGURES the capability, so gating
@@ -433,14 +382,10 @@ export function registerPaymentsMethods(
   deps: PaymentsHandlerDeps,
 ): PaymentsRegistration {
   // Every descriptor this module attaches to, captured BEFORE any
-  // registration runs. `registerCatalogHandlers`' own teardown (used below for
-  // four of these) removes the DESCRIPTOR from the catalog entirely rather
-  // than merely clearing its handler slot (`GatewayMethodCatalog.register`'s
-  // returned teardown calls `unregister`, a `Map.delete`, not a handler
-  // reset), so restoring a handler-less descriptor after THIS module's own
-  // teardown, matching what the platform's three descriptors are restored to below,
-  // needs the descriptor object captured here rather than re-fetched from the
-  // catalog afterward, when it may no longer be there to fetch.
+  // registration runs. `registerCatalogHandlers`' teardown removes the
+  // DESCRIPTOR from the catalog entirely rather than clearing its handler slot
+  // (a `Map.delete`), so restoring a handler-less descriptor after teardown
+  // needs the descriptor object captured here.
   const descriptors = new Map<string, GatewayMethodDescriptor>();
   for (const id of ATTACHED_PAYMENTS_METHOD_IDS) {
     const descriptor = catalog.get(id);
@@ -448,22 +393,31 @@ export function registerPaymentsMethods(
   }
 
   const checkoutServiceHolder = new CheckoutServiceHolder(deps, deps.checkout.journal);
-  const service = buildPaymentsGatewayService(deps, checkoutServiceHolder);
+  const service = buildPaymentsGatewayService(deps);
 
-  // Attaches its six `payments.*` descriptors once its boot recovery sweep
-  // finishes. budget/list/delete stay attached through this; create/purchases-
-  // list/checkout-begin are transiently attached and then
-  // replaced with this daemon's own local handlers in the chain below. The
-  // hook payloads are the platform's designed audit records: the failure callback
-  // never carries a notice body and the sweep envelope exists to be logged.
-  const engineAttach = registerPaymentsGatewayMethods(catalog, service, {
-    onRecoveryFailure: (error) => {
-      logger.error('payments boot recovery failed', { error });
-    },
-    onRecoverySettled: (sweep) => {
+  // Boot recovery runs TO COMPLETION before any handler attaches, so no
+  // checkout verb can start a purchase the sweep would then read as
+  // interrupted. A failed sweep is logged and does not withhold the verbs: it
+  // is a disclosure duty, not a serving precondition once it has stopped.
+  const bootRecovery = (async (): Promise<void> => {
+    try {
+      const sweep = await checkoutServiceHolder.recoverInterruptedCheckouts();
       logger.info('payments boot recovery settled', { sweep });
-    },
-  });
+    } catch (error) {
+      logger.error('payments boot recovery failed', { error });
+    }
+  })();
+
+  const cardsList: TypedHandler<unknown, Record<string, unknown>> = async () => {
+    const { cards, defaultCardId } = await service.listCards();
+    return { cards, defaultCardId };
+  };
+
+  const cardsDelete: TypedHandler<unknown, Record<string, unknown>> = async ({ body }) => {
+    const id = readString(asRecord(body), 'id');
+    const result = await service.deleteCard(id);
+    return { id, deleted: result.deleted, secretsCleared: result.secretsCleared };
+  };
 
   const cardsCreate: TypedHandler<unknown, Record<string, unknown>> = async ({ body }) => {
     const params = asRecord(body);
@@ -524,16 +478,9 @@ export function registerPaymentsMethods(
     });
   };
 
-  // Restores EVERY descriptor this module attached to, handler-less, not
-  // only the three `registerPaymentsGatewayMethods` still holds a live
-  // handler on. The other four have their descriptor removed outright by
-  // `localTeardown()` (see the `descriptors` capture at the top of this
-  // function for why), so without this a re-registration on the SAME catalog
-  // (a second `registerPaymentsMethods` call, as a restart-without-recompose
-  // test does) would find those four ids gone from the catalog and throw
-  // `METHOD_NOT_FOUND` trying to attach to them, rather than finding the
-  // platform's own builtin descriptor there to replace, exactly as it would on a
-  // catalog this module had never touched.
+  // Restores every descriptor this module attached to, handler-less, so a
+  // later registration on the SAME catalog (a restart without recompose)
+  // finds them there to attach to instead of failing with METHOD_NOT_FOUND.
   const restoreDescriptors = (): void => {
     for (const [, descriptor] of descriptors) {
       catalog.register(descriptor, undefined, { replace: true });
@@ -543,17 +490,17 @@ export function registerPaymentsMethods(
   let torn = false;
   let localTeardown: Unregister | undefined;
 
-  const ready = engineAttach.then(() => {
-    // Teardown already ran: the platform's attach (which resolved just before this
-    // callback) put live handlers back on descriptors the teardown had
-    // restored handler-less, so restore them again instead of attaching the
-    // local handlers to a surface that was already released.
+  const ready = bootRecovery.then(() => {
+    // Teardown already ran while recovery was settling: leave the descriptors
+    // handler-less instead of attaching to a surface that was already released.
     if (torn) {
       restoreDescriptors();
       return;
     }
     localTeardown = registerCatalogHandlers(catalog, [
+      { id: 'payments.cards.list', handler: cardsList as TypedHandler<unknown, unknown> },
       { id: 'payments.cards.create', handler: cardsCreate as TypedHandler<unknown, unknown> },
+      { id: 'payments.cards.delete', handler: cardsDelete as TypedHandler<unknown, unknown> },
       { id: 'payments.purchases.list', handler: purchasesList as TypedHandler<unknown, unknown> },
       // The confirmation gate (`confirm: true` AND the explicit-user-request
       // context) is what makes this verb owner-direct: the handler then passes

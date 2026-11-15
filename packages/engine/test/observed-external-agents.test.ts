@@ -204,12 +204,15 @@ describe('ObservedAgentSource: steer (tmux three-send recipe)', () => {
     liveness: { state: 'quiet', cpuSeconds: 0, detail: 'x' }, steer,
   });
 
-  test('a tmux row round-trips exactly three sends: literal message, Enter, Enter', () => {
+  test('text is typed without Enter unless submit is asked for', () => {
     const calls: string[][] = [];
     const runner: TmuxCommandRunner = { run: (args) => { calls.push([...args]); return { status: 0, stderr: '' }; } };
     const source = makeSource(runner);
-    const result = source.steer(row({ kind: 'tmux', paneId: '%90', tty: '/dev/pts/11' }), 'hello there');
-    expect(result.queued).toBe(true);
+    const channel = { kind: 'tmux', paneId: '%90', tty: '/dev/pts/11' } as const;
+    expect(source.steer(row(channel), 'hello there').queued).toBe(true);
+    expect(calls).toEqual([['send-keys', '-t', '%90', '-l', '--', 'hello there']]);
+    calls.length = 0;
+    expect(source.steer(row(channel), 'hello there', { submit: true }).queued).toBe(true);
     expect(calls).toEqual([
       ['send-keys', '-t', '%90', '-l', '--', 'hello there'],
       ['send-keys', '-t', '%90', 'Enter'],
@@ -416,5 +419,40 @@ describe('routes/fleet: fleet.observed.steer handler', () => {
     const handler = createFleetObservedSteerHandler(registry);
     expect(() => handler(invoke({ text: 'go' }))).toThrow(/id is required/);
     expect(() => handler(invoke({ id: observedNode.id }))).toThrow(/text is required/);
+  });
+});
+
+describe('fleet.observed.steer asks the owner before typing into a foreign agent', () => {
+  async function steerWith(approved: boolean, body: Record<string, unknown>) {
+    const { createFleetObservedSteerHandler } = await import('../platform/src/platform/control-plane/routes/fleet.ts');
+    const node = adaptObservedAgent(observedRow(), T0);
+    const steered: Array<{ text: string; submit: boolean | undefined }> = [];
+    const asks: unknown[] = [];
+    const handler = createFleetObservedSteerHandler(
+      {
+        getNode: (id: string) => (id === node.id ? node : null),
+        steer: (_id: string, text: string, options?: { submit?: boolean | undefined }) => {
+          steered.push({ text, submit: options?.submit });
+          return { queued: true, messageId: 'm1' };
+        },
+      } as never,
+      { raiseApproval: async (input) => { asks.push(input.request.args); return { approval: {} as never, coalesced: false, decision: Promise.resolve({ approved }) }; } },
+    );
+    const result = await handler({ body: { id: node.id, ...body }, context: {} } as never) as { queued: boolean };
+    return { result, steered, asks };
+  }
+
+  test('a declined ask sends nothing', async () => {
+    const { result, steered, asks } = await steerWith(false, { text: 'rm -rf build' });
+    expect(asks).toHaveLength(1);
+    expect(result.queued).toBe(false);
+    expect(steered).toEqual([]);
+  });
+
+  test('an approved ask types the text and submits only when asked', async () => {
+    const typed = await steerWith(true, { text: 'please rebase' });
+    expect(typed.steered).toEqual([{ text: 'please rebase', submit: false }]);
+    const submitted = await steerWith(true, { text: 'please rebase', submit: true });
+    expect(submitted.steered).toEqual([{ text: 'please rebase', submit: true }]);
   });
 });

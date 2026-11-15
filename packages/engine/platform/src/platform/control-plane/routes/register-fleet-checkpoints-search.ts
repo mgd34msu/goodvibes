@@ -14,7 +14,7 @@
  * is constructed last of the three, so the call site is right after it).
  */
 import type { GatewayMethodCatalog } from '../method-catalog.js';
-import { registerFleetGatewayMethods, type FleetQueryOnlyRegistry, type FleetSteerCapableRegistry, type FleetAttemptsController } from './fleet.js';
+import { registerFleetGatewayMethods, type FleetQueryOnlyRegistry, type FleetSteerApprovals, type FleetSteerCapableRegistry, type FleetAttemptsController } from './fleet.js';
 import { registerCheckpointGatewayMethods, type CheckpointsGatewayManager, type CheckpointsEventSink } from './checkpoints.js';
 import { registerSessionSearchGatewayMethod, type SessionSearchBroker } from './session-search.js';
 import { createEventEnvelope } from '../../runtime/events/index.js';
@@ -46,10 +46,15 @@ export interface FleetCheckpointsSearchGatewayDeps {
    * registered; absent, they stay cataloged-but-unhandled, like the attempts verbs.
    */
   readonly contractOperator?: ContractOperatorService | undefined;
+  /**
+   * The approval broker `fleet.observed.steer` asks the owner through. Absent,
+   * a steer into a foreign agent is refused unsent.
+   */
+  readonly approvalRaise?: FleetSteerApprovals | undefined;
 }
 
 export function registerFleetCheckpointsSearchGatewayMethods(catalog: GatewayMethodCatalog, deps: FleetCheckpointsSearchGatewayDeps): void {
-  registerFleetGatewayMethods(catalog, deps.processRegistry, deps.attemptsController);
+  registerFleetGatewayMethods(catalog, deps.processRegistry, deps.attemptsController, deps.approvalRaise);
   if (deps.contractOperator) registerContractGatewayMethods(catalog, deps.contractOperator);
   const bus = deps.runtimeBus;
   const checkpointsEmit: CheckpointsEventSink | undefined = bus

@@ -37,6 +37,7 @@ import type {
   ProcessRegistry,
   ProcessState,
   ProcessUsage,
+  SteerOptions,
   SteerResult,
 } from './types.js';
 import type { AgentActivityEntry, AgentAdapterContext } from './adapters/agent.js';
@@ -799,14 +800,14 @@ export function createProcessRegistry(deps: ProcessRegistryDeps): ProcessRegistr
    * contract group (no conversation loop of their own, steer a unit
    * instead).
    */
-  function steer(id: string, text: string): SteerResult {
+  function steer(id: string, text: string, options?: SteerOptions): SteerResult {
     const { nodes } = assemble();
     const target = nodes.find((node) => node.id === id);
     if (!target) return { queued: false, reason: 'no such process' };
     // A hosted ACP agent's steer travels over its own stdio connection (no message bus needed).
     if (target.kind === 'acp-agent') return steerHostedAcpNode(deps.acpHost, target, text);
     // An observed foreign agent's steer travels over its own control channel (tmux send-keys); stop is never offered.
-    if (target.kind === 'observed-external') return steerObservedNode(deps.observedAgents, target, text);
+    if (target.kind === 'observed-external') return steerObservedNode(deps.observedAgents, target, text, options);
     if (!deps.messageBus) {
       return { queued: false, reason: 'steering is unavailable: no message bus configured' };
     }

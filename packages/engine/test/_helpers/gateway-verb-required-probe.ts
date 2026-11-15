@@ -67,7 +67,6 @@ import { registerEmailGatewayMethods } from '../../platform/src/platform/control
 import { registerEmailExpectationGatewayMethods } from '../../platform/src/platform/control-plane/routes/email-expectations.ts';
 import { registerOccasionsGatewayMethods } from '../../platform/src/platform/control-plane/routes/occasions.ts';
 import { registerOwnerProfileGatewayMethods } from '../../platform/src/platform/control-plane/routes/owner-profile.ts';
-import { registerPaymentsGatewayMethods } from '../../platform/src/platform/control-plane/routes/payments.ts';
 import { registerFlagsGraduationGatewayMethods } from '../../platform/src/platform/control-plane/routes/flags-graduation.js';
 import { registerFleetCheckpointsSearchGatewayMethods } from '../../platform/src/platform/control-plane/routes/register-fleet-checkpoints-search.js';
 import { registerMemoryGatewayMethods } from '../../platform/src/platform/control-plane/routes/memory.js';
@@ -142,7 +141,6 @@ const ROUTE_REGISTRARS: ReadonlyArray<readonly [string, (catalog: GatewayMethodC
   ['email-expectations', (catalog) => registerEmailExpectationGatewayMethods(catalog, stubDeps())],
   ['occasions', (catalog) => registerOccasionsGatewayMethods(catalog, stubDeps())],
   ['owner-profile', (catalog) => registerOwnerProfileGatewayMethods(catalog, stubDeps())],
-  ['payments', (catalog) => registerPaymentsGatewayMethods(catalog, stubDeps())],
   ['email-composition', (catalog) => registerDaemonEmailVerbs(catalog, stubDeps())],
   ['flags-graduation', (catalog) => registerFlagsGraduationGatewayMethods(catalog)],
   ['fleet-checkpoints-search', (catalog) => registerFleetCheckpointsSearchGatewayMethods(catalog, stubDeps())],
@@ -218,7 +216,6 @@ export const EXPECTED_ROUTE_REGISTRARS: readonly string[] = [
   'registerEmailExpectationGatewayMethods',
   'registerOccasionsGatewayMethods',
   'registerOwnerProfileGatewayMethods',
-  'registerPaymentsGatewayMethods',
   'registerFlagsGraduationGatewayMethods',
   'registerFleetCheckpointsSearchGatewayMethods',
   'registerFleetGatewayMethods',

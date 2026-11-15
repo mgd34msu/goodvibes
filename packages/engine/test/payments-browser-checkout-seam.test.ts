@@ -64,7 +64,7 @@ import {
 } from '../platform/src/platform/control-plane/routes/browser-composition.js';
 import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.js';
 import {
-  registerPaymentsGatewayMethods,
+  createPaymentsCheckoutBeginHandler,
   type PaymentsGatewayService,
 } from '../platform/src/platform/control-plane/routes/payments.js';
 import { usePaymentsReadings } from './helpers/payments-readings.ts';
@@ -1002,7 +1002,7 @@ async function sixVerbComposition(options: SixVerbCompositionOptions = {}): Prom
   } as unknown as PaymentsGatewayService;
 
   const catalog = new GatewayMethodCatalog();
-  await registerPaymentsGatewayMethods(catalog, service);
+  catalog.register(catalog.get('payments.checkout.begin')!, createPaymentsCheckoutBeginHandler(service), { replace: true });
   return { catalog, engine, guard, ledger, recorded, sent };
 }
 
@@ -1046,25 +1046,7 @@ function beginParams(): Record<string, unknown> {
   };
 }
 
-describe('a daemon-style composition can now serve all six payments verbs', () => {
-  const ALL_SIX = [
-    'payments.budget.status',
-    'payments.cards.list',
-    'payments.cards.create',
-    'payments.cards.delete',
-    'payments.checkout.begin',
-    'payments.purchases.list',
-  ] as const;
-
-  test('every one of them has a handler attached, checkout included', async () => {
-    const { catalog } = await sixVerbComposition();
-    for (const id of ALL_SIX) {
-      expect(catalog.get(id)).toBeDefined();
-      // The two that had to answer 501 are the two this seam is for.
-      expect(catalog.hasHandler(id)).toBe(true);
-    }
-  });
-
+describe('checkout.begin over the browser seam', () => {
   test('checkout.begin runs a whole purchase against the browser seam', async () => {
     const harness = await sixVerbComposition();
     const response = await harness.catalog.invoke(

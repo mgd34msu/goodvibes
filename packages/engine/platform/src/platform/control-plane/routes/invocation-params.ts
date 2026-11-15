@@ -18,6 +18,7 @@
  * nothing unchecked reaches a manager either way.
  */
 import type { GatewayMethodInvocation } from '../method-catalog-shared.js';
+import { GatewayVerbError } from './gateway-verb-error.js';
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -28,4 +29,17 @@ function asRecord(value: unknown): Record<string, unknown> {
 /** Merged params for a handler-registered verb: query as fallback, body wins. */
 export function readInvocationParams(invocation: GatewayMethodInvocation): Record<string, unknown> {
   return { ...asRecord(invocation.query), ...asRecord(invocation.body) };
+}
+
+/**
+ * A required string parameter, trimmed. Absent, not a string, or only
+ * whitespace is one refusal for every verb, naming the field.
+ */
+export function requireString(params: Record<string, unknown>, field: string): string {
+  const value = params[field];
+  const text = typeof value === 'string' ? value.trim() : '';
+  if (!text) {
+    throw new GatewayVerbError(`${field} is required: a non-empty string`, 'INVALID_ARGUMENT', 400, field);
+  }
+  return text;
 }

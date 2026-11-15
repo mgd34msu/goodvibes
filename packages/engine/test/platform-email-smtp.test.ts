@@ -673,7 +673,7 @@ describe('SmtpClient.verifyAuth', () => {
       password: 'mypassword',
       timeoutMs: 5000,
     });
-    await expect(client.verifyAuth()).rejects.toThrow('SMTP unexpected greeting');
+    await expect(client.verifyAuth()).rejects.toMatchObject({ name: 'SmtpReplyError', stage: 'greeting', code: 554 });
   });
 
   test('rejects a failed AUTH', async () => {

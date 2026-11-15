@@ -83,6 +83,7 @@ export type ConversationRewindAnswer =
 /** Why a host-facing call was refused. Each maps to one honest message. */
 export type ConversationRewindRefusal =
   | 'not-the-host'
+  | 'held-by-another-principal'
   | 'taken-over'
   | 'host-unknown'
   | 'request-unknown'
@@ -108,7 +109,9 @@ export class ConversationRewindHostError extends Error {
     this.name = 'ConversationRewindHostError';
     this.refusal = refusal;
     this.field = field;
-    this.code = refusal === 'taken-over' ? CONVERSATION_HOST_TAKEN_OVER_CODE : 'CONFLICT';
+    this.code = refusal === 'taken-over'
+      ? CONVERSATION_HOST_TAKEN_OVER_CODE
+      : refusal === 'held-by-another-principal' ? 'FORBIDDEN' : 'CONFLICT';
   }
 }
 
@@ -252,7 +255,7 @@ export class ConversationRewindHostBroker implements RewindConversationPort {
       throw new ConversationRewindHostError(
         `Session ${JSON.stringify(input.sessionId)} is already hosted by a surface registered by another principal. `
         + 'Only that principal can replace it; until its lease lapses or it releases the session, rewind is served by that surface.',
-        'not-the-host',
+        'held-by-another-principal',
         'sessionId',
       );
     }
@@ -294,6 +297,11 @@ export class ConversationRewindHostBroker implements RewindConversationPort {
     }
     this.evictHost(host.hostId, 'the surface hosting this conversation released it');
     return host;
+  }
+
+  /** The principal that registered a host, when one was named; undefined for an unknown or unbound host. */
+  hostPrincipal(hostId: string): string | undefined {
+    return this.hostPrincipals.get(hostId);
   }
 
   /** Every live registration, for a status surface. */

@@ -1,32 +1,14 @@
 /**
- * routes/payments.ts, the platform handlers for `payments.*`.
+ * routes/payments.ts, the wire shapes of the `payments.*` verbs.
  *
- * The daemon is the process that holds the card and charges it, with every
- * surface closed and across restarts. In the daemon, `payments/host/register.ts`
- * replaces `cards.create`, `purchases.list` and `checkout.begin` with its own
- * handlers (which add ownership, approval and admission), so for those three
- * the code here serves only a host that composes the platform groups without
- * the daemon's payments host. A validation change
- * to one of them belongs in both places. This module is deliberately thin: it maps
- * the descriptors' declared shapes onto a narrow service slice, performs no
- * I/O, holds no credential, and never touches a card number.
- *
- * Two properties are enforced HERE rather than merely advertised, so neither
- * rests on schema validation being reached by every transport:
- *
- *  - **Card material is write-only.** `cards.create` takes the number, expiry,
- *    CVV and cardholder name and returns the METADATA record. Nothing in this
- *    module can return a stored secret, and `sanitizeCardMetadata` strips any
- *    field a future service might mistakenly hand back, a service bug becomes
- *    a missing field rather than a leaked card.
- *  - **Card material never reaches an error.** Failures report the stage and a
- *    plain reason; what was submitted is never part of a diagnostic, because
- *    an error string is a read path like any other.
- *
- * The daemon types the card itself, inside the purchase it runs
- * (`payments.checkout.begin`); no verb here types a card or returns one.
+ * The daemon's payments host (`payments/host/register.ts`) is the one
+ * registrar: it attaches every `payments.*` handler, builds each card view from
+ * named fields, and never forwards the message of a call that had card
+ * material in its arguments. This module holds the types that registrar and
+ * its service share, and `createPaymentsCheckoutBeginHandler`, a context-free
+ * begin over the same service that the live payments proof drives; no shipped
+ * registrar attaches it.
  */
-import type { GatewayMethodCatalog } from '../method-catalog.js';
 import type { GatewayMethodHandler } from '../method-catalog-shared.js';
 import { GatewayVerbError } from './gateway-verb-error.js';
 import { readInvocationParams } from './invocation-params.js';
@@ -85,14 +67,6 @@ export interface PaymentCardView extends CardMetadata {
 
 /** The narrow slice of the capability these handlers need. */
 export interface PaymentsGatewayService {
-  /**
-   * Settle checkouts a restart interrupted, per the journal's phase verdicts
-   * and the windows' documented silence rules, returning the sweep envelope
-   * (`CheckoutRecoverySweep`: swept or skipped, plus settlements). Optional
-   * so a narrower test double stays valid; when present, registration runs
-   * it to completion at attach time, before any checkout verb can be served.
-   */
-  recoverInterruptedCheckouts?(): Promise<unknown>;
   budgetStatus(): Promise<PaymentsBudgetView>;
   listCards(): Promise<{ cards: readonly PaymentCardView[]; defaultCardId: string }>;
   /**
@@ -182,128 +156,6 @@ function readInteger(value: unknown, field: string, min?: number, max?: number):
     throw new GatewayVerbError(`${field} must be a whole number${range}.`, 'INVALID_ARGUMENT', 400, field);
   }
   return value;
-}
-
-/** Absent or null means "no cap"; anything else must be a non-negative whole number, never silently dropped. */
-function readIssuerCap(value: unknown): number | null {
-  if (value === undefined || value === null) return null;
-  if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) {
-    throw new GatewayVerbError('issuerCapMinorUnits must be a non-negative whole number of minor units, or omitted for no cap.', 'INVALID_ARGUMENT', 400, 'issuerCapMinorUnits');
-  }
-  return value;
-}
-
-/**
- * A GET's `limit` arrives as a query string ("100", not 100). A numeric string
- * parses the same as the number it names; anything else, including a
- * non-digit string, is treated as absent and the caller falls back to the
- * default, exactly as a wrong-typed value does today.
- */
-function readOptionalPositiveInteger(value: unknown): number | undefined {
-  const parsed = typeof value === 'string' ? Number(value) : value;
-  return typeof parsed === 'number' && Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
-}
-
-/**
- * The exact set of card fields that may leave this process.
- *
- * Built by naming what is ALLOWED rather than by deleting what is forbidden.
- * A denylist silently ships whatever field a later change adds; an allowlist
- * silently drops it, and for card material that is the correct direction to
- * fail.
- */
-function sanitizeCardMetadata(card: PaymentCardView): PaymentCardView {
-  return {
-    id: card.id,
-    label: card.label,
-    brand: card.brand,
-    last4: card.last4,
-    kind: card.kind,
-    expiryMonth: card.expiryMonth,
-    expiryYear: card.expiryYear,
-    issuerCapMinorUnits: card.issuerCapMinorUnits,
-    addedAt: card.addedAt,
-    materialComplete: card.materialComplete,
-  };
-}
-
-export function createPaymentsBudgetStatusHandler(service: PaymentsGatewayService): GatewayMethodHandler {
-  return async () => {
-    const view = await service.budgetStatus();
-    return {
-      enabled: view.enabled,
-      dayKey: view.pools.dayKey,
-      timezone: view.pools.timezone,
-      currency: view.currency,
-      item: view.pools.item,
-      overage: view.pools.overage,
-      tolerance: view.pools.tolerance,
-      reservationCount: view.reservationCount,
-      isPaymentsLeader: view.isPaymentsLeader,
-    };
-  };
-}
-
-export function createPaymentsCardsListHandler(service: PaymentsGatewayService): GatewayMethodHandler {
-  return async () => {
-    const { cards, defaultCardId } = await service.listCards();
-    return { cards: cards.map(sanitizeCardMetadata), defaultCardId };
-  };
-}
-
-export function createPaymentsCardsCreateHandler(service: PaymentsGatewayService): GatewayMethodHandler {
-  return async (invocation) => {
-    const params = readInvocationParams(invocation);
-    const kind = readString(params['kind'], 'kind');
-    if (kind !== 'virtual' && kind !== 'real') {
-      throw new GatewayVerbError("kind must be 'virtual' or 'real'.", 'INVALID_ARGUMENT', 400);
-    }
-    // Field reading happens BEFORE the storage try/catch below, on purpose: a
-    // validation failure here must surface as the field-named 400 these
-    // readers throw, not get swallowed into the storage handler's blanket 500.
-    const issuerCap = params['issuerCapMinorUnits'];
-    const label = readString(params['label'], 'label');
-    const number = readString(params['number'], 'number');
-    const expiryMonth = readInteger(params['expiryMonth'], 'expiryMonth', 1, 12);
-    const expiryYear = readInteger(params['expiryYear'], 'expiryYear', 1000, 9999);
-    const cvv = readString(params['cvv'], 'cvv');
-    const cardholderName = readString(params['cardholderName'], 'cardholderName');
-    const issuerCapMinorUnits = readIssuerCap(issuerCap);
-
-    let card: PaymentCardView;
-    try {
-      card = await service.createCard({
-        label,
-        kind,
-        number,
-        expiryMonth,
-        expiryYear,
-        cvv,
-        cardholderName,
-        issuerCapMinorUnits,
-      });
-    } catch (error) {
-      // Deliberately does not forward the underlying message: the failing call
-      // had the card in its arguments, and an error string is a read path like
-      // any other.
-      void error;
-      throw new GatewayVerbError(
-        'Storing the card failed. Nothing was saved.',
-        'INTERNAL_ERROR',
-        500,
-      );
-    }
-    return { card: sanitizeCardMetadata(card) };
-  };
-}
-
-export function createPaymentsCardsDeleteHandler(service: PaymentsGatewayService): GatewayMethodHandler {
-  return async (invocation) => {
-    const params = readInvocationParams(invocation);
-    const id = readString(params['id'], 'id');
-    const result = await service.deleteCard(id);
-    return { id, deleted: result.deleted, secretsCleared: result.secretsCleared };
-  };
 }
 
 function readStringArray(value: unknown, field: string): readonly string[] {
@@ -420,66 +272,4 @@ export function createPaymentsCheckoutBeginHandler(service: PaymentsGatewayServi
       challengeStep: result.challengeStep ?? null,
     };
   };
-}
-
-export function createPaymentsPurchasesListHandler(service: PaymentsGatewayService): GatewayMethodHandler {
-  return async (invocation) => {
-    const params = readInvocationParams(invocation);
-    const parsedLimit = readOptionalPositiveInteger(params['limit']);
-    const limit = parsedLimit !== undefined ? Math.min(parsedLimit, 500) : 100;
-    const rawDay = params['dayKey'];
-    const result = await service.listPurchases({
-      limit,
-      dayKey: typeof rawDay === 'string' && rawDay.trim().length > 0 ? rawDay.trim() : undefined,
-    });
-    return { purchases: result.purchases, total: result.total,
-      ...(result.reconciliations === undefined ? {} : { reconciliations: result.reconciliations }) };
-  };
-}
-
-/**
- * Attach the payment handlers to their registered descriptors (missing = no-op).
- *
- * Boot recovery runs TO COMPLETION before any handler attaches, so no checkout
- * verb can start a purchase the sweep would then read as interrupted. The
- * promise resolves once the verbs are attached; a caller that does not await
- * it serves the payment verbs a beat later, never a swept-mid-flight checkout.
- * Recovery failure, thrown synchronously or rejected, is reported through
- * `onRecoveryFailure` and does not withhold the verbs: the sweep is a
- * disclosure duty, not a serving precondition once it has stopped running.
- */
-export async function registerPaymentsGatewayMethods(
-  catalog: GatewayMethodCatalog,
-  service: PaymentsGatewayService,
-  options: {
-    /** Reported when boot recovery itself fails; never carries a notice body. */
-    readonly onRecoveryFailure?: ((error: unknown) => void) | undefined;
-    /**
-     * Receives the sweep envelope every time recovery runs, including a
-     * skipped-not-leader boot, for the composition's audit log; disclosure
-     * of recoveries is the platform rule, and the envelope is the audit
-     * record.
-     */
-    readonly onRecoverySettled?: ((sweep: unknown) => void) | undefined;
-  } = {},
-): Promise<void> {
-  if (typeof service.recoverInterruptedCheckouts === 'function') {
-    try {
-      const sweep = await service.recoverInterruptedCheckouts();
-      options.onRecoverySettled?.(sweep);
-    } catch (error) {
-      // Covers both a rejected promise and a synchronous throw from the call.
-      options.onRecoveryFailure?.(error);
-    }
-  }
-  const attach = (id: string, handler: GatewayMethodHandler): void => {
-    const descriptor = catalog.get(id);
-    if (descriptor) catalog.register(descriptor, handler, { replace: true });
-  };
-  attach('payments.budget.status', createPaymentsBudgetStatusHandler(service));
-  attach('payments.cards.list', createPaymentsCardsListHandler(service));
-  attach('payments.cards.create', createPaymentsCardsCreateHandler(service));
-  attach('payments.cards.delete', createPaymentsCardsDeleteHandler(service));
-  attach('payments.checkout.begin', createPaymentsCheckoutBeginHandler(service));
-  attach('payments.purchases.list', createPaymentsPurchasesListHandler(service));
 }

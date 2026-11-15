@@ -9,16 +9,10 @@
 import type { GatewayMethodCatalog } from '../method-catalog.js';
 import type { GatewayMethodHandler } from '../method-catalog-shared.js';
 import type { UserPermissionRuleStore } from '../../permissions/user-rule-store.js';
-import { GatewayVerbError } from './gateway-verb-error.js';
-import { readInvocationParams } from './invocation-params.js';
+import { readInvocationParams, requireString } from './invocation-params.js';
+import { attachHandler } from './attach-handler.js';
 import { logger } from '../../utils/logger.js';
 
-function requireString(value: unknown, field: string): string {
-  if (typeof value !== 'string' || value.length === 0) {
-    throw new GatewayVerbError(`Invalid ${field}: expected a non-empty string`, 'INVALID_ARGUMENT', 400, field);
-  }
-  return value;
-}
 
 export interface PermissionRulesGatewayDeps {
   readonly userRuleStore: Pick<UserPermissionRuleStore, 'list' | 'delete'>;
@@ -40,7 +34,7 @@ export function createPermissionRulesListHandler(store: PermissionRulesGatewayDe
 export function createPermissionRulesDeleteHandler(store: PermissionRulesGatewayDeps['userRuleStore']): GatewayMethodHandler {
   return async (invocation) => {
     const params = readInvocationParams(invocation);
-    const ruleId = requireString(params.ruleId, 'ruleId');
+    const ruleId = requireString(params, 'ruleId');
     const deleted = await store.delete(ruleId);
     // A standing grant or denial is security policy: who removed it is kept,
     // the rule's content is not.
@@ -55,11 +49,8 @@ export function createPermissionRulesDeleteHandler(store: PermissionRulesGateway
   };
 }
 
-/** Attach the permissions.rules.list/.delete handlers to their descriptors. Missing descriptor is a silent no-op. */
+/** Attach the permissions.rules.list/.delete handlers to their descriptors (a missing one is logged). */
 export function registerPermissionRulesGatewayMethods(catalog: GatewayMethodCatalog, deps: PermissionRulesGatewayDeps): void {
-  const listDescriptor = catalog.get('permissions.rules.list');
-  if (listDescriptor) catalog.register(listDescriptor, createPermissionRulesListHandler(deps.userRuleStore), { replace: true });
-
-  const deleteDescriptor = catalog.get('permissions.rules.delete');
-  if (deleteDescriptor) catalog.register(deleteDescriptor, createPermissionRulesDeleteHandler(deps.userRuleStore), { replace: true });
+  attachHandler(catalog, 'permissions.rules.list', createPermissionRulesListHandler(deps.userRuleStore));
+  attachHandler(catalog, 'permissions.rules.delete', createPermissionRulesDeleteHandler(deps.userRuleStore));
 }

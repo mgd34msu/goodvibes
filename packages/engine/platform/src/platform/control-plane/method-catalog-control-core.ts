@@ -520,7 +520,7 @@ export const builtinGatewayControlCoreMethodDescriptors: readonly GatewayMethodD
   methodDescriptor({
     id: 'sessions.contextUsage.get',
     title: 'Get Session Context Usage',
-    description: 'Return the live context-window usage for a session: estimatedContextTokens (the runtime\'s current estimate, not a fresh preflight count), a source-supported contextWindow or configured cap, and the derived contextUsagePct and contextRemainingTokens (all three null when capacity is unknown). Typed source, origin and accepted-input floor metadata remain separate from the known ceiling. `estimated` is always true, marking the token figure as an estimate rather than a fact. Only the daemon\'s live local runtime session is resolvable; any other session id is a 404 SESSION_NOT_LOCAL.',
+    description: 'Return the live context-window usage for a session: estimatedContextTokens (the runtime\'s current estimate, not a fresh preflight count), a source-supported contextWindow or configured cap, and the derived contextUsagePct and contextRemainingTokens (all three null when capacity is unknown). Typed source, origin and accepted-input floor metadata remain separate from the known ceiling. `estimated` is always true, marking the token figure as an estimate rather than a fact. Answers for the daemon\'s own runtime session and every session it hosts; a session it runs but keeps no figure for (an active channel session) is a 409 CONTEXT_USAGE_UNAVAILABLE, and any other session id is a 404 SESSION_NOT_LOCAL.',
     category: 'sessions',
     scopes: ['read:sessions'],
     http: { method: 'GET', path: '/api/sessions/{sessionId}/context-usage' },

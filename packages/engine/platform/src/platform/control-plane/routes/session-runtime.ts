@@ -9,11 +9,12 @@ import type { TurnCancellationResult } from '../../core/turn-cancellation.js';
  * `permissions.mode` config the way the in-process TUI reads per-session
  * state.
  *
- * SCOPE OF TRUTH: the daemon can only get/set the permission mode of, and read
- * the context usage of, the LIVE LOCAL runtime it actually hosts. A request
- * for any other session id is an honest 404 (SESSION_NOT_LOCAL) rather than a
- * fabricated answer, mirroring the honest-refusal pattern the fleet archive
- * verbs use (routes/fleet.ts).
+ * SCOPE OF TRUTH: the daemon answers for the sessions whose loops it runs:
+ * its own local runtime, every hosted session (through the controls the
+ * hosted loop binds), and active channel sessions. A request for any other
+ * session id is an honest 404 (SESSION_NOT_LOCAL) rather than a fabricated
+ * answer. A session it runs but holds no context figure for answers 409
+ * CONTEXT_USAGE_UNAVAILABLE, naming why.
  *
  * MODE-CHANGE EVENT: `sessions.permissionMode.set` mutates `permissions.mode`
  * through the ordinary config surface, which the already-wired
@@ -83,6 +84,8 @@ export interface SessionContextUsage {
  */
 export interface SessionLiveTurnControls {
   getPermissionMode?(): GatePresetName;
+  /** This session's own context usage, read from the conversation and model it runs. */
+  getContextUsage?(): SessionContextUsage;
   setPermissionMode?(mode: SettableGatePresetName): Promise<void>;
   cancelTurn?(expectedTurnId: string): TurnCancellationResult;
   cancelToolCall(callId: string): boolean;
@@ -392,28 +395,51 @@ export function createSessionRuntimeControls(deps: {
       deps.config.set('permissions.mode', mode);
     },
     getContextUsage(sessionId: string): SessionContextUsage {
-      const state = deps.store.getState();
-      // Hosted live-turn bindings do not provide per-session usage/model data.
-      // Do not answer for those sessions with this single runtime store.
-      if (sessionId !== LOCAL_RUNTIME_ALIAS && (!state.session.id || sessionId !== state.session.id)) {
-        throw new GatewayVerbError(`Context usage is unavailable for session ${sessionId} on this runtime.`, 'SESSION_NOT_LOCAL', 404);
+      const hosted = deps.liveTurnHolder?.getSession(sessionId);
+      if (hosted) {
+        if (!hosted.getContextUsage) throw contextUsageUnavailable(sessionId, 'its host does not report context usage');
+        return hosted.getContextUsage();
       }
-      const usedTokens = state.conversation.estimatedContextTokens;
-      const reading = readCurrentContextWindow(deps.providerRegistry);
-      const window = reading?.knownContextWindow ?? null;
-      const derived = deriveContextUsage(usedTokens, window);
-      return {
-        estimatedContextTokens: usedTokens,
-        contextWindow: window,
-        contextUsagePct: derived.contextUsagePct,
-        contextRemainingTokens: derived.contextRemainingTokens,
-        ...(reading ? {
-          contextWindowSource: reading.contextWindowSource,
-          ...(reading.contextWindowOrigin ? { contextWindowOrigin: reading.contextWindowOrigin } : {}),
-          ...(reading.contextWindowAcceptedFloor !== undefined ? { contextWindowAcceptedFloor: reading.contextWindowAcceptedFloor } : {}),
-        } : {}),
-      };
+      const state = deps.store.getState();
+      if (sessionId !== LOCAL_RUNTIME_ALIAS && (!state.session.id || sessionId !== state.session.id)) {
+        // Local by `isLocalSession` (an active channel session) but with no
+        // conversation figure this process holds.
+        throw contextUsageUnavailable(sessionId, 'no conversation figure is kept for it');
+      }
+      return readSessionContextUsage(state.conversation.estimatedContextTokens, deps.providerRegistry);
     },
+  };
+}
+
+function contextUsageUnavailable(sessionId: string, why: string): GatewayVerbError {
+  return new GatewayVerbError(
+    `Context usage is unavailable for session ${sessionId}: ${why}. Its permission mode, cancel and queue verbs still answer.`,
+    'CONTEXT_USAGE_UNAVAILABLE',
+    409,
+  );
+}
+
+/**
+ * One session's context usage from its token estimate and the model it runs,
+ * the one derivation the local runtime and every hosted session share.
+ */
+export function readSessionContextUsage(
+  usedTokens: number,
+  providerRegistry: Pick<ProviderRegistry, 'getCurrentModel' | 'getContextWindowForModel' | 'getKnownContextWindowForModel'> | undefined,
+): SessionContextUsage {
+  const reading = readCurrentContextWindow(providerRegistry);
+  const window = reading?.knownContextWindow ?? null;
+  const derived = deriveContextUsage(usedTokens, window);
+  return {
+    estimatedContextTokens: usedTokens,
+    contextWindow: window,
+    contextUsagePct: derived.contextUsagePct,
+    contextRemainingTokens: derived.contextRemainingTokens,
+    ...(reading ? {
+      contextWindowSource: reading.contextWindowSource,
+      ...(reading.contextWindowOrigin ? { contextWindowOrigin: reading.contextWindowOrigin } : {}),
+      ...(reading.contextWindowAcceptedFloor !== undefined ? { contextWindowAcceptedFloor: reading.contextWindowAcceptedFloor } : {}),
+    } : {}),
   };
 }
 

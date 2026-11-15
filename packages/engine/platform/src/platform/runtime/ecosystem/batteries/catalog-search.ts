@@ -7,9 +7,12 @@
  * words ("github" never found a "pull request tools" entry) and kept entries
  * that only shared letters with the query ("auth" matched "author").
  *
- * One yes/no per (query, entry) pair, each pair its own request so no entry
- * becomes context for another. An empty query lists everything with no
- * reading; that guard and the name order stay code in catalog.ts.
+ * One yes/no per entry, asked for a page of entries at once: the state carries
+ * the query and the page, and the question names one entry by its index
+ * ({@link catalogSearchAt}), so a page costs one request instead of one per
+ * entry. Other entries on the page are context, never an alternative target.
+ * An empty query lists everything with no reading; that guard, the paging, the
+ * cache and the name order stay code in catalog.ts.
  *
  * Band: low stakes. The result only filters a listing; installing an entry
  * still takes an explicit review and `/marketplace install`.
@@ -105,37 +108,47 @@ const SECRET_SCAN = entry({
   tags: ['commit', 'credentials'],
 });
 
-export const catalogSearch = defineBattery({
-  name: 'engine.ecosystem.catalog-search',
-  version: 1,
-  description: 'Whether an ecosystem catalog entry is something the person searching the catalog with a query is looking for.',
-  accuracyFloor: 0.9,
-  items: {
-    wanted: yesNo(
-      '`query` is what a person typed to search the ecosystem catalog. `entry` is one catalog entry. Is `entry` something the person searching for `query` is looking for?',
-      STAKES_BANDS.low.yesNo,
-      {
-        true: "The entry's name, summary, tags or notes describe what the query asks for, in the same or other words.",
-        false: 'The entry is about something else, or only shares letters or a word with the query.',
-      },
-    ),
-  },
-  fixtures: [
-    { name: 'github finds pull request tools described in other words', state: { query: 'github', entry: PR_TOOLS }, expect: { wanted: 'yes' } },
-    { name: 'pull requests finds pull request tools by name', state: { query: 'pull requests', entry: PR_TOOLS }, expect: { wanted: 'yes' } },
-    { name: 'auth does not find author stats that only share letters', state: { query: 'auth', entry: AUTHOR_STATS }, expect: { wanted: 'no' } },
-    { name: 'auth finds the OAuth sign-in hooks', state: { query: 'auth', entry: OAUTH_HELPER }, expect: { wanted: 'yes' } },
-    { name: 'dark mode finds the solarized color schemes', state: { query: 'dark mode', entry: SOLARIZED_THEME }, expect: { wanted: 'yes' } },
-    { name: 'dark mode does not find pull request tools', state: { query: 'dark mode', entry: PR_TOOLS }, expect: { wanted: 'no' } },
-    { name: 'documentation finds the docs writer skill', state: { query: 'documentation', entry: DOCS_WRITER }, expect: { wanted: 'yes' } },
-    { name: 'documentation does not find the recipe skill', state: { query: 'documentation', entry: RECIPE_SKILL }, expect: { wanted: 'no' } },
-    { name: 'run tests finds the test on save hooks', state: { query: 'run tests', entry: TEST_RUNNER_HOOKS }, expect: { wanted: 'yes' } },
-    { name: 'run tests does not find the read-only shell policy', state: { query: 'run tests', entry: READONLY_SHELL }, expect: { wanted: 'no' } },
-    { name: 'docker finds the container deploy plugin', state: { query: 'docker', entry: DOCKER_DEPLOY }, expect: { wanted: 'yes' } },
-    { name: 'docs does not find the container deploy plugin', state: { query: 'docs', entry: DOCKER_DEPLOY }, expect: { wanted: 'no' } },
-    { name: 'leaked credentials finds the secret scan hooks', state: { query: 'leaked credentials', entry: SECRET_SCAN }, expect: { wanted: 'yes' } },
-    { name: 'shell permissions finds the read-only shell policy', state: { query: 'shell permissions', entry: READONLY_SHELL }, expect: { wanted: 'yes' } },
-    { name: 'kubernetes does not find the recipe skill', state: { query: 'kubernetes', entry: RECIPE_SKILL }, expect: { wanted: 'no' } },
-    { name: 'theme does not find the secret scan hooks', state: { query: 'theme', entry: SECRET_SCAN }, expect: { wanted: 'no' } },
-  ],
-});
+const one = (query: string, entry: { [field: string]: string | string[] }) => ({ query, entries: [entry] });
+
+/** The question about `entries[index]` of a page; the index names evidence, nothing else. */
+export function catalogSearchAt(index: number) {
+  if (!Number.isSafeInteger(index) || index < 0) throw new RangeError('Invalid catalog page index.');
+  return defineBattery({
+    name: 'engine.ecosystem.catalog-search',
+    version: 2,
+    description: 'Whether an ecosystem catalog entry is something the person searching the catalog with a query is looking for.',
+    accuracyFloor: 0.9,
+    items: {
+      wanted: yesNo(
+        `\`query\` is what a person typed to search the ecosystem catalog. \`entries\` is a page of catalog entries. Is entries[${index}] something the person searching for \`query\` is looking for? The other entries are context, not alternatives.`,
+        STAKES_BANDS.low.yesNo,
+        {
+          true: "The entry's name, summary, tags or notes describe what the query asks for, in the same or other words.",
+          false: 'The entry is about something else, or only shares letters or a word with the query.',
+        },
+      ),
+    },
+    fixtures: [
+      { name: 'github finds pull request tools described in other words', state: one('github', PR_TOOLS), expect: { wanted: 'yes' } },
+      { name: 'pull requests finds pull request tools by name', state: one('pull requests', PR_TOOLS), expect: { wanted: 'yes' } },
+      { name: 'auth does not find author stats that only share letters', state: one('auth', AUTHOR_STATS), expect: { wanted: 'no' } },
+      { name: 'auth finds the OAuth sign-in hooks', state: one('auth', OAUTH_HELPER), expect: { wanted: 'yes' } },
+      { name: 'dark mode finds the solarized color schemes', state: one('dark mode', SOLARIZED_THEME), expect: { wanted: 'yes' } },
+      { name: 'dark mode does not find pull request tools', state: one('dark mode', PR_TOOLS), expect: { wanted: 'no' } },
+      { name: 'documentation finds the docs writer skill', state: one('documentation', DOCS_WRITER), expect: { wanted: 'yes' } },
+      { name: 'documentation does not find the recipe skill', state: one('documentation', RECIPE_SKILL), expect: { wanted: 'no' } },
+      { name: 'run tests finds the test on save hooks', state: one('run tests', TEST_RUNNER_HOOKS), expect: { wanted: 'yes' } },
+      { name: 'run tests does not find the read-only shell policy', state: one('run tests', READONLY_SHELL), expect: { wanted: 'no' } },
+      { name: 'docker finds the container deploy plugin', state: one('docker', DOCKER_DEPLOY), expect: { wanted: 'yes' } },
+      { name: 'docs does not find the container deploy plugin', state: one('docs', DOCKER_DEPLOY), expect: { wanted: 'no' } },
+      { name: 'leaked credentials finds the secret scan hooks', state: one('leaked credentials', SECRET_SCAN), expect: { wanted: 'yes' } },
+      { name: 'shell permissions finds the read-only shell policy', state: one('shell permissions', READONLY_SHELL), expect: { wanted: 'yes' } },
+      { name: 'kubernetes does not find the recipe skill', state: one('kubernetes', RECIPE_SKILL), expect: { wanted: 'no' } },
+      { name: 'theme does not find the secret scan hooks', state: one('theme', SECRET_SCAN), expect: { wanted: 'no' } },
+      { name: 'a matching entry later on the page does not make the first one a match', state: { query: 'auth', entries: [AUTHOR_STATS, OAUTH_HELPER] }, expect: { wanted: 'no' } },
+    ],
+  });
+}
+
+/** The registered reading: the question about the first entry of a page. */
+export const catalogSearch = catalogSearchAt(0);

@@ -2,7 +2,7 @@
  * ecosystem-catalog-readings.test.ts
  *
  * Catalog search and review. Which entries answer a search query is the
- * `engine.ecosystem.catalog-search` reading, one request per entry; whether a
+ * `engine.ecosystem.catalog-search` reading, one request per page of entries; whether a
  * trust note raises the risk label is the `engine.ecosystem.trust-note-caution`
  * reading. Pins that a blank query and a note-free or remote entry ask
  * nothing, that only strong readings act (a strong no hides a search row, a
@@ -27,7 +27,7 @@ import { makeProjectTempDir } from './_helpers/project-temp.ts';
 import { withDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.js';
 import { rankRecommendationCandidates } from '../platform/src/platform/runtime/ecosystem/recommendations.js';
 
-type SearchState = { readonly query: string; readonly entry: { readonly id: string } };
+type SearchState = { readonly query: string; readonly entries: readonly { readonly id: string }[] };
 type NoteState = { readonly name: string; readonly trustNotes: string };
 
 /** A port answering one named question through `probability`, recording every request. */
@@ -85,35 +85,56 @@ test('Preferred exhausted catalog search continues literal browsing without rest
 });
 
 describe('catalog search', () => {
-  test('one request per entry; only a strong no hides a row; kept rows stay in name order', async () => {
+  /** A port answering each page question from the entry its index names. */
+  function pagePort(probability: (id: string) => number) {
+    return fakePort((name: string, _question: Question, state: EntryType) => {
+      const match = /^entry(\d+)__wanted$/.exec(name);
+      if (!match) throw new Error(`catalog port: unexpected question ${name}`);
+      return noulAnswer(probability((state as unknown as SearchState).entries[Number(match[1])]!.id));
+    });
+  }
+
+  test('one request per page; only a strong no hides a row; kept rows stay in name order; a repeat asks nothing', async () => {
     upsertEcosystemCatalogEntry(plugin('zeta', 'Zeta pull requests'), options);
     upsertEcosystemCatalogEntry(plugin('alpha', 'Alpha author stats'), options);
     upsertEcosystemCatalogEntry(plugin('mid', 'Mid code host'), options);
     const readings: Record<string, number> = { zeta: 0.9, alpha: 0.1, mid: 0.43 }; // mid is a weak no: kept
-    const { port, requests } = portFor<SearchState>('wanted', (state) => readings[state.entry.id]!);
+    const { port, requests } = pagePort((id) => readings[id]!);
     installJudgmentPort(port);
 
     const found = await searchEcosystemCatalog('plugin', '  github ', options);
     expect(found.map((entry) => entry.id)).toEqual(['mid', 'zeta']);
-    expect(requests).toHaveLength(3);
-    expect(requests.map((request) => (request.state as unknown as SearchState).query)).toEqual(['github', 'github', 'github']);
+    expect(requests).toHaveLength(1);
+    expect((requests[0]!.state as unknown as SearchState).query).toBe('github');
+    expect((await searchEcosystemCatalog('plugin', 'github', options)).map((entry) => entry.id)).toEqual(['mid', 'zeta']);
+    expect(requests).toHaveLength(1);
+  });
+
+  test('a changed catalog is read again', async () => {
+    upsertEcosystemCatalogEntry(plugin('a', 'Alpha'), options);
+    const { port, requests } = pagePort(() => 0.9);
+    installJudgmentPort(port);
+    await searchEcosystemCatalog('plugin', 'alpha', options);
+    upsertEcosystemCatalogEntry(plugin('b', 'Beta'), options);
+    expect((await searchEcosystemCatalog('plugin', 'alpha', options)).map((entry) => entry.id)).toEqual(['a', 'b']);
+    expect(requests).toHaveLength(2);
   });
 
   test('the question sees the entry words, not its source', async () => {
     upsertEcosystemCatalogEntry(plugin('p', 'P', { source: '/secret/path', trustNotes: 'note', installHint: 'hint', tags: ['t'] }), options);
-    const { port, requests } = portFor<SearchState>('wanted', () => 0.9);
+    const { port, requests } = pagePort(() => 0.9);
     installJudgmentPort(port);
     await searchEcosystemCatalog('plugin', 'p', options);
     expect(requests[0]!.state).toEqual({
       query: 'p',
-      entry: { kind: 'plugin', id: 'p', name: 'P', summary: 'P summary', tags: ['t'], installHint: 'hint', trustNotes: 'note' },
+      entries: [{ kind: 'plugin', id: 'p', name: 'P', summary: 'P summary', tags: ['t'], installHint: 'hint', trustNotes: 'note' }],
     });
   });
 
   test('a blank query lists every entry and asks nothing', async () => {
     upsertEcosystemCatalogEntry(plugin('b', 'Beta'), options);
     upsertEcosystemCatalogEntry(plugin('a', 'Alpha'), options);
-    const { port, requests } = portFor<SearchState>('wanted', () => 0.1);
+    const { port, requests } = portFor<SearchState>('entry0__wanted', () => 0.1);
     installJudgmentPort(port);
     expect((await searchEcosystemCatalog('plugin', '   ', options)).map((entry) => entry.id)).toEqual(['a', 'b']);
     expect(requests).toHaveLength(0);

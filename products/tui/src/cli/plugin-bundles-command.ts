@@ -1,18 +1,20 @@
 import { commandJsonOrText as formatJsonOrText } from '@goodvibes-jev/engine/terminal-shell/cli-output';
-import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { readFileSync } from 'node:fs';
 import {
   parseMarketplaceIndex,
   fetchAndVerifyBundle,
+  readBundleArchive,
   validateCapabilityBundleManifest,
   planBundleActivation,
+  installVerifiedBundle,
+  listInstalledEcosystemEntries,
   BundlePinRefusal,
+  type PinnedBundleSource,
   type PinnedMarketplaceIndexEntry,
-  type CapabilityBundleManifest,
   type BundleActivationPlan,
+  type EcosystemInstallReceipt,
 } from '@goodvibes-jev/engine/platform/platform/runtime/ecosystem';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-import { writeJsonFileAtomic } from '@goodvibes-jev/engine/platform/platform/state/durable-file-io';
 import type { CliCommandOutput, CliCommandRuntime } from '@goodvibes-jev/engine/terminal-shell';
 
 // ---------------------------------------------------------------------------
@@ -22,49 +24,23 @@ import type { CliCommandOutput, CliCommandRuntime } from '@goodvibes-jev/engine/
 // parseMarketplaceIndex, fetchAndVerifyBundle, planBundleActivation. There is
 // deliberately NO flag that bypasses a pin mismatch, `install` either
 // verifies or refuses; `--yes` only confirms an ALREADY-verified activation
-// plan, it never substitutes for the pin.
+// plan, it never substitutes for the pin. A confirmed install unpacks the
+// verified archive into the same install directories, receipts, backups and
+// rollback `/marketplace` uses; the receipt carries the pin and the grant.
 // ---------------------------------------------------------------------------
 
-interface InstalledBundleRecord {
-  readonly id: string;
-  readonly name: string;
-  readonly version: string;
-  readonly kind: CapabilityBundleManifest['kind'];
-  readonly source: { readonly kind: 'file' | 'url'; readonly location: string; readonly sha256: string };
-  readonly capabilities: BundleActivationPlan['capabilityManifest'];
-  readonly quarantine: BundleActivationPlan['quarantine'];
-  readonly installedAt: number;
-}
-
-function installedBundlesPath(runtime: CliCommandRuntime): string {
-  return join(runtime.homeDirectory, '.goodvibes', 'bundles', 'installed.json');
-}
-
-/** An unreadable ledger is reported, never treated as empty: the next write would replace every earlier record. */
-function readInstalledBundles(runtime: CliCommandRuntime): InstalledBundleRecord[] {
-  const path = installedBundlesPath(runtime);
-  if (!existsSync(path)) return [];
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(readFileSync(path, 'utf-8'));
-  } catch (error) {
-    throw new Error(`The installed-bundles record at ${path} cannot be read (${summarizeError(error)}). Repair or remove that file; nothing was changed.`);
-  }
-  if (!Array.isArray(parsed)) throw new Error(`The installed-bundles record at ${path} is not a list. Repair or remove that file; nothing was changed.`);
-  return parsed as InstalledBundleRecord[];
-}
-
-function writeInstalledBundles(runtime: CliCommandRuntime, records: readonly InstalledBundleRecord[]): void {
-  writeJsonFileAtomic(installedBundlesPath(runtime), records);
-}
-
-/** file:// / bare-path vs http(s)://, the only two source kinds this CLI surface accepts (no git ref flag exists yet). */
-function inferSourceKind(ref: string): 'file' | 'url' {
+/** A source is a git remote when a ref is given, an http(s) URL, or a file path. */
+function inferSourceKind(ref: string, gitRef: string | undefined): PinnedBundleSource['kind'] {
+  if (gitRef !== undefined) return 'git';
   return ref.startsWith('http://') || ref.startsWith('https://') ? 'url' : 'file';
 }
 
+function ecosystemPaths(runtime: CliCommandRuntime): { cwd: string; homeDir: string } {
+  return { cwd: runtime.workingDirectory, homeDir: runtime.homeDirectory };
+}
+
 async function readIndexBytes(ref: string): Promise<string> {
-  if (inferSourceKind(ref) === 'url') {
+  if (inferSourceKind(ref, undefined) === 'url') {
     const res = await fetch(ref);
     if (!res.ok) throw new Error(`URL '${ref}' returned HTTP ${res.status}`);
     return res.text();
@@ -131,7 +107,7 @@ async function handleBrowse(runtime: CliCommandRuntime, ref: string | undefined)
 /** Render an activation plan (granted capabilities, withheld/quarantined ones) for confirmation. */
 function renderPlan(plan: BundleActivationPlan, committed: boolean): string {
   const lines = [
-    `${committed ? 'Recorded (not yet activated)' : 'Activation plan (preview; re-run with --yes to record it)'}: ${plan.manifest.id} v${plan.manifest.version} (${plan.manifest.kind})`,
+    `${committed ? 'Installed' : 'Activation plan (preview; re-run with --yes to install it)'}: ${plan.manifest.id} v${plan.manifest.version} (${plan.manifest.kind})`,
     `  trust tier: ${plan.trustTier}`,
     `  declared runtime capabilities: ${plan.manifest.capabilities.runtime.join(', ') || 'none'}`,
     `  declared tools: ${plan.manifest.capabilities.tools.join(', ') || 'none'}`,
@@ -148,19 +124,18 @@ function renderPlan(plan: BundleActivationPlan, committed: boolean): string {
   } else {
     lines.push('  quarantined: no; every declared capability fit the trust tier');
   }
-  if (committed) lines.push('  This version only keeps the record: the bundle\'s tools, hooks and channels are not loaded.');
   return lines.join('\n');
 }
 
-async function handleInstall(runtime: CliCommandRuntime, ref: string | undefined, sha256: string | undefined): Promise<CliCommandOutput> {
+async function handleInstall(runtime: CliCommandRuntime, ref: string | undefined, sha256: string | undefined, gitRef: string | undefined): Promise<CliCommandOutput> {
   if (!ref || !sha256) {
     return {
-      output: 'Usage: goodvibes plugin bundles install <ref> --sha256 <pin>  (the pin is required; there is no unpinned install path)',
+      output: 'Usage: goodvibes plugin bundles install <ref> --sha256 <pin> [--ref <git-ref>]  (the pin is required; there is no unpinned install path)',
       exitCode: 2,
     };
   }
-  const kind = inferSourceKind(ref);
-  const source = { kind, location: ref, sha256 } as const;
+  const kind = inferSourceKind(ref, gitRef);
+  const source: PinnedBundleSource = { kind, location: ref, sha256, ...(gitRef === undefined ? {} : { ref: gitRef }) };
   let bytes: Uint8Array;
   try {
     const fetched = await fetchAndVerifyBundle(source);
@@ -174,13 +149,13 @@ async function handleInstall(runtime: CliCommandRuntime, ref: string | undefined
     }
     return { output: `Could not fetch bundle from '${ref}': ${summarizeError(error)}`, exitCode: 1 };
   }
-  let parsed: unknown;
+  let archive: ReturnType<typeof readBundleArchive>;
   try {
-    parsed = JSON.parse(new TextDecoder().decode(bytes));
+    archive = readBundleArchive(bytes);
   } catch (error) {
-    return { output: `Bundle at '${ref}' is not valid JSON: ${summarizeError(error)}`, exitCode: 1 };
+    return { output: `Bundle at '${ref}' was refused: ${summarizeError(error)}`, exitCode: 1 };
   }
-  const validation = validateCapabilityBundleManifest(parsed);
+  const validation = validateCapabilityBundleManifest(archive.manifest);
   if (!validation.ok) {
     return {
       output: formatJsonOrText(
@@ -192,64 +167,74 @@ async function handleInstall(runtime: CliCommandRuntime, ref: string | undefined
     };
   }
   const plan = planBundleActivation(validation.manifest);
-  // --yes records the plan as shown, quarantine included. A record loads
-  // nothing and the withheld capabilities stay withheld, so a script or agent
-  // that passed --yes gets the same record a person at a terminal would.
+  // --yes installs the plan as shown, quarantine included: the withheld
+  // capabilities stay withheld in the receipt, so a script or agent that
+  // passed --yes gets the same install a person at a terminal would.
   const committed = runtime.cli.flags.yes;
-  if (committed) {
-    let existing: InstalledBundleRecord[];
-    try {
-      existing = readInstalledBundles(runtime);
-    } catch (error) {
-      return { output: summarizeError(error), exitCode: 1 };
-    }
-    const records = existing.filter((r) => r.id !== plan.manifest.id);
-    records.push({
-      id: plan.manifest.id,
-      name: plan.manifest.name,
-      version: plan.manifest.version,
-      kind: plan.manifest.kind,
+  if (!committed) return { output: formatJsonOrText(runtime, { ok: true, committed, plan }, renderPlan(plan, false)), exitCode: 0 };
+  const { manifest } = plan;
+  const installed = installVerifiedBundle({
+    id: manifest.id, kind: manifest.kind, name: manifest.name, version: manifest.version, description: manifest.description,
+    ...(manifest.author ? { author: manifest.author } : {}),
+    files: archive.files,
+    grant: {
       source,
-      capabilities: plan.capabilityManifest,
-      quarantine: plan.quarantine,
-      installedAt: Date.now(),
-    });
-    writeInstalledBundles(runtime, records);
-  }
-  return { output: formatJsonOrText(runtime, { ok: true, committed, plan }, renderPlan(plan, committed)), exitCode: 0 };
+      trustTier: plan.trustTier,
+      granted: [...plan.capabilityManifest.granted],
+      withheld: [...plan.quarantine.revokedCapabilities],
+      quarantined: plan.quarantine.required,
+      tools: [...manifest.capabilities.tools],
+      hooks: [...manifest.capabilities.hooks],
+      configDomains: [...manifest.capabilities.configDomains],
+      channels: [...manifest.capabilities.channels],
+    },
+  }, ecosystemPaths(runtime));
+  if (!installed.ok) return { output: formatJsonOrText(runtime, { ok: false, error: installed.error }, installed.error), exitCode: 1 };
+  const text = `${renderPlan(plan, true)}\n  installed at: ${installed.receipt.targetPath}\n  undo: /marketplace rollback ${manifest.kind} ${manifest.id} ${installed.receipt.scope} (or uninstall)`;
+  return { output: formatJsonOrText(runtime, { ok: true, committed, plan, receipt: installed.receipt }, text), exitCode: 0 };
+}
+
+function installedBundles(runtime: CliCommandRuntime): EcosystemInstallReceipt[] {
+  const paths = ecosystemPaths(runtime);
+  return (['plugin', 'skill', 'hook-pack', 'policy-pack'] as const)
+    .flatMap((kind) => listInstalledEcosystemEntries(kind, paths))
+    .filter((receipt) => receipt.bundle !== undefined);
 }
 
 function handleList(runtime: CliCommandRuntime): CliCommandOutput {
-  let records: InstalledBundleRecord[];
-  try {
-    records = readInstalledBundles(runtime);
-  } catch (error) {
-    return { output: summarizeError(error), exitCode: 1 };
+  const receipts = installedBundles(runtime);
+  if (receipts.length === 0) {
+    return { output: formatJsonOrText(runtime, receipts, 'No capability bundles installed.'), exitCode: 0 };
   }
-  if (records.length === 0) {
-    return { output: formatJsonOrText(runtime, records, 'No capability bundles installed.'), exitCode: 0 };
-  }
-  const lines = [`Recorded capability bundles (${records.length}; recorded only, not loaded):`];
-  for (const record of records) {
+  const lines = [`Installed capability bundles (${receipts.length}):`];
+  for (const receipt of receipts) {
+    const grant = receipt.bundle!;
     lines.push(
-      `  ${record.id}: ${record.name} v${record.version} (${record.kind})`,
-      `    installedAt: ${new Date(record.installedAt).toISOString()}`,
-      `    source: ${record.source.kind}:${record.source.location} (sha256:${record.source.sha256})`,
-      `    quarantined: ${record.quarantine.required ? `yes: ${record.quarantine.reason ?? 'over-reached its trust tier'}` : 'no'}`,
+      `  ${receipt.entry.id}: ${receipt.entry.name} v${receipt.entry.version ?? '?'} (${receipt.kind}, ${receipt.scope})`,
+      `    installedAt: ${new Date(receipt.installedAt).toISOString()} at ${receipt.targetPath}`,
+      `    source: ${grant.source.kind}:${grant.source.location}${grant.source.ref ? `@${grant.source.ref}` : ''} (sha256:${grant.source.sha256})`,
+      `    granted: ${grant.granted.join(', ') || 'none'}; quarantined: ${grant.quarantined ? `yes (withheld: ${grant.withheld.join(', ')})` : 'no'}`,
     );
   }
-  return { output: formatJsonOrText(runtime, records, lines.join('\n')), exitCode: 0 };
+  return { output: formatJsonOrText(runtime, receipts, lines.join('\n')), exitCode: 0 };
 }
 
 export async function handlePluginBundlesCommand(runtime: CliCommandRuntime, args: readonly string[]): Promise<CliCommandOutput> {
   const [sub, ...rest] = args;
   if (sub === 'browse') return handleBrowse(runtime, rest[0]);
   if (sub === 'install') {
-    const sha256Index = rest.indexOf('--sha256');
-    const sha256 = sha256Index >= 0 ? rest[sha256Index + 1] : undefined;
-    const ref = rest.find((token, i) => (sha256Index < 0 || (i !== sha256Index && i !== sha256Index + 1)) && !token.startsWith('-'));
-    return handleInstall(runtime, ref, sha256);
+    const valueFlags = new Set<number>();
+    const flag = (name: string): string | undefined => {
+      const index = rest.indexOf(name);
+      if (index < 0) return undefined;
+      valueFlags.add(index).add(index + 1);
+      return rest[index + 1];
+    };
+    const sha256 = flag('--sha256');
+    const gitRef = flag('--ref');
+    const ref = rest.find((token, i) => !valueFlags.has(i) && !token.startsWith('-'));
+    return handleInstall(runtime, ref, sha256, gitRef);
   }
   if (sub === 'list') return handleList(runtime);
-  return { output: 'Usage: goodvibes plugin bundles browse <index-url-or-file>|install <ref> --sha256 <pin>|list', exitCode: 2 };
+  return { output: 'Usage: goodvibes plugin bundles browse <index-url-or-file>|install <ref> --sha256 <pin> [--ref <git-ref>]|list', exitCode: 2 };
 }

@@ -1,12 +1,13 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   appendCrashRecord,
   buildCrashRecord,
   CRASH_LOG_FILENAME,
-  CRASH_LOG_MAX_RECORDS,
+  CRASH_LOG_PREVIOUS_FILENAME,
+  CRASH_LOG_ROTATE_BYTES,
   CRASH_STACK_MAX_CHARS,
   readCrashRecords,
 } from '../platform/src/platform/runtime/crash-capture.ts';
@@ -83,19 +84,25 @@ describe('crash log: bounded, validated, disclosed', () => {
     expect(records[0]!.sessionId).toBe('user-cd11b528');
   });
 
-  test('the log is bounded by record count, keeping the NEWEST', () => {
+  test('the log rotates by size and loses no record across one rotation', () => {
     const path = join(tempDir(), CRASH_LOG_FILENAME);
-    for (let i = 0; i < CRASH_LOG_MAX_RECORDS + 15; i++) {
-      appendCrashRecord(path, buildCrashRecord('uncaughtException', new Error(`crash-${i}`), {
+    const padding = 'p'.repeat(4000);
+    const perFile = Math.ceil(CRASH_LOG_ROTATE_BYTES / 4000);
+    const total = perFile * 3;
+    for (let i = 0; i < total; i++) {
+      expect(appendCrashRecord(path, buildCrashRecord('uncaughtException', new Error(`crash-${i}`), {
         ...CONTEXT,
-        // Pad so the file crosses the size threshold that triggers the trim.
-        sessionId: `session-${'p'.repeat(900)}-${i}`,
-      }));
+        sessionId: `session-${padding}-${i}`,
+      }))).toBe(true);
     }
+    // Two files at most, each a little over the rotation size.
+    expect(statSync(path).size).toBeLessThan(CRASH_LOG_ROTATE_BYTES + 8192);
+    expect(statSync(join(path, '..', CRASH_LOG_PREVIOUS_FILENAME)).size).toBeLessThan(CRASH_LOG_ROTATE_BYTES + 8192);
     const records = readCrashRecords(path);
-    expect(records.length).toBeLessThanOrEqual(CRASH_LOG_MAX_RECORDS);
-    // The newest crash is the one under investigation.
-    expect(records[records.length - 1]!.message).toBe(`crash-${CRASH_LOG_MAX_RECORDS + 14}`);
+    // The newest crash is the one under investigation, and the ones before it are in order.
+    expect(records.at(-1)!.message).toBe(`crash-${total - 1}`);
+    const first = Number(records[0]!.message.slice('crash-'.length));
+    expect(records.map((entry) => entry.message)).toEqual(records.map((_, index) => `crash-${first + index}`));
   });
 
   test('a torn final line does not cost the records before it', () => {
@@ -155,7 +162,7 @@ describe('crash log: retention ownership', () => {
   test('it resolves to the home-anchored surface root, and to nothing without one', () => {
     const descriptor = APPEND_ONLY_STORES.find((store) => store.id === 'surface-crash-log')!;
     const targets = descriptor.resolve({ homeDirectory: '/home/op', surfaceRoot: 'agent' });
-    expect(targets.files).toEqual([`/home/op/.goodvibes/agent/${CRASH_LOG_FILENAME}`]);
+    expect(targets.files).toEqual([`/home/op/.goodvibes/agent/${CRASH_LOG_FILENAME}`, `/home/op/.goodvibes/agent/${CRASH_LOG_PREVIOUS_FILENAME}`]);
     expect(targets.journalDirs).toEqual([]);
     // A faulting process may have no usable working directory; absent a home
     // root the store is skipped rather than guessed at.

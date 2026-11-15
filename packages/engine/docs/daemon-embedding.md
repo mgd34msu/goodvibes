@@ -100,8 +100,11 @@ a port probe and an identity probe onto one of these outcomes, reported as
 
 - **`external`** (adopt): a compatible GoodVibes daemon answers on the
   configured host/port. The host runs without owning the daemon process.
-- **`incompatible`**: a GoodVibes daemon answers, but on a version band this
-  host cannot adopt. The host reports the mismatch and runs without one.
+- **`incompatible`**: a GoodVibes daemon answers, but it is of another major
+  version, or older than this host on major.minor (it may not serve every
+  method the host calls). The host reports both versions and the next step
+  (restart the daemon with `goodvibes-daemon restart-service`, or update the
+  older program) and runs without one.
 - **`blocked`**: the configured port is occupied by a process that does not
   verify as a GoodVibes daemon. The host runs without a daemon rather than
   guessing.

@@ -1,19 +1,11 @@
 /**
- * Diagnostics system, barrel re-exports and factory.
- *
- * This module provides the public API for the runtime diagnostics system.
- * Import from here to access types, providers, and the factory function.
- *
- * Usage:
- * ```ts
- * import { createDiagnosticsProvider } from '../runtime/diagnostics/index.js';
- *
- * const provider = createDiagnosticsProvider({
- *   eventBus,
- *   healthAggregator,
- *   domains: [...],
- * });
- * ```
+ * Diagnostics types and the panels live owners build. The policy runtime
+ * builds the policy and divergence panels; the security read model shares the
+ * security snapshot type; the state inspector and deterministic replay share
+ * the runtime-state snapshot types. Remediation (retry or cancel a task, cancel
+ * an agent) and health and event reads are served by the live owners through
+ * the operator methods `tasks.retry`, `tasks.cancel`, `health.snapshot` and
+ * `telemetry.*`.
  */
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -37,75 +29,11 @@ export type {
 } from './types.js';
 export { DEFAULT_BUFFER_LIMIT, DEFAULT_COMPONENT_CONFIG, applyFilter, appendBounded } from './types.js';
 
-// ── Action system ────────────────────────────────────────────────────────────
-export type {
-  DiagnosticActionType,
-  DiagnosticActionPermission,
-  DiagnosticActionPayload,
-  DiagnosticAction,
-  HighSeverityDiagnostic,
-  ActionResult,
-  NavigateToEntryCallback,
-  PermissionChecker,
-  ReplayRunData,
-  ReplayRunLoader,
-  DiagnosticActionDispatcherConfig,
-  LoadReplayPayload,
-  RunPolicySimulationPayload,
-  JumpToTaskPayload,
-  JumpToAgentPayload,
-  JumpToToolCallPayload,
-  RetryTaskPayload,
-  CancelTaskPayload,
-  CancelAgentPayload,
-} from './actions.js';
-export {
-  DiagnosticActionDispatcher,
-  buildLoadReplayAction,
-  buildRunPolicySimulationAction,
-  buildJumpToTaskAction,
-  buildJumpToAgentAction,
-  buildJumpToToolCallAction,
-  buildRetryTaskAction,
-  buildCancelTaskAction,
-  buildCancelAgentAction,
-  diagnosticFromTaskFailure,
-  diagnosticFromAgentFailure,
-  diagnosticFromToolContractViolation,
-  diagnosticFromForensicsRun,
-} from './actions.js';
-
 // ── Panel data providers ─────────────────────────────────────────────────────
-export { ToolCallsPanel } from './panels/tool-calls.js';
-export { AgentsPanel } from './panels/agents.js';
-export { TasksPanel } from './panels/tasks.js';
-export { EventsPanel } from './panels/events.js';
 export { StateInspectorPanel } from './panels/state-inspector.js';
 export type { InspectableDomain } from './panels/state-inspector.js';
-export { HealthPanel } from './panels/health.js';
-export { ForensicsDataPanel } from './panels/forensics.js';
 export { DivergencePanel } from './panels/divergence.js';
-export { ReplayPanel } from './panels/replay.js';
+export { PolicyPanel } from './panels/policy.js';
+export type { PolicyPanelSnapshot } from './panels/policy.js';
 export { SecurityPanel } from './panels/security.js';
 export type { SecurityPanelSnapshot } from './panels/security.js';
-export { ToolContractsPanel } from './panels/tool-contracts.js';
-export { TransportPanel } from './panels/transport.js';
-export type { TransportPanelSnapshot } from './panels/transport.js';
-
-// ── Provider ─────────────────────────────────────────────────────────────────
-export { DiagnosticsProvider } from './provider.js';
-export type { DiagnosticsProviderConfig, DiagnosticPanelName } from './provider.js';
-
-// ── Factory ───────────────────────────────────────────────────────────────────
-import { DiagnosticsProvider, type DiagnosticsProviderConfig } from './provider.js';
-
-/**
- * Factory function that creates a fully wired DiagnosticsProvider.
- *
- * @param config - Configuration including the event bus, health aggregator,
- *   optional domain adapters, and optional per-panel buffer config.
- * @returns A ready-to-use DiagnosticsProvider.
- */
-export function createDiagnosticsProvider(config: DiagnosticsProviderConfig): DiagnosticsProvider {
-  return new DiagnosticsProvider(config);
-}

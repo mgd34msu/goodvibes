@@ -1,11 +1,15 @@
 /**
- * pid/port discovery for the detached daemon.
+ * pid/port discovery for the running daemon.
  *
- * When a surface spawns the daemon as a detached, standalone process, it records
- * the pid/host/port to a small JSON file under the daemon home so a later surface
- * (or a `GET /api/service/status` call against the daemon HTTP API) can discover and adopt it without a fresh
- * spawn. This is deliberately a plain record, not a lock, since the daemon's own
- * identity probe is the source of truth for "is it actually alive and mine".
+ * The daemon records where it actually listens (pid, host, port, start time) in
+ * a small JSON file under the daemon home once its listener is bound
+ * ({@link publishDaemonRuntimeRecord}), and removes it again when it stops. A
+ * client that resolves the daemon's address (config routing, settings
+ * preconditions) prefers that record over the configured binding, so a daemon
+ * started on another port, for one run, is still found. It is a plain record,
+ * not a lock: the pid check and the identity probe decide whether it is alive
+ * and the daemon; a record left by a daemon that died is reaped by the reader
+ * that proved it stale.
  */
 
 import { readJsonFileOrQuarantine, writeJsonFileAtomic } from '../utils/atomic-json-store.js';
@@ -16,13 +20,6 @@ import { join } from 'node:path';
 
 /** File name of the detached-daemon runtime record within the daemon home dir. */
 export const DETACHED_DAEMON_RUNTIME_FILE = 'detached-daemon.json';
-
-/**
- * File name of the receipt written when a stale record is reaped. Reaping is
- * disclosed rather than silent: a record that vanished with no trace is
- * indistinguishable from one that was never written.
- */
-export const DETACHED_DAEMON_REAPED_FILE = 'detached-daemon-reaped.json';
 
 export interface DetachedDaemonRuntimeRecord {
   readonly pid: number | undefined;
@@ -36,11 +33,6 @@ export interface DetachedDaemonRuntimeRecord {
 /** Absolute path of the runtime record file for a given daemon runtime dir. */
 export function detachedDaemonRuntimePath(runtimeDir: string): string {
   return join(runtimeDir, DETACHED_DAEMON_RUNTIME_FILE);
-}
-
-/** Absolute path of the reaping receipt for a given daemon runtime dir. */
-export function detachedDaemonReapedPath(runtimeDir: string): string {
-  return join(runtimeDir, DETACHED_DAEMON_REAPED_FILE);
 }
 
 /**
@@ -90,7 +82,7 @@ export function detachedDaemonProcessAlive(
   return isProcessAlive(record.pid);
 }
 
-/** What a reaping receipt records, so a removed record leaves evidence. */
+/** What a reap removed and why; the reader discloses it (config routing passes it to `onRuntimeRecordReaped`). */
 export interface DetachedDaemonReapReceipt {
   readonly reapedAt: string;
   /** Plain-language reason: which check the record failed. */
@@ -100,7 +92,7 @@ export interface DetachedDaemonReapReceipt {
 
 /**
  * Remove a runtime record that has been proven not to describe a live daemon,
- * and leave a receipt saying so.
+ * and return what was removed and why.
  *
  * Best-effort and idempotent: two processes can reap the same record
  * concurrently and neither throws. The record is removed only while the file
@@ -133,12 +125,6 @@ export function reapDetachedDaemonRuntime(
   } catch {
     return null;
   }
-  try {
-    writeJsonFileAtomic(detachedDaemonReapedPath(runtimeDir), receipt);
-  } catch {
-    // The record is gone, which is the part that matters; a receipt that could
-    // not be written must not turn a successful reap into a failure.
-  }
   return receipt;
 }
 
@@ -147,23 +133,6 @@ function sameDaemonRecord(current: DetachedDaemonRuntimeHint, stale: DetachedDae
   if (current.host !== stale.host || current.port !== stale.port || current.pid !== stale.pid) return false;
   if (current.startedAt && stale.startedAt) return current.startedAt === stale.startedAt;
   return true;
-}
-
-/** Read the last reaping receipt, or null when nothing has been reaped. */
-export function readDetachedDaemonReapReceipt(runtimeDir: string): DetachedDaemonReapReceipt | null {
-  try {
-    return readJsonFileOrQuarantine<DetachedDaemonReapReceipt>(detachedDaemonReapedPath(runtimeDir), {
-      label: 'runtime/detached-daemon-reaped',
-      recovery: 'The reaping receipt is treated as absent; it is evidence only and nothing depends on it.',
-      validate: (raw) => {
-        const parsed = raw as Partial<DetachedDaemonReapReceipt> | null;
-        if (!parsed || typeof parsed.reason !== 'string') throw new Error('receipt is missing a reason');
-        return parsed as DetachedDaemonReapReceipt;
-      },
-    });
-  } catch {
-    return null;
-  }
 }
 
 /** Write (or overwrite) the detached-daemon runtime record. Best-effort; never throws. */
@@ -209,4 +178,47 @@ export function readDetachedDaemonRuntime(runtimeDir: string): DetachedDaemonRun
   } catch {
     return null;
   }
+}
+
+/** The record a daemon publishes for itself; remove it when the daemon stops. */
+export interface PublishedDaemonRuntimeRecord {
+  readonly record: DetachedDaemonRuntimeRecord;
+  /** Remove the record, unless another daemon has since written its own. Never throws. */
+  remove(): void;
+}
+
+/**
+ * Publish the running daemon's own record once its listener is bound: one
+ * atomic write per daemon start. `remove()` takes it away at stop, and leaves
+ * the file alone when it no longer holds this daemon's record (a replacement
+ * daemon that started meanwhile keeps its own). Returns null when the record
+ * could not be written; the daemon is then still found through its configured
+ * binding.
+ */
+export function publishDaemonRuntimeRecord(
+  runtimeDir: string,
+  bound: { readonly host: string; readonly port: number; readonly command: string; readonly logFilePath?: string | undefined },
+  now: () => Date = () => new Date(),
+): PublishedDaemonRuntimeRecord | null {
+  const record: DetachedDaemonRuntimeRecord = {
+    pid: process.pid,
+    host: bound.host,
+    port: bound.port,
+    command: bound.command,
+    startedAt: now().toISOString(),
+    ...(bound.logFilePath === undefined ? {} : { logFilePath: bound.logFilePath }),
+  };
+  if (recordDetachedDaemonRuntime(runtimeDir, record) === null) return null;
+  return {
+    record,
+    remove() {
+      try {
+        const onDisk = readDetachedDaemonRuntime(runtimeDir);
+        if (onDisk === null || !sameDaemonRecord(onDisk, record)) return;
+        rmSync(detachedDaemonRuntimePath(runtimeDir), { force: true });
+      } catch {
+        // A record left behind is reaped by the next reader that finds its pid gone.
+      }
+    },
+  };
 }

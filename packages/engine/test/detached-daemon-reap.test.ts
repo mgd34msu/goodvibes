@@ -4,6 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   detachedDaemonRuntimePath,
+  publishDaemonRuntimeRecord,
+  readDetachedDaemonRuntime,
   reapDetachedDaemonRuntime,
   recordDetachedDaemonRuntime,
   type DetachedDaemonRuntimeRecord,
@@ -18,7 +20,7 @@ const record = (overrides: Partial<DetachedDaemonRuntimeRecord> = {}): DetachedD
   pid: 111, host: '127.0.0.1', port: 3421, command: 'goodvibes-daemon', startedAt: '2026-01-01T00:00:00.000Z', ...overrides,
 });
 
-test('reaping removes the record that was judged stale and leaves a receipt', () => {
+test('reaping removes the record that was judged stale and says why', () => {
   const runtimeDir = dir();
   const stale = record();
   recordDetachedDaemonRuntime(runtimeDir, stale);
@@ -53,4 +55,17 @@ test('a record that could not be written is reported in the log, not silently dr
     expect(warn).toHaveBeenCalledTimes(1);
     expect(String(warn.mock.calls[0]![0])).toContain('could not write the runtime record');
   } finally { warn.mockRestore(); }
+});
+
+test('a daemon publishes its bound address and removes only its own record at stop', () => {
+  const runtimeDir = dir();
+  const published = publishDaemonRuntimeRecord(runtimeDir, { host: '127.0.0.1', port: 4567, command: 'goodvibes-daemon serve' });
+  expect(readDetachedDaemonRuntime(runtimeDir)).toMatchObject({ pid: process.pid, host: '127.0.0.1', port: 4567 });
+  published!.remove();
+  expect(existsSync(detachedDaemonRuntimePath(runtimeDir))).toBe(false);
+
+  const first = publishDaemonRuntimeRecord(runtimeDir, { host: '127.0.0.1', port: 4567, command: 'goodvibes-daemon serve' }, () => new Date('2026-01-01T00:00:00.000Z'));
+  publishDaemonRuntimeRecord(runtimeDir, { host: '127.0.0.1', port: 4568, command: 'goodvibes-daemon serve' }, () => new Date('2026-01-01T00:05:00.000Z'));
+  first!.remove();
+  expect(readDetachedDaemonRuntime(runtimeDir)?.port).toBe(4568);
 });

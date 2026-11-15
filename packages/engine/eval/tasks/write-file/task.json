@@ -1,0 +1,6 @@
+{
+  "id": "write-file",
+  "instruction": "Create a file named hello.txt in the current directory whose only content is the line: hello from goodvibes",
+  "verify": "verify.sh",
+  "timeoutMs": 180000
+}

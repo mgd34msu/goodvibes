@@ -16,7 +16,7 @@
  */
 
 import { createHash } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { readFileSync, statSync } from 'node:fs';
 import { isIP } from 'node:net';
 
@@ -37,9 +37,10 @@ export interface BundleFetchDeps {
   readonly fetchImpl?: typeof fetch | undefined;
   /**
    * Produce deterministic archive bytes for a git source. Defaults to
-   * `git archive --format=tar <ref> --remote=<location>`. Injected in tests.
+   * `git archive --format=tar --remote=<location> <ref>`, run without blocking
+   * and stopped at the fetch deadline. Injected in tests.
    */
-  readonly gitArchive?: ((location: string, ref: string) => Uint8Array) | undefined;
+  readonly gitArchive?: ((location: string, ref: string) => Uint8Array | Promise<Uint8Array>) | undefined;
   /** Largest bundle read from a file or URL source, in bytes. Defaults to {@link MAX_BUNDLE_BYTES}. */
   readonly maxBytes?: number | undefined;
   /** Time allowed for a whole URL fetch, in milliseconds. Defaults to {@link BUNDLE_FETCH_TIMEOUT_MS}. */
@@ -49,7 +50,7 @@ export interface BundleFetchDeps {
 /** Largest bundle a file or URL source may supply; bytes are counted before they are hashed. */
 export const MAX_BUNDLE_BYTES = 64 * 1024 * 1024;
 
-/** Time allowed for a URL source's whole fetch. */
+/** Time allowed for a URL source's whole fetch, and for a git source's archive. */
 export const BUNDLE_FETCH_TIMEOUT_MS = 60_000;
 
 const MAX_REDIRECTS = 5;
@@ -184,6 +185,25 @@ async function fetchUrlBytes(source: PinnedBundleSource, deps: BundleFetchDeps):
   throw new Error(`URL source '${source.location}' redirected more than ${MAX_REDIRECTS} times`);
 }
 
+/** `git archive` of one ref from a remote, without blocking, bounded by the byte cap and the fetch deadline. */
+function gitArchive(location: string, ref: string, deps: BundleFetchDeps): Promise<Uint8Array> {
+  const maxBytes = deps.maxBytes ?? MAX_BUNDLE_BYTES;
+  const timeoutMs = deps.timeoutMs ?? BUNDLE_FETCH_TIMEOUT_MS;
+  return new Promise((resolve, reject) => {
+    execFile('git', ['archive', '--format=tar', `--remote=${location}`, ref], {
+      encoding: 'buffer', maxBuffer: maxBytes, timeout: timeoutMs, killSignal: 'SIGKILL',
+      // Only plain transports; a remote cannot pick a helper program.
+      env: { ...process.env, GIT_ALLOW_PROTOCOL: 'file:git:ssh:https', GIT_TERMINAL_PROMPT: '0' },
+    }, (error, stdout, stderr) => {
+      if (!error) { resolve(new Uint8Array(stdout)); return; }
+      const reason = (error as { killed?: boolean }).killed
+        ? `it did not finish within ${timeoutMs} ms or passed the ${maxBytes}-byte limit`
+        : (Buffer.isBuffer(stderr) ? stderr.toString('utf8') : String(stderr)).trim() || error.message;
+      reject(new Error(`git source '${location}' at '${ref}' could not be archived: ${reason}`));
+    });
+  });
+}
+
 function resolveBytes(source: PinnedBundleSource, deps: BundleFetchDeps): Uint8Array | Promise<Uint8Array> {
   assertSafeBundleSource(source);
   switch (source.kind) {
@@ -197,17 +217,7 @@ function resolveBytes(source: PinnedBundleSource, deps: BundleFetchDeps): Uint8A
     case 'git': {
       const ref = source.ref;
       if (!ref) throw new Error(`git source '${source.location}' requires a 'ref' (tag/commit) to pin against`);
-      const archive =
-        deps.gitArchive ??
-        ((location: string, gitRef: string): Uint8Array =>
-          new Uint8Array(
-            execFileSync('git', ['archive', '--format=tar', `--remote=${location}`, gitRef], {
-              maxBuffer: 256 * 1024 * 1024,
-              // Only plain transports; a remote cannot pick a helper program.
-              env: { ...process.env, GIT_ALLOW_PROTOCOL: 'file:git:ssh:https' },
-            }),
-          ));
-      return archive(source.location, ref);
+      return (deps.gitArchive ?? ((location: string, gitRef: string) => gitArchive(location, gitRef, deps)))(source.location, ref);
     }
     case 'url':
       return fetchUrlBytes(source, deps);

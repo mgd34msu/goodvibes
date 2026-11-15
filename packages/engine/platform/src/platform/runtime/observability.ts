@@ -26,60 +26,12 @@ export {
   applyFilter,
   appendBounded,
 } from './diagnostics/index.js';
-export type {
-  DiagnosticActionType,
-  DiagnosticActionPermission,
-  DiagnosticActionPayload,
-  DiagnosticAction,
-  HighSeverityDiagnostic,
-  ActionResult,
-  NavigateToEntryCallback,
-  PermissionChecker,
-  DiagnosticActionDispatcherConfig,
-  LoadReplayPayload,
-  RunPolicySimulationPayload,
-  JumpToTaskPayload,
-  JumpToAgentPayload,
-  JumpToToolCallPayload,
-  RetryTaskPayload,
-  CancelTaskPayload,
-  CancelAgentPayload,
-} from './diagnostics/index.js';
 export {
-  DiagnosticActionDispatcher,
-  buildLoadReplayAction,
-  buildRunPolicySimulationAction,
-  buildJumpToTaskAction,
-  buildJumpToAgentAction,
-  buildJumpToToolCallAction,
-  buildRetryTaskAction,
-  buildCancelTaskAction,
-  buildCancelAgentAction,
-  diagnosticFromTaskFailure,
-  diagnosticFromAgentFailure,
-  diagnosticFromToolContractViolation,
-  diagnosticFromForensicsRun,
-} from './diagnostics/index.js';
-export {
-  ToolCallsPanel,
-  AgentsPanel,
-  TasksPanel,
-  EventsPanel,
   StateInspectorPanel,
-  HealthPanel,
-  ForensicsDataPanel,
   DivergencePanel,
-  ReplayPanel,
   SecurityPanel,
-  ToolContractsPanel,
-  TransportPanel,
 } from './diagnostics/index.js';
-export type {
-  SecurityPanelSnapshot,
-  TransportPanelSnapshot,
-} from './diagnostics/index.js';
-export { DiagnosticsProvider, createDiagnosticsProvider } from './diagnostics/index.js';
-export type { DiagnosticsProviderConfig, DiagnosticPanelName } from './diagnostics/index.js';
+export type { SecurityPanelSnapshot } from './diagnostics/index.js';
 
 // ── Eval ─────────────────────────────────────────────────────────────────────
 export type {

@@ -20,11 +20,15 @@
  * {@link installProcessCrashCapture}.
  *
  * Persisted-state doctrine (bounded / content-validated / disclosed):
- *  - Bounded twice. `appendCrashRecord` keeps at most
- *    {@link CRASH_LOG_MAX_RECORDS} records, dropping oldest-first at write
- *    time, and the store also registers with the append-only retention
- *    registry so the existing janitor enforces the age and total-size caps.
- *    An append-only file nobody prunes is a leak with a nicer name.
+ *  - Bounded by rotation, not by rewriting. A record is one O_APPEND write.
+ *    Once the log has reached {@link CRASH_LOG_ROTATE_BYTES} it is renamed to
+ *    the previous-log name (replacing the older one) before the record is
+ *    appended, so the two files together never hold much more than twice
+ *    that, and nothing is ever read back or rewritten on the write path. A
+ *    record another process appends during the rename lands in one file or
+ *    the other; it is not lost. Both files are registered with the
+ *    append-only retention registry, whose janitor also applies the age and
+ *    total-size caps every other append-only store gets.
  *  - Content-validated. `readCrashRecords` parses and shape-checks every line
  *    and SKIPS anything torn or malformed rather than throwing. A crash log is
  *    written by a process that is in the act of dying, so a half-written last
@@ -39,11 +43,9 @@
  * `uncaughtException` handler where the process is about to exit, so a
  * promise-based write would lose the race with `process.exit`.
  */
-import { appendFileSync, mkdirSync, readFileSync, statSync, writeSync } from 'node:fs';
-import { dirname } from 'node:path';
-import { writeFileAtomic } from '../utils/atomic-json-store.js';
+import { appendFileSync, mkdirSync, readFileSync, renameSync, statSync, writeSync } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
 import { redactAtRestLine } from './at-rest-persistence.js';
-import { withSyncFileLock } from '../config/sync-file-lock.js';
 import { resolveScopedDirectory } from './surface-root.js';
 
 /** Which process-level fault produced a record. */
@@ -57,13 +59,20 @@ export function surfaceCrashLogPath(homeDirectory: string, surfaceRoot: string):
   return resolveScopedDirectory(homeDirectory, surfaceRoot, CRASH_LOG_FILENAME);
 }
 
+/** Filename the crash log is moved to when it rotates; the one before it is replaced. */
+export const CRASH_LOG_PREVIOUS_FILENAME = 'crashes.previous.jsonl';
+
+/** The previous-log path beside a crash log. */
+export function previousCrashLogPath(filePath: string): string {
+  return join(dirname(filePath), basename(filePath) === CRASH_LOG_FILENAME ? CRASH_LOG_PREVIOUS_FILENAME : `${basename(filePath)}.previous`);
+}
+
 /**
- * Count cap on retained crash records. Small on purpose: the newest crashes
- * are the ones under investigation, and this file is read by a human, not a
- * query engine. Age and total-size caps come from the retention registry on
- * top of this.
+ * Size at which the crash log rotates. At the largest record (a stack cut at
+ * {@link CRASH_STACK_MAX_CHARS}) that is still about thirty crashes per file;
+ * typical records are far smaller.
  */
-export const CRASH_LOG_MAX_RECORDS = 25;
+export const CRASH_LOG_ROTATE_BYTES = 256 * 1024;
 
 /**
  * Cap on a single record's stack text. A runaway recursive stack can be
@@ -160,7 +169,8 @@ function isCrashRecord(value: unknown): value is CrashRecord {
 }
 
 /**
- * Read every well-formed record from a crash log, oldest first.
+ * Read every well-formed record from a crash log, oldest first, including the
+ * records the log rotated out into its previous file.
  *
  * Content-validated, never existence-validated: a line that does not parse or
  * does not carry the record shape is skipped, so one torn tail line (the
@@ -168,6 +178,10 @@ function isCrashRecord(value: unknown): value is CrashRecord {
  * A missing or unreadable file reads as an empty history.
  */
 export function readCrashRecords(filePath: string): CrashRecord[] {
+  return [...readCrashFile(previousCrashLogPath(filePath)), ...readCrashFile(filePath)];
+}
+
+function readCrashFile(filePath: string): CrashRecord[] {
   let raw: string;
   try {
     raw = readFileSync(filePath, 'utf-8');
@@ -223,17 +237,13 @@ export function describeCrashLog(summary: CrashLogSummary): string | null {
 }
 
 /**
- * Append one crash record, enforcing the count cap.
- *
- * Fast path is a plain O_APPEND write, a single small line, which is the
- * cheapest thing that can land from a dying process. The rewrite that enforces
- * {@link CRASH_LOG_MAX_RECORDS} only runs once the file has actually grown
- * past the cap (a log of unusually small records can sit a little over the
- * cap until then; the retention janitor still bounds it), and goes through `writeFileAtomic` so a crash during the
- * trim cannot leave a truncated log.
+ * Append one crash record: one masked line in one O_APPEND write, the cheapest
+ * thing that can land from a dying process. When the log has already reached
+ * {@link CRASH_LOG_ROTATE_BYTES} it is first renamed to the previous-log name;
+ * nothing is read back, rewritten or locked.
  *
  * Best-effort by contract: returns `false` instead of throwing when the record
- * cannot be redacted or written. The caller is an exit-boundary handler whose remaining duty (stderr,
+ * cannot be masked or written. The caller is an exit-boundary handler whose remaining duty (stderr,
  * activity log, exit code) must still run on a read-only or full disk.
  */
 export function appendCrashRecord(filePath: string, record: CrashRecord): boolean {
@@ -244,31 +254,14 @@ export function appendCrashRecord(filePath: string, record: CrashRecord): boolea
   } catch {
     return false;
   }
-  // Appending and trimming run under one cross-process lock: a trim rewrites
-  // the whole file, so a record another process appended between its read and
-  // its rename would be lost. The lock is brief and, when it cannot be taken,
-  // the operation still runs rather than dropping the record.
   try {
-    return withSyncFileLock(filePath, () => {
-      try {
-        appendFileSync(filePath, line, { mode: 0o600 });
-      } catch {
-        return false;
-      }
-      try {
-        // Cheap guard: only pay for a read+rewrite once the file could plausibly
-        // hold more than the cap. An average record is well under 1 KiB.
-        if (statSync(filePath).size < CRASH_LOG_MAX_RECORDS * 1024) return true;
-        const records = readCrashRecords(filePath);
-        if (records.length <= CRASH_LOG_MAX_RECORDS) return true;
-        const kept = records.slice(records.length - CRASH_LOG_MAX_RECORDS);
-        const contents = kept.map((entry) => `${redactAtRestLine(JSON.stringify(entry))}\n`).join('');
-        writeFileAtomic(filePath, contents, { mode: 0o600 });
-      } catch {
-        // The record itself already landed; failing to trim is not worth losing it.
-      }
-      return true;
-    });
+    if (statSync(filePath).size >= CRASH_LOG_ROTATE_BYTES) renameSync(filePath, previousCrashLogPath(filePath));
+  } catch {
+    // No log yet, or it could not be rotated: the record is appended either way.
+  }
+  try {
+    appendFileSync(filePath, line, { mode: 0o600 });
+    return true;
   } catch {
     return false;
   }

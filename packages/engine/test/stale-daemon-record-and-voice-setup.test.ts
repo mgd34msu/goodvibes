@@ -25,8 +25,6 @@ import {
   type DaemonConfigRouterDeps,
 } from '../platform/src/platform/config/index.js';
 import {
-  detachedDaemonReapedPath,
-  readDetachedDaemonReapReceipt,
   recordDetachedDaemonRuntime,
 } from '../platform/src/platform/runtime/detached-daemon-runtime.js';
 import { preconfigureLocalVoiceKeys } from '../platform/src/platform/voice/provisioning/config-preconfigure.js';
@@ -78,7 +76,7 @@ function localStore(): {
 }
 
 describe('a runtime record is a hint, validated before it is trusted', () => {
-  test('a record naming a dead pid is reaped, receipted, and discovery falls through to the live daemon', async () => {
+  test('a record naming a dead pid is reaped, disclosed, and discovery falls through to the live daemon', async () => {
     const home = daemonHome();
     recordDetachedDaemonRuntime(home, {
       pid: 424242,
@@ -89,9 +87,11 @@ describe('a runtime record is a hint, validated before it is trusted', () => {
     });
 
     const answered: string[] = [];
+    const reaped: { baseUrl: string; reason: string }[] = [];
     const deps: DaemonConfigRouterDeps = {
       hostsDaemon: false,
       daemonHomeDir: home,
+      onRuntimeRecordReaped: (event) => { reaped.push(event); },
       // The pid in the record no longer exists.
       isProcessAlive: () => false,
       // The live daemon is on a DIFFERENT port, discoverable from its own config.
@@ -110,12 +110,11 @@ describe('a runtime record is a hint, validated before it is trusted', () => {
     expect(snapshot.endpoint?.baseUrl).toBe('http://127.0.0.1:3421');
     expect(answered.every((url) => !url.includes('4444'))).toBe(true);
 
-    // The stale record is gone, and its removal left evidence.
+    // The stale record is gone, and its removal was disclosed.
     expect(existsSync(join(home, 'detached-daemon.json'))).toBe(false);
-    expect(existsSync(detachedDaemonReapedPath(home))).toBe(true);
-    const receipt = readDetachedDaemonReapReceipt(home);
-    expect(receipt?.record.port).toBe(4444);
-    expect(receipt?.reason).toContain('no longer exists');
+    expect(reaped).toHaveLength(1);
+    expect(reaped[0]!.baseUrl).toContain('4444');
+    expect(reaped[0]!.reason).toContain('no longer exists');
   });
 
   test('a record whose pid is alive but whose port answers nothing is reaped, then the derived binding is used', async () => {
@@ -128,9 +127,11 @@ describe('a runtime record is a hint, validated before it is trusted', () => {
       startedAt: new Date().toISOString(),
     });
 
+    const reaped: string[] = [];
     const deps: DaemonConfigRouterDeps = {
       hostsDaemon: false,
       daemonHomeDir: home,
+      onRuntimeRecordReaped: (event) => { reaped.push(event.reason); },
       isProcessAlive: () => true,
       readDaemonBinding: () => ({ hostMode: 'local', host: '127.0.0.1', port: 3421, tlsMode: 'off' }),
       fetchImpl: (async (url: string | URL) => {
@@ -142,7 +143,7 @@ describe('a runtime record is a hint, validated before it is trusted', () => {
     const snapshot = await loadDaemonConfigSnapshot(deps);
     expect(snapshot.error).toBeNull();
     expect(snapshot.endpoint?.baseUrl).toBe('http://127.0.0.1:3421');
-    expect(readDetachedDaemonReapReceipt(home)?.reason).toContain('nothing answered');
+    expect(reaped.some((reason) => reason.includes('nothing answered'))).toBe(true);
   });
 
   test('a record for a daemon found nowhere still fails loudly rather than reading a local value', async () => {

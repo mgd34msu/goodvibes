@@ -22,7 +22,6 @@ import {
   appendCrashRecord,
   buildCrashRecord,
   CRASH_LOG_FILENAME,
-  CRASH_LOG_MAX_RECORDS,
   readCrashRecords,
 } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 
@@ -79,19 +78,6 @@ describe('crash record', () => {
 });
 
 describe('crash log: bounded and content-validated', () => {
-  test('keeps the NEWEST records within the cap', () => {
-    const path = join(tempHome(), CRASH_LOG_FILENAME);
-    for (let i = 0; i < CRASH_LOG_MAX_RECORDS + 15; i++) {
-      appendCrashRecord(path, buildCrashRecord('uncaughtException', new Error(`crash-${i}`), {
-        ...CONTEXT,
-        sessionId: `session-${'p'.repeat(900)}-${i}`,
-      }));
-    }
-    const records = readCrashRecords(path);
-    expect(records.length).toBeLessThanOrEqual(CRASH_LOG_MAX_RECORDS);
-    expect(records[records.length - 1]!.message).toBe(`crash-${CRASH_LOG_MAX_RECORDS + 14}`);
-  });
-
   test('a torn final line does not cost the records before it', () => {
     const path = join(tempHome(), CRASH_LOG_FILENAME);
     appendCrashRecord(path, buildCrashRecord('uncaughtException', new Error('first'), CONTEXT));

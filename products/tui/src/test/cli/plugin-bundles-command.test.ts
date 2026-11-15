@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import {
@@ -64,27 +65,29 @@ describe('goodvibes plugin bundles', () => {
 
     const committed = await handlePluginCommand(makeRuntime(root, ['plugin', 'bundles', 'install', manifestPath, '--sha256', pin, '--yes']));
     expect(committed.exitCode).toBe(0);
-    expect(committed.output).toContain('Recorded (not yet activated)');
+    expect(committed.output).toContain('Installed');
+    expect(existsSync(join(root, '.goodvibes', 'plugins', 'demo-bundle', 'goodvibes-bundle.json'))).toBe(true);
     const finalList = await handlePluginCommand(makeRuntime(root, ['plugin', 'bundles', 'list']));
     expect(finalList.output).toContain('demo-bundle');
   });
 
-  test('install refuses to write over an unreadable record and leaves it untouched', async () => {
-    const manifest = scaffoldCapabilityBundleManifest('demo-bundle');
-    const manifestPath = join(root, 'bundle.json');
-    const bytes = JSON.stringify(manifest);
-    writeFileSync(manifestPath, bytes, 'utf-8');
-    const pin = computeSha256(new TextEncoder().encode(bytes));
-    const recordPath = join(root, '.goodvibes', 'bundles', 'installed.json');
-    mkdirSync(join(root, '.goodvibes', 'bundles'), { recursive: true });
-    writeFileSync(recordPath, '[{"id":"earlier"', 'utf-8');
+  test('a pinned archive installs its payload beside the manifest, with the grant in the receipt', async () => {
+    const source = join(root, 'archive-src');
+    mkdirSync(join(source, 'tools'), { recursive: true });
+    writeFileSync(join(source, 'goodvibes-bundle.json'), JSON.stringify(scaffoldCapabilityBundleManifest('demo-archive')));
+    writeFileSync(join(source, 'tools', 'run.ts'), 'export const run = 1;\n');
+    const archivePath = join(root, 'demo-archive.tar');
+    const tar = spawnSync('tar', ['-cf', archivePath, '-C', source, 'goodvibes-bundle.json', 'tools']);
+    expect(tar.status).toBe(0);
+    const pin = computeSha256(readFileSync(archivePath));
 
-    const result = await handlePluginCommand(makeRuntime(root, ['plugin', 'bundles', 'install', manifestPath, '--sha256', pin, '--yes']));
-    expect(result.exitCode).toBe(1);
-    expect(result.output).toContain('cannot be read');
-    expect(readFileSync(recordPath, 'utf-8')).toBe('[{"id":"earlier"');
-    const list = await handlePluginCommand(makeRuntime(root, ['plugin', 'bundles', 'list']));
-    expect(list.exitCode).toBe(1);
+    const result = await handlePluginCommand(makeRuntime(root, ['plugin', 'bundles', 'install', archivePath, '--sha256', pin, '--yes']));
+    expect(result.exitCode).toBe(0);
+    const installed = join(root, '.goodvibes', 'plugins', 'demo-archive');
+    expect(readFileSync(join(installed, 'tools', 'run.ts'), 'utf-8')).toBe('export const run = 1;\n');
+    const receipt = JSON.parse(readFileSync(join(root, '.goodvibes', 'ecosystem', 'installed', 'plugin-demo-archive.json'), 'utf-8'));
+    expect(receipt.bundle.source.sha256).toBe(pin);
+    expect(receipt.bundle.quarantined).toBe(false);
   });
 
   test('browse lists a governed marketplace index (name, capability summary, pin)', async () => {

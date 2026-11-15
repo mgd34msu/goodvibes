@@ -1,12 +1,12 @@
-import { cpSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { readJsonFileOrQuarantine, writeJsonFileAtomic } from '../../utils/atomic-json-store.js';
 import { dirname, join, resolve, sep } from 'node:path';
 import { VERSION } from '../../version.js';
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
 import { decisionOrClassic, isClassicOperation } from '../decision-policy.js';
 import { rankClassicCatalog } from '../classic-catalog.js';
-import { mapLimit } from '@goodvibes-jev/judgment';
-import { catalogSearch, catalogSearchEntryView } from './batteries/catalog-search.js';
+import { fanOut, mapLimit, toJson, type EntryType } from '@goodvibes-jev/judgment';
+import { catalogSearch, catalogSearchAt, catalogSearchEntryView } from './batteries/catalog-search.js';
 import { trustNoteCaution } from './batteries/trust-note-caution.js';
 
 export type EcosystemEntryKind = 'plugin' | 'skill' | 'hook-pack' | 'policy-pack';
@@ -75,6 +75,24 @@ export interface EcosystemInstallReceipt {
     readonly status: 'supported' | 'warning';
     readonly reasons: readonly string[];
   };
+  /** Present when the entry was installed from a pinned capability bundle: what was verified and what was granted. */
+  readonly bundle?: EcosystemBundleGrant | undefined;
+}
+
+/** The pin and the capability grant an installed bundle carries in its receipt; the loader reads the grant from here. */
+export interface EcosystemBundleGrant {
+  readonly source: { readonly kind: 'file' | 'url' | 'git'; readonly location: string; readonly sha256: string; readonly ref?: string | undefined };
+  readonly trustTier: string;
+  /** Security capabilities granted at the trust tier. */
+  readonly granted: readonly string[];
+  /** Declared capabilities the tier did not grant (withheld). */
+  readonly withheld: readonly string[];
+  readonly quarantined: boolean;
+  /** Declared surfaces: tools registered, hooks subscribed, config domains read, channels touched. */
+  readonly tools: readonly string[];
+  readonly hooks: readonly string[];
+  readonly configDomains: readonly string[];
+  readonly channels: readonly string[];
 }
 
 export interface EcosystemCatalogBundle {
@@ -263,6 +281,9 @@ function loadBackup(path: string): EcosystemInstallBackup | null {
   }
 }
 
+/** Backups kept per installed entry; the oldest beyond this are removed when a new one is taken. */
+export const ECOSYSTEM_BACKUPS_KEPT = 5;
+
 function createBackupFromReceipt(
   receipt: EcosystemInstallReceipt,
   reason: EcosystemInstallBackup['reason'],
@@ -289,7 +310,86 @@ function createBackupFromReceipt(
     reason,
   };
   writeJsonFileAtomic(backupMetaPath(receipt.kind, receipt.entry.id, createdAt, options, receipt.scope), backup);
+  pruneBackups(receipt.kind, receipt.entry.id, options, receipt.scope);
   return backup;
+}
+
+/**
+ * Keep the newest {@link ECOSYSTEM_BACKUPS_KEPT} backups of one entry and
+ * remove the rest (metadata and archived copy). One listing of the backup
+ * directory; best effort, since a backup that cannot be removed now is removed
+ * by the next one.
+ */
+function pruneBackups(
+  kind: EcosystemEntryKind,
+  entryId: string,
+  options: EcosystemCatalogPathOptions,
+  scope: 'project' | 'user',
+): void {
+  const dir = backupRoot(options, scope);
+  const prefix = `${backupPrefix(kind, entryId)}-`;
+  let stamps: number[];
+  try {
+    stamps = readdirSync(dir)
+      .filter((name) => name.startsWith(prefix) && name.endsWith('.json'))
+      .map((name) => Number(name.slice(prefix.length, -'.json'.length)))
+      .filter((stamp) => Number.isSafeInteger(stamp))
+      .sort((a, b) => b - a);
+  } catch {
+    return;
+  }
+  for (const stamp of stamps.slice(ECOSYSTEM_BACKUPS_KEPT)) {
+    try {
+      rmSync(backupArchivePath(kind, entryId, stamp, options, scope), { recursive: true, force: true });
+      rmSync(backupMetaPath(kind, entryId, stamp, options, scope), { force: true });
+    } catch {
+      // Left for the next backup of this entry to remove.
+    }
+  }
+}
+
+/**
+ * Replace `targetPath` with a copy of `sourcePath`: copy into a staging
+ * directory beside the target first, then swap by rename, so a copy that fails
+ * half way leaves the installed copy untouched. `commit` runs after the swap
+ * (the receipt write); if it throws, the previous copy is put back. Install and
+ * rollback both replace a directory through here.
+ */
+function replaceDirectory(
+  sourcePath: string,
+  targetPath: string,
+  commit: () => void,
+): { ok: true } | { ok: false; error: unknown; displacedPath?: string } {
+  const root = dirname(targetPath);
+  const name = targetPath.slice(root.length + 1);
+  const stagingPath = join(root, `.${name}.staging-${process.pid}`);
+  const displacedPath = join(root, `.${name}.replaced-${process.pid}`);
+  let displaced = false;
+  try {
+    mkdirSync(root, { recursive: true });
+    rmSync(stagingPath, { recursive: true, force: true });
+    cpSync(sourcePath, stagingPath, { recursive: true });
+    rmSync(displacedPath, { recursive: true, force: true });
+    if (existsSync(targetPath)) {
+      renameSync(targetPath, displacedPath);
+      displaced = true;
+    }
+    renameSync(stagingPath, targetPath);
+    commit();
+    if (displaced) rmSync(displacedPath, { recursive: true, force: true });
+    return { ok: true };
+  } catch (error) {
+    rmSync(stagingPath, { recursive: true, force: true });
+    if (displaced) {
+      try {
+        rmSync(targetPath, { recursive: true, force: true });
+        renameSync(displacedPath, targetPath);
+      } catch {
+        return { ok: false, error, displacedPath };
+      }
+    }
+    return { ok: false, error };
+  }
 }
 
 function parseVersionParts(value: string): number[] {
@@ -366,18 +466,75 @@ export function loadEcosystemCatalog(
   return entries.sort((a, b) => a.name.localeCompare(b.name));
 }
 
-/** (query, entry) readings in flight at once. */
+/** Entries read in one request; a catalog larger than this is read as several pages at once. */
+const SEARCH_PAGE_SIZE = 24;
+/** Pages in flight at once. */
 const SEARCH_CONCURRENCY = 8;
+/** Searches remembered per process; the oldest is forgotten first. */
+const SEARCH_CACHE_LIMIT = 64;
 
 const SEARCH_SITE = 'runtime.ecosystem.catalog-search';
 const TRUST_NOTE_SITE = 'runtime.ecosystem.trust-note-caution';
 
+/** Kept/hidden per entry, by (kind, query, catalog files' size and time): a repeated search costs no request. */
+const searchCache = new Map<string, readonly string[]>();
+const pageQuestions = new Map<number, ReturnType<typeof catalogSearchAt>>();
+
+function pageQuestion(index: number): ReturnType<typeof catalogSearchAt> {
+  let question = pageQuestions.get(index);
+  if (!question) {
+    question = index === 0 ? catalogSearch : catalogSearchAt(index);
+    pageQuestions.set(index, question);
+  }
+  return question;
+}
+
+/** The revision of a kind's catalogs: each file's path, inode, size and modification time (a catalog write replaces the file). */
+function catalogStamp(kind: EcosystemEntryKind, options: EcosystemCatalogPathOptions): string {
+  return catalogPaths(kind, options).map((path) => {
+    try {
+      const stat = statSync(path);
+      return `${path}:${stat.ino}:${stat.size}:${stat.mtimeMs}`;
+    } catch {
+      return `${path}:-`;
+    }
+  }).join('|');
+}
+
+/** Which entries of one page the reading keeps, or why the page could not be read. */
+async function readSearchPage(
+  query: string,
+  page: readonly EcosystemCatalogEntry[],
+  signal: AbortSignal | undefined,
+): Promise<{ readonly kept: readonly boolean[] } | { readonly failure: unknown }> {
+  const parts: Record<string, ReturnType<typeof catalogSearchAt>> = {};
+  page.forEach((_, index) => { parts[`entry${index}`] = pageQuestion(index); });
+  try {
+    const read = await fanOut(judgmentPort(SEARCH_SITE), toJson({ query, entries: page.map(catalogSearchEntryView) }) as EntryType, parts, {
+      site: SEARCH_SITE, label: catalogSearch.name, ...(signal ? { signal } : {}),
+    });
+    const kept = page.map((_, index) => {
+      const reading = read.readings[`entry${index}`]?.wanted;
+      return !(reading?.verdict === 'no' && reading.outcome === 'act');
+    });
+    read.recordAction(`listed ${kept.filter(Boolean).length} hid ${kept.filter((keep) => !keep).length}`);
+    return { kept };
+  } catch (failure) {
+    signal?.throwIfAborted();
+    return { failure };
+  }
+}
+
 /**
  * Catalog entries of `kind` that answer `query`, in name order. A blank
- * query lists every entry with no reading. Otherwise each entry is read
- * against the query by `engine.ecosystem.catalog-search`, one request per
- * entry, and dropped only when read as a strong no: hiding a real match costs
- * the searcher more than one extra row.
+ * query lists every entry with no reading. Otherwise the entries are read
+ * against the query by `engine.ecosystem.catalog-search` a page at a time (one
+ * request per {@link SEARCH_PAGE_SIZE} entries, the pages in parallel), and an
+ * entry is dropped only when read as a strong no: hiding a real match costs
+ * the searcher more than one extra row, so a page whose request failed is
+ * listed whole (and the answer is not remembered). The answer is remembered for the
+ * process by (kind, query, catalog files' size and time), so repeating a
+ * search, or searching an unchanged catalog again, makes no request.
  */
 export async function searchEcosystemCatalog(
   kind: EcosystemEntryKind,
@@ -390,16 +547,27 @@ export async function searchEcosystemCatalog(
   const entries = loadEcosystemCatalog(kind, options);
   if (!trimmed || entries.length === 0) return entries;
   return decisionOrClassic(async () => {
-    const port = judgmentPort(SEARCH_SITE);
-    const context = { site: SEARCH_SITE, ...(run.signal ? { signal: run.signal } : {}) };
-    const kept = await mapLimit(entries, SEARCH_CONCURRENCY, async (entry) => {
-      const search = await catalogSearch.run(port, { query: trimmed, entry: catalogSearchEntryView(entry) }, context);
-      const reading = search.readings.wanted;
-      const dropped = reading.verdict === 'no' && reading.outcome === 'act';
-      search.recordAction(dropped ? 'hidden' : 'listed');
-      return !dropped;
-    });
-    return entries.filter((_, index) => kept[index]);
+    const key = `${kind}\0${trimmed.toLocaleLowerCase()}\0${catalogStamp(kind, options)}`;
+    const remembered = searchCache.get(key);
+    if (remembered) {
+      const keptIds = new Set(remembered);
+      return entries.filter((entry) => keptIds.has(entry.id));
+    }
+    const pages: EcosystemCatalogEntry[][] = [];
+    for (let start = 0; start < entries.length; start += SEARCH_PAGE_SIZE) pages.push(entries.slice(start, start + SEARCH_PAGE_SIZE));
+    const read = await mapLimit(pages, SEARCH_CONCURRENCY, (page) => readSearchPage(trimmed, page, run.signal));
+    // With no page read the decision path itself failed, and the policy decides
+    // (fall back to the literal match, or report). One failed page among read
+    // ones lists its entries: hiding a real match costs more than an extra row.
+    const firstFailure = read.find((page) => 'failure' in page);
+    if (firstFailure && read.every((page) => 'failure' in page)) throw (firstFailure as { failure: unknown }).failure;
+    const kept = read.flatMap((page, index) => 'kept' in page ? page.kept : pages[index]!.map(() => true));
+    const result = entries.filter((_, index) => kept[index]);
+    if (firstFailure) return result;
+    searchCache.delete(key);
+    searchCache.set(key, result.map((entry) => entry.id));
+    while (searchCache.size > SEARCH_CACHE_LIMIT) searchCache.delete(searchCache.keys().next().value!);
+    return result;
   }, () => {
     run.signal?.throwIfAborted();
     return rankClassicCatalog(entries, trimmed, entry => ({ id: entry.id,
@@ -528,62 +696,116 @@ export function installEcosystemCatalogEntry(
   const root = installedRoot(kind, options, scope);
   const targetPath = join(root, entry.id);
   if (!isInside(root, targetPath)) return { ok: false, error: unsafeIdMessage(kind, entryId) };
-  const stagingPath = join(root, `.${entry.id}.staging-${process.pid}`);
-  const displacedPath = join(root, `.${entry.id}.replaced-${process.pid}`);
-  let displaced = false;
   try {
     const previousReceipt = loadReceipt(receiptPath(kind, entry.id, options, scope));
     if (previousReceipt && !options.skipBackup) {
       createBackupFromReceipt(previousReceipt, 'replace', options);
     }
-    mkdirSync(root, { recursive: true });
-    // Copy first and swap after: a failed copy leaves the installed copy untouched.
-    rmSync(stagingPath, { recursive: true, force: true });
-    cpSync(review.sourcePath, stagingPath, { recursive: true });
-    rmSync(displacedPath, { recursive: true, force: true });
-    if (existsSync(targetPath)) {
-      renameSync(targetPath, displacedPath);
-      displaced = true;
-    }
-    renameSync(stagingPath, targetPath);
-
-    const receipt: EcosystemInstallReceipt = {
-      version: 1,
-      id: `${kind}:${entry.id}`,
-      kind,
-      installedAt: Date.now(),
-      scope,
-      entry,
-      sourcePath: review.sourcePath,
-      targetPath,
-      provenanceSummary: entry.provenance ?? entry.source,
-      runtimeFit: {
-        appVersion: VERSION,
-        status: review.runtimeFit.status,
-        reasons: review.runtimeFit.reasons,
-      },
-      compatibility: {
-        appVersion: VERSION,
-        status: review.runtimeFit.status,
-        reasons: review.runtimeFit.reasons,
-      },
-    };
-    writeJsonFileAtomic(receiptPath(kind, entry.id, options, scope), receipt);
-    if (displaced) rmSync(displacedPath, { recursive: true, force: true });
-    return { ok: true, receipt };
   } catch (error) {
-    rmSync(stagingPath, { recursive: true, force: true });
-    if (displaced) {
-      try {
-        rmSync(targetPath, { recursive: true, force: true });
-        renameSync(displacedPath, targetPath);
-      } catch {
-        // The displaced copy stays on disk beside the target; the message names it.
-        return { ok: false, error: `Installing ${kind} ${entryId} failed (${errorText(error)}) and the previous copy could not be put back; it is at ${displacedPath}.` };
-      }
-    }
-    return { ok: false, error: `Installing ${kind} ${entryId} failed: ${errorText(error)}. The previous install, if any, was left in place.` };
+    return { ok: false, error: `Backing up ${kind} ${entryId} before installing failed: ${errorText(error)}. Nothing was changed.` };
   }
+  const receipt: EcosystemInstallReceipt = {
+    version: 1,
+    id: `${kind}:${entry.id}`,
+    kind,
+    installedAt: Date.now(),
+    scope,
+    entry,
+    sourcePath: review.sourcePath,
+    targetPath,
+    provenanceSummary: entry.provenance ?? entry.source,
+    runtimeFit: {
+      appVersion: VERSION,
+      status: review.runtimeFit.status,
+      reasons: review.runtimeFit.reasons,
+    },
+    compatibility: {
+      appVersion: VERSION,
+      status: review.runtimeFit.status,
+      reasons: review.runtimeFit.reasons,
+    },
+  };
+  const replaced = replaceDirectory(review.sourcePath, targetPath, () => writeJsonFileAtomic(receiptPath(kind, entry.id, options, scope), receipt));
+  if (replaced.ok) return { ok: true, receipt };
+  if (replaced.displacedPath) {
+    // The displaced copy stays on disk beside the target; the message names it.
+    return { ok: false, error: `Installing ${kind} ${entryId} failed (${errorText(replaced.error)}) and the previous copy could not be put back; it is at ${replaced.displacedPath}.` };
+  }
+  return { ok: false, error: `Installing ${kind} ${entryId} failed: ${errorText(replaced.error)}. The previous install, if any, was left in place.` };
+}
+
+/** What a verified capability bundle installs: its manifest facts, payload files and grant. */
+export interface VerifiedBundleInstall {
+  readonly id: string;
+  readonly kind: EcosystemEntryKind;
+  readonly name: string;
+  readonly version: string;
+  readonly description: string;
+  readonly author?: string | undefined;
+  /** Payload files by relative path; the bundle reader has already refused any path that could escape. */
+  readonly files: ReadonlyMap<string, Uint8Array>;
+  readonly grant: EcosystemBundleGrant;
+}
+
+/**
+ * Install a pinned bundle whose bytes were verified and unpacked: the payload
+ * is written to a staging directory and swapped into the entry's install
+ * directory exactly as a catalog install is (backup of the previous install,
+ * staged copy, rename, receipt), and the receipt carries the pin and the grant.
+ * Updates, rollback, history and uninstall work on it like any installed entry.
+ */
+export function installVerifiedBundle(
+  bundle: VerifiedBundleInstall,
+  options: EcosystemCatalogPathOptions & { scope?: 'project' | 'user' },
+): { ok: true; receipt: EcosystemInstallReceipt } | { ok: false; error: string } {
+  const scope = options.scope ?? (bundle.kind === 'plugin' ? 'project' : 'user');
+  const { kind, id } = bundle;
+  if (!isSafeEcosystemEntryId(id)) return { ok: false, error: unsafeIdMessage(kind, String(id)) };
+  const root = installedRoot(kind, options, scope);
+  const targetPath = join(root, id);
+  if (!isInside(root, targetPath)) return { ok: false, error: unsafeIdMessage(kind, id) };
+  const unpacked = join(installedReceiptsRoot(options, scope), `.bundle-${kind}-${id}-${process.pid}`);
+  try {
+    const previousReceipt = loadReceipt(receiptPath(kind, id, options, scope));
+    if (previousReceipt) createBackupFromReceipt(previousReceipt, 'replace', options);
+    rmSync(unpacked, { recursive: true, force: true });
+    mkdirSync(unpacked, { recursive: true });
+    for (const [path, bytes] of bundle.files) {
+      const target = join(unpacked, path);
+      if (!isInside(unpacked, target)) throw new Error(`bundle member '${path}' would be written outside the install directory`);
+      mkdirSync(dirname(target), { recursive: true });
+      writeFileSync(target, bytes, { mode: 0o644 });
+    }
+  } catch (error) {
+    rmSync(unpacked, { recursive: true, force: true });
+    return { ok: false, error: `Unpacking ${kind} bundle ${id} failed: ${errorText(error)}. Nothing was installed.` };
+  }
+  const entry: EcosystemCatalogEntry = {
+    id, kind, name: bundle.name, summary: bundle.description, version: bundle.version,
+    ...(bundle.author ? { author: bundle.author } : {}),
+    source: bundle.grant.source.location, tags: [], provenance: `sha256:${bundle.grant.source.sha256}`,
+  };
+  const receipt: EcosystemInstallReceipt = {
+    version: 1,
+    id: `${kind}:${id}`,
+    kind,
+    installedAt: Date.now(),
+    scope,
+    entry,
+    sourcePath: bundle.grant.source.location,
+    targetPath,
+    provenanceSummary: `${bundle.grant.source.kind}:${bundle.grant.source.location} (sha256:${bundle.grant.source.sha256})`,
+    runtimeFit: { appVersion: VERSION, status: 'supported', reasons: [] },
+    compatibility: { appVersion: VERSION, status: 'supported', reasons: [] },
+    bundle: bundle.grant,
+  };
+  const replaced = replaceDirectory(unpacked, targetPath, () => writeJsonFileAtomic(receiptPath(kind, id, options, scope), receipt));
+  rmSync(unpacked, { recursive: true, force: true });
+  if (replaced.ok) return { ok: true, receipt };
+  if (replaced.displacedPath) {
+    return { ok: false, error: `Installing ${kind} bundle ${id} failed (${errorText(replaced.error)}) and the previous copy could not be put back; it is at ${replaced.displacedPath}.` };
+  }
+  return { ok: false, error: `Installing ${kind} bundle ${id} failed: ${errorText(replaced.error)}. The previous install, if any, was left in place.` };
 }
 
 export function inspectInstalledEcosystemEntry(
@@ -679,13 +901,13 @@ export function rollbackInstalledEcosystemEntry(
     || typeof backup.archivedTargetPath !== 'string' || !isInside(backupRoot(options, scope), backup.archivedTargetPath)) {
     return { ok: false, error: `The ${kind} backup for ${entryId} points outside ${root}; nothing was restored.` };
   }
-  try {
-    mkdirSync(dirname(backup.targetPath), { recursive: true });
-    rmSync(backup.targetPath, { recursive: true, force: true });
-    cpSync(backup.archivedTargetPath, backup.targetPath, { recursive: true });
-    writeJsonFileAtomic(receiptPath(kind, entryId, options, scope), backup.receipt);
-  } catch (error) {
-    return { ok: false, error: `Rolling back ${kind} ${entryId} failed: ${errorText(error)}. The archived copy is still at ${backup.archivedTargetPath}.` };
+  const restored = replaceDirectory(backup.archivedTargetPath, backup.targetPath,
+    () => writeJsonFileAtomic(receiptPath(kind, entryId, options, scope), backup.receipt));
+  if (!restored.ok) {
+    const left = restored.displacedPath
+      ? `the installed copy could not be put back and is at ${restored.displacedPath}`
+      : 'the installed copy was left in place';
+    return { ok: false, error: `Rolling back ${kind} ${entryId} failed: ${errorText(restored.error)}; ${left}. The archived copy is still at ${backup.archivedTargetPath}.` };
   }
   return { ok: true, receipt: backup.receipt, restoredFrom: backup };
 }

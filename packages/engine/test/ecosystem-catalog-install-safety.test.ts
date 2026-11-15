@@ -7,7 +7,7 @@
  * a failed copy leaves the previous install in place and returns a result
  * instead of throwing, and that a bundle import merges rather than replaces.
  */
-import { beforeEach, describe, expect, test } from 'bun:test';
+import { beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { chmodSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
@@ -15,7 +15,10 @@ import {
   inspectEcosystemCatalogBundle,
   installEcosystemCatalogEntry,
   loadEcosystemCatalog,
+  listEcosystemInstallBackups,
   rollbackInstalledEcosystemEntry,
+  updateInstalledEcosystemEntry,
+  ECOSYSTEM_BACKUPS_KEPT,
   uninstallEcosystemCatalogEntry,
   upsertEcosystemCatalogEntry,
   type EcosystemCatalogBundle,
@@ -161,5 +164,38 @@ describe('bundle import', () => {
     expect(result.imported).toBe(0);
     expect(result.error).toContain('no entries array');
     expect(inspectEcosystemCatalogBundle({ version: 1, exportedAt: 0, scope: 'project' } as unknown as EcosystemCatalogBundle).counts.skill).toBe(0);
+  });
+});
+
+describe('backups and rollback', () => {
+  test('updates keep only the newest backups of an entry', () => {
+    upsertEcosystemCatalogEntry(skill('kept', 'Kept', makeSource('kept')), options);
+    expect(installEcosystemCatalogEntry('skill', 'kept', options).ok).toBe(true);
+    // Backups are named by their millisecond; give each update its own.
+    let clock = Date.now();
+    const now = spyOn(Date, 'now').mockImplementation(() => (clock += 1000));
+    try {
+      for (let i = 0; i < ECOSYSTEM_BACKUPS_KEPT + 3; i++) expect(updateInstalledEcosystemEntry('skill', 'kept', options).ok).toBe(true);
+    } finally { now.mockRestore(); }
+    expect(listEcosystemInstallBackups('skill', 'kept', options)).toHaveLength(ECOSYSTEM_BACKUPS_KEPT);
+    const backupDir = join(root, '.goodvibes', 'ecosystem', 'installed', 'backups');
+    expect(readdirSync(backupDir).filter((name) => !name.endsWith('.json'))).toHaveLength(ECOSYSTEM_BACKUPS_KEPT);
+  });
+
+  test('a rollback whose copy fails leaves the installed copy in place', () => {
+    const source = makeSource('roll', { 'SKILL.md': 'v1' });
+    upsertEcosystemCatalogEntry(skill('roll', 'Roll', source), options);
+    expect(installEcosystemCatalogEntry('skill', 'roll', options).ok).toBe(true);
+    writeFileSync(join(root, 'src', 'roll', 'SKILL.md'), 'v2');
+    expect(updateInstalledEcosystemEntry('skill', 'roll', options).ok).toBe(true);
+    const [backup] = listEcosystemInstallBackups('skill', 'roll', options);
+    const unreadable = join(backup!.archivedTargetPath, 'SKILL.md');
+    chmodSync(unreadable, 0o000);
+    try {
+      const rolled = rollbackInstalledEcosystemEntry('skill', 'roll', options);
+      if (process.getuid?.() === 0) return; // root reads anything; the copy cannot be made to fail
+      expect(rolled.ok).toBe(false);
+      expect(readFileSync(join(root, '.goodvibes', 'skills', 'roll', 'SKILL.md'), 'utf8')).toBe('v2');
+    } finally { chmodSync(unreadable, 0o644); }
   });
 });

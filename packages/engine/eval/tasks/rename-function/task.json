@@ -1,0 +1,6 @@
+{
+  "id": "rename-function",
+  "instruction": "In this directory, rename the function addNumbers to sum everywhere it is defined or called. Change nothing else.",
+  "verify": "verify.sh",
+  "timeoutMs": 240000
+}

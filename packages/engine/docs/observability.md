@@ -314,32 +314,6 @@ const systemHealth = selectSystemHealth(state);
 const providerStatus = selectDomainHealth(state, 'providerHealth');
 ```
 
-### HealthPanel
-
-`HealthPanel` bridges `RuntimeHealthAggregator` into a subscribe/snapshot model for the health diagnostics panel. It includes SLO status rows and remediation action suggestions when optional dependencies are attached:
-
-```ts
-const panel = new HealthPanel(
-  aggregator,
-  sloCollector,   // optional: adds SLO rows to the dashboard
-  cascadeTimer,   // optional: adds remediation playbook suggestions
-);
-
-const snapshot = panel.getSnapshot();
-// snapshot.overall: HealthStatus
-// snapshot.domains: DomainHealthSummary[]
-// snapshot.sloRows: SloRow[]  (empty if sloCollector not attached)
-// snapshot.remediationActions: RemediationAction[]
-
-const unsub = panel.subscribe(() => {
-  const updated = panel.getSnapshot();
-});
-unsub(); // release subscription
-panel.dispose();
-```
-
-Domain rows are sorted: failed first, then degraded, then healthy, then unknown.
-
 ### SLO collector
 
 `SloCollector` measures four end-to-end SLO metrics from the runtime event stream:
@@ -500,52 +474,33 @@ for (const link of report.jumpLinks) {
 }
 ```
 
-### ForensicsDataPanel
-
-`ForensicsDataPanel` bridges `ForensicsRegistry` into the diagnostics panel subscription model. It is built from a registry directly; the diagnostics provider does not create it:
-
-```ts
-import { ForensicsDataPanel } from '@goodvibes-jev/engine/platform/platform/runtime/observability';
-
-const panel = new ForensicsDataPanel(forensicsRegistry);
-
-const all = panel.getAll();               // capped at bufferLimit
-const latest = panel.latest();            // most recent report
-const report = panel.getById(id);
-
-const unsub = panel.subscribe(() => {
-  const reports = panel.getAll();
-});
-panel.dispose();
-```
-
 ---
 
 ## Diagnostics
 
-### Available panels
+### Reading and acting on failures
 
-The diagnostics subsystem provides data providers for the following built-in panels:
+What failed and what can be done about it are served by the live owners, through operator methods every surface and agent can call:
 
-| Panel | Provider Class | Data |
+| Need | Operator method |
+|---|---|
+| Health of every domain | `health.snapshot` |
+| Recent errors, events and metrics | `telemetry.errors.list`, `telemetry.events.list`, `telemetry.metrics.get` |
+| Retry or cancel a task | `tasks.retry`, `tasks.cancel` (the ops control plane) |
+| Agents and their work | `fleet.snapshot`, `fleet.list` |
+
+### Panels built by live owners
+
+| Panel | Class | Built by |
 |---|---|---|
-| Health | `HealthPanel` | Domain health, SLO rows, remediation actions |
-| Forensics | `ForensicsDataPanel` | Failure reports with causal chains |
-| Agents | `AgentsPanel` | Agent lifecycle and state |
-| Events | `EventsPanel` | Recent event stream |
-| Tool calls | `ToolCallsPanel` | Tool dispatch history |
-| Tool contracts | `ToolContractsPanel` | Tool contract verification results |
-| Ops | `OpsPanel` | Operations-plane state |
-| Tasks | `TasksPanel` | Task queue and status |
-| State inspector | `StateInspectorPanel` | Raw domain state |
-| Security | `SecurityPanel` | Permission policy state |
-| Transport | `TransportPanel` | Connection health |
-| Replay | `ReplayPanel` | Deterministic replay state |
-| Divergence | `DivergencePanel` | Replay divergence tracking |
+| Policy | `PolicyPanel` | the policy runtime (`runtime/permissions/policy-runtime.ts`) |
+| Divergence | `DivergencePanel` | the policy runtime |
+| Security | `SecurityPanel` | its snapshot type is the security read model's shape |
+| State inspector | `StateInspectorPanel` | its `InspectableDomain` type is the state inspector's |
 
-All panel providers follow the same pattern: construct with data sources, call `getSnapshot()` / `getAll()` for the current view, subscribe for change notifications, and call `dispose()` to release.
+A panel follows one pattern: construct it with its data sources, read `getSnapshot()`, subscribe for changes, and call `dispose()` to release.
 
-### Provider health panel
+### Provider health
 
 Provider health is tracked in the `providerHealth` store domain. Read it via selector:
 
@@ -556,30 +511,6 @@ const ph = selectProviderHealth(state);
 // ph.status: provider health status
 // ph.providers: per-provider health records
 ```
-
-### Accessing diagnostics
-
-`createDiagnosticsProvider` takes the event bus and the health aggregator, plus optional extras:
-
-```ts
-import { createDiagnosticsProvider } from '@goodvibes-jev/engine/platform/platform/runtime/observability';
-
-const diag = createDiagnosticsProvider({
-  eventBus,                 // RuntimeEventBus the event-driven panels listen to
-  healthAggregator,         // RuntimeHealthAggregator behind the health dashboard
-  sloCollector,             // optional: adds SLO rows to the health dashboard
-  cascadeTimer,             // optional: adds remediation suggestions
-  domains,                  // optional: InspectableDomain[] for the state inspector
-  panelConfig,              // optional: per-panel buffer limits
-});
-
-const health = diag.getHealthDashboard();
-const toolCalls = diag.getToolCalls({ taskId: 't1' });
-const unsubscribe = diag.subscribe('health', () => render());
-diag.dispose();
-```
-
-The provider builds the tool-calls, agents, tasks, events, state-inspector, health and tool-contracts panels. The other panels in the table above are constructed directly from their own data sources.
 
 ---
 

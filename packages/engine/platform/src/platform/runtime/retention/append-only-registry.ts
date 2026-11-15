@@ -25,7 +25,7 @@ import {
   type RetentionOutcome,
 } from '../at-rest-persistence.js';
 import { resolveScopedDirectory, resolveSharedDirectory } from '../surface-root.js';
-import { CRASH_LOG_FILENAME } from '../crash-capture.js';
+import { CRASH_LOG_FILENAME, CRASH_LOG_PREVIOUS_FILENAME } from '../crash-capture.js';
 import { isLegacyAgentJournalFile } from './legacy-agent-journal-patterns.js';
 import { logger } from '../../utils/logger.js';
 import { join } from 'node:path';
@@ -246,7 +246,7 @@ export const APPEND_ONLY_STORES: readonly AppendOnlyStoreDescriptor[] = [
   {
     id: 'surface-crash-log',
     owner: 'process-fault crash capture (runtime/crash-capture.ts)',
-    description: 'the home-anchored crashes.jsonl a surface writes from its uncaughtException/unhandledRejection exit boundary; the writer already caps it by record count, and this entry adds the age and total-size caps every other append-only store gets',
+    description: 'the home-anchored crashes.jsonl a surface writes from its uncaughtException/unhandledRejection exit boundary, and the crashes.previous.jsonl it rotates into; the writer rotates by size, and this entry adds the age and total-size caps every other append-only store gets',
     policy: DEFAULT_AT_REST_POLICY,
     resolve(roots) {
       // Home-anchored, matching where crash-capture.ts writes: a faulting
@@ -255,7 +255,7 @@ export const APPEND_ONLY_STORES: readonly AppendOnlyStoreDescriptor[] = [
       // project.
       if (!roots.homeDirectory) return EMPTY_TARGETS;
       const surfaceDir = resolveScopedDirectory(roots.homeDirectory, roots.surfaceRoot);
-      return { journalDirs: [], files: [join(surfaceDir, CRASH_LOG_FILENAME)] };
+      return { journalDirs: [], files: [join(surfaceDir, CRASH_LOG_FILENAME), join(surfaceDir, CRASH_LOG_PREVIOUS_FILENAME)] };
     },
   },
   {

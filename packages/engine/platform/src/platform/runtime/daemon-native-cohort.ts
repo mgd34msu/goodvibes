@@ -1,5 +1,6 @@
 /** Fixed daemon payloads and receipt admission. Update publication stays in self-update.ts. */
 import { createHash } from 'node:crypto';
+import { lstatSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { parseSemanticVersion } from './semantic-version.js';
 import type { UpdateTarget } from './self-update.js';
@@ -144,9 +145,14 @@ function assertCapturedBunMetadata(artifact: DaemonCiArtifact, bunDigest: string
     || value.upstreamSource !== `https://github.com/oven-sh/bun/tree/bun-v${value.version}` || typeof value.source !== 'string'
     || !(value.source === 'build-interpreter' || value.source.startsWith('installed:@oven/bun-linux-') || value.source.startsWith('npm:@oven/bun-linux-'))) throw new Error('Native daemon Bun runtime provenance is invalid: its version, upstream source, target and digest must agree with the bundled runtime');
 }
-/** Resolve the fixed paths ourselves; receipt JSON never supplies filesystem paths. */
+/**
+ * Resolve the fixed paths ourselves; receipt JSON never supplies filesystem paths.
+ * `integrity`: true (the default) reads and hashes every member against the
+ * receipt; 'size' compares each member's mode and size only (daemon start, for
+ * a cohort verified when it was installed or updated); false checks the receipt alone.
+ */
 export function inspectDaemonNativeInstallation(execPath: string, platform: string, arch: string, suffix: '' | '.previous', io: UpdateFileIo,
-  options: { readonly integrity?: boolean } = {}): DaemonInstallationReceipt | null {
+  options: { readonly integrity?: boolean | 'size' } = {}): DaemonInstallationReceipt | null {
   const targets = resolveDaemonNativeTargets(execPath, platform, arch);
   if (!targets) throw new Error('Native daemon target is unsupported');
   if (!io.readFile || !io.observe) throw new Error('Native daemon I/O requires retained file observations and reads');
@@ -161,7 +167,9 @@ export function inspectDaemonNativeInstallation(execPath: string, platform: stri
   const observation = io.observe(receiptTarget.path + suffix);
   if (!observation || observation.mode !== 0o644) throw new Error('Native daemon receipt is missing or invalid');
   const receipt = parseDaemonInstallationReceipt(JSON.parse(io.readFile(receiptTarget.path + suffix).toString('utf8')), target);
-  if (options.integrity !== false) {
+  if (options.integrity === 'size') {
+    assertInstalledShape(targets.slice(0, -1), suffix, receipt, io);
+  } else if (options.integrity !== false) {
     const buffers = targets.slice(0, -1).map(member => {
       const observation = io.observe!(member.path + suffix);
       if (!observation || observation.mode !== (member.executable ? 0o755 : 0o644)) throw new Error(`Native daemon payload is missing or has the wrong mode: ${member.label}`);
@@ -170,6 +178,23 @@ export function inspectDaemonNativeInstallation(execPath: string, platform: stri
     assertDaemonNativePayloadBytes(receipt.artifact, buffers);
   }
   return receipt;
+}
+/**
+ * Admission of a cohort whose bytes were verified when it was installed or
+ * updated (install, the update transaction's download pins): every member must
+ * still be a regular file with its receipt's mode and size. Nothing is read or
+ * hashed, so a daemon start costs one stat per member instead of reading and
+ * hashing the whole cohort; a member that was truncated, half copied or
+ * replaced by a build of another size is refused.
+ */
+function assertInstalledShape(members: readonly UpdateTarget[], suffix: '' | '.previous', receipt: DaemonInstallationReceipt, io: UpdateFileIo): void {
+  if (members.length !== receipt.artifact.files.length) throw new Error('Native daemon payload set is incomplete');
+  for (const [index, member] of members.entries()) {
+    const file = receipt.artifact.files[index]!;
+    const observation = io.observe!(member.path + suffix);
+    if (!observation || observation.mode !== (member.executable ? 0o755 : 0o644)) throw new Error(`Native daemon payload is missing or has the wrong mode: ${member.label}`);
+    if (lstatSync(member.path + suffix).size !== file.size) throw new Error(`Native daemon payload differs from its source manifest: ${member.label}`);
+  }
 }
 type FileIdentity = NonNullable<ReturnType<NonNullable<UpdateFileIo['observe']>>>;
 /** Actual native I/O certifies physical revisions after initial payload pin

@@ -22,11 +22,6 @@ const darwinWriters = new WeakMap<OriginalDarwinDaemonInstallation, NativeDataWr
 // Only this module's actual inspector can populate the verification cache.
 // The early loader's shared source record is immutable and carries no cache slot.
 const darwinInstallations = new WeakMap<OriginalDarwinDaemonInstallation, DarwinDaemonInstallation>();
-// One full integrity pass per process: a later admission of the same files
-// reuses it while the file identities (inode, ctime, mtime) taken when the
-// bytes were hashed still hold. A suite repair or update that writes into the
-// cohort changes those identities, so the next admission hashes again.
-const verifiedLinuxInstallations = new Map<string, () => void>();
 
 export interface ResolveDaemonUpdateArtifactOptions {
   /** The executable to identify; defaults to process.execPath. */
@@ -111,15 +106,15 @@ export function resolveInstalledDaemonUpdateArtifact(
   const receipt = inspectDaemonNativeInstallation(execPath, platform, arch, '', io, { integrity: false });
   if (!receipt || receipt.version !== version) throw installationRefused('INSTALLATION_NOT_OWNED', 'Running daemon does not own the installed native version');
   const assertRetained = () => { signal?.throwIfAborted(); assertInstallationCurrent(); assertIdle(); };
-  const verifiedKey = `${execPath}\0${platform}\0${arch}\0${version}`;
-  let verifiedCurrent = sameVerifiedFiles(verifiedKey);
+  // The bytes were verified when the cohort was installed or updated; at start
+  // each member's mode and size are compared with the receipt (one stat each).
+  let verifiedCurrent = false;
   const assertCurrent = () => {
     assertRetained();
     if (!verifiedCurrent) {
-      inspectDaemonNativeInstallation(execPath, platform, arch, '', io);
+      inspectDaemonNativeInstallation(execPath, platform, arch, '', io, { integrity: 'size' });
       assertRetained();
       verifiedCurrent = true;
-      verifiedLinuxInstallations.set(verifiedKey, assertInstallationCurrent);
     }
   };
   let assertStarting = assertCurrent;
@@ -144,15 +139,6 @@ export function resolveInstalledDaemonUpdateArtifact(
     assertInstallationCurrent();
   } });
   return Object.freeze({ version, execPath, suite: true as const, currentReader, assertStarting, assertCurrent });
-}
-
-/** True when the files hashed by an earlier admission in this process are still
- * the same files; a changed or vanished file drops the entry. */
-function sameVerifiedFiles(key: string): boolean {
-  const retained = verifiedLinuxInstallations.get(key);
-  if (!retained) return false;
-  try { retained(); return true; }
-  catch { verifiedLinuxInstallations.delete(key); return false; }
 }
 
 /** Config/migration publication uses the same original complete Darwin owner as

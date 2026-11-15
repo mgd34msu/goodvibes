@@ -132,20 +132,16 @@ describe('verified native lifecycle admission', () => {
     expect(Object.isFrozen(artifact)).toBe(true); expect(() => artifact?.assertCurrent?.()).not.toThrow();
   });
 
-  test('a process hashes its installed cohort once and again only after the files change', () => {
+  test('a daemon start hashes no cohort member and refuses one whose size differs from its receipt', () => {
     const f = installedFixture();
-    const payloads = f.receipt.artifact.files.length;
     const hash = spyOn(crypto, 'createHash');
     try {
       resolveInstalledDaemonUpdateArtifact(defaultHome, f.options)?.assertCurrent?.();
-      expect(hash.mock.calls.length).toBe(payloads);
-      resolveInstalledDaemonUpdateArtifact(defaultHome, f.options)?.assertCurrent?.();
-      expect(hash.mock.calls.length).toBe(payloads);
-      // A write into the cohort (as a suite repair or update makes) retires the earlier pass.
-      writeFileSync(f.execPath, readFileSync(f.execPath));
-      resolveInstalledDaemonUpdateArtifact(defaultHome, f.options)?.assertCurrent?.();
-      expect(hash.mock.calls.length).toBe(payloads * 2);
+      expect(hash.mock.calls.length).toBe(0);
     } finally { hash.mockRestore(); }
+    const member = f.targets[2]!;
+    writeFileSync(member.path, Buffer.concat([readFileSync(member.path), Buffer.from('x')]));
+    expect(() => resolveInstalledDaemonUpdateArtifact(defaultHome, f.options)).toThrow('differs from its source manifest');
   });
 
   test('a source invocation refuses before inspecting native files', () => {

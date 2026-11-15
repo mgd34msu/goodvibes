@@ -72,3 +72,4 @@ export type {
   TaskSuiteResult,
   RunTaskSuiteOptions,
 } from './task-suite.js';
+export { createHeadlessRunExecutor, type HeadlessRunExecutorOptions } from './headless-executor.js';

@@ -11,5 +11,6 @@ export * from './catalog.js';
 export * from './recommendations.js';
 export * from './bundle-manifest.js';
 export * from './bundle-pin.js';
+export * from './bundle-archive.js';
 export * from './bundle-install.js';
 export * from './marketplace-index.js';

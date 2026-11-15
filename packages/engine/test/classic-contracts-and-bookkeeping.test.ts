@@ -4,7 +4,6 @@ import { JudgmentError, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { withDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.js';
 import { forgetDescriptionReadings, ToolContractVerifier } from '../platform/src/platform/runtime/tools/contract-verifier.js';
-import { ToolContractsPanel } from '../platform/src/platform/runtime/diagnostics/panels/tool-contracts.js';
 import { ToolRegistry } from '../platform/src/platform/tools/registry.js';
 import type { Tool } from '../platform/src/platform/types/tools.js';
 import { createContractIntake, type ContractIntakeDeps } from '../platform/src/platform/contract/intake-route.js';
@@ -28,14 +27,11 @@ test.each(['Classic - Off', 'Preferred'] as const)('%s full registered-tool diag
     const results = await registry.verifyAllContracts({ strictIdempotency: false });
     const read = results.get('read');
     expect(read).toMatchObject({ passed: true, descriptionQuality: 'not-evaluated', provenance: 'classic' });
-    const panel = new ToolContractsPanel(); panel.load(results);
-    expect(panel.get('read')).toMatchObject({ descriptionQuality: 'not-evaluated', provenance: 'classic' });
     expect(ToolContractVerifier.formatAllResults(results)).toContain('Description quality was not assessed');
     const invalid = await new ToolContractVerifier().verify(tool('broken', { type: 'tuple' }));
     expect(invalid.passed).toBe(false);
     expect(invalid.violations.some(v => v.severity === 'error' && v.dimension === 'schema')).toBe(true);
     expect(policy === 'Classic - Off' ? fake.requests.length === 0 : fake.requests.length > 0).toBe(true);
-    panel.dispose();
   });
 });
 

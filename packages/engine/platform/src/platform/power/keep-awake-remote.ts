@@ -1,38 +1,22 @@
 /**
- * keep-awake-remote.ts, forward the owner keep-awake toggle to an adopted
- * EXTERNAL daemon over the `power.keepAwake.set` gateway verb.
+ * keep-awake-remote.ts, forward the owner keep-awake toggle from a surface (the
+ * TUI, the Agent) to an adopted EXTERNAL daemon over `power.keepAwake.set`.
  *
- * In the external/adopted-daemon topology a surface's in-process `PowerManager`
- * is NOT the daemon's: it holds a LOCAL OS-level inhibitor that releases the
- * moment that process exits. The owner ruling is that keep-awake is
- * daemon-held, it must survive a surface closing. The config file does not
- * carry it across surfaces (`power.keepAwake` is a plain surface-local config
- * key, not one of the shared-config-tier keys), so the toggle is forwarded to
- * the daemon over the wire instead, best-effort, gated on reachability.
+ * In the adopted-daemon topology the daemon is the owner of keep-awake: its
+ * hold outlives a surface closing, and `power.keepAwake` is a surface-local
+ * config key that does not reach the daemon's own config. Each surface still
+ * holds a local inhibitor of its own, so keep-awake works with no daemon at
+ * all; every change made in the surface is forwarded to the daemon, and the
+ * CURRENT value, on or off, is sent again each time the daemon becomes
+ * reachable, so a change made while it was away (a restart, a blip) reaches it.
  *
- * Written in raw-REST style deliberately, matching every other version-tolerant
- * wire mirror in this platform: request/response only, a Bearer token, an
- * AbortController timeout, and the same
- * ok/auth_required/route_unavailable/host_unavailable/error classification.
- * The verb is an HTTP route of the operator contract (`POST /api/power/keep-awake`)
- * and a gateway verb; this helper keeps working against a daemon older than the
- * typed client.
- *
- * ── Hoist provenance (2026-07-30 daemon/TUI split) ──────────────────────────
- *
- * Both the TUI (`runtime/power-keepawake-remote.ts`) and the agent
- * (`agent/power-keep-awake-remote.ts`) carried independent forward helpers.
- * The agent's is the superset adopted here: it classifies wire failures into a
- * discriminated result instead of swallowing every error silently, and it
- * takes its reachability probe and connection resolver as injected
- * dependencies rather than reaching into a surface-local RPC resolver, which
- * is what makes it portable into the platform at all. The TUI's version additionally
- * wires a `ConfigManager` subscription (so all three toggle origins, the
- * `/power` command, Alt+A, and the settings modal, forward through one seam)
- * and a `power.status.get` poll for the status chip; both of those are
- * surface-specific composition and stay local to each consumer, not part of
- * this hoist.
+ * This file is the one forwarder both products use: the raw-REST request
+ * (`postPowerKeepAwakeSet`, version tolerant, with the shared failure
+ * classification), the reachability-gated send, the owner notice, the ordered
+ * queue, and `createKeepAwakeForwarder`, which composes them for a surface that
+ * brings its own transport.
  */
+import { logger } from '../utils/logger.js';
 
 export type PowerKeepAwakeRemoteFailureKind =
   | 'auth_required'
@@ -88,6 +72,12 @@ async function readResponseBody(response: Response): Promise<unknown> {
   }
 }
 
+/** What a served power state says keep-awake is doing ('off', 'held', 'held-partial', 'refused'), when it says. */
+export function readServedKeepAwakeState(body: unknown): string | undefined {
+  const served = isRecord(body) && isRecord(body.keepAwake) ? body.keepAwake.state : undefined;
+  return typeof served === 'string' ? served : undefined;
+}
+
 /** Identical failure classification to the platform's other raw-REST wire mirrors. */
 function classifyHttpFailure(status: number, body: unknown): PowerKeepAwakeRemoteFailure {
   const detail = isRecord(body) && typeof body.error === 'string' ? body.error : '';
@@ -138,8 +128,8 @@ export async function postPowerKeepAwakeSet(
     });
     const body = await readResponseBody(response);
     if (!response.ok) return classifyHttpFailure(response.status, body);
-    const served = isRecord(body) && isRecord(body.keepAwake) ? body.keepAwake.state : undefined;
-    return typeof served === 'string' ? { ok: true, keepAwakeState: served } : { ok: true };
+    const served = readServedKeepAwakeState(body);
+    return served !== undefined ? { ok: true, keepAwakeState: served } : { ok: true };
   } catch (error) {
     return { ok: false, kind: 'connected_host_unavailable', error: summarizeError(error) };
   } finally {
@@ -160,12 +150,11 @@ export type ForwardKeepAwakeOutcome =
 
 /**
  * Forward power.keepAwake to the adopted daemon ONLY when a daemon is
- * actually reachable right now, an unreachable/unknown daemon means there is
- * nothing durable to hold the toggle for this process anyway, so this is a
- * clean no-op (`attempted: false`) rather than a wasted network call. Never
- * throws: a reachability probe rejection is treated the same as "not
- * reachable" (best-effort, a live keep-awake apply must never take down the
- * settings-modal apply path it is called from).
+ * actually reachable right now; otherwise it is a no-op (`attempted: false`)
+ * rather than a wasted network call, and the re-send when the daemon next
+ * becomes reachable delivers the value. Never throws: a reachability probe
+ * rejection is treated the same as "not reachable" (a live keep-awake apply
+ * must never take down the settings-modal apply path it is called from).
  */
 export async function forwardKeepAwakeToAdoptedDaemon(
   enabled: boolean,
@@ -181,4 +170,100 @@ export async function forwardKeepAwakeToAdoptedDaemon(
   if (reachable !== 'online') return { attempted: false };
   const result = await post(deps.resolveConnection(), enabled);
   return { attempted: true, result };
+}
+
+/**
+ * The one line the owner reads when the daemon did not take, or could not act
+ * on, a keep-awake change; null when the daemon holds it as asked. `where` names
+ * the surface ("this process", "this terminal").
+ */
+export function describeKeepAwakeOutcome(enabled: boolean, outcome: ForwardKeepAwakeOutcome, where = 'this process'): string | null {
+  if (!outcome.attempted) {
+    return enabled
+      ? `Keep-awake is on in ${where} only: no daemon is reachable right now. It is sent to the daemon when ${where} reaches it again; until then the hold ends when ${where} exits.`
+      : `Keep-awake is off in ${where}, but no daemon is reachable right now, so a daemon holding keep-awake keeps the host awake until ${where} reaches it again.`;
+  }
+  if (!outcome.result.ok) {
+    return enabled
+      ? `Keep-awake is on in ${where} only; the daemon did not take it (${outcome.result.error}). It is sent again the next time ${where} attaches to the daemon; until then the hold ends when ${where} exits.`
+      : `Keep-awake is off in ${where}, but the daemon did not take it (${outcome.result.error}), so the daemon may still hold the host awake. It is sent again the next time ${where} attaches to the daemon.`;
+  }
+  if (enabled && outcome.result.keepAwakeState === 'refused') {
+    return 'The daemon accepted keep-awake but the system refused to hold the host awake, so the machine can still sleep.';
+  }
+  return null;
+}
+
+export interface KeepAwakeNoticeDeps {
+  /** Deliver the value to the daemon; `attempted: false` when no daemon is reachable. Never throws. */
+  readonly send: (enabled: boolean) => Promise<ForwardKeepAwakeOutcome>;
+  /** Shown to the owner. Absent: the outcome is logged only. */
+  readonly notify?: ((text: string) => void) | undefined;
+  /** Whether an unreachable daemon is worth a notice (a toggle: yes; a re-send on attach: no). */
+  readonly tellWhenUnreachable?: boolean | undefined;
+  /** The surface named in the notice; default "this process". */
+  readonly where?: string | undefined;
+}
+
+/** Send one keep-awake value to the daemon and tell the owner when it did not hold. Never throws. */
+export async function forwardKeepAwakeWithNotice(enabled: boolean, deps: KeepAwakeNoticeDeps): Promise<void> {
+  try {
+    const outcome = await deps.send(enabled);
+    if (!outcome.attempted && deps.tellWhenUnreachable === false) return;
+    const line = describeKeepAwakeOutcome(enabled, outcome, deps.where);
+    if (line === null) return;
+    logger.warn('[power] keep-awake daemon forward did not hold', { enabled, attempted: outcome.attempted });
+    deps.notify?.(line);
+  } catch (error) {
+    logger.warn('[power] keep-awake daemon forward failed', { error: summarizeError(error) });
+  }
+}
+
+/**
+ * Runs keep-awake forwards one after another, in the order they were asked, so
+ * a slow re-send can never reach the daemon after a newer change. A step that
+ * fails does not stop the ones behind it.
+ */
+export function createKeepAwakeForwardQueue(): { run<T>(step: () => Promise<T>): Promise<T> } {
+  let tail: Promise<unknown> = Promise.resolve();
+  return {
+    run<T>(step: () => Promise<T>): Promise<T> {
+      const result = tail.then(step);
+      tail = result.catch(() => {});
+      return result;
+    },
+  };
+}
+
+export interface KeepAwakeForwarderDeps extends Omit<KeepAwakeNoticeDeps, 'tellWhenUnreachable'> {
+  /** The surface's current keep-awake value, read when a re-send's turn comes. */
+  readonly readKeepAwake: () => boolean;
+}
+
+export interface KeepAwakeForwarder {
+  /** Forward a change the owner made in this surface. */
+  set(enabled: boolean): Promise<void>;
+  /** The daemon became reachable: send the current value, on or off. */
+  attached(): Promise<void>;
+  /** Report each daemon reachability reading; a change to reachable sends the current value. */
+  reachable(isReachable: boolean): void;
+}
+
+/**
+ * The forwarder a surface wires once: changes and re-sends go through one
+ * ordered queue, and a re-send reads the value at its own turn, so an "off" set
+ * meanwhile is never followed by a late "on".
+ */
+export function createKeepAwakeForwarder(deps: KeepAwakeForwarderDeps): KeepAwakeForwarder {
+  const queue = createKeepAwakeForwardQueue();
+  let wasReachable = false;
+  const attached = (): Promise<void> => queue.run(() => forwardKeepAwakeWithNotice(deps.readKeepAwake(), { ...deps, tellWhenUnreachable: false }));
+  return {
+    set: (enabled) => queue.run(() => forwardKeepAwakeWithNotice(enabled, deps)),
+    attached,
+    reachable(isReachable) {
+      if (isReachable && !wasReachable) void attached();
+      wasReachable = isReachable;
+    },
+  };
 }

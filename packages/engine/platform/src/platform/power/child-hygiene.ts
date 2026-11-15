@@ -6,9 +6,9 @@
  * An exiting process must never leave a watcher parented to init: on Linux an
  * accumulation of orphaned monitors exhausts the system D-Bus broker's
  * per-uid connection quota, and on either platform a leaked watcher is a
- * process nobody will ever stop. The registry + the once-only exit/signal
- * hooks below guarantee every watcher dies with us, the same discipline the
- * inhibitor children get through the PowerManager's process-exit cleanup.
+ * process nobody will ever stop. Every watcher is registered here, and the
+ * PowerManager's process-death hook (manager.ts) stops them all together with
+ * the inhibitor children, only when the process is really going down.
  */
 import { spawn, type ChildProcess } from 'node:child_process';
 
@@ -45,27 +45,13 @@ export function pidIsAlive(pid: number): boolean {
 
 /** Live sleep-edge watcher children spawned in this process. */
 const liveSleepWatchers = new Set<ChildProcess>();
-let sleepWatcherExitHooksInstalled = false;
 
 /**
- * Signal listeners that only reap sleep watchers. The inhibitor exit hook
- * (manager.ts) must not count them as a host owning shutdown: they never exit
- * the process themselves, and each would otherwise defer to the other so the
- * signal is swallowed.
+ * Stop every sleep-edge watcher this process spawned. Synchronous, so it runs
+ * from an 'exit' handler. The PowerManager's process-death hook calls it beside
+ * releasing the inhibitors: the one owner of "power children die with us".
  */
-const sleepWatcherReapers = new WeakSet<object>();
-
-/** Record `listener` as a watcher-reaping signal listener (see `isSleepWatcherReaper`). */
-export function markSleepWatcherReaper<T extends (...args: never[]) => void>(listener: T): T {
-  sleepWatcherReapers.add(listener);
-  return listener;
-}
-
-export function isSleepWatcherReaper(listener: unknown): boolean {
-  return typeof listener === 'object' || typeof listener === 'function' ? sleepWatcherReapers.has(listener as object) : false;
-}
-
-function killAllSleepWatchers(): void {
+export function stopAllSleepWatchers(): void {
   for (const child of liveSleepWatchers) {
     try {
       child.kill('SIGTERM');
@@ -77,51 +63,11 @@ function killAllSleepWatchers(): void {
 }
 
 /**
- * Install process exit + SIGINT/SIGTERM/SIGHUP cleanup for sleep-edge watchers
- * ONCE per process. Mirrors the inhibitor exit-hook shape (see manager.ts): a
- * signal handler kills the watchers and re-raises the signal only when it was
- * the sole listener, so a host application that also handles the signal keeps
- * owning shutdown while this handler stays installed to reap the watchers on
- * every later signal too.
- */
-function ensureSleepWatcherExitHooks(): void {
-  if (sleepWatcherExitHooksInstalled) return;
-  sleepWatcherExitHooksInstalled = true;
-  process.on('exit', killAllSleepWatchers);
-  installSleepWatcherSignalReapers(process);
-}
-
-/** The slice of `process` the signal reapers use (injectable for tests). */
-export type SleepWatcherSignalProcess = Pick<NodeJS.Process, 'on' | 'removeListener' | 'listenerCount' | 'kill' | 'pid'>;
-
-export function installSleepWatcherSignalReapers(proc: SleepWatcherSignalProcess): void {
-  const signals: NodeJS.Signals[] = ['SIGINT', 'SIGTERM', 'SIGHUP'];
-  for (const signal of signals) {
-    const reap = (): void => {
-      killAllSleepWatchers();
-      // Step aside while deciding: with this listener installed the signal
-      // always has one, so only its removal shows whether the host has another.
-      proc.removeListener(signal, reap);
-      if (proc.listenerCount(signal) === 0) {
-        proc.kill(proc.pid, signal);
-        return;
-      }
-      // The host handles the signal and may keep running; a watcher spawned
-      // later must still be reaped by the next one.
-      proc.on(signal, reap);
-    };
-    markSleepWatcherReaper(reap);
-    proc.on(signal, reap);
-  }
-}
-
-/**
- * Track a freshly spawned watcher child: installs the process-exit reaper (once),
- * registers the child, and deregisters it when it exits on its own or fails to
- * spawn. Returns the stop function the seam's unsubscribe calls.
+ * Track a freshly spawned watcher child: registers it for the process-death
+ * cleanup, and deregisters it when it exits on its own or fails to spawn.
+ * Returns the stop function the seam's unsubscribe calls.
  */
 export function trackSleepWatcher(child: ChildProcess, onSpawnError: (error: Error) => void): () => void {
-  ensureSleepWatcherExitHooks();
   liveSleepWatchers.add(child);
   child.once('error', (error: Error) => {
     liveSleepWatchers.delete(child);

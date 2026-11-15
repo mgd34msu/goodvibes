@@ -10,7 +10,6 @@
 import { describe, expect, test } from 'bun:test';
 import type { ChildProcess } from 'node:child_process';
 import { EventEmitter } from 'node:events';
-import { markSleepWatcherReaper } from '../platform/src/platform/power/child-hygiene.ts';
 import { createDarwinCaffeinateSeam } from '../platform/src/platform/power/darwin-caffeinate.ts';
 import { createLinuxLogindSeam } from '../platform/src/platform/power/linux-logind.ts';
 import {
@@ -303,40 +302,6 @@ describe('default process exit hook', () => {
     emitter.emit('SIGTERM');
     expect(releases).toBe(1);
     expect(kills).toEqual(['SIGTERM']);
-  });
-});
-
-describe('default process exit hook beside the sleep watcher reaper', () => {
-  test('a signal only the watcher reaper also listens for still releases and re-raises once', () => {
-    const emitter = new EventEmitter();
-    const kills: string[] = [];
-    const proc = Object.assign(emitter, {
-      pid: 1,
-      kill: (_pid: number, signal: string) => { kills.push(signal); return true; },
-    }) as unknown as PowerExitProcess;
-    // The reaper is registered first, as it is once a sleep watcher has started.
-    emitter.on('SIGTERM', markSleepWatcherReaper(() => {}));
-    let releases = 0;
-    defaultRegisterProcessExitHooks(() => { releases += 1; }, proc);
-    emitter.emit('SIGTERM');
-    expect(releases).toBe(1);
-    expect(kills).toEqual(['SIGTERM']);
-  });
-
-  test('a host listener beside the reaper still keeps ownership of shutdown', () => {
-    const emitter = new EventEmitter();
-    const kills: string[] = [];
-    const proc = Object.assign(emitter, {
-      pid: 1,
-      kill: (_pid: number, signal: string) => { kills.push(signal); return true; },
-    }) as unknown as PowerExitProcess;
-    emitter.on('SIGTERM', markSleepWatcherReaper(() => {}));
-    emitter.on('SIGTERM', () => {});
-    let releases = 0;
-    defaultRegisterProcessExitHooks(() => { releases += 1; }, proc);
-    emitter.emit('SIGTERM');
-    expect(releases).toBe(0);
-    expect(kills).toEqual([]);
   });
 });
 

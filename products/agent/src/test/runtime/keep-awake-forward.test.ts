@@ -25,11 +25,10 @@ describe('keep-awake forward to the adopted daemon', () => {
     expect(lines[0]).toContain('can still sleep');
   });
 
-  test('a failed forward names the reason and that the hold will not outlive the process', async () => {
+  test('a failed forward is reported with its reason', async () => {
     const lines = await run(true, 'online', async () => ({ ok: false, kind: 'connected_host_error', error: 'HTTP 500' }));
     expect(lines).toHaveLength(1);
     expect(lines[0]).toContain('HTTP 500');
-    expect(lines[0]).toContain('will not outlive');
   });
 
   test('an unreachable daemon is reported for a toggle but not for the re-send on attach', async () => {
@@ -83,6 +82,13 @@ describe('keep-awake re-send on attach', () => {
     };
   }
 
+  test('an off set while the daemon was away is sent on attach', async () => {
+    const queue = createKeepAwakeForwardQueue();
+    const posts: boolean[] = [];
+    await queueKeepAwakeResend(queue, () => false, resendDeps(posts));
+    expect(posts).toEqual([false]);
+  });
+
   test('an off set while an earlier forward is in flight is not followed by a late on', async () => {
     const queue = createKeepAwakeForwardQueue();
     const posts: boolean[] = [];
@@ -95,7 +101,7 @@ describe('keep-awake re-send on attach', () => {
     const off = queue.run(() => forwardKeepAwakeWithNotice(false, resendDeps(posts)));
     release();
     await Promise.all([inFlight, resend, off]);
-    expect(posts).toEqual([true, false]);
+    expect(posts).toEqual([true, false, false]);
   });
 
   test('an on toggle in flight is sent before the re-send, then the off', async () => {

@@ -269,9 +269,10 @@ export function createDarwinCaffeinateSeam(options: DarwinCaffeinateSeamOptions 
         },
       };
     },
-    onPrepareForSleep(callback): () => void {
+    onPrepareForSleep(callback, onWatcherOff): () => void {
       return watchSleepEdge({
         label: 'log stream',
+        onWatcherOff,
         spawnWatcher: () => spawnMonitor(LOG_PATH, sleepWatchArgs(process.pid)),
         createLineHandler: () => (line) => {
           const sleeping = darwinSleepEdgeFromLogLine(line);

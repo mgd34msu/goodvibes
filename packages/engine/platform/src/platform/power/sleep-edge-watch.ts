@@ -4,14 +4,17 @@
  *
  * A watcher (`dbus-monitor`, `log stream`) that exits on its own (system bus
  * restart, the tool killed) would otherwise leave the checkpoint-before-sleep
- * and wake catch-up hooks silently dead. It is respawned a few times, each exit
- * logged; a watcher that cannot start at all is not retried.
+ * and wake catch-up hooks silently dead. It is respawned, each exit logged; a
+ * child that runs long enough to print a line has proved itself healthy, so
+ * the restart budget counts only exits in a row with no output between them.
+ * When the budget runs out, or a watcher cannot start at all, the subscriber
+ * is told the watcher is off and why, so the power state can say so.
  */
 import type { ChildProcess } from 'node:child_process';
 import { logger } from '../utils/logger.js';
 import { onStdoutLines, trackSleepWatcher } from './child-hygiene.js';
 
-/** Respawns allowed per subscription; a watcher that keeps dying is reported and left off. */
+/** Respawns in a row (no output between them) before the watcher is left off. */
 export const SLEEP_WATCH_MAX_RESTARTS = 3;
 
 export function watchSleepEdge(input: {
@@ -19,12 +22,21 @@ export function watchSleepEdge(input: {
   readonly spawnWatcher: () => ChildProcess;
   /** Builds the line handler for ONE child, so per-child parse state never leaks into a respawn. */
   readonly createLineHandler: () => (line: string) => void;
+  /** Told once when the watcher stops for good, with the reason. */
+  readonly onWatcherOff?: ((reason: string) => void) | undefined;
   readonly maxRestarts?: number | undefined;
 }): () => void {
   const maxRestarts = input.maxRestarts ?? SLEEP_WATCH_MAX_RESTARTS;
   let stopped = false;
   let restarts = 0;
   let stopCurrent: () => void = () => undefined;
+  const off = (reason: string): void => {
+    try {
+      input.onWatcherOff?.(reason);
+    } catch (error) {
+      logger.warn('[power] sleep-edge watcher-off report failed', { error: error instanceof Error ? error.message : String(error) });
+    }
+  };
 
   const start = (): void => {
     const child = input.spawnWatcher();
@@ -33,12 +45,22 @@ export function watchSleepEdge(input: {
     stopCurrent = trackSleepWatcher(child, (error) => {
       failedToSpawn = true;
       logger.warn(`[power] ${input.label} unavailable; sleep-edge signal disabled`, { error: error.message });
+      if (!stopped) off(`the sleep-edge watcher (${input.label}) could not start (${error.message}), so work is not checkpointed before sleep and nothing catches up on wake`);
     });
-    onStdoutLines(child, input.createLineHandler());
+    const handleLine = input.createLineHandler();
+    let sawOutput = false;
+    onStdoutLines(child, (line) => {
+      if (!sawOutput) {
+        sawOutput = true;
+        restarts = 0;
+      }
+      handleLine(line);
+    });
     child.once('exit', (code, signal) => {
       if (stopped || failedToSpawn) return;
       if (restarts >= maxRestarts) {
         logger.warn(`[power] ${input.label} keeps exiting; sleep-edge signal disabled`, { restarts, code, signal });
+        off(`the sleep-edge watcher (${input.label}) kept exiting, so work is not checkpointed before sleep and nothing catches up on wake until the process restarts`);
         return;
       }
       restarts += 1;

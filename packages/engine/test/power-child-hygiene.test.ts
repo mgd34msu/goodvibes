@@ -1,7 +1,8 @@
 /**
  * Sleep-watcher children: stdout is split into whole lines including a final
- * unterminated one, a broken pipe does not throw, and a tracked watcher is
- * stopped by its stop function and forgotten when it fails to spawn.
+ * unterminated one, a broken pipe does not throw, a tracked watcher is stopped
+ * by its stop function, and the one process-death hook stops watchers only
+ * when the process is really going down.
  */
 import { describe, expect, test } from 'bun:test';
 import { EventEmitter } from 'node:events';
@@ -75,31 +76,46 @@ describe('signal handling with the power manager hooks', () => {
     return { proc, state };
   }
 
-  test.each(['reaper-first', 'manager-first'] as const)('a signal nobody else handles still ends the process (%s)', async (order) => {
-    const { installSleepWatcherSignalReapers } = await import('../platform/src/platform/power/child-hygiene.ts');
+  test('a signal nobody else handles runs the cleanup, stops the watchers and ends the process', async () => {
     const { defaultRegisterProcessExitHooks } = await import('../platform/src/platform/power/manager.ts');
     const { proc, state } = fakeProcess();
+    const watcher = fakeChild();
+    trackSleepWatcher(watcher as unknown as ChildProcess, () => undefined);
     let cleanups = 0;
-    const install = () => installSleepWatcherSignalReapers(proc as never);
-    const register = () => defaultRegisterProcessExitHooks(() => { cleanups++; }, proc as never);
-    if (order === 'reaper-first') { install(); register(); } else { register(); install(); }
+    defaultRegisterProcessExitHooks(() => { cleanups++; }, proc as never);
     proc.emit('SIGTERM');
     expect(state.terminatedBy).toBe('SIGTERM');
     expect(cleanups).toBe(1);
+    expect(watcher.kills).toEqual(['SIGTERM']);
   });
 
-  test('a host that handles the signal keeps owning shutdown and the reaper stays installed', async () => {
-    const { installSleepWatcherSignalReapers } = await import('../platform/src/platform/power/child-hygiene.ts');
+  test('a signal the host handles and survives leaves the watchers and holds alone, every time', async () => {
     const { defaultRegisterProcessExitHooks } = await import('../platform/src/platform/power/manager.ts');
     const { proc, state } = fakeProcess();
-    installSleepWatcherSignalReapers(proc as never);
-    defaultRegisterProcessExitHooks(() => undefined, proc as never);
+    const watcher = fakeChild();
+    trackSleepWatcher(watcher as unknown as ChildProcess, () => undefined);
+    let cleanups = 0;
+    const unregister = defaultRegisterProcessExitHooks(() => { cleanups++; }, proc as never);
     let hostCalls = 0;
-    proc.on('SIGTERM', () => { hostCalls++; });
-    proc.emit('SIGTERM');
-    proc.emit('SIGTERM');
-    expect(hostCalls).toBe(2);
+    proc.on('SIGINT', () => { hostCalls++; });
+    for (let i = 0; i < 4; i += 1) proc.emit('SIGINT');
+    expect(hostCalls).toBe(4);
     expect(state.terminatedBy).toBeUndefined();
-    expect(proc.listenerCount('SIGTERM')).toBeGreaterThanOrEqual(2);
+    expect(cleanups).toBe(0);
+    expect(watcher.kills).toEqual([]);
+    unregister();
+    watcher.emit('exit');
+  });
+
+  test('two managers in one process share one hook, and an unhandled signal still ends the process', async () => {
+    const { defaultRegisterProcessExitHooks } = await import('../platform/src/platform/power/manager.ts');
+    const { proc, state } = fakeProcess();
+    let cleanups = 0;
+    defaultRegisterProcessExitHooks(() => { cleanups++; }, proc as never);
+    defaultRegisterProcessExitHooks(() => { cleanups++; }, proc as never);
+    expect(proc.listenerCount('SIGTERM')).toBe(1);
+    proc.emit('SIGTERM');
+    expect(state.terminatedBy).toBe('SIGTERM');
+    expect(cleanups).toBe(2);
   });
 });

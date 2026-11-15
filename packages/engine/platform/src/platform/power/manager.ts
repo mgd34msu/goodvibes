@@ -21,7 +21,7 @@
  */
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
-import { isSleepWatcherReaper } from './child-hygiene.js';
+import { stopAllSleepWatchers } from './child-hygiene.js';
 import type { PowerInhibitClass, PowerInhibitHandle, PowerPlatformSeam } from './types.js';
 import { bindPowerWorkSignals, type PowerWorkSignalBus } from './work-signals.js';
 
@@ -77,6 +77,12 @@ export interface PowerState {
     /** The honest-split note when part of the requested coverage was refused, or KEEP_AWAKE_NOT_HELD when none was granted. */
     readonly note: string | null;
   };
+  /** Whether the checkpoint-before-sleep and wake catch-up hooks can fire. */
+  readonly sleepEdge: {
+    readonly watching: boolean;
+    /** Why they cannot, once that is known; null while watching or before start. */
+    readonly note: string | null;
+  };
 }
 
 export interface PowerSleepEdgeHooks {
@@ -115,40 +121,81 @@ export interface PowerManagerOptions {
 }
 
 /** The slice of `process` the default exit hook uses (injectable for tests). */
-export type PowerExitProcess = Pick<NodeJS.Process, 'on' | 'once' | 'removeListener' | 'listeners' | 'kill' | 'pid'>;
+export type PowerExitProcess = Pick<NodeJS.Process, 'on' | 'removeListener' | 'listeners' | 'kill' | 'pid'>;
 
-/**
- * Default process-exit hook registration: the 'exit' event (normal exits and
- * handled-signal exits) plus SIGINT/SIGTERM/SIGHUP once-handlers.
- *
- * A signal handler acts ONLY when it is the sole listener: nothing else owns
- * shutdown, so it releases the holds and re-raises the signal for the default
- * action. When a host application also handles the signal, that handler owns
- * shutdown and may well keep running (a surface that treats SIGINT as cancel,
- * a daemon that ignores SIGHUP), so releasing there would silently drop a hold
- * the state still reports. A host that does exit reaches the 'exit' hook, or
- * calls stop().
- */
-export function defaultRegisterProcessExitHooks(cleanup: () => void, proc: PowerExitProcess = process): () => void {
-  const signals: NodeJS.Signals[] = ['SIGINT', 'SIGTERM', 'SIGHUP'];
-  const onExit = (): void => cleanup();
+const DEATH_SIGNALS: readonly NodeJS.Signals[] = ['SIGINT', 'SIGTERM', 'SIGHUP'];
+
+/** The one set of process-death hooks per process, shared by every manager in it. */
+interface ProcessDeathHooks {
+  readonly cleanups: Set<() => void>;
+  readonly uninstall: () => void;
+}
+
+const processDeathHooks = new WeakMap<PowerExitProcess, ProcessDeathHooks>();
+
+function installProcessDeathHooks(proc: PowerExitProcess): ProcessDeathHooks {
+  const cleanups = new Set<() => void>();
+  const runAll = (): void => {
+    for (const cleanup of [...cleanups]) {
+      try {
+        cleanup();
+      } catch (error) {
+        logger.warn('[power] process-exit cleanup failed', { error: summarizeError(error) });
+      }
+    }
+    stopAllSleepWatchers();
+  };
+  proc.on('exit', runAll);
   const signalHandlers = new Map<NodeJS.Signals, () => void>();
-  proc.on('exit', onExit);
-  for (const signal of signals) {
+  for (const signal of DEATH_SIGNALS) {
     const handler = (): void => {
-      // `once` has already removed this listener, so no other listener means nobody else is handling the signal.
-      // The sleep watchers' reaper is not a host owner: it never exits the process, and counting it would
-      // make it and this handler each wait for the other.
-      if (proc.listeners(signal).some((listener) => !isSleepWatcherReaper(listener))) return;
-      cleanup();
+      // Another listener means the host owns shutdown and may keep running
+      // (a terminal app treats SIGINT as Ctrl-C): every power child stays. A
+      // host that does exit reaches the 'exit' hook.
+      if (proc.listeners(signal).some((listener) => listener !== handler)) return;
+      runAll();
+      // Step aside so the re-raised signal takes its default action.
+      proc.removeListener(signal, handler);
       proc.kill(proc.pid, signal);
     };
     signalHandlers.set(signal, handler);
-    proc.once(signal, handler);
+    proc.on(signal, handler);
   }
+  return {
+    cleanups,
+    uninstall: () => {
+      proc.removeListener('exit', runAll);
+      for (const [signal, handler] of signalHandlers) proc.removeListener(signal, handler);
+    },
+  };
+}
+
+/**
+ * Default process-death hook registration: the one owner of "power children
+ * die with this process". One 'exit' listener and one SIGINT/SIGTERM/SIGHUP
+ * listener per process run every registered cleanup (each manager releases its
+ * inhibitors) and then stop every sleep-edge watcher child.
+ *
+ * The hooks act only when the process is really going down: on 'exit', or on a
+ * signal nothing else listens for, which is then re-raised for its default
+ * action. When a host application also handles the signal it owns shutdown
+ * and may keep running, so releasing there would silently drop a hold the
+ * state still reports and kill a watcher of a live process. The listeners stay
+ * installed across a survived signal, and are removed with the last cleanup.
+ */
+export function defaultRegisterProcessExitHooks(cleanup: () => void, proc: PowerExitProcess = process): () => void {
+  let hooks = processDeathHooks.get(proc);
+  if (!hooks) {
+    hooks = installProcessDeathHooks(proc);
+    processDeathHooks.set(proc, hooks);
+  }
+  const registered = hooks;
+  registered.cleanups.add(cleanup);
   return () => {
-    proc.removeListener('exit', onExit);
-    for (const [signal, handler] of signalHandlers) proc.removeListener(signal, handler);
+    registered.cleanups.delete(cleanup);
+    if (registered.cleanups.size > 0 || processDeathHooks.get(proc) !== registered) return;
+    registered.uninstall();
+    processDeathHooks.delete(proc);
   };
 }
 
@@ -178,6 +225,8 @@ export class PowerManager {
   private seamAvailable: boolean | null = null;
   private readonly sleepHooks: PowerSleepEdgeHooks[] = [];
   private unsubscribeSleepEdge: (() => void) | null = null;
+  /** Why the sleep-edge watcher stopped for good; null while it runs (or before start). */
+  private sleepEdgeOff: string | null = null;
   private unsubscribeKeepAwakeConfig: (() => void) | null = null;
   private unregisterExitHooks: (() => void) | null = null;
   /** Serializes acquire/release transitions so async seam calls never race. */
@@ -233,16 +282,23 @@ export class PowerManager {
       logger.warn('[power] availability check failed; assuming the host can hold inhibitors', { error: summarizeError(error) });
     }
     if (this.stopped) return;
-    if (this.options.seam.onPrepareForSleep) {
-      this.unsubscribeSleepEdge = this.options.seam.onPrepareForSleep((sleeping) => {
-        void this.queueSleepEdge(sleeping);
-      });
-    }
-    // Exit/signal cleanup at the source: an exiting process must never leave
-    // an inhibitor blocking host sleep with no owner.
+    // Exit/signal cleanup at the source, before any power child is spawned: an
+    // exiting process must never leave an inhibitor blocking host sleep, or a
+    // sleep-edge watcher, with no owner.
     this.unregisterExitHooks ??= (this.options.registerProcessExitHooks ?? defaultRegisterProcessExitHooks)(
       () => this.releaseAllHoldsNow(),
     );
+    if (this.options.seam.onPrepareForSleep) {
+      this.unsubscribeSleepEdge = this.options.seam.onPrepareForSleep(
+        (sleeping) => {
+          void this.queueSleepEdge(sleeping);
+        },
+        (reason) => {
+          this.sleepEdgeOff = reason;
+          this.emitState();
+        },
+      );
+    }
     if (this.readBool('power.keepAwake', false)) {
       await this.setKeepAwake(true, { persist: false });
     }
@@ -427,7 +483,17 @@ export class PowerManager {
         deniedClasses: keepAwakeDenied,
         note: this.keepAwakeNote(keepAwakeDenied),
       },
+      sleepEdge: this.sleepEdgeView(),
     };
+  }
+
+  private sleepEdgeView(): PowerState['sleepEdge'] {
+    if (this.sleepEdgeOff !== null) return { watching: false, note: this.sleepEdgeOff };
+    if (this.unsubscribeSleepEdge !== null) return { watching: true, note: null };
+    if (this.seamAvailable !== null && !this.options.seam.onPrepareForSleep) {
+      return { watching: false, note: `this host has no sleep-edge signal (${this.options.seam.platform}), so work is not checkpointed before sleep and nothing catches up on wake` };
+    }
+    return { watching: false, note: null };
   }
 
   private keepAwakeNote(denied: readonly PowerInhibitClass[]): string | null {

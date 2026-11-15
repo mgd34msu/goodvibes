@@ -108,7 +108,8 @@ import { createCancelGeneration, runOwnedTurnRetry } from './core/turn-cancellat
 import { wireInteractionSeams, createMemoryProvenanceUi } from './runtime/interaction-seams.ts';
 import { createPowerChipSource } from './core/power-chip-source.ts';
 import { keepAwakeHolding } from './core/power-status.ts';
-import { fetchDaemonPowerState, installKeepAwakeRemoteForward, resendKeepAwakeOnReconnect } from './runtime/power-keepawake-remote.ts';
+import { createKeepAwakeForwarder, readServedKeepAwakeState, type PowerState } from '@goodvibes-jev/engine/platform/platform/power';
+import { resolveOperatorRpc } from './input/commands/operator-rpc.ts';
 import { wrapRequestPermissionWithAlert } from './core/approval-alert.ts';
 import { createTerminalNotifier } from './core/terminal-notifier.ts';
 import { createDeferredRender } from './renderer/deferred-render.ts';
@@ -372,22 +373,51 @@ async function main() {
   let stopSpokenOutputForExit: (() => Promise<void>) | null = null;
   // The optional "used N memories" provenance chip (default OFF), see interaction-seams.ts.
   const memoryProvenanceUi = createMemoryProvenanceUi({ render: () => render(), memorySpine: ctx.services.memorySpine });
-  // Topology-aware keep-awake: the chip renders the DAEMON's state in adopted-external mode (power-chip-source.ts) and every toggle is forwarded to that daemon (power-keepawake-remote.ts) so keep-awake survives the TUI closing in BOTH topologies.
+  // Topology-aware keep-awake: in adopted-external mode the daemon owns keep-awake, the chip renders its
+  // state (power-chip-source.ts), every toggle from /power, Alt+A or the settings modal (all land on the
+  // power.keepAwake key) is forwarded to it, and the current value, on or off, is sent again each time it
+  // becomes reachable, through the engine's one forwarder.
   const isExternalDaemon = () => uiServices.platform.externalServices?.inspect()?.daemonStatus?.mode === 'external';
-  const keepAwakeRemoteDeps = {
-    configManager,
-    homeDirectory,
-    isExternalDaemon,
-    notify: (line: string) => { systemMessageRouter.high(line); render(); },
+  const daemonRpc = () => resolveOperatorRpc({ configManager, homeDirectory });
+  const keepAwakeForwarder = createKeepAwakeForwarder({
+    where: 'this terminal',
+    readKeepAwake: () => configManager.get('power.keepAwake') === true,
+    notify: (line) => { systemMessageRouter.high(line); render(); },
+    send: async (enabled) => {
+      const rpc = daemonRpc();
+      if (!rpc.available) return { attempted: true, result: { ok: false, kind: 'connected_host_unavailable', error: rpc.reason } };
+      try {
+        const keepAwakeState = readServedKeepAwakeState(await rpc.platformClient.operator.invoke('power.keepAwake.set', { enabled }));
+        return { attempted: true, result: keepAwakeState !== undefined ? { ok: true, keepAwakeState } : { ok: true } };
+      } catch (error) {
+        return { attempted: true, result: { ok: false, kind: 'connected_host_error', error: summarizeError(error) } };
+      }
+    },
+  });
+  const fetchDaemonPowerState = async (): Promise<PowerState | null> => {
+    let state: PowerState | null = null;
+    const rpc = isExternalDaemon() ? daemonRpc() : null;
+    if (rpc?.available) {
+      try {
+        state = await rpc.platformClient.operator.invoke('power.status.get', {}) as unknown as PowerState;
+      } catch {
+        state = null;
+      }
+    }
+    keepAwakeForwarder.reachable(state !== null);
+    return state;
   };
   const powerChipSource = createPowerChipSource({
     powerManager: ctx.services.powerManager,
     render: () => render(),
     isExternalDaemon,
     onPowerEvent: (cb) => uiServices.events.ops.on('OPS_POWER_STATE_CHANGED', cb as never),
-    fetchDaemonPowerState: resendKeepAwakeOnReconnect(keepAwakeRemoteDeps, () => fetchDaemonPowerState(keepAwakeRemoteDeps)),
+    fetchDaemonPowerState,
   });
-  unsubs.push(powerChipSource.stop, installKeepAwakeRemoteForward(keepAwakeRemoteDeps));
+  const unsubscribeKeepAwakeForward = configManager.subscribe('power.keepAwake', (newValue) => {
+    if (isExternalDaemon()) void keepAwakeForwarder.set(newValue === true);
+  });
+  unsubs.push(powerChipSource.stop, unsubscribeKeepAwakeForward);
   const lifecycle = installProcessLifecycle({
     stdin,
     stdout,

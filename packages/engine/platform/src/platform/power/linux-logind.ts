@@ -262,9 +262,10 @@ export function createLinuxLogindSeam(
         },
       };
     },
-    onPrepareForSleep(callback): () => void {
+    onPrepareForSleep(callback, onWatcherOff): () => void {
       return watchSleepEdge({
         label: 'dbus-monitor',
+        onWatcherOff,
         spawnWatcher: () => spawnMonitor('dbus-monitor', [
           '--system',
           "type='signal',interface='org.freedesktop.login1.Manager',member='PrepareForSleep'",

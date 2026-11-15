@@ -45,10 +45,12 @@ export interface PowerPlatformSeam {
   }): Promise<PowerInhibitHandle | null>;
   /**
    * Subscribe to the sleep edge (logind PrepareForSleep). The callback fires
-   * with true just before suspend and false on wake. Returns an unsubscribe.
-   * Optional: a platform without the signal simply never fires it.
+   * with true just before suspend and false on wake. `onWatcherOff` fires once
+   * if the watcher stops for good (it cannot start, or keeps exiting), with
+   * the reason. Returns an unsubscribe. Optional: a platform without the
+   * signal simply never fires it.
    */
-  onPrepareForSleep?(callback: (sleeping: boolean) => void): () => void;
+  onPrepareForSleep?(callback: (sleeping: boolean) => void, onWatcherOff?: (reason: string) => void): () => void;
   /**
    * Reap inhibitor child processes left behind by a CRASHED previous process
    * (holds are stamped with the owning pid; an inhibitor whose owner is dead

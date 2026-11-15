@@ -194,7 +194,7 @@ async function waitFor(predicate: () => boolean, label: string, ceilingMs = 10_0
 describe('telegram ingress: mode selection is explicit and exclusive', () => {
   test('an unsaved payment reply stops the real poller before confirming its original update cursor', async () => {
     const h = makeHarness({ ingressFailure: new PaymentReplyHistoryError() });
-    const cursor = new TelegramOffsetStore(h.offsetPath, '123456'); cursor.save(500);
+    new TelegramOffsetStore(h.offsetPath, '123456').retainPolling().save(500);
     const bytes = readFileSync(h.offsetPath);
     h.telegram.queue('getUpdates', () => ok([textUpdate(500, 'Do not buy the original item.')]));
     try {
@@ -791,31 +791,39 @@ describe('telegram offset store: the cursor survives restarts', () => {
     } finally { await h.supervisor.stop(); h.cleanup(); }
   }, TEST_BUDGET_MS);
 
-  test('a torn cursor remains intact and blocks polling instead of confirming away missed replies', async () => {
-    const h = makeHarness(), bytes = '{"version":1,"offset":';
+  test('a torn cursor is moved aside and polling asks for everything Telegram still holds', async () => {
+    const h = makeHarness(), bytes = '{"version":2,"accounts":';
     writeFileSync(h.offsetPath, bytes);
-    h.telegram.queue('getUpdates', () => ok([textUpdate(900, 'owner objection must remain queued')]));
+    h.telegram.queue('getUpdates', () => ok([textUpdate(900, 'owner objection must still arrive')]));
     try {
-      const status = await h.supervisor.start();
-      expect(status.mode).toBe('inactive'); expect(status.running).toBe(false);
-      expect(status.reason).toContain('cursor');
-      expect(h.telegram.countOf('getUpdates')).toBe(0);
-      expect(readFileSync(h.offsetPath, 'utf-8')).toBe(bytes); expect(h.spawned).toEqual([]);
+      await h.supervisor.start();
+      await waitFor(() => h.spawned.length > 0, 'the queued message');
+      expect(h.telegram.calls.find(call => call.method === 'getUpdates')?.body.offset).toBeUndefined();
+      expect(readFileSync(h.offsetPath, 'utf-8')).not.toBe(bytes);
     } finally { await h.supervisor.stop(); h.cleanup(); }
   }, TEST_BUDGET_MS);
 
-  test('a cursor write failure stops before a later poll can acknowledge the processed batch', async () => {
-    const h = makeHarness();
-    h.telegram.queue('getUpdates', () => {
-      writeFileSync(h.offsetPath, 'damaged original cursor');
-      return ok([textUpdate(900, 'one processed message')]);
-    });
+  test('a cursor saved by an earlier version resumes for the bot recorded as discovered', async () => {
+    const h = makeHarness({ config: { 'surfaces.telegram.discoveredBotTokenId': '123456' } });
+    writeFileSync(h.offsetPath, JSON.stringify({ version: 1, offset: 700, updatedAt: '2026-11-08T12:00:00.000Z' }));
     try {
-      await h.supervisor.start();
-      await waitFor(() => h.supervisor.status.mode === 'inactive', 'cursor failure stops confirmation');
-      expect(h.telegram.countOf('getUpdates')).toBe(1);
-      expect(h.telegram.calls.filter(call => call.method === 'getUpdates').every(call => call.body.offset === undefined)).toBe(true);
-      expect(readFileSync(h.offsetPath, 'utf-8')).toBe('damaged original cursor');
+      const status = await h.supervisor.start();
+      expect(status.kind).not.toBe('blocked');
+      await waitFor(() => h.telegram.countOf('getUpdates') > 0, 'a first poll');
+      expect(h.telegram.calls.find(call => call.method === 'getUpdates')?.body.offset).toBe(700);
+    } finally { await h.supervisor.stop(); h.cleanup(); }
+  }, TEST_BUDGET_MS);
+
+  test('a cursor saved by an earlier version with no recorded bot waits for review without polling', async () => {
+    const h = makeHarness();
+    const bytes = JSON.stringify({ version: 1, offset: 700, updatedAt: '2026-11-08T12:00:00.000Z' });
+    writeFileSync(h.offsetPath, bytes);
+    try {
+      const status = await h.supervisor.start();
+      expect(status.kind).toBe('blocked');
+      expect(status.reason).toContain('/channels telegram-cursor');
+      expect(h.telegram.countOf('getUpdates')).toBe(0);
+      expect(readFileSync(h.offsetPath, 'utf-8')).toBe(bytes);
     } finally { await h.supervisor.stop(); h.cleanup(); }
   }, TEST_BUDGET_MS);
 
@@ -840,25 +848,6 @@ describe('telegram offset store: the cursor survives restarts', () => {
       expect(h.telegram.calls.slice(returning).find(call => call.method === 'getUpdates')?.body.offset).toBe(501);
       expect(new TelegramOffsetStore(h.offsetPath, '654321').load()).toEqual({ mode: 'resume', offset: 5 });
     } finally { await h.supervisor.stop(); h.cleanup(); }
-  }, TEST_BUDGET_MS);
-
-  test('the store validates content, preserves unbound state, and never silently resets evidence', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'gv-tg-store-')), path = join(dir, 'offset.json');
-    try {
-      const store = new TelegramOffsetStore(path, '123456');
-      expect(store.load()).toEqual({ mode: 'fresh' });
-      store.save(42); expect(store.load()).toEqual({ mode: 'resume', offset: 42 });
-      const bytes = JSON.stringify({ version: 1, offset: 42, updatedAt: new Date().toISOString() });
-      writeFileSync(path, bytes);
-      const unbound = new TelegramOffsetStore(path, '123456');
-      expect(unbound.load()).toMatchObject({ mode: 'blocked', kind: 'unbound' });
-      expect(() => unbound.save(99)).toThrow('no bot binding');
-      expect(readFileSync(path, 'utf8')).toBe(bytes);
-      writeFileSync(path, 'x'.repeat(20_000));
-      expect(new TelegramOffsetStore(path, '123456').load().mode).toBe('blocked');
-      expect(readFileSync(path, 'utf8')).toHaveLength(20_000);
-      expect(() => store.save(Number.NaN)).toThrow('invalid');
-    } finally { rmSync(dir, { recursive: true, force: true }); }
   }, TEST_BUDGET_MS);
 });
 

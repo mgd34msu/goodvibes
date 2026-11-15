@@ -1,314 +1,299 @@
-/** Account-partitioned Telegram confirmation cursors. A cursor selects a
- * provider queue; it is never payment or ingress authority. Damaged/unbound
- * evidence is preserved and blocks polling rather than confirming history away.
- * Cursor publication must finish before another poll acknowledges that offset. */
-import { lstatSync } from 'node:fs';
-import { atomicWriteFileSync } from '../../config/atomic-write.js';
-import { readFileObservation, type FileObservation } from '../../utils/file-observation.js';
-import { tryAcquireCrossProcessLock } from '../../workspace/checkpoint/cross-process-lock.js';
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+/**
+ * The Telegram getUpdates confirmation cursor: one small document holding, for
+ * each bot, the next update id to ask for, plus the payment receive spans that
+ * wait on that bot's queue.
+ *
+ * Telegram keeps the queue and forgets an update once getUpdates is called with
+ * a higher offset, and it answers 409 to a second consumer of the same bot. So
+ * this file decides nothing about who receives: it only spares a restart from
+ * processing the last confirmed updates again. The document is read once, held
+ * in memory and written whole (one temp file and one rename) on a real change.
+ * An unreadable file is moved aside and receiving starts without an offset,
+ * which costs at most the last batch being delivered again.
+ *
+ * A cursor saved by an earlier version (`version: 1`) names no bot. It is bound
+ * to the bot this host last discovered (`surfaces.telegram.discoveredBotTokenId`)
+ * without asking, see {@link bindEarlierTelegramCursor}; only when no bot was
+ * ever discovered does it wait for the owner's review (`cursor-migration.ts`).
+ */
+import { readDocument, writeDocument } from '../../utils/atomic-json-store.js';
+import { logger } from '../../utils/logger.js';
+import { summarizeError } from '../../utils/error-display.js';
 import { readTelegramPaymentReceiveSpan, MAX_TELEGRAM_PAYMENT_RECEIVE_SPANS, type TelegramPaymentReceiveSpan } from './payment-receive-span.js';
 import { TelegramReceiveCoverageError } from './receive-progress.js';
 
-const MAX_FILE_BYTES = 512 * 1024;
-const MAX_ACCOUNTS = 64;
-const missing = (error: unknown): boolean => error !== null && typeof error === 'object' && 'code' in error && error.code === 'ENOENT';
 const offsetValue = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
 const accountValue = (value: unknown): value is string => typeof value === 'string' && /^[1-9]\d{0,15}$/.test(value) && Number.isSafeInteger(Number(value));
 const object = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value);
-export type TelegramOffsetFailure = 'unavailable' | 'unbound' | 'busy' | 'write-uncertain' | 'invalid-request' | 'identity-unavailable';
+
+export type TelegramOffsetFailure = 'unavailable' | 'unbound' | 'invalid-request' | 'identity-unavailable' | 'write-failed';
+
+const FAILURE_MESSAGES: Record<TelegramOffsetFailure, string> = {
+  unbound: 'The saved Telegram cursor was written by an earlier version and does not say which bot it belongs to, so polling waits. '
+    + 'Review it with /channels telegram-cursor or Settings → Surfaces → Telegram cursor recovery.',
+  unavailable: 'Telegram cursor recovery is not available right now: Telegram ingress is not running. Check channel status, then open it again.',
+  'invalid-request': 'The Telegram cursor request is invalid.',
+  'identity-unavailable': 'Telegram could not confirm which bot this is right now (network or token). The saved cursor was not touched; try again shortly.',
+  'write-failed': 'The Telegram cursor could not be saved.',
+};
+
 export class TelegramOffsetStoreError extends Error {
   override readonly name = 'TelegramOffsetStoreError';
-  constructor(readonly kind: TelegramOffsetFailure) {
-    super(kind === 'unbound'
-      ? 'The saved Telegram cursor has no bot binding. Inspect its original bot and missed messages before migrating it.'
-      : kind === 'busy' ? 'Another Telegram owner is updating the saved cursor. Restart ingress after that owner finishes.'
-      : kind === 'invalid-request' ? 'The Telegram bot cursor request is invalid.'
-      : kind === 'identity-unavailable' ? 'Telegram could not confirm which bot this is right now (network or token). The saved cursor was not touched; try again shortly.'
-      : 'The saved Telegram cursor could not be confirmed. Restore its original state and inspect missed messages before restarting ingress.');
+  constructor(readonly kind: TelegramOffsetFailure, detail?: string) {
+    super(detail ? `${FAILURE_MESSAGES[kind]} ${detail}` : FAILURE_MESSAGES[kind]);
   }
 }
+
 export type TelegramOffsetStart = { readonly mode: 'resume'; readonly offset: number } | { readonly mode: 'fresh' }
   | { readonly mode: 'blocked'; readonly reason: string; readonly kind: TelegramOffsetFailure };
-/** Queue facts only. A copy cannot acquire a polling lease or prove that any
- * payment replies were archived. Protected history must retain its own link. */
+
+/** Queue facts only: which bot, and the next update id to ask for (null before the first confirmation). */
 export interface TelegramCursorObservation {
   readonly accountId: string;
   readonly offset: number | null;
-  readonly physical: string | null;
 }
+
+/**
+ * One receiving session's handle on its bot's cursor. `assertCurrent` (and the
+ * capture's) throws only once the handle was released; the `assertCurrent`
+ * callbacks callers pass are their own "is this still wanted" check, run once
+ * before the write.
+ */
 export interface TelegramPollingCursor {
   capture(): { readonly observation: TelegramCursorObservation; assertCurrent(): void };
   assertCurrent(): void;
-  save(offset: number, assertCurrent: () => void): number;
+  /** Record the next offset. Never moves back; a failed write keeps it in memory and is retried by the next save. */
+  save(offset: number, assertCurrent?: () => void): number;
   receiveSpans(): readonly TelegramPaymentReceiveSpan[];
-  replaceReceiveSpans(spans: readonly TelegramPaymentReceiveSpan[], assertCurrent: () => void): void;
+  /** Replace this bot's receive spans; a failed write throws and leaves them as they were. */
+  replaceReceiveSpans(spans: readonly TelegramPaymentReceiveSpan[], assertCurrent?: () => void): void;
   release(): void;
 }
+
 interface AccountCursor { readonly accountId: string; readonly offset: number; readonly updatedAt: string; readonly receiveSpans?: readonly TelegramPaymentReceiveSpan[] }
+type CursorDocument =
+  | { readonly kind: 'accounts'; readonly accounts: readonly AccountCursor[]; readonly spanFormat: boolean }
+  | { readonly kind: 'earlier'; readonly offset: number; readonly updatedAt: string };
+
+const EMPTY: CursorDocument = { kind: 'accounts', accounts: [], spanFormat: false };
+
+/** Spans that do not parse, belong to another bot or repeat an id are dropped: their purchase then reports coverage unavailable. */
+function readSpans(accountId: string, value: unknown, seen: Set<string>): readonly TelegramPaymentReceiveSpan[] {
+  if (!Array.isArray(value)) return [];
+  const spans: TelegramPaymentReceiveSpan[] = [];
+  for (const entry of value) {
+    let span: TelegramPaymentReceiveSpan;
+    try { span = readTelegramPaymentReceiveSpan(entry); } catch { continue; }
+    if (span.accountId !== accountId || seen.has(span.id) || seen.size >= MAX_TELEGRAM_PAYMENT_RECEIVE_SPANS) continue;
+    seen.add(span.id); spans.push(span);
+  }
+  return Object.freeze(spans);
+}
+
+function parseCursorDocument(row: unknown): CursorDocument {
+  if (!object(row)) throw new Error('the cursor file is not an object');
+  if (row['version'] === 1) {
+    if (!offsetValue(row['offset']) || typeof row['updatedAt'] !== 'string') throw new Error('the earlier cursor has no valid offset');
+    return { kind: 'earlier', offset: row['offset'], updatedAt: row['updatedAt'] };
+  }
+  if ((row['version'] !== 2 && row['version'] !== 3) || !Array.isArray(row['accounts'])) throw new Error('the cursor file has an unknown format');
+  const accounts: AccountCursor[] = [], bots = new Set<string>(), spanIds = new Set<string>();
+  // A damaged entry costs only that bot its offset; the others are kept.
+  for (const entry of row['accounts']) {
+    if (!object(entry) || !accountValue(entry['accountId']) || bots.has(entry['accountId']) || !offsetValue(entry['offset'])) continue;
+    bots.add(entry['accountId']);
+    const updatedAt = typeof entry['updatedAt'] === 'string' ? entry['updatedAt'] : new Date(0).toISOString();
+    const receiveSpans = Object.hasOwn(entry, 'receiveSpans') ? readSpans(entry['accountId'], entry['receiveSpans'], spanIds) : undefined;
+    accounts.push(Object.freeze({ accountId: entry['accountId'], offset: entry['offset'], updatedAt, ...(receiveSpans ? { receiveSpans } : {}) }));
+  }
+  return { kind: 'accounts', accounts: Object.freeze(accounts), spanFormat: row['version'] === 3 };
+}
+
+function readCursorDocument(filePath: string): CursorDocument {
+  try {
+    return readDocument(filePath, {
+      label: 'channels/telegram-cursor',
+      validate: parseCursorDocument,
+      recovery: 'Telegram receiving starts without a saved offset; at most the last batch of updates is delivered again.',
+    }) ?? EMPTY;
+  } catch (error) {
+    logger.warn('Telegram cursor could not be read; receiving starts without a saved offset', { error: summarizeError(error) });
+    return EMPTY;
+  }
+}
+
 declare const legacyMigrationHandle: unique symbol;
 export interface TelegramLegacyCursorHandle { readonly [legacyMigrationHandle]: true; }
-interface LegacyCursor { readonly offset: number; readonly updatedAt: string; }
-function legacyCursor(value: unknown): LegacyCursor {
-  if (!object(value) || Object.keys(value).length !== 3 || value['version'] !== 1 || !offsetValue(value['offset'])
-    || typeof value['updatedAt'] !== 'string' || !Number.isFinite(Date.parse(value['updatedAt']))) throw new TelegramOffsetStoreError('unavailable');
-  return Object.freeze({ offset: value['offset'], updatedAt: value['updatedAt'] });
-}
-interface CursorSnapshot { readonly observed: FileObservation | null; readonly accounts: readonly AccountCursor[]; }
+interface EarlierCursor { readonly offset: number; readonly updatedAt: string }
 
 export class TelegramOffsetStore {
-  private readonly migrations = new WeakMap<TelegramLegacyCursorHandle, { readonly observed: FileObservation; readonly cursor: LegacyCursor }>();
-  private observedFile = false;
-  private failed: TelegramOffsetFailure | undefined;
-  private receiveSpanFormat = false;
+  private document: CursorDocument | undefined;
+  private readonly migrations = new WeakMap<TelegramLegacyCursorHandle, EarlierCursor>();
+  private declaredCursorFormat = false;
+  private declaredSpanFormat = false;
+  /** Set while offset writes fail, so the failure is logged once and its end once. */
+  private offsetWriteFailing = false;
+
+  /**
+   * `beforeWrite` and `beforeReceiveSpanWrite` declare the file format to the
+   * host's reader-compatibility owner; each runs once, before the first write
+   * of that format, and a refusal fails that write.
+   */
   constructor(private readonly filePath: string, private readonly accountId: string, private readonly beforeWrite?: () => void,
     private readonly beforeReceiveSpanWrite?: () => void) {
     if (!accountValue(accountId)) throw new TelegramOffsetStoreError('invalid-request');
   }
 
-  private readRaw(): { readonly observed: FileObservation; readonly row: unknown } | null {
-    if (this.failed) throw new TelegramOffsetStoreError(this.failed);
-    try {
-      const stat = lstatSync(this.filePath);
-      if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1 || stat.size > MAX_FILE_BYTES) throw new Error();
-      const observed = readFileObservation(this.filePath);
-      if (observed.bytes.length > MAX_FILE_BYTES) throw new Error();
-      const row: unknown = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(observed.bytes));
-      this.observedFile = true; return { observed, row };
-    } catch (error) {
-      if (missing(error) && !this.observedFile) {
-        try { lstatSync(this.filePath); } catch (absent) { if (missing(absent)) return null; }
-      }
-      this.failed = 'unavailable'; throw new TelegramOffsetStoreError('unavailable');
-    }
-  }
-  private read(): CursorSnapshot {
-    try {
-      const raw = this.readRaw(); if (!raw) return { observed: null, accounts: [] };
-      const { row, observed } = raw;
-      if (object(row) && row['version'] === 1) { legacyCursor(row); throw new TelegramOffsetStoreError('unbound'); }
-      if (!object(row) || Object.keys(row).length !== 2 || (row['version'] !== 2 && row['version'] !== 3) || !Array.isArray(row['accounts'])
-        || row['accounts'].length > MAX_ACCOUNTS) throw new Error();
-      const seen = new Set<string>(), spans = new Set<string>();
-      const accounts: AccountCursor[] = [];
-      for (const entry of row['accounts']) {
-        if (!object(entry) || Object.keys(entry).length !== (Object.hasOwn(entry, 'receiveSpans') ? 4 : 3) || !accountValue(entry['accountId']) || seen.has(entry['accountId'])
-          || !offsetValue(entry['offset']) || typeof entry['updatedAt'] !== 'string' || !Number.isFinite(Date.parse(entry['updatedAt']))) throw new Error();
-        seen.add(entry['accountId']);
-        let receiveSpans: readonly TelegramPaymentReceiveSpan[] | undefined;
-        if (Object.hasOwn(entry, 'receiveSpans')) {
-          if (row['version'] !== 3 || !Array.isArray(entry['receiveSpans'])) throw new Error();
-          receiveSpans = Object.freeze(entry['receiveSpans'].map(readTelegramPaymentReceiveSpan));
-          for (const span of receiveSpans) {
-            if (span.accountId !== entry['accountId'] || span.offsetAtStart !== null && span.offsetAtStart > entry['offset'] || spans.has(span.id)) throw new Error(); spans.add(span.id);
-          }
-          if (spans.size > MAX_TELEGRAM_PAYMENT_RECEIVE_SPANS) throw new Error();
-        }
-        accounts.push(Object.freeze({ accountId: entry['accountId'], offset: entry['offset'], updatedAt: entry['updatedAt'],
-          ...(receiveSpans === undefined ? {} : { receiveSpans }) }));
-      }
-      if (row['version'] === 3) this.receiveSpanFormat = true;
-      return { observed, accounts: Object.freeze(accounts) };
-    } catch (error) {
-      this.failed = error instanceof TelegramOffsetStoreError ? error.kind : 'unavailable';
-      throw new TelegramOffsetStoreError(this.failed);
-    }
+  private read(): CursorDocument {
+    return this.document ??= readCursorDocument(this.filePath);
   }
 
-  /** A private, exact-file preparation. No parsed or caller-supplied offset can
-   * become this handle, and preparing never writes or clears the old record. */
-  prepareLegacyMigration(): (LegacyCursor & { readonly handle: TelegramLegacyCursorHandle }) | null {
-    const raw = this.readRaw(); if (!raw) return null;
-    if (object(raw.row) && (raw.row['version'] === 2 || raw.row['version'] === 3)) { this.read(); return null; }
-    const cursor = legacyCursor(raw.row), handle = Object.freeze({}) as TelegramLegacyCursorHandle;
-    this.migrations.set(handle, { observed: raw.observed, cursor });
+  private publish(document: Extract<CursorDocument, { kind: 'accounts' }>): void {
+    if (!this.declaredCursorFormat) { this.beforeWrite?.(); this.declaredCursorFormat = true; }
+    const spanFormat = document.spanFormat || document.accounts.some(account => account.receiveSpans !== undefined);
+    if (spanFormat && !this.declaredSpanFormat) { this.beforeReceiveSpanWrite?.(); this.declaredSpanFormat = true; }
+    writeDocument(this.filePath, { version: spanFormat ? 3 : 2, accounts: document.accounts }, { mode: 0o600, indent: null });
+  }
+
+  private withAccount(document: Extract<CursorDocument, { kind: 'accounts' }>, update: (previous: AccountCursor | undefined) => AccountCursor):
+    Extract<CursorDocument, { kind: 'accounts' }> {
+    const previous = document.accounts.find(entry => entry.accountId === this.accountId);
+    const next = Object.freeze(update(previous));
+    const accounts = previous ? document.accounts.map(entry => entry === previous ? next : entry) : [...document.accounts, next];
+    return { kind: 'accounts', accounts: Object.freeze(accounts), spanFormat: document.spanFormat || next.receiveSpans !== undefined };
+  }
+
+  load(): TelegramOffsetStart {
+    const document = this.read();
+    if (document.kind === 'earlier') {
+      const failure = new TelegramOffsetStoreError('unbound');
+      return { mode: 'blocked', reason: failure.message, kind: failure.kind };
+    }
+    const cursor = document.accounts.find(entry => entry.accountId === this.accountId);
+    return cursor ? { mode: 'resume', offset: cursor.offset } : { mode: 'fresh' };
+  }
+
+  /** The receiving session's handle. Refuses only a cursor from an earlier version still waiting for review. */
+  retainPolling(): TelegramPollingCursor {
+    if (this.read().kind === 'earlier') throw new TelegramOffsetStoreError('unbound');
+    let released = false;
+    const assertCurrent = (): void => { if (released) throw new TelegramOffsetStoreError('unavailable'); };
+    const accounts = (): Extract<CursorDocument, { kind: 'accounts' }> => this.read() as Extract<CursorDocument, { kind: 'accounts' }>;
+    const own = (): AccountCursor | undefined => accounts().accounts.find(entry => entry.accountId === this.accountId);
+    return Object.freeze({
+      assertCurrent,
+      capture: () => {
+        assertCurrent();
+        return Object.freeze({ observation: Object.freeze({ accountId: this.accountId, offset: own()?.offset ?? null }), assertCurrent });
+      },
+      receiveSpans: () => { assertCurrent(); return own()?.receiveSpans ?? []; },
+      replaceReceiveSpans: (input: readonly TelegramPaymentReceiveSpan[], current?: () => void) => {
+        assertCurrent();
+        const spans = Object.freeze(input.map(readTelegramPaymentReceiveSpan));
+        if (spans.some(span => span.accountId !== this.accountId) || new Set(spans.map(span => span.id)).size !== spans.length) {
+          throw new TelegramOffsetStoreError('invalid-request');
+        }
+        // The cap bounds the one file every bot shares, so it counts them all.
+        const others = accounts().accounts.reduce((count, entry) => count + (entry.accountId === this.accountId ? 0 : entry.receiveSpans?.length ?? 0), 0);
+        if (others + spans.length > MAX_TELEGRAM_PAYMENT_RECEIVE_SPANS) throw new TelegramReceiveCoverageError();
+        current?.();
+        const next = this.withAccount(accounts(), previous => ({
+          accountId: this.accountId, offset: previous?.offset ?? 0, updatedAt: new Date().toISOString(), receiveSpans: spans,
+        }));
+        // Payment custody must not be claimed from memory alone: the write has to land.
+        try { this.publish(next); }
+        catch (error) { throw new TelegramOffsetStoreError('write-failed', `${summarizeError(error)}. Receiving resumes on the backoff.`); }
+        this.document = next;
+      },
+      save: (offset: number, current?: () => void) => {
+        assertCurrent();
+        if (!offsetValue(offset)) throw new TelegramOffsetStoreError('invalid-request');
+        const previous = own();
+        if (previous && offset <= previous.offset) return previous.offset;
+        current?.();
+        const next = this.withAccount(accounts(), before => ({ ...before, accountId: this.accountId, offset, updatedAt: new Date().toISOString() }));
+        // Telegram confirms by the offset this process sends next, which is the
+        // one in memory; the file only matters after a restart, so a failed
+        // write is logged and the next save writes the newer offset.
+        this.document = next;
+        try {
+          this.publish(next);
+          if (this.offsetWriteFailing) {
+            this.offsetWriteFailing = false;
+            logger.info('Telegram cursor is being saved again', { surface: 'telegram' });
+          }
+        } catch (error) {
+          if (!this.offsetWriteFailing) {
+            this.offsetWriteFailing = true;
+            logger.error('Telegram cursor could not be saved; receiving continues, and after a restart the updates since the last save are processed again', {
+              surface: 'telegram', error: summarizeError(error),
+            });
+          }
+        }
+        return offset;
+      },
+      release: () => { released = true; },
+    });
+  }
+
+  /** Read the earlier-version cursor afresh for the owner's review; null when there is none. */
+  prepareLegacyMigration(): (EarlierCursor & { readonly handle: TelegramLegacyCursorHandle }) | null {
+    this.document = undefined;
+    const document = this.read();
+    if (document.kind !== 'earlier') return null;
+    const cursor = Object.freeze({ offset: document.offset, updatedAt: document.updatedAt });
+    const handle = Object.freeze({}) as TelegramLegacyCursorHandle;
+    this.migrations.set(handle, cursor);
     return Object.freeze({ ...cursor, handle });
   }
 
-  /** Explicit administrative adoption, preserving the observed offset/time.
-   * This only binds a provider queue; it grants no ingress/payment authority. */
+  /**
+   * Bind the reviewed earlier-version cursor to this bot, keeping its offset.
+   * Refused when the file no longer holds the cursor the owner reviewed.
+   */
   migrateLegacy(handle: TelegramLegacyCursorHandle, assertCurrent: () => void): number {
     const prepared = this.migrations.get(handle);
     this.migrations.delete(handle);
     if (!prepared) throw new TelegramOffsetStoreError('invalid-request');
-    return this.mutate(assertCurrent, currentLease => {
-      const observed = readFileObservation(this.filePath);
-      if (observed.physical !== prepared.observed.physical || !observed.bytes.equals(prepared.observed.bytes)) throw new Error();
-      this.publish(prepared.observed, [{ accountId: this.accountId, ...prepared.cursor }], assertCurrent, currentLease);
-      return prepared.cursor.offset;
-    });
-  }
-
-  private declareReceiveSpanFormat(): void {
-    if (!this.receiveSpanFormat) return;
-    const declared: unknown = this.beforeReceiveSpanWrite?.();
-    if (declared !== undefined) { drainOwned(declared); throw new TelegramOffsetStoreError('unavailable'); }
-  }
-
-  load(): TelegramOffsetStart {
-    try {
-      const snapshot = this.read(), cursor = snapshot.accounts.find(entry => entry.accountId === this.accountId);
-      this.declareReceiveSpanFormat(); this.assertFileCurrent(snapshot.observed);
-      return cursor ? { mode: 'resume', offset: cursor.offset } : { mode: 'fresh' };
-    } catch (error) {
-      const failure = error instanceof TelegramOffsetStoreError ? error : new TelegramOffsetStoreError('unavailable');
-      return { mode: 'blocked', reason: failure.message, kind: failure.kind };
-    }
-  }
-
-  /** One actual receiving session owns confirmation for this bot. Keep the
-   * strict lease through provider awaits, dispatch and persistence, including
-   * cancellation drainage. An external cursor change is not an offset this
-   * receiver may silently adopt with Math.max(). */
-  retainPolling(): TelegramPollingCursor {
-    const lockPath = `${this.filePath}.polling-${this.accountId}.lock`;
-    let release: (() => void) | null;
-    try { release = tryAcquireCrossProcessLock(lockPath); } catch { throw new TelegramOffsetStoreError('unavailable'); }
-    if (!release) throw new TelegramOffsetStoreError('busy');
-    try {
-      const lease = readFileObservation(lockPath);
-      let expected = this.read(), retired = false, offsetGeneration = {};
-      this.declareReceiveSpanFormat(); this.assertFileCurrent(expected.observed);
-      const assertLease = () => {
-        if (retired || this.failed) throw new TelegramOffsetStoreError('unavailable');
-        try {
-          const held = readFileObservation(lockPath);
-          if (held.physical !== lease.physical || !held.bytes.equals(lease.bytes)) throw new Error();
-        } catch { throw new TelegramOffsetStoreError('unavailable'); }
-      };
-      const assertCurrent = () => {
-        assertLease();
-        try { this.assertFileCurrent(expected.observed); }
-        catch { throw new TelegramOffsetStoreError('unavailable'); }
-      };
-      assertCurrent();
-      const releaseOriginal = release;
-      return Object.freeze({
-        assertCurrent,
-        capture: () => {
-          assertCurrent(); const selected = expected, generation = offsetGeneration, cursor = selected.accounts.find(entry => entry.accountId === this.accountId);
-          const observation = Object.freeze({ accountId: this.accountId, offset: cursor?.offset ?? null, physical: selected.observed?.physical ?? null });
-          return Object.freeze({ observation, assertCurrent: () => {
-            // Own metadata-only span publication may happen while getUpdates
-            // waits. It must not substitute another offset generation or file.
-            assertCurrent();
-            if (generation !== offsetGeneration) throw new TelegramOffsetStoreError('unavailable');
-          } });
-        },
-        receiveSpans: () => { assertCurrent(); return expected.accounts.find(entry => entry.accountId === this.accountId)?.receiveSpans ?? []; },
-        replaceReceiveSpans: (input: readonly TelegramPaymentReceiveSpan[], current: () => void) => {
-          const spans = Object.freeze(input.map(readTelegramPaymentReceiveSpan));
-          if (spans.some(span => span.accountId !== this.accountId) || new Set(spans.map(span => span.id)).size !== spans.length) throw new TelegramOffsetStoreError('invalid-request');
-          // The cap counts every bot in the file, so it is checked before the write: a refusal inside the write would latch this store as failed.
-          const others = expected.accounts.reduce((count, entry) => count + (entry.accountId === this.accountId ? 0 : entry.receiveSpans?.length ?? 0), 0);
-          if (others + spans.length > MAX_TELEGRAM_PAYMENT_RECEIVE_SPANS) throw new TelegramReceiveCoverageError();
-          const selected = expected, owned = () => { assertLease(); current(); assertLease(); };
-          this.mutate(owned, mutationLease => {
-            owned(); this.assertFileCurrent(selected.observed);
-            const previous = selected.accounts.find(entry => entry.accountId === this.accountId);
-            if (!previous && selected.accounts.length >= MAX_ACCOUNTS) throw new Error();
-            const next: AccountCursor = { accountId: this.accountId, offset: previous?.offset ?? 0,
-              updatedAt: new Date().toISOString(), receiveSpans: spans };
-            const accounts = previous ? selected.accounts.map(entry => entry.accountId === this.accountId ? next : entry) : [...selected.accounts, next];
-            if (accounts.reduce((count, entry) => count + (entry.receiveSpans?.length ?? 0), 0) > MAX_TELEGRAM_PAYMENT_RECEIVE_SPANS) throw new Error();
-            this.publish(selected.observed, accounts, owned, mutationLease, () => { expected = this.read(); });
-            owned(); this.assertFileCurrent(expected.observed); return 0;
-          });
-        },
-        save: (offset: number, current: () => void) => {
-          if (!offsetValue(offset)) throw new TelegramOffsetStoreError('invalid-request');
-          const selected = expected;
-          const owned = () => { assertLease(); current(); assertLease(); };
-          return this.mutate(owned, mutationLease => {
-            owned(); this.assertFileCurrent(selected.observed);
-            const previous = selected.accounts.find(entry => entry.accountId === this.accountId);
-            if (previous && offset < previous.offset) throw new TelegramOffsetStoreError('invalid-request');
-            if (previous?.offset === offset) { mutationLease(); assertCurrent(); return offset; }
-            if (!previous && selected.accounts.length >= MAX_ACCOUNTS) throw new TelegramOffsetStoreError('unavailable');
-            const next = { ...previous, accountId: this.accountId, offset, updatedAt: new Date().toISOString() };
-            const accounts = previous ? selected.accounts.map(entry => entry.accountId === this.accountId ? next : entry) : [...selected.accounts, next];
-            this.publish(selected.observed, accounts, owned, mutationLease, () => { expected = this.read(); offsetGeneration = {}; });
-            owned(); this.assertFileCurrent(expected.observed);
-            return offset;
-          });
-        },
-        release: () => { if (retired) return; retired = true; releaseOriginal(); },
-      });
-    } catch (error) { release(); throw error instanceof TelegramOffsetStoreError ? error : new TelegramOffsetStoreError('unavailable'); }
-  }
-
-  /** Refresh under the real shared lock and preserve every other bot's cursor.
-   * Return the published offset; an older batch cannot move confirmation back.
-   * A failed write stops polling before another getUpdates can acknowledge it. */
-  save(offset: number, assertCurrent: () => void = () => {}): number {
-    if (!offsetValue(offset)) throw new TelegramOffsetStoreError('invalid-request');
     assertCurrent();
-    if (this.failed) throw new TelegramOffsetStoreError(this.failed);
-    return this.mutate(assertCurrent, currentLease => {
-      const snapshot = this.read();
-      const previous = snapshot.accounts.find(entry => entry.accountId === this.accountId);
-      const nextOffset = Math.max(previous?.offset ?? 0, offset);
-      if (previous?.offset === nextOffset) { assertCurrent(); currentLease(); this.assertFileCurrent(snapshot.observed); return nextOffset; }
-      if (!previous && snapshot.accounts.length >= MAX_ACCOUNTS) throw new Error();
-      // This compatibility writer does not own actual archive dispatch. An
-      // administrative advance cannot certify old payment receive custody.
-      const next = { ...previous, accountId: this.accountId, offset: nextOffset, updatedAt: new Date().toISOString(),
-        ...(previous?.receiveSpans ? { receiveSpans: previous.receiveSpans.map(span => ({ ...span, invalid: true })) } : {}) };
-      const accounts = previous ? snapshot.accounts.map(entry => entry.accountId === this.accountId ? next : entry) : [...snapshot.accounts, next];
-      this.publish(snapshot.observed, accounts, assertCurrent, currentLease);
-      return nextOffset;
-    });
+    this.document = undefined;
+    const document = this.read();
+    if (document.kind !== 'earlier' || document.offset !== prepared.offset || document.updatedAt !== prepared.updatedAt) {
+      throw new TelegramOffsetStoreError('invalid-request', 'The saved cursor changed since it was reviewed; review it again.');
+    }
+    const next = { kind: 'accounts', spanFormat: false,
+      accounts: Object.freeze([Object.freeze({ accountId: this.accountId, offset: prepared.offset, updatedAt: prepared.updatedAt })]) } as const;
+    try { this.publish(next); }
+    catch (error) { throw new TelegramOffsetStoreError('write-failed', summarizeError(error)); }
+    this.document = next;
+    return prepared.offset;
   }
+}
 
-  private assertFileCurrent(observed: FileObservation | null): void {
-    if (observed) {
-      const file = readFileObservation(this.filePath);
-      if (file.physical !== observed.physical || !file.bytes.equals(observed.bytes)) throw new Error();
-    } else {
-      try { lstatSync(this.filePath); } catch (error) { if (missing(error)) return; throw error; }
-      throw new Error();
-    }
+/**
+ * Bind a cursor saved by an earlier version to the bot it belongs to.
+ *
+ * That version kept one offset for whichever bot was polling, and the bot it
+ * last polled for is the one recorded in `discoveredBotTokenId`, so the offset
+ * is filed under that bot (the current bot, or an earlier one whose entry is
+ * then simply unused). Call before anything rewrites `discoveredBotTokenId`.
+ * Returns `held` when no bot was ever recorded: the cursor then waits for the
+ * owner's review, and the caller must not record a bot until it is reviewed.
+ */
+export function bindEarlierTelegramCursor(filePath: string, discoveredBotId: string, beforeWrite?: () => void): 'none' | 'bound' | 'held' {
+  const document = readCursorDocument(filePath);
+  if (document.kind !== 'earlier') return 'none';
+  if (!accountValue(discoveredBotId)) return 'held';
+  try {
+    beforeWrite?.();
+    writeDocument(filePath, { version: 2, accounts: [{ accountId: discoveredBotId, offset: document.offset, updatedAt: document.updatedAt }] },
+      { mode: 0o600, indent: null });
+  } catch (error) {
+    logger.warn('Telegram cursor from an earlier version could not be bound to its bot; polling waits and the next start tries again', {
+      surface: 'telegram', error: summarizeError(error),
+    });
+    return 'held';
   }
-  private publish(observed: FileObservation | null, accounts: readonly AccountCursor[], assertCurrent: () => void, currentLease: () => void,
-    publishedOwnImage?: () => void): void {
-    const version = this.receiveSpanFormat || accounts.some(account => account.receiveSpans !== undefined) ? 3 : 2;
-    const contents = `${JSON.stringify({ version, accounts })}\n`;
-    if (Buffer.byteLength(contents, 'utf8') > MAX_FILE_BYTES) throw new Error();
-    const current = () => { assertCurrent(); currentLease(); this.assertFileCurrent(observed); };
-    try {
-      current();
-      const published: unknown = this.beforeWrite?.();
-      if (published !== undefined) { drainOwned(published); throw new Error(); }
-      if (version === 3) {
-        const declared: unknown = this.beforeReceiveSpanWrite?.();
-        if (declared !== undefined) { drainOwned(declared); throw new Error(); }
-      }
-      current();
-      atomicWriteFileSync(this.filePath, contents, { mode: 0o600, assertCurrent: current,
-        onEffect: published => { if (published) publishedOwnImage?.(); } });
-      if (!readFileObservation(this.filePath).bytes.equals(Buffer.from(contents, 'utf8'))) throw new Error();
-      this.observedFile = true; assertCurrent(); currentLease();
-    } catch { this.failed = 'write-uncertain'; throw new TelegramOffsetStoreError('write-uncertain'); }
-  }
-  private mutate(assertCurrent: () => void, operation: (currentLease: () => void) => number): number {
-    assertCurrent();
-    if (this.failed) throw new TelegramOffsetStoreError(this.failed);
-    const lockPath = `${this.filePath}.mutation.lock`;
-    let release: (() => void) | null;
-    try { release = tryAcquireCrossProcessLock(lockPath); } catch { throw new TelegramOffsetStoreError('unavailable'); }
-    if (!release) throw new TelegramOffsetStoreError('busy');
-    try {
-      const lease = readFileObservation(lockPath);
-      const currentLease = () => {
-        const held = readFileObservation(lockPath);
-        if (held.physical !== lease.physical || !held.bytes.equals(lease.bytes)) throw new Error();
-      };
-      return operation(currentLease);
-    } catch (error) {
-      this.failed ??= error instanceof TelegramOffsetStoreError ? error.kind : 'unavailable';
-      throw new TelegramOffsetStoreError(this.failed);
-    } finally {
-      try { release(); } catch { this.failed = 'write-uncertain'; throw new TelegramOffsetStoreError('write-uncertain'); }
-    }
-  }
+  logger.info('Telegram cursor from an earlier version was bound to the bot it belongs to', { surface: 'telegram', botId: discoveredBotId, offset: document.offset });
+  return 'bound';
 }

@@ -44,7 +44,7 @@ export function TelegramCursorRecovery() {
       if (!controller.signal.aborted) setMessage(`${formatError(error)} Review the cursor and channel status before trying again.`);
     } finally { if (active.current === controller) { active.current = null; writing.current = false; } if (!controller.signal.aborted) setPending(false); }
   };
-  return <SettingsBlock title="Telegram cursor recovery" description="When polling stops because a previous cursor has no bot identity, verify which bot owns that saved position. Selecting the wrong bot can skip its waiting messages.">
+  return <SettingsBlock title="Telegram cursor recovery" description="A cursor saved by an earlier version is bound to the bot that version last polled for. When no bot was ever recorded for it, polling waits until you verify which bot owns that saved position. Selecting the wrong bot can skip its waiting messages.">
     <Button size="sm" disabled={pending} onClick={() => { void inspect(); }}>{pending ? 'Working…' : 'Review saved Telegram cursor'}</Button>
     {preview?.state === 'not-needed' && <p role="status">{preview.message}</p>}
     {preview?.state === 'unbound' && <div>

@@ -303,10 +303,10 @@ on this node, on purpose) or `inactive` (cannot receive until a setting changes;
 the reason says which).
 
 Receiving stops for good only when Telegram rejects the bot token. Any other
-failure (a cursor that cannot be read or saved, a payment reply that cannot be
-archived, a malformed answer from Telegram or an intermediary) shows `retrying`
-with the reason and when it resumes; the cursor is re-read from disk and
-polling resumes on a growing delay of up to a minute. The `start` account
+failure (a payment receive record that cannot be saved, a payment reply that
+cannot be archived, a malformed answer from Telegram or an intermediary) shows
+`retrying` with the reason and when it resumes, and polling resumes from the
+last processed update on a growing delay of up to a minute. The `start` account
 action (`telegram_account_action start`) restarts receiving at once.
 
 **Webhook registration failed.**
@@ -344,25 +344,28 @@ from each bot's own saved offset. Switching bots does not reuse or overwrite the
 other bot's cursor. The account ID partitions the queue; it does not authorize
 an incoming message or payment answer.
 
-An unreadable, unsupported or damaged cursor holds polling and stays intact:
-the status says `retrying` with the reason, and the daemon reads the cursor
-again on each retry, so polling resumes by itself once it loads. The daemon
-does not jump to the newest message or discard the backlog. A failed cursor
-save holds polling the same way before the next request can confirm that offset. Restore the original state and
-inspect missed messages before restarting ingress; do not delete the cursor to
-hide the failure. Version 1 cursors have no bot binding. In WebUI, open
-**Settings → Surfaces → Telegram cursor recovery** and choose **Review saved
-Telegram cursor**. TUI and Agent provide the same confirmation at
-**`/channels telegram-cursor`**. With polling enabled and a locally stored bot
-credential, the daemon verifies the selected bot through Telegram. Confirm only
-if that saved position belongs to the displayed bot: choosing the wrong bot
-can skip its waiting messages. Confirmation preserves the saved offset and
-restarts polling. It never moves the cursor to the newest message.
+The cursor is saved after each processed update. Telegram itself forgets an
+update once the next poll confirms it, so the saved offset only keeps a restart
+from processing the last updates again. An unreadable or damaged cursor file is
+moved aside (with a `.why` note beside it) and polling starts without an offset:
+Telegram then sends everything it has not had confirmed, so nothing is lost and
+at most the last batch is processed twice. A cursor save that fails is logged and
+polling continues; the next save writes the newer offset. A second program
+polling the same bot is reported by Telegram itself (409) and handled as
+described under conflicts above.
 
-The preview expires after five minutes and is invalidated by changes to the
-saved file, selected bot, credentials or serving runtime. A failed or lost
-confirmation requires a fresh review; the interfaces do not retry it. Damaged
-or unsupported records remain blocked for inspection.
+A cursor saved by an earlier version (version 1) names no bot. At start the
+daemon binds it to the bot recorded in `surfaces.telegram.discoveredBotTokenId`,
+which is the bot that version last polled for, keeping the saved offset. Only
+when no bot was ever recorded does polling wait (status `blocked`) for your
+review: in WebUI, open **Settings → Surfaces → Telegram cursor recovery** and
+choose **Review saved Telegram cursor**; TUI and Agent provide the same
+confirmation at **`/channels telegram-cursor`**. With polling enabled and a
+locally stored bot credential, the daemon verifies the selected bot through
+Telegram. Confirm only if that saved position belongs to the displayed bot:
+choosing the wrong bot can skip its waiting messages. Confirmation preserves the
+saved offset and restarts polling. The preview expires after five minutes, and a
+confirmation is refused when the saved file changed since the preview.
 
 Native installs publish the new reader requirement before
 writing account-bound cursors, so an incompatible binary cannot be restored.
@@ -376,7 +379,7 @@ original deadlines and re-notifies only uncovered actual recipients.
 This relies on exclusive native custody of that bot's receiving token. Telegram
 cannot retrospectively disclose an unrelated consumer that drained updates
 while the daemon was down. Observed conflicts, webhook transitions, scoped
-gaps, replaced cursor files, clock regression or retention loss invalidate the
+gaps, a cursor file that could not be read, clock regression or retention loss invalidate the
 span. Webhook identity and a `backfillable` flag do not provide absence evidence.
 See [payment restart behavior](payments.md#861-a-window-interrupted-by-downtime-is-keyed-on-delivery-not-on-uptime).
 The corresponding runtime regression checks have been authored and remain

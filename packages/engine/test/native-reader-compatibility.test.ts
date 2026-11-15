@@ -39,7 +39,7 @@ test('actual account cursor publication declares its reader format before writin
     expect(() => assertNativeReaderCompatible(f.execPath, '3.1.1', realUpdateFileIo)).toThrow(NativeDataCompatibilityError);
   });
   expect(store.load()).toEqual({ mode: 'fresh' }); expect(existsSync(f.file)).toBe(false);
-  expect(store.save(8)).toBe(8); expect(declared).toBe(true);
+  expect(store.retainPolling().save(8)).toBe(8); expect(declared).toBe(true);
   expect(JSON.parse(readFileSync(f.file, 'utf8')).formats).toEqual(['telegram-account-cursors-v2']);
   expect(new TelegramOffsetStore(cursor, '111').load()).toEqual({ mode: 'resume', offset: 8 });
   expect(() => assertNativeReaderCompatible(f.execPath, '3.1.2', realUpdateFileIo,
@@ -50,7 +50,8 @@ test('actual account cursor publication declares its reader format before writin
 test('an unavailable installed-data publisher cannot create an incompatible cursor', () => {
   const f = fixture(), cursor = join(f.prefix, 'telegram-offset.json');
   const store = new TelegramOffsetStore(cursor, '111', () => { throw new Error('Installation owner retired'); });
-  expect(() => store.save(8)).toThrow('could not be confirmed');
+  // Receiving keeps its offset in memory; nothing is written in a format the installed readers were not told about.
+  expect(store.retainPolling().save(8)).toBe(8);
   expect(existsSync(cursor)).toBe(false); expect(existsSync(f.file)).toBe(false);
 });
 

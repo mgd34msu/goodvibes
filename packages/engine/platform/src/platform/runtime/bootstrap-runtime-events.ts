@@ -167,8 +167,7 @@ export function registerContractRuntimeEvents(options: ContractRuntimeEventBridg
     withRouter(getSystemMessageRouter, (router) => router.contract(`[Contract] ${message}`, 'high', runtimeEvent));
   };
   /** The cohort check for a contract that ended: any cohort one of its unit agents belongs to. */
-  const checkContractCohorts = (contractId: string): void => {
-    const contract = contractRunner.get(contractId);
+  const checkContractCohorts = (contract: ReturnType<typeof contractRunner.get>): void => {
     if (!contract) return;
     const agentId = contract.units.flatMap((unit) => unit.agentIds).find((id) => agentManager.getStatus(id)?.cohort !== undefined);
     if (agentId === undefined) return;
@@ -176,9 +175,10 @@ export function registerContractRuntimeEvents(options: ContractRuntimeEventBridg
   };
 
   onContract('CONTRACT_CREATED', (payload) => {
-    // Registered here as well as in the channel renderer, because the
-    // conversation follow-ups below need a name for this contract and a
-    // TUI-only run never goes through a channel. Remembering twice is a no-op.
+    // Registered here as well as in the channel renderer, so two same-named
+    // workstreams are numbered in a TUI-only run that never goes through a
+    // channel. The words themselves come from the record at each ending.
+    // Remembering twice is a no-op.
     rememberWorkstreamLabel(payload.contractId, payload.ask);
     // Operator feed: the id belongs here, where it is used for correlation.
     contractLine(`${payload.contractId} started: ${payload.ask}`, payload);
@@ -225,37 +225,41 @@ export function registerContractRuntimeEvents(options: ContractRuntimeEventBridg
 
   onContract('CONTRACT_PASSED', (payload) => {
     contractLine(`\u2713 ${payload.contractId} PASSED: ${payload.criteriaMet} of ${payload.criteriaJudged} criteria met, ${payload.nudges} corrections`, payload);
-    const answer = contractRunner.get(payload.contractId)?.answer?.trim();
+    const contract = contractRunner.get(payload.contractId);
+    const answer = contract?.answer?.trim();
     // A conversation follow-up is read by the person, not the operator, so it
-    // is named in plain words. The `key` keeps the id: it is a dedupe key
-    // nobody reads. See channels/workstream-labels.ts.
+    // is named in plain words, from the record so it still names the request
+    // after a restart. The `key` keeps the id: it is a dedupe key nobody
+    // reads. See channels/workstream-labels.ts.
     queueConversationFollowUp?.({
       key: `contract:${payload.contractId}:passed`,
-      summary: `${workstreamLabel(payload.contractId)} passed all its checks.`,
+      summary: `${workstreamLabel(payload.contractId, contract?.ask)} passed all its checks.`,
       ...(answer ? { result: answer } : {}),
     });
     finishWorkstreamLabel(payload.contractId);
-    checkContractCohorts(payload.contractId);
+    checkContractCohorts(contract);
   });
 
   onContract('CONTRACT_FAILED', (payload) => {
     contractLine(`\u2717 ${payload.contractId} FAILED: ${payload.reason}`, payload);
+    const contract = contractRunner.get(payload.contractId);
     queueConversationFollowUp?.({
       key: `contract:${payload.contractId}:failed`,
-      summary: `${workstreamLabel(payload.contractId)} could not be finished: ${payload.reason.slice(0, 120)}`,
+      summary: `${workstreamLabel(payload.contractId, contract?.ask)} could not be finished: ${payload.reason.slice(0, 120)}`,
     });
     finishWorkstreamLabel(payload.contractId);
-    checkContractCohorts(payload.contractId);
+    checkContractCohorts(contract);
   });
 
   onContract('CONTRACT_CANCELLED', (payload) => {
     contractLine(`${payload.contractId} cancelled: ${payload.reason} (${payload.filesModified} files modified)`, payload);
+    const contract = contractRunner.get(payload.contractId);
     queueConversationFollowUp?.({
       key: `contract:${payload.contractId}:cancelled`,
-      summary: `${workstreamLabel(payload.contractId)} was cancelled: ${payload.reason.slice(0, 120)}`,
+      summary: `${workstreamLabel(payload.contractId, contract?.ask)} was cancelled: ${payload.reason.slice(0, 120)}`,
     });
     finishWorkstreamLabel(payload.contractId);
-    checkContractCohorts(payload.contractId);
+    checkContractCohorts(contract);
   });
 
   return unsubs;

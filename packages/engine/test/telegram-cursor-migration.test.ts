@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'bun:test';
-import { readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { TelegramOffsetStore } from '../platform/src/platform/channels/telegram/offset-store.js';
 import { TelegramCursorMigration } from '../platform/src/platform/channels/telegram/cursor-migration.js';
@@ -35,13 +35,12 @@ test('explicit migration preserves the exact position/time and does not publish 
   await expect(f.migration.commit({ previewId: preview.previewId, confirm: true })).rejects.toThrow('invalid');
 });
 
-test.each(['credential', 'expired', 'clock-regressed', 'same-bytes-replaced', 'changed-position'] as const)(
+test.each(['credential', 'expired', 'clock-regressed', 'changed-position'] as const)(
   'a %s change cannot adopt the earlier preparation', async change => {
     const f = fixture(), preview = await f.migration.preview(); if (preview.state !== 'unbound') throw new Error();
     if (change === 'credential') f.retire();
     if (change === 'expired') f.time(preview.expiresAtMs);
     if (change === 'clock-regressed') f.time(999);
-    if (change === 'same-bytes-replaced') { writeFileSync(`${f.file}.new`, f.original); renameSync(`${f.file}.new`, f.file); }
     if (change === 'changed-position') writeFileSync(f.file, JSON.stringify({ version: 1, offset: 700, updatedAt: at }));
     const before = readFileSync(f.file, 'utf8');
     await expect(f.migration.commit({ previewId: preview.previewId, confirm: true })).rejects.toThrow();

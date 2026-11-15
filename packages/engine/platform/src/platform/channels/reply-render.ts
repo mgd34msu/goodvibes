@@ -413,10 +413,22 @@ function renderEvent(
   };
 }
 
+/** What the renderer may read beyond the event itself. */
+export interface ChannelRenderSources {
+  /**
+   * The task of a contract, read from its record. Names a workstream in every
+   * line about it, also when this process did not see it start.
+   */
+  readonly contractAsk?: ((contractId: string) => string | undefined) | undefined;
+}
+
 export function normalizeChannelRenderEventFromRuntime(
   envelope: RuntimeEventEnvelope<AnyRuntimeEvent['type'], AnyRuntimeEvent>,
+  sources: ChannelRenderSources = {},
 ): ChannelRenderEvent[] {
   const payload = envelope.payload;
+  // Read only for the contract events that name their workstream.
+  const askOf = (contractId: string): string | undefined => sources.contractAsk?.(contractId);
   switch (payload.type) {
     case 'AGENT_STREAM_DELTA':
       return payload.content.trim().length > 0
@@ -550,7 +562,8 @@ export function normalizeChannelRenderEventFromRuntime(
     //
     // A contract is named by what it is doing, never by its register id, and
     // two that would read the same are counted in words. `payload.contractId`
-    // below is only ever a lookup key, see workstream-labels.ts. Unit checks,
+    // below is only ever a lookup key, see workstream-labels.ts; the words come
+    // from the contract's record when `sources` can read it. Unit checks,
     // nudges and the other per-unit events are the operator's and render
     // nothing here.
     case 'CONTRACT_CREATED':
@@ -565,7 +578,7 @@ export function normalizeChannelRenderEventFromRuntime(
     case 'CONTRACT_STATUS_CHANGED':
       return [renderEvent('status', 'progress', envelope, {
         audience: 'owner',
-        text: `${workstreamLabel(payload.contractId)} is now ${describeContractStatus(payload.to)}`,
+        text: `${workstreamLabel(payload.contractId, askOf(payload.contractId))} is now ${describeContractStatus(payload.to)}`,
       })];
     case 'CONTRACT_CHECKED': {
       if (payload.scope === 'unit') return [];
@@ -575,8 +588,8 @@ export function normalizeChannelRenderEventFromRuntime(
         ? `: ${met} of ${payload.criteria.length} requirement${payload.criteria.length === 1 ? '' : 's'} met`
         : '';
       const subject = payload.scope === 'group'
-        ? `a part of ${workstreamLabelInline(payload.contractId)}`
-        : workstreamLabelInline(payload.contractId);
+        ? `a part of ${workstreamLabelInline(payload.contractId, askOf(payload.contractId))}`
+        : workstreamLabelInline(payload.contractId, askOf(payload.contractId));
       return [renderEvent(passed ? 'status' : 'error', 'progress', envelope, {
         audience: 'owner',
         text: `The check of ${subject} ${passed ? 'passed' : 'found things to fix'}${requirements}`,
@@ -588,7 +601,7 @@ export function normalizeChannelRenderEventFromRuntime(
       // gets the contract's name in words instead.
       const idPrefix = `Contract ${payload.contractId} `;
       const question = payload.question.startsWith(idPrefix)
-        ? `${workstreamLabel(payload.contractId)} ${payload.question.slice(idPrefix.length)}`
+        ? `${workstreamLabel(payload.contractId, askOf(payload.contractId))} ${payload.question.slice(idPrefix.length)}`
         : payload.question;
       return [renderEvent('status', 'progress', envelope, { audience: 'owner', text: question })];
     }
@@ -598,32 +611,32 @@ export function normalizeChannelRenderEventFromRuntime(
         case 'committed':
           return [renderEvent('status', 'progress', envelope, {
             audience: 'owner',
-            text: `Committed the changes for ${workstreamLabelInline(payload.contractId)}${payload.hash ? ` as ${payload.hash}` : ''}`,
+            text: `Committed the changes for ${workstreamLabelInline(payload.contractId, askOf(payload.contractId))}${payload.hash ? ` as ${payload.hash}` : ''}`,
           })];
         case 'applied':
           return [renderEvent('status', 'progress', envelope, {
             audience: 'owner',
-            text: `Applied the changes for ${workstreamLabelInline(payload.contractId)} without committing them`,
+            text: `Applied the changes for ${workstreamLabelInline(payload.contractId, askOf(payload.contractId))} without committing them`,
           })];
         case 'skipped':
           return [renderEvent('status', 'progress', envelope, {
             audience: 'owner',
-            text: `Did not commit the changes for ${workstreamLabelInline(payload.contractId)}: ${payload.note}`,
+            text: `Did not commit the changes for ${workstreamLabelInline(payload.contractId, askOf(payload.contractId))}: ${payload.note}`,
           })];
         case 'failed':
           return [renderEvent('error', 'progress', envelope, {
             audience: 'owner',
-            text: `Could not commit the changes for ${workstreamLabelInline(payload.contractId)}: ${payload.note}`,
+            text: `Could not commit the changes for ${workstreamLabelInline(payload.contractId, askOf(payload.contractId))}: ${payload.note}`,
           })];
       }
       return [];
     case 'CONTRACT_PASSED': {
-      const label = workstreamLabel(payload.contractId);
+      const label = workstreamLabel(payload.contractId, askOf(payload.contractId));
       finishWorkstreamLabel(payload.contractId);
       return [renderEvent('status', 'final', envelope, { audience: 'owner', text: `${label} is done` })];
     }
     case 'CONTRACT_FAILED': {
-      const label = workstreamLabel(payload.contractId);
+      const label = workstreamLabel(payload.contractId, askOf(payload.contractId));
       finishWorkstreamLabel(payload.contractId);
       return [renderEvent('error', 'final', envelope, {
         audience: 'owner',
@@ -631,7 +644,7 @@ export function normalizeChannelRenderEventFromRuntime(
       })];
     }
     case 'CONTRACT_CANCELLED': {
-      const label = workstreamLabel(payload.contractId);
+      const label = workstreamLabel(payload.contractId, askOf(payload.contractId));
       finishWorkstreamLabel(payload.contractId);
       return [renderEvent('status', 'final', envelope, {
         audience: 'owner',

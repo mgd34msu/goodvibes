@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { TelegramIngressSupervisor, describeWebhookUrlProblem } from '../platform/src/platform/channels/telegram/ingress.ts';
@@ -88,30 +88,6 @@ describe('webhook registration without a secret', () => {
       const status = await h.supervisor.start();
       expect(status.kind).toBe('inactive');
       expect(status.reason).toContain('surfaces.telegram.webhookSecret');
-      expect(h.calls.some((call) => call.method === 'setWebhook')).toBe(false);
-    } finally { await h.supervisor.stop(); h.cleanup(); }
-  });
-});
-
-describe('webhook registration while polling custody is unavailable', () => {
-  test('a held polling lock reads inactive as "did not start" and registers nothing', async () => {
-    const h = harness({ config: { 'surfaces.telegram.mode': 'webhook', 'surfaces.telegram.webhookSecret': 'shared-secret' } });
-    const holder = new TelegramOffsetStore(h.offsetPath, '123456').retainPolling();
-    try {
-      const status = await h.supervisor.start();
-      expect(status.kind).toBe('inactive');
-      expect(status.reason).toContain('did not start');
-      expect(h.calls.some((call) => call.method === 'setWebhook')).toBe(false);
-    } finally { holder.release(); await h.supervisor.stop(); h.cleanup(); }
-  });
-
-  test('a damaged cursor file reads inactive as "did not start" and registers nothing', async () => {
-    const h = harness({ config: { 'surfaces.telegram.mode': 'webhook', 'surfaces.telegram.webhookSecret': 'shared-secret' } });
-    writeFileSync(h.offsetPath, '{ not json');
-    try {
-      const status = await h.supervisor.start();
-      expect(status.kind).toBe('inactive');
-      expect(status.reason).toContain('did not start');
       expect(h.calls.some((call) => call.method === 'setWebhook')).toBe(false);
     } finally { await h.supervisor.stop(); h.cleanup(); }
   });

@@ -13,8 +13,11 @@ interface Preparation {
 class IdentityReadError extends Error {
   constructor(cause: unknown) { super('bot identity could not be read', { cause }); }
 }
-/** One serving ingress owns the verified bot, exact cursor file preparation
- * and preview lifetime. No bearer, raw cursor bytes or file path enter views. */
+/** The owner's review of a cursor saved by an earlier version whose bot was
+ * never recorded (a recorded bot binds it at start, without asking). One
+ * serving ingress owns the verified bot and the preview lifetime; the commit
+ * binds only the cursor that was previewed. No bearer, raw cursor bytes or
+ * file path enter views. */
 export class TelegramCursorMigration {
   private readonly work = new OwnedWork();
   private readonly abort = new AbortController();

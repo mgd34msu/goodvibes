@@ -36,7 +36,7 @@ import { summarizeError } from '../../utils/error-display.js';
 import { IngressProcessingHealth, ingressOutcome, type ChannelIngressAlarm } from '../ingress-alarm.js';
 import { TelegramApiError, TelegramBotApi, TelegramUpdateResponseError, type TelegramBotIdentity, type TelegramUpdate } from './api.js';
 import { TelegramPollingReceiveProgress, TelegramReceiveCoverageError } from './receive-progress.js';
-import { TelegramOffsetStore, TelegramOffsetStoreError, type TelegramPollingCursor } from './offset-store.js';
+import { bindEarlierTelegramCursor, TelegramOffsetStore, TelegramOffsetStoreError, type TelegramPollingCursor } from './offset-store.js';
 import { CONFLICT_ESCALATION_ATTEMPTS, classifyTelegramConflict } from './conflict-policy.js';
 import { TelegramCursorMigration } from './cursor-migration.js';
 import type { TelegramCursorPreview, TelegramCursorMigrationResult } from './cursor-migration-data.js';
@@ -78,7 +78,8 @@ export type TelegramIngressMode = 'polling' | 'webhook' | 'inactive';
  *
  *   receiving  polling returned, or the webhook is registered and Telegram
  *              reports no delivery failure
- *   blocked    polling is up but something else holds the bot or its cursor, or
+ *   blocked    polling is up but another receiver holds the bot (Telegram's
+ *              409), a cursor saved by an earlier version waits for review, or
  *              the webhook is registered and Telegram cannot deliver to it
  *   retrying   polling or webhook registration is failing and is retried on
  *              the backoff; `reason` says why and when
@@ -196,6 +197,13 @@ export class TelegramIngressSupervisor {
   private readonly cursorMigrations = new Set<TelegramCursorMigration>();
   /** Who this bot is, per getMe, see resolveBotIdentity. */
   private botIdentity: TelegramBotIdentity | null = null;
+  /**
+   * A cursor saved by an earlier version is waiting for the owner's review
+   * because no bot was ever recorded for it. While it waits, the discovered
+   * bot is not recorded either: that record is what would name the cursor's
+   * bot, and writing the current bot into it would bind the cursor unasked.
+   */
+  private earlierCursorHeld = false;
   private currentStatus: TelegramIngressStatus = {
     kind: 'inactive',
     mode: 'inactive',
@@ -336,6 +344,9 @@ export class TelegramIngressSupervisor {
       },
     });
     this.cursorMigration = migration; this.cursorMigrations.add(migration);
+    // Before resolveBotIdentity records this bot as the discovered one.
+    this.earlierCursorHeld = bindEarlierTelegramCursor(this.deps.offsetFilePath,
+      String(config.get('surfaces.telegram.discoveredBotTokenId') ?? ''), this.beforeCursorWrite) === 'held';
 
     // Learn who this bot is before arming ingress, so the very first message is
     // matched against a real handle rather than an empty string.
@@ -470,9 +481,7 @@ export class TelegramIngressSupervisor {
         // Registering webhook delivery gives up native polling custody. Save
         // that gap before the provider can route original updates elsewhere.
         const store = new TelegramOffsetStore(this.deps.offsetFilePath, api.botId, this.beforeCursorWrite, this.beforeReceiveSpanWrite);
-        const saved = store.load();
-        if (saved.mode === 'blocked' && saved.kind !== 'unbound') throw new TelegramOffsetStoreError(saved.kind);
-        if (saved.mode !== 'blocked') {
+        if (store.load().mode !== 'blocked') {
           const cursor = store.retainPolling();
           try {
             const spans = cursor.receiveSpans();
@@ -510,10 +519,10 @@ export class TelegramIngressSupervisor {
         }
         // Everything else is retried on the capped backoff while the surface
         // stays enabled in webhook mode: the network or tunnel not up yet,
-        // Telegram unable to resolve the public host, a held or damaged cursor.
+        // Telegram unable to resolve the public host, a cursor that would not save.
         // A settings change restarts setup at once.
         const delayMs = Math.min(BACKOFF_MIN_MS * 2 ** Math.min(attempt - 1, 16), BACKOFF_MAX_MS);
-        // A held polling lock or a damaged cursor file is not a connectivity problem; say what it is.
+        // A cursor that would not save is not a connectivity problem; say what it is.
         const cause = error instanceof TelegramOffsetStoreError
           ? error.message
           : 'check that web.publicBaseUrl reaches this daemon over HTTPS';
@@ -685,14 +694,11 @@ export class TelegramIngressSupervisor {
     const start = store.load();
     const createStore = (): TelegramOffsetStore => new TelegramOffsetStore(this.deps.offsetFilePath, api.botId, this.beforeCursorWrite, this.beforeReceiveSpanWrite);
     // Reserve the runner before any dependency can synchronously reenter stop.
-    // Waiting for another local receiver does not attach payment-source proof.
     this.loop = this.runOwnedPolling(api, store, createStore, lifetime.signal, attachSource, priorWebhook)
       .finally(() => { lifetime.abort(); });
     if (start.mode === 'blocked') {
-      // The loop retries the cursor on the backoff; nothing is confirmed until it loads.
-      const failure = `Telegram receiving is waiting for its saved cursor: ${start.reason}`;
-      logger.error('Telegram is enabled but is NOT receiving messages', { surface: 'telegram', kind: start.kind, action: failure });
-      this.setStatus('retrying', 'polling', failure, true, failure);
+      // An earlier-version cursor waiting for review; the loop polls once it is bound.
+      this.markBlocked(start.reason);
       return this.currentStatus;
     }
     return this.settle('polling',
@@ -704,17 +710,18 @@ export class TelegramIngressSupervisor {
   /**
    * Own one receiving session for this bot, and keep owning it. Only a rejected
    * token ends receiving (runPollLoop settles that, and a token change restarts
-   * it). Every other failure, a cursor that would not load or save, a payment
-   * reply that could not be archived, a malformed batch, a lease that would not
-   * release, rebuilds the cursor from disk and resumes on the backoff, with the
-   * reason in the status, the same way a 409 recovers.
+   * it). Every other failure, a receive span that would not save, a payment
+   * reply that could not be archived, a malformed batch, resumes on the backoff
+   * with the reason in the status, the same way a 409 recovers. The store is
+   * kept across those retries: its offsets are the last ones processed. Only an
+   * earlier-version cursor waiting for review is read again from disk, on the
+   * backoff, so a review done elsewhere is picked up.
    */
   private async runOwnedPolling(api: TelegramBotApi, initialStore: TelegramOffsetStore, createStore: () => TelegramOffsetStore,
     lifetime: AbortSignal,
     attach: (cursor: TelegramPollingCursor, progress: TelegramPollingReceiveProgress) => TelegramSourceAccountLease | undefined,
     priorWebhook = false): Promise<void> {
     await Promise.resolve();
-    let reportedBusy = false;
     let store = initialStore;
     let gap = priorWebhook;
     let backoffMs = BACKOFF_MIN_MS;
@@ -723,48 +730,38 @@ export class TelegramIngressSupervisor {
       let cursor: TelegramPollingCursor;
       try { cursor = store.retainPolling(); }
       catch (error) {
-        if (error instanceof TelegramOffsetStoreError && error.kind === 'busy') {
-          const reason = 'Another local Telegram receiver is using this bot. Waiting for its actual work to finish.';
-          this.markBlocked(reason);
-          if (!reportedBusy) {
-            reportedBusy = true;
-            try { this.deps.onConcurrentConsumerConflict?.(reason); }
-            catch (listenerError) {
-              logger.warn('Telegram receiver coordination listener failed', { surface: 'telegram', error: summarizeError(listenerError) });
-            }
-          }
-          await this.delay(BACKOFF_MIN_MS); continue;
+        if (error instanceof TelegramOffsetStoreError && error.kind === 'unbound') {
+          this.markBlocked(error.message);
+          await this.delay(backoffMs);
+        } else {
+          await this.retryReceiving(error, backoffMs);
         }
-        await this.retryReceiving(error, backoffMs);
         backoffMs = Math.min(backoffMs * 2, BACKOFF_MAX_MS);
         store = createStore();
         continue;
       }
-      reportedBusy = false;
       const pollsBefore = this.completedPolls;
       let failure: unknown = null;
       try {
         lifetime.throwIfAborted();
         if (!owned()) return;
         const progress = new TelegramPollingReceiveProgress(lifetime, this.deps.now ?? Date.now, cursor);
-        // Receive coverage is unknown across a webhook period or a rebuilt cursor.
+        // Receive coverage is unknown across a webhook period or a failed poll loop.
         if (gap) progress.gap();
         const source = attach(cursor, progress);
         await this.runPollLoop(api, cursor, lifetime, source, progress);
       } catch (error) {
         failure = error;
       } finally {
-        // Even an injected getUpdates that ignores abort must finish before a
-        // replacement receiver can acquire and confirm this queue's offsets.
-        try { cursor.release(); }
-        catch (releaseError) { failure ??= releaseError; }
+        // Even an injected getUpdates that ignores abort finishes before the
+        // next session takes the cursor.
+        cursor.release();
       }
       // runPollLoop returns on its own only when stopped or the token was rejected.
       if (!owned() || failure === null) return;
       if (this.completedPolls > pollsBefore) backoffMs = BACKOFF_MIN_MS;
       await this.retryReceiving(failure, backoffMs);
       backoffMs = Math.min(backoffMs * 2, BACKOFF_MAX_MS);
-      store = createStore();
       gap = true;
     }
   }
@@ -792,15 +789,14 @@ export class TelegramIngressSupervisor {
 
     while (!this.stopped && !lifetime.aborted) {
       try {
-        let entered = cursor.capture();
-        const offset = entered.observation.offset ?? undefined;
+        const offset = cursor.capture().observation.offset ?? undefined;
         const startedAtMs = receiveProgress?.beginRequest();
         const updates = await api.getUpdates({
           offset,
           timeoutSeconds: receiveProgress?.timeoutSeconds(POLL_TIMEOUT_SECONDS) ?? POLL_TIMEOUT_SECONDS,
           signal: lifetime,
         });
-        lifetime.throwIfAborted(); entered.assertCurrent();
+        lifetime.throwIfAborted(); cursor.assertCurrent();
         this.completedPolls += 1;
         backoffMs = BACKOFF_MIN_MS;
         conflictRecoveries = 0;
@@ -819,17 +815,15 @@ export class TelegramIngressSupervisor {
         }
         let retryAfterMs: number | null = null;
         if (updates.length > 0) {
-          // Each update's offset is saved as soon as it is processed, so a stop
-          // or a failure part-way through a batch never replays the updates
-          // already handled. Saving moves the cursor's generation, so the
-          // capture is renewed after every save.
+          // Each update's offset is saved as soon as it is processed, so a
+          // restart part-way through a batch never replays the updates already
+          // handled (a "yes" to a proposal, a purchase answer): one small
+          // document write per processed update.
           const persist = (next: number): void => {
-            entered.assertCurrent();
             cursor.save(next, () => {
               lifetime.throwIfAborted();
               if (this.stopped || this.abort?.signal !== lifetime) throw new Error('Telegram polling owner retired');
             });
-            entered = cursor.capture();
           };
           retryAfterMs = await this.dispatchBatch(updates, api, persist, offset, sourceAccount, receiveProgress);
         }
@@ -841,9 +835,9 @@ export class TelegramIngressSupervisor {
         if (retryAfterMs !== null) await this.delay(retryAfterMs);
       } catch (error) {
         if (this.stopped || lifetime.aborted || (error instanceof Error && error.name === 'AbortError')) return;
-        // The cursor, the payment reply archive or the receive record could not
-        // be trusted: nothing past it is confirmed. The owner rebuilds them and
-        // resumes (runOwnedPolling).
+        // A receive span that would not save, the payment reply archive or the
+        // receive record could not be trusted: nothing past it is confirmed.
+        // The owner marks a receive gap and resumes (runOwnedPolling).
         if (error instanceof TelegramOffsetStoreError || error instanceof PaymentReplyHistoryError
           || error instanceof TelegramUpdateResponseError || error instanceof TelegramReceiveCoverageError) throw error;
         if (error instanceof TelegramApiError && error.errorCode === 409) receiveProgress?.gap();
@@ -1236,6 +1230,7 @@ export class TelegramIngressSupervisor {
   }
 
   private rememberDiscoveredToken(botId: string): void {
+    if (this.earlierCursorHeld) return;
     try {
       this.deps.configManager.set('surfaces.telegram.discoveredBotTokenId', botId);
     } catch {

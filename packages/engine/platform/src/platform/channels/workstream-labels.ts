@@ -43,17 +43,21 @@
  * changed under the reader mid-run would be worse than a name that is slightly
  * more specific than it needs to be.
  *
- * ── Why this holds state, and what bounds it ────────────────────────────────
+ * ── Where the words come from, and what this module remembers ─────────────
  *
- * Only the opening event carries the task; every later one carries the id
- * alone. Something has to remember the mapping, and it is small and lives for
- * the length of a workstream.
+ * The task is a property of the contract record, fixed when it is created, so
+ * a caller that can read the record passes its `ask` and the line names the
+ * work even when this process never saw it start (a daemon restart while the
+ * work runs). Only the opening event carries the task; a caller without the
+ * record falls back to the phrase remembered from that event.
  *
- * It is bounded and reaped rather than left to grow: an entry is dropped the
- * moment its workstream reaches a terminal state, and the map is capped so a
- * process that somehow never sees a terminal event cannot grow one unbounded.
- * A workstream whose label was evicted or never seen reads as "the workstream",
- * which is honest, it does not invent an identifier to fill the gap.
+ * What this module owns is the numbering of same-named workstreams, which
+ * exists nowhere else. It is bounded rather than left to grow: a finished
+ * workstream is first in line to be dropped, and the map is capped so a process
+ * that somehow never sees a terminal event cannot grow one unbounded. A
+ * workstream known neither from its record nor from its start reads as "the
+ * workstream", which is honest, it does not invent an identifier to fill the
+ * gap.
  */
 
 import type { ContractStatus, ContractUnitStatus } from '../../events/contract.js';
@@ -83,9 +87,9 @@ interface RememberedWorkstream {
    * Set when the workstream reached a terminal state.
    *
    * A finished workstream is NOT dropped on the spot. Several subscribers each
-   * build a line from the same terminal event, the channel renderer, the
-   * conversation follow-up, the webhook notifier, and whichever ran after a
-   * drop would render "the workstream" while the others named it. That is a
+   * build a line from the same terminal event, the channel renderer and the
+   * conversation follow-up, and whichever ran after a drop would lose the
+   * "(the second one)" the other one showed. That is a
    * race decided by subscription order, which is not a thing a reader should be
    * able to see. So a finished entry stays readable and is simply first in line
    * to be evicted when the map is full.
@@ -197,23 +201,32 @@ export function finishWorkstreamLabel(contractId: string): void {
   if (entry !== undefined) entry.finished = true;
 }
 
+/** The task phrase: from the record's ask when given, else the one remembered at start. */
+function phraseFor(contractId: string, ask: string | undefined): { readonly base: string; readonly entry: RememberedWorkstream | undefined } | null {
+  const entry = labels.get(contractId);
+  const base = ask === undefined ? '' : toLabel(ask);
+  if (base.length > 0) return { base, entry };
+  return entry === undefined ? null : { base: entry.base, entry };
+}
+
 /**
  * How to refer to this workstream in a line a person reads.
  *
+ * `ask` is the contract record's task, when the caller can read the record.
  * Quoted when known, so the task words read as a name rather than as part of
  * the sentence around them. `The workstream` when not, never the id.
  */
-export function workstreamLabel(contractId: string): string {
-  const entry = labels.get(contractId);
-  if (entry === undefined) return 'The workstream';
-  return `"${entry.base}"${placeSuffix(entry)}`;
+export function workstreamLabel(contractId: string, ask?: string): string {
+  const phrase = phraseFor(contractId, ask);
+  if (phrase === null) return 'The workstream';
+  return `"${phrase.base}"${placeSuffix(phrase.entry)}`;
 }
 
 /** Same, lowercased for mid-sentence use. */
-export function workstreamLabelInline(contractId: string): string {
-  const entry = labels.get(contractId);
-  if (entry === undefined) return 'the workstream';
-  return `"${entry.base}"${placeSuffix(entry)}`;
+export function workstreamLabelInline(contractId: string, ask?: string): string {
+  const phrase = phraseFor(contractId, ask);
+  if (phrase === null) return 'the workstream';
+  return `"${phrase.base}"${placeSuffix(phrase.entry)}`;
 }
 
 /**

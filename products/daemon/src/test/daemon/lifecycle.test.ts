@@ -132,6 +132,22 @@ describe('verified native lifecycle admission', () => {
     expect(Object.isFrozen(artifact)).toBe(true); expect(() => artifact?.assertCurrent?.()).not.toThrow();
   });
 
+  test('a process hashes its installed cohort once and again only after the files change', () => {
+    const f = installedFixture();
+    const payloads = f.receipt.artifact.files.length;
+    const hash = spyOn(crypto, 'createHash');
+    try {
+      resolveInstalledDaemonUpdateArtifact(defaultHome, f.options)?.assertCurrent?.();
+      expect(hash.mock.calls.length).toBe(payloads);
+      resolveInstalledDaemonUpdateArtifact(defaultHome, f.options)?.assertCurrent?.();
+      expect(hash.mock.calls.length).toBe(payloads);
+      // A write into the cohort (as a suite repair or update makes) retires the earlier pass.
+      writeFileSync(f.execPath, readFileSync(f.execPath));
+      resolveInstalledDaemonUpdateArtifact(defaultHome, f.options)?.assertCurrent?.();
+      expect(hash.mock.calls.length).toBe(payloads * 2);
+    } finally { hash.mockRestore(); }
+  });
+
   test('a source invocation refuses before inspecting native files', () => {
     const execPath = join(makeOwnedTempDir('native-source-refusal'), 'goodvibes-daemon');
     writeFileSync(execPath, 'Inert source-selected executable', { mode: 0o755 });

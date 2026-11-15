@@ -8,8 +8,9 @@ import { readVerifiedDaemonCiArtifact } from './ci-artifact.ts';
 import { daemonCiPayloads } from '../src/cli/native-artifact.ts';
 import { stageDaemonCiArchive } from './acquire-native.ts';
 import { installDaemonNative, readDaemonInstallOwner, type DaemonInstallOwner } from './install-native.ts';
-import { assertPath, expectedModes, inspectInstallation, validateOwner } from '../src/cli/native-installation.ts';
-import { verifiedDaemonNativePath } from '../src/cli/native-launch.ts';
+import { assertPath, expectedModes, targetPaths, validateOwner } from '../src/cli/native-installation.ts';
+import { assertNativeInstallationIdle, verifiedDaemonNativePath } from '../src/cli/native-launch.ts';
+import { captureUpdateFileIo, realUpdateFileIo, retainDaemonNativeFiles } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
 
 /** Pack only admitted captured bytes, then re-admit the actual tarball before returning it. */
 export async function packDaemonNative(artifactRoot: string, owner: DaemonInstallOwner): Promise<Buffer> {
@@ -28,13 +29,16 @@ export async function packDaemonNative(artifactRoot: string, owner: DaemonInstal
     }
     writeFileSync(join(native, 'ci-artifact.json'), JSON.stringify(artifact, null, 2) + '\n', { mode: 0o644 });
     chmodSync(join(native, 'ci-artifact.json'), 0o644);
-    // Detect source changes between initial verification and capture.
-    await readVerifiedDaemonCiArtifact(join(scratch, 'products/daemon'), owner);
     const archive = join(scratch, 'cohort.tgz');
     execFileSync('tar', ['--format=ustar', '-czf', archive, ...[...daemonCiPayloads(owner.target), 'ci-artifact.json'].map(path => `products/daemon/native/${path}`)], { cwd: scratch });
     const bytes = readFileSync(archive);
+    // The restored tarball is the one byte check of what was captured: a source
+    // change after the first verification shows up here as a digest mismatch.
+    // Its readers were confirmed by running the source binary above, and the
+    // digests prove these are the same bytes; the consumer stage runs them again.
     const restored = stageDaemonCiArchive(bytes, join(scratch, 'restored'), owner.target);
-    await readVerifiedDaemonCiArtifact(restored, owner);
+    const packed = await readVerifiedDaemonCiArtifact(restored, owner, { readerEvidence: 'recorded-ci' });
+    if (JSON.stringify(packed) !== JSON.stringify(artifact)) throw new Error('Packed native cohort differs from its verified source');
     return bytes;
   } finally { rmSync(scratch, { recursive: true, force: true }); }
 }
@@ -47,16 +51,18 @@ export async function verifyDaemonNativePackage(archive: Uint8Array, owner: Daem
     const artifactRoot = stageDaemonCiArchive(archive, join(scratch, 'restored'), owner.target);
     const prefix = join(scratch, 'installed');
     await installDaemonNative({ artifactRoot, prefix, owner });
+    // Hash the installed cohort once, as the launcher does; the identities
+    // retained around that pass are what prove the probe left it untouched.
+    const retained = retainDaemonNativeFiles(targetPaths(prefix, owner.target), captureUpdateFileIo(realUpdateFileIo));
     const binary = verifiedDaemonNativePath(prefix, owner);
+    retained();
     // Remove the unpacked source before executing the installed artifact.
     rmSync(join(scratch, 'restored'), { recursive: true, force: true });
     execFileSync('node', [resolve(import.meta.dir, 'verify-binary.mjs'), '--binary', binary], {
       cwd: scratch, stdio: 'inherit', timeout: 300_000,
     });
-    // The behavior probe must not mutate its installed cohort.
-    const receipt = inspectInstallation(prefix, '', owner.target);
-    if (!receipt || receipt.version !== owner.version) throw new Error('Native package installation disappeared during verification');
-    verifiedDaemonNativePath(prefix, owner);
+    try { retained(); assertNativeInstallationIdle(prefix); }
+    catch { throw new Error('Native package installation changed during its behaviour probe'); }
   } finally { rmSync(scratch, { recursive: true, force: true }); }
 }
 

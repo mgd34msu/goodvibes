@@ -3,8 +3,8 @@
 import { resolve } from 'node:path';
 import { acquireDaemonNative } from './acquire-native.ts';
 import { readDaemonInstallOwner } from './install-native.ts';
-import { inspectInstallation } from '../src/cli/native-installation.ts';
-import { assertNativeInstallationIdle, finishDaemonNativeLaunch, runVerifiedDaemonNative, verifiedDaemonNativePath } from '../src/cli/native-launch.ts';
+import { inspectInstallationIdentity } from '../src/cli/native-installation.ts';
+import { assertNativeInstallationIdle, finishDaemonNativeLaunch, runVerifiedDaemonNative } from '../src/cli/native-launch.ts';
 import { UpdateTransactionError } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
 
 if (import.meta.main) {
@@ -22,9 +22,10 @@ if (import.meta.main) {
     const prefix = values.get('--prefix')!;
     // Only an absent cohort is eligible for first-run repair. Corrupt, unowned,
     // stale or fenced installations refuse instead of silently replacing state.
+    // Presence is decided from the receipt alone; the launcher's own admission
+    // is the one full byte verification before the executable runs.
     assertNativeInstallationIdle(prefix);
-    if (!inspectInstallation(prefix, '')) await acquireDaemonNative({ runId: values.get('--run-id')!, prefix, owner });
-    verifiedDaemonNativePath(prefix, owner);
+    if (!inspectInstallationIdentity(prefix, '')) await acquireDaemonNative({ runId: values.get('--run-id')!, prefix, owner });
     finishDaemonNativeLaunch(await runVerifiedDaemonNative(prefix, owner, args.slice(separator + 1)));
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));

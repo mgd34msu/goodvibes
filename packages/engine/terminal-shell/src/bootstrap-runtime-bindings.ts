@@ -19,11 +19,13 @@ export function initializeTerminalCatalog(
   wirePricing?.(provider);
   loadKeybindings();
 }
+/**
+ * The terminal is not a control-plane client, so it is not recorded as one: the
+ * client list holds the devices and surfaces that connect to the listener.
+ */
 export function seedTerminalControlPlane(
   dispatch: DomainDispatch,
   config: Pick<ConfigManager, 'get'>,
-  sessionId: string,
-  client: Pick<Parameters<DomainDispatch['syncControlPlaneClient']>[0], 'id' | 'kind' | 'label' | 'capabilities' | 'metadata'>,
 ): void {
   const enabled = Boolean(config.get('controlPlane.enabled'));
   // The address is the one the platform would bind; nothing has started yet, so the state is not running until the gateway reports it.
@@ -36,10 +38,6 @@ export function seedTerminalControlPlane(
       connectionState: enabled ? 'initializing' : 'disabled',
       isRunning: false,
     },
-    'bootstrap.control-plane',
-  );
-  dispatch.syncControlPlaneClient(
-    { ...client, transport: 'local', connected: true, sessionId, authenticatedAt: Date.now(), lastSeenAt: Date.now() },
     'bootstrap.control-plane',
   );
 }

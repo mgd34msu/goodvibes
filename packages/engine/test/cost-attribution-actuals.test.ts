@@ -138,7 +138,7 @@ describe('per-dimension cost actuals from real emit sites', () => {
       sessionId: () => 'session-2',
     });
 
-    await withCostOriginAsync({ tool: 'commit_helper', callId: 'call-9' }, () => helper.chat('commit_message', 'msg'));
+    await withCostOriginAsync({ tool: 'commit_helper', callId: 'call-9' }, () => helper.chat('session_title', 'msg'));
     await drainBus();
 
     const byTool = svc.attribution('24h', 'tool');

@@ -276,6 +276,7 @@ export class IntegrationHelperService {
     const state = this.context.runtimeStore.getState();
     return {
       id: state.session.id,
+      conversationSessionId: state.session.conversationSessionId,
       title: this.context.getConversationTitle?.() ?? '',
       status: state.session.status,
       recoveryState: state.session.recoveryState,

@@ -1,19 +1,21 @@
 /**
- * Helper Model, lightweight LLM routing for grunt-work tasks.
- *
- * Routes tasks like compaction, commit messages, etc. to a
- * cheaper/free model so expensive main models don't waste tokens on routine work.
+ * Helper Model, the route for supporting work (a resumed session's summary,
+ * and the other {@link HelperTask} kinds), so a cheaper model can do it in
+ * place of the main one.
  *
  * Resolution order:
  *   1. Per-provider helper (helper.providers.{currentProvider}.provider + model)
  *   2. Global helper (helper.globalProvider + helper.globalModel)
  *   3. Tool LLM (tools.llmProvider + tools.llmModel), when enabled/configured
+ *   4. The main model (`isHelper: false`): an empty helper route inherits Main Chat,
+ *      as the model picker says, and so does a disabled helper.
  *
  * Design constraints:
- *   - Optional helper absence is explicit: helperOnly calls return null.
+ *   - `helperOnly` calls run only on a dedicated route and return null otherwise.
  *   - Configured routes are provider-qualified through the model registry.
  *   - HelperModel.chat() throws request and configuration failures.
- *   - Tracks token usage separately from the main model
+ *   - Tracks token usage separately from the main model; with a runtime bus the
+ *     spend of every call is emitted to the shared cost pipeline.
  */
 
 import { randomUUID } from 'node:crypto';
@@ -27,19 +29,18 @@ import { splitModelRegistryKey } from '../providers/registry-helpers.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 
-/** Tasks that can be routed to a helper model. */
+/** Supporting work that runs on the helper route. */
 export type HelperTask =
+  | 'resume_summary'     // One-line summary shown when a session is resumed
   | 'compaction'         // Summarize prior context for compaction
-  | 'intent_classify'    // Classify user intent (question vs task)
-  | 'tool_summarize'     // Condense large tool output
-  | 'commit_message'     // Generate commit messages
-  | 'review_triage';     // Triage which files need deep review
+  | 'session_title'      // Title a session from its first exchange
+  | 'tool_summarize';    // Condense large tool output
 
 /** Resolved helper model: provider instance + model ID. */
 export interface ResolvedHelper {
   provider: LLMProvider;
   modelId: string;
-  /** true when a dedicated helper/tool-LLM route was configured. */
+  /** true for a dedicated helper/tool-LLM route; false when the work inherits the main model. */
   isHelper: boolean;
 }
 
@@ -47,7 +48,7 @@ export interface ResolvedHelper {
 export interface HelperChatOptions {
   maxTokens?: number | undefined;
   systemPrompt?: string | undefined;
-  /** If true, return null when no dedicated helper route is available. */
+  /** If true, return null instead of running on the main model when no dedicated route is available. */
   helperOnly?: boolean | undefined;
   /** Give up on a provider that does not answer. Defaults to two minutes; 0 disables the bound. */
   timeoutMs?: number | undefined;
@@ -118,12 +119,21 @@ export class HelperRouter {
     };
   }
 
+  /** The main model, which supporting work inherits when no helper route is configured. */
+  resolveMainModel(): ResolvedHelper {
+    const current = this.deps.providerRegistry.getCurrentModel();
+    return {
+      provider: this.deps.providerRegistry.getForModel(current.registryKey, current.provider),
+      modelId: current.id,
+      isHelper: false,
+    };
+  }
+
   /**
-   * Resolve the best helper for the given task.
-   *
-   * Returns null only when no dedicated helper route is configured.
+   * Resolve the route for the given task: the first configured helper route,
+   * or the main model (`isHelper: false`) when none is configured.
    */
-  resolve(_task: HelperTask): ResolvedHelper | null {
+  resolve(_task: HelperTask): ResolvedHelper {
     try {
       // 1. Check per-provider helper
       const currentModel = this.deps.providerRegistry.getCurrentModel();
@@ -168,7 +178,7 @@ export class HelperRouter {
         return this.resolveConfiguredProviderModel(toolProvider, toolModel);
       }
 
-      return null;
+      return this.resolveMainModel();
     } catch (err) {
       logger.error('HelperRouter.resolve: failed', { task: _task, error: summarizeError(err) });
       throw err;
@@ -197,26 +207,16 @@ export class HelperModel {
    * @param task     The helper task type (for routing).
    * @param prompt   The user prompt to send.
    * @param options  Optional maxTokens, systemPrompt, helperOnly.
-   * @returns        The assistant's text response, or null for explicit optional helper absence.
+   * @returns        The assistant's text response, or null when `helperOnly` and no dedicated route runs it.
    */
   async chat(task: HelperTask, prompt: string, options: HelperChatOptions = {}): Promise<string | null> {
     const enabled = this.deps.configManager.get('helper.enabled') as boolean;
-    if (!enabled) {
-      if (options.helperOnly) {
-        logger.info('HelperModel.chat: helper disabled for optional helper request', { task });
-        return null;
-      }
-      throw new HelperModelUnavailableError('Helper model routing is disabled.');
-    }
-
     try {
-      const resolved = this.router.resolve(task);
-      if (!resolved) {
-        if (options.helperOnly) {
-          logger.info('HelperModel.chat: no helper route for optional helper request', { task });
-          return null;
-        }
-        throw new HelperModelUnavailableError('No helper model route is configured.');
+      // A disabled helper sends supporting work to the main model, as an unset route does.
+      const resolved = enabled ? this.router.resolve(task) : this.router.resolveMainModel();
+      if (!resolved.isHelper && options.helperOnly) {
+        logger.debug('HelperModel.chat: no dedicated helper route for an optional helper request', { task });
+        return null;
       }
 
       // The signal asks the provider to stop; the race frees the caller even when a provider ignores it.

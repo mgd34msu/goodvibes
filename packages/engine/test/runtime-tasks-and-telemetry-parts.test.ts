@@ -25,7 +25,7 @@ import {
 import { emitTaskCreated } from '../platform/src/platform/runtime/emitters/tasks.js';
 import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.js';
 import { createDomainDispatch, createRuntimeStore } from '../platform/src/platform/runtime/store/index.js';
-import { TaskTransitionError, UnifiedTaskManager } from '../platform/src/platform/runtime/tasks/manager.js';
+import { TaskTransitionError, TaskVerbUnsupportedError, UnifiedTaskManager } from '../platform/src/platform/runtime/tasks/manager.js';
 import { ProcessTaskAdapter } from '../platform/src/platform/runtime/tasks/adapters/process-adapter.js';
 
 const realFetch = globalThis.fetch;
@@ -219,17 +219,22 @@ describe('UnifiedTaskManager', () => {
     expect(store.getState().tasks.tasks.get('external-parent')!.childTaskIds).toEqual([child.id]);
   });
 
-  test('the first retry waits the base delay even when the attempt counter starts at zero', () => {
+  test('a failure is final: nothing re-queues a task that no runner would start', () => {
     const { manager } = setup();
     const task = manager.createTask({
       kind: 'exec', title: 't', owner: 'o',
       retryPolicy: { maxAttempts: 3, currentAttempt: 0, delayMs: 100, backoff: 'exponential', retryOn: ['transient'] },
     });
     manager.startTask(task.id);
-    const requeued = manager.failTask(task.id, { error: 'boom' });
+    expect(manager.failTask(task.id, { error: 'boom' }).status).toBe('failed');
+  });
 
-    expect(requeued.status).toBe('queued');
-    expect(requeued.retryDelayMs).toBe(100);
+  test('a verb the owner does not implement is refused and leaves the row unchanged', () => {
+    const { manager } = setup();
+    const task = manager.createTask({ kind: 'exec', title: 't', owner: 'o' });
+    manager.startTask(task.id);
+    expect(() => manager.cancelTask(task.id)).toThrow(TaskVerbUnsupportedError);
+    expect(manager.getTask(task.id)?.status).toBe('running');
   });
 });
 

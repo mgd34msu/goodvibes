@@ -32,7 +32,6 @@
  * not-provisioned with the recovery act named.
  */
 import { readFileSync, statSync } from 'node:fs';
-import { assertSecurityReadSource, captureSecurityReadBindings, captureSecurityReadFiles } from '../security/read-source.js';
 import {
   provisionWakeWordModels,
   resolveManagedWakePaths,
@@ -130,17 +129,6 @@ export interface WakeSetupService {
   modelChunk(request: WakeModelChunkRequest): WakeModelChunkResult;
 }
 
-const wakeReadSources = new WeakMap<WakeSetupService, () => () => void>();
-const getWakeReadSource = wakeReadSources.get.bind(wakeReadSources);
-const setWakeReadSource = wakeReadSources.set.bind(wakeReadSources);
-
-/** Retains the seven original managed assets without invoking status or provisioning. */
-export function captureWakeSetupReadSource(service: WakeSetupService): () => void {
-  const capture = getWakeReadSource(service);
-  assertSecurityReadSource(capture !== undefined);
-  return capture();
-}
-
 /** The pinned path and checksum for one component. */
 function resolveComponent(
   managedRoot: string,
@@ -203,7 +191,7 @@ export function createWakeSetupService(deps: WakeSetupServiceDeps): WakeSetupSer
   const runProvision = singleFlight(async (): Promise<WakeProvisionResult> =>
     provisionImpl({ managedRoot: deps.managedVoiceRoot }));
 
-  const service: WakeSetupService = {
+  return {
     status: () => readStatus({ managedRoot: deps.managedVoiceRoot }),
     provision: () => runProvision(),
     ensureProvisioned: (options) => provisionWakeWordModelsAtInstall({
@@ -238,15 +226,4 @@ export function createWakeSetupService(deps: WakeSetupServiceDeps): WakeSetupSer
       };
     },
   };
-  setWakeReadSource(service, () => {
-    const source = captureSecurityReadBindings(deps, ['managedVoiceRoot', 'provision', 'readStatus', 'readArtifact', 'artifactSize']);
-    const methods = captureSecurityReadBindings(service, ['status', 'provision', 'ensureProvisioned', 'modelChunk']);
-    source(); methods();
-    const paths = resolveManagedWakePaths(deps.managedVoiceRoot);
-    const files = captureSecurityReadFiles([paths.classifierPath, paths.mobileClassifierPath, paths.noticePath,
-      paths.embeddingPath, paths.embeddingNoticePath, paths.vadPath, paths.vadNoticePath]);
-    source(); methods();
-    return () => { source(); methods(); files(); source(); methods(); };
-  });
-  return service;
 }

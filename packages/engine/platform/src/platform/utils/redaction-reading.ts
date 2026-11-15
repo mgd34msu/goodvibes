@@ -1,7 +1,7 @@
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { captureJudgmentPort, type JudgmentPortCapture, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
 import { assertJudgmentInput } from '../gate/judgment-input.js';
-import { exportCredential, profileDistinctive, redactionCredential, residualCredential, type CredentialProjection, type RedactionPart } from './batteries/redaction.js';
+import { profileDistinctive } from './batteries/redaction.js';
 import { isClassicOperation } from '../runtime/decision-policy.js';
 
 /** A source assertion must finish before any observation can proceed. */
@@ -12,40 +12,6 @@ export function assertRedactionCurrent(check: (() => void) | undefined): void {
   if (result === undefined) return;
   drainOwned(result);
   throw new Error('Redaction source ownership must be synchronous');
-}
-
-export async function readResidualProjection(parts: readonly RedactionPart[], options: JudgmentReadingOptions): Promise<boolean | undefined> {
-  try {
-    options.signal?.throwIfAborted(); assertRedactionCurrent(options.assertCurrent);
-    if (isClassicOperation()) return undefined;
-    const state = { parts: parts.map((part) => ({ ...part })) };
-    assertJudgmentInput(state); assertRedactionCurrent(options.assertCurrent);
-    const owner = captureJudgmentPort(residualCredential.name, options);
-    const result = await residualCredential.run(owner.port, state,
-      { signal: owner.signal, site: residualCredential.name, beforeAttempt: owner.assertCurrent });
-    owner.assertCurrent();
-    const reading = result.readings.credentialRemains;
-    return reading.outcome === 'act' && reading.verdict !== 'uncertain' ? reading.verdict === 'yes' : undefined;
-  } catch { return undefined; }
-}
-
-/** The projection has no raw locally protected value, and retains every admitted text part. */
-export async function readCredentialProjection(projection: CredentialProjection,
-  purpose: 'redaction' | 'export', options: JudgmentReadingOptions): Promise<{ line: boolean; span: boolean } | undefined> {
-  try {
-    options.signal?.throwIfAborted(); assertRedactionCurrent(options.assertCurrent);
-    if (isClassicOperation()) return undefined;
-    assertJudgmentInput(projection); assertRedactionCurrent(options.assertCurrent);
-    const battery = purpose === 'export' ? exportCredential : redactionCredential;
-    const owner = captureJudgmentPort(battery.name, options);
-    const state = { phase: projection.phase, parts: projection.parts.map((part) => ({ ...part })), target: projection.target };
-    const result = await battery.run(owner.port, state, { signal: owner.signal,
-      site: battery.name, beforeAttempt: owner.assertCurrent });
-    owner.assertCurrent();
-    const line = result.readings.lineHasCredential, span = result.readings.spanIsCredential;
-    if (line.outcome !== 'act' || span.outcome !== 'act' || line.verdict === 'uncertain' || span.verdict === 'uncertain') return undefined;
-    return { line: line.verdict === 'yes', span: span.verdict === 'yes' };
-  } catch { return undefined; }
 }
 
 export interface ProfileRedactionRole {

@@ -28,22 +28,23 @@ export {
   isTerminalStatus,
 } from './lifecycle.js';
 
-// ── Registry ──────────────────────────────────────────────────────────────────
-export { TaskRegistry } from './registry.js';
-
 // ── Manager ───────────────────────────────────────────────────────────────────
 export {
   UnifiedTaskManager,
   TaskTransitionError,
   TaskNotFoundError,
   TaskNotCancellableError,
+  TaskVerbUnsupportedError,
+  type TaskController,
+  type TaskControllerResolver,
+  type TaskVerb,
 } from './manager.js';
 
 // ── Factory ───────────────────────────────────────────────────────────────────
 import type { RuntimeStore } from '../store/index.js';
 import type { RuntimeEventBus } from '../events/index.js';
 import type { TaskManager } from './types.js';
-import { UnifiedTaskManager } from './manager.js';
+import { UnifiedTaskManager, type TaskControllerResolver } from './manager.js';
 import type { FeatureFlagReader } from '../feature-flags/index.js';
 
 /**
@@ -53,6 +54,7 @@ import type { FeatureFlagReader } from '../feature-flags/index.js';
  * @param store - The runtime Zustand store.
  * @param bus - The RuntimeEventBus for event emission.
  * @param sessionId - Current session identifier (used in emitter context).
+ * @param controllers - Finds the owner's controller for a task; operator verbs are refused for a task without one.
  * @returns A TaskManager instance ready for use.
  *
  * @example
@@ -65,6 +67,7 @@ export function createTaskManager(
   bus: RuntimeEventBus,
   sessionId: string,
   featureFlags?: FeatureFlagReader,
+  controllers?: TaskControllerResolver,
 ): TaskManager {
-  return new UnifiedTaskManager(store, bus, sessionId, featureFlags);
+  return new UnifiedTaskManager(store, bus, sessionId, featureFlags, controllers);
 }

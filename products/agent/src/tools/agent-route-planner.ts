@@ -13,8 +13,8 @@ import type { JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
 import type { CommandContext } from '../input/command-registry.ts';
 import { AGENT_WORKSPACE_CATEGORIES } from '../input/agent-workspace-categories.ts';
 import { HARNESS_MODE_DESCRIPTORS, listHarnessModes } from './agent-harness-mode-catalog.ts';
-import { captureCatalogMethods, prepareHarnessCatalog, rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
-import { captureModelReadingInput, captureModelReadingSnapshotGuard, withModelReadingSource } from './agent-harness-model-reading-source.ts';
+import { prepareHarnessCatalog, rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import { captureModelReadingInput, withModelReadingSource } from './agent-harness-model-reading-source.ts';
 import { listWorkspaceActions } from './agent-harness-workspace-actions.ts';
 import { externalMemoryLiveProviderRecords, externalMemoryProviderCatalog, externalMemoryReceiptEvidence } from './agent-harness-memory-external-providers.ts';
 
@@ -35,7 +35,6 @@ function freezeRouteDeclarations(value: unknown, visited = new Set<object>()): v
   Object.freeze(value);
 }
 freezeRouteDeclarations(HARNESS_MODE_DESCRIPTORS);
-const assertDeclarationMethods = captureCatalogMethods(Array.prototype, ['flatMap', 'map', 'filter', 'slice', 'find', 'sort']);
 
 export type AgentRoutePlannerArgs = TaskRouteArgs;
 export type AgentRouteCandidate = TaskRouteCandidate;
@@ -103,26 +102,13 @@ export async function planAgentTaskRoute(
   const captured = captureModelReadingInput(args);
   const request = (typeof captured.query === 'string' ? captured.query.trim() : '') || (typeof captured.target === 'string' ? captured.target.trim() : '');
   if (!request) return planTaskRoute(captured);
-  const modes = captureModelReadingInput(HARNESS_MODE_DESCRIPTORS);
   const workspace = captureModelReadingInput(await listWorkspaceActions(context, { limit: 1000 }, options));
   freezeRouteDeclarations(workspace);
-  const assertArgs = captureModelReadingSnapshotGuard(captured);
-  const assertModes = captureModelReadingSnapshotGuard(modes);
-  const assertCategories = captureModelReadingSnapshotGuard(captureModelReadingInput(AGENT_WORKSPACE_CATEGORIES));
-  const assertContext = captureCatalogMethods(context, ['provider']);
-  const provider = context.provider;
-  const assertProvider = provider ? captureCatalogMethods(provider, ['providerRegistry']) : undefined;
+  // The arguments and the workspace actions are captured above as frozen
+  // values; the planner checks the caller once when it publishes.
   const providers = context.provider?.providerRegistry;
-  const assertSources = captureCatalogMethods(sources, ['channelRegistry']);
   const channels = sources.channelRegistry;
-  const assertSourcesCurrent = () => {
-    assertDeclarationMethods(); assertContext(); assertProvider?.(); assertSources();
-    assertArgs(args); assertModes(HARNESS_MODE_DESCRIPTORS);
-    assertCategories(AGENT_WORKSPACE_CATEGORIES);
-    if (context.provider !== provider || provider?.providerRegistry !== providers || sources.channelRegistry !== channels) throw new ToolInputProjectionError('held');
-  };
-  options.retainCurrent?.(assertSourcesCurrent, 'agent.task-route.sources');
-  const assertCurrent = () => { options.signal?.throwIfAborted(); options.assertCurrent?.(); assertSourcesCurrent(); };
+  const assertCurrent = () => { options.signal?.throwIfAborted(); options.assertCurrent?.(); };
   assertCurrent();
   return withModelReadingSource(captured, { ...options, assertCurrent }, async (protectedArgs, readingOptions) => {
     assertCurrent();

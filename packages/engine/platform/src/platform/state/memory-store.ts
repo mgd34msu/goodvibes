@@ -11,16 +11,13 @@
 import { captureMemoryOperation, assertMemoryOperationCurrent, awaitMemoryOperation, type MemoryOperationOptions } from './memory-operation.js';
 import { randomUUID } from 'node:crypto';
 import { statSync } from 'node:fs';
-import { isDeepStrictEqual, types as nodeTypes } from 'node:util';
-import { retainOwnedJson } from '../gate/judgment-input.js';
 import { rankReviewQueue, rankSemanticSearch, rerankRetrieved } from './memory-search-ranking.js';
 import { SQLiteStore } from './sqlite-store.js';
 import {
   SqliteVecMemoryIndex,
   type MemoryVectorStats,
   resolveMemoryVectorDbPath,
-  memoryVectorInput,
-  type MemoryVectorSourceRevision,
+  type MemoryVectorEntry,
 } from './memory-vector-store.js';
 import {
   HASHED_MEMORY_EMBEDDING_PROVIDER,
@@ -175,88 +172,64 @@ export interface MemoryAddOptions {
   };
 }
 
-/** Native publication proof; only the matching prepared add can validate it. */
-export type MemoryAddPublication = object;
-
-export interface MemoryPreparedAddCommitOptions extends MemoryOperationOptions {
-  readonly onPublished?: ((publication: MemoryAddPublication) => void) | undefined;
+/**
+ * Pins an add to a record the caller staged ({@link planMemoryRecord}) and
+ * runs a callback at the insert. The Agent's learning promotion stages its own
+ * transition with the record before the write and completes it at the insert.
+ */
+export interface MemoryAddInsert {
+  /** The staged id; the row is stored under it, and an id already in use is refused. */
+  readonly id?: string | undefined;
+  /** The staged creation time, so the stored row is the staged record. */
+  readonly createdAt?: number | undefined;
+  /** Runs synchronously after the row is inserted and before it is saved; a throw removes the row and fails the add. */
+  readonly onInserted?: ((record: MemoryRecord) => void) | undefined;
 }
 
-export interface MemoryPreparedAdd {
-  /** Exact canonical row getAll/get will expose after this add, allocated before effects. */
-  readonly record: Readonly<Omit<MemoryRecord, 'tags' | 'provenance'>> & {
-    readonly tags: readonly string[];
-    readonly provenance: readonly Readonly<ProvenanceLink>[];
-  };
-  assertCurrent(): void;
-  /** Valid only synchronously inside this plan's actual SQL publication callback. */
-  assertPublication(publication: MemoryAddPublication): void;
-  commit(options?: MemoryPreparedAddCommitOptions): Promise<MemoryRecord>;
+const ADD_RECORD_COLUMNS = ['id', 'scope', 'cls', 'summary', 'detail', 'tags', 'provenance', 'review_state', 'confidence',
+  'reviewed_at', 'reviewed_by', 'stale_reason', 'created_at', 'updated_at', 'valid_from', 'valid_until'];
+const MEMORY_ID_SHAPE = /^mem_[a-z0-9]+_[a-f0-9]{8}$/;
+
+function newMemoryId(at: number): string {
+  return `mem_${at.toString(36)}_${randomUUID().replace(/-/g, '').slice(0, 8)}`;
 }
 
-const memoryOwnerMapGet = WeakMap.prototype.get;
-const memoryOwnerMapHas = WeakMap.prototype.has;
-const memoryOwnerMapSet = WeakMap.prototype.set;
-const memoryOwnerMapApply = Reflect.apply;
-function ownerMapGet<K extends object, V>(map: WeakMap<K, V>, key: K): V | undefined {
-  return memoryOwnerMapApply(memoryOwnerMapGet, map, [key]);
-}
-function ownerMapHas<K extends object, V>(map: WeakMap<K, V>, key: K): boolean {
-  return memoryOwnerMapApply(memoryOwnerMapHas, map, [key]);
-}
-function ownerMapSet<K extends object, V>(map: WeakMap<K, V>, key: K, value: V): void {
-  memoryOwnerMapApply(memoryOwnerMapSet, map, [key, value]);
+function addRecordParameters(record: MemoryRecord): Array<string | number | null> {
+  return [record.id, record.scope, record.cls, record.summary, record.detail ?? null,
+    JSON.stringify(record.tags), JSON.stringify(record.provenance), record.reviewState, record.confidence,
+    record.reviewedAt ?? null, record.reviewedBy ?? null, record.staleReason ?? null,
+    record.createdAt, record.updatedAt, record.validFrom ?? null, record.validUntil ?? null];
 }
 
-const ownedMemoryStores = new WeakMap<MemoryStore, { readonly sqlite: SQLiteStore; readonly vector: SqliteVecMemoryIndex | null; readonly embeddings: MemoryEmbeddingProviderRegistry }>();
-
-/** Internal retained data-method binding. Replacement accessors are never invoked. */
-export function retainMemoryAddBinding(subject: object, keys: readonly PropertyKey[]): () => void {
-  const holders: Array<{ subject: object; prototype: unknown; key: PropertyKey; descriptor: PropertyDescriptor | undefined }> = [];
-  for (const key of keys) {
-    let holder: object | null = subject;
-    let depth = 0;
-    while (holder) {
-      if (nodeTypes.isProxy(holder) || ++depth > 64) throw new Error('Memory prepared add binding unavailable');
-      const prototype: unknown = Object.getPrototypeOf(holder);
-      const descriptor = Object.getOwnPropertyDescriptor(holder, key);
-      if (descriptor && !('value' in descriptor)) throw new Error('Memory prepared add binding unavailable');
-      holders.push({ subject: holder, prototype, key, descriptor });
-      if (descriptor) break;
-      if (prototype !== null && typeof prototype !== 'object') throw new Error('Memory prepared add binding unavailable');
-      holder = prototype;
-    }
-  }
-  return () => {
-    for (const saved of holders) {
-      const current = Object.getOwnPropertyDescriptor(saved.subject, saved.key), previous = saved.descriptor;
-      if (Object.getPrototypeOf(saved.subject) !== saved.prototype || Boolean(current) !== Boolean(previous)
-        || (current && previous && (!('value' in current) || !Object.is(current.value, previous.value)
-          || current.enumerable !== previous.enumerable || current.configurable !== previous.configurable
-          || current.writable !== previous.writable))) throw new Error('Memory prepared add binding changed');
-    }
+function authoredRecord(opts: MemoryAddOptions, id: string, at: number): MemoryRecord {
+  return {
+    id,
+    scope: opts.scope ?? 'project',
+    cls: opts.cls,
+    summary: opts.summary,
+    detail: opts.detail,
+    tags: opts.tags ?? [],
+    provenance: opts.provenance ?? [],
+    reviewState: opts.review?.state ?? 'fresh',
+    confidence: clampConfidence(opts.review?.confidence ?? FRESH_MEMORY_CONFIDENCE),
+    reviewedAt: opts.review?.reviewedAt,
+    reviewedBy: opts.review?.reviewedBy,
+    staleReason: opts.review?.staleReason,
+    createdAt: at,
+    updatedAt: at,
+    validFrom: opts.validFrom,
+    validUntil: opts.validUntil,
   };
 }
 
-const preparedOptionBindings = new WeakMap<MemoryPreparedAddCommitOptions, () => void>();
-
-/** Restrictive option capture, including the native publication callback identity. */
-export function captureMemoryPreparedAddOptions(options: MemoryPreparedAddCommitOptions = {}): MemoryPreparedAddCommitOptions {
-  const binding = retainMemoryAddBinding(options, ['signal', 'assertCurrent', 'onPublished']);
-  const lifecycle = captureMemoryOperation(options), onPublished = options.onPublished;
-  if (onPublished !== undefined && typeof onPublished !== 'function') throw new Error('Memory publication callback unavailable');
-  const captured: MemoryPreparedAddCommitOptions = Object.freeze({ signal: lifecycle.signal, onPublished, assertCurrent: () => {
-    binding(); assertMemoryOperationCurrent(lifecycle); binding();
-  } });
-  ownerMapSet(preparedOptionBindings, captured, binding);
-  return captured;
-}
-
-/** Identity/cancellation fence usable before the exact source callback adopts its native publication. */
-export function assertMemoryPreparedAddOptionsBinding(options: MemoryPreparedAddCommitOptions): void {
-  const current = ownerMapGet(preparedOptionBindings, options);
-  if (!current) throw new Error('Memory prepared options are not captured');
-  current(); options.signal?.throwIfAborted(); current();
+/**
+ * The record an add of `opts` stores, exactly as a read returns it, without
+ * writing anything: pass its `id` and `createdAt` to {@link MemoryStore.add}
+ * to store this record.
+ */
+export function planMemoryRecord(opts: MemoryAddOptions, at: number = Date.now()): MemoryRecord {
+  assertValidMemoryFields(opts);
+  return rowToRecord(ADD_RECORD_COLUMNS, addRecordParameters(authoredRecord(opts, newMemoryId(at), at)));
 }
 
 export interface MemoryReviewPatch {
@@ -346,6 +319,8 @@ export class MemoryStore {
   private vectorIndex: SqliteVecMemoryIndex | null;
   private ready = false;
   private rebuildVectorIndexPromise: Promise<MemoryVectorStats> | null = null;
+  /** A pass asked for while one ran: null when none, else whether it re-embeds every row. */
+  private rebuildVectorIndexAgain: boolean | null = null;
   private readonly embeddingRegistry: MemoryEmbeddingProviderRegistry;
   private mutationRevision = 0;
   private backendEpoch = 0;
@@ -366,9 +341,8 @@ export class MemoryStore {
           options.vectorDbPath ?? resolveMemoryVectorDbPath(dbPath),
           undefined,
           this.embeddingRegistry,
-          record => this.captureVectorSourceRevision(record),
+          id => this.rowRevision(id),
         );
-    ownerMapSet(ownedMemoryStores, this, { sqlite: this.sqlite, vector: this.vectorIndex, embeddings: this.embeddingRegistry });
   }
 
   async init(): Promise<void> {
@@ -379,7 +353,7 @@ export class MemoryStore {
     this.diskIdentity = this.currentDiskIdentity(this.sqlite);
     this.ready = true;
     await this.vectorIndex?.init();
-    this.rebuildVectorIndex();
+    this.syncVectorIndexInBackground();
     logger.info('MemoryStore: initialized', { ready: true });
   }
 
@@ -421,8 +395,12 @@ export class MemoryStore {
     return operation;
   }
 
-  /** Add a new memory record. Returns the created record. */
-  async add(opts: MemoryAddOptions, options?: MemoryOperationOptions): Promise<MemoryRecord> {
+  /**
+   * Add a new memory record. Returns the created record. `insert` pins the
+   * row to a staged id and creation time and runs `onInserted` at the insert
+   * (see {@link MemoryAddInsert}); a staged add returns the record as a read does.
+   */
+  async add(opts: MemoryAddOptions, options?: MemoryOperationOptions, insert: MemoryAddInsert = {}): Promise<MemoryRecord> {
     // Checked without yielding, so an unchanged file keeps the write synchronous.
     if (this.imageIsStale()) await this.refuseStaleImage();
     const operation = this.captureOperation(options);
@@ -430,58 +408,37 @@ export class MemoryStore {
     if (!this.ready) throw new Error('MemoryStore: not initialized');
     assertValidMemoryFields(opts);
 
-    const now = Date.now();
-    const id = `mem_${now.toString(36)}_${randomUUID().replace(/-/g, '').slice(0, 8)}`;
+    const now = insert.createdAt ?? Date.now();
+    if (!Number.isFinite(now)) throw new Error('MemoryStore: the staged creation time is not a time; nothing was stored.');
+    const id = insert.id ?? newMemoryId(now);
+    if (insert.id !== undefined && (!MEMORY_ID_SHAPE.test(insert.id) || this.get(insert.id) !== null)) {
+      throw new Error(`MemoryStore: ${insert.id} is not a new memory id; nothing was stored. Plan the record again and retry.`);
+    }
+    const record = authoredRecord(opts, id, now);
+    const parameters = addRecordParameters(record);
+    const stored = rowToRecord(ADD_RECORD_COLUMNS, parameters);
 
-    const record: MemoryRecord = {
-      id,
-      scope: opts.scope ?? 'project',
-      cls: opts.cls,
-      summary: opts.summary,
-      detail: opts.detail,
-      tags: opts.tags ?? [],
-      provenance: opts.provenance ?? [],
-      reviewState: opts.review?.state ?? 'fresh',
-      confidence: clampConfidence(opts.review?.confidence ?? FRESH_MEMORY_CONFIDENCE),
-      reviewedAt: opts.review?.reviewedAt,
-      reviewedBy: opts.review?.reviewedBy,
-      staleReason: opts.review?.staleReason,
-      createdAt: now,
-      updatedAt: now,
-      validFrom: opts.validFrom,
-      validUntil: opts.validUntil,
-    };
-
-    this.runMutation(
-      `INSERT INTO memory_records
-         (id, scope, cls, summary, detail, tags, provenance, review_state, confidence, reviewed_at, reviewed_by, stale_reason, created_at, updated_at, valid_from, valid_until)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        record.id,
-        record.scope,
-        record.cls,
-        record.summary,
-        record.detail ?? null,
-        JSON.stringify(record.tags),
-        JSON.stringify(record.provenance),
-        record.reviewState,
-        record.confidence,
-        record.reviewedAt ?? null,
-        record.reviewedBy ?? null,
-        record.staleReason ?? null,
-        record.createdAt,
-        record.updatedAt,
-        record.validFrom ?? null,
-        record.validUntil ?? null,
-      ],
-      operation,
-    );
+    let inserted = false;
+    try {
+      this.runMutation(
+        `INSERT INTO memory_records
+           (id, scope, cls, summary, detail, tags, provenance, review_state, confidence, reviewed_at, reviewed_by, stale_reason, created_at, updated_at, valid_from, valid_until)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        parameters,
+        operation,
+        () => { inserted = true; insert.onInserted?.(stored); },
+      );
+    } catch (error) {
+      // The insert callback refused the row: it is taken out again, so nothing was stored.
+      if (inserted) this.withdrawUnsavedAdd(id);
+      throw error;
+    }
 
     // The row is published: from here only a failed save can make this add
     // fail, never the caller's lifecycle or another write landing meanwhile, or
     // the caller would retry a row that already exists into a duplicate. The
     // index follows the committed row whatever happened to the caller.
-    this.indexCommitted(() => this.vectorIndex?.upsert(record, this.committedOperation()));
+    this.indexRow(record);
     try {
       await this.persistNow();
     } catch (error) {
@@ -491,106 +448,7 @@ export class MemoryStore {
       throw new Error(`MemoryStore: the memory could not be saved to disk (${summarizeError(cause)}); nothing was stored. Retry once the disk can be written.`, { cause });
     }
     logger.info('MemoryStore: record added', { id, cls: opts.cls });
-    return record;
-  }
-
-  /** Prepare a fixed native add. Preparation itself writes nothing and grants no permission. */
-  prepareAdd(opts: MemoryAddOptions, options: MemoryOperationOptions = {}): MemoryPreparedAdd {
-    if (!ownerMapHas(ownedMemoryStores, this)) throw new Error('Memory prepared add owner unavailable');
-    const binding = retainMemoryAddBinding(this, ['prepareAdd', 'captureOperationScope', 'captureOperation',
-      'runMutation', 'createAddRecord', 'addRecordParameters', 'insertAddRecord', 'get', 'retrieve', 'save', 'sqlite', 'vectorIndex', 'embeddingRegistry', 'ready', 'backendEpoch']);
-    assertNativeMemoryAddMethods(this);
-    const owner = ownerMapGet(ownedMemoryStores, this);
-    if (!owner || owner.sqlite !== this.sqlite || owner.vector !== this.vectorIndex || owner.embeddings !== this.embeddingRegistry) {
-      throw new Error('Memory prepared add native backend unavailable');
-    }
-    const providerBinding = retainMemoryAddBinding(this.embeddingRegistry, ['getDefaultProviderOrNull']);
-    const sqliteBinding = retainMemoryAddBinding(this.sqlite, ['run', 'exec', 'save', 'close']);
-    const vectorBinding = this.vectorIndex ? retainMemoryAddBinding(this.vectorIndex, ['upsert']) : () => {};
-    const lifecycle = captureMemoryPreparedAddOptions(options), input = retainOwnedJson(opts, nodeTypes.isProxy);
-    const assertBindings = () => { binding(); providerBinding(); sqliteBinding(); vectorBinding(); };
-    assertBindings();
-    const scope = this.captureOperationScope();
-    assertBindings();
-    let expectedRevision = this.mutationRevision, consumed = false, publishing = false;
-    let publication: MemoryAddPublication | undefined;
-    let commitLifecycle: MemoryPreparedAddCommitOptions | undefined;
-    const assertCurrent = () => {
-      assertBindings(); assertMemoryOperationCurrent(lifecycle); assertBindings();
-      input.assertCurrent(); assertBindings(); scope(); assertBindings();
-      if (this.mutationRevision !== expectedRevision) throw new Error('Memory prepared add source changed');
-      if (commitLifecycle) { assertMemoryOperationCurrent(commitLifecycle); assertBindings(); }
-      input.assertCurrent(); assertBindings(); scope(); assertBindings();
-      if (this.mutationRevision !== expectedRevision) throw new Error('Memory prepared add source changed');
-    };
-    assertCurrent();
-    if (!this.ready) throw new Error('MemoryStore: not initialized');
-    const authored = this.createAddRecord(opts);
-    const canonical = rowToRecord(
-      ['id', 'scope', 'cls', 'summary', 'detail', 'tags', 'provenance', 'review_state', 'confidence',
-        'reviewed_at', 'reviewed_by', 'stale_reason', 'created_at', 'updated_at', 'valid_from', 'valid_until'],
-      this.addRecordParameters(authored),
-    );
-    const record = Object.freeze({ ...canonical,
-      tags: Object.freeze([...canonical.tags]),
-      provenance: Object.freeze(canonical.provenance.map(link => Object.freeze({ ...link }))),
-    });
-    freezeNewMemoryData(record);
-    // Internal writer/vector input is detached too; callers only receive the immutable plan row.
-    const written: MemoryRecord = { ...authored, tags: [...canonical.tags],
-      provenance: canonical.provenance.map(link => ({ ...link })) };
-    const expectedRow = JSON.stringify(canonical);
-    assertCurrent();
-    const store = this;
-    const prepared: MemoryPreparedAdd = Object.freeze({
-      record,
-      assertCurrent,
-      assertPublication(receipt: MemoryAddPublication) {
-        if (this !== prepared || !publishing || receipt !== publication) throw new Error('Memory publication is not owned by this plan');
-        assertBindings(); scope(); assertBindings(); assertMemoryOperationCurrent(lifecycle); assertBindings();
-        input.assertCurrent();
-        if (commitLifecycle) assertMemoryPreparedAddOptionsBinding(commitLifecycle);
-        assertBindings();
-        if (store.mutationRevision !== expectedRevision || JSON.stringify(store.get(written.id)) !== expectedRow) {
-          throw new Error('Memory prepared publication changed');
-        }
-        assertBindings();
-      },
-      async commit(commitOptions: MemoryPreparedAddCommitOptions = {}): Promise<MemoryRecord> {
-        if (this !== prepared || consumed) throw new Error('Memory prepared add is not available');
-        consumed = true;
-        commitLifecycle = captureMemoryPreparedAddOptions(commitOptions);
-        assertCurrent();
-        const signals = [lifecycle.signal, commitLifecycle.signal].filter((signal): signal is AbortSignal => signal !== undefined);
-        const signal = signals.length > 1 ? AbortSignal.any(signals) : signals[0];
-        const operation = store.captureOperation({ signal, assertCurrent });
-        store.insertAddRecord(written, operation, () => {
-          expectedRevision = store.mutationRevision;
-          assertBindings(); scope(); assertBindings(); assertMemoryOperationCurrent(lifecycle); assertBindings();
-          input.assertCurrent();
-          if (commitLifecycle) assertMemoryPreparedAddOptionsBinding(commitLifecycle);
-          assertBindings();
-          if (JSON.stringify(store.get(written.id)) !== expectedRow) throw new Error('Memory prepared publication changed');
-          assertBindings();
-          publication = Object.freeze({}); publishing = true;
-          try {
-            const outcome: unknown = commitLifecycle?.onPublished?.(publication);
-            if (outcome !== undefined) {
-              if (outcome instanceof Promise) void outcome.catch(() => {});
-              throw new TypeError('Memory publication callbacks must be synchronous');
-            }
-          } finally { publishing = false; }
-        });
-        store.vectorIndex?.upsert(written, operation);
-        // The row is published: neither the caller's lifecycle nor an
-        // unrelated write landing during the save can retire the result, or
-        // the caller would retry a row that already exists into a duplicate.
-        await store.persistNow();
-        logger.info('MemoryStore: prepared record added', { id: written.id, cls: written.cls });
-        return { ...canonical, tags: [...canonical.tags], provenance: canonical.provenance.map(link => ({ ...link })) };
-      },
-    });
-    return prepared;
+    return insert.id !== undefined ? stored : record;
   }
 
   /** Retrieve a single record by ID. */
@@ -717,9 +575,11 @@ export class MemoryStore {
    * The vector index's candidates for the filter's query, in similarity order,
    * with the filter's post-SQL conditions applied. Retrieval only: nothing here
    * judges relevance. Empty when there is no query or the index returns
-   * nothing. `score` is the similarity on a 0 to 100 scale.
+   * nothing (a failed query embed is on `vectorStats().error`). The query is
+   * embedded through the asynchronous embed, so every embedding provider
+   * answers. `score` is the similarity on a 0 to 100 scale.
    */
-  semanticCandidates(filter: MemorySearchFilter = {}, options?: MemoryOperationOptions): MemorySemanticSearchResult[] {
+  async semanticCandidates(filter: MemorySearchFilter = {}, options?: MemoryOperationOptions): Promise<MemorySemanticSearchResult[]> {
     const operation = this.captureOperation(options, 'read');
     assertMemoryOperationCurrent(operation);
     if (!this.ready) return [];
@@ -731,7 +591,7 @@ export class MemoryStore {
       limit: Math.max(requestedLimit * 8, 50),
     };
     const results: MemorySemanticSearchResult[] = [];
-    for (const candidate of this.vectorIndex?.search(query, vectorFilter, operation) ?? []) {
+    for (const candidate of await this.vectorIndex?.search(query, vectorFilter, operation) ?? []) {
       const record = this.get(candidate.id, operation);
       if (!record) continue;
       if (!recordMatchesPostSqlFilter(record, filter)) continue;
@@ -846,7 +706,7 @@ export class MemoryStore {
         importedRecords++;
         // Index the row as stored (normalised), not the bundle's raw values.
         const stored = this.get(record.id, operation);
-        if (stored) this.vectorIndex?.upsert(stored, operation);
+        if (stored) this.indexRow(stored);
       }
 
       for (const link of bundle.links) {
@@ -1006,7 +866,7 @@ export class MemoryStore {
 
     const updated: MemoryRecord = { ...existing, cls: newClass, scope: newScope, summary: newSummary, detail: newDetail, tags: newTags, validFrom: newValidFrom, validUntil: newValidUntil, updatedAt: now,
       ...(resetReview ? { reviewState: 'fresh', confidence: FRESH_MEMORY_CONFIDENCE, reviewedAt: undefined, reviewedBy: undefined, staleReason: undefined } : {}) };
-    this.indexCommitted(() => this.vectorIndex?.upsert(updated, this.committedOperation()));
+    this.indexRow(updated);
     this.persist();
     logger.info('MemoryStore: record updated', { id });
     return updated;
@@ -1052,7 +912,7 @@ export class MemoryStore {
     );
 
     const reviewed = { ...existing, reviewState, confidence, reviewedAt, reviewedBy, staleReason, updatedAt: now };
-    this.indexCommitted(() => this.vectorIndex?.upsert(reviewed, this.committedOperation()));
+    this.indexRow(reviewed);
     this.persist();
     logger.info('MemoryStore: record reviewed', { id, reviewState, confidence });
     return reviewed;
@@ -1071,7 +931,7 @@ export class MemoryStore {
     // stores with FK enforcement disabled for a connection.
     this.runMutation('DELETE FROM memory_links WHERE from_id = ? OR to_id = ?', [id, id], operation);
     this.runMutation('DELETE FROM memory_records WHERE id = ?', [id], operation);
-    this.indexCommitted(() => this.vectorIndex?.delete(id, this.committedOperation()));
+    this.indexCommitted(() => this.vectorIndex?.delete(id));
     this.persist();
     logger.info('MemoryStore: record deleted', { id });
     return true;
@@ -1190,41 +1050,59 @@ export class MemoryStore {
     return standing;
   }
 
+  /** Bring the vector index in step with the rows now (a provider that only embeds over the network continues in the background). */
   rebuildVectorIndex(): MemoryVectorStats {
     if (!this.ready) return this.vectorStats();
-    const rows = this.sqlite.exec(
-      `SELECT id, scope, cls, summary, detail, tags, provenance, review_state, confidence, reviewed_at, reviewed_by, stale_reason, created_at, updated_at, valid_from, valid_until
-         FROM memory_records
-         ORDER BY updated_at DESC, created_at DESC`,
-    );
-    const records = rows.length ? (rows[0]?.values ?? []).map((value) => rowToRecord(rows[0]?.columns ?? [], value)) : [];
-    this.vectorIndex?.sync(records);
+    this.vectorIndex?.sync(this.vectorEntries());
     return this.vectorStats();
   }
 
-  async rebuildVectorIndexAsync(): Promise<MemoryVectorStats> {
+  /**
+   * Embed the rows through the asynchronous embed: every row when `force` is
+   * set (the default, an explicit rebuild), else only rows the index does not
+   * hold at their revision. Calls made while a pass runs share it and start
+   * one more pass after it, so rows loaded meanwhile are covered.
+   */
+  async rebuildVectorIndexAsync(options: { readonly force?: boolean } = {}): Promise<MemoryVectorStats> {
     if (!this.ready) return this.vectorStats();
-    if (!this.rebuildVectorIndexPromise) {
-      this.rebuildVectorIndexPromise = (async () => {
-        try {
-          const rows = this.sqlite.exec(
-            `SELECT id, scope, cls, summary, detail, tags, provenance, review_state, confidence, reviewed_at, reviewed_by, stale_reason, created_at, updated_at, valid_from, valid_until
-               FROM memory_records
-               ORDER BY updated_at DESC, created_at DESC`,
-          );
-          const records = rows.length ? (rows[0]?.values ?? []).map((value) => rowToRecord(rows[0]?.columns ?? [], value)) : [];
-          if (this.vectorIndex?.syncAsync) {
-            await this.vectorIndex.syncAsync(records, { force: true });
-          } else {
-            this.vectorIndex?.sync(records);
-          }
-          return this.vectorStats();
-        } finally {
-          this.rebuildVectorIndexPromise = null;
-        }
-      })();
+    const force = options.force ?? true;
+    if (this.rebuildVectorIndexPromise) {
+      this.rebuildVectorIndexAgain = (this.rebuildVectorIndexAgain ?? false) || force;
+      return this.rebuildVectorIndexPromise;
     }
-    return this.rebuildVectorIndexPromise;
+    const pass = (async () => {
+      try {
+        await this.vectorIndex?.syncAsync(this.vectorEntries(), { force });
+        return this.vectorStats();
+      } finally {
+        this.rebuildVectorIndexPromise = null;
+        const again = this.rebuildVectorIndexAgain;
+        this.rebuildVectorIndexAgain = null;
+        if (again !== null && this.ready) this.syncVectorIndexInBackground(again);
+      }
+    })();
+    this.rebuildVectorIndexPromise = pass;
+    return pass;
+  }
+
+  /** Start-up and reload: index the rows the index does not hold yet, off the caller's path. */
+  private syncVectorIndexInBackground(force = false): void {
+    if (!this.vectorIndex) return;
+    void this.rebuildVectorIndexAsync({ force }).catch((error: unknown) => {
+      logger.warn('MemoryStore: the vector index could not be brought up to date', { error: summarizeError(error) });
+    });
+  }
+
+  /** Every row with the revision its trigger stamped, in one query. */
+  private vectorEntries(): MemoryVectorEntry[] {
+    const result = this.sqlite.exec(
+      `SELECT id, scope, cls, summary, detail, tags, provenance, review_state, confidence, reviewed_at, reviewed_by, stale_reason, created_at, updated_at, valid_from, valid_until, gv_revision
+         FROM memory_records
+         ORDER BY updated_at DESC, created_at DESC`,
+    )[0];
+    if (!result) return [];
+    const revisionAt = result.columns.indexOf('gv_revision');
+    return result.values.map((values) => ({ record: rowToRecord(result.columns, values), revision: String(values[revisionAt] ?? '') }));
   }
 
   vectorStats(options?: MemoryOperationOptions): MemoryVectorStats {
@@ -1291,9 +1169,8 @@ export class MemoryStore {
       this.backendEpoch++;
       this.sqlite = next;
       this.diskIdentity = this.currentDiskIdentity(next);
-      ownerMapSet(ownedMemoryStores, this, { sqlite: this.sqlite, vector: this.vectorIndex, embeddings: this.embeddingRegistry });
       sqlite.close();
-      this.rebuildVectorIndex();
+      this.syncVectorIndexInBackground();
       logger.info('MemoryStore: reloaded the memory file after another process saved it', { path });
     })().finally(() => { this.reloading = null; });
     this.reloading = reload;
@@ -1324,15 +1201,15 @@ export class MemoryStore {
     this.vectorIndex?.close();
     this.ready = false;
     this.rebuildVectorIndexPromise = null;
+    this.rebuildVectorIndexAgain = null;
     this.diskIdentity = undefined;
     this.sqlite = this.openBackend(newDbPath);
     this.vectorIndex = new SqliteVecMemoryIndex(
       resolveMemoryVectorDbPath(newDbPath),
       undefined,
       this.embeddingRegistry,
-      record => this.captureVectorSourceRevision(record),
+      id => this.rowRevision(id),
     );
-    ownerMapSet(ownedMemoryStores, this, { sqlite: this.sqlite, vector: this.vectorIndex, embeddings: this.embeddingRegistry });
     await this.init();
   }
 
@@ -1407,71 +1284,19 @@ export class MemoryStore {
     throw new MemoryStoreChangedOnDiskError(path, 'reloading');
   }
 
-  private captureVectorSourceRevision(record: MemoryRecord): MemoryVectorSourceRevision {
-    const sqlite = this.sqlite, epoch = this.backendEpoch;
-    // Read this connection: a mutation can have committed locally before the
-    // autosave publishes its image to disk. A disk read would bind the old row.
-    const selected = sqlite.exec('SELECT * FROM memory_records WHERE id = ? LIMIT 1', [record.id])[0];
-    const values = selected?.values[0];
-    if (!selected || !values || !isDeepStrictEqual(memoryVectorInput(record), memoryVectorInput(rowToRecord(selected.columns, values)))) {
-      throw new Error('Memory vector record source changed');
-    }
-    const revision = values[selected.columns.indexOf('gv_revision')];
-    if (typeof revision !== 'string' || !/^[0-9a-f]{32}$/.test(revision)) {
-      throw new Error('Memory vector record revision unavailable');
-    }
-    return {
-      revision,
-      assertCurrent: () => {
-        if (!this.ready || this.sqlite !== sqlite || this.backendEpoch !== epoch
-          || sqlite.exec('SELECT gv_revision FROM memory_records WHERE id = ? LIMIT 1', [record.id])[0]?.values[0]?.[0] !== revision) {
-          throw new Error('Memory vector record source changed');
-        }
-      },
-    };
+  /** The row's revision as its trigger stamped it, read on this connection: a committed write may not be saved to disk yet. */
+  private rowRevision(id: string): string | undefined {
+    const value = this.sqlite.exec('SELECT gv_revision FROM memory_records WHERE id = ? LIMIT 1', [id])[0]?.values[0]?.[0];
+    return typeof value === 'string' ? value : undefined;
   }
 
-  private createAddRecord(opts: MemoryAddOptions): MemoryRecord {
-    assertValidMemoryFields(opts);
-    const now = Date.now();
-    const id = `mem_${now.toString(36)}_${randomUUID().replace(/-/g, '').slice(0, 8)}`;
-
-    const record: MemoryRecord = {
-      id,
-      scope: opts.scope ?? 'project',
-      cls: opts.cls,
-      summary: opts.summary,
-      detail: opts.detail,
-      tags: opts.tags ?? [],
-      provenance: opts.provenance ?? [],
-      reviewState: opts.review?.state ?? 'fresh',
-      confidence: clampConfidence(opts.review?.confidence ?? FRESH_MEMORY_CONFIDENCE),
-      reviewedAt: opts.review?.reviewedAt,
-      reviewedBy: opts.review?.reviewedBy,
-      staleReason: opts.review?.staleReason,
-      createdAt: now,
-      updatedAt: now,
-      validFrom: opts.validFrom,
-      validUntil: opts.validUntil,
-    };
-
-    return record;
-  }
-
-  private addRecordParameters(record: MemoryRecord): Array<string | number | null> {
-    return [record.id, record.scope, record.cls, record.summary, record.detail ?? null,
-      JSON.stringify(record.tags), JSON.stringify(record.provenance), record.reviewState, record.confidence,
-      record.reviewedAt ?? null, record.reviewedBy ?? null, record.staleReason ?? null,
-      record.createdAt, record.updatedAt, record.validFrom ?? null, record.validUntil ?? null];
-  }
-
-  private insertAddRecord(record: MemoryRecord, operation: MemoryOperationOptions, onPublished?: () => void): void {
-    this.runMutation(
-      `INSERT INTO memory_records
-         (id, scope, cls, summary, detail, tags, provenance, review_state, confidence, reviewed_at, reviewed_by, stale_reason, created_at, updated_at, valid_from, valid_until)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      this.addRecordParameters(record), operation, onPublished,
-    );
+  /**
+   * Keep the index in step with a committed row: the write hands the index
+   * the row and the revision it just produced (one read), and nothing is
+   * checked after. A refusal here is logged; the row stays stored.
+   */
+  private indexRow(record: MemoryRecord): void {
+    this.indexCommitted(() => this.vectorIndex?.upsert(record, { revision: this.rowRevision(record.id) }));
   }
 
   /**
@@ -1491,15 +1316,6 @@ export class MemoryStore {
     onPublished?.();
   }
 
-  /**
-   * The operation for work that follows a committed row (its vector entry):
-   * bound to the store's backend only, never to the caller's lifecycle, so a
-   * caller that is gone cannot leave a committed row unindexed or make it look
-   * failed.
-   */
-  private committedOperation(): MemoryOperationOptions {
-    return this.captureOperation(undefined, 'read');
-  }
 
   /**
    * Keep the index in step with a committed row. A refusal here (a later write
@@ -1564,7 +1380,7 @@ export class MemoryStore {
     try {
       this.sqlite.run('DELETE FROM memory_records WHERE id = ?', [id]);
       this.mutationRevision++;
-      this.vectorIndex?.delete(id, this.committedOperation());
+      this.vectorIndex?.delete(id);
     } catch (error) {
       logger.warn('MemoryStore: could not withdraw an add whose save failed', { id, error: summarizeError(error) });
     }
@@ -1588,37 +1404,4 @@ function consolidationProposalKey(proposal: Pick<MemoryConsolidationProposal, 'k
   return `${proposal.kind}:${[...proposal.ids].sort().join(',')}`;
 }
 
-function freezeNewMemoryData(value: unknown): void {
-  if (!value || typeof value !== 'object') return;
-  for (const child of Object.values(value)) freezeNewMemoryData(child);
-  Object.freeze(value);
-}
 
-const nativePrepareAdd = MemoryStore.prototype.prepareAdd;
-const nativeAddMethods = ['prepareAdd', 'captureOperationScope', 'captureOperation', 'runMutation',
-  'createAddRecord', 'addRecordParameters', 'insertAddRecord', 'get', 'retrieve', 'save']
-  .map(key => ({ key, value: Object.getOwnPropertyDescriptor(MemoryStore.prototype, key)?.value }));
-function assertNativeMemoryAddMethods(store: MemoryStore): void {
-  for (const original of nativeAddMethods) {
-    let holder: object | null = store;
-    while (holder) {
-      const slot = Object.getOwnPropertyDescriptor(holder, original.key);
-      if (slot) {
-        if (!('value' in slot) || slot.value !== original.value) throw new Error('Memory prepared add native method changed');
-        break;
-      }
-      holder = Object.getPrototypeOf(holder);
-    }
-    if (!holder) throw new Error('Memory prepared add native method unavailable');
-  }
-}
-/** Internal native bridge. A copied/constructed store cannot issue a prepared add. */
-export function prepareMemoryStoreAdd(store: MemoryStore, input: MemoryAddOptions, options?: MemoryOperationOptions): MemoryPreparedAdd {
-  if (!ownerMapHas(ownedMemoryStores, store)) throw new Error('Memory prepared add owner unavailable');
-  const current = retainMemoryAddBinding(store, ['prepareAdd']);
-  if (store.prepareAdd !== nativePrepareAdd) throw new Error('Memory prepared add owner changed');
-  current();
-  const prepared = nativePrepareAdd.call(store, input, options);
-  current();
-  return prepared;
-}

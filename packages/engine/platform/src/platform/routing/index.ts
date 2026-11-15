@@ -40,7 +40,6 @@ export {
   contentPartKind,
   localServerIdentity,
   localServerIdentityDefinition,
-  localServerIdentityPolicy,
   reasoningFamily,
   reasoningRejection,
   stopReason,
@@ -121,13 +120,13 @@ export {
 } from './model-readiness.js';
 export { personalOpsLaneMember, personalOpsToolLane, personalOpsSampleField, personalOpsReceiptStatus, personalOpsResultField } from './batteries/personal-ops.js';
 
-export { localServingStatus, localServingStatusPolicy, localResourcePressure, localResourcePressurePolicy, localServingSchemaStatus, localServingSchemaStatusPolicy } from './batteries/local-model-diagnostics.js';
+export { localServingStatus, localResourcePressure, localServingSchemaStatus } from './batteries/local-model-diagnostics.js';
 
 export { remotePublisherOutcomeKind, remotePublisherSchemaStatus } from './batteries/remote-publisher.js';
 
 export { atRestCredential, memoryRouteRole, memoryCredentialState, memoryLiveStatus, memoryReceiptMember, memorySchemaCertified, memoryProviderSelect } from './batteries/memory-provider.js';
 
-export { localBenchmarkPrompt, localBenchmarkPromptPolicy } from './batteries/local-benchmark-prompt.js';
+export { localBenchmarkPrompt } from './batteries/local-benchmark-prompt.js';
 
 export { readCommandDiscovery, type CommandDiscoveryEntry, type CommandDiscoveryRequest, type CommandDiscoveryReading } from './command-discovery.js';
 export { declaredClassicModelStack, declaredClassicBoolean, declaredClassicServingStatus, declaredClassicResourcePressure,

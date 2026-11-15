@@ -21,10 +21,15 @@ import type { Battery, YesNoItem } from '@goodvibes-jev/judgment';
 import type { BackgroundProcess } from '@goodvibes-jev/engine/platform/platform/tools';
 import { ordinaryResearchOwner, cleanupResearchScreeningFixtures } from '../helpers/research-screening.ts';
 import {
-  resolveBackgroundProcessClass,
+  withBackgroundProcessClass,
   resolveKillOnTimeout, clampTimeout, DEFAULT_BACKGROUND_TIMEOUT_MS, MAX_BACKGROUND_TIMEOUT_MS, processAgeMs, processStatus,
 } from '@/tools/agent-harness-process-timeout-policy.ts';
 import type { AgentHarnessBackgroundProcessArgs } from '@/tools/agent-harness-background-processes-types.ts';
+import type { ProcessClassificationOptions } from '@/tools/agent-harness-process-classification.ts';
+
+// The class is read for a start that has a deadline and no killOnTimeout.
+const resolveBackgroundProcessClass = (args: AgentHarnessBackgroundProcessArgs, command: string, options: ProcessClassificationOptions = {}) =>
+  withBackgroundProcessClass(args, command, 30_000, options, processClass => processClass);
 
 const args = (extra: Record<string, unknown> = {}): AgentHarnessBackgroundProcessArgs =>
   extra as AgentHarnessBackgroundProcessArgs;

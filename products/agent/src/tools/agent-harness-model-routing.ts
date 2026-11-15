@@ -77,7 +77,7 @@ function routeCandidates(context: CommandContext): readonly RouteCandidate[] {
       kind: 'route',
       id: 'helper-model',
       label: 'Helper model route',
-      detail: 'Optional helper-model route for Agent-owned helper operations.',
+      detail: 'Optional route for supporting work (resume summaries). An empty provider and model, or helper.enabled off, keep that work on the main model.',
       currentValue: {
         enabled: readConfig(context, 'helper.enabled') ?? null,
         provider: readConfig(context, 'helper.globalProvider') ?? null,

@@ -1,6 +1,5 @@
-import { captureMemoryOperation, assertMemoryOperationCurrent, type MemoryOperationOptions } from './memory-operation.js';
-import { assertMemoryPreparedAddOptionsBinding, captureMemoryPreparedAddOptions, prepareMemoryStoreAdd, retainMemoryAddBinding } from './memory-store.js';
-import type { MemoryClass, MemoryPreparedAdd, MemoryPreparedAddCommitOptions, MemoryAddPublication, MemoryAddOptions, MemoryBundle, MemoryDoctorReport, MemoryLink, MemoryRecord, MemoryReviewPatch, MemoryScope, MemorySearchFilter, MemorySemanticSearchResult, MemoryStore } from './memory-store.js';
+import { captureMemoryOperation, type MemoryOperationOptions } from './memory-operation.js';
+import type { MemoryClass, MemoryAddInsert, MemoryAddOptions, MemoryBundle, MemoryDoctorReport, MemoryLink, MemoryRecord, MemoryReviewPatch, MemoryScope, MemorySearchFilter, MemorySemanticSearchResult, MemoryStore } from './memory-store.js';
 import type { MemoryVectorStats } from './memory-vector-store.js';
 import type { MemoryImportResult } from './memory-store.js';
 import type { MemoryUsageChange, MemoryUsageEntry, MemoryUsageTopEntry } from './memory-usage-stats.js';
@@ -13,25 +12,12 @@ import { runHonestMemorySearch, type HonestMemorySearchOptions, type HonestMemor
  * MemoryRegistry, thin observable wrapper around the MemoryStore.
  * Panels subscribe via listeners; commands push/retrieve through this.
  */
-const memoryOwnerMapGet = WeakMap.prototype.get;
-const memoryOwnerMapSet = WeakMap.prototype.set;
-const memoryOwnerMapApply = Reflect.apply;
-function ownerMapGet<K extends object, V>(map: WeakMap<K, V>, key: K): V | undefined {
-  return memoryOwnerMapApply(memoryOwnerMapGet, map, [key]);
-}
-function ownerMapSet<K extends object, V>(map: WeakMap<K, V>, key: K, value: V): void {
-  memoryOwnerMapApply(memoryOwnerMapSet, map, [key, value]);
-}
-
-const nativeRegistries = new WeakMap<object, { readonly store: MemoryStore; readonly notify: () => void }>();
-
 export class MemoryRegistry {
   private store: MemoryStore;
   private listeners: Array<() => void> = [];
 
   constructor(store: MemoryStore) {
     this.store = store;
-    ownerMapSet(nativeRegistries, this, Object.freeze({ store, notify: () => this.notify() }));
   }
 
   getStore(): MemoryStore {
@@ -65,7 +51,8 @@ export class MemoryRegistry {
     }
   }
 
-  async add(opts: MemoryAddOptions, options?: MemoryOperationOptions): Promise<MemoryRecord> {
+  /** `insert` pins the row to a staged record and runs a callback at the insert (see MemoryStore.add). */
+  async add(opts: MemoryAddOptions, options?: MemoryOperationOptions, insert?: MemoryAddInsert): Promise<MemoryRecord> {
     const operation = captureMemoryOperation(options);
     // A new record may not claim the reserved consolidation reviewer either (see review()).
     const claimsAutomation = options?.automatedReview !== true && opts.review?.reviewedBy?.trim().toLowerCase() === 'consolidation';
@@ -74,7 +61,7 @@ export class MemoryRegistry {
     // Not raced against the signal: the store checks it before the row is
     // published and then lets the write finish, so an aborted add either
     // stores nothing or resolves with the stored record.
-    const record = await this.store.add(safeOpts, operation);
+    const record = await this.store.add(safeOpts, operation, insert);
     this.notify();
     return record;
   }
@@ -222,79 +209,3 @@ export class MemoryRegistry {
   }
 }
 
-/** Genuine constructed registry bridge; generic MemoryApi doubles cannot issue native plans. */
-export function prepareMemoryRegistryAdd(registry: object, input: MemoryAddOptions, options?: MemoryOperationOptions): MemoryPreparedAdd {
-  const owner = ownerMapGet(nativeRegistries, registry);
-  if (!owner || !(registry instanceof MemoryRegistry)) throw new Error('Memory prepared add registry unavailable');
-  const store = owner.store;
-  const binding = retainMemoryAddBinding(registry, ['store', 'getStore', 'getAll', 'notify']);
-  assertNativeRegistryMethods(registry);
-  if (registry.getStore() !== store) throw new Error('Memory prepared add registry changed');
-  const lifecycle = captureMemoryPreparedAddOptions(options);
-  const assertRegistryCurrent = () => {
-    binding(); assertMemoryOperationCurrent(lifecycle); binding();
-    if (registry.getStore() !== store) throw new Error('Memory prepared add registry changed');
-  };
-  assertRegistryCurrent();
-  const native = prepareMemoryStoreAdd(store, input, { signal: lifecycle.signal, assertCurrent: assertRegistryCurrent });
-  let commitLifecycle: MemoryPreparedAddCommitOptions | undefined;
-  let consumed = false;
-  const assertCurrent = () => {
-    assertRegistryCurrent(); native.assertCurrent();
-    if (commitLifecycle) assertMemoryOperationCurrent(commitLifecycle);
-    assertRegistryCurrent();
-  };
-  const prepared: MemoryPreparedAdd = Object.freeze({
-    record: native.record,
-    assertCurrent,
-    assertPublication(receipt: MemoryAddPublication) {
-      if (this !== prepared) throw new Error('Memory publication plan changed');
-      if (commitLifecycle) assertMemoryPreparedAddOptionsBinding(commitLifecycle);
-      assertRegistryCurrent(); native.assertPublication(receipt); assertRegistryCurrent();
-    },
-    async commit(commitOptions: MemoryPreparedAddCommitOptions = {}): Promise<MemoryRecord> {
-      if (this !== prepared || consumed) throw new Error('Memory prepared add is not available');
-      consumed = true;
-      commitLifecycle = captureMemoryPreparedAddOptions(commitOptions);
-      assertCurrent();
-      const assertCommitCurrent = () => {
-        assertRegistryCurrent();
-        if (commitLifecycle) assertMemoryOperationCurrent(commitLifecycle);
-        assertRegistryCurrent();
-      };
-      const result = await native.commit({ signal: commitLifecycle.signal, assertCurrent: assertCommitCurrent,
-        onPublished: receipt => {
-          if (commitLifecycle) assertMemoryPreparedAddOptionsBinding(commitLifecycle);
-          assertRegistryCurrent(); native.assertPublication(receipt);
-          const outcome: unknown = commitLifecycle?.onPublished?.(receipt);
-          if (outcome !== undefined) {
-            if (outcome instanceof Promise) void outcome.catch(() => {});
-            throw new TypeError('Memory publication callbacks must be synchronous');
-          }
-        },
-      });
-      // The row is published and saved: every listener is told and the record
-      // returned, whatever happened to the callers' lifecycles meanwhile.
-      owner.notify();
-      return result;
-    },
-  });
-  return prepared;
-}
-
-const nativeRegistryAddMethods = ['getStore', 'getAll', 'notify']
-  .map(key => ({ key, value: Object.getOwnPropertyDescriptor(MemoryRegistry.prototype, key)?.value }));
-function assertNativeRegistryMethods(registry: MemoryRegistry): void {
-  for (const original of nativeRegistryAddMethods) {
-    let holder: object | null = registry;
-    while (holder) {
-      const slot = Object.getOwnPropertyDescriptor(holder, original.key);
-      if (slot) {
-        if (!('value' in slot) || slot.value !== original.value) throw new Error('Memory prepared add native registry method changed');
-        break;
-      }
-      holder = Object.getPrototypeOf(holder);
-    }
-    if (!holder) throw new Error('Memory prepared add native registry method unavailable');
-  }
-}

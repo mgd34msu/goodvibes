@@ -15,17 +15,25 @@ export interface ProcessClassificationOptions {
 const BATTERY = 'agent.tools.long-lived-process';
 const SITE = 'agent.tools.background-process.classification';
 
-/** Keep the protected receipt alive through the last check and the actual spawn. */
+/**
+ * Read whether a command is an app or server that should outlive its deadline.
+ * `undefined` means the reading could not be taken or did not settle; the caller
+ * then starts the process and leaves it running past the deadline. Only a
+ * cancelled call or a changed caller refuses. The protected receipt stays alive
+ * through the last check and the actual spawn.
+ */
 export async function withLongLivedProcessReading<T>(
   command: string,
   options: ProcessClassificationOptions,
-  consume: (longLived: boolean, assertCurrent: () => void) => T | Promise<T>,
+  consume: (longLived: boolean | undefined, assertCurrent: () => void) => T | Promise<T>,
 ): Promise<T> {
   options.signal?.throwIfAborted(); options.assertCurrent?.();
   const state = snapshotJudgmentInput({ command, platform: process.platform }) as { readonly command: string; readonly platform: string };
-  if (typeof state.command !== 'string' || state.command.length > SOURCE_SCREENING_LIMITS.characters) throw new ToolInputProjectionError('held');
   const owner = options.sourceOwner;
-  if (!owner) throw new ToolInputProjectionError('held');
+  const unread = () => { options.signal?.throwIfAborted(); options.assertCurrent?.(); };
+  if (!owner || typeof state.command !== 'string' || state.command.length > SOURCE_SCREENING_LIMITS.characters) {
+    unread(); return await consume(undefined, unread);
+  }
   const handle = owner.capture([state.command]);
   let receipt: SourceScreeningReceipt | undefined;
   let released = false;
@@ -47,17 +55,19 @@ export async function withLongLivedProcessReading<T>(
     assertSourceCurrent();
     const screened = await owner.screen(handle);
     assertSourceCurrent();
-    if (screened.status !== 'settled') throw new ToolInputProjectionError('held');
+    if (screened.status !== 'settled') return await consume(undefined, assertSourceCurrent);
     receipt = screened.receipt;
     const projected = owner.project(receipt);
-    if (projected.length !== 1 || typeof projected[0] !== 'string') throw new ToolInputProjectionError('held');
+    if (projected.length !== 1 || typeof projected[0] !== 'string') return await consume(undefined, assertSourceCurrent);
     // Neither a registry lookup nor a port/cache/log/transport is reached until
     // the complete source has a settled, current local screening projection.
     assertSourceCurrent();
-    const classification = await decisionOrClassic(async () => {
+    const classification = await decisionOrClassic<{ readonly longLived: boolean | undefined; readonly assertCurrent: () => void }>(async () => {
     const decision = gateJudgmentRegistry.get(BATTERY);
-    if (!decision || !('run' in decision) || typeof decision.run !== 'function') throw new ToolInputProjectionError('unavailable');
-    const port = judgmentPort(SITE);
+    if (!decision || !('run' in decision) || typeof decision.run !== 'function') return { longLived: undefined, assertCurrent: assertSourceCurrent };
+    let port: ReturnType<typeof judgmentPort>;
+    try { port = judgmentPort(SITE); }
+    catch { return { longLived: undefined, assertCurrent: assertSourceCurrent }; }
     const portModel = port.model, portAsk = port.ask, recorder = port.recorder;
     const assertCurrent = () => {
       assertSourceCurrent();
@@ -73,13 +83,21 @@ export async function withLongLivedProcessReading<T>(
       assertCurrent(); return result;
     } };
     assertCurrent();
-    const run = await (decision as Battery<{ readonly long_lived: YesNoItem }>).run(guardedPort,
-      { command: projected[0], platform: state.platform }, { site: SITE, ...(options.signal ? { signal: options.signal } : {}) });
+    let run;
+    try {
+      run = await (decision as Battery<{ readonly long_lived: YesNoItem }>).run(guardedPort,
+        { command: projected[0], platform: state.platform }, { site: SITE, ...(options.signal ? { signal: options.signal } : {}) });
+    } catch (error) {
+      // A failed reading starts the process anyway; a cancelled call or a changed caller does not.
+      if (options.signal?.aborted || error instanceof ToolInputProjectionError) throw error;
+      assertCurrent();
+      return { longLived: undefined, assertCurrent };
+    }
     assertCurrent();
     const reading = run.readings.long_lived;
     if (reading?.kind !== 'yes-no' || reading.outcome !== 'act' || (reading.verdict !== 'yes' && reading.verdict !== 'no')) {
-      run.recordAction('process launch held: unsettled lifetime classification');
-      throw new ToolInputProjectionError('held');
+      run.recordAction('process started unclassified: its deadline leaves it running');
+      return { longLived: undefined, assertCurrent };
     }
     run.recordAction(reading.verdict === 'yes' ? 'classified long_lived' : 'classified command');
     assertCurrent();

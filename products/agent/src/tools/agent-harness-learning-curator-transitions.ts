@@ -1,4 +1,3 @@
-import type { MemoryPreparedAdd } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import type { MemoryAddOptions, MemoryRecord } from '@goodvibes-jev/engine/platform/platform/state';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { AgentPersonaCreateInput, AgentPersonaUpdateInput, AgentPersonaRecord, AgentPersonaSnapshot } from '../agent/persona-registry.ts';
@@ -10,7 +9,7 @@ export type LearningTransitionIntent =
   | { readonly kind: 'create'; readonly domain: 'persona'; readonly input: AgentPersonaCreateInput }
   | { readonly kind: 'create'; readonly domain: 'skill'; readonly input: AgentSkillCreateInput }
   | { readonly kind: 'create'; readonly domain: 'routine'; readonly input: AgentRoutineCreateInput }
-  | { readonly kind: 'create'; readonly domain: 'memory'; readonly input: MemoryAddOptions; readonly preparedRecord: MemoryPreparedAdd['record'] }
+  | { readonly kind: 'create'; readonly domain: 'memory'; readonly input: MemoryAddOptions; readonly preparedRecord: MemoryRecord }
   | { readonly kind: 'update'; readonly domain: 'persona'; readonly id: string; readonly input: AgentPersonaUpdateInput }
   | { readonly kind: 'update'; readonly domain: 'skill'; readonly id: string; readonly input: AgentSkillUpdateInput }
   | { readonly kind: 'update'; readonly domain: 'routine'; readonly id: string; readonly input: AgentRoutineUpdateInput }

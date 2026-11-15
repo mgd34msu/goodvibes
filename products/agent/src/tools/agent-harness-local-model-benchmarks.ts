@@ -3,7 +3,7 @@ import { declaredClassicModelStack } from '@goodvibes-jev/engine/platform/platfo
 import { types as nodeTypes } from 'node:util';
 import { captureJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { prepareJudgmentResult } from '@goodvibes-jev/engine/platform/platform/gate';
-import { localBenchmarkPrompt, localBenchmarkPromptPolicy, routingRegistry } from '@goodvibes-jev/engine/platform/platform/routing';
+import { localBenchmarkPrompt } from '@goodvibes-jev/engine/platform/platform/routing';
 import { assertProjectionCurrent, ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import type { ArtifactDescriptor, ArtifactRecord } from '@goodvibes-jev/engine/platform/platform/artifacts';
@@ -312,30 +312,14 @@ function benchmarkReadingSource(source: CompleteBenchmarkArtifact) {
 }
 
 async function readBenchmarkMembership(source: { readonly artifact: ReturnType<typeof benchmarkReadingSource> }, options: ModelReadingOptions): Promise<LocalBenchmarkMembership> {
-  localBenchmarkPromptPolicy.assertCurrent();
   return withModelReadingSource(source, options, async (state, scoped) => {
     return decisionOrClassic<LocalBenchmarkMembership>(async () => {
       assertProjectionCurrent(scoped.assertCurrent);
-      const assertRegistry = captureCatalogMethods(routingRegistry, ['get']);
-      const getDecision = routingRegistry.get; assertRegistry();
-      if (getDecision.call(routingRegistry, localBenchmarkPrompt.name) !== localBenchmarkPrompt) throw new ToolInputProjectionError('unavailable');
-      const assertDefinitionSlots = captureCatalogMethods(localBenchmarkPrompt,
-        ['name', 'version', 'description', 'accuracyFloor', 'model', 'items', 'fixtures', 'fixtureCount', 'checkFixtures', 'run']);
-      const definition = { name: localBenchmarkPrompt.name, version: localBenchmarkPrompt.version, description: localBenchmarkPrompt.description,
-        accuracyFloor: localBenchmarkPrompt.accuracyFloor, model: localBenchmarkPrompt.model, items: localBenchmarkPrompt.items, fixtures: localBenchmarkPrompt.fixtures };
-      const capturedDefinition = captureModelReadingInput(definition);
       const installation = captureJudgmentPort(localBenchmarkPrompt.name, { signal: scoped.signal, prepareResultCapture: prepareJudgmentResult });
       let assertInstallation = installation.assertCurrent;
-      const assertBackendBindings = () => {
-        localBenchmarkPromptPolicy.assertCurrent();
-        assertRegistry(); assertDefinitionSlots(); assertModelReadingInputCurrent(definition, JSON.stringify(capturedDefinition));
+      const assertBackend = () => {
         scoped.signal?.throwIfAborted(); installation.signal.throwIfAborted();
         if (!isClassicOperation()) assertInstallation();
-      };
-      const assertBackend = () => {
-        assertBackendBindings();
-        if (getDecision.call(routingRegistry, localBenchmarkPrompt.name) !== localBenchmarkPrompt) throw new ToolInputProjectionError('held');
-        assertBackendBindings();
       };
       scoped.retainCurrent?.(assertBackend);
       const assertCurrent = () => { scoped.signal?.throwIfAborted(); assertProjectionCurrent(scoped.assertCurrent); assertBackend(); };
@@ -389,7 +373,7 @@ async function readOwnedLocalModelBenchmarkSnapshot(context: BenchmarkArtifactCo
   const assertOptions = captureCatalogMethods(options, ['signal', 'sourceOwner', 'assertCurrent', 'retainCurrent']);
   const signal = options.signal, originalAssert = options.assertCurrent;
   const assertCaller = () => { assertOptions(); signal?.throwIfAborted(); assertProjectionCurrent(originalAssert); assertOptions(); signal?.throwIfAborted(); };
-  assertCaller(); localBenchmarkPromptPolicy.assertCurrent();
+  assertCaller();
   const nativeStore = modelReadingServicePath(context, ['platform', 'artifactStore']);
   const store = context.platform.artifactStore ?? null;
   const assertStoreSlots = store ? captureCatalogMethods(store, ['list', 'readContent']) : () => {};
@@ -402,7 +386,6 @@ async function readOwnedLocalModelBenchmarkSnapshot(context: BenchmarkArtifactCo
   const loaded = new Map<string, CompleteBenchmarkArtifact>();
   const contentGuards: (() => void)[] = [];
   const assertNativeBindings = () => {
-    localBenchmarkPromptPolicy.assertCurrent();
     assertOptions(); signal?.throwIfAborted(); assertStoreSlots();
     if (modelReadingServicePath(context, ['platform', 'artifactStore']) !== nativeStore
       || options.signal !== signal || options.assertCurrent !== originalAssert) throw new ToolInputProjectionError('held');
@@ -491,9 +474,8 @@ async function readOwnedLocalModelBenchmarkSnapshot(context: BenchmarkArtifactCo
 
 export async function readLocalModelBenchmarkHistory(context: BenchmarkArtifactContext, includeParameters: boolean, options: ModelReadingOptions): Promise<LocalModelBenchmarkHistory> {
   const snapshot = await readLocalModelBenchmarkSnapshot(context, options);
-  options.signal?.throwIfAborted(); assertProjectionCurrent(options.assertCurrent); localBenchmarkPromptPolicy.assertCurrent();
-  const result = localModelBenchmarkHistoryFrom(snapshot, includeParameters);
-  localBenchmarkPromptPolicy.assertCurrent(); return result;
+  options.signal?.throwIfAborted(); assertProjectionCurrent(options.assertCurrent);
+  return localModelBenchmarkHistoryFrom(snapshot, includeParameters);
 }
 
 export function localModelBenchmarkPlan(recipe: LocalModelRecipe): LocalModelBenchmarkPlan {

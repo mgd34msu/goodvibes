@@ -16,8 +16,8 @@ import { drainOwned } from '@goodvibes-jev/judgment/decisions';
  * judgment, independent of display limits.
  */
 import { captureJudgmentPort, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
-import { isDeepStrictEqual, types as nodeTypes } from 'node:util';
-import { assertJudgmentInput, isDeepFrozenJson } from '../../gate/judgment-input.js';
+import { isDeepStrictEqual } from 'node:util';
+import { assertJudgmentInput } from '../../gate/judgment-input.js';
 import { captureStrictJudgmentJson, prepareJudgmentResult } from '../../gate/judgment-result.js';
 import { SOURCE_SCREENING_LIMITS, type SourceScreeningReceipt } from '../../security/source-screening/types.js';
 import { ToolInputProjectionError } from '../../tools/input-projection.js';
@@ -176,88 +176,40 @@ export async function planTaskRoute(
   if (!request) return MISSING_REQUEST;
   assertJudgmentInput(originalArgs);
 
-  const descriptors = (value: object) => {
-    if (nodeTypes.isProxy(value) || ![Object.prototype, null].includes(Object.getPrototypeOf(value))) throw new ToolInputProjectionError('invalid');
-    const fields = Object.getOwnPropertyDescriptors(value);
-    if (Object.getOwnPropertySymbols(value).length || Object.values(fields).some(field => !('value' in field))) throw new ToolInputProjectionError('invalid');
-    return fields;
-  };
-  const sameBindings = (left: Record<string, PropertyDescriptor>, right: Record<string, PropertyDescriptor>) =>
-    Object.keys(left).length === Object.keys(right).length && Object.entries(right).every(([key, field]) => {
-      const current = left[key];
-      return current !== undefined && Object.is(current.value, field.value) && current.enumerable === field.enumerable
-        && current.configurable === field.configurable && current.writable === field.writable;
-    });
-  const depsFields = descriptors(deps), optionsFields = descriptors(options);
-  const listing = deps.namedIds;
-  const listingFields = listing === undefined ? undefined : descriptors(listing);
+  // The request and the listings are read once into frozen values and passed
+  // down; nothing below re-lists or re-compares them.
   const owner = options.sourceOwner;
   if (!owner) throw new ToolInputProjectionError('held');
-  const ownerFields = descriptors(owner);
-  const capture = owner.capture, screen = owner.screen, project = owner.project, release = owner.release;
+  const listing = deps.namedIds;
   const signal = options.signal, callerCurrent = options.assertCurrent, retainCurrent = options.retainCurrent;
-  const depsPrototype = Object.getPrototypeOf(deps), optionsPrototype = Object.getPrototypeOf(options);
-  const ownerPrototype = Object.getPrototypeOf(owner), listingPrototype = listing === undefined ? undefined : Object.getPrototypeOf(listing);
-  // Frozen arguments cannot change after capture (a proxy was refused by the
-  // capture above), so only mutable arguments are compared again.
-  const argsFrozen = isDeepFrozenJson(args);
-  const assertBindings = () => {
-    signal?.throwIfAborted();
-    if (Object.getPrototypeOf(deps) !== depsPrototype || Object.getPrototypeOf(options) !== optionsPrototype
-      || Object.getPrototypeOf(owner) !== ownerPrototype || (listing !== undefined && Object.getPrototypeOf(listing) !== listingPrototype)
-      || !sameBindings(descriptors(deps), depsFields) || !sameBindings(descriptors(options), optionsFields)
-      || !sameBindings(descriptors(owner), ownerFields)
-      || (listing !== undefined && listingFields !== undefined && !sameBindings(descriptors(listing), listingFields))
-      || (!argsFrozen && !isDeepStrictEqual(captureStrictJudgmentJson(args), originalArgs))) throw new ToolInputProjectionError('held');
-  };
   const assertCaller = () => {
     signal?.throwIfAborted();
     const checked: unknown = callerCurrent?.();
     if (checked !== undefined) { drainOwned(checked); throw new ToolInputProjectionError('held'); }
     signal?.throwIfAborted();
   };
-  assertBindings(); assertCaller(); assertBindings();
-  const sources = NAMED_KINDS.map(kind => ({ kind, source: listing?.[kind] }));
-  const snapshots = sources.map(({ kind, source }) => {
-    assertBindings(); const ids = captureStrictJudgmentJson(source?.() ?? []); assertBindings();
-    return { kind, source, ids };
-  });
+  assertCaller();
+  const snapshots = NAMED_KINDS.map(kind => ({ kind, ids: captureStrictJudgmentJson(listing?.[kind]?.() ?? []) }));
   // The route catalog is frozen where it is declared, so its candidates are read once.
   const routeSource = captureStrictJudgmentJson(routeCandidates());
-  const sourceCurrent = () => {
-    assertBindings();
-    for (const { source, ids } of snapshots) {
-      if (!isDeepStrictEqual(captureStrictJudgmentJson(source?.() ?? []), ids)) throw new ToolInputProjectionError('held');
-    }
-    assertBindings();
-  };
-  const assertOriginal = () => {
-    sourceCurrent();
-    assertCaller();
-    sourceCurrent();
-  };
-  assertOriginal();
   const parts = [request, ...snapshots.map(({ ids }) => JSON.stringify(ids))];
   if (parts.reduce((total, part) => total + part.length, 0) > SOURCE_SCREENING_LIMITS.characters) throw new ToolInputProjectionError('held');
-  const handle = capture.call(owner, parts);
+  const handle = owner.capture(parts);
   let receipt: SourceScreeningReceipt | undefined;
   let projection: readonly string[] | undefined;
-  let publicationCurrent = sourceCurrent;
-  // The source, then the caller, bracket the owner's projection; each foreign call is
-  // followed by a check, and nothing is re-proven between two calls that run no foreign code.
-  const assertSource = () => {
-    sourceCurrent(); assertCaller();
-    if (receipt && !isDeepStrictEqual(project.call(owner, receipt), projection)) throw new ToolInputProjectionError('held');
-    assertCaller(); sourceCurrent();
+  // During the readings only cancellation is checked; the caller and the
+  // screening receipt are confirmed once, when the plan is published.
+  const assertLive = () => { signal?.throwIfAborted(); };
+  const assertPublication = () => {
+    assertCaller();
+    if (receipt && !isDeepStrictEqual(owner.project(receipt), projection)) throw new ToolInputProjectionError('held');
   };
-  const abort = () => { void release.call(owner, handle).catch(() => {}); };
+  const abort = () => { void owner.release(handle).catch(() => {}); };
   signal?.addEventListener('abort', abort, { once: true });
   try {
-    assertSource();
-    const screened = await whileCurrent(screen.call(owner, handle), { signal, assertCurrent: assertSource });
-    assertSource();
+    const screened = await whileCurrent(owner.screen(handle), { signal, assertCurrent: assertLive });
     if (screened.status !== 'settled') throw new ToolInputProjectionError('held');
-    receipt = screened.receipt; projection = captureStrictJudgmentJson(project.call(owner, receipt));
+    receipt = screened.receipt; projection = captureStrictJudgmentJson(owner.project(receipt));
     if (projection.length !== parts.length || typeof projection[0] !== 'string') throw new ToolInputProjectionError('held');
     const protectedRequest = projection[0];
     const namedIds: NamedIdSources = Object.fromEntries(snapshots.map(({ kind, ids }, index) => {
@@ -274,8 +226,7 @@ export async function planTaskRoute(
       return [kind, () => protectedIds];
     }));
     assertJudgmentInput({ request: protectedRequest, namedIds: snapshots.map(({ kind }) => namedIds[kind]?.()) });
-    assertSource();
-    const authority = captureJudgmentPort(TASK_ROUTE_SITE, { ...options, assertCurrent: assertSource, prepareResultCapture: prepareJudgmentResult });
+    const authority = captureJudgmentPort(TASK_ROUTE_SITE, { ...options, assertCurrent: assertLive, prepareResultCapture: prepareJudgmentResult });
     const includeParameters = originalArgs.includeParameters === true;
     const limit = readLimit(originalArgs.limit, includeParameters ? 8 : 5);
     const matchLimit = includeParameters ? 6 : 3;
@@ -301,8 +252,7 @@ export async function planTaskRoute(
       selection.recordAction(`held: route selection unsure between ${ranked.length} routes`);
       slotRun.recordAction('held: route selection unsure');
       const restriction = authority.consumeObservation();
-      publicationCurrent = () => { sourceCurrent(); restriction.assertCurrent(); sourceCurrent(); };
-      retainCurrent?.(publicationCurrent, TASK_ROUTE_SITE); assertOriginal(); publicationCurrent();
+      retainCurrent?.(restriction.assertCurrent, TASK_ROUTE_SITE); assertPublication();
       const held: HeldTaskRoutePlan = {
         status: 'uncertain', request: previewText(protectedRequest, includeParameters ? 220 : 120), judgment,
         unsure: { reading: 'route selection', outcome: selection.outcome, leading: leading.draft.id, probability: leading.score },
@@ -339,12 +289,10 @@ export async function planTaskRoute(
     };
     authority.assertCurrent();
     const restriction = authority.consumeObservation();
-    publicationCurrent = () => { sourceCurrent(); restriction.assertCurrent(); sourceCurrent(); };
-    retainCurrent?.(publicationCurrent, TASK_ROUTE_SITE); assertOriginal(); publicationCurrent();
+    retainCurrent?.(restriction.assertCurrent, TASK_ROUTE_SITE); assertPublication();
     return plan;
   } finally {
     signal?.removeEventListener('abort', abort);
-    await release.call(owner, handle);
-    assertOriginal(); publicationCurrent();
+    await owner.release(handle);
   }
 }

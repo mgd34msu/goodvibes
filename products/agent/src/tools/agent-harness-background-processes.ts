@@ -691,18 +691,19 @@ export async function runBackgroundProcessAction(context: CommandContext, args: 
       }
       const cwd = readCwd(context, args);
       const root = context.workspace.shellPaths?.workingDirectory;
-      if (!root) throw new ToolInputProjectionError('held');
+      if (!root) throw new Error('Background process start needs the workspace working directory, and this Agent context has none. Start the Agent inside the project directory, then start the process again.');
       const physicalRoot = realpathSync(root);
       const launchOptions = { ...supplied, assertCurrent: () => {
         assertPrivilegeCurrent(); assertEffect(); current.assertCurrent?.();
         if (realpathSync(root) !== physicalRoot || readCwd(context, args) !== cwd) throw new ToolInputProjectionError('held');
       } };
       const timeoutMs = clampTimeout(args.timeoutMs ?? readField(args, 'timeoutMs'), DEFAULT_BACKGROUND_TIMEOUT_MS);
-      const { processClass, killOnTimeout, result } = await spawnClassifiedBackgroundProcess(manager, args, command, cwd, timeoutMs, launchOptions);
+      const { processClass, killOnTimeout, result, note } = await spawnClassifiedBackgroundProcess(manager, args, command, cwd, timeoutMs, launchOptions);
       return {
         status: 'started',
         processClass,
         killOnTimeout,
+        ...(note ? { classificationNote: note } : {}),
         timeoutBehavior: timeoutMs === 0 ? 'No automatic deadline; stop it explicitly with process action:"kill".' : killOnTimeout
           ? `SIGTERM then SIGKILL after ${timeoutMs}ms.`
           : `Left running past ${timeoutMs}ms; stop it explicitly with process action:"kill".`,

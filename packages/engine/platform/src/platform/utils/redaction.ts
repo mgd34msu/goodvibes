@@ -1,10 +1,10 @@
 import { declaredFieldKind, FieldKindReader, withheldFieldKind, type FieldKind } from './field-kind-reading.js';
 import { isClassicOperation } from '../runtime/decision-policy.js';
-import { assertRedactionCurrent, ProfileDistinctiveReader, readCredentialProjection, readResidualProjection, type ProfileRedactionRole } from './redaction-reading.js';
-import { captureJudgmentPort, type JudgmentPortCapture, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
-import { assertJudgmentInput, captureOwnedJson, retainOwnedJson, judgmentInputProblem, snapshotJudgmentEvidence, snapshotJudgmentInput } from '../gate/judgment-input.js';
+import { assertRedactionCurrent, ProfileDistinctiveReader, type ProfileRedactionRole } from './redaction-reading.js';
+import { captureJudgmentPort, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
+import { assertJudgmentInput, captureOwnedJson, retainOwnedJson, judgmentInputProblem, snapshotJudgmentEvidence } from '../gate/judgment-input.js';
 import { captureStructuredCredentialReferenceConfigValue } from '../config/structured-credential-config.js';
-import { redactionCredential, exportCredential, residualCredential, profileDistinctive, type RedactionPart } from './batteries/redaction.js';
+import { exportCredentialSpans } from './batteries/export-credential-spans.js';
 
 const profileRoles = new ProfileDistinctiveReader();
 
@@ -493,17 +493,21 @@ function operationFieldReadings(options: JudgmentReadingOptions): OperationField
   };
 }
 
-/** Captures the complete source locally, then reads only its protected projection. */
-export function redactSensitiveDataAsync(text: string, options: RedactionOptions = {}): Promise<string> {
-  if (isClassicOperation()) {
-    // Synchronous: nothing can change between the start and the end, so the
-    // caller's own check runs once, before the result is handed back.
-    options.signal?.throwIfAborted();
-    const result = redactClassicText(text, options.secretValues);
-    options.assertCurrent?.();
-    return Promise.resolve(result);
-  }
-  return redactTextSource(text, options);
+/**
+ * Mask text that leaves the machine. Everything but a session export gets the
+ * local masking pass alone (no model request). A session export also has its
+ * candidate spans read, all of them in one request for the text: a span read
+ * as not a credential keeps its value, an unsure one stays masked, and a failed
+ * request leaves the local result.
+ */
+export async function redactSensitiveDataAsync(text: string, options: RedactionOptions = {}): Promise<string> {
+  options.signal?.throwIfAborted();
+  if (options.purpose === 'export' && !isClassicOperation()) return redactExportText(text, options);
+  // Synchronous: nothing can change between the start and the end, so the
+  // caller's own check runs once, before the result is handed back.
+  const result = redactClassicText(text, options.secretValues);
+  options.assertCurrent?.();
+  return result;
 }
 
 /**
@@ -514,13 +518,104 @@ export function redactSensitiveDataAsync(text: string, options: RedactionOptions
  * text leaving the machine wants and text kept on it does not.
  */
 function redactClassicText(text: string, secrets: readonly string[] = [], anonymize = true): string {
+  const protectedText = maskKnownValues(text, secrets, anonymize);
+  const result = replaceSpans(protectedText, localSpans(protectedText, 0).map(span => ({ ...span, replacement: span.marker })));
+  return judgmentInputProblem(result) === undefined ? result : '[REDACTED]';
+}
+
+/** Issuer formats, identity (when `anonymize`), registered profile values and the caller's secrets. */
+function maskKnownValues(text: string, secrets: readonly string[], anonymize: boolean): string {
   let protectedText = applyPatterns(text, anonymize ? [...ISSUER_CREDENTIAL_PATTERNS, ...currentIdentityPatterns()] : ISSUER_CREDENTIAL_PATTERNS);
   const profile = profileValueReader?.();
   const values = [...secrets, ...(profile?.guarded ?? []), ...(profile?.absolute ?? []), ...(profile?.guardedFields?.map(field => field.value) ?? [])];
   for (const secret of values.filter(value => value.length > 0).sort((a, b) => b.length - a.length))
     protectedText = protectedText.split(secret).join('[REDACTED]');
-  const result = replaceSpans(protectedText, localSpans(protectedText, 0).map(span => ({ ...span, replacement: span.marker })));
-  return judgmentInputProblem(result) === undefined ? result : '[REDACTED]';
+  return protectedText;
+}
+
+/** Most serialized characters one span reading carries; a larger text is read in several requests. */
+const EXPORT_SPAN_REQUEST_CHARS = 120_000;
+
+/**
+ * The session-export pass: the local masking, with its candidate tokens read
+ * together. Cost: 0 requests for a text with no candidate token, otherwise one
+ * (more only when the lines around the spans exceed one request's budget).
+ */
+async function redactExportText(text: string, options: RedactionOptions): Promise<string> {
+  if (text.length === 0) return text;
+  const signal = options.signal;
+  const reading = { ...(signal ? { signal } : {}), ...(options.assertCurrent ? { assertCurrent: options.assertCurrent } : {}) };
+  // Profile roles decide which registered profile values the local pass masks.
+  try { await prepareProfileRedactionRoles(reading); }
+  catch (error) { if (signal?.aborted) throw error; }
+  let known = '', spans: OutgoingSpan[] = [], local = '';
+  try {
+    known = maskKnownValues(text, options.secretValues ?? [], true);
+    spans = localSpans(known, 0);
+    local = replaceSpans(known, spans.map(span => ({ ...span, replacement: span.marker })));
+    if (judgmentInputProblem(local) !== undefined) local = '[REDACTED]';
+  } catch { return '[REDACTED]'; }
+  // A credential-named value is masked as a fact; only candidate tokens are a judgment.
+  const askable = spans.flatMap((span, index) => span.field === undefined && span.syntax === 'candidate-token' ? [index] : []);
+  if (askable.length === 0 || local === '[REDACTED]') { assertRedactionCurrent(options.assertCurrent); return local; }
+  const items = askable.map(index => exportSpanItem(known, spans, index));
+  const released = new Set<number>();
+  try {
+    const owner = captureJudgmentPort(exportCredentialSpans.name, reading);
+    for (const batch of exportSpanBatches(items)) {
+      const result = await exportCredentialSpans.count(owner.port, batch.map(entry => entry.item), { signal: owner.signal, site: exportCredentialSpans.name });
+      owner.assertCurrent();
+      for (const [position, reading] of result.readings.entries()) {
+        const entry = batch[position];
+        if (entry !== undefined && reading.outcome === 'act' && reading.verdict === 'no') released.add(entry.span);
+      }
+    }
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    return local;
+  }
+  const result = replaceSpans(known, spans.map((span, index) => {
+    if (!released.has(index)) return { ...span, replacement: span.marker };
+    // A released value still may not carry literal credential or card syntax.
+    try { snapshotJudgmentEvidence(span.value); return { ...span, replacement: span.value }; }
+    catch { return { ...span, replacement: span.marker }; }
+  }));
+  assertRedactionCurrent(options.assertCurrent);
+  return judgmentInputProblem(result) === undefined ? result : local;
+}
+
+type ExportSpanPart = { kind: 'text'; text: string } | { kind: 'span'; reference: string; syntax: 'assignment-value' | 'candidate-token' };
+
+/** One span's question: its line with every span withheld, and which span is asked about. */
+function exportSpanItem(text: string, spans: readonly OutgoingSpan[], target: number): { span: number; item: { parts: ExportSpanPart[]; target: string } } {
+  const span = spans[target]!;
+  const lineStart = text.lastIndexOf('\n', span.start - 1) + 1;
+  const newline = text.indexOf('\n', span.end);
+  const lineEnd = newline === -1 ? text.length : newline;
+  const parts: ExportSpanPart[] = [];
+  let offset = lineStart, reference = 0, targetReference = '';
+  for (const [index, other] of spans.entries()) {
+    if (other.start < lineStart || other.end > lineEnd) continue;
+    parts.push({ kind: 'text', text: text.slice(offset, other.start) });
+    const ref = `span-${++reference}`;
+    if (index === target) targetReference = ref;
+    parts.push({ kind: 'span', reference: ref, syntax: other.syntax });
+    offset = other.end;
+  }
+  parts.push({ kind: 'text', text: text.slice(offset, lineEnd) });
+  return { span: target, item: { parts: parts.filter(part => part.kind !== 'text' || part.text.length > 0), target: targetReference } };
+}
+
+function exportSpanBatches<T extends { readonly item: unknown }>(entries: readonly T[]): T[][] {
+  const batches: T[][] = [];
+  let batch: T[] = [], size = 0;
+  for (const entry of entries) {
+    const length = JSON.stringify(entry.item).length;
+    if (batch.length > 0 && size + length > EXPORT_SPAN_REQUEST_CHARS) { batches.push(batch); batch = []; size = 0; }
+    batch.push(entry); size += length;
+  }
+  if (batch.length > 0) batches.push(batch);
+  return batches;
 }
 
 /**
@@ -633,112 +728,6 @@ function redactClassicStructure(value: unknown, options: StructuredRedactionOpti
   return result;
 }
 
-async function redactTextSource(text: string, options: RedactionOptions,
-  operationFields?: OperationFieldReadings, retainCurrent?: (assertCurrent: () => void) => void): Promise<string> {
-  if (text.length === 0) return text;
-  const signal = options.signal, ownerCurrent = options.assertCurrent, purpose = options.purpose ?? 'redaction';
-  let source: ReturnType<typeof captureRedactionSource>;
-  let secrets: readonly string[];
-  let secretSource: ReturnType<typeof retainOwnedJson>;
-  const originalSecrets = options.secretValues;
-  let readingOwner: JudgmentPortCapture | undefined;
-  try {
-    source = captureRedactionSource();
-    captureOwnedJson(text);
-    secretSource = retainOwnedJson(originalSecrets ?? []);
-    const captured = secretSource.snapshot;
-    if (!Array.isArray(captured) || !captured.every((value: unknown) => typeof value === 'string')) return '[REDACTED]';
-    secrets = captured;
-  } catch { return '[REDACTED]'; }
-  const assertSource = () => {
-    assertRedactionCurrent(ownerCurrent); source.assertCurrent();
-    if (signal?.aborted || options.signal !== signal || options.assertCurrent !== ownerCurrent
-      || (options.purpose ?? 'redaction') !== purpose
-      || options.secretValues !== originalSecrets) throw new Error('Redaction operation is no longer current');
-    secretSource.assertCurrent();
-  };
-  const assertCurrent = () => { if (readingOwner) readingOwner.assertCurrent(); else assertSource(); };
-  const kinds = operationFields ?? operationFieldReadings({ ...(signal ? { signal } : {}), assertCurrent });
-  try {
-    assertCurrent();
-    await prepareProfileRedactionRoles({ ...(signal ? { signal } : {}), assertCurrent });
-    let protectedText = applyPatterns(text, [...ISSUER_CREDENTIAL_PATTERNS, ...currentIdentityPatterns()]);
-    for (const secret of [...secrets].filter((value) => value.length > 0).sort((a, b) => b.length - a.length))
-      protectedText = protectedText.replaceAll(secret, '[REDACTED]');
-    const lines = protectedText.split('\n').map((line) => {
-      const spans = outgoingSpans(line);
-      const parts: RedactionPart[] = [];
-      let offset = 0;
-      for (const [index, span] of spans.entries()) {
-        parts.push({ kind: 'text', text: line.slice(offset, span.start) });
-        const safeField = span.field !== undefined && applyPatterns(span.field,
-          [...ISSUER_CREDENTIAL_PATTERNS, ...currentIdentityPatterns()]) === span.field ? span.field : undefined;
-        parts.push({ kind: 'span', reference: `span-${index + 1}`, syntax: span.syntax,
-          ...(safeField !== undefined ? { field: safeField } : {}) });
-        offset = span.end;
-      }
-      parts.push({ kind: 'text', text: line.slice(offset) });
-      return { line, spans, parts };
-    });
-    // Inspect the complete projection before capturing any free-text reading port.
-    snapshotJudgmentInput({ lines: lines.map(({ parts }) => ({ parts })) });
-    readingOwner = captureJudgmentPort(purpose === 'export' ? 'engine.export.credential' : 'engine.redaction.credential',
-      { ...(signal ? { signal } : {}), assertCurrent: assertSource });
-    const output: string[] = [];
-    // Each reading below checks the operation's owner at its own boundary; the
-    // loop only stops early when the caller cancels.
-    for (const { line, spans, parts } of lines) {
-      signal?.throwIfAborted();
-      if (line.length === 0) { output.push(line); continue; }
-      const replacements: { start: number; end: number; replacement: string }[] = [];
-      if (spans.length === 0) {
-        const reading = await readCredentialProjection({ phase: 'source', parts, target: 'whole-line' }, purpose,
-          { ...(signal ? { signal } : {}), assertCurrent });
-        output.push(reading?.line === false && reading.span === false ? line : '[REDACTED]');
-      } else {
-        let lineHasCredential = false, hasProtectedSpan = false;
-        for (const [index, span] of spans.entries()) {
-          let replacement = span.marker;
-          const field = span.field;
-          const kind = field === undefined ? undefined : await kinds.read(field);
-          if (kind === 'secret') replacement = (span.value.match(/^Bearer\s+/i)?.[0] ?? '') + span.marker;
-          else if (kind === 'owner_profile') replacement = '[REDACTED_PROFILE]';
-          else if (kind === 'content') replacement = '[REDACTED_TEXT]';
-          else if (kind === undefined || kind === 'other') {
-            const reading = await readCredentialProjection({ phase: 'source', parts, target: `span-${index + 1}` }, purpose,
-              { ...(signal ? { signal } : {}), assertCurrent });
-            lineHasCredential ||= reading?.line === true;
-            // A role reading cannot release literal authentication/card syntax
-            // nested inside an otherwise ordinary opaque value.
-            if (reading?.span === false) {
-              // Observational egress may already contain our public redaction
-              // tokens. Actual nested credentials and cards still withhold the
-              // complete span; this never changes action-input admission.
-              try { snapshotJudgmentEvidence(span.value); replacement = span.value; }
-              catch { /* Preserve the withheld replacement. */ }
-            }
-          }
-          hasProtectedSpan ||= replacement !== span.value;
-          replacements.push({ start: span.start, end: span.end, replacement });
-        }
-        // A benign target cannot certify unrelated prose. Read every residual
-        // text part after removing all local spans, independently of target roles.
-        const residual = parts.map((part): RedactionPart => part.kind === 'span'
-          ? { kind: 'withheld', reference: part.reference } : part);
-        const remaining = await readResidualProjection(residual,
-          { ...(signal ? { signal } : {}), assertCurrent });
-        output.push(remaining === false && (!lineHasCredential || hasProtectedSpan)
-          ? replaceSpans(line, replacements) : '[REDACTED]');
-      }
-    }
-    assertCurrent(); kinds.assertCurrent();
-    const result = output.join('\n');
-    retainCurrent?.(() => { assertCurrent(); kinds.assertCurrent(); });
-    return result;
-  } catch { return '[REDACTED]'; }
-  finally { if (operationFields === undefined) kinds.dispose(); }
-}
-
 /**
  * Profile values and issuer-reserved credential formats only, leaving paths
  * and candidate-shaped spans intact.
@@ -795,30 +784,7 @@ export async function redactStructuredDataAsync(value: unknown, options: Structu
   type ReferenceCapture = { readonly kind: 'held' } | { readonly kind: 'sentinel' }
     | { readonly kind: 'reference'; readonly value: ReturnType<typeof captureStructuredCredentialReferenceConfigValue> };
   const nativeReferences = new Map<string, { readonly path: readonly string[]; readonly capture: ReferenceCapture }>();
-  let readingOwner: JudgmentPortCapture | undefined;
-  let assertTextContracts: () => void;
   try {
-    // Repeated text may share a result only while every defining contract is
-    // still the one captured for this operation, including profile roles.
-    const contracts = [redactionCredential, exportCredential, residualCredential, profileDistinctive].map(battery => {
-      const keys = ['name', 'version', 'model', 'items', 'run'] as const;
-      const prototype = Object.getPrototypeOf(battery);
-      const descriptors = keys.map(key => Object.getOwnPropertyDescriptor(battery, key));
-      if (descriptors.some(descriptor => descriptor && !('value' in descriptor))) throw new Error('Redaction contract is unavailable');
-      const data = retainOwnedJson({ name: battery.name, version: battery.version, model: battery.model, items: battery.items });
-      return () => {
-        if (Object.getPrototypeOf(battery) !== prototype) throw new Error('Redaction contract is no longer current');
-        for (const [index, key] of keys.entries()) {
-          const original = descriptors[index], current = Object.getOwnPropertyDescriptor(battery, key);
-          if (original === undefined ? current !== undefined : current === undefined || !('value' in current)
-            || !Object.is(current.value, original.value) || current.writable !== original.writable
-            || current.enumerable !== original.enumerable || current.configurable !== original.configurable)
-            throw new Error('Redaction contract is no longer current');
-        }
-        data.assertCurrent();
-      };
-    });
-    assertTextContracts = () => { for (const assertContract of contracts) assertContract(); };
     source = captureRedactionSource(); retainedValue = retainOwnedJson(value); snapshot = retainedValue.snapshot;
     // Only native config and the support bundle's root config envelope carry
     // this declaration. An arbitrary extension suffix grants no exemption.
@@ -841,10 +807,10 @@ export async function redactStructuredDataAsync(value: unknown, options: Structu
       throw new Error('Structured redaction source is no longer current');
     secretSource.assertCurrent(); declaredSource.assertCurrent(); retainedValue.assertCurrent();
   };
-  const assertCurrent = () => { if (readingOwner) readingOwner.assertCurrent(); else assertSource(); };
+  const assertCurrent = assertSource;
   const reading = { ...options, assertCurrent };
   const fields = operationFieldReadings(reading);
-  const texts = new Map<string, { readonly value: string; readonly assertCurrent: () => void }>();
+  const texts = new Map<string, string>();
   function protectKey(key: string): string {
     let protectedKey = applyPatterns(key, [...ISSUER_CREDENTIAL_PATTERNS, ...currentIdentityPatterns()]);
     for (const secret of secretLiterals) protectedKey = protectedKey.replaceAll(secret, '[REDACTED]');
@@ -878,20 +844,17 @@ export async function redactStructuredDataAsync(value: unknown, options: Structu
     if (typeof entry === 'string') {
       // A fixed credential-reference sentinel, never a raw secret value.
       if (entry === '<redacted>') return entry;
-      assertTextContracts();
       const cached = texts.get(entry);
-      if (cached) { cached.assertCurrent(); return cached.value; }
-      let current: (() => void) | undefined;
-      const result = await redactTextSource(entry, reading, fields, guard => { current = guard; });
-      assertTextContracts();
-      if (current) {
-        current();
-        if (texts.size >= 256) {
-          const oldest = texts.keys().next();
-          if (!oldest.done) texts.delete(oldest.value);
-        }
-        texts.set(entry, { value: result, assertCurrent: current });
+      if (cached !== undefined) return cached;
+      // Only an export reads its candidate spans; every other value gets the local pass alone.
+      const result = purpose === 'export'
+        ? await redactExportText(entry, { ...reading, secretValues: secretLiterals })
+        : redactClassicText(entry, secretLiterals);
+      if (texts.size >= 256) {
+        const oldest = texts.keys().next();
+        if (!oldest.done) texts.delete(oldest.value);
       }
+      texts.set(entry, result);
       return result;
     }
     if (Array.isArray(entry)) {
@@ -956,9 +919,7 @@ export async function redactStructuredDataAsync(value: unknown, options: Structu
       }
     }
     collect(snapshot); assertJudgmentInput({ fields: names }); assertCurrent();
-    try { readingOwner = captureJudgmentPort('engine.redaction.credential', { ...options, assertCurrent: assertSource }); }
-    catch { /* Local field policy still applies; semantic credential readers withhold when unavailable. */ }
-    const result = await visit(snapshot); assertCurrent(); fields.assertCurrent(); assertTextContracts(); return result;
+    const result = await visit(snapshot); assertCurrent(); fields.assertCurrent(); return result;
   }
   catch { return '[REDACTED]'; }
   finally { fields.dispose(); }

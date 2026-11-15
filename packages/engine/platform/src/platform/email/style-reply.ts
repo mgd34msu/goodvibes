@@ -3,7 +3,7 @@ import type { SecretLikeTextPredicate } from '../google/account-registry.js';
 import type { EmailSummary } from './email-service.js';
 import { assertJudgmentInput } from '../gate/judgment-input.js';
 import { isClassicOperation } from '../runtime/decision-policy.js';
-import { readStyleFrequency, readStyleFrequencyOrNone, readStyleSenderName, readStyleSentenceCount, readStyleTone, StyleReplyReadingError, withEmailStyleSource, type StyleReplyReadingOptions } from './style-reply-readings.js';
+import { readStyleProfile, readStyleSenderName, StyleReplyReadingError, withEmailStyleSource, type StyleReplyReadingOptions } from './style-reply-readings.js';
 export { StyleReplyReadingError } from './style-reply-readings.js';
 export type { StyleReplyReadingOptions } from './style-reply-readings.js';
 
@@ -22,44 +22,28 @@ export interface StyleProfile {
   readonly greeting: string;
   /** Most common sign-off found in sent messages, e.g. 'Thanks', 'Best', 'Cheers'. */
   readonly signOff: string;
-  /** Median sentence count across sent messages (whole number, ≥1). */
+  /** Typical sentence count of a sent message (whole number, ≥1). */
   readonly medianSentenceCount: number;
   /** Dominant tone established by the corpus reading: 'formal' | 'casual' | 'neutral'. */
   readonly tone: 'formal' | 'casual' | 'neutral';
   /** True when values are explicit defaults, including an unassessed Classic template. */
   readonly isDefault: boolean;
   /**
-   * Fields of a corpus-derived profile that the sent messages gave no evidence for,
-   * so they hold the template value rather than a learned one. Absent when none did.
+   * Fields of a corpus-derived profile the reading did not establish (the sent
+   * messages showed none, or the reading was unsure), so they hold the template
+   * value rather than a learned one. Absent when every field was read.
    */
-  readonly templateFields?: readonly ('greeting' | 'signOff' | 'medianSentenceCount')[];
+  readonly templateFields?: readonly ('greeting' | 'signOff' | 'medianSentenceCount' | 'tone')[];
 }
 
 export const DEFAULT_STYLE_PROFILE: StyleProfile = Object.freeze({ greeting: 'Hi', signOff: 'Thanks', medianSentenceCount: 3, tone: 'neutral', isDefault: true });
 
-/** Greeting tokens in priority order (most → least common in business email). */
-const GREETING_TOKENS: readonly string[] = [
-  'Hi', 'Hello', 'Hey', 'Dear', 'Greetings', 'Good morning', 'Good afternoon',
-];
-
-/**
- * Sign-off tokens in offered tie order. Semantic readings establish the actual closing phrase;
- * a substring in the body does not count as a sign-off.
- */
-const SIGN_OFF_TOKENS: readonly string[] = [
-  'Kind regards', 'Best regards', 'All the best', 'Thank you', 'Thanks',
-  'Sincerely', 'Take care', 'Cheers', 'Regards', 'Best',
-];
-
 // ---------------------------------------------------------------------------
-// Internal helpers (exported for testing)
+// Internal helpers
 // ---------------------------------------------------------------------------
 
 function record(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
-}
-function requireStrings(value: unknown): void {
-  if (!Array.isArray(value) || !value.every(item => typeof item === 'string')) throw new StyleReplyReadingError();
 }
 function requireSentMessages(value: unknown): void {
   if (!Array.isArray(value) || !value.every(item => record(item) && typeof item.bodyPreview === 'string')) throw new StyleReplyReadingError();
@@ -72,74 +56,35 @@ function requireDraftInput(inbound: unknown, profile: unknown, context: unknown)
     || typeof context !== 'string') throw new StyleReplyReadingError();
 }
 
-/** Code counts only settled, acting sentence-boundary readings. */
-export async function countSentences(text: string, options: StyleReplyReadingOptions = {}): Promise<number> {
-  return withEmailStyleSource({ text }, options, source => { if (typeof source.text !== 'string') throw new StyleReplyReadingError(); return Boolean(source.text.trim()); }, async (source, readings) => {
-    if (!source.text.trim()) return 0;
-    if (!readings) throw new StyleReplyReadingError();
-    return readStyleSentenceCount(source.text, readings);
-  });
-}
-
-/**
- * Compute the median of a sorted number array.
- * Returns `fallback` when the array is empty.
- */
-export function median(sorted: readonly number[], fallback: number): number {
-  if (sorted.length === 0) return fallback;
-  const mid = Math.floor(sorted.length / 2);
-  if (sorted.length % 2 === 1) return sorted[mid]!;
-  return Math.round(((sorted[mid - 1]!) + (sorted[mid]!)) / 2);
-}
-
-/** Count actual phrase use per message. Offered order breaks settled ties. */
-export async function mostFrequent(
-  corpus: readonly string[], candidates: readonly string[], fallback: string,
-  options: StyleReplyReadingOptions = {},
-): Promise<string> {
-  return withEmailStyleSource({ corpus, candidates, fallback }, options, source => { requireStrings(source.corpus); requireStrings(source.candidates); if (typeof source.fallback !== 'string') throw new StyleReplyReadingError(); return source.corpus.length > 0 || source.candidates.length > 0 || source.fallback.length > 0; }, async (source, readings) => {
-    if (!source.corpus.length || !source.candidates.length) return source.fallback;
-    if (!readings) throw new StyleReplyReadingError();
-    return readStyleFrequency(source.corpus, source.candidates, source.fallback, 'phrase', readings);
-  });
-}
-
-/** Read overall author voice, retaining the complete supplied corpus. */
-export async function classifyTone(bodies: readonly string[], options: StyleReplyReadingOptions = {}): Promise<StyleProfile['tone']> {
-  return withEmailStyleSource({ bodies }, options, source => { requireStrings(source.bodies); return source.bodies.length > 0; }, async (source, readings) => {
-    if (!source.bodies.length) return 'neutral';
-    if (!readings) throw new StyleReplyReadingError();
-    return readStyleTone(source.bodies, readings);
-  });
-}
-
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
-/** Read supplied sent messages; an actually empty corpus has explicit defaults. */
+/**
+ * Read supplied sent messages in one request over the whole corpus; an actually
+ * empty corpus has explicit defaults. A part the reading does not establish keeps
+ * its template value and is named in `templateFields`; the profile is never refused for it.
+ */
 export async function extractStyleProfile(sentMessages: readonly StyleSentMessage[], options: StyleReplyReadingOptions = {}): Promise<StyleProfile> {
   return withEmailStyleSource({ sentMessages }, options, source => { requireSentMessages(source.sentMessages); return source.sentMessages.length > 0; }, async (source, readings) => {
     if (isClassicOperation()) return { ...DEFAULT_STYLE_PROFILE, provenance: 'classic' as const, assessment: 'not-evaluated' as const };
     const bodies = source.sentMessages.map(message => message.bodyPreview).filter(body => body.length > 0);
     if (!bodies.length) return { greeting: 'Hi', signOff: 'Thanks', medianSentenceCount: 3, tone: 'neutral', isDefault: true };
     if (!readings) throw new StyleReplyReadingError();
-    const templateFields: Array<'greeting' | 'signOff' | 'medianSentenceCount'> = [];
-    const greetingRead = await readStyleFrequencyOrNone(bodies, GREETING_TOKENS, 'greeting', readings);
-    if (greetingRead === null) templateFields.push('greeting');
-    const signOffRead = await readStyleFrequencyOrNone(bodies, SIGN_OFF_TOKENS, 'signOff', readings);
-    if (signOffRead === null) templateFields.push('signOff');
-    const greeting = greetingRead ?? 'Hi', signOff = signOffRead ?? 'Thanks';
-    const sentenceCounts: number[] = [];
-    for (const body of bodies) {
-      const count = await readStyleSentenceCount(body, readings);
-      if (count > 0) sentenceCounts.push(count);
-    }
-    sentenceCounts.sort((a, b) => a - b);
-    if (!sentenceCounts.length) templateFields.push('medianSentenceCount');
-    const tone = await readStyleTone(bodies, readings);
-    readings.assertCurrent();
-    return { greeting, signOff, medianSentenceCount: Math.max(1, median(sentenceCounts, 3)), tone, isDefault: false, ...(templateFields.length > 0 ? { templateFields } : {}) };
+    const read = await readStyleProfile(bodies, readings);
+    const templateFields: Array<'greeting' | 'signOff' | 'medianSentenceCount' | 'tone'> = [];
+    if (read.greeting === null) templateFields.push('greeting');
+    if (read.signOff === null) templateFields.push('signOff');
+    if (read.medianSentenceCount === null) templateFields.push('medianSentenceCount');
+    if (read.tone === null) templateFields.push('tone');
+    return {
+      greeting: read.greeting ?? DEFAULT_STYLE_PROFILE.greeting,
+      signOff: read.signOff ?? DEFAULT_STYLE_PROFILE.signOff,
+      medianSentenceCount: read.medianSentenceCount ?? DEFAULT_STYLE_PROFILE.medianSentenceCount,
+      tone: read.tone ?? DEFAULT_STYLE_PROFILE.tone,
+      isDefault: false,
+      ...(templateFields.length > 0 ? { templateFields } : {}),
+    };
   }, undefined, true);
 }
 
@@ -175,8 +120,8 @@ export async function composeDraftReply(
     const usedContext = source.context;
     const usedProfile = source.profile;
 
-    // Build body paragraphs scaled to the user's median sentence count.
-    // The settled corpus median controls only the fixed placeholder length.
+    // Build body paragraphs scaled to the author's typical message length,
+    // which controls only the fixed placeholder length.
     const lines: string[] = [];
 
     // Greeting
@@ -193,7 +138,7 @@ export async function composeDraftReply(
       lines.push(usedContext.trim());
     }
 
-    // Filler sentences to approximate median length (when no context provided
+    // Filler sentences to approximate the typical length (when no context provided
     // and the profile expects more sentences than the acknowledgement alone)
     if (!classic && !usedContext.trim() && usedProfile.medianSentenceCount > 2) {
       lines.push('');
@@ -215,7 +160,7 @@ export async function composeDraftReply(
     readings?.assertCurrent();
     // Profiles can arrive from a caller, so only the known field names are echoed.
     const templateFields = (Array.isArray(usedProfile.templateFields) ? usedProfile.templateFields : [])
-      .filter(field => field === 'greeting' || field === 'signOff' || field === 'medianSentenceCount');
+      .filter(field => field === 'greeting' || field === 'signOff' || field === 'medianSentenceCount' || field === 'tone');
     return {
       ...(classic ? { provenance: 'classic' as const, styleAssessment: 'not-evaluated' as const } : {}),
       body,
@@ -225,7 +170,7 @@ export async function composeDraftReply(
       reviewBoundary:
         (classic ? 'Classic uses the supplied/default template; writing style and personal salutation were not inferred. ' : '') +
         (templateFields.length
-          ? `The ${templateFields.join(', ')} in this draft are template defaults: the sent messages showed none, so they are not the author's own style. `
+          ? `The ${templateFields.join(', ')} in this draft are template defaults: the sent messages did not establish them, so they are not the author's own style. `
           : '') +
         'This is a DRAFT only. Review the content before sending. ' +
         'Sending requires confirm:true on the email send path (SMTP or connector) ' +

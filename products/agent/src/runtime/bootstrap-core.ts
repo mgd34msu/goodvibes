@@ -127,6 +127,7 @@ export function composeAgentPermissionManager(services: Pick<RuntimeServices, 'p
 export function composeAgentRuntimeState(
   configManager: BootstrapOptions['configManager'],
   binding: LiveSessionBindingDeps<ConversationManager>,
+  onSessionIdChanged?: ((sessionId: string) => void) | undefined,
 ): MutableRuntimeState {
   return {
     ...initialTerminalRuntimeFields(
@@ -138,7 +139,9 @@ export function composeAgentRuntimeState(
       return binding.ref.value;
     },
     set sessionId(value: string) {
+      const previous = binding.ref.value;
       moveLiveSession(binding, value);
+      if (value !== previous) onSessionIdChanged?.(value);
     },
   };
 }
@@ -198,17 +201,7 @@ export async function initializeBootstrapCore(
   const providerRegistry = services.providerRegistry;
   let keybindingNotices: readonly string[] = [];
   initializeTerminalCatalog(providerRegistry, services.benchmarkStore, () => { keybindingNotices = services.keybindingsManager.loadFromDisk(); });
-  seedTerminalControlPlane(domainDispatch, configManager, userSessionId, {
-    id: 'client:goodvibes-agent',
-    kind: 'service',
-    label: 'GoodVibes Agent',
-    capabilities: ['session', 'commands', 'automation'],
-    metadata: {
-      product: 'goodvibes-agent',
-      surfaceRoot: GOODVIBES_AGENT_SURFACE_ROOT,
-      clientKindNote: 'Connected-host client kind; GoodVibes Agent remains an interactive operator TUI.',
-    },
-  });
+  seedTerminalControlPlane(domainDispatch, configManager);
 
   const {
     approvalBroker,
@@ -430,7 +423,7 @@ export async function initializeBootstrapCore(
     rewindHost: services.conversationRewindHost,
     spine: services.sessionSpineClient,
     project: workingDir,
-  });
+  }, (sessionId) => { domainDispatch.syncSessionState({ conversationSessionId: sessionId }, 'runtime.session-id'); });
   runtimeSessionIdRef.value = userSessionId;
   // Register this process's live conversation so the composed daemon's
   // rewind.plan/apply verbs can serve conversation scope for this session

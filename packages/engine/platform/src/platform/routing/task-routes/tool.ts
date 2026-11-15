@@ -9,7 +9,6 @@ import type { Tool } from '../../types/tools.js';
 import { planTaskRoute } from './planner.js';
 import type { TaskRouteDeps, TaskRouteReadOptions } from './types.js';
 import { captureStrictJudgmentJson } from '../../gate/judgment-result.js';
-import { isDeepStrictEqual } from 'node:util';
 import { ToolInputProjectionError } from '../../tools/input-projection.js';
 
 type TaskRouteAction = 'plan' | 'status';
@@ -48,16 +47,6 @@ function output(value: unknown): { readonly success: true; readonly output: stri
     success: true,
     output: typeof value === 'string' ? value : JSON.stringify(value, null, 2),
   };
-}
-
-function sameBindings(value: object, original: Record<string, PropertyDescriptor>): boolean {
-  const fields = Object.getOwnPropertyDescriptors(value);
-  return Object.getOwnPropertySymbols(value).length === 0 && Object.keys(fields).length === Object.keys(original).length
-    && Object.entries(original).every(([key, field]) => {
-      const current = fields[key];
-      return current !== undefined && 'value' in current && Object.is(current.value, field.value)
-        && current.enumerable === field.enumerable && current.configurable === field.configurable && current.writable === field.writable;
-    });
 }
 
 function status(): Record<string, unknown> {
@@ -116,34 +105,18 @@ export function createTaskRouteTool(deps: TaskRouteDeps = {}, options: TaskRoute
       const args: TaskRouteToolArgs = rawArgs !== null && typeof rawArgs === 'object' && !Array.isArray(rawArgs) ? captureStrictJudgmentJson(rawArgs) : {};
       const action = readAction(args);
       if (action === 'status') return output(status());
-      const original = captureStrictJudgmentJson(args);
-      const optionsFields = Object.getOwnPropertyDescriptors(options);
-      const invocationFields = opts === undefined ? undefined : Object.getOwnPropertyDescriptors(opts);
-      if (Object.getOwnPropertySymbols(options).length || Object.values(optionsFields).some(field => !('value' in field))
-        || (opts !== undefined && (Object.getOwnPropertySymbols(opts).length || Object.values(invocationFields ?? {}).some(field => !('value' in field))))) throw new ToolInputProjectionError('invalid');
+      // The arguments were copied into a frozen value above; the planner reads that copy.
       const signal = options.signal && opts?.signal ? AbortSignal.any([options.signal, opts.signal]) : options.signal ?? opts?.signal;
       const callerCurrent = options.assertCurrent, invocationCurrent = opts?.assertCurrent;
       const assertCurrent = () => {
         signal?.throwIfAborted();
-        if (!isDeepStrictEqual(captureStrictJudgmentJson(rawArgs), original)
-          || !sameBindings(options, optionsFields)
-          || (opts !== undefined && invocationFields !== undefined && !sameBindings(opts, invocationFields))) throw new ToolInputProjectionError('held');
-        const first: unknown = callerCurrent?.(), second: unknown = invocationCurrent?.(original);
+        const first: unknown = callerCurrent?.(), second: unknown = invocationCurrent?.(args);
         if (first !== undefined || second !== undefined) {
           void Promise.resolve(first).catch(() => {}); drainOwned(second);
           throw new ToolInputProjectionError('held');
         }
-        signal?.throwIfAborted();
-        if (!isDeepStrictEqual(captureStrictJudgmentJson(rawArgs), original)
-          || !sameBindings(options, optionsFields)
-          || (opts !== undefined && invocationFields !== undefined && !sameBindings(opts, invocationFields))) throw new ToolInputProjectionError('held');
       };
-      assertCurrent();
-      let publicationCurrent = assertCurrent;
-      const plan = await planTaskRoute(args, deps, { ...options, signal, assertCurrent, retainCurrent(guard, key) {
-        publicationCurrent = guard; options.retainCurrent?.(guard, key);
-      } });
-      publicationCurrent();
+      const plan = await planTaskRoute(args, deps, { ...options, signal, assertCurrent });
       return output(plan);
     },
   };

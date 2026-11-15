@@ -46,7 +46,8 @@ function makeHarness(canceller: OpsAgentCanceller | null = recordingCanceller())
 } {
   const store = createRuntimeStore();
   const bus = new RuntimeEventBus();
-  const tasks = new UnifiedTaskManager(store, bus, 'sess-ops');
+  // Every task here is owned by a test owner that implements each verb.
+  const tasks = new UnifiedTaskManager(store, bus, 'sess-ops', undefined, () => ({ cancel() {}, pause() {}, resume() {}, retry() {} }));
   const ops = new OpsControlPlane(tasks, bus, store, 'sess-ops', canceller ?? undefined);
   const events: OpsEventCapture[] = [];
   bus.onDomain('ops', (envelope) => {

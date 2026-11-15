@@ -8,6 +8,7 @@ import {
   type KnowledgeInjection,
 } from '../state/knowledge-injection.js';
 import type {
+  MemoryAddInsert,
   MemoryAddOptions,
   MemoryBundle,
   MemoryDoctorReport,
@@ -20,9 +21,7 @@ import type {
   MemorySemanticSearchResult,
 } from '../state/memory-store.js';
 import type { MemoryVectorStats } from '../state/memory-vector-store.js';
-import { prepareMemoryRegistryAdd } from '../state/memory-registry.js';
-import { captureMemoryPreparedAddOptions, retainMemoryAddBinding, type MemoryPreparedAdd } from '../state/memory-store.js';
-import { assertMemoryOperationCurrent, type MemoryOperationOptions } from '../state/memory-operation.js';
+import type { MemoryOperationOptions } from '../state/memory-operation.js';
 import type { MemoryRegistry } from '../state/memory-registry.js';
 import type { CodeChunkMode, CodeContextResult, CodeIndexBuildStats, CodeIndexStats, CodeIndexStore } from '../state/code-index-store.js';
 export type { ArtifactFetchMode } from '../artifacts/types.js';
@@ -48,9 +47,7 @@ type RecordUsageInput = Parameters<KnowledgeService['recordUsage']>[0];
 type IngestUrlInput = Parameters<KnowledgeService['ingestUrl']>[0];
 type IngestArtifactInput = Parameters<KnowledgeService['ingestArtifact']>[0];
 type ImportBookmarksInput = Parameters<KnowledgeService['importBookmarksFromFile']>[0];
-type ImportUrlsInput = Parameters<KnowledgeService['importUrlsFromFile']>[0];
 type BrowserHistoryInput = Parameters<KnowledgeService['syncBrowserHistory']>[0];
-type BookmarkSeedsInput = Parameters<KnowledgeService['ingestBookmarkSeeds']>[0];
 type ConnectorInput = Parameters<KnowledgeService['ingestConnectorInput']>[0];
 type KnowledgeMapInput = Parameters<KnowledgeService['map']>[0];
 type ProjectionRenderInput = Parameters<KnowledgeService['renderProjection']>[0];
@@ -76,13 +73,38 @@ export interface KnowledgeApiArtifactIngestInput extends Omit<IngestArtifactInpu
   readonly metadata?: Record<string, unknown> | undefined;
 }
 
+/** Every ingest entry point takes the same fetch setting, `fetchMode`, and stamps the same intent. */
+export interface KnowledgeApiFileImportInput extends Omit<ImportBookmarksInput, 'allowPrivateHosts'> {
+  readonly fetchMode?: RemoteKnowledgeFetchMode | undefined;
+}
+
+export interface KnowledgeApiBookmarkSeedsInput {
+  readonly seeds: Parameters<KnowledgeService['ingestBookmarkSeeds']>[0];
+  readonly sessionId?: string | undefined;
+  readonly sourceType?: Parameters<KnowledgeService['ingestBookmarkSeeds']>[2];
+  readonly connectorId?: string | undefined;
+  readonly fetchMode?: RemoteKnowledgeFetchMode | undefined;
+  readonly metadata?: Record<string, unknown> | undefined;
+}
+
+export interface KnowledgeApiConnectorOptions {
+  readonly sessionId?: string | undefined;
+  readonly fetchMode?: RemoteKnowledgeFetchMode | undefined;
+  readonly metadata?: Record<string, unknown> | undefined;
+}
+
+export interface KnowledgeApiConnectorInput extends Omit<ConnectorInput, 'allowPrivateHosts'> {
+  readonly fetchMode?: RemoteKnowledgeFetchMode | undefined;
+}
+
 export interface MemoryExplainResult {
   readonly injections: readonly KnowledgeInjection[];
   readonly prompt: string | null;
 }
 
 export interface MemoryApi {
-  add(input: MemoryAddOptions, options?: MemoryOperationOptions): Promise<MemoryRecord>;
+  /** `insert` pins the row to a record staged with planMemoryRecord and runs a callback at the insert. */
+  add(input: MemoryAddOptions, options?: MemoryOperationOptions, insert?: MemoryAddInsert): Promise<MemoryRecord>;
   search(filter?: MemorySearchFilter): Promise<readonly MemoryRecord[]>;
   searchSemantic(filter?: MemorySearchFilter): Promise<readonly MemorySemanticSearchResult[]>;
   vectorStats(): MemoryVectorStats;
@@ -207,15 +229,15 @@ export interface KnowledgeApi {
     url(input: KnowledgeApiUrlIngestInput): ReturnType<KnowledgeService['ingestUrl']>;
     artifact(input: KnowledgeApiArtifactIngestInput): ReturnType<KnowledgeService['ingestArtifact']>;
     browserHistory(input?: BrowserHistoryInput): ReturnType<KnowledgeService['syncBrowserHistory']>;
-    bookmarksFile(input: ImportBookmarksInput): ReturnType<KnowledgeService['importBookmarksFromFile']>;
-    urlsFile(input: ImportUrlsInput): ReturnType<KnowledgeService['importUrlsFromFile']>;
-    bookmarkSeeds(input: BookmarkSeedsInput): ReturnType<KnowledgeService['ingestBookmarkSeeds']>;
+    bookmarksFile(input: KnowledgeApiFileImportInput): ReturnType<KnowledgeService['importBookmarksFromFile']>;
+    urlsFile(input: KnowledgeApiFileImportInput): ReturnType<KnowledgeService['importUrlsFromFile']>;
+    bookmarkSeeds(input: KnowledgeApiBookmarkSeedsInput): ReturnType<KnowledgeService['ingestBookmarkSeeds']>;
     withConnector(
       connectorId: Parameters<KnowledgeService['ingestWithConnector']>[0],
       input: Parameters<KnowledgeService['ingestWithConnector']>[1],
-      sessionId?: Parameters<KnowledgeService['ingestWithConnector']>[2],
+      options?: KnowledgeApiConnectorOptions,
     ): ReturnType<KnowledgeService['ingestWithConnector']>;
-    connectorInput(input: ConnectorInput): ReturnType<KnowledgeService['ingestConnectorInput']>;
+    connectorInput(input: KnowledgeApiConnectorInput): ReturnType<KnowledgeService['ingestConnectorInput']>;
   };
   readonly packets: {
     build(
@@ -270,6 +292,11 @@ export interface KnowledgeApi {
   readonly codeIndex?: CodeIndexApi | undefined;
 }
 
+/** The service's spelling of the fetch setting. */
+function privateHosts(fetchMode: RemoteKnowledgeFetchMode | undefined): { allowPrivateHosts?: boolean } {
+  return fetchMode ? { allowPrivateHosts: fetchMode === 'allow-private-hosts' } : {};
+}
+
 function normalizeKnowledgeFetchMode(fetchMode: RemoteKnowledgeFetchMode | undefined): {
   fetchMode?: RemoteKnowledgeFetchMode | undefined;
   allowPrivateHosts?: boolean | undefined;
@@ -281,10 +308,12 @@ function normalizeKnowledgeFetchMode(fetchMode: RemoteKnowledgeFetchMode | undef
   };
 }
 
+type KnowledgeIngestMode = 'url' | 'artifact' | 'bookmarks-file' | 'urls-file' | 'bookmark-seeds' | 'connector';
+
 function appendKnowledgeIntentMetadata(
   metadata: Record<string, unknown> | undefined,
   fetchMode: RemoteKnowledgeFetchMode | undefined,
-  ingestMode: 'url' | 'artifact',
+  ingestMode: KnowledgeIngestMode,
 ): Record<string, unknown> | undefined {
   if (!metadata && !fetchMode) return {
     knowledgeIntent: {
@@ -300,22 +329,10 @@ function appendKnowledgeIntentMetadata(
   };
 }
 
-const memoryOwnerMapGet = WeakMap.prototype.get;
-const memoryOwnerMapSet = WeakMap.prototype.set;
-const memoryOwnerMapApply = Reflect.apply;
-function ownerMapGet<K extends object, V>(map: WeakMap<K, V>, key: K): V | undefined {
-  return memoryOwnerMapApply(memoryOwnerMapGet, map, [key]);
-}
-function ownerMapSet<K extends object, V>(map: WeakMap<K, V>, key: K, value: V): void {
-  memoryOwnerMapApply(memoryOwnerMapSet, map, [key, value]);
-}
-
-const nativeMemoryApiOwners = new WeakMap<MemoryApi, MemoryApiRegistry>();
-
 export function createMemoryApi(memoryRegistry: MemoryApiRegistry): MemoryApi {
   const api: MemoryApi = Object.freeze({
-    add: (input: MemoryAddOptions, options?: MemoryOperationOptions) => options === undefined
-      ? memoryRegistry.add(input) : memoryRegistry.add(input, options),
+    add: (input: MemoryAddOptions, options?: MemoryOperationOptions, insert?: MemoryAddInsert) => insert !== undefined
+      ? memoryRegistry.add(input, options, insert) : options === undefined ? memoryRegistry.add(input) : memoryRegistry.add(input, options),
     search: (filter: MemorySearchFilter = {}) => memoryRegistry.search(filter),
     searchSemantic: (filter: MemorySearchFilter = {}) => memoryRegistry.searchSemantic(filter),
     vectorStats: () => memoryRegistry.vectorStats(),
@@ -342,24 +359,7 @@ export function createMemoryApi(memoryRegistry: MemoryApiRegistry): MemoryApi {
       };
     },
   });
-  ownerMapSet(nativeMemoryApiOwners, api, memoryRegistry);
   return api;
-}
-
-/** Native preparation is available only on an exact createMemoryApi-owned registry. */
-export function prepareMemoryApiAdd(api: MemoryApi, input: MemoryAddOptions, options?: MemoryOperationOptions): MemoryPreparedAdd {
-  const registry = ownerMapGet(nativeMemoryApiOwners, api);
-  if (!registry) throw new Error('Memory prepared add API unavailable');
-  const apiBinding = retainMemoryAddBinding(api, ['add', 'getAll']);
-  const lifecycle = captureMemoryPreparedAddOptions(options);
-  const assertCurrent = () => {
-    apiBinding(); assertMemoryOperationCurrent(lifecycle); apiBinding();
-    if (ownerMapGet(nativeMemoryApiOwners, api) !== registry) throw new Error('Memory prepared add API changed');
-  };
-  assertCurrent();
-  const prepared = prepareMemoryRegistryAdd(registry, input, { signal: lifecycle.signal, assertCurrent });
-  assertCurrent();
-  return prepared;
 }
 
 export function createCodeIndexApi(codeIndexStore: CodeIndexApiRegistry): CodeIndexApi {
@@ -463,20 +463,33 @@ export function createKnowledgeApi(
         metadata: appendKnowledgeIntentMetadata(input.metadata, input.fetchMode, 'artifact'),
       }),
       browserHistory: (input: BrowserHistoryInput = {}) => knowledgeService.syncBrowserHistory(input),
-      bookmarksFile: (input: ImportBookmarksInput) => knowledgeService.importBookmarksFromFile(input),
-      urlsFile: (input: ImportUrlsInput) => knowledgeService.importUrlsFromFile(input),
-      bookmarkSeeds: (
-        seeds: Parameters<KnowledgeService['ingestBookmarkSeeds']>[0],
-        sessionId?: Parameters<KnowledgeService['ingestBookmarkSeeds']>[1],
-        sourceType?: Parameters<KnowledgeService['ingestBookmarkSeeds']>[2],
-        connectorId?: Parameters<KnowledgeService['ingestBookmarkSeeds']>[3],
-      ) => knowledgeService.ingestBookmarkSeeds(seeds, sessionId, sourceType, connectorId),
+      bookmarksFile: ({ fetchMode, ...input }: KnowledgeApiFileImportInput) => knowledgeService.importBookmarksFromFile({
+        ...input,
+        ...privateHosts(fetchMode),
+        metadata: appendKnowledgeIntentMetadata(input.metadata, fetchMode, 'bookmarks-file'),
+      }),
+      urlsFile: ({ fetchMode, ...input }: KnowledgeApiFileImportInput) => knowledgeService.importUrlsFromFile({
+        ...input,
+        ...privateHosts(fetchMode),
+        metadata: appendKnowledgeIntentMetadata(input.metadata, fetchMode, 'urls-file'),
+      }),
+      bookmarkSeeds: (input: KnowledgeApiBookmarkSeedsInput) => knowledgeService.ingestBookmarkSeeds(
+        input.seeds, input.sessionId, input.sourceType ?? 'bookmark', input.connectorId ?? 'bookmark',
+        privateHosts(input.fetchMode).allowPrivateHosts,
+        appendKnowledgeIntentMetadata(input.metadata, input.fetchMode, 'bookmark-seeds'),
+      ),
       withConnector: (
         connectorId: Parameters<KnowledgeService['ingestWithConnector']>[0],
         input: Parameters<KnowledgeService['ingestWithConnector']>[1],
-        sessionId?: Parameters<KnowledgeService['ingestWithConnector']>[2],
-      ) => knowledgeService.ingestWithConnector(connectorId, input, sessionId),
-      connectorInput: (input: ConnectorInput) => knowledgeService.ingestConnectorInput(input),
+        options: KnowledgeApiConnectorOptions = {},
+      ) => knowledgeService.ingestWithConnector(connectorId, input, options.sessionId,
+        privateHosts(options.fetchMode).allowPrivateHosts,
+        appendKnowledgeIntentMetadata(options.metadata, options.fetchMode, 'connector')),
+      connectorInput: ({ fetchMode, ...input }: KnowledgeApiConnectorInput) => knowledgeService.ingestConnectorInput({
+        ...input,
+        ...privateHosts(fetchMode),
+        metadata: appendKnowledgeIntentMetadata(input.metadata, fetchMode, 'connector'),
+      }),
     }),
     packets: Object.freeze({
       build: (

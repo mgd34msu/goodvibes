@@ -7,35 +7,24 @@ import { completeJudgmentView } from './complete-view.js';
  * description 1, threshold 0.4, with a lowercase substring test when fuse.js
  * was missing) and the word-overlap count of its recommend mode.
  *
- * The re-ranking cookbook: the registry's scan of skill and agent folders and
- * the tool registry's list are the shortlist (code), then one yes/no per
- * query-candidate pair, each in its own request, orders it by probability.
- * Search leaves out candidates read as not matching; recommend lists them
- * after the matching ones.
+ * Code ranks first: an exact name is the answer and a candidate carrying every
+ * query word is a clear winner, with no request. Otherwise the top few
+ * code-ranked candidates (name and description only) are read together in one
+ * request. Search leaves out candidates read as not matching; recommend lists
+ * them after the matching ones.
  *
  * Band: low stakes. The reading only decides what a model is shown first when
  * it looks for a capability; nothing runs on the strength of it.
  */
 import { defineRerank, STAKES_BANDS } from '@goodvibes-jev/judgment';
 
-/** Most characters of a candidate's description or preview the reading carries. */
-export const MAX_JUDGED_REGISTRY_CHARS = Number.POSITIVE_INFINITY;
-
-
-
-/** What the rerank sees of a skill, agent or tool: its kind, name, description and, when it has one, a preview of its body. */
+/** What the rerank sees of a skill, agent or tool: its kind, name and description. */
 export function registryCandidateView(item: {
   readonly type: 'skill' | 'agent' | 'tool';
   readonly name: string;
   readonly description: string;
-  readonly preview?: string | undefined;
 }): { [field: string]: string } {
-  return completeJudgmentView({
-    type: item.type,
-    name: item.name,
-    description: item.description,
-    ...(item.preview ? { preview: item.preview } : {}),
-  });
+  return completeJudgmentView({ type: item.type, name: item.name, description: item.description });
 }
 
 const candidate = (type: 'skill' | 'agent' | 'tool', name: string, description: string) => ({
@@ -58,7 +47,8 @@ const DOC_WRITER = candidate('agent', 'doc-writer', 'Writes and updates user-fac
 
 export const registryRank = defineRerank({
   name: 'engine.tools.registry-rank',
-  version: 1,
+  version: 2,
+  together: true,
   description: 'Orders skills, agents and tools by whether each one provides what a registry search query or task description is looking for.',
   accuracyFloor: 0.85,
   instructions: 'Someone is looking for a skill, agent or tool, described by `query`: either a few search words or a description of a task they need to do. `candidate` is one available skill, agent or tool with its `type`, `name` and `description`. Is this candidate one they are looking for: something that provides, or directly helps with, what the query names?',

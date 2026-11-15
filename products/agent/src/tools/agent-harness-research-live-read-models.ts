@@ -1,7 +1,7 @@
 import { types as nodeTypes } from 'node:util';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { captureCatalogMethods, captureCatalogSnapshot, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
-import { captureCatalogPath, rankResearchRecords } from './agent-harness-research-catalog-source.ts';
+import { captureCatalogPath } from './agent-harness-research-catalog-source.ts';
 import { modelReadingServicePath, withModelReadingSource } from './agent-harness-model-reading-source.ts';
 import { captureAsyncHarnessInput } from './agent-harness-async-input.ts';
 const nativeApply = Reflect.apply, nativeIsPromise = nodeTypes.isPromise;
@@ -146,18 +146,31 @@ function safeUrl(value: string): string | null {
   }
 }
 
-async function schemaStatus(records: readonly Record<string, unknown>[], options: CatalogRankingOptions): Promise<ResearchLiveRecordCertification['schemaStatus']> {
+/**
+ * The schema status the publisher states, read in code: `schema.status` is the
+ * contract field ('certified' | 'legacy'); an older record's explicit
+ * `schemaStatus`, `receiptSchemaStatus` or `certificationStatus` counts only
+ * when it is exactly 'certified'. With no explicit status, a record that
+ * publishes a schema version, a publication guarantee and a publisher is
+ * certified.
+ */
+function schemaStatus(record: Record<string, unknown>): ResearchLiveRecordCertification['schemaStatus'] {
+  const declared = readObject(record.schema).status;
+  if (declared === 'certified' || declared === 'legacy') return declared;
+  const records = certificationRecords(record);
   const explicit = firstAcross(records, ['schemaStatus', 'receiptSchemaStatus', 'certificationStatus']);
-  const presence = !!firstAcross(records, ['schemaVersion', 'receiptSchemaVersion', 'contractVersion'])
+  if (explicit) return explicit.toLowerCase() === 'certified' ? 'certified' : 'legacy';
+  const presence = !!schemaVersionOf(record)
     && !!firstAcross(records, ['publicationGuarantee', 'hostPublicationGuarantee', 'researchPublicationGuarantee'])
     && !!firstAcross(records, ['publisher', 'publisherId', 'daemonId', 'hostId']);
-  if (!explicit) return presence ? 'certified' : 'legacy';
-  const matches = await rankResearchRecords([{ records, explicit }], 'Explicit schema certification',
-    entry => ({ id: 'schema', description: 'Explicit schema certification claim', evidence: entry }), options,
-    'agent.research.schema-status', 'engine.tools.research-schema-status');
-  // An explicit claim decides: a record that states it is not certified stays legacy however many publication fields it carries.
-  // The reading neither authenticates these fields nor grants any effect authority.
-  return matches.length > 0 ? 'certified' : 'legacy';
+  return presence ? 'certified' : 'legacy';
+}
+
+function schemaVersionOf(record: Record<string, unknown>): string {
+  const version = readObject(record.schema).version;
+  return typeof version === 'string' && version.trim()
+    ? version.trim()
+    : firstAcross(certificationRecords(record), ['schemaVersion', 'receiptSchemaVersion', 'contractVersion']);
 }
 
 function certification(input: {
@@ -176,7 +189,7 @@ function certification(input: {
   readonly hasVisualSections?: boolean;
 }, currentSchemaStatus: ResearchLiveRecordCertification['schemaStatus']): ResearchLiveRecordCertification {
   const records = certificationRecords(input.record);
-  const schemaVersion = firstAcross(records, ['schemaVersion', 'receiptSchemaVersion', 'contractVersion']);
+  const schemaVersion = schemaVersionOf(input.record);
   const publicationGuarantee = firstAcross(records, ['publicationGuarantee', 'hostPublicationGuarantee', 'researchPublicationGuarantee']);
   const publisher = firstAcross(records, ['publisher', 'publisherId', 'daemonId', 'hostId']);
   const receiptId = firstAcross(records, ['receiptId', 'runReceiptId', 'sourceReceiptId', 'renderReceiptId', 'reportRenderReceiptId']);
@@ -489,11 +502,11 @@ export async function researchLiveReadModelSnapshot(context: object, options: Ca
   return withModelReadingSource({ envelopes, runnerEntries, visualEntries }, { ...caller.options, assertCurrent }, async (captured, scoped) => {
     const browserRunnerRecords: ResearchBrowserRunnerRecord[] = [], visualReportRecords: ResearchVisualReportRecord[] = [];
     for (const [index, entry] of captured.runnerEntries.entries()) {
-      const status = await schemaStatus(certificationRecords(entry.record), scoped); scoped.assertCurrent?.();
+      const status = schemaStatus(entry.record);
       const normalized = normalizeRunner(entry, index, status); if (normalized) browserRunnerRecords.push(normalized);
     }
     for (const [index, entry] of captured.visualEntries.entries()) {
-      const status = await schemaStatus(certificationRecords(entry.record), scoped); scoped.assertCurrent?.();
+      const status = schemaStatus(entry.record);
       const normalized = normalizeVisualReport(entry, index, status); if (normalized) visualReportRecords.push(normalized);
     }
     scoped.assertCurrent?.();

@@ -1,4 +1,3 @@
-import { captureNativeDecisionPolicy } from '../../tools/batteries/decision-policy.js';
 import { defineBattery, oneOf, STAKES_BANDS, yesNo, type JsonValue } from '@goodvibes-jev/judgment/decisions';
 
 const localServingStatusDefinition = Object.freeze({
@@ -21,7 +20,6 @@ const localServingStatusDefinition = Object.freeze({
   ],
 } as const);
 export const localServingStatus = defineBattery(localServingStatusDefinition);
-export const localServingStatusPolicy = captureNativeDecisionPolicy(localServingStatusDefinition, localServingStatus);
 
 const localResourcePressureDefinition = Object.freeze({
   name: 'agent.local-model.resource-pressure', version: 1,
@@ -42,7 +40,6 @@ const localResourcePressureDefinition = Object.freeze({
   ],
 } as const);
 export const localResourcePressure = defineBattery(localResourcePressureDefinition);
-export const localResourcePressurePolicy = captureNativeDecisionPolicy(localResourcePressureDefinition, localResourcePressure);
 
 const localServingSchemaStatusDefinition = Object.freeze({
   name: 'agent.local-model.schema-status', version: 1,
@@ -56,4 +53,3 @@ const localServingSchemaStatusDefinition = Object.freeze({
   ],
 } as const);
 export const localServingSchemaStatus = defineBattery(localServingSchemaStatusDefinition);
-export const localServingSchemaStatusPolicy = captureNativeDecisionPolicy(localServingSchemaStatusDefinition, localServingSchemaStatus);

@@ -149,7 +149,8 @@ describe('tasks command', () => {
 
     const store = createRuntimeStore();
     const bus = new RuntimeEventBus();
-    const taskManager = createTaskManager(store, bus, 'sess-tasks');
+    // The task's owner implements each verb; a task without one is refused.
+    const taskManager = createTaskManager(store, bus, 'sess-tasks', undefined, () => ({ cancel() {}, pause() {}, resume() {}, retry() {} }));
     const plane = new OpsControlPlane(taskManager, bus, store, 'sess-tasks');
     const task = taskManager.createTask({
       kind: 'exec',

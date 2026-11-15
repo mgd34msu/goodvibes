@@ -9,7 +9,11 @@
  * - Emit TaskEvents via RuntimeEventBus at each transition
  * - Update RuntimeState.tasks domain via Zustand store
  * - Track per-kind concurrency
- * - Support retry policies
+ * - Route operator verbs (cancel, pause, resume, retry) to the task's owner
+ *
+ * A task row mirrors work owned elsewhere (an agent, an ACP subagent, a
+ * caller of the ops API). A verb changes the row only after the owner acted
+ * on it; a verb the owner does not implement is refused with that reason.
  */
 
 import { GoodVibesError } from '@goodvibes-jev/engine/errors';
@@ -25,7 +29,6 @@ import type {
   TaskCancelParams,
   TaskFailParams,
 } from './types.js';
-import { TaskRegistry } from './registry.js';
 import { canRetry, canTransition } from './lifecycle.js';
 import {
   emitTaskCreated,
@@ -95,40 +98,91 @@ export class TaskNotCancellableError extends GoodVibesError {
   }
 }
 
+/** The operator verbs a task's owner may implement. */
+export type TaskVerb = 'cancel' | 'pause' | 'resume' | 'retry';
+
+/**
+ * What the owner of a task's work can do to it. Only the verbs the owner
+ * implements are present; the manager refuses the others.
+ */
+export interface TaskController {
+  cancel?(reason?: string): void | Promise<void>;
+  pause?(): void | Promise<void>;
+  resume?(): void | Promise<void>;
+  retry?(): void | Promise<void>;
+}
+
+/** Finds the controller for a task from what the row records (its kind and owner). */
+export type TaskControllerResolver = (task: RuntimeTask) => TaskController | undefined;
+
+/** Thrown when a verb is asked of a task whose owner does not implement it. */
+export class TaskVerbUnsupportedError extends GoodVibesError {
+  declare readonly code: 'TASK_VERB_UNSUPPORTED';
+  public readonly taskId: string;
+  public readonly verb: TaskVerb;
+
+  public constructor(task: RuntimeTask, verb: TaskVerb) {
+    super(
+      `[TaskManager] Task ${task.id} (${task.kind}, owned by ${task.owner}) was not ${verb === 'retry' ? 'retried' : `${verb === 'pause' ? 'paused' : verb === 'resume' ? 'resumed' : 'cancelled'}`}: `
+        + `its owner does not support ${verb} from here, so the task is unchanged. Act on it where it runs (its owner, ${task.owner}).`,
+      { code: 'TASK_VERB_UNSUPPORTED', category: 'bad_request', source: 'runtime', recoverable: false },
+    );
+    this.name = 'TaskVerbUnsupportedError';
+    this.taskId = task.id;
+    this.verb = verb;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // UnifiedTaskManager
 // ---------------------------------------------------------------------------
 
 /**
- * UnifiedTaskManager, implements TaskManager using a TaskRegistry for
- * in-memory lookup and a Zustand store + RuntimeEventBus for persistence
- * and event emission.
+ * UnifiedTaskManager, implements TaskManager over the runtime store (the one
+ * copy of every task) and the RuntimeEventBus for event emission.
  */
 export class UnifiedTaskManager implements TaskManager {
-  private readonly _registry = new TaskRegistry();
   private readonly _store: RuntimeStore;
   private readonly _dispatch: DomainDispatch;
   private readonly _bus: RuntimeEventBus;
   /** Session ID for emitter context. */
   private readonly _sessionId: string;
   private readonly _featureFlags: FeatureFlagReader;
+  private readonly _controllers: TaskControllerResolver;
 
   /**
    * @param store - The Zustand runtime store to dispatch state updates to.
    * @param bus - The RuntimeEventBus to emit task lifecycle events on.
    * @param sessionId - The current session identifier for emitter context.
+   * @param controllers - Finds the owner's controller for a task; without one every verb is refused.
    */
   public constructor(
     store: RuntimeStore,
     bus: RuntimeEventBus,
     sessionId: string,
     featureFlags?: FeatureFlagReader,
+    controllers?: TaskControllerResolver,
   ) {
     this._store = store;
     this._dispatch = createDomainDispatch(store);
     this._bus = bus;
     this._sessionId = sessionId;
     this._featureFlags = featureFlags ?? null;
+    this._controllers = controllers ?? (() => undefined);
+  }
+
+  /** The owner's implementation of `verb` for `task`, or a refusal naming why the row is unchanged. */
+  private _requireVerb<V extends TaskVerb>(task: RuntimeTask, verb: V): NonNullable<TaskController[V]> {
+    const action = this._controllers(task)?.[verb];
+    if (!action) throw new TaskVerbUnsupportedError(task, verb);
+    return action as NonNullable<TaskController[V]>;
+  }
+
+  /** Run the owner's verb; a failure it reports leaves the row as it was. */
+  private _runVerb(action: () => void | Promise<void>): void {
+    const result = action();
+    // An owner that acts asynchronously reports its outcome through its own task events.
+    if (result instanceof Promise) result.catch(() => undefined);
   }
 
   private _isEnabled(): boolean {
@@ -162,9 +216,6 @@ export class UnifiedTaskManager implements TaskManager {
       turnId: params.turnId,
     };
 
-    // Register in local registry
-    this._registry.register(task);
-
     // If this task has a parent, add to parent's childTaskIds
     if (params.parentTaskId) {
       this._patchChildIds(params.parentTaskId, id);
@@ -183,10 +234,15 @@ export class UnifiedTaskManager implements TaskManager {
     return task;
   }
 
+  /** Queued → running is the owner reporting a start; blocked → running is a resume its owner must perform. */
   public startTask(taskId: string): RuntimeTask {
     this._requireEnabled('start runtime task');
     const task = this._requireTask(taskId);
     this._requireTransition(task, 'running');
+    if (task.status === 'blocked') {
+      const resume = this._requireVerb(task, 'resume');
+      this._runVerb(() => resume());
+    }
 
     const updated = this._applyTransition(task, 'running', {
       startedAt: Date.now(),
@@ -200,6 +256,8 @@ export class UnifiedTaskManager implements TaskManager {
     this._requireEnabled('block runtime task');
     const task = this._requireTask(taskId);
     this._requireTransition(task, 'blocked');
+    const pause = this._requireVerb(task, 'pause');
+    this._runVerb(() => pause());
 
     const updated = this._applyTransition(task, 'blocked', {});
 
@@ -232,41 +290,8 @@ export class UnifiedTaskManager implements TaskManager {
     const now = Date.now();
     const durationMs = task.startedAt !== undefined ? now - task.startedAt : 0;
 
-    if (task.retryPolicy) {
-      const { maxAttempts, currentAttempt, delayMs, backoff } = task.retryPolicy;
-      if (currentAttempt < maxAttempts) {
-        // Increment attempt and re-queue
-        const updatedPolicy = {
-          ...task.retryPolicy,
-          currentAttempt: currentAttempt + 1,
-        };
-        const resolvedDelay =
-          backoff === 'exponential'
-            ? delayMs * Math.pow(2, Math.max(0, currentAttempt - 1))
-            : delayMs;
-
-        const requeued = this._applyTransition(task, 'queued', {
-          retryPolicy: updatedPolicy,
-          error: params.error,
-          exitCode: params.exitCode,
-          startedAt: undefined,
-          endedAt: undefined,
-          retryDelayMs: resolvedDelay,
-          retryAt: now + resolvedDelay,
-        });
-
-        // Emit failed event then re-queue semantically
-        emitTaskFailed(this._bus, this._makeCtx(taskId), {
-          taskId,
-          error: `${params.error} (retry ${currentAttempt}/${maxAttempts} in ${resolvedDelay}ms)`,
-          durationMs,
-        });
-
-        return requeued;
-      }
-    }
-
-    // No retry, mark as permanently failed
+    // A retry is the owner's act (retryTask), never an automatic re-queue: nothing
+    // here would run a re-queued task.
     const updated = this._applyTransition(task, 'failed', {
       endedAt: now,
       error: params.error,
@@ -291,6 +316,8 @@ export class UnifiedTaskManager implements TaskManager {
     }
 
     this._requireTransition(task, 'cancelled');
+    const cancel = this._requireVerb(task, 'cancel');
+    this._runVerb(() => cancel(params?.reason));
 
     const now = Date.now();
     const updated = this._applyTransition(task, 'cancelled', {
@@ -317,7 +344,6 @@ export class UnifiedTaskManager implements TaskManager {
       ...(params.result !== undefined ? { result: params.result } : {}),
     };
 
-    this._registry.register(updated);
     this._syncTaskToStore(updated);
     return updated;
   }
@@ -329,26 +355,22 @@ export class UnifiedTaskManager implements TaskManager {
 
   public getTasksByKind(kind: TaskKind): RuntimeTask[] {
     if (!this._isEnabled()) return [];
-    this._refreshRegistry();
-    return this._registry.getByKind(kind);
+    return this._tasks().filter((t) => t.kind === kind);
   }
 
   public getRunningTasks(): RuntimeTask[] {
     if (!this._isEnabled()) return [];
-    this._refreshRegistry();
-    return this._registry.getRunning();
+    return this._tasks().filter((t) => t.status === 'running');
   }
 
   public getRunningCount(kind: TaskKind): number {
     if (!this._isEnabled()) return 0;
-    this._refreshRegistry();
-    return this._registry.getByKind(kind).filter((t) => t.status === 'running').length;
+    return this._tasks().filter((t) => t.kind === kind && t.status === 'running').length;
   }
 
   public getChildTasks(parentTaskId: string): RuntimeTask[] {
     if (!this._isEnabled()) return [];
-    this._refreshRegistry();
-    return this._registry.getChildren(parentTaskId);
+    return this._tasks().filter((t) => t.parentTaskId === parentTaskId);
   }
 
   public getTaskStatus(taskId: string): TaskLifecycleState | undefined {
@@ -363,6 +385,8 @@ export class UnifiedTaskManager implements TaskManager {
     if (!canRetry(task.status)) {
       throw new TaskTransitionError(task.id, task.status, 'queued');
     }
+    const retry = this._requireVerb(task, 'retry');
+    this._runVerb(() => retry());
 
     return this._applyTransition(task, 'queued', {
       startedAt: undefined,
@@ -389,26 +413,15 @@ export class UnifiedTaskManager implements TaskManager {
   }
 
   /**
-   * The task as the store holds it. The store is what every other writer (the
-   * ops control plane, adapters, agent sync) changes, so a transition judged
-   * from the registry copy could overwrite a cancel it never saw. The registry
-   * is refreshed from it, and a task the store no longer holds (it evicts the
-   * oldest ended ones) is dropped from the registry instead of answering from a
-   * stale, possibly still-running copy. createTask syncs to the store before any read.
+   * The task as the store holds it. The store is what every writer (the ops
+   * control plane, adapters, agent sync) changes, so it is the only copy read.
    */
   private _current(taskId: string): RuntimeTask | undefined {
-    const stored = this._store.getState().tasks.tasks.get(taskId);
-    if (stored === undefined) {
-      this._registry.deregister(taskId);
-      return undefined;
-    }
-    this._registry.register(stored);
-    return stored;
+    return this._store.getState().tasks.tasks.get(taskId);
   }
 
-  /** Bring every registered task up to the store's version before a read. */
-  private _refreshRegistry(): void {
-    for (const id of [...this._registry.snapshot().keys()]) this._current(id);
+  private _tasks(): RuntimeTask[] {
+    return [...this._store.getState().tasks.tasks.values()];
   }
 
   /**
@@ -450,7 +463,6 @@ export class UnifiedTaskManager implements TaskManager {
       ...parent,
       childTaskIds: [...parent.childTaskIds, childId],
     };
-    this._registry.register(updated);
     this._syncTaskToStore(updated);
   }
 

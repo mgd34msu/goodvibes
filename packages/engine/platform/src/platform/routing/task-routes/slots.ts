@@ -31,7 +31,6 @@ import type { ChannelTask, PersonalOpsLaneId, TaskRouteSlots } from './types.js'
 import type { JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
 import { assertJudgmentInput } from '../../gate/judgment-input.js';
 import { captureStrictJudgmentJson } from '../../gate/judgment-result.js';
-import { isDeepStrictEqual } from 'node:util';
 
 const LOW = STAKES_BANDS.low;
 
@@ -252,27 +251,18 @@ export async function readSlots(
   request: string,
   options: JudgmentReadingOptions & { readonly site: string; readonly namedIds?: NamedIdSources | undefined },
 ): Promise<SlotRun> {
+  // The listings are read once; the caller's check (cancellation, its own
+  // currency) runs before each attempt, and nothing re-lists a source.
   const signal = options.signal, originalCurrent = options.assertCurrent, sources = options.namedIds, site = options.site;
-  const model = port.model, ask = port.ask, recorder = port.recorder;
-  const callerCurrent = () => {
+  const assertCurrent = () => {
     signal?.throwIfAborted();
     const assertion: unknown = originalCurrent?.();
     if (assertion !== undefined) { drainOwned(assertion); throw new Error('Task-route slot ownership must be synchronous.'); }
-    if (options.signal !== signal || options.assertCurrent !== originalCurrent || options.namedIds !== sources || options.site !== site
-      || port.model !== model || port.ask !== ask || port.recorder !== recorder) throw new Error('Task-route slot source changed.');
-  };
-  callerCurrent();
-  const snapshots = (Object.keys(NAMED_ID_KINDS) as NamedIdKind[])
-    .map((kind) => ({ kind, source: sources?.[kind], ids: captureStrictJudgmentJson(sources?.[kind]?.() ?? []) }));
-  const listed = snapshots.filter(({ ids }) => ids.length > 0);
-  const assertCurrent = () => {
-    callerCurrent();
-    for (const { kind, source, ids } of snapshots) {
-      if (sources?.[kind] !== source || !isDeepStrictEqual(captureStrictJudgmentJson(source?.() ?? []), ids)) throw new Error('Task-route named target source changed.');
-    }
-    callerCurrent();
   };
   assertCurrent();
+  const snapshots = (Object.keys(NAMED_ID_KINDS) as NamedIdKind[])
+    .map((kind) => ({ kind, ids: captureStrictJudgmentJson(sources?.[kind]?.() ?? []) }));
+  const listed = snapshots.filter(({ ids }) => ids.length > 0);
   assertJudgmentInput({ request, named: listed.map(({ kind, ids }) => ({ kind, ids })) });
   const call = { site, ...(signal === undefined ? {} : { signal }), beforeAttempt: assertCurrent };
   const [run, selections] = await Promise.all([
@@ -286,10 +276,8 @@ export async function readSlots(
   return {
     slots: composeSlots(run.readings, named), readings: run.readings, decisionId: run.result.decisionId, named,
     recordAction(action) {
-      assertCurrent();
       run.recordAction(action);
       for (const selection of selections) selection.recordAction(action);
-      assertCurrent();
     },
   };
 }

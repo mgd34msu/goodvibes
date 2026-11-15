@@ -1,5 +1,5 @@
 /**
- * Tests for the writing-style-matched draft reply composer and lane descriptor.
+ * Tests for the writing-style-matched draft reply composer.
  *
  * Recorded semantic answers run against the real protected loopback source owner. No external mail or provider service is contacted.
  *
@@ -18,23 +18,14 @@ import {
 } from './_helpers/platform-email-fixtures.ts';
 import type { EmailSummary } from '../platform/src/platform/email/email-service.ts';
 import {
-  classifyTone as nativeClassifyTone,
   composeDraftReply as nativeComposeDraftReply,
-  countSentences as nativeCountSentences,
   extractSenderName as nativeExtractSenderName,
   extractStyleProfile as nativeExtractStyleProfile,
-  median,
-  mostFrequent as nativeMostFrequent,
   replySubject,
   StyleReplyReadingError,
   type StyleProfile,
 } from '../platform/src/platform/email/style-reply.ts';
-import {
-  buildStyleReplyLaneAdditions,
-  styleReplyLiveRecord,
-  styleReplyWorkflow,
-  styleReplyWorkflowStatus,
-} from '../platform/src/platform/email/style-reply-lane.ts';
+import { STYLE_GREETINGS, STYLE_SIGN_OFFS } from '../platform/src/platform/email/style-reply-readings.ts';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -96,7 +87,15 @@ const names = new Map<string, string>([
   ['Alice Smith <alice@example.com>', 'Alice'], ['"Carol Jones" <carol@example.com>', 'Carol'],
   ['bob@example.com', ''], ['dave@example.com', ''], ['noreply@example.com', ''],
 ]);
-const offeredPhrases = new Set(['Hi', 'Hello', 'Hey', 'Dear', 'Greetings', 'Good morning', 'Good afternoon', 'Kind regards', 'Best regards', 'All the best', 'Thank you', 'Thanks', 'Sincerely', 'Take care', 'Cheers', 'Regards', 'Best', 'Yo']);
+const optionFor = (table: Readonly<Record<string, string>>, text: string): string =>
+  Object.entries(table).find(([, value]) => value === text)?.[0] ?? 'none';
+/** One corpus-wide answer: every body of a test corpus shares its greeting, closing, tone and length. */
+function corpusValue(bodies: readonly unknown[], read: (fact: MessageFact) => string): string {
+  const values = bodies.map(body => read(messageFact(body)));
+  const value = values[0];
+  if (value === undefined || !values.every(entry => entry === value)) throw new Error('Unmapped exact corpus style');
+  return value;
+}
 function messageFact(body: unknown): MessageFact {
   const fact = facts.find(fact => fact.body === body);
   if (!fact) throw new Error('Unmapped complete style fixture body');
@@ -105,27 +104,12 @@ function messageFact(body: unknown): MessageFact {
 function recordedStyles() {
   return fakePort((name, question, value) => {
     const state = object(value);
-    if (Object.keys(state).join() === 'items' && Array.isArray(state.items) && /^item_\d+$/.test(name) && question.type === 'noul') {
-      const item = object(state.items[Number(name.slice(5))]);
-      if (typeof item.body === 'string') {
-        const fact = messageFact(item.body);
-        if (typeof item.candidate !== 'string' || !offeredPhrases.has(item.candidate)) throw new Error('Unmapped offered style phrase');
-        const yes = item.purpose === 'phrase' ? fact.phrases.includes(item.candidate)
-          : item.purpose === 'greeting' ? fact.greeting === item.candidate
-          : item.purpose === 'signOff' ? fact.signOff === item.candidate : undefined;
-        if (yes === undefined) throw new Error('Unmapped style phrase role');
-        return noulAnswer(yes ? 0.999 : 0.001);
-      }
-      const document = object(state.items[0]).document, fact = messageFact(document);
-      if (typeof document !== 'string' || typeof item.position !== 'number') throw new Error('Malformed sentence candidate');
-      const ends = fact.sentences.map(sentence => document.indexOf(sentence) + sentence.length);
-      return noulAnswer(ends.includes(item.position) ? 0.999 : 0.001);
-    }
-    if (Object.keys(state).join() === 'bodies' && Array.isArray(state.bodies) && name === 'tone' && question.type === 'choice') {
-      const tones = state.bodies.map(body => messageFact(body).tone);
-      const tone = tones[0];
-      if (!tone || !tones.every(value => value === tone)) throw new Error('Unmapped exact corpus tone');
-      return choiceAnswer(question, tone, 0.999);
+    if (Object.keys(state).join() === 'bodies' && Array.isArray(state.bodies) && question.type === 'choice') {
+      const bodies = state.bodies;
+      if (name === 'greeting') return choiceAnswer(question, corpusValue(bodies, fact => optionFor(STYLE_GREETINGS, fact.greeting)), 0.999);
+      if (name === 'signOff') return choiceAnswer(question, corpusValue(bodies, fact => optionFor(STYLE_SIGN_OFFS, fact.signOff)), 0.999);
+      if (name === 'tone') return choiceAnswer(question, corpusValue(bodies, fact => fact.tone), 0.999);
+      if (name === 'length') return choiceAnswer(question, corpusValue(bodies, fact => fact.sentences.length <= 2 ? 'short' : fact.sentences.length <= 5 ? 'medium' : 'long'), 0.999);
     }
     if (Object.keys(state).join() === 'context,candidates,selectionFitInstructions'
       && typeof state.selectionFitInstructions === 'string' && Array.isArray(state.candidates)) {
@@ -143,129 +127,13 @@ function recordedStyles() {
 beforeEach(() => { source = taskRouteSourceFixture(); styles = recordedStyles(); prior = installJudgmentPort(styles.port); });
 afterEach(async () => { installJudgmentPort(prior); await source.close(); });
 const options = () => ({ sourceOwner: source.owner });
-const countSentences = (text: string) => nativeCountSentences(text, options());
-const mostFrequent = (corpus: readonly string[], candidates: readonly string[], fallback: string) => nativeMostFrequent(corpus, candidates, fallback, options());
-const classifyTone = (bodies: readonly string[]) => nativeClassifyTone(bodies, options());
 const extractSenderName = (from: string) => nativeExtractSenderName(from, options());
 const extractStyleProfile = (messages: readonly EmailSummary[]) => nativeExtractStyleProfile(messages, options());
 const composeDraftReply = (inbound: EmailSummary, profile: StyleProfile, context: string, predicate: Parameters<typeof nativeComposeDraftReply>[3]) => nativeComposeDraftReply(inbound, profile, context, predicate, options());
 
-// ---------------------------------------------------------------------------
-// countSentences
-// ---------------------------------------------------------------------------
 
-describe('countSentences', () => {
-  it('returns 0 for empty string', async () => {
-    expect(await countSentences('')).toBe(0);
-  });
 
-  it('does not count a greeting fragment as a full sentence', async () => {
-    expect(await countSentences('Hello there')).toBe(0);
-  });
 
-  it('counts multiple sentences separated by period-space', async () => {
-    expect(await countSentences('First sentence. Second sentence. Third sentence.')).toBe(3);
-  });
-
-  it('counts sentences ending with exclamation marks', async () => {
-    expect(await countSentences('Great! Sounds good! Talk soon.')).toBe(3);
-  });
-
-  it('counts sentences ending with question marks', async () => {
-    expect(await countSentences('How are you? Are you free? Let me know.')).toBe(3);
-  });
-
-  it('does not invent a sentence from a nonempty fragment', async () => {
-    expect(await countSentences('no punctuation here')).toBe(0);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// median
-// ---------------------------------------------------------------------------
-
-describe('median', () => {
-  it('returns fallback for empty array',  () => {
-    expect(median([], 5)).toBe(5);
-  });
-
-  it('returns the single element for a one-element array',  () => {
-    expect(median([7], 0)).toBe(7);
-  });
-
-  it('returns the middle element for odd-length array',  () => {
-    expect(median([1, 3, 5], 0)).toBe(3);
-  });
-
-  it('returns rounded average of two midpoints for even-length array',  () => {
-    expect(median([2, 4], 0)).toBe(3);
-  });
-
-  it('handles larger sorted arrays',  () => {
-    expect(median([1, 2, 3, 4, 5, 6], 0)).toBe(4);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// mostFrequent
-// ---------------------------------------------------------------------------
-
-describe('mostFrequent', () => {
-  it('returns fallback when corpus is empty', async () => {
-    expect(await mostFrequent([], ['Hi', 'Hello'], 'Hey')).toBe('Hey');
-  });
-
-  it('returns the candidate that appears most in the corpus', async () => {
-    const corpus = [
-      'Hi there, hope you are well',
-      'Hi Alice,',
-      'Hello Bob,',
-    ];
-    expect(await mostFrequent(corpus, ['Hi', 'Hello', 'Hey'], 'Hey')).toBe('Hi');
-  });
-
-  it('returns fallback when no candidates appear in corpus', async () => {
-    const corpus = ['Good morning team'];
-    expect(await mostFrequent(corpus, ['Hey', 'Yo'], 'Hi')).toBe('Hi');
-  });
-
-  it('is case-insensitive', async () => {
-    const corpus = ['HELLO everyone', 'hello again'];
-    expect(await mostFrequent(corpus, ['Hello', 'Hi'], 'Hi')).toBe('Hello');
-  });
-});
-
-// ---------------------------------------------------------------------------
-// classifyTone
-// ---------------------------------------------------------------------------
-
-describe('classifyTone', () => {
-  it('returns neutral for empty corpus', async () => {
-    expect(await classifyTone([])).toBe('neutral');
-  });
-
-  it('returns formal when formal tokens dominate', async () => {
-    const bodies = [
-      'Please kindly review the attached document.',
-      'I am writing pursuant to our previous discussion.',
-      'Regards, sincerely yours.',
-    ];
-    expect(await classifyTone(bodies)).toBe('formal');
-  });
-
-  it('returns casual when casual tokens dominate', async () => {
-    const bodies = [
-      'Hey, sounds good! No worries about the delay.',
-      'Yeah, cheers! Chat soon.',
-    ];
-    expect(await classifyTone(bodies)).toBe('casual');
-  });
-
-  it('returns neutral when balanced', async () => {
-    // Deliberately crafted to have equal formal and casual hits (0 each)
-    expect(await classifyTone(['Thank you for your time'])).toBe('neutral');
-  });
-});
 
 // ---------------------------------------------------------------------------
 // extractSenderName
@@ -468,115 +336,6 @@ describe('composeDraftReply', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// styleReplyWorkflowStatus
-// ---------------------------------------------------------------------------
 
-describe('styleReplyWorkflowStatus', () => {
-  it('returns ready when protected reading capability is available',  () => {
-    expect(styleReplyWorkflowStatus(true)).toBe('ready');
-  });
 
-  it('returns needs-setup when protected reading capability is absent',  () => {
-    expect(styleReplyWorkflowStatus(false)).toBe('needs-setup');
-  });
-});
 
-// ---------------------------------------------------------------------------
-// styleReplyWorkflow
-// ---------------------------------------------------------------------------
-
-describe('styleReplyWorkflow', () => {
-  it('has correct id',  () => {
-    const wf = styleReplyWorkflow(true);
-    expect(wf.id).toBe('inbox-style-matched-draft-reply');
-  });
-
-  it('is ready when capability is available',  () => {
-    const wf = styleReplyWorkflow(true);
-    expect(wf.status).toBe('ready');
-  });
-
-  it('is needs-setup when capability is absent',  () => {
-    const wf = styleReplyWorkflow(false);
-    expect(wf.status).toBe('needs-setup');
-  });
-
-  it('runBoundary names protected readings without a send',  () => {
-    const wf = styleReplyWorkflow(true);
-    expect(wf.runBoundary.toLowerCase()).toContain('protected');
-  });
-
-  it('runBoundary mentions confirmed send',  () => {
-    const wf = styleReplyWorkflow(true);
-    expect(wf.runBoundary.toLowerCase()).toContain('confirmed');
-  });
-
-  it('is deterministic: same capability produces identical descriptor',  () => {
-    const a = styleReplyWorkflow(true);
-    const b = styleReplyWorkflow(true);
-    expect(a).toEqual(b);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// styleReplyLiveRecord
-// ---------------------------------------------------------------------------
-
-describe('styleReplyLiveRecord', () => {
-  it('has id inbox-style-reply-draft',  () => {
-    const rec = styleReplyLiveRecord(true);
-    expect(rec.id).toBe('inbox-style-reply-draft');
-  });
-
-  it('effect is read-only (local composition, no provider write)',  () => {
-    const rec = styleReplyLiveRecord(true);
-    expect(rec.effect).toBe('read-only');
-  });
-
-  it('confirmationRequired is false for local composition',  () => {
-    const rec = styleReplyLiveRecord(true);
-    expect(rec.confirmationRequired).toBe(false);
-  });
-
-  it('follow-up send route has confirmationRequired = true',  () => {
-    const rec = styleReplyLiveRecord(true);
-    const sendRoute = rec.followUpRoutes?.find((r) => r.id === 'send-after-review');
-    expect(sendRoute).toBeDefined();
-    expect(sendRoute!.requiresConfirmation).toBe(true);
-  });
-
-  it('follow-up send route effect is confirmed-effect',  () => {
-    const rec = styleReplyLiveRecord(true);
-    const sendRoute = rec.followUpRoutes?.find((r) => r.id === 'send-after-review');
-    expect(sendRoute!.effect).toBe('confirmed-effect');
-  });
-
-  it('is needs-setup when capability absent',  () => {
-    const rec = styleReplyLiveRecord(false);
-    expect(rec.status).toBe('needs-setup');
-  });
-});
-
-// ---------------------------------------------------------------------------
-// buildStyleReplyLaneAdditions
-// ---------------------------------------------------------------------------
-
-describe('buildStyleReplyLaneAdditions', () => {
-  it('returns both workflow and liveRecord',  () => {
-    const additions = buildStyleReplyLaneAdditions(true);
-    expect(additions.workflow).toBeDefined();
-    expect(additions.liveRecord).toBeDefined();
-  });
-
-  it('workflow and liveRecord have consistent status',  () => {
-    const additions = buildStyleReplyLaneAdditions(true);
-    expect(additions.liveRecord.status).toBe(additions.workflow.status);
-  });
-
-  it('is deterministic: two calls with same arg produce equal results',  () => {
-    const a = buildStyleReplyLaneAdditions(false);
-    const b = buildStyleReplyLaneAdditions(false);
-    expect(a).toEqual(b);
-  });
-});

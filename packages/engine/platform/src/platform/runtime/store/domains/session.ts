@@ -48,8 +48,17 @@ export interface SessionDomainState {
   source: string;
 
   // ── Identity ───────────────────────────────────────────────────────────────
-  /** Unique session identifier (ulid/uuid). */
+  /**
+   * The process session id (`user-<id>`), fixed for the life of this terminal
+   * process. It is not a saved conversation and cannot be passed to /resume.
+   */
   id: string;
+  /**
+   * The saved conversation this process is running now: the id /resume and the
+   * session list use. It moves on resume, fork and recovery; the runtime's
+   * session id setter is its one writer.
+   */
+  conversationSessionId: string;
   /** Absolute path to the project root for this session. */
   projectRoot: string;
   /** Optional user identifier (from config or auth layer). */
@@ -66,9 +75,9 @@ export interface SessionDomainState {
   // ── Recovery machine ───────────────────────────────────────────────────────
   /** Current state of the session recovery state machine. */
   recoveryState: SessionRecoveryState;
-  /** Whether this session was resumed from a saved state. */
+  /** Whether this process resumed a saved conversation. */
   isResumed: boolean;
-  /** ID of the session that was resumed (undefined for fresh sessions). */
+  /** The saved conversation that was last resumed (undefined for fresh sessions). */
   resumedFromId?: string | undefined;
   /** Whether a compaction repair was applied during load. */
   wasRepaired: boolean;
@@ -110,6 +119,7 @@ export function createInitialSessionState(): SessionDomainState {
     lastUpdatedAt: 0,
     source: 'init',
     id: '',
+    conversationSessionId: '',
     projectRoot: '',
     userId: undefined,
     status: 'initializing',
@@ -144,7 +154,7 @@ export function sessionRecoveryPatch(event: SessionEvent): Partial<SessionDomain
     case 'SESSION_RECONCILING':
       return { recoveryState: 'reconciling' };
     case 'SESSION_RESUMED':
-      return { isResumed: true };
+      return { isResumed: true, resumedFromId: event.sessionId };
     case 'SESSION_READY':
       return { recoveryState: 'ready', recoveryError: undefined };
     case 'SESSION_RECOVERY_FAILED':

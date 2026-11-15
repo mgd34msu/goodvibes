@@ -722,8 +722,7 @@ export function registerAllTools(
   registerTool(createChannelTool(channelRegistry));
   return { fileCache, projectIndex, dispose };
 }
-export { booleanValue, booleanValuePolicy } from './batteries/boolean-value.js';
-export type { NativeDecisionPolicy } from './batteries/decision-policy.js';
+export { booleanValue } from './batteries/boolean-value.js';
 
 export { learningCuratorScore, learningProposalTarget, learningDuplicateAlignment, learningSurvivorSelection, learningSurvivorEquivalence } from './batteries/learning-curator.js';
 

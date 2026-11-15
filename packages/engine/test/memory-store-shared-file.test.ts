@@ -10,8 +10,8 @@ import { rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ConfigManager } from '../platform/src/platform/config/manager.ts';
 import { MemoryEmbeddingProviderRegistry } from '../platform/src/platform/state/memory-embeddings.ts';
-import { MemoryStore, MemoryStoreChangedOnDiskError, prepareMemoryStoreAdd } from '../platform/src/platform/state/memory-store.ts';
-import { MemoryRegistry, prepareMemoryRegistryAdd } from '../platform/src/platform/state/memory-registry.ts';
+import { MemoryStore, MemoryStoreChangedOnDiskError, planMemoryRecord } from '../platform/src/platform/state/memory-store.ts';
+import { MemoryRegistry } from '../platform/src/platform/state/memory-registry.ts';
 import { SQLiteStore } from '../platform/src/platform/state/sqlite-store.ts';
 import { Database } from 'bun:sqlite';
 import { loadSqliteVecExtension } from '../platform/src/platform/state/sqlite-vec-loader.ts';
@@ -101,7 +101,7 @@ test('a ranked search still answers when another caller writes while it is ranki
   expect((await pending).map((record) => record.summary)).toEqual(['deploy runs through the release pipeline']);
 });
 
-test('a prepared add whose row is saved reports success even when another write lands during the save', async () => {
+test('a staged add whose row is saved reports success even when another write lands during the save', async () => {
   const { open } = setup();
   const store = await open();
   const other = await store.add({ cls: 'fact', summary: 'other record' });
@@ -113,15 +113,27 @@ test('a prepared add whose row is saved reports success even when another write 
     return result;
   });
   cleanups.push(() => save.mockRestore());
-  const plan = prepareMemoryStoreAdd(store, { cls: 'fact', summary: 'prepared record' });
-  expect((await plan.commit()).id).toBe(plan.record.id);
+  const plan = planMemoryRecord({ cls: 'fact', summary: 'prepared record' });
+  expect((await store.add({ cls: 'fact', summary: 'prepared record' }, undefined, { id: plan.id, createdAt: plan.createdAt })).id).toBe(plan.id);
   nested = false;
-  const viaRegistry = prepareMemoryRegistryAdd(new MemoryRegistry(store), { cls: 'fact', summary: 'prepared through the registry' });
-  expect((await viaRegistry.commit()).id).toBe(viaRegistry.record.id);
+  const viaRegistry = planMemoryRecord({ cls: 'fact', summary: 'prepared through the registry' });
+  expect((await new MemoryRegistry(store).add({ cls: 'fact', summary: 'prepared through the registry' }, undefined,
+    { id: viaRegistry.id, createdAt: viaRegistry.createdAt })).id).toBe(viaRegistry.id);
   save.mockRestore();
   const reopened = await open();
-  expect(reopened.get(plan.record.id)?.summary).toBe('prepared record');
-  expect(reopened.get(viaRegistry.record.id)?.summary).toBe('prepared through the registry');
+  expect(reopened.get(plan.id)?.summary).toBe('prepared record');
+  expect(reopened.get(viaRegistry.id)?.summary).toBe('prepared through the registry');
+});
+
+test('an insert callback that throws takes the row out again, so nothing is stored', async () => {
+  const { open } = setup();
+  const store = await open();
+  const plan = planMemoryRecord({ cls: 'fact', summary: 'refused at the insert' });
+  await expect(store.add({ cls: 'fact', summary: 'refused at the insert' }, undefined, {
+    id: plan.id, createdAt: plan.createdAt, onInserted: () => { throw new Error('caller refused'); },
+  })).rejects.toThrow('caller refused');
+  expect(store.get(plan.id)).toBeNull();
+  expect((await open()).get(plan.id)).toBeNull();
 });
 
 test('two adds in flight together, or an add with another write during its save, each succeed once', async () => {

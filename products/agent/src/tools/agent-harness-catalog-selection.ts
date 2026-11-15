@@ -5,7 +5,7 @@ import { gateJudgmentRegistry, prepareJudgmentResult } from '@goodvibes-jev/engi
 import { registryCatalogGroupFit, registrySelect, ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { captureCatalogMethods, captureCatalogSnapshot, rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { withModelReadingSource } from './agent-harness-model-reading-source.ts';
-import { activateClassicFallback, decisionOrClassic, isClassicOperation, selectClassicCatalog } from '@goodvibes-jev/engine/platform/platform/runtime';
+import { activateClassicFallback, decisionOrClassic, isClassicOperation, rankClassicCatalog, selectClassicCatalog } from '@goodvibes-jev/engine/platform/platform/runtime';
 
 function requireSynchronousRestriction(result: unknown): void {
   if (result === undefined) return;
@@ -80,10 +80,32 @@ export function captureHarnessCatalogSelectionSource(site: string): () => void {
   return assertCurrent;
 }
 
-/** Read every complete group; only one settled affirmative group can scope a record choice. */
+function entryId(entry: unknown): string | undefined {
+  const id: unknown = entry && typeof entry === 'object' ? Object.getOwnPropertyDescriptor(entry, 'id')?.value : undefined;
+  return typeof id === 'string' ? id : undefined;
+}
+
+/** The one entry whose declared id is the query, ignoring case; a lookup by id needs no reading. */
+function exactIdEntry<T>(entries: readonly T[], query: string, id: (entry: T) => string | undefined): T | null {
+  const wanted = query.trim().toLocaleLowerCase();
+  if (!wanted) return null;
+  const matches = entries.filter(entry => id(entry)?.toLocaleLowerCase() === wanted);
+  return matches.length === 1 ? matches[0] ?? null : null;
+}
+
+/** Most catalog rows the one selection request is shown when code found literal matches. */
+const SELECTION_SHORTLIST = 8;
+
+/**
+ * Read the groups in one request; only one affirmative group can scope a record
+ * choice. A lookup that names a group id exactly needs no reading, and a group
+ * whose reading did not settle is not a match.
+ */
 export async function selectHarnessCatalogGroup<T>(entries: readonly T[], query: string,
   describe: (entry: T) => { readonly description: string },
   options: CatalogRankingOptions = {}, site = 'agent.catalog.group', contextEvidence?: unknown): Promise<T | null> {
+  const exact = exactIdEntry(entries, query, entryId);
+  if (exact !== null) return exact;
   return decisionOrClassic(() => selectDecisionHarnessCatalogGroup(entries, query, describe, options, site, contextEvidence),
     () => classicCatalogSelection(entries, query, entry => {
       const id: unknown = entry && typeof entry === 'object' ? Object.getOwnPropertyDescriptor(entry, 'id')?.value : undefined;
@@ -124,19 +146,27 @@ async function selectDecisionHarnessCatalogGroup<T>(entries: readonly T[], query
   for (const judgment of ranked.judgments) {
     if (!/^(0|[1-9][0-9]*)$/.test(judgment.id)) throw new ToolInputProjectionError('held');
     const entry = entries[Number(judgment.id)];
-    if (entry === undefined || judgment.reading.outcome !== 'act'
-      || (judgment.reading.verdict !== 'yes' && judgment.reading.verdict !== 'no')) throw new ToolInputProjectionError('held');
-    if (judgment.reading.verdict === 'yes') matches.push(entry);
+    if (entry === undefined) throw new ToolInputProjectionError('held');
+    if (judgment.reading.outcome === 'act' && judgment.reading.verdict === 'yes') matches.push(entry);
   }
   request.assertCurrent();
   return matches.length === 1 ? matches[0] ?? null : null;
 }
 
-/** A complete screened choice maps only to the original local row. */
+/**
+ * A complete screened choice maps only to the original local row. An exact id
+ * is a lookup with no reading; otherwise one selection request reads the
+ * catalog, cut to the best literal matches when code found any.
+ */
 export async function selectHarnessCatalog<T>(entries: readonly T[], query: string,
   describe: (entry: T) => { readonly id: string; readonly description: string; readonly evidence?: unknown },
   options: CatalogRankingOptions = {}, site = 'agent.catalog.select', contextEvidence?: unknown): Promise<T | null> {
-  return decisionOrClassic(() => selectDecisionHarnessCatalog(entries, query, describe, options, site, contextEvidence),
+  const exact = exactIdEntry(entries, query, entry => describe(entry).id);
+  if (exact !== null) return exact;
+  const literal = rankClassicCatalog(entries, query, entry => describe(entry));
+  const shortlist = literal.length > 0 && entries.length > SELECTION_SHORTLIST
+    ? literal.slice(0, SELECTION_SHORTLIST).map(match => match.entry) : entries;
+  return decisionOrClassic(() => selectDecisionHarnessCatalog(shortlist, query, describe, options, site, contextEvidence),
     () => classicCatalogSelection(entries, query, describe, options, site, contextEvidence));
 }
 
@@ -205,7 +235,8 @@ async function selectDecisionHarnessCatalog<T>(entries: readonly T[], query: str
       authority.assertCurrent(); current.assertCurrent?.();
       result.recordAction('read-only catalog detail selection');
       authority.assertCurrent(); current.assertCurrent?.();
-      if (result.outcome !== 'act') throw new ToolInputProjectionError('held');
+      // An unsettled selection selects nothing; the caller reports the lookup as unresolved.
+      if (result.outcome !== 'act') return null;
       if (result.pick.choice === 'none') {
         if (result.chosen !== undefined) throw new ToolInputProjectionError('held');
         return null;

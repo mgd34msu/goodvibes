@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { ArtifactStore, type ArtifactDescriptor } from '@goodvibes-jev/engine/platform/platform/artifacts';
-import { localBenchmarkPrompt, localBenchmarkPromptPolicy, routingRegistry } from '@goodvibes-jev/engine/platform/platform/routing';
+import { localBenchmarkPrompt, routingRegistry } from '@goodvibes-jev/engine/platform/platform/routing';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { localBenchmarkRouteLatencyMapFor, localModelBenchmarkHistory, localModelBenchmarkHistoryFrom,
   readLocalModelBenchmarkHistory, readLocalModelBenchmarkSnapshot, type BenchmarkArtifactContext } from '../../tools/agent-harness-local-model-benchmarks.ts';
@@ -47,7 +47,6 @@ function deferred() {
 }
 
 test('registered canonical battery owns the membership decision and original synthetic fixtures', () => {
-  expect(() => localBenchmarkPromptPolicy.assertCurrent()).not.toThrow();
   expect(routingRegistry.get(localBenchmarkPrompt.name)).toBe(localBenchmarkPrompt);
   expect(localBenchmarkPrompt.model).toBeUndefined();
   expect(Object.keys(localBenchmarkPrompt.items)).toEqual(['member']);
@@ -149,14 +148,12 @@ test('privacy uncertainty refuses the complete artifact before canonical port ac
   expect(fake.requests).toHaveLength(0);
 });
 
-test.each(['artifact', 'content', 'definition', 'store-method', 'port', 'authority', 'signal'] as const)('pending membership cannot publish after %s retirement', async retirement => {
+test.each(['artifact', 'content', 'store-method', 'port', 'authority', 'signal'] as const)('pending membership cannot publish after %s retirement', async retirement => {
   const f = await fixture(); const artifact = await comparison(f.store, 'Compare the on-device endpoint with the hosted baseline.');
   const entered = deferred(), release = deferred(); const controller = new AbortController(); let revoked = false;
   let content: Awaited<ReturnType<ArtifactStore['readContent']>> | undefined;
   const originalReadContent = f.store.readContent;
   f.store.readContent = async id => { content = await originalReadContent.call(f.store, id); return content; };
-  const question = localBenchmarkPrompt.items.member.question;
-  const originalField = Object.getOwnPropertyDescriptor(question, 'retiredFixtureOnly');
   const fake = fakePort(() => noulAnswer(0.99));
   const nativeTails: Promise<unknown>[] = [];
   installJudgmentPort({ ...fake.port, ask: request => {
@@ -170,7 +167,6 @@ test.each(['artifact', 'content', 'definition', 'store-method', 'port', 'authori
     await Promise.race([entered.promise, observed.then(() => { throw new Error('Membership settled before the retained request began'); })]);
     if (retirement === 'artifact') f.store.delete(artifact.id);
     if (retirement === 'content') { if (!content) throw new Error('Native body was not acquired'); content.buffer[0] = 0; }
-    if (retirement === 'definition') Object.defineProperty(question, 'retiredFixtureOnly', { value: true, configurable: true, enumerable: true });
     if (retirement === 'store-method') f.store.list = () => [];
     if (retirement === 'port') installJudgmentPort(fakePort(() => noulAnswer(0.99)).port);
     if (retirement === 'authority') revoked = true;
@@ -179,7 +175,6 @@ test.each(['artifact', 'content', 'definition', 'store-method', 'port', 'authori
     expect(await observed).toEqual({ accepted: false });
   } finally {
     release.resolve(); await observed; await Promise.allSettled(nativeTails);
-    if (originalField) Object.defineProperty(question, 'retiredFixtureOnly', originalField); else Reflect.deleteProperty(question, 'retiredFixtureOnly');
   }
 });
 
@@ -300,138 +295,6 @@ test('native list array accessors refuse before normalization without executing 
   expect(calls).toBe(0); expect(fake.requests).toHaveLength(0);
 });
 
-
-type PolicyRetirement = 'published-items' | 'original-band' | 'run';
-function policyControl() {
-  const originalItems = localBenchmarkPrompt.items, originalRun = localBenchmarkPrompt.run;
-  const yesBand = originalItems.member.band.yes;
-  const itemsDescriptor = Object.getOwnPropertyDescriptor(localBenchmarkPrompt, 'items');
-  const runDescriptor = Object.getOwnPropertyDescriptor(localBenchmarkPrompt, 'run');
-  const actAtDescriptor = Object.getOwnPropertyDescriptor(yesBand, 'actAt');
-  if (!itemsDescriptor || !runDescriptor || !actAtDescriptor) throw new Error('Native policy control descriptors are absent');
-  return {
-    retire(kind: PolicyRetirement) {
-      if (kind === 'published-items') Object.defineProperty(localBenchmarkPrompt, 'items', { ...itemsDescriptor, value: structuredClone(originalItems) });
-      if (kind === 'original-band') Object.defineProperty(yesBand, 'actAt', { ...actAtDescriptor, value: 0.65 });
-      if (kind === 'run') Object.defineProperty(localBenchmarkPrompt, 'run', { ...runDescriptor,
-        value: (...args: Parameters<typeof originalRun>) => originalRun(...args) });
-    },
-    restore() {
-      Object.defineProperty(localBenchmarkPrompt, 'items', itemsDescriptor);
-      Object.defineProperty(localBenchmarkPrompt, 'run', runDescriptor);
-      Object.defineProperty(yesBand, 'actAt', actAtDescriptor);
-    },
-  };
-}
-
-test.each(['published-items', 'original-band', 'run'] as const)('pre-entry %s replacement refuses before native source acquisition or evidence credit', async retirement => {
-  const f = await fixture(); await comparison(f.store, 'Evaluate this workstation endpoint on the same repository task.');
-  let listCalls = 0, bodyCalls = 0;
-  const nativeList = f.store.list, nativeRead = f.store.readContent;
-  f.store.list = limit => { listCalls++; return nativeList.call(f.store, limit); };
-  f.store.readContent = id => { bodyCalls++; return nativeRead.call(f.store, id); };
-  const fake = fakePort(() => noulAnswer(0.7)); installJudgmentPort(fake.port);
-  const control = policyControl();
-  try {
-    control.retire(retirement);
-    await expect(readLocalModelBenchmarkSnapshot(f.context, { sourceOwner: ordinaryResearchOwner() })).rejects.toThrow();
-    expect(listCalls).toBe(0); expect(bodyCalls).toBe(0); expect(fake.requests).toHaveLength(0);
-  } finally { control.restore(); }
-  expect(() => localBenchmarkPromptPolicy.assertCurrent()).not.toThrow();
-});
-
-test.each(['published-items', 'original-band', 'run'] as const)('pending %s replacement cannot publish the actual membership response', async retirement => {
-  const f = await fixture(); await comparison(f.store, 'Evaluate this workstation endpoint against our baseline.');
-  const entered = deferred(), release = deferred(), control = policyControl();
-  const fake = fakePort(() => noulAnswer(0.7)), nativeTails: Promise<unknown>[] = [];
-  installJudgmentPort({ ...fake.port, ask: request => {
-    const tail = (async () => { const response = await fake.port.ask(request); entered.resolve(); await release.promise; return response; })();
-    nativeTails.push(tail); return tail;
-  } });
-  const pending = readLocalModelBenchmarkSnapshot(f.context, { sourceOwner: ordinaryResearchOwner() });
-  const observed = pending.then(() => ({ accepted: true }), () => ({ accepted: false }));
-  try {
-    await Promise.race([entered.promise, observed.then(() => { throw new Error('Membership settled before the retained response began'); })]);
-    expect(fake.requests).toHaveLength(1);
-    control.retire(retirement); release.resolve();
-    expect(await observed).toEqual({ accepted: false });
-  } finally {
-    release.resolve();
-    try { await observed; await Promise.allSettled(nativeTails); } finally { control.restore(); }
-  }
-  expect(() => localBenchmarkPromptPolicy.assertCurrent()).not.toThrow();
-});
-
-test('completed membership keeps construction-owned policy restrictions in retained publication guards', async () => {
-  const f = await fixture(); await comparison(f.store, 'Evaluate this workstation endpoint against our baseline.');
-  const guards: (() => void)[] = [], control = policyControl();
-  const fake = fakePort(() => noulAnswer(0.99)); installJudgmentPort(fake.port);
-  const snapshot = await readLocalModelBenchmarkSnapshot(f.context, { sourceOwner: ordinaryResearchOwner(), retainCurrent: guard => { guards.push(guard); } });
-  expect(snapshot.membership).toMatchObject([{ outcome: 'act', verdict: 'yes' }]);
-  expect(() => { for (const guard of guards) guard(); }).not.toThrow();
-  try {
-    control.retire('original-band');
-    expect(() => { for (const guard of guards) guard(); }).toThrow();
-  } finally { control.restore(); }
-  expect(() => { for (const guard of guards) guard(); }).not.toThrow();
-});
-
-
-test.each(['store', 'registry', 'store-owner', 'store-list', 'store-read', 'registry-get'] as const)('retained %s callback cannot retire the original policy or owner after its boundary check', async source => {
-  const f = await fixture(); const artifact = await comparison(f.store, 'Evaluate this workstation endpoint against our baseline.');
-  const control = policyControl(), guards: (() => void)[] = [];
-  const nativeList = f.store.list, nativeRead = f.store.readContent, nativeGet = routingRegistry.get;
-  const originalGetDescriptor = Object.getOwnPropertyDescriptor(routingRegistry, 'get');
-  const originalReadDescriptor = Object.getOwnPropertyDescriptor(f.store, 'readContent');
-  const originalStoreDescriptor = Object.getOwnPropertyDescriptor(f.context.platform, 'artifactStore');
-  if (!originalStoreDescriptor) throw new Error('Native store control descriptor is absent');
-  let armed = false, mutations = 0;
-  const retireOwner = () => {
-    mutations++;
-    if (source === 'store' || source === 'registry') control.retire('original-band');
-    if (source === 'store-owner') Object.defineProperty(f.context.platform, 'artifactStore', { ...originalStoreDescriptor, value: { list: () => [] } });
-    if (source === 'store-list') f.store.list = limit => nativeList.call(f.store, limit);
-    if (source === 'store-read') f.store.readContent = id => nativeRead.call(f.store, id);
-    if (source === 'registry-get') routingRegistry.get = name => nativeGet.call(routingRegistry, name);
-  };
-  const ownedList: typeof nativeList = limit => {
-    const artifacts = nativeList.call(f.store, limit);
-    if (armed && source !== 'registry' && source !== 'registry-get') retireOwner();
-    return artifacts;
-  };
-  const ownedGet: typeof nativeGet = name => {
-    const decision = nativeGet.call(routingRegistry, name);
-    if (armed && (source === 'registry' || source === 'registry-get')) retireOwner();
-    return decision;
-  };
-  f.store.list = ownedList; routingRegistry.get = ownedGet;
-  const restoreOwner = () => {
-    control.restore();
-    Object.defineProperty(f.context.platform, 'artifactStore', originalStoreDescriptor);
-    f.store.list = ownedList; routingRegistry.get = ownedGet;
-    if (originalReadDescriptor) Object.defineProperty(f.store, 'readContent', originalReadDescriptor);
-    else Reflect.deleteProperty(f.store, 'readContent');
-  };
-  const fake = fakePort(() => noulAnswer(0.99)); installJudgmentPort(fake.port);
-  try {
-    const snapshot = await readLocalModelBenchmarkSnapshot(f.context, { sourceOwner: ordinaryResearchOwner(), retainCurrent: guard => { guards.push(guard); } });
-    expect(snapshot.comparisons.map(artifact => artifact.id)).toEqual([artifact.id]);
-    expect(snapshot.membership).toMatchObject([{ outcome: 'act', verdict: 'yes' }]);
-    expect(fake.requests).toHaveLength(1); expect(guards.length).toBeGreaterThan(0);
-    expect(() => { for (const guard of guards) guard(); }).not.toThrow();
-    const unchangedArtifacts = nativeList.call(f.store, 100);
-    armed = true;
-    expect(() => { for (const guard of guards) guard(); }).toThrow();
-    expect(mutations).toBe(1);
-    expect(nativeList.call(f.store, 100)).toEqual(unchangedArtifacts);
-    armed = false; restoreOwner();
-    expect(() => { for (const guard of guards) guard(); }).not.toThrow();
-  } finally {
-    armed = false; restoreOwner();
-    if (originalGetDescriptor) Object.defineProperty(routingRegistry, 'get', originalGetDescriptor);
-    else Reflect.deleteProperty(routingRegistry, 'get');
-  }
-});
 
 test('Classic benchmark history preserves explicit native latency and source links without inferring unmarked membership or stack names', async () => {
   const f = await fixture();

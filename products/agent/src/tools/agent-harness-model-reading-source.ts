@@ -1,7 +1,6 @@
 import { OwnedSelectionObservation } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 import { captureConfigSelectedScalars, type ConfigScalarSelection } from '@goodvibes-jev/engine/platform/platform/config';
 import { JudgmentAuthorityRetiredError } from '@goodvibes-jev/engine/errors';
-import { captureVoiceWakeReadSource } from '@goodvibes-jev/engine/platform/platform/runtime/voice-setup';
 import { dirname, relative } from 'node:path';
 import { VoiceProviderRegistry, captureVoiceProviderReadSource } from '@goodvibes-jev/engine/platform/platform/voice';
 import { MediaProviderRegistry, captureMediaProviderReadSource } from '@goodvibes-jev/engine/platform/platform/media';
@@ -1138,10 +1137,6 @@ export function captureCatalogNativeFacts(context: unknown, family: 'media' | 'p
   bindings.push(() => { if (process.env !== env) held(); envSlots(); });
   const assertBindings = (): void => { for (const binding of bindings) binding(); };
   assertBindings();
-  if (wakeService !== null && wakeService !== undefined) {
-    const wakeCurrent = captureVoiceWakeReadSource(wakeService);
-    assertBindings(); observations.push(() => { assertBindings(); wakeCurrent(); assertBindings(); });
-  }
   // File identity, ancestry and complete original bytes are private custody,
   // not semantic evidence or permission to publish the selected credential.
   if (paths !== null && typeof paths === 'object') {

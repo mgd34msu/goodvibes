@@ -42,12 +42,10 @@ import { wakeSurfaceKey, type WakeSurface } from '../voice/wake/settings.js';
 import { executePolicyCheck } from '../gate/execute-policy-check.js';
 import {
   createWakeSetupService,
-  captureWakeSetupReadSource,
   type WakeModelChunkRequest,
   type WakeModelChunkResult,
   type WakeSetupService,
 } from './wake-setup.js';
-import { assertSecurityReadSource, captureSecurityReadBindings } from '../security/read-source.js';
 import { GatewayVerbError } from '../control-plane/routes/gateway-verb-error.js';
 import type { WakeInstallProvisionOutcome } from '../voice/wake/install-provision.js';
 
@@ -140,18 +138,6 @@ export interface VoiceSetupService {
    */
   wakeEnsureProvisioned(options?: { readonly recoveryHint?: string | undefined }): Promise<WakeInstallProvisionOutcome>;
   wakeModelChunk(request: WakeModelChunkRequest): WakeModelChunkResult;
-}
-
-const voiceWakeReadSources = new WeakMap<object, () => () => void>();
-const getVoiceWakeReadSource = voiceWakeReadSources.get.bind(voiceWakeReadSources);
-const setVoiceWakeReadSource = voiceWakeReadSources.set.bind(voiceWakeReadSources);
-
-/** Only the original factory-issued service can retain its managed wake source. */
-export function captureVoiceWakeReadSource(service: unknown): () => void {
-  assertSecurityReadSource(service !== null && typeof service === 'object');
-  const capture = getVoiceWakeReadSource(service);
-  assertSecurityReadSource(capture !== undefined);
-  return capture();
 }
 
 function currentVoiceInstallStamp(platform: VoiceProvisionResult['platform']): VoiceInstallStamp | null {
@@ -410,11 +396,5 @@ export function createVoiceSetupService(deps: VoiceSetupServiceDeps): VoiceSetup
     wakeEnsureProvisioned: (options) => wake.ensureProvisioned(options),
     wakeModelChunk: (request) => wake.modelChunk(request),
   };
-  setVoiceWakeReadSource(service, () => {
-    const source = captureSecurityReadBindings(deps, ['managedVoiceRoot', 'getConfig', 'setConfig', 'resetLocalEngineFailureState', 'admitExpensiveWork', 'provision', 'prove', 'readStatus']);
-    const methods = captureSecurityReadBindings(service, ['status', 'install', 'setup', 'wakeStatus', 'wakeProvision', 'wakeEnsureProvisioned', 'wakeModelChunk']);
-    source(); methods(); const wakeCurrent = captureWakeSetupReadSource(wake); source(); methods();
-    return () => { source(); methods(); wakeCurrent(); source(); methods(); };
-  });
   return service;
 }

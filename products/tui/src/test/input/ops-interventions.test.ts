@@ -46,7 +46,8 @@ function makeEnv(options: { readonly withCanceller?: boolean } = {}) {
   const store = createRuntimeStore();
   const bus = new RuntimeEventBus();
   const dispatch = createDomainDispatch(store);
-  const taskManager = createTaskManager(store, bus, SESSION_ID);
+  // Every task here is owned by a test owner that implements each verb.
+  const taskManager = createTaskManager(store, bus, SESSION_ID, undefined, () => ({ cancel() {}, pause() {}, resume() {}, retry() {} }));
   // Stands in for the agent manager: it runs every agent it is asked about and,
   // like the real manager, publishes AGENT_CANCELLED, which moves the store record.
   const cancelCalls: string[] = [];

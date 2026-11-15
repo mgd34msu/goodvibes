@@ -1,7 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import {
   HelperModel,
-  HelperModelUnavailableError,
   HelperRouter,
   resolveToolLLM,
   ToolLLM,
@@ -151,55 +150,41 @@ describe('tool LLM routing', () => {
 });
 
 describe('helper model routing', () => {
-  test('helperOnly preserves optional helper absence as explicit null', async () => {
+  test('helperOnly returns null when no dedicated route exists', async () => {
     const helper = new HelperModel({
       configManager: {
         get: (() => false) as ConfigManager['get'],
         getCategory: (() => undefined) as unknown as ConfigManager['getCategory'],
       },
       providerRegistry: {
-        getCurrentModel: () => {
-          throw new Error('must not fall back to current model');
+        getCurrentModel: () => model(),
+        getForModel: () => provider('openai'),
+        resolveModelPricing: resolveModelPricingStub,
+      },
+    });
+
+    await expect(helper.chat('resume_summary', 'summarize', { helperOnly: true })).resolves.toBeNull();
+  });
+
+  for (const enabled of [false, true]) {
+    test(`with helper.enabled ${enabled} and no route, supporting work inherits the main model`, async () => {
+      const used: string[] = [];
+      const helper = new HelperModel({
+        configManager: {
+          get: ((key: string) => key === 'helper.enabled' ? enabled : undefined) as ConfigManager['get'],
+          getCategory: (() => undefined) as unknown as ConfigManager['getCategory'],
         },
-        getForModel: () => provider('openai'),
-        resolveModelPricing: resolveModelPricingStub,
-      },
+        providerRegistry: {
+          getCurrentModel: () => model('openai', 'main-model'),
+          getForModel: (key: string) => { used.push(key); return provider('openai', 'from main'); },
+          resolveModelPricing: resolveModelPricingStub,
+        },
+      });
+
+      await expect(helper.chat('compaction', 'plan')).resolves.toBe('from main');
+      expect(used).toEqual(['openai:main-model']);
     });
-
-    await expect(helper.chat('tool_summarize', 'summarize', { helperOnly: true })).resolves.toBeNull();
-  });
-
-  test('disabled non-optional helper chat throws instead of using the main model', async () => {
-    const helper = new HelperModel({
-      configManager: {
-        get: (() => false) as ConfigManager['get'],
-        getCategory: (() => undefined) as unknown as ConfigManager['getCategory'],
-      },
-      providerRegistry: {
-        getCurrentModel: () => model(),
-        getForModel: () => provider('openai'),
-        resolveModelPricing: resolveModelPricingStub,
-      },
-    });
-
-    await expect(helper.chat('compaction', 'plan')).rejects.toThrow(HelperModelUnavailableError);
-  });
-
-  test('enabled helper with no dedicated route does not fall back to main model', async () => {
-    const helper = new HelperModel({
-      configManager: {
-        get: ((key: string) => key === 'helper.enabled') as ConfigManager['get'],
-        getCategory: (() => undefined) as unknown as ConfigManager['getCategory'],
-      },
-      providerRegistry: {
-        getCurrentModel: () => model(),
-        getForModel: () => provider('openai'),
-        resolveModelPricing: resolveModelPricingStub,
-      },
-    });
-
-    await expect(helper.chat('compaction', 'plan')).rejects.toThrow(HelperModelUnavailableError);
-  });
+  }
 
   test('per-provider helper route rejects provider/model conflicts without trying later routes', () => {
     const router = new HelperRouter({

@@ -21,7 +21,13 @@ import { ConversationManager } from '../../core/conversation.ts';
 import { runBackgroundProcessAction } from '../../tools/agent-harness-background-processes.ts';
 import { createAgentHarnessTool, registerAgentHarnessTool } from '../../tools/agent-harness-tool.ts';
 import { processClassificationOptions } from '../../tools/agent-harness-process-launch.ts';
-import { resolveBackgroundProcessClass } from '../../tools/agent-harness-process-timeout-policy.ts';
+import { withBackgroundProcessClass } from '../../tools/agent-harness-process-timeout-policy.ts';
+import type { ProcessClassificationOptions } from '../../tools/agent-harness-process-classification.ts';
+import type { AgentHarnessBackgroundProcessArgs } from '../../tools/agent-harness-background-processes-types.ts';
+
+// The class is read for a start that has a deadline and no killOnTimeout.
+const resolveBackgroundProcessClass = (args: AgentHarnessBackgroundProcessArgs, command: string, options: ProcessClassificationOptions = {}) =>
+  withBackgroundProcessClass(args, command, 30_000, options, processClass => processClass);
 import { createAgentProcessTool, createAgentTerminalTool, registerAgentTerminalProcessTools } from '../../tools/agent-terminal-process-tools.ts';
 import { ordinaryResearchOwner, researchScreeningFixture, cleanupResearchScreeningFixtures, exactSensitiveSpans } from '../helpers/research-screening.ts';
 import { recordedEffectFixture } from '../helpers/recorded-effect-admission.ts';
@@ -167,21 +173,37 @@ describe('protected process lifetime classification', () => {
     expect(local.calls).toHaveLength(0); expect(fake.requests).toHaveLength(0); expect(f.calls).toHaveLength(0);
   });
 
-  test('missing owner, unsettled screening, missing port, malformed answer and uncertain answer never spawn', async () => {
+  test('missing owner, unsettled screening, missing port, malformed answer and uncertain answer leave the process unclassified', async () => {
     const noOwner = fixture(); const fake = reading();
-    await expect(resolveBackgroundProcessClass({}, start.command)).rejects.toThrow();
+    expect(await resolveBackgroundProcessClass({}, start.command)).toBe('unclassified');
     expect(fake.requests).toHaveLength(0); expect(noOwner.calls).toHaveLength(0);
     const local = researchScreeningFixture({ complete: 0.5 }); const held = fixture(local.owner);
-    await expect(resolveBackgroundProcessClass({}, start.command, held.options())).rejects.toThrow();
+    expect(await resolveBackgroundProcessClass({}, start.command, held.options())).toBe('unclassified');
     expect(fake.requests).toHaveLength(0); expect(held.calls).toHaveLength(0);
     for (const response of ['missing', 'malformed', 'uncertain', 'failure']) {
       const f = fixture();
       installJudgmentPort(response === 'missing' ? undefined : response === 'failure'
         ? { model: 'jev-1.13.0', ask: async () => { throw new Error('synthetic unavailable'); } }
         : fakePort(() => response === 'malformed' ? { type: 'noul', noul: 'yes' } : noulAnswer(0.5)).port);
-      await expect(resolveBackgroundProcessClass({}, start.command, f.options())).rejects.toThrow();
+      expect(await resolveBackgroundProcessClass({}, start.command, f.options())).toBe('unclassified');
       expect(f.calls).toHaveLength(0);
     }
+  });
+
+  test('an unsettled reading starts the process and the deadline leaves it running', async () => {
+    const f = fixture(); installJudgmentPort(fakePort(() => noulAnswer(0.5)).port);
+    const result = await f.run(start, f.options());
+    expect(result).toMatchObject({ status: 'started', processClass: 'unclassified', killOnTimeout: false });
+    expect(typeof result.classificationNote).toBe('string');
+    expect(f.calls[0]?.[3]).toMatchObject({ kill_on_timeout: false });
+  });
+
+  test('no deadline or an explicit killOnTimeout starts the process without a reading', async () => {
+    const f = fixture(); const fake = reading();
+    await f.run({ ...start, timeoutMs: 0 }, f.options());
+    await f.run({ ...start, killOnTimeout: true }, f.options());
+    expect(f.calls.map(call => call[3])).toMatchObject([{ kill_on_timeout: false }, { kill_on_timeout: true }]);
+    expect(fake.requests.filter(request => request.context?.battery === 'agent.tools.long-lived-process')).toHaveLength(0);
   });
 
   test('cancellation during local screening never contacts the classifier', async () => {
@@ -288,7 +310,7 @@ describe('protected process lifetime classification', () => {
     try {
       for (const command of ['env firefox', 'env firefox Authorization: Bearer synthetic-credential']) {
         const local = researchScreeningFixture({ complete: 0.5 });
-        await expect(resolveBackgroundProcessClass({}, command, { sourceOwner: local.owner })).rejects.toThrow();
+        await resolveBackgroundProcessClass({}, command, { sourceOwner: local.owner }).catch(() => undefined);
       }
       expect(getter).not.toHaveBeenCalled(); expect(modelReads).toBe(0); expect(fake.requests).toHaveLength(0);
     } finally { getter.mockRestore(); }

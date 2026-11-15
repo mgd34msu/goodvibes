@@ -1,4 +1,3 @@
-import { captureNativeDecisionPolicy } from '../../tools/batteries/decision-policy.js';
 /**
  * Provider protocol readings: what a local server is, whether a provider
  * error means "try the other API", whether a rejection was caused by the
@@ -60,7 +59,6 @@ export const localServerIdentityDefinition = Object.freeze({
   ],
 } as const);
 export const localServerIdentity = defineDispatch(localServerIdentityDefinition);
-export const localServerIdentityPolicy = captureNativeDecisionPolicy(localServerIdentityDefinition, localServerIdentity);
 
 /**
  * `routing.alternate-api`: whether a local server's error means the request

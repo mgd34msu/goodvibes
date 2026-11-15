@@ -281,12 +281,12 @@ function buildRoutingRoles(config: ConfigManager): RoutingRole[] {
       ...(config.get('tools.llmEnabled') === true ? {} : { note: 'disabled: no tool-LLM route active' }),
     },
     {
-      role: 'Helper (cache/compaction/commit-message/etc.)',
+      role: 'Helper (supporting work: resume summaries)',
       enabled: config.get('helper.enabled') === true,
       provider: emptyProvider(helperProvider),
-      model: helperModel || '(unset)',
+      model: helperModel || `(inherits main: ${mainModel || 'unset'})`,
       keys: ['helper.enabled', 'helper.globalProvider', 'helper.globalModel'],
-      ...(config.get('helper.enabled') === true ? {} : { note: 'disabled: helper tasks stay on the main model' }),
+      ...(config.get('helper.enabled') === true ? {} : { note: 'disabled: supporting work stays on the main model' }),
     },
     {
       role: 'Narration LLM (TTS phrasing)',

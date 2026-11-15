@@ -3,7 +3,7 @@ import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platfor
 import { types as nodeTypes } from 'node:util';
 import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { previewHarnessText } from './agent-harness-text.ts';
-import { prepareMemoryApiAdd } from '@goodvibes-jev/engine/platform/platform/knowledge';
+import { planMemoryRecord } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import type { MemoryApi } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import type { ShellPathService } from '@/runtime/index.ts';
 import { AgentPersonaRegistry } from '../agent/persona-registry.ts';
@@ -147,28 +147,28 @@ async function promoteMemory(
   } satisfies Parameters<MemoryApi['add']>[0];
   let transition: ReturnType<LearningCandidateCollection['prepareTransition']> | undefined;
   try {
-    assertOwnership(); assertLearningCandidateCollection(collection, context, options); assertOwnership();
-    const plan = prepareMemoryApiAdd(api, input, { signal: options.signal, assertCurrent: options.assertCurrent });
-    assertOwnership(); assertLearningCandidateCollection(collection, context, options); assertOwnership();
-    const assertReturned = captureModelReadingSnapshotGuard(plan.record);
-    const owned = collection.prepareTransition({ kind: 'create', domain: 'memory', input, preparedRecord: plan.record });
+    assertOwnership(); assertLearningCandidateCollection(collection, context, options);
+    // The record is planned before the write so the transition is staged with it;
+    // the store inserts exactly this record and completes the transition at the insert.
+    const planned = planMemoryRecord(input);
+    const owned = collection.prepareTransition({ kind: 'create', domain: 'memory', input, preparedRecord: planned });
     transition = owned;
-    let published = false;
-    const record = await plan.commit({
+    const record = await api.add(input, {
       signal: options.signal,
+      // Checked by the store immediately before the insert, the one step that cannot be undone.
       assertCurrent: () => {
-        assertOwnership(); assertLearningCandidateCollection(collection, context, options); assertOwnership();
-        if (!published) owned.effects.assertCurrent();
+        options.assertCurrent?.();
+        assertOwnership(); assertLearningCandidateCollection(collection, context, options);
+        owned.effects.assertCurrent();
       },
-      onPublished: receipt => {
+    }, {
+      id: planned.id, createdAt: planned.createdAt,
+      onInserted: inserted => {
         onDurable?.();
-        assertOwnership(); plan.assertPublication(receipt);
         owned.effects.onEffect(true);
-        owned.commit(plan.record);
-        published = true; assertOwnership();
+        owned.commit(inserted);
       },
     });
-    assertOwnership(); assertReturned(record); assertLearningCandidateCollection(collection, context, options); assertOwnership();
     return `memory:${record.id}  ${summary.slice(0, 60)}`;
   } catch (error) {
     try { transition?.abort(); } catch (failure) { throw new PromotionRestrictionFailure(failure); }

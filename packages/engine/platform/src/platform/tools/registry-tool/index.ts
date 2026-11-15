@@ -20,7 +20,7 @@ import type { ContractInputAuthority } from '../../contract/input-authority.js';
 import { createLiveRegistrySource, liveRegistryScope, registryMarkdown, materializeRegistryMarkdown, type RegistryToolSource } from './source.js';
 import { capturedRegistryAdmission, type CapturedRegistryContext } from './captured-source.js';
 import { decisionOrClassic, isClassicOperation, withConfiguredDecisionModelPolicy } from '../../runtime/decision-policy.js';
-import { rankClassicCatalog } from '../../runtime/classic-catalog.js';
+import { rankClassicCatalog, type ClassicCatalogMatch } from '../../runtime/classic-catalog.js';
 
 const capturedTools = new WeakMap<Tool, ContractInputAuthority>();
 export function isCapturedRegistryTool(tool: Tool, authority: ContractInputAuthority): boolean {
@@ -43,7 +43,6 @@ interface RegistryMatch {
 }
 
 /** Complete source is for judgments; output previews remain concise. */
-const registryEvidence = new WeakMap<RegistryMatch, string>();
 
 export interface RegistryToolRoots {
   readonly workingDirectory: string;
@@ -86,7 +85,6 @@ async function scanDirectoryAll(
         dependencies: normalizeFrontmatterList(frontmatter['depends_on']),
         includes: collectMarkdownReferences(body),
       };
-      registryEvidence.set(match, content);
       results.push(match);
       continue;
     }
@@ -113,7 +111,6 @@ async function scanDirectoryAll(
         dependencies: normalizeFrontmatterList(frontmatter['depends_on']),
         includes: collectMarkdownReferences(body),
       };
-      registryEvidence.set(match, content);
       results.push(match);
     }
   }
@@ -134,73 +131,88 @@ function dedupe(items: readonly RegistryMatch[]): RegistryMatch[] {
   });
 }
 
+/** Most candidates the one model request is shown; code ranks and cuts to these. */
+const REGISTRY_SHORTLIST = 8;
+
+interface RegistryRanking { matching: RegistryMatch[]; rest: RegistryMatch[]; note?: string }
+
+const registryId = (item: RegistryMatch): string => `${item.type}:${item.name}`;
+const byName = (a: RegistryMatch, b: RegistryMatch): number => a.name.localeCompare(b.name);
+
+/** The code ranking: literal-overlap matches best first, the rest alphabetically. */
+function classicRanking(items: readonly RegistryMatch[], query: string): { matches: readonly ClassicCatalogMatch<RegistryMatch>[]; ranking: RegistryRanking } {
+  const matches = rankClassicCatalog(items, query, item => ({ id: registryId(item), description: item.description }));
+  const selected = new Set(matches.map(match => match.entry));
+  return { matches, ranking: { matching: matches.map(match => match.entry), rest: items.filter(item => !selected.has(item)).sort(byName) } };
+}
+
 /**
- * Reads every candidate against `query` (search words or a task description)
- * through the `engine.tools.registry-rank` rerank. `matching` holds the
- * candidates not read as a no, best first; `rest` holds the ones read as a
- * no, alphabetically.
+ * Orders the candidates against `query` (search words or a task description).
+ * Code decides first: an exact name or id is the answer, and a single
+ * candidate that carries every query word is a clear winner; neither costs a
+ * request. Otherwise one `engine.tools.registry-rank` request reads the top
+ * few code-ranked candidates together. `matching` holds the candidates read as
+ * fitting, then the other literal matches in code order; `rest` holds the
+ * others alphabetically. A failed or unsure reading leaves the code order in
+ * place and says so in `note`.
  */
 async function rankAgainst(
   items: readonly RegistryMatch[],
   query: string,
   source: RegistryToolSource,
-): Promise<{ matching: RegistryMatch[]; rest: RegistryMatch[] }> {
-  return decisionOrClassic(() => rankDecisionAgainst(items, query, source), async () => {
-    source.signal?.throwIfAborted(); await source.assertCurrent();
-    const original = retainStrictJudgmentJson({ query, items });
-    assertJudgmentInput(original.snapshot);
-    const matching = rankClassicCatalog(items, query, item => ({ id: `${item.type}:${item.name}`, description: item.description })).map(match => match.entry);
-    const selected = new Set(matching);
-    original.assertCurrent(); source.signal?.throwIfAborted(); await source.assertCurrent();
-    return { matching, rest: items.filter(item => !selected.has(item)).sort((a, b) => a.name.localeCompare(b.name)) };
-  });
+): Promise<RegistryRanking> {
+  source.signal?.throwIfAborted(); await source.assertCurrent();
+  const wanted = query.trim().toLocaleLowerCase();
+  const exact = items.filter(item => item.name.toLocaleLowerCase() === wanted || registryId(item).toLocaleLowerCase() === wanted);
+  if (exact.length > 0) {
+    const chosen = new Set(exact);
+    return { matching: exact, rest: items.filter(item => !chosen.has(item)).sort(byName) };
+  }
+  const { matches, ranking } = classicRanking(items, query);
+  const [first, second] = matches;
+  const clearWinner = first !== undefined && first.score === 1 && (second === undefined || second.score < 1);
+  if (clearWinner || items.length === 0) return ranking;
+  return decisionOrClassic(() => rankDecisionAgainst(items, query, source, matches, ranking), () => ranking);
 }
-async function rankDecisionAgainst(items: readonly RegistryMatch[], query: string, source: RegistryToolSource): Promise<{ matching: RegistryMatch[]; rest: RegistryMatch[] }> {
-  if (items.length === 0) return { matching: [], rest: [] };
-  const byId = new Map(items.map((item) => [`${item.type}:${item.name}`, item]));
-  const candidates = Array.from(byId, ([id, item]) => ({ id, content: registryCandidateView({ ...item, preview: registryEvidence.get(item) ?? item.preview }) }));
+
+async function rankDecisionAgainst(
+  items: readonly RegistryMatch[],
+  query: string,
+  source: RegistryToolSource,
+  matches: readonly ClassicCatalogMatch<RegistryMatch>[],
+  ranking: RegistryRanking,
+): Promise<RegistryRanking> {
+  // The shortlist is the code's best literal matches; with none, the first entries alphabetically.
+  const shortlist = (matches.length > 0 ? matches.map(match => match.entry) : [...items].sort(byName)).slice(0, REGISTRY_SHORTLIST);
+  const byId = new Map(shortlist.map((item) => [registryId(item), item]));
+  const candidates = shortlist.map(item => ({ id: registryId(item), content: registryCandidateView(item) }));
   const original = retainStrictJudgmentJson({ query, candidates });
   assertJudgmentInput(original.snapshot);
   const owner = captureJudgmentPort(REGISTRY_RANK_SITE, { signal: source.signal, assertCurrent: original.assertCurrent, prepareResultCapture: prepareJudgmentResult });
-  const port = owner.port;
-  // Captured candidates are dispatched one at a time so a revocation during one
-  // judgment cannot leave another queued candidate carrying stale authorization.
-  let priorJudgment = Promise.resolve();
-  const guardedPort: typeof port = {
-    model: port.model,
-    ...(port.recorder === undefined ? {} : { recorder: port.recorder }),
-    ...(port.health === undefined ? {} : { health: port.health }),
-    ask: async (request) => {
-      if (source.live) return port.ask(request);
-      const previous = priorJudgment;
-      let release!: () => void;
-      priorJudgment = new Promise<void>((resolve) => { release = resolve; });
-      await previous;
-      try {
-        await source.assertCurrent();
-        const signal = source.signal && request.signal ? AbortSignal.any([source.signal, request.signal]) : (source.signal ?? request.signal);
-        const result = await port.ask({ ...request, ...(signal === undefined ? {} : { signal }) });
-        await source.assertCurrent();
-        return result;
-      } finally { release(); }
-    },
-  };
-  const { ranked } = await registryRank.rerank(guardedPort, original.snapshot.query, original.snapshot.candidates, { site: REGISTRY_RANK_SITE, signal: owner.signal });
+  let ranked: Awaited<ReturnType<typeof registryRank.rerank>>['ranked'];
+  try {
+    ({ ranked } = await registryRank.rerank(owner.port, original.snapshot.query, original.snapshot.candidates, { site: REGISTRY_RANK_SITE, signal: owner.signal }));
+  } catch (error) {
+    if (source.signal?.aborted) throw error;
+    logger.debug('registry: ranking reading failed; returning the literal-match order', { error: summarizeError(error) });
+    return { ...ranking, note: 'Ordered by literal word match: the ranking reading did not complete.' };
+  }
   await source.assertCurrent(); owner.assertCurrent();
-  const matching = ranked.filter((entry) => entry.reading.outcome !== 'act' || entry.reading.verdict !== 'no').map((entry) => byId.get(entry.id)!);
-  const rest = ranked
-    .filter((entry) => entry.reading.outcome === 'act' && entry.reading.verdict === 'no')
-    .map((entry) => byId.get(entry.id)!)
-    .sort((a, b) => a.name.localeCompare(b.name));
-  return { matching, rest };
+  const fitting = ranked.filter(entry => entry.reading.outcome === 'act' && entry.reading.verdict === 'yes').map(entry => byId.get(entry.id)!);
+  const refused = new Set(ranked.filter(entry => entry.reading.outcome === 'act' && entry.reading.verdict === 'no').map(entry => byId.get(entry.id)!));
+  const placed = new Set(fitting);
+  const matching = [...fitting, ...ranking.matching.filter(item => !placed.has(item) && !refused.has(item))];
+  const kept = new Set(matching);
+  const unsure = ranked.some(entry => entry.reading.outcome !== 'act');
+  return {
+    matching,
+    rest: items.filter(item => !kept.has(item)).sort(byName),
+    ...(unsure ? { note: 'Some candidates could not be read with confidence; they are listed by literal word match.' } : {}),
+  };
 }
 
 function listTools(toolRegistry: ToolRegistry): RegistryMatch[] {
-  return toolRegistry.list().map(t => {
-    const match: RegistryMatch = { name: t.definition.name, type: 'tool', description: t.definition.description, path: '' };
-    registryEvidence.set(match, JSON.stringify(t.definition));
-    return match;
-  });
+  return toolRegistry.list().map((t): RegistryMatch => ({ name: t.definition.name, type: 'tool', description: t.definition.description, path: '' }));
 }
 
 function getSkillDirs(roots: RegistryToolRoots): string[] {
@@ -325,7 +337,8 @@ async function runSearch(
   }
 
   const candidates = dedupe(all);
-  const results = query ? (await rankAgainst(candidates, query, source)).matching : candidates;
+  const ranking = query ? await rankAgainst(candidates, query, source) : undefined;
+  const results = ranking ? ranking.matching : candidates;
 
   return {
     success: true,
@@ -334,6 +347,7 @@ async function runSearch(
       ...(isClassicOperation() ? { provenance: 'classic', match_source: 'literal-token-overlap' } : {}),
       query,
       count: results.length,
+      ...(ranking?.note ? { note: ranking.note } : {}),
       results,
     }),
   };
@@ -362,9 +376,11 @@ async function runRecommend(
   // With a task: the candidates read as fitting it, best first, then the rest
   // alphabetically. Without one: every candidate alphabetically.
   let sorted: RegistryMatch[];
+  let note: string | undefined;
   if (task) {
-    const { matching, rest } = await rankAgainst(candidates, task, source);
+    const { matching, rest, note: rankingNote } = await rankAgainst(candidates, task, source);
     sorted = [...matching, ...rest];
+    note = rankingNote;
   } else {
     sorted = [...candidates].sort((a, b) => a.name.localeCompare(b.name));
   }
@@ -377,6 +393,7 @@ async function runRecommend(
       task,
       scope,
       count: sorted.length,
+      ...(note ? { note } : {}),
       results: sorted,
     }),
   };

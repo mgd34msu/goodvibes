@@ -25,7 +25,7 @@ export async function spawnClassifiedBackgroundProcess(
   timeoutMs: number, options: ProcessClassificationOptions,
 ) {
   const spawn = manager.spawn;
-  return withBackgroundProcessClass(args, command, options, async (processClass, assertCurrent) => {
+  return withBackgroundProcessClass(args, command, timeoutMs, options, async (processClass, assertCurrent, note) => {
     const killOnTimeout = resolveKillOnTimeout(args, processClass);
     assertCurrent();
     if (manager.spawn !== spawn) throw new ToolInputProjectionError('held');
@@ -34,6 +34,6 @@ export async function spawnClassifiedBackgroundProcess(
       stdin: 'pipe',
       signal: options.signal, assertCurrent,
     });
-    return { processClass, killOnTimeout, result };
+    return { processClass, killOnTimeout, result, ...(note ? { note } : {}) };
   });
 }

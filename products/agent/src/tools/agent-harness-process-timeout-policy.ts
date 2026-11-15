@@ -62,39 +62,47 @@ export function clampWaitTimeout(value: unknown, fallback: number): { readonly t
   return timeout > MAX_WAIT_TIMEOUT_MS ? { timeoutMs: MAX_WAIT_TIMEOUT_MS, capped: true } : { timeoutMs: timeout, capped: false };
 }
 
-/** How a started process is treated when its timeout expires. */
-export type BackgroundProcessClass = 'command' | 'long_lived';
+/**
+ * How a started process is treated when its timeout expires. `unclassified`
+ * means nobody needed to (or could) say: the deadline leaves it running.
+ */
+export type BackgroundProcessClass = 'command' | 'long_lived' | 'unclassified';
 
-/** Explicit declarations stay first; only omitted/invalid classes need a reading. */
+function hasExplicitKillOnTimeout(args: AgentHarnessBackgroundProcessArgs): boolean {
+  const explicit = args.killOnTimeout ?? readField(args, 'killOnTimeout');
+  return explicit !== undefined && explicit !== null && explicit !== '';
+}
+
+/**
+ * The class only decides whether a deadline may end the process, so it is read
+ * only when that can happen: a deadline is set and `killOnTimeout` was not given.
+ * An explicit `processClass` wins; in Classic operation an omitted class is an
+ * ordinary command. When the reading does not settle, the process still starts
+ * and the deadline leaves it running; `note` says so.
+ */
 export async function withBackgroundProcessClass<T>(
   args: AgentHarnessBackgroundProcessArgs,
   command: string,
+  timeoutMs: number,
   options: ProcessClassificationOptions,
-  consume: (processClass: BackgroundProcessClass, assertCurrent: () => void) => T | Promise<T>,
+  consume: (processClass: BackgroundProcessClass, assertCurrent: () => void, note?: string) => T | Promise<T>,
 ): Promise<T> {
   options.signal?.throwIfAborted(); options.assertCurrent?.();
   const captured = snapshotJudgmentInput(args) as AgentHarnessBackgroundProcessArgs;
   const explicit = readString(captured.processClass) || readField(captured, 'processClass');
-  if (explicit === 'long_lived' || explicit === 'command' || decisionModelPolicyState().operation === 'classic') {
-    const assertCurrent = () => { options.signal?.throwIfAborted(); options.assertCurrent?.(); };
-    // An omitted Classic class is the bounded ordinary-command default, never an inferred daemon lifetime.
-    assertCurrent(); return await consume(explicit === 'long_lived' ? 'long_lived' : 'command', assertCurrent);
-  }
-  return withLongLivedProcessReading(command, options, (longLived, assertCurrent) => consume(longLived ? 'long_lived' : 'command', assertCurrent));
-}
-
-/** Classify without a side effect; launching uses the same reading's live lease. */
-export async function resolveBackgroundProcessClass(
-  args: AgentHarnessBackgroundProcessArgs,
-  command: string,
-  options: ProcessClassificationOptions = {},
-): Promise<BackgroundProcessClass> {
-  return withBackgroundProcessClass(args, command, options, (processClass) => processClass);
+  const assertCurrent = () => { options.signal?.throwIfAborted(); options.assertCurrent?.(); };
+  if (explicit === 'long_lived' || explicit === 'command') { assertCurrent(); return await consume(explicit, assertCurrent); }
+  if (timeoutMs === 0 || hasExplicitKillOnTimeout(captured)) { assertCurrent(); return await consume('unclassified', assertCurrent); }
+  if (decisionModelPolicyState().operation === 'classic') { assertCurrent(); return await consume('command', assertCurrent); }
+  return withLongLivedProcessReading(command, options, (longLived, current) => longLived === undefined
+    ? consume('unclassified', current, `Left running past the ${timeoutMs}ms deadline because its lifetime could not be classified; stop it with action:"kill", or start it with processClass or killOnTimeout to decide.`)
+    : consume(longLived ? 'long_lived' : 'command', current));
 }
 
 /**
  * Whether the timeout watchdog may terminate this process. Explicit
- * `killOnTimeout` always wins; otherwise only ordinary commands are killable.
+ * `killOnTimeout` always wins; otherwise only ordinary commands are killable,
+ * and an unclassified process is left running.
  */
 export function resolveKillOnTimeout(
   args: AgentHarnessBackgroundProcessArgs,

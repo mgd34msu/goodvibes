@@ -36,13 +36,16 @@ export interface ControlPlaneDomainState {
   readonly lastUpdatedAt: number;
   readonly source: string;
   readonly enabled: boolean;
+  /** The listener's state, written only by the gateway; a client record never changes it. */
   readonly connectionState: ControlPlaneConnectionState;
   readonly host: string;
   readonly port: number;
   readonly clients: Map<string, ControlPlaneClientRecord>;
   readonly activeClients: Map<string, ControlPlaneClientRecord>;
   readonly clientIds: string[];
+  /** Connected devices and surfaces; the terminal that hosts the store is not one of them. */
   readonly activeClientIds: string[];
+  /** Whether the listener is up, written only by the gateway. */
   readonly isRunning: boolean;
   readonly lastError?: string | undefined;
   readonly totalConnections: number;

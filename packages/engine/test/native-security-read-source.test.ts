@@ -4,11 +4,8 @@ import { gateReadingsPort } from './_helpers/gate-readings.ts';
 import { mkdtempSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createStore } from 'zustand/vanilla';
 import { ApiTokenAuditor, captureTokenAuditReadSource } from '../platform/src/platform/security/token-audit.js';
 import { SecurityReadSourceRetiredError, captureSecurityReadFiles, retainSecurityReadData } from '../platform/src/platform/security/read-source.js';
-import { createRuntimeStore, captureRuntimeSecurityReadSource } from '../platform/src/platform/runtime/store/index.js';
-import { createInitialRuntimeState } from '../platform/src/platform/runtime/store/state.js';
 import { PolicyRuntimeState, capturePolicyRuntimeReadSource } from '../platform/src/platform/runtime/permissions/policy-runtime.js';
 import { PolicyRegistry } from '../platform/src/platform/runtime/permissions/policy-registry.js';
 import { createUnsignedBundle } from '../platform/src/platform/runtime/permissions/policy-loader.js';
@@ -46,19 +43,6 @@ describe('native read receipts retain original publishers and clocks', () => {
   test('a getter in native snapshot data is refused without invocation', () => {
     let reads = 0; const source = Object.defineProperty({}, 'hidden', { get() { reads++; return 'value'; }, enumerable: false });
     expect(() => retainSecurityReadData(source)).toThrow(SecurityReadSourceRetiredError); expect(reads).toBe(0);
-  });
-
-  test('genuine runtime permission publication and restore retires the original receipt', () => {
-    const store = createRuntimeStore(), original = store.getState().permissions, current = captureRuntimeSecurityReadSource(store);
-    store.setState({ permissions: { ...original, revision: original.revision + 1 } }); store.setState({ permissions: original });
-    expect(store.getState().permissions).toBe(original); expect(current).toThrow(SecurityReadSourceRetiredError);
-  });
-
-  test('unrelated native runtime publication preserves the security receipt and unowned stores cannot mint one', () => {
-    const store = createRuntimeStore(), current = captureRuntimeSecurityReadSource(store);
-    store.setState({ panels: { nativePanel: true } }); expect(current).not.toThrow();
-    const unowned = createStore(() => createInitialRuntimeState());
-    expect(() => captureRuntimeSecurityReadSource(unowned)).toThrow(SecurityReadSourceRetiredError);
   });
 
   test('native token deregistration and identical re-registration retains the retirement witness', () => {

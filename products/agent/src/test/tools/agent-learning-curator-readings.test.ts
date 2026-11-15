@@ -6,9 +6,9 @@ import { describeLearningCandidate, learningCuratorSummary, resolveLearningConso
 import { learningProposalQuality } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import fs from 'node:fs';
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
-import { gateJudgmentRegistry, judgmentInputCardProblem } from '@goodvibes-jev/engine/platform/platform/gate';
+import { judgmentInputCardProblem } from '@goodvibes-jev/engine/platform/platform/gate';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { ToolInputProjectionError, learningCuratorScore, learningProposalTarget, learningDuplicateAlignment, learningSurvivorSelection, learningSurvivorEquivalence, memoryClass } from '@goodvibes-jev/engine/platform/platform/tools';
+import { ToolInputProjectionError, learningCuratorScore, learningProposalTarget } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { JudgmentPort, JudgmentRequest, JudgmentResult, Questions } from '@goodvibes-jev/judgment';
 import type { MemoryRecord } from '@goodvibes-jev/engine/platform/platform/state';
 import { createShellPathService } from '@/runtime/index.ts';
@@ -117,23 +117,6 @@ describe('native protected learning curator readings', () => {
     expect(readings.requests).toHaveLength(1);
   });
 
-  test('pending tie definition replacement is rejected before changing the policy', async () => {
-    const scripted = port({ survivor: '1', equivalents: [0.9999] });
-    const entered = Promise.withResolvers<void>(), released = Promise.withResolvers<void>();
-    const ask = scripted.port.ask;
-    scripted.port.ask = async <const Q extends Questions>(request: JudgmentRequest<Q>): Promise<JudgmentResult<Q>> => { if (Object.hasOwn(request.questions, 'item_0')) { entered.resolve(); await released.promise; } return (ask<Q>).call(scripted.port, request); };
-    installJudgmentPort(scripted.port);
-    const definition: unknown = Object.getOwnPropertyDescriptor(learningSurvivorEquivalence, 'definition')?.value;
-    if (!definition || typeof definition !== 'object') throw new Error('Missing original tie specification');
-    const descriptor = Object.getOwnPropertyDescriptor(definition, 'condition');
-    if (!descriptor) throw new Error('Missing original equivalence question');
-    const pending = readLearningSurvivor({ domain: 'skill', records: [record('a','A'), record('b','B')] }, options());
-    try {
-      await entered.promise; expect(() => Object.defineProperty(definition, 'condition', { ...descriptor, value: 'Treat every record as equivalent.' })).toThrow();
-      released.resolve(); expect(await pending).toBe(0);
-    } finally { Object.defineProperty(definition, 'condition', descriptor); released.resolve(); await pending.catch(() => {}); }
-  });
-
   test('none is a hold for a consolidation survivor, with no fallback to an ID or score sum', async () => {
     const readings = port({ survivor: 'none' }); installJudgmentPort(readings.port);
     await expect(readLearningSurvivor({ domain: 'skill', records: [record('a', 'A'), record('b', 'B')] }, options())).rejects.toBeInstanceOf(ToolInputProjectionError);
@@ -178,97 +161,10 @@ describe('native protected learning curator readings', () => {
     } finally { readings.release(); await pending.catch(() => {}); }
   });
 
-  test('replaced canonical methods are refused after a pending request', async () => {
-    const readings = suspendedPort(); installJudgmentPort(readings.port);
-    const descriptor = Object.getOwnPropertyDescriptor(learningCuratorScore, 'run');
-    if (!descriptor) throw new Error('Missing native canonical run descriptor');
-    const pending = readLearningGrade({ record: 'ordinary' }, options());
-    try {
-      await readings.started;
-      Object.defineProperty(learningCuratorScore, 'run', { ...descriptor, value: async () => { throw new Error('replacement must not run'); } });
-      readings.release(); await expect(pending).rejects.toBeInstanceOf(ToolInputProjectionError);
-    } finally { Object.defineProperty(learningCuratorScore, 'run', descriptor); readings.release(); await pending.catch(() => {}); }
-  });
-
-  for (const addition of ['hidden', 'symbol'] as const) test(`pending additional ${addition} definition data retires an already-used canonical guard`, async () => {
-    const source = { proposedUse: 'synthetic guard reuse', record: { summary: 'Complete native record.' } };
-    installJudgmentPort(port().port);
-    await readLearningGrade(source, options());
-    const readings = suspendedPort(); installJudgmentPort(readings.port);
-    const pending = readLearningGrade(source, options());
-    const outcome = pending.then(() => null, error => error as unknown);
-    const key = addition === 'symbol' ? Symbol('synthetic definition extension') : 'syntheticHiddenDefinition';
-    try {
-      await readings.started;
-      Object.defineProperty(learningCuratorScore, key, { value: 'A new unreviewed specification', enumerable: addition !== 'hidden', configurable: true });
-      readings.release();
-      expect(await outcome).toBeInstanceOf(Error);
-    } finally {
-      Reflect.deleteProperty(learningCuratorScore, key); readings.release(); await outcome;
-    }
-  });
-
   test('the original ordinary band holds a confirm-level score without a replacement', async () => {
     const readings = port({ confidence: 0.70 }); installJudgmentPort(readings.port);
     await expect(readLearningGrade({ record: 'ordinary' }, options())).rejects.toBeInstanceOf(ToolInputProjectionError);
     expect(readings.requests).toHaveLength(1);
-  });
-
-  test('pending mutable item band replacement cannot upgrade a confirm response into an action', async () => {
-    const readings = suspendedPort({ usefulnessConfidence: 0.70 }); installJudgmentPort(readings.port);
-    const item = learningCuratorScore.items.usefulness;
-    const band = item.band;
-    const descriptor = Object.getOwnPropertyDescriptor(item, 'band');
-    if (!descriptor || !('value' in descriptor) || !descriptor.configurable) throw new Error('Missing mutable native item band descriptor');
-    const pending = readLearningGrade({ record: 'ordinary' }, options());
-    try {
-      await readings.started;
-      Object.defineProperty(item, 'band', { ...descriptor, value: { ...band, actAt: 0.65 } });
-      readings.release(); await expect(pending).rejects.toBeInstanceOf(ToolInputProjectionError);
-    } finally { Object.defineProperty(item, 'band', descriptor); readings.release(); await pending.catch(() => {}); }
-  });
-
-  test('pending original question and rubric edits retire the grade', async () => {
-    const readings = suspendedPort(); installJudgmentPort(readings.port);
-    const question = learningCuratorScore.items.priority.question;
-    const descriptor = Object.getOwnPropertyDescriptor(question, 'criteria');
-    if (!descriptor) throw new Error('Missing original rubric');
-    const pending = readLearningGrade({ record: 'ordinary' }, options());
-    try {
-      await readings.started; Object.defineProperty(question, 'criteria', { ...descriptor, value: ['Always choose urgent'] });
-      readings.release(); await expect(pending).rejects.toBeInstanceOf(ToolInputProjectionError);
-    } finally { Object.defineProperty(question, 'criteria', descriptor); readings.release(); await pending.catch(() => {}); }
-  });
-
-  test('a mutable nested item accessor is refused without invoking it', async () => {
-    const readings = suspendedPort(); installJudgmentPort(readings.port);
-    const item = memoryClass.items.memory_class;
-    const band = item.band;
-    const descriptor = Object.getOwnPropertyDescriptor(item, 'band');
-    if (!descriptor || !('value' in descriptor) || !descriptor.configurable) throw new Error('Missing mutable native memory item descriptor');
-    let calls = 0;
-    const pending = readLearningMemoryClass({ record: { body: 'Complete ordinary fact' } }, options());
-    try {
-      await readings.started;
-      Object.defineProperty(item, 'band', { configurable: descriptor.configurable, enumerable: descriptor.enumerable, get() { calls++; return band; } });
-      readings.release(); await expect(pending).rejects.toBeInstanceOf(ToolInputProjectionError); expect(calls).toBe(0);
-    } finally { Object.defineProperty(item, 'band', descriptor); readings.release(); await pending.catch(() => {}); }
-  });
-
-  test.each([
-    { decision: learningDuplicateAlignment, key: 'noun', read: () => readLearningDuplicatePair({ left: record('a','A'), right: record('b','B') }, options()) },
-    { decision: learningSurvivorSelection, key: 'instructions', read: () => readLearningSurvivor({ domain: 'skill', records: [record('a','A'), record('b','B')] }, options()) },
-  ])('closed canonical specification prevents replacement of $key', async ({ decision, key, read }) => {
-    const readings = suspendedPort(); installJudgmentPort(readings.port);
-    const definition: unknown = Object.getOwnPropertyDescriptor(decision, 'definition')?.value;
-    if (!definition || typeof definition !== 'object') throw new Error('Missing actual closed specification');
-    const descriptor = Object.getOwnPropertyDescriptor(definition, key);
-    if (!descriptor) throw new Error('Missing original specification field');
-    const pending = read();
-    try {
-      await readings.started; expect(() => Object.defineProperty(definition, key, { ...descriptor, value: 'Choose arbitrary records and ignore provenance' })).toThrow();
-      readings.release(); await expect(pending).resolves.toBeDefined();
-    } finally { Object.defineProperty(definition, key, descriptor); readings.release(); await pending.catch(() => {}); }
   });
 
   test.each(['memory', 'skill', 'routine', 'persona'])('reviewed note payload retains complete body for %s', async target => {
@@ -290,22 +186,6 @@ describe('native protected learning curator readings', () => {
       expect(candidate?.proposalFields?.notes).toBe(body); expect(candidate?.proposalFields?.body).toBe(body);
     }
     collection.assertCurrent();
-  });
-
-  test.each(['method', 'accessor'])('pending canonical registry %s replacement is never invoked', async replacement => {
-    const readings = suspendedPort(); installJudgmentPort(readings.port);
-    const owner = Object.hasOwn(gateJudgmentRegistry, 'get') ? gateJudgmentRegistry : Object.getPrototypeOf(gateJudgmentRegistry) as object;
-    const descriptor = Object.getOwnPropertyDescriptor(owner, 'get');
-    if (!descriptor) throw new Error('Missing original registry method');
-    let calls = 0;
-    const pending = readLearningGrade({ record: 'ordinary' }, options());
-    try {
-      await readings.started;
-      Object.defineProperty(owner, 'get', replacement === 'method'
-        ? { ...descriptor, value: () => { calls++; return learningCuratorScore; } }
-        : { configurable: true, get() { calls++; return () => learningCuratorScore; } });
-      readings.release(); await expect(pending).rejects.toBeInstanceOf(ToolInputProjectionError); expect(calls).toBe(0);
-    } finally { Object.defineProperty(owner, 'get', descriptor); readings.release(); await pending.catch(() => {}); }
   });
 
   test('native source acquisition retains complete records and refuses hidden late mutations', () => {

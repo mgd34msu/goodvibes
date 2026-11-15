@@ -1,4 +1,3 @@
-import { captureNativeDecisionPolicy } from './decision-policy.js';
 /**
  * `engine.tools.boolean-value`: a tool call passed a string where the schema
  * declares a boolean parameter, and the string is not the JSON literal `true`
@@ -62,4 +61,3 @@ const booleanValueDefinition = Object.freeze({
   ],
 } as const);
 export const booleanValue = defineBattery(booleanValueDefinition);
-export const booleanValuePolicy = captureNativeDecisionPolicy(booleanValueDefinition, booleanValue);

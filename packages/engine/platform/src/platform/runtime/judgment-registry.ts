@@ -97,10 +97,8 @@ registry.register(imapRefusalReading);
 registry.register(imapDraftsReading);
 
 // Email writing style; complete protected corpus and actual sender evidence.
-import { emailStylePhraseReading, emailStyleToneReading, emailStyleSentenceReading, emailStyleSenderReading } from '../email/style-reply-readings.js';
-registry.register(emailStylePhraseReading);
-registry.register(emailStyleToneReading);
-registry.register(emailStyleSentenceReading);
+import { emailStyleProfileReading, emailStyleSenderReading } from '../email/style-reply-readings.js';
+registry.register(emailStyleProfileReading);
 registry.register(emailStyleSenderReading);
 
 // Browser host provisioning diagnoses, shared by runtime and driver installs.

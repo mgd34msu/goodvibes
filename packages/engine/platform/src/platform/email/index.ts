@@ -198,18 +198,14 @@ export {
 } from './email-service.js';
 
 // ---------------------------------------------------------------------------
-// Writing-style-matched draft replies (composer + lane descriptors)
+// Writing-style-matched draft replies (the Agent's Personal Ops owns the lane descriptors)
 // ---------------------------------------------------------------------------
 
 export {
-  classifyTone,
   DEFAULT_STYLE_PROFILE,
   composeDraftReply,
-  countSentences,
   extractSenderName,
   extractStyleProfile,
-  median,
-  mostFrequent,
   replySubject,
   StyleReplyReadingError,
 } from './style-reply.js';
@@ -221,15 +217,6 @@ export type {
   StyleReplyMessage,
   StyleSentMessage,
 } from './style-reply.js';
-
-export {
-  buildStyleReplyLaneAdditions,
-  styleReplyLiveRecord,
-  styleReplyWorkflow,
-  styleReplyWorkflowStatus,
-} from './style-reply-lane.js';
-
-export type { StyleReplyLaneAdditions } from './style-reply-lane.js';
 
 // ---------------------------------------------------------------------------
 // The neutral sender-claim describer, and the daemon's surfaces.email.* keys

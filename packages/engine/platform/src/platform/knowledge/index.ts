@@ -8,8 +8,9 @@ export {
   REGULAR_KNOWLEDGE_DB_FILE,
 } from './store-config.js';
 export type { MemoryApi } from './knowledge-api.js';
-export { createMemoryApi, prepareMemoryApiAdd } from './knowledge-api.js';
-export type { MemoryPreparedAdd, MemoryPreparedAddCommitOptions, MemoryAddPublication } from '../state/memory-store.js';
+export { createMemoryApi } from './knowledge-api.js';
+export { planMemoryRecord } from '../state/memory-store.js';
+export type { MemoryAddInsert } from '../state/memory-store.js';
 export { renderPacket } from './shared.js';
 export { extractKnowledgeArtifact } from './extractors.js';
 export {

@@ -208,9 +208,6 @@ export async function maybeAssistReturnContextSummary(
 ): Promise<SessionReturnContextSummary> {
   if (getReturnContextMode(configManager) !== 'assisted') return summary;
 
-  const enabled = configManager.get('helper.enabled') as boolean | undefined;
-  if (!enabled) return summary;
-
   const prompt = [
     'You are generating a terse resume summary for a coding session.',
     'Return one sentence under 160 characters.',
@@ -225,7 +222,8 @@ export async function maybeAssistReturnContextSummary(
     `Tool results: ${summary.toolResultCount}`,
   ].join('\n');
 
-  const response = ((await helperModel.chat('tool_summarize', prompt, { maxTokens: 80, helperOnly: true })) ?? '').trim();
+  // Only a dedicated helper route writes this line; without one the resume shows the plain summary.
+  const response = ((await helperModel.chat('resume_summary', prompt, { maxTokens: 80, helperOnly: true })) ?? '').trim();
   if (!response) return summary;
   return {
     ...summary,

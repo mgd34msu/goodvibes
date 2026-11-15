@@ -574,8 +574,7 @@ export function updateControlPlaneDomainFromClient(domain: ControlPlaneDomainSta
     activeClients: new Map(active.map((record) => [record.id, record])),
     clientIds: records.map((record) => record.id),
     activeClientIds: active.map((record) => record.id),
-    isRunning: domain.isRunning || active.length > 0,
-    connectionState: active.length > 0 ? 'connected' : domain.isRunning ? 'disconnected' : domain.connectionState,
+    // Whether the listener runs, and its connection state, are the gateway's facts (syncControlPlaneState).
     totalConnections: domain.totalConnections + (client.connected && !previous?.connected ? 1 : 0),
     totalDisconnects: domain.totalDisconnects + (!client.connected && previous?.connected ? 1 : 0),
   };

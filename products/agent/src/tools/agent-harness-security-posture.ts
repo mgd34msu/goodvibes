@@ -1,9 +1,8 @@
 import { type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { captureCatalogReadRequest, selectHarnessCatalog } from './agent-harness-catalog-selection.ts';
 import { captureStatefulCatalogRequest, rankStatefulCatalog } from './agent-harness-stateful-catalog-source.ts';
-import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
-import { buildMcpAttackPathReview, captureUiSecurityReadSource } from '@/runtime/index.ts';
-import { capturePolicyRuntimeReadSource } from '@goodvibes-jev/engine/platform/platform/runtime/security';
+import { existsSync, readFileSync, statSync } from 'node:fs';
+import { buildMcpAttackPathReview } from '@/runtime/index.ts';
 import { listBuiltinSubscriptionProviders } from '@goodvibes-jev/engine/platform/platform/config';
 import type { CommandContext } from '../input/command-registry.ts';
 import { previewHarnessText } from './agent-harness-text.ts';
@@ -423,24 +422,19 @@ export function securityPostureCatalogStatus(context: CommandContext): Record<st
   };
 }
 
+// The security and policy snapshots are copies taken once, when the call starts;
+// the answer is built from those values and stamped with that time, so tool calls
+// passing the gate meanwhile cannot invalidate it.
 function captureSecurityRequest(context: CommandContext, args: AgentHarnessSecurityArgs, options: CatalogRankingOptions) {
-  const captured: { securitySnapshot: Record<string, unknown> | null; policySnapshot: ReturnType<typeof capturePolicyRuntimeReadSource>['snapshot'] | null } = { securitySnapshot: null, policySnapshot: null };
   const request = captureStatefulCatalogRequest(context, args, options, [
     ['platform', 'readModels', 'security', 'getSnapshot'], ['platform', 'subscriptionManager', 'list'],
     ['platform', 'subscriptionManager', 'listPending'], ['platform', 'serviceRegistry', 'getAll'],
     ['platform', 'secretsManager', 'list'], ['extensions', 'policyRuntimeState', 'getSnapshot'],
-  ], () => {
-    const model = context.platform.readModels?.security;
-    const nativeSecurity = model ? captureUiSecurityReadSource(model) : undefined;
-    const policy = context.extensions.policyRuntimeState;
-    const nativePolicy = policy ? capturePolicyRuntimeReadSource(policy) : undefined;
-    const capturedSnapshot: unknown = nativeSecurity?.snapshot;
-    captured.securitySnapshot = isRecord(capturedSnapshot) ? capturedSnapshot : null;
-    captured.policySnapshot = nativePolicy?.snapshot ?? null;
-    return [...(nativeSecurity ? [nativeSecurity.assertCurrent] : []), ...(nativePolicy ? [nativePolicy.assertCurrent] : [])];
-  });
-  request.assertCurrent();
-  return { request, ...captured };
+  ]);
+  const capturedAt = Date.now();
+  const securitySnapshot = readSecuritySnapshot(context);
+  const policySnapshot = context.extensions.policyRuntimeState?.getSnapshot() ?? null;
+  return { request, securitySnapshot, policySnapshot, capturedAt };
 }
 
 /** The counted sections of the security summary, derived only from the snapshot and the findings built from it. */
@@ -481,7 +475,7 @@ export function securitySnapshotSummary(securitySnapshot: Record<string, unknown
 }
 
 export async function securityPostureSummary(context: CommandContext, args: AgentHarnessSecurityArgs, options: CatalogRankingOptions = {}): Promise<Record<string, unknown>> {
-  const { request, securitySnapshot, policySnapshot } = captureSecurityRequest(context, args, options);
+  const { request, securitySnapshot, policySnapshot, capturedAt } = captureSecurityRequest(context, args, options);
   args = request.input;
   if (!securitySnapshot) {
     const { reason } = readSecuritySnapshotReading(context);
@@ -490,6 +484,7 @@ export async function securityPostureSummary(context: CommandContext, args: Agen
     const returnedFindings = policyFindings.slice(0, readLimit(args.limit, 100));
     return {
       status: 'unavailable',
+      capturedAt: new Date(capturedAt).toISOString(),
       ...(reason ? { unavailableReason: reason } : {}),
       findings: returnedFindings.map((finding) => describeFinding(finding, args.includeParameters === true)),
       returned: returnedFindings.length,
@@ -508,11 +503,8 @@ export async function securityPostureSummary(context: CommandContext, args: Agen
   let secretRefsError: string | null = null;
   if (args.includeParameters === true && context.platform.secretsManager) {
     try {
-      request.assertCurrent();
       secretRefCount = (await context.platform.secretsManager.list()).length;
-      request.assertCurrent();
     } catch (error) {
-      request.assertCurrent();
       secretRefCount = null;
       secretRefsError = previewHarnessText(error instanceof Error ? error.message : String(error), 160);
     }
@@ -520,6 +512,7 @@ export async function securityPostureSummary(context: CommandContext, args: Agen
   request.assertCurrent();
   return {
     status: 'available',
+    capturedAt: new Date(capturedAt).toISOString(),
     summary: {
       ...securitySnapshotSummary(securitySnapshot, findings),
       auth: {
@@ -634,19 +627,9 @@ function resolveBundlePath(context: CommandContext, args: AgentHarnessSecurityAr
   }
   const shellPaths = context.workspace.shellPaths;
   const outside = `Bundle path ${previewHarnessText(raw, 120)} is outside the workspace. support_bundle only reads files inside the workspace; export the bundle into the workspace (for example with the bundle export route from mode:"support_bundles") and pass that path.`;
+  // The containment test follows links, so a link inside the workspace that leads outside it is refused.
   if (!shellPaths || !shellPaths.isWithinWorkingDirectory(raw)) return { status: 'refused', usage: outside };
-  const path = shellPaths.resolveWorkspacePath(raw);
-  try {
-    // A symlink inside the workspace must not lead to a file outside it.
-    const root = realpathSync(shellPaths.workingDirectory);
-    if (existsSync(path)) {
-      const real = realpathSync(path);
-      if (real !== root && !real.startsWith(root.endsWith('/') ? root : `${root}/`)) return { status: 'refused', usage: outside };
-    }
-  } catch {
-    return { status: 'refused', usage: outside };
-  }
-  return { status: 'ok', path };
+  return { status: 'ok', path: shellPaths.resolveWorkspacePath(raw) };
 }
 
 function summarizeBundleType(bundle: Record<string, unknown>): string {

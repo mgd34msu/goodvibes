@@ -10,7 +10,7 @@ import { readToolCall, readCatastrophic } from '../platform/src/platform/gate/re
 import { readRequest } from '../platform/src/platform/routing/request-reading.js';
 import { planTaskRoute } from '../platform/src/platform/routing/task-routes/planner.js';
 import { readAutonomyIntake } from '../platform/src/platform/routing/task-routes/autonomy-intake.js';
-import { ProfileDistinctiveReader, readResidualProjection } from '../platform/src/platform/utils/redaction-reading.js';
+import { ProfileDistinctiveReader } from '../platform/src/platform/utils/redaction-reading.js';
 
 let previous: JudgmentPort | undefined, installed = false;
 afterEach(() => { if (installed) installJudgmentPort(previous); installed = false; });
@@ -62,7 +62,6 @@ test('Classic config reads keep public schema values, mask unknown roles and pre
     expect(await redactObjectByPath('provider', { model: 'fixture-general-model' })).toEqual({ model: 'fixture-general-model' });
     expect(await readRetryWaitMs({ message: 'Please retry in 5 minutes', status: 429 }, 'test.classic.retry')).toBeUndefined();
     expect(await readRetryWait(new ProviderError('Retry in 5 minutes', { statusCode: 429, retryAfterMs: 7300 }))).toBe(7300);
-    expect(await readResidualProjection([], {})).toBeUndefined();
     expect(new ProfileDistinctiveReader().read({ field: 'profile.role', sourceKind: 'field' }, { assertCurrent() {} })).toBeUndefined();
     for (const operation of [
       () => readToolCall({ toolName: 'exec', args: { command: 'pwd' }, port: forbidden }),

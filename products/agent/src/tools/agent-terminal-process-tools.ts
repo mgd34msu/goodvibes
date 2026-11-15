@@ -105,7 +105,7 @@ export function createAgentTerminalTool(commandContext: CommandContext, registry
           processClass: {
             type: 'string',
             enum: ['command', 'long_lived'],
-            description: 'command: an ordinary job, terminated when timeoutMs expires. long_lived: an interactive application or a server whose lifetime is the user\'s, it keeps running past timeoutMs and must be stopped explicitly. When omitted, Jev reads the complete command and an unsettled reading prevents launch; when Jev is not reading commands (Classic operation) an omitted class is command, so a timeout kills it and only an explicit long_lived or killOnTimeout:false spares it.',
+            description: 'command: an ordinary job, terminated when timeoutMs expires. long_lived: an interactive application or a server whose lifetime is the user\'s, it keeps running past timeoutMs and must be stopped explicitly. When omitted with no deadline or with killOnTimeout given, nothing is read and the process starts at once. When omitted with a deadline, Jev reads the complete command; if that reading does not settle the process still starts and the deadline leaves it running. When Jev is not reading commands (Classic operation) an omitted class is command, so a timeout kills it unless killOnTimeout:false is given.',
           },
           killOnTimeout: { type: 'boolean', description: 'Overrides processClass: true terminates this process when timeoutMs expires, false leaves it running. Set true deliberately before a timeout may destroy something the user is using.' },
           pty: { type: 'boolean', description: 'Request PTY mode; returns unsupported until the platform publishes a typed PTY contract.' },
@@ -154,7 +154,7 @@ export function createAgentProcessTool(commandContext: CommandContext, registry?
           command: { type: 'string', description: 'Shell command for action:start.' },
           cwd: { type: 'string', description: 'Working directory for action:start.' },
           timeoutMs: { type: 'number', description: 'Milliseconds. For wait: default 30000, 0 returns the current status without waiting, more than 600000 is capped (wait again to keep watching). For start: 0 or omitted means no deadline. At most 2147483647.' },
-          processClass: { type: 'string', enum: ['command', 'long_lived'], description: 'Explicit lifetime class for action:start; otherwise Jev reads the complete command, or in Classic operation (Jev not reading commands) an omitted class is command and a timeout kills it.' },
+          processClass: { type: 'string', enum: ['command', 'long_lived'], description: 'Explicit lifetime class for action:start. When omitted, it is read only if timeoutMs is set and killOnTimeout is not; an unsettled reading leaves the process running past the deadline. In Classic operation (Jev not reading commands) an omitted class is command and a timeout kills it.' },
           killOnTimeout: { type: 'boolean', description: 'Explicit timeout termination override for action:start.' },
           pty: { type: 'boolean', description: 'Request PTY mode; reports unsupported until a typed contract exists.' },
           data: { type: 'string', description: 'Input data for action:write to a running tracked native stdin pipe.' },

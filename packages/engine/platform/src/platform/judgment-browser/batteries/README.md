@@ -1,8 +1,8 @@
 # First WebUI battery readers
 
-These are server-only definitions and readers for the browser judgment registrations. The surrounding `webui-runtime.ts` source owner and daemon `browser-judgment-composition.ts` install the error, mail-subject, speech-seam and provider-catalog readers under authenticated host ownership; this reader layer itself grants no access or transmission permission.
+These are server-only definitions and readers for the browser judgment registrations. The surrounding `webui-runtime.ts` source owner and daemon `browser-judgment-composition.ts` install the error, speech-seam and provider-catalog readers under authenticated host ownership; this reader layer itself grants no access or transmission permission.
 
-`webui-adapters.ts` implements the published `BrowserJudgmentBattery` descriptor contract. `webuiDaemonRefusalAdapter` and `webuiMailReplySubjectAdapter` resolve existing server references with the fresh `currentPrincipal` callback. No browser text-staging endpoint or private-source permission is created here.
+`webui-adapters.ts` implements the published `BrowserJudgmentBattery` descriptor contract. `webuiDaemonRefusalAdapter` resolves existing server references with the fresh `currentPrincipal` callback. No browser text-staging endpoint or private-source permission is created here.
 
 The web UI command palette, code-block language, settings key classification and credential-to-provider highlight are decided in the browser by code (the palette's lexical matcher, the bundled highlighter's own detection, the engine's declared config key facts, the provider catalog and the provider's own sign-in routes); none of them asks a model. `webui-status-catalog.ts` contains exhaustive structural tone mappings for the current companion-session, knowledge-job, knowledge-refinement and provider-account auth enum types. `readWebuiStatusCatalog()` is caller-side; unknown labels stay unsupported. Status tone is always read from this table; no model is asked for it. The public `judgment-browser/catalogs` entrypoint re-exports only these pure catalogs, the declared-fact rules below and erased types. Its browser graph includes no provider, source resolver, log or SQLite implementation.
 
@@ -18,7 +18,7 @@ The source-level adapter API also exports `WebuiDaemonRefusalRun`. The run type 
 
 Code answers these at once, in the browser and in the adapters, from the same declarations exported by `catalogs.ts`. An adapter refuses (`JUDGMENT_INPUT_HELD`) a request about a declared fact before any model call, so a reading is spent only on what no declaration covers:
 
-- Reply marker: `readReplySubjectMarker(subject)` (`reply-subject-marker.ts`) reads the leading `Prefix:` chain against the known localized reply and forward markers. Only a short unknown prefix (`unrecognised-prefix`) is sent to `webui.mail.reply-subject`, as advice.
+- Reply subject: `replySubjectLine(subject)` (`reply-subject-marker.ts`) reads the leading `Prefix:` chain against the known localized reply and forward markers and prepends `Re: ` when no reply marker leads. The web UI's Reply and the daemon's drafted replies both use it; no model is asked.
 - Code grammar: `readFenceTagLanguage(tag)` (`code-fence-language.ts`) maps a fence tag or its highlighter alias to a grammar.
 - Provider credential names: a built-in provider (`isDeclaredCredentialProvider`) declares every name it reads (`readDeclaredProviderCredential`).
 - Status tone: `readWebuiStatusCatalog()`; there is no status battery.
@@ -44,17 +44,3 @@ Errors use at most one logical call and select all unresolved eligible items tog
 Abort prevents new calls and late results cannot produce a ready result. Active cancellation depends on the injected port honoring the signal. The service owns admission/fan-out bounds, provider cancellation and request echo validation. It checks the source (`assertCurrent()`), the route and the host policy once at admission and once at commit; between them source revocation, route revocation and request cancellation abort the run through their signals, and each transmission and retention step checks only that signal and the caller's identity. The shared port owns transient-availability retry/backoff with no total outage cutoff.
 
 Known status consumers use catalog IDs; unsupported text is visibly unclassified and makes no provider request. Error interpretation now awaits real server-issued references at the asynchronous HTTP caller boundary. The default daemon owner binds the closed source purposes to its configured Jev route and existing decision-log metadata policy. Actual daemon tests use synthetic loopback inference; they do not establish live-provider calibration.
-
-## Mail reply subjects
-
-`webui.mail.reply-subject` adds one fixed yes/no item. The browser supplies only `subjectRef`; settled output is `{ alreadyReply: boolean }`, never generated subject text. `email.inbox.read` may issue `replySubjectRef` only from a canonical complete read whose account epoch, actual mailbox, positive UIDVALIDITY and returned UID are known. Private exact-result maps carry that provenance without accepting browser or sender claims. Ordinary legacy, incomplete or unavailable reads still render but issue no source.
-
-The lease identifies an immutable observed read, not ongoing remote message existence. It authorizes only subject interpretation through the configured Jev route and existing decision-log metadata policy (including the subject-state hash); it never authorizes sending or another mailbox read. Complete original subject screening precedes retention and model work; clipped, ambiguous, protected or unsupported subjects hold. Raw subject, sender, body, account and mailbox values never enter decision-log fields. Only the complete subject is model state.
-
-Config mutations and credential changes synchronously retire account epochs, including ABA changes. Newer source reads, observed mailbox replacement, expiry and shutdown revoke old leases; shared retries recheck fresh authentication, source, purpose and route at every transmission and retention boundary. The WebUI decides the subject by the reply-marker rule at once; only an unknown short prefix waits for a reading, for at most 1.5 seconds. Typing a subject, closing, selecting another message, starting a newer reply, changing client identity or navigating away cancels a pending reading. An unavailable, unsure or late reading leaves the rule's answer (prefix `Re:`), so the draft is never held.
-
-The canonical in-memory IMAP fixtures, authenticated request/response tests and recorded-wire browser replay are synthetic implementation proof. They are not live mailbox/provider verification or hosted browser calibration.
-
-Server-owned `fallbackModels` admits configured cross-model attempt identities.
-Returned aliases are validated against the model of the final answered attempt;
-neither browser input nor an alias entry can authorize another fallback target.

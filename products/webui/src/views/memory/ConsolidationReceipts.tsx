@@ -6,10 +6,9 @@
  * cross-scope duplicate, a long-stale delete) is emitted as a PROPOSAL instead of
  * applied automatically. They are the first group on the Library's Review tab.
  *
- * The records a proposal references are already marked into the review queue by the
- * consolidation pass itself, so a proposal row only makes the proposal legible (what
- * kind, how many records, why) and selects it; its detail pane lists the records and
- * the queue rows they point at are highlighted. `route` on the wire is an internal
+ * A proposal row makes the proposal legible (what kind, how many records, why) and
+ * opens it; its detail pane lists the records and offers the answers its kind takes
+ * (memory.consolidation.decide), and the queue rows it points at are highlighted. `route` on the wire is an internal
  * agent-tool invocation string, never a browser route or link.
  *
  * Honest states: a daemon build with no memory.consolidation.receipts id at all
@@ -86,7 +85,7 @@ export function ConsolidationProposals({ query = '', selectedKey = null, onSelec
               meta={`${PROPOSAL_KIND_LABEL[proposal.kind]} · ${proposal.ids.length} record${proposal.ids.length === 1 ? '' : 's'}`}
               selected={key === selectedKey}
               onSelect={() => onSelect(key, proposal)}
-              trailing={<Button variant="outline" size="sm" onClick={() => onSelect(key, proposal)}>Resolve</Button>}
+              trailing={<Button variant="outline" size="sm" onClick={() => onSelect(key, proposal)}>Decide</Button>}
             />
           ))}
         </RowGroup>
@@ -95,7 +94,7 @@ export function ConsolidationProposals({ query = '', selectedKey = null, onSelec
         <p className="lib-quiet">No consolidation runs yet. This daemon has not run an idle or scheduled consolidation pass yet.</p>
       )}
       {pending.length === 0 && runs.length > 0 && (
-        <p className="lib-quiet">Nothing currently pending a human call; every prior proposal has been resolved.</p>
+        <p className="lib-quiet">Nothing currently pending a human call; every prior proposal has been decided.</p>
       )}
     </div>
   );

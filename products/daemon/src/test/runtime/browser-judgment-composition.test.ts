@@ -302,33 +302,6 @@ test.each(['browser', 'inbox'] as const)('failed %s factory acquisition releases
   }
 }, 30_000);
 
-test('default configured browser policy admits only the issued mail-subject purpose and fences source retirement', async () => {
-  using log = new SqliteDecisionLog(':memory:');
-  const calls: unknown[] = [];
-  const source = new AbortController();
-  const cleanup: (() => void | Promise<void>)[] = [];
-  const inner: JudgmentPort = { model: 'jev-1.13.0', async ask(input) {
-    calls.push(input.state);
-    return { requestedModel: 'jev-1.13.0', model: 'jev-1.13.0', requestId: undefined, usage: { inputTokens: 1, outputTokens: 1 }, latencyMs: 1,
-      answers: { already_reply: { type: 'noul', noul: 0.99 } } as never };
-  } };
-  const service = composeBrowserJudgment({ judgment: { port: withDecisionLog(inner, log), decisionLog: log, volumeMonitor: { lastAlert: () => undefined } }, env: {},
-    methods: new GatewayMethodCatalog(), config: configuration().configManager, secrets: { onDidChange: () => () => {} },
-    disposal: { add(_label, dispose) { cleanup.push(dispose); } },
-  });
-  try {
-    const subjectRef = service.issueMailSubjectReference({ principal, snapshot: { revision: 'synthetic-canonical-read', subject: 'Vs: Synthetic note', signal: source.signal, assertCurrent: () => source.signal.throwIfAborted() } });
-    expect(subjectRef).toBeString();
-    const request = { protocolVersion: 1, batteryVersion: 1, requestId: crypto.randomUUID(), battery: 'webui.mail.reply-subject', input: { subjectRef } };
-    expect(await service.execute(request, principal, new AbortController().signal, () => principal)).toMatchObject({ status: 'settled', value: { alreadyReply: true } });
-    expect(calls).toEqual([{ subject: 'Vs: Synthetic note' }]);
-    expect(log.query()).toHaveLength(1);
-    source.abort();
-    await expect(service.execute({ ...request, requestId: crypto.randomUUID() }, principal, new AbortController().signal, () => principal)).rejects.toMatchObject({ code: 'JUDGMENT_REFERENCE_HELD' });
-    expect(calls).toHaveLength(1);
-  } finally { for (const dispose of cleanup.reverse()) await dispose(); }
-});
-
 test('daemon composition explicitly authorizes canonical chat speech seams on the configured judgment route', async () => {
   using log = new SqliteDecisionLog(':memory:');
   const content = 'Dr. Rivera paused. Next came silence.'; const calls: Array<Parameters<JudgmentPort['ask']>[0]> = [];

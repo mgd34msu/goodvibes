@@ -64,6 +64,10 @@ type SendState = 'idle' | 'sending' | 'delivered' | 'failed';
  * secondary/fallback) reads the checkpoint-baseline picker. */
 type ViewMode = 'session' | 'workspace';
 
+function sameLines(a: DiffHunk, b: DiffHunk): boolean {
+  return a.lines.length === b.lines.length && a.lines.every((line, index) => JSON.stringify(line) === JSON.stringify(b.lines[index]));
+}
+
 export function SessionChanges({ sessionId, canSteer, closed, streamPaused = false }: SessionChangesProps) {
   const queryClient = useQueryClient();
   const [mode, setMode] = useState<ViewMode>('session');
@@ -290,17 +294,21 @@ export function SessionChanges({ sessionId, canSteer, closed, streamPaused = fal
     if (!actionTarget) return;
     setSendError(null);
     setSendState('idle');
-    const fileIndex = files.indexOf(actionTarget.file);
-    const hunkIndex = actionTarget.file.hunks.indexOf(actionTarget.hunk);
+    // A refresh while the sheet was open replaces the parsed objects; the same
+    // hunk (same file, header and lines) in the new diff is still the one tapped.
+    const fileIndex = files.findIndex((file) => file.path === actionTarget.file.path);
+    const file = files[fileIndex];
+    const hunkIndex = file ? file.hunks.findIndex((hunk) => hunk === actionTarget.hunk
+      || (hunk.header === actionTarget.hunk.header && sameLines(hunk, actionTarget.hunk))) : -1;
     const unifiedDiff = mode === 'session' ? sessionChanges.data?.unifiedDiff : diff.data?.diff.unifiedDiff;
-    if (fileIndex < 0 || hunkIndex < 0 || unifiedDiff === undefined) {
-      // The diff was refreshed while the sheet was open, so the tapped hunk is no longer in it.
-      setSendError('The diff changed while the menu was open. Tap the hunk again to comment on it.');
+    if (!file || hunkIndex < 0 || unifiedDiff === undefined) {
+      setSendError('That hunk is no longer in the diff: it changed while the menu was open. Tap the hunk as it is now to comment on it.');
       setSendState('failed');
       setActionTarget(null);
       return;
     }
-    setCommentTarget({ ...actionTarget, capturedLabel, selection: {
+    const hunk = file.hunks[hunkIndex]!;
+    setCommentTarget({ file, hunk, capturedLabel, selection: {
       kind: mode, ...(mode === 'workspace' ? { baselineId: effectiveBaselineId } : {}),
       unifiedDiff, fileIndex, hunkIndex,
       revision: mode === 'session' ? sessionChanges.data?.nativeRevision : diff.data?.diff.nativeRevision,

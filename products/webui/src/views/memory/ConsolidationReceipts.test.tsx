@@ -119,7 +119,7 @@ describe('ConsolidationReceipts: genuinely empty', () => {
 });
 
 describe('ConsolidationReceipts: pending proposals', () => {
-  test('renders the reason; Resolve selects the proposal with exactly those ids', async () => {
+  test('renders the reason; Decide selects the proposal with exactly those ids', async () => {
     receiptsImpl = () => Promise.resolve({
       receipts: [],
       pendingProposals: [{
@@ -133,7 +133,7 @@ describe('ConsolidationReceipts: pending proposals', () => {
     await waitFor(() => (el.textContent ?? '').includes('Same-summary records span multiple scopes'));
     // The internal agent-tool route string is never rendered as a browser link or route.
     expect(el.querySelector('a')).toBeNull();
-    click([...el.querySelectorAll('.consolidation-proposal-row button')].find((b) => b.textContent === 'Resolve'));
+    click([...el.querySelectorAll('.consolidation-proposal-row button')].find((b) => b.textContent === 'Decide'));
     expect(selectCalls).toEqual([['mem-a', 'mem-b']]);
     unmount();
   });

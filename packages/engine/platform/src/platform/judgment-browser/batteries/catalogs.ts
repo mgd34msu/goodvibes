@@ -5,7 +5,7 @@ export { WEBUI_STATUS_CATALOG, readWebuiStatusCatalog, type WebuiStatusLabelId }
 export type { StatusValue } from './webui-types.js';
 export { readDeclaredProviderCredential } from '../../config/provider-credential-catalog.js';
 export { readFenceTagLanguage } from './code-fence-language.js';
-export { readReplySubjectMarker, type ReplySubjectMarker } from './reply-subject-marker.js';
+export { isReplySubject, replySubjectLine } from './reply-subject-marker.js';
 export { SECRET_BEARING_CONFIG_PATHS, isSecretBearingConfigKey } from '../../config/secret-bearing-config-keys.js';
 export { isStructuredCredentialReferenceConfigKey, captureStructuredCredentialReferenceConfigValue } from '../../config/structured-credential-config.js';
 

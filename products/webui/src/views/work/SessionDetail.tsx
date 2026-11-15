@@ -363,7 +363,7 @@ export function SessionDetail({ record, agents, tab, onTabChange, streamPaused, 
 
       {tab === 'rewind' && <SessionRewind sessionId={record.id} closed={closed} />}
 
-      {tab === 'checkpoints' && <CheckpointsPanel />}
+      {tab === 'checkpoints' && <CheckpointsPanel sessionId={record.id} />}
     </DetailPane>
   );
 }

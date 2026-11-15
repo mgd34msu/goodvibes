@@ -80,7 +80,7 @@ export const responseCorruptions: readonly [string, (raw: JudgmentResponse) => v
   [
     "battery",
     (raw) => {
-      raw.battery = "webui.mail.reply-subject";
+      raw.battery = "webui.unknown-battery";
     },
   ],
   [

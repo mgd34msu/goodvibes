@@ -10,6 +10,7 @@ import {
   BOOLEAN_SCHEMA,
   NUMBER_SCHEMA,
   STRING_SCHEMA,
+  arraySchema,
   methodDescriptor,
   objectSchema,
 } from './method-catalog-shared.js';
@@ -58,5 +59,27 @@ export const builtinGatewayMemoryMethodDescriptors: readonly GatewayMethodDescri
     http: { method: 'GET', path: '/api/ops/memory' },
     inputSchema: objectSchema({}, []),
     outputSchema: MEMORY_SNAPSHOT_SCHEMA,
+  }),
+  methodDescriptor({
+    id: 'memory.consolidation.decide',
+    title: 'Decide a Memory Consolidation Proposal',
+    description:
+      'Answer one pending consolidation proposal (memory.consolidation.receipts lists them with their `id`). The actions each kind accepts, `first`/`second` being the proposal\'s ids in order: contradiction keep-first | keep-second | both-stand; cross-scope-duplicate keep-first | keep-second | keep-both; stale-delete delete | keep. Keeping one record marks the other stale (recoverable); delete removes the record; both-stand and keep-both mark the records reviewed and record the decision, so the proposal is not raised again. Answers decided:true with the records changed and removed, or decided:false with a refusal (code, state, reason, next) and nothing changed. ws-only invoke verb.',
+    category: 'memory',
+    transport: ['ws'],
+    scopes: ['write:memory'],
+    access: 'admin',
+    inputSchema: objectSchema({
+      proposalId: STRING_SCHEMA,
+      action: { type: 'string', enum: ['keep-first', 'keep-second', 'both-stand', 'keep-both', 'delete', 'keep'] },
+    }, ['proposalId', 'action']),
+    outputSchema: objectSchema({
+      decided: BOOLEAN_SCHEMA,
+      proposalId: STRING_SCHEMA,
+      action: STRING_SCHEMA,
+      changed: arraySchema(STRING_SCHEMA),
+      removed: arraySchema(STRING_SCHEMA),
+      refusal: objectSchema({ code: STRING_SCHEMA, state: STRING_SCHEMA, reason: STRING_SCHEMA, next: arraySchema(STRING_SCHEMA) }, ['code', 'state', 'reason', 'next']),
+    }, ['decided', 'proposalId']),
   }),
 ];

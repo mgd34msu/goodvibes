@@ -21,7 +21,11 @@ export async function listEmailInbox(deps: EmailServiceDeps, config: EmailConfig
     // Page here, visibly, rather than handing the whole match set to a
     // function that would quietly keep the tail of it. `total` below reports
     // the full match, so a caller can always see that this is a page.
-    const pageUids = uids.slice(-Math.min(limit, IMAP_MAX_FETCH_UIDS));
+    // `before` pages backwards: the next page is the newest UIDs below the
+    // oldest one already shown.
+    const before = input.before;
+    const remaining = before === undefined ? uids : uids.filter((uid) => uid < before);
+    const pageUids = remaining.slice(-Math.min(limit, IMAP_MAX_FETCH_UIDS));
     // `fetchEnvelopeBatch`, not `fetchEnvelopes`. They run the same fetch;
     // the difference is that one of them answers the question this method
     // has to answer. `fetchEnvelopes` returns a list, and its own doc warns

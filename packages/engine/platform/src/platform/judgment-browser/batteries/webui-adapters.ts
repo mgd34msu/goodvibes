@@ -1,14 +1,12 @@
 import { declaredProviderCatalogId } from '@goodvibes-jev/engine/contracts';
-import { readReplySubjectMarker } from './reply-subject-marker.js';
 import type { BatteryRun, Outcome, Reading, YesNoReading } from '@goodvibes-jev/judgment/decisions';
 import { BrowserJudgmentError, type BrowserJudgmentInputMap } from '@goodvibes-jev/engine/daemon-api';
 import type { BrowserJudgmentBattery, BrowserJudgmentProjection } from '../types.js';
-import { catalogProviderMatchBattery, daemonRefusalBattery, mailReplySubjectBattery, WEBUI_BATTERY_QUESTIONS } from './webui-specs.js';
-import { readStructuredDaemonRefusal, snapshotWebuiDaemonRefusal, snapshotWebuiMailSubject, snapshotWebuiCredentialNames } from './webui-readers.js';
+import { catalogProviderMatchBattery, daemonRefusalBattery, WEBUI_BATTERY_QUESTIONS } from './webui-specs.js';
+import { readStructuredDaemonRefusal, snapshotWebuiDaemonRefusal, snapshotWebuiCredentialNames } from './webui-readers.js';
 import { REFUSAL_ITEMS, type DaemonRefusalValue, type ResolvedDaemonRefusal } from './webui-types.js';
 
 const ERRORS = 'webui.errors.daemon-refusal';
-const MAIL = 'webui.mail.reply-subject';
 const inputHeld = (): never => { throw new BrowserJudgmentError('JUDGMENT_INPUT_HELD'); };
 const referenceHeld = (): never => { throw new BrowserJudgmentError('JUDGMENT_REFERENCE_HELD'); };
 const invalid = (): never => { throw new BrowserJudgmentError('JUDGMENT_INVALID_RESPONSE'); };
@@ -57,29 +55,6 @@ export function createWebuiCatalogProviderAdapter(resolve: BrowserJudgmentBatter
     record(runs, projection) { recordProjection(runs, projection); },
   };
 }
-
-/** Only an authenticated canonical read can issue the referenced subject. Asked only for a prefix the reply-marker rule does not know. */
-export const webuiMailReplySubjectAdapter: BrowserJudgmentBattery<typeof MAIL, { readonly subject: string }, BatteryRun<typeof mailReplySubjectBattery.items>> = {
-  id: MAIL, version: 1, maxCalls: 1, questions: WEBUI_BATTERY_QUESTIONS[MAIL]!,
-  async resolve(input, context) {
-    checkAbort(context.signal);
-    return context.references.resolve(input.subjectRef, context.currentPrincipal, MAIL, snapshotWebuiMailSubject);
-  },
-  async run(port, raw, { signal }) {
-    checkAbort(signal);
-    const source = preflight(() => snapshotWebuiMailSubject(raw));
-    if (readReplySubjectMarker(source.subject) !== 'unrecognised-prefix') return inputHeld();
-    const run = await mailReplySubjectBattery.run(port, source, { signal, site: MAIL });
-    checkAbort(signal);
-    return run;
-  },
-  project(run) {
-    const readings = { already_reply: run.readings.already_reply };
-    if (unsettled(readings)) return held(readings);
-    return { status: 'settled', value: { alreadyReply: readings.already_reply.verdict === 'yes' }, readings };
-  },
-  record(run, projection) { recordProjection([run], projection); },
-};
 
 /** Server-only intermediate evidence consumed by the refusal descriptor. */
 export interface WebuiDaemonRefusalRun {

@@ -156,32 +156,29 @@ export function createDaemonIntegrationRouteHandlers(
     getIntelligence: () => withHelpers(context.integrationHelpers, (helpers) => Response.json(helpers.getIntelligenceSnapshot())),
     getMemoryDoctor: async () => Response.json(await context.memoryRegistry.doctor()),
     getMemoryConsolidationReceipts: () => {
-      // What consolidation DID (retained run receipts) and what it PROPOSED,
-      // judgment outcomes a human acts on via the confirmation-gated review
-      // route. A proposal stays pending until every record it names has been
-      // reviewed or removed; the receipts themselves are kept by the scheduler
-      // ring, so a decided proposal would otherwise stay listed until its
-      // receipt aged out. The referenced records are already marked into the
-      // review queue by the engine.
+      // What consolidation DID (retained run receipts) and what it PROPOSED and
+      // a person has not decided yet. The proposals come from the memory store
+      // with their ids; each is decided with memory.consolidation.decide, which
+      // changes the records it names or records that they stand, and a decided
+      // proposal is no longer listed. A scheduler without a proposal store falls
+      // back to the proposals of its retained receipts.
       if (!context.memoryConsolidation) {
         return jsonErrorResponse({ error: 'This runtime has no memory-consolidation scheduler.' }, { status: 501 });
       }
-      const receipts = context.memoryConsolidation.listReceipts();
-      const proposals = receipts.flatMap((receipt) => {
-        const proposed = (receipt as { proposed?: unknown }).proposed;
-        return Array.isArray(proposed) ? proposed : [];
+      const scheduler = context.memoryConsolidation as typeof context.memoryConsolidation & { listProposals?: () => readonly unknown[] };
+      const receipts = scheduler.listReceipts();
+      const proposed = receipts.flatMap((receipt) => {
+        const entries = (receipt as { proposed?: unknown }).proposed;
+        return Array.isArray(entries) ? entries : [];
       });
-      const stillOpen = (proposal: unknown): boolean => {
-        const ids = (proposal as { ids?: unknown } | null)?.ids;
-        if (!Array.isArray(ids) || ids.length === 0) return true;
-        return ids.some((id) => {
-          if (typeof id !== 'string') return true;
-          const record = context.memoryRegistry.get(id) as { reviewState?: unknown } | null;
-          return record !== null && record !== undefined && record.reviewState !== 'reviewed';
-        });
+      const pendingProposals = scheduler.listProposals ? [...scheduler.listProposals()] : proposed;
+      const keyOf = (proposal: unknown): string => {
+        const { kind, ids } = (proposal ?? {}) as { kind?: unknown; ids?: unknown };
+        return `${String(kind)}:${Array.isArray(ids) ? ids.map(String).sort().join(',') : ''}`;
       };
-      const pendingProposals = proposals.filter(stillOpen);
-      return Response.json({ receipts, pendingProposals, decidedProposalCount: proposals.length - pendingProposals.length });
+      const pending = new Set(pendingProposals.map(keyOf));
+      const decidedProposalCount = new Set(proposed.map(keyOf).filter((key) => !pending.has(key))).size;
+      return Response.json({ receipts, pendingProposals, decidedProposalCount });
     },
     getMemoryVectorStats: () => Response.json({ vector: context.memoryRegistry.vectorStats() }),
     getMemoryReviewQueue: async (url) => {

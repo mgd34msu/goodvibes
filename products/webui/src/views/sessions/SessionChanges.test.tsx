@@ -246,21 +246,6 @@ describe('SessionChanges', () => {
     unmount();
   });
 
-  test('commenting on a hunk whose diff was refreshed under the open sheet says so instead of doing nothing', async () => {
-    const { container, client, unmount } = render({ canSteer: true, closed: false });
-    await settle();
-
-    click(container.querySelector('.diff-mb__hunk'));
-    flushSync(() => client.setQueryData(queryKeys.sessionChanges('s-1'), { ...sessionChangesResult, stat: 'refreshed' }));
-    await settle(2);
-    click(container.querySelector('.hunk-actions__btn:not(.hunk-actions__btn--approve):not(.hunk-actions__btn--reject)'));
-    await settle(2);
-
-    expect(container.querySelector('.hunk-sheet__input')).toBeNull();
-    expect(container.querySelector('.session-changes__send-error')?.textContent).toContain('diff changed');
-    unmount();
-  });
-
   test('with no bound agent COMMENT queues a follow-up instead of steering', async () => {
     const { container, unmount } = render({ canSteer: false, closed: false });
     await settle();

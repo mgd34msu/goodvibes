@@ -20,6 +20,31 @@ export const MEMORY_SCOPES: readonly MemoryScope[] = ['session', 'project', 'tea
 
 export const MEMORY_REVIEW_STATES: readonly MemoryReviewState[] = ['fresh', 'reviewed', 'stale', 'contradicted'];
 
+/** A consolidation proposal's id as memory.consolidation.decide names it: `<kind>:<sorted ids>`. */
+export function consolidationProposalId(proposal: { readonly kind: string; readonly ids: readonly string[] }): string {
+  return `${proposal.kind}:${[...proposal.ids].sort().join(',')}`;
+}
+
+export type ConsolidationAction = 'keep-first' | 'keep-second' | 'both-stand' | 'keep-both' | 'delete' | 'keep';
+
+/** The answers each proposal kind takes, labelled for the person deciding; first/second follow the proposal's ids. */
+export const CONSOLIDATION_CHOICES: Readonly<Record<'contradiction' | 'cross-scope-duplicate' | 'stale-delete', readonly { readonly action: ConsolidationAction; readonly label: string }[]>> = {
+  contradiction: [
+    { action: 'keep-first', label: 'Keep the first, mark the second stale' },
+    { action: 'keep-second', label: 'Keep the second, mark the first stale' },
+    { action: 'both-stand', label: 'Both stand' },
+  ],
+  'cross-scope-duplicate': [
+    { action: 'keep-first', label: 'Keep the first, mark the second stale' },
+    { action: 'keep-second', label: 'Keep the second, mark the first stale' },
+    { action: 'keep-both', label: 'Keep both' },
+  ],
+  'stale-delete': [
+    { action: 'delete', label: 'Delete it' },
+    { action: 'keep', label: 'Keep it' },
+  ],
+};
+
 /** The store's documented baseline trust (memory-recall-contract.ts's
  * MIN_PROMPT_MEMORY_CONFIDENCE), MemoryStore.add stamps new records at this
  * confidence, and it is the recall-injection floor. Kept only as a documented fact for

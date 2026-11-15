@@ -1,13 +1,14 @@
 /**
  * The Work page's one primary action: "New", a menu of what can be started
- * from here, each in a kit Dialog. Task (tasks.create), hosted session
- * (sessions.hosted.create; the detach policy defaults to the daemon's own
- * setting and is omitted from the call unless chosen), CI watch
+ * from here, each in a kit Dialog, named by what it gets done. Task
+ * (tasks.create), session in a folder (sessions.hosted.create, offered only the
+ * folders sessions.hosted.workspaces names; the detach policy defaults to the
+ * daemon's own setting and is omitted from the call unless chosen), CI watch
  * (ci.watches.create), and a one-off CI status check (ci.status) that creates
  * nothing.
  */
 import { useState, type SyntheticEvent } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ChevronDown, GitBranch, ListTodo, Plus, Search, Server } from 'lucide-react';
 import { client as platformClient } from '../../lib/goodvibes';
 import type { SessionsHostedCreateInput } from '../../lib/goodvibes';
@@ -80,6 +81,14 @@ function HostedForm({ onDone }: { onDone: (key?: string) => void }) {
   const { toast } = useToast();
   const [workspaceRoot, setWorkspaceRoot] = useState('');
   const [title, setTitle] = useState('');
+  // The daemon decides which folders work may run in; the form offers exactly those.
+  const roots = useQuery({
+    queryKey: ['sessions', 'hosted', 'workspaces'] as const,
+    queryFn: () => platformClient.operator.sessions.hosted.workspaces(),
+    retry: false,
+  });
+  const offered = roots.data?.roots ?? [];
+  const chosenRoot = workspaceRoot || offered[0] || '';
   const [detachPolicy, setDetachPolicy] = useState<'' | 'kill' | 'survive'>('');
   const create = useMutation({
     mutationFn: (input: SessionsHostedCreateInput) => platformClient.operator.sessions.hosted.create(input),
@@ -98,7 +107,7 @@ function HostedForm({ onDone }: { onDone: (key?: string) => void }) {
   });
   const submit = (event: SyntheticEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const root = workspaceRoot.trim();
+    const root = chosenRoot.trim();
     if (!root || create.isPending) return;
     create.mutate({
       workspaceRoot: root,
@@ -108,9 +117,21 @@ function HostedForm({ onDone }: { onDone: (key?: string) => void }) {
   };
   return (
     <form className="work-form" onSubmit={submit}>
-      <Field label="Workspace path">
-        <Input autoFocus required placeholder="/home/you/project" value={workspaceRoot} onChange={(e) => setWorkspaceRoot(e.target.value)} disabled={create.isPending} />
-      </Field>
+      {offered.length > 0 ? (
+        <Field label="Folder" help="The daemon's own folder and the projects registered with it. Register another project from the terminal app to add it here.">
+          <Select
+            aria-label="Folder"
+            value={chosenRoot}
+            onChange={setWorkspaceRoot}
+            disabled={create.isPending}
+            options={offered.map((root) => ({ value: root, label: root }))}
+          />
+        </Field>
+      ) : (
+        <Field label="Folder path" help={roots.isPending ? 'Loading the folders this daemon allows…' : 'An absolute path on the daemon\'s machine.'}>
+          <Input autoFocus required placeholder="/home/you/project" value={workspaceRoot} onChange={(e) => setWorkspaceRoot(e.target.value)} disabled={create.isPending} />
+        </Field>
+      )}
       <Field label="Title (optional)">
         <Input value={title} onChange={(e) => setTitle(e.target.value)} disabled={create.isPending} />
       </Field>
@@ -128,7 +149,7 @@ function HostedForm({ onDone }: { onDone: (key?: string) => void }) {
         />
       </Field>
       <div className="work-form__actions">
-        <Button type="submit" variant="primary" disabled={create.isPending || !workspaceRoot.trim()}>
+        <Button type="submit" variant="primary" disabled={create.isPending || !chosenRoot.trim()}>
           {create.isPending ? 'Creating…' : 'Create'}
         </Button>
       </div>
@@ -240,9 +261,9 @@ function CiStatusForm() {
 }
 
 const TITLES: Record<NewKind, { title: string; description: string }> = {
-  native: { title: 'Native request', description: 'Capture original text and let Jev decide admission to the work ledger.' },
-  task: { title: 'New task', description: 'Submit a task for the daemon to run.' },
-  hosted: { title: 'New hosted session', description: 'A conversation that runs inside the daemon and survives this tab.' },
+  native: { title: 'Ask for work to be done', description: 'Describe what you want; the daemon carries it through and shows its progress here.' },
+  task: { title: 'Run a background task', description: 'A one-off task the daemon runs on its own, with no conversation.' },
+  hosted: { title: 'Start a session in a folder', description: 'A conversation that runs inside the daemon in one of its folders and keeps going when this tab closes.' },
   'ci-watch': { title: 'Watch CI', description: 'Get notified when a repository, ref or pull request finishes its checks.' },
   'ci-status': { title: 'Check CI status', description: 'Look up any repository, ref or pull request once, without creating a watch.' },
 };
@@ -266,9 +287,9 @@ export function NewWorkMenu({ onCreated, lifetime }: NewWorkMenuProps) {
           </Button>
         )}
       >
-        <MenuItem icon={<ListTodo />} onSelect={() => setOpen('native')}>Native request</MenuItem>
-        <MenuItem icon={<ListTodo />} onSelect={() => setOpen('task')}>Task</MenuItem>
-        <MenuItem icon={<Server />} onSelect={() => setOpen('hosted')}>Hosted session</MenuItem>
+        <MenuItem icon={<ListTodo />} onSelect={() => setOpen('native')}>Ask for work to be done</MenuItem>
+        <MenuItem icon={<ListTodo />} onSelect={() => setOpen('task')}>Run a background task</MenuItem>
+        <MenuItem icon={<Server />} onSelect={() => setOpen('hosted')}>Start a session in a folder</MenuItem>
         <MenuItem icon={<GitBranch />} onSelect={() => setOpen('ci-watch')}>CI watch</MenuItem>
         <MenuItem icon={<Search />} onSelect={() => setOpen('ci-status')}>Check CI status</MenuItem>
       </Menu>

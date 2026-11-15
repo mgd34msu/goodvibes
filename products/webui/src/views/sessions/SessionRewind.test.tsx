@@ -233,29 +233,6 @@ describe('SessionRewind', () => {
     await settle(3);
   }
 
-  test('a conversation-only receipt names the snapshot, says this page cannot restore it, and offers no file undo', async () => {
-    applyResult = {
-      receipt: {
-        sessionId: 's-1', turnId: 't-2', scope: 'conversation', appliedAt: 1,
-        files: null,
-        conversation: { rewound: true, droppedMessages: 1, undoSnapshotId: 'snap-7' },
-        undo: { files: null, conversation: { undoSnapshotId: 'snap-7' } },
-        warnings: [],
-      },
-      refused: false, refusal: null,
-    };
-    const { container, unmount } = render();
-    await applyRewind(container);
-
-    const receiptText = container.querySelector('.session-rewind__receipt')?.textContent ?? '';
-    expect(receiptText).toContain('dropped 1 message');
-    expect(receiptText).toContain('snap-7');
-    expect(receiptText).toContain("can't restore a conversation");
-    expect(receiptText).toContain('No file undo point');
-    expect(container.querySelector('.session-rewind__undo-btn')).toBeNull();
-    unmount();
-  });
-
   test('a receipt where nothing was rewound says so instead of claiming a change', async () => {
     applyResult = {
       receipt: {

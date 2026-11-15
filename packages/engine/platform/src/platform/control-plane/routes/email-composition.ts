@@ -27,8 +27,7 @@ import { readErrorFailure } from '../../types/errors.js';
  *
  * Operational log fields omit sender and recipient addresses.
  */
-import type { BrowserJudgmentCapability } from '@goodvibes-jev/engine/daemon-api';
-import { EmailService, type EmailServiceDeps, type EmailReplySubjectSource } from '../../email/index.js';
+import { EmailService, SmtpDeliveryUnconfirmedError, type EmailServiceDeps } from '../../email/index.js';
 import {
   getProcessUntrustedContentLedger,
   type UntrustedContentLedger,
@@ -39,6 +38,10 @@ import { resolveOwnerAddresses } from '../../security/owner-identity.js';
 import { registerEmailGatewayMethods } from './email.js';
 import type { GatewayMethodCatalog } from '../method-catalog.js';
 import type {
+  EmailGatewayAttachmentContent,
+  EmailGatewayDraftList,
+  EmailGatewayMessageUpdate,
+  EmailGatewayMessageUpdateResult,
   EmailGatewayDraftInput,
   EmailGatewayDraftResult,
   EmailGatewayListInput,
@@ -62,7 +65,6 @@ export type EmailGatewayLog = (
 
 /** The slice of the verb-group deps this composition needs. */
 export interface EmailCompositionDeps {
-  readonly browserJudgment?: BrowserJudgmentCapability | undefined;
   /** Test seam: overrides the whole service, so no real socket is opened. */
   readonly emailGateway?: EmailGatewayService | undefined;
   /** Everything `EmailService` needs. Absent in narrow compositions. */
@@ -102,6 +104,9 @@ async function translate(error: unknown): Promise<never> {
   if (error instanceof EmailConfigurationError && error.kind === 'invalid') {
     throw new GatewayVerbError(message, 'EMAIL_NOT_CONFIGURED', 400);
   }
+  if (error instanceof SmtpDeliveryUnconfirmedError) {
+    throw new GatewayVerbError(message, 'EMAIL_DELIVERY_UNCONFIRMED', 502);
+  }
   const failure = await readErrorFailure(error instanceof Error ? error : new Error(message), 'email.gateway.failure').catch(() => null);
   if (failure?.category === 'authentication') {
     throw new GatewayVerbError(
@@ -124,12 +129,7 @@ async function guard<T>(run: () => Promise<T>): Promise<T> {
 
 /** The `EmailGatewayService` slice, served by a platform `EmailService`. */
 export function createServiceBackedGateway(service: EmailService): EmailGatewayService {
-  const sources = new WeakMap<EmailGatewayMessageDetail, EmailReplySubjectSource>();
   return {
-    getReplySubjectSource(message) {
-      const source = sources.get(message);
-      return source?.signal.aborted === false ? source : undefined;
-    },
     async listInbox(input: EmailGatewayListInput): Promise<EmailGatewayListResult> {
       return guard(async () => {
         const since = input.since === undefined ? undefined : new Date(input.since);
@@ -140,6 +140,7 @@ export function createServiceBackedGateway(service: EmailService): EmailGatewayS
           ...(input.limit === undefined ? {} : { limit: input.limit }),
           ...(since === undefined ? {} : { since }),
           ...(input.unreadOnly === undefined ? {} : { unreadOnly: input.unreadOnly }),
+          ...(input.before === undefined ? {} : { before: input.before }),
         });
         return {
           messages: result.messages.map((message) => ({
@@ -178,8 +179,6 @@ export function createServiceBackedGateway(service: EmailService): EmailGatewayS
           ...(message.bodyHtml.length > 0 ? { bodyHtml: message.bodyHtml } : {}),
           ...(message.attachments.length > 0 ? { attachments: message.attachments } : {}),
         };
-        const source = service.getReplySubjectSource(message);
-        if (source) sources.set(detail, source);
         return detail;
       });
     },
@@ -221,8 +220,29 @@ export function createServiceBackedGateway(service: EmailService): EmailGatewayS
           // confirm: true from the caller; this is the service's own
           // belt-and-braces precondition, not a second decision.
           confirm: true,
+          // A repeat of the same send carries the same Message-ID, so a
+          // receiving server that saw the first copy can drop the second.
+          ...(input.clientSendId === undefined ? {} : { messageIdLocalPart: `gv.${input.clientSendId}` }),
         });
         return { messageId: result.messageId, sentAt: result.sentAt };
+      });
+    },
+
+    async updateMessage(input: EmailGatewayMessageUpdate): Promise<EmailGatewayMessageUpdateResult> {
+      return guard(async () => {
+        const result = await service.updateMessage(input.uid, input.action, input.uidValidity);
+        return { uid: result.uid, action: result.action, ...(result.movedTo === undefined ? {} : { movedTo: result.movedTo }) };
+      });
+    },
+
+    async readAttachment(uid: number, index: number): Promise<EmailGatewayAttachmentContent | null> {
+      return guard(async () => service.readAttachment(uid, index));
+    },
+
+    async listDrafts(limit: number): Promise<EmailGatewayDraftList> {
+      return guard(async () => {
+        const result = await service.listDrafts(limit);
+        return { drafts: result.drafts.map((draft) => ({ ...draft })), total: result.total, mailbox: result.mailbox };
       });
     },
   };
@@ -252,9 +272,6 @@ export function instrumentEmailGateway(
   }
 
   return {
-    ...(backend.getReplySubjectSource === undefined ? {} : {
-      getReplySubjectSource: (message: EmailGatewayMessageDetail) => backend.getReplySubjectSource?.(message),
-    }),
     ...(backend.replyEnvelopeSenders === undefined ? {} : {
       replyEnvelopeSenders: (inReplyTo: string) => backend.replyEnvelopeSenders?.(inReplyTo) ?? [],
     }),
@@ -299,6 +316,33 @@ export function instrumentEmailGateway(
       });
       return result;
     },
+
+    ...(backend.updateMessage === undefined ? {} : {
+      async updateMessage(input: EmailGatewayMessageUpdate): Promise<EmailGatewayMessageUpdateResult> {
+        await ready();
+        const result = await backend.updateMessage!(input);
+        log('email.inbox.update', { uid: result.uid, action: result.action });
+        return result;
+      },
+    }),
+
+    ...(backend.readAttachment === undefined ? {} : {
+      async readAttachment(uid: number, index: number): Promise<EmailGatewayAttachmentContent | null> {
+        await ready();
+        const result = await backend.readAttachment!(uid, index);
+        if (result) log('email.attachment.get', { uid, index, sizeBytes: result.sizeBytes });
+        return result;
+      },
+    }),
+
+    ...(backend.listDrafts === undefined ? {} : {
+      async listDrafts(limit: number): Promise<EmailGatewayDraftList> {
+        await ready();
+        const result = await backend.listDrafts!(limit);
+        log('email.drafts.list', { count: result.drafts.length, total: result.total });
+        return result;
+      },
+    }),
   };
 }
 
@@ -356,6 +400,5 @@ export function registerDaemonEmailVerbs(
     getConfig === undefined
       ? new Set<string>()
       : () => resolveOwnerAddresses((key) => getConfig.get(key as never)),
-    deps.browserJudgment,
   );
 }

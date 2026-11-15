@@ -82,9 +82,19 @@ const HOSTED_SESSION_HISTORY_SCHEMA = arraySchema(objectSchema({
 
 export const builtinGatewayHostedSessionMethodDescriptors: readonly GatewayMethodDescriptor[] = [
   methodDescriptor({
+    id: 'sessions.hosted.workspaces',
+    title: 'Folders a Hosted Session May Use',
+    description: 'The folders sessions.hosted.create accepts as workspaceRoot: the daemon\'s working directory and every registered workspace (a path inside one is accepted too). The same list contract work dispatched into a hosted session is held to. ws-only invoke verb; no REST binding.',
+    category: 'sessions',
+    transport: ['ws'],
+    scopes: ['read:sessions'],
+    inputSchema: objectSchema({}),
+    outputSchema: objectSchema({ roots: arraySchema(STRING_SCHEMA) }, ['roots']),
+  }),
+  methodDescriptor({
     id: 'sessions.hosted.create',
     title: 'Create a Daemon-Hosted Session',
-    description: 'Compose a full conversation loop INSIDE the daemon for a workspace: the same orchestrator, tool registry and permission gate a terminal runs, hosted here so the conversation does not depend on the client that started it staying open. `workspaceRoot` must be absolute, a relative path would resolve against the daemon\'s own directory, which is never what the caller meant. `modelId` is resolved against this daemon\'s live model registry when given, so an unknown or ambiguous id is refused here rather than at the first turn; omitted, the session follows the daemon\'s current selection. `detachPolicy` overrides the `hostedSessions.detachPolicy` setting for this session alone. `initialPrompt` is submitted as the first user message and the call does NOT wait for that turn, watch the `turn` and `tools` event domains filtered on the returned session id. Refused with the live count and the setting named when `hostedSessions.maxSessions` is already reached. ws-only invoke verb; no REST binding.',
+    description: 'Compose a full conversation loop INSIDE the daemon for a workspace: the same orchestrator, tool registry and permission gate a terminal runs, hosted here so the conversation does not depend on the client that started it staying open. `workspaceRoot` must be absolute, a relative path would resolve against the daemon\'s own directory, which is never what the caller meant, and must be the daemon\'s working directory or a registered workspace (or inside one); anything else is refused with the allowed folders named (sessions.hosted.workspaces lists them). `modelId` is resolved against this daemon\'s live model registry when given, so an unknown or ambiguous id is refused here rather than at the first turn; omitted, the session follows the daemon\'s current selection. `detachPolicy` overrides the `hostedSessions.detachPolicy` setting for this session alone. `initialPrompt` is submitted as the first user message and the call does NOT wait for that turn, watch the `turn` and `tools` event domains filtered on the returned session id. Refused with the live count and the setting named when `hostedSessions.maxSessions` is already reached. ws-only invoke verb; no REST binding.',
     category: 'sessions',
     transport: ['ws'],
     scopes: ['write:sessions'],

@@ -191,8 +191,8 @@ test.describe('Tasks: phone: fully actionable via confirm sheets', () => {
   test('submitting a task from New completes against the mock daemon', async ({ page }) => {
     await page.goto('/?view=work&tab=processes');
     await page.getByRole('button', { name: 'New', exact: true }).click();
-    await page.getByRole('menuitem', { name: 'Task' }).click();
-    const dialog = page.getByRole('dialog', { name: 'New task' });
+    await page.getByRole('menuitem', { name: 'Run a background task' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Run a background task' });
     await dialog.getByLabel('Task').fill('Ship the phone parity fix');
     await expectTappable(page, '.work-form__actions button', 'task submit');
     await dialog.getByRole('button', { name: 'Submit' }).click();

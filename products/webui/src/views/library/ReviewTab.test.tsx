@@ -1,6 +1,6 @@
 /**
  * ReviewTab: consolidation proposals, the memory review queue and knowledge candidates in
- * one list. A proposal's "Resolve" highlights exactly the queue rows it points at (never
+ * one list. A proposal's "Decide" highlights exactly the queue rows it points at (never
  * filters the rest away) and opens its detail; queue rows open the record pane.
  */
 import { afterEach, describe, expect, mock, test } from 'bun:test';
@@ -41,7 +41,7 @@ afterEach(() => {
 
 describe('ReviewTab', () => {
 
-  test('"Resolve" on a proposal opens its detail and keeps the whole queue', async () => {
+  test('"Decide" on a proposal opens its detail and keeps the whole queue', async () => {
     receipts = () => Promise.resolve({
       receipts: [],
       pendingProposals: [{
@@ -54,7 +54,7 @@ describe('ReviewTab', () => {
     queue = [fakeRecord({ id: 'r1', summary: 'First record' }), fakeRecord({ id: 'r2', summary: 'Second record' })];
     const { el, unmount } = renderInto(React.createElement(ReviewTab, {}));
     await waitFor(() => (el.textContent ?? '').includes('Same-summary records disagree'));
-    click([...el.querySelectorAll('.consolidation-proposal-row button')].find((b) => b.textContent === 'Resolve'));
+    click([...el.querySelectorAll('.consolidation-proposal-row button')].find((b) => b.textContent === 'Decide'));
     await waitFor(() => Boolean(el.querySelector('[aria-label="Review item"]')));
     // A jump never filters: both queued records are still listed.
     expect([...el.querySelectorAll('ul[aria-label="Review queue"] li')]).toHaveLength(2);

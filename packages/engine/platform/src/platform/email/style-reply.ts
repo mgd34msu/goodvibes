@@ -1,4 +1,5 @@
 /** Protected semantic style extraction and draft-only reply composition. */
+import { replySubjectLine } from '../judgment-browser/batteries/reply-subject-marker.js';
 import type { SecretLikeTextPredicate } from '../google/account-registry.js';
 import type { EmailSummary } from './email-service.js';
 import { assertJudgmentInput } from '../gate/judgment-input.js';
@@ -198,11 +199,9 @@ export async function extractSenderName(from: string, options: StyleReplyReading
   });
 }
 
-/** Ensure subject is prefixed with 'Re: ' exactly once. */
+/** The reply's subject: unchanged when it already marks a reply (in any common language), else "Re: " in front. */
 export function replySubject(subject: string): string {
-  const trimmed = subject.trim();
-  if (/^re:\s*/i.test(trimmed)) return trimmed;
-  return `Re: ${trimmed}`;
+  return replySubjectLine(subject);
 }
 
 /** Build a natural acknowledgement sentence adapted to tone. */

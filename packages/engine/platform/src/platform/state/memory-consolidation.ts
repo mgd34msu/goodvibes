@@ -109,11 +109,32 @@ export interface MemoryConsolidationDecayEntry {
 }
 
 export interface MemoryConsolidationProposal {
+  /** `<kind>:<sorted ids>`, the id a decision names; set on every listed proposal. */
+  readonly id?: string;
   readonly kind: 'contradiction' | 'cross-scope-duplicate' | 'stale-delete';
   readonly ids: readonly string[];
   readonly route: string;
   readonly reason: string;
 }
+
+/**
+ * The answers a proposal accepts, by kind. `first`/`second` are the proposal's
+ * `ids` in order.
+ * - contradiction: keep-first / keep-second (the other is marked stale), both-stand.
+ * - cross-scope-duplicate: keep-first / keep-second (the other is marked stale), keep-both.
+ * - stale-delete: delete (the record is removed), keep (marked reviewed).
+ */
+export type MemoryConsolidationAction = 'keep-first' | 'keep-second' | 'both-stand' | 'keep-both' | 'delete' | 'keep';
+
+export const MEMORY_CONSOLIDATION_ACTIONS: Readonly<Record<MemoryConsolidationProposal['kind'], readonly MemoryConsolidationAction[]>> = {
+  contradiction: ['keep-first', 'keep-second', 'both-stand'],
+  'cross-scope-duplicate': ['keep-first', 'keep-second', 'keep-both'],
+  'stale-delete': ['delete', 'keep'],
+};
+
+export type MemoryConsolidationDecision =
+  | { readonly decided: true; readonly proposalId: string; readonly action: MemoryConsolidationAction; readonly changed: readonly string[]; readonly removed: readonly string[] }
+  | { readonly decided: false; readonly proposalId: string; readonly refusal: { readonly code: string; readonly state: string; readonly reason: string; readonly next: readonly string[] } };
 
 export interface MemoryConsolidationRunReceipt {
   readonly provenance?: 'classic';

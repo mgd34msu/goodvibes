@@ -98,9 +98,9 @@ test('creating a hosted session from New attaches it immediately and lists it', 
   await page.goto('/?view=work&tab=sessions');
 
   await page.getByRole('button', { name: 'New', exact: true }).click();
-  await page.getByRole('menuitem', { name: 'Hosted session' }).click();
-  const dialog = page.getByRole('dialog', { name: 'New hosted session' });
-  await dialog.getByLabel('Workspace path').fill('/home/operator/projects/new-thing');
+  await page.getByRole('menuitem', { name: 'Start a session in a folder' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Start a session in a folder' });
+  await dialog.getByLabel('Folder path').fill('/home/operator/projects/new-thing');
   await dialog.getByLabel('Title (optional)').fill('Untangle the build');
   await dialog.getByRole('combobox', { name: 'Detach policy' }).click();
   await page.getByRole('option', { name: 'Keep it running' }).click();

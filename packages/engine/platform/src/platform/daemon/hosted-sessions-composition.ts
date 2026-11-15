@@ -28,6 +28,8 @@ import type { SharedSessionBroker } from '../control-plane/session-broker.js';
  */
 
 import { existsSync, statSync } from 'node:fs';
+import { allowedWorkspaceRoots } from '../hosted-sessions/workspace-roots.js';
+import { sharedWorkspaceRegisterPath } from '../workspace/registration/shared-register-path.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 import type { ConfigManager } from '../config/manager.js';
@@ -145,7 +147,12 @@ export function composeHostedSessions(input: HostedSessionCompositionInput): Hos
     ...(input.spine === undefined ? {} : { spine: input.spine }),
     ...(input.cloudflareAuthToken === undefined ? {} : { cloudflareAuthToken: input.cloudflareAuthToken }),
     isWorkspaceUsable: input.options.isWorkspaceUsable ?? isExistingDirectory,
+    allowedWorkspaceRoots: () => allowedWorkspaceRoots(input.shellPaths.workingDirectory, sharedWorkspaceRegisterPath(input.shellPaths)),
   });
+  const rootsDescriptor = input.gatewayMethods.get('sessions.hosted.workspaces');
+  if (rootsDescriptor) {
+    input.gatewayMethods.register(rootsDescriptor, () => ({ roots: [...manager.workspaceRoots()] }), { replace: true });
+  }
   if (input.options.nativeConversation) {
     const broker = input.spine as SharedSessionBroker | undefined;
     if (!broker || typeof broker.reserveNativeTurnInput !== 'function') throw new Error('Native hosted delivery requires the canonical session broker');

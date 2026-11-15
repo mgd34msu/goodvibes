@@ -15,6 +15,7 @@ export async function withEmailReadConnection<T>(
   sourceRead: EmailReplySubjectRead | undefined,
   signal: AbortSignal | undefined,
   read: (client: ImapClient, assertCurrent: () => void) => Promise<T>,
+  options: { readonly maxLiteralBytes?: number } = {},
 ): Promise<T> {
   const signals = [signal, sourceRead?.signal].filter((value): value is AbortSignal => value !== undefined);
   const lifetime = AbortSignal.any(signals);
@@ -38,7 +39,8 @@ export async function withEmailReadConnection<T>(
   try {
     current();
     client = new ImapClient({ socket, username: config.username, password, signal: lifetime, assertCurrent: current,
-      ...(config.mailbox.length > 0 ? { mailbox: config.mailbox } : {}) });
+      ...(config.mailbox.length > 0 ? { mailbox: config.mailbox } : {}),
+      ...(options.maxLiteralBytes === undefined ? {} : { maxLiteralBytes: options.maxLiteralBytes }) });
     await client.open();
     current();
     sourceRead?.observeMailbox(client.mailbox, client.mailboxStatus?.uidValidity ?? null);

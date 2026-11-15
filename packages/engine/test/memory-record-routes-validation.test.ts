@@ -232,26 +232,6 @@ describe('creating a local user', () => {
   });
 });
 
-describe('consolidation receipts', () => {
-  test('a proposal whose records were all reviewed or removed is no longer pending', async () => {
-    const receipts = [{ proposed: [
-      { kind: 'contradiction', ids: ['reviewed-one'], route: 'r', reason: 'x' },
-      { kind: 'stale-delete', ids: ['gone'], route: 'r', reason: 'x' },
-      { kind: 'contradiction', ids: ['open-one'], route: 'r', reason: 'x' },
-    ] }];
-    const { context } = integrationContext({
-      consolidation: { listReceipts: () => receipts },
-      registry: {
-        get: (id: string) => (id === 'gone' ? null : { id, reviewState: id === 'reviewed-one' ? 'reviewed' : 'stale' }),
-      },
-    });
-    const response = await createDaemonIntegrationRouteHandlers(context).getMemoryConsolidationReceipts() as Response;
-    const body = await response.json() as { pendingProposals: Array<{ ids: string[] }>; decidedProposalCount: number };
-    expect(body.pendingProposals.map((proposal) => proposal.ids[0])).toEqual(['open-one']);
-    expect(body.decidedProposalCount).toBe(2);
-  });
-});
-
 describe('a memory review is recorded under the credential that made it', () => {
   function withPrincipal(context: DaemonIntegrationRouteContext, principalId: string | null): DaemonIntegrationRouteContext {
     return { ...context, resolveAuthenticatedPrincipal: () => (principalId ? { principalId } : null) };

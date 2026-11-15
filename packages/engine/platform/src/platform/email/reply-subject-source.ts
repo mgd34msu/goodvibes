@@ -1,18 +1,10 @@
 /**
- * Revocable evidence of one completed canonical mail read. This is an observed
- * subject snapshot, never send authority or a claim of live remote existence.
- * Owners retain bounded metadata/controllers only; the result's WeakMap owns
- * the subject text. An embedding without a lifecycle owner gets no evidence.
+ * The account lifetime of one mail composition: every read begins here before
+ * its first credential or transport await, and a config or credential change
+ * retires the reads and mailbox observations taken under the old account.
  */
 import { randomUUID } from 'node:crypto';
 import type { EmailConfig } from './email-service.js';
-
-export interface EmailReplySubjectSource {
-  readonly revision: string;
-  readonly subject: string;
-  readonly signal: AbortSignal;
-  readonly assertCurrent: () => void;
-}
 
 /** Mailbox/account observation only; not message-content or transmission authority. */
 export interface EmailMailboxObservation {
@@ -32,8 +24,6 @@ export interface EmailReplySubjectRead {
   completeMailboxObservation(): EmailMailboxObservation | undefined;
   /** Called after EXAMINE, before fetching the message. */
   observeMailbox(mailbox: string, uidValidity: number | null): void;
-  /** Called only for the exact canonical result after a successful read. */
-  complete(uid: number, mailbox: string, subject: string): EmailReplySubjectSource | undefined;
 }
 
 const MAX_CURRENT_SOURCES = 256;
@@ -47,7 +37,6 @@ export class EmailReplySubjectSourceOwner {
   #accountRevision = randomUUID();
   #readController: AbortController | undefined;
   #uidValidity: number | undefined;
-  readonly #controllers = new Map<number, AbortController>();
   readonly #observations = new Set<AbortController>();
 
   /** Invalidate even an ABA change: equality with the old config is insufficient. */
@@ -69,7 +58,7 @@ export class EmailReplySubjectSourceOwner {
   }
 
   /** Must run before the first credential or transport await. */
-  beginRead(config: EmailConfig, uid?: number): EmailReplySubjectRead {
+  beginRead(config: EmailConfig): EmailReplySubjectRead {
     const account = JSON.stringify(config);
     const retired: AbortController[] = [];
     if (account !== this.#account) {
@@ -86,11 +75,6 @@ export class EmailReplySubjectSourceOwner {
     const controller = new AbortController();
     this.#readController = controller;
     if (this.#closed) retired.push(controller);
-    if (uid !== undefined) {
-      const previous = this.#controllers.get(uid);
-      if (previous) retired.push(previous);
-      this.#controllers.delete(uid);
-    }
     const expectedMailbox = config.mailbox.trim() || 'INBOX';
     let observedValidity: number | undefined;
     const current = (): boolean => !this.#closed
@@ -135,37 +119,11 @@ export class EmailReplySubjectSourceOwner {
         observedValidity = uidValidity;
         if (changed) this.#retire(this.#detachSources());
       },
-      complete: (readUid, mailbox, subject): EmailReplySubjectSource | undefined => {
-        if (!current() || observedValidity === undefined
-          || observedValidity !== this.#uidValidity || mailbox !== expectedMailbox
-          || uid === undefined || readUid !== uid || !Number.isSafeInteger(uid) || uid <= 0 || uid > 0xffffffff) return undefined;
-        const sourceController = new AbortController();
-        const previous = this.#controllers.get(uid);
-        this.#controllers.delete(uid);
-        this.#controllers.set(uid, sourceController);
-        const evicted: AbortController[] = previous ? [previous] : [];
-        if (this.#controllers.size > MAX_CURRENT_SOURCES) {
-          const oldest = this.#controllers.entries().next().value;
-          if (oldest) { this.#controllers.delete(oldest[0]); evicted.push(oldest[1]); }
-        }
-        this.#retire(evicted);
-        if (!current() || sourceController.signal.aborted || this.#controllers.get(uid) !== sourceController) {
-          if (this.#controllers.get(uid) === sourceController) this.#controllers.delete(uid);
-          sourceController.abort(); return undefined;
-        }
-        const uidValidity = observedValidity;
-        return Object.freeze({ revision: randomUUID(), subject, signal: sourceController.signal,
-          assertCurrent: (): void => {
-            if (sourceController.signal.aborted || this.#closed || epoch !== this.#epoch
-              || uidValidity !== this.#uidValidity) throw new Error('Mail subject source is no longer current.');
-          } });
-      },
     };
   }
 
   #detachSources(): AbortController[] {
-    const controllers = [...this.#controllers.values(), ...this.#observations];
-    this.#controllers.clear();
+    const controllers = [...this.#observations];
     this.#observations.clear();
     return controllers;
   }

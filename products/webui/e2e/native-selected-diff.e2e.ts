@@ -641,8 +641,8 @@ for (const surface of ["Sessions", "Fleet"] as const) {
       })
     ).toBeVisible();
     await page.getByRole("button", { name: "New", exact: true }).click();
-    await page.getByRole("menuitem", { name: "Native request", exact: true }).click();
-    const fresh = page.getByRole("dialog", { name: "Native request", exact: true });
+    await page.getByRole("menuitem", { name: "Ask for work to be done", exact: true }).click();
+    const fresh = page.getByRole("dialog", { name: "Ask for work to be done", exact: true });
     await expect(
       fresh.getByRole("textbox", { name: "Original request", exact: true })
     ).toBeVisible();

@@ -54,6 +54,8 @@ export interface SmtpSendOptions extends DeliveryLifetime {
   readonly inReplyTo?: string | undefined;
   /** The thread's Message-ID chain; written as `References`. */
   readonly references?: string | undefined;
+  /** Left half of the Message-ID, so a repeated send carries the same id; generated when absent. */
+  readonly messageIdLocalPart?: string | undefined;
 }
 
 /**
@@ -191,11 +193,16 @@ function base64(str: string): string {
  * side belongs to whoever wrote it. The from-address supplies it; the SMTP
  * hostname stands in only if the address somehow carries none.
  */
-function generateMessageId(fromAddress: string, smtpHostname: string): string {
+const MESSAGE_ID_LOCAL_PART = /^[A-Za-z0-9._-]{8,160}$/;
+
+function generateMessageId(fromAddress: string, smtpHostname: string, localPart?: string): string {
   const at = fromAddress.lastIndexOf('@');
   const fromDomain = at === -1 ? '' : fromAddress.slice(at + 1).trim();
   const domain = fromDomain.length > 0 ? fromDomain : smtpHostname;
-  const unique = `${Date.now().toString(36)}.${randomBytes(12).toString('hex')}`;
+  if (localPart !== undefined && !MESSAGE_ID_LOCAL_PART.test(localPart)) {
+    throw new Error('A chosen Message-ID must be 8 to 160 letters, digits, dots, underscores or hyphens.');
+  }
+  const unique = localPart ?? `${Date.now().toString(36)}.${randomBytes(12).toString('hex')}`;
   return `<${unique}@${domain}>`;
 }
 
@@ -378,7 +385,7 @@ export class SmtpClient {
       if (opts.references !== undefined) validateSmtpThreadHeader(opts.references, 'references');
 
       // The same builder as a saved draft, so the sent copy reads as the draft did.
-      const messageId = generateMessageId(opts.from, hostname);
+      const messageId = generateMessageId(opts.from, hostname, opts.messageIdLocalPart);
       const eightBitAllowed = capabilities.includes('8BITMIME');
       const composed = composePlainTextMessage({ ...opts, messageId }, new Date(), { eightBitAllowed });
       const message = `${dotStuff(composed.message)}.${CRLF}`;

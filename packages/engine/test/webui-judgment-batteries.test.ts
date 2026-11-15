@@ -4,7 +4,7 @@ import {
   type DecisionNote, type JudgmentPort, type NewDecisionEntry,
 } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { daemonRefusalBattery, mailReplySubjectBattery, WEBUI_BATTERY_QUESTIONS } from '../platform/src/platform/judgment-browser/batteries/webui-specs.ts';
+import { daemonRefusalBattery, WEBUI_BATTERY_QUESTIONS } from '../platform/src/platform/judgment-browser/batteries/webui-specs.ts';
 import { readStructuredDaemonRefusal } from '../platform/src/platform/judgment-browser/batteries/webui-readers.ts';
 import { webuiDaemonRefusalAdapter } from '../platform/src/platform/judgment-browser/batteries/webui-adapters.ts';
 import { REFUSAL_ITEMS, type ResolvedDaemonRefusal } from '../platform/src/platform/judgment-browser/batteries/webui-types.ts';
@@ -47,25 +47,20 @@ const held = { code: 'JUDGMENT_INPUT_HELD' };
 
 describe('fixed WebUI batteries', () => {
   test('IDs, versions and complete fixed question maps match the registrations', () => {
-    expect([daemonRefusalBattery, mailReplySubjectBattery].map(({ name, version }) => [name, version])).toEqual([
-      ['webui.errors.daemon-refusal', 1], ['webui.mail.reply-subject', 1],
-    ]);
+    expect([daemonRefusalBattery].map(({ name, version }) => [name, version])).toEqual([['webui.errors.daemon-refusal', 1]]);
     expect(Object.keys(WEBUI_BATTERY_QUESTIONS[daemonRefusalBattery.name]!)).toEqual([...REFUSAL_ITEMS]);
-    expect(Object.keys(WEBUI_BATTERY_QUESTIONS[mailReplySubjectBattery.name]!)).toEqual(['already_reply']);
   });
 
   test('calibration fixtures state the readings a human would give, independent of the fixtures themselves', () => {
     // The replay below can only prove plumbing; these are the hard cases written out by hand, so a
     // wrong fixture expectation (the thing calibration exists to catch) fails here.
     const none = { session_not_found: 'no', session_closed: 'no', session_active: 'no', session_not_local: 'no', method_unknown: 'no' };
-    const hand: [typeof daemonRefusalBattery | typeof mailReplySubjectBattery, string, Record<string, string>][] = [
+    const hand: [typeof daemonRefusalBattery, string, Record<string, string>][] = [
       [daemonRefusalBattery, 'missing session', { ...none, session_not_found: 'yes' }],
       [daemonRefusalBattery, 'negated active state', none],
       [daemonRefusalBattery, 'quoted troubleshooting is not current refusal', none],
       [daemonRefusalBattery, 'method wording without required status', none],
       [daemonRefusalBattery, 'runtime on another daemon', { ...none, session_not_local: 'yes' }],
-      [mailReplySubjectBattery, 'Replies due tomorrow', { already_reply: 'no' }],
-      [mailReplySubjectBattery, 'Antw: Lunch?', { already_reply: 'yes' }],
     ];
     for (const [battery, name, expected] of hand) {
       expect(battery.fixtures.find((fixture) => fixture.name === name)?.expect, `${battery.name}: ${name}`).toEqual(expected);
@@ -74,7 +69,7 @@ describe('fixed WebUI batteries', () => {
 
   test('synthetic calibration fixtures cover negation and missing resources', async () => {
     // Fixture-driven answer replay checks plumbing and coverage, not live accuracy.
-    for (const battery of [daemonRefusalBattery, mailReplySubjectBattery]) {
+    for (const battery of [daemonRefusalBattery]) {
       const expectations = new Map(battery.fixtures.map((fixture) => [JSON.stringify(fixture.state), fixture.expect]));
       const { port } = fakePort((name, question, state) => {
         const expected = expectations.get(JSON.stringify(state)) as Record<string, string> | undefined;

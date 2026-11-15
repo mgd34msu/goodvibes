@@ -187,6 +187,8 @@ export interface ImapAppendDraftResult {
 }
 
 export interface ImapClientOptions {
+  /** Largest single literal the session accepts; raised only for an attachment download. */
+  readonly maxLiteralBytes?: number | undefined;
   /** Internal account lifetime that survives failed-session cleanup. */
   readonly publication?: JudgmentReadingOptions | undefined;
   /** Current account/source lifetime, checked before and after semantic readings. */

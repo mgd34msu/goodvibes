@@ -54,10 +54,10 @@ function fixture(options: { status?: unknown; omitMethod?: boolean; structuralBa
 
 describe('server-bound structural omission', () => {
   test('structural error facts cannot be attached to another battery', () => {
-    const request = { protocolVersion: 1, requestId: crypto.randomUUID(), battery: 'webui.mail.reply-subject', batteryVersion: 1,
-      input: { subjectRef: 'fixture' } } as const;
+    const request = { protocolVersion: 1, requestId: crypto.randomUUID(), battery: 'webui.code.language', batteryVersion: 2,
+      input: { sessionId: 's', messageId: 'm', start: 0, end: 5, contentRevision: 'r' } } as const;
     expect(() => validateBrowserJudgmentProjection(request, { status: 'held', reason: 'uncertain', structuralBasis: basis,
-      readings: { already_reply: { kind: 'yes-no', probability: 0.5, verdict: 'uncertain', outcome: 'escalate' } } }, { status: 500 })).toThrow();
+      readings: { language: { kind: 'yes-no', probability: 0.5, verdict: 'uncertain', outcome: 'escalate' } } }, { status: 500 })).toThrow();
   });
 
   test('non404 yields four genuine readings and an explicit structural false', async () => {

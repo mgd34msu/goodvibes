@@ -1,14 +1,12 @@
 /**
  * Mail, the Mail tab of Personal: a two-pane inbox (messages left, the open
  * message right) with a compose panel that floats from the lower right, over
- * the daemon's four `email.*` verbs. The web UI is mail's first screen, exactly
- * as it was calendar's.
+ * the daemon's `email.*` verbs: list (paged backwards with `before`), read,
+ * mark read or unread, archive, delete (to the account's Trash), attachment
+ * download, drafts (listed and reopened in the composer), save draft and send.
  *
- * WHY THIS EXISTS: `email.inbox.list`, `email.inbox.read`, `email.draft.create`
- * and `email.send` have been in the operator contract and in the generated
- * WEBUI_METHOD_ROUTES table since before the platform pin this repo was stuck on, the
- * routing was always there and no surface ever rendered it. This view is wiring
- * over capability the daemon already publishes, not an integration: there is no
+ * This view is wiring over capability the daemon publishes, not an
+ * integration: there is no
  * IMAP client, no SMTP client, no OAuth flow and no credential handling anywhere
  * in this file or anything it imports. Every call is `platform.operator.email.*`. The
  * browser never holds a mail credential because it never has one to hold.
@@ -29,12 +27,12 @@
  * all, so nothing invites an action that cannot land.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { useMutation, useQuery } from '@tanstack/react-query';
-import { AlertCircle, AlertTriangle, Inbox, Mail, Pencil, RefreshCw, Reply } from 'lucide-react';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { AlertCircle, AlertTriangle, Archive, FileText, Inbox, Mail, MailOpen, Pencil, RefreshCw, Reply, Trash2 } from 'lucide-react';
 import { client as platformClient, invokeMethod } from '../../lib/goodvibes';
 import type { EmailDraftCreateInput, EmailSendInput, EmailUnreadableMessage } from '../../lib/goodvibes';
 import { queryKeys } from '../../lib/queries';
-import { formatError } from '../../lib/errors';
+import { errorCode, formatError, isDaemonUnreachableError } from '../../lib/errors';
 import ErrorBoundary from '../../components/feedback/ErrorBoundary';
 import { useToast } from '../../lib/toast';
 import { useConfirm } from '../../components/ui/ConfirmDialog';
@@ -48,8 +46,9 @@ import { PersonalPage } from '../personal/PersonalPage';
 import { openSettingsSection } from '../personal/openSettings';
 import { MailCompose, type MailComposeHandle } from './MailCompose';
 import { MailMessageBody, useMailMessage, type MailMessageData } from './MailMessagePeek';
-import { readMailReplySubject } from '../../lib/mail-reply-subject';
-import { getClientLifetime, isClientLifetimeCurrent, subscribeClientLifetime, type ClientLifetime } from '../../lib/client-lifetime';
+import { replySubjectLine } from '@goodvibes-jev/engine/platform/platform/judgment-browser/catalogs';
+import { getClientLifetime, isClientLifetimeCurrent, type ClientLifetime } from '../../lib/client-lifetime';
+import { randomUuid } from '../../lib/uuid';
 import '../../styles/components/mail.css';
 import { whenLabel } from '../../lib/when-label';
 import { nonEmpty } from '../../lib/non-empty';
@@ -123,6 +122,36 @@ function formatShort(iso: string): string {
     : parsed.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
+/** The original under a reply, quoted the way mail programs do. */
+function quotedReply(message: MailMessageData): string {
+  const quoted = message.bodyText.replace(/\r\n/g, '\n').trimEnd().split('\n').map((line) => (line ? `> ${line}` : '>')).join('\n');
+  return `\n\nOn ${formatWhen(message.date)}, ${message.from} wrote:\n${quoted}\n`;
+}
+
+/** Hand bytes to the browser as a file to save; never rendered in the page. */
+function saveAttachment(filename: string, contentBase64: string): void {
+  const binary = atob(contentBase64);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  // octet-stream so the browser saves the file instead of opening whatever the sender attached.
+  const url = URL.createObjectURL(new Blob([bytes], { type: 'application/octet-stream' }));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename || 'attachment';
+  link.rel = 'noopener';
+  document.body.append(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
+
+/** A send whose answer never arrived may have gone; the same clientSendId makes a repeat safe. */
+function sendOutcomeUnknown(error: unknown): boolean {
+  return errorCode(error) === 'EMAIL_DELIVERY_UNCONFIRMED' || isDaemonUnreachableError(error);
+}
+
+const STALE_CONNECTION = 'The connection changed. Check the recipients and press Send again.';
+
 interface ComposerSnapshot {
   readonly lifetime: ClientLifetime;
   readonly revision: number;
@@ -138,12 +167,10 @@ export interface MailViewProps {
 }
 
 export function MailView({ tabs }: MailViewProps = {}) {
-  // Deliberately no queryClient/invalidation here. Neither write touches the inbox:
-  // email.send puts a message in the recipient's mailbox, and email.draft.create
-  // appends to the account's Drafts folder, the inbox listing this view caches is
-  // unchanged by both, and the read verb is BODY.PEEK so opening a message does not
-  // flip its unread flag either. Invalidating anyway would refetch the whole inbox to
-  // redraw identical rows and would quietly imply a relationship that is not there.
+  // Send and save-draft do not touch the inbox, so they invalidate nothing; mark,
+  // archive and delete change it and refresh the listing. Opening a message is a
+  // BODY.PEEK read and leaves it unread until Mark read is pressed.
+  const queryClient = useQueryClient();
   const { toast } = useToast();
   const confirm = useConfirm();
 
@@ -151,6 +178,7 @@ export function MailView({ tabs }: MailViewProps = {}) {
   const [unreadOnly, setUnreadOnly] = useState(false);
   const [since, setSince] = useState('');
   const [selectedUid, setSelectedUid] = useState<number | null>(null);
+  const [showDrafts, setShowDrafts] = useState(false);
 
   const [composeOpen, setComposeOpen] = useState(false);
   const composeRef = useRef<MailComposeHandle | null>(null);
@@ -158,28 +186,32 @@ export function MailView({ tabs }: MailViewProps = {}) {
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
   const [inReplyTo, setInReplyTo] = useState('');
-  const [replySubjectState, setReplySubjectState] = useState<'pending' | 'held' | undefined>();
-  const replyRequest = useRef<{ readonly abort: AbortController; readonly message: MailMessageData } | null>(null);
   const composerLifetime = useRef<ClientLifetime | null>(null);
   const composerRevision = useRef(0);
-  // Set from the first Send press until the send settles or is declined. Enter in a field
-  // submits the form even while the Send button is disabled, and `email.send` has no
-  // idempotency key, so a second confirmed press would email the recipients twice.
+  // One id per message as written: kept while the text is unchanged, so a repeated
+  // Send (after a lost answer) is answered by the daemon with the first result.
+  const sendId = useRef<{ readonly key: string; readonly id: string } | null>(null);
+  // A confirmation sheet is open or a send is in flight. Enter in a field submits the
+  // form even while Send is disabled; this only keeps a second sheet from opening.
+  // Duplicate mail is prevented by the daemon, which answers a repeated clientSendId once.
   const sendInFlight = useRef(false);
-  const cancelReply = useCallback(() => {
-    const previous = replyRequest.current;
-    replyRequest.current = null;
-    previous?.abort.abort();
-  }, []);
 
-  const inbox = useQuery({
+  const inbox = useInfiniteQuery({
     queryKey: queryKeys.emailInbox(Number(limit), unreadOnly, since),
-    queryFn: () =>
+    initialPageParam: undefined as number | undefined,
+    queryFn: ({ pageParam }) =>
       platformClient.operator.email.inbox.list({
         limit: Number(limit),
         ...(unreadOnly ? { unreadOnly: true } : {}),
-        ...(since ? { since: new Date(`${since}T00:00:00.000Z`).toISOString() } : {}),
+        // Noon UTC of the chosen day names that calendar day in every time zone; IMAP SINCE is a date.
+        ...(since ? { since: `${since}T12:00:00.000Z` } : {}),
+        ...(pageParam === undefined ? {} : { before: pageParam }),
       }),
+    getNextPageParam: (last, pages) => {
+      const loaded = pages.reduce((count, page) => count + page.messages.length, 0);
+      if (last.messages.length === 0 || loaded >= (pages[0]?.total ?? 0)) return undefined;
+      return Math.min(...last.messages.map((message) => message.uid));
+    },
   });
   // Triage labels live in the daemon's inbox store, one row per message named
   // `email:<account>:<uidvalidity>:<uid>`. Best effort: a daemon without that
@@ -191,6 +223,32 @@ export function MailView({ tabs }: MailViewProps = {}) {
   });
   const labels = useMemo(() => mailTriageLabels(triage.data), [triage.data]);
   const detail = useMailMessage(selectedUid);
+  const drafts = useQuery({
+    queryKey: ['email', 'drafts'] as const,
+    queryFn: () => platformClient.operator.email.drafts.list({ limit: 50 }),
+    enabled: showDrafts,
+  });
+
+  const update = useMutation({
+    mutationFn: (input: { uid: number; action: 'seen' | 'unseen' | 'archive' | 'delete' }) => platformClient.operator.email.inbox.update(input),
+    onSuccess: async (result) => {
+      if (result.action === 'archive' || result.action === 'delete') {
+        if (selectedUid === result.uid) setSelectedUid(null);
+        toast({ title: result.action === 'archive' ? 'Archived' : 'Moved to Trash', description: result.movedTo ? `Now in ${result.movedTo}.` : undefined, tone: 'success' });
+      }
+      await queryClient.invalidateQueries({ queryKey: ['email', 'inbox'] });
+    },
+    onError: (error) => {
+      const note = mailRefusalNote(error);
+      toast({ title: note?.title ?? 'The message was not changed', description: note?.description ?? formatError(error), tone: 'danger' });
+    },
+  });
+
+  const attachment = useMutation({
+    mutationFn: (input: { uid: number; index: number }) => platformClient.operator.email.attachment.get(input),
+    onSuccess: (file) => saveAttachment(file.filename, file.contentBase64),
+    onError: (error) => toast({ title: 'The attachment could not be downloaded', description: formatError(error), tone: 'danger' }),
+  });
 
   const inboxNote = inbox.error ? mailRefusalNote(inbox.error) : null;
   // Sending follows the inbox's verdict: if listing is refused, sending is too (same
@@ -199,37 +257,45 @@ export function MailView({ tabs }: MailViewProps = {}) {
   const surfaceRefusing = Boolean(inboxNote) || inbox.isPending;
 
   const clearComposer = useCallback((): void => {
-    cancelReply();
     composerLifetime.current = null;
     composerRevision.current++;
-    setReplySubjectState(undefined);
+    sendId.current = null;
     setTo('');
     setSubject('');
     setBody('');
     setInReplyTo('');
     setComposeOpen(false);
-  }, [cancelReply]);
+  }, []);
 
-  useEffect(() => subscribeClientLifetime(clearComposer), [clearComposer]);
-  useEffect(() => () => { cancelReply(); composerRevision.current++; }, [cancelReply]);
-  useEffect(() => {
-    if (replyRequest.current && replyRequest.current.message !== detail.data) {
-      cancelReply();
-      setReplySubjectState('held');
-    }
-  }, [detail.data, cancelReply]);
+  useEffect(() => () => { composerRevision.current++; }, []);
 
   function composerCurrent(snapshot: ComposerSnapshot): boolean {
     return composerLifetime.current === snapshot.lifetime && composerRevision.current === snapshot.revision
       && isClientLifetimeCurrent(snapshot.lifetime);
   }
+  /**
+   * The text as it is now, under the connection it was written for. A connection that
+   * changed since (sign-in renewed, direct and relay route swapped) keeps the text,
+   * re-arms the composer under the current connection and asks for one more press,
+   * so nothing is sent through a connection the person did not review.
+   */
   function captureComposer(): ComposerSnapshot | undefined {
     const lifetime = composerLifetime.current;
-    if (!lifetime || !isClientLifetimeCurrent(lifetime)) return undefined;
+    if (!lifetime || !isClientLifetimeCurrent(lifetime)) {
+      composerLifetime.current = getClientLifetime();
+      composerRevision.current++;
+      toast({ title: 'Not sent yet', description: STALE_CONNECTION, tone: 'warning' });
+      return undefined;
+    }
     return { lifetime, revision: composerRevision.current, to: normalizeRecipients(to), subject: subject.trim(), body, inReplyTo };
   }
   function assertComposerCurrent(snapshot: ComposerSnapshot): void {
-    if (!composerCurrent(snapshot)) throw new Error('The draft or mail account connection changed. Review the current draft before continuing.');
+    if (!composerCurrent(snapshot)) throw new Error(STALE_CONNECTION);
+  }
+  function clientSendIdFor(snapshot: ComposerSnapshot): string {
+    const key = JSON.stringify([snapshot.to, snapshot.subject, snapshot.body, snapshot.inReplyTo]);
+    if (sendId.current?.key !== key) sendId.current = { key, id: randomUuid() };
+    return sendId.current.id;
   }
 
   const send = useMutation({
@@ -243,6 +309,7 @@ export function MailView({ tabs }: MailViewProps = {}) {
         // platform marks this verb dangerous and irreversible, so the flag is set because
         // the operator saw the recipients and agreed, never on their behalf.
         confirm: true,
+        clientSendId: clientSendIdFor(snapshot),
         ...(snapshot.inReplyTo ? { inReplyTo: snapshot.inReplyTo } : {}),
       };
       return platformClient.operator.email.send(input);
@@ -252,6 +319,14 @@ export function MailView({ tabs }: MailViewProps = {}) {
       toast({ title: 'Message sent', description: `Sent ${formatWhen(result.sentAt)} · ${result.messageId}`, tone: 'success' });
     },
     onError: (error) => {
+      if (sendOutcomeUnknown(error)) {
+        toast({
+          title: 'We could not confirm this was sent',
+          description: 'It may have gone. Check the Sent folder; pressing Send again with the same text will not send it twice.',
+          tone: 'warning',
+        });
+        return;
+      }
       const note = mailRefusalNote(error);
       toast({ title: note?.title ?? 'Send failed', description: note?.description ?? formatError(error), tone: 'danger' });
     },
@@ -282,7 +357,8 @@ export function MailView({ tabs }: MailViewProps = {}) {
     },
   });
 
-  const messages = inbox.data?.messages;
+  const messages = useMemo(() => inbox.data?.pages.flatMap((page) => page.messages), [inbox.data]);
+  const total = inbox.data?.pages[0]?.total;
   // Ordered by `uid` (server-assigned) descending, NEVER by `date` (sender-written,
   // sorting on it would let a sender pin their message to the top with a far-future
   // Date: header). Full rationale in mail-order.ts; do not "simplify" this to `date`.
@@ -291,39 +367,37 @@ export function MailView({ tabs }: MailViewProps = {}) {
   // reason. The contract has always carried this list, and they are shown even when
   // every message in the window is unreadable, where the list would otherwise
   // report a normal empty inbox.
-  const unreadable = inbox.data?.unreadable ?? [];
+  const unreadable = useMemo(() => inbox.data?.pages.flatMap((page) => page.unreadable ?? []) ?? [], [inbox.data]);
+  const selectedSummary = sorted.find((message) => message.uid === selectedUid);
+  const openMessage = detail.data;
 
   const composerReady = to.trim() !== '' && subject.trim() !== '' && body.trim() !== '';
 
-  async function startReply(message: MailMessageData): Promise<void> {
-    cancelReply();
+  function startReply(message: MailMessageData): void {
     composerLifetime.current = getClientLifetime();
     composerRevision.current++;
     setTo(message.from);
-    setSubject('');
+    setSubject(replySubjectLine(message.subject));
     setInReplyTo(message.messageId);
-    setBody('');
+    setBody(quotedReply(message));
     setComposeOpen(true);
-    setReplySubjectState('pending');
     // A repeated Reply clicked in the still-visible desktop drawer must return
     // keyboard ownership to the composer, even though the panel stays mounted.
     composeRef.current?.focus('body');
-    const pending = { abort: new AbortController(), message };
-    replyRequest.current = pending;
-    const result = await readMailReplySubject(message.replySubjectRef, pending.abort.signal, message.subject);
-    if (replyRequest.current !== pending || pending.abort.signal.aborted) return;
-    replyRequest.current = null;
-    if (result.status !== 'ready' || !result.isCurrent()) { setReplySubjectState('held'); return; }
+  }
+
+  function openDraft(draft: { to: string; subject: string; body: string; inReplyTo: string }): void {
+    composerLifetime.current = getClientLifetime();
     composerRevision.current++;
-    setSubject(result.alreadyReply ? message.subject : `Re: ${message.subject}`);
-    setReplySubjectState(undefined);
+    setTo(draft.to);
+    setSubject(draft.subject);
+    setBody(draft.body);
+    setInReplyTo(draft.inReplyTo);
+    setComposeOpen(true);
+    composeRef.current?.focus('body');
   }
 
   function selectMessage(uid: number | null): void {
-    if (uid !== selectedUid && replyRequest.current) {
-      cancelReply();
-      setReplySubjectState('held');
-    }
     setSelectedUid(uid);
   }
 
@@ -359,8 +433,11 @@ export function MailView({ tabs }: MailViewProps = {}) {
       />
       <DateField value={since} onChange={setSince} aria-label="Only messages on or after this date" />
       <Checkbox checked={unreadOnly} onChange={setUnreadOnly}>Unread only</Checkbox>
+      <Button variant={showDrafts ? 'primary' : 'outline'} size="sm" icon={<FileText />} onClick={() => setShowDrafts((open) => !open)} aria-pressed={showDrafts}>
+        Drafts
+      </Button>
       <div className="dv-filters__end">
-        <IconButton label="Refresh inbox" icon={<RefreshCw />} onClick={() => { void inbox.refetch(); void triage.refetch(); }} />
+        <IconButton label="Refresh inbox" icon={<RefreshCw />} onClick={() => { void inbox.refetch(); void triage.refetch(); if (showDrafts) void drafts.refetch(); }} />
       </div>
     </>
   );
@@ -372,8 +449,6 @@ export function MailView({ tabs }: MailViewProps = {}) {
         variant="primary"
         icon={<Pencil />}
         onClick={() => {
-          cancelReply();
-          setReplySubjectState(undefined);
           composerLifetime.current = getClientLifetime();
           composerRevision.current++;
           if (!composeOpen) setComposeOpen(true);
@@ -385,7 +460,33 @@ export function MailView({ tabs }: MailViewProps = {}) {
     );
 
   let content: ReactNode;
-  if (inbox.isPending) {
+  if (showDrafts && !inboxNote) {
+    content = drafts.isPending ? <SkeletonRows count={4} label="Loading drafts" />
+      : drafts.error ? (
+        <EmptyState icon={<AlertCircle />} title="Drafts failed to load" role="status"
+          action={<Button variant="outline" onClick={() => void drafts.refetch()}>Try again</Button>}>
+          {mailRefusalNote(drafts.error)?.description ?? formatError(drafts.error)}
+        </EmptyState>
+      ) : (drafts.data?.drafts.length ?? 0) === 0 ? (
+        <EmptyState icon={<FileText />} title="No drafts">Drafts saved to the account appear here and open in the composer.</EmptyState>
+      ) : (
+        <div data-testid="mail-drafts">
+          <p className="mail-count">Showing {drafts.data?.drafts.length} of {drafts.data?.total} drafts in {drafts.data?.mailbox}.</p>
+          <RowList aria-label="Drafts">
+            {drafts.data?.drafts.map((draft) => (
+              <Row
+                key={draft.uid}
+                className="mail-row"
+                title={draft.subject || '(no subject)'}
+                meta={`${draft.to || '(no recipient)'} · ${draft.body.slice(0, 120)}`}
+                onSelect={() => openDraft(draft)}
+                trailing={<span className="mail-row__date">{formatShort(draft.date)}</span>}
+              />
+            ))}
+          </RowList>
+        </div>
+      );
+  } else if (inbox.isPending) {
     content = <SkeletonRows count={6} label="Loading inbox" />;
   } else if (inboxNote) {
     const notAvailable = inboxNote.kind === 'not-available';
@@ -436,7 +537,7 @@ export function MailView({ tabs }: MailViewProps = {}) {
     const list = (
       <div data-testid="mail-list">
         <p className="mail-count">
-          Showing {sorted.length} of {inbox.data?.total ?? sorted.length} messages the account reported.
+          Showing {sorted.length} of {total ?? sorted.length} messages the account reported.
         </p>
         <UnreadableNote items={unreadable} />
         <RowList aria-label="Inbox">
@@ -457,6 +558,11 @@ export function MailView({ tabs }: MailViewProps = {}) {
             />
           ))}
         </RowList>
+        {inbox.hasNextPage ? (
+          <Button variant="outline" size="sm" onClick={() => void inbox.fetchNextPage()} disabled={inbox.isFetchingNextPage}>
+            {inbox.isFetchingNextPage ? 'Loading…' : 'Load older messages'}
+          </Button>
+        ) : null}
       </div>
     );
     content = (
@@ -472,23 +578,34 @@ export function MailView({ tabs }: MailViewProps = {}) {
           <DetailPane
             title={nonEmpty(detail.data?.subject) ?? (detail.isPending ? 'Message' : '(no subject)')}
             meta={detail.data ? `${detail.data.from} · ${formatWhen(detail.data.date)}` : undefined}
-            actions={detail.data ? (
-              <Button
-                variant="outline"
-                size="sm"
-                icon={<Reply />}
-                onClick={() => {
-                  const message = detail.data;
-                  if (message) void startReply(message);
-                }}
-              >
-                Reply
-              </Button>
+            actions={openMessage ? (
+              <>
+                <Button variant="outline" size="sm" icon={<Reply />} onClick={() => startReply(openMessage)}>
+                  Reply
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  icon={<MailOpen />}
+                  disabled={update.isPending}
+                  onClick={() => update.mutate({ uid: openMessage.uid, action: selectedSummary?.unread === false ? 'unseen' : 'seen' })}
+                >
+                  {selectedSummary?.unread === false ? 'Mark unread' : 'Mark read'}
+                </Button>
+                <IconButton label="Archive" icon={<Archive />} disabled={update.isPending}
+                  onClick={() => update.mutate({ uid: openMessage.uid, action: 'archive' })} />
+                <IconButton label="Delete (moves to Trash)" icon={<Trash2 />} disabled={update.isPending}
+                  onClick={() => update.mutate({ uid: openMessage.uid, action: 'delete' })} />
+              </>
             ) : undefined}
             onClose={() => selectMessage(null)}
             closeLabel="Close message"
           >
-            <MailMessageBody detail={detail} />
+            <MailMessageBody
+              detail={detail}
+              onDownload={(index) => { if (openMessage) attachment.mutate({ uid: openMessage.uid, index }); }}
+              downloading={attachment.isPending}
+            />
           </DetailPane>
         )}
       />
@@ -515,16 +632,15 @@ export function MailView({ tabs }: MailViewProps = {}) {
             body={body}
             inReplyTo={inReplyTo}
             onToChange={(value) => { composerRevision.current++; setTo(value); }}
-            onSubjectChange={(value) => { composerRevision.current++; cancelReply(); setReplySubjectState(undefined); setSubject(value); }}
+            onSubjectChange={(value) => { composerRevision.current++; setSubject(value); }}
             onBodyChange={(value) => { composerRevision.current++; setBody(value); }}
-            onClearReply={() => { composerRevision.current++; cancelReply(); setReplySubjectState(undefined); setInReplyTo(''); }}
+            onClearReply={() => { composerRevision.current++; setInReplyTo(''); }}
             onSend={() => void submitSend()}
-            onSaveDraft={() => { const snapshot = captureComposer(); if (snapshot && composerReady && !surfaceRefusing && !saveDraft.isPending) saveDraft.mutate(snapshot); }}
-            onClose={() => { composerRevision.current++; cancelReply(); setReplySubjectState(undefined); setComposeOpen(false); }}
+            onSaveDraft={() => { if (!composerReady || surfaceRefusing || saveDraft.isPending) return; const snapshot = captureComposer(); if (snapshot) saveDraft.mutate(snapshot); }}
+            onClose={() => { composerRevision.current++; setComposeOpen(false); }}
             ready={composerReady}
             sending={send.isPending}
             saving={saveDraft.isPending}
-            replySubjectState={replySubjectState}
           />
         ) : null}
         {confirm.element}

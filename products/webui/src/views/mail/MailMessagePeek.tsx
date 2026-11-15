@@ -16,15 +16,12 @@
  *    nothing is hidden from the operator, and nothing a stranger wrote gets to
  *    run in here.
  *
- * 2. Attachments are listed, never fetched. The schema is metadata only, filename,
- *    content type, size, and there is no attachment-download verb in the contract
- *    at all. So this lists what is attached and stops, rather than rendering a
- *    download control that no daemon method backs.
+ * 2. Attachments are downloaded, never rendered. Each one has a Download button
+ *    (`email.attachment.get`); the bytes are saved as a file by the browser and
+ *    nothing a sender attached is opened inside this page.
  *
- * The read verb is explicitly non-mutating on the server (BODY.PEEK, the platform's
- * own description says it does not mark the message read), so opening a message
- * does not silently change the operator's mailbox state. The unread dot in the
- * list stays truthful after a read, which is why nothing here clears it.
+ * The read verb is non-mutating on the server (BODY.PEEK), so opening a message
+ * leaves it unread; the pane's Mark read button is the explicit change.
  */
 import { useQuery, type UseQueryResult } from '@tanstack/react-query';
 import { AlertCircle, Mail } from 'lucide-react';
@@ -33,6 +30,7 @@ import { queryKeys } from '../../lib/queries';
 import { formatError } from '../../lib/errors';
 import { mailRefusalNote } from '../../lib/mail-refusal';
 import { Button } from '../../components/ui';
+import { Download } from 'lucide-react';
 import { DetailSection, EmptyState, Facts, SkeletonRows } from '../../components/data-view/DataView';
 
 export type MailMessageData = Awaited<ReturnType<typeof platformClient.operator.email.inbox.read>>;
@@ -51,7 +49,12 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export function MailMessageBody({ detail }: { detail: UseQueryResult<MailMessageData> }) {
+export function MailMessageBody({ detail, onDownload, downloading = false }: {
+  detail: UseQueryResult<MailMessageData>;
+  /** Save the attachment at this position as a file. */
+  onDownload?: (index: number) => void;
+  downloading?: boolean;
+}) {
   if (detail.isPending) return <SkeletonRows count={3} label="Loading message" />;
 
   if (detail.error) {
@@ -85,14 +88,22 @@ export function MailMessageBody({ detail }: { detail: UseQueryResult<MailMessage
       {attachments.length > 0 ? (
         <DetailSection title={`Attachments (${attachments.length})`}>
           <Facts
-            items={attachments.map((attachment) => ({
-              label: attachment.filename,
-              value: `${attachment.contentType} · ${formatBytes(attachment.sizeBytes)}`,
+            items={attachments.map((attachment, index) => ({
+              label: attachment.filename || `Attachment ${index + 1}`,
+              value: (
+                <>
+                  {`${attachment.contentType} · ${formatBytes(attachment.sizeBytes)} `}
+                  {onDownload ? (
+                    <Button variant="ghost" size="sm" icon={<Download />} disabled={downloading} onClick={() => onDownload(index)}>
+                      Download
+                    </Button>
+                  ) : null}
+                </>
+              ),
             }))}
           />
           <p className="mail-detail__note">
-            Listed from the message metadata. The daemon publishes no attachment-download verb, so these cannot be
-            opened from here yet.
+            Downloads are saved as files. Nothing attached is opened inside this page.
           </p>
         </DetailSection>
       ) : null}

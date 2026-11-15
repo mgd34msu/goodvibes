@@ -1,4 +1,5 @@
 import type { GatePresetName } from '../gate/presets.js';
+import { allowedRootFor, outsideAllowedRootsMessage } from './workspace-roots.js';
 import type { FailureReadOptions } from '@goodvibes-jev/engine/errors';
 import { createHash } from 'node:crypto';
 import { captureNativeConversationContinuation, canonicalNativeConversationContinuation, createNativeContinuationSnapshotOwner, type NativeConversationContinuation } from '../workflow/work-ledger/native-continuation-context.js';
@@ -139,6 +140,12 @@ export interface HostedSessionManagerOptions {
   readonly cloudflareAuthToken?: (() => string | null) | undefined;
   /** Whether a workspace root is acceptable. Omitted ⇒ any absolute path. */
   readonly isWorkspaceUsable?: ((workspaceRoot: string) => boolean) | undefined;
+  /**
+   * The folders work may run in (see workspace-roots.ts), read at each create.
+   * A workspaceRoot outside all of them is refused with them named. Omitted ⇒
+   * no folder restriction (narrow compositions and tests).
+   */
+  readonly allowedWorkspaceRoots?: (() => readonly string[]) | undefined;
   /**
    * How often queued inputs are collected and each live session's participant
    * heartbeat is refreshed. Default 750ms, the same order as every other
@@ -1261,7 +1268,16 @@ export class HostedSessionManager {
     if (this.options.isWorkspaceUsable && !this.options.isWorkspaceUsable(workspaceRoot)) {
       throw new HostedSessionArgumentError(`workspaceRoot '${workspaceRoot}' is not a directory this daemon can host a session in.`);
     }
+    const roots = this.options.allowedWorkspaceRoots?.();
+    if (roots !== undefined && allowedRootFor(workspaceRoot, roots) === undefined) {
+      throw new HostedSessionArgumentError(outsideAllowedRootsMessage(workspaceRoot, roots));
+    }
     return workspaceRoot;
+  }
+
+  /** The folders a hosted session may be started in; empty when this composition sets no restriction. */
+  workspaceRoots(): readonly string[] {
+    return this.options.allowedWorkspaceRoots?.() ?? [];
   }
 
   private requireKnown(sessionId: string): LiveSession {

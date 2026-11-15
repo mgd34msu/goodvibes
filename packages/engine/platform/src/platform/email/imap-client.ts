@@ -122,6 +122,15 @@ import {
   type ImapBodyProbe,
 } from './imap-body-probe.js';
 import { ImapSession } from './imap-session.js';
+import {
+  applyImapMessageAction,
+  fetchImapAttachment,
+  listImapDrafts,
+  type ImapAttachmentContent,
+  type ImapDraftSummary,
+  type ImapMessageAction,
+  type ImapMessageActionResult,
+} from './imap-mailbox-actions.js';
 import type {
   ImapAppendDraftInput,
   ImapAppendDraftResult,
@@ -714,6 +723,30 @@ export class ImapClient {
     return { removed: stale.filter(keyword => !confirmed.has(keyword.toLowerCase())), kept: stale.filter(keyword => confirmed.has(keyword.toLowerCase())) };
   }
 
+  /**
+   * Mark one message read or unread, archive it, or move it to Trash. The one
+   * place this client writes to the read mailbox besides keyword labels; see
+   * `imap-mailbox-actions.ts` for how each is confirmed.
+   */
+  async applyMessageAction(uid: number, action: ImapMessageAction, uidValidity: number | null = null): Promise<ImapMessageActionResult> {
+    const capabilities = await this.capabilities();
+    return applyImapMessageAction(this.requireReadableMailbox(), this.mailbox, uid, uidValidity, action, capabilities);
+  }
+
+  /** One attachment's bytes, by its position in the message's attachment list; null when the message is gone. */
+  async fetchAttachment(uid: number, index: number): Promise<ImapAttachmentContent | null> {
+    return fetchImapAttachment(this.requireReadableMailbox(), uid, index);
+  }
+
+  /** The newest drafts in the Drafts folder (discovered as `appendDraft` does), newest first. */
+  async listDrafts(limit: number, override?: string): Promise<{ readonly drafts: readonly ImapDraftSummary[]; readonly total: number; readonly mailbox: string }> {
+    const session = this.requireSession();
+    const selection = await this.resolveDraftsMailbox(session, override);
+    selection.assertCurrent();
+    const result = await listImapDrafts(session, selection.value, limit);
+    return { ...result, mailbox: selection.value };
+  }
+
   /** Cancel outstanding reads and release transport without waiting for LOGOUT. */
   close(): void {
     this.lifetime.abort();
@@ -829,7 +862,7 @@ export class ImapClient {
   private newSession(): ImapSession {
     const maxBodyBytes = this.options.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES;
     // Cap literal size at the larger of 1 MB or 4× the configured body preview limit
-    const literalCap = Math.max(1_048_576, 4 * maxBodyBytes);
+    const literalCap = this.options.maxLiteralBytes ?? Math.max(1_048_576, 4 * maxBodyBytes);
     return new ImapSession(
       this.options.socket,
       this.options.timeoutMs ?? IMAP_DEFAULT_TIMEOUT_MS,

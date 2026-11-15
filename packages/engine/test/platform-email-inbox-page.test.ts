@@ -125,7 +125,6 @@ describe('oldest pending pages preserve durable UID progress', () => {
       source.detail, source.textSections, ...source.textSections, result.coveredUids, result.selectedUids]) expect(Object.isFrozen(value)).toBe(true);
     expect(f.service.getInboxMailboxObservation(result)?.uidValidity).toBe(7);
     expect(f.service.getInboxMailboxObservation({ ...result })).toBeUndefined();
-    expect(f.service.getReplySubjectSource(source.detail)).toBeUndefined();
     expect(f.ingests).toHaveLength(0); expect(f.connections()).toBe(1);
   });
 

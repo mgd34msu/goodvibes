@@ -49,8 +49,12 @@ declares these WebSocket verbs. They require authenticated access; listing decla
 | `sessions.hosted.detach` | Required `sessionId` and `clientId`. | `{ session }` after applying the detach policy |
 | `sessions.hosted.kill` | Required `sessionId`. | `{ session }` with its termination reason |
 | `sessions.hosted.list` | Optional `includeTerminated`. | `{ sessions }`, most recently updated first |
+| `sessions.hosted.workspaces` | None. | `{ roots }`: the folders a session may be started in |
 
-`workspaceRoot` must be an absolute, existing directory on the daemon's machine.
+`workspaceRoot` must be an absolute, existing directory on the daemon's machine, and it
+must be the daemon's working directory or a registered workspace (`workspaces.registrations.add`),
+or lie inside one; symlinks are resolved first. Anything else is refused with the allowed
+folders named. Contract work dispatched into a new hosted session is held to the same list.
 Creation resolves a supplied `modelId` against the host's live model registry.
 Unknown or ambiguous models are refused. `clientId` attaches the creating client;
 `originSurface` preserves the originating product's settings identity across

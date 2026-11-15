@@ -12,14 +12,16 @@
  * unavailable (in the plan's `warnings` and/or the part's `available:false`) rather than
  * faking it, the files scope is live; the conversation scope may report unavailable, and
  * this renders that verbatim. The receipt's undo point: the file restore's pre-restore
- * safety checkpoint is reversible from the browser (checkpoints.restore); the conversation
- * snapshot id is shown but has no browser-side restore verb (an honest note, never a
- * fabricated button).
+ * safety checkpoint is reversed with checkpoints.restore, the conversation snapshot with
+ * rewind.undo. A conversation undo the daemon cannot do (the snapshot aged out, newer
+ * messages arrived, a terminal app holds the conversation) comes back as a refusal that
+ * names the state and the next step, and is shown as such.
  */
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Undo2 } from 'lucide-react';
 import { client as platformClient } from '../../lib/goodvibes';
+import type { OperatorMethodOutput } from '../../lib/goodvibes';
 import type { RewindApplyResult } from '../../lib/goodvibes';
 import { queryKeys } from '../../lib/queries';
 import { formatError } from '../../lib/errors';
@@ -53,6 +55,7 @@ export function SessionRewind({ sessionId }: SessionRewindProps) {
   const [anchorTurnId, setAnchorTurnId] = useState('');
   const [confirmApply, setConfirmApply] = useState(false);
   const [confirmUndo, setConfirmUndo] = useState(false);
+  const [confirmUndoConversation, setConfirmUndoConversation] = useState(false);
   const [receipt, setReceipt] = useState<NonNullable<RewindApplyResult['receipt']> | null>(null);
 
   const messages = useQuery({
@@ -76,6 +79,7 @@ export function SessionRewind({ sessionId }: SessionRewindProps) {
       if (result.receipt) {
         setReceipt(result.receipt);
         undoFiles.reset();
+        undoConversation.reset();
         plan.reset();
         await queryClient.invalidateQueries({ queryKey: queryKeys.sessions });
         await queryClient.invalidateQueries({ queryKey: queryKeys.sessionMessages(sessionId) });
@@ -93,10 +97,19 @@ export function SessionRewind({ sessionId }: SessionRewindProps) {
     },
   });
 
+  const undoConversation = useMutation({
+    mutationFn: (undoSnapshotId: string): Promise<OperatorMethodOutput<'rewind.undo'>> =>
+      platformClient.operator.rewind.undo({ sessionId, undoSnapshotId }),
+    onSuccess: async (result) => {
+      if (result.undone) await queryClient.invalidateQueries({ queryKey: queryKeys.sessionMessages(sessionId) });
+    },
+  });
+
   function resetFlow(): void {
     plan.reset();
     apply.reset();
     undoFiles.reset();
+    undoConversation.reset();
     setReceipt(null);
   }
 
@@ -254,13 +267,29 @@ export function SessionRewind({ sessionId }: SessionRewindProps) {
                 <span>No file undo point (nothing was restored).</span>
               )}
               {receipt.undo.conversation && (
-                <p className="session-rewind__note" role="note">
-                  The conversation rewind is kept as a snapshot
-                  ({receipt.undo.conversation.undoSnapshotId}), but this page can&apos;t restore a conversation. Use
-                  the terminal app to reverse it.
-                </p>
+                <Button
+                  size="sm"
+                  className="session-rewind__undo-btn"
+                  // The snapshot replaces the conversation once; a second press has nothing left to restore.
+                  disabled={undoConversation.isPending || Boolean(undoConversation.data?.undone)}
+                  onClick={() => setConfirmUndoConversation(true)}
+                >
+                  {undoConversation.isPending ? 'Undoing…' : 'Undo the conversation rewind'}
+                </Button>
               )}
             </div>
+            {undoConversation.isError && <p className="session-rewind__error" role="alert">{formatError(undoConversation.error)}</p>}
+            {undoConversation.data?.refusal && (
+              <p className="session-rewind__error" role="alert">
+                {undoConversation.data.refusal.reason}. {undoConversation.data.refusal.next[0] ?? ''}
+              </p>
+            )}
+            {undoConversation.data?.undone && (
+              <p className="session-rewind__ok" role="status">
+                <StatusDot tone="ok" />
+                Conversation rewind undone.
+              </p>
+            )}
             {undoFiles.isError && <p className="session-rewind__error" role="alert">{formatError(undoFiles.error)}</p>}
             {undoFiles.isSuccess && undoFiles.data?.refused && (
               <p className="session-rewind__error" role="alert">
@@ -321,6 +350,23 @@ export function SessionRewind({ sessionId }: SessionRewindProps) {
             if (id) undoFiles.mutate(id);
           }}
           onCancel={() => setConfirmUndo(false)}
+        />
+      )}
+
+      {confirmUndoConversation && receipt?.undo.conversation && (
+        <ConfirmDialog
+          open
+          tone="danger"
+          title="Undo the conversation rewind?"
+          target={`Snapshot ${receipt.undo.conversation.undoSnapshotId}`}
+          description="The messages the rewind dropped come back. If anything was said since the rewind, nothing changes and you are told why."
+          confirmLabel="Undo"
+          onConfirm={() => {
+            const id = receipt.undo.conversation?.undoSnapshotId;
+            setConfirmUndoConversation(false);
+            if (id) undoConversation.mutate(id);
+          }}
+          onCancel={() => setConfirmUndoConversation(false)}
         />
       )}
     </section>

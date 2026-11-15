@@ -47,8 +47,16 @@ const EMAIL_MESSAGE_DETAIL_SCHEMA = objectSchema({
   bodyText: STRING_SCHEMA,
   bodyHtml: STRING_SCHEMA,
   attachments: arraySchema(EMAIL_ATTACHMENT_SCHEMA),
-  replySubjectRef: STRING_SCHEMA,
 }, ['uid', 'from', 'subject', 'date', 'messageId', 'bodyText']);
+
+const EMAIL_DRAFT_SUMMARY_SCHEMA = objectSchema({
+  uid: NUMBER_SCHEMA,
+  to: STRING_SCHEMA,
+  subject: STRING_SCHEMA,
+  date: STRING_SCHEMA,
+  inReplyTo: STRING_SCHEMA,
+  body: STRING_SCHEMA,
+}, ['uid', 'to', 'subject', 'date', 'inReplyTo', 'body']);
 
 /**
  * Email operator methods, inbox read and outbound send through the standard
@@ -247,7 +255,7 @@ export const builtinGatewayEmailMethodDescriptors: readonly GatewayMethodDescrip
     id: 'email.inbox.list',
     title: 'List Email Inbox',
     description:
-      'Return inbox message summaries fetched live from the configured IMAP account, newest first (ordered by server-assigned UID, never by the sender-written Date header). Read-only (EXAMINE / BODY.PEEK); never marks messages read. When the server answered for a message and the daemon could not read the answer, the page is short and `unreadable` says so, an omitted message is not by itself evidence that it was deleted.',
+      'Return inbox message summaries fetched live from the configured IMAP account, newest first (ordered by server-assigned UID, never by the sender-written Date header). Read-only (EXAMINE / BODY.PEEK); never marks messages read. `before` pages backwards: pass the smallest UID of the page you have to get the next older page; `total` counts every match. When the server answered for a message and the daemon could not read the answer, the page is short and `unreadable` says so, an omitted message is not by itself evidence that it was deleted.',
     category: 'email',
     scopes: ['read:email'],
     http: { method: 'GET', path: '/api/email/inbox' },
@@ -255,6 +263,7 @@ export const builtinGatewayEmailMethodDescriptors: readonly GatewayMethodDescrip
       limit: NUMBER_SCHEMA,
       since: STRING_SCHEMA,
       unreadOnly: BOOLEAN_SCHEMA,
+      before: NUMBER_SCHEMA,
     }),
     // `unreadable` is deliberately NOT required: it is absent on every page
     // that came back whole, which is almost all of them, and a required-but-
@@ -310,7 +319,7 @@ export const builtinGatewayEmailMethodDescriptors: readonly GatewayMethodDescrip
     id: 'email.send',
     title: 'Send Email',
     description:
-      'Send a composed email via the configured SMTP account. Irreversible external send; requires confirm: true and explicit user review of recipients and body.',
+      'Send a composed email via the configured SMTP account. Irreversible external send; requires confirm: true and explicit user review of recipients and body. Pass a clientSendId (8-128 letters, digits, - or _) chosen when the message was composed: a repeat with the same id and the same message within ten minutes returns the first answer instead of sending again (the id also becomes the Message-ID), and the same id with a different message is refused (409 CLIENT_SEND_ID_REUSED). A send whose final server reply was lost fails with EMAIL_DELIVERY_UNCONFIRMED: it may have gone, and repeating it with the same id will not send it twice.',
     category: 'email',
     scopes: ['write:email'],
     access: 'admin',
@@ -321,12 +330,69 @@ export const builtinGatewayEmailMethodDescriptors: readonly GatewayMethodDescrip
       body: STRING_SCHEMA,
       inReplyTo: STRING_SCHEMA,
       confirm: BOOLEAN_SCHEMA,
+      clientSendId: STRING_SCHEMA,
     }, ['to', 'subject', 'body', 'confirm']),
     outputSchema: objectSchema({
       messageId: STRING_SCHEMA,
       sentAt: STRING_SCHEMA,
     }, ['messageId', 'sentAt']),
     dangerous: true,
+  }),
+  methodDescriptor({
+    id: 'email.inbox.update',
+    title: 'Mark, Archive or Delete an Email',
+    description:
+      'Change one inbox message by IMAP UID: action seen or unseen sets or clears its read flag; archive moves it to the folder the server marks Archive (or All Mail); delete moves it to the folder the server marks Trash, so it can be recovered there. A server with no such folder is refused and nothing changes; nothing here expunges permanently. Pass uidValidity when you have it so a reset mailbox refuses instead of changing another message. Answers { uid, action, movedTo? }.',
+    category: 'email',
+    scopes: ['write:email'],
+    access: 'admin',
+    // Served through the control-plane invoke endpoint, like checkpoints.* and rewind.*.
+    transport: ['ws'],
+    inputSchema: objectSchema({
+      uid: NUMBER_SCHEMA,
+      action: { type: 'string', enum: ['seen', 'unseen', 'archive', 'delete'] },
+      uidValidity: NUMBER_SCHEMA,
+    }, ['uid', 'action']),
+    outputSchema: objectSchema({
+      uid: NUMBER_SCHEMA,
+      action: STRING_SCHEMA,
+      movedTo: STRING_SCHEMA,
+    }, ['uid', 'action']),
+  }),
+  methodDescriptor({
+    id: 'email.attachment.get',
+    title: 'Download an Email Attachment',
+    description:
+      'Return one attachment of an inbox message as base64 bytes, by UID and its position (from 0) in the attachments list email.inbox.read returns. Read-only (BODY.PEEK). Meant to be saved as a file, never rendered: the bytes are whatever the sender attached. Attachments over 25 MB are refused with the reason.',
+    category: 'email',
+    scopes: ['read:email'],
+    access: 'admin',
+    // Served through the control-plane invoke endpoint, like checkpoints.* and rewind.*.
+    transport: ['ws'],
+    inputSchema: objectSchema({ uid: NUMBER_SCHEMA, index: NUMBER_SCHEMA }, ['uid', 'index']),
+    outputSchema: objectSchema({
+      filename: STRING_SCHEMA,
+      contentType: STRING_SCHEMA,
+      sizeBytes: NUMBER_SCHEMA,
+      contentBase64: STRING_SCHEMA,
+    }, ['filename', 'contentType', 'sizeBytes', 'contentBase64']),
+  }),
+  methodDescriptor({
+    id: 'email.drafts.list',
+    title: 'List Email Drafts',
+    description:
+      'Return the newest drafts (default 25, at most 100) in the account\'s Drafts folder, newest first, each with its recipient, subject, date, the Message-ID it replies to and up to 64 KB of body text, so a draft can be reopened in a composer. Read-only.',
+    category: 'email',
+    scopes: ['read:email'],
+    access: 'admin',
+    // Served through the control-plane invoke endpoint, like checkpoints.* and rewind.*.
+    transport: ['ws'],
+    inputSchema: objectSchema({ limit: NUMBER_SCHEMA }),
+    outputSchema: objectSchema({
+      drafts: arraySchema(EMAIL_DRAFT_SUMMARY_SCHEMA),
+      total: NUMBER_SCHEMA,
+      mailbox: STRING_SCHEMA,
+    }, ['drafts', 'total', 'mailbox']),
   }),
   /**
    * The three expectation verbs carry NO `http` binding, unlike the mail

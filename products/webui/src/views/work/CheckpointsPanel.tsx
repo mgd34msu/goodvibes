@@ -46,7 +46,25 @@ function isNotFound(error: unknown): boolean {
   return errorCode(error) === 'NOT_FOUND';
 }
 
-export function CheckpointsPanel() {
+/**
+ * Sessions other than `sessionId` that made checkpoints after `checkpoint`: a
+ * restore rewrites the whole workspace, so their files go back too.
+ */
+function otherSessionsSince(all: readonly WorkspaceCheckpoint[], checkpoint: WorkspaceCheckpoint, sessionId: string | undefined): string[] {
+  const others = new Set<string>();
+  for (const entry of all) {
+    if (entry.createdAt <= checkpoint.createdAt || !entry.sessionId) continue;
+    if (entry.sessionId !== (sessionId ?? checkpoint.sessionId)) others.add(entry.sessionId);
+  }
+  return [...others];
+}
+
+export interface CheckpointsPanelProps {
+  /** A session's own tab lists only the checkpoints that session's turns made. */
+  sessionId?: string;
+}
+
+export function CheckpointsPanel({ sessionId }: CheckpointsPanelProps = {}) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const isPhone = useIsPhoneViewport();
@@ -58,8 +76,8 @@ export function CheckpointsPanel() {
   const [restoringId, setRestoringId] = useState('');
 
   const list = useQuery({
-    queryKey: queryKeys.checkpoints,
-    queryFn: () => platformClient.operator.checkpoints.list(),
+    queryKey: [...queryKeys.checkpoints, sessionId ?? 'workspace'],
+    queryFn: () => platformClient.operator.checkpoints.list(sessionId ? { sessionId } : undefined),
   });
   const checkpoints = useMemo(() => sortCheckpointsNewestFirst(list.data?.checkpoints ?? []), [list.data]);
   const selected = useMemo(() => checkpoints.find((c) => c.id === selectedId) ?? null, [checkpoints, selectedId]);
@@ -153,6 +171,17 @@ export function CheckpointsPanel() {
         return;
       }
       description = `The preview of the files this restore changes could not be loaded (${formatError(error)}). ${description}`;
+    }
+    // A restore rewrites the whole workspace, not one session's files: name the
+    // other sessions whose later work it puts back. Read only when restoring.
+    try {
+      const workspace = await platformClient.operator.checkpoints.list({ since: checkpoint.createdAt });
+      const others = otherSessionsSince(workspace.checkpoints, checkpoint, sessionId);
+      if (others.length > 0) {
+        description += ` This rewrites the whole workspace, so files changed since then by ${others.length === 1 ? 'session' : 'sessions'} ${others.join(', ')} go back too.`;
+      }
+    } catch {
+      description += ' This rewrites the whole workspace, including files other sessions changed since then.';
     }
     const ok = await confirm.ask({
       title: restoreConfirmTitle(checkpoint),
@@ -284,7 +313,9 @@ export function CheckpointsPanel() {
       )}
       {list.isSuccess && checkpoints.length === 0 && (
         <EmptyState icon={<History />} action={<Button onClick={() => void handleCreate()}>Snapshot now</Button>}>
-          Checkpoints of the workspace appear here, made by hand or automatically per turn.
+          {sessionId
+            ? 'Checkpoints this session’s turns made appear here; a snapshot made here belongs to the workspace.'
+            : 'Checkpoints of the workspace appear here, made by hand or automatically per turn.'}
         </EmptyState>
       )}
       {checkpoints.length > 0 && (

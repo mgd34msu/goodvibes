@@ -23,9 +23,13 @@
  *  - **A body is never echoed into an error.** Failures report the stage and
  *    the server's own plain-language reason; the message being sent is not
  *    part of a diagnostic.
- *  - **Read stays read.** `inbox.list` and `inbox.read` are declared read-only
- *    and the underlying client uses `BODY.PEEK`, so serving them over the wire
- *    cannot mark the owner's mail as read.
+ *  - **Read stays read.** `inbox.list`, `inbox.read` and `attachment.get` use
+ *    `BODY.PEEK`, so reading over the wire never marks the owner's mail read;
+ *    `inbox.update` is the one verb that changes a message, and only the one
+ *    UID it names.
+ *  - **A repeated send is one send.** `email.send` takes a `clientSendId`; a
+ *    repeat with the same id and the same message returns the first answer
+ *    instead of mailing the recipients again.
  *
  * Mail read through here is attacker-controlled text, anyone who knows the
  * address can put words in front of whatever consumes this. The service
@@ -44,7 +48,6 @@ import { evaluateOutwardEffect } from '../../security/untrusted-content.js';
 import { isSendToOwnerOnly } from '../../security/owner-identity.js';
 import { refuseNonUserRequest } from './explicit-user-request.js';
 import { readInvocationParams } from './invocation-params.js';
-import { missingScopes, type BrowserJudgmentCapability, type BrowserJudgmentMailSubjectSnapshot } from '@goodvibes-jev/engine/daemon-api';
 
 /** One inbox message, in the shape `email.inbox.list` advertises. */
 export interface EmailGatewayMessageSummary {
@@ -73,14 +76,14 @@ export interface EmailGatewayMessageDetail {
   readonly bodyText: string;
   readonly bodyHtml?: string;
   readonly attachments?: readonly EmailGatewayAttachment[];
-  /** Opaque server-issued source; never supplied or inferred from sender headers. */
-  readonly replySubjectRef?: string;
 }
 
 export interface EmailGatewayListInput {
   readonly limit?: number | undefined;
   readonly since?: string | undefined;
   readonly unreadOnly?: boolean | undefined;
+  /** Only messages with a UID below this one: the next page after a page ending at it. */
+  readonly before?: number | undefined;
 }
 
 /** A FETCH response on the returned page the daemon could not read. */
@@ -133,6 +136,46 @@ export interface EmailGatewaySendInput {
   readonly subject: string;
   readonly body: string;
   readonly inReplyTo?: string | undefined;
+  /** The caller's id for this send; a repeat with the same id returns the first answer. */
+  readonly clientSendId?: string | undefined;
+}
+
+export type EmailGatewayMessageAction = 'seen' | 'unseen' | 'archive' | 'delete';
+
+export interface EmailGatewayMessageUpdate {
+  readonly uid: number;
+  readonly action: EmailGatewayMessageAction;
+  /** The mailbox generation the UID was listed under, when the caller has it. */
+  readonly uidValidity?: number | undefined;
+}
+
+export interface EmailGatewayMessageUpdateResult {
+  readonly uid: number;
+  readonly action: EmailGatewayMessageAction;
+  /** The folder an archived or deleted message now lives in. */
+  readonly movedTo?: string;
+}
+
+export interface EmailGatewayAttachmentContent {
+  readonly filename: string;
+  readonly contentType: string;
+  readonly sizeBytes: number;
+  readonly contentBase64: string;
+}
+
+export interface EmailGatewayDraftSummary {
+  readonly uid: number;
+  readonly to: string;
+  readonly subject: string;
+  readonly date: string;
+  readonly inReplyTo: string;
+  readonly body: string;
+}
+
+export interface EmailGatewayDraftList {
+  readonly drafts: readonly EmailGatewayDraftSummary[];
+  readonly total: number;
+  readonly mailbox: string;
 }
 
 export interface EmailGatewaySendResult {
@@ -158,8 +201,12 @@ export interface EmailGatewayService {
    * a header the correspondent wrote. Absent or empty: no reply exemption.
    */
   replyEnvelopeSenders?(inReplyTo: string): readonly string[];
-  /** Exact result-object lookup owned by the canonical read implementation. */
-  getReplySubjectSource?(message: EmailGatewayMessageDetail): BrowserJudgmentMailSubjectSnapshot | undefined;
+  /** Mark read or unread, archive, or move to Trash; absent on a backend that cannot write. */
+  updateMessage?(input: EmailGatewayMessageUpdate): Promise<EmailGatewayMessageUpdateResult>;
+  /** One attachment's bytes by its position in the read's attachment list; null when the message is gone. */
+  readAttachment?(uid: number, index: number): Promise<EmailGatewayAttachmentContent | null>;
+  /** The newest drafts in the Drafts folder, each with its body. */
+  listDrafts?(limit: number): Promise<EmailGatewayDraftList>;
 }
 
 function readOptionalString(value: unknown): string | undefined {
@@ -209,11 +256,12 @@ export function createEmailInboxListHandler(service: EmailGatewayService): Gatew
       limit: readOptionalCount(params.limit),
       since: readOptionalString(params.since),
       unreadOnly: readOptionalBoolean(params.unreadOnly),
+      ...(params.before === undefined ? {} : { before: readUid(params.before) }),
     });
   };
 }
 
-export function createEmailInboxReadHandler(service: EmailGatewayService, judgment?: BrowserJudgmentCapability): GatewayMethodHandler {
+export function createEmailInboxReadHandler(service: EmailGatewayService): GatewayMethodHandler {
   return async (invocation) => {
     const uid = readUid(readInvocationParams(invocation).uid);
     const message = await service.readMessage(uid);
@@ -225,24 +273,60 @@ export function createEmailInboxReadHandler(service: EmailGatewayService, judgme
         404,
       );
     }
-    // Normal mail reads remain available in narrower compositions. Neither a
-    // backend's serialized ref nor browser-supplied subject text can mint
-    // judgment authority. Only the canonical result-object lease is eligible.
-    const { replySubjectRef: _untrustedReference, ...result } = message;
-    const context = invocation.context;
-    try {
-      const scopes = context.scopes ?? [];
-      if (!judgment?.issueMailSubjectReference || !context.principalId || !context.principalKind
-        || context.principalKind === 'remote-peer' || invocation.signal?.aborted
-        || (context.admin !== true && missingScopes(scopes, ['read:email', 'write:judgment']).length > 0)
-        || invocation.isAuthorized?.(['read:email', 'write:judgment']) !== true) return result;
-      const snapshot = service.getReplySubjectSource?.(message);
-      if (!snapshot || snapshot.subject !== message.subject) return result;
-      const replySubjectRef = judgment.issueMailSubjectReference({ snapshot, principal: {
-        principalId: context.principalId, principalKind: context.principalKind, admin: context.admin === true, scopes,
-      } });
-      return replySubjectRef ? { ...result, replySubjectRef } : result;
-    } catch { return result; }
+    return message;
+  };
+}
+
+const MESSAGE_ACTIONS: readonly EmailGatewayMessageAction[] = ['seen', 'unseen', 'archive', 'delete'];
+
+function unsupported(verb: string): never {
+  throw new GatewayVerbError(`This daemon's mail backend does not support ${verb}.`, 'NOT_IMPLEMENTED', 501);
+}
+
+export function createEmailInboxUpdateHandler(service: EmailGatewayService): GatewayMethodHandler {
+  return async (invocation) => {
+    const params = readInvocationParams(invocation);
+    const uid = readUid(params.uid);
+    const action = params.action;
+    if (typeof action !== 'string' || !(MESSAGE_ACTIONS as readonly string[]).includes(action)) {
+      throw new GatewayVerbError(`action must be one of ${MESSAGE_ACTIONS.join(', ')}`, 'INVALID_ARGUMENT', 400, 'action');
+    }
+    refuseNonUserRequest(invocation, 'email.inbox.update');
+    if (!service.updateMessage) return unsupported('changing a message');
+    return service.updateMessage({
+      uid,
+      action: action as EmailGatewayMessageAction,
+      ...(params.uidValidity === undefined ? {} : { uidValidity: readUid(params.uidValidity) }),
+    });
+  };
+}
+
+export function createEmailAttachmentGetHandler(service: EmailGatewayService): GatewayMethodHandler {
+  return async (invocation) => {
+    const params = readInvocationParams(invocation);
+    const uid = readUid(params.uid);
+    const index = typeof params.index === 'string' ? Number(params.index) : params.index;
+    if (typeof index !== 'number' || !Number.isInteger(index) || index < 0) {
+      throw new GatewayVerbError('index (the attachment\'s position, from 0) is required', 'INVALID_ARGUMENT', 400, 'index');
+    }
+    if (!service.readAttachment) return unsupported('attachment downloads');
+    const attachment = await service.readAttachment(uid, index);
+    if (attachment === null) {
+      throw new GatewayVerbError(
+        `No message with UID ${String(uid)} is in the mailbox. It may have been moved or deleted since it was listed.`,
+        'NOT_FOUND',
+        404,
+      );
+    }
+    return attachment;
+  };
+}
+
+export function createEmailDraftsListHandler(service: EmailGatewayService): GatewayMethodHandler {
+  return async (invocation) => {
+    const params = readInvocationParams(invocation);
+    if (!service.listDrafts) return unsupported('listing drafts');
+    return service.listDrafts(Math.min(100, readOptionalCount(params.limit) ?? 25));
   };
 }
 
@@ -374,6 +458,7 @@ export function createEmailSendHandler(
    */
   ownerAddresses: OwnerAddressSource = new Set(),
 ): GatewayMethodHandler {
+  const recent = new Map<string, { readonly fingerprint: string; readonly at: number; readonly result: Promise<unknown> }>();
   return async (invocation) => {
     const params = readInvocationParams(invocation);
     if (params.confirm !== true) {
@@ -388,10 +473,40 @@ export function createEmailSendHandler(
     const to = readRequiredString(params.to, 'to');
     const subject = readRequiredString(params.subject, 'subject');
     const body = readRequiredString(params.body, 'body');
+    const inReplyTo = readOptionalString(params.inReplyTo);
+    const clientSendId = readClientSendId(params.clientSendId);
+    if (clientSendId !== undefined) {
+      const now = Date.now();
+      for (const [id, entry] of recent) if (now - entry.at > SEND_ID_RETENTION_MS) recent.delete(id);
+      const fingerprint = JSON.stringify([to, subject, body, inReplyTo ?? '']);
+      const earlier = recent.get(clientSendId);
+      if (earlier) {
+        if (earlier.fingerprint !== fingerprint) {
+          throw new GatewayVerbError(
+            'This clientSendId was already used for a different message, so nothing was sent. Use a new id for a new message.',
+            'CLIENT_SEND_ID_REUSED', 409, 'clientSendId');
+        }
+        return earlier.result;
+      }
+      const result = sendOnce(to, subject, body, inReplyTo, clientSendId);
+      recent.set(clientSendId, { fingerprint, at: now, result });
+      if (recent.size > SEND_ID_CAPACITY) recent.delete(recent.keys().next().value!);
+      // A refusal or a failure before the server took the message frees the id
+      // for another try; an unconfirmed delivery keeps it, so a repeat answers
+      // "unconfirmed" again instead of mailing the recipients a second time.
+      result.catch((error: unknown) => {
+        if (!(error instanceof GatewayVerbError && error.code === 'EMAIL_DELIVERY_UNCONFIRMED')
+          && recent.get(clientSendId)?.result === result) recent.delete(clientSendId);
+      });
+      return result;
+    }
+    return sendOnce(to, subject, body, inReplyTo, undefined);
+  };
+
+  async function sendOnce(to: string, subject: string, body: string, inReplyTo: string | undefined, clientSendId: string | undefined): Promise<unknown> {
     // Before anything leaves the machine: does what is about to leave derive
     // from what was read? Recipient included, a redirected reply is as much
     // an injection outcome as a rewritten body.
-    const inReplyTo = readOptionalString(params.inReplyTo);
     await refuseTaintedSend(
       ledger,
       { to, subject, body },
@@ -404,9 +519,23 @@ export function createEmailSendHandler(
       subject,
       body,
       ...(inReplyTo === undefined ? {} : { inReplyTo }),
+      ...(clientSendId === undefined ? {} : { clientSendId }),
     });
     return { ...sent, ...untrustedExposureDisclosure(ledger) };
-  };
+  }
+}
+
+/** How long a send's answer is kept for a repeat with the same `clientSendId`. */
+const SEND_ID_RETENTION_MS = 10 * 60_000;
+const SEND_ID_CAPACITY = 512;
+const CLIENT_SEND_ID = /^[A-Za-z0-9_-]{8,128}$/;
+
+function readClientSendId(value: unknown): string | undefined {
+  if (value === undefined || value === null || value === '') return undefined;
+  if (typeof value !== 'string' || !CLIENT_SEND_ID.test(value)) {
+    throw new GatewayVerbError('clientSendId must be 8 to 128 letters, digits, hyphens or underscores', 'INVALID_ARGUMENT', 400, 'clientSendId');
+  }
+  return value;
 }
 
 /** Attach the email handlers to their registered descriptors (missing = no-op). */
@@ -416,14 +545,16 @@ export function registerEmailGatewayMethods(
   ledger: UntrustedContentLedger = getProcessUntrustedContentLedger(),
   /** See createEmailSendHandler. Empty means the exemption cannot fire. */
   ownerAddresses: OwnerAddressSource = new Set(),
-  judgment?: BrowserJudgmentCapability,
 ): void {
   const attach = (id: string, handler: GatewayMethodHandler): void => {
     const descriptor = catalog.get(id);
     if (descriptor) catalog.register(descriptor, handler, { replace: true });
   };
   attach('email.inbox.list', createEmailInboxListHandler(service));
-  attach('email.inbox.read', createEmailInboxReadHandler(service, judgment));
+  attach('email.inbox.read', createEmailInboxReadHandler(service));
+  attach('email.inbox.update', createEmailInboxUpdateHandler(service));
+  attach('email.attachment.get', createEmailAttachmentGetHandler(service));
+  attach('email.drafts.list', createEmailDraftsListHandler(service));
   attach('email.draft.create', createEmailDraftCreateHandler(service));
   attach('email.send', createEmailSendHandler(service, ledger, ownerAddresses));
 }

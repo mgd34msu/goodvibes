@@ -3,7 +3,21 @@ import type { MemoryClass, MemoryAddInsert, MemoryAddOptions, MemoryBundle, Memo
 import type { MemoryVectorStats } from './memory-vector-store.js';
 import type { MemoryImportResult } from './memory-store.js';
 import type { MemoryUsageChange, MemoryUsageEntry, MemoryUsageTopEntry } from './memory-usage-stats.js';
-import type { MemoryConsolidationProposal } from './memory-consolidation.js';
+import {
+  MEMORY_CONSOLIDATION_ACTIONS,
+  type MemoryConsolidationAction,
+  type MemoryConsolidationDecision,
+  type MemoryConsolidationProposal,
+} from './memory-consolidation.js';
+
+/** Store meta key: ids of proposals the owner decided should stand as they are. */
+const STANDING_DECISIONS_META = 'consolidation.proposals.decided-standing';
+const STANDING_DECISIONS_LIMIT = 2_000;
+
+/** One proposal per kind and set of records, whatever order a pass found them in (the store's key). */
+function consolidationProposalId(proposal: Pick<MemoryConsolidationProposal, 'kind' | 'ids'>): string {
+  return `${proposal.kind}:${[...proposal.ids].sort().join(',')}`;
+}
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 import { runHonestMemorySearch, type HonestMemorySearchOptions, type HonestMemorySearchResult } from './memory-recall-contract.js';
@@ -191,8 +205,66 @@ export class MemoryRegistry {
     return this.store.addConsolidationProposals(proposals, at);
   }
 
+  /**
+   * The proposals that still need a person, each with its `id`. A proposal is
+   * gone once decided: the records it named were changed so it no longer holds,
+   * or the owner decided they stand as they are (kept in store meta).
+   */
   listConsolidationProposals(): MemoryConsolidationProposal[] {
-    return this.store.listConsolidationProposals();
+    const standing = this.standingDecisions();
+    return this.store.listConsolidationProposals()
+      .map((proposal) => ({ ...proposal, id: consolidationProposalId(proposal) }))
+      .filter((proposal) => !standing.has(proposal.id));
+  }
+
+  /**
+   * Apply the owner's answer to one proposal. One write per record changed;
+   * nothing is changed when the proposal is gone or the action does not fit
+   * its kind.
+   */
+  decideConsolidationProposal(proposalId: string, action: MemoryConsolidationAction): MemoryConsolidationDecision {
+    const proposal = this.listConsolidationProposals().find((entry) => entry.id === proposalId);
+    if (!proposal) {
+      return { decided: false, proposalId, refusal: { code: 'PROPOSAL_NOT_FOUND', state: 'the proposal is no longer pending',
+        reason: 'No pending consolidation proposal has that id: it was decided already, or a record it named changed so it no longer holds; nothing was changed',
+        next: ['Refresh the review list'] } };
+    }
+    const allowed = MEMORY_CONSOLIDATION_ACTIONS[proposal.kind];
+    if (!allowed.includes(action)) {
+      return { decided: false, proposalId, refusal: { code: 'ACTION_NOT_ALLOWED', state: `a ${proposal.kind} proposal`,
+        reason: `A ${proposal.kind} proposal accepts ${allowed.join(', ')}; nothing was changed`, next: [`Answer with one of: ${allowed.join(', ')}`] } };
+    }
+    const [first, second] = proposal.ids;
+    const changed: string[] = [];
+    const removed: string[] = [];
+    const reviewed = (id: string | undefined): void => {
+      if (id && this.review(id, { state: 'reviewed', reviewedBy: 'operator' })) changed.push(id);
+    };
+    const superseded = (loser: string | undefined, winner: string | undefined): void => {
+      if (!loser) return;
+      const reason = proposal.kind === 'contradiction' ? `Contradicted by ${winner ?? 'another record'}; the owner kept that one.`
+        : `Duplicate of ${winner ?? 'another record'} in another scope; the owner kept that one.`;
+      if (this.review(loser, { state: 'stale', staleReason: reason, reviewedBy: 'operator' })) changed.push(loser);
+      reviewed(winner);
+    };
+    if (action === 'delete') { if (first && this.delete(first)) removed.push(first); }
+    else if (action === 'keep') reviewed(first);
+    else if (action === 'keep-first') superseded(second, first);
+    else if (action === 'keep-second') superseded(first, second);
+    else {
+      for (const id of proposal.ids) reviewed(id);
+      const standing = [...this.standingDecisions(), proposalId].slice(-STANDING_DECISIONS_LIMIT);
+      this.writeStoreMeta(STANDING_DECISIONS_META, JSON.stringify(standing));
+    }
+    return { decided: true, proposalId, action, changed, removed };
+  }
+
+  private standingDecisions(): Set<string> {
+    try {
+      const raw = this.readStoreMeta(STANDING_DECISIONS_META);
+      const parsed: unknown = raw === null ? [] : JSON.parse(raw);
+      return new Set(Array.isArray(parsed) ? parsed.filter((entry): entry is string => typeof entry === 'string') : []);
+    } catch { return new Set(); }
   }
 
   /**

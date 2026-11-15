@@ -45,7 +45,7 @@ const {
 } = operations;
 const { WorkspaceTrustManager } = operations;
 import { MemorySpineClient, createLocalMemoryAccess } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
-import { createWorkspaceCheckpointing } from './workspace-checkpointing.js';
+import { createWorkspaceCheckpointing, daemonWorkspaceCheckpoints } from './workspace-checkpointing.js';
 import { createSessionConversationRewindPort } from './conversation-rewind-port.js';
 import { createDomainDispatch } from '@goodvibes-jev/engine/platform/platform/runtime/store';
 import { bindHealthDomainEvents, createWiredHealthSystem } from '@goodvibes-jev/engine/platform/platform/runtime/observability';
@@ -590,8 +590,12 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
     disposalScope.registry.add('fleet event bridge', fleetNeedsInputPush.detach); // newer than the registry, so detaches first
     const modeManager = new ModeManager({ featureFlags }); const fileUndoManager = new FileUndoManager({ onFileChanged: (path) => fileCache.invalidate(path) });
     // Checkpoints, gated on live workspace registration, see workspace-checkpointing.ts.
+    // This workspace snapshots the daemon's own sessions' turns; a hosted session
+    // in another workspace is snapshotted by that workspace's manager.
+    const workspaceCheckpoints = daemonWorkspaceCheckpoints(options.runtimeBus);
     const checkpointing = createWorkspaceCheckpointing({
       workspaceRoot: workingDirectory, surface, runtimeBus: options.runtimeBus, configManager, shellPaths,
+      ownsSession: workspaceCheckpoints.ownsSession(workingDirectory, { daemonOwn: true }),
     });
     disposalScope.registry.add('workspace checkpoint initialization and work', checkpointing.close);
     const workspaceCheckpointManager = checkpointing.manager;
@@ -652,11 +656,12 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
       // (platform control-plane-store-paths.ts). Required, not defaulted: a default
       // is what let these stores write to the unscoped orphan directory.
       surfaceRoot: GOODVIBES_DAEMON_SURFACE_ROOT,
-      homeDirectory, emailServiceDeps, describeEmailConfigProblem, processRegistry, browserJudgment,
+      homeDirectory, emailServiceDeps, describeEmailConfigProblem, processRegistry,
       onBrowserCheckout: browserCheckoutSeam.set,
       // The registration-gated surface, not the raw manager: an explicit create in
-      // an unregistered workspace refuses with something actionable.
-      workspaceCheckpointManager: checkpointing.gatewayManager,
+      // an unregistered workspace refuses with something actionable. Verbs naming a
+      // hosted session, or a checkpoint its workspace holds, reach that workspace's manager.
+      workspaceCheckpointManager: workspaceCheckpoints.gateway(checkpointing, workingDirectory),
       conversationRewindPort: createSessionConversationRewindPort(), sessionBroker, secretsManager, stepUpService,
       // Fills the capture port with the owner-profile store and the occasions
       // service, so the `profile` tool a conversational turn is given has

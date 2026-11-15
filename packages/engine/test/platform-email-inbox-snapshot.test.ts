@@ -109,7 +109,6 @@ describe('strict batch snapshot ownership', () => {
     expect(Object.isFrozen(result.messages[0]!.source.detail)).toBe(true);
     expect(requireValue(f.service.getInboxMailboxObservation(result)).uidValidity).toBe(7);
     expect(f.service.getInboxMailboxObservation({ ...result })).toBeUndefined();
-    expect(f.service.getReplySubjectSource(result.messages[0]!.source.detail)).toBeUndefined();
     // A batch goes to privacy screening, never to a model, so it is not an ingest.
     expect(f.ingests).toHaveLength(0);
     expect(f.sockets[0]!.commands.some(command => command.includes('SINCE'))).toBe(false);

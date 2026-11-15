@@ -11,7 +11,6 @@ const inputs: Record<BrowserJudgmentBatteryId, unknown> = {
   'webui.voice.speech-seams': { ...text, cursor: 0 },
   'webui.errors.daemon-refusal': { errorRef: 'x' },
   'webui.palette.command-rank': { query: { kind: 'inline', text: 'a' }, registryVersion: 'v', candidates: [{ kind: 'builtin', commandId: 'a' }] },
-  'webui.mail.reply-subject': { subjectRef: 'x' },
   'webui.credentials.provider-key': { providerId: 'p', keys: ['k'] },
   'webui.code.language': text,
   'webui.config.credential-key': { keys: ['k'] },

@@ -3,11 +3,19 @@
  * Consolidation proposals (contradictions, cross-scope duplicates, stale deletes) come
  * first, then the memory review queue, then knowledge candidates. Selecting a row opens
  * it in the detail pane; selecting a proposal also highlights the queue rows it points at
- * (a jump lands on the rows, it never filters the rest of the queue away).
+ * (a jump lands on the rows, it never filters the rest of the queue away). A proposal is
+ * answered in its pane with the choices its kind allows (memory.consolidation.decide);
+ * the records it names are loaded by id, so a record outside the first page of the
+ * queue still opens.
  */
 import { ClipboardList } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMutation, useQueries, useQueryClient } from '@tanstack/react-query';
+import { client as platformClient } from '../../lib/goodvibes';
+import { queryKeys } from '../../lib/queries';
+import { Button } from '../../components/ui/Button';
+import { CONSOLIDATION_CHOICES, consolidationProposalId, type ConsolidationAction } from '../memory/memory-helpers';
 import type { MemoryConsolidationProposal, MemoryRecord } from '../../lib/goodvibes';
 import { formatError } from '../../lib/errors';
 import { DetailPane, DetailSection, EmptyState, ListDetail, RowGroup, SkeletonRows } from '../../components/data-view/DataView';
@@ -54,6 +62,29 @@ export function ReviewTab({ query = '' }: ReviewTabProps) {
     [queue.data, query],
   );
   const queueById = useMemo(() => new Map((queue.data?.records ?? []).map((r) => [r.id, r])), [queue.data]);
+  const queryClient = useQueryClient();
+  const proposalIds = selection?.kind === 'proposal' ? selection.proposal.ids.filter((id) => !queueById.has(id)) : [];
+  const proposalRecords = useQueries({
+    queries: proposalIds.map((id) => ({
+      queryKey: ['memory', 'record', id] as const,
+      queryFn: () => platformClient.operator.memory.get(id),
+      retry: false,
+    })),
+  });
+  const recordById = (id: string): MemoryRecord | undefined => {
+    const queued = queueById.get(id);
+    if (queued) return queued;
+    const loaded = proposalRecords[proposalIds.indexOf(id)]?.data as { record?: MemoryRecord } | MemoryRecord | undefined;
+    return loaded && 'record' in loaded ? loaded.record : (loaded as MemoryRecord | undefined);
+  };
+  const decide = useMutation({
+    mutationFn: (input: { proposalId: string; action: ConsolidationAction }) => platformClient.operator.memory.consolidation.decide(input),
+    onSuccess: async (result) => {
+      if (result.decided) setSelection(null);
+      await queryClient.invalidateQueries({ queryKey: queryKeys.memoryConsolidationReceipts });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.memoryReviewQueue });
+    },
+  });
 
   useEffect(() => {
     if (highlight.size === 0) return;
@@ -80,6 +111,7 @@ export function ReviewTab({ query = '' }: ReviewTabProps) {
         onSelect={(key, proposal) => {
           setSelection({ kind: 'proposal', key, proposal });
           setHighlight(new Set(proposal.ids));
+          decide.reset();
         }}
       />
 
@@ -149,22 +181,42 @@ export function ReviewTab({ query = '' }: ReviewTabProps) {
         <DetailSection title="What was found">
           <p className="lib-prose">{proposal.reason}</p>
         </DetailSection>
-        <DetailSection title="Records to look at">
+        <DetailSection title="Records">
           <RowList aria-label="Records this proposal points at">
-            {proposal.ids.map((id) => {
-              const record = queueById.get(id);
+            {proposal.ids.map((id, index) => {
+              const record = recordById(id);
+              const position = proposal.ids.length > 1 ? (index === 0 ? 'First · ' : index === 1 ? 'Second · ' : '') : '';
               return record ? (
                 <Row
                   key={id}
                   title={record.summary}
-                  meta={`${sentence(record.cls)} · ${record.scope} · ${id}`}
-                  onSelect={() => setSelection({ kind: 'record', id })}
+                  meta={`${position}${sentence(record.cls)} · ${record.scope} · ${record.reviewState}`}
+                  onSelect={queueById.has(id) ? () => setSelection({ kind: 'record', id }) : undefined}
                 />
               ) : (
-                <Row key={id} title={id} meta="Not in the review queue" />
+                <Row key={id} title={id} meta={`${position}Loading…`} />
               );
             })}
           </RowList>
+        </DetailSection>
+        <DetailSection title="Decide">
+          <div className="lib-actions">
+            {CONSOLIDATION_CHOICES[proposal.kind].map((choice) => (
+              <Button
+                key={choice.action}
+                size="sm"
+                variant={choice.action === 'delete' ? 'danger' : 'outline'}
+                disabled={decide.isPending}
+                onClick={() => decide.mutate({ proposalId: consolidationProposalId(proposal), action: choice.action })}
+              >
+                {choice.label}
+              </Button>
+            ))}
+          </div>
+          {decide.data && !decide.data.decided && decide.data.refusal && (
+            <p className="lib-quiet" role="alert">{decide.data.refusal.reason}. {decide.data.refusal.next[0] ?? ''}</p>
+          )}
+          {decide.isError && <p className="lib-quiet" role="alert">{formatError(decide.error)}</p>}
         </DetailSection>
       </DetailPane>
     );

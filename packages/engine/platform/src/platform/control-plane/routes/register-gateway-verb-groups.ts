@@ -94,6 +94,12 @@ import { registerCalendarGatewayMethods, type CalendarGatewayService } from './c
 import { createDaemonCalendarGatewayService } from './calendar-composition.js';
 import { registerEmailGatewayMethods, type EmailGatewayService } from './email.js';
 import { registerDaemonEmailVerbs, type EmailCompositionDeps } from './email-composition.js';
+import { readInvocationParams } from './invocation-params.js';
+import { GatewayVerbError } from './gateway-verb-error.js';
+import type { MemoryRegistry } from '../../state/memory-registry.js';
+import type { MemoryConsolidationAction } from '../../state/memory-consolidation.js';
+
+const MEMORY_CONSOLIDATION_ACTION_NAMES: readonly MemoryConsolidationAction[] = ['keep-first', 'keep-second', 'both-stand', 'keep-both', 'delete', 'keep'];
 import { bindCostAttributionIngest } from './attribution-ingest.js';
 import type { ConfigManager } from '../../config/manager.js';
 import type { AsyncDisposalRegistry } from '../../runtime/async-disposal.js';
@@ -230,7 +236,6 @@ export interface GatewayVerbGroupDeps extends FleetCheckpointsSearchGatewayDeps,
   readonly emailGateway?: EmailGatewayService | undefined;
   /** Everything platform/email needs; absent in narrow compositions. */
   readonly emailServiceDeps?: EmailCompositionDeps['emailServiceDeps'];
-  readonly browserJudgment?: EmailCompositionDeps['browserJudgment'];
   /**
    * Why the mailbox is not usable yet, in the operator's own key names.
    * Supplied by a composition reading the daemon's `surfaces.email.*` keys.
@@ -308,7 +313,7 @@ export interface GatewayVerbGroupDeps extends FleetCheckpointsSearchGatewayDeps,
    * absent (an embed with no memory store) → the verbs stay cataloged-but-
    * unhandled, a graceful degrade exactly like the other optional groups.
    */
-  readonly memoryRegistry?: MemoryProjectionSource | undefined;
+  readonly memoryRegistry?: (MemoryProjectionSource & Partial<Pick<MemoryRegistry, 'decideConsolidationProposal'>>) | undefined;
   /**
    * The config + secret pair the credentials.set/.clear verbs write through,
    * the only way a surface that is not on this filesystem can finish a settings
@@ -718,6 +723,20 @@ export function registerGatewayVerbGroups(catalog: GatewayMethodCatalog, deps: G
   // verbs stay cataloged-but-unhandled rather than a facade over no store.
   if (deps.memoryRegistry) {
     registerMemoryProjectionsGatewayMethods(catalog, deps.memoryRegistry);
+    const registry = deps.memoryRegistry;
+    const decideDescriptor = catalog.get('memory.consolidation.decide');
+    if (decideDescriptor && registry.decideConsolidationProposal) {
+      const decide = registry.decideConsolidationProposal.bind(registry);
+      catalog.register(decideDescriptor, (invocation) => {
+        const params = readInvocationParams(invocation);
+        const proposalId = typeof params.proposalId === 'string' ? params.proposalId : '';
+        const action = params.action;
+        if (!proposalId || typeof action !== 'string' || !(MEMORY_CONSOLIDATION_ACTION_NAMES as readonly string[]).includes(action)) {
+          throw new GatewayVerbError(`proposalId and an action (${MEMORY_CONSOLIDATION_ACTION_NAMES.join(', ')}) are required`, 'INVALID_ARGUMENT', 400, 'action');
+        }
+        return decide(proposalId, action as MemoryConsolidationAction);
+      }, { replace: true });
+    }
   }
 
   // Feature-flag graduation report: a read-only view over the static flag

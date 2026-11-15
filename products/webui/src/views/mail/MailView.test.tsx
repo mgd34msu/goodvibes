@@ -16,15 +16,6 @@ import { openOverlayCount, PHONE_QUERY } from '../../components/ui/overlay';
 
 type InboxListImpl = () => Promise<{ messages: unknown[]; total: number; unreadable?: { uid?: number; detail: string }[] }>;
 
-interface ReplyInput { requestId: string; battery: string; input: { subjectRef: string } }
-let replyRequests: { input: ReplyInput; signal: AbortSignal }[] = [];
-function replyWire(input: ReplyInput, alreadyReply = false) {
-  return { protocolVersion: 1, batteryVersion: 1, requestId: input.requestId, battery: input.battery, status: 'settled',
-    value: { alreadyReply }, readings: { already_reply: { kind: 'yes-no', probability: alreadyReply ? 0.99 : 0.01, verdict: alreadyReply ? 'yes' : 'no', outcome: 'act' } },
-    outcome: 'act', evidence: [{ decisionId: 'synthetic-decision', model: 'synthetic', requestedModel: 'synthetic', usage: { inputTokens: 1, outputTokens: 1 }, latencyMs: 1 }] };
-}
-let replyJudgment: (input: ReplyInput, signal: AbortSignal) => Promise<unknown> = async input => replyWire(input);
-
 let sentInputs: unknown[] = [];
 let draftInputs: unknown[] = [];
 let sendImpl: () => Promise<unknown> = () => Promise.resolve({ messageId: '<x@example.com>', sentAt: '2026-01-01T00:00:00Z' });
@@ -34,8 +25,6 @@ let inboxList: InboxListImpl = () => Promise.resolve({ messages: [], total: 0 })
 let inboxRead: (uid: number) => Promise<unknown> = () => Promise.reject(Object.assign(new Error('not used'), { status: 500 }));
 
 mock.module('../../lib/goodvibes', () => ({
-  readBrowserDecisionPolicy: async () => ({ policy: 'Default - On', operation: 'decision', reason: null, revision: 0 }),
-  runBrowserJudgment: (input: ReplyInput, signal: AbortSignal) => { replyRequests.push({ input, signal }); return replyJudgment(input, signal); },
   // src/lib/queries.ts (imported transitively via queryKeys) destructures these off
   // the same module, the mock's surface must satisfy that import even though this
   // test never calls them (same gotcha CalendarView.test.tsx documents).
@@ -47,7 +36,10 @@ mock.module('../../lib/goodvibes', () => ({
         inbox: {
           list: () => inboxList(),
           read: (uid: number) => inboxRead(uid),
+          update: (input: unknown) => Promise.resolve({ ...(input as object) }),
         },
+        attachment: { get: () => Promise.reject(new Error('not used')) },
+        drafts: { list: () => Promise.resolve({ drafts: [], total: 0, mailbox: 'Drafts' }) },
         send: (input: unknown) => { sentInputs.push(input); return sendImpl(); },
         draft: {
           create: (input: unknown) => { draftInputs.push(input); return createDraft(); },
@@ -107,10 +99,8 @@ async function waitFor(predicate: () => boolean, timeoutMs = 2000): Promise<void
 }
 
 afterEach(() => {
-  replyRequests = [];
   sendImpl = () => Promise.resolve({ messageId: '<x@example.com>', sentAt: '2026-01-01T00:00:00Z' });
   sentInputs = []; draftInputs = []; createDraft = async () => ({ uid: 1, draftId: 'd1' });
-  replyJudgment = async input => replyWire(input);
   inboxList = () => Promise.resolve({ messages: [], total: 0 });
   inboxRead = () => Promise.reject(Object.assign(new Error('not used'), { status: 500 }));
 });
@@ -179,7 +169,7 @@ describe('MailView: populated / empty ("no fourth reading")', () => {
       total: 1,
     });
     inboxRead = () => Promise.resolve({
-      uid: 5, from: 'a@example.com', subject: 'Lunch?', date: '2026-01-01T09:00:00Z', messageId: '<lunch@x>', bodyText: 'Noon works?', replySubjectRef: 'synthetic-ref-5',
+      uid: 5, from: 'a@example.com', subject: 'Lunch?', date: '2026-01-01T09:00:00Z', messageId: '<lunch@x>', bodyText: 'Noon works?',
     });
     const { el, unmount } = render();
     await waitFor(() => Boolean(el.querySelector('[data-testid="mail-list"]')));
@@ -192,11 +182,9 @@ describe('MailView: populated / empty ("no fourth reading")', () => {
     const compose = document.body.querySelector('[data-testid="mail-compose"]') as HTMLElement;
     const inputs = [...compose.querySelectorAll('input')];
     expect(inputs[0]?.value).toBe('a@example.com');
-    await waitFor(() => inputs[1]?.value === 'Re: Lunch?');
-    // A subject with no prefix is decided by the reply-marker rule: no reading is requested.
-    expect(replyRequests).toHaveLength(0);
-    // Nothing typed yet, so Send stays disabled.
-    expect(buttonNamed(compose, 'Send')?.hasAttribute('disabled')).toBe(true);
+    expect(inputs[1]?.value).toBe('Re: Lunch?');
+    // The original is quoted under the reply.
+    expect(compose.querySelector('textarea')?.value).toContain('> Noon works?');
     unmount();
   });
 
@@ -355,11 +343,10 @@ function setField(input: HTMLInputElement | HTMLTextAreaElement, value: string) 
   Object.getOwnPropertyDescriptor(proto, 'value')!.set!.call(input, value);
   input.dispatchEvent(new window.Event('input', { bubbles: true }));
 }
-async function openSyntheticReply(subject = 'Synthetic original', reference: string | undefined = 'synthetic-ref') {
-  const message = { uid: 5, from: 'a@example.com', subject, date: '2026-01-01T09:00:00Z', messageId: '<synthetic@x>', bodyText: 'Synthetic body',
-    ...(reference === undefined ? {} : { replySubjectRef: reference }) };
+async function openSyntheticReply(subject = 'Synthetic original') {
+  const message = { uid: 5, from: 'a@example.com', subject, date: '2026-01-01T09:00:00Z', messageId: '<synthetic@x>', bodyText: 'Synthetic body' };
   inboxList = async () => ({ messages: [message, { ...message, uid: 6, subject: 'Other synthetic message' }], total: 2 });
-  inboxRead = async uid => ({ ...message, uid, ...(uid === 6 ? { subject: 'Other synthetic message', replySubjectRef: 'other-ref' } : {}) });
+  inboxRead = async uid => ({ ...message, uid, ...(uid === 6 ? { subject: 'Other synthetic message' } : {}) });
   const view = render();
   await waitFor(() => Boolean(view.el.querySelector('[data-testid="mail-list"]')));
   flushSync(() => ([...view.el.querySelectorAll('.mail-row')].find(row => row.textContent?.includes(subject))?.querySelector('.gv-row__main') as HTMLElement).click());
@@ -441,102 +428,15 @@ test('Escape outside the reply closes the top composer before the message drawer
   } finally { view.unmount(); }
 });
 
-describe('MailView: subject interpretation owns only its exact pending draft', () => {
-  test.each(['RE:  Café plan  ', 'Re[2]: Synthetic lunch', 'AW: Synthetic lunch', 'SV: Synthetic lunch'])('the rule keeps a subject that already marks a reply, with no reading: %s', async subject => {
+describe('MailView: the reply subject is decided by the rule, at once', () => {
+  test.each([['RE:  Café plan  ', 'RE:  Café plan'], ['Re[2]: Synthetic lunch', 'Re[2]: Synthetic lunch'], ['AW: Synthetic lunch', 'AW: Synthetic lunch'], ['Vs: Synthetic lunch', 'Re: Vs: Synthetic lunch']])('%s', async (subject, expected) => {
     const view = await openSyntheticReply(subject);
     try {
-      await waitFor(() => view.subjectInput.value === subject);
-      expect(replyRequests).toHaveLength(0);
+      expect(view.subjectInput.value).toBe(expected);
       expect(view.compose.textContent).toContain('<synthetic@x>');
     } finally { view.unmount(); }
   });
-
-  test.each([true, false])('an unknown short prefix asks once and the reading (%s) controls the prefix', async alreadyReply => {
-    replyJudgment = async input => replyWire(input, alreadyReply);
-    const view = await openSyntheticReply('Vs: Synthetic original');
-    try {
-      await waitFor(() => view.subjectInput.value === (alreadyReply ? 'Vs: Synthetic original' : 'Re: Vs: Synthetic original'));
-      expect(replyRequests).toHaveLength(1);
-      expect(replyRequests[0]!.input.input).toEqual({ subjectRef: 'synthetic-ref' });
-    } finally { view.unmount(); }
-  });
-
-  test.each(['missing', 'uncertain', 'error'] as const)('%s reading leaves the rule answer, so the reply is never held', async kind => {
-    replyJudgment = async input => {
-      if (kind === 'error') throw new Error('Synthetic service unavailable');
-      const { value: _value, ...wire } = replyWire(input);
-      return { ...wire, status: 'held', reason: 'uncertain',
-        readings: { already_reply: { kind: 'yes-no', probability: 0.5, verdict: 'uncertain', outcome: 'confirm' } }, outcome: 'confirm' };
-    };
-    if (kind === 'missing') replyJudgment = async () => { throw new Error('Unexpected call'); };
-    const view = await openSyntheticReply('Vs: Synthetic original', kind === 'missing' ? '' : 'synthetic-ref');
-    try {
-      await waitFor(() => view.subjectInput.value === 'Re: Vs: Synthetic original');
-      expect(view.el.textContent?.includes('could not be prepared')).toBe(false);
-      expect(replyRequests).toHaveLength(kind === 'missing' ? 0 : 1);
-    } finally { view.unmount(); }
-  });
-
-  test.each(['subject-edit', 'close', 'selection', 'new-compose', 'threading', 'unmount'] as const)('%s cancels pending interpretation and its late reply cannot overwrite user work', async kind => {
-    const barrier = Promise.withResolvers<unknown>();
-    replyJudgment = () => barrier.promise;
-    const view = await openSyntheticReply('Vs: Synthetic original');
-    let unmounted = false;
-    try {
-      expect(replyRequests).toHaveLength(1);
-      const first = replyRequests[0]!;
-      if (kind === 'subject-edit') flushSync(() => setField(view.subjectInput, 'Owner edit'));
-      if (kind === 'close') flushSync(() => buttonNamed(view.compose, 'Close compose')?.click());
-      if (kind === 'selection') flushSync(() => (view.el.querySelector('.mail-row .gv-row__main') as HTMLElement).click());
-      if (kind === 'new-compose') {
-        flushSync(() => { const compose = buttonNamed(view.el, 'Compose'); compose?.focus(); compose?.click(); });
-        expect(document.activeElement).toBe(view.compose.querySelector('textarea'));
-      }
-      if (kind === 'threading') flushSync(() => buttonNamed(view.compose, 'Clear reply threading')?.click());
-      if (kind === 'unmount') { view.unmount(); unmounted = true; }
-      expect(first.signal.aborted).toBe(true);
-      barrier.resolve(replyWire(first.input, false));
-      await drain(); flushSync(() => {});
-      if (kind === 'close' || kind === 'unmount') expect(view.el.querySelector('[data-testid="mail-compose"]')).toBeNull();
-      else expect(view.subjectInput.value).toBe(kind === 'subject-edit' ? 'Owner edit' : '');
-    } finally { barrier.resolve({}); if (!unmounted) view.unmount(); }
-  });
-
-  test('repeated Reply retires the first request and accepts only the newest decision', async () => {
-    const first = Promise.withResolvers<unknown>();
-    replyJudgment = input => replyRequests.length === 1 ? first.promise : Promise.resolve(replyWire(input, true));
-    const view = await openSyntheticReply('Vs: Synthetic exact');
-    try {
-      flushSync(() => { const reply = buttonNamed(view.el, 'Reply'); reply?.focus(); reply?.click(); });
-      expect(document.activeElement).toBe(view.compose.querySelector('textarea'));
-      await waitFor(() => view.subjectInput.value === 'Vs: Synthetic exact');
-      expect(replyRequests).toHaveLength(2); expect(replyRequests[0]!.signal.aborted).toBe(true);
-      first.resolve(replyWire(replyRequests[0]!.input, false));
-      await drain();
-      expect(view.subjectInput.value).toBe('Vs: Synthetic exact');
-      expect(document.activeElement).toBe(view.compose.querySelector('textarea'));
-      flushSync(() => document.activeElement?.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
-      expect(view.el.querySelector('[data-testid="mail-compose"]')).toBeNull();
-      expect(view.el.querySelector('[data-testid="mail-message-detail"]')).not.toBeNull();
-    } finally { first.resolve({}); view.unmount(); }
-  });
-
-  test('host/account lifetime invalidation closes the pending draft and its late reply stays discarded', async () => {
-    const { invalidateClientLifetime } = await import('../../lib/client-lifetime');
-    const barrier = Promise.withResolvers<unknown>(); replyJudgment = () => barrier.promise;
-    const view = await openSyntheticReply('Vs: Synthetic original');
-    try {
-      flushSync(() => invalidateClientLifetime());
-      expect(replyRequests[0]!.signal.aborted).toBe(true);
-      barrier.resolve(replyWire(replyRequests[0]!.input));
-      await drain();
-      expect(view.el.querySelector('[data-testid="mail-compose"]')).toBeNull();
-      flushSync(() => buttonNamed(view.el, 'Compose')?.click());
-      expect([...view.el.querySelectorAll('[data-testid="mail-compose"] input')].map(input => (input as HTMLInputElement).value)).toEqual(['', '']);
-    } finally { barrier.resolve({}); view.unmount(); }
-  });
 });
-
 
 test('an old send confirmation cannot approve a new draft after account/host identity changes', async () => {
   const { invalidateClientLifetime } = await import('../../lib/client-lifetime');

@@ -30,6 +30,9 @@ interface NativeIntakeFormProps {
   projectId?: string;
   closed?: boolean;
 }
+/** How often an unsettled request's status is read again. */
+const NATIVE_STATUS_REFRESH_MS = 5_000;
+
 export function NativeIntakeForm(props: NativeIntakeFormProps) {
   return (
     <ScopedNativeIntakeForm
@@ -385,6 +388,21 @@ function ScopedNativeIntakeForm({
       }
     });
   };
+  // The status keeps itself current: while the selected request's turn or work
+  // is still moving, it is read again every few seconds (one read in flight at a
+  // time), so nobody has to press Inspect to learn that it finished.
+  const turnState = turn?.kind === "recorded" ? turn.snapshot.state : undefined;
+  const executionSnapshot = execution?.kind === "recorded" ? execution.snapshot : undefined;
+  const unsettled = Boolean(selected) && !error && (
+    (turnState !== undefined && ["queued", "preparing", "running", "cancelling"].includes(turnState))
+    || (executionSnapshot !== undefined && !["refused", "cancelled"].includes(executionSnapshot.state)
+      && executionSnapshot.recovery !== "required" && executionSnapshot.recovery !== "cancelled"
+      && executionSnapshot.progress?.status !== "passed" && executionSnapshot.progress?.status !== "failed"));
+  useEffect(() => {
+    if (!unsettled || busy || !selected) return;
+    const timer = setTimeout(() => { if (!busyRef.current) inspect(selected); }, NATIVE_STATUS_REFRESH_MS);
+    return () => clearTimeout(timer);
+  });
   const newRequest = () => {
     // Detach only. The saved immutable input and host execution are untouched.
     ++generation.current;
@@ -440,7 +458,7 @@ function ScopedNativeIntakeForm({
         </Button>
       )}
       {closed && <p role="status">Session closed: reopen to submit a continuation.</p>}
-      {ready && !selected && !closed && (
+      {ready && !closed && (
         <form className="work-form" onSubmit={submit}>
           <Field
             label={selectedDiff ? "Original comment" : "Original request"}

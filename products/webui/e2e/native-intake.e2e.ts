@@ -16,8 +16,8 @@ async function installNativeIntakeDaemon(...args: Parameters<typeof installIntak
 
 async function open(page: Page) {
   await page.getByRole("button", { name: "New", exact: true }).click();
-  await page.getByRole("menuitem", { name: "Native request", exact: true }).click();
-  return page.getByRole("dialog", { name: "Native request", exact: true });
+  await page.getByRole("menuitem", { name: "Ask for work to be done", exact: true }).click();
+  return page.getByRole("dialog", { name: "Ask for work to be done", exact: true });
 }
 
 async function originals(page: Page) {
@@ -347,7 +347,7 @@ test("replacing the paired identity hides the old source and ignores its late ad
       new StorageEvent("storage", { key: "goodvibes.webui.token", storageArea: localStorage })
     );
   });
-  await expect(page.getByRole("dialog", { name: "Native request", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("dialog", { name: "Ask for work to be done", exact: true })).toHaveCount(0);
   await daemon.release("admit");
   dialog = await open(page);
   await expect(

@@ -86,8 +86,6 @@ export function parseBrowserJudgmentRequest(value: unknown): BrowserJudgmentRequ
     for (const key of input.keys) { const name = judgmentText(key, 256); if (seen.has(name)) return invalid(); seen.add(name); }
   } else if (battery === 'webui.errors.daemon-refusal') {
     const input = judgmentRecord(request.input, ['errorRef']); judgmentText(input.errorRef);
-  } else if (battery === 'webui.mail.reply-subject') {
-    const input = judgmentRecord(request.input, ['subjectRef']); judgmentText(input.subjectRef);
   } else if (battery === 'webui.palette.command-rank') {
     const input = judgmentRecord(request.input, ['query', 'registryVersion', 'candidates']);
     judgmentText(input.registryVersion);

@@ -49,7 +49,8 @@ import { assertDeliveryCurrent, type DeliveryLifetime } from '../utils/delivery-
 import { readEmailInboxPage, type EmailInboxPageInput, type EmailInboxPageRead } from './email-inbox-page.js';
 import { listEmailInbox } from './email-inbox-list.js';
 import { readEmailMessage } from './email-message-reader.js';
-import type { EmailMailboxObservation, EmailReplySubjectSource, EmailReplySubjectSourceOwner } from './reply-subject-source.js';
+import type { EmailMailboxObservation, EmailReplySubjectSourceOwner } from './reply-subject-source.js';
+import { IMAP_ATTACHMENT_LITERAL_BYTES, type ImapAttachmentContent, type ImapDraftSummary, type ImapMessageAction, type ImapMessageActionResult } from './imap-mailbox-actions.js';
 import { ensureMailboxConfigDefaults } from '../config/connector-config-sections.js';
 import { withEmailReadConnection } from './email-read-connection.js';
 import { SmtpClient, validateSmtpAddress, validateSmtpSubject, validateSmtpThreadHeader } from './smtp-client.js';
@@ -234,6 +235,11 @@ export interface SendMailOptions extends DeliveryLifetime {
   readonly references?: string | undefined;
   /** Must be true at the call site; the service rejects sends without it. */
   readonly confirm: boolean;
+  /**
+   * The left half of the Message-ID, chosen by the caller so a repeated send
+   * carries the same id. Letters, digits, `.`, `_` and `-`, 8 to 160 characters.
+   */
+  readonly messageIdLocalPart?: string | undefined;
 }
 
 /** What to list, for `listInbox`. Every field is optional. */
@@ -250,6 +256,8 @@ export interface EmailInboxListInput {
    * SEARCH, not the same one filtered afterwards.
    */
   readonly unreadOnly?: boolean | undefined;
+  /** Only messages whose UID is below this one: the page after a page that ended at it. */
+  readonly before?: number | undefined;
 }
 
 export interface EmailInboxListResult {
@@ -405,8 +413,6 @@ export class EmailService {
     } });
   }
 
-  readonly #replySubjectSources = new WeakMap<ImapMessageDetail, EmailReplySubjectSource>();
-
   /**
    * Message-ID -> the sender address of a message this process read whose
    * receiving server vouched for the sender (DKIM, SPF and DMARC all passed in
@@ -457,12 +463,6 @@ export class EmailService {
         readSenderAuthentication(detail.authenticationResults, mailboxAuthservIds(config.imapHost)),
       ),
     );
-  }
-
-  /** Only the exact canonical result can retrieve its immutable subject snapshot. */
-  getReplySubjectSource(message: ImapMessageDetail): EmailReplySubjectSource | undefined {
-    const source = this.#replySubjectSources.get(message);
-    return source?.signal.aborted === false ? source : undefined;
   }
 
   constructor(deps: EmailServiceDeps) {
@@ -516,8 +516,8 @@ export class EmailService {
    * the truncated page.
    */
   async listInbox(input: EmailInboxListInput = {}): Promise<EmailInboxListResult> {
-    const { signal, limit, since, unreadOnly } = input;
-    input = { signal, limit, since: since === undefined ? undefined : new Date(since.getTime()), unreadOnly };
+    const { signal, limit, since, unreadOnly, before } = input;
+    input = { signal, limit, since: since === undefined ? undefined : new Date(since.getTime()), unreadOnly, before };
     if (input.signal?.aborted) throw new Error('Mail read was cancelled.');
     const config = this.getValidatedConfig('read');
     const sourceRead = this.deps.replySubjectSourceOwner?.beginRead(config);
@@ -635,7 +635,7 @@ export class EmailService {
   async readMessageResult(uid: number): Promise<EmailMessageRead> {
     const config = this.getValidatedConfig('read');
     const read = await readEmailMessage(
-      this.deps, config, uid, this.#replySubjectSources,
+      this.deps, config, uid,
       (messages, current) => this.recordIngest(messages, current),
     );
     if (read.outcome === 'read') this.#noteDetail(config, read.detail);
@@ -687,6 +687,44 @@ export class EmailService {
       if (remembered !== undefined) this.#draftsMailboxes.delete(account);
       throw error;
     }
+  }
+
+  /**
+   * Mark one message in the read mailbox read or unread, archive it, or move it
+   * to Trash. `uidValidity`, when given, is the mailbox generation the UID was
+   * listed under; a reset mailbox refuses instead of changing another message.
+   */
+  async updateMessage(uid: number, action: ImapMessageAction, uidValidity?: number): Promise<ImapMessageActionResult> {
+    const config = this.getValidatedConfig('read');
+    const sourceRead = this.deps.replySubjectSourceOwner?.beginRead(config);
+    return withEmailReadConnection(this.deps, config, sourceRead, undefined,
+      (client) => client.applyMessageAction(uid, action, uidValidity ?? null));
+  }
+
+  /**
+   * One attachment's bytes, by its position in `readMessage`'s attachment list,
+   * or null when the message is gone. The bytes are handed over as a file and
+   * never read as text, so nothing is recorded as an untrusted ingest.
+   */
+  async readAttachment(uid: number, index: number): Promise<ImapAttachmentContent | null> {
+    const config = this.getValidatedConfig('read');
+    const sourceRead = this.deps.replySubjectSourceOwner?.beginRead(config);
+    return withEmailReadConnection(this.deps, config, sourceRead, undefined,
+      (client) => client.fetchAttachment(uid, index), { maxLiteralBytes: IMAP_ATTACHMENT_LITERAL_BYTES });
+  }
+
+  /** The newest drafts in the account's Drafts folder, newest first, each with its body. */
+  async listDrafts(limit = 25): Promise<{ readonly drafts: readonly ImapDraftSummary[]; readonly total: number; readonly mailbox: string }> {
+    const config = this.getValidatedConfig('read');
+    const account = draftsAccountKey(config);
+    const chosen = config.draftsMailbox.length > 0 ? config.draftsMailbox : this.#draftsMailboxes.get(account);
+    const sourceRead = this.deps.replySubjectSourceOwner?.beginRead(config);
+    const result = await withEmailReadConnection(this.deps, config, sourceRead, undefined,
+      (client) => client.listDrafts(limit, chosen));
+    // A draft is the owner's own text, written to be sent, so it is not recorded as an
+    // untrusted ingest: recording it would refuse sending the very draft that was opened.
+    if (config.draftsMailbox.length === 0) this.#draftsMailboxes.set(account, result.mailbox);
+    return result;
   }
 
   /** Drafts folder per account, resolved once by discovery and kept for the life of this service. */
@@ -818,6 +856,7 @@ export class EmailService {
       body: opts.body,
       inReplyTo: opts.inReplyTo,
       references: opts.references,
+      ...(opts.messageIdLocalPart === undefined ? {} : { messageIdLocalPart: opts.messageIdLocalPart }),
       signal: opts.signal,
       assertCurrent: opts.assertCurrent,
       withPublication: opts.withPublication,

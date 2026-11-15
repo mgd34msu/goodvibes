@@ -17,7 +17,6 @@ const inputs = [
     ] },
     registryVersion: ref, candidates: { ...arraySchema(candidate), minItems: 1, maxItems: 64 },
   }, ['query', 'registryVersion', 'candidates'])],
-  ['webui.mail.reply-subject', objectSchema({ subjectRef: ref }, ['subjectRef'])],
   ['webui.models.catalog-provider-match', objectSchema({ providerId: { type: 'string', minLength: 1, maxLength: 128 }, keys: { ...arraySchema(ref), minItems: 1, maxItems: 64 } }, ['providerId', 'keys'])],
   ['webui.credentials.provider-key', objectSchema({ providerId: { type: 'string', minLength: 1, maxLength: 128 }, keys: { ...arraySchema(ref), minItems: 1, maxItems: 64 } }, ['providerId', 'keys'])],
   ['webui.settings.card-material-key', objectSchema({ keys: { ...arraySchema(ref), minItems: 1, maxItems: 64 } }, ['keys'])],

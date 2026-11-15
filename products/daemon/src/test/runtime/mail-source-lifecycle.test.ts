@@ -25,10 +25,10 @@ function fixture() {
     registerDispose: (callback) => { dispose = callback; },
   });
   const owner = emailServiceDeps.replySubjectSourceOwner!;
-  const begin = () => owner.beginRead(readEmailConfig(emailServiceDeps.getConfig), 42);
+  const begin = () => owner.beginRead(readEmailConfig(emailServiceDeps.getConfig));
   const source = () => {
     const read = begin(); read.observeMailbox('INBOX', 7);
-    return read.complete(42, 'INBOX', 'Synthetic subject')!;
+    return read.completeMailboxObservation()!;
   };
   return { configManager, emailServiceDeps, begin, source, dispose: () => dispose(), reads: () => reads, changes };
 }
@@ -40,7 +40,7 @@ test('real config subscription revokes ABA, category merge/removal, reset and re
   state.configManager.set('surfaces.email.user', 'other@example.invalid');
   state.configManager.set('surfaces.email.user', 'fixture@example.invalid');
   pending.observeMailbox('INBOX', 7);
-  expect(pending.complete(42, 'INBOX', 'Old account')).toBeUndefined();
+  expect(pending.completeMailboxObservation()).toBeUndefined();
   expect(first.signal.aborted).toBe(true);
   for (const change of [
     () => state.configManager.mergeCategory('helper', { syntheticEpoch: 'value' } as never),
@@ -61,7 +61,7 @@ test('shared, IMAP fallback and aliased credential changes revoke without resolv
     const pending = state.begin();
     for (const listener of state.changes) listener(key);
     pending.observeMailbox('INBOX', 7);
-    expect(pending.complete(42, 'INBOX', 'Stale credential')).toBeUndefined();
+    expect(pending.completeMailboxObservation()).toBeUndefined();
     expect(source.signal.aborted).toBe(true);
   }
   const source = state.source();
@@ -77,11 +77,11 @@ test('narrow composition lacks provenance unless all lifecycle hooks and disposa
   expect(emailServiceDeps.replySubjectSourceOwner).toBeUndefined();
 });
 
-test('canonical mail composition revokes mailbox observations with subject sources on reload, secret changes and shutdown', () => {
+test('canonical mail composition revokes mailbox observations on reload, secret changes and shutdown', () => {
   const state = fixture();
   const observe = () => {
     const read = state.begin(); read.observeMailbox('INBOX', 7);
-    return { source: read.complete(42, 'INBOX', 'Synthetic subject')!, mailbox: read.completeMailboxObservation()! };
+    return { source: read.completeMailboxObservation()!, mailbox: read.completeMailboxObservation()! };
   };
   for (const mutate of [
     () => { state.configManager.set('surfaces.email.user', 'other@example.invalid'); state.configManager.set('surfaces.email.user', 'fixture@example.invalid'); },

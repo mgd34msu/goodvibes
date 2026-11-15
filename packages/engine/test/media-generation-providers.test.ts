@@ -1,167 +1,106 @@
-import { afterEach, describe, expect, test } from 'bun:test';
-import { builtinGenerationProviders } from '../platform/src/platform/media/builtin-generation-providers.ts';
-import type { MediaProvider } from '../platform/src/platform/media/provider-registry.ts';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { builtinGenerationProviders, pollTask } from '../platform/src/platform/media/builtin-generation-providers.ts';
+import type { MediaGenerationProvider } from '../platform/src/platform/media/provider-registry.ts';
 
+const KEYS = ['FAL_KEY', 'FAL_API_KEY', 'RUNWAYML_API_SECRET', 'RUNWAY_API_KEY'];
+const saved = new Map<string, string | undefined>();
 const originalFetch = globalThis.fetch;
-const originalFalKey = process.env.FAL_KEY;
-
+beforeEach(() => { for (const key of KEYS) { saved.set(key, process.env[key]); delete process.env[key]; } });
 afterEach(() => {
   globalThis.fetch = originalFetch;
-  if (originalFalKey === undefined) {
-    delete process.env.FAL_KEY;
-  } else {
-    process.env.FAL_KEY = originalFalKey;
-  }
+  for (const key of KEYS) { const value = saved.get(key); if (value === undefined) delete process.env[key]; else process.env[key] = value; }
 });
 
-function getFalProvider(): MediaProvider {
-  const provider = builtinGenerationProviders().find((entry) => entry.id === 'fal');
-  if (!provider?.generate) throw new Error('fal generation provider unavailable');
-  return provider;
+function provider(id: string): MediaGenerationProvider {
+  const found = builtinGenerationProviders().find((entry) => entry.id === id);
+  if (!found?.generate) throw new Error(`${id} generation provider unavailable`);
+  return found;
 }
 
-function installFalFetchStub(
-  finalFetch: (input: string | URL | Request, init?: RequestInit) => Promise<Response>,
-): Array<{ readonly url: string; readonly method: string }> {
-  const calls: Array<{ readonly url: string; readonly method: string }> = [];
-  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+interface Call { readonly url: string; readonly method: string; readonly body?: string | undefined }
+function stubFetch(answer: (url: string, method: string) => Response | Promise<Response>): Call[] {
+  const calls: Call[] = [];
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = input instanceof Request ? input.url : String(input);
-    const method = init?.method ?? (input instanceof Request ? input.method : 'GET');
-    calls.push({ url, method });
-    if (method === 'POST' && url.includes('queue.fal.run')) {
-      return Response.json({
-        status_url: 'https://queue.fal.run/status/task-1',
-        response_url: 'https://queue.fal.run/result/task-1',
-      });
-    }
-    if (url === 'https://queue.fal.run/status/task-1') {
-      return Response.json({ status: 'COMPLETED' });
-    }
-    if (url === 'https://queue.fal.run/result/task-1') {
-      return Response.json({ image: { url: 'https://cdn.example/generated.png' } });
-    }
-    return finalFetch(input, init);
+    const method = init?.method ?? 'GET';
+    calls.push({ url, method, body: typeof init?.body === 'string' ? init.body : undefined });
+    return answer(url, method);
   }) as typeof globalThis.fetch;
   return calls;
 }
 
+const falSubmitted = { request_id: 'req-1', status_url: 'https://queue.fal.run/status/req-1', response_url: 'https://queue.fal.run/result/req-1' };
+
 describe('media generation providers', () => {
-  test('credential replacement after submission fences every later poll', async () => {
-    process.env.FAL_KEY = 'synthetic-original-key';
-    const calls: string[] = [];
-    globalThis.fetch = (async input => {
-      calls.push(String(input)); process.env.FAL_KEY = 'synthetic-replacement-key';
-      return Response.json({ status_url: 'https://queue.fal.run/status/task-1', response_url: 'https://queue.fal.run/result/task-1' });
-    }) as typeof globalThis.fetch;
-    await expect(getFalProvider().generate!({ prompt: 'synthetic fixture', options: { image: true }, metadata: {} })).rejects.toThrow('owner changed');
-    expect(calls).toHaveLength(1);
-  });
   test('cancellation interrupts a provider polling delay before the next request', async () => {
-    process.env.FAL_KEY = 'synthetic-key'; const controller = new AbortController();
-    const calls: string[] = [];
-    globalThis.fetch = (async input => {
-      const url = String(input); calls.push(url);
+    process.env.FAL_KEY = 'synthetic-key';
+    const controller = new AbortController();
+    const calls = stubFetch((url) => {
       if (url.includes('/status/')) {
         setImmediate(() => controller.abort());
         return Response.json({ status: 'IN_PROGRESS' });
       }
-      return Response.json({ status_url: 'https://queue.fal.run/status/task-1', response_url: 'https://queue.fal.run/result/task-1' });
-    }) as typeof globalThis.fetch;
-    await expect(getFalProvider().generate!({ prompt: 'synthetic fixture', options: { image: true }, metadata: {} }, { signal: controller.signal })).rejects.toThrow();
+      return Response.json(falSubmitted);
+    });
+    await expect(provider('fal').generate!({ prompt: 'synthetic fixture', options: { image: true }, metadata: {} }, { signal: controller.signal })).rejects.toThrow();
     expect(calls).toHaveLength(2);
   });
-  test('cancellation during HEAD failure prevents the GET recovery request', async () => {
-    process.env.FAL_KEY = 'synthetic-key'; const controller = new AbortController();
-    const calls = installFalFetchStub(async (_input, init) => {
-      expect(init?.method).toBe('HEAD'); controller.abort(); throw new Error('synthetic failed probe');
-    });
-    await expect(getFalProvider().generate!({ prompt: 'synthetic fixture', options: { image: true }, metadata: {} }, { signal: controller.signal })).rejects.toThrow();
-    expect(calls.filter(call => call.url.includes('cdn.example')).map(call => call.method)).toEqual(['HEAD']);
-  });
-  test('source replacement during HEAD fences artifact retrieval', async () => {
-    process.env.FAL_KEY = 'synthetic-key'; let current = true;
-    const calls = installFalFetchStub(async () => { current = false; return new Response(null, { headers: { 'Content-Type': 'image/png' } }); });
-    await expect(getFalProvider().generate!({ prompt: 'synthetic fixture', options: { image: true }, metadata: {} }, { assertCurrent() { if (!current) throw new Error('Synthetic source retired'); } })).rejects.toThrow('source retired');
-    expect(calls.filter(call => call.url.includes('cdn.example')).map(call => call.method)).toEqual(['HEAD']);
+
+  test('a poll that fails once with a transient status does not lose the paid job', async () => {
+    let polls = 0;
+    const waited = await pollTask(async () => {
+      polls += 1;
+      if (polls === 1) throw Object.assign(new Error('synthetic unavailable'), { status: 503 });
+      return { state: 'done' as const, value: 'output' };
+    }, { deadline: Date.now() + 60_000, intervalMs: 5_000, sleep: async () => {} });
+    expect(waited).toEqual({ done: true, value: 'output' });
+    expect(polls).toBe(2);
   });
 
-  test('records explicit HEAD-to-GET transport recovery for inlined generated artifacts', async () => {
-    process.env.FAL_KEY = 'test-key';
-    const calls = installFalFetchStub(async (_input, init) => {
-      if (init?.method === 'HEAD') throw new Error('HEAD not supported by provider CDN');
-      return new Response(new Uint8Array([1, 2, 3]), {
-        headers: { 'Content-Type': 'image/png' },
-      });
-    });
+  test('a job still running when the wait ends is returned pending and collected later by its task id', async () => {
+    process.env.FAL_KEY = 'synthetic-key';
+    const submitCalls = stubFetch(() => Response.json(falSubmitted));
+    const fal = provider('fal');
+    const first = await fal.generate!({ prompt: 'synthetic fixture', outputMimeType: 'image/png', options: { waitSeconds: 0 }, metadata: {} });
+    expect(first.artifacts).toEqual([]);
+    expect(first.pending).toMatchObject({ providerId: 'fal', taskId: 'req-1' });
+    expect(submitCalls.map((call) => call.method)).toEqual(['POST']);
 
-    const result = await getFalProvider().generate!({
-      prompt: 'a small icon',
-      outputMimeType: 'image/png',
-      options: { image: true },
-      metadata: {},
-    });
-
-    const artifact = result.artifacts[0]!;
-    expect(artifact.dataBase64).toBe('AQID');
-    expect(artifact.metadata).toMatchObject({
-      source: 'media-generation-provider',
-      sourceProviderId: 'fal',
-      sourceUrl: 'https://cdn.example/generated.png',
-      sourceQuality: 'provider-output-url',
-      inlined: true,
-      retrievalMethod: 'GET',
-      transportRecovery: {
-        from: 'HEAD',
-        to: 'GET',
-        reason: 'Media artifact HEAD probe failed.',
-      },
-      headProbe: {
-        attempted: true,
-        ok: false,
-        error: 'Media artifact HEAD probe failed.',
-      },
-    });
-    expect(calls.some((call) => call.url === 'https://cdn.example/generated.png' && call.method === 'GET')).toBe(true);
+    stubFetch((url) => url.includes('/status/')
+      ? Response.json({ status: 'COMPLETED' })
+      : Response.json({ image: { url: 'https://cdn.example/generated.png' } }));
+    const collected = await fal.collect!(first.pending!);
+    expect(collected.pending).toBeUndefined();
+    expect(collected.artifacts.map((artifact) => artifact.uri)).toEqual(['https://cdn.example/generated.png']);
   });
 
-  test('keeps oversized generated artifacts as observable remote references', async () => {
-    process.env.FAL_KEY = 'test-key';
-    const calls = installFalFetchStub(async (_input, init) => {
-      expect(init?.method).toBe('HEAD');
-      return new Response(null, {
-        status: 200,
-        headers: {
-          'Content-Length': '6000000',
-          'Content-Type': 'image/png',
-        },
-      });
-    });
+  test('a collect request never sends the key to a queue address outside the vendor queue host', async () => {
+    process.env.FAL_KEY = 'synthetic-key';
+    const calls = stubFetch(() => Response.json({ status: 'COMPLETED' }));
+    await expect(provider('fal').collect!({
+      providerId: 'fal',
+      taskId: 'req-1',
+      resume: { statusUrl: 'https://evil.example/status', responseUrl: 'https://evil.example/result', output: 'image' },
+    })).rejects.toThrow('outside');
+    expect(calls).toHaveLength(0);
+  });
 
-    const result = await getFalProvider().generate!({
-      prompt: 'a large image',
-      outputMimeType: 'image/png',
-      options: { image: true },
-      metadata: {},
-    });
+  test('a video-only provider refuses an image request before anything is sent', async () => {
+    process.env.RUNWAYML_API_SECRET = 'synthetic-key';
+    const calls = stubFetch(() => Response.json({ id: 'task-1' }));
+    await expect(provider('runway').generate!({ prompt: 'a cat', outputMimeType: 'image/png', metadata: {} }))
+      .rejects.toMatchObject({ code: 'MEDIA_OUTPUT_UNSUPPORTED' });
+    expect(calls).toHaveLength(0);
+  });
 
-    const artifact = result.artifacts[0]!;
-    expect(artifact.uri).toBe('https://cdn.example/generated.png');
-    expect(artifact.dataBase64).toBeUndefined();
-    expect(artifact.metadata).toMatchObject({
-      source: 'media-generation-provider',
-      sourceProviderId: 'fal',
-      sourceUrl: 'https://cdn.example/generated.png',
-      sourceQuality: 'provider-output-url',
-      inlined: false,
-      retrievalMethod: 'remote-reference',
-      headProbe: {
-        attempted: true,
-        ok: true,
-        status: 200,
-        contentLength: 6000000,
-        contentType: 'image/png',
-      },
-    });
-    expect(calls.filter((call) => call.url === 'https://cdn.example/generated.png' && call.method === 'GET')).toHaveLength(0);
+  test('fal uses the model asked for an image, and Runway uses an image given by URL', async () => {
+    process.env.FAL_KEY = 'synthetic-key';
+    process.env.RUNWAYML_API_SECRET = 'synthetic-key';
+    const calls = stubFetch((url) => url.includes('runwayml') ? Response.json({ id: 'task-1' }) : Response.json(falSubmitted));
+    await provider('fal').generate!({ prompt: 'a cat', outputMimeType: 'image/png', modelId: 'fal-ai/recraft-v3', options: { waitSeconds: 0 }, metadata: {} });
+    await provider('runway').generate!({ prompt: 'a cat', options: { imageUrl: 'https://cdn.example/cat.png', waitSeconds: 0 }, metadata: {} });
+    expect(calls[0]!.url).toBe('https://queue.fal.run/fal-ai/recraft-v3');
+    expect(calls[1]!.url).toBe('https://api.dev.runwayml.com/v1/image_to_video');
+    expect(JSON.parse(calls[1]!.body!)).toMatchObject({ promptImage: 'https://cdn.example/cat.png' });
   });
 });

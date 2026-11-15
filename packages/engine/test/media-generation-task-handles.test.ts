@@ -95,26 +95,3 @@ test('a Comfy job that failed is reported as failed on the first poll instead of
   expect(error.message).toBe('Comfy generation failed');
   expect((error as unknown as { providerTask: { taskId: string } }).providerTask.taskId).toBe('prompt-1');
 });
-
-test('an output without a content-length is not buffered past the inline limit', async () => {
-  process.env['FAL_KEY'] = 'synthetic-key';
-  let read = 0;
-  stubFetch((url, method) => {
-    if (url.includes('/status/')) return Response.json({ status: 'COMPLETED' });
-    if (url.includes('/result/')) return Response.json({ image: { url: 'https://cdn.example/huge.png' } });
-    if (url.includes('cdn.example')) {
-      if (method === 'HEAD') throw new Error('no HEAD');
-      return new Response(new ReadableStream({ pull(controller) {
-        if (read >= 20) { controller.close(); return; }
-        read += 1; controller.enqueue(new Uint8Array(1_000_000));
-      } }), { headers: { 'Content-Type': 'image/png' } });
-    }
-    return Response.json(submitted);
-  });
-  const result = await provider('fal').generate!(request);
-  const artifact = result.artifacts[0]!;
-  expect(artifact.dataBase64).toBeUndefined();
-  expect(artifact.metadata).toMatchObject({ inlined: false, retrievalMethod: 'remote-reference' });
-  // Reading stopped soon after the 5 MB limit rather than draining the whole body.
-  expect(read).toBeLessThan(20);
-});

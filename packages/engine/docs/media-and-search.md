@@ -97,6 +97,24 @@ Built-in media registration wires OpenAI, Gemini, Anthropic, local image
 understanding, built-in image understanding, and generation providers into a
 single registry.
 
+The built-in image understanding provider, which answers a request that names
+no provider, reads an image with the session's current model only. When that
+model does not accept images it refuses with `MEDIA_MODEL_CANNOT_READ_IMAGES`
+and names the models that do; the image is not sent to another vendor. Name a
+model (`modelId`) or a scoped provider to use another one.
+
+Each generation provider states what it makes: BytePlus, Runway and Alibaba
+make video; fal and Comfy make images and video. A lookup for one kind of
+output considers only providers that make it, and a provider refuses a request
+for a kind it does not make (`MEDIA_OUTPUT_UNSUPPORTED`) before anything is
+sent. The model asked for is the model used, and a reference image or video
+given by URL or as an artifact chooses the matching endpoint. Finished outputs
+are streamed into the artifact store. A job the provider accepted but had not
+finished when the wait ended (`options.waitSeconds`, ten minutes by default;
+brief poll failures such as a 429 or 5xx are retried) comes back with
+`pending: { providerId, taskId, resume }`; passing that task to the registry's
+`collect` finishes it later without submitting, or paying for, a new job.
+
 | Method | What it does |
 | --- | --- |
 | `media.providers.list` | Return registered media provider capabilities |

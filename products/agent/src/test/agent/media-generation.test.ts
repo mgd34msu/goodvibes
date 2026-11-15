@@ -115,6 +115,6 @@ describe('Agent media generation', () => {
 
     await expect(generateAgentMedia(registry, artifactStore(), {
       prompt: 'Create an image',
-    })).rejects.toThrow('No media generation provider is available');
+    })).rejects.toMatchObject({ code: 'PROVIDER_NOT_CONFIGURED' });
   });
 });

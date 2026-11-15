@@ -9,6 +9,7 @@ import type {
 } from './provider-registry.js';
 import { toRecord } from '../utils/record-coerce.js';
 import { resolveModelReference } from '../providers/model-id-resolution.js';
+import { RefusalError, refusal } from '@goodvibes-jev/engine/errors';
 
 interface StructuredImageAnalysis {
   description?: string | undefined;
@@ -22,6 +23,16 @@ interface ImageUnderstandingScope {
   readonly label: string;
   readonly allowProviderIds?: readonly string[] | undefined;
   readonly requireLocal?: boolean | undefined;
+  /**
+   * The unscoped default reads images with the session's current model only;
+   * this names the model it may use instead (a setting the owner chose).
+   */
+  readonly visionFallbackModel?: (() => string | undefined) | undefined;
+}
+
+/** Scoped variants name a vendor or local runtime the caller chose; the default names none. */
+function isUnscoped(scope: ImageUnderstandingScope): boolean {
+  return (scope.allowProviderIds?.length ?? 0) === 0 && !scope.requireLocal;
 }
 
 type ImageModelRegistry = Pick<ProviderRegistry, 'getCurrentModel' | 'getForModel' | 'listModels' | 'describeRuntime'>;
@@ -92,27 +103,45 @@ async function resolveModel(
   modelId: string;
 }> {
   const models: readonly ModelDefinition[] = providerRegistry.listModels();
-  const resolveCandidate = async () => {
-    if (modelId) {
-      // Accepts either a provider-qualified registryKey or a bare model id,
-      // bare ids resolve via the shared resolver (unique -> auto-qualify;
-      // ambiguous or unknown -> a rich error naming real candidates).
-      const registryKey = resolveModelReference(modelId, models);
-      const explicit = models.find((model) => model.registryKey === registryKey);
-      if (!explicit) {
-        throw new Error(`Unknown model for media analysis: ${modelId}`);
-      }
-      if (!explicit.capabilities.multimodal) {
-        throw new Error(`Model does not support image input: ${explicit.displayName}`);
-      }
-      if (!await modelMatchesScope(providerRegistry, toRecord(explicit), scope)) {
-        throw new Error(`Model does not match media provider scope ${scope.label}: ${explicit.displayName}`);
-      }
-      return explicit;
+  const named = async (requested: string) => {
+    // Accepts either a provider-qualified registryKey or a bare model id,
+    // bare ids resolve via the shared resolver (unique -> auto-qualify;
+    // ambiguous or unknown -> a rich error naming real candidates).
+    const registryKey = resolveModelReference(requested, models);
+    const explicit = models.find((model) => model.registryKey === registryKey);
+    if (!explicit) {
+      throw new Error(`Unknown model for media analysis: ${requested}`);
     }
+    if (!explicit.capabilities.multimodal) {
+      throw new Error(`Model does not support image input: ${explicit.displayName}`);
+    }
+    if (!await modelMatchesScope(providerRegistry, toRecord(explicit), scope)) {
+      throw new Error(`Model does not match media provider scope ${scope.label}: ${explicit.displayName}`);
+    }
+    return explicit;
+  };
+  const resolveCandidate = async () => {
+    if (modelId) return named(modelId);
     const current = providerRegistry.getCurrentModel();
     if (current.capabilities.multimodal && await modelMatchesScope(providerRegistry, toRecord(current), scope)) {
       return current;
+    }
+    if (isUnscoped(scope)) {
+      // The image goes only where the owner pointed: the current model, or the fallback he set.
+      const fallback = scope.visionFallbackModel?.()?.trim();
+      if (fallback) return named(fallback);
+      const choices = models.filter((model) => model.selectable && model.capabilities.multimodal).map((model) => model.registryKey);
+      throw new RefusalError(refusal({
+        code: 'MEDIA_MODEL_CANNOT_READ_IMAGES',
+        state: `the current model (${current.displayName}) does not accept images`,
+        reason: choices.length > 0
+          ? `The current model cannot read images; choose one of: ${choices.join(', ')}. The image was not sent anywhere`
+          : 'The current model cannot read images, and no registered model can; the image was not sent anywhere',
+        next: choices.length > 0
+          ? ['Pass modelId naming one of them, or switch the session to one with /model']
+          : ['Add a provider whose models accept images, then switch to one with /model'],
+        status: 409,
+      }));
     }
     for (const candidate of models) {
       if (!candidate.selectable || !candidate.capabilities.multimodal) continue;
@@ -184,6 +213,7 @@ async function analyzeWithScope(
   const response = await selected.provider.chat({
     model: selected.modelId,
     messages,
+    signal: request.signal,
   });
 
   const structured = parseStructuredAnalysis(response.content);
@@ -228,6 +258,24 @@ function createScopedImageUnderstandingProvider(
     capabilities: ['understand'],
     async status(): Promise<MediaProviderStatus> {
       let available = false;
+      if (isUnscoped(scope)) {
+        const current = providerRegistry.getCurrentModel();
+        const fallback = scope.visionFallbackModel?.()?.trim();
+        available = current.capabilities.multimodal || Boolean(fallback);
+        return {
+          id: scope.providerId,
+          label: scope.label,
+          state: available ? 'healthy' : 'unconfigured',
+          capabilities: ['understand'],
+          configured: available,
+          detail: current.capabilities.multimodal
+            ? `Reads images with the current model (${current.displayName}).`
+            : fallback
+              ? `The current model cannot read images; reads them with the configured fallback ${fallback}.`
+              : `The current model (${current.displayName}) cannot read images; switch to one that can, or name a model per request.`,
+          metadata: {},
+        };
+      }
       for (const model of providerRegistry.listModels()) {
         if (!model.selectable || !model.capabilities.multimodal) continue;
         if (await modelMatchesScope(providerRegistry, toRecord(model), scope)) {
@@ -254,10 +302,12 @@ function createScopedImageUnderstandingProvider(
 export function createBuiltinImageUnderstandingProvider(
   providerRegistry: ImageModelRegistry,
   artifactStore: Pick<ArtifactStore, 'readContent'>,
+  options: { readonly visionFallbackModel?: (() => string | undefined) | undefined } = {},
 ): MediaProvider {
   return createScopedImageUnderstandingProvider(providerRegistry, {
     providerId: 'builtin:image-understanding',
     label: 'Built-in Image Understanding',
+    visionFallbackModel: options.visionFallbackModel,
   }, artifactStore);
 }
 

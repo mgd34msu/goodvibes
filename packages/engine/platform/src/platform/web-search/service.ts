@@ -1,6 +1,7 @@
 import { FetchRuntimeService, type FetchRuntimeDeps } from '../tools/fetch/index.js';
 import type { FetchExtractMode } from '../tools/fetch/schema.js';
 import { WebSearchProviderRegistry } from './provider-registry.js';
+import { RefusalError, refusal } from '@goodvibes-jev/engine/errors';
 import type {
   WebSearchEvidence,
   WebSearchProvider,
@@ -78,17 +79,27 @@ export class WebSearchService {
     const provider = this.registry.find(request.providerId);
     if (!provider) {
       const ids = this.registry.list().map((entry) => entry.id).join(', ');
-      throw Object.assign(new Error(request.providerId
-        ? `Web search provider unavailable: ${request.providerId}. Registered providers: ${ids || 'none'}.`
-        : 'No web search provider is registered'), { status: 400 });
+      throw new RefusalError(refusal({
+        code: 'WEB_SEARCH_PROVIDER_UNKNOWN',
+        state: request.providerId ? `no web search provider is registered as ${request.providerId}` : 'no web search provider is registered',
+        reason: request.providerId
+          ? `Web search provider unavailable: ${request.providerId}. Registered providers: ${ids || 'none'}.`
+          : 'No web search provider is registered',
+        next: [ids ? `Pass providerId as one of: ${ids}, or leave it out` : 'Register a web search provider'],
+        status: 400,
+      }));
     }
+    // A provider without its credential would only fail at the vendor: say which ones can search now instead.
     const descriptor = provider.descriptor?.();
     if (descriptor && !descriptor.configured) {
       const configured = this.registry.list().filter((entry) => entry.configured).map((entry) => entry.id).join(', ');
-      throw Object.assign(
-        new Error(`Web search provider "${provider.id}" is not configured. ${descriptor.note ?? ''} Configured providers: ${configured || 'none'}.`.replace(/\s+/g, ' ')),
-        { status: 400 },
-      );
+      throw new RefusalError(refusal({
+        code: 'PROVIDER_NOT_CONFIGURED',
+        state: `web search provider ${provider.id} has no credential`,
+        reason: `Web search provider "${provider.id}" is not configured. ${descriptor.note ?? ''} Configured providers: ${configured || 'none'}.`.replace(/\s+/g, ' '),
+        next: [configured ? `Pass providerId as one of: ${configured}, or leave it out` : (descriptor.note ?? `Configure ${provider.id}`)],
+        status: 400,
+      }));
     }
 
     const verbosity = request.verbosity ?? 'snippets';

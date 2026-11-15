@@ -1,29 +1,31 @@
 import type { CommandRegistry } from '../command-registry.ts';
+import type { MediaGenerationResult, MediaProviderTask } from '@goodvibes-jev/engine/platform/platform/media';
 import { redactSensitiveDataAsync, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+
+const USAGE = 'Usage: /imagine <prompt>  |  /imagine --collect <provider> <task-id> [key=value ...]';
+
+function collectCommand(task: MediaProviderTask): string {
+  const resume = Object.entries(task.resume ?? {}).map(([key, value]) => ` ${key}=${value}`).join('');
+  return `/imagine --collect ${task.providerId} ${task.taskId}${resume}`;
+}
 
 /**
  * registerImageRuntimeCommands - `/imagine <prompt>`.
  *
- * Named 'imagine', not 'image', `/image <path> [prompt]` already exists
- * (local-runtime.ts) and does something entirely different (attach a local
- * image file to the next message). Re-verified against the current registry
- * before wiring this in: the brief that scoped this command was written
- * before checking for the collision.
+ * Named 'imagine', not 'image': `/image <path> [prompt]` (local-runtime.ts)
+ * attaches a local image file to the next message.
  *
- * First production caller of MediaProviderRegistry.generate(), the platform
- * plumbing existed with zero non-test call sites before this command.
- * findProvider('generate') returns whichever generation-capable provider is
- * configured; when none are, the command prints the registry's own
- * per-provider status (id/state/detail) verbatim, those detail strings
- * already name the exact env var per builtin provider
- * (builtin-generation-providers.ts's buildStatus()), so this command never
- * has to (and never should) guess or hardcode an env-var name itself.
+ * The provider is chosen among those that make images, so a configured video
+ * provider is never sent an image request. When none is configured the command
+ * prints the registry's own per-provider status, whose detail strings name each
+ * provider's key, so this command never names one itself. A job still running
+ * when the wait ends is reported with the command that collects it later.
  */
 export function registerImageRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
     name: 'imagine',
     description: 'Generate an image from a prompt via a configured media provider',
-    usage: '<prompt>',
+    usage: '<prompt> | --collect <provider> <task-id> [key=value ...]',
     argsHint: '<prompt>',
     async handler(args, ctx) {
       const mediaProviders = ctx.platform.mediaProviders;
@@ -33,56 +35,86 @@ export function registerImageRuntimeCommands(registry: CommandRegistry): void {
         return;
       }
 
-      const prompt = args.join(' ').trim();
-      if (!prompt) {
-        ctx.print('Usage: /imagine <prompt>');
-        return;
-      }
-
-      const provider = mediaProviders.findProvider('generate');
-      if (!provider?.generate) {
-        const statuses = await mediaProviders.status();
-        const generationStatuses = statuses.filter((status) => status.capabilities.includes('generate'));
-        const lines = ['No image-generation provider is configured.', ''];
-        if (generationStatuses.length === 0) {
-          lines.push('No media-generation providers are registered in this build.');
-        } else {
-          for (const status of generationStatuses) {
-            lines.push(`  ${status.id} (${status.label}): ${status.state}${status.detail ? `; ${status.detail}` : ''}`);
-          }
+      let result: MediaGenerationResult;
+      let label: string;
+      if (args[0] === '--collect') {
+        const [, providerId, taskId, ...pairs] = args;
+        if (!providerId || !taskId) {
+          ctx.print(USAGE);
+          return;
         }
-        ctx.print(lines.join('\n'));
-        return;
+        const resume = Object.fromEntries(pairs.flatMap((pair) => {
+          const at = pair.indexOf('=');
+          return at > 0 ? [[pair.slice(0, at), pair.slice(at + 1)]] : [];
+        }));
+        label = mediaProviders.get(providerId)?.label ?? providerId;
+        try {
+          result = await mediaProviders.collect({ providerId, taskId, resume });
+        } catch (error) {
+          ctx.print(`Collecting ${providerId} task ${taskId} failed: ${await redactSensitiveDataAsync(summarizeError(error))}`);
+          return;
+        }
+      } else {
+        const prompt = args.join(' ').trim();
+        if (!prompt) {
+          ctx.print(USAGE);
+          return;
+        }
+        const provider = await mediaProviders.resolveProvider('generate', undefined, { output: 'image' });
+        if (!provider?.generate) {
+          const statuses = await mediaProviders.status();
+          const generationStatuses = statuses.filter((status) => status.capabilities.includes('generate'));
+          const lines = ['No configured provider makes images.', ''];
+          if (generationStatuses.length === 0) {
+            lines.push('No media-generation providers are registered in this build.');
+          } else {
+            for (const status of generationStatuses) {
+              const outputs = Array.isArray(status.metadata['outputs']) ? ` [makes ${(status.metadata['outputs'] as unknown[]).join(', ')}]` : '';
+              lines.push(`  ${status.id} (${status.label})${outputs}: ${status.state}${status.detail ? `; ${status.detail}` : ''}`);
+            }
+          }
+          ctx.print(lines.join('\n'));
+          return;
+        }
+        label = provider.label;
+        try {
+          result = await provider.generate({
+            prompt,
+            outputMimeType: 'image/png',
+            metadata: { source: 'tui-image-command' },
+          });
+        } catch (error) {
+          // A provider can echo the request's Authorization value in its error body.
+          ctx.print(`Image generation failed: ${await redactSensitiveDataAsync(summarizeError(error))}`);
+          return;
+        }
       }
 
-      let result: Awaited<ReturnType<NonNullable<typeof provider.generate>>>;
-      try {
-        result = await provider.generate({
-          prompt,
-          outputMimeType: 'image/png',
-          metadata: { source: 'tui-image-command' },
-        });
-      } catch (error) {
-        // A provider can echo the request's Authorization value in its error body.
-        ctx.print(`Image generation failed: ${await redactSensitiveDataAsync(summarizeError(error))}`);
+      if (result.pending) {
+        ctx.print([
+          `${label} accepted the job (task ${result.pending.taskId}) and is still generating it; it is paid for and keeps running.`,
+          `Collect it with: ${collectCommand(result.pending)}`,
+        ].join('\n'));
         return;
       }
-
       if (result.artifacts.length === 0) {
-        ctx.print(`${provider.label} returned no artifacts for this prompt.`);
+        ctx.print(`${label} returned no artifacts for this prompt.`);
         return;
       }
 
       // The provider has produced (and may have charged for) every artifact by now, so a
       // failure to keep one must not hide the others: each is stored on its own and reported.
-      const lines = [`Generated ${result.artifacts.length} artifact(s) via ${provider.label} (${result.providerId}).`];
+      const lines = [`Generated ${result.artifacts.length} artifact(s) via ${label} (${result.providerId}).`];
       let storeFailures = 0;
       for (const [index, artifact] of result.artifacts.entries()) {
         if (!artifact.mimeType.startsWith('image/')) {
-          lines.push(`  Note: ${provider.label} produced ${artifact.mimeType}, not an image; no image-capable provider is configured in this build.`);
+          lines.push(`  Note: ${label} produced ${artifact.mimeType}, not an image.`);
         }
         try {
-          if (artifact.dataBase64) {
+          if (artifact.artifactId && typeof artifact.sizeBytes === 'number') {
+            // Built-in providers stream their outputs into the artifact store themselves.
+            lines.push(`  artifact: ${artifact.artifactId} (${artifact.mimeType}, ${artifact.sizeBytes} bytes)`);
+          } else if (artifact.dataBase64) {
             const descriptor = await artifactStore.create({
               dataBase64: artifact.dataBase64,
               mimeType: artifact.mimeType,
@@ -91,24 +123,17 @@ export function registerImageRuntimeCommands(registry: CommandRegistry): void {
             });
             lines.push(`  artifact: ${descriptor.id} (${descriptor.mimeType}, ${descriptor.sizeBytes} bytes)`);
           } else if (artifact.uri) {
-            // Design note: this is the first production caller of generate(), and
-            // returned artifacts may be provider-hosted remote URLs rather than
-            // inline bytes. There is no existing precedent for whether to eagerly
-            // download remote-only output into ArtifactStore, and doing so
-            // unconditionally would turn a text command into an unbounded
-            // background fetch of arbitrary provider-hosted content. Conservative
-            // default: store a small JSON pointer record (not the media bytes) so
-            // the generation is still discoverable via the artifact store, and
-            // render the URL directly so the result stays immediately usable.
+            // A provider-hosted link expires, so the bytes are kept: the store fetches public addresses only.
             const descriptor = await artifactStore.create({
-              text: JSON.stringify({ remoteUrl: artifact.uri, mimeType: artifact.mimeType, providerId: result.providerId }, null, 2),
-              mimeType: 'application/json',
-              filename: `${artifact.filename ?? 'generated-image'}.reference.json`,
+              uri: artifact.uri,
               sourceUri: artifact.uri,
-              metadata: { ...artifact.metadata, generatedBy: result.providerId, remote: true },
+              mimeType: artifact.mimeType,
+              filename: artifact.filename ?? 'generated-image',
+              acquisitionMode: 'remote-fetch',
+              fetchMode: 'public-only',
+              metadata: { ...artifact.metadata, generatedBy: result.providerId },
             });
-            lines.push(`  artifact: ${descriptor.id} (remote reference; not downloaded)`);
-            lines.push(`  url: ${artifact.uri}`);
+            lines.push(`  artifact: ${descriptor.id} (${descriptor.mimeType}, ${descriptor.sizeBytes} bytes)`);
           } else {
             lines.push('  artifact: (no retrievable content returned)');
           }

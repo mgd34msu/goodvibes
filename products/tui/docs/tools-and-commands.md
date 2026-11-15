@@ -274,7 +274,7 @@ Representative slash-command families, with a one-line summary of each:
 | `/session` | Session lifecycle and orchestration: list, resume, fork, save, export, and cross-session task handoff |
 | `/work-plan` | Track a persistent, workspace-scoped work plan |
 | `/search` | Provider-backed web search with ranked results and source labels |
-| `/imagine` | Generate an image from a prompt through a configured media provider |
+| `/imagine` | Generate an image from a prompt through a configured provider that makes images, or collect a job still running |
 | `/codebase` | Build, inspect, and search the repo source-tree code index |
 | `/workstream` | Author and oversee multi-phase agent workstreams (orchestration engine) |
 | `/checkpoint` | Create a manual workspace checkpoint for forensic retention |
@@ -288,7 +288,7 @@ Composer capture markers: a single line beginning with `#` saves the rest as a s
 
 `/search <query> [--limit <n>]` runs a provider-backed web search directly (bypassing the agent-tool JSON wrapper) and renders ranked results, an instant answer, and the source label into the transcript; it degrades honestly using the web-search service's own status note.
 
-`/imagine <prompt>` is the first production caller of the media-provider registry's image generation. On success it persists the artifact (inline bytes stored directly; a remote-URL-only result is stored as a small JSON pointer record rather than eagerly fetched), and prints the registry's own per-provider status (naming the exact env var) when no image-capable provider is configured. (`/image` is a different, pre-existing command; it attaches a local image file to the next message for multimodal analysis.)
+`/imagine <prompt>` generates an image through the first configured provider that makes images; a provider that only makes video is never sent the request. Built-in providers stream the result into the artifact store, so the saved image keeps opening after the provider's own link expires. When no configured provider makes images, it prints each generation provider's status, what it makes, and the key it needs. A job the provider accepted but had not finished when the wait ended is reported with the command that collects it later: `/imagine --collect <provider> <task-id> [key=value ...]`. (`/image` is a different command; it attaches a local image file to the next message for multimodal analysis.)
 
 `/session` is the single front-door for all session work, split across two domains. The lifecycle subcommands operate on sessions themselves:
 

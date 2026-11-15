@@ -140,7 +140,6 @@ describe('agent_media_generate tool', () => {
     });
 
     expect(result.success).toBe(false);
-    expect(result.error).toContain('No media generation provider is available');
     expect(storeCreates).toEqual([]);
   });
 

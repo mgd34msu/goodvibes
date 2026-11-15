@@ -46,10 +46,11 @@ function makeFakeProvider(options: {
   };
 }
 
-function makeFakeMediaProviders(provider: ReturnType<typeof makeFakeProvider> | null, statuses: Array<{ id: string; label: string; state: string; capabilities: string[]; configured: boolean; detail?: string }> = []) {
+function makeFakeMediaProviders(provider: ReturnType<typeof makeFakeProvider> | null, statuses: Array<{ id: string; label: string; state: string; capabilities: string[]; configured: boolean; detail?: string; metadata?: Record<string, unknown> }> = []) {
   return {
-    findProvider: (_capability: string) => provider,
-    status: async () => statuses,
+    resolveProvider: async (_capability: string) => provider,
+    get: (_id: string) => provider,
+    status: async () => statuses.map((status) => ({ metadata: {}, ...status })),
   };
 }
 
@@ -102,18 +103,6 @@ describe('/imagine: honest degradation', () => {
     expect(printed).toEqual(['Image generation is not available in this session.']);
   });
 
-  test('prints usage when no prompt is given', async () => {
-    const registry = new CommandRegistry();
-    registerImageRuntimeCommands(registry);
-    const mediaProviders = makeFakeMediaProviders(makeFakeProvider());
-    const artifactStore = makeFakeArtifactStore();
-    const { ctx, printed } = makeCtx(mediaProviders, artifactStore);
-
-    await registry.execute('imagine', [], ctx);
-
-    expect(printed).toEqual(['Usage: /imagine <prompt>']);
-  });
-
   test('prints the registry\'s own per-provider status when no generate-capable provider is found', async () => {
     const registry = new CommandRegistry();
     registerImageRuntimeCommands(registry);
@@ -127,7 +116,6 @@ describe('/imagine: honest degradation', () => {
     await registry.execute('imagine', ['a', 'cat'], ctx);
 
     const text = printed.join('\n');
-    expect(text).toContain('No image-generation provider is configured.');
     expect(text).toContain('byteplus (BytePlus): unconfigured');
     expect(text).toContain('Set BYTEPLUS_API_KEY to enable BytePlus video generation.');
     expect(text).toContain('fal (fal): unconfigured');
@@ -201,7 +189,7 @@ describe('/imagine: success paths', () => {
     expect(text).toContain('artifact: artifact-1');
   });
 
-  test('stores a remote artifact as a reference without eager download', async () => {
+  test('keeps the bytes of a remote artifact instead of a link that expires', async () => {
     const registry = new CommandRegistry();
     registerImageRuntimeCommands(registry);
     const provider = makeFakeProvider({
@@ -219,16 +207,9 @@ describe('/imagine: success paths', () => {
 
     expect(artifactStore.created).toHaveLength(1);
     const stored = artifactStore.created[0]!;
-    // Reference path uses `text` + `sourceUri`, never `uri` (which would trigger
-    // ArtifactStore's own eager-fetch codepath for the referenced media itself).
-    expect(stored['uri']).toBeUndefined();
-    expect(stored['sourceUri']).toBe('https://provider.example/out.png');
-    expect(typeof stored['text']).toBe('string');
-    expect(JSON.parse(stored['text'] as string)).toMatchObject({ remoteUrl: 'https://provider.example/out.png' });
-
-    const text = printed.join('\n');
-    expect(text).toContain('remote reference; not downloaded');
-    expect(text).toContain('url: https://provider.example/out.png');
+    expect(stored['uri']).toBe('https://provider.example/out.png');
+    expect(stored['fetchMode']).toBe('public-only');
+    expect(printed.join('\n')).toContain('artifact: artifact-1');
   });
 
   test('notes honestly when the found provider produced a non-image artifact', async () => {

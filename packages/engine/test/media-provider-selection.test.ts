@@ -32,3 +32,37 @@ test('an unscoped generation lookup skips providers that are not configured', ()
 test('an explicit provider id is still honoured even when it is not configured', () => {
   expect(builtins().findProvider('generate', 'byteplus')?.id).toBe('byteplus');
 });
+
+test('with only a video provider configured, an image request finds no provider', async () => {
+  process.env['RUNWAYML_API_SECRET'] = 'synthetic-key';
+  const registry = builtins();
+  expect(registry.findProvider('generate', undefined, { output: 'image' })).toBeNull();
+  expect(await registry.resolveProvider('generate', undefined, { output: 'image' })).toBeNull();
+  expect(registry.findProvider('generate', undefined, { output: 'video' })?.id).toBe('runway');
+});
+
+test('an unscoped image lookup reads no model catalogue', () => {
+  let listed = 0;
+  const registry = new MediaProviderRegistry();
+  ensureBuiltinMediaProviders(registry, { readContent: async () => { throw new Error('not used'); } } as never,
+    { ...anthropicOnly, listModels: () => { listed += 1; return anthropicOnly.listModels(); } } as never);
+  registry.findProvider('understand');
+  expect(listed).toBe(0);
+});
+
+test('an image is not sent to another vendor when the current model cannot read images', async () => {
+  let chats = 0;
+  const vision = { provider: 'openai', registryKey: 'openai:vision', id: 'vision', displayName: 'Vision', selectable: true, capabilities: { multimodal: true } };
+  const textOnly = { provider: 'local', registryKey: 'local:text', id: 'text', displayName: 'Text', selectable: true, capabilities: { multimodal: false } };
+  const registry = new MediaProviderRegistry();
+  ensureBuiltinMediaProviders(registry, { readContent: async () => { throw new Error('not used'); } } as never, {
+    describeRuntime: async () => null,
+    getCurrentModel: () => textOnly,
+    getForModel: () => ({ chat: async () => { chats += 1; return { content: '{}' }; } }),
+    listModels: () => [textOnly, vision],
+  } as never);
+  const reader = registry.findProvider('understand')!;
+  await expect(reader.analyze!({ artifact: { mimeType: 'image/png', dataBase64: 'AQID', metadata: {} } }))
+    .rejects.toMatchObject({ code: 'MEDIA_MODEL_CANNOT_READ_IMAGES' });
+  expect(chats).toBe(0);
+});

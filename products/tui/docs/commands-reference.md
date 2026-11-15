@@ -248,7 +248,7 @@ GoodVibes ships **163** built-in slash commands across **75** categories. Every 
 
 | Command | Aliases | Usage | Description |
 | --- | --- | --- | --- |
-| `/imagine` | None | `<prompt>` | Generate an image from a prompt via a configured media provider |
+| `/imagine` | None | `<prompt>` \| `--collect <provider> <task-id> [key=value ...]` | Generate an image from a prompt via a configured provider that makes images, or collect a job that was still running |
 
 ## Incidents
 

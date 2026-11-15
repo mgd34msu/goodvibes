@@ -458,6 +458,7 @@ export class DaemonSurfaceActionHelper {
     const consumed = await tryResolveApprovalReplyFromChannel(input, decision, {
       approvalBroker: this.context.approvalBroker,
       routeBindings: this.context.routeBindings,
+      sessions: this.context.sessionBroker,
     });
     if (consumed) {
       // The reply was a settled answer from the paired owner and resolved a

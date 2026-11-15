@@ -1,4 +1,3 @@
-import { readResponseSpool } from './response-spool.js';
 import { WebSocketOutbox } from './websocket-outbox.js';
 import { WebSocketMessageAssembler } from '@goodvibes-jev/engine/transport-core';
 import type { AgentManager } from '../tools/agent/index.js';
@@ -36,7 +35,7 @@ import { summarizeError } from '../utils/error-display.js';
 import { redactDiagnosticText } from '../utils/redaction.js';
 import { validateInvocationInput } from '../control-plane/invoke-input-validation.js';
 import { readGatewayVerbRefusal } from '../control-plane/routes/gateway-verb-error.js';
-import { buildErrorResponseBody } from './http/error-response.js';
+import { buildErrorResponseBody, jsonErrorResponse } from './http/error-response.js';
 import { EngineErrorCodes } from '@goodvibes-jev/engine/errors';
 import {
   type AuthenticatedPrincipal,
@@ -124,6 +123,39 @@ interface UpgradeCapableServer {
  * refused with an honest structured 503, never retained.
  */
 const WS_CALL_MAX_IN_FLIGHT = 256;
+/** Largest response body a call frame reads back into a string. */
+export const RESPONSE_TEXT_MAX_BYTES = 128 * 1024 * 1024;
+
+/**
+ * Read a finite response body as text in memory, refusing one over `maxBytes`
+ * while it streams, before it can fill the heap.
+ */
+export async function readResponseTextBounded(response: Response, signal?: AbortSignal, maxBytes = RESPONSE_TEXT_MAX_BYTES): Promise<string> {
+  signal?.throwIfAborted();
+  if (!response.body) return '';
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  const abort = () => { void reader.cancel(signal?.reason).catch(() => {}); };
+  signal?.addEventListener('abort', abort, { once: true });
+  let total = 0;
+  let text = '';
+  try {
+    for (;;) {
+      const chunk = await reader.read();
+      signal?.throwIfAborted();
+      if (chunk.done) break;
+      total += chunk.value.length;
+      if (total > maxBytes) throw new Error(`Response body is larger than the ${maxBytes} byte limit`);
+      text += decoder.decode(chunk.value, { stream: true });
+    }
+    return text + decoder.decode();
+  } finally {
+    signal?.removeEventListener('abort', abort);
+    await reader.cancel().catch(() => {});
+    reader.releaseLock();
+  }
+}
+
 /** The one envelope every refusal this dispatcher mints is written in. */
 function refusalBody(message: string, code: string, status: number): ReturnType<typeof buildErrorResponseBody> {
   return buildErrorResponseBody({ message, code, status });
@@ -171,6 +203,12 @@ interface GatewayMethodCallInput {
   };
   /** Synthesized dispatches behind this call. 0 = a real client. */
   readonly synthesizedDepth?: number | undefined;
+  /**
+   * The principal the caller already verified for this credential on this
+   * call (a socket compares its authentication revision first). Absent: the
+   * call authenticates the token once itself.
+   */
+  readonly principal?: AuthenticatedPrincipal | undefined;
 }
 
 export class DaemonControlPlaneHelper {
@@ -296,7 +334,8 @@ export class DaemonControlPlaneHelper {
       return Response.json({ error: 'Unauthorized' }, { status: 401 });
     }
     if (!principal.admin) {
-      return Response.json({ error: 'Admin role required' }, { status: 403 });
+      return jsonErrorResponse({ error: 'Admin role required', code: 'ADMIN_REQUIRED',
+        state: 'this credential is not an admin', next: ['Sign in with an admin account or use the operator token'] }, { status: 403 });
     }
     return null;
   }
@@ -431,7 +470,8 @@ export class DaemonControlPlaneHelper {
       return Response.json({ error: 'Unauthorized remote peer' }, { status: 401 });
     }
     if (scope && !auth.token.scopes.includes(scope)) {
-      return Response.json({ error: `Remote peer token missing required scope: ${scope}` }, { status: 403 });
+      return jsonErrorResponse({ error: `Remote peer token missing required scope: ${scope}`, code: 'MISSING_SCOPE',
+        state: `this peer token does not carry ${scope}`, next: [`Issue the peer a token with ${scope}`] }, { status: 403 });
     }
     return auth;
   }
@@ -462,6 +502,13 @@ export class DaemonControlPlaneHelper {
     });
   }
 
+  /**
+   * The grant is decided here, once, when the credential is authenticated, and
+   * carried on the request or socket. The default sets come from the catalog
+   * and are rebuilt only when a method or event is registered or removed. A
+   * pairing token or a user that stores its own scope list is granted that
+   * list, never more than the default set for its role.
+   */
   private principalFor(authenticated: AuthenticatedOperatorRequest): AuthenticatedPrincipal {
     if (authenticated.kind === 'shared-token') {
       return {
@@ -471,15 +518,17 @@ export class DaemonControlPlaneHelper {
         scopes: this.getGrantedGatewayScopes(true),
       };
     }
+    const stored = storedScopesOf(authenticated);
     if (authenticated.kind === 'pairing-token') {
       // A paired device is a distinct, per-token principal (`pairing:<id>`) with
-      // full operator authority, so step-up credentials key per token and a
-      // revoked device drops out cleanly.
+      // full operator authority unless its pairing stores a narrower list, so
+      // step-up credentials key per token and a revoked device drops out cleanly.
+      const scopes = narrowGrant(this.getGrantedGatewayScopes(true), stored);
       return {
         principalId: pairingPrincipalId(authenticated.tokenId),
         principalKind: 'token',
-        admin: true,
-        scopes: this.getGrantedGatewayScopes(true),
+        admin: stored === undefined || stored.includes('*'),
+        scopes,
       };
     }
     const admin = authenticated.roles.includes('admin');
@@ -487,7 +536,7 @@ export class DaemonControlPlaneHelper {
       principalId: authenticated.username,
       principalKind: 'user',
       admin,
-      scopes: this.getGrantedGatewayScopes(admin),
+      scopes: narrowGrant(this.getGrantedGatewayScopes(admin), stored),
     };
   }
 
@@ -550,7 +599,8 @@ export class DaemonControlPlaneHelper {
   }
 
   getGrantedGatewayScopes(includeWrite: boolean): readonly string[] {
-    return grantedGatewayScopes(this.context.gatewayMethods, includeWrite);
+    const catalog = this.context.gatewayMethods;
+    return typeof catalog.grantedScopes === 'function' ? catalog.grantedScopes(includeWrite) : grantedGatewayScopes(catalog, includeWrite);
   }
 
   validateGatewayInvocation(
@@ -601,7 +651,10 @@ export class DaemonControlPlaneHelper {
     const originAllowed = origin === null
       ? bearer
       : origin === url.origin || (origin !== 'null' && (this.context.allowedBrowserOrigins?.() ?? []).includes(origin));
-    if (!originAllowed) return Response.json({ error: 'ORIGIN_NOT_ALLOWED' }, { status: 403 });
+    if (!originAllowed) {
+      return jsonErrorResponse({ error: 'This browser origin is not allowed to connect', code: 'ORIGIN_NOT_ALLOWED',
+        state: `the origin ${origin ?? '(none)'} is not on the allowed list`, next: ['Open the web UI from the daemon address, or add this origin to controlPlane.cors.allowedOrigins'] }, { status: 403 });
+    }
     const rawDomains = url.searchParams.get('domains');
     const domains = parseRuntimeDomains(rawDomains);
     if (domains instanceof Response) return domains;
@@ -833,10 +886,19 @@ export class DaemonControlPlaneHelper {
         return;
       }
       const id = typeof frame.id === 'string' ? frame.id : `call-${Date.now()}`;
+      // The socket's principal stands while the authentication revision has
+      // not moved: one integer compare, no second authentication per call.
+      // A credential that no longer authenticates gets the call refused.
+      if (!this.socketPrincipalCurrent(ws)) {
+        this.sendFrame(ws, JSON.stringify({ type: 'response', id, ok: false, status: 401,
+          body: refusalBody('Operator authentication is no longer valid', 'UNAUTHORIZED', 401) }));
+        return;
+      }
       const methodId = typeof frame.methodId === 'string' ? frame.methodId : undefined;
       const response = methodId
         ? await this.invokeGatewayMethodCall({
             authToken: ws.data.authToken,
+            principal: { principalId: ws.data.principalId, principalKind: ws.data.principalKind, admin: ws.data.admin, scopes: ws.data.scopes },
             signal: this.socketSignal(ws),
             methodId,
             query: typeof frame.query === 'object' && frame.query !== null ? frame.query as Record<string, unknown> : undefined,
@@ -976,7 +1038,7 @@ export class DaemonControlPlaneHelper {
           body: { error: 'streaming-not-supported', message: 'This path serves an event stream; it cannot be invoked as a WS call. Subscribe via the events channel instead.' },
         };
       }
-      const raw = await readResponseSpool(response, signal);
+      const raw = await readResponseTextBounded(response, signal);
       let body: unknown = raw;
       if (raw.length > 0) {
         try {
@@ -1006,11 +1068,14 @@ export class DaemonControlPlaneHelper {
     const catalog = this.context.gatewayMethods, pairing = this.context.pairingTokens, users = this.context.userAuth;
     const captured = Object.freeze({ principalId: context?.principalId, principalKind: context?.principalKind,
       admin: context?.admin === true, scopes: Object.freeze([...(context?.scopes ?? [])]) });
+    // Authenticated again only when the credential owners' revision moved.
+    let known: RequestPrincipal | null | undefined;
     return (requiredScopes = []) => {
       if (this.context.gatewayMethods !== catalog || catalog.get(descriptor.id) !== descriptor
         || this.context.pairingTokens !== pairing || this.context.userAuth !== users) return false;
       if (descriptor.access === 'public' || descriptor.access === 'remote-peer') return true;
-      const fresh = this.describeAuthenticatedPrincipal(token);
+      if (!known || !isPrincipalCurrent(known, this.authRevision())) known = this.describeRequestPrincipal(token);
+      const fresh = known;
       return fresh !== null && fresh.principalId === captured.principalId && fresh.principalKind === captured.principalKind
         && requiredScopes.every(scope => (fresh.scopes.includes('*') || fresh.scopes.includes(scope))
           && (captured.scopes.includes('*') || captured.scopes.includes(scope)))
@@ -1030,17 +1095,19 @@ export class DaemonControlPlaneHelper {
     // principal's window.
     const descriptor = this.context.gatewayMethods.get(input.methodId);
     const authenticates = !!descriptor && descriptor.access !== 'public' && descriptor.access !== 'remote-peer';
-    const principalId = authenticates ? this.describeAuthenticatedPrincipal(input.authToken)?.principalId : undefined;
+    // One authentication per call, handed to the dispatch below.
+    const principal = authenticates ? input.principal ?? this.describeAuthenticatedPrincipal(input.authToken) : null;
+    const principalId = principal?.principalId;
     // Clients of one principal (every shared-token client, every login of one user) each get their own
     // window: a fresh request on one connection must not end what another connection just read.
     const connectionId = principalId === undefined ? undefined : input.context?.connectionId;
     const scope = principalId === undefined ? 'unauthenticated'
       : connectionId === undefined ? `principal:${principalId}` : `principal:${principalId}:connection:${connectionId}`;
     return withUntrustedContentScope(scope,
-      () => this.dispatchGatewayMethodCall(input));
+      () => this.dispatchGatewayMethodCall(input, principal));
   }
 
-  private async dispatchGatewayMethodCall(input: GatewayMethodCallInput): Promise<{ status: number; ok: boolean; body: unknown }> {
+  private async dispatchGatewayMethodCall(input: GatewayMethodCallInput, authenticated: AuthenticatedPrincipal | null): Promise<{ status: number; ok: boolean; body: unknown }> {
     const descriptor = this.context.gatewayMethods.get(input.methodId);
     if (!descriptor) {
       return {
@@ -1056,7 +1123,7 @@ export class DaemonControlPlaneHelper {
     // Remote peers have a separate credential verifier on their HTTP routes.
     let context = input.context;
     if (descriptor.access !== 'public' && descriptor.access !== 'remote-peer') {
-      const principal = this.describeAuthenticatedPrincipal(input.authToken);
+      const principal = authenticated;
       if (!principal || (context?.principalId !== undefined && context.principalId !== principal.principalId)
         || (context?.principalKind !== undefined && context.principalKind !== principal.principalKind)) {
         return { status: 401, ok: false, body: refusalBody('Operator authentication is no longer valid', 'UNAUTHORIZED', 401) };
@@ -1123,6 +1190,9 @@ export class DaemonControlPlaneHelper {
           body: input.body,
           query: input.query,
           signal: input.signal,
+          // A plain field, not built on first read: handlers refuse invocation
+          // fields that are accessors. For anything but a paired device's token
+          // it is a prefix test and null.
           nativeExecutionAuthority: this.createNativeExecutionAuthority(input.authToken, context?.scopes ?? []) ?? undefined,
           isAuthorized: this.retainGatewayAuthorization(input.authToken, descriptor, context),
           context: {
@@ -1146,7 +1216,7 @@ export class DaemonControlPlaneHelper {
               body: { error: 'streaming-not-supported', message: 'This method serves an event stream; it cannot be invoked as a WS call. Subscribe via the events channel instead.' },
             };
           }
-          const text = await readResponseSpool(body, input.signal);
+          const text = await readResponseTextBounded(body, input.signal);
           let responseBody: unknown = text || null;
           if (text.length > 0) {
             try {
@@ -1264,4 +1334,19 @@ function normalizeFrameDomains(values: readonly unknown[]): RuntimeEventDomain[]
     }, { status: 400 });
   }
   return [...new Set(domains)];
+}
+
+/** A scope list the credential stores for itself, when it carries one. */
+function storedScopesOf(authenticated: AuthenticatedOperatorRequest): readonly string[] | undefined {
+  // The credential owners add `scopes` to a pairing token or a user that was
+  // issued a narrower list; without one the role's default set applies.
+  const stored = (authenticated as AuthenticatedOperatorRequest & { readonly scopes?: readonly string[] | undefined }).scopes;
+  return Array.isArray(stored) ? stored : undefined;
+}
+
+/** The default grant, narrowed to a stored list. A stored list never widens it. */
+function narrowGrant(defaults: readonly string[], stored: readonly string[] | undefined): readonly string[] {
+  if (stored === undefined || stored.includes('*')) return defaults;
+  const allowed = new Set(stored);
+  return Object.freeze(defaults.filter(scope => allowed.has(scope)));
 }

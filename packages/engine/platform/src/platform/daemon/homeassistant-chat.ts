@@ -19,6 +19,8 @@ export interface HomeGraphGroundingReader {
 export const HOME_ASSISTANT_DEFAULT_REMOTE_SESSION_TTL_MS = 20 * 60_000;
 const MIN_REMOTE_SESSION_TTL_MS = 60_000;
 const MAX_REMOTE_SESSION_TTL_MS = 24 * 60 * 60_000;
+/** The longest a turn waits for home-graph grounding when the caller set no tighter deadline. */
+const HOME_GRAPH_GROUNDING_MAX_MS = 10_000;
 
 type JsonRecord = Record<string, unknown>;
 
@@ -99,8 +101,14 @@ export async function postHomeAssistantChatMessage(
     readonly onResolved?: ((resolution: HomeAssistantChatResolution) => void) | undefined;
   } = {},
 ): Promise<HomeAssistantChatPostResult> {
+  // One deadline covers grounding and the reply. Grounding is a read that
+  // runs beside the session resolution, outside the per-conversation chain,
+  // so a slow graph never holds the next utterance.
+  const deadlineAt = options.timeoutMs === undefined ? undefined : Date.now() + options.timeoutMs;
+  const grounding = resolveHomeGraphGrounding(runtime.homeGraph, input, deadlineAt);
   const resolution = await resolveHomeAssistantChatSession(runtime, input);
   options.onResolved?.(resolution);
+  const message = formatHomeAssistantUserMessage(input, await grounding);
   const clientId = options.clientId ?? `homeassistant:${input.surfaceId}:${input.conversationId}`;
   // No `ownerDirect` on either post below, deliberately. A Home Assistant
   // surface is a room: anyone within earshot of the speaker can address it, and
@@ -109,7 +117,7 @@ export async function postHomeAssistantChatMessage(
   // to, the window stays open and outward effects stay judged on derivation.
   // Wiring this honestly would need speaker identification, not a flag.
   if (options.wait === false) {
-    const messageId = await runtime.chatManager.postMessage(resolution.session.id, formatHomeAssistantUserMessage(input), clientId, {
+    const messageId = await runtime.chatManager.postMessage(resolution.session.id, message, clientId, {
       ...(options.onTurnEvent ? { onTurnEvent: options.onTurnEvent } : {}),
     });
     return { ...resolution, messageId };
@@ -117,10 +125,10 @@ export async function postHomeAssistantChatMessage(
   let cancelled = false;
   const reply = await runtime.chatManager.postMessageAndWaitForReply(
     resolution.session.id,
-    formatHomeAssistantUserMessage(input),
+    message,
     clientId,
     {
-      timeoutMs: options.timeoutMs,
+      timeoutMs: deadlineAt === undefined ? undefined : Math.max(1, deadlineAt - Date.now()),
       onTurnEvent: (event) => {
         if (event.type === 'turn.cancelled') cancelled = true;
         options.onTurnEvent?.(event);
@@ -142,9 +150,9 @@ const resolutionTails = new Map<string, Promise<unknown>>();
 
 /**
  * Runs `run` after every earlier call with the same key has settled. Resolving a
- * conversation's chat session reads the binding, awaits (grounding is a model
- * call), then creates a session and writes the binding back; two overlapping
- * calls would both see no session and leave the first turn in an orphan.
+ * conversation's chat session reads the binding, awaits, then creates a
+ * session and writes the binding back; two overlapping calls would both see no
+ * session and leave the first turn in an orphan.
  */
 function serializeResolution<T>(key: string, run: () => Promise<T>): Promise<T> {
   const previous = resolutionTails.get(key) ?? Promise.resolve();
@@ -205,8 +213,9 @@ async function resolveHomeAssistantChatSessionNow(
   const defaultProviderModel = runtime.resolveDefaultProviderModel?.() ?? null;
   const provider = input.providerId ?? defaultProviderModel?.provider;
   const model = input.modelId ?? defaultProviderModel?.model;
-  const grounding = await resolveHomeGraphGrounding(runtime.homeGraph, input);
-  const systemPrompt = buildHomeAssistantSystemPrompt(input, grounding);
+  // The prompt is stable for the conversation, so the provider's prompt cache
+  // holds across turns; per-turn grounding travels in the user message.
+  const systemPrompt = buildHomeAssistantSystemPrompt(input);
   const shouldCreate = !existing || existing.status === 'closed' || expired;
   const session = shouldCreate
     ? runtime.chatManager.createSession({
@@ -254,7 +263,7 @@ export function readHomeAssistantRemoteSessionTtlMs(
   );
 }
 
-export function buildHomeAssistantSystemPrompt(input: HomeAssistantChatInput, grounding?: string | undefined): string {
+export function buildHomeAssistantSystemPrompt(input: HomeAssistantChatInput): string {
   const contextLines = [
     `Conversation id: ${input.conversationId}`,
     `Surface id: ${input.surfaceId}`,
@@ -270,31 +279,36 @@ export function buildHomeAssistantSystemPrompt(input: HomeAssistantChatInput, gr
     'For weather questions, first look for Home Assistant weather entities or other relevant sensors before saying live weather is unavailable.',
     'Ask a concise follow-up only when Home Assistant does not expose enough information to answer safely.',
     contextLines.length ? `Home Assistant context:\n${contextLines.join('\n')}` : '',
-    grounding ? grounding : '',
   ].filter(Boolean).join('\n\n');
 }
 
 /**
  * Consult the pre-registered home-graph space for this turn and return a
- * grounding block to fold into the system prompt, or undefined when there is
- * nothing to add (no reader wired, no grounding reference, empty query, an
- * empty/failed answer). Honest: only the graph's own answer text is carried,
- * with its confidence, and any failure degrades to an ungrounded turn rather
- * than breaking the conversation.
+ * grounding block for the user message, or undefined when there is nothing to
+ * add (no reader wired, no grounding reference, empty query, an empty/failed
+ * answer). Grounding is a read: it never repairs extractions, refreshes device
+ * pages or queues enrichment (those stay with the admin home-graph routes),
+ * and it ends at the caller's deadline. Any failure degrades to an ungrounded
+ * turn rather than breaking the conversation.
  */
 async function resolveHomeGraphGrounding(
   reader: HomeGraphGroundingReader | undefined,
   input: HomeAssistantChatInput,
+  deadlineAt: number | undefined,
 ): Promise<string | undefined> {
   if (!reader || !input.grounding || !input.text.trim()) return undefined;
   const hasRef = readString(input.grounding.installationId) !== undefined
     || readString(input.grounding.knowledgeSpaceId) !== undefined;
   if (!hasRef) return undefined;
   try {
+    const remainingMs = deadlineAt === undefined ? HOME_GRAPH_GROUNDING_MAX_MS : deadlineAt - Date.now();
+    if (remainingMs <= 0) return undefined;
     const result = await reader.ask({
       query: input.text,
       mode: 'concise',
       includeSources: false,
+      readOnly: true,
+      timeoutMs: Math.min(remainingMs, HOME_GRAPH_GROUNDING_MAX_MS),
       ...(input.grounding.installationId ? { installationId: input.grounding.installationId } : {}),
       ...(input.grounding.knowledgeSpaceId ? { knowledgeSpaceId: input.grounding.knowledgeSpaceId } : {}),
     });
@@ -312,7 +326,7 @@ async function resolveHomeGraphGrounding(
   }
 }
 
-function formatHomeAssistantUserMessage(input: HomeAssistantChatInput): string {
+function formatHomeAssistantUserMessage(input: HomeAssistantChatInput, grounding?: string | undefined): string {
   const metadata = {
     source: 'homeassistant',
     messageId: input.messageId,
@@ -327,6 +341,7 @@ function formatHomeAssistantUserMessage(input: HomeAssistantChatInput): string {
   return [
     input.text,
     `Home Assistant metadata: ${JSON.stringify(metadata)}`,
+    ...(grounding ? [grounding] : []),
   ].join('\n\n');
 }
 

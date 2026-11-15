@@ -64,6 +64,15 @@ export function errorCode(error: unknown): string {
     || '';
 }
 
+/**
+ * The daemon's refusal of a non-admin credential on an admin-only route. Read
+ * from the machine code, so a refused origin or a missing scope (also 403)
+ * shows its own reason instead of "sign in as admin".
+ */
+export function isAdminRequiredError(error: unknown): boolean {
+  return errorCode(error) === 'ADMIN_REQUIRED';
+}
+
 export function isSessionNotFoundError(error: unknown): boolean {
   return errorCode(error) === 'SESSION_NOT_FOUND' || daemonRefusalValue(error)?.session_not_found === true;
 }

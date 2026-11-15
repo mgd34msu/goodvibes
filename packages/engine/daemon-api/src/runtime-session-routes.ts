@@ -110,7 +110,10 @@ async function callOrSessionClosed<T>(fn: () => Promise<T>): Promise<T | Respons
       return jsonErrorResponse({ error: closed.message ?? 'Unknown shared session', code: 'SESSION_NOT_FOUND' }, { status: closed.status ?? 404 });
     }
     if (closed.code === 'WORKSPACE_BUSY') {
-      return jsonErrorResponse({ error: closed.message ?? 'A workspace swap is in progress', code: 'WORKSPACE_BUSY', ...(typeof closed.retryAfterMs === 'number' ? { retryAfterMs: closed.retryAfterMs } : {}) }, { status: closed.status ?? 409 });
+      return jsonErrorResponse({ error: closed.message ?? 'A workspace swap is in progress', code: 'WORKSPACE_BUSY',
+        state: 'the daemon is switching to another workspace; the message was not recorded',
+        next: ['Send the message again once the swap has finished (about a second)'],
+        ...(typeof closed.retryAfterMs === 'number' ? { retryAfterMs: closed.retryAfterMs } : {}) }, { status: closed.status ?? 409 });
     }
     if (closed.code !== EngineErrorCodes.SESSION_CLOSED) throw err;
     return jsonErrorResponse({ error: 'Session is closed', code: EngineErrorCodes.SESSION_CLOSED }, { status: closed.status ?? 409 });

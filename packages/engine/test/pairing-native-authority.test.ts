@@ -217,27 +217,29 @@ describe('persisted paired native authority', () => {
   });
 
   test('live scopes are intersected with captured transport scope and checked again at launch', async () => {
-    const item = fixture(); let liveScopes = ['read:synthetic', 'write:synthetic'];
-    const catalog = spyOn(item.catalog, 'getAllScopes').mockImplementation(() => liveScopes);
-    try {
-      const capability = item.helper.createNativeExecutionAuthority(item.paired.token, ['write:synthetic'])!;
-      const expected = capability.current()!;
-      expect(expected.scopes).toEqual(['write:synthetic']);
-      liveScopes = ['read:synthetic'];
-      expect(capability.current()?.scopes).toEqual([]);
-      let launched = false;
-      await expect(capability.withCurrent(expected, () => { launched = true; })).rejects.toThrow('scopes');
-      expect(launched).toBe(false);
-      liveScopes = ['read:synthetic', 'write:synthetic', 'write:new'];
-      expect(capability.current()?.scopes).toEqual(['write:synthetic']);
-      await expect(capability.withCurrent(expected, async assertCurrent => {
-        await Promise.resolve();
-        liveScopes = ['read:synthetic'];
-        assertCurrent();
-        launched = true;
-      })).rejects.toThrow('scopes');
-      expect(launched).toBe(false);
-    } finally { catalog.mockRestore(); }
+    const item = fixture();
+    // The catalog is the one owner of which scopes exist; a method registered or removed changes them.
+    const declare = (id: string, scope: string) => item.catalog.register({ id, title: id, description: 'Fixture', category: 'fixture',
+      source: 'builtin', access: 'admin', transport: ['http'], scopes: [scope], inputSchema: { type: 'object' } });
+    let removeWrite = declare('synthetic.write', 'write:synthetic');
+    const capability = item.helper.createNativeExecutionAuthority(item.paired.token, ['write:synthetic'])!;
+    const expected = capability.current()!;
+    expect(expected.scopes).toEqual(['write:synthetic']);
+    removeWrite();
+    expect(capability.current()?.scopes).toEqual([]);
+    let launched = false;
+    await expect(capability.withCurrent(expected, () => { launched = true; })).rejects.toThrow('scopes');
+    expect(launched).toBe(false);
+    removeWrite = declare('synthetic.write', 'write:synthetic');
+    declare('synthetic.new', 'write:new');
+    expect(capability.current()?.scopes).toEqual(['write:synthetic']);
+    await expect(capability.withCurrent(expected, async assertCurrent => {
+      await Promise.resolve();
+      removeWrite();
+      assertCurrent();
+      launched = true;
+    })).rejects.toThrow('scopes');
+    expect(launched).toBe(false);
   });
 
   test('gateway handler gets only the transport-created capability and cannot inject one in payload', async () => {

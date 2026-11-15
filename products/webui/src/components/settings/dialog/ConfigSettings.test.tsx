@@ -83,8 +83,9 @@ mock.module("../../../lib/goodvibes", () => ({
       config: {
         get: () => {
           if (outcome === "admin-required") {
-            const err = new Error("Admin role required") as Error & { status?: number };
+            const err = new Error("Admin role required") as Error & { status?: number; body?: unknown };
             err.status = 403;
+            err.body = { error: "Admin role required", code: "ADMIN_REQUIRED" };
             return Promise.reject(err);
           }
           if (outcome === "network-error") {

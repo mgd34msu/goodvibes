@@ -123,7 +123,7 @@ describe('CredentialStatusPanel: degraded and refused reads', () => {
     ['a 503 CREDENTIAL_STORE_UNAVAILABLE', () => rejection(503, { error: 'Shared credential store unavailable', code: 'CREDENTIAL_STORE_UNAVAILABLE' })],
     ['a METHOD_NOT_FOUND from an older daemon', () => rejection(404, { error: 'Unknown gateway method', code: 'METHOD_NOT_FOUND' })],
     ['a transport failure', () => Promise.reject(new Error('fetch failed'))],
-    ['a 403 admin refusal', () => rejection(403, { error: 'Admin role required' })],
+    ['a 403 admin refusal', () => rejection(403, { error: 'Admin role required', code: 'ADMIN_REQUIRED' })],
   ] as const) {
     test(`${label} renders the degraded status and no credential rows`, async () => {
       _credentialsGet = impl as typeof _credentialsGet;

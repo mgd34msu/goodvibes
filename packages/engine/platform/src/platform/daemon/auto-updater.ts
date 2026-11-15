@@ -159,6 +159,11 @@ export interface DaemonAutoUpdaterOptions {
   readonly updateTimeoutMs?: number | undefined;
   /** The daemon's real activity signal: true only when NO work is in flight. */
   readonly isIdle: () => boolean;
+  /**
+   * Ids of the work keeping the daemon busy, read only when `isIdle` said no,
+   * so a waiting update can say what it waits for. Absent = not reported.
+   */
+  readonly describeActiveWork?: (() => readonly string[]) | undefined;
   readonly serviceActions: AutoUpdateServiceActions;
   readonly receipts: DaemonReceiptStore;
   readonly fetchImpl?: UpdateFetchLike | undefined;
@@ -202,7 +207,11 @@ export interface DaemonAutoUpdaterOptions {
   readonly alertAfterFailedChecks?: number | undefined;
   /** Quiet window after an update alert, so a persistent failure is one message, not one per hour. Default 12h. */
   readonly alertWindowMs?: number | undefined;
-  /** Unbroken failing time after which a network-shaped failure is reported too. Default 24h. */
+  /**
+   * Unbroken failing time after which a network-shaped failure is reported
+   * too, and how long a found update may wait for an idle moment before the
+   * owner is told what holds it. Default 24h.
+   */
   readonly persistentFailureMs?: number | undefined;
   readonly now?: (() => number) | undefined;
   readonly setTimer?: ((fn: () => void, ms: number) => ReturnType<typeof setTimeout>) | undefined;
@@ -244,6 +253,10 @@ export interface DaemonUpdateLoopSnapshot {
   readonly lastCheckFailure: string | null;
   /** A discovered release waiting for an idle moment, or null. */
   readonly pendingVersion: string | null;
+  /** When the waiting release first had to wait for active work (epoch ms), or null. */
+  readonly pendingSince?: number | null;
+  /** The work that kept the last check from installing it, by fleet id. */
+  readonly pendingBlockedBy?: readonly string[];
   /** The version installed on disk by this process, independently of handover. */
   readonly appliedVersion?: string | null;
   /** An incomplete filesystem transaction has paused updates pending inspection. */
@@ -259,6 +272,12 @@ export class DaemonAutoUpdater {
   private failureReadAbort = new AbortController();
   /** A discovered release descriptor waiting for an idle moment. */
   private pendingSwap: PendingSwap | null = null;
+  /** When the current release first had to wait for active work, or null. */
+  private waitingSince: number | null = null;
+  /** What held the last deferral, by fleet id. */
+  private waitingFor: readonly string[] = [];
+  /** The owner was told about this wait already. */
+  private waitAlerted = false;
   /** A completed disk swap is terminal for this process, even if handover fails. */
   private appliedVersion: string | null = null;
   private recoveryRequired = false;
@@ -338,6 +357,7 @@ export class DaemonAutoUpdater {
         } finally {
           this.finishActiveCheck?.();
         }
+        if (!this.pendingSwap) this.clearWait();
         return this.pendingSwap ? 'deferred' : 'settled';
       },
       onError: (error) => {
@@ -440,6 +460,34 @@ export class DaemonAutoUpdater {
     );
   }
 
+  /**
+   * A found release is waiting because work is in flight. Says what holds it
+   * and, once the wait passes the same bar failures use, tells the owner once.
+   */
+  private recordWait(tag: string): void {
+    const now = this.now();
+    this.waitingSince ??= now;
+    this.waitingFor = this.options.describeActiveWork?.() ?? [];
+    logger.info('DaemonAutoUpdater: update ready but the daemon has active work; deferring the swap', {
+      tag, waitingSince: this.waitingSince, blockedBy: this.waitingFor,
+    });
+    const limitMs = Math.max(0, this.options.persistentFailureMs ?? DEFAULT_UPDATE_PERSISTENT_FAILURE_MS);
+    if (this.waitAlerted || now - this.waitingSince < limitMs) return;
+    this.waitAlerted = true;
+    const hours = Math.floor((now - this.waitingSince) / 3_600_000);
+    this.alertOwner(
+      `v${normalizeVersion(tag)} has waited ${hours} hours to install because work is still running`
+      + (this.waitingFor.length > 0 ? ` (${this.waitingFor.slice(0, 5).join(', ')}${this.waitingFor.length > 5 ? ` and ${this.waitingFor.length - 5} more` : ''})` : '')
+      + `. The daemon stays on v${normalizeVersion(this.options.currentVersion)} until that work ends; stop it from /fleet to install sooner.`,
+    );
+  }
+
+  private clearWait(): void {
+    this.waitingSince = null;
+    this.waitingFor = [];
+    this.waitAlerted = false;
+  }
+
   /** The most recent failure detail, exposed for the /status surface and tests. */
   get lastCheckFailure(): string | null {
     return this.lastFailureDetail;
@@ -464,6 +512,8 @@ export class DaemonAutoUpdater {
       failedCheckCount: this.consecutiveFailures,
       lastCheckFailure: this.lastFailureDetail,
       pendingVersion: this.pendingSwap ? normalizeVersion(this.pendingSwap.tag) : null,
+      pendingSince: this.pendingSwap ? this.waitingSince : null,
+      pendingBlockedBy: this.pendingSwap ? [...this.waitingFor] : [],
       appliedVersion: this.appliedVersion,
       recoveryRequired: this.recoveryRequired,
       transactionRecovery: this.transactionRecovery ? {
@@ -610,9 +660,7 @@ export class DaemonAutoUpdater {
     // repeated below after every asynchronous download and synchronous stage.
     assertCurrent();
     if (!this.options.isIdle()) {
-      logger.info('DaemonAutoUpdater: update ready but the daemon has active work; deferring the swap', {
-        tag: this.pendingSwap.tag,
-      });
+      this.recordWait(this.pendingSwap.tag);
       return;
     }
 
@@ -692,7 +740,7 @@ export class DaemonAutoUpdater {
         }
         if (failure.receipt.phase === 'admission' && !failure.receipt.committed && failure.cause === busyBeforeCommit) {
           assertCurrent();
-          logger.info('DaemonAutoUpdater: daemon became busy before commit; deferring the update', { tag });
+          this.recordWait(tag);
           if (preparation?.preservedPaths.length) this.recordReceipt(`Update deferred before publication because the daemon became busy. Discarded staging was preserved at: ${preparation.preservedPaths.join(', ')}`);
           return;
         }

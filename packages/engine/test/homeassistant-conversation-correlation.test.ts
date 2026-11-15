@@ -106,12 +106,10 @@ function chatInput(overrides: Partial<HomeAssistantChatInput> = {}): HomeAssista
 
 describe('one chat session per conversation', () => {
   test('two overlapping first messages share the session the first one creates', async () => {
-    const gate = Promise.withResolvers<never>();
-    const { runtime, created } = fixture({ homeGraphAsk: () => gate.promise });
-    const grounded = chatInput({ grounding: { installationId: 'house-1' } });
-    const first = resolveHomeAssistantChatSession(runtime, grounded);
-    const second = resolveHomeAssistantChatSession(runtime, { ...grounded, messageId: 'm2' });
-    gate.reject(new Error('graph unavailable'));
+    const { runtime, created } = fixture();
+    const input = chatInput();
+    const first = resolveHomeAssistantChatSession(runtime, input);
+    const second = resolveHomeAssistantChatSession(runtime, { ...input, messageId: 'm2' });
     const [a, b] = await Promise.all([first, second]);
     expect(created).toHaveLength(1);
     expect(a.session.id).toBe(b.session.id);

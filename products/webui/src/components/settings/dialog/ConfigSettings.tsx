@@ -36,8 +36,7 @@ import { readConfigKey, type ConfigKeyResult } from '../../../lib/config-key-jud
 import { subscribeClientLifetime } from '../../../lib/client-lifetime';
 import { client as platformClient, type ConfigSetOutcome } from '../../../lib/goodvibes';
 import { isSecretStoreOnlyConfigKey, secretStoreSetCommandFor } from '../../../lib/secret-store-only-config-keys';
-import { formatError, isMethodUnavailableError, serializeError } from '../../../lib/errors';
-import { asRecord } from '../../../lib/object';
+import { formatError, isAdminRequiredError, isMethodUnavailableError } from '../../../lib/errors';
 import { useToast } from '../../../lib/toast';
 import { ErrorState } from '../../feedback/ErrorState';
 import { SkeletonBlock } from '../../feedback/SkeletonBlock';
@@ -108,13 +107,6 @@ async function setSecretStoreOnlyCredential(key: string, value: unknown): Promis
       `This daemon cannot store credentials from the browser, so nothing was saved. Run ${secretStoreSetCommandFor(key)} from a terminal with daemon access.`,
     );
   }
-}
-
-export function isAdminRequiredError(error: unknown): boolean {
-  const serialized = serializeError(error);
-  const transport = asRecord(serialized.transport);
-  const status = typeof serialized.status === 'number' ? serialized.status : typeof transport.status === 'number' ? transport.status : undefined;
-  return status === 403;
 }
 
 interface ConfigSettingsValue {

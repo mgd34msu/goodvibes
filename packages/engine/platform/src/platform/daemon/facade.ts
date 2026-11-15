@@ -80,6 +80,7 @@ import { resolveHostBinding } from './host-resolver.js';
 import { createHostModeRestartWatcher, RestartController } from './host-mode-watcher.js';
 import { configureJudgmentRequestLifetime } from './http/judgment-request-lifetime.js';
 import type { ServiceCommandRunner } from './service-handover.js';
+import { inFlightWorkIds } from '../runtime/fleet/registry.js';
 
 /**
  * The facade's configuration plus what a composing host that owns the whole
@@ -341,7 +342,10 @@ export class DaemonServer {
     this.lifecycle = new DaemonLifecycleRuntime({
       configManager: this.configManager,
       platformServiceManager: this.platformServiceManager,
-      isIdle: () => this.sessionBroker.countBusySessions() === 0,
+      // The fleet is the one owner of "work in flight": agents, contracts,
+      // automation runs, watchers, background processes and hosted agents.
+      isIdle: () => inFlightWorkIds(this.runtimeServices.processRegistry).length === 0,
+      describeActiveWork: () => inFlightWorkIds(this.runtimeServices.processRegistry),
       updateArtifact: this.config.updateArtifact, // absent = host-managed updates (see DaemonUpdateArtifact)
       // Forwarded so a daemon on an overridden home cannot seize the machine's
       // service unit. Absent = the machine default, which is the only case that

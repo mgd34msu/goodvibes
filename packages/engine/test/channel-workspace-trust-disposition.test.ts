@@ -44,8 +44,11 @@ for (const choice of ['approve', 'reject', 'amend', 'cancelled'] as const) {
       reply: choice === 'cancelled' ? 'approve' : choice,
       ...(choice === 'cancelled' ? { beforeReply: async () => { await broker.cancelApproval(pending.id, 'other-owner'); } } : {}),
     });
+    // The ask as delivered to the conversation the reply arrives in.
+    const delivered = { listApprovals: (limit?: number) => broker.listApprovals(limit).map((record) => ({ ...record, routeId: 'route-1' })),
+      resolveApproval: broker.resolveApproval.bind(broker) };
     expect(await tryResolveApprovalReplyFromChannel(input, channelDecision, {
-      approvalBroker: broker, routeBindings: { getBinding: () => undefined },
+      approvalBroker: delivered, routeBindings: { getBinding: (id: string) => ({ id, surfaceKind: 'slack' }) as never },
     })).toBe(choice !== 'cancelled');
     const settled = await result;
     const disposition = choice === 'approve' ? 'approved' : choice === 'reject' ? 'denied' : choice === 'amend' ? 'amended' : 'cancelled';

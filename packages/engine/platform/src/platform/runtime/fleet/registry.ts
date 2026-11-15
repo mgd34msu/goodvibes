@@ -37,6 +37,7 @@ import type {
   ProcessControlFailure,
   ProcessNode,
   ProcessRegistry,
+  ProcessState,
   ProcessUsage,
   SteerResult,
 } from './types.js';
@@ -80,6 +81,22 @@ export const DEFAULT_TICK_INTERVAL_MS = 750;
  * silently expiring before the agent reaches its next turn boundary.
  */
 export const STEER_TTL_MS = 30 * 60 * 1000;
+
+/** States in which a node is doing work a daemon restart would cut short. */
+const IN_FLIGHT_STATES: readonly ProcessState[] = [
+  'thinking', 'executing-tool', 'awaiting-approval', 'streaming', 'stalled', 'retrying', 'queued',
+];
+
+/**
+ * Ids of the owned work now in flight: agents, contracts, automation runs,
+ * watchers, background processes and hosted agents. Empty means the daemon is
+ * idle. Observed external sessions are not ours to protect and are left out.
+ */
+export function inFlightWorkIds(registry: Pick<ProcessRegistry, 'query'>): string[] {
+  return registry.query({ states: IN_FLIGHT_STATES }).nodes
+    .filter((node) => node.kind !== 'observed-external')
+    .map((node) => node.id);
+}
 
 /** Injectable timer seam so tests can drive/observe the coalesced tick. */
 export interface RegistryTimers {

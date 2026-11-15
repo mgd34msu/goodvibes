@@ -828,13 +828,18 @@ could not narrow that registry, and a caller must not assume a read-only turn.
 Other optional fields: `threadId`, `surfaceId` (or `instanceId`), `areaId` and
 `entityId`, `userId` and `displayName`, `context` (an object passed to the chat
 as Home Assistant context), `wait` (default `true`; `false` returns `202`
-without waiting for the reply), `timeoutMs` (the wait cap), and
+without waiting for the reply), `timeoutMs` (the wait cap, covering grounding
+and the reply together), and
 `remoteSessionTtlMs`. The session TTL is clamped to between 1 minute and 24
 hours, so a smaller configured value is raised to 60 seconds.
 
 To ground a turn in the Home Graph, send `grounding: { knowledgeSpaceId,
 installationId }` (or the same two ids at the top level, camelCase or
-snake_case). The turn then consults that knowledge space before answering.
+snake_case). The turn then reads that knowledge space before answering and
+passes the answer to the assistant with the message. Grounding only reads: it
+never repairs the graph, refreshes device pages or queues enrichment (use the
+admin Home Graph `ask` and `reindex` routes for that), and it gives up at the
+turn's deadline, or after 10 seconds when `wait` is `false`.
 Grounding applies to this route only; the webhook below never grounds a turn.
 
 `POST /api/homeassistant/conversation` returns the final response directly and

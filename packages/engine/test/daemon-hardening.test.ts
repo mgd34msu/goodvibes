@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, setSystemTime, test } from 'bun:test';
-import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ConfigManager } from '../platform/src/platform/config/manager.js';
 import { WebSocketOutbox } from '../platform/src/platform/daemon/websocket-outbox.js';
 import { isSurfaceDeliveryEnabled } from '../platform/src/platform/daemon/surface-policy.js';
-import { readResponseSpool } from '../platform/src/platform/daemon/response-spool.js';
+import { readResponseTextBounded } from '../platform/src/platform/daemon/control-plane.js';
 import { isPortAvailable } from '../platform/src/platform/daemon/port-check.js';
 import { reservedApiPathRoots } from '../platform/src/platform/daemon/http/webui-serving.js';
 import { DaemonReceiptStore, type ReceiptStoreIo } from '../platform/src/platform/daemon/receipts.js';
@@ -110,7 +110,7 @@ describe('surface delivery policy', () => {
   });
 });
 
-describe('response spool', () => {
+describe('call response read', () => {
   function bodyOf(chunks: readonly string[]): Response {
     return new Response(new ReadableStream<Uint8Array>({
       start(controller) {
@@ -121,16 +121,10 @@ describe('response spool', () => {
   }
 
   test('a body is read back whole, and one over the byte limit is refused', async () => {
-    expect(await readResponseSpool(bodyOf(['hello ', 'world']))).toBe('hello world');
-    await expect(readResponseSpool(bodyOf(['12345', '67890']), undefined, 8)).rejects.toThrow('larger than the 8 byte limit');
+    expect(await readResponseTextBounded(bodyOf(['hello ', 'world']))).toBe('hello world');
+    await expect(readResponseTextBounded(bodyOf(['12345', '67890']), undefined, 8)).rejects.toThrow('larger than the 8 byte limit');
   });
 
-  test('a refused body leaves no spool directory behind', async () => {
-    const before = readdirSync(tmpdir()).filter((name) => name.startsWith('goodvibes-response-')).length;
-    await expect(readResponseSpool(bodyOf(['1234567890']), undefined, 4)).rejects.toThrow();
-    const after = readdirSync(tmpdir()).filter((name) => name.startsWith('goodvibes-response-')).length;
-    expect(after).toBeLessThanOrEqual(before);
-  });
 });
 
 describe('port check', () => {

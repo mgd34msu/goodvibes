@@ -657,7 +657,9 @@ separate mechanisms, deliberately not unified, and this capability uses both:
    using registered Jev reply/target readings after deterministic checks on
    `ChannelPolicyRecord.allowlistUserIds` (`platform/channels/types.ts`). This is
    what lets the owner reply "approve" in Telegram and have it resolve a broker
-   record. It only answers an ask we already raised; it can never manufacture a
+   record. It only answers an ask that was delivered to the same conversation
+   (same surface, chat and thread); an ask shown elsewhere is answered there. It
+   only answers an ask we already raised; it can never manufacture a
    new instruction from channel content. Conditional approval declines the original
    arguments and carries the full reply as guidance. Unclear or unsettled readings
    leave asks pending; unavailable judgment fails without resolving anything.

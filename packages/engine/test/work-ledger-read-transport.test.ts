@@ -40,7 +40,7 @@ function fixture(count = 0) {
   registerWorkLedgerGatewayMethods(catalog, reader);
   const helper = new DaemonControlPlaneHelper({
     gatewayMethods: catalog, authToken: () => revoked ? null : token,
-    controlPlaneGateway: { touchWebSocketClient() {} },
+    controlPlaneGateway: { touchWebSocketClient() {}, regrantClient() {} },
     userAuth: {
       validateSession: (value: string) => value === 'synthetic-reader-token' ? { username: 'reader' } : value === 'synthetic-admin-session' ? { username: 'session-user' } : null,
       getUser: (username: string) => ({ username, roles: username === 'reader' ? [] : sessionRoles }),
@@ -422,9 +422,9 @@ describe('fresh authorization on every ledger entry point', () => {
     ws.socket.data.scopes = ['read:events'];
     expect((await ws.call(method))?.status).toBe(403); expect(host.snapshotCalls).toBe(0);
     ws.socket.data.scopes = ['*'];
-    const original = host.helper.describeAuthenticatedPrincipal.bind(host.helper);
-    const fresh = spyOn(host.helper, 'describeAuthenticatedPrincipal').mockImplementation(token => {
-      const principal = original(token); return principal ? { ...principal, scopes: ['read:events'] } : null;
+    const original = host.helper.describeRequestPrincipal.bind(host.helper);
+    const fresh = spyOn(host.helper, 'describeRequestPrincipal').mockImplementation(token => {
+      const principal = original(token); return principal ? { ...principal, scopes: ['read:events'], scopeSet: new Set(['read:events']) } : null;
     });
     try {
       expect((await ws.call(method))?.status).toBe(403); expect(host.snapshotCalls).toBe(0);

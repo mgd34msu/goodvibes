@@ -3,6 +3,7 @@ import { judgmentPort } from '@goodvibes-jev/engine/errors';
 import { LIMITS, toJson, type Selection } from '@goodvibes-jev/judgment';
 import type { ChannelIngressPolicyInput, ChannelPolicyDecision, RouteBindingManager } from '../channels/index.js';
 import type { ApprovalBroker, SharedApprovalRecord } from '../control-plane/approval-broker.js';
+import type { SharedSessionBroker } from '../control-plane/session-broker.js';
 import { logger } from '../utils/logger.js';
 import { assertJudgmentInput, snapshotJudgmentInput } from '../gate/judgment-input.js';
 import { channelApprovalReply, channelApprovalTarget } from './batteries/approval-reply.js';
@@ -35,12 +36,24 @@ function sourceKey(record: SharedApprovalRecord, routes: Pick<RouteBindingManage
 }
 
 /**
- * Only an authorized owner can answer. Surface-bound asks remain preferred;
- * without one, only the single platform-wide ask is eligible. These are
- * structural boundaries, not judgments. With several eligible asks the
- * selector must identify exactly one before the reply is read against it.
- * Unclear or unsettled readings consume nothing; unavailable judgment throws
- * and leaves every ask waiting. There is no heuristic fallback.
+ * The route an ask is delivered to: its own route, else the first route of its
+ * session. The same rule picks where the approval prompt is sent.
+ */
+export function approvalDeliveryRouteId(
+  record: Pick<SharedApprovalRecord, 'routeId' | 'sessionId'>,
+  sessions: Pick<SharedSessionBroker, 'getSession'> | undefined,
+): string | undefined {
+  return record.routeId ?? (record.sessionId ? sessions?.getSession(record.sessionId)?.routeIds[0] : undefined);
+}
+
+/**
+ * Only an authorized owner can answer, and only an ask that was delivered to
+ * the conversation the reply arrived in (same surface, channel and thread).
+ * An ask raised elsewhere is answered where it was shown, and a message in a
+ * conversation that holds no ask costs no decision request. With several
+ * asks in one conversation the selector must identify exactly one before the
+ * reply is read against it. Unclear or unsettled readings consume nothing;
+ * unavailable judgment throws and leaves every ask waiting.
  */
 export async function tryResolveApprovalReplyFromChannel(
   input: ChannelIngressPolicyInput,
@@ -48,6 +61,7 @@ export async function tryResolveApprovalReplyFromChannel(
   deps: {
     readonly approvalBroker?: ApprovalReplyBroker | undefined;
     readonly routeBindings: Pick<RouteBindingManager, 'getBinding'>;
+    readonly sessions?: Pick<SharedSessionBroker, 'getSession'> | undefined;
   },
 ): Promise<boolean> {
   const broker = deps.approvalBroker;
@@ -57,26 +71,23 @@ export async function tryResolveApprovalReplyFromChannel(
   if (owners.length === 0 || !owners.includes(userId)) return false;
 
   // Inspect all pending records: truncating newest-first can hide ambiguity.
-  const pending = broker.listApprovals(Number.MAX_SAFE_INTEGER).filter(isPending);
-  const surfaceBound = pending.filter((record) => {
-    if (!record.routeId) return false;
-    return deps.routeBindings.getBinding(record.routeId)?.surfaceKind === surface;
+  const candidates = broker.listApprovals(Number.MAX_SAFE_INTEGER).filter((record) => {
+    if (!isPending(record)) return false;
+    const routeId = approvalDeliveryRouteId(record, deps.sessions);
+    const binding = routeId ? deps.routeBindings.getBinding(routeId) : undefined;
+    return binding !== undefined && binding.surfaceKind === surface
+      && (binding.channelId ?? binding.externalId) === input.channelId && binding.threadId === input.threadId;
   });
-  const candidates = surfaceBound.length > 0 ? surfaceBound : pending.length === 1 ? pending : [];
   // A selector has one additional option for none. Never truncate candidates.
   if (candidates.length === 0 || candidates.length >= LIMITS.maxChoiceOptions) return false;
   if (isClassicOperation()) {
     const command = /^\/(approve|deny)\s+(\S+)$/u.exec(text.trim());
     const action = command?.[1], id = command?.[2];
     if (!id || (action !== 'approve' && action !== 'deny')) return false;
-    const target = candidates.find(candidate => candidate.id === id);
-    if (!target) return false;
-    const identity = sourceKey(target, deps.routeBindings);
-    const current = broker.listApprovals(Number.MAX_SAFE_INTEGER).find(record => record.id === id);
-    if (current !== target || !isPending(current) || sourceKey(current, deps.routeBindings) !== identity) return false;
+    if (!candidates.some(candidate => candidate.id === id)) return false;
     const resolved = await broker.resolveApproval(id, { approved: action === 'approve', disposition: action === 'approve' ? 'approved' : 'denied',
       actor: userId, actorSurface: surface, note: text.trim(), reason: 'Explicit owner command during Classic operation.' });
-    return resolved !== null;
+    return resolved?.status === (action === 'approve' ? 'approved' : 'denied');
   }
 
   // Validate every candidate and the full reply before any request starts.
@@ -110,22 +121,6 @@ export async function tryResolveApprovalReplyFromChannel(
     selection?.recordAction(action);
     return false;
   }
-  // Re-check the exact proposal and its source after the asynchronous readings.
-  const current = broker.listApprovals(Number.MAX_SAFE_INTEGER).find((record) => record.id === target.id);
-  if (!current || !isPending(current)) {
-    reply.recordAction(`no resolution: approval ${target.id} is no longer pending`);
-    selection?.recordAction(`no resolution: approval ${target.id} is no longer pending`);
-    return false;
-  }
-
-  if (sourceKey(current, deps.routeBindings) !== target.source
-    || JSON.stringify(proposalFor(current)) !== JSON.stringify(target.content)) {
-    const action = `no resolution: approval ${target.id} proposal or route changed`;
-    reply.recordAction(action);
-    selection?.recordAction(action);
-    return false;
-  }
-
   const approved = reply.reading.choice === 'approve';
   // Record the decision before its side effect. A recording failure cannot
   // authorize an action without the underlying reading in the decision log.
@@ -143,8 +138,10 @@ export async function tryResolveApprovalReplyFromChannel(
     note: text.trim(),
     reason: text.trim(),
   });
-  // The ask can be settled elsewhere between the re-check and this call; the broker then
-  // returns that other record, which this reply did not decide.
+  // A record's request and route are fixed when it is raised; only its status
+  // moves. When the ask was settled elsewhere during the reading, the broker
+  // returns that record, which this reply did not decide, and the message
+  // goes on as ordinary chat.
   if (!settled || settled.status !== (approved ? 'approved' : 'denied')) {
     const outcome = `no resolution: approval ${target.id} was already ${settled?.status ?? 'unavailable'}`;
     reply.recordAction(outcome);

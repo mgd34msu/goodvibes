@@ -216,7 +216,21 @@ function normalizeEventDescriptor(descriptor: GatewayEventDescriptor): GatewayEv
   });
 }
 
-/** The actual grant ceiling used by authenticated transport and native recovery. */
+/**
+ * The actual grant ceiling used by authenticated transport and native recovery.
+ *
+ * The authorization model, stated once: scopes are not stored per token or
+ * per user. A principal's scopes are derived from its role when it
+ * authenticates: an admin (the owner's shared token, a paired device, an
+ * admin user) holds every scope the catalog declares, read and write; any
+ * other signed-in user holds every read scope and no write scope. What
+ * restricts a non-admin beyond that is each method's and each event's
+ * `access` (admin-only where it carries settings, approvals, conversation or
+ * tool content, or other principals' credentials). The event stream applies
+ * the same rule as the request path, derived from the event descriptors
+ * (gateway-scope-enforcement.ts `resolveEventGrant`), so an event a non-admin
+ * receives carries nothing that principal could not read through a method.
+ */
 export function grantedGatewayScopes(catalog: Pick<GatewayMethodCatalog, 'getAllScopes'>, includeWrite: boolean): string[] {
   const scopes = new Set(catalog.getAllScopes({ includeWrite }));
   scopes.add('read:events'); scopes.add('read:control-plane'); scopes.add('read:telemetry');
@@ -257,6 +271,8 @@ export class GatewayMethodCatalog {
   private scopePolicyLegacySnapshot: ReturnType<GatewayScopePolicyOwner['current']> | undefined;
   private scopePolicyData: GatewayPolicySnapshot | undefined;
   private scopePolicyScopesSnapshot: readonly string[] | undefined;
+  /** The admin and non-admin grants, rebuilt only after a method or event changes. */
+  private grantCache: { write?: readonly string[]; read?: readonly string[] } = {};
 
   /**
    * Called after initial host construction. Startup registration is hydration,
@@ -332,6 +348,7 @@ export class GatewayMethodCatalog {
   }
 
   private invalidateScopePolicySnapshot(): void {
+    this.grantCache = {};
     if (!this.scopePolicyOwner) return;
     this.scopePolicyState = {};
     this.scopePolicySnapshot = undefined; this.scopePolicyData = undefined; this.scopePolicyLegacySnapshot = undefined;
@@ -476,6 +493,16 @@ export class GatewayMethodCatalog {
       if (pathMatchesTemplate(binding.path, pathname)) return entry.descriptor;
     }
     return null;
+  }
+
+  /**
+   * The grant for an admin (`includeWrite`) or non-admin principal. Built from
+   * every method and event descriptor once, then served from memory until the
+   * catalog changes; callers compare against it per request and per frame.
+   */
+  grantedScopes(includeWrite: boolean): readonly string[] {
+    const key = includeWrite ? 'write' : 'read';
+    return this.grantCache[key] ??= Object.freeze(grantedGatewayScopes(this, includeWrite));
   }
 
   getAllScopes(options: { readonly includeWrite?: boolean } = {}): string[] {

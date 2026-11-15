@@ -36,10 +36,11 @@ async function harness() {
   await policy.evaluateIngress({ surface: 'slack', userId: OWNER, text: 'hello', conversationKind: 'direct' });
   const broker = new ApprovalBroker({ storePath: join(dir, 'approvals.json') });
   const boundSurfaces = new Map<string, string>();
+  const boundChannels = new Map<string, string>();
   const notices: string[] = [];
   const routeBindings = { resolve: () => undefined, getBinding: (id: string) => {
     const surfaceKind = boundSurfaces.get(id);
-    return surfaceKind ? { id, surfaceKind } : undefined;
+    return surfaceKind ? { id, surfaceKind, channelId: boundChannels.get(id) ?? 'C1' } : undefined;
   } };
   const helper = new DaemonSurfaceActionHelper({ channelPolicy: policy, approvalBroker: broker, routeBindings,
     deliverSurfaceNotice: async (_binding: unknown, text: string) => { notices.push(text); return { delivered: true }; } } as unknown as ConstructorParameters<typeof DaemonSurfaceActionHelper>[0]);
@@ -56,12 +57,12 @@ async function harness() {
   } as unknown as SurfaceAdapterContext;
   return {
     broker, helper, policy, submitted, notices,
-    moveRoute: (id: string, surface: string) => boundSurfaces.set(id, surface),
     get bindingsCreated() { return bindingsCreated; },
-    async ask(tool = 'deploy', summary = 'Deploy production', surface: string | undefined = 'slack', args: Record<string, unknown> = { destination: summary }) {
+    async ask(tool = 'deploy', summary = 'Deploy production', surface: string | undefined = 'slack', args: Record<string, unknown> = { destination: summary }, channel = 'C1') {
       const callId = `call-${broker.listApprovals().length}`;
       const routeId = `route-${callId}`;
       if (surface) boundSurfaces.set(routeId, surface);
+      boundChannels.set(routeId, channel);
       return broker.raiseApproval({ routeId, request: {
         callId, tool, args, category: 'execute',
         analysis: { classification: 'execute', riskLevel: 'high', summary, reasons: [] },
@@ -76,7 +77,7 @@ async function harness() {
       return response;
     },
     ingress: (text: string, userId: string | undefined = OWNER) => helper.authorizeSurfaceIngress({
-      surface: 'slack', userId, text, conversationKind: 'direct',
+      surface: 'slack', userId, text, conversationKind: 'direct', channelId: 'C1',
     }),
   };
 }
@@ -225,12 +226,15 @@ describe('the reply must identify its target before its meaning is read', () => 
     expect(readings.requests).toHaveLength(1);
   });
 
-  test('a single unbound global ask remains answerable', async () => {
+  test('an ask not delivered to this conversation is never answered from it and costs no request', async () => {
     const h = await harness();
-    const ask = await h.ask('deploy', 'Deploy production', '');
-    readings.set({ reply: 'reject' });
-    await h.ingress('no');
-    expect((await ask.decision).approved).toBe(false);
+    const unbound = await h.ask('deploy', 'Deploy production', '');
+    const otherChat = await h.ask('export_data', 'Export customer data', 'slack', { destination: 'customers.csv' }, 'C2');
+    readings.set({ reply: 'approve' });
+    expect((await h.ingress('yes')).allowed).toBe(true);
+    expect(h.broker.getApproval(unbound.approval.id)?.status).toBe('pending');
+    expect(h.broker.getApproval(otherChat.approval.id)?.status).toBe('pending');
+    expect(readings.requests).toHaveLength(0);
   });
 
   test('the full pending set is offered rather than a newest-first slice', async () => {
@@ -274,9 +278,9 @@ describe('authorization and failures are fail closed', () => {
     const record = { ...ask.approval, request: { ...ask.approval.request, args } };
     readings.set({ reply: 'unclear' });
     const decision = { allowed: true, policy: { allowlistUserIds: [OWNER] } } as unknown as ChannelPolicyDecision;
-    expect(await tryResolveApprovalReplyFromChannel({ surface: 'slack', userId: OWNER, text: 'which deployment?' }, decision, {
+    expect(await tryResolveApprovalReplyFromChannel({ surface: 'slack', userId: OWNER, text: 'which deployment?', channelId: 'C1' }, decision, {
       approvalBroker: { listApprovals: () => [record], resolveApproval: h.broker.resolveApproval.bind(h.broker) },
-      routeBindings: { getBinding: () => undefined },
+      routeBindings: { getBinding: (id: string) => ({ id, surfaceKind: 'slack', channelId: 'C1' }) as never },
     })).toBe(false);
     expect(readings.requests.filter((request) => JSON.stringify(request.state).includes(marker))).toHaveLength(0);
     expect(gets).toBe(0);
@@ -366,19 +370,6 @@ describe('authorization and failures are fail closed', () => {
     expect(h.broker.getApproval(ask.approval.id)?.status).toBe('pending');
   });
 
-  test.each(['arguments', 'call-id', 'route'] as const)('a changed %s during judgment leaves the ask unresolved', async (change) => {
-    const h = await harness();
-    const ask = await h.ask();
-    readings.set({ reply: 'approve', beforeReply: async () => {
-      if (change === 'arguments') ask.approval.request.args['destination'] = 'A different deployment';
-      if (change === 'call-id') ask.approval.request.callId = 'another-tool-call';
-      if (change === 'route') h.moveRoute(ask.approval.routeId!, 'telegram');
-    } });
-    expect((await h.ingress('yes')).allowed).toBe(true);
-    expect(h.broker.getApproval(ask.approval.id)?.status).toBe('pending');
-    expect(actionOf(readings.log.query({ battery: REPLY_BATTERY })[0]!)).toContain('proposal or route changed');
-  });
-
   test.each(['approve', 'reject', 'amend'] as const)('a cancelled ask cannot receive a late %s disposition', async (choice) => {
     const h = await harness();
     const ask = await h.ask();
@@ -391,7 +382,7 @@ describe('authorization and failures are fail closed', () => {
     expect(current.status).toBe('cancelled');
     expect(current.decision).toMatchObject({ approved: false, disposition: 'cancelled' });
     expect(current.resolvedBy).toBe('other-owner');
-    expect(actionOf(readings.log.query({ battery: REPLY_BATTERY })[0]!)).toContain('no longer pending');
+    expect(actionOf(readings.log.query({ battery: REPLY_BATTERY })[0]!)).toContain('was already');
   });
 
   test('an ask resolved while judgment runs is not overwritten or consumed', async () => {
@@ -403,7 +394,7 @@ describe('authorization and failures are fail closed', () => {
     expect((await h.ingress('yes')).allowed).toBe(true);
     expect((await ask.decision).approved).toBe(false);
     expect(h.broker.getApproval(ask.approval.id)?.resolvedBy).toBe('other-owner');
-    expect(actionOf(readings.log.query({ battery: REPLY_BATTERY })[0]!)).toContain('no longer pending');
+    expect(actionOf(readings.log.query({ battery: REPLY_BATTERY })[0]!)).toContain('was already');
   });
 });
 

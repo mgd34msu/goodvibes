@@ -30,7 +30,7 @@ import { KeyRound } from 'lucide-react';
 import type { StatusTone } from './ui/StatusDot';
 import { client as platformClient } from '../lib/goodvibes';
 import { deriveCredentialAvailability, type CredentialStatusEntry } from '../lib/provider-status';
-import { errorCode, serializeError } from '../lib/errors';
+import { errorCode, formatError, isAdminRequiredError, serializeError } from '../lib/errors';
 import { EmptyState } from './feedback/EmptyState';
 import { SkeletonBlock } from './feedback/SkeletonBlock';
 import { Chip } from './ui/Chip';
@@ -38,26 +38,10 @@ import { Row, RowList } from './ui/Row';
 import { SettingsBlock } from './settings/dialog/parts';
 import '../styles/components/providers.css';
 
-/**
- * True for the daemon's 403 admin-scope refusal on the admin-only
- * `credentials.get` route. Checked BEFORE deriveCredentialAvailability so a
- * non-admin token renders an honest "admin access required" message instead
- * of falling into the facade's generic "unavailable right now" catch-all,
- * both are honest (neither fabricates "configured"), but this one names the
- * actual cause. The wire shape carries no machine `code` for this refusal
- * (control-plane.ts's requireAdmin returns `{error: 'Admin role required'}`,
- * status 403 only), so this checks status, not code.
- */
-function isAdminRequiredError(error: unknown): boolean {
+function isForbidden(error: unknown): boolean {
   const serialized = serializeError(error);
   const transport = serialized.transport as Record<string, unknown> | undefined;
-  const status =
-    typeof serialized.status === 'number'
-      ? serialized.status
-      : typeof transport?.status === 'number'
-        ? transport.status
-        : undefined;
-  return status === 403;
+  return serialized.status === 403 || transport?.status === 403;
 }
 
 function credentialTone(entry: CredentialStatusEntry): StatusTone {
@@ -86,7 +70,11 @@ export function CredentialStatusPanel({ selectedProviderId }: CredentialStatusPa
     retry: false,
   });
 
+  // Checked before deriveCredentialAvailability so a non-admin credential is
+  // told the actual cause; any other 403 (a refused origin, a missing scope)
+  // shows the daemon's own reason rather than a generic "unavailable".
   const refused = query.isError && isAdminRequiredError(query.error);
+  const otherRefusal = query.isError && !refused && isForbidden(query.error) ? formatError(query.error) : null;
   const availability =
     query.isSuccess
       ? deriveCredentialAvailability({ ok: true, value: query.data })
@@ -96,7 +84,7 @@ export function CredentialStatusPanel({ selectedProviderId }: CredentialStatusPa
   // Flattened once here (rather than repeated `availability && availability.available`
   // chains in the JSX below) so the discriminated union narrows cleanly and the
   // optional-chain lint rule has nothing to flag.
-  const degradedReason = availability?.available === false ? availability.reason : null;
+  const degradedReason = otherRefusal ?? (availability?.available === false ? availability.reason : null);
   const credentials = availability?.available === true ? availability.credentials : null;
   const unknownNames = (credentials?.map(entry => entry.key) ?? []).filter(key => selectedProviderId && readDeclaredProviderCredential(selectedProviderId, key) === undefined);
   const nameSnapshot = JSON.stringify(unknownNames);

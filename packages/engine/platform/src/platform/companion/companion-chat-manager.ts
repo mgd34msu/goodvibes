@@ -945,9 +945,11 @@ export class CompanionChatManager {
         // Benign races: the turn finished naturally (NO_ACTIVE_TURN), or the
         // slot already belongs to a newer turn, possibly this very steer
         // (TURN_MISMATCH). The turnId guard is what makes this safe: a steer
-        // must never cancel its own turn or an unrelated newer one.
+        // must never cancel its own turn or an unrelated newer one. A turn
+        // still stopping (TURN_STOPPING) is not reported as cancelled; the
+        // steer starts when it has stopped.
         const code = (err as { code?: string }).code;
-        if (code !== 'NO_ACTIVE_TURN' && code !== 'TURN_MISMATCH') {
+        if (code !== 'NO_ACTIVE_TURN' && code !== 'TURN_MISMATCH' && code !== 'TURN_STOPPING') {
           // The message is already queued, so failing here would invite a
           // retry that sends it twice. Report what happened instead.
           logger.warn('[companion-chat] a steer could not stop the running reply', { sessionId, error: summarizeError(err) });

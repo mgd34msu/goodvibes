@@ -12,9 +12,8 @@ export function retainAdmittedBrowserAction(engine: object, args: Record<string,
   additional: () => void, sessionId: string, pageId: string): BrowserActionLifetime | undefined {
   if (!isInvocationAdmitted('browser', args) || !assertCurrentToolInvocation(args, options)) return undefined;
   const assertCurrent = () => {
-    currentExecutionMode(); additional();
-    if (!isInvocationAdmitted('browser', args) || !assertCurrentToolInvocation(args, options)) throw new Error('Browser invocation is no longer current');
     additional();
+    if (!isInvocationAdmitted('browser', args) || !assertCurrentToolInvocation(args, options)) throw new Error('Browser invocation is no longer current');
   };
   const lifetime = Object.freeze({ assertCurrent, signal: options.signal });
   actions.set(assertCurrent, { engine, args, sessionId, pageId });
@@ -28,7 +27,6 @@ export function isAdmittedBrowserAction(engine: object, lifetime: BrowserActionL
   if (!lifetime) return false;
   const captured = actions.get(lifetime.assertCurrent);
   if (!captured || captured.engine !== engine || captured.sessionId !== sessionId || captured.pageId !== pageId) return false;
-  lifetime.assertCurrent();
   const args = captured.args;
   if (text(args.action).toLowerCase().replace(/-/g, '_') !== action || text(args.ref) !== actual.ref
     || (text(args.sessionId) && text(args.sessionId) !== sessionId) || (text(args.pageId) && text(args.pageId) !== pageId)) return false;
@@ -50,7 +48,7 @@ export function retainAdmittedBrowserWork(work: object, engine: object, lifetime
   sessionId: string, pageId: string, action: string, args: Readonly<Record<string, unknown>>, current: () => void): void {
   const allowed = () => currentExecutionMode() === 'yolo' || isAdmittedBrowserAction(engine, lifetime, sessionId, pageId, action, args);
   if (!allowed()) return;
-  controlWork.set(work, () => { current(); if (!allowed()) throw new Error('Browser action decision is no longer current'); current(); });
+  controlWork.set(work, () => { current(); if (!allowed()) throw new Error('Browser action decision is no longer current'); });
 }
 
 export function hasAdmittedBrowserWork(work: object): boolean {

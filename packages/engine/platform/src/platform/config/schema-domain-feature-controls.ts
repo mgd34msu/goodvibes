@@ -111,14 +111,14 @@ export const featureControlSettings: ConfigSetting[] = [
     type: 'boolean',
     default: false,
     description:
-      'Enforce per-call budgets on tool execution: wall-clock, token, and cost limits (runtime.toolBudget.maxMs/maxTokens/maxCostUsd). The check runs after the tool returns, so a call over its limit is reported to the model as failed with its output kept and a note that its action may have taken effect. Token and cost limits apply only to tools that report tokenCount or costUsd.',
+      'Enforce per-call budgets on tool execution: wall-clock, token, and cost limits (runtime.toolBudget.maxMs/maxTokens/maxCostUsd). The wall-clock limit stops a call when it is reached and tells the model what it was stopped by. Token and cost are known only when the tool returns, so a call over those is reported to the model as failed with its output kept and a note that its action may have taken effect; they apply only to tools that report tokenCount or costUsd.',
   },
   {
     key: 'runtime.toolBudget.maxMs',
     type: 'number',
     default: 0,
     description:
-      'Wall-clock budget (ms) for one tool call when runtime.toolBudget.enforced is true, checked when the tool returns. 0 = unlimited.',
+      'Wall-clock budget (ms) for one tool call when runtime.toolBudget.enforced is true: the call is stopped when it is reached. 0 = unlimited.',
     ...intRange(0, 24 * 60 * 60 * 1000),
   },
   {

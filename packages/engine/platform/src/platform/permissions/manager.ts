@@ -6,7 +6,7 @@ import { decisionOrClassic, rememberDecisionRefusal, wasDecisionRefused, type Re
 import { readExternalRequestEvidence, type ExternalRequestEvidence } from './external-request-evidence.js';
 import { JudgmentError, type EntryType, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
-import { captureOwnedJson, captureJsonEntry, snapshotJudgmentEntry } from '../gate/judgment-input.js';
+import { captureOwnedJson, captureJsonEntry } from '../gate/judgment-input.js';
 import { getProcessUntrustedContentLedger } from '../security/untrusted-content.js';
 import { assertAutonomousData, captureCurrentAutonomousChoices, captureCurrentAutonomousSourceFrame, type AutonomousToolChoices, type AutonomousToolRevision, type AutonomousToolSource, autonomousSourceEvidence, decideAutonomousTool } from './autonomous.js';
 import { AutonomousChoiceProjectionOwner, type AutonomousChoiceProjection } from './autonomous-input-projection.js';
@@ -809,10 +809,9 @@ export class PermissionManager {
       result, revisionIds: Object.freeze(safety.revision ? [safety.revision.ref.id] : []),
       ...(safety.revision ? { revision: safety.revision } : {}),
       claim: () => {
-        assertCurrent();
         if (!result.approved) throw new Error('Owner policy denied this tool call');
-        safety.recordClaim?.();
-        assertCurrent();
+        // A Jev decision's claim runs this same check once, then records the claim.
+        if (safety.recordClaim) safety.recordClaim(); else assertCurrent();
         this.autonomousClaims.add(sourceId);
       },
     });
@@ -1027,9 +1026,12 @@ export class PermissionManager {
         get model() { return installed.model; },
         ...(installed.recorder ? { recorder: installed.recorder } : {}),
         async ask(request) {
-          input.assertCurrent();
+          // Checked before every attempt, the first included. The one caller that brings
+          // its own attempt guard (decideAutonomous) runs this same check in it.
           const prior = request.beforeAttempt;
-          const result = await awaitPermission(() => installed.ask({ ...request, beforeAttempt() { assertSynchronousJudgmentGuard(() => prior?.()); input.assertCurrent(); } }), input.signal);
+          const result = await awaitPermission(() => installed.ask({ ...request, beforeAttempt() {
+            if (prior) assertSynchronousJudgmentGuard(() => prior()); else input.assertCurrent();
+          } }), input.signal);
           input.assertCurrent();
           if (input.mode === 'safe-jev' && !result.decisionId) throw new JudgmentError('unrecorded', 'execution safety requires recorded provenance');
           if (result.decisionId) supportingIds.push(result.decisionId);
@@ -1074,7 +1076,8 @@ export class PermissionManager {
         actionId: input.callId, actionRevision: input.actionRevision,
         authorityId: 'engine.permission-runtime', authorityRevision: input.authorityRevision,
         scopeId: 'execution-safety', scopeRevision: input.authorityRevision },
-      state: snapshotJudgmentEntry({ tool: input.toolName, arguments: input.args,
+      // decideAutonomous screens the state it sends; it is passed as it is.
+      state: ({ tool: input.toolName, arguments: input.args,
         ...(input.source ? { source: autonomousSourceEvidence(input.source) } : {}),
         ...(input.workingDirectory ? { workingDirectory: input.workingDirectory } : {}),
         evidence: { boundary: boundaryResult, ...(reading ? { reading: { family: reading.family, stakes: reading.stakes, uncertain: reading.uncertain,
@@ -1082,7 +1085,7 @@ export class PermissionManager {
           beyondProject: reading.beyondProject, weakensSecurity: reading.weakensSecurity, obfuscated: reading.obfuscated,
           boundary: reading.boundary } } : {}) },
         constraints: { mode: input.mode, ownerPolicyAllowed: input.policyResult.approved },
-        provenance: { surface: this.gate.surfaceOf?.() ?? 'owner-direct' } }),
+        provenance: { surface: this.gate.surfaceOf?.() ?? 'owner-direct' } }) as unknown as EntryType,
       evidence: [{ id: 'requested-tool-input', revision: input.actionRevision }, { id: 'live-authority', revision: input.authorityRevision }],
       supportingDecisionIds: supportingIds, choices: {}, allowAct: input.policyResult.approved,
       assertCurrent: input.assertCurrent, signal: input.signal,
@@ -1093,7 +1096,7 @@ export class PermissionManager {
       result: this.result(receipt.outcome === 'act', false, 'jev_decision', `jev_${receipt.outcome}`, analysis,
         { boundary: boundaryResult, autonomousDecision: receipt, detail: receipt.summary,
           preset: { preset: 'safe-jev', action: receipt.outcome === 'act' ? 'allow' : 'deny' } }),
-      recordClaim: () => { decision.assertCurrent(); decision.recordClaim(); input.assertCurrent(); },
+      recordClaim: () => decision.recordClaim(),
     };
   }
 

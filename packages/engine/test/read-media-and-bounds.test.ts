@@ -22,13 +22,12 @@ beforeEach(() => {
 });
 afterEach(async () => { await index.dispose(); rmSync(root, { recursive: true, force: true }); });
 
-type ReadResult = { success: boolean; output?: string; error?: string };
-const parse = (result: ReadResult) => JSON.parse(result.output!) as {
+type ReadResult = { success: boolean; output?: string; error?: string; _images?: readonly { path: string; mediaType: string }[] };
+const parse = (result: ReadResult) => ({ ...JSON.parse(result.output!) as {
   files: Array<{ path: string; error?: string; content?: string; mediaType?: string; lineCount: number }>;
-  images?: Array<{ path: string; mediaType: string }>;
   summary: Record<string, unknown>;
   pagination?: unknown;
-};
+}, images: result._images });
 
 const PNG_HEAD = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0, 0, 0, 0, 0]);
 const JPEG_HEAD = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0x10, 0x4a, 0x46, 0x49, 0x46, 0, 1, 1, 0, 0, 1]);

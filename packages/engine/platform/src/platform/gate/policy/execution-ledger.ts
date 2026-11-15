@@ -6,10 +6,14 @@ import { decisionOrClassic, isClassicOperation, withConfiguredDecisionModelPolic
  * filter.
  *
  * Hoisted from the agent (src/runtime/execution-ledger.ts) into the engine
- * gate. Each record's route kind is Jev's reading of the call
- * (`readSideEffectKind`, the side-effect battery's `kind` question, asked at
- * the `engine.gate.execution-ledger` site); it replaces the tool-name keyword
- * ladder the agent used. The kind vocabulary is the ledger's own.
+ * gate. A record's route kind is a fact for the engine's own tools
+ * (`ENGINE_TOOL_ROUTES`); only for any other tool is it Jev's reading of the
+ * call (`readSideEffectKind`, the side-effect battery's `kind` question, at
+ * the `engine.gate.execution-ledger` site). Whether the call is a verification
+ * attempt (`record.verification`) is likewise a fact for the engine tools that
+ * never verify, and one reading (`engine.gate.execution-purpose`) for the
+ * rest; it is the one answer every history view shows, and nothing asks it
+ * again.
  *
  * Readings asynchronously enrich an immediately visible, value-free record.
  * Lifecycle events apply in delivery order without waiting for judgment.
@@ -17,10 +21,12 @@ import { decisionOrClassic, isClassicOperation, withConfiguredDecisionModelPolic
  * added so the call is never lost, with the kind `other` and the failure
  * stated in `routeKindError`.
  *
- * Which arguments carry a credential (redacted from the preview) and which
- * one the call acts on (the target preview) are read per tool and argument
- * name (`engine.gate.ledger-arg`) and remembered for the process; they replace
- * a key-name regex and a fixed key list. A name not read as a confident no is
+ * Which top-level arguments carry a credential (redacted from the preview)
+ * and which one the call acts on (the target preview) are read per tool and
+ * argument name (`engine.gate.ledger-arg`) and remembered for the process; a
+ * key nested inside an argument is part of that argument's value, shown with
+ * it unless its name is a credential or owner-profile field name by the local
+ * check (`withheldFieldKind`). A name not read as a confident no is
  * redacted, and when the reading fails every value is redacted and the
  * failure is stated in `argsReadingError`.
  */
@@ -36,6 +42,7 @@ import { judgmentPort } from '@goodvibes-jev/engine/errors';
 import { isYoloExecution } from '../execution-context.js';
 import { mapLimit } from '@goodvibes-jev/judgment';
 import { ledgerArg } from '../batteries/ledger-arg.js';
+import { withheldFieldKind } from '../../utils/field-kind-reading.js';
 
 /** The decision site the ledger's route-kind readings are logged under. */
 export const EXECUTION_LEDGER_SITE = 'engine.gate.execution-ledger';
@@ -141,23 +148,24 @@ const ARG_DEPTH_LIMIT = 64;
 const ARG_READ_CONCURRENCY = 8;
 const roleKey = (tool: string, argument: string): string => JSON.stringify([tool, argument]);
 
-/** Every captured object key, including beyond the visible preview limits. */
-function argumentNames(value: unknown, depth = 0, names = new Set<string>()): Set<string> {
-  if (!value || typeof value !== 'object' || depth > ARG_DEPTH_LIMIT) return names;
-  if (Array.isArray(value)) {
-    for (const entry of value) argumentNames(entry, depth + 1, names);
-    return names;
-  }
-  for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
-    names.add(key);
-    argumentNames(entry, depth + 1, names);
-  }
-  return names;
-}
+/**
+ * The route kind of the engine's own tools, a fact of their definitions; any
+ * other tool's kind is read. `verifies: false` marks a tool that never runs a
+ * check of correctness, so no purpose reading is taken for it.
+ */
+const ENGINE_TOOL_ROUTES: Readonly<Record<string, { readonly kind: AgentExecutionRouteKind; readonly verifies?: false }>> = {
+  read: { kind: 'read', verifies: false }, find: { kind: 'read', verifies: false }, inspect: { kind: 'read', verifies: false },
+  repo_map: { kind: 'read', verifies: false }, context_accounting: { kind: 'read', verifies: false },
+  goodvibes_context: { kind: 'read', verifies: false }, analyze: { kind: 'read' },
+  write: { kind: 'write', verifies: false }, edit: { kind: 'write', verifies: false }, goodvibes_settings: { kind: 'write', verifies: false },
+  exec: { kind: 'shell' },
+  fetch: { kind: 'network', verifies: false }, web_search: { kind: 'network', verifies: false },
+  agent: { kind: 'delegation', verifies: false }, delegate: { kind: 'delegation', verifies: false }, workflow: { kind: 'delegation' },
+};
 
-/** Reads the roles of the argument names not read yet for this tool. A JudgmentError propagates. */
+/** Reads the roles of the call's top-level argument names not read yet for this tool. A JudgmentError propagates. */
 async function readArgRoles(tool: string, args: Record<string, unknown>, signal: AbortSignal): Promise<ReadonlyMap<string, ArgRole>> {
-  const names = [...argumentNames(args)];
+  const names = Object.keys(args);
   if (names.length === 0) return new Map();
   const port = judgmentPort(EXECUTION_LEDGER_SITE);
   const model = port.model;
@@ -202,7 +210,16 @@ function truncateText(value: string, max = 220): string {
   return compact.length > max ? `${compact.slice(0, Math.max(0, max - 1))}...` : compact;
 }
 
-/** A value as the preview shows it: a key not read as a confident non-credential is redacted. */
+/**
+ * Whether a key's value is shown: a top-level argument when its name was read
+ * as a confident non-credential, a nested key (part of its argument's value)
+ * unless its name is a credential or owner-profile field name.
+ */
+function shownKey(key: string, roles: ReadonlyMap<string, ArgRole> | null, topLevel: boolean): boolean {
+  return topLevel ? roles?.get(key)?.credential === false : roles !== null && withheldFieldKind(key) === undefined;
+}
+
+/** A value as the preview shows it. */
 function redactValue(value: unknown, roles: ReadonlyMap<string, ArgRole> | null, depth = 0): unknown {
   if (depth > 3) return '[truncated]';
   if (typeof value === 'string') return truncateText(value);
@@ -210,7 +227,7 @@ function redactValue(value: unknown, roles: ReadonlyMap<string, ArgRole> | null,
   if (Array.isArray(value)) return value.slice(0, 8).map((entry) => redactValue(entry, roles, depth + 1));
   if (!value || typeof value !== 'object') return String(value);
   const entries = Object.entries(value as Record<string, unknown>).slice(0, 16).map(([key, entry]) => (
-    [key, roles?.get(key)?.credential === false ? redactValue(entry, roles, depth + 1) : '[redacted]'] as const
+    [key, shownKey(key, roles, depth === 0) ? redactValue(entry, roles, depth + 1) : '[redacted]'] as const
   ));
   return Object.fromEntries(entries);
 }
@@ -233,12 +250,12 @@ function targetPreview(args: Record<string, unknown>, roles: ReadonlyMap<string,
 }
 
 /** Redact the complete captured tree before any value-bearing reading. */
-function readingArgs(value: unknown, roles: ReadonlyMap<string, ArgRole> | null, depth = 0): unknown {
+function readingArgs(value: unknown, roles: ReadonlyMap<string, ArgRole> | null, depth = 0, topLevel = true): unknown {
   if (depth > ARG_DEPTH_LIMIT) return '[truncated]';
-  if (Array.isArray(value)) return value.map((entry) => readingArgs(entry, roles, depth + 1));
+  if (Array.isArray(value)) return value.map((entry) => readingArgs(entry, roles, depth + 1, false));
   if (!value || typeof value !== 'object') return value;
   return Object.fromEntries(Object.entries(value).map(([key, entry]) => [
-    key, roles?.get(key)?.credential === false ? readingArgs(entry, roles, depth + 1) : '[redacted]',
+    key, shownKey(key, roles, topLevel) ? readingArgs(entry, roles, depth + 1, false) : '[redacted]',
   ]));
 }
 
@@ -249,6 +266,8 @@ const READING_CANCELLED = 'Execution judgment cancelled; values withheld.';
 
 /** Reads the call's route kind; uncertainty never becomes a guessed kind. */
 async function readRouteKind(tool: string, args: Record<string, unknown>, signal: AbortSignal): Promise<{ routeKind: AgentExecutionRouteKind; routeKindError?: string; classic?: true }> {
+  const known = ENGINE_TOOL_ROUTES[tool];
+  if (known) return { routeKind: known.kind };
   try {
     signal.throwIfAborted();
     return await decisionOrClassic<{ routeKind: AgentExecutionRouteKind; routeKindError?: string; classic?: true }>(async () => {
@@ -515,7 +534,9 @@ export class AgentExecutionLedger {
       record.commandPreview = command && command !== '[redacted]' && command.trim() ? truncateText(command, 180) : undefined;
       record.targetPreview = targetPreview(args, roles.roles);
       this.notify();
-      if (!roles.error) {
+      if (!roles.error && ENGINE_TOOL_ROUTES[record.tool]?.verifies === false) {
+        record.verification = false; this.notify();
+      } else if (!roles.error) {
         try {
           const verification = await decisionOrClassic<boolean | undefined>(() => readExecutionPurpose(record.tool, safeArgs, controller.signal),
             () => { controller.signal.throwIfAborted(); return undefined; }, () => { controller.signal.throwIfAborted(); return true; });

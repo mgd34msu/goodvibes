@@ -267,6 +267,35 @@ export function findCardNumberShapes(text: string, maxFindings = Number.POSITIVE
   return accepted.sort((a, b) => a.startIndex - b.startIndex);
 }
 
+/** Words that say a nearby number is a payment card's (`cardNumber` and `credit` match inside longer words on purpose). */
+const CARD_CONTEXT = /card|credit|debit|visa|master\s?card|amex|american express|discover|\bpan\b|\bcvv2?\b|\bcvc2?\b|\bcsc\b|expir|\bexp\b|security code/i;
+const CARD_CONTEXT_REACH = 40;
+
+/**
+ * Card numbers that are written as one: a Luhn-valid run that is grouped the
+ * way cards are written (`4111 1111 1111 1111`, `5500-0000-0000-0004`) or
+ * that has a card word within 40 characters (`card`, `visa`, `cvv`, `exp`,
+ * `cardNumber`, ...). A bare Luhn-valid digit run is not enough: about one in
+ * ten long ids (a message or channel snowflake, a nanosecond timestamp, an
+ * order number) passes the checksum. This is the decision tool calls are
+ * refused on before anything is sent to a decision model; a bare number goes
+ * on to the model's `cardDetails` reading with the rest of the call.
+ */
+export function findCardNumbersInContext(text: string, maxFindings = Number.POSITIVE_INFINITY): CardShapeFinding[] {
+  const found: CardShapeFinding[] = [];
+  for (const finding of findCardNumberShapes(text)) {
+    const end = finding.startIndex + finding.length;
+    const grouped = /[ -]/.test(text.slice(finding.startIndex, end));
+    const near = text.slice(Math.max(0, finding.startIndex - CARD_CONTEXT_REACH), finding.startIndex)
+      + ' ' + text.slice(end, end + CARD_CONTEXT_REACH);
+    if (grouped || CARD_CONTEXT.test(near)) {
+      found.push(finding);
+      if (found.length >= maxFindings) break;
+    }
+  }
+  return found;
+}
+
 /** A UUID (8-4-4-4-12 hex) anywhere in the text. */
 const UUID_TOKEN = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
 

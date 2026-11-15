@@ -6,11 +6,9 @@ import { sideEffect } from './batteries/side-effect.js';
 import { boundaryReading } from './batteries/boundary.js';
 import { sandboxNeeds } from './batteries/sandbox-needs.js';
 import { agentReadScope } from './batteries/agent-read-scope.js';
-import { mcpScopeArg } from './batteries/mcp-scope-arg.js';
 import { policyBreadth } from './batteries/policy-breadth.js';
 import { ledgerArg } from './batteries/ledger-arg.js';
 import { autonomousDisposition, autonomousRefusal } from './batteries/autonomous.js';
-import { executionVerification } from './batteries/execution-verification.js';
 
 /**
  * Every named decision the gate makes, for calibration:
@@ -25,19 +23,16 @@ registry.register(sandboxAdvisory);
 registry.register(boundaryReading);
 registry.register(sandboxNeeds);
 registry.register(agentReadScope);
-registry.register(mcpScopeArg);
 registry.register(policyBreadth);
 registry.register(ledgerArg);
 registry.register(autonomousDisposition);
 registry.register(autonomousRefusal);
-registry.register(executionVerification);
 
 import { editTarget } from '../tools/batteries/edit-target.js';
 import { contentRank } from '../tools/batteries/content-rank.js';
 import { registryRank } from '../tools/batteries/registry-rank.js';
 import { registrySelect } from '../tools/batteries/registry-select.js';
 import { registryCatalogGroupFit } from '../tools/batteries/registry-catalog-group.js';
-import { researchSchemaStatus } from '../tools/batteries/research-schema-status.js';
 
 registry.register(editTarget);
 registry.register(editWindow);
@@ -45,7 +40,6 @@ registry.register(contentRank);
 registry.register(registryRank);
 registry.register(registrySelect);
 registry.register(registryCatalogGroupFit);
-registry.register(researchSchemaStatus);
 
 import { semanticDiff } from '../tools/batteries/semantic-diff.js';
 import { paramFill } from '../tools/batteries/param-fill.js';

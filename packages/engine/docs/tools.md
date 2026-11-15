@@ -232,10 +232,12 @@ Related tool settings:
 - `permissions.divergenceDashboard` (default on): aggregates
   permission-simulation divergence by tool/prefix/mode and gates enforce-mode
   transitions on the divergence rate.
-- `runtime.toolBudget.enforced` (default off): checks each tool call against the
+- `runtime.toolBudget.enforced` (default off): holds each tool call to the
   wall-clock, token, and cost limits (`runtime.toolBudget.maxMs`, `maxTokens`,
-  `maxCostUsd`) once it returns. A call over a limit is reported as failed with
-  its output kept and a note that its action may already have happened.
+  `maxCostUsd`). The wall-clock limit stops the call when it is reached and the
+  result says so. Token and cost are known only when the call returns, so a
+  call over those is reported as failed with its output kept and a note that
+  its action may already have happened.
 - `tools.overflowSpillBackend`: selects the overflow spill backend
   (`file`, `ledger`, or `diagnostics`); `file` is the stock behavior. The
   choice is read when the runtime starts, so a change applies after a restart.

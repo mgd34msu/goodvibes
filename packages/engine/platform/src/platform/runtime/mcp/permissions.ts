@@ -23,8 +23,10 @@ import type {
 import { logger } from '../../utils/logger.js';
 import { summarizeError } from '../../utils/error-display.js';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
-import { hostsInScope, pathsInScope, readScopedValues } from './scope.js';
+import { hostOutsideScope, pathOutsideScope, readScopedValues, type ScopedValue } from './scope.js';
 import { assertJudgmentInput } from '../../gate/judgment-input.js';
+import { sideEffect, MCP_CAPABILITY_OPTIONS } from '../../gate/batteries/side-effect.js';
+import { judge } from '../judge.js';
 
 // ── Defaults ──────────────────────────────────────────────────────────────────
 
@@ -67,8 +69,31 @@ function trustLevelFromMode(mode: McpTrustMode): McpTrustLevel {
   }
 }
 
-/** Compatibility context for callers; tool permissions do not request Jev readings. */
-export interface McpReadingOwner { readonly externalRequestEvidence?: ExternalRequestEvidence | undefined; readonly port?: JudgmentPort | undefined; readonly signal?: AbortSignal | undefined }
+/**
+ * What the caller knows about the call. `port` and `signal` reach the one
+ * reading this manager may take (a tool's capability class, only when the
+ * server's profile lists allowed capabilities); `workingDirectory` is where
+ * the server resolves a relative path; `toolDescription` and
+ * `toolSchemaRevision` describe the tool as the server listed it.
+ */
+export interface McpReadingOwner {
+  readonly externalRequestEvidence?: ExternalRequestEvidence | undefined;
+  readonly port?: JudgmentPort | undefined;
+  readonly signal?: AbortSignal | undefined;
+  readonly workingDirectory?: string | undefined;
+  readonly toolDescription?: string | undefined;
+  readonly toolSchemaRevision?: string | undefined;
+}
+
+const CAPABILITY_SITE = 'engine.mcp.tool-capability';
+const MCP_CAPABILITIES = Object.keys(MCP_CAPABILITY_OPTIONS) as McpCapabilityClass[];
+const isCapability = (value: unknown): value is McpCapabilityClass => MCP_CAPABILITIES.includes(value as McpCapabilityClass);
+
+/** One argument value for a refusal: the argument name and the value, shortened. */
+function describeScoped(entry: ScopedValue): string {
+  const value = entry.value.length > 120 ? `${entry.value.slice(0, 117)}...` : entry.value;
+  return `argument '${entry.argument || '(value)'}' = '${value}'`;
+}
 
 function scopeLabel(items: readonly string[]): string {
   if (items.length === 0) return 'unbounded';
@@ -455,7 +480,7 @@ export class McpPermissionManager {
         toolName,
         verdict: permission.verdict ?? (permission.allowed ? 'allow' : 'deny'),
         riskLevel: severityForPosture(profile.mode, 'unknown', profile.allowedPaths, profile.allowedHosts),
-        capability: 'generic',
+        capability: permission.capability ?? 'generic',
         incoherent: (permission.causes?.length ?? 0) > 0,
         reason: permission.reason,
         profileMode: profile.mode,
@@ -490,18 +515,60 @@ export class McpPermissionManager {
       };
     }
 
-    owner.signal?.throwIfAborted();
-    const scoped = await readScopedValues(serverName, toolName, args,
-      { paths: record.profile.allowedPaths.length > 0, hosts: record.profile.allowedHosts.length > 0 }, owner);
-    owner.signal?.throwIfAborted();
+    const profile = record.profile;
+    const scoped = readScopedValues(args, { paths: profile.allowedPaths.length > 0, hosts: profile.allowedHosts.length > 0 });
+    const outsidePath = pathOutsideScope(profile.allowedPaths, scoped.paths, owner.workingDirectory);
+    const outsideHost = hostOutsideScope(profile.allowedHosts, scoped.hosts);
+    const capability = profile.allowedCapabilities.length > 0 ? await this._readCapability(serverName, toolName, owner) : undefined;
+    const outsideCapability = capability !== undefined && !profile.allowedCapabilities.includes(capability.value);
     const causes = [
-      ...(record.profile.allowedCapabilities.length > 0 && !record.profile.allowedCapabilities.includes('generic') ? ['capability-out-of-scope' as const] : []),
-      ...(!pathsInScope(record.profile.allowedPaths, scoped.paths) ? ['path-out-of-scope' as const] : []),
-      ...(!hostsInScope(record.profile.allowedHosts, scoped.hosts) ? ['host-out-of-scope' as const] : []),
+      ...(outsideCapability ? ['capability-out-of-scope' as const] : []),
+      ...(outsidePath ? ['path-out-of-scope' as const] : []),
+      ...(outsideHost ? ['host-out-of-scope' as const] : []),
     ];
-    const allowed = record.profile.mode === 'allow-all' || causes.length === 0;
-    return { allowed, verdict: allowed ? 'allow' : 'deny', profileMode: record.profile.mode, causes,
-      reason: allowed ? `server '${serverName}' permits this tool` : `request exceeds configured scope for server '${serverName}'` };
+    const allowed = profile.mode === 'allow-all' || causes.length === 0;
+    const details = [
+      ...(outsideCapability ? [capability!.value === 'generic' && capability!.read === false
+        ? `the capability of '${toolName}' could not be read (no decision model answered), and allowedCapabilities (${profile.allowedCapabilities.join(', ')}) does not list 'generic'`
+        : `'${toolName}' uses capability '${capability!.value}', not in allowedCapabilities (${profile.allowedCapabilities.join(', ')})`] : []),
+      ...(outsidePath ? [`${describeScoped(outsidePath)} is outside allowedPaths (${profile.allowedPaths.join(', ')})`] : []),
+      ...(outsideHost ? [`${describeScoped(outsideHost)} is not an allowed host (${profile.allowedHosts.join(', ')})`] : []),
+    ];
+    return {
+      allowed, verdict: allowed ? 'allow' : 'deny', profileMode: profile.mode, causes,
+      ...(capability ? { capability: capability.value } : {}),
+      ...(capability?.decisionId ? { judgmentDecisionIds: [capability.decisionId] } : {}),
+      reason: allowed
+        ? `server '${serverName}' permits this tool`
+        : `request exceeds configured scope for server '${serverName}': ${details.join('; ')}. Call it with values inside the scope, or ask the owner to widen the server's scope.`,
+    };
+  }
+
+  /**
+   * The capability class of one server tool: a property of the tool, read
+   * once per (server, tool, listed schema) for the life of the process and
+   * only for a server whose profile lists allowed capabilities. With no
+   * decision model, or an unsure reading, it is `generic`.
+   */
+  private async _readCapability(serverName: string, toolName: string, owner: McpReadingOwner): Promise<{ value: McpCapabilityClass; read: boolean; decisionId?: string }> {
+    const outcome = await judge({
+      site: CAPABILITY_SITE,
+      battery: sideEffect,
+      only: ['capability'],
+      state: { server: serverName, tool: toolName, ...(owner.toolDescription ? { description: owner.toolDescription } : {}) },
+      cache: { key: JSON.stringify([serverName, toolName, owner.toolSchemaRevision ?? '']), scope: 'process' },
+      settle: (readings) => {
+        const reading = readings.capability;
+        return reading.outcome === 'act' && isCapability(reading.choice) ? reading.choice : undefined;
+      },
+      fallback: (): McpCapabilityClass | undefined => undefined,
+      describe: (value) => value ?? 'unread',
+      ...(owner.port ? { port: owner.port } : {}),
+      ...(owner.signal ? { signal: owner.signal } : {}),
+    });
+    return outcome.value === undefined
+      ? { value: 'generic', read: false }
+      : { value: outcome.value, read: true, ...(outcome.decisionId ? { decisionId: outcome.decisionId } : {}) };
   }
 
   // ── Inspection ────────────────────────────────────────────────────────────

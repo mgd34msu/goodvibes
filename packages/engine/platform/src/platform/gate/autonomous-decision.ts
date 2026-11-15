@@ -1,8 +1,19 @@
-/** Shared recorded semantic evaluator. It selects host-owned operations; it executes none. */
+/**
+ * Shared recorded semantic evaluator. It selects host-owned operations; it
+ * executes none.
+ *
+ * It is the privacy boundary for everything it sends: callers pass their own
+ * data as it is, and the state, every offered continuation's input, every
+ * description and the protocol references are screened here, once.
+ *
+ * Currentness: the caller's `assertCurrent` runs before every attempt (the
+ * port's `beforeAttempt`) and after every answer, and once more when the act
+ * is claimed. Nothing in between can change it: there is no other await.
+ */
 import { JudgmentError, type EntryType, type JsonValue, type JudgmentPort, type JudgmentRetryProgress } from '@goodvibes-jev/judgment';
 import { captureJevDecisionContext, JEV_DECISION_BINDING_KEYS, validateJevDecision, type JevContinuation, type JevDecision, type JevDecisionBinding, type JevDecisionContext, type JevVersionRef } from '@goodvibes-jev/judgment/decisions';
 import { snapshotJudgmentEntry, snapshotJudgmentInput } from './judgment-input.js';
-import { autonomousDisposition, autonomousRefusal } from './batteries/autonomous.js';
+import { autonomousCriteria, autonomousDisposition, autonomousDispositionState, autonomousRefusal, autonomousRefusalState } from './batteries/autonomous.js';
 
 export interface AutonomousContinuation {
   readonly ref: JevContinuation;
@@ -37,33 +48,16 @@ export interface AutonomousDecision {
   recordClaim(): void;
 }
 
-/**
- * Canonical UUID/SHA identity encodings are protocol metadata, not raw PAN
- * candidates. Other reference text still crosses the existing privacy check;
- * naming a field as metadata does not exempt secret-shaped content.
- */
-function protocolIdentity(value: string): string {
-  if ((value.length === 36 && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value))
-    || (value.length === 64 && /^[0-9a-f]{64}$/i.test(value))) return '[host-protocol-identity]';
-  // Native intake's saved action revision embeds its exact proposal commitment.
-  // Inspect the known operation/counters, while keeping the canonical checksum
-  // in its protocol role. Semantic state never passes through this projection.
-  const nativeAction = /^(?:routing|publish-work|ordinary-turn):g[a-z0-9]{1,11}:p[0-3]:[a-f0-9]{64}$/.exec(value);
-  if (nativeAction?.[0] === value) {
-    return value.slice(0, -64) + '[host-protocol-identity]';
-  }
-  return value;
-}
-
 function protocolReference(value: JevVersionRef) {
-  return { id: protocolIdentity(value.id), revision: protocolIdentity(value.revision) };
+  return { id: value.id, revision: value.revision };
 }
 
+/** Screens every protocol reference of a decision context (ids, binding, evidence, offered references). */
 export function inspectDecisionProtocolReferences(context: JevDecisionContext): void {
   snapshotJudgmentInput({
-    decisionId: protocolIdentity(context.decisionId),
-    binding: Object.fromEntries(JEV_DECISION_BINDING_KEYS.map(key => [key, protocolIdentity(context.binding[key])])),
-    judgmentDecisionIds: context.judgmentDecisionIds.map(protocolIdentity), evidence: context.evidence.map(protocolReference),
+    decisionId: context.decisionId,
+    binding: Object.fromEntries(JEV_DECISION_BINDING_KEYS.map(key => [key, context.binding[key]])),
+    judgmentDecisionIds: context.judgmentDecisionIds, evidence: context.evidence.map(protocolReference),
     continuations: context.continuations.map(value => ({ ...protocolReference(value), kind: value.kind })),
     resumeConditions: context.resumeConditions.map(protocolReference),
   });
@@ -106,17 +100,16 @@ export async function decideAutonomous(input: AutonomousDecisionInput): Promise<
   Object.freeze(evidence);
   const binding = Object.freeze({ ...metadata.binding });
   if (continuations.length + conditions.length > 253 || new Set(continuations.map(item => item.ref.id)).size !== continuations.length) throw new JudgmentError('invalid-request', 'autonomous host catalog is invalid');
-  const options: Record<string, string> = { ...(allowAct ? { act: input.actionDescription } : {}), reject: 'Refuse this action. Do not execute it or ask a human for approval.' };
-  continuations.forEach((item, index) => { options[`revise_${index}`] = item.description; });
-  conditions.forEach((item, index) => { options[`defer_${index}`] = `Wait for registered condition: ${item.description}. Obtain a fresh decision after it changes.`; });
+  const options = autonomousCriteria({ act: allowAct ? input.actionDescription : undefined,
+    continuations: continuations.map(item => item.description), conditions: conditions.map(item => item.description) });
   const ids: string[] = [...metadata.judgmentDecisionIds];
   const active = () => { signal?.throwIfAborted(); assertCurrent(); };
   const recorder = port.recorder;
   if (!recorder) throw new JudgmentError('unrecorded', 'autonomous decisions require the recorded judgment port');
+  // `beforeAttempt` checks currentness before each attempt, the first included.
   const ask = async (criteria: Record<string, string>, resolving = false) => {
-    active();
     if (Object.keys(criteria).length === 1) {
-      const result = await autonomousRefusal.ask(port, { state: { input: state, deterministicConstraints: 'No action or continuation is eligible. Refusal is the only executable semantic disposition.' },
+      const result = await autonomousRefusal.ask(port, { state: autonomousRefusalState(state),
         instructions: input.instructions }, { site: input.site, beforeAttempt: active,
         ...(signal === undefined ? {} : { signal }), ...(onRetry === undefined ? {} : { onRetry }) });
       active();
@@ -128,9 +121,7 @@ export async function decideAutonomous(input: AutonomousDecisionInput): Promise<
       return { choice: 'reject', confidence: reading.probability, outcome: reading.outcome };
     }
     const result = await autonomousDisposition.ask(port, {
-      state: Object.freeze({ input: state, binding, evidence,
-        offeredChoices: Object.freeze({ continuations, resumeConditions: conditions }),
-        ...(resolving ? { uncertainty: 'The prior act candidate did not reach the high-stakes band. Select a legal non-executing outcome.' } : {}) }),
+      state: autonomousDispositionState({ input: state, binding, evidence, continuations, resumeConditions: conditions, resolving }),
       instructions: input.instructions, criteria,
     }, { site: input.site, beforeAttempt: active, ...(signal === undefined ? {} : { signal }), ...(onRetry === undefined ? {} : { onRetry }),
     });
@@ -151,11 +142,11 @@ export async function decideAutonomous(input: AutonomousDecisionInput): Promise<
   const condition = selected.choice.startsWith('defer_') ? conditions[Number(selected.choice.slice(6))] : undefined;
   const outcome = continuation ? 'revise' : condition ? 'defer' : selected.choice;
   if (outcome !== 'act' && outcome !== 'revise' && outcome !== 'defer' && outcome !== 'reject') throw new JudgmentError('invalid-response', 'invalid autonomous outcome');
-  const context = captureJevDecisionContext({ ...metadata, judgmentDecisionIds: ids });
+  // The metadata was captured and screened at entry; only the ids are new.
+  const context: JevDecisionContext = Object.freeze({ ...metadata, judgmentDecisionIds: Object.freeze([...ids]) });
   const decision = validateJevDecision({ schemaVersion: 1, decisionId: context.decisionId, binding: context.binding, judgmentDecisionIds: ids,
     evidence: context.evidence, summary: `Jev selected ${outcome} for the bound action.`, outcome,
     ...(continuation ? { next: continuation.ref } : {}), ...(condition ? { until: condition.ref } : {}) }, context);
-  active();
   const recordedDecision = decisionRecord(decision);
   for (const id of ids) {
     recorder.recordReadings(id, recordedDecision);
@@ -165,15 +156,16 @@ export async function decideAutonomous(input: AutonomousDecisionInput): Promise<
   // another one. Consume before calling recorder hooks so re-entry and partial
   // storage failures cannot admit a second execution of this decision.
   let claimed = false;
+  // The decision and its context are frozen values built above; only the
+  // owner's facts can move, so currentness is the caller's check alone.
   return Object.freeze({ decision, context,
-    assertCurrent() { active(); validateJevDecision(decision, context); },
+    assertCurrent: active,
     recordClaim() {
       active();
       if (decision.outcome !== 'act') throw new JudgmentError('invalid-request', 'only an act decision records a claim');
       if (claimed) throw new JudgmentError('invalid-request', 'autonomous decision was already claimed');
       claimed = true;
       for (const id of ids) recorder.recordAction(id, `autonomous:claim:${context.decisionId}`);
-      active();
     },
   });
 }

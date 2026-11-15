@@ -1074,13 +1074,6 @@ export function createHarnessFixtureReadings(): JudgmentPort {
     if (!selected) throw new Error(`Unscripted metadata catalog fixture ${rawState.query}`);
     return noulAnswer(selected.includes(rawState.candidate.name) ? 0.95 : 0.01);
   });
-  const executionVerification = fakePort((name, question, state) => {
-    if (name !== 'verification' || question.type !== 'noul' || !state || typeof state !== 'object' || Array.isArray(state)) throw new Error('Unexpected execution verification fixture.');
-    const id = state.callId ?? state.id;
-    if (id === 'call-shell') return noulAnswer(0.999);
-    if (id === 'call-edit') return noulAnswer(0.001);
-    throw new Error(`Unscripted execution verification fixture ${String(id)}`);
-  });
   const receiptStatus = fakePort((name, question, state) => {
     if (name !== 'status' || question.type !== 'choice' || !state || typeof state !== 'object' || Array.isArray(state)) {
       throw new Error('Unexpected authored receipt-status fixture.');
@@ -1500,7 +1493,6 @@ export function createHarnessFixtureReadings(): JudgmentPort {
       : request.context?.battery === 'automation.schedule' ? intakeSchedule.port.ask(request)
       : ['agent.runtime.schema-status', 'agent.runtime.kind', 'agent.runtime.status', 'agent.runtime.route-role'].includes(request.context?.battery ?? '') ? interactiveRuntime.port.ask(request)
       : request.context?.battery === 'agent.tools.long-lived-process' ? lifetime.port.ask(request)
-      : request.context?.battery === 'engine.gate.execution-verification' ? executionVerification.port.ask(request)
       : request.context?.battery === 'agent.remote-publisher.schema-status' || request.context?.battery === 'agent.remote-publisher.outcome-kind' ? publisher.port.ask(request)
       : request.context?.battery === 'agent.personal-ops.receipt-status' ? receiptStatus.port.ask(request)
       : ['agent.memory.route-role', 'agent.memory.credential-state', 'agent.memory.live-status', 'agent.memory.schema-certified',

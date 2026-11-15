@@ -5,9 +5,9 @@
  * a path-scope or network-scope rule; a broad pattern in an allow rule is an
  * error the preflight review blocks on, in a deny rule a warning.
  *
- * It replaces two four-spelling lists (`**`, `/`, `/*`, `/**` and `*`, `*.*`,
- * `*.com`, `*:*`): `/home/**` and `*.org` passed them, and a pattern broad in
- * effect but spelled any other way was never flagged.
+ * The linter decides the spellings that cover everything (`**`, `/`, `/*`,
+ * `/**`, `~/**`; `*`, `*.*`, `*:*`) in code before asking, in every mode; this
+ * reading covers the rest, such as `/home/**` and `*.org`.
  *
  * Band: medium stakes. Code flags a pattern unless the reading is a no that
  * acts, so a doubtful pattern is shown to the owner.

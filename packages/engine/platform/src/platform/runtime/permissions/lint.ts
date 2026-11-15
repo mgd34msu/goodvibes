@@ -23,12 +23,21 @@ const BREADTH_CONCURRENCY = 8;
 const BREADTH_SITE = 'engine.gate.policy-lint';
 
 /**
+ * Spellings that cover everything in every reading: code decides them, in
+ * every mode and with no model request.
+ */
+const EVERY_PATH = new Set(['**', '/', '/*', '/**', '~', '~/**', '~/*']);
+const EVERY_HOST = new Set(['*', '*.*', '*:*', '**']);
+
+/**
  * Whether a path or host pattern grants a broader area than a scoped rule
- * should: a Jev reading (`engine.gate.policy-breadth`). A pattern is broad
- * unless the reading is a no that acts, so a doubtful one is shown to the
- * owner. A JudgmentError propagates.
+ * should. The spellings above are broad by code; any other pattern is a Jev
+ * reading (`engine.gate.policy-breadth`), broad unless the reading is a no
+ * that acts, so a doubtful one is shown to the owner. A JudgmentError
+ * propagates.
  */
 async function isBroadPattern(kind: 'path' | 'host', pattern: string, effect: string): Promise<boolean | undefined> {
+  if ((kind === 'path' ? EVERY_PATH : EVERY_HOST).has(pattern.trim())) return true;
   return decisionOrClassic<boolean | undefined>(async () => {
     const item = kind === 'path' ? 'broad_path' : 'broad_host';
     const run = await policyBreadth.run(judgmentPort(BREADTH_SITE), { kind, pattern, effect }, { site: BREADTH_SITE, only: [item] });
@@ -47,7 +56,7 @@ async function anyBroad(kind: 'path' | 'host', patterns: readonly string[], effe
 
 function unassessedBreadth(rule: PolicyRule): PolicyLintFinding {
   return { severity: 'info', ruleId: rule.id, operationProvenance: 'classic', semanticAssessment: 'not-evaluated',
-    message: `Rule '${rule.id}' was checked structurally. Pattern breadth was not evaluated in Classic; native permission rules and owner approvals still apply.` };
+    message: `Rule '${rule.id}': the breadth of its patterns was not evaluated (no decision model in Classic); patterns that cover everything are still errors, and native permission rules and owner approvals still apply.` };
 }
 
 async function lintRule(rule: PolicyRule): Promise<PolicyLintFinding[]> {

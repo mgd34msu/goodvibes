@@ -1,18 +1,18 @@
-/** Apply configured MCP scopes to structured path/URL arguments without remote classification. */
+/** Apply configured MCP scopes to the path and address arguments of a call, in code. */
 import { realpathSync } from 'node:fs';
 import { basename, dirname, join, resolve, sep } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
-import type { McpReadingOwner } from './permissions.js';
 
 /**
  * The path as the file system will resolve it: `..` and `.` segments removed
  * and symlinks followed for the part of the path that exists, so a request
  * for `/allowed/../elsewhere` or a link out of an allowed directory is judged
- * by where it lands, not by how it is spelled.
+ * by where it lands, not by how it is spelled. A relative path is resolved
+ * against `base`, the directory the server works in.
  */
-function realPathOf(path: string): string {
-  const absolute = resolve(path);
+function realPathOf(path: string, base?: string): string {
+  const absolute = base === undefined ? resolve(path) : resolve(base, path);
   let existing = absolute;
   const rest: string[] = [];
   for (;;) {
@@ -27,39 +27,62 @@ function realPathOf(path: string): string {
   }
 }
 
-/** A dotted hostname, `localhost`, an IPv4 address or a bracketed IPv6 address, with an optional port. */
-const BARE_HOST = /^(?:localhost|(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z][a-z0-9-]*|\d{1,3}(?:\.\d{1,3}){3}|\[[0-9a-f:.]+\])(?::\d{1,5})?$/i;
+/** An IPv4 address, `localhost` or a bracketed IPv6 address, or any dotted host with a port. */
+const ADDRESS = /^(?:(?:localhost|\d{1,3}(?:\.\d{1,3}){3}|\[[0-9a-f:.]+\])(?::\d{1,5})?|(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z][a-z0-9-]*:\d{1,5})$/i;
+const SCHEME = /^[a-z][a-z0-9+.-]*:\/\//i;
 
-/** Extract structured addresses locally; owner scopes remain real-path and host checks. */
-export async function readScopedValues(
-  serverName: string,
-  toolName: string,
+/** Keys whose value is a filesystem location, whatever it looks like (a bare name included). */
+const PATH_KEYS = new Set(['path', 'paths', 'file', 'files', 'filename', 'filenames', 'dir', 'dirs', 'directory', 'directories',
+  'folder', 'folders', 'cwd', 'root', 'src', 'source', 'dest', 'dst', 'destination', 'target', 'from']);
+/** Keys whose value is a network destination. */
+const HOST_KEYS = new Set(['host', 'hosts', 'hostname', 'hostnames', 'url', 'urls', 'uri', 'uris', 'endpoint', 'endpoints', 'href', 'domain', 'domains']);
+
+const normalizedKey = (key: string): string => key.toLowerCase().replace(/[-_\s]/g, '');
+const isPathKey = (key: string): boolean => {
+  const name = normalizedKey(key);
+  return PATH_KEYS.has(name) || /(?:path|paths|file|files|dir|directory|directories|folder)$/.test(name);
+};
+const isHostKey = (key: string): boolean => {
+  const name = normalizedKey(key);
+  return HOST_KEYS.has(name) || /(?:url|urls|uri|host|hostname)$/.test(name);
+};
+
+/** One argument value the scope applies to, with the argument it came from. */
+export interface ScopedValue { readonly argument: string; readonly value: string }
+
+/**
+ * The values of a call that the server's scopes apply to. A value is a path
+ * when its argument is named like one (`path`, `filename`, `target`,
+ * `sourcePath`, ...) or when the whole value is shaped like a path: no
+ * whitespace and a separator, a home prefix, `.`/`..` or a `file:` URL. Prose
+ * that happens to hold a slash ("TCP/IP tuning") is not a path. A value is a
+ * destination when its argument is named like one, it has a URL scheme, or
+ * it is an address (an IP, `localhost`, or a host with a port); a dotted file
+ * name such as `report.pdf` is not a host.
+ */
+export function readScopedValues(
   args: Record<string, unknown>,
   scopes: { readonly paths: boolean; readonly hosts: boolean },
-  owner: McpReadingOwner = {},
-): Promise<{ readonly paths: readonly string[]; readonly hosts: readonly string[]; readonly uncertain: boolean; readonly judgmentDecisionIds: readonly string[] }> {
-  owner.signal?.throwIfAborted();
-  const paths: string[] = [];
-  const hosts: string[] = [];
-  const pathKeys = new Set(['path', 'paths', 'file', 'files', 'filename', 'directory', 'directories', 'cwd', 'root']);
-  const hostKeys = new Set(['host', 'hosts', 'hostname', 'hostnames', 'url', 'urls', 'uri', 'endpoint', 'href']);
+): { readonly paths: readonly ScopedValue[]; readonly hosts: readonly ScopedValue[] } {
+  const paths: ScopedValue[] = [];
+  const hosts: ScopedValue[] = [];
+  if (!scopes.paths && !scopes.hosts) return { paths, hosts };
   const visit = (value: unknown, key: string): void => {
     if (Array.isArray(value)) { for (const entry of value) visit(entry, key); return; }
-    if (value && typeof value === 'object') { for (const [name, entry] of Object.entries(value)) visit(entry, name.toLowerCase()); return; }
-    if (typeof value !== 'string' || !value.trim()) return;
-    // With a scope configured, any value that is shaped like a path (it has a
-    // separator or a home prefix) or like a URL (it has a scheme) is held to it,
-    // whatever its argument is called: a tool's argument names are the server's
-    // choice, and `{"target":"secrets/key"}` must not slip past `allowedPaths`.
-    const pathShaped = value.startsWith('file:') || value.startsWith('~') || value.includes('/') || value.includes('\\') || value === '.' || value === '..';
-    // A bare host (`evil.test`, `10.0.0.5:8080`) has no scheme, so it is recognised by its own shape.
-    const hostShaped = !pathKeys.has(key) && BARE_HOST.test(value.trim());
-    const urlShaped = /^[a-z][a-z0-9+.-]*:\/\//i.test(value) && !value.startsWith('file:');
-    if (scopes.paths && (pathKeys.has(key) || pathShaped) && !(urlShaped && !pathKeys.has(key))) paths.push(value);
-    if (scopes.hosts && (hostKeys.has(key) || urlShaped || hostShaped) && !value.startsWith('file:')) hosts.push(value);
+    if (value && typeof value === 'object') { for (const [name, entry] of Object.entries(value)) visit(entry, name); return; }
+    if (typeof value !== 'string') return;
+    const trimmed = value.trim();
+    if (!trimmed) return;
+    const fileUrl = trimmed.startsWith('file:');
+    const url = SCHEME.test(trimmed) && !fileUrl;
+    const pathKey = isPathKey(key);
+    const pathShaped = fileUrl || (!/\s/.test(trimmed) && !url
+      && (trimmed.startsWith('~') || trimmed.includes('/') || trimmed.includes('\\') || trimmed === '.' || trimmed === '..'));
+    if (scopes.paths && ((pathKey && !url) || pathShaped)) paths.push({ argument: key, value: trimmed });
+    if (scopes.hosts && !fileUrl && !pathShaped && (isHostKey(key) || url || ADDRESS.test(trimmed))) hosts.push({ argument: key, value: trimmed });
   };
   visit(args, '');
-  return { paths, hosts, uncertain: false, judgmentDecisionIds: [] };
+  return { paths, hosts };
 }
 
 /** A path value as a filesystem path: a `file:` URL is converted by the URL grammar. */
@@ -70,21 +93,22 @@ const asFilesystemPath = (value: string): string => {
 };
 
 /**
- * Whether every path the call touches lies inside one of the owner's allowed
- * directories. Containment is a path-component comparison of real paths, so
- * `/allowed-2` is not inside `/allowed`.
+ * The first path the call touches that lies outside every one of the owner's
+ * allowed directories, or undefined when all are inside. Containment is a
+ * path-component comparison of real paths, so `/allowed-2` is not inside
+ * `/allowed`; a relative path is resolved against `base`.
  */
-export function pathsInScope(allowedPaths: readonly string[], paths: readonly string[]): boolean {
-  if (allowedPaths.length === 0) return true;
-  const roots = allowedPaths.map(realPathOf);
-  return paths.every((value) => {
+export function pathOutsideScope(allowedPaths: readonly string[], paths: readonly ScopedValue[], base?: string): ScopedValue | undefined {
+  if (allowedPaths.length === 0) return undefined;
+  const roots = allowedPaths.map((root) => realPathOf(root));
+  return paths.find(({ value }) => {
     let target: string;
     try {
-      target = realPathOf(asFilesystemPath(value));
+      target = realPathOf(asFilesystemPath(value), base);
     } catch {
-      return false;
+      return true;
     }
-    return roots.some((root) => target === root || target.startsWith(root.endsWith(sep) ? root : `${root}${sep}`));
+    return !roots.some((root) => target === root || target.startsWith(root.endsWith(sep) ? root : `${root}${sep}`));
   });
 }
 
@@ -101,12 +125,12 @@ function hostOf(value: string): string | undefined {
   }
 }
 
-/** Whether every destination the call reaches is one of the owner's allowed hosts or their subdomains. */
-export function hostsInScope(allowedHosts: readonly string[], hosts: readonly string[]): boolean {
-  if (allowedHosts.length === 0) return true;
-  return hosts.every((value) => {
+/** The first destination the call reaches that is not one of the owner's allowed hosts or their subdomains. */
+export function hostOutsideScope(allowedHosts: readonly string[], hosts: readonly ScopedValue[]): ScopedValue | undefined {
+  if (allowedHosts.length === 0) return undefined;
+  return hosts.find(({ value }) => {
     const host = hostOf(value);
-    return host !== undefined && allowedHosts.some((entry) => {
+    return host === undefined || !allowedHosts.some((entry) => {
       // An allowed host is compared as a host: `Example.com`, `https://example.com`
       // and `example.com:8443` all name `example.com`.
       const allowed = hostOf(entry.trim());

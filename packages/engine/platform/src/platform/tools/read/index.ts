@@ -17,13 +17,14 @@ import {
   paginateFiles,
   readOneFile,
   type FileReadResult,
+  type ReadImage,
   type ReadOutput,
 } from './file-readers.js';
 import { mapWithConcurrency } from '../../utils/concurrency.js';
 import { clipReadContent } from './observation.js';
 import type { tryLoadSharp } from './media.js';
 
-export type { FileReadResult, ReadOutput } from './file-readers.js';
+export type { FileReadResult, ReadImage, ReadOutput } from './file-readers.js';
 
 const MAX_PARALLEL_READ_FILES = 8;
 /** Response cap when the caller sets neither output.max_tokens nor token_budget. */
@@ -64,7 +65,7 @@ export class ReadTool implements Tool {
     this.codeIntelligence = codeIntelligence ?? new CodeIntelligence({});
   }
 
-  async execute(args: Record<string, unknown>, options?: ToolExecuteOptions): Promise<{ success: boolean; output?: string; error?: string; hostEvidence?: ToolHostEvidence }> {
+  async execute(args: Record<string, unknown>, options?: ToolExecuteOptions): Promise<{ success: boolean; output?: string; error?: string; hostEvidence?: ToolHostEvidence; _images?: readonly ReadImage[] }> {
     if (!Array.isArray(args.files) || args.files.length === 0) {
       return { success: false, error: 'Missing or empty "files" array' };
     }
@@ -200,7 +201,8 @@ export class ReadTool implements Tool {
         reason: clipped.has(r) ? 'max_tokens' as const : 'max_per_item' as const }];
     });
 
-    const images: NonNullable<ReadOutput['images']> = [];
+    // Image bytes travel beside the result text (`_images`), so nothing parses the text to find them.
+    const images: ReadImage[] = [];
     const fileResults: FileReadResult[] = results.map((r) => {
       if (r.imageData) {
         images.push({
@@ -239,7 +241,6 @@ export class ReadTool implements Tool {
         ...(truncated.length > 0 ? { truncated } : {}),
         ...(elapsedMs >= SLOW_READ_MS ? { elapsed_ms: elapsedMs } : {}),
       },
-      ...(images.length > 0 ? { images } : {}),
     };
 
     if (format === 'count_only') {
@@ -270,7 +271,7 @@ export class ReadTool implements Tool {
     const reads = fileResults.flatMap((r, index) => r.readObservation || r.resolvedPath
       ? [{ index, path: r.path, resolvedPath: r.resolvedPath, readObservation: r.readObservation ? { ...r.readObservation } : undefined }]
       : []);
-    const hostEvidence = reads.length ? { hostEvidence: { reads } } : {};
+    const hostEvidence = { ...(reads.length ? { hostEvidence: { reads } } : {}), ...(images.length > 0 ? { _images: images } : {}) };
 
     if (allFailed) {
       const reasons = [...new Set(fileResults.map((r) => r.error).filter((error): error is string => typeof error === 'string'))];

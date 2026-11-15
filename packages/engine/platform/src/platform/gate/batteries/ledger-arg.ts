@@ -1,9 +1,11 @@
 /**
- * `engine.gate.ledger-arg`: what one argument of a tool call is, by the tool
- * and the argument's name, for the execution ledger's record of the call
- * (gate/policy/execution-ledger.ts). Read once per tool and argument name and
- * remembered for the process: the names repeat across calls, the values do
- * not.
+ * `engine.gate.ledger-arg`: what one top-level argument of a tool call is, by
+ * the tool and the argument's name, for the execution ledger's record of the
+ * call (gate/policy/execution-ledger.ts). Read once per tool and argument name
+ * and remembered for the process: a tool's parameter names repeat across
+ * calls. Keys nested inside a value are data (file names, header names, ids),
+ * never read here; the ledger shows them with their argument unless the local
+ * field-name check calls them credentials.
  *
  * - `holds_credential`: does the argument carry a credential (a password,
  *   token, API key, client secret or authorization value)? Its value is then

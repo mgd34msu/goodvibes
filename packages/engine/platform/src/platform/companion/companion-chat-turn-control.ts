@@ -246,20 +246,23 @@ export function finalizeCancelledTurn(ctx: CancelFinalizeContext): void {
 // ---------------------------------------------------------------------------
 
 /**
- * How long a cancel waits for the aborted turn to finalize before answering
- * with partialPersisted:false (the terminal turn.cancelled SSE event stays the
- * authoritative signal either way). Providers release an aborted fetch stream
- * near-instantly; this bound only matters for a wedged provider.
+ * How long a cancel waits for the aborted turn to stop. The abort reaches the
+ * provider stream, every running tool call and any pending approval, so a turn
+ * normally stops at once; this bound only matters for a tool that ignores its
+ * signal or a wedged provider. Past it the cancel answers TURN_STOPPING, never
+ * `cancelled`, and the terminal turn.cancelled event follows when it stops.
  */
 const CANCEL_SETTLE_TIMEOUT_MS = 3_000;
 
 /**
- * Cancel the given active turn. Refusals are honest machine codes:
+ * Cancel the given active turn. `cancelled: true` is answered only once the
+ * turn has stopped. Refusals are honest machine codes:
  * no turn in flight → 404 NO_ACTIVE_TURN (benign, the turn finished before
  * the stop landed); `turnId` guard mismatch → 409 TURN_MISMATCH (a newer turn
- * took the slot, a stale stop click must not kill it). Repeat cancels are
- * idempotent successes, never errors. The caller resolves the session
- * (SESSION_NOT_FOUND is its refusal).
+ * took the slot, a stale stop click must not kill it); the stop was sent but
+ * the turn has not stopped within the bound → 409 TURN_STOPPING (still the
+ * active turn; turn.cancelled arrives when it stops). Repeat cancels are
+ * idempotent. The caller resolves the session (SESSION_NOT_FOUND is its refusal).
  */
 export async function cancelActiveTurn(
   sessionId: string,
@@ -300,12 +303,19 @@ export async function cancelActiveTurn(
   } finally {
     cancelSettleDeadline?.();
   }
+  if (settled === null) {
+    throw Object.assign(
+      new Error(`The stop was sent, but turn ${turn.turnId} has not stopped yet: a tool call or the provider has not ended.`),
+      { code: 'TURN_STOPPING', status: 409, state: 'stopping',
+        next: ['Wait for the turn.cancelled event on the session stream; it arrives when the turn has stopped'] },
+    );
+  }
   return {
     sessionId,
     turnId: turn.turnId,
     cancelled: true,
     ...(alreadyCancelled ? { alreadyCancelled: true } : {}),
-    partialPersisted: settled?.partialPersisted ?? false,
+    partialPersisted: settled.partialPersisted,
   };
 }
 

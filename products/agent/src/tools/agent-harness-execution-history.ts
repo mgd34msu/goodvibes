@@ -1,9 +1,5 @@
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
-import { decisionOrClassic, isClassicOperation, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime';
+import { isClassicOperation, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime';
 import type { CommandContext } from '../input/command-registry.ts';
-import { captureJudgmentPort, JudgmentPortMissingError, decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
-import { executionVerification, gateJudgmentRegistry, prepareJudgmentResult } from '@goodvibes-jev/engine/platform/platform/gate';
-import { SOURCE_SCREENING_LIMITS, type ProtectedSource, type SourceScreeningReceipt } from '@goodvibes-jev/engine/platform/platform/security';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { captureCatalogData, captureCatalogMethods, rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import type { AgentExecutionRecord, AgentExecutionRouteKind, AgentExecutionStatus } from '../runtime/execution-ledger.ts';
@@ -29,9 +25,9 @@ type ExecutionHistoryResolution =
 
 type ActivityCardStatus = AgentExecutionStatus | 'mixed';
 type VerificationStatus = 'passed' | 'failed' | 'running' | 'cancelled' | 'not_recorded' | 'held' | 'not-evaluated';
-type VerificationReading = Awaited<ReturnType<typeof executionVerification.run>>['readings']['verification'];
-type VerificationObservation = { readonly status: 'settled'; readonly verification: boolean; readonly judgment: VerificationReading }
-  | { readonly status: 'held'; readonly judgment?: VerificationReading }
+/** Whether a record is a verification attempt, as the execution ledger recorded it when the call ran. */
+type VerificationObservation = { readonly status: 'settled'; readonly verification: boolean }
+  | { readonly status: 'held' }
   | { readonly status: 'not-evaluated'; readonly provenance: 'classic' };
 type VerificationObservations = ReadonlyMap<string, VerificationObservation>;
 
@@ -496,122 +492,17 @@ async function matchingRecords(all: readonly AgentExecutionRecord[], query: stri
     'agent.harness.execution-history', { ...options, requirePreservedSource: true });
 }
 
-async function readVerificationObservations(all: readonly AgentExecutionRecord[], options: CatalogRankingOptions): Promise<VerificationObservations> {
-  const observations = new Map<string, VerificationObservation>(all.map(record => [record.id, { status: 'held' }]));
-  options.signal?.throwIfAborted(); options.assertCurrent?.();
-  const unassessed = () => {
-    options.signal?.throwIfAborted(); options.assertCurrent?.();
-    for (const record of all) {
-      const previous = observations.get(record.id);
-      if (previous?.status === 'held' && previous.judgment === undefined) observations.set(record.id, { status: 'not-evaluated', provenance: 'classic' });
-    }
-    return observations;
-  };
-  if (!all.length || !options.sourceOwner) return isClassicOperation() ? unassessed() : observations;
-  if (observations.size !== all.length) throw new ToolInputProjectionError('invalid');
-  const owner = options.sourceOwner, signal = options.signal, callerCurrent = options.assertCurrent;
-  const assertOwnerCurrent = captureCatalogMethods(owner, ['capture', 'screen', 'project', 'release']);
-  const releaseSource = owner.release;
-  const readingRecords = all.map(verificationRecordView);
-  const source = readingRecords.map(record => JSON.stringify(record));
-  if (source.reduce((sum, text) => sum + text.length, 0) > 1_000_000) throw new ToolInputProjectionError('held');
-  const batches: string[][] = [];
-  for (const text of source) {
-    if (text.length > SOURCE_SCREENING_LIMITS.characters) throw new ToolInputProjectionError('held');
-    let batch = batches.at(-1);
-    if (!batch || batch.length === SOURCE_SCREENING_LIMITS.parts || batch.reduce((sum, part) => sum + part.length, 0) + text.length > SOURCE_SCREENING_LIMITS.characters) {
-      batch = []; batches.push(batch);
-    }
-    batch.push(text);
-  }
-  if (batches.length > SOURCE_SCREENING_LIMITS.sources) throw new ToolInputProjectionError('held');
-  const handles: ProtectedSource[] = [];
-  const receipts: { readonly receipt: SourceScreeningReceipt; readonly projection: readonly string[] }[] = [];
-  let released = false, releasing: Promise<void> | undefined;
-  let assertBackend: (() => void) | undefined;
-  const assertPublicationCurrent = () => {
-    if (options.sourceOwner !== owner || options.signal !== signal || options.assertCurrent !== callerCurrent) throw new ToolInputProjectionError('held');
-    signal?.throwIfAborted(); callerCurrent?.(); assertOwnerCurrent(); assertBackend?.();
-  };
-  const assertOwnedCurrent = () => {
-    assertPublicationCurrent();
-    if (released) throw new ToolInputProjectionError('held');
-    for (const { receipt, projection } of receipts) {
-      const current = owner.project(receipt);
-      if (current.length !== projection.length || current.some((text, index) => text !== projection[index])) throw new ToolInputProjectionError('held');
-    }
-  };
-  const release = () => {
-    if (releasing) return releasing;
-    released = true; signal?.removeEventListener('abort', abort);
-    releasing = Promise.resolve().then(async () => { await Promise.all(handles.map(handle => Promise.resolve().then(() => releaseSource.call(owner, handle)))); });
-    return releasing;
-  };
-  const abort = () => { void release().catch(() => {}); };
-  try {
-    assertOwnedCurrent();
-    for (const batch of batches) { assertOwnedCurrent(); handles.push(owner.capture(batch)); }
-    signal?.addEventListener('abort', abort, { once: true });
-    const projected: string[] = [];
-    for (const handle of handles) {
-      assertOwnedCurrent();
-      const screened = await owner.screen(handle, { signal, assertCurrent: assertOwnedCurrent });
-      assertOwnedCurrent();
-      if (screened.status !== 'settled') throw new ToolInputProjectionError('held');
-      const projection = owner.project(screened.receipt);
-      receipts.push({ receipt: screened.receipt, projection }); projected.push(...projection);
-    }
-    assertOwnedCurrent();
-    if (projected.length !== source.length || projected.some((text, index) => text !== source[index])) throw new ToolInputProjectionError('held');
-    return await decisionOrClassic(async () => {
-      const assertDefinitionSlots = captureCatalogMethods(executionVerification, ['name', 'version', 'description', 'accuracyFloor', 'model', 'items', 'fixtureCount', 'run', 'checkFixtures']);
-      const batteryRevision = JSON.stringify(captureCatalogData({ name: executionVerification.name, version: executionVerification.version,
-        description: executionVerification.description, accuracyFloor: executionVerification.accuracyFloor, model: executionVerification.model,
-        items: executionVerification.items, fixtureCount: executionVerification.fixtureCount }));
-      const run = executionVerification.run, checkFixtures = executionVerification.checkFixtures;
-      const assertDefinitionCurrent = () => {
-        assertDefinitionSlots();
-        const descriptors = Object.getOwnPropertyDescriptors(executionVerification);
-        if (!descriptors.run || !('value' in descriptors.run) || descriptors.run.value !== run
-          || !descriptors.checkFixtures || !('value' in descriptors.checkFixtures) || descriptors.checkFixtures.value !== checkFixtures
-          || Object.values(descriptors).some(descriptor => !('value' in descriptor))
-          || gateJudgmentRegistry.get('engine.gate.execution-verification') !== executionVerification
-          || JSON.stringify(captureCatalogData({ name: executionVerification.name, version: executionVerification.version,
-            description: executionVerification.description, accuracyFloor: executionVerification.accuracyFloor, model: executionVerification.model,
-            items: executionVerification.items, fixtureCount: executionVerification.fixtureCount })) !== batteryRevision) throw new ToolInputProjectionError('held');
-      };
-      let capture: ReturnType<typeof captureJudgmentPort>;
-      try { capture = captureJudgmentPort('agent.harness.execution-verification', { ...(signal ? { signal } : {}), assertCurrent: () => {
-        signal?.throwIfAborted(); assertDefinitionCurrent();
-      }, prepareResultCapture: prepareJudgmentResult }); }
-      catch (error) { if (error instanceof JudgmentPortMissingError && decisionModelPolicyState().policy !== 'Preferred') return observations; throw error; }
-      assertBackend = () => {
-        signal?.throwIfAborted(); assertDefinitionCurrent();
-        if (!isClassicOperation()) capture.assertCurrent();
-      };
-      options.retainCurrent?.(assertBackend, 'agent.harness.execution-verification.backend');
-      const recorder = capture.port.recorder;
-      const port: typeof capture.port = { model: capture.port.model,
-        ...(recorder ? { recorder: {
-          recordReadings: (...args: Parameters<typeof recorder.recordReadings>) => { assertOwnedCurrent(); recorder.recordReadings(...args); assertOwnedCurrent(); },
-          recordAction: (...args: Parameters<typeof recorder.recordAction>) => { assertOwnedCurrent(); recorder.recordAction(...args); assertOwnedCurrent(); },
-        } } : {}),
-        ask: async request => { assertOwnedCurrent(); const result = await capture.port.ask({ ...request,
-          beforeAttempt: () => { assertSynchronousJudgmentGuard(() => request.beforeAttempt?.()); assertOwnedCurrent(); },
-          assertLogCurrent: () => { assertSynchronousJudgmentGuard(() => request.assertLogCurrent?.(), 'retention'); assertOwnedCurrent(); },
-        }); assertOwnedCurrent(); return result; },
-      };
-      for (const [index, record] of all.entries()) {
-        assertOwnedCurrent();
-        const result = await run.call(executionVerification, port, { id: record.id, recordJson: projected[index]! }, { site: 'agent.harness.execution-verification', signal: capture.signal, beforeAttempt: assertOwnedCurrent });
-        assertOwnedCurrent();
-        const judgment = result.readings.verification;
-        if (judgment.outcome === 'act' && judgment.verdict !== 'uncertain') observations.set(record.id, { status: 'settled', verification: judgment.verdict === 'yes', judgment });
-        else observations.set(record.id, { status: 'held', judgment });
-      }
-      return observations;
-    }, () => { assertOwnedCurrent(); return unassessed(); }, () => { assertOwnedCurrent(); return true; });
-  } finally { await release(); assertPublicationCurrent(); }
+/**
+ * The verification role of each record is the ledger's own reading, taken
+ * once when the call ran (`record.verification`); a history view reads it
+ * and asks nothing. A record whose reading has not settled is held; one
+ * recorded during Classic operation is not evaluated.
+ */
+function verificationObservations(all: readonly AgentExecutionRecord[]): VerificationObservations {
+  return new Map(all.map((record): [string, VerificationObservation] => [record.id,
+    typeof record.verification === 'boolean' ? { status: 'settled', verification: record.verification }
+      : record.operationProvenance === 'classic' ? { status: 'not-evaluated', provenance: 'classic' }
+        : { status: 'held' }]));
 }
 
 export async function executionHistorySummary(context: CommandContext, args: AgentHarnessExecutionHistoryArgs, options: CatalogRankingOptions = {}): Promise<Record<string, unknown>> {
@@ -629,8 +520,7 @@ async function ownedExecutionHistorySummary(context: CommandContext, args: Agent
   const selected = await matchingRecords(all, query, { ...options, assertCurrent });
   assertCurrent();
   const filtered = selected.matches.slice(0, readLimit(args.limit, 100));
-  const observations = await readVerificationObservations(filtered.map(({ entry }) => entry), { ...options, assertCurrent });
-  assertCurrent();
+  const observations = verificationObservations(filtered.map(({ entry }) => entry));
   const cards = activityCards(context, filtered.map(({ entry }) => entry), includeParameters, observations);
   return {
     ...(isClassicOperation() ? { provenance: 'classic' } : {}),
@@ -669,8 +559,7 @@ async function ownedExecutionHistoryItem(context: CommandContext, args: AgentHar
   const assertCurrent = retainHistorySources(context, sources, options, assertBackend);
   const all = sources.records;
   const describe = async (record: AgentExecutionRecord, resolvedBy: string) => {
-    const observations = await readVerificationObservations([record], { ...options, assertCurrent });
-    assertCurrent(); return describeRecord(context, record, true, observations, { ...lookup, resolvedBy });
+    return describeRecord(context, record, true, verificationObservations([record]), { ...lookup, resolvedBy });
   };
   const normalized = lookup.input.toLowerCase();
   const exact = all.find((record) => record.id === lookup.input || record.callId === lookup.input);

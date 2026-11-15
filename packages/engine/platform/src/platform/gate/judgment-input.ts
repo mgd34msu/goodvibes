@@ -16,7 +16,7 @@
 import { findCredentialScopeDeclaration, isDaemonNeededSecretKey } from '../config/credential-scope-registry.js';
 import { isSecretBearingConfigKey, isSecretReferenceValue } from '../config/secret-bearing-config-keys.js';
 import { CARD_FIELD_NAMES } from '../payments/card-material.js';
-import { findCardNumberShapes } from '../security/card-shapes.js';
+import { findCardNumbersInContext } from '../security/card-shapes.js';
 import type { EntryType, JsonValue } from '@goodvibes-jev/judgment';
 import { evidenceCredentialMarker, inlineDeclarations, literalDeclarationValue } from './inline-declarations.js';
 
@@ -284,7 +284,7 @@ function inlineProblem(text: string, cardOnly = false, evidence = false): Judgme
  * redacted shell program has the same effects as the original program.
  */
 function inspectInlineProblem(text: string, cardOnly = false, evidence = false): JudgmentInputProblem | undefined {
-  if (findCardNumberShapes(text, 1).length > 0) return 'card-material';
+  if (findCardNumbersInContext(text, 1).length > 0) return 'card-material';
   if (!cardOnly && /-----BEGIN (?:RSA |EC |OPENSSH |ENCRYPTED )?PRIVATE KEY-----/.test(text)) return 'credential-material';
   for (const flags of [true, false]) {
     for (const declaration of inlineDeclarations(text, flags)) {

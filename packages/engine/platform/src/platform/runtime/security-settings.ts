@@ -146,9 +146,9 @@ const SECURITY_FEATURE_SETTINGS: readonly Omit<SecuritySettingReport, 'currentSt
     securityRelevant: true,
     summary: 'Controls runtime budget enforcement for tool execution pipelines.',
     insecureWhen:
-      'When off, a tool call over a wall-clock, token or cost limit is not reported as failed.',
+      'When off, a tool call runs as long as it takes, and one over a token or cost limit is not reported as failed.',
     enablementEffect:
-      'When on, a tool call that finishes over a configured budget is reported as failed, with its output kept and a note that its action may have taken effect.',
+      'When on, a tool call is stopped at its wall-clock limit and the model is told so; a call that finishes over its token or cost limit is reported as failed, with its output kept and a note that its action may have taken effect.',
     enablementRequirements: [
       'Configure appropriate budget limits (runtime.toolBudget.maxMs/maxTokens/maxCostUsd) for the host surface.',
       'Ensure callers handle budget-exceeded tool errors as normal failures.',

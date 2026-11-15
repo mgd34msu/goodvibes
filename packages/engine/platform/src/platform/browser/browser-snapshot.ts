@@ -385,33 +385,26 @@ function credentialDocument(value: unknown, checkout?: { readonly scrub: (text: 
 
 type BrowserPageReadWork = Pick<BrowserControlIdentityWork, 'wait' | 'assertCurrent'>;
 
-async function credentialFrameChain(frame: Frame, work: BrowserPageReadWork, assertSource: () => void): Promise<{ readonly chain: readonly string[]; readonly assertCurrent: () => void }> {
-  const retained: (() => void)[] = [];
-  const assertMethods = () => { for (const guard of retained) guard(); };
-  const current = () => { assertMethods(); assertSource(); assertMethods(); };
-  const original = retainBrowserMethods(frame, ['__frameChain']); retained.push(original.assertCurrent);
-  const precomputed = original.value('__frameChain'); current();
+/** The selector path from the main document to one frame. Checked after each await; the page's own methods are its own. */
+async function credentialFrameChain(frame: Frame, work: BrowserPageReadWork, assertSource: () => void): Promise<readonly string[]> {
+  const precomputed = (frame as Frame & { readonly __frameChain?: unknown }).__frameChain;
   if (precomputed !== undefined) {
     const captured = captureOwnedJson(precomputed, nodeTypes.isProxy);
     if (!Array.isArray(captured) || captured.some(part => typeof part !== 'string' || !part)) throw new Error('Complete browser frames are unavailable.');
-    const chain: string[] = [];
-    for (const part of captured) { if (typeof part !== 'string') throw new Error('Complete browser frames are unavailable.'); chain.push(part); }
-    return { chain, assertCurrent: assertMethods };
+    return captured as string[];
   }
   const chain: string[] = [], visited = new Set<Frame>();
   let selected: Frame = frame;
   for (;;) {
     if (visited.has(selected) || visited.size >= 64) throw new Error('Complete browser frames are unavailable.');
     visited.add(selected);
-    const methods = retainBrowserMethods(selected, ['parentFrame', 'frameElement']); retained.push(methods.assertCurrent);
-    current(); const parent = selected.parentFrame(); current();
-    if (!parent) return { chain, assertCurrent: assertMethods };
+    const parent = selected.parentFrame();
+    if (!parent) return chain;
     const selectedFrame = selected;
-    const element = await work.wait(() => { current(); return selectedFrame.frameElement(); }); current();
-    const elementMethods = retainBrowserMethods(element, ['evaluate']); retained.push(elementMethods.assertCurrent);
-    const selector = await work.wait(() => { current(); return element.evaluate(selectorOfFrameElement); }); current();
+    const element = await work.wait(() => selectedFrame.frameElement()); assertSource();
+    const selector = await work.wait(() => element.evaluate(selectorOfFrameElement)); assertSource();
     if (typeof selector !== 'string' || !selector || selectedFrame.parentFrame() !== parent) throw new Error('Complete browser frames are unavailable.');
-    current(); chain.unshift(selector); selected = parent;
+    chain.unshift(selector); selected = parent;
   }
 }
 
@@ -436,62 +429,54 @@ function credentialFrameVector(frames: readonly Frame[]): readonly Frame[] {
   return result;
 }
 
-/** Complete current native metadata only. No stored snapshot grants page purpose. */
+/**
+ * Complete current native metadata only. No stored snapshot grants page purpose.
+ *
+ * Currentness (`work` and the caller's `assertSource`) is checked after each
+ * await, never per frame method or per string. Live payment material is
+ * looked for once, in the encoded state (`assertMetadata(encoded)`): every
+ * key and string of the state appears verbatim in it.
+ */
 export async function captureCredentialPage(
   page: Page, work: BrowserPageReadWork, assertSource: () => void, assertMetadata: (text: string) => void,
   checkout?: { readonly scrub: (text: string) => string },
 ) {
-  const pageMethods = retainBrowserMethods(page, ['url', 'frames', 'mainFrame', 'refreshFrames']);
-  const frameOwners = new Map<Frame, ReturnType<typeof retainBrowserMethods>>();
-  const chainGuards: (() => void)[] = [];
-  let initialFrames: readonly Frame[] | undefined;
-  const assertMethods = () => { pageMethods.assertCurrent(); for (const owner of frameOwners.values()) owner.assertCurrent(); for (const guard of chainGuards) guard(); };
-  const current = () => { assertMethods(); work.assertCurrent(); assertMethods(); assertSource(); assertMethods(); };
-  const refresh = pageMethods.value('refreshFrames');
+  const current = () => { work.assertCurrent(); assertSource(); };
+  const refresh = (page as Page & { readonly refreshFrames?: unknown }).refreshFrames;
   if (refresh !== undefined && typeof refresh !== 'function') throw new Error('Complete browser frames are unavailable.');
+  let initialFrames: readonly Frame[] | undefined;
   const read = async () => {
-    current();
-    if (typeof refresh === 'function') { await work.wait(() => { current(); return Promise.resolve(Reflect.apply(refresh, page, [{ complete: true }])); }); current(); }
-    const frames = credentialFrameVector(page.frames()); current();
-    current();
+    if (typeof refresh === 'function') { await work.wait(() => Promise.resolve(Reflect.apply(refresh, page, [{ complete: true }]))); assertSource(); }
+    const frames = credentialFrameVector(page.frames());
     if (typeof refresh !== 'function') {
       if (initialFrames && (initialFrames.length !== frames.length || frames.some((frame, index) => frame !== initialFrames?.[index]))) throw new StaleElementError('Browser frames changed.', 'Read the page again.');
       initialFrames ??= [...frames];
     }
-    const mainFrame = page.mainFrame(); current();
+    const mainFrame = page.mainFrame();
     if (typeof refresh !== 'function' && !frames.includes(mainFrame)) throw new Error('Complete browser frames are unavailable.');
     const documents: Array<ReturnType<typeof credentialDocument>['document'] & { readonly frameChain: readonly string[] }> = [];
     let password = false;
     for (const frame of frames) {
-      let methods = frameOwners.get(frame);
-      if (!methods) { methods = retainBrowserMethods(frame, ['evaluate', 'parentFrame', 'frameElement', '__frameChain']); frameOwners.set(frame, methods); }
-      const frameMethods = methods;
-      const frameCurrent = () => { current(); frameMethods.assertCurrent(); };
-      frameCurrent();
-      const chainOwner = await credentialFrameChain(frame, work, frameCurrent); chainGuards.push(chainOwner.assertCurrent); frameCurrent();
-      const chain = chainOwner.chain;
-      const result = await work.wait(() => { frameCurrent(); return frame.evaluate(collectElements, {
+      const chain = await credentialFrameChain(frame, work, assertSource);
+      const result = await work.wait(() => frame.evaluate(collectElements, {
         limit: Number.MAX_SAFE_INTEGER, identityOnly: true, ...(checkout ? { checkout: true as const } : {}),
-      } satisfies Parameters<typeof collectElements>[0]); }); frameCurrent();
-      const captured = credentialDocument(result, checkout); frameCurrent();
+      } satisfies Parameters<typeof collectElements>[0])); assertSource();
+      const captured = credentialDocument(result, checkout);
       password ||= captured.password;
       documents.push({ frameChain: chain, ...captured.document });
     }
-    current();
     if (typeof refresh === 'function') {
-      await work.wait(() => { current(); return Promise.resolve(Reflect.apply(refresh, page, [{ complete: true }])); }); current();
-      const fresh = credentialFrameVector(page.frames()); current();
+      await work.wait(() => Promise.resolve(Reflect.apply(refresh, page, [{ complete: true }]))); assertSource();
+      const fresh = credentialFrameVector(page.frames());
       const chains = fresh.map((frame, index) => {
-        const owner = retainBrowserMethods(frame, ['__frameChain', 'url']); owner.assertCurrent(); current(); owner.assertCurrent();
-        const frameUrl = frame.url(); owner.assertCurrent(); current(); owner.assertCurrent();
-        if (frameUrl !== documents[index]?.url) throw new StaleElementError('Browser document changed.', 'Read the page again.');
-        return owner.value('__frameChain');
+        if (frame.url() !== documents[index]?.url) throw new StaleElementError('Browser document changed.', 'Read the page again.');
+        return (frame as Frame & { readonly __frameChain?: unknown }).__frameChain;
       });
       if (fresh.length !== documents.length || JSON.stringify(captureOwnedJson(chains, nodeTypes.isProxy)) !== JSON.stringify(documents.map(document => document.frameChain))) {
         throw new StaleElementError('Browser frames changed.', 'Read the page again.');
       }
     } else {
-      const fresh = credentialFrameVector(page.frames()); current();
+      const fresh = credentialFrameVector(page.frames());
       if (page.mainFrame() !== mainFrame || fresh.length !== frames.length || fresh.some((frame, index) => frame !== frames[index])) throw new StaleElementError('Browser frames changed.', 'Read the page again.');
     }
     // Evaluate document URL, not just a remote Page's cached URL.
@@ -501,11 +486,7 @@ export async function captureCredentialPage(
     const encoded = JSON.stringify(state);
     if (checkout && encoded.length > 80_000) throw new Error('Complete checkout evidence exceeds its reading budget.');
     // Exact live material in metadata cannot be made safe by a display marker.
-    const inspectMetadata = (entry: unknown): void => {
-      if (typeof entry === 'string') assertMetadata(entry);
-      else if (entry && typeof entry === 'object') for (const [key, value] of Object.entries(entry)) { assertMetadata(key); inspectMetadata(value); }
-    };
-    inspectMetadata(state); assertMetadata(encoded); current();
+    assertMetadata(encoded);
     const inspectIssuer = (entry: unknown, depth = 0): void => {
       if (depth > 64) throw new Error('Browser page evidence is unsupported.');
       if (typeof entry === 'string') {
@@ -517,13 +498,16 @@ export async function captureCredentialPage(
         for (const [key, value] of Object.entries(entry)) { inspectIssuer(key, depth + 1); inspectIssuer(value, depth + 1); }
       }
     };
-    const admitted = snapshotJudgmentInput(state); inspectIssuer(admitted); current();
+    const admitted = snapshotJudgmentInput(state); inspectIssuer(admitted);
     if (!plainRecord(admitted)) throw new Error('Browser page evidence is incomplete.');
     return { state: admitted, encoded, password };
   };
-  const captured = await read(); current();
+  current();
+  const captured = await read();
+  // The checkout is read again in full before an order is placed: the cart,
+  // totals and terms the purchase was decided on must be the ones on the page.
   const assertCurrent = async () => {
-    current(); const fresh = await read(); current();
+    current(); const fresh = await read();
     if (fresh.encoded !== captured.encoded || fresh.password !== captured.password) throw new StaleElementError('Browser page evidence changed.', 'Read the page again.');
   };
   const url = captured.state.url;
@@ -918,7 +902,6 @@ export async function resolveRef(
 ): Promise<{ readonly locator: Locator; readonly element: BrowserElementRef; readonly revalidate: () => Promise<void>; readonly assertCurrent: () => void;
   /** Whether the control's own document holds a native password input right now. */
   readonly passwordInDocument: boolean }> {
-  work.assertCurrent();
   if (!snapshot) {
     throw new StaleElementError(
       `No snapshot has been taken for this page, so ref ${ref} means nothing yet.`,
@@ -940,17 +923,15 @@ export async function resolveRef(
   }
   const recorded = captureOwnedJson(element, nodeTypes.isProxy) as BrowserElementRef;
   const metadata = identityMetadata.get(element);
-  const recordedJson = JSON.stringify(recorded);
   const url = snapshot.url;
-  const snapshotIdentity = JSON.stringify([snapshot.sessionId, snapshot.pageId, snapshot.snapshotId, snapshot.url]);
+  // Checked after each await: the call, the snapshot the ref came from, and the page's address.
+  // The snapshot's own records are this process's data and do not change once stored.
   const current = () => {
     work.assertCurrent(); assertSnapshotCurrent();
-    if (page.url() !== url || JSON.stringify([snapshot.sessionId, snapshot.pageId, snapshot.snapshotId, snapshot.url]) !== snapshotIdentity || snapshot.elements.find(candidate => candidate.ref === ref) !== element
-      || JSON.stringify(captureOwnedJson(element, nodeTypes.isProxy)) !== recordedJson) {
+    if (page.url() !== url || snapshot.elements.find(candidate => candidate.ref === ref) !== element) {
       throw new StaleElementError('The selected browser snapshot is no longer current.', 'Call action:"snapshot" again.');
     }
   };
-  current();
   const scope = frameScope(page, recorded.frameChain);
   const locator = scope.locator(element.selector).first();
   const count = await work.wait(() => scope.locator(recorded.selector).count());
@@ -974,10 +955,10 @@ export async function resolveRef(
     agrees = left.length > 0 && right.length > 0 && left === right;
     if (!agrees) {
       try {
-        assertIdentityReadingAllowed.get(element)?.(); assertReadingAllowed(); current();
+        assertIdentityReadingAllowed.get(element)?.(); assertReadingAllowed();
         agrees = await work.sameControl({ recorded: { ref: recorded.ref, tag: recorded.tag, role: recorded.role, name: recorded.name, selector: recorded.selector, frameChain: recorded.frameChain, submits: recorded.submits, disabled: recorded.disabled, cardField: recorded.cardField, ...(metadata ? { metadata } : {}) }, current: actual });
       }
-      catch { current(); agrees = false; }
+      catch { agrees = false; }
       current();
     }
   }
@@ -989,7 +970,6 @@ export async function resolveRef(
   }
   const approved = JSON.stringify(actual);
   const revalidate = async () => {
-    current();
     if (actual.type === 'password' && !hasAdmittedBrowserWork(work)) throw new StaleElementError('The password control has no current action decision.', 'Obtain a decision for the exact browser action.');
     const count = await work.wait(() => scope.locator(recorded.selector).count());
     current();
@@ -998,6 +978,6 @@ export async function resolveRef(
     current();
     if (JSON.stringify(latest) !== approved) throw new StaleElementError('The selected control changed after its identity reading.', 'Call action:"snapshot" again.');
   };
-  await revalidate(); current();
+  await revalidate();
   return { locator, element: recorded, revalidate, assertCurrent: current, passwordInDocument: actual.passwordInDocument === true };
 }

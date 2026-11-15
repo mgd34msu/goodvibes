@@ -65,12 +65,14 @@ export interface FileReadResult {
   archive?: boolean | undefined;
 }
 
+/** An image a read returned, for the turn to attach as an image part; never part of the result text. */
+export interface ReadImage { readonly path: string; readonly base64: string; readonly mediaType: string; readonly description: string }
+
 export interface ReadOutput {
   success: boolean;
   error?: string | undefined;
   /** Standard format omits the per-file tokenEstimate and resolvedPath (host facts); verbose keeps them. */
   files?: Array<Omit<FileReadResult, 'tokenEstimate' | 'resolvedPath'> & { tokenEstimate?: number | undefined; resolvedPath?: string | undefined }> | undefined;
-  images?: Array<{ path: string; base64: string; mediaType: string; description: string }> | undefined;
   summary: {
     files_read: number;
     files_binary: number;

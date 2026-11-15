@@ -4,7 +4,6 @@ import { ToolRegistry, ToolInputProjectionError } from '@goodvibes-jev/engine/pl
 import { registerAccountIdentityRedaction, registerProfileRedactionValues } from '@goodvibes-jev/engine/platform/platform/utils';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { SqliteDecisionLog, withDecisionLog, type JudgmentPort } from '@goodvibes-jev/judgment';
-import { executionVerification } from '@goodvibes-jev/engine/platform/platform/gate';
 import type { CommandContext } from '../../input/command-registry.ts';
 import type { AgentExecutionRecord } from '../../runtime/execution-ledger.ts';
 import { agentOrchestrationSummary, describeAgentOrchestrationAgent } from '../../tools/agent-harness-agent-orchestration.ts';
@@ -405,27 +404,18 @@ describe('owned canonical route and record selectors', () => {
     expect(() => { for (const guard of guards) guard(); }).toThrow(ToolInputProjectionError);
   });
 
-  test('verification role uses its named battery and typed run status, not test words in a result', async () => {
-    const f = fixture(), fake = readings({}, { 'opaque-proof': 0.999 }); installJudgmentPort(fake.port);
+  test('the verification role is the ledger record\'s own reading: a history view asks no model', async () => {
+    const f = fixture(), fake = readings({}); installJudgmentPort(fake.port);
+    f.records[1] = { ...f.records[1]!, verification: true };
+    f.records[0] = { ...f.records[0]!, verification: false };
     const result = await executionHistorySummary(f.context, {}, options());
     expect(result.activityCards).toMatchObject([{ verification: { status: 'passed', evidence: [{ executionRecordId: 'opaque-proof' }] } }]);
-    expect(fake.requests).toHaveLength(2);
-    expect(fake.requests.every(request => request.context?.battery === 'engine.gate.execution-verification')).toBe(true);
-    f.records[1] = record('opaque-proof', 'artifact_probe --synthetic', 'failed');
+    f.records[1] = { ...record('opaque-proof', 'artifact_probe --synthetic', 'failed'), verification: true };
     expect((await executionHistorySummary(f.context, {}, options())).activityCards).toMatchObject([{ verification: { status: 'failed' } }]);
+    f.records[1] = record('opaque-proof', 'artifact_probe --synthetic');
+    expect((await executionHistorySummary(f.context, {}, options())).activityCards).toMatchObject([{ verification: { status: 'held', heldExecutionRecordIds: ['opaque-proof'] } }]);
+    expect(fake.requests).toHaveLength(0);
   });
-
-  test('uncertain or unavailable verification remains explicitly held', async () => {
-    const f = fixture();
-    for (const probability of [0.5, 0.8]) {
-      installJudgmentPort(readings({}, { 'opaque-proof': probability }).port);
-      expect((await executionHistorySummary(f.context, {}, options())).activityCards).toMatchObject([{ verification: { status: 'held', heldExecutionRecordIds: ['opaque-proof'] } }]);
-    }
-    installJudgmentPort(undefined);
-    expect((await describeExecutionHistoryItem(f.context, { executionRecordId: 'opaque-proof' })).status).toBe('found');
-    expect((await executionHistorySummary(f.context, {})).activityCards).toMatchObject([{ verification: { status: 'held' } }]);
-  });
-
   test('the typed route alone determines file recovery; a delete-like read name grants none', async () => {
     const f = fixture();
     f.records[0] = { ...record('name-only', ''), tool: 'delete_inbox_preview', routeKind: 'read' };
@@ -449,32 +439,6 @@ describe('owned canonical route and record selectors', () => {
     expect(older).toMatchObject({ status: 'found', record: { recoveryRoute: 'execution action:"recovery"' } });
     if (newer.status === 'found') expect(newer.record.recoveryRoute).toBeUndefined();
     else throw new Error('expected newer-edit to be found');
-  });
-
-  test('a cancelled verification cannot retain a late reading or a success card', async () => {
-    const f = fixture(), fake = readings({}, { 'opaque-proof': 0.999 }), controller = new AbortController();
-    using log = new SqliteDecisionLog(':memory:');
-    installJudgmentPort(withDecisionLog({ ...fake.port, ask: async request => { const response = await fake.port.ask(request); controller.abort(); return response; } }, log));
-    await expect(executionHistorySummary(f.context, {}, { ...options(), signal: controller.signal })).rejects.toThrow();
-    expect(log.query({})).toHaveLength(0);
-  });
-
-  test('a replaced verification source owner accessor cannot execute or log a reading', async () => {
-    const f = fixture(), fake = readings({}, { 'opaque-proof': 0.999 }), owner = ordinaryResearchOwner();
-    const descriptor = Object.getOwnPropertyDescriptor(owner, 'project');
-    let accessorCalls = 0;
-    using log = new SqliteDecisionLog(':memory:');
-    installJudgmentPort(withDecisionLog({ ...fake.port, ask: async request => {
-      const response = await fake.port.ask(request);
-      Object.defineProperty(owner, 'project', { configurable: true, get() { accessorCalls++; throw new Error('Replacement accessor must not execute.'); } });
-      return response;
-    } }, log));
-    try {
-      await expect(executionHistorySummary(f.context, {}, { sourceOwner: owner })).rejects.toThrow(ToolInputProjectionError);
-      expect(accessorCalls).toBe(0); expect(log.query({})).toHaveLength(0);
-    } finally {
-      if (descriptor) Object.defineProperty(owner, 'project', descriptor); else Reflect.deleteProperty(owner, 'project');
-    }
   });
 
   test('producer clocks use ISO in protected readings while identical borrowed values remain refused', async () => {
@@ -538,22 +502,6 @@ describe('owned canonical route and record selectors', () => {
     expect(fake.requests).toHaveLength(before);
   });
 
-  test('a changed verification definition cannot log or consume an old response', async () => {
-    const f = fixture(), fake = readings({}, { 'opaque-proof': 0.999 });
-    const question = executionVerification.items.verification.question;
-    const descriptor = Object.getOwnPropertyDescriptor(question, 'instructions');
-    if (!descriptor) throw new Error('Missing fixture question instructions.');
-    using log = new SqliteDecisionLog(':memory:');
-    installJudgmentPort(withDecisionLog({ ...fake.port, ask: async request => {
-      const result = await fake.port.ask(request);
-      Object.defineProperty(question, 'instructions', { ...descriptor, value: 'A different verification contract.' });
-      return result;
-    } }, log));
-    try {
-      await expect(executionHistorySummary(f.context, {}, options())).rejects.toThrow();
-      expect(log.query({})).toHaveLength(0);
-    } finally { Object.defineProperty(question, 'instructions', descriptor); }
-  });
 });
 
 

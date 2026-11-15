@@ -42,23 +42,20 @@ export function registerNativeAutomationGatewayMethods(catalog: GatewayMethodCat
     const autonomous = requestsNativeAdmission(body);
     if (autonomous && typeof body.expectedMutationRevision !== 'string') throw new HandlerError('Autonomous updates require the selected job revision.', 'AUTOMATION_JOB_REVISION_REQUIRED', 409);
     const jobId = body.jobId;
-    const manager = input.manager, host = input.host, update = manager.updateJob, retainTarget = manager.retainJobTarget;
+    const { manager, host } = input;
     const requestCurrent = retainNativeMutationRequest(body);
-    const current = () => {
-      context.signal?.throwIfAborted(); requestCurrent();
-      if (input.manager !== manager || input.host !== host || manager.updateJob !== update || manager.retainJobTarget !== retainTarget) throw new AutomationJobMutationStaleError();
-    };
+    const current = () => { context.signal?.throwIfAborted(); requestCurrent(); };
     try {
       current();
       const patch = parseUpdateAutomationJobInput(body);
       const expected = patch.expectedMutationRevision;
-      const selected = expected ? retainTarget.call(manager, jobId, expected) : undefined;
+      const selected = expected ? manager.retainJobTarget(jobId, expected) : undefined;
       const updated = await runNativeMutation({ host, method: 'automation.jobs.update', body, context,
         automationTarget: selected,
         target: selected ? nativeJobMeaning(selected.job) : { jobId },
         scopes: ['write:automation'], confirmation: 'none',
         assertTargetCurrent: () => { current(); selected?.assertCurrent(); },
-        mutate: (assertCurrent, _admission, withPublication) => update.call(manager, jobId, patch, { signal: context.signal, assertCurrent: () => { current(); assertCurrent(); }, withPublication }),
+        mutate: (assertCurrent, _admission, withPublication) => manager.updateJob(jobId, patch, { signal: context.signal, assertCurrent: () => { current(); assertCurrent(); }, withPublication }),
       });
       if (!updated) throw new HandlerError('Automation job not found.', 'NOT_FOUND', 404);
       return updated;
@@ -70,12 +67,9 @@ export function registerNativeAutomationGatewayMethods(catalog: GatewayMethodCat
   for (const method of ['automation.jobs.create', 'automation.schedules.create']) {
     disposals.push(registerCatalogHandler<unknown, unknown>(catalog, method, async ({ body, context }) => {
       if (!isRecord(body) || typeof body.prompt !== 'string' || !body.prompt.trim()) throw new HandlerError('An automation prompt is required.', 'INVALID_ARGUMENT', 400);
-      const manager = input.manager, host = input.host, create = manager.createJob;
+      const { manager, host } = input;
       const requestCurrent = retainNativeMutationRequest(body);
-      const current = () => {
-        context.signal?.throwIfAborted(); requestCurrent();
-        if (input.manager !== manager || input.host !== host || manager.createJob !== create) throw new AutomationJobMutationStaleError();
-      };
+      const current = () => { context.signal?.throwIfAborted(); requestCurrent(); };
       current();
       const schedule = isRecord(body.schedule) && body.schedule.kind !== undefined ? body.schedule
         : body.kind === 'every' ? normalizeEverySchedule(typeof body.every === 'string' ? body.every : '')
@@ -84,7 +78,7 @@ export function registerNativeAutomationGatewayMethods(catalog: GatewayMethodCat
       const patch = parseCreateAutomationJobInput({ ...body, name: typeof body.name === 'string' ? body.name : body.prompt.slice(0, 40), schedule });
       try {
         const created = await runNativeMutation({ host, method, body, context, target: { schedule: nativeScheduleMeaning(patch.schedule) }, scopes: ['write:automation'], confirmation: 'none', assertTargetCurrent: current,
-          mutate: (assertCurrent, _admission, withPublication) => create.call(manager, patch, { signal: context.signal, assertCurrent: () => { current(); assertCurrent(); }, withPublication }),
+          mutate: (assertCurrent, _admission, withPublication) => manager.createJob(patch, { signal: context.signal, assertCurrent: () => { current(); assertCurrent(); }, withPublication }),
         });
         return Response.json(created, { status: 201 });
       } catch (error) {
@@ -100,27 +94,24 @@ export function registerNativeAutomationGatewayMethods(catalog: GatewayMethodCat
       const jobId = body[key], revision = body.expectedMutationRevision;
       if (revision !== undefined && (typeof revision !== 'string' || !revision.trim())) throw new HandlerError('expectedMutationRevision must be a nonempty string.', 'INVALID_ARGUMENT', 400);
       if (requestsNativeAdmission(body) && typeof revision !== 'string') throw new HandlerError('Autonomous mutations require the selected job revision.', 'AUTOMATION_JOB_REVISION_REQUIRED', 409);
-      const manager = input.manager, host = input.host, remove = manager.removeJob, toggle = manager.setEnabled, retainTarget = manager.retainJobTarget;
+      const { manager, host } = input;
       const requestCurrent = retainNativeMutationRequest(body);
-      const current = () => {
-        context.signal?.throwIfAborted(); requestCurrent();
-        if (input.manager !== manager || input.host !== host || manager.removeJob !== remove || manager.setEnabled !== toggle || manager.retainJobTarget !== retainTarget) throw new AutomationJobMutationStaleError();
-      };
+      const current = () => { context.signal?.throwIfAborted(); requestCurrent(); };
       try {
         current();
-        const selected = typeof revision === 'string' ? retainTarget.call(manager, jobId, revision) : undefined;
+        const selected = typeof revision === 'string' ? manager.retainJobTarget(jobId, revision) : undefined;
         return await runNativeMutation({ host, method, body, context, target: selected ? nativeJobMeaning(selected.job) : { jobId }, scopes: ['write:automation'], confirmation: 'none',
           automationTarget: selected,
           assertTargetCurrent: () => { current(); selected?.assertCurrent(); },
           mutate: async (assertCurrent, _admission, withPublication) => {
             const options = { signal: context.signal, assertCurrent: () => { current(); assertCurrent(); }, withPublication };
             if (method.endsWith('.delete')) {
-              const removed = await remove.call(manager, jobId, options);
+              const removed = await manager.removeJob(jobId, options);
               if (!removed) throw new HandlerError('Automation job not found.', 'NOT_FOUND', 404);
               return { id: jobId, removed };
             }
             const enabled = method.endsWith('.enable');
-            const updated = await toggle.call(manager, jobId, enabled, options);
+            const updated = await manager.setEnabled(jobId, enabled, options);
             if (!updated) throw new HandlerError('Automation job not found.', 'NOT_FOUND', 404);
             return { id: jobId, enabled };
           },

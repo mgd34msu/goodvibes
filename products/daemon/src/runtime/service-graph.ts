@@ -333,6 +333,10 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
       // the shared resolver instead of a format-only rejection.
       providerRegistry,
       featureFlags,
+      // The run's agent is how a run ends: the manager reads its status to
+      // settle the run and stops it to cancel the run or end it at its timeout.
+      agentStatusProvider: agentManager,
+      cancelTask: (agentId) => { agentManager.cancel(agentId); },
       spawnTask: (input) => {
         const record = agentManager.spawn({
           mode: 'spawn',

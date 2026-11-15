@@ -7,6 +7,9 @@
  * verbs, and the automation kind:'checkin' execution branch.
  */
 import { describe, expect, test } from 'bun:test';
+import { settleRunOver } from './_helpers/automation-settle.ts';
+import type { AutomationJob } from '../platform/src/platform/automation/jobs.ts';
+import type { AutomationRun } from '../platform/src/platform/automation/runs.ts';
 import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.ts';
 import { registerCheckinGatewayMethods } from '../platform/src/platform/control-plane/routes/checkin.ts';
 import {
@@ -218,8 +221,8 @@ describe('checkin.* gateway verbs', () => {
 
 describe('automation kind:checkin execution branch', () => {
   test('executeCheckinJob records a completed run through the evaluator', async () => {
-    const runs = new Map<string, { status: string }>();
-    const jobs = new Map<string, unknown>();
+    const runs = new Map<string, AutomationRun>();
+    const jobs = new Map<string, AutomationJob>();
     const events: string[] = [];
     // Minimal execution context, only the members executeCheckinJob touches.
     const context = {
@@ -234,6 +237,7 @@ describe('automation kind:checkin execution branch', () => {
       emitRunStarted: () => events.push('started'),
       emitRunCompleted: (_j: unknown, _r: unknown, outcome: string) => events.push(`completed:${outcome}`),
       emitRunFailed: () => events.push('failed'),
+      settleRun: settleRunOver({ jobs, runs, emitRunCompleted: (_j, _r, outcome) => { events.push(`completed:${outcome}`); } }),
     } as never;
     const job = {
       id: 'checkin-scheduled',
@@ -244,7 +248,10 @@ describe('automation kind:checkin execution branch', () => {
       runCount: 0,
       successCount: 0,
       failureCount: 0,
-    } as never;
+      delivery: { mode: 'none', targets: [], fallbackTargets: [] },
+      failure: {},
+    } as unknown as AutomationJob;
+    jobs.set(job.id, job);
 
     const run = await executeCheckinJob(
       context,

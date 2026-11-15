@@ -32,16 +32,21 @@ export function emitAutomationManagerJobCreated(runtimeBus: RuntimeEventBus | nu
   });
 }
 
+/**
+ * Announces a change to a job's definition: the fields that differ, and an
+ * enabled or disabled event only when the job's enabled state changed.
+ */
 export function emitAutomationManagerJobUpdated(
   runtimeBus: RuntimeEventBus | null,
   job: AutomationJob,
   changedFields: string[],
 ): void {
-  if (!runtimeBus) return;
+  if (!runtimeBus || changedFields.length === 0) return;
   emitAutomationJobUpdated(runtimeBus, automationEmitterContext(job.id, job.execution.target.sessionId), {
     jobId: job.id,
     changedFields,
   });
+  if (!changedFields.includes('enabled')) return;
   if (job.enabled) {
     emitAutomationJobEnabled(runtimeBus, automationEmitterContext(job.id, job.execution.target.sessionId), {
       jobId: job.id,
@@ -100,16 +105,20 @@ export function emitAutomationManagerRunCompleted(
   job: AutomationJob,
   run: AutomationRun,
   outcome: 'success' | 'partial' | 'failed' | 'cancelled',
+  failure?: { readonly error: string; readonly retryable: boolean },
 ): void {
   if (!runtimeBus || run.startedAt === undefined || run.endedAt === undefined) return;
-  emitAutomationRunCompleted(runtimeBus, automationEmitterContext(run.id, job.execution.target.sessionId), {
+  // A failed run's end carries what went wrong and whether another attempt could succeed.
+  const data = {
     jobId: job.id,
     runId: run.id,
     startedAt: run.startedAt,
     completedAt: run.endedAt,
     durationMs: run.durationMs ?? Math.max(0, run.endedAt - run.startedAt),
     outcome,
-  });
+    ...(failure ? { error: failure.error, retryable: failure.retryable } : {}),
+  };
+  emitAutomationRunCompleted(runtimeBus, automationEmitterContext(run.id, job.execution.target.sessionId), data);
 }
 
 export function emitAutomationManagerRunFailed(

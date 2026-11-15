@@ -123,7 +123,7 @@ test('a run whose agent failed ends with AUTOMATION_RUN_COMPLETED (failed), and 
   const { reconcileAutomationActiveRuns } = await import('../platform/src/platform/automation/manager-runtime-reconcile.js');
   const j = { ...job(), enabled: false, deleteAfterRun: true } as AutomationJob;
   const jobs = new Map([[j.id, j]]);
-  const run = { id: 'run-1', jobId: j.id, status: 'running', agentId: 'agent-1', startedAt: 10, queuedAt: 5, attempt: 1 } as unknown as AutomationRun;
+  const run = { id: 'run-1', jobId: j.id, status: 'running', agentId: 'agent-1', startedAt: 10, queuedAt: 5, attempt: 1, execution: {} } as unknown as AutomationRun;
   const runs = new Map([[run.id, run]]);
   const completed: Array<{ outcome: string; error?: string; retryable?: boolean }> = [];
   const failedDetail: string[] = [];
@@ -142,7 +142,8 @@ test('a run whose agent failed ends with AUTOMATION_RUN_COMPLETED (failed), and 
     },
     emitJobAutoDisabled: () => {}, maybeDeliverRun: () => {},
     applyFailureToJob: (x: AutomationJob) => ({ ...x, failureCount: x.failureCount + 1 }),
-    pruneRunHistory: () => {}, cancelTimer: () => {},
+    pruneRunHistory: () => {}, restoredRunIds: new Set<string>(),
+    removeJobRecord: (jobId: string) => { jobs.delete(jobId); },
   } as unknown as Parameters<typeof reconcileAutomationActiveRuns>[0]);
   // The follow-up classifies the failure before announcing it; let it settle.
   for (let i = 0; i < 50 && completed.length === 0; i += 1) await new Promise<void>((resolve) => setImmediate(resolve));
@@ -152,4 +153,38 @@ test('a run whose agent failed ends with AUTOMATION_RUN_COMPLETED (failed), and 
   expect(completed[0]!.outcome).toBe('failed');
   expect(completed[0]!.error).toContain('HTTP 401');
   expect(failedDetail).toEqual([run.id]);
+});
+
+test('an agent cancelled from any surface ends its run as cancelled: not counted, not retried, no failure notice', async () => {
+  const { reconcileAutomationActiveRuns } = await import('../platform/src/platform/automation/manager-runtime-reconcile.js');
+  const j = job();
+  const jobs = new Map([[j.id, j]]);
+  const run = { id: 'run-1', jobId: j.id, status: 'running', agentId: 'agent-1', startedAt: 10, queuedAt: 5, attempt: 1, execution: {} } as unknown as AutomationRun;
+  const runs = new Map([[run.id, run]]);
+  const retryTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  const outcomes: string[] = [];
+  let notices = 0, delivered = 0;
+  reconcileAutomationActiveRuns({
+    configManager: { get: () => undefined },
+    sessionBroker: {},
+    agentStatusProvider: { getStatus: () => ({ id: 'agent-1', status: 'cancelled', completedAt: 20 }) },
+    jobs, runs, restoredRunIds: new Set<string>(),
+    saveJobs: async () => {}, saveRuns: async () => {},
+    syncExecutionRoute: async () => {}, syncRunToRuntime: () => {}, syncJobToRuntime: () => {},
+    emitRunCompleted: (_j: AutomationJob, _r: AutomationRun, outcome: string) => outcomes.push(outcome),
+    followUp: {
+      jobs, retryTimers, deliveryManager: null, activeRunCount: () => 0, maxConcurrentRuns: () => 1,
+      executeJob: async () => run, saveJobs: async () => {}, scheduleJob: () => {}, deliverFailureNotice: () => { notices += 1; },
+      emitRunFailed: () => {},
+    },
+    emitJobAutoDisabled: () => {}, maybeDeliverRun: () => { delivered += 1; },
+    applyFailureToJob: (x: AutomationJob) => ({ ...x, failureCount: x.failureCount + 1 }),
+    pruneRunHistory: () => {}, removeJobRecord: () => {},
+  } as unknown as Parameters<typeof reconcileAutomationActiveRuns>[0]);
+  expect(runs.get(run.id)!.status).toBe('cancelled');
+  expect(outcomes).toEqual(['cancelled']);
+  expect(jobs.get(j.id)!.failureCount).toBe(0);
+  expect(retryTimers.size).toBe(0);
+  expect(notices).toBe(0);
+  expect(delivered).toBe(1);
 });

@@ -27,3 +27,20 @@ export function createAutomationSpawnTask(agentManager: Pick<AgentManager, 'spaw
     return record.id;
   };
 }
+
+/**
+ * Everything the automation manager needs from the agent manager: how a run
+ * starts its agent, how it reads that agent's status to settle the run, and
+ * how it stops the agent to cancel the run or end it at its timeout.
+ */
+export function createAutomationAgentControls(agentManager: Pick<AgentManager, 'spawn' | 'getStatus' | 'cancel'>): {
+  readonly spawnTask: (input: SpawnAutomationTaskInput) => string;
+  readonly agentStatusProvider: Pick<AgentManager, 'getStatus'>;
+  readonly cancelTask: (agentId: string) => void;
+} {
+  return {
+    spawnTask: createAutomationSpawnTask(agentManager),
+    agentStatusProvider: agentManager,
+    cancelTask: (agentId) => { agentManager.cancel(agentId); },
+  };
+}

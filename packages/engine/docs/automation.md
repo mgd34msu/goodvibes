@@ -47,7 +47,25 @@ heartbeat processing, and scheduler capacity.
 | `scheduler.capacity` | Return the scheduler capacity snapshot: total slots, in-use slots, queue depth, and oldest queued run age |
 
 A cancelled run stays cancelled. If its evaluator or execution finishes after
-the cancel, that late result does not change the stored run.
+the cancel, that late result does not change the stored run. A cancellation is
+the same whoever made it: cancelling the run, stopping its agent from any agent
+view, or deleting its job. The run is recorded as cancelled and its ordinary
+run message is sent; it does not count as a failure and is not retried.
+Deleting a job cancels a run of it that is still in flight.
+
+A run ends at its timeout: the job's `execution.timeoutMs`, or
+`automation.defaultTimeoutMs` when the job sets none. Past it, the run's agent
+is stopped and the run fails with `Timed out after <duration>`; the job's
+failure policy then applies as for any other failure. A run that was in flight
+when the daemon or app stopped is failed when it starts again ("Agent state
+lost before completion"), since nothing can report on it any more, and the
+retry policy applies at once.
+
+Editing a job's name, prompt, delivery or failure policy keeps its next run
+time; only a change to its schedule or to whether it is enabled moves it. An
+`every` schedule counts from when it was set. An edit made against a job's
+revision stays valid while the job runs: running a job does not change its
+revision, only a change to what the job is does.
 
 When a run fails, the job's failure policy decides what follows. With the
 `retry` action the failed run is tried again up to the retry policy's
@@ -85,7 +103,7 @@ runs at once, and how long its history is kept:
 | `automation.enabled` | `true` | Master gate for the subsystem: durable jobs, schedule evaluation, run history. With no jobs defined it idles. |
 | `automation.maxConcurrentRuns` | `4` | How many automation runs may execute at the same time. |
 | `automation.runHistoryLimit` | `100` | Run history entries retained per job before the oldest are dropped. |
-| `automation.defaultTimeoutMs` | `0` (no deadline) | Execution timeout in milliseconds applied to a run that does not set its own `timeoutMs`; `0` means such a run has no deadline and ends only when it finishes or is cancelled. |
+| `automation.defaultTimeoutMs` | `0` (no deadline) | Timeout in milliseconds for a run whose job sets no `timeoutMs`: past it the run's agent is stopped and the run fails. `0` means such a run has no deadline and ends only when it finishes or is cancelled. |
 | `automation.catchUpWindowMinutes` | `30` | How long after daemon startup the engine will still catch up runs it missed while it was down. |
 | `automation.failureCooldownMs` | `300000` (5 minutes) | Cooldown enforced after a failed run before the job is eligible to run again. |
 | `automation.deleteAfterRun` | `false` | Whether a one-shot job (`kind: 'at'`) deletes itself after its first successful run. |

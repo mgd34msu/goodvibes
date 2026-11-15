@@ -18,9 +18,73 @@ export function ownedAutomationJob(job: AutomationJob, revision: string = random
 
 export function hasOwnedAutomationRevision(job: AutomationJob): boolean { return ownedJobs.has(job); }
 
+/**
+ * What the scheduler writes about a job as it runs: when it fires next, when
+ * it last ran and the counters. None of it is the job's definition, so the
+ * job's revision does not move when only these change, and an edit prepared
+ * against the definition stays current while the job keeps running.
+ */
+export const AUTOMATION_SCHEDULER_STATE_FIELDS = [
+  'nextRunAt', 'lastRunAt', 'lastRunId', 'runCount', 'successCount', 'failureCount', 'updatedAt',
+] as const satisfies readonly (keyof AutomationJob)[];
+
+type SchedulerStateField = (typeof AUTOMATION_SCHEDULER_STATE_FIELDS)[number];
+
+function definitionOf(job: AutomationJob): Omit<AutomationJob, SchedulerStateField | 'mutationRevision'> {
+  const { mutationRevision: _revision, nextRunAt: _next, lastRunAt: _last, lastRunId: _lastId, runCount: _runs,
+    successCount: _successes, failureCount: _failures, updatedAt: _updated, ...definition } = job;
+  return definition;
+}
+
+/** True when the two records differ in anything other than scheduler state. */
+export function automationDefinitionChanged(previous: AutomationJob, next: AutomationJob): boolean {
+  return JSON.stringify(definitionOf(previous)) !== JSON.stringify(definitionOf(next));
+}
+
+/**
+ * `next` with the scheduler state the job has now, for every scheduler field
+ * the mutation left as it found it in `previous`. A mutation prepared before
+ * the job ran must not write back the counters and run time it read then.
+ */
+export function withCurrentSchedulerState(previous: AutomationJob, next: AutomationJob, current: AutomationJob): AutomationJob {
+  let merged: AutomationJob = next;
+  for (const field of AUTOMATION_SCHEDULER_STATE_FIELDS) {
+    if (next[field] === previous[field] && current[field] !== previous[field]) merged = { ...merged, [field]: current[field] };
+  }
+  return merged;
+}
+
+/**
+ * A job an owner or agent selected by revision. The revision is the one fact
+ * an approved change needs: the job is still the one that was approved when
+ * its revision has not moved.
+ */
 export interface RetainedAutomationJobTarget {
+  readonly jobId: string;
+  readonly revision: string;
+  /** The job as it was selected, for describing the change to whoever approves it. */
   readonly job: ManagedAutomationJob;
+  /** Throws AutomationJobMutationStaleError once the job's revision has moved or the job is gone. */
   readonly assertCurrent: () => void;
+}
+
+const SELECTED_JOB_METHODS = new Set([
+  'automation.jobs.update', 'automation.jobs.enable', 'automation.jobs.disable', 'automation.jobs.delete',
+  'automation.schedules.enable', 'automation.schedules.disable', 'automation.schedules.delete',
+]);
+
+/**
+ * The request as the approver sees it: the selected job named by id, its
+ * revision replaced by a marker (the revision is an opaque id with no meaning
+ * to a reader). Refuses a request that names a different job or revision.
+ */
+export function projectAutomationTargetRequest(target: RetainedAutomationJobTarget, method: string, body: unknown): unknown {
+  if (!SELECTED_JOB_METHODS.has(method) || !body || typeof body !== 'object' || Array.isArray(body)) throw new AutomationJobMutationStaleError();
+  const request = body as Record<string, unknown>;
+  const selector = method.startsWith('automation.schedules.') ? 'scheduleId' : 'jobId';
+  if (request[selector] !== target.jobId || request.expectedMutationRevision !== target.revision) throw new AutomationJobMutationStaleError();
+  target.assertCurrent();
+  return { ...request, expectedMutationRevision: { kind: 'selected-native-revision', target: 'selected-automation-target' } };
 }
 
 export interface AutomationJobMutationOptions {
@@ -48,11 +112,18 @@ export function automationJobRevision(job: AutomationJob): string {
   return job.mutationRevision;
 }
 
-/** Internal writers share this map; each actual replacement advances only that job. */
+/**
+ * Internal writers share this map. A replacement that changes the job's
+ * definition advances its revision; one that changes only scheduler state
+ * keeps it.
+ */
 export class AutomationJobMap extends Map<string, ManagedAutomationJob> {
   override set(id: string, job: AutomationJob): this {
     const previous = super.get(id);
-    if (previous === job || previous && JSON.stringify(previous) === JSON.stringify(job)) return this;
+    if (previous === job) return this;
+    if (previous && !automationDefinitionChanged(previous, job)) {
+      return super.set(id, ownedAutomationJob(job, previous.mutationRevision));
+    }
     return super.set(id, ownedAutomationJob(job));
   }
   restore(job: AutomationJob): void {
@@ -61,17 +132,10 @@ export class AutomationJobMap extends Map<string, ManagedAutomationJob> {
   publish(job: ManagedAutomationJob): void { super.set(job.id, job); }
 }
 
+/** The caller's still-wanted check: its signal, then its own currency check. */
 export function retainAutomationMutation(options: AutomationJobMutationOptions): () => void {
-  const signal = options.signal, assertCurrent = options.assertCurrent, withPublication = options.withPublication;
   return () => {
-    if (options.signal !== signal || options.assertCurrent !== assertCurrent || options.withPublication !== withPublication) throw new AutomationJobMutationStaleError();
-    signal?.throwIfAborted();
-    const result: unknown = assertCurrent?.();
-    if (result !== undefined) {
-      if (result instanceof Promise) void result.catch(() => undefined);
-      throw new Error('Automation ownership checks must return undefined synchronously.');
-    }
-    signal?.throwIfAborted();
-    if (options.signal !== signal || options.assertCurrent !== assertCurrent || options.withPublication !== withPublication) throw new AutomationJobMutationStaleError();
+    options.signal?.throwIfAborted();
+    options.assertCurrent?.();
   };
 }

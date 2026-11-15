@@ -4,6 +4,7 @@
  * failures, artifact attachments and event reporting.
  */
 import { afterEach, describe, expect, jest, test } from 'bun:test';
+import { settleRunOver } from './_helpers/automation-settle.ts';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -564,6 +565,7 @@ describe('check-in runs', () => {
       saveRuns: async () => { throw new Error('disk full'); },
       syncRunToRuntime: () => undefined,
       syncJobToRuntime: () => undefined,
+      settleRun: settleRunOver({ jobs, runs }),
     };
     const run = await executeCheckinJob(
       context as never,

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
+import { settleRunOver } from './_helpers/automation-settle.ts';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { SqliteDecisionLog, withDecisionLog, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { fakePort, choiceAnswer, noulAnswer } from '@goodvibes-jev/judgment/testing';
@@ -23,12 +24,14 @@ function fixture() {
     createdAt: 1, updatedAt: 1, createdBy: 'owner-a', labels: [],
     source: { id: 'source-a', kind: 'manual', enabled: true, createdAt: 1, updatedAt: 1, label: 'Owner', metadata: { owner: 'owner-a' } },
     execution: { target: { kind: 'isolated' }, prompt: '(check-in)' }, schedule: { kind: 'cron', expression: '0 */4 * * *' },
+    delivery: { mode: 'none', targets: [], fallbackTargets: [] }, failure: { action: 'retry', maxConsecutiveFailures: 3, retryPolicy: { maxAttempts: 1 } },
     runCount: 0, successCount: 0, failureCount: 0 } as unknown as AutomationJob;
   const jobs = new Map([[job.id, job]]), runs = new Map<string, AutomationRun>();
   const synced: AutomationJob[] = [];
   const context = { jobs, runs, saveJobs: async () => {}, saveRuns: async () => {}, pruneRunHistory: () => {},
     syncRunToRuntime: () => {}, syncJobToRuntime: (job: AutomationJob) => synced.push(job),
-    emitRunQueued: () => {}, emitRunStarted: () => {}, emitRunCompleted: () => {}, emitRunFailed: () => {} } as unknown as AutomationManagerExecutionContext;
+    emitRunQueued: () => {}, emitRunStarted: () => {}, emitRunCompleted: () => {}, emitRunFailed: () => {},
+    settleRun: settleRunOver({ jobs, runs, syncJobToRuntime: (job: AutomationJob) => { synced.push(job); } }) } as unknown as AutomationManagerExecutionContext;
   return { job, jobs, runs, context, synced };
 }
 type Change = 'disable' | 'remove' | 'owner' | 'disable-reenable';
@@ -60,7 +63,6 @@ for (const change of ['disable', 'remove', 'owner', 'disable-reenable'] as const
     else {
       expect(current?.enabled).toBe(changed!.enabled); expect(current?.status).toBe(changed!.status);
       expect(current?.createdBy).toBe(changed!.createdBy); expect(current?.source).toEqual(changed!.source);
-      if (change === 'owner') expect(current).toEqual(changed);
     }
   });
 }

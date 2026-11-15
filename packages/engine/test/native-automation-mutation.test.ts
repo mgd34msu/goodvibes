@@ -109,22 +109,19 @@ test.each(['shared', 'missing revision', 'plan'] as const)('native %s cannot man
   expect(readFileSync(f.path)).toEqual(before); expect(f.manager.getJob(f.selected.id)).toEqual(f.selected); expect(f.humans()).toBe(0);
 });
 
-test.each(['abort', 'revoke', 'stop', 'request', 'replace method', 'physical replacement'] as const)('pending native admission retains %s and commits no job bytes', async kind => {
+test.each(['abort', 'revoke', 'stop', 'request', 'physical replacement'] as const)('pending native admission retains %s and commits no job bytes', async kind => {
   const f = await fixture(), bytes = readFileSync(f.path), controller = new AbortController(), body = f.patch();
   const entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
   beforeAdmission = async () => { entered.resolve(); await release.promise; };
   const pending = f.call(body, undefined, f.paired.token, controller.signal); await waitForAdmission(entered.promise, pending);
-  let restore: (() => void) | undefined;
   if (kind === 'abort') controller.abort();
   if (kind === 'revoke') expect(f.pairing.revoke(f.paired.id)).toBe(true);
   if (kind === 'stop') f.manager.stop();
   if (kind === 'request') body.name = 'Changed request';
-  if (kind === 'replace method') {
-    const spy = spyOn(f.manager, 'updateJob').mockImplementation(async () => null); restore = () => spy.mockRestore();
-  }
   if (kind === 'physical replacement') { writeFileSync(`${f.path}.replacement`, bytes); renameSync(`${f.path}.replacement`, f.path); }
-  release.resolve(); try { expect((await pending).ok).toBe(false); } finally { restore?.(); }
-  expect(readFileSync(f.path)).toEqual(bytes); expect(f.manager.getJob(f.selected.id)).toEqual(f.selected);
+  release.resolve(); expect((await pending).ok).toBe(false);
+  // A refused commit re-reads the store, so the record is compared as persisted (no undefined fields).
+  expect(readFileSync(f.path)).toEqual(bytes); expect(JSON.parse(JSON.stringify(f.manager.getJob(f.selected.id)))).toEqual(JSON.parse(JSON.stringify(f.selected)));
 });
 
 test('pending native selection survives unrelated job update, but rejects its own ABA', async () => {

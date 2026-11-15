@@ -1,4 +1,4 @@
-import { ensureAutomationCronPhase, withCronTimezone } from './schedules.js';
+import { ensureAutomationCronPhase, withCronTimezone, type AutomationScheduleDefinition } from './schedules.js';
 import { randomUUID } from 'node:crypto';
 import type { ConfigManager } from '../config/manager.js';
 import type { AutomationJob, ManagedAutomationJob } from './jobs.js';
@@ -37,6 +37,22 @@ interface AutomationJobMutationContext {
   readonly listModels?: () => readonly ModelIdCandidate[];
 }
 
+/**
+ * An interval counts from when it was set, not from whenever the next run is
+ * computed: the anchor is stamped once, so later edits and restarts keep the
+ * same rhythm.
+ */
+function anchoredSchedule(schedule: AutomationScheduleDefinition, now: number): AutomationScheduleDefinition {
+  return schedule.kind === 'every' && schedule.anchorAt === undefined ? { ...schedule, anchorAt: now } : schedule;
+}
+
+const UPDATE_FIELDS = ['kind', 'name', 'description', 'enabled', 'schedule', 'execution', 'delivery', 'failure', 'deleteAfterRun'] as const;
+
+/** The definition fields that differ between two records of one job. */
+function changedJobFields(previous: AutomationJob, next: AutomationJob): string[] {
+  return UPDATE_FIELDS.filter(field => JSON.stringify(previous[field]) !== JSON.stringify(next[field]));
+}
+
 export async function createAutomationJobRecord(
   context: AutomationJobMutationContext,
   input: CreateAutomationJobInput,
@@ -45,7 +61,7 @@ export async function createAutomationJobRecord(
   const now = Date.now();
   const enabled = input.enabled ?? true;
   const jobId = `auto-${randomUUID().slice(0, 8)}`;
-  const schedule = ensureAutomationCronPhase(withCronTimezone(input.schedule));
+  const schedule = anchoredSchedule(ensureAutomationCronPhase(withCronTimezone(input.schedule)), now);
   const job: AutomationJob = {
     id: jobId,
     labels: [],
@@ -109,7 +125,7 @@ export async function toggleAutomationJobEnabled(
   const committed = await context.commitJob(job, updated, options);
   context.scheduleJob(committed);
   context.syncJobToRuntime(committed, 'automation.toggle');
-  context.emitJobUpdated(committed, ['enabled', 'status', 'pausedReason', 'nextRunAt']);
+  context.emitJobUpdated(committed, changedJobFields(job, committed));
   return committed;
 }
 
@@ -130,7 +146,13 @@ export async function updateAutomationJobRecord(
     ? normalizeProviderQualifiedModelList(patch.fallbackModels, 'Automation fallback models', models)
     : undefined;
   const thinkingPatch = normalizeOptionalString(patch.thinking);
-  const nextSchedule = ensureAutomationCronPhase(patch.schedule ? withCronTimezone(patch.schedule) : job.schedule, job.schedule);
+  const nextSchedule = patch.schedule
+    ? anchoredSchedule(ensureAutomationCronPhase(withCronTimezone(patch.schedule), job.schedule), updatedAt)
+    : job.schedule;
+  // The next run moves only when what decides it moved: the schedule, or
+  // whether the job is enabled. A rename or a prompt fix keeps it.
+  const scheduleChanged = JSON.stringify(nextSchedule) !== JSON.stringify(job.schedule);
+  const timingChanged = scheduleChanged || nextEnabled !== job.enabled;
   const nextModelProvider = patch.provider !== undefined
     ? normalizeOptionalString(patch.provider)
     : job.execution.modelProvider;
@@ -191,7 +213,7 @@ export async function updateAutomationJobRecord(
     }),
     deleteAfterRun: patch.deleteAfterRun ?? job.deleteAfterRun,
     pausedReason: nextEnabled ? undefined : job.pausedReason ?? 'operator-disabled',
-    nextRunAt: nextEnabled ? computeNextRun(nextSchedule, updatedAt) : undefined,
+    nextRunAt: !nextEnabled ? undefined : timingChanged || job.nextRunAt === undefined ? computeNextRun(nextSchedule, updatedAt) : job.nextRunAt,
     updatedAt,
     source: {
       ...job.source,
@@ -203,6 +225,6 @@ export async function updateAutomationJobRecord(
   const committed = await context.commitJob(job, updated, options);
   context.scheduleJob(committed);
   context.syncJobToRuntime(committed, 'automation.update');
-  context.emitJobUpdated(committed, ['name', 'description', 'schedule', 'execution', 'delivery', 'failure', 'enabled']);
+  context.emitJobUpdated(committed, changedJobFields(job, committed));
   return committed;
 }

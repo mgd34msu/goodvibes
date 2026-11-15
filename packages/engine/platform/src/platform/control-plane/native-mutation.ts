@@ -9,7 +9,7 @@ import { assertConfirmed, HandlerError, type HandlerContextEnvelope } from './ho
 import type { MutationPublication } from '../utils/file-mutation.js';
 import type { ToolExecutionEffect } from '../tools/registry.js';
 import type { RetainedAutomationJobTarget } from '../automation/job-mutations.js';
-import { assertRetainedAutomationTargetCurrent, projectRetainedAutomationRequest } from '../automation/manager-runtime.js';
+import { projectAutomationTargetRequest } from '../automation/job-mutations.js';
 
 export type NativeMutationHost = ExternalPermissionHost;
 export interface NativeMutationAdmission { readonly kind: 'native-recorded-mutation'; }
@@ -111,7 +111,7 @@ export async function runNativeMutation<T>(input: {
   const originalBytes = JSON.stringify(original);
   const automationTarget = input.automationTarget, originalMethod = input.method;
   const request = automationTarget === undefined ? original
-    : projectRetainedAutomationRequest(automationTarget, originalMethod, original);
+    : projectAutomationTargetRequest(automationTarget, originalMethod, original);
   const args = { method: input.method, request: snapshotJudgmentInput(request), selectedTarget: snapshotJudgmentInput(input.target) };
   const invalidation = new AbortController();
   const unsubscribe = host.config.onDidInvalidate(() => invalidation.abort());
@@ -136,7 +136,7 @@ export async function runNativeMutation<T>(input: {
     if (input.automationTarget !== automationTarget || (automationTarget !== undefined && input.method !== originalMethod)) {
       throw new HandlerError('Native mutation selected reference changed', 'NATIVE_MUTATION_STALE', 409);
     }
-    if (automationTarget !== undefined) assertRetainedAutomationTargetCurrent(automationTarget);
+    automationTarget?.assertCurrent();
     if (context.isAuthorized !== authorized || context.signal !== originalSignal || context.isAuthorized?.(scopes) !== true || context.nativeExecutionAuthority !== authority
       || JSON.stringify({ principalId: context.principalId, principalKind: context.principalKind,
         admin: context.admin, scopes: context.scopes, explicitUserRequest: context.explicitUserRequest }) !== originalContext

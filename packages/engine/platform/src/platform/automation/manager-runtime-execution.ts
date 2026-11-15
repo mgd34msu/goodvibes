@@ -21,6 +21,7 @@ import {
 } from './manager-runtime-helpers.js';
 import { executeCheckinJob, type AutomationCheckinEvaluator } from './checkin-execution.js';
 import { markWorkAuthorized } from '../agents/conversation-continuation.js';
+import type { AutomationRunSettlement } from './manager-runtime-reconcile.js';
 
 export interface AutomationManagerExecutionContext {
   /** Transfer a reserved startup slot to the now-visible run record. */
@@ -65,6 +66,8 @@ export interface AutomationManagerExecutionContext {
   readonly emitJobAutoDisabled?: ((job: AutomationJob, reason: string) => void) | undefined;
   readonly cancelTask?: ((agentId: string) => void) | undefined;
   readonly applyFailureToJob: (job: AutomationJob, timestamp: number, countRun?: boolean) => AutomationJob;
+  /** Ends a running run the one way every run ends (see settleAutomationRun). */
+  readonly settleRun: (run: AutomationRun, settlement: AutomationRunSettlement, source: string) => AutomationRun;
   readonly jobs: Map<string, AutomationJob>;
   readonly runs: Map<string, AutomationRun>;
   /**
@@ -87,6 +90,28 @@ interface ResolvedAutomationExecution {
   readonly target: AutomationSessionTarget;
   readonly executionIntent: AutomationRun['executionIntent'];
   readonly updatedJob?: AutomationJob | undefined;
+}
+
+/** The job was removed while one of its runs was starting. */
+class AutomationJobRemovedError extends Error {
+  constructor(jobId: string) { super(`Automation job ${jobId} was removed while its run was starting`); }
+}
+
+/**
+ * Applies a run's start to the job as it is now, not to the copy read before
+ * the start awaited anything: an edit that landed meanwhile is kept, and a
+ * job removed meanwhile is not brought back (undefined is returned).
+ */
+function recordOnCurrentJob(
+  context: AutomationManagerExecutionContext,
+  jobId: string,
+  change: (current: AutomationJob) => AutomationJob,
+): AutomationJob | undefined {
+  const current = context.jobs.get(jobId);
+  if (!current) return undefined;
+  const updated = change(current);
+  context.jobs.set(jobId, updated);
+  return updated;
 }
 
 function requireHostSurfaceKind(
@@ -118,11 +143,10 @@ export async function executeAutomationJob(
   attempt = 1,
   operation?: ExternalOperationSource,
 ): Promise<AutomationRun> {
-  const original = JSON.stringify(job);
   const assertSource = () => {
     if (job.execution.requiresSourceOwner && !operation) throw new Error('Automation original source owner is unavailable');
     operation?.assertCurrent(); operation?.signal?.throwIfAborted();
-    if (operation && (context.jobs.get(job.id) !== job || JSON.stringify(job) !== original)) throw new Error('Source-owned automation job changed or was removed');
+    if (operation && context.jobs.get(job.id)?.mutationRevision !== job.mutationRevision) throw new Error('Source-owned automation job changed or was removed');
   };
   assertSource();
   if (job.kind === 'checkin' && context.checkinEvaluator) {
@@ -190,6 +214,17 @@ export async function executeAutomationJob(
     agentId: resolved.agentId,
   };
 
+  // What starting a run writes on its job: the run counters, and the session
+  // a pinned target was given on its first run.
+  const startOnJob = (current: AutomationJob): AutomationJob => ({
+    ...current,
+    ...(resolved.updatedJob ? { execution: { ...current.execution, target: resolved.updatedJob.execution.target } } : {}),
+    lastRunAt: now,
+    lastRunId: run.id,
+    runCount: current.runCount + 1,
+    updatedAt: now,
+  });
+
   // Set once the agent exists, so a later failure can cancel and record it.
   let spawnedAgentId: string | undefined;
   try {
@@ -199,16 +234,10 @@ export async function executeAutomationJob(
         ...run,
         agentId: resolved.agentId,
       };
-      const updatedJob: AutomationJob = {
-        ...effectiveJob,
-        lastRunAt: now,
-        lastRunId: runningRun.id,
-        runCount: effectiveJob.runCount + 1,
-        updatedAt: now,
-      };
+      const updatedJob = recordOnCurrentJob(context, job.id, startOnJob);
+      if (!updatedJob) throw new AutomationJobRemovedError(job.id);
       context.runs.set(runningRun.id, runningRun);
       context.onRunRecorded?.();
-      context.jobs.set(updatedJob.id, updatedJob);
       await context.syncExecutionRoute(updatedJob, runningRun);
       context.pruneRunHistory(updatedJob.id);
       await Promise.all([context.saveJobs(), context.saveRuns()]);
@@ -238,19 +267,13 @@ export async function executeAutomationJob(
       ...run,
       agentId,
     };
-    const updatedJob: AutomationJob = {
-      ...effectiveJob,
-      lastRunAt: now,
-      lastRunId: runningRun.id,
-      runCount: effectiveJob.runCount + 1,
-      updatedAt: now,
-    };
     if (resolved.session?.id && resolved.continuationMode !== 'background') {
       await context.sessionBroker.bindAgent(resolved.session.id, agentId, resolved.inputId);
     }
+    const updatedJob = recordOnCurrentJob(context, job.id, startOnJob);
+    if (!updatedJob) throw new AutomationJobRemovedError(job.id);
     context.runs.set(runningRun.id, runningRun);
     context.onRunRecorded?.();
-    context.jobs.set(updatedJob.id, updatedJob);
     await context.syncExecutionRoute(updatedJob, runningRun);
     context.pruneRunHistory(updatedJob.id);
     await Promise.all([context.saveJobs(), context.saveRuns()]);
@@ -278,6 +301,35 @@ export async function executeAutomationJob(
         logger.warn('AutomationManager: could not cancel the agent of a run that failed to record', { jobId: job.id, runId: run.id, agentId: spawnedAgentId, error: summarizeError(cancelError) });
       }
     }
+    if (resolved.session?.id && resolved.inputId && resolved.continuationMode === 'shared-session') {
+      // The job's prompt was queued in the session for this run's agent. No
+      // agent will answer it now, so it is marked failed instead of waiting
+      // there; a retry queues its own.
+      try { await context.sessionBroker.failInput(resolved.session.id, resolved.inputId, message); }
+      catch (inputError) {
+        logger.warn('AutomationManager: the session input of a failed start could not be marked failed', { jobId: job.id, runId: run.id, inputId: resolved.inputId, error: summarizeError(inputError) });
+      }
+    }
+    if (error instanceof AutomationJobRemovedError || !context.jobs.has(job.id)) {
+      // Nothing is left to count the run against or retry: it is recorded as
+      // cancelled, the way a running run of a removed job is.
+      const cancelledRun: AutomationRun = {
+        ...run,
+        status: 'cancelled',
+        endedAt: now,
+        durationMs: 0,
+        cancelledReason: 'job-removed',
+        ...(spawnedAgentId !== undefined ? { agentId: spawnedAgentId } : {}),
+      };
+      context.runs.set(cancelledRun.id, cancelledRun);
+      context.onRunRecorded?.();
+      context.syncRunToRuntime(cancelledRun, 'automation.execute');
+      try { await context.saveRuns(); }
+      catch (persistError) {
+        logger.warn('AutomationManager: the run of a removed job could not be saved', { jobId: job.id, runId: run.id, error: summarizeError(persistError) });
+      }
+      throw error;
+    }
     const failedRun: AutomationRun = {
       ...run,
       status: 'failed',
@@ -288,8 +340,7 @@ export async function executeAutomationJob(
     };
     context.runs.set(failedRun.id, failedRun);
     context.onRunRecorded?.();
-    const updatedJob = context.applyFailureToJob(effectiveJob, now);
-    context.jobs.set(updatedJob.id, updatedJob);
+    const updatedJob = recordOnCurrentJob(context, job.id, current => context.applyFailureToJob(current, now))!;
     try {
       await context.syncExecutionRoute(updatedJob, failedRun);
       if (failedRun.sessionId && failedRun.continuationMode !== 'continued-live') {

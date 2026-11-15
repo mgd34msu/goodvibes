@@ -1,8 +1,10 @@
 import { expect, spyOn, test } from 'bun:test';
+import { settleRunOver } from './_helpers/automation-settle.ts';
 import { CheckinService } from '../platform/src/platform/checkin/service.js';
 import { executeCheckinJob } from '../platform/src/platform/automation/checkin-execution.js';
 import type { AutomationManagerExecutionContext } from '../platform/src/platform/automation/manager-runtime-execution.js';
 import type { AutomationJob } from '../platform/src/platform/automation/jobs.js';
+import type { AutomationRun } from '../platform/src/platform/automation/runs.js';
 import { CheckinReceiptStore } from '../platform/src/platform/checkin/receipts.js';
 
 for (const confirmed of [false, true]) {
@@ -43,14 +45,15 @@ test('receipt persistence failure retains known delivery acceptance and ID witho
     const result = await service.evaluate('manual');
     expect(result).toMatchObject({ outcome: 'delivered', deliveryId: 'known-accepted-id', error: 'Check-in receipt persistence failed' });
     expect(result.summary).toContain('delivery was confirmed'); expect(result.summary).not.toContain('not confirmed');
-    const jobs = new Map<string, AutomationJob>();
-    let evaluations = 0;
-    const context = { jobs, runs: new Map(), saveJobs: async () => {}, saveRuns: async () => {}, pruneRunHistory() {},
-      syncRunToRuntime() {}, syncJobToRuntime() {}, emitRunQueued() {}, emitRunStarted() {}, emitRunCompleted() {}, emitRunFailed() {},
-    } as unknown as AutomationManagerExecutionContext;
     const job = { id: 'receipt-job', kind: 'checkin', source: {}, execution: { target: { kind: 'isolated' } },
-      schedule: { kind: 'cron', expression: '0 */4 * * *' }, failure: { mode: 'retry' }, runCount: 0, successCount: 0, failureCount: 0,
+      schedule: { kind: 'cron', expression: '0 */4 * * *' }, failure: { mode: 'retry' }, delivery: { mode: 'none' }, runCount: 0, successCount: 0, failureCount: 0,
     } as unknown as AutomationJob;
+    const jobs = new Map<string, AutomationJob>([[job.id, job]]), runs = new Map<string, AutomationRun>();
+    let evaluations = 0;
+    const context = { jobs, runs, saveJobs: async () => {}, saveRuns: async () => {}, pruneRunHistory() {},
+      syncRunToRuntime() {}, syncJobToRuntime() {}, emitRunQueued() {}, emitRunStarted() {}, emitRunCompleted() {}, emitRunFailed() {},
+      settleRun: settleRunOver({ jobs, runs }),
+    } as unknown as AutomationManagerExecutionContext;
     const run = await executeCheckinJob(context, async () => { evaluations++; return result; }, job, 'scheduled', true, 1);
     expect(run.status).toBe('completed'); expect(run.deliveryIds).toEqual(['known-accepted-id']);
     expect(run.error).toBe('Check-in receipt persistence failed'); expect(jobs.get(job.id)?.failureCount).toBe(0);

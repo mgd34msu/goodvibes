@@ -10,10 +10,7 @@ import { AgentMessageBus } from '../agents/message-bus.js';
 import { computeSchedulerCapacity, type SchedulerCapacityReport } from './scheduler-capacity.js';
 import { AutomationJobStore } from './store/jobs.js';
 import { AutomationRunStore } from './store/runs.js';
-import { AutomationJobMap, automationJobRevision, ownedAutomationJob, hasOwnedAutomationRevision, AutomationJobCommitIndeterminateError, AutomationJobMutationStaleError, retainAutomationMutation, type AutomationJobMutationOptions, type RetainedAutomationJobTarget } from './job-mutations.js';
-import { types as nodeTypes } from 'node:util';
-import { captureOwnedJson } from '../gate/judgment-input.js';
-import { isRecord } from '../utils/record-coerce.js';
+import { AutomationJobMap, automationJobRevision, ownedAutomationJob, withCurrentSchedulerState, AutomationJobCommitIndeterminateError, AutomationJobMutationStaleError, retainAutomationMutation, type AutomationJobMutationOptions, type RetainedAutomationJobTarget } from './job-mutations.js';
 import { AutomationDeliveryManager } from './delivery-manager.js';
 import { RouteBindingManager } from '../channels/index.js';
 import type { AutomationJob, ManagedAutomationJob } from './jobs.js';
@@ -56,8 +53,6 @@ import {
 import {
   maybeDeliverAutomationFailureNotice,
   maybeDeliverAutomationRun,
-  readAutomationRunTransience,
-  failureNoticeCoversRunDelivery,
   scheduleAutomationFailureFollowUp,
   type AutomationFailureFollowUpContext,
 } from './manager-runtime-delivery.js';
@@ -76,7 +71,7 @@ import {
   syncAutomationRunToRuntime,
   syncAutomationRuntimeSnapshot,
 } from './manager-runtime-sync.js';
-import { reconcileAutomationActiveRuns } from './manager-runtime-reconcile.js';
+import { reconcileAutomationActiveRuns, settleAutomationRun, type AutomationRunSettleContext, type AutomationRunSettlement } from './manager-runtime-reconcile.js';
 import { recordAutomationMissedRun } from './manager-runtime-missed.js';
 import { summarizeError } from '../utils/error-display.js';
 import {
@@ -86,44 +81,6 @@ import {
 } from './manager-runtime-job-mutations.js';
 import type { FeatureFlagReader } from '../runtime/feature-flags/index.js';
 import { isFeatureGateEnabled, requireFeatureGate } from '../runtime/feature-flags/index.js';
-
-const retainedTargetReferences = new WeakMap<RetainedAutomationJobTarget, {
-  readonly selected: ManagedAutomationJob;
-  readonly job: ManagedAutomationJob;
-  readonly jobBytes: string;
-  readonly assertCurrent: () => void;
-}>();
-const nativeSelectedMethods = new Set([
-  'automation.jobs.update', 'automation.jobs.enable', 'automation.jobs.disable', 'automation.jobs.delete',
-  'automation.schedules.enable', 'automation.schedules.disable', 'automation.schedules.delete',
-]);
-
-export function assertRetainedAutomationTargetCurrent(target: RetainedAutomationJobTarget): void {
-  const known = retainedTargetReferences.get(target);
-  if (!known) throw new AutomationJobMutationStaleError();
-  const identity = () => {
-    const job = Object.getOwnPropertyDescriptor(target, 'job'), assertion = Object.getOwnPropertyDescriptor(target, 'assertCurrent');
-    if (!hasOwnedAutomationRevision(known.selected) || Reflect.ownKeys(target).length !== 2
-      || !job || !('value' in job) || job.value !== known.job
-      || !assertion || !('value' in assertion) || assertion.value !== known.assertCurrent
-      || JSON.stringify(captureOwnedJson(known.job, nodeTypes.isProxy)) !== known.jobBytes) throw new AutomationJobMutationStaleError();
-  };
-  identity(); known.assertCurrent(); identity();
-}
-
-/** Internal native adapter: only the actual retained owner can issue this reference. */
-export function projectRetainedAutomationRequest(target: RetainedAutomationJobTarget, method: string, body: unknown): unknown {
-  const known = retainedTargetReferences.get(target);
-  if (!known || !nativeSelectedMethods.has(method)) throw new AutomationJobMutationStaleError();
-  assertRetainedAutomationTargetCurrent(target);
-  const captured = captureOwnedJson(body, nodeTypes.isProxy);
-  const selector = method.startsWith('automation.schedules.') ? 'scheduleId' : 'jobId';
-  if (!isRecord(captured) || captured[selector] !== known.selected.id
-    || captured.expectedMutationRevision !== automationJobRevision(known.selected)) throw new AutomationJobMutationStaleError();
-  const projected = { ...captured, expectedMutationRevision: { kind: 'selected-native-revision', target: 'selected-automation-target' } };
-  assertRetainedAutomationTargetCurrent(target);
-  return projected;
-}
 
 export type {
   CreateAutomationJobInput,
@@ -167,15 +124,6 @@ export interface AutomationHeartbeatResult {
 }
 
 export class AutomationManager {
-  static readonly #storeOwnershipMethods = Object.getOwnPropertyDescriptors(AutomationJobStore.prototype);
-  static readonly #mapGet = Map.prototype.get;
-  static readonly #mapIterator = Map.prototype[Symbol.iterator];
-  readonly #retainedTargetOwner: {
-    readonly jobs: AutomationJobMap;
-    readonly store: AutomationJobStore;
-    readonly featureFlags: FeatureFlagReader;
-    readonly storeFields: PropertyDescriptorMap;
-  };
   private readonly jobStore: AutomationJobStore;
   private readonly runStore: AutomationRunStore;
   private readonly spawnTask?: ((input: SpawnAutomationTaskInput) => string) | undefined;
@@ -190,6 +138,8 @@ export class AutomationManager {
   private readonly jobs = new AutomationJobMap();
   private mutationLifetime = {};
   private readonly runs = new Map<string, AutomationRun>();
+  /** Running runs read back from disk that the first reconcile pass has not looked at yet. */
+  private readonly restoredRunIds = new Set<string>();
   private readonly timers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly retryTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly heartbeatWakes = new Map<string, AutomationHeartbeatWake>();
@@ -230,45 +180,6 @@ export class AutomationManager {
     this.runtimeBus = config.runtimeBus ?? null;
     this.deliveryManager = config.deliveryManager ?? null;
     this.featureFlags = config.featureFlags ?? null;
-    this.#retainedTargetOwner = { jobs: this.jobs, store: this.jobStore, featureFlags: this.featureFlags,
-      storeFields: nodeTypes.isProxy(this.jobStore) ? {} : Object.getOwnPropertyDescriptors(this.jobStore) };
-  }
-
-  #assertRetainedTargetOwner() {
-    const owner = this.#retainedTargetOwner;
-    const jobs = Object.getOwnPropertyDescriptor(this, 'jobs'), store = Object.getOwnPropertyDescriptor(this, 'jobStore');
-    const featureFlags = Object.getOwnPropertyDescriptor(this, 'featureFlags');
-    if (!jobs || !('value' in jobs) || jobs.value !== owner.jobs || !store || !('value' in store) || store.value !== owner.store
-      || !featureFlags || !('value' in featureFlags) || featureFlags.value !== owner.featureFlags
-      || nodeTypes.isProxy(owner.jobs) || nodeTypes.isProxy(owner.store)
-      || Object.getPrototypeOf(this) !== AutomationManager.prototype
-      || Object.getPrototypeOf(owner.jobs) !== AutomationJobMap.prototype
-      || Object.getPrototypeOf(owner.store) !== AutomationJobStore.prototype
-      || Object.getPrototypeOf(AutomationJobMap.prototype) !== Map.prototype) throw new AutomationJobMutationStaleError();
-    for (const [object, prototype, key, original] of [
-      [this, AutomationManager.prototype, 'requireEnabled', managerOwnershipMethods.requireEnabled],
-      ...['assertCurrent', 'fileIdentity', 'directoryIdentity', 'parentIdentity'].map(key =>
-        [owner.store, AutomationJobStore.prototype, key, AutomationManager.#storeOwnershipMethods[key]] as const),
-    ] as const) {
-      const descriptor = Object.getOwnPropertyDescriptor(object, key) ?? Object.getOwnPropertyDescriptor(prototype, key);
-      if (!original || !('value' in original) || !descriptor || !('value' in descriptor) || descriptor.value !== original.value) throw new AutomationJobMutationStaleError();
-    }
-    const get = Object.getOwnPropertyDescriptor(owner.jobs, 'get') ?? Object.getOwnPropertyDescriptor(AutomationJobMap.prototype, 'get')
-      ?? Object.getOwnPropertyDescriptor(Map.prototype, 'get');
-    if (!get || !('value' in get) || get.value !== AutomationManager.#mapGet) throw new AutomationJobMutationStaleError();
-    for (const key of ['store', 'writes', 'path', 'anchor', 'anchorIdentity', 'parents']) {
-      const original = owner.storeFields[key], current = Object.getOwnPropertyDescriptor(owner.store, key);
-      if (!original || !('value' in original) || !current || !('value' in current) || current.value !== original.value) throw new AutomationJobMutationStaleError();
-    }
-    const parents: unknown = owner.storeFields.parents?.value;
-    if (!parents || typeof parents !== 'object' || nodeTypes.isProxy(parents) || !nodeTypes.isMap(parents)
-      || Object.getPrototypeOf(parents) !== Map.prototype) throw new AutomationJobMutationStaleError();
-    const iterator = Object.getOwnPropertyDescriptor(parents, Symbol.iterator) ?? Object.getOwnPropertyDescriptor(Map.prototype, Symbol.iterator);
-    if (!iterator || !('value' in iterator) || iterator.value !== AutomationManager.#mapIterator) throw new AutomationJobMutationStaleError();
-    if (Object.values(Object.getOwnPropertyDescriptors(owner.store)).some(descriptor => !('value' in descriptor))) throw new AutomationJobMutationStaleError();
-    const lifetime = Object.getOwnPropertyDescriptor(this, 'mutationLifetime');
-    if (!lifetime || !('value' in lifetime) || !lifetime.value || typeof lifetime.value !== 'object' || nodeTypes.isProxy(lifetime.value)) throw new AutomationJobMutationStaleError();
-    return owner;
   }
 
   private isEnabled(): boolean {
@@ -318,6 +229,7 @@ export class AutomationManager {
       emitJobAutoDisabled: (job: AutomationJob, reason: string) => this.emitJobAutoDisabled(job, reason),
       cancelTask: this.cancelTask,
       applyFailureToJob: (job: AutomationJob, timestamp: number, countRun = true) => this.applyFailureToJob(job, timestamp, countRun),
+      settleRun: (run: AutomationRun, settlement: AutomationRunSettlement, source: string) => settleAutomationRun(this.runSettleContext(), run, settlement, source),
       jobs: this.jobs,
       runs: this.runs,
       checkinEvaluator: this.checkinEvaluator,
@@ -337,37 +249,37 @@ export class AutomationManager {
     };
   }
 
-  private retainJobMutation(input: unknown, options: AutomationJobMutationOptions): () => void {
+  private retainJobMutation(options: AutomationJobMutationOptions): () => void {
     const restrictions = retainAutomationMutation(options), lifetime = this.mutationLifetime;
-    const store = this.jobStore, commit = store.commit, ownedInput = JSON.stringify(input);
     const current = () => {
       restrictions();
       this.requireEnabled('mutate automation job');
-      if (this.mutationLifetime !== lifetime || this.jobStore !== store || store.commit !== commit || JSON.stringify(input) !== ownedInput) throw new AutomationJobMutationStaleError();
-      store.assertCurrent();
+      if (this.mutationLifetime !== lifetime) throw new AutomationJobMutationStaleError();
     };
     current();
     return current;
   }
 
+  /** The revision a job has now, or null when there is no such job. */
+  private jobRevision(jobId: string): string | null {
+    const job = this.jobs.get(jobId);
+    return job ? automationJobRevision(job) : null;
+  }
+
+  /**
+   * Select a job by the revision its caller read. The returned target stays
+   * current for as long as the job's revision does; the scheduler running the
+   * job does not move it.
+   */
   retainJobTarget(jobId: string, expectedMutationRevision: string): RetainedAutomationJobTarget {
-    const owner = this.#assertRetainedTargetOwner();
     const selected = this.jobs.get(jobId);
-    if (!selected || !hasOwnedAutomationRevision(selected) || automationJobRevision(selected) !== expectedMutationRevision) throw new AutomationJobMutationStaleError();
-    const original = JSON.stringify(selected), lifetime = this.mutationLifetime, store = this.jobStore;
-    const current = () => {
-      if (this.#assertRetainedTargetOwner() !== owner || this.mutationLifetime !== lifetime) throw new AutomationJobMutationStaleError();
+    if (!selected || automationJobRevision(selected) !== expectedMutationRevision) throw new AutomationJobMutationStaleError();
+    const lifetime = this.mutationLifetime;
+    const assertCurrent = () => {
       this.requireEnabled('update automation job');
-      if (this.#assertRetainedTargetOwner() !== owner || this.mutationLifetime !== lifetime) throw new AutomationJobMutationStaleError();
-      store.assertCurrent();
-      if (this.#assertRetainedTargetOwner() !== owner || this.mutationLifetime !== lifetime) throw new AutomationJobMutationStaleError();
-      if (this.jobStore !== store || this.mutationLifetime !== lifetime || this.jobs.get(jobId) !== selected || JSON.stringify(selected) !== original) throw new AutomationJobMutationStaleError();
+      if (this.mutationLifetime !== lifetime || this.jobRevision(jobId) !== expectedMutationRevision) throw new AutomationJobMutationStaleError();
     };
-    current();
-    const job = { ...structuredClone(selected), mutationRevision: expectedMutationRevision };
-    const target = { job, assertCurrent: current };
-    retainedTargetReferences.set(target, { selected, job, jobBytes: JSON.stringify(captureOwnedJson(job, nodeTypes.isProxy)), assertCurrent: current });
-    return target;
+    return Object.freeze({ jobId, revision: expectedMutationRevision, job: selected, assertCurrent });
   }
 
   private commitJob(previous: AutomationJob | undefined, next: AutomationJob, options?: AutomationJobMutationOptions): Promise<ManagedAutomationJob>;
@@ -375,37 +287,81 @@ export class AutomationManager {
   private async commitJob(previous: AutomationJob | undefined, next: AutomationJob | null, options: AutomationJobMutationOptions = {}): Promise<ManagedAutomationJob | null> {
     const jobId = next?.id ?? previous?.id;
     if (!jobId) throw new Error('An automation mutation requires a job id.');
-    const restrictions = retainAutomationMutation(options), original = JSON.stringify(previous);
+    const restrictions = retainAutomationMutation(options);
     const lifetime = this.mutationLifetime;
-    const candidate = next ? ownedAutomationJob(next) : null;
+    const expectedRevision = previous ? automationJobRevision(previous) : null;
+    // The revision covers the definition only; scheduler state written while
+    // this mutation was prepared is carried into the record it commits.
+    const live = this.jobs.get(jobId);
+    const candidate = next ? ownedAutomationJob(previous && live ? withCurrentSchedulerState(previous, next, live) : next) : null;
     const current = () => {
       restrictions();
-      if (this.jobs.get(jobId) !== previous || JSON.stringify(previous) !== original) throw new AutomationJobMutationStaleError();
+      if (this.jobRevision(jobId) !== expectedRevision) throw new AutomationJobMutationStaleError();
     };
     current();
     try {
-      await this.jobStore.commit(jobId, previous ? automationJobRevision(previous) : null, candidate, { signal: options.signal, assertCurrent: current, withPublication: options.withPublication });
+      await this.jobStore.commit(jobId, expectedRevision, candidate, { signal: options.signal, assertCurrent: current, withPublication: options.withPublication });
       current();
     } catch (error) {
       // A stale error can mean the jobs file was changed by someone else: the
       // store has re-read it, so this job's in-memory copy is refreshed from it
       // and the caller's next attempt starts from the current revision.
       const reconcile = error instanceof AutomationJobCommitIndeterminateError || error instanceof AutomationJobMutationStaleError;
-      if (reconcile && this.jobs.get(jobId) === previous && this.mutationLifetime === lifetime) {
+      if (reconcile && this.jobRevision(jobId) === expectedRevision && this.mutationLifetime === lifetime) {
         // Reconcile the observed bytes, without scheduling or emitting a
         // successful mutation after its authority has gone away.
         const loaded = error instanceof AutomationJobMutationStaleError ? await this.jobStore.load().catch(() => undefined) : await this.jobStore.load();
         const persisted = loaded?.jobs.find(job => job.id === jobId);
-        if (loaded && this.jobs.get(jobId) === previous && this.mutationLifetime === lifetime) {
+        if (loaded && this.jobRevision(jobId) === expectedRevision && this.mutationLifetime === lifetime) {
           if (persisted) this.jobs.restore(persisted);
           else this.jobs.delete(jobId);
         }
       }
       throw error;
     }
-    if (candidate) this.jobs.publish(candidate);
-    else this.jobs.delete(jobId);
-    return candidate;
+    if (!candidate) return null;
+    const latest = this.jobs.get(jobId);
+    const published = previous && next && latest && latest !== live
+      ? ownedAutomationJob(withCurrentSchedulerState(previous, next, latest), candidate.mutationRevision)
+      : candidate;
+    this.jobs.publish(published);
+    return published;
+  }
+
+  /**
+   * The one way a job leaves the manager, whoever removes it (an owner, an
+   * agent, a one-shot job finishing): its record, timers and queued wakes go,
+   * and a run of it still in flight is cancelled rather than left to finish
+   * against a job that no longer exists.
+   */
+  private removeJobRecord(jobId: string, reason: string): void {
+    this.cancelTimer(jobId);
+    this.heartbeatWakes.delete(jobId);
+    for (const [key, timer] of this.retryTimers) {
+      if (!key.startsWith(`${jobId}:`)) continue;
+      clearTimeout(timer);
+      this.retryTimers.delete(key);
+    }
+    let cancelled = false;
+    for (const run of [...this.runs.values()]) {
+      if (run.jobId !== jobId || run.status !== 'running') continue;
+      // The run is detached from the removed job either way; when its agent
+      // cannot be stopped the run record says so.
+      let detail = reason;
+      try { if (run.agentId) this.requireCancelTask()(run.agentId); }
+      catch (error) {
+        detail = `${reason}; its agent could not be stopped`;
+        logger.warn('AutomationManager: the agent of a removed job\'s run could not be stopped', { jobId, runId: run.id, agentId: run.agentId, error: summarizeError(error) });
+      }
+      settleAutomationRun(this.runSettleContext(), run, { status: 'cancelled', endedAt: Date.now(), reason: detail }, 'automation.job-removed');
+      cancelled = true;
+    }
+    this.jobs.delete(jobId);
+    if (cancelled) {
+      void this.saveRuns().catch((error: unknown) => {
+        logger.warn('AutomationManager: run persistence failed', { reason: 'job-removed', jobId, error: summarizeError(error) });
+      });
+    }
   }
 
   async start(): Promise<void> {
@@ -525,7 +481,7 @@ export class AutomationManager {
   }
 
   async createJob(input: CreateAutomationJobInput, options: AutomationJobMutationOptions = {}): Promise<ManagedAutomationJob> {
-    const current = this.retainJobMutation(input, options);
+    const current = this.retainJobMutation(options);
     this.requireEnabled('create automation job');
     await this.start();
     current();
@@ -533,19 +489,19 @@ export class AutomationManager {
   }
 
   async removeJob(jobId: string, options: AutomationJobMutationOptions = {}): Promise<boolean> {
-    const current = this.retainJobMutation({ jobId }, options);
+    const current = this.retainJobMutation(options);
     this.requireEnabled('remove automation job');
     await this.start();
     current();
     const selected = this.jobs.get(jobId);
     if (!selected) return false;
     await this.commitJob(selected, null, { signal: options.signal, assertCurrent: current, withPublication: options.withPublication });
-    this.cancelTimer(jobId);
+    this.removeJobRecord(jobId, 'job-removed');
     return true;
   }
 
   async setEnabled(jobId: string, enabled: boolean, options: AutomationJobMutationOptions = {}): Promise<ManagedAutomationJob | null> {
-    const current = this.retainJobMutation({ jobId, enabled }, options);
+    const current = this.retainJobMutation(options);
     this.requireEnabled('set automation job enabled state');
     await this.start();
     current();
@@ -555,7 +511,7 @@ export class AutomationManager {
   }
 
   async updateJob(jobId: string, patch: UpdateAutomationJobInput, options: AutomationJobMutationOptions = {}): Promise<ManagedAutomationJob | null> {
-    const current = this.retainJobMutation(patch, options);
+    const current = this.retainJobMutation(options);
     this.requireEnabled('update automation job');
     await this.start();
     current();
@@ -629,7 +585,7 @@ export class AutomationManager {
     const job = this.jobs.get(run.jobId);
     if (!job) throw new Error(`Automation job not found: ${run.jobId}`);
     if (run.status !== 'failed' && run.status !== 'cancelled' && run.status !== 'missed') {
-      throw new Error(`Automation run ${runId} is ${run.status}; only a failed, cancelled or missed run can be retried`);
+      throw new Error(`Automation run ${runId} is ${run.status}; only a failed, cancelled or missed run can be retried. Start a new run of job ${job.id} instead.`);
     }
     if (this.activeRunCount() >= this.maxConcurrentRuns()) {
       throw new Error(`Automation concurrency limit reached (${this.maxConcurrentRuns()})`);
@@ -644,46 +600,18 @@ export class AutomationManager {
     if (!run) return null;
     if (run.status !== 'running') return run;
 
-    if (run.agentId) {
-      this.requireCancelTask()(run.agentId);
-    }
-
-    const endedAt = Date.now();
-    const updatedRun: AutomationRun = {
-      ...run,
-      status: 'cancelled',
-      endedAt,
-      durationMs: Math.max(0, endedAt - (run.startedAt ?? run.queuedAt)),
-      cancelledReason: reason,
-      updatedAt: endedAt,
-    };
-    this.runs.set(run.id, updatedRun);
-    this.syncRunToRuntime(updatedRun, 'automation.cancel');
-
-    const job = this.jobs.get(run.jobId);
-    if (job) {
-      const updatedJob: AutomationJob = {
-        ...job,
-        lastRunAt: endedAt,
-        updatedAt: endedAt,
-      };
-      this.jobs.set(job.id, updatedJob);
-      await this.syncExecutionRoute(updatedJob, updatedRun);
-      if (updatedRun.sessionId && updatedRun.continuationMode !== 'continued-live') {
-        await this.sessionBroker.completeAgent(updatedRun.sessionId, updatedRun.agentId ?? run.id, reason, {
-          status: 'cancelled',
-          automationJobId: updatedJob.id,
-          automationRunId: updatedRun.id,
-        });
-      }
-      this.syncJobToRuntime(updatedJob, 'automation.cancel');
-      this.emitRunCompleted(updatedJob, updatedRun, 'cancelled');
-      this.maybeDeliverRun(updatedJob, updatedRun);
-    }
-
+    const updatedRun = this.cancelRunNow(run, reason);
     await this.saveRuns();
     await this.saveJobs();
     return updatedRun;
+  }
+
+  /** Stop a running run's agent and settle the run as cancelled. */
+  private cancelRunNow(run: AutomationRun, reason: string): AutomationRun {
+    if (run.agentId) {
+      this.requireCancelTask()(run.agentId);
+    }
+    return settleAutomationRun(this.runSettleContext(), run, { status: 'cancelled', endedAt: Date.now(), reason }, 'automation.cancel');
   }
 
   async recordExternalRunResult(
@@ -703,67 +631,12 @@ export class AutomationManager {
     if (run.status !== 'running') return run;
 
     const endedAt = Date.now();
-    const updatedRun: AutomationRun = {
-      ...run,
-      status: input.status,
-      endedAt,
-      durationMs: Math.max(0, endedAt - (run.startedAt ?? run.queuedAt)),
-      updatedAt: endedAt,
-      ...(input.status === 'completed'
-        ? { result: input.result }
-        : input.status === 'failed'
-          ? { error: input.error ?? 'Remote work failed' }
-          : { cancelledReason: input.error ?? 'Remote work cancelled' }),
-      ...(input.telemetry ? { telemetry: normalizeExternalTelemetry(input.telemetry, run, input.metadata) } : {}),
-    };
-    this.runs.set(run.id, updatedRun);
-    this.syncRunToRuntime(updatedRun, 'automation.external');
-
-    const job = this.jobs.get(run.jobId);
-    if (!job) {
-      await this.saveRuns();
-      return updatedRun;
-    }
-
-    const wasEnabled = job.enabled;
-    const updatedJob: AutomationJob = input.status === 'completed'
-      ? {
-          ...job,
-          successCount: job.successCount + 1,
-          failureCount: 0,
-          updatedAt: endedAt,
-        }
+    const telemetry = input.telemetry ? normalizeExternalTelemetry(input.telemetry, run, input.metadata) : undefined;
+    const updatedRun = settleAutomationRun(this.runSettleContext(), run, input.status === 'completed'
+      ? { status: 'completed', endedAt, result: input.result, telemetry }
       : input.status === 'failed'
-        ? this.applyFailureToJob(job, endedAt, false)
-        : {
-            ...job,
-            updatedAt: endedAt,
-          };
-    this.jobs.set(job.id, updatedJob);
-    await this.syncExecutionRoute(updatedJob, updatedRun);
-    this.syncJobToRuntime(updatedJob, 'automation.external');
-    const retryable = input.status === 'failed'
-      && (await readAutomationRunTransience({ error: input.error ?? '' }, 'automation.run.remote', { jobId: job.id, runId: run.id }))?.failureClass === 'retryable';
-
-    if (input.status === 'completed') {
-      this.emitRunCompleted(updatedJob, updatedRun, 'success');
-    } else if (input.status === 'failed') {
-      emitAutomationManagerRunFailed(this.runtimeBus, updatedJob, updatedRun, updatedRun.error ?? 'Remote work failed', retryable);
-    } else {
-      this.emitRunCompleted(updatedJob, updatedRun, 'cancelled');
-    }
-    // A failed run is announced by its failure notice below.
-    if (input.status !== 'failed' || !failureNoticeCoversRunDelivery(updatedJob)) this.maybeDeliverRun(updatedJob, updatedRun);
-    if (input.status === 'completed' && updatedJob.deleteAfterRun) {
-      this.cancelTimer(updatedJob.id);
-      this.jobs.delete(updatedJob.id);
-    } else if (input.status === 'failed') {
-      scheduleAutomationFailureFollowUp(this.failureFollowUpContext(), updatedJob, updatedRun, retryable);
-    }
-    if (!updatedJob.enabled && wasEnabled && input.status === 'failed') {
-      this.emitJobAutoDisabled(updatedJob, updatedJob.pausedReason ?? 'failure-threshold-reached');
-    }
-
+        ? { status: 'failed', endedAt, error: input.error ?? 'Remote work failed', failure: { error: input.error ?? '' }, telemetry }
+        : { status: 'cancelled', endedAt, reason: input.error ?? 'Remote work cancelled', telemetry }, 'automation.external');
     await this.saveRuns();
     await this.saveJobs();
     return updatedRun;
@@ -782,6 +655,7 @@ export class AutomationManager {
     for (const run of runSnapshot.runs) {
       const normalizedRun = normalizeRunRecord(run, this.jobs.get(run.jobId));
       this.runs.set(normalizedRun.id, normalizedRun);
+      if (normalizedRun.status === 'running') this.restoredRunIds.add(normalizedRun.id);
     }
     this.loaded = true;
     this.pruneRunHistory();
@@ -880,24 +754,32 @@ export class AutomationManager {
       return;
     }
     reconcileAutomationActiveRuns({
+      ...this.runSettleContext(),
       configManager: this.configManager,
-      sessionBroker: this.sessionBroker,
       agentStatusProvider: this.agentStatusProvider,
-      jobs: this.jobs,
-      runs: this.runs,
+      cancelTask: this.cancelTask,
+      restoredRunIds: this.restoredRunIds,
       saveJobs: () => this.saveJobs(),
       saveRuns: () => this.saveRuns(),
+      pruneRunHistory: () => this.pruneRunHistory(),
+    });
+  }
+
+  private runSettleContext(): AutomationRunSettleContext {
+    return {
+      sessionBroker: this.sessionBroker,
+      jobs: this.jobs,
+      runs: this.runs,
       syncExecutionRoute: (job, run) => this.syncExecutionRoute(job, run),
       syncRunToRuntime: (run, source) => this.syncRunToRuntime(run, source),
       syncJobToRuntime: (job, source) => this.syncJobToRuntime(job, source),
-      emitRunCompleted: (job, run, outcome) => this.emitRunCompleted(job, run, outcome),
+      emitRunCompleted: (job, run, outcome, failure) => this.emitRunCompleted(job, run, outcome, failure),
       followUp: this.failureFollowUpContext(),
       emitJobAutoDisabled: (job, reason) => this.emitJobAutoDisabled(job, reason),
       maybeDeliverRun: (job, run) => this.maybeDeliverRun(job, run),
       applyFailureToJob: (job, timestamp, countRun) => this.applyFailureToJob(job, timestamp, countRun),
-      pruneRunHistory: () => this.pruneRunHistory(),
-      cancelTimer: (jobId) => this.cancelTimer(jobId),
-    });
+      removeJobRecord: (jobId, reason) => this.removeJobRecord(jobId, reason),
+    };
   }
 
   private async saveJobs(): Promise<void> {
@@ -1014,8 +896,13 @@ export class AutomationManager {
     emitAutomationManagerRunStarted(this.runtimeBus, job, run);
   }
 
-  private emitRunCompleted(job: AutomationJob, run: AutomationRun, outcome: 'success' | 'partial' | 'failed' | 'cancelled'): void {
-    emitAutomationManagerRunCompleted(this.runtimeBus, job, run, outcome);
+  private emitRunCompleted(
+    job: AutomationJob,
+    run: AutomationRun,
+    outcome: 'success' | 'partial' | 'failed' | 'cancelled',
+    failure?: { readonly error: string; readonly retryable: boolean },
+  ): void {
+    emitAutomationManagerRunCompleted(this.runtimeBus, job, run, outcome, failure);
   }
 
   private maybeDeliverRun(job: AutomationJob, run: AutomationRun): void {
@@ -1029,4 +916,3 @@ export class AutomationManager {
   }
 }
 
-const managerOwnershipMethods = Object.getOwnPropertyDescriptors(AutomationManager.prototype);

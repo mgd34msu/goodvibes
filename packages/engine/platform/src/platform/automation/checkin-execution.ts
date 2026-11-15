@@ -18,7 +18,7 @@ import type { AutomationJob } from './jobs.js';
 import type { AutomationRun } from './runs.js';
 import type { AutomationRunTrigger } from './types.js';
 import type { AutomationManagerExecutionContext } from './manager-runtime-execution.js';
-import { canSettleStoredRun } from './manager-runtime-helpers.js';
+import type { AutomationRunSettlement } from './manager-runtime-reconcile.js';
 import { logger } from '../utils/logger.js';
 
 /** What a single check-in evaluation decided, the outcome the evaluator returns. */
@@ -72,95 +72,70 @@ export async function executeCheckinJob(
     deliveryIds: [],
   };
 
+  const current = context.jobs.get(job.id) ?? job;
   const runningJob: AutomationJob = {
-    ...job,
+    ...current,
     lastRunAt: now,
     lastRunId: baseRun.id,
-    runCount: job.runCount + 1,
+    runCount: current.runCount + 1,
     updatedAt: now,
   };
   context.runs.set(baseRun.id, baseRun);
   context.onRunRecorded?.();
-  context.jobs.set(runningJob.id, runningJob);
+  if (context.jobs.has(job.id)) context.jobs.set(runningJob.id, runningJob);
   context.emitRunQueued(runningJob, baseRun);
   context.emitRunStarted(runningJob, baseRun);
 
-  let written: AutomationRun | undefined;
+  let evaluation: AutomationCheckinOutcome;
   try {
-    const evaluation = await evaluator(job);
-    const end = Date.now();
-    const failed = evaluation.outcome === 'error';
-    const stored = context.runs.get(baseRun.id);
-    if (stored && !canSettleStoredRun(stored, failed ? 'failed' : 'completed')) {
-      // Cancelled while the evaluator ran: keep that outcome, count nothing.
-      logger.warn('AutomationManager: check-in finished after its run was already settled; keeping its recorded status', {
-        jobId: job.id, runId: baseRun.id, status: stored.status,
-      });
-      return stored;
-    }
-    const terminal: AutomationRun = {
+    evaluation = await evaluator(job);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return await settleCheckinRun(context, baseRun, { status: 'failed', endedAt: Date.now(), error: message, failure: { error } });
+  }
+  const end = Date.now();
+  const result = { checkin: evaluation.outcome, summary: evaluation.summary };
+  return await settleCheckinRun(context, baseRun, evaluation.outcome === 'error'
+    ? { status: 'failed', endedAt: end, error: evaluation.error ?? evaluation.summary, failure: { error: evaluation.error ?? evaluation.summary } }
+    : { status: 'completed', endedAt: end, result }, evaluation);
+}
+
+/**
+ * A check-in run ends the way every run does (settleRun): a success resets
+ * the job's failure count, a failure goes through the failure notice and the
+ * job's retry policy, a run cancelled meanwhile keeps its cancellation. The
+ * check-in's own delivery id and outcome stay on the record.
+ */
+async function settleCheckinRun(
+  context: AutomationManagerExecutionContext,
+  baseRun: AutomationRun,
+  settlement: AutomationRunSettlement,
+  evaluation?: AutomationCheckinOutcome,
+): Promise<AutomationRun> {
+  const stored = context.runs.get(baseRun.id);
+  if (stored && stored.status !== 'running') {
+    logger.warn('AutomationManager: check-in finished after its run was already settled; keeping its recorded status', {
+      jobId: baseRun.jobId, runId: baseRun.id, status: stored.status,
+    });
+    return stored;
+  }
+  if (evaluation) {
+    // The evaluator already delivered (or chose not to): its outcome rides on the run.
+    context.runs.set(baseRun.id, {
       ...baseRun,
-      status: failed ? 'failed' : 'completed',
-      endedAt: end,
-      durationMs: end - now,
       deliveryIds: evaluation.deliveryId ? [evaluation.deliveryId] : [],
       result: { checkin: evaluation.outcome, summary: evaluation.summary },
       ...(evaluation.error ? { error: evaluation.error } : {}),
-    };
-    const currentJob = context.jobs.get(runningJob.id);
-    const finalJob = currentJob ? settleCurrentJob(currentJob, runningJob, end, failed) : undefined;
-    context.runs.set(terminal.id, terminal);
-    written = terminal;
-    if (finalJob) context.jobs.set(finalJob.id, finalJob);
-    context.pruneRunHistory(runningJob.id);
-    await Promise.all([context.saveJobs(), context.saveRuns()]);
-    context.syncRunToRuntime(terminal, 'automation.checkin');
-    if (finalJob) context.syncJobToRuntime(finalJob, 'automation.checkin');
-    context.emitRunCompleted(finalJob ?? runningJob, terminal, failed ? 'failed' : 'success');
-    return terminal;
-  } catch (error) {
-    const end = Date.now();
-    const message = error instanceof Error ? error.message : String(error);
-    const stored = context.runs.get(baseRun.id);
-    if (written && stored === written) {
-      // The evaluation finished and its outcome is recorded; only saving or
-      // announcing it failed. Rewriting the run as failed would contradict a
-      // check-in that was already delivered, so the outcome stands.
-      logger.warn('AutomationManager: check-in outcome recorded but could not be saved or announced', {
-        jobId: job.id, runId: baseRun.id, status: written.status, error: message,
-      });
-      return written;
-    }
-    if (stored && stored !== written && !canSettleStoredRun(stored, 'failed')) {
-      logger.warn('AutomationManager: check-in failed after its run was already settled; keeping its recorded status', {
-        jobId: job.id, runId: baseRun.id, status: stored.status, error: message,
-      });
-      return stored;
-    }
-    const failedRun: AutomationRun = {
-      ...baseRun,
-      status: 'failed',
-      endedAt: end,
-      durationMs: end - now,
-      error: message,
-    };
-    const currentJob = context.jobs.get(runningJob.id);
-    const finalJob = currentJob ? settleCurrentJob(currentJob, runningJob, end, true) : undefined;
-    context.runs.set(failedRun.id, failedRun);
-    if (finalJob) context.jobs.set(finalJob.id, finalJob);
-    context.pruneRunHistory(runningJob.id);
-    await Promise.all([context.saveJobs(), context.saveRuns()]);
-    context.syncRunToRuntime(failedRun, 'automation.checkin');
-    if (finalJob) context.syncJobToRuntime(finalJob, 'automation.checkin');
-    context.emitRunFailed(finalJob ?? runningJob, failedRun, message, false);
-    return failedRun;
+    });
   }
-}
-
-/** Pending reads must never resurrect a deleted job or restore captured settings/ownership. */
-function settleCurrentJob(current: AutomationJob, captured: AutomationJob, endedAt: number, failed: boolean): AutomationJob {
-  if (current.createdAt !== captured.createdAt || current.createdBy !== captured.createdBy
-    || JSON.stringify(current.source) !== JSON.stringify(captured.source)) return current;
-  return { ...current, successCount: failed ? current.successCount : current.successCount + 1,
-    failureCount: failed ? current.failureCount + 1 : current.failureCount, updatedAt: endedAt };
+  const terminal = context.settleRun(context.runs.get(baseRun.id) ?? baseRun, settlement, 'automation.checkin');
+  context.pruneRunHistory(baseRun.jobId);
+  try { await Promise.all([context.saveJobs(), context.saveRuns()]); }
+  catch (error) {
+    // The outcome is recorded in memory and announced; only saving it failed.
+    logger.warn('AutomationManager: check-in outcome recorded but could not be saved', {
+      jobId: baseRun.jobId, runId: baseRun.id, status: terminal.status, error: error instanceof Error ? error.message : String(error),
+    });
+  }
+  return terminal;
 }

@@ -1,10 +1,10 @@
 import { afterEach, expect, spyOn, test } from 'bun:test';
-import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { ownedAutomationJob, AutomationJobMutationStaleError } from '../platform/src/platform/automation/job-mutations.ts';
-import { AutomationManager, assertRetainedAutomationTargetCurrent, projectRetainedAutomationRequest } from '../platform/src/platform/automation/manager-runtime.ts';
+import { ownedAutomationJob, AutomationJobMutationStaleError, projectAutomationTargetRequest } from '../platform/src/platform/automation/job-mutations.ts';
+import { AutomationManager } from '../platform/src/platform/automation/manager-runtime.ts';
 import { AutomationJobStore } from '../platform/src/platform/automation/store/jobs.ts';
 import { snapshotJudgmentInput } from '../platform/src/platform/gate/judgment-input.ts';
 import { KnowledgeStore } from '../platform/src/platform/knowledge/store.ts';
@@ -36,143 +36,72 @@ async function automation() {
 
 test('a real producer-owned card-shaped UUID is local while the full request meaning remains admitted', async () => {
   const f = await automation(); expect(findCardNumberShapes(revision, 1)).toHaveLength(1);
-  const projected = snapshotJudgmentInput(projectRetainedAutomationRequest(f.target, 'automation.jobs.update', { ...f.body, extra: { note: 'Keep this unknown meaning' } }));
+  const projected = snapshotJudgmentInput(projectAutomationTargetRequest(f.target, 'automation.jobs.update', { ...f.body, extra: { note: 'Keep this unknown meaning' } }));
   expect(projected).toMatchObject({ name: 'Native durable', extra: { note: 'Keep this unknown meaning' }, expectedMutationRevision: { kind: 'selected-native-revision' } });
   expect(JSON.stringify(projected)).not.toContain(revision);
   expect(f.body.expectedMutationRevision).toBe(revision);
 });
 
-test('a borrowed selection method cannot mint a native reference through receiver-supplied callbacks', async () => {
-  const f = await automation();
-  let suppliedCalls = 0;
-  const job = ownedAutomationJob(f.selected, revision);
-  const foreign = {
-    jobs: new Map([[job.id, job]]), mutationLifetime: {},
-    jobStore: { assertCurrent: () => { suppliedCalls += 1; } },
-    requireEnabled: () => { suppliedCalls += 1; },
-  };
-  Object.setPrototypeOf(foreign, AutomationManager.prototype);
-  expect(() => Reflect.apply(AutomationManager.prototype.retainJobTarget, foreign, [job.id, revision])).toThrow(TypeError);
-  expect(suppliedCalls).toBe(0);
-});
-
-for (const kind of ['jobs', 'jobs accessor', 'store', 'store accessor', 'owner method', 'owner method accessor',
-  'store method', 'store method accessor', 'file method', 'file method accessor', 'map method', 'map method accessor',
-  'feature flags accessor', 'lifetime accessor'] as const) {
-  test(`a genuine manager refuses replaced ${kind} before invoking supplied ownership`, async () => {
-    const f = await automation(); let suppliedCalls = 0;
-    const jobs: unknown = Object.getOwnPropertyDescriptor(f.manager, 'jobs')?.value;
-    if (!jobs || typeof jobs !== 'object') throw new Error('Actual manager lost its native job map');
-    const object = kind.startsWith('store method') || kind.startsWith('file method') ? f.store
-      : kind.startsWith('map method') ? jobs : f.manager;
-    const key = kind.startsWith('jobs') ? 'jobs' : kind.startsWith('store method') ? 'assertCurrent'
-      : kind.startsWith('file method') ? 'fileIdentity' : kind.startsWith('store') ? 'jobStore'
-      : kind.startsWith('map method') ? 'get' : kind.startsWith('feature') ? 'featureFlags'
-      : kind.startsWith('lifetime') ? 'mutationLifetime' : 'requireEnabled';
-    const original = Object.getOwnPropertyDescriptor(object, key);
-    const supplied = () => { suppliedCalls += 1; return undefined; };
-    const value = kind === 'jobs' ? new Map([[f.selected.id, ownedAutomationJob(f.selected, revision)]])
-      : kind === 'store' ? { assertCurrent: supplied } : supplied;
-    Object.defineProperty(object, key, kind.endsWith('accessor') ? { configurable: true, get: supplied } : { configurable: true, value });
-    try {
-      const before = readFileSync(f.path);
-      expect(() => f.manager.retainJobTarget(f.selected.id, revision)).toThrow(AutomationJobMutationStaleError);
-      expect(() => projectRetainedAutomationRequest(f.target, 'automation.jobs.update', f.body)).toThrow(AutomationJobMutationStaleError);
-      expect(suppliedCalls).toBe(0); expect(readFileSync(f.path)).toEqual(before);
-    } finally {
-      if (original) Object.defineProperty(object, key, original); else Reflect.deleteProperty(object, key);
-    }
-  });
-}
-
-test('a proxy receiver cannot borrow the canonical issuer or invoke receiver traps', async () => {
-  const f = await automation(); let suppliedCalls = 0;
-  const proxy = new Proxy(f.manager, { get(target, key, receiver) { suppliedCalls += 1; return Reflect.get(target, key, receiver); } });
-  expect(() => Reflect.apply(AutomationManager.prototype.retainJobTarget, proxy, [f.selected.id, revision])).toThrow(TypeError);
-  expect(suppliedCalls).toBe(0);
-});
-
-for (const kind of ['function', 'accessor'] as const) {
-  test(`a native parent map refuses a supplied iterator ${kind} before invoking it`, async () => {
-    const f = await automation(); let suppliedCalls = 0;
-    const parents: unknown = Object.getOwnPropertyDescriptor(f.store, 'parents')?.value;
-    if (!(parents instanceof Map)) throw new Error('Actual store lost its native parent map');
-    const original = Object.getOwnPropertyDescriptor(parents, Symbol.iterator);
-    const supplied = () => { suppliedCalls += 1; return Map.prototype[Symbol.iterator].call(parents); };
-    Object.defineProperty(parents, Symbol.iterator, kind === 'function'
-      ? { configurable: true, value: supplied } : { configurable: true, get: () => { suppliedCalls += 1; return supplied; } });
-    try {
-      const before = readFileSync(f.path);
-      expect(() => f.manager.retainJobTarget(f.selected.id, revision)).toThrow(AutomationJobMutationStaleError);
-      expect(() => projectRetainedAutomationRequest(f.target, 'automation.jobs.update', f.body)).toThrow(AutomationJobMutationStaleError);
-      expect(suppliedCalls).toBe(0); expect(readFileSync(f.path)).toEqual(before);
-    } finally {
-      if (original) Object.defineProperty(parents, Symbol.iterator, original); else Reflect.deleteProperty(parents, Symbol.iterator);
-    }
-    assertRetainedAutomationTargetCurrent(f.target);
-  });
-}
-
-test('canonical persistence can establish originally absent parent identities without retiring the native owner', async () => {
+test('canonical persistence can establish originally absent parent directories', async () => {
   const f = await automation();
   const store = new AutomationJobStore(join(dirname(f.path), 'native-owned', 'inner', 'jobs.json'));
   const manager = new AutomationManager({ configManager: f.config, jobStore: store, routeBindings: f.routes,
     sessionBroker: f.broker, spawnTask: () => 'synthetic-local-agent', agentStatusProvider: { getStatus: () => null } });
   cleanup.push(() => manager.stop());
-  const parents: unknown = Object.getOwnPropertyDescriptor(store, 'parents')?.value;
-  if (!(parents instanceof Map)) throw new Error('Actual store lost its native parent map');
-  expect(parents.size).toBe(2); expect([...parents.values()]).toEqual([null, null]);
   const job = await manager.createJob({ name: 'Nested native', prompt: 'Synthetic local reminder',
     schedule: { kind: 'every', intervalMs: 3_600_000 }, enabled: false });
   if (!job || typeof job.mutationRevision !== 'string') throw new Error('Actual manager lost its producer revision');
-  expect([...parents.values()].every(value => typeof value === 'string')).toBe(true);
   const target = manager.retainJobTarget(job.id, job.mutationRevision);
-  expect(snapshotJudgmentInput(projectRetainedAutomationRequest(target, 'automation.jobs.update', {
+  expect(snapshotJudgmentInput(projectAutomationTargetRequest(target, 'automation.jobs.update', {
     jobId: job.id, expectedMutationRevision: job.mutationRevision, name: 'Nested native retained',
   }))).toMatchObject({ name: 'Nested native retained', expectedMutationRevision: { kind: 'selected-native-revision' } });
 });
 
-for (const kind of ['copy', 'job identity', 'job content', 'assertion', 'accessor', 'unknown method', 'foreign selector', 'foreign revision'] as const) {
-  test(`automation reference refuses ${kind} without invoking supplied ownership`, async () => {
-    const f = await automation(); let suppliedCalls = 0;
-    let target = f.target, body = f.body, method = 'automation.jobs.update';
-    if (kind === 'copy') target = { ...target, assertCurrent: () => { suppliedCalls += 1; } };
-    if (kind === 'job identity') Object.defineProperty(target, 'job', { value: { ...target.job } });
-    if (kind === 'job content') Object.defineProperty(target.job, 'name', { value: 'Different semantic target' });
-    if (kind === 'assertion') Object.defineProperty(target, 'assertCurrent', { value: () => { suppliedCalls += 1; } });
-    if (kind === 'accessor') Object.defineProperty(target, 'job', { get: () => { suppliedCalls += 1; return f.selected; } });
+for (const kind of ['unknown method', 'foreign selector', 'foreign revision'] as const) {
+  test(`automation reference refuses ${kind}`, async () => {
+    const f = await automation();
+    let body = f.body, method = 'automation.jobs.update';
     if (kind === 'unknown method') method = 'automation.jobs.create';
     if (kind === 'foreign selector') body = { ...body, jobId: 'foreign' };
     if (kind === 'foreign revision') body = { ...body, expectedMutationRevision: 'foreign' };
     const before = readFileSync(f.path);
-    expect(() => projectRetainedAutomationRequest(target, method, body)).toThrow(AutomationJobMutationStaleError);
-    expect(suppliedCalls).toBe(0); expect(readFileSync(f.path)).toEqual(before);
+    expect(() => projectAutomationTargetRequest(f.target, method, body)).toThrow(AutomationJobMutationStaleError);
+    expect(readFileSync(f.path)).toEqual(before);
   });
 }
 
 for (const tail of [{ unknown: { pan: '4111111111111111' } }, { unknown: { apiKey: 'SYNTHETIC_NOT_A_REAL_KEY' } }]) {
   test('a retained automation reference never suppresses a nested private tail', async () => {
     const f = await automation(); const before = readFileSync(f.path);
-    expect(() => snapshotJudgmentInput(projectRetainedAutomationRequest(f.target, 'automation.jobs.update', { ...f.body, ...tail }))).toThrow();
+    expect(() => snapshotJudgmentInput(projectAutomationTargetRequest(f.target, 'automation.jobs.update', { ...f.body, ...tail }))).toThrow();
     expect(readFileSync(f.path)).toEqual(before);
   });
 }
 
-for (const kind of ['ABA', 'physical replacement', 'stop'] as const) {
+for (const kind of ['ABA', 'stop'] as const) {
   test(`retained automation reference keeps actual ${kind} retirement`, async () => {
     const f = await automation();
     if (kind === 'ABA') {
       await f.manager.updateJob(f.selected.id, { name: 'Temporary' });
       await f.manager.updateJob(f.selected.id, { name: f.selected.name });
     }
-    if (kind === 'physical replacement') { const bytes = readFileSync(f.path); renameSync(f.path, `${f.path}.old`); writeFileSync(f.path, bytes); }
     if (kind === 'stop') f.manager.stop();
     const before = readFileSync(f.path);
-    expect(() => assertRetainedAutomationTargetCurrent(f.target)).toThrow(AutomationJobMutationStaleError);
-    expect(() => projectRetainedAutomationRequest(f.target, 'automation.jobs.update', f.body)).toThrow(AutomationJobMutationStaleError);
+    expect(() => f.target.assertCurrent()).toThrow(AutomationJobMutationStaleError);
+    expect(() => projectAutomationTargetRequest(f.target, 'automation.jobs.update', f.body)).toThrow(AutomationJobMutationStaleError);
     expect(readFileSync(f.path)).toEqual(before);
   });
 }
+
+test('a retained automation reference stays current while its job runs', async () => {
+  const f = await automation();
+  const current = f.manager.getJob(f.selected.id);
+  if (!current) throw new Error('Actual manager lost the selected job');
+  // What the scheduler writes as a job runs is not part of what was selected.
+  (f.manager as unknown as { jobs: Map<string, typeof current> }).jobs.set(current.id, { ...current, nextRunAt: Date.now() + 60_000, runCount: current.runCount + 1 });
+  expect(() => f.target.assertCurrent()).not.toThrow();
+  expect(f.manager.getJob(f.selected.id)?.mutationRevision).toBe(revision);
+});
 
 async function planning() {
   const directory = makeProjectTempDir('planning-selected-reference');

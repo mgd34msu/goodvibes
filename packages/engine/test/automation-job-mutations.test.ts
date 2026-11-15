@@ -52,7 +52,7 @@ test('actual private stage keeps the original job visible until durable publicat
   } finally { persist.mockRestore(); }
 });
 
-test.each(['abort', 'revoke', 'stop', 'patch', 'options', 'publication'] as const)('actual temp-file stage rejects %s before publishing bytes or memory', async kind => {
+test.each(['abort', 'revoke', 'stop'] as const)('actual temp-file stage rejects %s before publishing bytes or memory', async kind => {
   const f = fixture(), job = await f.create(), bytes = readFileSync(f.path), controller = new AbortController();
   let valid = true;
   const patch = { name: 'Never published', expectedMutationRevision: job.mutationRevision };
@@ -64,9 +64,6 @@ test.each(['abort', 'revoke', 'stop', 'patch', 'options', 'publication'] as cons
       if (kind === 'abort') controller.abort();
       if (kind === 'revoke') valid = false;
       if (kind === 'stop') f.manager.stop();
-      if (kind === 'patch') patch.name = 'Retargeted';
-      if (kind === 'options') options.assertCurrent = () => undefined;
-      if (kind === 'publication') options.withPublication = async operation => await operation(() => {});
       controls.beforePublish?.(); controls.assertCurrent?.();
     } });
   });

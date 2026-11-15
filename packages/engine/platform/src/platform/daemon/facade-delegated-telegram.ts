@@ -9,7 +9,12 @@ import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/native-error-summary.js';
 import { GatewayVerbError } from '../control-plane/routes/gateway-verb-error.js';
 import { readInvocationParams } from '../control-plane/routes/invocation-params.js';
-import { delegatedTelegramResultSchema, delegatedTelegramConfigureSchema, delegatedTelegramDecisionSchema, delegatedTelegramLookupSchema, delegatedTelegramRevokeSchema, delegatedTelegramReleaseSchema } from '../control-plane/delegated-inbound-wire.js';
+import { NativeInboundReceiverRefusal } from '../control-plane/native-inbound-handoff.js';
+import {
+  DelegatedIntakeRefusal, delegatedHold, delegatedTelegramResultSchemas, delegatedTelegramConfigureSchema, delegatedTelegramDecisionSchema,
+  delegatedTelegramLookupSchema, delegatedTelegramRevokeSchema, delegatedTelegramReleaseSchema, type DelegatedTelegramOperation,
+} from '../control-plane/delegated-inbound-wire.js';
+import { z } from 'zod/v4';
 const scopes = ['read:work-ledger', 'write:work-ledger'] as const;
 function owner(invocation: GatewayMethodInvocation) {
   const authority = invocation.nativeExecutionAuthority; const current = authority?.current(); const context = invocation.context;
@@ -20,8 +25,24 @@ function owner(invocation: GatewayMethodInvocation) {
   }
   return { authority, current };
 }
-function releaseTarget(input: ReturnType<typeof delegatedTelegramReleaseSchema.parse>): string | { readonly chatId: string; readonly threadId?: string | undefined } {
-  return 'configurationId' in input ? input.configurationId : input;
+/** Each command's input, parsed once at the top so a malformed one is a 400 for every command. */
+const inputSchemas = {
+  configure: delegatedTelegramConfigureSchema, decide: delegatedTelegramDecisionSchema, status: delegatedTelegramLookupSchema,
+  read: delegatedTelegramLookupSchema, cancel: delegatedTelegramLookupSchema, revoke: delegatedTelegramRevokeSchema,
+  release: delegatedTelegramReleaseSchema, list: z.object({}).strict(),
+} as const;
+const MAX_COMMAND_BYTES = 16_384;
+function parseInput<O extends DelegatedTelegramOperation>(operation: O, input: Record<string, unknown>): z.infer<typeof inputSchemas[O]> {
+  if (new TextEncoder().encode(JSON.stringify(input)).byteLength > MAX_COMMAND_BYTES) {
+    throw new GatewayVerbError(`The inbound.telegram.${operation} command is larger than ${MAX_COMMAND_BYTES} bytes. Send only the fields the command takes.`, 'INVALID_ARGUMENT', 400);
+  }
+  const parsed = inputSchemas[operation].safeParse(input);
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    const field = issue?.path.map(String).join('.') || undefined;
+    throw new GatewayVerbError(`Invalid inbound.telegram.${operation} input${field ? ` at ${field}` : ''}: ${issue?.message ?? 'the input does not match the command'}.`, 'INVALID_ARGUMENT', 400, field);
+  }
+  return parsed.data as z.infer<typeof inputSchemas[O]>;
 }
 export function registerDelegatedTelegramCommands(catalog: GatewayMethodCatalog, host: DelegatedTelegramIntake): void {
   // `release` takes a configuration id like `revoke` and returns the chat to normal handling; it is served once the catalog describes it.
@@ -31,31 +52,42 @@ export function registerDelegatedTelegramCommands(catalog: GatewayMethodCatalog,
     if (!descriptor) throw new Error('Missing delegated Telegram command descriptor');
     catalog.register(descriptor, async invocation => {
       const { authority, current } = owner(invocation);
-      const input = readInvocationParams(invocation);
-      if (new TextEncoder().encode(JSON.stringify(input)).byteLength > 16_384) throw new GatewayVerbError('Oversize command', 'DELEGATED_INTAKE_HELD', 409);
-      // Never hold the global paired-owner lock across provider/credential I/O.
-      const configuration = operation === 'configure' ? delegatedTelegramConfigureSchema.parse(input) : null;
-      const selection = configuration ? await authority.withCurrent(current, async check => { check(); const attempt = await host.selectConfiguration(configuration, authority); check(); return attempt; }) : undefined;
-      const needsProof = operation === 'configure' || (operation === 'decide' && delegatedTelegramDecisionSchema.parse(input).approved);
-      const prepared = needsProof ? await host.prepareAccount(invocation.signal).catch(() => { throw new GatewayVerbError('Telegram account proof is unavailable or cancelled.', 'DELEGATED_INTAKE_HELD', 409); }) : null;
-      invocation.signal?.throwIfAborted(); owner(invocation);
-      return authority.withCurrent(current, async assertCurrent => {
-        try {
+      const input = parseInput(operation, readInvocationParams(invocation));
+      try {
+        // Never hold the global paired-owner lock across provider/credential I/O.
+        const selection = operation === 'configure'
+          ? await authority.withCurrent(current, async check => { check(); const attempt = await host.selectConfiguration(input as z.infer<typeof delegatedTelegramConfigureSchema>, authority); check(); return attempt; })
+          : undefined;
+        const needsProof = operation === 'configure' || (operation === 'decide' && (input as z.infer<typeof delegatedTelegramDecisionSchema>).approved);
+        const prepared = needsProof ? await host.prepareAccount(invocation.signal).catch(() => { throw new DelegatedIntakeRefusal('account-proof-unavailable'); }) : null;
+        invocation.signal?.throwIfAborted(); owner(invocation);
+        return await authority.withCurrent(current, async assertCurrent => {
           invocation.signal?.throwIfAborted(); assertCurrent();
-          let result: Record<string, unknown>;
-          if (operation === 'configure') result = await host.configure(delegatedTelegramConfigureSchema.parse(input), authority, prepared, selection);
-          else if (operation === 'decide') result = await host.decide(delegatedTelegramDecisionSchema.parse(input), authority, prepared);
-          else if (operation === 'revoke') result = host.revoke(delegatedTelegramRevokeSchema.parse(input).configurationId, authority);
-          else if (operation === 'release') result = await host.release(releaseTarget(delegatedTelegramReleaseSchema.parse(input)), authority);
-          else if (operation === 'list') { if (Object.keys(input).length) throw new Error('List takes no source payload'); result = await host.list(authority); }
-          else { const { ref } = delegatedTelegramLookupSchema.parse(input); result = operation === 'cancel' ? await host.cancel(ref, authority) : await host.status(ref, authority, operation === 'read'); }
-          invocation.signal?.throwIfAborted(); assertCurrent(); owner(invocation); return delegatedTelegramResultSchema.parse(result);
-        } catch (error) {
-          if (error instanceof GatewayVerbError) throw error;
-          logger.warn('Delegated Telegram command held', { operation, error: summarizeError(error) });
-          throw new GatewayVerbError('Delegated Telegram intake is held. Inspect the original source identity; no fallback or replay occurred.', 'DELEGATED_INTAKE_HELD', 409);
-        }
-      });
+          let result: unknown;
+          if (operation === 'configure') result = await host.configure(input as z.infer<typeof delegatedTelegramConfigureSchema>, authority, prepared, selection);
+          else if (operation === 'decide') result = await host.decide(input as z.infer<typeof delegatedTelegramDecisionSchema>, authority, prepared);
+          else if (operation === 'revoke') result = host.revoke((input as z.infer<typeof delegatedTelegramRevokeSchema>).configurationId, authority);
+          else if (operation === 'release') {
+            const target = input as z.infer<typeof delegatedTelegramReleaseSchema>;
+            result = await host.release('configurationId' in target ? target.configurationId : target, authority);
+          } else if (operation === 'list') result = await host.list(authority);
+          else {
+            const { ref } = input as z.infer<typeof delegatedTelegramLookupSchema>;
+            result = operation === 'cancel' ? await host.cancel(ref, authority) : await host.status(ref, authority, operation === 'read');
+          }
+          invocation.signal?.throwIfAborted(); assertCurrent(); owner(invocation);
+          return delegatedTelegramResultSchemas[operation].parse(result);
+        });
+      } catch (error) {
+        // A cancelled request gets no result; it ends as the caller's own abort.
+        if (invocation.signal?.aborted) throw error;
+        // A refusal is a result an agent can branch on: its reason, its sentence and its next step.
+        if (error instanceof DelegatedIntakeRefusal) return delegatedHold(error.reason, { message: error.message });
+        if (error instanceof NativeInboundReceiverRefusal) return delegatedHold('review-queue-refused', { message: error.message });
+        if (error instanceof GatewayVerbError) throw error;
+        logger.warn('Delegated Telegram command failed', { operation, error: summarizeError(error) });
+        throw new GatewayVerbError(`inbound.telegram.${operation} failed and changed nothing it could not undo; no message was replayed. The daemon log has the cause.`, 'DELEGATED_INTAKE_HELD', 409);
+      }
     }, { replace: true });
   }
 }

@@ -166,7 +166,8 @@ export function createDaemonAttachHandshake(deps: DaemonAttachHandshakeDeps): Da
       // place they can still be shown. They render before recording or adopting
       // so a throw there cannot lose them.
       for (const receipt of answer.notices) deps.notify(receipt);
-      if (verdict.status === 'daemon-update-required') {
+      // Whether to adopt is the platform's decision, the same one the Agent reads.
+      if (!verdict.adopt) {
         const refused: HostServiceStatus = { ...daemonStatus, mode: 'incompatible', reason: verdict.message };
         refusal = { before: daemonStatus, marked: refused };
         deps.recordRefusal(refused);

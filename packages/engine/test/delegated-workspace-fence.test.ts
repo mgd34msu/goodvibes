@@ -110,7 +110,7 @@ test('real workspace swap retires approved originals synchronously before reroot
     expect(f.manager.getCurrentWorkingDir()).toBe(f.initialRoot);
     expect(noticeDelivered).toBe(false);
     // revoke is synchronous: this cannot pass by yielding to the bus callback.
-    expect(() => host.revoke(configured.configurationId as string, f.authority)).toThrow('fresh workspace construction');
+    expect(() => host.revoke((configured as { configurationId: string }).configurationId, f.authority)).toThrow('fresh workspace construction');
   });
   expect(await f.manager.requestSwap(f.replacementRoot)).toMatchObject({ ok: true, previous: f.initialRoot, current: f.replacementRoot });
   expect(noticeDelivered).toBe(true);
@@ -156,7 +156,7 @@ test('same-root stop/start supports fresh approval and reinstalls workspace inva
   expect(reads).toBe(0);
   const configured = await host.configure(configuration, f.authority); const next = await f.approve(host);
   f.onReroot(() => {
-    expect(() => host.revoke(configured.configurationId as string, f.authority)).toThrow('fresh workspace construction');
+    expect(() => host.revoke((configured as { configurationId: string }).configurationId, f.authority)).toThrow('fresh workspace construction');
   });
   // A real reroot is a transition even if its pathname is unchanged.
   expect(await f.manager.requestSwap(f.initialRoot)).toMatchObject({ ok: true, current: f.initialRoot });
@@ -172,7 +172,7 @@ test('failed reroot cannot revive a host even though the manager retains its ori
   // fail, so an assertion thrown inside it would be swallowed as that failure.
   let revokeDuringReroot: unknown = null;
   f.onReroot(() => {
-    try { host.revoke(configured.configurationId as string, f.authority); } catch (error) { revokeDuringReroot = error; }
+    try { host.revoke((configured as { configurationId: string }).configurationId, f.authority); } catch (error) { revokeDuringReroot = error; }
     throw new Error('Synthetic reroot failure');
   });
   expect(await f.manager.requestSwap(f.replacementRoot)).toMatchObject({ ok: false, code: 'REROOT_FAILED' });

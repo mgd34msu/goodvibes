@@ -61,6 +61,11 @@
       "types": "./contracts/dist/testing/index.d.ts",
       "import": "./contracts/dist/testing/index.js"
     },
+    "./contracts/conversation-message": {
+      "bun": "./contracts/src/conversation-message.ts",
+      "types": "./contracts/dist/conversation-message.d.ts",
+      "import": "./contracts/dist/conversation-message.js"
+    },
     "./contracts/generated/foundation-client-types": {
       "bun": "./contracts/src/generated/foundation-client-types.ts",
       "types": "./contracts/dist/generated/foundation-client-types.d.ts",
@@ -671,6 +676,21 @@
       "bun": "./platform/src/platform/control-plane/index.ts",
       "types": "./platform/dist/platform/control-plane/index.d.ts",
       "import": "./platform/dist/platform/control-plane/index.js"
+    },
+    "./platform/platform/control-plane/approval-hunk-apply": {
+      "bun": "./platform/src/platform/control-plane/approval-hunk-apply.ts",
+      "types": "./platform/dist/platform/control-plane/approval-hunk-apply.d.ts",
+      "import": "./platform/dist/platform/control-plane/approval-hunk-apply.js"
+    },
+    "./platform/platform/control-plane/build-compatibility": {
+      "bun": "./platform/src/platform/control-plane/build-compatibility.ts",
+      "types": "./platform/dist/platform/control-plane/build-compatibility.d.ts",
+      "import": "./platform/dist/platform/control-plane/build-compatibility.js"
+    },
+    "./platform/platform/control-plane/daemon-compatibility": {
+      "bun": "./platform/src/platform/control-plane/daemon-compatibility.ts",
+      "types": "./platform/dist/platform/control-plane/daemon-compatibility.d.ts",
+      "import": "./platform/dist/platform/control-plane/daemon-compatibility.js"
     },
     "./platform/platform/core": {
       "bun": "./platform/src/platform/core/index.ts",
@@ -3151,6 +3171,11 @@
       "bun": "./terminal-shell/src/blocking-permission-input.ts",
       "types": "./terminal-shell/dist/blocking-permission-input.d.ts",
       "import": "./terminal-shell/dist/blocking-permission-input.js"
+    },
+    "./terminal-shell/hunk-selection": {
+      "bun": "./terminal-shell/src/hunk-selection.ts",
+      "types": "./terminal-shell/dist/hunk-selection.d.ts",
+      "import": "./terminal-shell/dist/hunk-selection.js"
     },
     "./terminal-shell/bootstrap-orchestrator": {
       "bun": "./terminal-shell/src/bootstrap-orchestrator.ts",

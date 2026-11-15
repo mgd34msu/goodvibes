@@ -1,9 +1,8 @@
 /** Durable metadata-only review queue; the original is exclusively abortable memory. */
 import { randomUUID } from 'node:crypto';
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { PersistentStore } from '../state/persistent-store.js';
 import { StoreWriteQueue } from '../state/store-write-queue.js';
-import { readJsonFileOrQuarantine } from '../utils/atomic-json-store.js';
+import { readDocument } from '../utils/atomic-json-store.js';
 import { logger } from '../utils/logger.js';
 import { sameNativeInboundSourceRef, type NativeInboundSourceRef, type NativeInboundResolvedSource } from './native-inbound-source.js';
 import { NativeInboundReceiverRefusal, type NativeInboundAcceptance, type NativeInboundReceiver } from './native-inbound-handoff.js';
@@ -15,6 +14,8 @@ export interface DelegatedReviewRecord {
   readonly acceptedAt: number; readonly sourceExpiresAt: number; readonly recordExpiresAt: number;
   readonly state: 'accepted-for-review' | 'cancelled'; readonly execution: 'not-started';
 }
+/** Rows waiting for review that one queue holds. A cancelled row is dropped at once, so cancelling makes room. */
+const MAX_REVIEW_ROWS = 500;
 interface Snapshot extends Record<string, unknown> { readonly records: readonly DelegatedReviewRecord[]; }
 export interface DelegatedReviewGrant {
   readonly configurationId: string; readonly ownerRevision: string; readonly owner: DelegatedReviewOwner; readonly workspaceRevision: string;
@@ -42,7 +43,7 @@ export class DelegatedInboundReviewReceiver {
     // The quarantining read is synchronous. Yield first so a close() issued
     // right after start still lands before any retention timer is armed.
     await Promise.resolve();
-    const saved = this.path === ':memory:' ? await this.store.load() : readJsonFileOrQuarantine<Snapshot>(this.path, {
+    const saved = readDocument<Snapshot>(this.path, {
       label: 'delegated review queue',
       recovery: 'The review queue starts empty; requests that were waiting must be sent again.',
       validate: (value) => {
@@ -67,10 +68,12 @@ export class DelegatedInboundReviewReceiver {
       loaded.push(record);
     }
     if (droppedRows > 0) logger.warn('Delegated review queue rows failed validation and were dropped', { droppedRows, kept: loaded.length });
-    // Old original proof is never reconstructed; persisted rows are metadata only.
-    for (const record of loaded) if (record.recordExpiresAt > Date.now()) { this.records.set(record.ref.requestId, record); this.durable.add(record.ref.requestId); }
+    // Old original proof is never reconstructed; persisted rows are metadata
+    // only. A cancelled row grants nothing, so one left by an earlier build is dropped.
+    for (const record of loaded) if (record.recordExpiresAt > Date.now() && record.state === 'accepted-for-review') { this.records.set(record.ref.requestId, record); this.durable.add(record.ref.requestId); }
     for (const record of this.records.values()) this.armExpiry(record);
-    if (saved) await this.persist();
+    // Rewrite only when loading dropped something; a clean file is already what memory holds.
+    if (saved && this.records.size !== saved.records.length) await this.persist();
   }
   private armExpiry(record: DelegatedReviewRecord): void {
     if (this.closed) return;
@@ -81,10 +84,7 @@ export class DelegatedInboundReviewReceiver {
     const snapshot = { records: [...this.records.values()] };
     return this.writes.run(() => {
       // Publish the reader floor before any new-format write, including pruning/cancel.
-      if (snapshot.records.some(record => record.owner !== undefined)) {
-        const result: unknown = this.beforeOwnerWrite?.();
-        if (result !== undefined) { drainOwned(result); throw new Error('Review reader compatibility must be confirmed synchronously'); }
-      }
+      if (snapshot.records.some(record => record.owner !== undefined)) this.beforeOwnerWrite?.();
       return this.store.persist(snapshot, { durable: true });
     });
   }
@@ -106,8 +106,8 @@ export class DelegatedInboundReviewReceiver {
       accept: async (source, options): Promise<NativeInboundAcceptance> => {
         await this.start(); await this.expire(); options.signal.throwIfAborted(); options.assertCurrent();
         if (this.closed) throw new NativeInboundReceiverRefusal('Delegated review receiver is closed');
-        if (this.records.size >= 500) throw new NativeInboundReceiverRefusal('Review queue is full');
-        if (this.records.has(source.ref.requestId)) throw new Error('Existing request requires read-only recovery');
+        if (this.records.size >= MAX_REVIEW_ROWS) throw new NativeInboundReceiverRefusal(`The review queue holds ${MAX_REVIEW_ROWS} messages waiting for review. Cancel one with inbound.telegram.cancel, or wait for its review record to expire.`);
+        if (this.records.has(source.ref.requestId)) throw new NativeInboundReceiverRefusal('This message is already in the review queue. Read it with inbound.telegram.status instead of accepting it again.');
         if (grant.sourceExpiresAt <= Date.now()) throw new NativeInboundReceiverRefusal('Original source expired');
         const record: DelegatedReviewRecord = Object.freeze({ id: `external-review-${randomUUID()}`, ref: source.ref, origin: source.origin,
           configurationId: grant.configurationId, ownerRevision: grant.ownerRevision, owner: grant.owner, workspaceRevision: grant.workspaceRevision,
@@ -151,9 +151,14 @@ export class DelegatedInboundReviewReceiver {
     if (!record || !entry || record.state !== 'accepted-for-review' || record.sourceExpiresAt <= Date.now()) { this.release(ref); return null; }
     try { entry.assertCurrent(); return entry.source.original; } catch { this.release(ref); return null; }
   }
+  /** A cancelled review grants nothing, so its row leaves the queue at once and frees its place. */
   async cancel(ref: NativeInboundSourceRef): Promise<void> {
     const record = await this.get(ref); if (!record) return;
-    this.release(ref); this.records.set(ref.requestId, { ...record, state: 'cancelled' }); await this.persist();
+    this.release(ref);
+    this.records.delete(ref.requestId); this.durable.delete(ref.requestId);
+    const timer = this.expiryTimers.get(ref.requestId); if (timer) clearTimeout(timer);
+    this.expiryTimers.delete(ref.requestId);
+    await this.persist();
   }
   reopen(): void { this.closed = false; for (const record of this.records.values()) if (!this.expiryTimers.has(record.ref.requestId)) this.armExpiry(record); }
   close(): void { this.closed = true; for (const timer of this.expiryTimers.values()) clearTimeout(timer); this.expiryTimers.clear(); for (const entry of [...this.originals.values()]) this.release(entry.source.ref); }

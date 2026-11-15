@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ApprovalBroker, type SharedApprovalRecord } from '../platform/src/platform/control-plane/approval-broker.js';
 import { ControlPlaneGateway } from '../platform/src/platform/control-plane/gateway.js';
-import { CONTROL_PLANE_GATEWAY_FLAG_ID } from '../platform/src/platform/control-plane/gateway-disabled-response.js';
+import { CONTROL_PLANE_FEATURE_FLAG } from '../platform/src/platform/runtime/surface-feature-flags.js';
 import { createFeatureFlagManager } from '../platform/src/platform/runtime/feature-flags/manager.js';
 import type { PermissionPromptRequest } from '../platform/src/platform/permissions/prompt.js';
 import { PersistentStore } from '../platform/src/platform/state/persistent-store.js';
@@ -33,7 +33,7 @@ function request(callId: string, args: Record<string, unknown> = { file: 'a.txt'
 describe('approvals with the control-plane gateway switched off', () => {
   test('an ask is still recorded and answered; only the broadcast is skipped', async () => {
     const featureFlags = createFeatureFlagManager();
-    featureFlags.loadFromConfig({ flags: { [CONTROL_PLANE_GATEWAY_FLAG_ID]: 'disabled' } });
+    featureFlags.loadFromConfig({ flags: { [CONTROL_PLANE_FEATURE_FLAG]: 'disabled' } });
     const gateway = new ControlPlaneGateway({ featureFlags });
     const broker = new ApprovalBroker({ storePath: storePath() });
     broker.setPublisher(gateway);
@@ -75,7 +75,7 @@ describe('releasing a raised ask', () => {
 });
 
 describe('an approval whose write failed', () => {
-  test('tells the approver the decision is held and still takes effect with the next write', async () => {
+  test('leaves the ask waiting, so it can still be cancelled and never fires on its own', async () => {
     const store = new FailingStore(storePath());
     const broker = new ApprovalBroker({ store });
     const first = await broker.raiseApproval({ request: request('first', { file: 'first.txt' }) });
@@ -84,15 +84,20 @@ describe('an approval whose write failed', () => {
 
     store.failWrites = true;
     const outcome: { applied?: boolean } = {};
-    await expect(broker.resolveApproval(first.approval.id, { approved: true, actor: 'operator', outcome })).rejects.toThrow(/disk full.*takes effect when the next write succeeds/s);
+    await expect(broker.resolveApproval(first.approval.id, { approved: true, actor: 'operator', outcome })).rejects.toThrow(/disk full.*still waiting/s);
     expect(outcome.applied).toBe(false);
     expect(settled).toBe(false);
+    expect(broker.getApproval(first.approval.id)?.status).toBe('pending');
     store.failWrites = false;
 
-    // The failure told the approver the decision is held; an unrelated write then commits it.
+    // An unrelated write does not approve it; the owner can still cancel it.
     const second = await broker.raiseApproval({ request: request('second', { file: 'second.txt' }) });
-    expect(await first.decision).toMatchObject({ approved: true });
+    expect(settled).toBe(false);
     expect(second.approval.status).toBe('pending');
+    const cancelled: { applied?: boolean } = {};
+    await broker.cancelApproval(first.approval.id, 'operator', 'web', undefined, cancelled);
+    expect(cancelled.applied).toBe(true);
+    expect(await first.decision).toMatchObject({ approved: false });
   });
 });
 

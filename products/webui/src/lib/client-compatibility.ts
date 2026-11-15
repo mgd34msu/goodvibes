@@ -1,131 +1,44 @@
 /**
- * client-compatibility.ts, this build's own copy of the client-build-floor check.
+ * client-compatibility.ts, this tab's view of the client-build floor.
  *
  * A daemon update swaps the daemon binary. It does not restart the clients already
  * attached to it: this browser tab, opened days earlier, keeps running its own build
  * and keeps participating in shared-session work under whatever rules that build
- * shipped with. A behavioral fix landed in the daemon is invisible for as long as one
- * stale client stays attached. The daemon publishes the minimum client build it will
- * accept as a full participant as the `X-Goodvibes-Client-Floor` response header
- * (CLIENT_COMPATIBILITY_FLOOR_HEADER below); a client below it says so plainly rather
- * than silently executing shared-session work under superseded rules.
+ * shipped with. The daemon publishes the minimum client build it accepts as the
+ * `X-Goodvibes-Client-Floor` response header on its authenticated `/status`
+ * response; a tab below it says so plainly.
  *
- * PROVENANCE: this logic is also implemented in the installed
- * @goodvibes-jev/engine/platform (platform/control-plane/client-compatibility.ts,
- * evaluateClientCompatibility/compareBuildVersions/readClientCompatibilityFloor), but
- * that module is exported only through the daemon-facing `@goodvibes-jev/engine/platform/platform/control-plane`
- * subpath, whose barrel also carries the gateway/session-broker/route-dispatch server
- * implementation (dispatchDaemonApiRoutes, SharedSessionBroker, ControlPlaneGateway, …),
- * not something this browser bundle should import. No browser-safe subpath exposes it at
- * the installed platform (re-verified at this pin: `./platform/control-plane` is still
- * the only export surfacing it, and its barrel still carries the full server
- * implementation). This module is a small, independently-tested copy of the same three
- * functions' documented semantics, kept here until a future platform release exposes them
- * through a seam this app can import directly (a `// SWAP:` seam, same pattern
- * contract-bridge-types.ts uses for a bridge type ahead of its generated counterpart).
- * Re-diffed field-by-field against the platform's
- * platform/control-plane/client-compatibility.ts at this re-pin: compareBuildVersions
- * and evaluateClientCompatibility are byte-identical in logic (the browser copy's
- * messages say "reload the page" / "Reload from the current install" where the platform's
- * process-oriented copy says "restart it", a deliberate, permanent surface-appropriate
- * wording divergence, not drift to fix).
- *
- * ALSO NOTE: the daemon writes this header on its authenticated `/status` response (the
- * control routes in daemon-api), so a signed-in client observes the floor from the status
- * reads the app already makes. Other responses do not carry it, and a daemon older than
- * that change sends none, which leaves the verdict unset rather than "ok".
+ * The comparison, the header reader and the verdict are the platform's own
+ * (control-plane/build-compatibility.ts, an import-free module); only the
+ * wording is this surface's: a tab reloads, where a terminal process restarts.
  */
 
+import {
+  CLIENT_COMPATIBILITY_FLOOR_HEADER,
+  compareBuildVersions,
+  evaluateClientCompatibility as evaluatePlatformClientCompatibility,
+  readClientCompatibilityFloor,
+  type ClientCompatibilityStatus,
+  type ClientCompatibilityVerdict,
+  type ClientRestartWording,
+} from '@goodvibes-jev/engine/platform/platform/control-plane/build-compatibility';
 import { subscribeClientLifetime } from './client-lifetime';
 
-/** Response header carrying the daemon's minimum acceptable client build. */
-export const CLIENT_COMPATIBILITY_FLOOR_HEADER = 'X-Goodvibes-Client-Floor';
+export { CLIENT_COMPATIBILITY_FLOOR_HEADER, compareBuildVersions, readClientCompatibilityFloor };
+export type { ClientCompatibilityStatus, ClientCompatibilityVerdict };
 
-export type ClientCompatibilityStatus = 'ok' | 'restart-required' | 'unknown';
+const TAB_WORDING: ClientRestartWording = {
+  subject: 'This tab',
+  restart: 'reload the page to pick up the current build',
+  reinstall: 'Reload from the current install',
+};
 
-export interface ClientCompatibilityVerdict {
-  readonly status: ClientCompatibilityStatus;
-  /** One plain line naming the real situation, for a log or a notice. */
-  readonly message: string;
-  readonly clientVersion: string | undefined;
-  readonly floor: string | undefined;
-}
-
-/**
- * Compare two dotted build versions numerically, segment by segment. Returns <0, 0, >0.
- * Pre-release suffixes ("1.14.0-rc.1") compare on their numeric prefix, so a release
- * candidate is treated as its release, this gates on behavior, and an rc carries it.
- */
-export function compareBuildVersions(a: string, b: string): number {
-  const parse = (value: string): number[] => value
-    .trim()
-    .replace(/^v/i, '')
-    .split(/[.+-]/)
-    .map((segment) => Number.parseInt(segment, 10))
-    .filter((segment) => Number.isFinite(segment));
-  const left = parse(a);
-  const right = parse(b);
-  const length = Math.max(left.length, right.length);
-  for (let index = 0; index < length; index += 1) {
-    const diff = (left[index] ?? 0) - (right[index] ?? 0);
-    if (diff !== 0) return diff;
-  }
-  return 0;
-}
-
-/**
- * Judge this build against a floor the daemon announced.
- *
- * An unparseable or absent client version is 'unknown', NOT 'ok': the point of the
- * floor is that a build which cannot prove it carries a required behavior is treated
- * as one that does not. An absent floor is a different thing, a daemon too old to
- * publish one, and yields 'ok', because that daemon is not asking for anything.
- */
+/** Judge this build against a floor the daemon announced. */
 export function evaluateClientCompatibility(input: {
   readonly clientVersion: string | undefined;
   readonly floor: string | undefined;
 }): ClientCompatibilityVerdict {
-  const floor = input.floor?.trim();
-  const clientVersion = input.clientVersion?.trim();
-
-  if (!floor) {
-    return {
-      status: 'ok',
-      message: 'The daemon publishes no client build floor; nothing to check.',
-      clientVersion,
-      floor: undefined,
-    };
-  }
-  if (!clientVersion || !/\d/.test(clientVersion)) {
-    return {
-      status: 'unknown',
-      message: `This build does not report a version, so it cannot be checked against the daemon's floor of ${floor}. Reload from the current install to be sure it is current.`,
-      clientVersion,
-      floor,
-    };
-  }
-  if (compareBuildVersions(clientVersion, floor) < 0) {
-    return {
-      status: 'restart-required',
-      message: `This tab is running build ${clientVersion}; the daemon requires ${floor} or newer. It has stopped taking shared-session work, reload the page to pick up the current build.`,
-      clientVersion,
-      floor,
-    };
-  }
-  return {
-    status: 'ok',
-    message: `Build ${clientVersion} meets the daemon's floor of ${floor}.`,
-    clientVersion,
-    floor,
-  };
-}
-
-/** Read the floor a daemon announced, from any response's headers. */
-export function readClientCompatibilityFloor(headers: { get(name: string): string | null } | undefined): string | undefined {
-  const value = headers?.get(CLIENT_COMPATIBILITY_FLOOR_HEADER)
-    ?? headers?.get(CLIENT_COMPATIBILITY_FLOOR_HEADER.toLowerCase());
-  const trimmed = value?.trim();
-  return trimmed && trimmed.length > 0 ? trimmed : undefined;
+  return evaluatePlatformClientCompatibility({ ...input, wording: TAB_WORDING });
 }
 
 // ---------------------------------------------------------------------------

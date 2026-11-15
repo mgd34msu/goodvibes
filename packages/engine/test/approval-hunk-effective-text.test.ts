@@ -20,7 +20,12 @@ describe('approval edit hunks show the text the edit tool writes', () => {
   test('a per-hunk selection keeps the other edit fields and stays consistent with its base64 twin', () => {
     const args = { edits: [{ path: 'a.ts', find: 'x', replace: '', replace_base64: b64('z'), hints: { near_line: 4 } }] };
     const modified = buildModifiedEditArgs({ args }, [0]);
-    expect(modified['edits']).toEqual([{ path: 'a.ts', find: 'x', replace: 'z', replace_base64: b64('z'), hints: { near_line: 4 } }]);
+    // The selected entries run exactly as the model sent them; the edit tool reads the base64 field first.
+    expect(modified['edits']).toEqual([args.edits[0]]);
+  });
+
+  test('an entry whose plain and base64 text disagree is not a hunk, as the edit tool refuses it', () => {
+    expect(readApprovalEditHunks({ edits: [{ path: 'a.ts', find: 'shown', find_base64: b64('written'), replace: 'n' }] })).toBeNull();
   });
 
   test('an entry with neither a plain nor an encoded find is not a hunk', () => {

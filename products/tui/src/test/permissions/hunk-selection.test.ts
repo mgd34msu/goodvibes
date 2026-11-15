@@ -3,7 +3,7 @@ import type { PermissionPromptRequest } from '@goodvibes-jev/engine/platform/pla
 import {
   applyHunkKey,
   buildHunkSelectionState,
-  buildModifiedEditArgs,
+  hunkSelectionAnswer,
   buildPendingPermissionExtras,
   isHunkSelectable,
   resolveApprovalRequester,
@@ -149,8 +149,8 @@ describe('applyHunkKey reducer', () => {
   });
 });
 
-describe('buildModifiedEditArgs', () => {
-  test('filters edits to exactly the selected indices in original order', () => {
+describe('hunkSelectionAnswer', () => {
+  test('sends the selected indices and the original entries filtered in original order', () => {
     const request = makeRequest('edit', {
       edits: threeEdits,
       match: { mode: 'exact' },
@@ -165,7 +165,10 @@ describe('buildModifiedEditArgs', () => {
       selected: new Set([0, 2]),
     };
 
-    const result = buildModifiedEditArgs(request, state);
+    const answer = hunkSelectionAnswer(request, state);
+    const result = answer.modifiedArgs;
+
+    expect(answer.selectedHunks).toEqual([0, 2]);
 
     expect(result['edits']).toEqual([threeEdits[0], threeEdits[2]]);
     // All other EditInput fields preserved unchanged.

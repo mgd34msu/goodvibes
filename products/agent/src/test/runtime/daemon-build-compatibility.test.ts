@@ -99,19 +99,20 @@ describe('judging for adoption, as the adoption path does', () => {
     expect(notices).toHaveLength(1);
   });
 
-  test('an unreadable body is unknown, not ok: but unknown does not refuse adoption', () => {
-    const guard = new DaemonBuildGuard({ floor: '1.28.0' });
+  test('a status body with no version is unknown and not adopted, the same verdict the terminal app reads', () => {
+    const notices: string[] = [];
+    const guard = new DaemonBuildGuard({ floor: '1.28.0', onDaemonUpdateRequired: (verdict) => { notices.push(verdict.notice ?? ''); } });
 
     const verdict = guard.judgeForAdoption({ status: 'running' });
 
-    // A peer that cannot prove its build is not reported as fine...
-    expect(verdict.status).not.toBe('ok');
-    // ...but it is still adopted. Only a POSITIVE reading of a too-old build
-    // refuses. Refusing on an unreadable answer would turn one truncated
-    // response into a lost adoption, which is the reachability probe's question
-    // to answer, not the floor's.
-    expect(verdict.status).not.toBe('daemon-update-required');
-    expect(guard.mayUseDaemonCapabilities()).toBe(true);
+    // A body that parsed but names no build is not a peer this client can
+    // identify. A read that failed outright yields no body at all and is left to
+    // the reachability handling (see createDaemonAdoptionGate).
+    expect(verdict.status).toBe('unknown');
+    expect(verdict.adopt).toBe(false);
+    expect(guard.mayUseDaemonCapabilities()).toBe(false);
+    expect(notices).toHaveLength(1);
+    expect(notices[0]).toContain('did not report a version');
   });
 });
 

@@ -12,6 +12,9 @@ export interface SharedApprovalDecision extends PermissionPromptDecision {
   readonly disposition?: SharedApprovalDisposition | undefined;
 }
 
+/** How a finished approval ended, as the record's status names it. */
+export type FinishedApprovalStatus = 'approved' | 'denied' | 'cancelled' | 'expired';
+
 /** Refuse malformed or contradictory resolution input before changing a record. */
 export function assertExplicitApprovalDisposition(
   approved: unknown,
@@ -27,19 +30,30 @@ export function assertExplicitApprovalDisposition(
   }
 }
 
-/** Validate a stored marker against the actual terminal status and verdict. */
-export function approvalDispositionMatches(
-  approved: boolean,
-  disposition: unknown,
-  status: string,
-): boolean {
-  if (disposition === undefined) return true; // legacy snapshots remain readable
-  if (status === 'approved') return approved && (disposition === 'approved' || disposition === 'remembered');
-  if (approved) return false;
-  if (status === 'denied') return disposition === 'denied' || disposition === 'amended' || disposition === 'remembered';
-  if (status === 'cancelled') return disposition === 'cancelled';
-  if (status === 'expired') return disposition === 'expired';
-  return false;
+export function isSharedApprovalDisposition(value: unknown): value is SharedApprovalDisposition {
+  return typeof value === 'string' && (SHARED_APPROVAL_DISPOSITIONS as readonly string[]).includes(value);
+}
+
+/**
+ * The one rule from a finished approval's disposition to its status and
+ * verdict. A stored finished record keeps only the disposition (plus the
+ * verdict for `remembered`, the one disposition that can go either way), so
+ * the three can never disagree on disk.
+ */
+export function finishedApprovalOutcome(
+  disposition: SharedApprovalDisposition,
+  rememberedApproved?: boolean,
+): { readonly status: FinishedApprovalStatus; readonly approved: boolean } | null {
+  switch (disposition) {
+    case 'approved': return { status: 'approved', approved: true };
+    case 'denied':
+    case 'amended': return { status: 'denied', approved: false };
+    case 'cancelled': return { status: 'cancelled', approved: false };
+    case 'expired': return { status: 'expired', approved: false };
+    case 'remembered':
+      if (typeof rememberedApproved !== 'boolean') return null;
+      return rememberedApproved ? { status: 'approved', approved: true } : { status: 'denied', approved: false };
+  }
 }
 
 /** Keep the exact legacy awaited shape: provenance is read from the record. */

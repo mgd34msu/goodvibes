@@ -38,6 +38,7 @@
  */
 import { stableSurfaceHash } from './surface-id.js';
 import { existingV1PeerSurfaceRank } from './ranking-v1-peer.js';
+import { compareBuildVersions } from '../control-plane/build-compatibility.js';
 
 /** The fields ranking reads from a message or a local snapshot. */
 export interface ClusterRankable {
@@ -55,70 +56,12 @@ export interface ClusterSpreadRankable extends ClusterRankable {
 }
 
 /**
- * Compare two dotted numeric versions.
- *
- * Returns > 0 when `a` is newer, < 0 when `b` is newer, 0 when equal. Missing
- * components read as 0, so `1.2` and `1.2.0` are the same version. A
- * prerelease suffix (`1.2.0-rc.1`) is ordered BELOW the same release, matching
- * semver, because a release candidate must not preempt the release.
+ * Compare two dotted versions: > 0 when `a` is newer, < 0 when `b` is, 0 when
+ * equal, prereleases below their release. The platform's one comparator, so
+ * an election and a build floor order versions the same way.
  */
 export function compareVersions(a: string, b: string): number {
-  const left = splitVersion(a);
-  const right = splitVersion(b);
-  const length = Math.max(left.release.length, right.release.length);
-  for (let index = 0; index < length; index += 1) {
-    const delta = (left.release[index] ?? 0) - (right.release[index] ?? 0);
-    if (delta !== 0) return delta > 0 ? 1 : -1;
-  }
-  // Equal release cores: a build WITHOUT a prerelease tag outranks one with.
-  if (left.prerelease === right.prerelease) return 0;
-  if (left.prerelease === '') return 1;
-  if (right.prerelease === '') return -1;
-  return comparePrerelease(left.prerelease, right.prerelease);
-}
-
-/**
- * Semver precedence for two different prerelease tags: dot-separated parts are
- * compared one by one, numeric parts by value (so `rc.10` is above `rc.9`),
- * numeric parts below text parts, and a tag that is a prefix of the other below it.
- */
-function comparePrerelease(a: string, b: string): number {
-  const left = a.split('.');
-  const right = b.split('.');
-  const length = Math.max(left.length, right.length);
-  for (let index = 0; index < length; index += 1) {
-    const x = left[index];
-    const y = right[index];
-    if (x === undefined) return -1;
-    if (y === undefined) return 1;
-    if (x === y) continue;
-    const xNumeric = /^\d+$/.test(x);
-    const yNumeric = /^\d+$/.test(y);
-    if (xNumeric && yNumeric) {
-      const delta = Number(x) - Number(y);
-      if (delta !== 0) return delta > 0 ? 1 : -1;
-      continue;
-    }
-    if (xNumeric) return -1;
-    if (yNumeric) return 1;
-    return x > y ? 1 : -1;
-  }
-  return 0;
-}
-
-function splitVersion(raw: string): { release: number[]; prerelease: string } {
-  const trimmed = String(raw ?? '').trim().replace(/^v/i, '');
-  const buildStripped = trimmed.split('+')[0] ?? '';
-  const dashIndex = buildStripped.indexOf('-');
-  const core = dashIndex === -1 ? buildStripped : buildStripped.slice(0, dashIndex);
-  const prerelease = dashIndex === -1 ? '' : buildStripped.slice(dashIndex + 1);
-  const release = core
-    .split('.')
-    .map((part) => {
-      const parsed = Number.parseInt(part, 10);
-      return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
-    });
-  return { release, prerelease };
+  return compareBuildVersions(a, b);
 }
 
 /**

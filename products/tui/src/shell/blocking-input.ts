@@ -1,6 +1,6 @@
 import { handleSimplePermissionInput } from '@goodvibes-jev/engine/terminal-shell/blocking-permission-input';
 import type { PermissionRequest, RememberTier } from '@goodvibes-jev/engine/platform/platform/permissions';
-import { applyHunkKey, buildModifiedEditArgs, type HunkSelectionState } from '../permissions/hunk-selection.ts';
+import { applyHunkKey, hunkSelectionAnswer, type HunkSelectionState } from '../permissions/hunk-selection.ts';
 import { asksAgainEvenIfRemembered, permissionButtons } from '../permissions/prompt-card.ts';
 
 export type PendingPermissionState = PermissionRequest & {
@@ -8,7 +8,7 @@ export type PendingPermissionState = PermissionRequest & {
     approved: boolean,
     remember?: boolean,
     modifiedArgs?: Record<string, unknown>,
-    extras?: { rememberTier?: RememberTier; reason?: string },
+    extras?: { rememberTier?: RememberTier; reason?: string; selectedHunks?: readonly number[] },
   ) => void;
   /** Present only when isHunkSelectable(request) was true when the prompt was opened. */
   hunkState?: HunkSelectionState;
@@ -117,7 +117,10 @@ export function handleBlockingShellInput(options: BlockingInputHandlerOptions): 
       }
       const { state, commit } = applyHunkKey(req.hunkState, data);
       if (commit === 'apply') {
-        req.resolve(true, false, buildModifiedEditArgs(req, state));
+        // The broker applies `selectedHunks` by the platform's one hunk rule; the
+        // same selection rides as arguments for a resolver that forwards only those.
+        const answer = hunkSelectionAnswer(req, state);
+        req.resolve(true, false, answer.modifiedArgs, { selectedHunks: answer.selectedHunks });
         render();
         return { handled: true, pendingPermission: null };
       }

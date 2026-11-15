@@ -38,17 +38,19 @@ test('the typed answer reaches the waiting command but is not stored, published 
   expect(JSON.stringify(published)).not.toContain(SECRET);
 });
 
-test('a decision whose first write failed still delivers the real answer when a later write succeeds', async () => {
-  const { broker } = fixture();
+test('an answer whose write failed leaves the ask waiting; answering again delivers the real answer', async () => {
+  const { broker, storePath } = fixture();
   const raised = await broker.raiseApproval({ request: execPrompt() });
   const store = (broker as unknown as { store: { persist: (snapshot: unknown) => Promise<void> } }).store;
   const original = store.persist.bind(store);
   let fail = true;
   store.persist = async (snapshot) => { if (fail) throw new Error('disk full'); await original(snapshot); };
-  await expect(broker.resolveApproval(raised.approval.id, { approved: true, remember: false, actor: 'operator', actorSurface: 'tui', modifiedArgs: { answer: SECRET } })).rejects.toThrow('could not be written');
+  await expect(broker.resolveApproval(raised.approval.id, { approved: true, remember: false, actor: 'operator', actorSurface: 'tui', modifiedArgs: { answer: SECRET } })).rejects.toThrow('still waiting');
+  expect(broker.getApproval(raised.approval.id)?.status).toBe('pending');
   fail = false;
-  await broker.resolveApproval(raised.approval.id, { approved: true, remember: false, actor: 'operator', actorSurface: 'tui' });
+  await broker.resolveApproval(raised.approval.id, { approved: true, remember: false, actor: 'operator', actorSurface: 'tui', modifiedArgs: { answer: SECRET } });
   expect(await raised.decision).toMatchObject({ approved: true, modifiedArgs: { answer: SECRET } });
+  expect(readFileSync(storePath, 'utf8')).not.toContain(SECRET);
 });
 
 test('modified arguments on any other ask are kept as sent', async () => {

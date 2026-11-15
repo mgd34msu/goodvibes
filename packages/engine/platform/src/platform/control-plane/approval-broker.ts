@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { PersistentStore } from '../state/persistent-store.js';
 import { StoreWriteQueue } from '../state/store-write-queue.js';
 import { WITHHELD_PROMPT_ANSWER, type PermissionPromptDecision, type PermissionPromptRequest, type PermissionRequestHandler } from '../permissions/prompt.js';
@@ -10,7 +10,7 @@ import { resolveApprovalHunkSelection } from './approval-hunk-apply.js';
 import type { PendingApprovalEntry, RaisedApproval } from './approval-broker-raise.js';
 import { OwnerApprovalAuthority, type OwnerApprovalGuard, type OwnerApprovalProof, type RaisedOwnerApproval, type ResolveSharedApprovalInput, type ApprovalActionOutcome } from './approval-broker-owner.js';
 import { awaitPermission } from '../permissions/cancellation.js';
-import { approvalDispositionMatches, assertExplicitApprovalDisposition, ordinaryApprovalDecision, type SharedApprovalDecision } from './approval-disposition.js';
+import { assertExplicitApprovalDisposition, finishedApprovalOutcome, isSharedApprovalDisposition, ordinaryApprovalDecision, type SharedApprovalDecision } from './approval-disposition.js';
 
 /**
  * `claimed` is advisory: it records who said they are handling an ask so other
@@ -135,12 +135,6 @@ function throwInvalidApprovalSnapshot(): never {
   throw new Error('Shared approval store snapshot is invalid.');
 }
 
-/** Name the record that failed, so an operator can repair or remove that one entry. */
-function describeInvalidApprovalRecord(value: unknown, index: number): string {
-  const id = isRecord(value) && typeof value['id'] === 'string' ? `'${value['id']}'` : `at position ${index}`;
-  return `Shared approval store snapshot is invalid: approval ${id} is malformed. Repair or remove that entry in the approvals store file; no approval can be read until then.`;
-}
-
 function validateOptionalString(value: unknown): void {
   if (value !== undefined && typeof value !== 'string') throwInvalidApprovalSnapshot();
 }
@@ -191,13 +185,22 @@ function validateApprovalAuditRecord(value: unknown): void {
   validateOptionalString(value['note']);
 }
 
-function validateApprovalRecord(value: unknown): void {
+/** An open ask as stored: its waiter may still be watching it, so it must be readable. */
+function isStoredOpenApproval(value: unknown): boolean {
+  return isRecord(value) && (value['status'] === 'pending' || value['status'] === 'claimed');
+}
+
+/**
+ * Read one stored approval. A finished record stores only its disposition
+ * (plus the verdict for `remembered`); its status and `approved` are derived
+ * here by the one rule in approval-disposition.ts. A record written before
+ * dispositions existed keeps its stored status and verdict.
+ */
+function decodeStoredApproval(value: unknown): SharedApprovalRecord {
   if (!isRecord(value)) throwInvalidApprovalSnapshot();
   if (
     typeof value['id'] !== 'string'
     || typeof value['callId'] !== 'string'
-    || typeof value['status'] !== 'string'
-    || !APPROVAL_STATUSES.has(value['status'] as SharedApprovalStatus)
     || !isFiniteNumber(value['createdAt'])
     || !isFiniteNumber(value['updatedAt'])
     || !isRecord(value['metadata'])
@@ -214,32 +217,70 @@ function validateApprovalRecord(value: unknown): void {
   validateOptionalNumber(value['expiresAt']);
   validateOptionalString(value['resolvedBy']);
   if (value['requiresOwnerDecision'] !== undefined && value['requiresOwnerDecision'] !== true) throwInvalidApprovalSnapshot();
-  if (value['decision'] !== undefined) {
-    const decision = value['decision'];
-    if (!isRecord(decision) || typeof decision['approved'] !== 'boolean') {
-      throwInvalidApprovalSnapshot();
-    }
-    if (decision['remember'] !== undefined && typeof decision['remember'] !== 'boolean') {
-      throwInvalidApprovalSnapshot();
-    }
-    if (!approvalDispositionMatches(decision['approved'], decision['disposition'], value['status'] as string)) {
-      throwInvalidApprovalSnapshot();
-    }
-    if (decision['disposition'] === 'amended' && (decision['remember'] === true || decision['rememberTier'] !== undefined)) {
-      throwInvalidApprovalSnapshot();
-    }
-  }
   for (const audit of value['audit']) validateApprovalAuditRecord(audit);
+  const storedStatus = value['status'];
+  const decision = value['decision'];
+  if (decision === undefined) {
+    if (storedStatus !== 'pending' && storedStatus !== 'claimed') throwInvalidApprovalSnapshot();
+    return value as unknown as SharedApprovalRecord;
+  }
+  if (!isRecord(decision)) throwInvalidApprovalSnapshot();
+  if (decision['remember'] !== undefined && typeof decision['remember'] !== 'boolean') throwInvalidApprovalSnapshot();
+  const disposition = decision['disposition'];
+  if (disposition === undefined) {
+    // Written before dispositions: its two fields are all there is.
+    if (typeof storedStatus !== 'string' || !TERMINAL_APPROVAL_STATUSES.has(storedStatus as SharedApprovalStatus)
+      || typeof decision['approved'] !== 'boolean') throwInvalidApprovalSnapshot();
+    return value as unknown as SharedApprovalRecord;
+  }
+  if (!isSharedApprovalDisposition(disposition)) throwInvalidApprovalSnapshot();
+  if (disposition === 'amended' && (decision['remember'] === true || decision['rememberTier'] !== undefined)) throwInvalidApprovalSnapshot();
+  const outcome = finishedApprovalOutcome(disposition, typeof decision['approved'] === 'boolean' ? decision['approved'] : undefined);
+  if (!outcome) throwInvalidApprovalSnapshot();
+  return { ...value, status: outcome.status, decision: { ...decision, approved: outcome.approved } } as unknown as SharedApprovalRecord;
 }
 
-function validateApprovalSnapshot(snapshot: SharedApprovalStoreSnapshot | null): SharedApprovalStoreSnapshot | null {
-  if (!snapshot) return null;
-  if (!isRecord(snapshot) || !Array.isArray(snapshot.approvals)) throwInvalidApprovalSnapshot();
-  snapshot.approvals.forEach((approval, index) => {
-    try { validateApprovalRecord(approval); }
-    catch { throw new Error(describeInvalidApprovalRecord(approval, index)); }
-  });
-  return snapshot;
+function argumentsDigest(args: unknown): string {
+  return `sha256:${createHash('sha256').update(stableJson(args)).digest('hex')}`;
+}
+
+/** The stored form of each finished record, built once per record object (records are replaced, never mutated). */
+const storedFinishedRecords = new WeakMap<SharedApprovalRecord, Record<string, unknown>>();
+
+/**
+ * What goes on disk. An open ask keeps everything: its arguments are what
+ * the owner is being shown. A finished one keeps the tool name, the summary
+ * and a digest of the arguments instead of the arguments themselves (which
+ * for a write or an edit are file contents), and only its disposition in
+ * place of status and verdict. The record in memory is unchanged, so the
+ * surfaces and waiters of this process still see the full decision.
+ */
+function encodeStoredApproval(record: SharedApprovalRecord): SharedApprovalRecord | Record<string, unknown> {
+  if (!TERMINAL_APPROVAL_STATUSES.has(record.status) || record.decision === undefined) return record;
+  const cached = storedFinishedRecords.get(record);
+  if (cached) return cached;
+  const { status, decision, request, metadata, ...rest } = record;
+  const { approved, modifiedArgs, disposition, ...decisionRest } = decision;
+  const stored: Record<string, unknown> = {
+    ...rest,
+    // A record written before dispositions has no other statement of how it ended.
+    ...(disposition === undefined ? { status } : {}),
+    request: { ...request, args: {} },
+    metadata: {
+      ...metadata,
+      argumentsDigest: typeof metadata['argumentsDigest'] === 'string' ? metadata['argumentsDigest'] : argumentsDigest(request.args),
+      ...(modifiedArgs !== undefined ? { modifiedArgumentsDigest: argumentsDigest(modifiedArgs) } : {}),
+    },
+    decision: disposition === undefined ? { ...decisionRest, approved }
+      : disposition === 'remembered' ? { ...decisionRest, approved, disposition }
+        : { ...decisionRest, disposition },
+  };
+  storedFinishedRecords.set(record, stored);
+  return stored;
+}
+
+function failureText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function buildAudit(action: SharedApprovalAuditRecord['action'], actor: string, actorSurface?: string, note?: string): SharedApprovalAuditRecord {
@@ -289,6 +330,8 @@ export class ApprovalBroker {
   private loaded = false;
   /** One load at a time: a second early caller must not clear a map the first already filled. */
   private loading: Promise<void> | null = null;
+  /** Names the store in a notice about a record that cannot be read. */
+  private readonly storeFile: string;
 
   constructor(
     options: {
@@ -301,6 +344,7 @@ export class ApprovalBroker {
     }
     const storePath = options.storePath;
     this.store = options.store ?? new PersistentStore<SharedApprovalStoreSnapshot>(storePath as string);
+    this.storeFile = storePath ?? 'the approvals store';
   }
 
   subscribe(listener: ApprovalListener): () => void {
@@ -324,12 +368,33 @@ export class ApprovalBroker {
     await this.loading;
   }
 
+  /**
+   * A finished record that cannot be read is set aside with a notice naming
+   * the file and the id, and loading carries on: it answers nobody. An open
+   * ask that cannot be read stops the load, because a waiter may still be
+   * watching it and dropping it would leave that waiter with no answer.
+   */
   private async load(): Promise<void> {
-    const snapshot = validateApprovalSnapshot(await this.store.load());
-    this.approvals.clear();
-    for (const approval of snapshot?.approvals ?? []) {
-      this.approvals.set(approval.id, approval);
+    const snapshot: unknown = await this.store.load();
+    if (snapshot !== null && (!isRecord(snapshot) || !Array.isArray(snapshot['approvals']))) {
+      throw new Error(`${this.storeFile} is not an approvals store. Move it aside to start with no recorded approvals.`);
     }
+    const stored: readonly unknown[] = snapshot === null ? [] : snapshot['approvals'] as unknown[];
+    this.approvals.clear();
+    stored.forEach((value, index) => {
+      let approval: SharedApprovalRecord;
+      try {
+        approval = decodeStoredApproval(value);
+      } catch {
+        const id = isRecord(value) && typeof value['id'] === 'string' ? value['id'] : `at position ${index}`;
+        if (isStoredOpenApproval(value)) {
+          throw new Error(`The waiting approval ${id} in ${this.storeFile} cannot be read. Remove that entry from the file; no approval can be raised or answered until then.`);
+        }
+        logger.warn('A finished approval record cannot be read and was set aside', { file: this.storeFile, approvalId: id });
+        return;
+      }
+      this.approvals.set(approval.id, approval);
+    });
     this.pruneTerminalApprovals();
     this.loaded = true;
     this.rearmRestoredTimers();
@@ -420,7 +485,7 @@ export class ApprovalBroker {
       start: () => this.start(),
       approvals: this.approvals,
       pendingResolvers: this.pendingResolvers,
-      persist: () => this.persist(),
+      persist: async () => { await this.persist(); },
       publish: (approval) => this.publish(approval),
       expire: (approvalId, note) => this.expireApproval(approvalId, note),
       cancel: async (approvalId) => { await this.cancelApproval(approvalId, 'approval-broker', 'service', 'requesting consumer no longer current'); },
@@ -490,11 +555,7 @@ export class ApprovalBroker {
       ownerCheck();
       if (this.approvals.get(approvalId) !== approval) throw new Error('Owner approval changed while resolving.');
     } : undefined;
-    if (approval.status === 'approved' || approval.status === 'denied' || approval.status === 'cancelled' || approval.status === 'expired') {
-      // A failed write leaves the decision retryable until a snapshot commits.
-      if (!approval.requiresOwnerDecision && this.pendingResolvers.has(approvalId)) await this.persist();
-      return approval;
-    }
+    if (TERMINAL_APPROVAL_STATUSES.has(approval.status)) return approval;
     // Per-hunk selection is only meaningful on approve; a deny is always a
     // whole-request rejection. Compute the modified args from the pending
     // request's OWN edits so the result is identical for every calling surface.
@@ -509,9 +570,11 @@ export class ApprovalBroker {
       }
       modifiedArgs = resolution.modifiedArgs;
     }
+    let withheldAnswer = false;
     if (approved && approval.request.attribution?.kind === 'exec-prompt' && typeof modifiedArgs?.['answer'] === 'string') {
       this.#withheldAnswers.set(approvalId, modifiedArgs['answer']);
       modifiedArgs = { ...modifiedArgs, answer: WITHHELD_ANSWER };
+      withheldAnswer = true;
     }
     const updated: SharedApprovalRecord = {
       ...approval,
@@ -532,43 +595,66 @@ export class ApprovalBroker {
         buildAudit(approved ? 'approved' : 'denied', input.actor, input.actorSurface, input.note),
       ],
     };
+    const forgetAnswer = (): void => { if (withheldAnswer) this.#withheldAnswers.delete(approvalId); };
     if (this.pendingResolvers.get(approvalId)?.retired) {
+      forgetAnswer();
       return this.cancelApproval(approvalId, 'approval-broker', 'service', 'all requesting consumers cancelled');
     }
     try {
       assertOwnerCurrent?.();
     } catch (error) {
       // The decision never started writing; the ask stays answerable.
+      forgetAnswer();
       this.#ownerApprovals.settle(approvalId);
       throw error;
     }
-    if (!assertOwnerCurrent) this.approvals.set(approvalId, updated);
-    try {
-      // Keep an owner ask pending in memory while its write is in flight, so
-      // denial/cancel/expiry can still win and no observer sees early approval.
-      await this.persist(assertOwnerCurrent ? updated : undefined);
-      assertOwnerCurrent?.();
-    } catch (error) {
-      if (!assertOwnerCurrent) {
-        // The decision stays in memory and a later successful write commits it
-        // and settles its waiters, so say that rather than only "failed".
+
+    if (!approved) {
+      // Deny direction: the waiting call is refused whether or not the write
+      // lands, because a refusal can never do what nobody agreed to.
+      this.approvals.set(approvalId, updated);
+      if (input.outcome) input.outcome.applied = true;
+      try {
+        await this.persist();
+      } catch (error) {
         throw new Error(
-          `The ${approved ? 'approval' : 'denial'} of ${approvalId} could not be written (${error instanceof Error ? error.message : String(error)}). `
-          + 'It is held in memory and takes effect when the next write succeeds; cancel the ask to stop that.',
+          `The denial of ${approvalId} was applied and the waiting call was refused, but it could not be saved (${failureText(error)}). It is saved with the next approvals write.`,
           { cause: error },
         );
+      } finally {
+        this.resolvePending(approvalId, updated.decision!);
+        this.publish(updated);
       }
-      await this.cancelApproval(approvalId, 'approval-broker', 'service', 'owner decision no longer current');
-      // A signal cancellation may already have queued its corrective write.
-      // Persist the current terminal snapshot before returning the failed owner answer.
-      await this.persist();
-      throw error;
+    } else {
+      // An approval takes effect only once it is written: until then the ask
+      // stays waiting, so it can still be answered, cancelled or expired, and
+      // nothing can release it later on its own.
+      let committed: SharedApprovalRecord | null;
+      try {
+        committed = await this.persist({ record: updated, check: assertOwnerCurrent });
+      } catch (error) {
+        forgetAnswer();
+        if (!assertOwnerCurrent) {
+          throw new Error(
+            `The approval of ${approvalId} could not be saved (${failureText(error)}). The ask is still waiting: approve it again, deny it or cancel it.`,
+            { cause: error },
+          );
+        }
+        await this.cancelApproval(approvalId, 'approval-broker', 'service', 'owner decision no longer current');
+        // A signal cancellation may already have queued its own write; land the
+        // cancelled record before returning the failed owner answer.
+        await this.persist();
+        throw error;
+      }
+      if (!committed) {
+        // A cancel or an expiry finished first; that answer stands.
+        forgetAnswer();
+        return this.approvals.get(approvalId) ?? null;
+      }
+      if (input.outcome) input.outcome.applied = true;
+      this.publish(updated);
+      this.resolvePending(approvalId, updated.decision!);
     }
-    if (assertOwnerCurrent) this.approvals.set(approvalId, updated);
-    if (input.outcome) input.outcome.applied = true;
-    this.publish(updated);
-
-    this.resolvePending(approvalId, updated.decision ?? { approved });
 
     // A generalizing remember tier answers more than this one ask: sweep every
     // queued pending ask the remembered decision covers (same rule match) and
@@ -712,12 +798,17 @@ export class ApprovalBroker {
     if (outcome) outcome.applied = true;
     try {
       await this.persist();
+    } catch (error) {
+      throw new Error(
+        `The cancellation of ${approvalId} was applied and the waiting call was refused, but it could not be saved (${failureText(error)}). It is saved with the next approvals write.`,
+        { cause: error },
+      );
     } finally {
       // Deny-direction: a waiter released before the write is durable can only
       // refuse its tool call, so a failed write must not leave it hanging.
       this.resolvePending(approvalId, updated.decision!);
+      this.publish(updated);
     }
-    this.publish(updated);
     return updated;
   }
 
@@ -771,8 +862,8 @@ export class ApprovalBroker {
       await this.persist();
     } finally {
       this.resolvePending(approvalId, updated.decision!);
+      this.publish(updated);
     }
-    this.publish(updated);
   }
 
   /**
@@ -794,38 +885,38 @@ export class ApprovalBroker {
   }
 
   /**
-   * Replace the store file with the approvals as they stand at THIS call,
-   * after every write already queued has finished.
+   * Replace the store file with the approvals as they stand when this write
+   * runs, after every write queued before it has finished.
    *
-   * The snapshot is still taken here, synchronously, exactly as it always was.
-   * What changed is that the write no longer races: `PersistentStore.persist`
-   * is atomic but unordered, so two of these in flight at once finished
-   * whenever their renames happened to land, and the one that started first
-   * could finish last and put its older view of the store back on disk. The
-   * queue is what makes "started first" mean "finished first".
-   *
-   * Ordering is sufficient because callers mutate the map and then persist, so
-   * each snapshot is at least as new as the one queued before it and the last
-   * one to land is the most recent state. Deferring the snapshot to write time
-   * would also work, but it would let a write serialise records belonging to
-   * callers that had not finished yet, including a create still deciding
-   * whether it can commit, and that is a wider door than this defect needs.
+   * The snapshot is taken inside the queued unit, so the last write to land
+   * always carries the newest state and a write queued earlier can never put
+   * an older view back on disk. `commit` is an approval that is not yet in
+   * effect: it is written in place of its waiting record and enters the map
+   * only after the write succeeded and `check` (the owner proof) still holds,
+   * inside the same unit, so the next write already carries it. If the ask
+   * was settled meanwhile (cancelled, expired), the commit is dropped and null
+   * is returned.
    */
-  private async persist(ownerDecision?: SharedApprovalRecord): Promise<void> {
-    this.pruneTerminalApprovals();
-    const snapshot: SharedApprovalStoreSnapshot = {
-      approvals: sortApprovals(this.approvals.values()).map((approval) => ownerDecision?.id === approval.id ? ownerDecision : approval),
-    };
-    await this.writes.run(() => this.store.persist(snapshot));
-    // A successful later write can commit a decision whose original write
-    // failed. Settle its waiting consumers as well as the current writer.
-    // Owner decisions retain their separate post-write currentness check.
-    for (const approval of snapshot.approvals) {
-      if (!approval.requiresOwnerDecision && approval.decision
-        && approval.status !== 'pending' && approval.status !== 'claimed') {
-        this.resolvePending(approval.id, approval.decision);
-      }
-    }
+  private async persist(commit?: { readonly record: SharedApprovalRecord; readonly check?: (() => void) | undefined }): Promise<SharedApprovalRecord | null> {
+    let committed: SharedApprovalRecord | null = null;
+    await this.writes.run(async () => {
+      const waiting = (): boolean => {
+        const current = commit ? this.approvals.get(commit.record.id) : undefined;
+        return current !== undefined && !TERMINAL_APPROVAL_STATUSES.has(current.status);
+      };
+      const override = commit && waiting() ? commit.record : undefined;
+      if (override) commit?.check?.();
+      this.pruneTerminalApprovals();
+      const approvals = sortApprovals(this.approvals.values())
+        .map((approval) => override?.id === approval.id ? override : approval);
+      await this.store.persist({ approvals: approvals.map(encodeStoredApproval) as SharedApprovalRecord[] });
+      if (!override) return;
+      commit?.check?.();
+      if (!waiting()) return;
+      this.approvals.set(override.id, override);
+      committed = override;
+    });
+    return committed;
   }
 
   private publish(approval: SharedApprovalRecord): void {

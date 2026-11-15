@@ -133,10 +133,11 @@ describe('the newest write is the one that survives on disk', () => {
       const updated = await broker.recordRemoteUpdate(created?.id as string, { actor: 'tester' });
       expect(updated).not.toBeNull();
 
-      // That later write serialises the map as it is now, so the resolution the
-      // failed write never got to disk is on disk after the next successful
-      // one. The file converges on the map; it does not stay behind it.
-      expect(onDisk(path, 'call-isolated')?.status).toBe('approved');
+      // An approval takes effect only once it is written, so the failed one
+      // left the ask waiting, and a later unrelated write does not approve it.
+      expect(onDisk(path, 'call-isolated')?.status).toBe('pending');
+      expect(broker.getApproval(created?.id as string)?.status).toBe('pending');
+      await broker.resolveApproval(created?.id as string, { approved: true, actor: 'tester', actorSurface: 'tui' });
       expect((await decision).approved).toBe(true);
     } finally {
       cleanup();

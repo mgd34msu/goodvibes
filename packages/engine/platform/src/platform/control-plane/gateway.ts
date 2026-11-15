@@ -15,7 +15,8 @@ import {
 } from '../runtime/emitters/index.js';
 import { renderControlPlaneGatewayWebUi } from './gateway-web-ui.js';
 import { AppError } from '../types/errors.js';
-import { buildGatewayDisabledResponseBody } from './gateway-disabled-response.js';
+import { buildGatewayDisabledResponseBody, controlPlaneGatewaySetting } from './gateway-disabled-response.js';
+import { CONTROL_PLANE_FEATURE_FLAG } from '../runtime/surface-feature-flags.js';
 import { SSE_HEARTBEAT_INTERVAL_MS } from './sse-timing.js';
 import {
   clientMayReceiveEventDomain,
@@ -151,10 +152,16 @@ export class ControlPlaneGateway {
     }
     return out;
   }
+  /*
+   * Liveness (request and error counts, last request and event times, each
+   * client's last-seen time and last event) is owned here and read from here.
+   * It reaches the runtime store only with a connect, an authentication or a
+   * disconnect: a delivered event or an answered request is a field
+   * assignment, not a store transaction that wakes every subscriber.
+   */
   private requestCount = 0;
   private errorCount = 0;
   private lastRequestAt: number | undefined;
-  private _syncScheduled = false;
   private _lastEventAt = 0;
 
   constructor(config: ControlPlaneGatewayConfig = {}) {
@@ -177,11 +184,11 @@ export class ControlPlaneGateway {
   }
 
   private isEnabled(): boolean {
-    return isFeatureGateEnabled(this.featureFlags, 'control-plane-gateway');
+    return isFeatureGateEnabled(this.featureFlags, CONTROL_PLANE_FEATURE_FLAG);
   }
 
   private requireEnabled(operation: string): void {
-    requireFeatureGate(this.featureFlags, 'control-plane-gateway', operation);
+    requireFeatureGate(this.featureFlags, CONTROL_PLANE_FEATURE_FLAG, operation);
   }
 
   attachRuntime(config: {
@@ -226,7 +233,7 @@ export class ControlPlaneGateway {
       return {
         server: { ...this.serverConfig, enabled: false },
         disabled: true,
-        setting: 'controlPlane.gateway',
+        setting: controlPlaneGatewaySetting(),
         totals: {
           clients: 0,
           activeClients: 0,
@@ -340,12 +347,6 @@ export class ControlPlaneGateway {
     if (input.status >= 400 || input.error) {
       this.errorCount += 1;
     }
-    this.dispatch?.syncControlPlaneState({
-      requestCount: this.requestCount,
-      errorCount: this.errorCount,
-      lastRequestAt: this.lastRequestAt,
-      ...(input.error ? { lastError: input.error } : {}),
-    }, 'control-plane.gateway.api-request');
     this.rememberEvent('api-request', {
       method: input.method,
       path: input.path,
@@ -472,6 +473,7 @@ export class ControlPlaneGateway {
       enabled: true,
       isRunning: true,
       connectionState: 'connected',
+      ...this.livenessCounters(),
     }, 'control-plane.gateway.ws-connect');
     this.dispatch?.syncControlPlaneClient(clientRecord, 'control-plane.gateway.ws-connect');
 
@@ -529,7 +531,6 @@ export class ControlPlaneGateway {
       },
     };
     this.clients.set(clientId, updated);
-    this.dispatch?.syncControlPlaneClient(updated, 'control-plane.gateway.ws-touch');
   }
 
   authenticateClient(clientId: string, input: {
@@ -652,6 +653,7 @@ export class ControlPlaneGateway {
       enabled: true,
       isRunning: true,
       connectionState: [...this.clients.values()].some((client) => client.connected) ? 'connected' : 'disconnected',
+      ...this.livenessCounters(),
     }, 'control-plane.gateway.ws-disconnect');
   }
 
@@ -710,6 +712,7 @@ export class ControlPlaneGateway {
       enabled: true,
       isRunning: true,
       connectionState: 'connected',
+      ...this.livenessCounters(),
     }, 'control-plane.gateway.connect');
     this.dispatch?.syncControlPlaneClient(clientRecord, 'control-plane.gateway.connect');
 
@@ -784,7 +787,6 @@ export class ControlPlaneGateway {
             },
           };
           this.clients.set(clientId, updated);
-          this.dispatch?.syncControlPlaneClient(updated, 'control-plane.gateway.heartbeat');
           const record = this.rememberRuntimeEvent(domain, envelope);
           send(domain, record.payload, record.id);
         }));
@@ -835,6 +837,7 @@ export class ControlPlaneGateway {
               enabled: true,
               isRunning: true,
               connectionState: [...this.clients.values()].some((client) => client.connected) ? 'connected' : 'disconnected',
+              ...this.livenessCounters(),
             }, 'control-plane.gateway.disconnect');
             emitControlPlaneSubscriptionDropped(this.runtimeBus!, evtCtx, {
               clientId,
@@ -929,18 +932,17 @@ export class ControlPlaneGateway {
     return renderControlPlaneGatewayWebUi(authTokenHint);
   }
 
-  private _scheduleControlPlaneSync(): void {
-    if (this._syncScheduled || !this.dispatch) return;
-    this._syncScheduled = true;
-    setImmediate(() => {
-      this._syncScheduled = false;
-      this.dispatch?.syncControlPlaneState({
-        requestCount: this.requestCount,
-        errorCount: this.errorCount,
-        lastRequestAt: this.lastRequestAt,
-        lastEventAt: this._lastEventAt,
-      }, 'control-plane.gateway.event');
-    });
+  private livenessCounters(): { requestCount: number; errorCount: number; lastRequestAt: number | undefined; lastEventAt: number } {
+    return { requestCount: this.requestCount, errorCount: this.errorCount, lastRequestAt: this.lastRequestAt, lastEventAt: this._lastEventAt };
+  }
+
+  /**
+   * The gateway's live counters and clients, read at snapshot time. The
+   * runtime store's copy is refreshed only on connect, authenticate and
+   * disconnect, so a reader that wants current values reads them here.
+   */
+  liveness(): { readonly requestCount: number; readonly errorCount: number; readonly lastRequestAt: number | undefined; readonly lastEventAt: number; readonly clients: ControlPlaneClientDescriptor[] } {
+    return { ...this.livenessCounters(), clients: this.listClients() };
   }
 
   /** Retained replay/message entries (ring + surface messages), for MemoryGovernor visibility. */
@@ -1002,7 +1004,6 @@ export class ControlPlaneGateway {
     this._recentEventsHead = (this._recentEventsHead + 1) % this._recentEventsCapacity;
     if (this._recentEventsCount < this._recentEventsCapacity) this._recentEventsCount++;
     this._lastEventAt = record.createdAt;
-    this._scheduleControlPlaneSync();
     return record;
   }
 }

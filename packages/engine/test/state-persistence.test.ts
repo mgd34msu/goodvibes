@@ -327,8 +327,8 @@ describe('state persistence failures', () => {
     mkdirSync(dir, { recursive: true });
 
     const approvals = join(dir, 'approvals.json');
-    writeFileSync(approvals, JSON.stringify({ approvals: [{ id: 'approval-1' }] }), 'utf-8');
-    await expect(new ApprovalBroker({ storePath: approvals }).start()).rejects.toThrow('Shared approval store snapshot is invalid');
+    writeFileSync(approvals, JSON.stringify({ approvals: [{ id: 'approval-1', status: 'pending' }] }), 'utf-8');
+    await expect(new ApprovalBroker({ storePath: approvals }).start()).rejects.toThrow('cannot be read');
 
     expect(() => loadSessionBrokerState({
       sessions: [{ id: 'sess-1' }],

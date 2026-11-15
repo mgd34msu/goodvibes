@@ -15,7 +15,7 @@
 import { describe, expect, test } from 'bun:test';
 import { createFeatureFlagManager } from '../platform/src/platform/runtime/feature-flags/manager.js';
 import { ControlPlaneGateway } from '../platform/src/platform/control-plane/gateway.js';
-import { CONTROL_PLANE_GATEWAY_FLAG_ID } from '../platform/src/platform/control-plane/gateway-disabled-response.js';
+import { CONTROL_PLANE_FEATURE_FLAG } from '../platform/src/platform/runtime/surface-feature-flags.js';
 import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.js';
 import { CompanionChatManager } from '../platform/src/platform/companion/companion-chat-manager.js';
 import type {
@@ -26,7 +26,7 @@ import type {
 import { DaemonHttpRouter } from '../platform/src/platform/daemon/http/router.js';
 import { createDaemonControlRouteHandlers } from '../daemon-api/src/control-routes.js';
 
-const FLAG = CONTROL_PLANE_GATEWAY_FLAG_ID;
+const FLAG = CONTROL_PLANE_FEATURE_FLAG;
 
 // ---------------------------------------------------------------------------
 // Helpers

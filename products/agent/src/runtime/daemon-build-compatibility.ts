@@ -66,9 +66,10 @@ export interface DaemonBuildGuardOptions {
   /** The floor this client declares. Undefined means it declares none. */
   readonly floor?: string | undefined;
   /**
-   * Invoked once, the first time an attached daemon is judged too old. Wiring
-   * it to a visible surface is what turns "the daemon needs updating" into
-   * something the owner actually sees, rather than a verb that quietly 404s.
+   * Invoked once, the first time an attached daemon is judged not adoptable
+   * (too old, or no readable version), with the verdict's notice. Wiring it to
+   * a visible surface is what turns "the daemon needs updating" into something
+   * the owner actually sees, rather than a verb that quietly 404s.
    */
   readonly onDaemonUpdateRequired?: ((verdict: DaemonCompatibilityVerdict) => void) | undefined;
 }
@@ -95,6 +96,8 @@ export class DaemonBuildGuard {
   private initialVerdict(): DaemonCompatibilityVerdict {
     return {
       status: 'ok',
+      adopt: true,
+      notice: null,
       message: 'No daemon build observed yet.',
       daemonVersion: undefined,
       floor: this.options.floor,
@@ -106,11 +109,15 @@ export class DaemonBuildGuard {
     if (this.verdict.status === 'daemon-update-required') return this.verdict;
     const next = evaluateDaemonStatusCompatibility(statusPayload, this.options.floor, daemonLabel);
     this.verdict = next;
-    if (next.status === 'daemon-update-required' && !this.announced) {
-      this.announced = true;
-      this.options.onDaemonUpdateRequired?.(next);
-    }
+    this.announce(next);
     return next;
+  }
+
+  /** Say a refusal once; the platform decided whether there is one. */
+  private announce(verdict: DaemonCompatibilityVerdict): void {
+    if (verdict.notice === null || this.announced) return;
+    this.announced = true;
+    this.options.onDaemonUpdateRequired?.(verdict);
   }
 
   /**
@@ -129,11 +136,8 @@ export class DaemonBuildGuard {
   judgeForAdoption(statusPayload: unknown, daemonLabel?: string): DaemonCompatibilityVerdict {
     const next = evaluateDaemonStatusCompatibility(statusPayload, this.options.floor, daemonLabel);
     this.verdict = next;
-    if (next.status === 'daemon-update-required') {
-      if (!this.announced) {
-        this.announced = true;
-        this.options.onDaemonUpdateRequired?.(next);
-      }
+    if (!next.adopt) {
+      this.announce(next);
       return next;
     }
     // A daemon that now meets the floor is a different situation from the one
@@ -143,7 +147,7 @@ export class DaemonBuildGuard {
   }
 
   /**
-   * False once the attached daemon has been judged too old for this build.
+   * False once the attached daemon has been judged not adoptable for this build.
    *
    * This is what the adoption path asks before routing anything over the wire:
    * a daemon below the floor is not adopted at all, so the spine stays local and
@@ -152,7 +156,7 @@ export class DaemonBuildGuard {
    * adoption is the single choke point.
    */
   mayUseDaemonCapabilities(): boolean {
-    return this.verdict.status !== 'daemon-update-required';
+    return this.verdict.adopt;
   }
 
   /** Forget everything observed. For an attach to a different daemon. */
@@ -219,6 +223,6 @@ export function createDaemonAdoptionGate(deps: {
     const connection = deps.resolveConnection();
     const status = await deps.readStatus(connection);
     if (status === null) return true;
-    return deps.guard.judgeForAdoption(status, connection.baseUrl).status !== 'daemon-update-required';
+    return deps.guard.judgeForAdoption(status, connection.baseUrl).adopt;
   };
 }

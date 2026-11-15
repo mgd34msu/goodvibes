@@ -4,6 +4,29 @@
  * No `any`. No side effects.
  */
 import type { ClientCompatibilityVerdict } from './client-compatibility';
+import {
+  evaluateDaemonStatusCompatibility,
+  type DaemonCompatibilityVerdict,
+} from '@goodvibes-jev/engine/platform/platform/control-plane/daemon-compatibility';
+
+export type { DaemonCompatibilityVerdict };
+
+/**
+ * The oldest daemon build this web UI works against: the build that serves
+ * the verbs it calls (approvals with per-hunk answers, the owner inbox, hosted
+ * sessions). Raise it only for a daemon behavior this UI must have.
+ */
+export const WEBUI_DAEMON_BUILD_FLOOR = '3.1.2';
+
+/**
+ * This web UI's verdict on the daemon from a `/status` body it already read:
+ * the platform's rule (control-plane/daemon-compatibility.ts), so the tab and
+ * the terminal apps judge one daemon the same way and a daemon too old for
+ * this UI is named instead of failing one verb at a time.
+ */
+export function daemonCompatibilityFromStatus(statusPayload: unknown, daemonLabel?: string): DaemonCompatibilityVerdict {
+  return evaluateDaemonStatusCompatibility(statusPayload, WEBUI_DAEMON_BUILD_FLOOR, daemonLabel);
+}
 
 // ---------------------------------------------------------------------------
 // Core types
@@ -73,6 +96,11 @@ export interface DaemonHealth {
    * is honest, there is nothing to report, not a clean bill of health.
    */
   compatibility: ClientCompatibilityVerdict | null;
+  /**
+   * The daemon's build against this UI's floor, from the last `/status` body
+   * read (see daemonCompatibilityFromStatus). Null until one has been read.
+   */
+  daemonCompatibility?: DaemonCompatibilityVerdict | null;
 }
 
 export const DAEMON_HEALTH_DEFAULTS: DaemonHealth = {
@@ -86,6 +114,7 @@ export const DAEMON_HEALTH_DEFAULTS: DaemonHealth = {
   queuedTasks: 0,
   modelName: null,
   compatibility: null,
+  daemonCompatibility: null,
 };
 
 interface TaskItem {

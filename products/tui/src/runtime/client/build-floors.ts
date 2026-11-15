@@ -155,12 +155,12 @@ export class DaemonBuildFloor {
    * already been shown (or there is nothing to say).
    */
   noticeFor(verdict: DaemonCompatibilityVerdict): string | null {
-    if (verdict.status === 'ok') {
+    if (verdict.notice === null) {
       this.announced = null;
       return null;
     }
-    if (this.announced === verdict.message) return null;
-    this.announced = verdict.message;
-    return verdict.message;
+    if (this.announced === verdict.notice) return null;
+    this.announced = verdict.notice;
+    return verdict.notice;
   }
 }

@@ -156,7 +156,7 @@ describe('exact host-owned approvals', () => {
     expect((await raised.decision).approved).toBe(false);
     expect(broker.getApproval(raised.approval.id)?.status).toBe('cancelled');
     expect(events).not.toContain('approved');
-    expect(JSON.parse(readFileSync(path, 'utf8')).approvals[0].status).toBe('cancelled');
+    expect(JSON.parse(readFileSync(path, 'utf8')).approvals[0].decision.disposition).toBe('cancelled');
   });
 
   test('generic denial wins while an owner decision write is pending', async () => {

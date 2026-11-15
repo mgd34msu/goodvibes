@@ -81,15 +81,29 @@ for (const [approved, disposition] of [
   });
 }
 
-test('a persisted contradictory marker is refused rather than normalized into authority', async () => {
+test('a finished approval is stored by its disposition alone, and an unreadable one never blocks the open asks', async () => {
   const { broker, storePath } = fixture();
-  const raised = await broker.raiseApproval({ request: request() });
-  await broker.resolveApproval(raised.approval.id, { approved: true, disposition: 'approved', actor: 'fixture-owner' });
-  await raised.decision;
-  const snapshot = JSON.parse(readFileSync(storePath, 'utf8')) as { approvals: Array<{ decision: unknown }> };
-  snapshot.approvals[0]!.decision = { approved: true, disposition: 'denied' satisfies ExplicitApprovalDisposition };
+  const finished = await broker.raiseApproval({ request: request('finished') });
+  await broker.resolveApproval(finished.approval.id, { approved: false, disposition: 'denied', actor: 'fixture-owner' });
+  await finished.decision;
+  const open = await broker.raiseApproval({ request: request('open') });
+  const snapshot = JSON.parse(readFileSync(storePath, 'utf8')) as { approvals: Array<Record<string, unknown> & { id: string }> };
+  const stored = snapshot.approvals.find((entry) => entry.id === finished.approval.id)!;
+  expect(stored['status']).toBeUndefined();
+  expect(stored['decision']).toEqual({ disposition: 'denied' satisfies ExplicitApprovalDisposition });
+  // The arguments of a finished ask are not kept, only their digest.
+  expect(stored['request']).toMatchObject({ args: {} });
+  expect((stored['metadata'] as Record<string, unknown>)['argumentsDigest']).toMatch(/^sha256:[0-9a-f]{64}$/);
+  const reread = new ApprovalBroker({ storePath });
+  expect((await reread.start(), reread.getApproval(finished.approval.id))).toMatchObject({ status: 'denied', decision: { approved: false, disposition: 'denied' } });
+
+  stored['decision'] = { disposition: 'from-a-newer-build' };
   writeFileSync(storePath, JSON.stringify(snapshot));
-  await expect(new ApprovalBroker({ storePath }).start()).rejects.toThrow('snapshot is invalid');
+  const restarted = new ApprovalBroker({ storePath });
+  await restarted.start();
+  expect(restarted.getApproval(finished.approval.id)).toBeNull();
+  expect(restarted.getApproval(open.approval.id)).not.toBeNull();
+  await broker.cancelApproval(open.approval.id, 'fixture cleanup');
 });
 
 

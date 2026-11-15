@@ -29,7 +29,8 @@ const grant = {
 
 test('a review queue that failed to load is loaded again on the next call', async () => {
   const path = storePath();
-  writeFileSync(path, '{"records":[]}');
+  // A row that fails its schema is dropped, so the load writes the queue back.
+  writeFileSync(path, '{"records":[{"unreadable":true}]}');
   const receiver = new DelegatedInboundReviewReceiver(path);
   const store = (receiver as unknown as { store: { persist: (...args: unknown[]) => Promise<void> } }).store;
   const persist = store.persist.bind(store);

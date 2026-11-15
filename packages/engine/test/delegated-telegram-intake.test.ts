@@ -23,6 +23,14 @@ import { DelegatedTelegramIntake, type DelegatedTelegramIngress } from '../platf
 import { registerDelegatedTelegramCommands } from '../platform/src/platform/daemon/facade-delegated-telegram.js';
 import type { NativeExecutionAuthority, NativePairedSnapshot } from '../platform/src/platform/security/http-auth.js';
 import type { NativeInboundSourceRef } from '../platform/src/platform/control-plane/native-inbound-source.js';
+
+/** A command that did not do what was asked: refused as a held result naming its reason, or rejected outright. */
+async function expectRefused(operation: Promise<unknown>): Promise<void> {
+  const outcome = await operation.then(value => value, (error: unknown) => error);
+  if (outcome instanceof Error) return;
+  expect(outcome).toMatchObject({ outcome: 'held', reason: expect.any(String), nextStep: expect.any(String) });
+}
+
 const cleanups: Array<() => void | Promise<void>> = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
 const original = '  /goodvibes 🚲 e\u0301 repeat repeat\r\nEXTERNAL ORIGINAL\t ';
@@ -96,7 +104,7 @@ async function fixture(persistedPairing = false) {
 
 test('actual Telegram adapter → canonical broker → paired owner command → usable non-owner review receiver', async () => {
   const f = await fixture(); await f.configure(); const pending = await f.ingress();
-  expect(pending.outcome).toBe('held'); expect(f.spawned()).toBe(0); expect(f.sent).toEqual([]);
+  expect(pending.outcome).toBe('awaiting-owner'); expect(f.spawned()).toBe(0); expect(f.sent).toEqual([]);
   const row = f.broker.getInputs(pending.ref.sessionId)[0]!;
   expect(row.id).toBe(pending.ref.inputId); expect(row.userId).toBe('99'); expect(row.body).not.toContain('EXTERNAL ORIGINAL');
   expect(f.broker.getInputsSince(pending.ref.sessionId)).toEqual([]);
@@ -110,9 +118,10 @@ test('actual Telegram adapter → canonical broker → paired owner command → 
   expect(f.broker.getInputs(pending.ref.sessionId)[0]?.state).toBe('completed');
   expect(await f.invoke('list')).toMatchObject({ records: [{ ref: pending.ref, execution: 'not-started' }] });
   for (const file of readdirSync(f.directory).filter(name => name.endsWith('.json'))) expect(readFileSync(join(f.directory, file), 'utf8')).not.toContain('EXTERNAL ORIGINAL');
-  await expect(f.decide({ ref: pending.ref, approvalId: pending.approvalId })).rejects.toThrow();
+  await expectRefused(f.decide({ ref: pending.ref, approvalId: pending.approvalId }));
   expect(await f.invoke('cancel', { ref: pending.ref })).toMatchObject({ outcome: 'cancelled', execution: 'not-started' });
-  expect(await f.invoke('read', { ref: pending.ref })).toMatchObject({ source: 'expired-or-lost', record: { state: 'cancelled' } });
+  // A cancelled review leaves the queue at once.
+  expect(await f.invoke('read', { ref: pending.ref })).toMatchObject({ outcome: 'held', reason: 'review-closed', source: 'expired-or-lost' });
 });
 
 test('unselected Telegram retains legacy path; selected revoked route never falls back', async () => {
@@ -252,8 +261,8 @@ test('source expiry denies later decisions without reconstructing broker body', 
     expect(await f.invoke('status', { ref: pending.ref })).toMatchObject({ source: 'awaiting-owner' });
     advance(2);
     expect(lifetime?.aborted).toBe(true);
-    await expect(f.decide({ ref: pending.ref, approvalId: pending.approvalId })).rejects.toThrow();
-    expect(await f.invoke('status', { ref: pending.ref })).toMatchObject({ outcome: 'held', source: 'expired-or-lost' });
+    await expectRefused(f.decide({ ref: pending.ref, approvalId: pending.approvalId }));
+    expect(await f.invoke('status', { ref: pending.ref })).toMatchObject({ outcome: 'held', reason: 'source-unavailable', source: 'expired-or-lost' });
     expect((await f.invoke('list') as { records: unknown[] }).records).toHaveLength(0); expect(f.spawned()).toBe(0);
     expect(f.sourceReads()).toBe(1); expect(f.sent).toEqual([]);
     expect(f.broker.getInputs(pending.ref.sessionId)[0]?.body).not.toContain('EXTERNAL ORIGINAL');
@@ -266,7 +275,7 @@ test('approval requires explicit exact source/retention/derived-record choices',
   const f = await fixture(); await f.configure(); const pending = await f.ingress();
   for (const override of [{ choices: undefined }, { choices: { ...choices, execution: 'start' } }, { choices: { ...choices, sourceRetentionMs: 0 } },
     { ref: { ...pending.ref, inputId: 'forged' } }, { choices: { ...choices, derivedRecordRetentionMs: 1 } }]) {
-    await expect(f.decide({ ref: pending.ref, approvalId: pending.approvalId }, override)).rejects.toThrow();
+    await expectRefused(f.decide({ ref: pending.ref, approvalId: pending.approvalId }, override));
   }
   expect(f.approvals.getApproval(pending.approvalId)?.status).toBe('pending'); expect(f.spawned()).toBe(0);
 });
@@ -274,7 +283,7 @@ test('approval requires explicit exact source/retention/derived-record choices',
 test.each(['account', 'owner', 'configuration'] as const)('%s replacement holds before receiver acceptance', async kind => {
   const f = await fixture(); const config = await f.configure() as { configurationId: string }; const pending = await f.ingress();
   if (kind === 'account') f.changeAccount(); else if (kind === 'owner') f.revokeOwner(); else await f.invoke('revoke', { configurationId: config.configurationId });
-  await expect(f.decide({ ref: pending.ref, approvalId: pending.approvalId })).rejects.toThrow(); expect(f.spawned()).toBe(0);
+  await expectRefused(f.decide({ ref: pending.ref, approvalId: pending.approvalId })); expect(f.spawned()).toBe(0);
 });
 
 test('restart retains selected hold and review metadata, never the original or approval capability', async () => {
@@ -299,11 +308,11 @@ test('real persisted paired authority reaches configure/decide and owner read af
 test('selected bot command is held without onboarding response and duplicate delivery reuses one input', async () => {
   const f = await fixture(); await f.configure();
   const first = await f.ingress('/start'); const again = await f.ingress('/start');
-  expect(first.outcome).toBe('held'); expect(again.ref).toEqual(first.ref); expect(f.approvals.listApprovals()).toHaveLength(1); expect(f.spawned()).toBe(0);
+  expect(first.outcome).toBe('awaiting-owner'); expect(again.ref).toEqual(first.ref); expect(f.approvals.listApprovals()).toHaveLength(1); expect(f.spawned()).toBe(0);
 });
 test('explicit denial succeeds and expires original without transfer', async () => {
   const f = await fixture(); await f.configure(); const pending = await f.ingress();
-  expect(await f.invoke('decide', { ref: pending.ref, approvalId: pending.approvalId, approved: false })).toMatchObject({ outcome: 'held', reason: 'owner-denied' });
+  expect(await f.invoke('decide', { ref: pending.ref, approvalId: pending.approvalId, approved: false })).toMatchObject({ outcome: 'denied', execution: 'not-started' });
   expect(await f.invoke('status', { ref: pending.ref })).toMatchObject({ source: 'expired-or-lost' });
   expect(f.broker.getInputs(pending.ref.sessionId)[0]?.state).toBe('cancelled');
 });
@@ -312,7 +321,7 @@ test('edited Telegram update retires the prior exact original without capturing 
   const f = await fixture(); await f.configure(); const pending = await f.ingress();
   const response = await processTelegramUpdate({ update_id: 2, edited_message: { message_id: 1, chat: { id: 42, type: 'private' }, from: { id: 99 }, text: 'replacement external text' } }, f.context, f.updateDeps);
   expect(await response.json()).toMatchObject({ outcome: 'held' });
-  await expect(f.decide({ ref: pending.ref, approvalId: pending.approvalId })).rejects.toThrow();
+  await expectRefused(f.decide({ ref: pending.ref, approvalId: pending.approvalId }));
   expect(f.approvals.listApprovals()).toHaveLength(1);
 });
 
@@ -321,7 +330,7 @@ test('remove/recreate of the same natural route cannot inherit pending source au
   const time = controlledTime(); cleanups.push(time.restore);
   const route = f.hostDeps.routes.listBindings()[0]!; await f.hostDeps.routes.removeBinding(route.id); time.advance(10);
   await f.hostDeps.routes.upsertBinding({ kind: route.kind, surfaceKind: route.surfaceKind, surfaceId: route.surfaceId, externalId: route.externalId, channelId: route.channelId, threadId: route.threadId });
-  await expect(f.decide({ ref: pending.ref, approvalId: pending.approvalId })).rejects.toThrow();
+  await expectRefused(f.decide({ ref: pending.ref, approvalId: pending.approvalId }));
 });
 
 test('approved source expiry makes durable review metadata honest without body reconstruction', async () => {
@@ -340,7 +349,7 @@ test('out-of-order edit tombstones the provider message before a delayed origina
 test('daemon lifecycle restart permits explicit reconfiguration without restoring old source grants', async () => {
   const f = await fixture(); await f.configure(); const first = await f.ingress();
   f.host.close(); f.host.startLifecycle();
-  await expect(f.decide({ ref: first.ref, approvalId: first.approvalId })).rejects.toThrow();
+  await expectRefused(f.decide({ ref: first.ref, approvalId: first.approvalId }));
   expect((await f.ingress('new message while configuration is revoked', 2)).outcome).toBe('held');
   await f.configure(); const next = await f.ingress('fresh original after explicit reconfiguration', 3);
   expect(await f.decide({ ref: next.ref, approvalId: next.approvalId })).toMatchObject({ outcome: 'transferred' });
@@ -348,8 +357,8 @@ test('daemon lifecycle restart permits explicit reconfiguration without restorin
 });
 
 test('a configuration command awaiting startup cannot mint a post-restart grant', async () => {
-  const f = await fixture(); const pending = f.configure(); const failure = pending.then(() => null, error => error);
-  f.host.close(); f.host.startLifecycle(); expect(await failure).toBeInstanceOf(Error);
+  const f = await fixture(); const pending = f.configure();
+  f.host.close(); f.host.startLifecycle(); await expectRefused(pending);
   expect(f.approvals.listApprovals()).toHaveLength(0);
 });
 
@@ -366,7 +375,7 @@ test('explicit pre-transfer cancel retires the canonical queue without claiming 
   expect(f.broker.countBusySessions()).toBe(1);
   expect(await f.invoke('cancel', { ref: pending.ref })).toMatchObject({ outcome: 'cancelled', execution: 'not-started' });
   expect(f.broker.getInputs(pending.ref.sessionId)[0]?.state).toBe('cancelled'); expect(f.broker.countBusySessions()).toBe(0);
-  await expect(f.decide({ ref: pending.ref, approvalId: pending.approvalId })).rejects.toThrow();
+  await expectRefused(f.decide({ ref: pending.ref, approvalId: pending.approvalId }));
 });
 
 test('real HTTP routes authenticate paired owner and expose all seven delegated commands', async () => {
@@ -437,7 +446,7 @@ test('provider preflight cannot install its old selection after host restart', a
   cleanups.push(() => host.close()); const catalog = new GatewayMethodCatalog(); registerDelegatedTelegramCommands(catalog, host);
   const operation = catalog.invoke('inbound.telegram.configure', { body: { chatId: '42', accountId: 'synthetic_bot', pendingRetention: 'memory-only-until-deadline', pendingRetentionMs: 1000, configurationLifetimeMs: 10000, onExpiry: 'release-original-and-hold' },
     context: { admin: true, principalKind: 'token', principalId: f.authority.current()!.principalId, scopes: ['*'] }, isAuthorized: () => true, nativeExecutionAuthority: f.authority });
-  await waiting; host.close(); host.startLifecycle(); release(); await expect(operation).rejects.toThrow();
+  await waiting; host.close(); host.startLifecycle(); release(); await expectRefused(operation);
   expect(await host.selects('42')).toBe(true); expect((await host.list(f.authority)).pending).toEqual([]);
 });
 
@@ -452,7 +461,7 @@ test('provider proof has a finite deadline even without caller cancellation', as
 test('delegated owner binding is detached from mutable scopes and includes authority revisions', async () => {
   const f = await fixture(); await f.configure(); const pending = await f.ingress();
   f.mutateOwnerScopes();
-  await expect(f.decide(pending)).rejects.toThrow();
+  await expectRefused(f.decide(pending));
   expect(f.spawned()).toBe(0);
   const g = await fixture(); await g.configure(); const other = await g.ingress();
   g.replaceOwner({ authorityRevision: 'replacement-native-authority' });
@@ -464,6 +473,7 @@ test('scope ordering does not change owner identity and public revisions remain 
   f.replaceOwner({ scopes: [...f.authority.current()!.scopes].reverse() });
   await f.decide(pending);
   const result = await f.host.status(pending.ref, f.authority, true);
+  if (result.outcome !== 'recorded') throw new Error(`Expected a recorded review, got ${result.outcome}`);
   const record = result.record as { ownerRevision: string; workspaceRevision: string; owner: { authorityId: string; scopes: string[] }; origin: { routeRevision: string } };
   expect(record.ownerRevision).toMatch(/^[0-9a-f-]{36}$/);
   expect(record.workspaceRevision).toMatch(/^[0-9a-f-]{36}$/);
@@ -485,7 +495,7 @@ test('owner revocation during original-source read cannot return retained text',
   const reading = f.host.status(pending.ref, f.authority, true);
   try {
     await Promise.race([waiting, reading.then(() => { throw new Error('Source status settled before the original read barrier'); })]);
-    f.revokeOwner(); release(); await expect(reading).rejects.toThrow('Owner or lifecycle changed');
+    f.revokeOwner(); release(); await expect(reading).rejects.toThrow('paired owner changed');
   } finally { release(); held.mockRestore(); await reading.then(() => {}, () => {}); }
 });
 
@@ -501,7 +511,7 @@ test('owner scope changes during metadata listing cannot return a stale-owner re
   const listing = f.host.list(f.authority);
   try {
     await Promise.race([waiting, listing.then(() => { throw new Error('Review listing settled before the original list barrier'); })]);
-    f.mutateOwnerScopes(); release(); await expect(listing).rejects.toThrow('Owner or lifecycle changed');
+    f.mutateOwnerScopes(); release(); await expect(listing).rejects.toThrow('paired owner changed');
   } finally { release(); held.mockRestore(); await listing.then(() => {}, () => {}); }
 });
 
@@ -517,11 +527,11 @@ test('saved digest-only review receipts retain metadata access without restoring
   expect(await reopened.status(pending.ref, f.authority, true)).toMatchObject({ source: 'expired-or-lost', recovery: 'new-original-required' });
   expect((await reopened.list(f.authority)).records).toHaveLength(1);
   expect(await reopened.cancel(pending.ref, f.authority)).toMatchObject({ outcome: 'cancelled' });
-  const retained = JSON.parse(readFileSync(path, 'utf8')) as { records: Array<{ owner?: unknown; state: string }> };
-  expect(retained.records[0]?.owner).toBeUndefined();
-  expect(retained.records[0]?.state).toBe('cancelled');
+  // A cancelled review grants nothing, so its row leaves the saved queue.
+  const retained = JSON.parse(readFileSync(path, 'utf8')) as { records: unknown[] };
+  expect(retained.records).toHaveLength(0);
   f.replaceOwner({ scopes: ['read:work-ledger'] });
-  await expect(reopened.status(pending.ref, f.authority, true)).rejects.toThrow();
+  expect(await reopened.status(pending.ref, f.authority, true)).toMatchObject({ outcome: 'held', reason: 'missing-source-proof' });
 });
 
 
@@ -570,7 +580,7 @@ test('status response metadata is rejected as a decision request without consumi
 
 test('a chat selected by a held configure is released by chatId, with no configuration id', async () => {
   const f = await fixture();
-  expect(await f.configure({ accountId: 'someone_else' })).toMatchObject({ outcome: 'held', reason: expect.stringContaining('inbound.telegram.release') });
+  expect(await f.configure({ accountId: 'someone_else' })).toMatchObject({ outcome: 'held', reason: 'account-not-chosen', nextStep: expect.stringContaining('inbound.telegram.release') });
   expect(await f.host.selects('42')).toBe(true);
   expect(await f.invoke('release', { chatId: '42' })).toMatchObject({ outcome: 'released' });
   expect(await f.host.selects('42')).toBe(false);

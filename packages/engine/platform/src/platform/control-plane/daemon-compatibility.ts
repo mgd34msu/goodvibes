@@ -29,12 +29,22 @@
  * raised the floor for.
  */
 
-import { compareBuildVersions } from './client-compatibility.js';
+import { versionMeetsFloor } from './build-compatibility.js';
 
 export type DaemonCompatibilityStatus = 'ok' | 'daemon-update-required' | 'unknown';
 
 export interface DaemonCompatibilityVerdict {
   readonly status: DaemonCompatibilityStatus;
+  /**
+   * Whether the client may adopt this daemon and route work to it. Decided
+   * here, once, for every client: a daemon below the floor is not adopted, and
+   * neither is one whose version cannot be read, because a build that cannot
+   * prove it serves the client's verbs is treated as one that does not (a
+   * proxy or another service answering on the port is the usual cause).
+   */
+  readonly adopt: boolean;
+  /** The line to show the owner, or null when there is nothing to say. */
+  readonly notice: string | null;
   /** One plain line naming the real situation, for a log, a banner or a refusal. */
   readonly message: string;
   readonly daemonVersion: string | undefined;
@@ -65,9 +75,9 @@ export function readDaemonVersion(statusPayload: unknown): string | undefined {
  *
  * The three outcomes mirror `evaluateClientCompatibility`, including the part
  * that matters most: a daemon whose version cannot be read is 'unknown', NOT
- * 'ok'. A build that cannot prove it carries a required behavior is treated as
- * one that does not. An absent FLOOR is a different thing, a client that is
- * not asking for anything, and yields 'ok'.
+ * 'ok', and is not adopted. An absent FLOOR is a different thing, a client
+ * that is not asking for anything, and yields 'ok'. Clients read `adopt` and
+ * `notice` rather than deciding from `status` themselves.
  *
  * `daemonLabel` names the peer in the sentence (a base URL, a host name) so an
  * operator with two daemons on the LAN learns WHICH one is old. Absent, the
@@ -85,29 +95,25 @@ export function evaluateDaemonCompatibility(input: {
   if (!floor) {
     return {
       status: 'ok',
+      adopt: true,
+      notice: null,
       message: 'This client declares no daemon build floor; nothing to check.',
       daemonVersion,
       floor: undefined,
     };
   }
   if (!daemonVersion || !/\d/.test(daemonVersion)) {
-    return {
-      status: 'unknown',
-      message: `${peer} did not report a version, so it cannot be checked against this client's floor of ${floor}. Update the daemon to be sure it is current.`,
-      daemonVersion,
-      floor,
-    };
+    const message = `${peer} did not report a version, so this client is not using it. Check that the address points at a GoodVibes daemon, and update the daemon to ${floor} or newer.`;
+    return { status: 'unknown', adopt: false, notice: message, message, daemonVersion, floor };
   }
-  if (compareBuildVersions(daemonVersion, floor) < 0) {
-    return {
-      status: 'daemon-update-required',
-      message: `${peer} is running build ${daemonVersion}; this client requires ${floor} or newer, update the daemon.`,
-      daemonVersion,
-      floor,
-    };
+  if (!versionMeetsFloor(daemonVersion, floor)) {
+    const message = `${peer} is running build ${daemonVersion}; this client requires ${floor} or newer, update the daemon.`;
+    return { status: 'daemon-update-required', adopt: false, notice: message, message, daemonVersion, floor };
   }
   return {
     status: 'ok',
+    adopt: true,
+    notice: null,
     message: `${peer} is running build ${daemonVersion}, which meets this client's floor of ${floor}.`,
     daemonVersion,
     floor,

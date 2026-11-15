@@ -197,15 +197,20 @@ export function createNativeDataWriteOwner(publisher: AdmittedNativeDataPublishe
   let physicalCurrent: () => void;
   try { physicalCurrent = retainPublisherDirectory(execPath); } catch { throw new NativeDataCompatibilityError('unavailable'); }
   let observedFile = false, failed = false;
+  // A requirement only grows: once this process has published or observed a
+  // format in the file it stays there, so a second declaration of it is a set
+  // lookup instead of a directory walk, a lock and three file reads.
+  const declared = new Set<NativeDataFormat>();
   const current = () => {
     if (failed || publisher.execPath !== execPath || publisher.version !== runningVersion || publisher.assertCurrent !== guard || publisher.readerCohort !== captureCohort) throw new NativeDataCompatibilityError('unavailable');
     const result: unknown = guard.call(publisher);
     if (result !== undefined) { drainOwned(result); throw new NativeDataCompatibilityError('unavailable'); }
   };
   return Object.freeze({ declare(format: NativeDataFormat): void {
+    if (failed) throw new NativeDataCompatibilityError('unavailable');
+    if (declared.has(format)) return;
     let release: (() => void) | null = null, published = false;
     try {
-      if (failed) throw new NativeDataCompatibilityError('unavailable');
       if (!Object.hasOwn(requirements, format)) throw new Error();
       physicalCurrent();
       // Another process starting at the same moment holds this for one short
@@ -256,6 +261,7 @@ export function createNativeDataWriteOwner(publisher: AdmittedNativeDataPublishe
       // An already established requirement is a retained data fact, not a
       // fresh execution grant. Final accounting may use it while the host
       // drains after cancellation; no new requirement is published there.
+      declared.add(format);
     } catch (error) {
       // A refusal made before anything was written (a lock held too long, a
       // running version below the floor, a reader cohort that cannot confirm the

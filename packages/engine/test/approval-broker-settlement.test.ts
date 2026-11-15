@@ -50,9 +50,9 @@ test('two concurrent first starts load the store once and keep records created i
 
 test('a failed load is retried by the next start instead of being remembered', async () => {
   const path = storePath();
-  writeFileSync(path, '{"approvals":[{"id":"broken"}]}');
+  writeFileSync(path, '{"approvals":[{"id":"broken","status":"pending"}]}');
   const broker = new ApprovalBroker({ storePath: path });
-  await expect(broker.start()).rejects.toThrow("approval 'broken' is malformed");
+  await expect(broker.start()).rejects.toThrow('waiting approval broken');
   writeFileSync(path, '{"approvals":[]}');
   await broker.start();
   expect(broker.listApprovals()).toEqual([]);

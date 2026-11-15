@@ -175,7 +175,7 @@ describe('a daemon that says nothing usable', () => {
     expect(h.notices).toEqual([]);
   });
 
-  test('a status body with no version is named, and adopted rather than refused', async () => {
+  test('a status body with no version is named and not adopted, the same verdict the Agent reads', async () => {
     const h = makeHarness({
       answer: { answered: true, notices: [], clientFloor: undefined, statusPayload: { status: 'running' } },
       daemonFloor: '1.28.0',
@@ -184,7 +184,7 @@ describe('a daemon that says nothing usable', () => {
     await h.handshake.attach('shared-bearer');
 
     expect(h.notices.join('\n')).toContain('did not report a version');
-    expect(h.adopted).toEqual([{ mode: 'external', reason: undefined, token: 'shared-bearer' }]);
+    expect(h.adopted.map((entry) => entry.mode)).toEqual(['incompatible']);
   });
 
   test('no adopted daemon at all is not read from; there is nothing to ask', async () => {

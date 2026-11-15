@@ -1,20 +1,18 @@
 /**
  * approvals.ts, tolerant readers + display helpers for approvals.* (existing
- * verb family; per-hunk selection lives in packages/engine/platform/src/platform/
- * control-plane/approval-hunk-apply.ts).
+ * verb family).
  *
- * Edit hunks are read DEFENSIVELY off `request.args.edits`, mirrors the platform's
- * own `readApprovalEditHunks` (approval-hunk-apply.ts): a request whose args
- * are not edit-shaped (no `edits` array, empty, or any entry missing
- * path/find/replace) simply has no hunks to render, never a crash.
+ * Edit hunks are read with the platform's own rule (control-plane
+ * approval-hunk-apply.ts): the same reader the daemon uses to accept a
+ * `selectedHunks` answer, including the text the edit tool will really write.
+ * A request whose args are not edit-shaped simply has no hunks to render.
  *
- * PARITY CONTRACT: this module never computes a modified-edit result. It only
- * reads hunks for display and packages a selected-index array for
- * `approvals.approve`. The daemon (S3's moved `buildModifiedEditArgs`) is the
- * single source of the applied result, see goodvibes.ts's ApprovalApproveInput
- * doc and the ApprovalsTasksView component, which sends indices only.
+ * This module never computes a modified-edit result. It reads hunks for
+ * display and packages a selected-index array for `approvals.approve`; the
+ * daemon applies the selection.
  */
 
+import { readApprovalEditHunks as readPlatformEditHunks } from '@goodvibes-jev/engine/platform/platform/control-plane/approval-hunk-apply';
 import type { ApprovalActionResult, ApprovalAttribution, ApprovalAuditRecord, ApprovalEditHunk, ApprovalRecord, ApprovalRememberOption, ApprovalStatus } from './goodvibes';
 
 /** APPROVAL_STATUS_SCHEMA (operator-contract-schemas-runtime.ts) at time of writing. */
@@ -38,57 +36,13 @@ export function isActionableApproval(record: ApprovalRecord): boolean {
   return record.status === 'pending';
 }
 
-/** A base64 field is UTF-8 text, as the edit tool decodes it. */
-function decodeBase64Text(value: string): string {
-  const binary = atob(value);
-  return new TextDecoder().decode(Uint8Array.from(binary, (char) => char.charCodeAt(0)));
-}
-
 /**
- * The text the edit tool will really match and write: a base64 field wins over
- * its plain twin (a plain '' beside base64 is allowed), so the approval shows
- * the bytes that would be written.
- */
-function effectiveText(candidate: Record<string, unknown>, plain: 'find' | 'replace'): string | null {
-  const encoded = candidate[`${plain}_base64`];
-  if (typeof encoded === 'string' && (plain === 'replace' || encoded !== '')) {
-    try {
-      return decodeBase64Text(encoded);
-    } catch {
-      return null;
-    }
-  }
-  const direct = candidate[plain];
-  return typeof direct === 'string' ? direct : null;
-}
-
-function toEditHunk(value: unknown): ApprovalEditHunk | null {
-  if (typeof value !== 'object' || value === null) return null;
-  const candidate = value as Record<string, unknown>;
-  if (typeof candidate.path !== 'string') return null;
-  if (candidate.id !== undefined && typeof candidate.id !== 'string') return null;
-  const find = effectiveText(candidate, 'find');
-  const replace = effectiveText(candidate, 'replace');
-  if (find === null || replace === null) return null;
-  return { ...(candidate as Record<string, unknown>), path: candidate.path, find, replace } as ApprovalEditHunk;
-}
-
-/**
- * Extract a validated edit-hunk list from an approval's request args, or null
- * if the args are not edit-shaped. Mirrors the platform's readApprovalEditHunks
- * exactly so "this approval has hunks to render" agrees with "the daemon will
- * accept a selectedHunks index array for it".
+ * The edit hunks of an approval's request, or null if the args are not
+ * edit-shaped. The platform's reader, so "this approval has hunks to render"
+ * agrees with "the daemon will accept a selectedHunks index array for it".
  */
 export function readApprovalEditHunks(record: ApprovalRecord): ApprovalEditHunk[] | null {
-  const edits = record.request.args.edits;
-  if (!Array.isArray(edits) || edits.length === 0) return null;
-  const items: ApprovalEditHunk[] = [];
-  for (const entry of edits) {
-    const hunk = toEditHunk(entry);
-    if (!hunk) return null;
-    items.push(hunk);
-  }
-  return items;
+  return readPlatformEditHunks(record.request.args);
 }
 
 export function isEditApproval(record: ApprovalRecord): boolean {

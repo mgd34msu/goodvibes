@@ -1,20 +1,13 @@
 import type { DaemonRuntimeRouteHandlers } from './context.js';
 import type { JsonRecord } from './route-helpers.js';
+import type { ConversationMessageEnvelope } from '@goodvibes-jev/engine/contracts/conversation-message';
 
 /**
- * Stable envelope shape for conversation-message-related events published
- * through the control-plane gateway. Used by companion follow-up routing
- * (kind='message') to broadcast messages to TUI surface subscribers without
- * spawning an agent.
+ * The conversation-message envelope, declared once in the contracts package.
+ * Companion follow-up routing (kind='message') publishes it to TUI surface
+ * subscribers without spawning an agent.
  */
-export interface ConversationMessageEnvelope {
-  readonly messageId: string;
-  readonly body: string;
-  readonly source: string;
-  readonly timestamp: number;
-  /** Optional metadata (tool info, model id, etc.) */
-  readonly metadata?: Readonly<Record<string, unknown>> | undefined;
-}
+export type { ConversationMessageEnvelope };
 
 // Boundary type kept intentionally wide so daemon-api does not depend on
 // runtime implementation unions from higher-level packages.

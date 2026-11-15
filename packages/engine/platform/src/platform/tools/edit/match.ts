@@ -11,6 +11,7 @@ import { assertJudgmentInput } from '../../gate/judgment-input.js';
 import { requireActingReading, JudgmentHeldError } from '../../types/judgment-held.js';
 import { editTarget, editTargetView } from '../batteries/edit-target.js';
 import { decisionOrClassic } from '../../runtime/decision-policy.js';
+import { resolveEditText } from './edit-text.js';
 
 type AstGrepModule = typeof import('@ast-grep/napi');
 type EditComputationResult =
@@ -24,34 +25,7 @@ function withExactFallbackWarning(
   return 'error' in result ? result : { ...result, warning };
 }
 
-export function decodeBase64(value: string): string {
-  return Buffer.from(value, 'base64').toString('utf-8');
-}
-
-/**
- * The find and replace text the executor will use. The base64 field wins when
- * set; a plain field that disagrees with it is refused, so the text an owner
- * is shown for approval cannot differ from the bytes written.
- */
-export function resolveEditText(item: EditItem): { find: string; replace: string } | { error: string } {
-  const plainFind = item.find ?? '';
-  const find = item.find_base64 ? decodeBase64(item.find_base64) : plainFind;
-  if (item.find_base64 && plainFind !== '' && plainFind !== find) {
-    return { error: 'find and find_base64 disagree. Send only one of them.' };
-  }
-  if (find === '') {
-    return { error: 'The find text is empty. Send the text to match in find or find_base64.' };
-  }
-  if (item.replace === undefined && item.replace_base64 === undefined) {
-    return { error: 'The replacement is missing. Send replace or replace_base64 (an empty string deletes the match).' };
-  }
-  const plainReplace = item.replace ?? '';
-  const replace = item.replace_base64 !== undefined ? decodeBase64(item.replace_base64) : plainReplace;
-  if (item.replace_base64 !== undefined && plainReplace !== '' && plainReplace !== replace) {
-    return { error: 'replace and replace_base64 disagree. Send only one of them.' };
-  }
-  return { find, replace };
-}
+export { decodeBase64, resolveEditText } from './edit-text.js';
 
 export function normalizeWhitespace(s: string): string {
   return s.replace(/\s+/g, ' ').trim();

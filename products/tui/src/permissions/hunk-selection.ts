@@ -1,69 +1,53 @@
 import type { PermissionAttribution, PermissionPromptRequest, RememberTier } from '@goodvibes-jev/engine/platform/platform/permissions';
+import { decodeBase64, resolveEditText, type EditTextFields } from '@goodvibes-jev/engine/platform/platform/control-plane/approval-hunk-apply';
+import {
+  applyHunkKey,
+  buildHunkSelectionState,
+  hunkSelectionAnswer,
+  isHunkSelectable,
+  type HunkCommit,
+  type HunkKeyResult,
+  type HunkSelectionAnswer,
+  type HunkSelectionState,
+} from '@goodvibes-jev/engine/terminal-shell/hunk-selection';
 
 /**
- * Per-hunk accept/reject at the approval gate (v1).
- *
- * Scoped to the `edit` tool only: EditInput.edits is already an array of
- * independent, atomic find/replace units (each a natural "hunk"), so no
- * diff/hunk-apply primitive is needed here. The `write` (whole-file
- * overwrite) tool stays whole-payload accept/reject, true whole-file hunk
- * splitting would require a genuinely new platform diff/patch-apply primitive,
- * flagged as an explicit v2 follow-up, not built here.
- *
- * NOTE ON platform TYPES: the installed @goodvibes-jev/engine/platform (0.36.0) does not
- * yet export `EditItem`/`EditInput` from its `platform/tools` subpath (that
- * export is added in the in-flight platform change for this work order, landing
- * in 0.37). Until then this module reads `request.args.edits` defensively
- * off a narrow local structural type rather than importing a not-yet-published
- * symbol, per the cross-repo compile contract for this wave.
+ * Per-hunk accept/reject at the approval card. The selection state and its
+ * keys are shared with the Agent (terminal-shell hunk-selection.ts); which
+ * entries are hunks and what each writes is the platform's one rule
+ * (control-plane approval-hunk-apply.ts). The `write` (whole-file overwrite)
+ * tool stays whole-payload accept/reject.
  */
+export { applyHunkKey, buildHunkSelectionState, hunkSelectionAnswer, isHunkSelectable };
+export type { HunkCommit, HunkKeyResult, HunkSelectionAnswer, HunkSelectionState };
 
-/** Structural shape of one EditItem, read defensively, see module doc. */
-export interface EditItemLike {
-  readonly path: string;
-  readonly find?: string | undefined;
-  readonly replace?: string | undefined;
-  readonly find_base64?: string | undefined;
-  readonly replace_base64?: string | undefined;
-  readonly id?: string | undefined;
-}
+/** Structural shape of one edit entry as a card reads it. */
+export type EditItemLike = EditTextFields & { readonly path: string; readonly id?: string | undefined };
 
 /**
- * The find and replace text the edit tool will use for one item: a base64 field
- * wins over its plain twin (a present `replace_base64` of '' is an empty
- * replacement), exactly as the executor reads it, so the card shows the bytes
- * that would be written.
+ * The find and replace text the edit tool will use for one entry, for display.
+ * An entry the edit tool would refuse (plain and base64 text that disagree)
+ * still shows its base64 text, which is what the tool reads first.
  */
-export function editItemText(item: EditItemLike): { readonly find: string; readonly replace: string } {
-  const decode = (value: string): string => Buffer.from(value, 'base64').toString('utf-8');
+export function editItemText(item: EditTextFields & { readonly path?: string }): { readonly find: string; readonly replace: string } {
+  const text = resolveEditText(item);
+  if (!('error' in text)) return text;
   return {
-    find: item.find_base64 ? decode(item.find_base64) : (item.find ?? ''),
-    replace: item.replace_base64 !== undefined ? decode(item.replace_base64) : (item.replace ?? ''),
+    find: item.find_base64 ? decodeBase64(item.find_base64) : (item.find ?? ''),
+    replace: item.replace_base64 !== undefined ? decodeBase64(item.replace_base64) : (item.replace ?? ''),
   };
 }
 
-export interface HunkSelectionState {
-  readonly hunks: readonly EditItemLike[];
-  readonly cursor: number;
-  readonly selected: ReadonlySet<number>;
-}
-
-export type HunkCommit = 'apply' | 'cancel' | null;
-
 /**
- * Structural widening of the installed platform's `PermissionPromptDecision`
- * (0.36.0, no `modifiedArgs` field yet) so main.ts can resolve a decision
- * carrying `modifiedArgs` without a nominal import of a not-yet-published
- * platform symbol. Assign to a variable of this type before calling the platform's
- * typed `resolve(decision: PermissionPromptDecision)`, passing a variable
- * (not an object literal) sidesteps TypeScript's excess-property check, and
- * the extra field is invisible to 0.36.0 callers, structurally compatible
- * once 0.37 adds it for real.
+ * The decision a card resolves with. `selectedHunks` reaches the approval
+ * broker, which applies it; `modifiedArgs` carries the same selection for a
+ * resolver that forwards arguments only.
  */
 export interface PermissionPromptDecisionWithModifiedArgs {
   approved: boolean;
   remember?: boolean;
   modifiedArgs?: Record<string, unknown>;
+  selectedHunks?: readonly number[];
   /** Generalizing remember tier: 'session' | 'exact' | 'command-class' | 'path' | 'tool'. */
   rememberTier?: RememberTier;
   /** Free-text from the user; most useful on deny, rides the structured "user declined" tool result. */
@@ -74,116 +58,7 @@ export interface PermissionPromptDecisionWithModifiedArgs {
 export interface PermissionResolveExtras {
   readonly rememberTier?: RememberTier;
   readonly reason?: string;
-}
-
-export interface HunkKeyResult {
-  readonly state: HunkSelectionState;
-  readonly commit: HunkCommit;
-}
-
-/** Runtime guard: is `value` shaped like an EditItem? */
-function isEditItemLike(value: unknown): value is EditItemLike {
-  if (typeof value !== 'object' || value === null) return false;
-  const candidate = value as Record<string, unknown>;
-  const optionalString = (key: string): boolean => candidate[key] === undefined || typeof candidate[key] === 'string';
-  return (
-    typeof candidate['path'] === 'string' &&
-    (typeof candidate['find'] === 'string' || typeof candidate['find_base64'] === 'string') &&
-    (typeof candidate['replace'] === 'string' || typeof candidate['replace_base64'] === 'string') &&
-    optionalString('find') && optionalString('replace') && optionalString('find_base64') && optionalString('replace_base64') &&
-    optionalString('id')
-  );
-}
-
-/** Extracts a validated EditItemLike[] from a permission request's args, or null if not edit-shaped. */
-function readEditItems(args: Record<string, unknown>): EditItemLike[] | null {
-  const edits = args['edits'];
-  if (!Array.isArray(edits) || edits.length === 0) return null;
-  const items: EditItemLike[] = [];
-  for (const entry of edits) {
-    if (!isEditItemLike(entry)) return null;
-    items.push(entry);
-  }
-  return items;
-}
-
-/**
- * isHunkSelectable, true iff this is a multi-edit `edit` tool call. Single-edit
- * `edit` calls, `write` calls, and everything else keep the exact current
- * y/a/n flow untouched (zero behavior change for the common case).
- */
-export function isHunkSelectable(request: PermissionPromptRequest): boolean {
-  if (request.tool !== 'edit') return false;
-  const items = readEditItems(request.args);
-  return items !== null && items.length > 1;
-}
-
-/** Builds initial hunk-selection state, all hunks selected by default (matches today's "y = approve everything" expectation as the zero-navigation path). */
-export function buildHunkSelectionState(request: PermissionPromptRequest): HunkSelectionState {
-  const hunks = readEditItems(request.args) ?? [];
-  return {
-    hunks,
-    cursor: 0,
-    selected: new Set(hunks.map((_, i) => i)),
-  };
-}
-
-/**
- * applyHunkKey, pure reducer over raw stdin `data` for an active hunk-selection
- * prompt. Mirrors the outer y/a/n prompt's raw-data key routing (not the
- * normalized key vocabulary) since Space must be distinguishable from
- * the trimmed/lowercased `key` the outer switch uses.
- */
-export function applyHunkKey(state: HunkSelectionState, data: string): HunkKeyResult {
-  const lower = data.toLowerCase().trim();
-
-  if (data === 'j' || data === '\x1b[B') {
-    return { state: { ...state, cursor: Math.min(state.hunks.length - 1, state.cursor + 1) }, commit: null };
-  }
-  if (data === 'k' || data === '\x1b[A') {
-    return { state: { ...state, cursor: Math.max(0, state.cursor - 1) }, commit: null };
-  }
-  if (data === ' ') {
-    const next = new Set(state.selected);
-    if (next.has(state.cursor)) {
-      next.delete(state.cursor);
-    } else {
-      next.add(state.cursor);
-    }
-    return { state: { ...state, selected: next }, commit: null };
-  }
-  if (lower === 'a') {
-    return { state: { ...state, selected: new Set(state.hunks.map((_, i) => i)) }, commit: null };
-  }
-  if (data === '\r' || data === '\n') {
-    if (state.selected.size === 0) {
-      // No-op: nothing selected, prompt stays open rather than applying an empty edit.
-      return { state, commit: null };
-    }
-    return { state, commit: 'apply' };
-  }
-  if (lower === 'y') {
-    // Bypass-navigation shortcut: preserves muscle memory for non-hunk prompts.
-    return { state: { ...state, selected: new Set(state.hunks.map((_, i) => i)) }, commit: 'apply' };
-  }
-  if (lower === 'n' || data === '\x1b' || data === '\x03') {
-    return { state, commit: 'cancel' };
-  }
-
-  return { state, commit: null };
-}
-
-/**
- * buildModifiedEditArgs, returns request.args with `edits` filtered to exactly
- * the selected hunks (in original order), preserving every other EditInput
- * field (match/transaction/output/dry_run/validate) untouched.
- */
-export function buildModifiedEditArgs(
-  request: PermissionPromptRequest,
-  state: HunkSelectionState,
-): Record<string, unknown> {
-  const filtered = state.hunks.filter((_, i) => state.selected.has(i));
-  return { ...request.args, edits: filtered };
+  readonly selectedHunks?: readonly number[];
 }
 
 /** Narrow approval-broker surface needed to attribute a prompt to its requester. */
@@ -293,6 +168,7 @@ export function buildPendingPermissionExtras(
       modifiedArgs,
       ...(extras?.rememberTier ? { rememberTier: extras.rememberTier } : {}),
       ...(extras?.reason ? { reason: extras.reason } : {}),
+      ...(approved && extras?.selectedHunks ? { selectedHunks: extras.selectedHunks } : {}),
     }),
     openedAt: now,
     requestedBy: resolveApprovalRequester(broker, request.callId, request.attribution) ?? undefined,

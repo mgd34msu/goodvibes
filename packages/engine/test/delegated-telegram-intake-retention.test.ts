@@ -23,6 +23,14 @@ import { DelegatedTelegramIntake, type DelegatedTelegramIngress } from '../platf
 import { registerDelegatedTelegramCommands } from '../platform/src/platform/daemon/facade-delegated-telegram.js';
 import type { NativeExecutionAuthority, NativePairedSnapshot } from '../platform/src/platform/security/http-auth.js';
 import type { NativeInboundSourceRef } from '../platform/src/platform/control-plane/native-inbound-source.js';
+
+/** A command that did not do what was asked: refused as a held result naming its reason, or rejected outright. */
+async function expectRefused(operation: Promise<unknown>): Promise<void> {
+  const outcome = await operation.then(value => value, (error: unknown) => error);
+  if (outcome instanceof Error) return;
+  expect(outcome).toMatchObject({ outcome: 'held', reason: expect.any(String), nextStep: expect.any(String) });
+}
+
 const cleanups: Array<() => void | Promise<void>> = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
 const original = '  /goodvibes 🚲 e\u0301 repeat repeat\r\nEXTERNAL ORIGINAL\t ';
@@ -102,15 +110,15 @@ const trackedMessages = (f: Awaited<ReturnType<typeof fixture>>) => (f.host as u
 
 test('messages whose source deadline passed leave the intake, so a busy chat is not locked out after 500 messages', async () => {
   const f = await fixture(); await f.configure();
-  for (let id = 1; id <= 500; id++) expect((await f.ingress(`message ${id}`, id)).reason).toBe('awaiting-exact-owner-decision');
+  for (let id = 1; id <= 500; id++) expect((await f.ingress(`message ${id}`, id)).outcome).toBe('awaiting-owner');
   const full = await f.ingress('message 501', 501);
   expect(full.outcome).toBe('held');
-  expect(full.reason).toContain('tracking 500 messages');
+  expect(full.reason).toBe('tracking-full');
   const real = Date.now.bind(Date);
   const clock = spyOn(Date, 'now').mockImplementation(() => real() + 11_000);
   cleanups.push(() => clock.mockRestore());
   const afterDeadline = await f.ingress('message 502', 502);
-  expect(afterDeadline.reason).toBe('awaiting-exact-owner-decision');
+  expect(afterDeadline.outcome).toBe('awaiting-owner');
   expect(trackedMessages(f)).toBe(1);
   const listed = await f.invoke('list') as { pending: unknown[] };
   expect(listed.pending).toHaveLength(1);
@@ -119,7 +127,7 @@ test('messages whose source deadline passed leave the intake, so a busy chat is 
 test('a message the intake held without capturing anything is not kept as a redelivery guard', async () => {
   const f = await fixture();
   await f.configure({ accountId: 'someone_else' });
-  expect((await f.ingress('no configuration yet', 1)).reason).toContain('pending-memory lifetime');
+  expect((await f.ingress('no configuration yet', 1)).reason).toBe('no-configuration');
   expect(trackedMessages(f)).toBe(0);
 });
 
@@ -147,7 +155,7 @@ test('a failure after the broker recorded the owner approval leaves the review h
   const holder = record as unknown as { approval: { resolveOwnerDecision: (...a: unknown[]) => Promise<unknown>; approval: { id: string } } };
   const approval = holder.approval, real = approval.resolveOwnerDecision.bind(approval);
   holder.approval = { ...approval, resolveOwnerDecision: async (...args: unknown[]) => { const settled = await real(...args); f.mutateOwnerScopes(); return settled; } };
-  await expect(f.decide(pending)).rejects.toThrow();
+  await expectRefused(f.decide(pending));
   expect(record.state).toBe('held');
   expect(f.approvals.listApprovals(10).find(entry => entry.id === pending.approvalId)?.status).toBe('approved');
 });

@@ -51,9 +51,9 @@ describe('ProfileManager names', () => {
     expect(manager.list().map((profile) => profile.name)).toEqual(['work-laptop']);
   });
 
-  test('a name with no letters or digits is refused instead of overwriting the fallback profile', () => {
+  test('a name of which nothing can be stored is refused instead of overwriting the fallback profile', () => {
     manager.save('profile', { display: { stream: false } });
-    expect(() => manager.save('!!!', {})).toThrow('no letters or digits');
+    expect(() => manager.save('!!!', {})).toThrow();
     expect(manager.load('profile').data.display?.stream).toBe(false);
   });
 

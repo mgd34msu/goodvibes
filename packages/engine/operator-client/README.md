@@ -39,8 +39,14 @@ const stop = await operator.stream('control.events.stream', {
 stop();
 ```
 
-Response bodies are validated against their Zod contract schemas by default;
-pass `validateResponses: false` to `createOperatorApiClient` to opt out. Call
+Every JSON response is validated by default against its method's output schema
+in the operator contract (a few methods use a hand-written Zod schema instead).
+A mismatch rejects with a `ContractError` that names the method and the field,
+which is how a daemon of another version shows up. Pass
+`validateResponses: false` to `createOperatorApiClient` to skip the check. A
+caller that reaches a method another way (a websocket-only verb sent to the
+daemon's generic method route) can apply the same check with
+`validateOperatorResponse(operator.getOperation(methodId), body)`. Call
 `dispose()` (or `await asyncDispose()`) to release resources when finished;
 the client also implements `Symbol.dispose` / `Symbol.asyncDispose`.
 

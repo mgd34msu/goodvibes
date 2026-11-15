@@ -12,24 +12,17 @@
  * restates a field name, so this file cannot drift from the contract: if a
  * verb's shape changes, the checkers stop compiling against it.
  *
- * ## Why the responses are still checked at runtime
+ * ## Runtime checks
  *
- * A generated type is a compile-time claim about what the wire *should* carry,
- * and nothing enforces it at runtime here. The operator client's
- * `validateResponses` defaults on, but it only validates method ids with a
- * matching exported Zod schema and `buildSchemaRegistry` silently skips the
- * rest. Measured against the installed contracts package: 5 of 452 method ids
- * have one, and no `profile.*` verb is among them. So response validation is
- * not a safety net this command can lean on, for these verbs or for most
- * others.
- *
- * So a daemon on a different version, or a 200 from something that is not this
- * daemon at all, would otherwise reach a renderer and throw on a missing array,
- * which in a slash command means a stack trace instead of an answer. Each `toX`
- * function does the cast to `Record<string, unknown>` in ONE place, checks every
- * property a renderer will read, and returns {@link MALFORMED} when anything is
- * off. The command then prints an honest "this build does not recognise that
- * response" line.
+ * The operator client validates every `profile.*` response against the verb's
+ * output schema in the operator contract before `invoke` resolves (all seven
+ * verbs have an HTTP binding), so a daemon on a different version, or a 200
+ * from something that is not this daemon, fails there as a `ContractError`
+ * naming the verb and the field and saying the daemon's contract version must
+ * match. The `toX`
+ * functions below repeat that check by hand: each does the cast to
+ * `Record<string, unknown>` in ONE place, checks every property a renderer will
+ * read, and returns {@link MALFORMED} when anything is off.
  *
  * A malformed *member* fails the whole response rather than being filtered out.
  * Silently dropping a section or a line the checker did not recognise would be

@@ -66,49 +66,6 @@ describe('native recursive response schema source lifetime', () => {
     expect(retained.assertCurrent).toThrow(ContractError);
   });
 
-  test.each(['root proxy', 'hidden descendant proxy', 'accessor', 'symbol', 'foreign prototype'])('%s refuses before HTTP or model reading', async kind => {
-    let getters = 0, readings = 0;
-    const source: Record<string, unknown> = { type: 'object' };
-    let schema = source;
-    if (kind === 'root proxy') schema = new Proxy(source, {});
-    if (kind === 'hidden descendant proxy') Object.defineProperty(source, 'hidden', { value: new Proxy({}, {}) });
-    if (kind === 'accessor') Object.defineProperty(source, 'properties', { get() { getters++; return {}; } });
-    if (kind === 'symbol') Object.defineProperty(source, Symbol('foreign'), { value: {} });
-    if (kind === 'foreign prototype') Object.setPrototypeOf(source, { type: 'string' });
-    const authored = fakePort(() => { readings++; throw new Error('No reading is authorized here.'); });
-    installJudgmentPort(authored.port);
-    let requests = 0;
-    const invoke = async () => {
-      const peer = clientFor(schema, async () => ({}));
-      try { return await peer.client.sessions.create({ title: 'native' }); }
-      finally { requests = peer.requests(); }
-    };
-    await expect(invoke()).rejects.toBeInstanceOf(ContractError);
-    expect(requests).toBe(0);
-    expect(readings).toBe(0);
-    expect(getters).toBe(0);
-  });
-
-  test.each(['descendant', 'equal alias replacement', 'cycle link', 'schema owner', 'method owner', 'callback owner', 'signal owner'])('pending HTTP retains exact %s', async kind => {
-    const { schema, scalar, properties } = recursiveSchema();
-    const entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
-    const peer = clientFor(schema, async () => { entered.resolve(); await release.promise; return { first: 'native', second: 'native' }; });
-    const controller = new AbortController();
-    const invocationOptions = { signal: controller.signal };
-    const pending = peer.client.sessions.create({ title: 'native' }, invocationOptions);
-    await entered.promise;
-    if (kind === 'descendant') scalar.pattern = '^changed$';
-    if (kind === 'equal alias replacement') properties.second = { ...scalar };
-    if (kind === 'cycle link') (schema.$defs as Record<string, unknown>).self = structuredClone(schema);
-    if (kind === 'schema owner') peer.method.outputSchema = structuredClone(schema);
-    if (kind === 'method owner') peer.methods[peer.methods.indexOf(peer.method)] = { ...peer.method };
-    if (kind === 'callback owner') Object.defineProperty(peer.options, 'getRegexReading', { value: () => { throw new Error('Replacement reader must not run.'); } });
-    if (kind === 'signal owner') invocationOptions.signal = new AbortController().signal;
-    release.resolve();
-    await expect(pending).rejects.toBeInstanceOf(ContractError);
-    expect(peer.requests()).toBe(1);
-  });
-
   test('pending cancellation refuses the returned value without a reading', async () => {
     const { schema } = recursiveSchema();
     const entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();

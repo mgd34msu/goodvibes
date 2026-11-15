@@ -45,12 +45,26 @@ export interface ContractStreamOptions extends ContractInvokeOptions {
   readonly handlers: ServerSentEventHandlers;
 }
 
+// One id index per route list. Shipped manifests are frozen, so the index is
+// built once; a hand-built list that grows is re-indexed when its length moves.
+const routeIndexes = new WeakMap<readonly ContractRouteLike[], { readonly length: number; readonly byId: ReadonlyMap<string, ContractRouteLike> }>();
+
+function routeIndex(routes: readonly ContractRouteLike[]): ReadonlyMap<string, ContractRouteLike> {
+  const known = routeIndexes.get(routes);
+  if (known && known.length === routes.length) return known.byId;
+  const byId = new Map<string, ContractRouteLike>();
+  // First declaration wins, as a linear search would find it.
+  for (const route of routes) if (!byId.has(route.id)) byId.set(route.id, route);
+  routeIndexes.set(routes, { length: routes.length, byId });
+  return byId;
+}
+
 export function requireContractRoute<TRoute extends ContractRouteLike>(
   routes: readonly TRoute[],
   routeId: string,
   kind: string,
 ): TRoute {
-  const route = routes.find((candidate) => candidate.id === routeId);
+  const route = routeIndex(routes).get(routeId) as TRoute | undefined;
   if (!route) {
     throw new GoodVibesError(`Unknown ${kind} "${routeId}". Verify the method/route id is correct and that your contract manifest is up to date.`, { category: 'contract', source: 'contract', recoverable: false });
   }

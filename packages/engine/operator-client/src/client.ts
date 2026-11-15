@@ -27,14 +27,24 @@ import { buildSchemaRegistry } from './schema-registry.js';
  */
 export interface OperatorApiClientOptions extends HttpTransportOptions, Pick<OperatorRemoteClientOptions, 'regexReading' | 'getRegexReading'> {
   /**
-   * When `true` (default), response bodies for typed operator methods are
-   * validated against their Zod contract schemas. Set to `false` to opt out.
-   * This is useful when a caller wants raw response bodies for contract
-   * debugging or benchmarking.
+   * When `true` (default), every JSON response is validated once against its
+   * method's output schema in the operator contract before `invoke` resolves;
+   * the few methods with a hand-written Zod schema in the contracts package use
+   * that instead. A mismatch rejects with a `ContractError` that names the
+   * method and the field, so a daemon of another version is reported as such.
+   * Set to `false` to receive raw bodies with no check at all.
    *
    * @defaultValue true
    */
   readonly validateResponses?: boolean | undefined;
+}
+
+let contractZodSchemas: ReturnType<typeof buildSchemaRegistry> | undefined;
+
+/** The contracts package's Zod response schemas by method id, found once per process. */
+function zodResponseSchemas(): ReturnType<typeof buildSchemaRegistry> {
+  contractZodSchemas ??= buildSchemaRegistry(OPERATOR_METHOD_IDS, ContractZodSchemas);
+  return contractZodSchemas;
 }
 
 /**
@@ -106,14 +116,12 @@ export function createOperatorApiClient(options: OperatorApiClientOptions): Oper
   const validateResponses = options.validateResponses !== false;
   const transport = createHttpTransport(options);
   const contract = getOperatorContract();
-  const schemaRegistry = validateResponses
-    ? buildSchemaRegistry(OPERATOR_METHOD_IDS, ContractZodSchemas)
-    : {};
+  const schemaRegistry = validateResponses ? zodResponseSchemas() : undefined;
   const remote = createOperatorRemoteClient(transport, contract, {
     validateResponses,
     regexReading: options.regexReading,
     getRegexReading: options.getRegexReading,
-    getResponseSchema: validateResponses
+    getResponseSchema: schemaRegistry
       ? (methodId) => schemaRegistry[methodId]
       : undefined,
   });

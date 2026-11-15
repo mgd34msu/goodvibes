@@ -36,8 +36,10 @@ export function methodIdToSchemaName(methodId: string): string {
  * `methodIdToSchemaName(methodId)`.
  *
  * Only entries where the exported value satisfies the `ZodType` interface
- * (has a `safeParse` method) are included. Unknown schema names are silently
- * skipped.
+ * (has a `safeParse` method) are included. A method with no Zod export is not
+ * left unchecked: the operator client validates its response against the
+ * method's output schema in the contract, which every method carries (the
+ * contract generator refuses a method without one).
  *
  * @param methodIds - All operator contract method ids to map.
  * @param schemas - The module namespace object from `@goodvibes-jev/engine/contracts`.

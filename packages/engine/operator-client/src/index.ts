@@ -7,12 +7,14 @@ export type {
 export { createOperatorApiClient } from './client.js';
 export {
   createOperatorRemoteClient,
+  validateOperatorResponse,
 } from './client-core.js';
 export type {
   OperatorRemoteClient,
   OperatorRemoteClientInvokeOptions,
   OperatorRemoteClientOptions,
   OperatorRemoteClientStreamOptions,
+  OperatorResponseValidationOptions,
   KnownMethodArgs,
   KnownPathMethodArgs,
   KnownStreamArgs,

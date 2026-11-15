@@ -11,7 +11,6 @@ import type { HttpTransport } from '@goodvibes-jev/engine/transport-http';
 import {
   invokeContractRoute,
   firstJsonSchemaFailureAsync,
-  retainJsonSchemaSource,
   openContractRouteStream,
   requireContractRoute,
   clientInputRecord,
@@ -36,8 +35,12 @@ export interface OperatorRemoteClientOptions {
   /** Factory that maps a method id to its Zod response schema, when available. */
   readonly getResponseSchema?: ((methodId: string) => ContractInvokeOptions['responseSchema']) | undefined;
   /**
-   * Applies to JSON request/response methods. Server-sent event stream payloads
-   * are validated by their realtime event schemas at the transport boundary.
+   * When on, every JSON response is checked against its method's output schema
+   * in the operator contract (or against the Zod schema from
+   * `getResponseSchema` where one exists), once, before `invoke` resolves. A
+   * mismatch rejects with a `ContractError` naming the method and the field.
+   * Off skips the check entirely. Server-sent event stream payloads are
+   * validated by their realtime event schemas at the transport boundary.
    *
    * @defaultValue true
    */
@@ -206,15 +209,23 @@ function requireMethodRoute(
   return methodHttpRoute(method);
 }
 
+// Keyed by the method record: the shipped manifest is deep-frozen when it is
+// generated, so a method's route and validator are built once per process.
+const httpRoutes = new WeakMap<OperatorMethodContract, ContractRouteDefinition & ContractRouteLike>();
+
 function methodHttpRoute(method: OperatorMethodContract): ContractRouteDefinition & ContractRouteLike {
+  const known = httpRoutes.get(method);
+  if (known) return known;
   if (!method.http) {
     throw new GoodVibesError(`Operator method "${method.id}" does not expose an HTTP binding. This method may be internal-only or require a different transport. Check the contract manifest for available HTTP methods.`, { category: 'contract', source: 'contract', recoverable: false });
   }
-  return {
+  const route = Object.freeze({
     ...method.http,
     id: method.id,
     idempotent: replaysSafely(method),
-  };
+  });
+  httpRoutes.set(method, route);
+  return route;
 }
 
 /**
@@ -230,6 +241,59 @@ function replaysSafely(method: OperatorMethodContract): boolean {
   if (replay.in === 'header') return replay.name.toLowerCase() === 'idempotency-key';
   const required = method.inputSchema?.['required'];
   return Array.isArray(required) && required.includes(replay.name);
+}
+
+/** Options for validating one operator response. */
+export interface OperatorResponseValidationOptions {
+  readonly signal?: AbortSignal | undefined;
+}
+
+type ResponseValidator = (
+  body: unknown,
+  options: OperatorResponseValidationOptions & { readonly reading?: RegexReadingCapability | undefined },
+) => Promise<void>;
+
+const responseValidators = new WeakMap<OperatorMethodContract, ResponseValidator>();
+
+function responseValidatorFor(method: OperatorMethodContract): ResponseValidator {
+  let validator = responseValidators.get(method);
+  if (!validator) {
+    validator = compileResponseValidator(method);
+    responseValidators.set(method, validator);
+  }
+  return validator;
+}
+
+function compileResponseValidator(method: OperatorMethodContract): ResponseValidator {
+  const schema = method.outputSchema;
+  // The contract generator refuses a method without an output schema, so this
+  // is reached only by a hand-built manifest that declares none.
+  if (!schema || typeof schema !== 'object') return async () => {};
+  const applied = isMutatingRoute(method.http?.method);
+  const methodId = method.id;
+  return async (body, options) => {
+    const failure = await firstJsonSchemaFailureAsync(schema, body, options);
+    if (!failure) return;
+    throw new ContractError(
+      `Response validation failed for operator method "${methodId}": field "${failure.path}" expected ${failure.expected} but received ${failure.received}. Ensure the daemon is running the matching GoodVibes contract version.`
+        + (applied ? ` ${REQUEST_APPLIED_NOTICE}` : ''),
+      { source: 'contract', ...(applied ? { phase: 'response-validation', hint: REQUEST_APPLIED_NOTICE } : {}) },
+    );
+  };
+}
+
+/**
+ * Validate a response body against the method's output schema in the operator
+ * contract, the same check `invoke` applies. For a caller that reached the
+ * method by another route (a websocket-only verb over the generic method
+ * route). Rejects with a `ContractError` naming the method and the field.
+ */
+export function validateOperatorResponse(
+  method: OperatorMethodContract,
+  body: unknown,
+  options: OperatorResponseValidationOptions = {},
+): Promise<void> {
+  return responseValidatorFor(method)(body, options);
 }
 
 /**
@@ -276,41 +340,29 @@ export function createOperatorRemoteClient(
     input: Record<string, unknown> | undefined,
     options: OperatorRemoteClientInvokeOptions,
   ): Promise<T> {
-    const schema = options.responseSchema ?? clientOptions.getResponseSchema?.(methodId);
     const method = requireMethod(contract, methodId);
-    const validateResponse = clientOptions.validateResponses !== false;
-    const getRegexReading = clientOptions.getRegexReading, configuredReading = clientOptions.regexReading;
-    const outputSchema = method.outputSchema;
-    const retainedSchema = retainJsonSchemaSource(outputSchema);
-    const signal = options.signal;
-    const assertValidationCurrent = () => {
-      signal?.throwIfAborted();
-      if (options.signal !== signal || requireMethod(contract, methodId) !== method || clientOptions.getRegexReading !== getRegexReading || clientOptions.regexReading !== configuredReading || method.id !== methodId || method.outputSchema !== outputSchema)
-        throw new ContractError('Response schema owner changed during the request.');
-      retainedSchema.assertCurrent();
-    };
     const route = methodHttpRoute(method);
-    return invokeContractRoute<T>(
+    const schema = options.responseSchema ?? clientOptions.getResponseSchema?.(methodId);
+    const request = invokeContractRoute<T>(
       transport,
       route,
       input,
       schema ? { ...options, responseSchema: schema } : options,
-    ).then(async (body) => {
-      // truth table for validation decision:
-      // | schema (Zod) | validateResponses | getResponseSchema | action                |
-      // |    present   |       any         |      any          | Zod only (no overlap) |
-      // |    absent    |      false        |      any          | skip                  |
-      // |    absent    |      true (def)   |    absent         | JSON-schema           |
-      // |    absent    |      true (def)   |    present        | JSON-schema (from fn) |
-      if (!schema && validateResponse) {
-        assertValidationCurrent();
-        const reading = getRegexReading && outputSchema
-          ? getRegexReading({ kind: 'operator', methodId: methodId, outputSchema: structuredClone(retainedSchema.snapshot) as Record<string, unknown>, signal, assertCurrent: assertValidationCurrent })
-          : configuredReading;
-        assertValidationCurrent();
-        await validateJsonSchemaResponse(method, body, { signal: options.signal, reading, assertCurrent: assertValidationCurrent });
-        assertValidationCurrent();
-      }
+    );
+    // Which check a response gets:
+    // | schema (Zod) | validateResponses | action                                   |
+    // |    present   |       any         | Zod, in the transport                    |
+    // |    absent    |      false        | none; nothing is built or evaluated      |
+    // |    absent    |      true (def)   | the method's contract output schema      |
+    if (schema || clientOptions.validateResponses === false) return request;
+    const validate = responseValidatorFor(method);
+    const signal = options.signal;
+    return request.then(async (body) => {
+      const outputSchema = method.outputSchema;
+      const reading = clientOptions.getRegexReading && outputSchema
+        ? clientOptions.getRegexReading({ kind: 'operator', methodId, outputSchema, signal, assertCurrent: () => signal?.throwIfAborted() })
+        : clientOptions.regexReading;
+      await validate(body, { signal, reading });
       return body;
     });
   }
@@ -499,17 +551,4 @@ const REQUEST_APPLIED_NOTICE = 'The daemon answered successfully, so this reques
 
 function isMutatingRoute(method: unknown): boolean {
   return typeof method === 'string' && !['GET', 'HEAD'].includes(method.toUpperCase());
-}
-
-async function validateJsonSchemaResponse(method: OperatorMethodContract, body: unknown, options: { readonly signal?: AbortSignal | undefined; readonly reading?: RegexReadingCapability | undefined; readonly assertCurrent: () => void }): Promise<void> {
-  const schema = method.outputSchema;
-  if (!schema || typeof schema !== 'object') return;
-  const failure = await firstJsonSchemaFailureAsync(schema as Record<string, unknown>, body, options);
-  if (!failure) return;
-  const applied = isMutatingRoute(method.http?.method);
-  throw new ContractError(
-    `Response validation failed for operator method "${method.id}": field "${failure.path}" expected ${failure.expected} but received ${failure.received}. Ensure the daemon is running the matching GoodVibes contract version.`
-      + (applied ? ` ${REQUEST_APPLIED_NOTICE}` : ''),
-    { source: 'contract', ...(applied ? { phase: 'response-validation', hint: REQUEST_APPLIED_NOTICE } : {}) },
-  );
 }

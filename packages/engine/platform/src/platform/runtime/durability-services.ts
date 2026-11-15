@@ -2,9 +2,10 @@
  * durability-services.ts, the data-safety and remembered-decision stores a
  * host composition wires, alongside createRuntimeServices:
  *
- *  - StoreSnapshotScheduler: a daily snapshot of every SQLite store this
- *    runtime writes (memory store, memory vector index, code index store),
- *    bounded by the retention engine. Timers are unref'd so an undisposed
+ *  - StoreSnapshotScheduler: a daily snapshot of the store that holds
+ *    primary data (the memory store; the vector and code indexes are derived
+ *    and get one copy before a migration instead), bounded by the retention
+ *    engine. Timers are unref'd so an undisposed
  *    scheduler cannot pin the event loop; hosts that tear down a runtime
  *    stop() it themselves.
  *  - UserPermissionRuleStore: durable user-origin permission rules
@@ -30,7 +31,6 @@
  */
 import { join } from 'node:path';
 import { AppendOnlyRetentionScheduler, runStartupAppendOnlySweep } from './retention/append-only-registry.js';
-import { resolveMemoryVectorDbPath } from '../state/memory-vector-store.js';
 import { StoreSnapshotScheduler } from '../state/store-snapshots.js';
 import { UserPermissionRuleStore } from '../permissions/user-rule-store.js';
 import { logger } from '../utils/logger.js';
@@ -48,7 +48,8 @@ export interface DurabilityServicesInput {
   readonly secretsManager: { onDidChange(listener: (key: string) => void): () => void };
   readonly providerRegistry: { refreshProviderCredentials(): Promise<void> };
   readonly memoryDbPath: string;
-  readonly codeIndexDbPath: string;
+  /** Accepted for hosts that still pass it; the code index is derived and gets no daily snapshot. */
+  readonly codeIndexDbPath?: string | undefined;
   /**
    * The product's declare-once storage handle. The retention-sweep roots below
    * are read straight off it rather than re-declared here, so the janitor can
@@ -126,12 +127,10 @@ export function createDurabilityServices(input: DurabilityServicesInput): Durabi
   const stopCredentialWatch = ownsCredentialRefresh ? secretsManager.onDidChange(() => refreshCredentials('live')) : () => undefined;
   if (ownsCredentialRefresh) refreshCredentials('boot');
 
+  // Primary data only: the memory vector index and the code index are derived and
+  // rebuilt; they get one copy before a schema migration and no daily copy.
   const storeSnapshotScheduler = new StoreSnapshotScheduler({
-    stores: [
-      { name: 'memory store', dbPath: input.memoryDbPath },
-      { name: 'memory vector index', dbPath: resolveMemoryVectorDbPath(input.memoryDbPath) },
-      { name: 'code index store', dbPath: input.codeIndexDbPath },
-    ],
+    stores: [{ name: 'memory store', dbPath: input.memoryDbPath }],
   });
   storeSnapshotScheduler.start();
 

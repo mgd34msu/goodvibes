@@ -60,7 +60,6 @@ import { createTokenAuditBusEmitter } from './token-audit-events.js';
 import { createAsyncDisposalScope, createRuntimeStopRequests, registerRuntimePollers, type AsyncDisposalScope } from './disposal.js';
 import { composeJudgment, type JudgmentServices } from './judgment-services.js';
 import type { BrowserJudgmentCapability } from '@goodvibes-jev/engine/daemon-api';
-import { resolveMemoryVectorDbPath } from '../state/memory-vector-store.js';
 import type { RuntimeEventBus } from './events/index.js';
 import { createDomainDispatch } from './store/index.js';
 import type { DomainDispatch, RuntimeStore } from './store/index.js';
@@ -687,9 +686,11 @@ function buildRuntimeGraph(product: ProductComposition, disposalScope: AsyncDisp
     // memory tier refuses new reindex work outright.
     isEnabled: () => codeInjectionSettingEnabled() && !pauseController.isPaused('code-index-reindex') && admitExpensiveWork('code-index reindex').allowed,
   });
-  // Daily snapshots of every SQLite store, bounded by the retention engine (unref'd timers).
+  // Daily snapshots of the store that holds primary data, bounded by the retention engine (unref'd timers).
+  // The memory vector index and the code index are derived and rebuilt from it and from the tree; they get
+  // one copy before a schema migration (store-versioning.ts) and no daily copy.
   const storeSnapshotScheduler = new StoreSnapshotScheduler({
-    stores: [{ name: 'memory store', dbPath: memoryDbPath }, { name: 'memory vector index', dbPath: resolveMemoryVectorDbPath(memoryDbPath) }, { name: 'code index store', dbPath: codeIndexDbPath }],
+    stores: [{ name: 'memory store', dbPath: memoryDbPath }],
   });
   storeSnapshotScheduler.start();
   // Each timer is registered where it starts so a later construction failure stops it;

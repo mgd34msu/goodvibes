@@ -55,7 +55,8 @@ export interface ShellFooterBuildOptions {
   readonly promptFocused?: boolean;
   /** The keyboard is in the conversation work tree: the status line shows its keys. */
   readonly workTreeFocused?: boolean;
-  readonly usage: { available?: boolean; up: number; down: number; cacheRead?: number; cacheWrite?: number };
+  /** `costUsd` is the session cost as spent (each response at its own model's price); without it the totals are priced at `model`. */
+  readonly usage: { available?: boolean; up: number; down: number; cacheRead?: number; cacheWrite?: number; costUsd?: number | undefined };
   readonly showExitNotice: boolean;
   readonly lastCopyTime: number;
   /** The model the session cost is priced against; not drawn (the header names the model). */

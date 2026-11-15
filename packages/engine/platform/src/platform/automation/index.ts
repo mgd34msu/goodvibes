@@ -64,6 +64,7 @@ export { AutomationJobStore } from './store/jobs.js';
 export { AutomationRunStore } from './store/runs.js';
 export { AutomationRouteStore } from './store/routes.js';
 export { AutomationSourceStore } from './store/sources.js';
+export { resolveAutomationStorePath } from './store/paths.js';
 export type {
   AutomationHeartbeatResult,
   AutomationHeartbeatWake,

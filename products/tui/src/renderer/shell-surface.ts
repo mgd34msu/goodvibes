@@ -63,7 +63,8 @@ export interface ShellFooterBuildOptions {
   readonly promptLineCount: number;
   readonly promptCursorPos?: number;
   readonly promptFocused?: boolean;
-  readonly usage: { available?: boolean; up: number; down: number; cacheRead?: number; cacheWrite?: number; fleetCostUsd?: number | null };
+  /** `costUsd` is the session cost as spent (each response at its own model's price); without it the totals are priced at `model`. */
+  readonly usage: { available?: boolean; up: number; down: number; cacheRead?: number; cacheWrite?: number; fleetCostUsd?: number | null; costUsd?: number | undefined };
   readonly showExitNotice: boolean;
   readonly lastCopyTime: number;
   /** The model the session cost is priced against; not drawn (the header names the model). */

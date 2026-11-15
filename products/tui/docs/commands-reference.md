@@ -482,7 +482,7 @@ GoodVibes ships **163** built-in slash commands across **75** categories. Every 
 
 | Command | Aliases | Usage | Description |
 | --- | --- | --- | --- |
-| `/schedule` | `/sched` | `add <cron\|every\|at\|when> <value> <prompt...> \| list \| remove <id> \| enable <id> \| disable <id> \| run <id>` | Manage automation jobs and scheduled runs |
+| `/schedule` | `/sched` | `add <cron\|every\|at\|when> <value> <prompt...> \| list \| remove <id> \| enable <id> \| disable <id> \| run <id>` | Manage scheduled routines. With the daemon on (the default) they are kept and run by the daemon, so each runs once with or without a terminal open; routines an older terminal kept are moved there once. With the daemon off, the one terminal holding the routine lock runs them and other terminals can only list them |
 
 ## Secrets
 

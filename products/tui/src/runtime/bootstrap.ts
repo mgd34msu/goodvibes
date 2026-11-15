@@ -78,6 +78,7 @@ import { createRelayReadAccessors } from './relay-reachability-bridge.ts';
 import { GOODVIBES_TUI_SURFACE_ROOT } from '../config/surface.ts';
 import { registerStartupProviders } from './startup-provider-registration.ts';
 import { createSerialSteps } from './serial-steps.ts';
+import { startTerminalRoutines } from './terminal-routines.ts';
 
 type ExternalServiceFactories = NonNullable<Parameters<typeof startExternalServices>[3]>;
 
@@ -206,7 +207,7 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
     sessionUnionCache,
   } = await initializeBootstrapCore(stdout, options, noLocalControlPlaneEvents);
   const providerRegistry = services.providerRegistry;
-  const { automationManager, hookDispatcher, pluginManager } = services;
+  const { hookDispatcher, pluginManager } = services;
   options.onHookDispatcherReady?.({ runtime, surface: services.surface, hookDispatcher });
   // A saved custom-provider model must never crash boot, see provider-fallback.ts.
   const bootModelSubstitution = await ensureBootModelResolvable(providerRegistry, configManager);
@@ -615,17 +616,23 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
     surfaceRoot: 'tui',
   });
   wireTerminalMcpReload(services.shellPaths, services.mcpRegistry, mcpDiscovery, bootstrapUnsubs, systemMessageRouter, requestRender);
+  // Routines belong to the daemon, so each runs once with or without a terminal
+  // open: this moves any this terminal kept to it. With the daemon off, the one
+  // terminal holding the routine lock runs them (runtime/terminal-routines.ts).
   if (configManager.get('automation.enabled')) {
     deferredStartup.schedule({
       label: 'automation',
       run: async () => {
-        await automationManager.start();
-        requestRender();
+        const lines = await startTerminalRoutines({ configManager, automationManager: services.automationManager, homeDirectory: services.homeDirectory });
+        if (lines.length > 0) {
+          systemMessageRouter.low(lines.join('\n'));
+          requestRender();
+        }
       },
       onError: (error) => {
         const message = summarizeError(error);
         logger.error('Deferred automation startup failed', { error: message });
-        systemMessageRouter.high(`[Startup] Automation failed to initialize: ${message}`);
+        systemMessageRouter.high(`[Startup] Scheduled routines could not be started: ${message}. /schedule list shows where they are kept.`);
         requestRender();
       },
     });

@@ -83,6 +83,11 @@ export interface SessionInboundInputPollerOptions {
   readonly sessionId: () => string | null;
   /** Surface-side injection: narrate + deliver the steer into the turn machinery. */
   readonly onSteer: (steer: InboundSteer) => void;
+  /**
+   * False while the turn machinery cannot take a steer yet (start-up): the pass
+   * is skipped, so nothing is claimed or reported delivered before a turn can run.
+   */
+  readonly ready?: () => boolean;
   readonly intervalMs?: number;
   readonly now?: () => number;
   readonly log?: InboundLogger;
@@ -95,6 +100,7 @@ const DEFAULT_POLL_INTERVAL_MS = 4_000;
 export class SessionInboundInputPoller {
   private readonly sessionId: () => string | null;
   private readonly onSteer: (steer: InboundSteer) => void;
+  private readonly ready: () => boolean;
   private readonly intervalMs: number;
   private readonly now: () => number;
   private readonly log: InboundLogger;
@@ -114,6 +120,7 @@ export class SessionInboundInputPoller {
   constructor(options: SessionInboundInputPollerOptions) {
     this.sessionId = options.sessionId;
     this.onSteer = options.onSteer;
+    this.ready = options.ready ?? (() => true);
     this.intervalMs = Math.max(250, options.intervalMs ?? DEFAULT_POLL_INTERVAL_MS);
     this.now = options.now ?? (() => Date.now());
     this.log = options.log ?? logger;
@@ -163,7 +170,7 @@ export class SessionInboundInputPoller {
    */
   async pollOnce(): Promise<number> {
     const client = this.client;
-    if (!client || this.polling) return 0;
+    if (!client || this.polling || !this.ready()) return 0;
     const sessionId = this.sessionId();
     if (!sessionId) return 0;
 
@@ -289,28 +296,31 @@ export function narrateInboundSteer(steer: InboundSteer): string {
 /**
  * Build the standard bootstrap-time poller: sessionId tracks the live runtime
  * session ref, and onSteer narrates the steer to the operator then injects it
- * via the SAME path COMPANION_MESSAGE_RECEIVED uses (orchestrator.handleUserInput
- * when wired, else a bare conversation append + render request as a fallback
- * before the orchestrator ref is patched). Extracted from bootstrap-core.ts to
- * keep this module (not the bootstrap god-function) the owner of the wiring.
+ * via the SAME path COMPANION_MESSAGE_RECEIVED uses (orchestrator.handleUserInput).
+ * Until the orchestrator is wired the poller does not claim anything (and onSteer
+ * throws if reached): a steer that arrives during start-up stays queued and is
+ * given to the turn on the first tick after, so it gets an answer instead of
+ * sitting in the transcript as delivered with no turn run.
+ * Extracted from bootstrap-core.ts to keep this module (not the bootstrap
+ * god-function) the owner of the wiring.
  */
 export function createBootstrapInboundInputPoller(deps: {
   readonly runtimeSessionIdRef: { readonly value: string };
   readonly routeOrBuffer: (text: string, priority: 'low' | 'high') => void;
   readonly orchestratorHandleUserInputRef: { readonly value: ((text: string) => void) | null };
-  readonly conversation: { readonly addUserMessage: (text: string) => void };
-  readonly requestRender: () => void;
+  /** No longer read: a steer waits for the orchestrator instead of being appended without a turn. */
+  readonly conversation?: unknown;
+  /** No longer read, for the same reason. */
+  readonly requestRender?: unknown;
 }): SessionInboundInputPoller {
   return new SessionInboundInputPoller({
     sessionId: () => deps.runtimeSessionIdRef.value || null,
+    ready: () => deps.orchestratorHandleUserInputRef.value !== null,
     onSteer: (steer) => {
+      const handleUserInput = deps.orchestratorHandleUserInputRef.value;
+      if (!handleUserInput) throw new Error('the conversation is still starting; the steer is held for the next tick');
       deps.routeOrBuffer(narrateInboundSteer(steer), 'low');
-      if (deps.orchestratorHandleUserInputRef.value) {
-        deps.orchestratorHandleUserInputRef.value(steer.body);
-      } else {
-        deps.conversation.addUserMessage(steer.body);
-        deps.requestRender();
-      }
+      handleUserInput(steer.body);
     },
   });
 }

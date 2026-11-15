@@ -1,24 +1,69 @@
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import {
+  AutomationJobStore,
   formatEveryInterval,
-  normalizeCronStaggerMs,
   normalizeAtSchedule,
   normalizeCronSchedule,
+  normalizeCronStaggerMs,
   normalizeEverySchedule,
   readNaturalLanguageSchedule,
 } from '@goodvibes-jev/engine/platform/platform/automation';
-import type { AutomationManager } from '@goodvibes-jev/engine/platform/platform/automation';
-import type { AutomationJob } from '@goodvibes-jev/engine/platform/platform/automation';
-import type { AutomationScheduleDefinition } from '@goodvibes-jev/engine/platform/platform/automation';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-import { REASONING_EFFORT_SEVERITY, reasoningEffortRank } from '@goodvibes-jev/engine/platform/platform/providers';
-import { buildAutomationEmptyState } from '@goodvibes-jev/engine/platform/platform/runtime/feature-announcements';
 import type {
   AutomationExecutionPolicy,
   AutomationExternalContentSource,
+  AutomationJob,
+  AutomationScheduleDefinition,
   AutomationSessionTarget,
   AutomationWakeMode,
+  CreateAutomationJobInput,
 } from '@goodvibes-jev/engine/platform/platform/automation';
+import type { OperatorMethodOutput } from '@goodvibes-jev/engine/platform';
+import { resolveDaemonEnabled } from '@goodvibes-jev/engine/platform/platform/config';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { REASONING_EFFORT_SEVERITY, reasoningEffortRank } from '@goodvibes-jev/engine/platform/platform/providers';
+import { describeOperatorRpcError, getOperatorRpc, type OperatorRpcAvailable } from './operator-rpc.ts';
+import {
+  daemonCreateInput,
+  daemonScheduleFields,
+  localRoutineRunnerFor,
+  moveTerminalRoutinesToDaemon,
+  terminalRoutineStorePath,
+} from '../../runtime/terminal-routines.ts';
+
+/**
+ * `/schedule` manages routines where they run (runtime/terminal-routines.ts).
+ * With the daemon on, it is a client of the daemon's `automation.jobs.*`: a
+ * routine runs once, with or without a terminal open, and the list is the one
+ * the web UI, channels and agents see. With the daemon off, the terminal that
+ * holds the routine lock runs and changes them; another terminal lists them.
+ */
+
+type JobsListOutput = OperatorMethodOutput<'automation.jobs.list'>;
+type DaemonJob = OperatorMethodOutput<'automation.jobs.create'>;
+
+/** The fields `/schedule` prints, the same for a daemon routine and a local one. */
+interface RoutineView {
+  readonly id: string;
+  readonly name: string;
+  readonly enabled: boolean;
+  readonly runCount: number;
+  readonly nextRunAt?: number | undefined;
+  readonly lastRunAt?: number | undefined;
+  readonly schedule: AutomationScheduleDefinition;
+  readonly prompt: string;
+}
+
+const LOCAL_ZONE = Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+/** One zone for every time this command prints: this machine's, named. */
+function formatTime(ms: number | undefined): string {
+  if (ms === undefined || !Number.isFinite(ms)) return 'n/a';
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: LOCAL_ZONE, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false,
+  }).formatToParts(new Date(ms));
+  const part = (type: string) => parts.find((entry) => entry.type === type)?.value ?? '';
+  return `${part('year')}-${part('month')}-${part('day')} ${part('hour')}:${part('minute')} ${LOCAL_ZONE}`;
+}
 
 function formatSchedule(schedule: AutomationScheduleDefinition): string {
   switch (schedule.kind) {
@@ -29,83 +74,137 @@ function formatSchedule(schedule: AutomationScheduleDefinition): string {
         schedule.staggerMs !== undefined ? `[stagger ${schedule.staggerMs}ms]` : '',
       ].filter(Boolean).join(' ');
     case 'every':
-      return formatEveryInterval(schedule.intervalMs);
+      return `every ${formatEveryInterval(schedule.intervalMs)}`;
     case 'at':
-      return new Date(schedule.at).toISOString();
+      return `once at ${formatTime(schedule.at)}`;
   }
 }
 
-function parseAutomationTarget(raw: string | undefined): AutomationSessionTarget | undefined {
-  if (!raw) return undefined;
+function parseAutomationTarget(raw: string): AutomationSessionTarget {
   const value = raw.trim();
-  if (!value) return undefined;
-  if (value.startsWith('session:')) {
-    return { kind: 'session', sessionId: value.slice('session:'.length), createIfMissing: true };
-  }
-  if (value.startsWith('route:')) {
-    return { kind: 'route', routeId: value.slice('route:'.length), preserveThread: true };
-  }
+  if (value.startsWith('session:')) return { kind: 'session', sessionId: value.slice('session:'.length), createIfMissing: true };
+  if (value.startsWith('route:')) return { kind: 'route', routeId: value.slice('route:'.length), preserveThread: true };
   if (value === 'main' || value === 'current' || value === 'isolated' || value === 'pinned' || value === 'background') {
     return { kind: value, createIfMissing: true };
   }
   return { kind: 'session', sessionId: value, createIfMissing: true };
 }
 
+/** Flags `/schedule add` takes with a value, and the switches it takes alone. Anything else is refused. */
+const VALUE_FLAGS = new Set(['--name', '--model', '--provider', '--template', '--tz', '--timezone', '--stagger', '--target',
+  '--reasoning', '--thinking', '--wake', '--fallback', '--fallbacks', '--tool', '--external-source']);
+const SWITCH_FLAGS = new Set(['--allow-unsafe-external-content', '--light-context']);
+
+/** A routine's fields apart from its schedule, in the shape both owners take. */
+type RoutineFields = Omit<CreateAutomationJobInput, 'schedule' | 'name' | 'prompt'> & { readonly name?: string | undefined };
+
+interface AddOptions {
+  readonly fields: RoutineFields;
+  readonly timezone?: string | undefined;
+  readonly staggerMs?: number | undefined;
+  readonly prompt: string;
+}
+
+/** Reads the words after the schedule value: flags with their values, the rest is the prompt. Throws a refusal sentence. */
+function readAddOptions(words: readonly string[]): AddOptions {
+  const values = new Map<string, string>();
+  const tools: string[] = [];
+  const switches = new Set<string>();
+  const promptWords: string[] = [];
+  for (let i = 0; i < words.length; i++) {
+    const token = words[i]!;
+    if (!token.startsWith('--')) { promptWords.push(token); continue; }
+    if (SWITCH_FLAGS.has(token)) { switches.add(token); continue; }
+    if (!VALUE_FLAGS.has(token)) {
+      throw new Error(`Unknown option ${token}. Options: ${[...VALUE_FLAGS, ...SWITCH_FLAGS].join(', ')}. A prompt word that starts with "--" goes inside quotes.`);
+    }
+    const value = words[i + 1];
+    if (value === undefined || value.startsWith('--')) throw new Error(`${token} needs a value.`);
+    i++;
+    if (token === '--tool') tools.push(value);
+    else values.set(token === '--timezone' ? '--tz' : token === '--fallbacks' ? '--fallback' : token, value);
+  }
+  const stagger = values.get('--stagger');
+  const staggerMs = stagger === undefined ? undefined : normalizeCronStaggerMs(stagger);
+  if (stagger !== undefined && staggerMs === undefined) throw new Error(`Invalid stagger window: "${stagger}".`);
+  const reasoning = values.get('--reasoning');
+  if (reasoning !== undefined && reasoningEffortRank(reasoning) === -1) {
+    throw new Error(`Invalid reasoning effort: "${reasoning}". Known levels: ${REASONING_EFFORT_SEVERITY.join(', ')}.`);
+  }
+  const wake = values.get('--wake');
+  if (wake !== undefined && wake !== 'now' && wake !== 'next-heartbeat') throw new Error(`Invalid wake mode: "${wake}". Use now or next-heartbeat.`);
+  const target = values.get('--target');
+  const fallback = values.get('--fallback')?.split(',').map((entry) => entry.trim()).filter(Boolean);
+  const name = values.get('--name');
+  const model = values.get('--model');
+  const provider = values.get('--provider');
+  const template = values.get('--template');
+  const thinking = values.get('--thinking');
+  const externalContentSource = values.get('--external-source');
+  return {
+    prompt: promptWords.join(' ').trim(),
+    timezone: values.get('--tz'),
+    staggerMs,
+    fields: {
+      ...(name ? { name } : {}),
+      ...(model ? { model } : {}),
+      ...(provider ? { provider } : {}),
+      ...(template ? { template } : {}),
+      ...(reasoning ? { reasoningEffort: reasoning as AutomationExecutionPolicy['reasoningEffort'] } : {}),
+      ...(thinking ? { thinking } : {}),
+      ...(wake ? { wakeMode: wake as AutomationWakeMode } : {}),
+      ...(externalContentSource ? { externalContentSource: externalContentSource as AutomationExternalContentSource } : {}),
+      ...(target ? { target: parseAutomationTarget(target) } : {}),
+      ...(fallback && fallback.length > 0 ? { fallbackModels: fallback } : {}),
+      ...(tools.length > 0 ? { toolAllowlist: tools } : {}),
+      ...(switches.has('--allow-unsafe-external-content') ? { allowUnsafeExternalContent: true } : {}),
+      ...(switches.has('--light-context') ? { lightContext: true } : {}),
+      enabled: true,
+    },
+  };
+}
+
+function shortPrompt(prompt: string): string {
+  const trimmed = prompt.trim();
+  return trimmed.length > 60 ? `${trimmed.slice(0, 60)}...` : trimmed;
+}
+
+function daemonView(job: DaemonJob): RoutineView {
+  return {
+    id: job.id, name: job.name, enabled: job.enabled, runCount: job.runCount, nextRunAt: job.nextRunAt, lastRunAt: job.lastRunAt,
+    // The daemon returns the platform's schedule shape; its contract type is the looser JSON schema of it.
+    schedule: job.schedule as unknown as AutomationScheduleDefinition,
+    prompt: job.execution.prompt ?? job.description ?? '',
+  };
+}
+
+function localView(job: AutomationJob): RoutineView {
+  return {
+    id: job.id, name: job.name, enabled: job.enabled, runCount: job.runCount, nextRunAt: job.nextRunAt, lastRunAt: job.lastRunAt,
+    schedule: job.schedule, prompt: job.execution.prompt ?? job.description ?? '',
+  };
+}
+
+function listedJobs(output: JobsListOutput): readonly DaemonJob[] {
+  return ('jobs' in output ? output.jobs : output.items) as readonly DaemonJob[];
+}
+
 /**
- * Validate a `--effort` argument.
- *
- * Not a fixed four-value list: which levels exist is per-model, so this checks
- * the platform's severity ladder, narrowed to the current model's own resolved
- * levels whenever the runtime has published them. A scheduled job may well run
- * on a different model than the one in use now, so a level this model does not
- * offer is still accepted when it is a real level, it is re-resolved against
- * whichever model actually serves the run.
- */
-function parseReasoningEffort(raw: string | undefined): AutomationExecutionPolicy['reasoningEffort'] | undefined {
-  if (!raw) return undefined;
-  if (reasoningEffortRank(raw) !== -1) return raw;
-  throw new Error(
-    `Invalid reasoning effort: "${raw}". Known levels: ${REASONING_EFFORT_SEVERITY.join(', ')}.`,
-  );
-}
-
-function parseWakeMode(raw: string | undefined): AutomationWakeMode | undefined {
-  if (!raw) return undefined;
-  if (raw === 'now' || raw === 'next-heartbeat') return raw;
-  throw new Error(`Invalid wake mode: "${raw}". Use now or next-heartbeat.`);
-}
-
-function parseFallbackModels(raw: string | undefined): string[] | undefined {
-  if (!raw) return undefined;
-  return raw.split(',').map((entry) => entry.trim()).filter((entry) => entry.length > 0);
-}
-
-function formatNextRun(nextRunAt?: number): string {
-  return nextRunAt ? new Date(nextRunAt).toLocaleString() : 'n/a';
-}
-
-function formatPrompt(job: AutomationJob): string {
-  const prompt = (job.execution.prompt ?? job.description ?? '').trim();
-  return prompt.length > 60 ? `${prompt.slice(0, 60)}...` : prompt;
-}
-
-/**
- * An exact id wins; otherwise a prefix must name exactly one job. `remove`,
+ * An exact id wins; otherwise a prefix must name exactly one routine. `remove`,
  * `disable` and `run` act on the result, so an ambiguous prefix is refused with
- * the candidates instead of acting on whichever job is listed first.
+ * the candidates instead of acting on whichever routine is listed first.
  */
-function resolveJob(manager: AutomationManager, id: string, ctx: CommandContext): AutomationJob | undefined {
-  const jobs = manager.listJobs();
+function resolveJob(jobs: readonly RoutineView[], id: string, ctx: CommandContext): RoutineView | undefined {
   const exact = jobs.find((job) => job.id === id);
   if (exact) return exact;
   const matches = jobs.filter((job) => job.id.startsWith(id));
   if (matches.length === 0) {
-    ctx.print(`Automation job not found: ${id}`);
+    ctx.print(`No routine with id ${id}. Run /schedule list to see routine ids.`);
     return undefined;
   }
   if (matches.length > 1) {
     ctx.print(
-      `Ambiguous automation job "${id}": ${matches.length} jobs start with it. Nothing was changed. Use a longer id:\n`
+      `Ambiguous routine id "${id}": ${matches.length} routines start with it. Nothing was changed. Use a longer id:\n`
       + matches.map((job) => `  ${job.id}  ${job.name}`).join('\n'),
     );
     return undefined;
@@ -113,301 +212,245 @@ function resolveJob(manager: AutomationManager, id: string, ctx: CommandContext)
   return matches[0];
 }
 
-function parseAtValue(raw: string): number {
-  const parsed = Date.parse(raw);
-  if (Number.isNaN(parsed)) {
-    throw new Error(`Invalid date/time: "${raw}". Use an ISO timestamp or a format Date.parse understands.`);
-  }
-  return parsed;
+/** Where the routines are kept and how each verb reaches them. */
+interface RoutineOwner {
+  /** Shown in the list header. */
+  readonly where: string;
+  /** Shown after a create, about when the routine runs. */
+  readonly runsNote: string;
+  /** Lines to show before the command's own output (routines moved to the daemon). */
+  readonly notices: readonly string[];
+  /** Set when this terminal may only read: the sentence that says why and what to do. */
+  readonly readOnly?: string | undefined;
+  list(): Promise<readonly RoutineView[]>;
+  create(schedule: AutomationScheduleDefinition, name: string, prompt: string, fields: RoutineFields): Promise<RoutineView>;
+  remove(id: string): Promise<void>;
+  setEnabled(id: string, enabled: boolean): Promise<void>;
+  run(id: string): Promise<string>;
 }
+
+async function daemonOwner(ctx: CommandContext, rpc: OperatorRpcAvailable): Promise<RoutineOwner> {
+  const operator = rpc.platformClient.operator;
+  const move = await moveTerminalRoutinesToDaemon(ctx.platform.configManager, rpc, ctx.ops.automationManager);
+  return {
+    where: 'kept and run by the daemon',
+    runsNote: 'runs once, with or without a terminal open',
+    notices: move.lines,
+    list: async () => listedJobs(await operator.invoke('automation.jobs.list', {})).map(daemonView),
+    create: async (schedule, name, prompt, fields) => daemonView(await operator.invoke('automation.jobs.create', daemonCreateInput({
+      ...daemonScheduleFields(schedule), ...fields, name, prompt, description: prompt,
+    }))),
+    remove: async (jobId) => { await operator.invoke('automation.jobs.delete', { jobId }); },
+    setEnabled: async (jobId, enabled) => {
+      if (enabled) await operator.invoke('automation.jobs.enable', { jobId });
+      else await operator.invoke('automation.jobs.disable', { jobId });
+    },
+    run: async (jobId) => {
+      const run = await operator.invoke('automation.jobs.run', { jobId });
+      return `run: ${run.runId}  status: ${run.status}`;
+    },
+  };
+}
+
+/** Daemon off: this terminal's own manager, when it holds the routine lock; otherwise the store file, read only. */
+async function localOwner(ctx: CommandContext): Promise<RoutineOwner | string> {
+  const manager = ctx.ops.automationManager;
+  const configManager = ctx.platform.configManager;
+  const runner = manager ? localRoutineRunnerFor(manager, configManager) : null;
+  if (!manager || !runner) return 'This terminal has no routine store, so routines cannot be kept here. Turn the daemon on (daemon.enabled in /settings) to keep them there.';
+  if (await runner.ensure()) {
+    return {
+      where: 'kept and run by this terminal (daemon off)',
+      runsNote: 'runs while this terminal is open; turn the daemon on to run it with every terminal closed',
+      notices: [],
+      list: async () => manager.listJobs().map(localView),
+      create: async (schedule, name, prompt, fields) => localView(await manager.createJob({ ...fields, schedule, name, prompt, description: prompt })),
+      remove: async (id) => { await manager.removeJob(id); },
+      setEnabled: async (id, enabled) => { await manager.setEnabled(id, enabled); },
+      run: async (id) => {
+        const run = await manager.runNow(id);
+        return `run: ${run.id}  agent: ${run.agentId ?? 'not started yet'}`;
+      },
+    };
+  }
+  const refusal = 'Another goodvibes terminal on this machine runs the routines while the daemon is off; change them there, or turn the daemon on (daemon.enabled in /settings) so every terminal shares one list. Nothing was changed.';
+  const path = terminalRoutineStorePath(configManager);
+  const refuse = async (): Promise<never> => { throw new Error(refusal); };
+  return {
+    where: 'run by another terminal on this machine (daemon off)',
+    runsNote: '',
+    notices: [],
+    readOnly: refusal,
+    list: async () => (path ? (await new AutomationJobStore({ path }).load()).jobs.filter((job) => job.archivedAt === undefined).map(localView) : []),
+    create: refuse,
+    remove: refuse,
+    setEnabled: refuse,
+    run: refuse,
+  };
+}
+
+/** Reads `/schedule add <kind> <value>` into a schedule; throws a refusal sentence. */
+function readSchedule(kind: 'cron' | 'every' | 'at', value: string, options: AddOptions): AutomationScheduleDefinition {
+  if (kind === 'cron') return normalizeCronSchedule(value, options.timezone, options.staggerMs);
+  if (kind === 'every') return normalizeEverySchedule(value);
+  const at = Date.parse(value);
+  if (Number.isNaN(at)) throw new Error(`"${value}" is not a date and time. Use an ISO timestamp such as 2026-04-10T09:00 (read in ${LOCAL_ZONE} when it has no zone).`);
+  if (at <= Date.now()) throw new Error(`${formatTime(at)} has already passed.`);
+  return normalizeAtSchedule(at);
+}
+
+const USAGE = [
+  'Usage:',
+  '  /schedule add cron "<expr>" <prompt...> [--tz <zone>] [--stagger <ms>] [options]',
+  '  /schedule add every <interval> <prompt...> [options]',
+  '  /schedule add at <timestamp> <prompt...> [options]',
+  '  /schedule add when "<natural language, e.g. every weekday at 9am>" <prompt...> [options]',
+  '  /schedule list | remove <id> | enable <id> | disable <id> | run <id>',
+  '  options: --name <name> --model <model> --provider <provider> --template <tmpl> --target main|current|isolated|pinned|background|session:<id>',
+  '           --reasoning <level> --thinking <mode> --wake now|next-heartbeat --fallback <a,b> --tool <name> --external-source <kind>',
+  '           --allow-unsafe-external-content --light-context',
+].join('\n');
 
 export function registerScheduleRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
     name: 'schedule',
+    // Its words are fields (kind, value, prompt), so an unclosed quote is refused, not shifted.
+    strictArgs: true,
     aliases: ['sched'],
-    description: 'Manage automation jobs and scheduled runs',
+    description: 'Manage scheduled routines (kept by the daemon, so each runs once, with or without a terminal open)',
     usage: 'add <cron|every|at|when> <value> <prompt...> | list | remove <id> | enable <id> | disable <id> | run <id>',
     argsHint: 'add cron <expr> | add every <interval> | add at <timestamp> | add when "<natural language>" | list | remove | enable | disable | run',
-    async handler(args, ctx) {
-      args = [...args];
-      const manager = ctx.ops.automationManager;
-      if (!manager) {
-        ctx.print('Automation manager is not available in this runtime.');
+    async handler(rawArgs, ctx) {
+      const args = [...rawArgs];
+      const sub = args[0] ?? 'list';
+      if (!['list', 'add', 'remove', 'enable', 'disable', 'run'].includes(sub)) {
+        ctx.print(USAGE);
         return;
       }
-      const sub = args[0];
-      if (sub === 'add' && args[1] !== 'when') ctx.scheduleReading?.cancel();
-      // Capture ownership and clock before the first await. Repeated delivery
-      // while pending cannot start another reading or create another job.
-      const reading = sub === 'add' && args[1] === 'when'
-        ? ctx.scheduleReading?.begin(JSON.stringify(args)) : undefined;
-      if (sub === 'add' && args[1] === 'when' && !reading) {
-        ctx.print('Schedule reading is unavailable or this submission is already pending. Nothing was created; your text is back in the prompt.');
-        // Nothing was sent, so the typed description returns to an empty composer rather than being lost.
-        ctx.restoreDraft?.(`/schedule ${args.join(' ')}`);
+      const rpc = resolveDaemonEnabled(ctx.platform.configManager) ? getOperatorRpc(ctx) : undefined;
+      if (rpc && !rpc.available) {
+        ctx.print(`Routines are kept and run by the GoodVibes daemon, so each runs once with or without a terminal open; it cannot be reached: ${rpc.reason} Nothing was scheduled or changed.`);
         return;
       }
-      const submittedAt = Date.now();
-      const localTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      const isWhen = sub === 'add' && args[1] === 'when';
+      if (sub === 'add' && !isWhen) ctx.commandReadings?.cancel('schedule');
+      // Captured before the first await: a repeat of the same line while the
+      // phrase is still being read must not start a second reading or a second routine.
+      const begun = isWhen ? ctx.commandReadings?.begin('schedule', JSON.stringify(args)) : undefined;
+      if (isWhen && !begun?.ok) {
+        if (begun?.reason === 'pending') {
+          ctx.print('This schedule is already being read; the routine is created when the reading finishes. Nothing new was started.');
+        } else {
+          ctx.print('Schedule reading is not available while the terminal is closing. Nothing was created; your text is back in the prompt.');
+          ctx.restoreDraft?.(`/schedule ${args.join(' ')}`);
+        }
+        return;
+      }
+      const reading = begun?.ok ? begun : undefined;
       try {
-      await manager.start();
-      if (reading && !reading.current()) return;
+        const owner = rpc ? await daemonOwner(ctx, rpc) : await localOwner(ctx);
+        if (typeof owner === 'string') {
+          ctx.print(owner);
+          return;
+        }
+        if (owner.notices.length > 0) ctx.print(owner.notices.join('\n'));
+        if (reading && !reading.current()) return;
 
-      if (!sub || sub === 'list') {
-        const jobs = manager.listJobs();
-        if (jobs.length === 0) {
-          // The platform owns the presence + title of the how-to-create-your-first-
-          // routine empty state (shown while automation is on and idle). Its
-          // body points at a command name this registry doesn't have, so we
-          // render its title with THIS surface's real /schedule commands, a
-          // command pointer that actually exists in the registry.
-          const emptyState = buildAutomationEmptyState({ enabled: true, routineCount: jobs.length });
+        if (sub === 'list') {
+          const jobs = await owner.list();
+          if (jobs.length === 0) {
+            ctx.print([
+              `No scheduled routines (${owner.where}).`,
+              'Create your first routine with:',
+              '  /schedule add cron "*/30 * * * *" "check build status"',
+              '  /schedule add every 15m "summarize open PRs"',
+              '  /schedule add at 2026-04-10T09:00:00 "send release reminder"',
+            ].join('\n'));
+            return;
+          }
+          const lines = [`Scheduled routines (${jobs.length}, ${owner.where}; times in ${LOCAL_ZONE}):`, ''];
+          for (const job of jobs) {
+            const status = job.enabled ? '● enabled ' : '○ paused  ';
+            lines.push(`  ${job.id.slice(0, 12)}  ${status} runs:${job.runCount}  next:${formatTime(job.nextRunAt)}  last:${job.lastRunAt ? formatTime(job.lastRunAt) : 'never'}`);
+            lines.push(`    name: ${job.name}  schedule: ${formatSchedule(job.schedule)}`);
+            lines.push(`    prompt: ${shortPrompt(job.prompt)}`);
+          }
+          ctx.print(lines.join('\n'));
+          return;
+        }
+
+        if (owner.readOnly) {
+          ctx.print(owner.readOnly);
+          return;
+        }
+
+        if (sub === 'add') {
+          const scheduleKind = args[1];
+          const scheduleArg = args[2];
+          if ((scheduleKind !== 'cron' && scheduleKind !== 'every' && scheduleKind !== 'at' && scheduleKind !== 'when') || !scheduleArg) {
+            ctx.print(USAGE);
+            return;
+          }
+          let options: AddOptions;
+          let schedule: AutomationScheduleDefinition;
+          try {
+            options = readAddOptions(args.slice(3));
+            if (!options.prompt) throw new Error('the routine needs prompt text after the schedule value.');
+            if (scheduleKind === 'when') {
+              ctx.print('Reading schedule with Jev…');
+              const parsed = await readNaturalLanguageSchedule({ phrase: scheduleArg, now: Date.now(), timezone: options.timezone ?? LOCAL_ZONE, staggerMs: options.staggerMs }, {
+                signal: reading!.signal,
+                beforeAttempt: reading!.assertCurrent,
+                onRetry: () => { if (reading!.current()) ctx.print('Waiting for Jev to read the schedule…'); },
+              });
+              if (!reading!.current()) return;
+              if (parsed.kind === 'unknown') throw new Error(`the timing is ${parsed.reason}; give it as cron, every or at instead.`);
+              if (parsed.schedule.kind === 'at' && parsed.schedule.at <= Date.now()) throw new Error('the interpreted time has already passed.');
+              ctx.print(`Interpreted "${scheduleArg}" as: ${formatSchedule(parsed.schedule)}`);
+              schedule = parsed.schedule;
+            } else {
+              schedule = readSchedule(scheduleKind, scheduleArg, options);
+            }
+          } catch (error) {
+            if (!reading || reading.current()) ctx.print(`Not scheduled: ${summarizeError(error)}`);
+            return;
+          }
+          // No await between this check and the request.
+          if (reading && !reading.current()) return;
+          const job = await owner.create(schedule, options.fields.name ?? options.prompt.slice(0, 40), options.prompt, options.fields);
+          if (reading && !reading.current()) return;
           ctx.print([
-            emptyState ? emptyState.title : 'No automation jobs.',
-            'Automation is on and idle. Create your first routine with:',
-            '  /schedule add cron "*/30 * * * *" "check build status"',
-            '  /schedule add every 15m "summarize open PRs"',
-            '  /schedule add at 2026-04-10T09:00:00 "send release reminder"',
+            `Routine created: ${job.id}`,
+            `  name: ${job.name}`,
+            `  schedule: ${formatSchedule(job.schedule)}`,
+            `  next run: ${formatTime(job.nextRunAt)} (${owner.runsNote})`,
           ].join('\n'));
           return;
         }
-        const lines = ['Automation jobs:', ''];
-        for (const job of jobs) {
-          const status = job.enabled ? '● enabled ' : '○ paused  ';
-          const next = formatNextRun(job.nextRunAt);
-          const last = job.lastRunAt ? new Date(job.lastRunAt).toLocaleString() : 'never';
-          lines.push(`  ${job.id.slice(0, 12)}  ${status} runs:${job.runCount}  next:${next}  last:${last}`);
-          lines.push(`    name: ${job.name}  schedule: ${formatSchedule(job.schedule)}`);
-          lines.push(`    prompt: ${formatPrompt(job)}`);
-        }
-        ctx.print(lines.join('\n'));
-        return;
-      }
 
-      if (sub === 'add') {
-        const scheduleKind = args[1];
-        if (!scheduleKind) {
-          ctx.print(
-            'Usage:\n'
-            + '  /schedule add cron "<expr>" <prompt...> [--name <name>] [--model <model>] [--provider <provider>] [--template <tmpl>] [--tz <timezone>] [--stagger <ms>]\n'
-            + '  /schedule add every <interval> <prompt...> [--name <name>] [--model <model>] [--provider <provider>] [--template <tmpl>]\n'
-            + '  /schedule add at <timestamp> <prompt...> [--name <name>] [--model <model>] [--provider <provider>] [--template <tmpl>]\n'
-            + '  /schedule add when "<natural language, e.g. every weekday at 9am>" <prompt...>'
-          );
-          return;
-        }
-
-        const legacyCronMode = scheduleKind !== 'cron' && scheduleKind !== 'every' && scheduleKind !== 'at' && scheduleKind !== 'when';
-        const scheduleArg = legacyCronMode ? args[1] : args[2];
-        const valueStartIndex = legacyCronMode ? 2 : 3;
-        if (!scheduleArg) {
-          ctx.print('Missing schedule value.');
-          return;
-        }
-
-        let name: string | undefined;
-        let model: string | undefined;
-        let provider: string | undefined;
-        let template: string | undefined;
-        let timezone: string | undefined;
-        let staggerMs: number | undefined;
-        let target: AutomationSessionTarget | undefined;
-        let reasoningEffort: AutomationExecutionPolicy['reasoningEffort'] | undefined;
-        let thinking: string | undefined;
-        let wakeMode: AutomationWakeMode | undefined;
-        let fallbackModels: string[] | undefined;
-        let externalContentSource: AutomationExternalContentSource | undefined;
-        let allowUnsafeExternalContent: boolean | undefined;
-        let lightContext: boolean | undefined;
-        const toolAllowlist: string[] = [];
-        const promptWords: string[] = [];
-        try {
-          for (let i = valueStartIndex; i < args.length; i++) {
-            const token = args[i]!;
-            if (token === '--name' && i + 1 < args.length) {
-              name = args[++i];
-            } else if (token === '--model' && i + 1 < args.length) {
-              model = args[++i];
-            } else if (token === '--provider' && i + 1 < args.length) {
-              provider = args[++i];
-            } else if (token === '--template' && i + 1 < args.length) {
-              template = args[++i];
-            } else if ((token === '--tz' || token === '--timezone') && i + 1 < args.length) {
-              timezone = args[++i];
-            } else if (token === '--stagger' && i + 1 < args.length) {
-              const parsed = normalizeCronStaggerMs(args[++i]);
-              if (parsed === undefined) throw new Error(`Invalid stagger window: "${args[i]}"`);
-              staggerMs = parsed;
-            } else if (token === '--target' && i + 1 < args.length) {
-              target = parseAutomationTarget(args[++i]);
-            } else if (token === '--reasoning' && i + 1 < args.length) {
-              reasoningEffort = parseReasoningEffort(args[++i]);
-            } else if (token === '--thinking' && i + 1 < args.length) {
-              thinking = args[++i];
-            } else if (token === '--wake' && i + 1 < args.length) {
-              wakeMode = parseWakeMode(args[++i]);
-            } else if ((token === '--fallback' || token === '--fallbacks') && i + 1 < args.length) {
-              fallbackModels = parseFallbackModels(args[++i]);
-            } else if (token === '--tool' && i + 1 < args.length) {
-              const tool = args[++i]?.trim();
-              if (tool) toolAllowlist.push(tool);
-            } else if (token === '--external-source' && i + 1 < args.length) {
-              externalContentSource = args[++i] as AutomationExternalContentSource;
-            } else if (token === '--allow-unsafe-external-content') {
-              allowUnsafeExternalContent = true;
-            } else if (token === '--light-context') {
-              lightContext = true;
-            } else {
-              promptWords.push(token);
-            }
-          }
-        } catch (error) {
-          ctx.print(`Error: ${summarizeError(error)}`);
-          return;
-        }
-
-        const prompt = promptWords.join(' ').trim();
-        if (!prompt) {
-          ctx.print('Missing prompt text for automation job.');
-          return;
-        }
-
-        try {
-          let schedule: AutomationScheduleDefinition;
-          if (scheduleKind === 'when') {
-            const sourceTimezone = timezone ?? localTimezone;
-            ctx.print('Reading schedule with Jev…');
-            const parsed = await readNaturalLanguageSchedule({ phrase: scheduleArg, now: submittedAt, timezone: sourceTimezone, staggerMs }, {
-              signal: reading!.signal,
-              beforeAttempt: reading!.assertCurrent,
-              onRetry: () => { if (reading!.current()) ctx.print('Waiting for Jev to read the schedule…'); },
-            });
-            if (!reading!.current()) return;
-            if (parsed.kind === 'unknown') {
-              ctx.print(`Schedule timing is ${parsed.reason}. No automation job was created.`);
-              return;
-            }
-            schedule = parsed.schedule;
-            ctx.print(`Interpreted "${scheduleArg}" as: ${formatSchedule(schedule)}`);
-          } else {
-            schedule = legacyCronMode
-              ? normalizeCronSchedule(scheduleArg, timezone, staggerMs)
-              : scheduleKind === 'cron'
-                ? normalizeCronSchedule(scheduleArg, timezone, staggerMs)
-                : scheduleKind === 'every'
-                  ? normalizeEverySchedule(scheduleArg)
-                  : normalizeAtSchedule(parseAtValue(scheduleArg));
-          }
-          // The read cannot outlive Escape, a new submission, the session or
-          // the terminal. There is no await between this check and dispatch.
-          if (reading && !reading.current()) return;
-          if (reading && schedule.kind === 'at' && schedule.at <= Date.now()) {
-            ctx.print('The interpreted time has already passed. No automation job was created.');
-            return;
-          }
-          const job = await manager.createJob({
-            name: name ?? prompt.slice(0, 40),
-            prompt,
-            schedule,
-            description: prompt,
-            model,
-            provider,
-            fallbackModels,
-            template,
-            target,
-            reasoningEffort,
-            thinking,
-            wakeMode,
-            toolAllowlist: toolAllowlist.length > 0 ? toolAllowlist : undefined,
-            allowUnsafeExternalContent,
-            externalContentSource,
-            lightContext,
-            enabled: true,
-          });
-          if (reading && !reading.current()) return;
-          ctx.print(
-            `Automation job created: ${job.id}\n`
-            + `  name: ${job.name}\n`
-            + `  schedule: ${formatSchedule(job.schedule)}\n`
-            + `  next run: ${formatNextRun(job.nextRunAt)}`
-          );
-        } catch (error) {
-          if (!reading || reading.current()) ctx.print(`Error: ${summarizeError(error)}`);
-        }
-        return;
-      }
-
-      if (sub === 'remove') {
-        const id = args[1];
-        if (!id) {
-          ctx.print('Usage: /schedule remove <id>');
-          return;
-        }
-        const job = resolveJob(manager, id, ctx);
-        if (!job) return;
-        await manager.removeJob(job.id);
-        ctx.print(`Removed automation job: ${job.id} (${job.name})`);
-        return;
-      }
-
-      if (sub === 'enable' || sub === 'disable') {
         const id = args[1];
         if (!id) {
           ctx.print(`Usage: /schedule ${sub} <id>`);
           return;
         }
-        const job = resolveJob(manager, id, ctx);
+        const job = resolveJob(await owner.list(), id, ctx);
         if (!job) return;
-        const updated = await manager.setEnabled(job.id, sub === 'enable');
-        if (!updated) {
-          ctx.print(`Automation job not found: ${id}`);
+        if (sub === 'remove') {
+          await owner.remove(job.id);
+          ctx.print(`Removed routine ${job.id} (${job.name}).`);
           return;
         }
-        ctx.print(
-          `${sub === 'enable' ? 'Enabled' : 'Disabled'} automation job: ${updated.id}\n`
-          + `  next run: ${formatNextRun(updated.nextRunAt)}`
-        );
-        return;
-      }
-
-      if (sub === 'run') {
-        const id = args[1];
-        if (!id) {
-          ctx.print('Usage: /schedule run <id>');
+        if (sub === 'enable' || sub === 'disable') {
+          await owner.setEnabled(job.id, sub === 'enable');
+          ctx.print(`${sub === 'enable' ? 'Enabled' : 'Paused'} routine ${job.id} (${job.name}).`);
           return;
         }
-        const job = resolveJob(manager, id, ctx);
-        if (!job) return;
-        try {
-          const run = await manager.runNow(job.id);
-          ctx.print(
-            `Running automation job ${job.id} immediately\n`
-            + `  run: ${run.id}\n`
-            + `  agent: ${run.agentId ?? 'unavailable'}`
-          );
-        } catch (error) {
-          ctx.print(`Error running automation job: ${summarizeError(error)}`);
-        }
-        return;
-      }
-
-      ctx.print(
-        'Usage:\n'
-        + '  /schedule add cron "<expr>" <prompt...> [--target main|current|isolated|pinned|session:<id>] [--stagger <ms>]\n'
-        + '  /schedule add every <interval> <prompt...> [--target <target>]\n'
-        + '  /schedule add at <timestamp> <prompt...> [--target <target>]\n'
-        + '  /schedule list\n'
-        + '  /schedule remove <id>\n'
-        + '  /schedule enable <id>\n'
-        + '  /schedule disable <id>\n'
-        + '  /schedule run <id>'
-      );
+        ctx.print(`Running routine ${job.id} (${job.name}) now\n  ${await owner.run(job.id)}`);
       } catch (error) {
-        if (!reading) throw error;
-        // Startup belongs to the same operation as reading. Neither a late
-        // rejection nor the terminal fallback may outlive that ownership.
-        if (reading.current()) ctx.print(`Error: ${summarizeError(error)}`);
-      } finally { reading?.finish(); }
+        if (!reading || reading.current()) ctx.print(`/schedule ${sub}: ${rpc ? describeOperatorRpcError(error) : summarizeError(error)}`);
+      } finally {
+        reading?.finish();
+      }
     },
   });
 }

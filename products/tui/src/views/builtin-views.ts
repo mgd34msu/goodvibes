@@ -66,7 +66,8 @@ export function createShellViews(deps: BuiltinViewDeps): ShellViews {
   const usage = new UsageTracker({
     turnEvents: ui.events.turns,
     agentEvents: ui.events.agents,
-    getUsage: () => (deps.orchestrator?.usage ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }) as { input: number; output: number; cacheRead: number; cacheWrite: number; model?: string },
+    // The orchestrator's counters, including `costUsd`: each response priced at the model that produced it.
+    getUsage: () => (deps.orchestrator?.usage ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }) as { input: number; output: number; cacheRead: number; cacheWrite: number; model?: string; costUsd?: number | undefined },
     getContextTokens: () => deps.orchestrator?.lastInputTokens ?? 0,
     getContextWindow: () => deps.getCtxWindow?.() ?? 0,
     getModelId: () => deps.providerRegistry.getCurrentModel().id,

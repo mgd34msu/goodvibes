@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { Agent } from 'undici';
-import { fieldKind, redactionCredential, residualCredential } from '@goodvibes-jev/engine/platform/platform/utils';
+import { redactionCredential, residualCredential } from '@goodvibes-jev/engine/platform/platform/utils';
 import { sessionEventDecoder, syntheticSystemOneAnswers } from './hosted-session-protocol.mjs';
 
 const pause = () => new Promise(resolve => setTimeout(resolve, 20));
@@ -20,13 +20,29 @@ const writeJson = (path, value) => writeFileSync(path, JSON.stringify(value));
 // independent logger/source operations are valid rereads, not boot retries.
 // Match complete emitted question contracts; a shared question name cannot
 // exempt an unrelated decision from the original two-boot replay bound.
-const scopedPrivacyContracts = [fieldKind, redactionCredential, residualCredential].map(battery => ({
+const scopedPrivacyContracts = [redactionCredential, residualCredential].map(battery => ({
   name: battery.name,
   questions: Object.fromEntries(Object.entries(battery.items).map(([name, item]) => [name, item.question])),
 }));
 function scopedPrivacyContract(request) {
   return scopedPrivacyContracts.find(contract => isDeepStrictEqual(request.body.questions, contract.questions));
 }
+// Decision-model requests the five turns of this proof may make. A ceiling, not
+// an exact count: fewer requests pass, more fail. Each listed question set sits
+// at or just above what a clean run makes (10 in all: completion review 2,
+// provider failure reading 2, the two credential readings 1 each, unit pick 1,
+// activity severity 3). A question set not listed here may be asked once; one
+// asked on every successful turn shows up twice and fails until it is listed.
+const judgmentRequestCeilings = new Map([
+  ['turn:false_blocker:unanswered:unfinished:unnecessary_permission:unsupported', 2],
+  ['turn:before_response:billing:category:connection_failure:context_exceeded:provider_unusable:rate_limited:transient_network', 2],
+  ['turn:lineHasCredential:spanIsCredential', 2],
+  ['turn:credentialRemains', 2],
+  ['turn:fits_n1:pick:unit', 2],
+  ['turn:activity:event:severity', 4],
+]);
+const unlistedQuestionSetCeiling = 1;
+const totalJudgmentRequestCeiling = 12;
 async function listen(server) {
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
   return server.address().port;
@@ -84,7 +100,7 @@ export async function runHostedSessionProof({ binary, boundary, env, root }) {
   });
   const judgment = peer(async (request, response) => {
     const body = await readBody(request);
-    assert(judgmentRequests.length < 5_000, 'Unexpected SystemOne request loop');
+    assert(judgmentRequests.length < totalJudgmentRequestCeiling, `Decision-model requests exceeded ${totalJudgmentRequestCeiling} for this proof`);
     judgmentRequests.push({ path: request.url, authorization: request.headers.authorization, body });
     const answers = syntheticSystemOneAnswers(body.questions);
     response.writeHead(200, { 'Content-Type': 'application/json' });
@@ -304,10 +320,16 @@ export async function runHostedSessionProof({ binary, boundary, env, root }) {
     // completion checks to the two successful turns this proof actually ran.
     assert.equal(judgmentRequests.filter(request => Object.hasOwn(request.body.questions, 'unfinished')).length, 2,
       'Each successful original turn must receive one completion review');
+    for (const [group, count] of questionGroups) {
+      const ceiling = judgmentRequestCeilings.get(group) ?? unlistedQuestionSetCeiling;
+      assert(count <= ceiling, `Decision-model question set ${group} was asked ${count} times; at most ${ceiling} expected`);
+    }
+    const unscopedRepeats = repeatedQuestionGroups.filter(group => group.scopedPrivacy === undefined);
+    assert.deepEqual(unscopedRepeats, [], 'Identical decision-model requests repeated more than twice outside the scoped privacy contracts');
     const identityCounts = {};
     for (const { count } of identities.values()) identityCounts[count] = (identityCounts[count] ?? 0) + 1;
     return { elapsedMs: Date.now() - startedAt, judgmentQuestionGroups: Object.fromEntries(questionGroups), judgmentUniqueIdentities: identities.size, judgmentRequestsPerIdentity: identityCounts,
-      repeatedWireIdentities: repeatedQuestionGroups, totalJudgmentRequestBound: 5_000,
+      repeatedWireIdentities: repeatedQuestionGroups, totalJudgmentRequestCeiling,
       evidence: 'synthetic-http-protocol-only; not live Jev calibration', modelRequests: modelRequests.length, judgmentRequests: judgmentRequests.length, streamedDeltas: deltas.length, persistedDetachPolicyPrecedence: true, originalSteerHistoryPreserved: true, lastWatcherDetachKills: true, explicitKillAndTerminatedList: true, relativeWorkspaceRefused: true, restartHistoryPreserved: true, cancellationSettled: true, failureObserved: true, shutdownDuringStream: true };
   } catch (error) {
     console.error('HOSTED FAILURE DETAILS', JSON.stringify({ output, errors, modelRequests: modelRequests.length, judgmentRequests: judgmentRequests.length, events: events.filter(event => event.value.type).map(event => event.value) })); throw error;

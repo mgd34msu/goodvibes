@@ -244,7 +244,7 @@ try {
   console.log(JSON.stringify({ proof: 'compiled-daemon-native-execution', target: source.target, sourceCommit, headCommit,
     runId: source.runId, runAttempt: source.runAttempt, producerRunAttempt: original.artifact.runAttempt,
     semanticQualification: 'synthetic-only', modelAcquisition: 'disabled',
-    status: 'running', startupElapsedMs, bootSemanticRequests: 0,
+    status: 'running', startupElapsedMs, bootSemanticRequests: 0, memoryRoundTripSemanticRequests: requests.length,
     malformedSettingsExit: malformed.code, nativeVectorAvailable: vector.vector.available, cleanShutdown: true }));
 } finally {
   try {

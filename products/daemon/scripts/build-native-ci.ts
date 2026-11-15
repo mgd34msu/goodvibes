@@ -6,16 +6,14 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runNativeBuildCommand } from './native-execution-process.mjs';
 
-interface BuildResult { readonly exitCode: number; readonly output: string; }
-interface GrammarBuildEffects {
-  readonly build: () => Promise<BuildResult>;
+interface NativeAssetEffects {
   readonly probe: () => Promise<void>;
   readonly install: () => Promise<void>;
   readonly report: (message: string) => void;
 }
 
 /** Acquire the locked build assets before compilation, with at most one repair. */
-export async function prepareNativeBuildAssets(effects: Pick<GrammarBuildEffects, 'probe' | 'install' | 'report'>): Promise<void> {
+export async function prepareNativeBuildAssets(effects: NativeAssetEffects): Promise<void> {
   try { await effects.probe(); return; }
   catch { effects.report('Installed native build assets are incomplete; performing one forced frozen-lockfile install.'); }
   await effects.install();
@@ -23,48 +21,15 @@ export async function prepareNativeBuildAssets(effects: Pick<GrammarBuildEffects
   await effects.probe();
 }
 
-function onlyGrammarResolutionFailed(output: string): boolean {
-  const errors = output.replace(/\x1b\[[0-9;]*m/g, '').split(/\r?\n/)
-    .map(line => line.trim()).filter(line => line.startsWith('error:'));
-  const grammar = /^error: Could not resolve: ["'](?:tree-sitter-typescript\/tree-sitter-(?:typescript|tsx)|tree-sitter-(javascript|python|json|css)\/tree-sitter-\1|web-tree-sitter\/web-tree-sitter)\.wasm["'](?:\. Maybe you need to "bun install"\?)?$/;
-  return errors.some(line => grammar.test(line))
-    && errors.every(line => grammar.test(line) || /^error: script "build:binary" exited with code [1-9][0-9]*$/.test(line));
-}
-
-/** Recover only the observed dependency-resolution failure, never general compiler errors. */
-export async function buildWithGrammarRecovery(effects: GrammarBuildEffects): Promise<void> {
-  const first = await effects.build();
-  if (first.exitCode === 0) return;
-  if (!onlyGrammarResolutionFailed(first.output)) throw new Error(`Native compilation failed without a recoverable grammar error:\n${first.output}`);
-  effects.report('Native grammar resolution failed; validating all embedded language grammars before one fresh compilation.');
-  try { await effects.probe(); }
-  catch {
-    effects.report('Installed grammars are incomplete; performing one forced frozen-lockfile install.');
-    await effects.install();
-    await effects.probe();
-  }
-  const recovered = await effects.build();
-  if (recovered.exitCode !== 0) throw new Error(`Native compilation still failed after its single recovery attempt:\n${recovered.output}`);
-}
-
-/** Exercise every embedded language; the presence of a file alone is insufficient. */
-export async function probeInstalledNativeGrammars(repository: string): Promise<void> {
-  probeInFreshProcess(repository, '--probe');
-}
-
 /** Validate required binary/glue assets as well as parsing every embedded language. */
 export async function probeInstalledNativeBuildAssets(repository: string): Promise<void> {
-  probeInFreshProcess(repository, '--probe-build-assets');
-}
-
-function probeInFreshProcess(repository: string, mode: '--probe' | '--probe-build-assets'): void {
   // A failed lookup can remain cached in Bun after a package is repaired.
   // Each probe must observe the actual current installation in a fresh process.
-  const child = spawnSync(process.execPath, [fileURLToPath(import.meta.url), mode, repository], {
+  const child = spawnSync(process.execPath, [fileURLToPath(import.meta.url), '--probe-build-assets', repository], {
     encoding: 'utf8', timeout: 15_000, maxBuffer: 1024 * 1024,
   });
   if (child.error) throw child.error;
-  if (child.signal || child.status !== 0) throw new Error(`Installed ${mode === '--probe' ? 'grammar' : 'native build asset'} validation failed: ${child.stderr.trim()}`);
+  if (child.signal || child.status !== 0) throw new Error(`Installed native build asset validation failed: ${child.stderr.trim()}`);
 }
 
 function inspectRequiredBuildAssets(repository: string): void {
@@ -120,22 +85,23 @@ if (import.meta.main) {
   const stop = (signal: NodeJS.Signals): void => { controller.abort(new Error(`Native build cancelled: ${signal}`)); };
   const interrupt = (): void => stop('SIGINT'), terminate = (): void => stop('SIGTERM');
   process.on('SIGINT', interrupt); process.on('SIGTERM', terminate);
-  const execute = (args: string[], timeoutMs = 300_000): Promise<BuildResult> => runNativeBuildCommand(process.execPath, args, {
+  const execute = (args: string[], timeoutMs = 300_000): Promise<{ readonly exitCode: number }> => runNativeBuildCommand(process.execPath, args, {
     cwd: repository, timeoutMs, signal: controller.signal,
   });
   try {
-    if ((target === '--probe' || target === '--probe-build-assets') && extra.length === 1) {
-      if (target === '--probe-build-assets') inspectRequiredBuildAssets(resolve(extra[0]!));
+    if (target === '--probe-build-assets' && extra.length === 1) {
+      inspectRequiredBuildAssets(resolve(extra[0]!));
       await parseInstalledNativeGrammars(resolve(extra[0]!));
       process.exit(0);
     }
     if (!target || extra.length || !['linux-arm64', 'darwin-x64', 'darwin-arm64'].includes(target)) throw new Error('Expected one native producer target');
-    await buildWithGrammarRecovery({
-      build: async () => execute(['run', '--cwd', 'products/daemon', 'build:binary', '--target', target]),
-      probe: () => probeInstalledNativeGrammars(repository),
+    await prepareNativeBuildAssets({
+      probe: () => probeInstalledNativeBuildAssets(repository),
       install: async () => { if ((await execute(['install', '--frozen-lockfile', '--force'], 120_000)).exitCode !== 0) throw new Error('Frozen dependency repair failed'); },
       report: message => console.error(message),
     });
+    const built = await execute(['run', '--cwd', 'products/daemon', 'build:binary', '--target', target]);
+    if (built.exitCode !== 0) throw new Error(`Native compilation failed with exit code ${built.exitCode}; the compiler output is above.`);
   } catch (error) { console.error(error); process.exitCode = 1; }
   finally { process.off('SIGINT', interrupt); process.off('SIGTERM', terminate); }
 }

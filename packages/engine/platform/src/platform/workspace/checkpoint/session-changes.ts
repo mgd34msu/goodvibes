@@ -9,15 +9,16 @@
  */
 
 import type { SideGitRunner } from './side-git.js';
-import { EMPTY_TREE_HASH } from './side-git.js';
 import type { WorkspaceCheckpoint, CheckpointSessionChanges } from './types.js';
 
 /**
  * Compute a session's aggregate change: the net diff from the state BEFORE the
- * session's earliest checkpoint (that checkpoint's parent, or the empty tree
- * when the session opened the store) to the session's LATEST checkpoint. A
- * session with no stamped checkpoints yields `checkpointCount: 0` with an empty
- * diff (from/to === 'EMPTY'), an honest "nothing recorded", never an error.
+ * session's earliest checkpoint (that checkpoint's parent) to the session's
+ * LATEST checkpoint. When that parent is not known (the earliest checkpoint has
+ * none, or retention removed it) the diff starts at the earliest checkpoint
+ * itself and `baseUnavailable` says so. A session with no stamped checkpoints
+ * yields `checkpointCount: 0` with an empty diff (from/to === 'EMPTY'), an
+ * honest "nothing recorded", never an error.
  */
 export async function computeSessionChanges(
   checkpoints: ReadonlyMap<string, WorkspaceCheckpoint>,
@@ -36,14 +37,14 @@ export async function computeSessionChanges(
   const earliest = sessionCheckpoints[0]!;
   const latest = sessionCheckpoints[sessionCheckpoints.length - 1]!;
   // The state before the session's first change is that checkpoint's parent.
-  // The empty tree is the base only when the session really opened the store
-  // (no parentId); a parent that retention removed leaves the base unknown, so
-  // the diff starts at the earliest checkpoint itself and says so instead of
-  // reporting the whole workspace as the session's work.
+  // Without one (no snapshot preceded it, or retention removed it) the state
+  // before is unknown: the empty tree would report every file in the workspace
+  // as this session's work, so the diff starts at the earliest checkpoint and
+  // says so.
   const parent = earliest.parentId ? checkpoints.get(earliest.parentId) : undefined;
-  const baseUnavailable = earliest.parentId !== null && earliest.parentId !== undefined && !parent;
-  const baseCommit = parent ? parent.commit : baseUnavailable ? earliest.commit : EMPTY_TREE_HASH;
-  const fromLabel = parent ? parent.id : baseUnavailable ? earliest.id : 'EMPTY';
+  const baseUnavailable = !parent;
+  const baseCommit = parent ? parent.commit : earliest.commit;
+  const fromLabel = parent ? parent.id : earliest.id;
   const [unifiedDiff, stat_, files] = await Promise.all([
     sideGit.diff(baseCommit, latest.commit),
     sideGit.diffStat(baseCommit, latest.commit),

@@ -12,14 +12,12 @@ import { createWorkspaceRegistrationLiveChecker, type StoreShellPaths } from './
  * surface's own directory AND gates every automatic snapshot on the owner's
  * registered-workspaces-only ruling.
  *
- * The gate is a LIVE re-check rather than a construction-time decision. The
- * manager only subscribes to turn/agent-lifecycle events when it is built with a
- * runtime bus, so building it without one for an unregistered workspace would
- * mean registering that workspace mid-run had no effect until a restart. It is
- * always built WITH the bus and each individual automatic snapshot attempt is
- * refused instead, by overriding this one instance's own `create`, since the
- * manager has no predicate hook and `create` is the single seam both the
- * automatic subscription and every explicit caller pass through.
+ * The gate is a LIVE re-check rather than a construction-time decision: the
+ * manager is always built with the runtime bus, and its
+ * `automaticSnapshotsAllowed` option is read at each turn or agent-run event,
+ * so registering the workspace mid-run takes effect at the next one. Explicit
+ * creates are gated by the gateway surface below; the safety snapshot a
+ * restore takes is never gated, so a restore always keeps its undo point.
  */
 
 export interface WorkspaceCheckpointing {
@@ -34,7 +32,7 @@ export interface WorkspaceCheckpointing {
    * restore stay unrestricted, they operate over checkpoints that may already
    * exist, including from a since-unregistered workspace.
    */
-  readonly gatewayManager: Pick<WorkspaceCheckpointManager, 'list' | 'create' | 'diff' | 'restore' | 'sessionChanges' | 'workspaceRoot'>;
+  readonly gatewayManager: Pick<WorkspaceCheckpointManager, 'list' | 'create' | 'diff' | 'restore' | 'sessionChanges' | 'workspaceRoot' | 'resolveRoot'>;
   /** Whether checkpoints are currently permitted for this workspace. Re-reads the store on every call. */
   readonly currentlyAllowed: () => boolean;
 }
@@ -67,20 +65,9 @@ export function createWorkspaceCheckpointing(opts: {
     ...readCheckpointGuardSettings(opts.configManager),
     surface: opts.surface,
     runtimeBus: opts.runtimeBus,
+    automaticSnapshotsAllowed: currentlyAllowed,
     ...(opts.resolveSessionId ? { resolveSessionId: opts.resolveSessionId } : {}),
   });
-
-  // Automatic snapshots ('turn' | 'agent-run', fired by the manager's own bus
-  // subscription) resolve to null quietly when the workspace is not eligible,
-  // there is no caller to throw to, and the manager already documents a null
-  // return as the cheap no-op for an unchanged tree. Explicit ('manual') creates
-  // are NOT re-gated here: they go through the gateway surface below, which
-  // throws something actionable before ever reaching this method.
-  const originalCreate = manager.create.bind(manager);
-  manager.create = ((createOpts) => {
-    if (createOpts.kind !== 'manual' && !currentlyAllowed()) return Promise.resolve(null);
-    return originalCreate(createOpts);
-  }) as typeof manager.create;
 
   // Eager initialization remains observable through checkpoint calls, which can
   // retry a failed init. close drains it before owned directories are released.
@@ -89,7 +76,10 @@ export function createWorkspaceCheckpointing(opts: {
   });
 
   const gatewayManager: WorkspaceCheckpointing['gatewayManager'] = {
-    workspaceRoot: manager.workspaceRoot,
+    // Read from the manager each time: init may move the root to the enclosing
+    // repository's top level after this object is built.
+    get workspaceRoot() { return manager.workspaceRoot; },
+    resolveRoot: manager.resolveRoot.bind(manager),
     list: manager.list.bind(manager),
     diff: manager.diff.bind(manager),
     restore: manager.restore.bind(manager),

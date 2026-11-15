@@ -19,7 +19,7 @@ describe('applyHunkRevert while the workspace changes', () => {
     writeFileSync(join(root, 'f.ts'), NEW_CONTENT, 'utf8');
     const edited = `${NEW_CONTENT}// saved while the snapshot ran\n`;
     const workspace: HunkRevertWorkspace = {
-      workspaceRoot: root,
+      resolveRoot: async () => root,
       create: async () => { writeFileSync(join(root, 'f.ts'), edited, 'utf8'); return checkpoint('wcp_safety'); },
     };
     await expect(applyHunkRevert(workspace, 'f.ts', HUNK)).rejects.toBeInstanceOf(HunkRevertConflictError);
@@ -29,7 +29,7 @@ describe('applyHunkRevert while the workspace changes', () => {
   test('a no-op snapshot still reports the latest checkpoint as the undo point', async () => {
     writeFileSync(join(root, 'f.ts'), NEW_CONTENT, 'utf8');
     const workspace: HunkRevertWorkspace = {
-      workspaceRoot: root,
+      resolveRoot: async () => root,
       create: async () => null,
       list: async () => [checkpoint('wcp_latest')],
     };

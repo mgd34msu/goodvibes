@@ -155,12 +155,13 @@ describe('session changes base', () => {
     expect(new Set(bases)).toEqual(new Set(['commit-b']));
   });
 
-  test('only a session that opened the store diffs from the empty tree', async () => {
+  test('a session whose first checkpoint has no parent is never diffed from the empty tree', async () => {
     const bases: string[] = [];
     const checkpoints = new Map([['a', record('a', 10, null, 's1')]]);
     const result = await computeSessionChanges(checkpoints, fakeSideGit(bases), 's1');
-    expect(result.from).toBe('EMPTY');
-    expect(result.baseUnavailable).toBeUndefined();
+    expect(result.from).toBe('a');
+    expect(result.baseUnavailable).toBe(true);
+    expect(new Set(bases)).toEqual(new Set(['commit-a']));
   });
 
   test('a session whose checkpoints sit alone in the history is still flagged, because uncheckpointed edits by others are in the tree', async () => {

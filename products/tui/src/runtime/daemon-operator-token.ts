@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/platform/platform/config';
+import { operatorTokenPath } from '@goodvibes-jev/engine/platform/platform/workspace';
 
 /**
  * The bearer token this process's daemon serves with, read without creating anything.
@@ -11,7 +11,7 @@ import { resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/platform/platf
 export function readDaemonOperatorToken(homeDirectory: string): string | null {
   const override = process.env.GOODVIBES_DAEMON_TOKEN?.trim();
   if (override) return override;
-  const path = join(resolveGoodVibesDaemonHome(homeDirectory), 'operator-tokens.json');
+  const path = operatorTokenPath(resolveGoodVibesDaemonHome(homeDirectory));
   if (!existsSync(path)) return null;
   try {
     const parsed = JSON.parse(readFileSync(path, 'utf-8')) as { token?: unknown } | null;

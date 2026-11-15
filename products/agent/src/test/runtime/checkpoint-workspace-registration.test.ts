@@ -121,14 +121,17 @@ describe('registered-workspaces-only automatic checkpoints', () => {
     // no-op (null) even on the very first checkpoint (manager.ts's "current
     // tree is identical to the parent checkpoint's tree" case), not a
     // registration-gate bug, just nothing to snapshot.
-    writeFileSync(join(workingDir, 'note.txt'), 'hello');
+    // Init first: it takes the empty store's baseline, so the file below is the
+    // turn's change.
     await services.workspaceCheckpointManager.init();
+    writeFileSync(join(workingDir, 'note.txt'), 'hello');
 
     emitTurnCompleted(runtimeBus, 'turn-1');
 
-    const created = await pollUntil(async () => (await services.workspaceCheckpointManager.list()).length > 0);
+    const turns = async () => (await services.workspaceCheckpointManager.list()).filter((c) => c.label !== 'workspace baseline');
+    const created = await pollUntil(async () => (await turns()).length > 0);
     expect(created).toBe(true);
-    const checkpoints = await services.workspaceCheckpointManager.list();
+    const checkpoints = await turns();
     expect(checkpoints[0]?.kind).toBe('turn');
   }, 10000);
 
@@ -149,6 +152,7 @@ describe('registered-workspaces-only automatic checkpoints', () => {
 
   test('explicit checkpoints.create succeeds for a registered workspace', async () => {
     const { services, workingDir } = await buildServices({ registered: true });
+    await services.workspaceCheckpointManager.init();
     writeFileSync(join(workingDir, 'note.txt'), 'hello');
 
     const created = await services.guardedCheckpoints.create({ kind: 'manual' });
@@ -186,6 +190,7 @@ describe('registered-workspaces-only automatic checkpoints', () => {
   test('explicit checkpoints.create also succeeds mid-launch once the workspace is registered, without a restart', async () => {
     const { services, workingDir } = await buildServices({ registered: false });
     const homeDir = services.shellPaths.homeDirectory;
+    await services.workspaceCheckpointManager.init();
     writeFileSync(join(workingDir, 'note.txt'), 'hello');
 
     // The gate moved with the verb. `checkpoints.create` is the daemon's now,

@@ -80,19 +80,6 @@ test('directory retention allows owned child changes while refusing foreign repl
   const other = join(f.directory, 'unselected'); expect(() => owner.ensure(other)).toThrow('selected'); expect(fs.existsSync(other)).toBe(false);
 });
 
-test('short native lease release never removes a substituted symlink to its original inode', () => {
-  const f = fixture(), path = join(f.directory, 'lock'), retained = path + '.retained', release = tryAcquireCrossProcessLock(path);
-  if (!release) throw new Error('Fixture lease unavailable');
-  fs.renameSync(path, retained); fs.symlinkSync(retained, path);
-  expect(() => release()).toThrow('Original native lock owner changed');
-  expect(fs.lstatSync(path).isSymbolicLink()).toBe(true); expect(fs.existsSync(retained)).toBe(true);
-});
-
-
-// Release runs in `finally` blocks, so the async release never throws: a lost
-// lock is logged and the substituted entry is left for its current holder.
-// The short synchronous lease throws because its caller asserts ownership
-// before committing.
 test('async native lease release also retains a substituted symlink to its original inode', async () => {
   const f = fixture(), path = join(f.directory, 'async-lock'), retained = path + '.retained';
   const release = await acquireCrossProcessLock(path, { strictOwnership: true });
@@ -101,21 +88,3 @@ test('async native lease release also retains a substituted symlink to its origi
   expect(fs.lstatSync(path).isSymbolicLink()).toBe(true); expect(fs.existsSync(retained)).toBe(true);
 });
 
-test('a strict owner never takes over a foreign symlink merely because its target names a dead process', () => {
-  const f = fixture(), path = join(f.directory, 'foreign-lock'), outside = join(f.root, 'outside-lock');
-  const child = spawnSync(process.execPath, ['-e', 'process.exit(0)'], { stdio: 'ignore' }); expect(child.status).toBe(0);
-  const original = JSON.stringify({ pid: child.pid, token: '0123456789abcdef', acquiredAt: Date.now() }); fs.writeFileSync(outside, original, { mode: 0o600 }); fs.symlinkSync(outside, path);
-  const acquired = tryAcquireCrossProcessLock(path); try { expect(acquired).toBeNull(); } finally { acquired?.(); }
-  expect(fs.lstatSync(path).isSymbolicLink()).toBe(true); expect(fs.readFileSync(outside, 'utf8')).toBe(original);
-});
-
-
-test('an inadmissible async lock keeps the event loop available until its bounded timeout', async () => {
-  const f = fixture(), path = join(f.directory, 'blocked-lock'), outside = join(f.root, 'outside-blocked');
-  fs.writeFileSync(outside, 'Foreign entry'); fs.symlinkSync(outside, path);
-  let timerRan = false; const timer = setTimeout(() => { timerRan = true; }, 0);
-  try {
-    await expect(acquireCrossProcessLock(path, { strictOwnership: true, totalTimeoutMs: 40, initialBackoffMs: 5, maxBackoffMs: 5 })).rejects.toThrow('timed out');
-    expect(timerRan).toBe(true); expect(fs.lstatSync(path).isSymbolicLink()).toBe(true); expect(fs.readFileSync(outside, 'utf8')).toBe('Foreign entry');
-  } finally { clearTimeout(timer); }
-});

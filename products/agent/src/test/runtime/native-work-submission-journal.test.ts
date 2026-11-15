@@ -232,7 +232,7 @@ test('strict dead-owner lock recovery after a process crash retains the original
   expect(child.success).toBe(false);
   const restarted = new NativeWorkSubmissionJournal(path, {
     acquireCrossProcessLock: (target, options) => acquireCrossProcessLock(target, {
-      ...options, staleMs: 1, initialBackoffMs: 1, maxBackoffMs: 5, totalTimeoutMs: 1_000,
+      ...options, totalTimeoutMs: 1_000,
     }),
   });
   expect(await restarted.read(binding)).toEqual({ binding, command });

@@ -72,6 +72,14 @@ export interface WorkspaceCheckpointManagerOptions {
    * fabricated.
    */
   readonly resolveSessionId?: CheckpointSessionResolver | undefined;
+  /**
+   * Whether automatic snapshots (after a turn or an agent run, and the
+   * baseline of an empty store) may be taken right now. Read at each lifecycle
+   * event, so a change (a workspace registered mid-run) applies to the next
+   * one. Explicit `create()` and the safety snapshot a restore takes are not
+   * governed by it. Defaults to always allowed.
+   */
+  readonly automaticSnapshotsAllowed?: (() => boolean) | undefined;
   readonly retention?: Partial<RetentionConfig> | undefined;
   /** Clock override for deterministic tests. */
   readonly now?: (() => number) | undefined;
@@ -106,7 +114,7 @@ export interface WorkspaceCheckpointManagerOptions {
    * with its own schedule).
    */
   readonly autoRetention?: boolean | undefined;
-  /** How long an operation waits for another process's checkpoint lock before failing. Default 15s. */
+  /** How long an operation waits for another live process's checkpoint lock before failing. Default 15s. */
   readonly lockTimeoutMs?: number | undefined;
   /** Home-directory override (broad-root detection). Defaults to `os.homedir()`. */
   readonly homeDir?: string | undefined;

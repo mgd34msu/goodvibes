@@ -102,6 +102,11 @@ export function SessionRewind({ sessionId }: SessionRewindProps) {
 
   const planData = plan.data ?? null;
   const applyRefused = apply.data?.refused;
+  // A files restore that wrote some files but not all is partial; the receipt's
+  // warnings name each file that kept its content and the undo checkpoint.
+  const filesPartial = Boolean(receipt?.files && !receipt.files.restored && receipt.files.checkpointId !== null
+    && receipt.files.safetyCheckpointId !== null && (receipt.files.restoredFileCount > 0 || receipt.files.removedFileCount > 0));
+  const undoFailed = undoFiles.data?.result?.failedPaths ?? [];
 
   return (
     <section className="session-rewind">
@@ -206,14 +211,16 @@ export function SessionRewind({ sessionId }: SessionRewindProps) {
 
         {receipt && (
           <div className="session-rewind__receipt" role="status">
-            <h4 className="session-rewind__receipt-title">Rewind applied</h4>
+            <h4 className="session-rewind__receipt-title">{filesPartial ? 'Rewind partly applied' : 'Rewind applied'}</h4>
             <ul className="session-rewind__plan-list">
               {receipt.files && (
                 <li>
                   <strong>Files:</strong>{' '}
                   {receipt.files.restored
                     ? `restored ${receipt.files.restoredFileCount} file${receipt.files.restoredFileCount === 1 ? '' : 's'}${receipt.files.removedFileCount ? `, removed ${receipt.files.removedFileCount}` : ''}`
-                    : 'not restored'}
+                    : filesPartial
+                      ? `partly restored; the files that kept their current content are listed below, with the checkpoint that undoes this rewind`
+                      : 'not restored'}
                 </li>
               )}
               {receipt.conversation && (
@@ -255,11 +262,29 @@ export function SessionRewind({ sessionId }: SessionRewindProps) {
               )}
             </div>
             {undoFiles.isError && <p className="session-rewind__error" role="alert">{formatError(undoFiles.error)}</p>}
-            {undoFiles.isSuccess && (
+            {undoFiles.isSuccess && undoFiles.data?.refused && (
+              <p className="session-rewind__error" role="alert">
+                {undoFiles.data.refusal?.reason ?? 'The undo was refused; nothing was changed.'}
+              </p>
+            )}
+            {undoFiles.isSuccess && !undoFiles.data?.refused && undoFailed.length === 0 && (
               <p className="session-rewind__ok" role="status">
                 <StatusDot tone="ok" />
                 File restore undone.
               </p>
+            )}
+            {undoFiles.isSuccess && !undoFiles.data?.refused && undoFailed.length > 0 && (
+              <div className="banner warning session-rewind__warnings" role="alert">
+                <p>
+                  File restore undone, except {undoFailed.length} file{undoFailed.length === 1 ? '' : 's'}:
+                </p>
+                <ul>
+                  {undoFailed.map((f) => <li key={f.path}>{f.path}: {f.reason}</li>)}
+                </ul>
+                {undoFiles.data?.result?.safetyCheckpointId && (
+                  <p>To go back to how the workspace was before this undo, restore checkpoint {undoFiles.data.result.safetyCheckpointId}.</p>
+                )}
+              </div>
             )}
           </div>
         )}

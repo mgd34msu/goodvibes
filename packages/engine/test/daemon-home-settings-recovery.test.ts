@@ -3,7 +3,7 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'n
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, test } from 'bun:test';
-import { readDaemonSetting, writeDaemonSetting, writeOperatorTokenFile } from '../platform/src/platform/workspace/daemon-home.js';
+import { readDaemonSetting, writeDaemonSetting } from '../platform/src/platform/workspace/daemon-home.js';
 
 describe('daemon settings writes', () => {
   test('a corrupt settings file keeps its original bytes next to the fresh file', () => {
@@ -26,7 +26,6 @@ describe('daemon settings writes', () => {
     try {
       writeDaemonSetting(dir, 'a', '1');
       writeDaemonSetting(dir, 'b', '2');
-      writeOperatorTokenFile(dir, 'tokens');
       expect([readDaemonSetting(dir, 'a'), readDaemonSetting(dir, 'b')]).toEqual(['1', '2']);
       expect(readdirSync(dir).filter((f) => f.endsWith('.tmp'))).toEqual([]);
     } finally {

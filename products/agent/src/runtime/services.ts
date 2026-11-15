@@ -552,7 +552,7 @@ export interface RuntimeServices extends Omit<PlatformRuntimeServices, 'sessionB
    */
   readonly guardedCheckpoints: Pick<
     WorkspaceCheckpointManager,
-    'list' | 'create' | 'diff' | 'restore' | 'sessionChanges' | 'workspaceRoot'
+    'list' | 'create' | 'diff' | 'restore' | 'sessionChanges' | 'workspaceRoot' | 'resolveRoot'
   >;
   /** Every client seam's one plug into the connected host. */
   readonly daemonVerbs: DaemonVerbCaller;
@@ -1854,9 +1854,9 @@ function composeRuntimeServices(options: RuntimeServicesOptions, disposalScope: 
   // root ALWAYS passes runtimeBus now (so the automatic-snapshot subscription
   // is live from process start regardless of boot-time registration state),
   // and instead gates each individual automatic snapshot attempt through a
-  // LIVE re-check via `checkpointsCurrentlyAllowed` below, patched onto this
-  // one manager instance's own `create` method, since the platform has no built-in
-  // predicate hook for this. `checkpointsCurrentlyAllowed` is cheap to call on
+  // LIVE re-check via `checkpointsCurrentlyAllowed` below, passed as the
+  // manager's `automaticSnapshotsAllowed` option, which it reads at each
+  // lifecycle event. `checkpointsCurrentlyAllowed` is cheap to call on
   // every event: `createWorkspaceRegistrationLiveChecker` probes the git
   // worktree link ONCE (a `git` subprocess spawn) and every call after that
   // only re-reads the shared registration JSON file. "Allowed" means
@@ -1905,6 +1905,7 @@ function composeRuntimeServices(options: RuntimeServicesOptions, disposalScope: 
     // into this scoped location automatically on first surface use.
     surface,
     runtimeBus: options.runtimeBus,
+    automaticSnapshotsAllowed: checkpointsCurrentlyAllowed,
     // Stamp automatic snapshots with the live session id so a checkpoint created
     // during this launch is found by the session-scoped restore/rewind lookup,
     // the fix that makes same-launch activation work without a restart. The
@@ -1913,25 +1914,6 @@ function composeRuntimeServices(options: RuntimeServicesOptions, disposalScope: 
     ...(options.resolveSessionId ? { resolveSessionId: options.resolveSessionId } : {}),
   });
   disposalScope.registry.add('workspace checkpoints', () => workspaceCheckpointManager.drain());
-  // Gate AUTOMATIC snapshots (kind 'turn' | 'agent-run', fired internally by
-  // the manager's own bus subscription via `this.create(...)`) on the live
-  // registration check, by overriding this instance's own `create` method,
-  // the manager has no predicate-hook option, and this is the one seam that
-  // every automatic-snapshot call and every explicit caller both go through.
-  // 'manual' (explicit, gateway-invoked) creates are NOT re-gated here: they
-  // already go through checkpointsGatewayManager.create's own live check
-  // below, which throws an actionable message BEFORE ever reaching this
-  // method, this override would just be a silent, redundant pass for that
-  // path. For an automatic snapshot there is no caller to throw to (the
-  // manager's own subscription callbacks only `.catch()`-log a rejection), so
-  // an automatic attempt against an unregistered/un-guarded workspace resolves
-  // to `null` quietly, the same "cheap no-op" contract `create()` already
-  // documents for an unchanged tree, not a new error path.
-  const originalCreateCheckpoint = workspaceCheckpointManager.create.bind(workspaceCheckpointManager);
-  workspaceCheckpointManager.create = ((opts) => {
-    if (opts.kind !== 'manual' && !checkpointsCurrentlyAllowed()) return Promise.resolve(null);
-    return originalCreateCheckpoint(opts);
-  }) as typeof workspaceCheckpointManager.create;
   // Eagerly initialize so the automatic snapshot subscription is wired up
   // immediately (mirrors the platform's own default runtime services) rather than
   // only on first explicit checkpoints.* call, otherwise the very first
@@ -1959,9 +1941,12 @@ function composeRuntimeServices(options: RuntimeServicesOptions, disposalScope: 
   // reaches the GATED create rather than the raw manager beside it.
   const checkpointsGatewayManager: Pick<
     WorkspaceCheckpointManager,
-    'list' | 'create' | 'diff' | 'restore' | 'sessionChanges' | 'workspaceRoot'
+    'list' | 'create' | 'diff' | 'restore' | 'sessionChanges' | 'workspaceRoot' | 'resolveRoot'
   > = {
-    workspaceRoot: workspaceCheckpointManager.workspaceRoot,
+    // Read from the manager each time: init may move the root to the enclosing
+    // repository's top level after this object is built.
+    get workspaceRoot() { return workspaceCheckpointManager.workspaceRoot; },
+    resolveRoot: workspaceCheckpointManager.resolveRoot.bind(workspaceCheckpointManager),
     list: workspaceCheckpointManager.list.bind(workspaceCheckpointManager),
     diff: workspaceCheckpointManager.diff.bind(workspaceCheckpointManager),
     restore: workspaceCheckpointManager.restore.bind(workspaceCheckpointManager),

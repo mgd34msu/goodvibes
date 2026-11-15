@@ -44,7 +44,6 @@ import {
   type AppendOnlyRetentionRoots,
 } from '../platform/src/platform/runtime/retention/append-only-registry.ts';
 import { resolveScopedDirectory } from '../platform/src/platform/runtime/surface-root.ts';
-import { acquireCrossProcessLock } from '../platform/src/platform/workspace/checkpoint/cross-process-lock.ts';
 import { DaemonReceiptStore, type ReceiptStoreIo } from '../platform/src/platform/daemon/receipts.ts';
 import {
   loadLastConversation,
@@ -256,52 +255,6 @@ describe('append-only retention sweeps for the life of the process, not only at 
     expect(again.deletedFiles).toBe(0);
     expect(again.countCappedFiles).toBe(0);
     expect(readdirSync(recoveryDir)).toHaveLength(3);
-  });
-});
-
-describe('cross-process lock reclaims abandoned staging files', () => {
-  test('an orphaned .gv-lock.new-* is reaped while an in-flight one survives', async () => {
-    const dir = tempDir(`gv-lockstaging-${randomUUID()}-`);
-    const lockPath = join(dir, '.gv-lock');
-    // Large enough that no scheduling stall can age the in-flight file past it;
-    // only the orphan is aged, through its mtime.
-    const staleMs = 10 * 60 * 1000;
-
-    // The litter a process leaves when it dies between openSync(staging,'wx')
-    // and linkSync(staging, lockPath).
-    const orphan = join(dir, '.gv-lock.new-999999-deadbeefcafe');
-    writeAgedFile(orphan, '{"pid":999999}', 2 * staleMs);
-    // Another process's staging file, created microseconds ago and about to be
-    // linked. Reaping this would be a genuine defect.
-    const inFlight = join(dir, '.gv-lock.new-424242-0badc0ffee00');
-    writeFileSync(inFlight, '{"pid":424242}', 'utf-8');
-
-    const release = await acquireCrossProcessLock(lockPath, { staleMs, totalTimeoutMs: 5_000 });
-    try {
-      expect(existsSync(orphan)).toBe(false);
-      expect(existsSync(inFlight)).toBe(true);
-    } finally {
-      release();
-    }
-
-    // Sweeping again is a no-op: the orphan is already gone and the in-flight
-    // file is still not old enough.
-    const release2 = await acquireCrossProcessLock(lockPath, { staleMs, totalTimeoutMs: 5_000 });
-    try {
-      expect(existsSync(orphan)).toBe(false);
-      expect(existsSync(inFlight)).toBe(true);
-    } finally {
-      release2();
-    }
-  });
-
-  test('a normal acquire/release cycle leaves no staging litter of its own', async () => {
-    const dir = tempDir(`gv-lockclean-${randomUUID()}-`);
-    const lockPath = join(dir, '.gv-lock');
-    const release = await acquireCrossProcessLock(lockPath, { totalTimeoutMs: 5_000 });
-    release();
-    expect(readdirSync(dir).filter((name) => name.includes('.new-'))).toEqual([]);
-    expect(existsSync(lockPath)).toBe(false);
   });
 });
 

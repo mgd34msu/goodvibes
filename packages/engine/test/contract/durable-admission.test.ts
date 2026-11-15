@@ -8,6 +8,7 @@ import type { DurableContractBoundary, DurableContractRequest } from '../../plat
 import { contractPath } from '../../platform/src/platform/contract/index.js';
 import { DurableContractAdmissions, durablePayloadRevision } from '../../platform/src/platform/contract/durable-admission.js';
 import { makeHarness, makeRepo, oneUnitPlan, waitFor, type Harness } from './runner-support.js';
+import { CrossProcessLockBusyError } from '../../platform/src/platform/workspace/checkpoint/cross-process-lock.js';
 
 const roots: string[] = [];
 const harnesses: Harness[] = [];
@@ -144,7 +145,7 @@ describe('native durable contract admission', () => {
     let joined = false;
     const join = h.runner.join(first.admission.contractId).then(() => { joined = true; });
     try {
-      await expect(new DurableContractAdmissions(h.root).lease(key)).rejects.toThrow('cross-process-lock');
+      await expect(new DurableContractAdmissions(h.root).lease(key)).rejects.toBeInstanceOf(CrossProcessLockBusyError);
       expect(joined).toBe(false);
       expect(drained).toBe(false);
     } finally { release(); }
@@ -181,7 +182,7 @@ describe('native durable contract admission', () => {
       await waitFor(() => joined, 'executor drainage despite final checkpoint failure');
       await drainage;
       expect(admissions.checkpoint(key)).toBe(original);
-      await expect(new DurableContractAdmissions(h.root).lease(key)).rejects.toThrow('cross-process-lock');
+      await expect(new DurableContractAdmissions(h.root).lease(key)).rejects.toBeInstanceOf(CrossProcessLockBusyError);
       expect(h.agentsOf('u1')).toHaveLength(0);
     } finally { h.store.write = write; }
   });
@@ -335,7 +336,7 @@ describe('native durable contract admission', () => {
       expect(contractId).toBeDefined(); await h.runner.join(contractId!);
       if (typeof original !== 'string') throw new Error('Missing original prepared checkpoint');
       expect(new DurableContractAdmissions(h.root).checkpoint(key)).toBe(original);
-      await expect(new DurableContractAdmissions(h.root).lease(key)).rejects.toThrow('cross-process-lock');
+      await expect(new DurableContractAdmissions(h.root).lease(key)).rejects.toBeInstanceOf(CrossProcessLockBusyError);
       expect(checks).toBe(0); expect(h.agentsOf('u1')).toHaveLength(0);
     } finally { h.store.write = write; }
   });
@@ -386,7 +387,7 @@ describe('native durable contract admission', () => {
     const first = await h.runner.startDurable(request(h.root));
     const other = setup(undefined, h.root);
     expect((await other.runner.startDurable(request(h.root))).admission).toEqual(first.admission);
-    await expect(other.runner.resumeDurable(key)).rejects.toThrow('cross-process-lock');
+    await expect(other.runner.resumeDurable(key)).rejects.toBeInstanceOf(CrossProcessLockBusyError);
     expect(other.manager.list()).toHaveLength(0);
   });
 
@@ -394,6 +395,7 @@ describe('native durable contract admission', () => {
     const h = setup(undefined, makeRepo(), 0);
     const first = await h.runner.startDurable(request(h.root));
     h.runner.cancel(first.admission.contractId, 'cancel');
+    await h.runner.join(first.admission.contractId);
     const snapshot = JSON.parse(h.runner.serializeContract(first.admission.contractId)!);
     snapshot.contract.completedAt = 1;
     snapshot.writtenAt = 1;

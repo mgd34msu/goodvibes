@@ -10,7 +10,8 @@
  * non-destructive restorePreview that names the files and mints the single-use
  * token the restore is authorized with (a failed preview falls back to an
  * explicit confirm:true; NOT_FOUND reports the checkpoint as gone). A refused
- * restore is reported as refused, never as done. create's noop ("tree
+ * restore is reported as refused, never as done, and a restore that could not
+ * write some files names each one and the undo checkpoint. create's noop ("tree
  * unchanged") is information, not an error.
  */
 import { useEffect, useMemo, useState } from 'react';
@@ -110,6 +111,18 @@ export function CheckpointsPanel() {
         return;
       }
       await queryClient.invalidateQueries({ queryKey: queryKeys.checkpoints });
+      const failed = result.result.failedPaths ?? [];
+      if (failed.length > 0) {
+        // Some files kept their current content: the workspace is a mix of the
+        // checkpoint and what was there before, and the person must know which.
+        const undo = result.result.safetyCheckpointId;
+        toast({
+          title: `Restored, except ${failed.length} file${failed.length === 1 ? '' : 's'}`,
+          description: `${failed.map((f) => `${f.path}: ${f.reason}`).join('; ')}.${undo ? ` To go back to how the workspace was before this restore, restore checkpoint ${undo}.` : ''}`,
+          tone: 'warning',
+        });
+        return;
+      }
       toast({ title: 'Workspace restored', description: checkpoint.label || checkpoint.id, tone: 'success' });
     },
     onError: (error: unknown, { checkpoint }) => {

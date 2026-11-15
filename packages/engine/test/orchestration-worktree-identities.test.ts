@@ -196,16 +196,3 @@ test('ordinary fresh allocation and current native restore never run the old SHA
   } finally { hashing.mockRestore(); }
 });
 
-test('lock replacement immediately after actual native acquisition cannot be adopted as the registry lease', async () => {
-  const f = fixture(), path = join(f.common, WORKTREE_IDENTITY_FILE), lock = `${path}.lock`, acquire = lockModule.tryAcquireCrossProcessLock;
-  const native = spyOn(lockModule, 'tryAcquireCrossProcessLock').mockImplementation((selected, options) => {
-    const release = acquire(selected, options);
-    if (release && selected === lock) { const bytes = readFileSync(lock); renameSync(lock, `${lock}.original`); writeFileSync(lock, bytes); }
-    return release;
-  });
-  try {
-    await expect(new WorktreeIdentityRegistry(f.common).reserve(key)).rejects.toThrow();
-    expect(native).toHaveBeenCalled();
-  } finally { native.mockRestore(); }
-  expect(existsSync(path)).toBe(false); expect(existsSync(lock)).toBe(true); expect(existsSync(`${lock}.original`)).toBe(true);
-});

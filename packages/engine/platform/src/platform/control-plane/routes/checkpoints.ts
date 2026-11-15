@@ -178,7 +178,7 @@ function clampLimit(raw: unknown): number {
 }
 
 /** Structural deps, the read/write surface `checkpoints.*` + `sessions.changes.get` needs. */
-export type CheckpointsGatewayManager = Pick<WorkspaceCheckpointManager, 'list' | 'create' | 'diff' | 'restore' | 'sessionChanges' | 'workspaceRoot'>
+export type CheckpointsGatewayManager = Pick<WorkspaceCheckpointManager, 'list' | 'create' | 'diff' | 'restore' | 'sessionChanges' | 'workspaceRoot' | 'resolveRoot'>
   & Partial<Pick<WorkspaceCheckpointManager, 'retentionFailure'>>;
 
 export function createCheckpointsListHandler(manager: CheckpointsGatewayManager): GatewayMethodHandler {
@@ -349,7 +349,9 @@ export function createCheckpointsRevertHunkPreviewHandler(
     const params = readInvocationParams(invocation);
     const path = requiredString(params.path, 'path');
     const hunk = requiredString(params.hunk, 'hunk');
-    const preview = previewHunkRevert(manager.workspaceRoot, path, hunk);
+    // Diff paths are relative to the root the manager resolved at init (the
+    // enclosing repository's top level when started in a subdirectory).
+    const preview = previewHunkRevert(await manager.resolveRoot(), path, hunk);
     if (!preview.applies) {
       return { ...preview, token: null, expiresAt: null };
     }

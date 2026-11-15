@@ -90,14 +90,12 @@ function generatePeerId(): string {
 }
 
 /**
- * Resolve the operator token store path.
- *
- * The only valid location is <daemonHomeDir>/operator-tokens.json.
- * Operator tokens are global and daemon-home scoped.
- *
- * @throws {Error} when daemonHomeDir is not provided, all callers must supply it.
+ * The operator token file of a daemon home: `<daemonHomeDir>/operator-tokens.json`.
+ * The one statement of where the token lives; this module is its only writer.
+ * Every reader takes the daemon home from `resolveGoodVibesDaemonHome` (which
+ * honours `GOODVIBES_DAEMON_HOME`) and this function, never a hand-built path.
  */
-function resolveSharedTokenPath(daemonHomeDir: string): string {
+export function operatorTokenPath(daemonHomeDir: string): string {
   return join(daemonHomeDir, 'operator-tokens.json');
 }
 
@@ -130,7 +128,7 @@ export function getOrCreateCompanionToken(
   second?: CompanionTokenOptions,
 ): CompanionPairingResult {
   const options = normalizeCompanionTokenOptions(first, second);
-  const tokenPath = resolveSharedTokenPath(options.daemonHomeDir);
+  const tokenPath = operatorTokenPath(options.daemonHomeDir);
 
   let quarantined: CompanionTokenQuarantine | undefined;
   if (!options.regenerate && existsSync(tokenPath)) {
@@ -309,7 +307,7 @@ export function regenerateCompanionToken(
 export function pruneStaleOperatorTokens(
   options: PruneStaleOperatorTokensOptions,
 ): PruneStaleOperatorTokensResult {
-  const canonicalPath = resolve(resolveSharedTokenPath(options.daemonHomeDir));
+  const canonicalPath = resolve(operatorTokenPath(options.daemonHomeDir));
   const prunedPaths: string[] = [];
   const failedPaths: string[] = [];
   const skippedPaths: string[] = [];

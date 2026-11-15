@@ -164,14 +164,8 @@ export class RetentionPolicy {
   async prune(options?: PruneOptions): Promise<PruneResult> {
     const candidates = this._collectCandidates();
     const result = await this._pruner.delete(candidates, options);
-
-    // Remove successfully deleted records from tracking (skip on dry run).
-    if (!result.dryRun) {
-      for (const id of result.deletedIds) {
-        this._records.delete(id);
-      }
-    }
-
+    // A dry run deletes nothing, so its `deletedIds` is empty.
+    for (const id of result.deletedIds) this._records.delete(id);
     return result;
   }
 
@@ -185,6 +179,17 @@ export class RetentionPolicy {
    */
   needsPrune(): boolean {
     return this._collectCandidates().length > 0;
+  }
+
+  /**
+   * The records that currently violate their class limits, without deleting
+   * anything. For an owner that removes records from its own index before it
+   * deletes their artifacts (so a crash in between leaves only unlisted
+   * artifacts, never listed records whose artifacts are gone); it calls
+   * `unregister` for each record it drops.
+   */
+  candidates(): readonly CheckpointRecord[] {
+    return this._collectCandidates();
   }
 
   /**

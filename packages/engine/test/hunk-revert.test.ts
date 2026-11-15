@@ -103,7 +103,7 @@ describe('applyHunkRevert / previewHunkRevert (workspace)', () => {
 
   function fakeWorkspace(snapshot: WorkspaceCheckpoint | null): HunkRevertWorkspace {
     return {
-      workspaceRoot: root,
+      resolveRoot: async () => root,
       create: async (opts) => {
         created.push({ kind: opts.kind, label: opts.label });
         return snapshot;
@@ -142,7 +142,7 @@ describe('applyHunkRevert / previewHunkRevert (workspace)', () => {
     writeFileSync(join(root, 'f.ts'), NEW_CONTENT, 'utf8');
     let seenDuringCreate: string | null = null;
     const workspace: HunkRevertWorkspace = {
-      workspaceRoot: root,
+      resolveRoot: async () => root,
       create: async () => {
         seenDuringCreate = readFileSync(join(root, 'f.ts'), 'utf8');
         return null;
@@ -158,7 +158,7 @@ describe('applyHunkRevert / previewHunkRevert (workspace)', () => {
     writeFileSync(join(root, 'f.ts'), NEW_CONTENT, 'utf8');
     const edited = `${NEW_CONTENT}// saved during the checkpoint\n`;
     const workspace: HunkRevertWorkspace = {
-      workspaceRoot: root,
+      resolveRoot: async () => root,
       create: async () => {
         writeFileSync(join(root, 'f.ts'), edited, 'utf8');
         return null;
@@ -212,7 +212,7 @@ describe('checkpoints.revertHunk handlers (confirm gate)', () => {
 
   function manager(): CheckpointsGatewayManager {
     const stub = {
-      workspaceRoot: root,
+      resolveRoot: async () => root,
       create: async () => ({ id: 'wcp_safety', kind: 'manual', label: '', createdAt: 1, parentId: null, retentionClass: 'standard', commit: 'c', sizeBytes: 1 } as WorkspaceCheckpoint),
     };
     return stub as unknown as CheckpointsGatewayManager;

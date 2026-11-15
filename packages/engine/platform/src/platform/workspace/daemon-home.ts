@@ -30,8 +30,9 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, chmodSync, unlinkSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
-import { join, isAbsolute, resolve, dirname } from 'node:path';
+import { join, isAbsolute, resolve } from 'node:path';
 import { resolveGoodVibesDaemonHome, resolveGoodVibesHome } from '../config/goodvibes-home.js';
+import { operatorTokenPath } from '../pairing/companion-token.js';
 import { logger } from '../utils/logger.js';
 
 // ---------------------------------------------------------------------------
@@ -84,13 +85,8 @@ export function resolveDaemonHomeDir(options: DaemonHomeOptions = {}): string {
 // Global operator token path
 // ---------------------------------------------------------------------------
 
-/**
- * Returns the single canonical path for operator tokens.
- * All reads and writes MUST use this path. No workspace-scoped fallback exists.
- */
-export function resolveOperatorTokenPath(daemonHomeDir: string): string {
-  return join(daemonHomeDir, 'operator-tokens.json');
-}
+// The token file's path is stated once, beside its only writer.
+export { operatorTokenPath } from '../pairing/companion-token.js';
 
 // ---------------------------------------------------------------------------
 // Daemon home creation
@@ -115,7 +111,7 @@ export function ensureDaemonHome(daemonHomeDir: string): DaemonHomeDirs {
 }
 
 // ---------------------------------------------------------------------------
-// Operator token file write (global-only, mode 0600)
+// Operator token file read, daemon settings write
 // ---------------------------------------------------------------------------
 
 /** A temp name no other writer shares, so two writers cannot rename each other's file away. */
@@ -128,41 +124,11 @@ function removeQuietly(path: string): void {
 }
 
 /**
- * Write operator tokens to the global daemon-home path with mode 0600.
- * All token provisioning MUST go through this function.
- *
- * Uses a write-to-tmp-then-rename pattern for atomicity.
- * Applies chmod 0600 after rename so the file is never world-readable.
- */
-export function writeOperatorTokenFile(daemonHomeDir: string, content: string): void {
-  const tokenPath = resolveOperatorTokenPath(daemonHomeDir);
-  mkdirSync(dirname(tokenPath), { recursive: true });
-  const tmpPath = uniqueTmpPath(tokenPath);
-  try {
-    writeFileSync(tmpPath, content, { encoding: 'utf-8', mode: 0o600 });
-    chmodSync(tmpPath, 0o600);
-    renameSync(tmpPath, tokenPath);
-  } catch (error) {
-    removeQuietly(tmpPath);
-    throw error;
-  }
-  // Apply chmod again after rename, some filesystems reset permissions on rename
-  try {
-    chmodSync(tokenPath, 0o600);
-  } catch (error) {
-    logger.warn('daemon-home: failed to chmod operator token file after rename', {
-      path: tokenPath,
-      error: String(error),
-    });
-  }
-}
-
-/**
  * Read operator tokens from the global daemon-home path.
  * Returns undefined when the file does not exist or cannot be parsed.
  */
 export function readOperatorTokenFile(daemonHomeDir: string): string | undefined {
-  const tokenPath = resolveOperatorTokenPath(daemonHomeDir);
+  const tokenPath = operatorTokenPath(daemonHomeDir);
   if (!existsSync(tokenPath)) return undefined;
   try {
     return readFileSync(tokenPath, 'utf-8');

@@ -113,7 +113,7 @@ describe('WorkspaceCheckpointManager retention/gc', () => {
 
     expect(ids).toHaveLength(5);
     const result = await manager.gc();
-    expect(result.deletedCount).toBe(2);
+    expect(result.failedIds).toHaveLength(0);
     expect(new Set(result.deletedIds)).toEqual(new Set([ids[0]!, ids[1]!]));
 
     const remaining = await manager.list();

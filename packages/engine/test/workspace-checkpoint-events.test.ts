@@ -29,6 +29,11 @@ function newManager(root: string, bus: RuntimeEventBus): WorkspaceCheckpointMana
   return manager;
 }
 
+/** The checkpoints the events made: the baseline an empty store takes at init is left out. */
+async function listed(manager: WorkspaceCheckpointManager) {
+  return (await manager.list()).filter((checkpoint) => checkpoint.label !== 'workspace baseline');
+}
+
 const ctx: EmitterContext = { sessionId: 'sess-1', traceId: 'trace-1', source: 'test' };
 
 /** One turn of the event loop: the bus dispatches listeners from a microtask, so after this every listener of an earlier emit has run. */
@@ -60,8 +65,8 @@ describe('WorkspaceCheckpointManager automatic snapshots', () => {
     emitTurnCompleted(bus, ctx, { turnId: 'turn-1', response: 'ok', stopReason: 'completed' });
 
     await watch.settled();
-    expect(await manager.list()).toHaveLength(1);
-    const [checkpoint] = await manager.list();
+    expect(await listed(manager)).toHaveLength(1);
+    const [checkpoint] = await listed(manager);
     expect(checkpoint!.kind).toBe('turn');
     expect(checkpoint!.turnId).toBe('turn-1');
   });
@@ -77,16 +82,16 @@ describe('WorkspaceCheckpointManager automatic snapshots', () => {
     writeFileSync(join(root, 'a.txt'), 'v1\n');
     emitAgentCompleted(bus, ctx, { agentId: 'agent-known', durationMs: 1 });
     await watch.settled();
-    expect(await manager.list()).toHaveLength(1);
-    const [stamped] = await manager.list();
+    expect(await listed(manager)).toHaveLength(1);
+    const [stamped] = await listed(manager);
     expect(stamped!.sessionId).toBe('sess-known');
     expect((await manager.list({ sessionId: 'sess-known' })).map((c) => c.id)).toEqual([stamped!.id]);
 
     writeFileSync(join(root, 'a.txt'), 'v2\n');
     emitAgentCompleted(bus, ctx, { agentId: 'agent-unknown', durationMs: 1 });
     await watch.settled();
-    expect(await manager.list()).toHaveLength(2);
-    const unstamped = (await manager.list()).find((c) => c.agentId === 'agent-unknown');
+    expect(await listed(manager)).toHaveLength(2);
+    const unstamped = (await listed(manager)).find((c) => c.agentId === 'agent-unknown');
     expect(unstamped!.sessionId).toBeUndefined();
   });
 
@@ -100,14 +105,14 @@ describe('WorkspaceCheckpointManager automatic snapshots', () => {
     writeFileSync(join(root, 'a.txt'), 'v1\n');
     emitTurnError(bus, ctx, { turnId: 'turn-err', error: 'boom', stopReason: 'provider_error' });
     await watch.settled();
-    expect(await manager.list()).toHaveLength(1);
+    expect(await listed(manager)).toHaveLength(1);
 
     writeFileSync(join(root, 'a.txt'), 'v2\n');
     emitTurnCancel(bus, ctx, { turnId: 'turn-cancel', stopReason: 'cancelled' });
     await watch.settled();
-    expect(await manager.list()).toHaveLength(2);
+    expect(await listed(manager)).toHaveLength(2);
 
-    const all = await manager.list();
+    const all = await listed(manager);
     expect(all.every((c) => c.kind === 'turn')).toBe(true);
     expect(all.map((c) => c.turnId).sort()).toEqual(['turn-cancel', 'turn-err']);
   });
@@ -122,14 +127,14 @@ describe('WorkspaceCheckpointManager automatic snapshots', () => {
     writeFileSync(join(root, 'a.txt'), 'v1\n');
     emitTurnCompleted(bus, ctx, { turnId: 'turn-1', response: 'ok', stopReason: 'completed' });
     await watch.settled();
-    expect(await manager.list()).toHaveLength(1);
+    expect(await listed(manager)).toHaveLength(1);
 
     writeFileSync(join(root, 'a.txt'), 'v2\n');
     emitAgentCompleted(bus, ctx, { agentId: 'agent-1', durationMs: 100, output: 'done' });
     await watch.settled();
-    expect(await manager.list()).toHaveLength(2);
+    expect(await listed(manager)).toHaveLength(2);
 
-    const all = await manager.list();
+    const all = await listed(manager);
     const agentCheckpoint = all.find((c) => c.kind === 'agent-run')!;
     const turnCheckpoint = all.find((c) => c.kind === 'turn')!;
     expect(agentCheckpoint.agentId).toBe('agent-1');
@@ -178,7 +183,7 @@ describe('WorkspaceCheckpointManager automatic snapshots', () => {
 
     expect(watch.create).toHaveBeenCalledTimes(1);
     await expect(watch.create.mock.results[0]!.value).resolves.toBeNull();
-    expect(await manager.list()).toHaveLength(0);
+    expect(await listed(manager)).toHaveLength(0);
   });
 
   test('dispose() unsubscribes from the bus: events after dispose never reach create()', async () => {
@@ -191,7 +196,7 @@ describe('WorkspaceCheckpointManager automatic snapshots', () => {
     writeFileSync(join(root, 'a.txt'), 'v1\n');
     emitTurnCompleted(bus, ctx, { turnId: 'turn-before-dispose', response: 'ok', stopReason: 'completed' });
     await watch.settled();
-    expect(await manager.list()).toHaveLength(1);
+    expect(await listed(manager)).toHaveLength(1);
     expect(watch.create).toHaveBeenCalledTimes(1);
 
     manager.dispose();
@@ -201,6 +206,6 @@ describe('WorkspaceCheckpointManager automatic snapshots', () => {
     await watch.settled();
 
     expect(watch.create).toHaveBeenCalledTimes(1);
-    expect(await manager.list()).toHaveLength(1);
+    expect(await listed(manager)).toHaveLength(1);
   });
 });

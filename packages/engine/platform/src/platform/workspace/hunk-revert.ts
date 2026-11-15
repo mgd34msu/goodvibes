@@ -274,7 +274,8 @@ export function previewHunkRevert(workspaceRoot: string, path: string, hunk: str
 
 /** The workspace surface `applyHunkRevert` needs: where files live, and the safety-snapshot idiom. */
 export interface HunkRevertWorkspace {
-  readonly workspaceRoot: string;
+  /** The root diff paths are relative to, once the checkpoint manager has resolved it. */
+  resolveRoot(): Promise<string>;
   /** Take a whole-tree snapshot; returns null when the tree is unchanged since the last checkpoint. */
   create(opts: { kind: 'manual'; label: string }): Promise<WorkspaceCheckpoint | null>;
   /** Newest-first listing; when present, the newest checkpoint names the undo point of a revert whose snapshot was a no-op. */
@@ -296,16 +297,17 @@ export interface HunkRevertReceipt {
 /**
  * Reverse-apply one hunk to a workspace file, snapshotting first. Validates the
  * current file (a hunk that went stale between preview and here is a conflict,
- * never a partial write), takes a whole-tree safety checkpoint as the undo
- * point, then re-reads the file: if it changed while the snapshot ran, the
- * revert is refused rather than overwriting the newer edit.
+ * never a partial write), takes a whole-tree safety checkpoint and resolves the
+ * undo point, then re-reads the file and writes with nothing awaited in
+ * between: an edit saved while the snapshot ran is never overwritten.
  */
 export async function applyHunkRevert(
   workspace: HunkRevertWorkspace,
   path: string,
   hunk: string,
 ): Promise<HunkRevertReceipt> {
-  const content = readWorkspaceFile(workspace.workspaceRoot, path);
+  const root = await workspace.resolveRoot();
+  const content = readWorkspaceFile(root, path);
   const result = reverseApplyHunk(content, hunk);
   if (!result.ok) {
     throw new HunkRevertConflictError(result.reason);
@@ -314,13 +316,13 @@ export async function applyHunkRevert(
   // checkpoint to undo). A null return means the tree already matched the latest
   // checkpoint, which is then the undo point.
   const safety = await workspace.create({ kind: 'manual', label: `pre-revertHunk: ${path}` });
-  // The snapshot can take long on a large tree; an edit saved meanwhile must not be overwritten.
-  if (readWorkspaceFile(workspace.workspaceRoot, path) !== content) {
+  const undoPoint = safety ?? (workspace.list ? (await workspace.list({ limit: 1 }))[0] ?? null : null);
+  // The snapshot can take long on a large tree; an edit saved meanwhile must not
+  // be overwritten. The check and the write below are synchronous and adjacent.
+  if (readWorkspaceFile(root, path) !== content) {
     throw new HunkRevertConflictError(`${path} changed while the safety checkpoint was being taken; nothing was written. Preview the hunk again and retry.`);
   }
-  const undoPoint = safety ?? (workspace.list ? (await workspace.list({ limit: 1 }))[0] ?? null : null);
-  const abs = resolveInsideRoot(workspace.workspaceRoot, path);
-  writeFileSync(abs, result.nextContent, 'utf8');
+  writeFileSync(resolveInsideRoot(root, path), result.nextContent, 'utf8');
   return {
     reverted: true,
     path,

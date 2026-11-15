@@ -6,7 +6,7 @@
  * Tests:
  *   1. Token present at global path → getOrCreateCompanionToken returns it
  *   2. No token anywhere → getOrCreateCompanionToken creates one at global path
- *   3. writeOperatorTokenFile sets mode 0600
+ *   3. getOrCreateCompanionToken writes the file at mode 0600
  *   4. The token on disk, handed to the daemon's own auth (DaemonControlPlaneHelper.authenticateRequest)
  *      behind DaemonHttpRouter: the stored bearer → 200, a wrong or missing bearer → 401
  *
@@ -25,12 +25,14 @@ import {
   type DaemonControlPlaneContext,
 } from '../platform/src/platform/daemon/control-plane.ts';
 import {
-  resolveOperatorTokenPath,
-  writeOperatorTokenFile,
-} from '../platform/src/platform/workspace/daemon-home.ts';
-import {
   getOrCreateCompanionToken,
+  operatorTokenPath as resolveOperatorTokenPath,
 } from '../platform/src/platform/pairing/companion-token.ts';
+
+/** Places a token record the way an operator or another host would. */
+function writeOperatorTokenFile(daemonHome: string, content: string): void {
+  writeFileSync(resolveOperatorTokenPath(daemonHome), content, { mode: 0o600 });
+}
 import { DaemonHttpRouter } from '../platform/src/platform/daemon/http/router.ts';
 import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.ts';
 import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.ts';
@@ -185,21 +187,14 @@ describe('global-only: workspace-scoped token path is never read', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 3. writeOperatorTokenFile sets mode 0600
+// 3. The token writer sets mode 0600
 // ---------------------------------------------------------------------------
 
-describe('writeOperatorTokenFile: mode 0600', () => {
+describe('operator token file: mode 0600', () => {
   let daemonHome: string;
 
   beforeEach(() => { daemonHome = tempDir('chmod'); });
   afterEach(() => { cleanup(daemonHome); });
-
-  test('file written by writeOperatorTokenFile has mode 0600', () => {
-    writeOperatorTokenFile(daemonHome, JSON.stringify({ token: 'gv_x', peerId: 'p', createdAt: 0 }));
-    const tokenPath = resolveOperatorTokenPath(daemonHome);
-    const mode = statSync(tokenPath).mode & 0o777;
-    expect(mode).toBe(0o600);
-  });
 
   test('file written by getOrCreateCompanionToken has mode 0600', () => {
     getOrCreateCompanionToken({ daemonHomeDir: daemonHome });

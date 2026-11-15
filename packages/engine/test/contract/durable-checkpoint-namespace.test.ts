@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path';
 import { contractPath, contractCheckpointsDir, contractsDir } from '../../platform/src/platform/contract/store.js';
 import { DurableContractAdmissions, durableKeyHash, type DurableContractRequest } from '../../platform/src/platform/contract/durable-admission.js';
 import { makeHarness, makeRepo, oneUnitPlan, type Harness } from './runner-support.js';
+import { CrossProcessLockBusyError } from '../../platform/src/platform/workspace/checkpoint/cross-process-lock.js';
 
 const roots = new Set<string>(), running = new Set<Harness>();
 async function close(h: Harness): Promise<void> {
@@ -36,7 +37,7 @@ test('schema6 namespace keeps the original durable operation and cross-process e
   // The old program's flat checkpoint scanner never visits the new image.
   expect(readdirSync(contractsDir(root)).filter(name => /^ctr-[a-f0-9]{8}\.json$/.test(name))).toEqual([]);
   // Moving the ID copy did not create a second execution namespace.
-  await expect(new DurableContractAdmissions(root).lease(input.key)).rejects.toThrow('cross-process-lock');
+  await expect(new DurableContractAdmissions(root).lease(input.key)).rejects.toBeInstanceOf(CrossProcessLockBusyError);
   const heldCheckpoint = admissions.checkpoint(input.key);
   expect(JSON.parse(heldCheckpoint).schemaVersion).toBe(6); expect(existsSync(path + '.unrecognized')).toBe(false);
   await close(first); expect(existsSync(lease)).toBe(false);

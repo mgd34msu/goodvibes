@@ -1,25 +1,40 @@
 import { closeSync, constants, fstatSync, lstatSync, openSync, readSync, type Stats } from 'node:fs';
-import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { dirname, isAbsolute, resolve, sep } from 'node:path';
+import { resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/platform/platform/config';
+import { operatorTokenPath } from '@goodvibes-jev/engine/platform/platform/workspace';
 
 /** Explicit pairing bootstrap only. Never called by native credential resolution.
  * Do not create, chmod, repair or adopt another token/home on read failure.
+ * Reads the daemon home this process's daemon uses, so a home relocated with
+ * `GOODVIBES_DAEMON_HOME` is found.
  */
 export function readTuiLegacyPairingBootstrap(home: string): string | null {
   let fd: number | undefined;
   try {
     if (!isAbsolute(home) || typeof process.geteuid !== 'function') return null;
     const uid = process.geteuid();
-    for (let path = resolve(home); ; path = dirname(path)) {
+    const daemonHome = resolve(resolveGoodVibesDaemonHome(home));
+    for (let path = daemonHome; ; path = dirname(path)) {
       const stat = lstatSync(path);
       if (!stat.isDirectory() || stat.isSymbolicLink() || (stat.uid !== uid && stat.uid !== 0)
         || ((stat.mode & 0o022) !== 0 && (stat.mode & 0o1000) === 0)) return null;
       if (dirname(path) === path) break;
     }
-    for (const path of [resolve(home), join(home, '.goodvibes'), join(home, '.goodvibes', 'daemon')]) {
+    // The daemon home, and every directory from it up to the login home when it
+    // lies inside that home, must be the user's own and private to writes.
+    const owned = [daemonHome];
+    const homeRoot = resolve(home);
+    if (daemonHome.startsWith(homeRoot + sep)) {
+      for (let path = dirname(daemonHome); path.startsWith(homeRoot); path = dirname(path)) {
+        owned.push(path);
+        if (path === homeRoot) break;
+      }
+    }
+    for (const path of owned) {
       const stat = lstatSync(path);
       if (!stat.isDirectory() || stat.isSymbolicLink() || stat.uid !== uid || (stat.mode & 0o022) !== 0) return null;
     }
-    const path = join(home, '.goodvibes', 'daemon', 'operator-tokens.json');
+    const path = operatorTokenPath(daemonHome);
     const safe = (stat: Stats) => stat.isFile() && !stat.isSymbolicLink() && stat.uid === uid && stat.nlink === 1
       && (stat.mode & 0o7777) === 0o600 && stat.size <= 16_384;
     const same = (a: Stats, b: Stats) => a.dev === b.dev && a.ino === b.ino && a.size === b.size && a.ctimeMs === b.ctimeMs && a.mtimeMs === b.mtimeMs;

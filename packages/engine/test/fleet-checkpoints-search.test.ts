@@ -234,6 +234,9 @@ describe('fleet/checkpoints/search: checkpoints.list / create / diff / restore',
   }
 
   test('checkpoints.create then checkpoints.list returns the created checkpoint', async () => {
+    // Waits for start-up to finish, including the baseline an empty store takes,
+    // so the file below is this create's change and not the baseline's.
+    await invokeVerb<CheckpointsListResponse>('checkpoints.list');
     touchWorkspaceFile();
     const created = await invokeVerb<CheckpointsCreateResponse>('checkpoints.create', { body: { kind: 'manual', label: 'fleet-search test checkpoint' } });
     expect(created.status).toBe(200);

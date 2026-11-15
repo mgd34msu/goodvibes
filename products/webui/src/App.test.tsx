@@ -92,7 +92,7 @@ function resetChatDeleteFixtures() {
 resetChatDeleteFixtures();
 
 // Full replacement of src/lib/goodvibes.ts, App.tsx's whole reachable import graph
-// (queries.ts, useSessionRealtime, useRealtimeInvalidation, SessionsView,
+// (queries.ts, lib/event-stream.ts, useRealtimeInvalidation, SessionsView,
 // SteerComposer, and the statically-imported-but-not-rendered other views) resolves
 // through this one module, so every name any of them import must be present.
 // App calls useDaemonHealth() (the shell's avatar dot and account menu read it), which

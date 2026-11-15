@@ -10,6 +10,11 @@ import { SettingsBlock } from './dialog/parts';
 
 const QUERY_KEY = ['payments', 'purchase-windows'] as const;
 
+/** While a window waits for an answer or a checkout runs, its deadline matters. */
+const ACTIVE_POLL_MS = 2_000;
+/** Payments publish no live event, so a newly opened window still needs a slow look. */
+const IDLE_POLL_MS = 30_000;
+
 /** The daemon owns amounts, deadlines and outcomes. This view sends only the
  * exact notice reference selected by an explicit owner click; it never retries. */
 export function PaymentWindows() {
@@ -21,7 +26,12 @@ export function PaymentWindows() {
   const [inspected, setInspected] = useState(false);
   const identity = useSyncExternalStore(subscribeClientLifetime, () => getClientLifetime().revision, () => 0);
   const windows = useQuery({ queryKey: [...QUERY_KEY, identity], queryFn: ({ signal }) => platformClient.operator.payments.purchase.status(signal),
-    refetchInterval: 2000, retry: false, gcTime: 0 });
+    refetchInterval: (query) => {
+      const data = query.state.data;
+      const active = data !== undefined && (data.windows.length > 0 || data.operations.some((operation) => isLivePaymentOperation(operation.state)));
+      return active ? ACTIVE_POLL_MS : IDLE_POLL_MS;
+    },
+    retry: false, gcTime: 0 });
   useEffect(() => () => active.current?.abort(), []);
   useEffect(() => subscribeClientLifetime(() => {
     // An aborted answer may already have been applied; say so rather than going silent.

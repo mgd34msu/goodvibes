@@ -3,7 +3,7 @@
  *
  * Fires reconcilePushSubscriptionOnOpen (lib/push/push-client.ts) once on every
  * rising edge into `enabled` (App.tsx passes `health.connection === 'connected'
- * && auth.isSuccess`, mirroring useSessionRealtime/useRealtimeInvalidation's own
+ * && auth.isSuccess`, mirroring useRealtimeInvalidation's own
  * gate). A rising edge covers both the ordinary app-open case and a daemon
  * reconnect after an outage, either is a legitimate moment to notice that the
  * browser's push endpoint drifted from what the daemon has on record.

@@ -17,6 +17,7 @@ mock.module('../lib/goodvibes', () => ({
   DEFAULT_SSE_RECONNECT: { ...actualGoodvibes.DEFAULT_SSE_RECONNECT, baseDelayMs: 5, maxDelayMs: 20 },
 }));
 const { useDaemonHealth } = await import('./useDaemonHealth');
+const { subscribeEvents } = await import('../lib/event-stream');
 
 const cleanups: (() => void | Promise<void>)[] = [];
 const nativeResponse = nativeRequestPrimitives.Response;
@@ -47,7 +48,9 @@ interface Arrival {
 
 // This is an owned HTTP source for the actual shipped platform, not a fake event bus.
 // It emits comments only. A successful socket or reconnect cannot make health active.
-function sourceEndpoint() {
+// `domains` is the stream it serves: `turn` for a typed per-domain feed, `tasks` for
+// the app's shared stream that health reads.
+function sourceEndpoint(domains = 'turn') {
   const arrivals: Arrival[] = [];
   const clientSignals: (AbortSignal | null | undefined)[] = [];
   const completedErrorResponses: number[] = [];
@@ -57,7 +60,7 @@ function sourceEndpoint() {
     hostname: '127.0.0.1', port: 0,
     fetch(request) {
       const url = new URL(request.url);
-      if (request.method !== 'GET' || url.pathname !== '/api/control-plane/events' || url.searchParams.get('domains') !== 'turn') {
+      if (request.method !== 'GET' || url.pathname !== '/api/control-plane/events' || url.searchParams.get('domains') !== domains) {
         return new nativeResponse('Unknown authored source route', { status: 404 });
       }
       return new Promise<Response>(resolve => {
@@ -78,8 +81,9 @@ function sourceEndpoint() {
   });
   globalThis.fetch = Object.assign((input: RequestInfo | URL, init?: RequestInit) => {
     const originalUrl = new URL(input instanceof Request ? input.url : String(input));
-    expect(originalUrl.pathname).toBe('/api/control-plane/events');
-    expect(originalUrl.searchParams.get('domains')).toBe('turn');
+    // Health's own liveness probe is not this source's business.
+    if (originalUrl.pathname !== '/api/control-plane/events') return Promise.resolve(new nativeResponse('unavailable', { status: 503 }));
+    expect(originalUrl.searchParams.get('domains')).toBe(domains);
     const requestIndex = clientSignals.length;
     clientSignals.push(init?.signal);
     const target = new URL(originalUrl.pathname + originalUrl.search, 'http://127.0.0.1:' + server.port);
@@ -122,12 +126,14 @@ function sourceEndpoint() {
 }
 
 function renderHealth() {
-  // The health stream stays real; unrelated polling is disabled by this query owner.
+  // The shared stream stays real; unrelated polling is disabled by this query owner.
+  // Health reads the stream; this component's app-wide subscription is what opens it.
   const client = new QueryClient({ defaultOptions: { queries: { enabled: false, retry: false, gcTime: 0 } } });
   const container = document.createElement('div'); document.body.appendChild(container);
   const root = createRoot(container);
   let mounted = true;
   function Probe() {
+    React.useEffect(() => subscribeEvents({ domains: ['tasks'], events: [], onEvent: () => {} }), []);
     const health = useDaemonHealth();
     return <output data-sse={health.sse}>{activityPhrase(health)}</output>;
   }
@@ -161,9 +167,9 @@ afterEach(async () => {
   }
 });
 
-describe('health consumes the actual platform source error and owner lifetime', () => {
+describe('health and the shared stream consume the actual platform source error and owner lifetime', () => {
   test('an asynchronously closed native source pauses health and the real platform reconnects without inventing active events', async () => {
-    const endpoint = sourceEndpoint(); const health = renderHealth();
+    const endpoint = sourceEndpoint('tasks'); const health = renderHealth();
     await until(() => endpoint.arrivals.length === 1, 'Initial native SSE request did not arrive');
     endpoint.open(0); expect(health.state()).toBe('connecting');
     endpoint.end(0);
@@ -211,7 +217,7 @@ describe('health consumes the actual platform source error and owner lifetime', 
   }, 10_000);
 
   test('same-route lifetime replacement drains the pending source without pausing its replacement', async () => {
-    const endpoint = sourceEndpoint(); const health = renderHealth();
+    const endpoint = sourceEndpoint('tasks'); const health = renderHealth();
     await until(() => endpoint.arrivals.length === 1, 'Initial native request did not arrive');
     flushSync(() => invalidateClientLifetime());
     await until(() => endpoint.arrivals.length === 2, 'Same-route lifetime replacement did not open a fresh source');
@@ -226,7 +232,7 @@ describe('health consumes the actual platform source error and owner lifetime', 
   }, 10_000);
 
   test('unmount aborts and drains the held first native response while a replacement owner stays live', async () => {
-    const endpoint = sourceEndpoint(); const original = renderHealth();
+    const endpoint = sourceEndpoint('tasks'); const original = renderHealth();
     await until(() => endpoint.arrivals.length === 1, 'Held initial native request did not arrive');
     expect(endpoint.get(0).replied).toBe(false);
     expect(endpoint.clientSignals[0]?.aborted).toBe(false);
@@ -252,8 +258,8 @@ describe('health consumes the actual platform source error and owner lifetime', 
     const requestSignals: (AbortSignal | null | undefined)[] = [];
     globalThis.fetch = Object.assign((input: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(input instanceof Request ? input.url : String(input));
-      expect(url.pathname).toBe('/api/control-plane/events');
-      expect(url.searchParams.get('domains')).toBe('turn');
+      if (url.pathname !== '/api/control-plane/events') return Promise.resolve(new nativeResponse('unavailable', { status: 503 }));
+      expect(url.searchParams.get('domains')).toBe('tasks');
       requestSignals.push(init?.signal);
       const body = new ReadableStream<Uint8Array>({
         start(controller) { sources.push({ controller, failed: false }); },
@@ -280,7 +286,7 @@ describe('health consumes the actual platform source error and owner lifetime', 
   }, 10_000);
 
   test('unmount aborts the acquired native stream without pausing a newly mounted health owner', async () => {
-    const endpoint = sourceEndpoint(); const original = renderHealth();
+    const endpoint = sourceEndpoint('tasks'); const original = renderHealth();
     await until(() => endpoint.arrivals.length === 1, 'Original native source did not arrive'); endpoint.open(0);
     // Wait for ready to install the native closer before exercising caller cleanup.
     await until(() => endpoint.get(0).source !== null, 'Original source is not open');

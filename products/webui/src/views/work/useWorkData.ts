@@ -3,9 +3,9 @@
  *
  * Freshness follows the old views' rules: the fleet (and its archive and
  * best-of-N groups) polls at a slow safety cadence while the fleet
- * subscription is live and every 15 s when it is down; approvals push over
- * their own subscription (useApprovalUpdates) and poll only while that is
- * down; hosted sessions poll slowly while their stream is up. Tasks, the
+ * subscription is live and every 15 s when it is down; approvals refresh from
+ * `approval-update` frames on the shared event stream and poll only while it
+ * is down; hosted sessions poll slowly while their stream is up. Tasks, the
  * session union and CI watches refresh from realtime invalidation and after
  * mutations. A daemon without a verb (METHOD_NOT_FOUND) degrades to "none",
  * never an error banner.
@@ -19,7 +19,7 @@ import { isMethodUnavailableError } from '../../lib/errors';
 import { sortApprovalsNewestFirst } from '../../lib/approvals';
 import { hostedSessionsFromListResult, sortHostedSessionsNewestFirst } from '../../lib/hosted-sessions';
 import { sortUnionSessions, unionSessionsFromListResponse } from '../../lib/sessions-union';
-import { useApprovalUpdates } from '../../hooks/useApprovalUpdates';
+import { useEventStreamState } from '../../lib/event-stream';
 import { useContractList } from '../../hooks/useContracts';
 import { readSessionList } from '../../hooks/useSessionLifecycle';
 import type { ClientLifetime } from '../../lib/client-lifetime';
@@ -62,11 +62,11 @@ export function useWorkData({ contractScope, subscriptionActive, archived, inclu
     retry: false,
   });
 
-  const approvalUpdates = useApprovalUpdates(true);
+  const streamLive = useEventStreamState('app').status === 'live';
   const approvals = useQuery({
     queryKey: queryKeys.approvals,
     queryFn: () => platformClient.operator.approvals.list(),
-    refetchInterval: approvalUpdates.connected ? false : 15_000,
+    refetchInterval: streamLive ? false : 15_000,
   });
 
   const sessions = useQuery({

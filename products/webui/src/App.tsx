@@ -19,7 +19,6 @@ import { useRelayPairingHandoff } from './hooks/useRelayPairingHandoff';
 import { RelayPairingOffer } from './components/auth/RelayPairingOffer';
 import { usePushSubscriptionReconcile } from './hooks/usePushSubscriptionReconcile';
 import { useRealtimeInvalidation } from './hooks/useRealtimeInvalidation';
-import { useSessionRealtime } from './hooks/useSessionRealtime';
 import { StepUpHost } from './components/auth/StepUpHost';
 import { PairingHandoffOffers } from './components/pairing/PairingHandoffOffers';
 import { PairingPostureNotice } from './components/pairing/PairingPostureNotice';
@@ -40,6 +39,7 @@ import { SettingsDialog } from './components/settings/dialog/SettingsDialog';
 import type { SettingsSectionId } from './components/settings/dialog/sections';
 import { needsYouCount } from './lib/needs-you';
 import { unpairRelay } from './lib/relay-connection';
+import { useEventStreamState } from './lib/event-stream';
 import { asRecord, bestId, bestTitle, firstString } from './lib/object';
 import { nonEmpty } from './lib/non-empty';
 import {
@@ -98,9 +98,9 @@ export default function App() {
   // D-WEBUI-3: auth.current only re-probes once it has ALREADY errored (see
   // refetchInterval above), while healthy it never re-runs on its own, so a daemon
   // death during an idle session would otherwise surface nothing until the user does
-  // something that happens to trigger a query. The health poll already re-probes the
-  // daemon unconditionally every 15s (useDaemonHealth), so it is the signal that
-  // catches an outage while auth.current is sitting on stale "everything is fine" data.
+  // something that happens to trigger a query. Health (useDaemonHealth) watches the live
+  // event stream and probes the daemon whenever that stream is down, so it is the signal
+  // that catches an outage while auth.current is sitting on stale "everything is fine" data.
   const health = useDaemonHealth();
   // Wake-word detection, mounted at the shell rather than in a view: it holds a
   // microphone for as long as the user has it on, so its lifetime cannot be a view's
@@ -109,17 +109,12 @@ export default function App() {
   // getUserMedia, so no permission prompt appears. The transcript sink is registered
   // separately by the view that owns a composer (ChatView).
   useWakeHost();
-  // Session liveness: consume the raw un-domained session-update stream, but only once
-  // signed in (opening it while signed-out just 401s). It degrades honestly on failure.
-  const sessionRealtime = useSessionRealtime(auth.isSuccess);
-  // Control-plane invalidation stream: SAME auth gate as the session stream. Opening it
-  // unconditionally at mount meant the paste-token sign-in flow (app mounts signed-out)
-  // fired it with no token, 401'd, and, because its enable flag never changed, the
-  // stream never re-opened after the token was applied, leaving live invalidation dead
-  // for the whole session AND painting the raw 401 body across every banner. Gating on
-  // auth.isSuccess opens it only once authenticated and re-opens it on every auth
-  // transition (sign-in, and a re-auth after a token expiry flips isSuccess back true).
+  // Live invalidation, session lifecycle and approval updates: one subscriber on the
+  // tab's shared event stream (lib/event-stream.ts), opened only once signed in (opening
+  // it signed-out just 401s) and re-subscribed on every auth transition. The message is
+  // the stream's own while it is paused or stopped, else null.
   const realtimeError = useRealtimeInvalidation(auth.isSuccess);
+  const liveUpdates = useEventStreamState('app');
   // Push self-heal: on every rising edge into connected+signed-in (first open, or a
   // reconnect after an outage), compare this browser's live push subscription against
   // the daemon's own record and heal any drift in place. See usePushSubscriptionReconcile.
@@ -480,8 +475,8 @@ export default function App() {
   // to sign-in, never the unreachable overlay.
   const authIsUnauthorized = auth.isError && !isDaemonUnreachableError(auth.error);
   // D-WEBUI-3: the daemon is "unreachable" either because auth.current itself just
-  // failed with a network error, OR because the independent health poll has declared
-  // the connection 'down' (2+ consecutive probe failures), the latter is what catches
+  // failed with a network error, OR because health has declared the connection 'down'
+  // (the event stream dropped and the probes since have failed), the latter is what catches
   // a daemon that dies mid-session while auth.current was sitting on old success data
   // and had no reason to re-fire. A network failure/health-down state with a stored
   // token means the daemon is unreachable, NOT that the operator is signed out: keep
@@ -634,17 +629,11 @@ export default function App() {
       )}
       banners={(
         <>
-          {/* Two SSE feeds back this app (the domained invalidation stream and the raw
-              session-update stream). A daemon drop trips BOTH, which used to stack two
-              near-identical "live updates paused" warnings. Collapse to ONE banner: a
-              unified line when both are down, otherwise the specific message. (F7e) */}
-          {(realtimeError ?? sessionRealtime.error) && (
+          {realtimeError && (
             <div className="banner warning">
               <Plug size={16} />
               {' '}
-              {realtimeError && sessionRealtime.error
-                ? 'Live updates paused: reconnecting. Views fall back to periodic refresh until the stream returns.'
-                : (realtimeError ?? sessionRealtime.error)}
+              {realtimeError}
             </div>
           )}
           {missingChatNotice && (
@@ -687,8 +676,8 @@ export default function App() {
           tab={tab}
           onTabChange={setTab}
           subscriptionActive={fleetSubscriptionActive}
-          sessionSubscriptionActive={sessionRealtime.connected}
-          streamPaused={Boolean(sessionRealtime.error)}
+          sessionSubscriptionActive={liveUpdates.status === 'live'}
+          streamPaused={realtimeError !== null}
           onOpenSession={handleOpenSession}
         />
       )}

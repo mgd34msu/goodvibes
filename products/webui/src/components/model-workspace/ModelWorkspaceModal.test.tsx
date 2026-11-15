@@ -210,7 +210,7 @@ function chooseGroup(el: HTMLElement, label: string): void {
 }
 
 describe('ModelWorkspaceModal: family enrichment lifecycle', () => {
-  test('polls only while open and family-grouped, resumes on reopen, and stops on unmount', async () => {
+  test('polls only while open, family-grouped and missing a family; stops once every model has one and on unmount', async () => {
     jest.useFakeTimers();
     providersResponse = { providers: PROVIDERS_RESPONSE.providers.map((provider) => ({
       ...provider,
@@ -250,9 +250,10 @@ describe('ModelWorkspaceModal: family enrichment lifecycle', () => {
       setOpen(true);
       await pump();
       expect(providerCalls).toBe(closedCalls + 1);
+      // Every model has a family now, so nothing is left to wait for.
       jest.advanceTimersByTime(5_000);
       await pump();
-      expect(providerCalls).toBe(closedCalls + 2);
+      expect(providerCalls).toBe(closedCalls + 1);
       chooseGroup(el, 'Provider');
       await pump();
       const regroupedCalls = providerCalls;

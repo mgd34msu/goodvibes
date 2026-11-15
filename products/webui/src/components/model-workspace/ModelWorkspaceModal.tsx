@@ -28,6 +28,7 @@ import {
   buildTargetEnableEntry,
   buildTargetWriteEntries,
   configuredProviderIdsFromProvidersResponse,
+  detectFamily,
   filterModels,
   groupModels,
   hasAnyCapabilityData,
@@ -46,6 +47,10 @@ import {
 } from '../../lib/model-catalog';
 import '../../styles/components/model-workspace.css';
 import '../../styles/components/providers.css';
+
+/** Re-read cadence and bound while the catalog is grouped by family and some families are missing. */
+const FAMILY_POLL_MS = 5_000;
+const FAMILY_POLL_LIMIT = 12;
 
 /** "128k context", "1M context", or '' when the catalog reports none. */
 function contextLabel(contextWindow: number | undefined): string {
@@ -120,8 +125,13 @@ export function ModelWorkspaceModal({ open, onClose }: ModelWorkspaceModalProps)
     queryFn: () => platformClient.operator.providers.list(),
     enabled: open,
     // Families arrive as optional server enrichment; never block catalog access
-    // on judgment. React Query owns/stops refreshes with the visible grouping.
-    refetchInterval: open && groupBy === 'family' ? 5_000 : false,
+    // on judgment. While grouped by family, re-read until every model has one,
+    // for at most a minute (a daemon without family metadata never sends them).
+    refetchInterval: (query) => open && groupBy === 'family'
+      && query.state.dataUpdateCount < FAMILY_POLL_LIMIT
+      && modelsFromProvidersResponse(query.state.data).some((model) => detectFamily(model) === undefined)
+      ? FAMILY_POLL_MS
+      : false,
   });
   const currentModel = useQuery({
     queryKey: ['models', 'current'],

@@ -17,13 +17,16 @@
  * daemon holds the pinned key, so a link must never store itself. Decoding is offline;
  * the decoded pairing is held as a pending offer (`status` 'pending', with `pairing`)
  * until the caller invokes `confirm()`, which is the only path that stores it.
- * `dismiss()` drops the offer. `status` is 'idle' until a fragment is present, 'stored'
- * once confirmed, or 'error' when the fragment was malformed.
+ * `dismiss()` drops the offer. A link for the pairing this device already holds changes
+ * nothing, so it reads as 'stored' at once and asks nothing. `status` is 'idle' until a
+ * fragment is present, 'stored' once confirmed (or already held), or 'error' when the
+ * fragment was malformed.
  */
 
 import { useCallback, useEffect, useState } from 'react';
 import {
   decodeRelayPairingCode,
+  getStoredRelayPairing,
   parseRelayPairingFromHash,
   storeRelayPairing,
   stripRelayPairingFragment,
@@ -75,7 +78,11 @@ export function resetRelayPairingCaptureForTest(): void {
 function offerRelayPairingCode(code: string): RelayOutcome {
   if (capture.outcome !== null) return capture.outcome;
   try {
-    capture.outcome = { status: 'pending', pairing: decodeRelayPairingCode(code) };
+    const pairing = decodeRelayPairingCode(code);
+    const held = getStoredRelayPairing();
+    const alreadyHeld = held !== null && held.relayUrl === pairing.relayUrl
+      && held.rid === pairing.rid && held.daemonPublicKey === pairing.daemonPublicKey;
+    capture.outcome = { status: alreadyHeld ? 'stored' : 'pending', pairing };
   } catch (error) {
     capture.outcome = { status: 'error', error };
   }

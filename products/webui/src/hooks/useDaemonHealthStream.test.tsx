@@ -4,6 +4,7 @@ import { createRoot } from 'react-dom/client';
 import { flushSync } from 'react-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useDaemonHealth } from './useDaemonHealth';
+import { subscribeEvents } from '../lib/event-stream';
 import { client as platformClient } from '../lib/goodvibes';
 import { closeRelayClient, setActiveRoute } from '../lib/relay-connection';
 import { nativeRequestPrimitives } from '../test-setup';
@@ -28,13 +29,13 @@ async function until(predicate: () => boolean, message: string) {
 
 interface Source { readonly controller: ReadableStreamDefaultController<Uint8Array> }
 
-/** Serves the health stream from a body the test writes frames into. */
+/** Serves the app's event stream from a body the test writes frames into; anything else is unavailable. */
 function installStreamFetch(): Source[] {
   const originalFetch = globalThis.fetch;
   const sources: Source[] = [];
   globalThis.fetch = Object.assign((input: RequestInfo | URL) => {
     const url = new URL(input instanceof Request ? input.url : String(input));
-    expect(url.pathname).toBe('/api/control-plane/events');
+    if (url.pathname !== '/api/control-plane/events') return Promise.resolve(new nativeResponse('unavailable', { status: 503 }));
     const body = new ReadableStream<Uint8Array>({ start(controller) { sources.push({ controller }); } });
     return Promise.resolve(new nativeResponse(body, { headers: { 'Content-Type': 'text/event-stream' } }));
   }, { preconnect: (...args: Parameters<typeof fetch.preconnect>) => nativeRequestPrimitives.fetch.preconnect(...args) });
@@ -49,7 +50,9 @@ function renderHealth() {
   const client = new QueryClient({ defaultOptions: { queries: { enabled: false, retry: false, gcTime: 0 } } });
   const container = document.createElement('div'); document.body.appendChild(container);
   const root = createRoot(container);
+  // Health reads the shared stream; an app-wide subscriber is what opens it.
   function Probe() {
+    React.useEffect(() => subscribeEvents({ domains: ['tasks'], events: [], onEvent: () => {} }), []);
     return <output data-sse={useDaemonHealth().sse} />;
   }
   flushSync(() => root.render(<QueryClientProvider client={client}><Probe /></QueryClientProvider>));
@@ -76,7 +79,7 @@ afterEach(() => {
   }
 });
 
-describe('health stream state on an idle daemon', () => {
+describe('health reads the shared stream state on an idle daemon', () => {
   test('the daemon ready frame makes the stream active without any turn event', async () => {
     const sources = installStreamFetch();
     const state = renderHealth();

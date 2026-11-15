@@ -1,23 +1,17 @@
 /**
  * Live turn/tool output and lifecycle updates for an attached hosted session.
- * The app-wide session stream owns list liveness even when nothing is attached.
- * Row changes retarget callbacks through refs without reopening this stream.
+ *
+ * Turn and tool output come from the shared event stream's detail lane (`turn`,
+ * `tools`); lifecycle updates (`hosted-session-update`) already ride the app lane,
+ * whose app-wide subscriber keeps the hosted list fresh, so this hook only forwards
+ * the attached session's own lifecycle frames. Row changes retarget callbacks through
+ * a ref without re-subscribing.
  */
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
-import { client as platformClient, DEFAULT_SSE_RECONNECT } from '../lib/goodvibes';
-import { getClientLifetime, isClientLifetimeCurrent, subscribeClientLifetime } from '../lib/client-lifetime';
-import { getActiveRoute, subscribeActiveRoute } from '../lib/relay-connection';
-import { queryKeys } from '../lib/queries';
+import { useEffect, useRef } from 'react';
+import { subscribeEvents, useEventStreamState } from '../lib/event-stream';
 import { HOSTED_SESSION_UPDATE_WIRE_EVENT } from '../lib/hosted-sessions';
 import { firstString, readPath } from '../lib/object';
 import { readHostedStreamFrame, type HostedStreamFrame } from '../lib/hosted-session-stream';
-import { RELAY_OVERFLOW_EVENT, noteRelayOverflow, readDroppedCount } from '../lib/relay-stream-overflow';
-
-/** `?domains=` narrowing for this stream: `session` tags hosted-session-update
- * (EVENT_DOMAIN in the platform's gateway-scope-enforcement.ts), `turn`/`tools` carry
- * the ordinary orchestrator's live output the hosted loop emits. */
-const HOSTED_SESSION_EVENTS_PATH = '/api/control-plane/events?domains=session,turn,tools';
 
 export interface UseHostedSessionRealtimeOptions {
   readonly enabled: boolean;
@@ -28,6 +22,7 @@ export interface UseHostedSessionRealtimeOptions {
   /** Called when a hosted-session-update frame's session id matches
    * `attachedSessionId`, the raw frame payload (`{event, session, ...}`). */
   readonly onLifecycleUpdate?: (payload: unknown) => void;
+  /** The output stream is live again or dropped frames: re-read the transcript. */
   readonly onReconcile?: () => void;
 }
 
@@ -36,29 +31,12 @@ export interface UseHostedSessionRealtimeResult {
   readonly error: string | null;
 }
 
-/** Fixed copy for transport failures; `err.message` can be the raw 401 body, so it is never shown. */
-const STREAM_ERROR_MESSAGE = 'Live session output paused: the event stream reported an error.';
-const STREAM_OPEN_FAILED_MESSAGE = 'Live session output paused: the event stream could not be opened.';
-/**
- * onTerminate fires only after the transport's reconnect attempts are exhausted, and
- * nothing here reopens the stream until the route or client identity changes, so this
- * must not say "reconnecting".
- */
-const STREAM_ENDED_MESSAGE = 'Live session output stopped: reconnect attempts ran out. Reload the page to resume it.';
-
 export function useHostedSessionRealtime(options: UseHostedSessionRealtimeOptions): UseHostedSessionRealtimeResult {
   const { enabled } = options;
-  const queryClient = useQueryClient();
-  const lifetime = useSyncExternalStore(subscribeClientLifetime, getClientLifetime, getClientLifetime);
-  const route = useSyncExternalStore(subscribeActiveRoute, getActiveRoute, getActiveRoute);
-  const connection = useMemo(() => ({ enabled, queryClient, lifetime, route }), [enabled, queryClient, lifetime, route]);
-  const [state, setState] = useState({ connection, error: null as string | null, connected: false });
+  const stream = useEventStreamState('detail');
 
-  // Read through refs inside the stream's long-lived callbacks so the effect below
-  // never needs attachedSessionId/onStreamFrame/onLifecycleUpdate in its deps, see
-  // the header comment on why reopening the stream on attach/detach is wrong. Synced
-  // in its own effect (never during render) so the stream-opening effect's identity
-  // is unaffected by how often this one re-runs.
+  // Read through a ref inside the long-lived callbacks so attaching or detaching a
+  // session never re-subscribes. Synced in its own effect, never during render.
   const optionsRef = useRef(options);
   useEffect(() => {
     optionsRef.current = options;
@@ -66,82 +44,36 @@ export function useHostedSessionRealtime(options: UseHostedSessionRealtimeOption
 
   useEffect(() => {
     if (!enabled) return undefined;
-    const controller = new AbortController();
-    let disposed = false;
-    let close: (() => void) | null = null;
-    const current = () => !disposed && !controller.signal.aborted && isClientLifetimeCurrent(lifetime) && route === getActiveRoute();
-
-    const invalidateList = () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.hostedSessionsAll });
-    };
-
-    platformClient.streams
-      .open(
-        HOSTED_SESSION_EVENTS_PATH,
-        {
-          onReady: () => {
-            if (!current()) return;
-            setState({ connection, connected: true, error: null });
-            optionsRef.current.onReconcile?.();
-          },
-          onEvent: (eventName: string, payload: unknown) => {
-            if (!current()) return;
-            const { attachedSessionId, onStreamFrame, onLifecycleUpdate } = optionsRef.current;
-            if (eventName === RELAY_OVERFLOW_EVENT) {
-              noteRelayOverflow(readDroppedCount(payload));
-              optionsRef.current.onReconcile?.();
-              invalidateList();
-              return;
-            }
-            if (eventName === HOSTED_SESSION_UPDATE_WIRE_EVENT) {
-              invalidateList();
-              const sessionId = firstString(readPath(payload, ['session']), ['id']);
-              if (attachedSessionId && sessionId === attachedSessionId) {
-                onLifecycleUpdate?.(payload);
-              }
-              return;
-            }
-            if (eventName === 'turn' || eventName === 'tools') {
-              if (!attachedSessionId) return;
-              const frame = readHostedStreamFrame(payload);
-              if (frame?.sessionId === attachedSessionId) {
-                onStreamFrame?.(frame);
-              }
-              return;
-            }
-            // 'session' domain riders (e.g. PERMISSION_MODE_CHANGED) carry nothing
-            // this feature renders, ignored, matching useRealtimeInvalidation's
-            // "unknown key, no-op" idiom for a frame outside this hook's scope.
-          },
-          onError: (_err: unknown) => {
-            if (!current()) return;
-            setState({ connection, connected: false, error: STREAM_ERROR_MESSAGE });
-          },
-          onTerminate: () => {
-            if (!current()) return;
-            setState({ connection, connected: false, error: STREAM_ENDED_MESSAGE });
-          },
-        },
-        { reconnect: DEFAULT_SSE_RECONNECT, signal: controller.signal },
-      )
-      .then((dispose) => {
-        if (!current()) {
-          dispose();
-          return;
-        }
-        close = dispose;
-      })
-      .catch((_err: unknown) => {
-        if (!current()) return;
-        setState({ connection, connected: false, error: STREAM_OPEN_FAILED_MESSAGE });
-      });
-
+    const output = subscribeEvents({
+      domains: ['turn', 'tools'],
+      events: ['turn', 'tools'],
+      onEvent: (_name, payload) => {
+        const { attachedSessionId, onStreamFrame } = optionsRef.current;
+        if (!attachedSessionId) return;
+        const frame = readHostedStreamFrame(payload);
+        if (frame?.sessionId === attachedSessionId) onStreamFrame?.(frame);
+      },
+      onReady: () => optionsRef.current.onReconcile?.(),
+      onGap: () => optionsRef.current.onReconcile?.(),
+    });
+    const lifecycle = subscribeEvents({
+      domains: ['session'],
+      events: [HOSTED_SESSION_UPDATE_WIRE_EVENT],
+      onEvent: (_name, payload) => {
+        const { attachedSessionId, onLifecycleUpdate } = optionsRef.current;
+        const sessionId = firstString(readPath(payload, ['session']), ['id']);
+        if (attachedSessionId && sessionId === attachedSessionId) onLifecycleUpdate?.(payload);
+      },
+    });
     return () => {
-      disposed = true;
-      controller.abort();
-      if (close) close();
+      output();
+      lifecycle();
     };
-  }, [enabled, queryClient, lifetime, route, connection]);
+  }, [enabled]);
 
-  return state.connection === connection ? { error: state.error, connected: state.connected } : { error: null, connected: false };
+  const down = stream.status === 'paused' || stream.status === 'ended';
+  return {
+    connected: enabled && stream.status === 'live',
+    error: enabled && down ? stream.message : null,
+  };
 }

@@ -1,7 +1,6 @@
-import { useEffect, useState, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { client as platformClient, DEFAULT_SSE_RECONNECT, GOODVIBES_BASE_URL, WEBUI_VERSION, getCurrentAuth } from '../lib/goodvibes';
-import { getClientLifetime, isClientLifetimeCurrent, subscribeClientLifetime } from '../lib/client-lifetime';
+import { client as platformClient, GOODVIBES_BASE_URL, WEBUI_VERSION, getCurrentAuth } from '../lib/goodvibes';
 import {
   evaluateClientCompatibility,
   getObservedClientCompatibilityFloor,
@@ -19,15 +18,16 @@ import {
   modelNameFromCurrent,
   clampLatency,
   deriveAuthState,
-  deriveWorkingState,
 } from '../lib/daemon-health';
 import { getActiveRoute, probeConnection, setActiveRoute, subscribeActiveRoute } from '../lib/relay-connection';
+import { reviveEventStreams, useEventStreamState, type EventStreamStatus } from '../lib/event-stream';
+import { queryKeys } from '../lib/queries';
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-/** How often to re-probe the daemon (ms) */
+/** How often to probe the daemon while the event stream cannot vouch for it (ms) */
 const HEALTH_PROBE_INTERVAL_MS = 15_000;
 
 /** A direct probe that has not answered by then counts as a miss (a LAN address off-network can hang). */
@@ -40,8 +40,13 @@ const DIRECT_PROBE_TIMEOUT_MS = 5_000;
  */
 const PING_PATH = '/api/local-auth';
 
-/** The turn domain is the lightest stream; the daemon answers it with a `ready` frame. */
-const HEALTH_EVENTS_PATH = '/api/control-plane/events?domains=turn';
+const SSE_FROM_STREAM: Record<EventStreamStatus, SseState> = {
+  idle: 'disabled',
+  connecting: 'connecting',
+  live: 'active',
+  paused: 'error',
+  ended: 'error',
+};
 
 // ---------------------------------------------------------------------------
 // Internal latency probe
@@ -65,14 +70,21 @@ function statusOf(error: unknown): number | null {
   return typeof status === 'number' ? status : null;
 }
 
-/** Run an authed call and reduce it to an {ok,status} probe result (never throws). */
-async function probeCall(fn: () => Promise<unknown>): Promise<{ ok: boolean; status: number | null }> {
-  try {
-    await fn();
-    return { ok: true, status: 200 };
-  } catch (error) {
-    return { ok: false, status: statusOf(error) };
-  }
+/** Whether a granted scope covers `required`, by the daemon's rule (`*`, exact, or `prefix:*`). */
+function scopeCovers(granted: string, required: string): boolean {
+  return granted === '*' || granted === required || (granted.endsWith(':*') && required.startsWith(granted.slice(0, -1)));
+}
+
+/**
+ * The WORKING axis from the sign-in's own grant, as auth.current reports it: data reads
+ * need `read:sessions`. A daemon that reports no scope list is not judged.
+ */
+function workingFromGrant(snapshot: unknown): WorkingState {
+  const scopes: unknown = (snapshot as { scopes?: unknown } | null)?.scopes;
+  if (!Array.isArray(scopes)) return 'working';
+  return (scopes as readonly unknown[]).some((scope) => typeof scope === 'string' && scopeCovers(scope, 'read:sessions'))
+    ? 'working'
+    : 'blocked';
 }
 
 // ---------------------------------------------------------------------------
@@ -83,10 +95,14 @@ async function probeCall(fn: () => Promise<unknown>): Promise<{ ok: boolean; sta
  * Returns live daemon health: connection state, latency, SSE stream state,
  * active turn count, queued task count, and current model name.
  *
- * - Probes the daemon every 15 s via a lightweight fetch (no throw on failure),
- *   together with the relay when a relay pairing is stored.
- * - Reuses the existing queryClient pattern for tasks + model (separate queries).
- * - Opens the turn-domain event stream for SSE state tracking.
+ * - Liveness is the app's shared event stream (lib/event-stream.ts): while it is live
+ *   on the direct route nothing is polled. While it is down, not yet open (signed out)
+ *   or on the relay (to notice the direct path coming back), a lightweight probe runs
+ *   every 15 s, together with the relay when a relay pairing is stored.
+ * - Signed in and "can read" come from the app's own auth query (auth.current reports
+ *   the grant); this hook adds no request for them.
+ * - Tasks and the current model refresh from stream frames, and poll only while the
+ *   stream is down. No interval runs while the tab is hidden; returning refreshes.
  */
 export function useDaemonHealth(): DaemonHealth {
   // -- Route state ------------------------------------------------------------
@@ -97,7 +113,6 @@ export function useDaemonHealth(): DaemonHealth {
   // what flips it, and the health.route field returned at the bottom maps it to null
   // whenever the daemon is unreachable by either path.
   const storeRoute = useSyncExternalStore(subscribeActiveRoute, getActiveRoute, getActiveRoute);
-  const sourceLifetime = useSyncExternalStore(subscribeClientLifetime, getClientLifetime, getClientLifetime);
 
   // -- Client-build compatibility floor --------------------------------------
   // Reactive view of the module-level observed-floor store (lib/client-compatibility.ts),
@@ -114,77 +129,42 @@ export function useDaemonHealth(): DaemonHealth {
     ? null
     : evaluateClientCompatibility({ clientVersion: WEBUI_VERSION, floor: observedFloor });
 
-  // -- SSE state ------------------------------------------------------------
-  // Stays 'connecting' until the daemon's `ready` frame (or any event) arrives, do NOT
-  // set 'active' synchronously before that, as it would show "Live" on a dead stream.
-  const [sseState, setSseState] = useState<SseState>('connecting');
-
-  useEffect(() => {
-    // The stream opens through routedFetch on both direct and relay routes (the relay
-    // tunnel carries event streams, see lib/relay-connection.ts).
-    // A route change retires this subscription before opening a fresh one, with
-    // reconnect and authentication still owned by the existing platform transport.
-    setSseState('connecting');
-    let mounted = true;
-    const controller = new AbortController();
-    const isCurrent = () => mounted && !controller.signal.aborted && isClientLifetimeCurrent(sourceLifetime);
-    let dispose: (() => void) | null = null;
-
-    // The daemon writes a `ready` frame as soon as it accepts the stream, so an idle
-    // daemon (no turn running) still proves the transport is delivering. Any later
-    // error or termination pauses the status until the reconnect's own `ready`.
-    platformClient.streams
-      .open(
-        HEALTH_EVENTS_PATH,
-        {
-          onReady: () => { if (isCurrent()) setSseState('active'); },
-          onEvent: () => { if (isCurrent()) setSseState('active'); },
-          onError: () => { if (isCurrent()) setSseState('error'); },
-          onTerminate: () => { if (isCurrent()) setSseState('error'); },
-        },
-        { signal: controller.signal, reconnect: DEFAULT_SSE_RECONNECT },
-      )
-      .then((close) => {
-        if (!mounted) {
-          close();
-          return;
-        }
-        dispose = close;
-      })
-      .catch(() => {
-        if (isCurrent()) setSseState('error');
-      });
-
-    return () => {
-      mounted = false;
-      controller.abort();
-      dispose?.();
-      // Don't flip to error on unmount, component teardown, not a real failure
-    };
-  }, [storeRoute, sourceLifetime]);
+  // -- Live updates -----------------------------------------------------------
+  // The app lane's own state: 'connecting' until the daemon's `ready` frame, so the
+  // strip never shows "Live" on a stream that has not delivered.
+  const stream = useEventStreamState('app');
+  const sseState: SseState = SSE_FROM_STREAM[stream.status];
+  const streamLive = stream.status === 'live';
 
   // -- Latency + connection probe -------------------------------------------
   const [latencyMs, setLatencyMs] = useState<number | null>(null);
   const [connectionState, setConnectionState] = useState<ConnectionState>('down');
 
-  // Use TanStack Query so we get deduplication and window-focus coordination.
-  // refetchIntervalInBackground: true, intentional trade-off: keeps the strip
-  // accurate even when the tab is backgrounded (battery/network cost is low at
-  // 15 s intervals; a stale connection indicator would be misleading to users
-  // who return to the tab expecting current status). With a relay pairing stored,
-  // the relay is tried together with the direct probe (lib/relay-connection.ts
-  // probeConnection), so a device away from home connects as soon as the relay answers.
+  // With a relay pairing stored, the relay is tried together with the direct probe
+  // (lib/relay-connection.ts probeConnection), so a device away from home connects as
+  // soon as the relay answers. TanStack pauses the interval in a hidden tab and
+  // refetches on return.
+  const probeWanted = !streamLive || storeRoute === 'relay';
   const healthQuery = useQuery({
     queryKey: ['daemon-health', 'probe'] as const,
     queryFn: () => probeConnection(probeLatency, () => setConnectionState('connected')),
     networkMode: 'always',
-    refetchInterval: HEALTH_PROBE_INTERVAL_MS,
-    refetchIntervalInBackground: true,
+    refetchInterval: probeWanted ? HEALTH_PROBE_INTERVAL_MS : false,
+    refetchIntervalInBackground: false,
     retry: 0,
     staleTime: HEALTH_PROBE_INTERVAL_MS / 2,
   });
 
   const refetchHealth = healthQuery.refetch;
+
+  // A stream that drops is checked at once rather than at the next interval, so a dead
+  // daemon or a lost direct path shows (and the relay takes over) without the wait.
+  const wasLive = useRef(streamLive);
+  useEffect(() => {
+    if (wasLive.current && !streamLive && stream.status !== 'idle') void refetchHealth();
+    wasLive.current = streamLive;
+  }, [streamLive, stream.status, refetchHealth]);
+
   const [browserOffline, setBrowserOffline] = useState(() => !navigator.onLine);
   useEffect(() => {
     let cancelled = false;
@@ -217,6 +197,8 @@ export function useDaemonHealth(): DaemonHealth {
       if (route) {
         setConnectionState('connected');
         setActiveRoute(route);
+        // The daemon answers again: live updates that gave up come back without a reload.
+        reviveEventStreams();
         return;
       }
     } else if (healthQuery.isError) {
@@ -227,47 +209,45 @@ export function useDaemonHealth(): DaemonHealth {
     setConnectionState((previous) => (previous === 'connected' ? 'reconnecting' : 'down'));
   }, [browserOffline, healthQuery.isSuccess, healthQuery.isError, healthQuery.data, healthQuery.dataUpdatedAt]);
 
+  // A live stream is itself proof the daemon answers over the current route.
+  useEffect(() => {
+    if (streamLive && !browserOffline) setConnectionState('connected');
+  }, [streamLive, browserOffline]);
+
   // -- Tasks ----------------------------------------------------------------
+  // `tasks` frames revalidate this key; it polls only while the stream is down.
   const tasksQuery = useQuery({
-    queryKey: ['tasks'] as const,
+    queryKey: queryKeys.tasks,
     queryFn: () => platformClient.operator.tasks.list(),
-    refetchInterval: HEALTH_PROBE_INTERVAL_MS,
-    refetchIntervalInBackground: true,
+    refetchInterval: streamLive ? false : HEALTH_PROBE_INTERVAL_MS,
+    refetchIntervalInBackground: false,
     retry: 0,
     staleTime: HEALTH_PROBE_INTERVAL_MS / 2,
   });
 
-  // -- Signed-in axis (auth.current: 200 vs 401) ----------------------------
-  const authProbe = useQuery({
-    queryKey: ['daemon-health', 'auth'] as const,
-    queryFn: () => probeCall(getCurrentAuth),
-    refetchInterval: HEALTH_PROBE_INTERVAL_MS,
-    refetchIntervalInBackground: true,
-    retry: 0,
-    staleTime: HEALTH_PROBE_INTERVAL_MS / 2,
+  // -- Signed-in and working axes ---------------------------------------------
+  // Read from the app's own auth query (same key and options as App.tsx), never fetched
+  // here: auth.current answers whether this credential is signed in and what it may read.
+  const auth = useQuery({
+    queryKey: queryKeys.auth,
+    queryFn: getCurrentAuth,
+    retry: false,
+    enabled: false,
   });
-
-  // -- Working axis (an authed read that surfaces the read:sessions scope gap) --
-  // A token that is signed-in but lacks read:sessions will 401 here → 'blocked',
-  // so the strip shows reachable+signed-in but NOT working rather than a false "live".
-  const workingProbe = useQuery({
-    queryKey: ['daemon-health', 'working'] as const,
-    queryFn: () => probeCall(() => platformClient.operator.sessions.list()),
-    refetchInterval: HEALTH_PROBE_INTERVAL_MS,
-    refetchIntervalInBackground: true,
-    retry: 0,
-    staleTime: HEALTH_PROBE_INTERVAL_MS / 2,
-  });
-
-  const signedIn: AuthState = authProbe.isSuccess ? deriveAuthState(authProbe.data) : 'unknown';
-  const working: WorkingState = workingProbe.isSuccess ? deriveWorkingState(workingProbe.data) : 'unknown';
+  const authStatus = auth.isError ? statusOf(auth.error) : null;
+  const signedIn: AuthState = auth.isSuccess
+    ? 'signed-in'
+    : auth.isError ? deriveAuthState({ ok: false, status: authStatus }) : 'unknown';
+  const working: WorkingState = auth.isSuccess
+    ? workingFromGrant(auth.data)
+    : authStatus === 401 ? 'blocked' : 'unknown';
 
   // -- Current model --------------------------------------------------------
+  // MODEL_CHANGED rides the `providers` domain, which revalidates this key.
   const modelQuery = useQuery({
     queryKey: ['daemon-health', 'model'] as const,
     queryFn: () => platformClient.operator.models.current.get(),
-    // Models change rarely, refresh every 60 s
-    refetchInterval: 60_000,
+    refetchInterval: streamLive ? false : 60_000,
     refetchIntervalInBackground: false,
     retry: 0,
     staleTime: 30_000,

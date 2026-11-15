@@ -5,7 +5,6 @@ import { flushSync } from 'react-dom';
 import type { ServerSentEventHandlers } from '@goodvibes-jev/engine/transport-http';
 
 let handlers: ServerSentEventHandlers | null = null;
-let failNextOpen = false;
 
 mock.module('../lib/goodvibes', () => ({
   DEFAULT_SSE_RECONNECT: { enabled: true },
@@ -13,7 +12,7 @@ mock.module('../lib/goodvibes', () => ({
     streams: {
       open: (_path: string, next: ServerSentEventHandlers) => {
         handlers = next;
-        return failNextOpen ? Promise.reject(new Error('open failed')) : Promise.resolve(() => {});
+        return Promise.resolve(() => {});
       },
     },
   },
@@ -22,7 +21,7 @@ mock.module('../lib/goodvibes', () => ({
 const { useCompactionReceipts } = await import('./useCompactionReceipts');
 
 let latest: ReturnType<typeof useCompactionReceipts> | null = null;
-afterEach(() => { handlers = null; failNextOpen = false; latest = null; });
+afterEach(() => { handlers = null; latest = null; });
 
 function mount() {
   const container = document.createElement('div'); document.body.appendChild(container);
@@ -35,22 +34,11 @@ function mount() {
   return { show, unmount: () => { flushSync(() => root.unmount()); container.remove(); } };
 }
 
-test('a session change whose stream fails to open is not reported as connected', async () => {
+test('a receipt frame as the daemon sends it (event inside the envelope payload) is captured with its outcome', async () => {
   const view = mount();
   view.show('s-1');
-  flushSync(() => handlers?.onReady?.({}));
-  expect(latest?.connected).toBe(true);
-  failNextOpen = true;
-  view.show('s-2');
-  await new Promise((resolve) => setImmediate(resolve));
-  expect(latest?.connected).toBe(false);
-  expect(latest?.error).not.toBeNull();
-  view.unmount();
-});
-
-test('a receipt frame as the daemon sends it (event inside the envelope payload) is captured with its outcome', () => {
-  const view = mount();
-  view.show('s-1');
+  // The shared stream opens on the next microtask.
+  for (let index = 0; index < 4; index++) await Promise.resolve();
   flushSync(() => handlers?.onEvent?.('compaction', {
     type: 'COMPACTION_RECEIPT', ts: 1, traceId: 't', sessionId: 's-1', source: 'runtime',
     payload: { type: 'COMPACTION_RECEIPT', outcome: 'applied', tokensBefore: 100, tokensAfter: 20, trigger: 'auto', strategy: 'x' },

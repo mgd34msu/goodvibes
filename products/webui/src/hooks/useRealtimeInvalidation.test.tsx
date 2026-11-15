@@ -1,14 +1,11 @@
 /**
- * useRealtimeInvalidation, the connection-budget regression test.
+ * useRealtimeInvalidation, the app-wide subscriber on the shared event stream.
  *
- * The bug this pins: the hook used to open ONE SSE connection PER domain (five of them)
- * via platform.realtime.viaSse(). Together with useSessionRealtime's own stream that reached
- * six long-lived connections and saturated the browser's per-origin socket pool, so the
- * next fetch (SessionsView's sessions.list) hung forever and the Sessions view rendered
- * zero rows. The fix opens a SINGLE multiplexed raw stream (?domains=a,b,c) and routes by
- * the frame's event name (the domain). These tests assert exactly ONE stream is opened,
- * that it carries every invalidated domain, and that each domain frame invalidates the
- * right query keys.
+ * Six long-lived streams once saturated the browser's per-origin socket pool, so the
+ * next fetch hung forever. The app now holds ONE multiplexed stream (?domains=a,b,c)
+ * owned by lib/event-stream.ts and routes by frame name. These tests assert exactly ONE
+ * stream is opened, that it carries every app-wide domain, and that each frame
+ * invalidates the right query keys.
  */
 
 import { afterEach, describe, expect, mock, test } from 'bun:test';
@@ -92,10 +89,9 @@ function renderHook(initialEnabled = true): HookHandle {
   };
 }
 
-/** The hook stores the closer from the open() promise one microtask later. */
+/** The stream owner opens on the next microtask and stores the closer one microtask later. */
 async function settleOpen(): Promise<void> {
-  await Promise.resolve();
-  await Promise.resolve();
+  for (let index = 0; index < 4; index++) await Promise.resolve();
 }
 
 function invalidatedKeys(invalidate: ReturnType<typeof mock>): unknown[] {
@@ -110,31 +106,35 @@ afterEach(() => {
 });
 
 describe('useRealtimeInvalidation', () => {
-  test('opens EXACTLY ONE multiplexed control-plane stream, not one per domain', () => {
+  test('opens EXACTLY ONE multiplexed control-plane stream, not one per domain', async () => {
     renderHook();
+    await settleOpen();
     expect(openCalls.length).toBe(1);
     expect(openCalls[0]).toContain('/api/control-plane/events');
-    // Every invalidated domain rides the single stream.
-    for (const domain of ['tasks', 'gate', 'providers', 'knowledge', 'control-plane', 'fleet', 'contracts']) {
+    // Every app-wide domain rides the single stream.
+    for (const domain of ['tasks', 'gate', 'providers', 'knowledge', 'control-plane', 'fleet', 'contracts', 'ops', 'session']) {
       expect(openCalls[0]).toContain(domain);
     }
   });
 
   test('a contracts frame invalidates the scoped list and detail prefix', async () => {
     const { invalidate } = renderHook();
+    await settleOpen();
     capturedHandlers?.onEvent?.('contracts', { type: 'CONTRACT_PASSED', contractId: 'a' });
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(invalidatedKeys(invalidate)).toEqual([['contracts']]);
   });
 
-  test('a `tasks` domain frame invalidates the tasks query', () => {
+  test('a `tasks` domain frame invalidates the tasks query', async () => {
     const { invalidate } = renderHook();
+    await settleOpen();
     capturedHandlers?.onEvent?.('tasks', { payload: { type: 'TASK_UPDATED' } });
     expect(invalidatedKeys(invalidate)).toEqual([['tasks']]);
   });
 
-  test('a `permissions` frame invalidates approvals, the sessions prefix, AND durable rules; `providers` also refreshes session context usage', async () => {
+  test('a `gate` frame invalidates approvals, the sessions prefix, AND durable rules; `providers` also refreshes the model and session context usage', async () => {
     const { invalidate } = renderHook();
+    await settleOpen();
     capturedHandlers?.onEvent?.('gate', {});
     capturedHandlers?.onEvent?.('providers', {});
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -143,43 +143,58 @@ describe('useRealtimeInvalidation', () => {
     // sessionId, and the session-scoped permission-mode/context-usage queries are
     // prefixed with 'sessions' (queries.ts), see useRealtimeInvalidation.ts's
     // DOMAIN_INVALIDATIONS comment.
-    expect(invalidatedKeys(invalidate)).toEqual([['approvals'], ['sessions'], ['permissions', 'rules'], ['providers'], ['sessions']]);
+    expect(invalidatedKeys(invalidate)).toEqual([['approvals'], ['sessions'], ['permissions', 'rules'], ['providers'], ['daemon-health', 'model'], ['sessions']]);
   });
 
-  test('a `knowledge` frame invalidates every knowledge query through its prefix', () => {
+  test('the broker wire events ride the same stream: session, hosted-session and approval updates', async () => {
     const { invalidate } = renderHook();
+    await settleOpen();
+    capturedHandlers?.onEvent?.('session-update', { event: 'session-created', payload: { sessionId: 's1' } });
+    capturedHandlers?.onEvent?.('hosted-session-update', { event: 'created', session: { id: 'h1' } });
+    capturedHandlers?.onEvent?.('approval-update', { approval: { id: 'a1' } });
+    expect(invalidatedKeys(invalidate)).toEqual([['sessions'], ['hosted-sessions'], ['approvals'], ['permissions', 'rules']]);
+  });
+
+  test('a `knowledge` frame invalidates every knowledge query through its prefix', async () => {
+    const { invalidate } = renderHook();
+    await settleOpen();
     capturedHandlers?.onEvent?.('knowledge', {});
     expect(invalidatedKeys(invalidate)).toEqual([
       ['knowledge'],
     ]);
   });
 
-  test('a `control-plane` frame invalidates the control snapshot', () => {
+  test('a `control-plane` frame invalidates the control snapshot', async () => {
     const { invalidate } = renderHook();
+    await settleOpen();
     capturedHandlers?.onEvent?.('control-plane', {});
     expect(invalidatedKeys(invalidate)).toEqual([['control', 'snapshot']]);
   });
 
-  test('a `fleet` frame (a FLEET_NODE_* delta) invalidates the live snapshot AND the archive', () => {
+  test('a `fleet` frame (a FLEET_NODE_* delta) invalidates the live snapshot AND the archive', async () => {
     const { invalidate } = renderHook();
+    await settleOpen();
     capturedHandlers?.onEvent?.('fleet', { payload: { type: 'FLEET_NODE_BLOCKED_ON_USER', nodeId: 'agent-7' } });
     expect(invalidatedKeys(invalidate)).toEqual([['fleet'], ['fleet', 'archived']]);
   });
 
-  test('an `ops` frame (OPS_POWER_STATE_CHANGED) invalidates the power AND memory-diagnostics queries', () => {
+  test('an `ops` frame (OPS_POWER_STATE_CHANGED) invalidates the power AND memory-diagnostics queries', async () => {
     const { invalidate } = renderHook();
+    await settleOpen();
     capturedHandlers?.onEvent?.('ops', { payload: { type: 'OPS_POWER_STATE_CHANGED', inhibited: true, keepAwake: true, workReasons: [] } });
     expect(invalidatedKeys(invalidate)).toEqual([['power', 'status'], ['ops', 'memory']]);
   });
 
-  test('an `ops` frame (OPS_MEMORY_PRESSURE) invalidates the SAME two queries, one domain, no separate event feed', () => {
+  test('an `ops` frame (OPS_MEMORY_PRESSURE) invalidates the SAME two queries, one domain, no separate event feed', async () => {
     const { invalidate } = renderHook();
+    await settleOpen();
     capturedHandlers?.onEvent?.('ops', { payload: { type: 'OPS_MEMORY_PRESSURE', tier: 'high', previousTier: 'elevated', rssMb: 900, heapMb: 400, budgetMb: 1024, usedPct: 88 } });
     expect(invalidatedKeys(invalidate)).toEqual([['power', 'status'], ['ops', 'memory']]);
   });
 
-  test('an unknown domain frame is ignored (no invalidation)', () => {
+  test('an unknown domain frame is ignored (no invalidation)', async () => {
     const { invalidate } = renderHook();
+    await settleOpen();
     capturedHandlers?.onEvent?.('session', {});
     capturedHandlers?.onEvent?.('heartbeat', {});
     expect(invalidate).not.toHaveBeenCalled();
@@ -187,19 +202,22 @@ describe('useRealtimeInvalidation', () => {
 
   // ---- Finding 1 (HIGH): auth-gated open, re-open on login, no raw JSON in the banner.
 
-  test('does NOT open the stream when disabled (signed-out: enabled=false)', () => {
+  test('does NOT open the stream when disabled (signed-out: enabled=false)', async () => {
     renderHook(false);
+    await settleOpen();
     // Pre-auth the app mounts signed-out; opening the stream with no token just 401s.
     // Gating on auth means no open happens at all until authenticated.
     expect(openCalls.length).toBe(0);
   });
 
-  test('re-opens the stream when enabled flips false → true (sign-in transition)', () => {
+  test('re-opens the stream when enabled flips false → true (sign-in transition)', async () => {
     const handle = renderHook(false);
+    await settleOpen();
     expect(openCalls.length).toBe(0);
     // The paste-token sign-in flips the auth gate to true; the effect must re-run and
     // open the stream, the exact recovery the old unconditional-enable code never did.
     handle.rerender(true);
+    await settleOpen();
     expect(openCalls.length).toBe(1);
     expect(openCalls[0]).toContain('/api/control-plane/events');
   });
@@ -210,6 +228,7 @@ describe('useRealtimeInvalidation', () => {
     expect(closers.length).toBe(1);
     expect(closers[0]?.mock.calls.length).toBe(0);
     handle.unmount();
+    await settleOpen();
     expect(closers[0]?.mock.calls.length).toBe(1);
   });
 
@@ -217,13 +236,15 @@ describe('useRealtimeInvalidation', () => {
     const handle = renderHook(true);
     await settleOpen();
     handle.rerender(false);
+    await settleOpen();
     expect(closers.length).toBe(1);
     expect(closers[0]?.mock.calls.length).toBe(1);
     expect(openCalls.length).toBe(1);
   });
 
-  test('a transport error body (raw 401 JSON) NEVER reaches the returned banner string', () => {
+  test('a transport error body (raw 401 JSON) NEVER reaches the returned banner string', async () => {
     const handle = renderHook(true);
+    await settleOpen();
     // The SSE transport sets err.message to the daemon's RAW response body on a pre-auth
     // open. Feed exactly that blob and assert the hook does not surface it.
     const rawBody =
@@ -263,6 +284,7 @@ test('provider change replaces a pending initial usage read and ignores its late
   try {
     flushSync(() => root.render(React.createElement(QueryClientProvider, { client }, React.createElement(Harness))));
     expect(calls).toBe(1);
+    await settleOpen();
     capturedHandlers?.onEvent?.('providers', { type: 'MODEL_CHANGED', registryKey: 'synthetic:unknown', provider: 'synthetic' });
     const deadline = Date.now() + 2000;
     while (container.textContent !== 'null') {

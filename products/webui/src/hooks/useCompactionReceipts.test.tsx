@@ -1,9 +1,7 @@
 /**
- * useCompactionReceipts, scoped-to-one-session compaction stream.
+ * useCompactionReceipts, one session's compaction frames on the shared stream's detail lane.
  *
- * Mirrors useSessionRealtime.test.tsx's harness (mock platform.streams.open, capture
- * the registered handlers, drive them by hand) since this hook follows the same
- * raw-stream-escape-hatch pattern rather than the invalidate-only viaSse facade.
+ * Mocks platform.streams.open, captures the registered handlers and drives them by hand.
  */
 
 import { afterEach, describe, expect, mock, test } from 'bun:test';
@@ -66,10 +64,9 @@ function renderHook(sessionId: string, enabled = true): { rerender: (sessionId: 
   return { rerender: doRender, unmount };
 }
 
-/** The hook stores the closer from the open() promise one microtask later. */
+/** The stream owner opens on the next microtask and stores the closer one microtask later. */
 async function settleOpen(): Promise<void> {
-  await Promise.resolve();
-  await Promise.resolve();
+  for (let index = 0; index < 4; index++) await Promise.resolve();
 }
 
 /** Fire a frame and flush the resulting setState synchronously so latestState
@@ -91,33 +88,38 @@ afterEach(() => {
 });
 
 describe('useCompactionReceipts', () => {
-  test('a transport error body (raw 401 JSON) never reaches the returned error', () => {
+  test('a transport error body (raw 401 JSON) never reaches the returned error', async () => {
     renderHook('s-1');
+    await settleOpen();
     flushSync(() => capturedHandlers?.onError?.(new Error('{"error":"Authentication required","code":"AUTH_REQUIRED","status":401}')));
     expect(latestState?.error).not.toBeNull();
     expect(latestState?.error).not.toContain('AUTH_REQUIRED');
     expect(latestState?.error).not.toContain('{');
   });
 
-  test('opens the raw control-plane stream scoped to the compaction domain', () => {
+  test('opens the raw control-plane stream scoped to the compaction domain', async () => {
     renderHook('s-1');
+    await settleOpen();
     expect(openCalls.length).toBe(1);
     expect(openCalls[0]).toContain('/api/control-plane/events');
     expect(openCalls[0]).toContain('domains=compaction');
   });
 
-  test('does not open a stream when disabled', () => {
+  test('does not open a stream when disabled', async () => {
     renderHook('s-1', false);
+    await settleOpen();
     expect(openCalls.length).toBe(0);
   });
 
-  test('does not open a stream when sessionId is empty', () => {
+  test('does not open a stream when sessionId is empty', async () => {
     renderHook('', true);
+    await settleOpen();
     expect(openCalls.length).toBe(0);
   });
 
-  test('a COMPACTION_RECEIPT frame for this session is captured', () => {
+  test('a COMPACTION_RECEIPT frame for this session is captured', async () => {
     renderHook('s-1');
+    await settleOpen();
     fireEvent('compaction', {
       type: 'COMPACTION_RECEIPT',
       sessionId: 's-1',
@@ -138,8 +140,9 @@ describe('useCompactionReceipts', () => {
     expect(latestState?.receipts[0]?.sessionId).toBe('s-1');
   });
 
-  test('a receipt for a DIFFERENT session is ignored; the domain is daemon-wide', () => {
+  test('a receipt for a DIFFERENT session is ignored; the domain is daemon-wide', async () => {
     renderHook('s-1');
+    await settleOpen();
     fireEvent('compaction', {
       type: 'COMPACTION_RECEIPT',
       sessionId: 's-OTHER',
@@ -159,21 +162,24 @@ describe('useCompactionReceipts', () => {
     expect(latestState?.receipts.length).toBe(0);
   });
 
-  test('a COMPACTION_CHECK frame for this session updates latestCheck', () => {
+  test('a COMPACTION_CHECK frame for this session updates latestCheck', async () => {
     renderHook('s-1');
+    await settleOpen();
     fireEvent('compaction', { type: 'COMPACTION_CHECK', sessionId: 's-1', tokenCount: 50, threshold: 100 });
     expect(latestState?.latestCheck?.tokenCount).toBe(50);
     expect(latestState?.latestCheck?.threshold).toBe(100);
   });
 
-  test('a frame on a non-compaction event name is ignored', () => {
+  test('a frame on a non-compaction event name is ignored', async () => {
     renderHook('s-1');
+    await settleOpen();
     fireEvent('permissions', { type: 'COMPACTION_RECEIPT', sessionId: 's-1' });
     expect(latestState?.receipts.length).toBe(0);
   });
 
-  test('receipts are capped at 20. An honest live log, not an unbounded leak', () => {
+  test('receipts are capped at 20. An honest live log, not an unbounded leak', async () => {
     renderHook('s-1');
+    await settleOpen();
     for (let i = 0; i < 25; i += 1) {
       fireEvent('compaction', {
         type: 'COMPACTION_RECEIPT',
@@ -202,32 +208,35 @@ describe('useCompactionReceipts', () => {
     expect(closers.length).toBe(1);
     expect(closers[0]?.mock.calls.length).toBe(0);
     unmount();
+    await settleOpen();
     expect(closers[0]?.mock.calls.length).toBe(1);
   });
 
-  test('unmounting before the open settles still closes the stream once it arrives', async () => {
+  test('unmounting in the same tick it mounted never opens the stream', async () => {
     const { unmount } = renderHook('s-1');
     unmount();
     await settleOpen();
-    expect(closers.length).toBe(1);
-    expect(closers[0]?.mock.calls.length).toBe(1);
+    expect(openCalls.length).toBe(0);
   });
 
   test('flipping enabled to false closes the stream and does not reopen it', async () => {
     const { rerender } = renderHook('s-1', true);
     await settleOpen();
     rerender('s-1', false);
+    await settleOpen();
     expect(closers.length).toBe(1);
     expect(closers[0]?.mock.calls.length).toBe(1);
     expect(openCalls.length).toBe(1);
   });
 
-  test('switching session closes the old stream and opens a new one', async () => {
+  test('switching session keeps the one stream and follows the new session', async () => {
     const { rerender } = renderHook('s-1');
     await settleOpen();
     rerender('s-2', true);
-    expect(openCalls.length).toBe(2);
-    expect(closers[0]?.mock.calls.length).toBe(1);
-    expect(closers[1]?.mock.calls.length).toBe(0);
+    await settleOpen();
+    expect(openCalls.length).toBe(1);
+    expect(closers[0]?.mock.calls.length).toBe(0);
+    fireEvent('compaction', { type: 'COMPACTION_CHECK', sessionId: 's-2', tokenCount: 7, threshold: 10 });
+    expect(latestState?.latestCheck?.tokenCount).toBe(7);
   });
 });

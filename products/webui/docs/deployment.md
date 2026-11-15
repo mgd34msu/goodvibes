@@ -102,7 +102,8 @@ Get the pairing onto the device by scanning it from the pairing QR, opening a
 `#relay=` hand-off link, or pasting the `gvrelay1.` code on the sign-in
 screen. The page shows the relay host and a short fingerprint of the
 daemon's key and stores the pairing only after you confirm it (it says when it
-would replace an existing one). Relay use is opt-in and probe-driven, so while the daemon is reachable
+would replace an existing one); a link for the pairing this device already
+holds changes nothing and asks nothing. Relay use is opt-in and probe-driven, so while the daemon is reachable
 directly, requests stay direct. State-changing calls over the relay require a
 passkey step-up (a WebAuthn assertion) before the daemon accepts them, so
 register a passkey from Settings, Account before relying on the relay away from home.

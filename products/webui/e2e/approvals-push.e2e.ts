@@ -1,6 +1,7 @@
 /**
  * Approvals push (control.approval_update), the webui's own SSE consumer
- * (useApprovalUpdates), not the platform's node-side stream helper. Proves a pushed
+ * (the app-wide subscriber on lib/event-stream.ts), not the platform's node-side
+ * stream helper. Proves a pushed
  * approval-update frame drives a real render change (a new pending card
  * appearing) rather than only the poll fallback, see mock-daemon.ts's
  * approvalUpdateFrames option for how the mock ties the emitted frame to a

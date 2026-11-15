@@ -340,8 +340,8 @@ export interface MockDaemonOptions {
   permissionRules?: readonly Record<string, unknown>[];
   /**
    * `control.approval_update` SSE frames to emit over the multiplexed control-plane
-   * subscription (the `?domains=…,gate` stream ApprovalsTasksView's push path
-   * rides). When non-empty, the FIRST request for a stream whose `?domains=` includes
+   * subscription (the app's one shared `?domains=…,gate,…` stream). When non-empty,
+   * every request for a stream whose `?domains=` includes
    * `gate` is fulfilled with these frames (`event: approval-update`, one per
    * entry, each `{ approval, createdAt }`) instead of being left pending, so a test
    * can prove the push-consumption path is live, mirroring `fleetEvents` above.
@@ -363,10 +363,9 @@ export interface MockDaemonOptions {
    */
   hostedSessionHistory?: Readonly<Record<string, readonly { role: string; content: string; at?: number }[]>>;
   /**
-   * Raw `turn`/`tools`/`hosted-session-update` frames to emit over the hosted
-   * session subscription (the `?domains=session,turn,tools` stream
-   * useHostedSessionRealtime opens). When non-empty, the FIRST request for that
-   * exact stream is fulfilled with these frames (`event: <entry.event>`, one per
+   * Raw `turn`/`tools` frames to emit over the shared stream's detail lane (the
+   * `?domains=tools,turn` stream useHostedSessionRealtime subscribes to). When
+   * non-empty, every request for a stream carrying `turn` is fulfilled with these frames (`event: <entry.event>`, one per
    * entry) instead of being left pending, proving a hosted session's attached
    * view actually receives its live output. Default [] (the existing
    * pending-stream baseline), same one-shot-emission shape as fleetEvents/
@@ -1410,15 +1409,11 @@ export async function installMockDaemon(page: Page, options: MockDaemonOptions =
         }
       }
       // Approval-update subscription emit (the approvals push spec): EVERY
-      // request for the EXACT `?domains=gate` stream gets the seeded
-      // approvalUpdateFrames as SSE (`event: approval-update`, one per entry),
-      // so a test can prove ApprovalsTasksView's push path actually receives a
-      // frame and reacts to it, distinct from the poll fallback. EXACT match, not
-      // "includes gate": useRealtimeInvalidation ALSO opens a multiplexed
-      // stream whose `?domains=` includes gate among six other domains,
-      // an "includes" check would race that unrelated stream and could hand the
-      // frame to a subscriber that silently drops unrecognized wire events, never
-      // reaching useApprovalUpdates at all.
+      // request for a stream whose `?domains=` includes gate (the app's one shared
+      // stream, lib/event-stream.ts) gets the seeded approvalUpdateFrames as SSE
+      // (`event: approval-update`, one per entry), so a test can prove the push
+      // path actually receives a frame and reacts to it, distinct from the poll
+      // fallback.
       //
       // UNLIKE the fleet block above, this is deliberately NOT gated to "only the
       // first matching request ever": React StrictMode's dev-mode double-invoke
@@ -1432,7 +1427,7 @@ export async function installMockDaemon(page: Page, options: MockDaemonOptions =
       // the record and the event together), a repeat emission to a second
       // (surviving) connection re-sends the same frame, which is idempotent, not
       // a duplicate side effect.
-      if (approvalUpdateFrames.length > 0 && domains === 'gate') {
+      if (approvalUpdateFrames.length > 0 && domains.split(',').includes('gate')) {
         // Let the initial approvals.list() fetch be answered first, same rationale as
         // the fleet block above.
         await approvalsReadServed.opened;
@@ -1448,17 +1443,17 @@ export async function installMockDaemon(page: Page, options: MockDaemonOptions =
         return route.fulfill({ status: 200, contentType: 'text/event-stream', body });
       }
       // Hosted session live-output emit (the hosted-sessions attach spec): EVERY
-      // request for the EXACT `?domains=session,turn,tools` stream
-      // (useHostedSessionRealtime's one stream) gets the seeded hostedStreamFrames
+      // request for a stream whose `?domains=` includes turn (the shared stream's
+      // detail lane, which useHostedSessionRealtime subscribes to) gets the seeded hostedStreamFrames
       // as SSE, one per entry, proving a hosted session's attached view actually
       // receives its live turn/tool output. Deliberately not gated to "first
       // request only", same StrictMode double-invoke rationale as the
       // approval-update block above: HostedSessionsView is view-scoped (mounted
       // only while that view is showing, not app-root-mounted like
-      // useSessionRealtime/useRealtimeInvalidation), so its double-invoke window
+      // useRealtimeInvalidation), so its double-invoke window
       // lands squarely inside a test's own navigation rather than settling before
       // the test's assertions run.
-      if (hostedStreamFrames.length > 0 && domains === 'session,turn,tools') {
+      if (hostedStreamFrames.length > 0 && domains.split(',').includes('turn')) {
         await hostedReadServed.opened;
         const body = hostedStreamFrames
           .map((frame) => `event: ${frame.event}\ndata: ${JSON.stringify(frame.payload)}\n\n`)

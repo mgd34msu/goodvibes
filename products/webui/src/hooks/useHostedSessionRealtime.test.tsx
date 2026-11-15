@@ -1,20 +1,22 @@
 import { invalidateClientLifetime } from '../lib/client-lifetime';
 import { getActiveRoute, setActiveRoute } from '../lib/relay-connection';
 /**
- * useHostedSessionRealtime, one raw stream for hosted-session list liveness
- * (`hosted-session-update`, invalidates the list unconditionally) and, when
- * attached, the LIVE `turn`/`tools` output filtered to that session's id.
+ * useHostedSessionRealtime, an attached hosted session's live `turn`/`tools` output on
+ * the shared stream's detail lane, and its own `hosted-session-update` frames on the
+ * app lane.
  */
 import { afterEach, describe, expect, mock, test } from 'bun:test';
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { flushSync } from 'react-dom';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ServerSentEventHandlers } from '@goodvibes-jev/engine/transport-http';
 
-let capturedHandlers: ServerSentEventHandlers | null = null;
+const DETAIL_PATH = '/api/control-plane/events?domains=tools,turn';
+const APP_PATH = '/api/control-plane/events?domains=session';
+
+const handlersByPath = new Map<string, ServerSentEventHandlers>();
 const openCalls: string[] = [];
-const closers: Array<ReturnType<typeof mock>> = [];
+const closers: Array<{ path: string; close: ReturnType<typeof mock> }> = [];
 const cleanups: Array<() => void> = [];
 
 mock.module('../lib/goodvibes', () => ({
@@ -25,9 +27,9 @@ mock.module('../lib/goodvibes', () => ({
     streams: {
       open: (pathOrUrl: string, handlers: ServerSentEventHandlers) => {
         openCalls.push(pathOrUrl);
-        capturedHandlers = handlers;
+        handlersByPath.set(pathOrUrl, handlers);
         const close = mock(() => {});
-        closers.push(close);
+        closers.push({ path: pathOrUrl, close });
         return Promise.resolve(close);
       },
     },
@@ -38,19 +40,16 @@ const { useHostedSessionRealtime } = await import('./useHostedSessionRealtime');
 type StreamFrame = import('../lib/hosted-session-stream').HostedStreamFrame;
 
 function renderHook(attachedSessionId: string | null = null, enabled = true): {
-  invalidate: ReturnType<typeof mock>;
   frames: StreamFrame[];
   lifecycleUpdates: unknown[];
+  reconciles: () => number;
   state: () => { connected: boolean; error: string | null };
   rerender: (enabled: boolean) => void;
   unmount: () => void;
 } {
-  const client = new QueryClient();
-  const invalidate = mock(() => Promise.resolve());
-  (client as unknown as { invalidateQueries: unknown }).invalidateQueries = invalidate;
-
   const frames: StreamFrame[] = [];
   const lifecycleUpdates: unknown[] = [];
+  let reconcileCount = 0;
 
   const container = document.createElement('div');
   document.body.appendChild(container);
@@ -63,18 +62,18 @@ function renderHook(attachedSessionId: string | null = null, enabled = true): {
       attachedSessionId,
       onStreamFrame: (frame) => frames.push(frame),
       onLifecycleUpdate: (payload) => lifecycleUpdates.push(payload),
+      onReconcile: () => { reconcileCount += 1; },
     });
     return null;
   }
 
   const doRender = (on: boolean) => {
     flushSync(() => {
-      root.render(React.createElement(QueryClientProvider, { client }, React.createElement(Harness, { on })));
+      root.render(React.createElement(Harness, { on }));
     });
   };
   doRender(enabled);
 
-  // Registered for afterEach so a failed assertion cannot leave the root mounted.
   let mounted = true;
   const unmount = () => {
     if (!mounted) return;
@@ -84,135 +83,123 @@ function renderHook(attachedSessionId: string | null = null, enabled = true): {
   };
   cleanups.push(unmount);
 
-  return {
-    invalidate,
-    frames,
-    lifecycleUpdates,
-    state: () => latest,
-    rerender: doRender,
-    unmount,
-  };
+  return { frames, lifecycleUpdates, reconciles: () => reconcileCount, state: () => latest, rerender: doRender, unmount };
 }
 
-/** The hook stores the closer from the open() promise one microtask later. */
+/** The stream owner opens on the next microtask and stores the closer one microtask later. */
 async function settleOpen(): Promise<void> {
-  await Promise.resolve();
-  await Promise.resolve();
+  for (let index = 0; index < 4; index++) await Promise.resolve();
 }
 
-afterEach(() => {
+const detail = () => handlersByPath.get(DETAIL_PATH);
+const app = () => handlersByPath.get(APP_PATH);
+
+afterEach(async () => {
   for (const cleanup of cleanups.splice(0)) cleanup();
+  await settleOpen();
   closers.length = 0;
-  capturedHandlers = null;
+  handlersByPath.clear();
   openCalls.length = 0;
 });
 
 describe('useHostedSessionRealtime', () => {
-  test('a transport error body (raw 401 JSON) never reaches the returned error', () => {
+  test('a transport error body (raw 401 JSON) never reaches the returned error', async () => {
     const { state } = renderHook();
-    flushSync(() => capturedHandlers?.onError?.(new Error('{"error":"Authentication required","code":"AUTH_REQUIRED","status":401}')));
+    await settleOpen();
+    flushSync(() => detail()?.onError?.(new Error('{"error":"Authentication required","code":"AUTH_REQUIRED","status":401}')));
     expect(state().error).not.toBeNull();
     expect(state().error).not.toContain('AUTH_REQUIRED');
     expect(state().error).not.toContain('{');
   });
 
-  test('the terminal state does not claim it is still reconnecting', () => {
+  test('the terminal state does not claim it is still reconnecting', async () => {
     const { state } = renderHook();
-    flushSync(() => capturedHandlers?.onTerminate?.({ error: null, reconnectAttempts: 3 }));
+    await settleOpen();
+    flushSync(() => detail()?.onTerminate?.({ error: null, reconnectAttempts: 3 }));
     expect(state().connected).toBe(false);
     expect(state().error).not.toBeNull();
     expect(state().error?.toLowerCase()).not.toContain('reconnecting');
   });
 
-  test('opens one stream narrowed to session, turn and tools', () => {
+  test('output rides the detail lane; lifecycle rides the app lane without a second session subscription', async () => {
     renderHook();
-    expect(openCalls.length).toBe(1);
-    expect(openCalls[0]).toBe('/api/control-plane/events?domains=session,turn,tools');
+    await settleOpen();
+    expect([...openCalls].sort()).toEqual([APP_PATH, DETAIL_PATH].sort());
   });
 
-  test('a hosted-session-update frame always invalidates the hosted sessions list', () => {
-    const { invalidate } = renderHook();
-    capturedHandlers?.onEvent?.('hosted-session-update', {
-      event: 'hosted-session-created',
-      session: { id: 'hosted-1' },
-      createdAt: 1,
-    });
-    expect(invalidate).toHaveBeenCalled();
-    const arg = invalidate.mock.calls[0][0] as { queryKey: unknown };
-    expect(arg.queryKey).toEqual(['hosted-sessions']);
+  test('the ready frame and a relay gap both ask the caller to reconcile the transcript', async () => {
+    const { reconciles, state } = renderHook('hosted-1');
+    await settleOpen();
+    flushSync(() => detail()?.onReady?.({}));
+    expect(state().connected).toBe(true);
+    flushSync(() => detail()?.onEvent?.('relay-overflow', { dropped: 2 }));
+    expect(reconciles()).toBe(2);
   });
 
-  test('a hosted-session-update for the attached session also calls onLifecycleUpdate', () => {
+  test('a hosted-session-update for the attached session calls onLifecycleUpdate', async () => {
     const { lifecycleUpdates } = renderHook('hosted-1');
+    await settleOpen();
     const payload = { event: 'hosted-session-turn-ended', session: { id: 'hosted-1' }, createdAt: 1 };
-    capturedHandlers?.onEvent?.('hosted-session-update', payload);
+    app()?.onEvent?.('hosted-session-update', payload);
     expect(lifecycleUpdates).toEqual([payload]);
   });
 
-  test('a hosted-session-update for a DIFFERENT session does not call onLifecycleUpdate', () => {
+  test('a hosted-session-update for a DIFFERENT session does not call onLifecycleUpdate', async () => {
     const { lifecycleUpdates } = renderHook('hosted-1');
-    capturedHandlers?.onEvent?.('hosted-session-update', { event: 'hosted-session-terminated', session: { id: 'hosted-other' }, createdAt: 1 });
+    await settleOpen();
+    app()?.onEvent?.('hosted-session-update', { event: 'hosted-session-terminated', session: { id: 'hosted-other' }, createdAt: 1 });
     expect(lifecycleUpdates).toEqual([]);
   });
 
-  test('turn/tools frames are forwarded only when attached and the sessionId matches', () => {
+  test('turn/tools frames are forwarded only when attached and the sessionId matches', async () => {
     const { frames } = renderHook('hosted-1');
-    // Matching session: forwarded.
-    capturedHandlers?.onEvent?.('turn', { type: 'STREAM_DELTA', sessionId: 'hosted-1', payload: { accumulated: 'hi' } });
-    // Different session: dropped.
-    capturedHandlers?.onEvent?.('turn', { type: 'STREAM_DELTA', sessionId: 'hosted-other', payload: { accumulated: 'nope' } });
+    await settleOpen();
+    detail()?.onEvent?.('turn', { type: 'STREAM_DELTA', sessionId: 'hosted-1', payload: { accumulated: 'hi' } });
+    detail()?.onEvent?.('turn', { type: 'STREAM_DELTA', sessionId: 'hosted-other', payload: { accumulated: 'nope' } });
     expect(frames.length).toBe(1);
     expect(frames[0].sessionId).toBe('hosted-1');
   });
 
-  test('turn/tools frames are dropped entirely when nothing is attached', () => {
+  test('turn/tools frames are dropped entirely when nothing is attached', async () => {
     const { frames } = renderHook(null);
-    capturedHandlers?.onEvent?.('turn', { type: 'STREAM_DELTA', sessionId: 'hosted-1', payload: { accumulated: 'hi' } });
+    await settleOpen();
+    detail()?.onEvent?.('turn', { type: 'STREAM_DELTA', sessionId: 'hosted-1', payload: { accumulated: 'hi' } });
     expect(frames.length).toBe(0);
   });
 });
 
 describe('useHostedSessionRealtime stream lifecycle', () => {
-  test('unmount closes the opened stream exactly once', async () => {
+  test('unmount closes both lanes exactly once', async () => {
     const { unmount } = renderHook();
     await settleOpen();
-    expect(closers.length).toBe(1);
-    expect(closers[0]?.mock.calls.length).toBe(0);
+    expect(closers.length).toBe(2);
     unmount();
-    expect(closers[0]?.mock.calls.length).toBe(1);
-  });
-
-  test('flipping enabled to false closes the stream and does not reopen it', async () => {
-    const { rerender } = renderHook(null, true);
     await settleOpen();
-    rerender(false);
-    expect(closers.length).toBe(1);
-    expect(closers[0]?.mock.calls.length).toBe(1);
-    expect(openCalls.length).toBe(1);
+    for (const { close } of closers) expect(close.mock.calls.length).toBe(1);
   });
 
-  test('disabled: never opens a stream', () => {
+  test('disabled: never opens a stream', async () => {
     renderHook(null, false);
+    await settleOpen();
     expect(openCalls.length).toBe(0);
   });
 });
 
 test('identity and route changes retire old stream callbacks, close the old stream and reopen', async () => {
-  const { invalidate } = renderHook();
+  const { frames } = renderHook('s1');
   const originalRoute = getActiveRoute();
   try {
     await settleOpen();
-    const old = capturedHandlers;
+    const old = detail();
     flushSync(() => invalidateClientLifetime());
-    expect(openCalls.length).toBe(2);
-    expect(closers[0]?.mock.calls.length).toBe(1);
-    old?.onEvent?.('hosted-session-update', { session: { id: 's1' } });
-    old?.onEvent?.('session-update', { payload: { sessionId: 's1' } });
-    expect(invalidate).not.toHaveBeenCalled();
     await settleOpen();
+    expect(openCalls.length).toBe(4);
+    expect(closers.filter(({ path }) => path === DETAIL_PATH)[0]?.close.mock.calls.length).toBe(1);
+    old?.onEvent?.('turn', { type: 'STREAM_DELTA', sessionId: 's1', payload: { accumulated: 'late' } });
+    expect(frames.length).toBe(0);
     flushSync(() => setActiveRoute(originalRoute === 'direct' ? 'relay' : 'direct'));
-    expect(openCalls.length).toBe(3);
-    expect(closers[1]?.mock.calls.length).toBe(1);
+    await settleOpen();
+    expect(openCalls.length).toBe(6);
   } finally {
     // The route is process-wide: restore it even when an assertion above fails.
     flushSync(() => setActiveRoute(originalRoute));

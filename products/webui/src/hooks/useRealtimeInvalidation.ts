@@ -1,117 +1,70 @@
 /**
- * useRealtimeInvalidation, refetch React Query caches off the control-plane event feed.
+ * useRealtimeInvalidation, refetch React Query caches off the app's live event lane.
  *
- * CONNECTION BUDGET (the W-2 fix): the browser caps concurrent connections per origin
- * (~6 on HTTP/1.1). The previous implementation used `platform.realtime.viaSse()` and
- * subscribed to five domains (tasks, gate, providers, knowledge, control-plane),
- * and viaSse opens ONE SSE connection PER domain. Together with useSessionRealtime's
- * own session stream that reached six long-lived streams, saturating the pool so the
- * NEXT fetch (notably SessionsView's sessions.list on navigation) had no socket and hung
- * forever: the Sessions/Union view rendered zero rows with no error and no empty state.
+ * One app-wide subscriber on the shared event stream (lib/event-stream.ts): every frame
+ * name below maps to the query keys it makes stale. Frames only INVALIDATE (trigger a
+ * revalidate); nothing renders straight from a frame. While the lane is not live, active
+ * queries are revalidated every 15 s in a visible tab instead, and a ready after a drop
+ * revalidates them once, since frames may have been missed in between.
  *
- * The daemon multiplexes every domain onto ONE stream via `?domains=a,b,c`
- * (GET /api/control-plane/events, `event: <domain>` per frame, integration/helpers.ts).
- * So we open a SINGLE raw multiplexed stream here and route by the frame's event name
- * (which IS the domain), invalidating that domain's query keys. This collapses five
- * connections to one; with useSessionRealtime that is two streams total, well under the
- * per-origin cap. We only INVALIDATE (trigger a revalidate) off the stream, never render
- * straight from a frame, matching useSessionRealtime.
+ * Returns the lane's message while live updates are paused or stopped, else null.
  */
 
-import { useEffect, useState, useSyncExternalStore } from 'react';
-import { getClientLifetime, subscribeClientLifetime } from '../lib/client-lifetime';
+import { useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import type { RuntimeEventDomain } from '@goodvibes-jev/engine/contracts';
-import { client as platformClient, DEFAULT_SSE_RECONNECT } from '../lib/goodvibes';
+import { getClientLifetime } from '../lib/client-lifetime';
+import { subscribeEvents, useEventStreamState } from '../lib/event-stream';
+import { HOSTED_SESSION_UPDATE_WIRE_EVENT } from '../lib/hosted-sessions';
 import { queryKeys } from '../lib/queries';
-import { RELAY_OVERFLOW_EVENT, noteRelayOverflow, readDroppedCount } from '../lib/relay-stream-overflow';
+import { SESSION_UPDATE_WIRE_EVENT } from '../lib/sessions-union';
+
+/** The approval broker's wire event; the daemon tags it with the `gate` domain. */
+const APPROVAL_UPDATE_WIRE_EVENT = 'approval-update';
+
+/** Every domain this tab needs app-wide; wire events ride the domain the daemon tags them with. */
+const APP_DOMAINS: readonly RuntimeEventDomain[] = [
+  'tasks', 'contracts', 'gate', 'providers', 'knowledge', 'control-plane', 'fleet', 'ops', 'session',
+];
 
 /**
- * Domain → the query keys a frame on that domain should revalidate. The raw stream
- * delivers the DOMAIN as the event name (the daemon writes `event: <domain>`), so we
- * invalidate at domain granularity rather than per specific event type, coarser than
- * the old per-event binding but identical in effect (invalidation only triggers a
- * refetch), and it drops the dead 'controlPlane' alias the old code carried.
+ * Frame name -> the query keys it revalidates. A domain frame is named after its domain;
+ * the broker's wire events (session-update, hosted-session-update, approval-update) carry
+ * their own names on the same stream.
  */
 const DOMAIN_INVALIDATIONS: Record<string, readonly (readonly unknown[])[]> = {
   tasks: [queryKeys.tasks],
   contracts: [queryKeys.contracts],
-  // gate: approvals AND queryKeys.sessions, the platform's PERMISSION_MODE_CHANGED
-  // event (events/gate.ts) rides this same domain (no dedicated wire event of
-  // its own) and carries no sessionId, so we can't target the one session-scoped
-  // permission-mode query that changed. Invalidating the broad `queryKeys.sessions`
-  // prefix (queries.ts: sessionPermissionMode/sessionContextUsage are BOTH prefixed
-  // with 'sessions') revalidates whichever session's chip is mounted, the same
-  // "invalidate off the frame, never render straight from it" idiom the rest of this
-  // map already uses. queryKeys.config is NOT invalidated here anymore: nothing reads
-  // permission mode off config.get() since SessionsView moved to the session-scoped
-  // sessions.permissionMode.get/set verbs (the engine gate preset contract).
+  // PERMISSION_MODE_CHANGED rides `gate` without a session id, so the broad
+  // `sessions` prefix revalidates whichever session's permission chip is mounted.
   gate: [queryKeys.approvals, queryKeys.sessions, queryKeys.permissionRules],
-  // Model changes and provider metadata updates can replace a known context
-  // window with an unknown one. Re-read the mounted session usage from the same
-  // stream; a provider frame is only an invalidation, never a capacity claim.
-  providers: [queryKeys.providers, queryKeys.sessions],
+  [APPROVAL_UPDATE_WIRE_EVENT]: [queryKeys.approvals, queryKeys.permissionRules],
+  // MODEL_CHANGED and provider metadata ride `providers`; a model change can also
+  // replace a session's context window, so mounted context usage is re-read too.
+  providers: [queryKeys.providers, queryKeys.sessions, ['daemon-health', 'model']],
   knowledge: [['knowledge']],
   'control-plane': [queryKeys.control],
-  // fleet: the platform now emits per-node lifecycle deltas (FLEET_NODE_STARTED /
-  // _STATE_CHANGED / _FINISHED / _BLOCKED_ON_USER / _UNBLOCKED) on the runtime
-  // event bus `fleet` domain, which the daemon fans out over this SAME multiplexed
-  // stream (no new connection). We follow this hook's established idiom, INVALIDATE
-  // off the frame, never render straight from it, so any fleet frame revalidates the
-  // live snapshot and the archive: the Fleet tree and the app-level attention badge
-  // update on the event instead of waiting for the next poll. The snapshot stays the
-  // single source of truth (the registry is "a view, not a second source"), so we do
-  // not reconstruct a client-side tree from the deltas. The poll remains as the honest
-  // fallback while this stream is down (see FleetView's subscriptionActive gate).
+  // Fleet node lifecycle deltas revalidate the snapshot and archive; the snapshot stays
+  // the one source of truth, so no client-side tree is built from the deltas.
   fleet: [queryKeys.fleet, queryKeys.fleetArchived],
-  // ops: the runtime.ops domain, OPS_POWER_STATE_CHANGED rides it (platform 1.8.0's host
-  // sleep-ownership work). Invalidating queryKeys.power revalidates the always-visible
-  // "sleep disabled" chip (StatusStrip) and the admin Power panel the instant the owner
-  // keep-awake toggle or the automatic work inhibitor changes on ANY attached surface,
-  // not only on this one's own mutation success. OPS_MEMORY_PRESSURE (platform 1.9.0-dev's
-  // memory-relay-voice-hardening work) rides the SAME 'ops' domain, invalidating
-  // queryKeys.opsMemory here is the whole surfacing story for that event: the admin
-  // Memory panel refetches its tier chip on the real pressure change, exactly the way
-  // PowerChip/PowerSettings already refetch on OPS_POWER_STATE_CHANGED (invalidate off
-  // the frame, re-render the fresh polled state, never a separate attention-item feed;
-  // no such feed exists in this webui today, see MemoryDiagnostics.tsx's header comment).
+  // OPS_POWER_STATE_CHANGED and OPS_MEMORY_PRESSURE ride `ops`.
   ops: [queryKeys.power, queryKeys.opsMemory],
-} satisfies Partial<Record<RuntimeEventDomain, readonly (readonly unknown[])[]>>;
+  [SESSION_UPDATE_WIRE_EVENT]: [queryKeys.sessions],
+  [HOSTED_SESSION_UPDATE_WIRE_EVENT]: [queryKeys.hostedSessionsAll],
+};
 
-/** The single multiplexed control-plane stream carrying every domain we invalidate on. */
-const INVALIDATION_EVENTS_PATH = `/api/control-plane/events?domains=${Object.keys(DOMAIN_INVALIDATIONS).join(',')}`;
+const FALLBACK_REFRESH_MS = 15_000;
 
-/**
- * The ONE operator-facing string this hook ever surfaces. Every failure mode, the
- * open() promise rejecting, an onError frame, or a clean onTerminate, collapses to this
- * friendly copy. Critically, the transport's onError sets `err.message` to the raw daemon
- * RESPONSE BODY (e.g. the `{"error":"Authentication required",...,"code":"AUTH_REQUIRED"}`
- * 401 blob seen on a pre-auth open); passing that through would paint that JSON verbatim
- * across every view's banner. We never render a transport-level body, the banner shows
- * this established "live updates paused / reconnecting" wording instead.
- */
-const REALTIME_PAUSED_MESSAGE =
-  'Live updates paused: reconnecting. Views fall back to periodic refresh until the stream returns.';
-
-export function useRealtimeInvalidation(enabled: boolean) {
+export function useRealtimeInvalidation(enabled: boolean): string | null {
   const queryClient = useQueryClient();
-  const lifetime = useSyncExternalStore(subscribeClientLifetime, getClientLifetime, getClientLifetime);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!enabled || !error) return;
-    const interval = setInterval(() => {
-      if (getClientLifetime() === lifetime) void queryClient.invalidateQueries({ type: 'active' });
-    }, 15_000);
-    return () => clearInterval(interval);
-  }, [enabled, error, queryClient, lifetime]);
+  const stream = useEventStreamState('app');
 
   useEffect(() => {
     if (!enabled) return undefined;
     let disposed = false;
-    let close: (() => void) | null = null;
-    const invalidate = (key: readonly unknown[], domain?: string) => {
-      if (domain === 'providers' && key[0] === 'sessions') {
+    const invalidate = (key: readonly unknown[], frame: string) => {
+      const lifetime = getClientLifetime();
+      if (frame === 'providers' && key[0] === 'sessions') {
         // Cancel the context read even if it has no cached data yet. Otherwise a
         // model-change event during the first request only marks it stale and
         // its pre-change capacity can win. Other session queries are untouched.
@@ -128,63 +81,38 @@ export function useRealtimeInvalidation(enabled: boolean) {
         if (!disposed && getClientLifetime() === lifetime) void queryClient.invalidateQueries({ queryKey: key });
       });
     };
-
-    platformClient.streams
-      .open(
-        INVALIDATION_EVENTS_PATH,
-        {
-          onReady: () => {
-            if (disposed) return;
-            setError(null);
-          },
-          onEvent: (eventName: string, payload: unknown) => {
-            if (disposed || getClientLifetime() !== lifetime) return;
-            if (eventName === RELAY_OVERFLOW_EVENT) {
-              // The relay tunnel dropped multiplexed invalidation frames. Record the honest
-              // notice and revalidate every domain we track, a full refetch is the correct
-              // recovery since these frames only ever trigger invalidations.
-              noteRelayOverflow(readDroppedCount(payload));
-              for (const [domain, keys] of Object.entries(DOMAIN_INVALIDATIONS)) {
-                for (const key of keys) invalidate(key, domain);
-              }
-              return;
-            }
-            if (!Object.hasOwn(DOMAIN_INVALIDATIONS, eventName)) return;
-            const keys = DOMAIN_INVALIDATIONS[eventName];
-            for (const key of keys) {
-              invalidate(key, eventName);
-            }
-          },
-          // NEVER surface `err.message` here, on a pre-auth open it IS the raw 401
-          // response body. Collapse every transport error to the friendly copy.
-          onError: (_err: unknown) => {
-            if (disposed) return;
-            setError(REALTIME_PAUSED_MESSAGE);
-          },
-          onTerminate: () => {
-            if (disposed) return;
-            setError(REALTIME_PAUSED_MESSAGE);
-          },
-        },
-        { reconnect: DEFAULT_SSE_RECONNECT },
-      )
-      .then((dispose) => {
-        if (disposed) {
-          dispose();
-          return;
-        }
-        close = dispose;
-      })
-      .catch((_err: unknown) => {
-        if (disposed) return;
-        setError(REALTIME_PAUSED_MESSAGE);
-      });
-
+    const unsubscribe = subscribeEvents({
+      domains: APP_DOMAINS,
+      events: Object.keys(DOMAIN_INVALIDATIONS),
+      onEvent: (name) => {
+        for (const key of DOMAIN_INVALIDATIONS[name] ?? []) invalidate(key, name);
+      },
+      onReady: (resumed) => {
+        if (resumed) void queryClient.invalidateQueries({ type: 'active' });
+      },
+    });
     return () => {
       disposed = true;
-      if (close) close();
+      unsubscribe();
     };
-  }, [enabled, queryClient, lifetime]);
+  }, [enabled, queryClient]);
 
-  return error;
+  const down = enabled && (stream.status === 'paused' || stream.status === 'ended');
+
+  // Periodic refresh only while the lane is down and someone is looking at the tab.
+  useEffect(() => {
+    if (!down) return undefined;
+    const interval = setInterval(() => {
+      if (document.visibilityState !== 'hidden') void queryClient.invalidateQueries({ type: 'active' });
+    }, FALLBACK_REFRESH_MS);
+    return () => clearInterval(interval);
+  }, [down, queryClient]);
+
+  // A refused or revoked sign-in: re-read auth once so the app shows the sign-in gate.
+  const refused = enabled && stream.status === 'ended' && stream.final;
+  useEffect(() => {
+    if (refused) void queryClient.invalidateQueries({ queryKey: queryKeys.auth });
+  }, [refused, queryClient]);
+
+  return down ? stream.message : null;
 }

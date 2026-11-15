@@ -1,4 +1,3 @@
-import { types as nodeTypes } from 'node:util';
 import type { CallOptions } from '@goodvibes-jev/judgment';
 // ---------------------------------------------------------------------------
 // gist-uploader, upload export content to a GitHub Gist
@@ -9,8 +8,8 @@ import type { CallOptions } from '@goodvibes-jev/judgment';
 // UploadTarget without changing the caller in share-runtime.
 //
 // Token resolution:
-//   1. serviceRegistry.resolveAuth('github'), standard service registry path
-//      (configured via .goodvibes/tui/services.json with tokenKey: GITHUB_TOKEN)
+//   1. serviceRegistry.resolveAuth('github'): its `Authorization` header, in
+//      the `Bearer <token>` or GitHub's `token <token>` form
 //   2. process.env.GITHUB_TOKEN fallback
 //   3. No token → honest guidance; no upload.
 //
@@ -18,8 +17,6 @@ import type { CallOptions } from '@goodvibes-jev/judgment';
 // the URL can view it).
 // ---------------------------------------------------------------------------
 
-import { snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
-import { readCredentialHeader } from '@goodvibes-jev/engine/platform/platform/tools';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 
 export type UploadResult =
@@ -44,49 +41,34 @@ export interface GistUploaderOptions {
   description?: string;
 }
 
-/** Capture own data properties without invoking getters or retaining mutable input. */
+/** Copy the service registry's header map so a later comparison sees what was used. */
 export function captureGithubAuthHeaders(headers: Record<string, string> | null | undefined): Record<string, string> {
-  const captured: Record<string, string> = Object.create(null);
-  if (!headers) return captured;
-  if (nodeTypes.isProxy(headers) || ![Object.prototype, null].includes(Object.getPrototypeOf(headers))
-    || Object.getOwnPropertySymbols(headers).length) throw new TypeError('Invalid GitHub auth header');
-  for (const [name, descriptor] of Object.entries(Object.getOwnPropertyDescriptors(headers))) {
-    if (!('value' in descriptor) || typeof descriptor.value !== 'string') throw new TypeError('Invalid GitHub auth header');
-    if (!descriptor.enumerable) continue;
-    captured[name] = descriptor.value;
+  return { ...(headers ?? {}) };
+}
+
+const GITHUB_AUTHORIZATION = /^(?:bearer|token)\s+(\S+)\s*$/i;
+
+/** The token in a header map's `Authorization: Bearer <token>` or `Authorization: token <token>`. */
+export function githubTokenFromHeaders(headers: Record<string, string> | null | undefined): string | undefined {
+  if (!headers) return undefined;
+  for (const [name, value] of Object.entries(headers)) {
+    if (name.toLowerCase() !== 'authorization' || typeof value !== 'string') continue;
+    const token = GITHUB_AUTHORIZATION.exec(value)?.[1];
+    if (token) return token;
   }
-  return Object.freeze(captured);
+  return undefined;
 }
 
 /**
- * resolveGithubToken, try auth header map then env var.
- * Returns undefined when no token is available.
+ * resolveGithubToken, the github service entry's bearer token, else GITHUB_TOKEN.
+ * Returns undefined when neither is available; no other header is used as a token.
  */
 export async function resolveGithubToken(
   authHeaders: Record<string, string> | null | undefined,
   options: CallOptions = {},
 ): Promise<string | undefined> {
   options.signal?.throwIfAborted();
-  const captured = captureGithubAuthHeaders(authHeaders);
-  const envToken = process.env['GITHUB_TOKEN'];
-  if (captured) {
-    // Service registry returns { Authorization: 'Bearer <token>' } for bearer type
-    const authHeader = captured['Authorization'] ?? captured['authorization'];
-    if (authHeader) {
-      const match = /^Bearer (.+)$/.exec(authHeader);
-      if (match?.[1]) return match[1];
-    }
-    // Screen every name before any projection or request; values stay local.
-    snapshotJudgmentInput(Object.keys(captured));
-    // Nonstandard names are read without ever sending their values to judgment.
-    for (const [key, val] of Object.entries(captured)) {
-      if (!val || key.toLowerCase() === 'authorization') continue;
-      if (await readCredentialHeader(key, { ...options, site: 'tui.gist.credential-header' }) === true) return val;
-    }
-  }
-  // Env var fallback
-  options.signal?.throwIfAborted();
-  return envToken || undefined;
+  return githubTokenFromHeaders(authHeaders) ?? (process.env['GITHUB_TOKEN'] || undefined);
 }
 
 /**
@@ -158,8 +140,10 @@ export class GistUploadTarget implements UploadTarget {
  */
 export const NO_TOKEN_GUIDANCE = [
   'No GitHub token found for --upload.',
-  'To enable Gist upload, configure a GitHub service entry:',
+  'To enable Gist upload, configure a GitHub service entry with bearer auth:',
   '  /services import .goodvibes/tui/services.json  (if already configured)',
-  'Or set the GITHUB_TOKEN environment variable to a PAT with the `gist` scope.',
+  'A github entry is used only when it sends `Authorization: Bearer <token>` (or `token <token>`);',
+  'any other header is not taken as the token. Change the entry or',
+  'set the GITHUB_TOKEN environment variable to a PAT with the `gist` scope.',
   'Token is sent to api.github.com only. Gists are secret (unlisted, not private).',
 ].join('\n');

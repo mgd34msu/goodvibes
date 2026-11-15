@@ -1,4 +1,3 @@
-import { JudgmentError } from '@goodvibes-jev/judgment';
 import { afterEach, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import { existsSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -23,20 +22,21 @@ function fixture() {
   const conversation = new ConversationManager();
   conversation.title = 'Test export';
   conversation.addUserMessage('hello');
-  const authHeaders = { 'X-API-Key': 'configured-literal' };
+  const authHeaders = { Authorization: 'Bearer configured-literal' };
+  let lookup: (() => Promise<void>) | undefined;
   const runtime = { model: 'synthetic-unpriced', provider: 'synthetic', sessionId: 'exact-session' };
   const lifetime = new ScheduleReadingLifetime(() => runtime.sessionId, () => true);
   const context = {
     shareReading: lifetime,
     print: (text: string) => lines.push(text),
     workspace: { shellPaths: createShellPathService({ workingDirectory: root, homeDirectory: root }) },
-    platform: { serviceRegistry: { resolveAuth: async (name: string) => { calls.push(name); return authHeaders; } } },
+    platform: { serviceRegistry: { resolveAuth: async (name: string) => { calls.push(name); const wait = lookup; lookup = undefined; await wait?.(); return authHeaders; } } },
     session: { runtime, conversationManager: conversation },
   } as unknown as CommandContext;
-  return { root, lines, calls, runtime, lifetime, authHeaders, replace: () => conversation.fromJSON({ messages: [{ role: 'user', content: 'hello' }] }), run: (args = ['json', 'session.json', '--upload']) => registry.get('share')!.handler(args, context) };
+  return { root, lines, calls, runtime, lifetime, authHeaders, holdNextLookup: (wait: () => Promise<void>) => { lookup = wait; }, replace: () => conversation.fromJSON({ messages: [{ role: 'user', content: 'hello' }] }), run: (args = ['json', 'session.json', '--upload']) => registry.get('share')!.handler(args, context) };
 }
 
-test('real share command awaits a reading before sending exact configured token and repeats normally', async () => {
+test('share sends the configured bearer token with no model reading and repeats normally', async () => {
   const f = fixture();
   const fake = fakePort(() => noulAnswer(0.99)); previous = installJudgmentPort(fake.port);
   const headers: string[] = [];
@@ -47,6 +47,7 @@ test('real share command awaits a reading before sending exact configured token 
   await f.run(); await f.run();
   expect(headers).toEqual(['Bearer configured-literal', 'Bearer configured-literal']);
   expect(f.calls).toEqual(['github', 'github', 'github', 'github']);
+  expect(fake.requests).toHaveLength(0);
   expect(f.lines.filter(line => line.includes('Share link:'))).toHaveLength(2);
   expect(readFileSync(join(f.root, 'session.json'), 'utf8')).toContain('hello');
 });
@@ -66,33 +67,37 @@ test('a replaced history cancels asynchronous export redaction before disk or st
   release.resolve();
 });
 
-test('failed reading uploads nothing, preserves local export, and a later retry recovers', async () => {
+test('a service entry without a bearer token uploads nothing and says how to fix it', async () => {
   const f = fixture(); let uploads = 0;
   globalThis.fetch = (async () => { uploads++; return Response.json({ html_url: 'https://gist.github.com/synthetic' }); }) as unknown as typeof fetch;
-  previous = installJudgmentPort(fakePort(() => { throw new JudgmentError('unavailable', 'unavailable'); }).port);
-  await f.run();
+  const fake = fakePort(() => noulAnswer(0.99)); previous = installJudgmentPort(fake.port);
+  const savedEnv = process.env['GITHUB_TOKEN']; delete process.env['GITHUB_TOKEN'];
+  try {
+    delete (f.authHeaders as Record<string, string>)['Authorization'];
+    (f.authHeaders as Record<string, string>)['X-API-Key'] = 'not-a-bearer';
+    await f.run();
+  } finally {
+    if (savedEnv !== undefined) process.env['GITHUB_TOKEN'] = savedEnv;
+  }
   expect(uploads).toBe(0);
-  expect(f.lines).toContain('Upload failed: credential-header reading unavailable. Local export saved.');
+  expect(fake.requests).toHaveLength(0);
+  expect(f.lines.some(line => line.startsWith('No GitHub token found for --upload.'))).toBe(true);
   expect(f.lines.some(line => line.startsWith('Exported JSON session'))).toBe(true);
-  expect(readFileSync(join(f.root, 'session.json'), 'utf8')).toContain('hello');
-  installJudgmentPort(fakePort(() => noulAnswer(0.99)).port);
-  await f.run(); expect(uploads).toBe(1);
 });
 
-for (const change of ['escape', 'session', 'exit', 'auth', 'conversation'] as const) {
+for (const change of ['escape', 'session', 'exit', 'conversation'] as const) {
   test(`pending share cannot upload after ${change}`, async () => {
     const f = fixture(); let uploads = 0;
     globalThis.fetch = (async () => { uploads++; return Response.json({ html_url: 'https://gist.github.com/synthetic' }); }) as unknown as typeof fetch;
     let release!: () => void; const gate = new Promise<void>(resolve => { release = resolve; });
     let requested!: () => void; const started = new Promise<void>(resolve => { requested = resolve; });
-    const fake = fakePort(() => noulAnswer(0.99));
-    previous = installJudgmentPort({ ...fake.port, async ask(request) { requested(); await gate; return fake.port.ask(request); } });
+    previous = installJudgmentPort(fakePort(() => noulAnswer(0.99)).port);
+    f.holdNextLookup(async () => { requested(); await gate; });
     const pending = f.run(); await started;
     if (change === 'escape') f.lifetime.cancel();
     if (change === 'exit') f.lifetime.dispose();
     if (change === 'session') f.runtime.sessionId = 'other-session';
     if (change === 'conversation') f.replace();
-    if (change === 'auth') f.authHeaders['X-API-Key'] = 'replacement';
     release(); await pending;
     expect(uploads).toBe(0);
     expect(readdirSync(f.root).filter(name => name.includes('.gist-'))).toEqual([]);
@@ -100,16 +105,16 @@ for (const change of ['escape', 'session', 'exit', 'auth', 'conversation'] as co
   });
 }
 
-test('repeated pending share owns one reading and one upload', async () => {
+test('repeated pending share makes one upload', async () => {
   const f = fixture(); let uploads = 0;
   globalThis.fetch = (async () => { uploads++; return Response.json({ html_url: 'https://gist.github.com/synthetic' }); }) as unknown as typeof fetch;
   let release!: () => void; const gate = new Promise<void>(resolve => { release = resolve; });
   let requested!: () => void; const started = new Promise<void>(resolve => { requested = resolve; });
-  const fake = fakePort(() => noulAnswer(0.99));
-  previous = installJudgmentPort({ ...fake.port, async ask(request) { requested(); await gate; return fake.port.ask(request); } });
+  previous = installJudgmentPort(fakePort(() => noulAnswer(0.99)).port);
+  f.holdNextLookup(async () => { requested(); await gate; });
   const pending = f.run(); await started;
   await f.run(); release(); await pending;
-  expect(uploads).toBe(1); expect(fake.requests).toHaveLength(1);
+  expect(uploads).toBe(1);
 });
 
 for (const outcome of ['accepted', 'unconfirmed'] as const) {

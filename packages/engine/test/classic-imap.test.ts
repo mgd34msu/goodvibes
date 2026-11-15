@@ -3,7 +3,7 @@ import { decisionModelPolicyState, installJudgmentPort, type DecisionModelPolicy
 import { JudgmentError, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { withDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.js';
-import { readImapRefusal, readImapCursorFailure, readImapDrafts } from '../platform/src/platform/email/imap-readings.js';
+import { readImapRefusal, readImapDrafts } from '../platform/src/platform/email/imap-readings.js';
 import { classifyServerRefusalOwned } from '../platform/src/platform/email/imap-open.js';
 import { selectDraftsMailboxFrames } from '../platform/src/platform/email/imap-draft.js';
 import { ImapClient } from '../platform/src/platform/email/imap-client.js';
@@ -24,8 +24,6 @@ test.each(['Classic - Off', 'Preferred'] as const)('%s email diagnostics remain 
     expect(refusal).toMatchObject({ value: 'unknown', provenance: 'classic' }); refusal.assertCurrent();
     const attempted = requests.length;
     expect(attempted).toBe(policy === 'Preferred' ? 1 : 0);
-    const cursor = await readImapCursorFailure('An unrelated state file could not be read.');
-    expect(cursor).toMatchObject({ value: null, provenance: 'classic' }); cursor.assertCurrent();
     const drafts = await readImapDrafts([{ name: 'Novel/Drafts', delimiter: '/', attributes: [] }]);
     expect(drafts).toMatchObject({ value: null, provenance: 'classic' });
     expect(requests).toHaveLength(attempted);

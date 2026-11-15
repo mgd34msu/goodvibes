@@ -110,6 +110,7 @@ import {
   type ImapMailboxStatus,
 } from './imap-headers.js';
 import { readCompleteMessageDetail, readMessageDetail } from './imap-message-read.js';
+import type { CompleteMessageRead } from './imap-message-complete.js';
 import {
   probeMailboxBody,
   type ImapBodyProbe,
@@ -119,7 +120,6 @@ import type {
   ImapAppendDraftInput,
   ImapAppendDraftResult,
   ImapClientOptions,
-  ImapCompleteMessageRead,
   ImapEnvelope,
   ImapEnvelopeBatch,
   ImapMessageDetail,
@@ -149,6 +149,7 @@ import {
 import {
   NOT_OPEN_MESSAGE,
   composeOpenFailure,
+  noteImapOpenAccepted,
   forgetConnection,
   idleSupportFrom,
   rememberConnection,
@@ -290,6 +291,7 @@ export class ImapClient {
     } catch (err) {
       throw await composeOpenFailure({
         refusedReason: 'authentication-rejected',
+        account: this.options.username,
         refusedSummary: `The mail server rejected the credentials for ${this.options.username}.`,
         error: err,
         mailbox: this.mailbox,
@@ -303,6 +305,7 @@ export class ImapClient {
     } catch (err) {
       throw await composeOpenFailure({
         refusedReason: 'mailbox-unavailable',
+        account: this.options.username,
         refusedSummary:
           `Signed in, but the mailbox '${this.mailbox}' could not be opened for reading.`,
         error: err,
@@ -311,6 +314,7 @@ export class ImapClient {
     }
 
     assertImapReadingCurrent(reading);
+    noteImapOpenAccepted(this.options.username);
     this.status = parseMailboxStatus(examineLines);
     this.advertised = parseCapabilities([greeting, ...authLines, ...examineLines]);
     this.readable = true;
@@ -581,7 +585,7 @@ export class ImapClient {
   }
 
   /** Full-source proof for screening; never promotes a partial display read. */
-  async readCompleteMessageDetail(uid: number): Promise<ImapCompleteMessageRead> {
+  async readCompleteMessageDetail(uid: number): Promise<CompleteMessageRead> {
     return readCompleteMessageDetail(this.requireReadableMailbox(), uid, this.mailbox);
   }
 
@@ -707,8 +711,12 @@ export class ImapClient {
     selection.assertCurrent();
     assertImapReadingCurrent(reading);
     if (selection.value === null) {
-      if (selection.provenance === 'classic') throw new DecisionModelsDisabledError('automatic Drafts discovery without a server-declared folder; select the mailbox explicitly');
-      throw new ImapReadingError();
+      if (selection.provenance === 'classic') {
+        throw new DecisionModelsDisabledError('picking the Drafts folder by name, because this mail server marks no '
+          + 'folder as Drafts; set email.draftsMailbox to the name of the drafts folder');
+      }
+      throw new Error('This mail server marks no folder as Drafts and none of its folders is clearly the drafts '
+        + 'folder, so the draft was not saved. Set email.draftsMailbox to the name of the drafts folder.');
     }
     return imapReadingLease(selection.value, selection);
   }

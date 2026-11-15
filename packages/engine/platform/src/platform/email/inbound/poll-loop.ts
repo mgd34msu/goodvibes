@@ -49,6 +49,7 @@ import type {
   WatcherClock,
 } from './ports.js';
 import { isImapUid, MAX_IMAP_UID } from './source-cursor.js';
+import { InboundNoticeTransportError } from './intake.js';
 import type { MailboxCursor } from './types.js';
 
 /** Everything one drain of the mailbox needs. */
@@ -529,7 +530,10 @@ export async function runPollLoop(deps: MailboxDeltaDeps): Promise<PollLoopResul
         delivered: report.delivered,
       };
     }
-    if (report.outcome === 'delivery-failed') {
+    // A notice route that is down: the next pass retries on this same
+    // connection after the poll interval; the sink sets the message aside
+    // after a bounded number of attempts.
+    if (report.outcome === 'delivery-failed' && !(report.error instanceof InboundNoticeTransportError)) {
       return {
         outcome: 'delivery-failed',
         cursor,

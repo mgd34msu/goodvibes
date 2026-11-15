@@ -474,7 +474,8 @@ test('an observer sees each screened message with its item id, and its failure d
   expect(seen[0]!.body).toContain('[redacted]');
 });
 
-const SIGNED_STRUCTURE = '(("TEXT" "PLAIN" ("CHARSET" "UTF-8") NIL NIL "8BIT" 5 1)("APPLICATION" "PGP-SIGNATURE" NIL NIL NIL "7BIT" 10) "SIGNED" ("PROTOCOL" "application/pgp-signature"))';
+// A body in a charset this runtime has no decoder for: the message's own bytes cannot be shown here.
+const SIGNED_STRUCTURE = '("TEXT" "PLAIN" ("CHARSET" "X-UNKNOWN-CHARSET") NIL NIL "BASE64" 8 1)';
 class SignedSocket extends SnapshotSocket {
   constructor(options: ConstructorParameters<typeof SnapshotSocket>[0], private readonly signed: readonly number[]) { super(options); }
   override async answer(command: string): Promise<void> {
@@ -487,23 +488,25 @@ class SignedSocket extends SnapshotSocket {
   }
 }
 
-test('an unsupported message is committed as suppressed beside the published one and reported in the poll result', async () => {
+test('an unreadable message is published as one that could not be read here, beside the readable one', async () => {
   const f = await fixture({ sockets: [new SnapshotSocket(), new SignedSocket({}, [42])] }); await f.seed();
   const poll = await f.owner.adapter.poll({ limit: 2, checkpoint: f.checkpoint()! });
-  expect(poll.items).toHaveLength(1);
+  expect(poll.items).toHaveLength(2);
+  expect(poll.items.find((item) => item.id.endsWith(':0000000042'))?.subjectPreview).toBe('A message could not be read here');
   expect(poll.checkpointAdvance?.coveredUids).toEqual([42, 43]);
-  expect(poll.checkpointAdvance?.terminal.map((entry) => `${entry.uid}:${entry.disposition}`)).toEqual(['42:suppressed', '43:published']);
+  expect(poll.checkpointAdvance?.terminal.map((entry) => `${entry.uid}:${entry.disposition}`)).toEqual(['42:published', '43:published']);
   expect(poll.checkpointAdvance?.next.lastTerminalUid).toBe(43);
   expect(poll.skippedMessages).toEqual([{ uid: 42, reason: 'bodystructure-incomplete-or-unsupported' }]);
   expect(poll.pendingMessages).toBe(0);
 });
 
-test('a page made only of unsupported messages still moves the checkpoint past them', async () => {
+test('a page made only of unreadable messages still moves the checkpoint past them', async () => {
   const f = await fixture({ sockets: [new SnapshotSocket(), new SignedSocket({}, [42, 43])] }); await f.seed();
   const poll = await f.owner.adapter.poll({ limit: 2, checkpoint: f.checkpoint()! });
-  expect(poll).toMatchObject({ state: 'empty', items: [], pendingMessages: 0 });
+  expect(poll).toMatchObject({ state: 'ready', pendingMessages: 0 });
+  expect(poll.items.map((item) => item.subjectPreview)).toEqual(['A message could not be read here', 'A message could not be read here']);
   expect(poll.checkpointAdvance?.coveredUids).toEqual([42, 43]);
-  expect(poll.checkpointAdvance?.terminal.every((entry) => entry.disposition === 'suppressed')).toBe(true);
+  expect(poll.checkpointAdvance?.terminal.every((entry) => entry.disposition === 'published')).toBe(true);
   expect(poll.checkpointAdvance?.next.lastTerminalUid).toBe(43);
 });
 

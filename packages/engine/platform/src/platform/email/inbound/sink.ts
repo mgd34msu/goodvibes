@@ -152,8 +152,25 @@ export interface DedupingInboundMailSinkDeps {
    * it again.
    */
   readonly handle: (message: InboundMailboxMessage) => Promise<void>;
+  /**
+   * What happens to a message whose handling failed `MAX_HANDLING_ATTEMPTS`
+   * times in a row: record it as set aside and tell the owner. When it
+   * resolves the message counts as handled and the source moves past it, so
+   * one message can never hold every later one. When it rejects, or is not
+   * given, the failure is rethrown as before.
+   */
+  readonly setAside?: ((message: InboundMailboxMessage, error: unknown, attempts: number) => Promise<void>) | undefined;
   readonly observer?: InboundMailSinkObserver | undefined;
 }
+
+/**
+ * Attempts one message gets before it is set aside. One rule for both sources:
+ * a message that fails this many passes in a row is not going to succeed on
+ * the next, and every message behind it is waiting.
+ */
+export const MAX_HANDLING_ATTEMPTS = 3;
+/** Bound on failure counts held at once; the oldest are forgotten first. */
+const MAX_TRACKED_FAILURES = 256;
 
 /**
  * The sink the watcher is given: suppress repeats, pass on everything else.
@@ -166,6 +183,8 @@ export class DedupingInboundMailSink implements InboundMailSink {
   private readonly deps: DedupingInboundMailSinkDeps;
   /** Handling that has started and not yet settled, by dedup key. */
   private readonly inFlight = new Map<string, Promise<void>>();
+  /** Consecutive failed attempts per message, by dedup key. In memory: a counter, no file. */
+  private readonly failures = new Map<string, number>();
 
   constructor(deps: DedupingInboundMailSinkDeps) {
     this.deps = deps;
@@ -216,11 +235,21 @@ export class DedupingInboundMailSink implements InboundMailSink {
     this.inFlight.set(key, handling);
     try {
       await handling;
+      this.failures.delete(key);
     } catch (error) {
       // The claim outliving a failed attempt would suppress the retry, and the
       // retry is the recovery. Give it back before rethrowing.
       this.deps.dedup.release(key);
-      throw error;
+      const attempts = (this.failures.get(key) ?? 0) + 1;
+      this.failures.delete(key);
+      this.failures.set(key, attempts);
+      if (this.failures.size > MAX_TRACKED_FAILURES) this.failures.delete(this.failures.keys().next().value!);
+      const setAside = this.deps.setAside;
+      if (setAside === undefined || attempts < MAX_HANDLING_ATTEMPTS) throw error;
+      try { await setAside(message, error, attempts); } catch { throw error; }
+      // Set aside is handled: claim it so a concurrent repeat is a duplicate.
+      this.failures.delete(key);
+      this.deps.dedup.claim(key);
     } finally {
       if (this.inFlight.get(key) === handling) this.inFlight.delete(key);
     }

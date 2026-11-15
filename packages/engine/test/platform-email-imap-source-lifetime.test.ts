@@ -1,6 +1,3 @@
-import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { describe, expect, spyOn, test } from 'bun:test';
 import { EventEmitter } from 'node:events';
 import type { Socket } from 'node:net';
@@ -189,42 +186,6 @@ describe('actual IMAP source lifetime', () => {
       expect(created).toBe(2); expect(h.wires[0]!.closed).toBe(true);
       expect(h.cursors.resolved).toEqual(['a']);
     } finally { await supervisor.stop(); }
-  });
-
-  test('local refusal lease retirement after settlement remains an operational reconnect', async () => {
-    const fake = fakePort(() => noulAnswer(0.01));
-    const port: JudgmentPort = { ...fake.port,
-      async ask(request) { return { ...await fake.port.ask(request), decisionId: 'synthetic-local-reading' }; },
-      recorder: { recordReadings() {}, recordAction() {
-        // First turn lets classifyLocalFailure construct its value; the second
-        // retires it before handleUnexpectedFailure consumes the outer await.
-        queueMicrotask(() => queueMicrotask(() => installJudgmentPort(fakePort(() => noulAnswer(0.01)).port)));
-      } },
-    };
-    const previous = installJudgmentPort(port); let pauses = 0; let reached!: () => void;
-    const recovering = new Promise<void>(resolve => { reached = resolve; });
-    const terminals: unknown[] = [];
-    const watcher = new InboundMailboxWatcher({ settings: resolveWatcherSettings({ account: 'a', mailbox: 'INBOX', mode: 'poll' }),
-      connections: { open: async () => ({
-        report: { advertisedCapabilities: [], idle: { known: false }, mailbox: { name: 'INBOX', exists: 0, uidValidity: 7, uidNext: 1, readOnly: true } },
-        bodyCapability: { outcome: 'unproven', detail: 'empty' },
-        get reader(): never { throw new Error('Unexpected reader access'); },
-        get wire(): never { throw new Error('Unexpected wire access'); },
-        close: async () => {},
-      } satisfies MailboxConnection) },
-      cursors: { ...cursorPort().port, resolve: async () => { throw new Error('Unexpected local state failure'); } },
-      sink: emptySink(), random: () => 0, observer: { terminalFailure: failure => { terminals.push(failure); } },
-      clock: { now: () => 0, sleep: async (_ms, signal) => {
-        pauses++; if (pauses < 10) return; reached();
-        if (!signal?.aborted) await new Promise<void>(resolve => signal?.addEventListener('abort', () => resolve(), { once: true }));
-      } },
-    });
-    watcher.start(); const settled = watcher.whenSettled().catch(error => error as unknown);
-    try {
-      await recovering;
-      expect(terminals).toEqual([]); expect(watcher.status.verdict.reason).toBe('reconnecting');
-      expect(watcher.status.running).toBe(true);
-    } finally { await watcher.stop(); await settled; installJudgmentPort(previous); }
   });
 
   test('buffered envelopes cannot deliver or advance after retirement during first delivery', async () => {

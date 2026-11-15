@@ -113,8 +113,10 @@ function responseCodeOf(serverMessage: string): string {
  * login step is only an authentication failure when it says something about
  * authentication; when it says `[LIMIT]` it is about the server, and treating
  * the two the same is how a transient condition becomes permanent silence.
- * `phaseReason` is used only when the refusal itself is ambiguous AND the
- * phase's own reason is not the terminal guess.
+ * When the refusal states nothing, a non-terminal phase reason is used as is,
+ * and a terminal one (a refused LOGIN, a refused EXAMINE) only after
+ * `MAX_UNEXPLAINED_REFUSALS` identical refusals in a row; before that it is
+ * retried on the long backoff.
  */
 export async function classifyServerRefusal(
   serverMessage: string,
@@ -132,17 +134,77 @@ export async function classifyServerRefusalOwned(
   phaseReason: ImapOpenFailureReason,
   options: ImapReadingOptions = {},
 ): Promise<ImapReadingLease<ImapOpenFailureReason>> {
+  const detailed = await classifyServerRefusalDetailed(serverMessage, phaseReason, '', options);
+  return imapReadingLease(detailed.value.reason, detailed);
+}
+
+/**
+ * How many code-less refusals in a row a sign-in or folder open may get before
+ * the phase decides. The phase is the evidence when the server names nothing:
+ * a refused LOGIN that gives no reason is, after a few tries, a refused
+ * password, and retrying it for ever is how an account gets locked.
+ */
+export const MAX_UNEXPLAINED_REFUSALS = 3;
+const unexplainedRefusals = new Map<string, number>();
+const MAX_TRACKED_REFUSALS = 64;
+
+/** A sign-in and folder open succeeded for this account: earlier unexplained refusals are over. */
+export function noteImapOpenAccepted(account: string): void {
+  for (const key of [...unexplainedRefusals.keys()]) {
+    if (key.startsWith(`${account}\n`)) unexplainedRefusals.delete(key);
+  }
+}
+
+interface RefusalClassification {
+  readonly reason: ImapOpenFailureReason;
+  /** Set when the server named no cause and the phase rule is counting: which attempt this was. */
+  readonly unexplainedAttempt?: number;
+}
+
+async function classifyServerRefusalDetailed(
+  serverMessage: string,
+  phaseReason: ImapOpenFailureReason,
+  account: string,
+  options: ImapReadingOptions,
+): Promise<ImapReadingLease<RefusalClassification>> {
   assertImapReadingCurrent(options);
+  const owner = options.publication ?? options;
   const code = responseCodeOf(serverMessage);
-  if (TRANSIENT_RESPONSE_CODES.has(code)) return imapReadingLease('server-unavailable', options.publication ?? options);
-  if (AUTH_RESPONSE_CODES.has(code)) return imapReadingLease('authentication-rejected', options.publication ?? options);
-  if (MAILBOX_RESPONSE_CODES.has(code)) return imapReadingLease('mailbox-unavailable', options.publication ?? options);
+  if (TRANSIENT_RESPONSE_CODES.has(code)) return imapReadingLease({ reason: 'server-unavailable' }, owner);
+  if (AUTH_RESPONSE_CODES.has(code)) return imapReadingLease({ reason: 'authentication-rejected' }, owner);
+  if (MAILBOX_RESPONSE_CODES.has(code)) return imapReadingLease({ reason: 'mailbox-unavailable' }, owner);
   const reading = await readImapRefusal(serverMessage, options);
   reading.assertCurrent();
   assertImapReadingCurrent(options);
-  const reason = reading.value === 'server' ? 'server-unavailable' : reading.value === 'credential' ? 'authentication-rejected'
-    : reading.value === 'mailbox' ? 'mailbox-unavailable' : TERMINAL_REASONS.has(phaseReason) ? 'server-unavailable' : phaseReason;
-  return imapReadingLease(reason, reading);
+  if (reading.value === 'server') return imapReadingLease({ reason: 'server-unavailable' }, reading);
+  if (reading.value === 'credential') return imapReadingLease({ reason: 'authentication-rejected' }, reading);
+  if (reading.value === 'mailbox') return imapReadingLease({ reason: 'mailbox-unavailable' }, reading);
+  if (!TERMINAL_REASONS.has(phaseReason)) return imapReadingLease({ reason: phaseReason }, reading);
+  // Nothing stated, or no model to read it: the phase decides after a bounded
+  // number of identical refusals, and until then it is retried on the long backoff.
+  const key = `${account}\n${phaseReason}\n${serverMessage.replace(/^IMAP command failed:\s*\S+\s+/, '').trim().slice(0, 500)}`;
+  const attempt = (unexplainedRefusals.get(key) ?? 0) + 1;
+  unexplainedRefusals.delete(key); unexplainedRefusals.set(key, attempt);
+  if (unexplainedRefusals.size > MAX_TRACKED_REFUSALS) unexplainedRefusals.delete(unexplainedRefusals.keys().next().value!);
+  return imapReadingLease({
+    reason: attempt >= MAX_UNEXPLAINED_REFUSALS ? phaseReason : 'server-unavailable',
+    unexplainedAttempt: attempt,
+  }, reading);
+}
+
+/** The owner sentence for a refusal the server gave no reason for. */
+function unexplainedRefusalMessage(phaseReason: ImapOpenFailureReason, attempt: number, mailbox: string): string {
+  const signIn = phaseReason === 'authentication-rejected';
+  const what = signIn ? 'the sign-in' : `opening the folder '${mailbox}'`;
+  const remedy = signIn
+    ? 'replace the password in the secret named by email.passwordRef, at daemon scope, and reconnect'
+    : 'check that email.mailbox names a folder that exists on the server';
+  if (attempt < MAX_UNEXPLAINED_REFUSALS) {
+    return `The mail server refused ${what} without giving a reason (attempt ${String(attempt)} of `
+      + `${String(MAX_UNEXPLAINED_REFUSALS)}). It is retried on a longer backoff; if it keeps happening, ${remedy}.`;
+  }
+  return `The mail server refused ${what} ${String(attempt)} times in a row without giving a reason, so it is `
+    + `no longer retried${signIn ? ': repeated refused sign-ins are how an account gets locked' : ''}. To fix it, ${remedy}.`;
 }
 
 const failureReadings = new WeakMap<object, ImapReadingLease<unknown>>();
@@ -179,6 +241,8 @@ export class ImapOpenError extends Error {
     readonly summary: string;
     readonly serverMessage: string;
     readonly mailbox: string;
+    /** Replaces the reason's standard sentence when this failure has a more exact one. */
+    readonly ownerMessage?: string;
   }) {
     super(input.summary);
     this.name = 'ImapOpenError';
@@ -190,7 +254,7 @@ export class ImapOpenError extends Error {
       reason: input.reason,
       terminal: this.terminal,
       mailbox: input.mailbox,
-      ownerMessage: ownerMessageForFailure(input.reason, input.mailbox),
+      ownerMessage: input.ownerMessage ?? ownerMessageForFailure(input.reason, input.mailbox),
       serverMessage: '',
     };
   }
@@ -429,6 +493,8 @@ export async function composeOpenFailure(input: {
   readonly refusedSummary: string;
   readonly error: unknown;
   readonly mailbox: string;
+  /** Whose sign-in this was; keys the count of refusals the server gave no reason for. */
+  readonly account?: string;
 }, options: ImapReadingOptions = {}): Promise<ImapOpenError> {
   assertImapReadingCurrent(options);
   const serverMessage = imapFailureText(input.error);
@@ -448,9 +514,9 @@ export async function composeOpenFailure(input: {
   // phase only supplies the fallback, and only when it is not the terminal
   // guess.
   if (serverMessage.startsWith('IMAP command failed:')) {
-    const reading = await classifyServerRefusalOwned(serverMessage, input.refusedReason, options);
+    const reading = await classifyServerRefusalDetailed(serverMessage, input.refusedReason, input.account ?? '', options);
     reading.assertCurrent();
-    const reason = reading.value;
+    const { reason, unexplainedAttempt } = reading.value;
     assertImapReadingCurrent(options);
     const failure = new ImapOpenError({
       reason,
@@ -459,6 +525,9 @@ export async function composeOpenFailure(input: {
         : summaryForReason(reason, input.mailbox),
       serverMessage: '',
       mailbox: input.mailbox,
+      ...(unexplainedAttempt === undefined ? {} : {
+        ownerMessage: unexplainedRefusalMessage(input.refusedReason, unexplainedAttempt, input.mailbox),
+      }),
     });
     retainImapFailureReading(failure, reading);
     return failure;

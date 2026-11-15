@@ -57,24 +57,25 @@ function readImapSecurity(value: unknown): ImapSecurityMode {
 /**
  * Which transport member opens the IMAP connection.
  *
- * The IMAP counterpart of the SMTP selection in `EmailService`, and here rather
- * than beside it because that file is at the repository's per-file line cap.
- *
  * A transport with no `connectImapPlain` cannot honour a plaintext request, and
  * is refused by name: silently handing back the TLS factory would open a TLS
  * handshake against a plain listener and report a protocol error from a port the
- * operator never asked to be encrypted.
+ * operator never asked to be encrypted. `setting` is the key the caller read the
+ * security choice from, so the refusal names the setting the operator actually
+ * has: `email.imapSecurity` for the mail tools, `surfaces.email.imap.secure`
+ * for the inbound watcher.
  */
 export function imapSocketFactoryFor(
   transport: Pick<EmailTransportPort, 'connectImapTls' | 'connectImapPlain'>,
   security: ImapSecurityMode | undefined,
+  setting: 'email.imapSecurity' | 'surfaces.email.imap.secure' = 'email.imapSecurity',
 ): EmailSocketFactory {
   if (security !== 'plaintext') return transport.connectImapTls;
   const plain = transport.connectImapPlain;
   if (!plain) {
     throw new Error(
-      'surfaces.email.imap.secure is false, which asks for a plaintext IMAP connection, '
-      + 'and this email transport provides no connectImapPlain to open one.',
+      `${setting} asks for a plaintext IMAP connection, and this email transport provides no `
+      + 'connectImapPlain to open one. Use TLS, or run with a transport that can open a plaintext connection.',
     );
   }
   return plain;
@@ -134,19 +135,30 @@ function notMailKeyMessage(setting: string, key: string): string {
   return `${setting} names '${key}', which is not a mail credential: the key must contain EMAIL, MAIL, IMAP or SMTP as a word (for example GOODVIBES_EMAIL_PASSWORD), so an unrelated secret is never sent to a mail server.`;
 }
 
-/** A secret ref problem as a one-line message, or null when the ref can be resolved. */
-function secretRefProblem(setting: string, ref: string): string | null {
+/**
+ * The one reading of a mail secret reference: the store key it names, or the
+ * problem with it. Validation reports the problem; `resolveEmailPassword`
+ * refuses with it. One function, so the two can never disagree about which
+ * references are readable.
+ */
+export function parseEmailSecretRef(setting: string, ref: string): { readonly key: string } | { readonly problem: string } {
   if (!ref.startsWith('goodvibes://secrets/')) {
-    return `${setting} must be a goodvibes secret reference (goodvibes://secrets/...)`;
+    return { problem: `${setting} must be a goodvibes secret reference (goodvibes://secrets/...)` };
   }
   if (!ref.startsWith(GOODVIBES_SECRET_PREFIX) || ref.length === GOODVIBES_SECRET_PREFIX.length) {
-    return `${setting} must name a key in the goodvibes secret store (${GOODVIBES_SECRET_PREFIX}<key>); other secret reference types are not resolved for email`;
+    return { problem: `${setting} must name a key in the goodvibes secret store (${GOODVIBES_SECRET_PREFIX}<key>); other secret reference types are not resolved for email` };
   }
   let key: string;
   try { key = decodeURIComponent(ref.slice(GOODVIBES_SECRET_PREFIX.length)); }
-  catch { return `${setting} is not a valid secret reference: the key after ${GOODVIBES_SECRET_PREFIX} has a malformed % escape`; }
-  if (!isMailSecretKey(key)) return notMailKeyMessage(setting, key);
-  return null;
+  catch { return { problem: `${setting} is not a valid secret reference: the key after ${GOODVIBES_SECRET_PREFIX} has a malformed % escape` }; }
+  if (!isMailSecretKey(key)) return { problem: notMailKeyMessage(setting, key) };
+  return { key };
+}
+
+/** A secret ref problem as a one-line message, or null when the ref can be resolved. */
+function secretRefProblem(setting: string, ref: string): string | null {
+  const parsed = parseEmailSecretRef(setting, ref);
+  return 'problem' in parsed ? parsed.problem : null;
 }
 
 function isLoopbackMailHost(host: string): boolean {
@@ -232,22 +244,17 @@ export class EmailCredentialUnavailableError extends Error {
 export async function resolveEmailPassword(
   passwordRef: string,
   secretsManager: { readonly get: (key: string) => Promise<string | null> },
+  setting = 'email.passwordRef',
 ): Promise<string> {
   // The store is asked for a KEY; it never parses references, so a reference of
   // any other form could only ever be reported as a missing secret.
-  if (!passwordRef.startsWith(GOODVIBES_SECRET_PREFIX) || passwordRef.length === GOODVIBES_SECRET_PREFIX.length) {
-    throw new EmailCredentialUnavailableError(
-      `email.passwordRef must be ${GOODVIBES_SECRET_PREFIX}<key>; other secret reference types are not resolved for email.`,
-    );
-  }
-  let key: string;
-  try { key = decodeURIComponent(passwordRef.slice(GOODVIBES_SECRET_PREFIX.length)); }
-  catch { throw new EmailCredentialUnavailableError('email.passwordRef has a malformed % escape in its key.'); }
-  if (!isMailSecretKey(key)) throw new EmailCredentialUnavailableError(notMailKeyMessage('email.passwordRef', key));
+  const parsed = parseEmailSecretRef(setting, passwordRef);
+  if ('problem' in parsed) throw new EmailCredentialUnavailableError(`${parsed.problem}.`);
+  const key = parsed.key;
   const value = await secretsManager.get(key);
   if (!value) {
     throw new EmailCredentialUnavailableError(
-      `email.passwordRef names '${key}', and no secret by that name was found.`,
+      `${setting} names '${key}', and no secret by that name was found.`,
     );
   }
   return value;

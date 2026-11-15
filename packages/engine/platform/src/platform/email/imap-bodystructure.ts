@@ -210,7 +210,49 @@ function paramValue(params: SNode[], wanted: string): string {
   for (let i = 0; i + 1 < params.length; i += 2) {
     if (asText(params[i]).toLowerCase() === wanted) return asText(params[i + 1]);
   }
-  return '';
+  return extendedParamValue(params, wanted);
+}
+
+/** A parameter name in its RFC 2231 forms: `name*`, `name*0`, `name*0*`. */
+const EXTENDED_PARAM = /^([^*]+)\*(?:(\d{1,3})(\*)?)?$/;
+
+/**
+ * An RFC 2231 extended parameter (`filename*=utf-8''R%C3%A9sum%C3%A9.pdf`,
+ * or one split into `filename*0*`, `filename*1*`, ...), decoded for display.
+ * Names in other languages and long names arrive this way. '' when absent or
+ * when the charset cannot be decoded.
+ */
+function extendedParamValue(params: SNode[], wanted: string): string {
+  const segments = new Map<number, { readonly text: string; readonly encoded: boolean }>();
+  for (let i = 0; i + 1 < params.length; i += 2) {
+    const match = EXTENDED_PARAM.exec(asText(params[i]).toLowerCase());
+    if (match === null || match[1] !== wanted) continue;
+    const index = match[2] === undefined ? 0 : Number(match[2]);
+    const encoded = match[2] === undefined || match[3] === '*';
+    if (!segments.has(index)) segments.set(index, { text: asText(params[i + 1]), encoded });
+  }
+  if (segments.size === 0) return '';
+  let charset = '';
+  const bytes: number[] = [];
+  for (let index = 0; segments.has(index); index += 1) {
+    const segment = segments.get(index)!;
+    let text = segment.text;
+    if (index === 0 && segment.encoded) {
+      const parts = text.split("'");
+      if (parts.length < 3) return '';
+      charset = (parts[0] ?? '').toLowerCase();
+      text = parts.slice(2).join("'");
+    }
+    if (!segment.encoded) { for (const byte of Buffer.from(text, 'utf8')) bytes.push(byte); continue; }
+    for (let at = 0; at < text.length; at += 1) {
+      const ch = text.charAt(at);
+      const hex = text.slice(at + 1, at + 3);
+      if (ch === '%' && /^[0-9a-f]{2}$/i.test(hex)) { bytes.push(parseInt(hex, 16)); at += 2; continue; }
+      for (const byte of Buffer.from(ch, 'utf8')) bytes.push(byte);
+    }
+  }
+  const decoder = charset === '' || /^(?:utf-?8|us-ascii|ascii)$/.test(charset) ? new TextDecoder('utf-8') : legacyCharsetDecoder(charset);
+  return decoder === null ? '' : decoder.decode(Buffer.from(bytes));
 }
 
 /**

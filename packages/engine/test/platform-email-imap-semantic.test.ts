@@ -184,10 +184,10 @@ describe('IMAP semantic refusal boundary', () => {
     expect(classifyOpenFailure(failure).terminal).toBe(false);
   });
 
-  test('local cursor validation is not mistaken for a failed state write', async () => {
+  test('local cursor validation is not mistaken for a failed state write, and no model is asked', async () => {
     const fake = facts(); installJudgmentPort(fake.port);
     expect((await classifyLocalFailure(new Error('cursor validation failed'), 10, 10)).verdict.reason).toBe('watcher-stopped-unexpectedly');
-    expect(fake.requests).toHaveLength(1);
+    expect(fake.requests).toHaveLength(0);
     installJudgmentPort(undefined);
     expect((await classifyLocalFailure(Object.assign(new Error('private'), { code: 'EACCES' }), 1, 10)).verdict.reason).toBe('local-store-unwritable');
   });
@@ -205,7 +205,7 @@ describe('IMAP drafts selection boundary', () => {
   test('ambiguous names and none cannot trigger default APPEND', async () => {
     installJudgmentPort(selection('none').port);
     const { client, wire } = await opened({}, '* LIST () "/" "Account A/Drafts"\r\n* LIST () "/" "Account B/Drafts"\r\n');
-    try { await expect(client.appendDraft(draft)).rejects.toBeInstanceOf(ImapReadingError);
+    try { await expect(client.appendDraft(draft)).rejects.toThrow('email.draftsMailbox');
       expect(wire.commands.some(command => command.includes(' APPEND '))).toBe(false);
     } finally { client.close(); }
   });

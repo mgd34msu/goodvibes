@@ -338,6 +338,21 @@ export interface MailboxCursorStoreOptions {
  * Durable per-mailbox cursor store. Every read re-validates from disk so a
  * corrupt or stale record written by a crashed process is never honoured.
  */
+/**
+ * The cursor file could not be written. Thrown by the store itself, so the
+ * watcher knows a failed pass was its own state write without reading the
+ * message. Carries the filesystem's errno as `code` when there was one.
+ */
+export class CursorWriteError extends Error {
+  readonly code: string | undefined;
+  constructor(cause: unknown) {
+    super(`The mailbox cursor file could not be written: ${cause instanceof Error ? cause.message : String(cause)}`, { cause });
+    this.name = 'CursorWriteError';
+    const code = typeof cause === 'object' && cause !== null ? (cause as { code?: unknown }).code : undefined;
+    this.code = typeof code === 'string' ? code : undefined;
+  }
+}
+
 export class MailboxCursorStore {
   private readonly store: PersistentStore<CursorSnapshot>;
   private readonly policy: MailboxCursorPolicy;
@@ -392,7 +407,7 @@ export class MailboxCursorStore {
       cursors: InboundSourceCursor[],
       malformed: number,
       corrupt: PersistentStoreCorruption | null,
-    ) => Promise<{ next: InboundSourceCursor[]; result: T }>,
+    ) => Promise<{ next: InboundSourceCursor[] | null; result: T }>,
   ): Promise<T> {
     // The chain orders writers inside THIS process; the lock orders them
     // across processes. Both, because neither alone is "one writer at a time"
@@ -400,7 +415,10 @@ export class MailboxCursorStore {
     const run = this.writeChain.then(async () => withInboundStoreWriteLock(this.store.lockPath, async () => {
       const { cursors, malformed, corrupt } = await this.readWithDrops(true);
       const { next, result } = await fn(cursors, malformed, corrupt);
-      await this.store.persist({ version: 1, cursors: next });
+      // `null` is "nothing changed": the file is left as it is.
+      if (next === null) return result;
+      try { await this.store.persist({ version: 1, cursors: next }); }
+      catch (error) { throw new CursorWriteError(error); }
       return result;
     }));
     this.writeChain = run.then(() => undefined, () => undefined);
@@ -669,6 +687,9 @@ export class MailboxCursorStore {
       const historyId = compareHistoryIds(position.historyId, existing.historyId) >= 0
         ? position.historyId
         : existing.historyId;
+      // A position that did not move is not a write: an idle mailbox polled
+      // every minute would otherwise rewrite this file every minute.
+      if (historyId === existing.historyId) return { next: null, result: existing };
       const updated: GmailMailboxCursor = {
         ...existing,
         historyId,

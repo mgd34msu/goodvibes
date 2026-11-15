@@ -102,12 +102,12 @@ describe('oldest pending pages preserve durable UID progress', () => {
     expect(retried.checkpoint.history.skippedOlderMessages).toBe(2); expect(f.ingests).toHaveLength(2);
   });
 
-  test.each(['gone', 'incomplete'] as const)('%s selected message withholds the whole page and coverage', async mode => {
+  test.each(['gone', 'incomplete'] as const)('a %s message ends the page there, keeping only what was read before it', async mode => {
     const socket = new PageSocket({}, mode === 'gone' ? { goneUid: 43 } : { incompleteUid: 43 });
     const f = snapshotFixture({ sockets: [socket] });
-    const result = await f.service.readInboxPage({ checkpoint: checkpoint() });
-    expect(result.outcome).toBe('incomplete'); expect('coveredUids' in result).toBe(false); expect('messages' in result).toBe(false);
-    expect(f.service.getInboxMailboxObservation(result)).toBeUndefined(); expect(f.ingests).toHaveLength(0);
+    const result = complete(await f.service.readInboxPage({ checkpoint: checkpoint() }));
+    expect(result.coveredUids).toEqual([42]); expect(result.hasMore).toBe(true); expect('unsupported' in result).toBe(false);
+    expect(f.ingests).toHaveLength(1);
     expect(fetched(socket)).toEqual([42, 43]); expect(socket.closed).toBe(true);
   });
 
@@ -126,12 +126,12 @@ describe('oldest pending pages preserve durable UID progress', () => {
     expect(JSON.stringify(f.ingests)).toContain('Second'); expect(f.connections()).toBe(1);
   });
 
-  test('aggregate source cap withholds all content rather than truncating a claimed complete page', async () => {
+  test('aggregate source cap ends the page before the message that would exceed it, never truncating one', async () => {
     const socket = new PageSocket({ uids: [1, 2, 3, 4, 5] }, { body: 'a'.repeat(900_000) });
     const f = snapshotFixture({ sockets: [socket] });
-    const result = await f.service.readInboxPage({ checkpoint: checkpoint() });
-    expect(result).toEqual({ outcome: 'incomplete', reason: 'Mail page exceeds the complete-source limit.' });
-    expect(f.ingests).toHaveLength(0); expect(f.service.getInboxMailboxObservation(result)).toBeUndefined();
+    const result = complete(await f.service.readInboxPage({ checkpoint: checkpoint() }));
+    expect(result.coveredUids).toEqual([1, 2, 3, 4]); expect(result.hasMore).toBe(true);
+    for (const message of result.messages) expect(message.source.textSections[0]!.text).toHaveLength(900_000);
   });
 
   test.each(['ALL', 'UNSEEN'] as const)('malformed %s SEARCH cannot become empty or progress', async malformedSearch => {

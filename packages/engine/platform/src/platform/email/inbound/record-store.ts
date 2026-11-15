@@ -23,8 +23,9 @@
  *  5. Disclose what was reaped, every sweep returns an itemised report.
  */
 import { randomUUID } from 'node:crypto';
+import { promises as fs } from 'node:fs';
 import { PersistentStore, type PersistentStoreCorruption } from '../../state/persistent-store.js';
-import { redactCardShapes } from '../../security/card-shapes.js';
+import { findCardNumberShapes } from '../../security/card-shapes.js';
 import {
   clampDeliveryAddress,
   clampLinkVerdicts,
@@ -349,20 +350,49 @@ export class InboundMailStore {
     return this.corruption;
   }
 
+  /**
+   * The validated record set from the last load or write, with the file
+   * identity it was read from. This process is the writer, so a read is one
+   * `stat`: the set is reloaded only when another process changed the file.
+   */
+  private loaded: { readonly records: InboundMailRecord[]; readonly malformed: number; readonly stamp: string } | null = null;
+
+  /** The file's identity (inode, size, mtime); renamed-in writes always change it. */
+  private async fileStamp(): Promise<string> {
+    const lockPath = this.store.lockPath;
+    if (lockPath === null) return 'memory';
+    try {
+      const stat = await fs.stat(lockPath.slice(0, -'.lock'.length));
+      return `${String(stat.ino)}:${String(stat.size)}:${String(stat.mtimeMs)}`;
+    } catch (error) {
+      // An unreadable stat must not serve the held set: load and let the load say why.
+      return (error as { code?: unknown }).code === 'ENOENT' ? 'absent' : `unknown:${randomUUID()}`;
+    }
+  }
+
   private async readWithDrops(forWrite = false): Promise<{
     records: InboundMailRecord[];
     malformed: number;
     corrupt: PersistentStoreCorruption | null;
   }> {
+    const stamp = await this.fileStamp();
+    if (this.loaded !== null && this.loaded.stamp === stamp) {
+      return { records: this.loaded.records, malformed: this.loaded.malformed, corrupt: null };
+    }
     // A write must not replace a file it only failed to read; see store-read.ts.
     const { data: raw, corruption } = forWrite
       ? await loadStoreForWrite(this.store)
       : await this.store.loadOrDiscard();
     if (corruption !== null) this.corruption = corruption;
-    if (!raw || typeof raw !== 'object') return { records: [], malformed: 0, corrupt: corruption };
+    if (!raw || typeof raw !== 'object') {
+      this.loaded = corruption === null ? { records: [], malformed: 0, stamp } : null;
+      return { records: [], malformed: 0, corrupt: corruption };
+    }
     const rawRecords = Array.isArray(raw.records) ? raw.records : [];
     const records = rawRecords.map(validateInboundMailRecord).filter((r): r is InboundMailRecord => r !== null);
-    return { records, malformed: rawRecords.length - records.length, corrupt: null };
+    const malformed = rawRecords.length - records.length;
+    this.loaded = { records, malformed, stamp };
+    return { records, malformed, corrupt: null };
   }
 
   private async mutate<T>(
@@ -378,7 +408,9 @@ export class InboundMailStore {
     const run = this.writeChain.then(async () => withInboundStoreWriteLock(this.store.lockPath, async () => {
       const { records, malformed, corrupt } = await this.readWithDrops(true);
       const { next, result } = await fn(records, malformed, corrupt);
+      this.loaded = null;
       await this.store.persist({ version: 1, records: next });
+      this.loaded = { records: next, malformed: 0, stamp: await this.fileStamp() };
       return result;
     }));
     this.writeChain = run.then(() => undefined, () => undefined);
@@ -492,15 +524,8 @@ export class InboundMailStore {
   }
 
   /**
-   * Record one inbound message. The body excerpt is redacted of card shapes and
-   * then truncated to the policy cap at write time.
-   *
-   * Redaction happens BEFORE the truncation, over the WHOLE body rather than
-   * a window. Truncating first and redacting the result would leave a card
-   * number straddling the cap as a still-readable prefix of up to eighteen
-   * digits, a shorter leak, not a redaction. A window sized to one span is
-   * not enough either, because redaction shortens and several of them slide
-   * later text back inside the cap; see the note at the call site.
+   * Record one inbound message. Its text fields arrive redacted of card shapes
+   * by the intake, over the WHOLE body before any cut; the store bounds them.
    *
    * ONE MESSAGE, ONE RECORD. A write whose message key already exists replaces
    * that row in place and keeps its `id`; it does not append a second row. That
@@ -527,18 +552,18 @@ export class InboundMailStore {
       // `clampRecordScope`, which `findByMessage` applies to its key for the
       // same reason.
       ...clampRecordScope(input),
-      // `From:`'s display name is written by whoever sent the message, the
-      // same standing the subject has, and the same handling. It was left raw
-      // while the subject beside it was redacted, so `"4111111111111111"
-      // <a@b.test>` put a card number on disk for `retentionDays` and into the
-      // owner's notice, through a field nobody thought of as content.
-      senderDisplay: (await redactCardShapes(input.senderDisplay)).slice(0, MAX_SENDER_DISPLAY_CHARS),
+      // Sender, subject and delivery address arrive already redacted by the
+      // intake (card numbers and, by a reading, short codes in card context),
+      // the same text the owner's notice shows. The store still masks card
+      // numbers itself, a local pattern pass with no model, so no caller can
+      // put one on disk; then it bounds them.
+      senderDisplay: maskCardNumbers(input.senderDisplay).slice(0, MAX_SENDER_DISPLAY_CHARS),
       // The subject is persisted alongside the excerpt AND rendered to the
       // owner in the notice, so it is the same exposure by a different field.
       // Re-clamped after redacting because a marker is longer than the digits
       // it replaces, and a subject over 998 chars fails validation on load,
       // taking the whole record with it.
-      subject: (await redactCardShapes(input.subject)).slice(0, MAX_SUBJECT_CHARS),
+      subject: maskCardNumbers(input.subject).slice(0, MAX_SUBJECT_CHARS),
       // Sender-chosen too, on the catch-all domain the aliases live on (§7.1):
       // the local part is whatever the message was addressed to, so a PAN can
       // arrive as the alias itself. Clamped by `clampDeliveryAddress` rather
@@ -546,7 +571,7 @@ export class InboundMailStore {
       // subject's re-clamp.
       deliveredToAddress: input.deliveredToAddress === null
         ? null
-        : clampDeliveryAddress(await redactCardShapes(input.deliveredToAddress)),
+        : clampDeliveryAddress(maskCardNumbers(input.deliveredToAddress)),
       deliveryEvidenceSource: input.deliveryEvidenceSource,
       // Clamped, not trusted: `reason` is bounded per entry and the array is
       // bounded by count, because sixty-four unbounded strings is an unbounded
@@ -564,60 +589,11 @@ export class InboundMailStore {
       ...(input.noticeFailureReason
         ? { noticeFailureReason: input.noticeFailureReason.slice(0, MAX_NOTICE_FAILURE_REASON_CHARS) }
         : {}),
-      // SCAN, THEN TRUNCATE, and scan everything that could reach the
-      // excerpt, not a window sized to one span.
-      //
-      // This used to scan `cap + MAX_CARD_SPAN_CHARS` and slice to `cap`, on
-      // the reasoning that the overshoot means a span starting just inside the
-      // cap is always seen whole. That reasoning is sound for ONE span and
-      // wrong for several, because redaction SHORTENS: `[redacted:pan]` is
-      // fourteen characters against a nineteen-digit grouped PAN's
-      // thirty-seven, so every redaction pulls everything after it leftwards.
-      // Enough of them and a span that sat beyond the window, seen only in
-      // part, so not matched, so left raw, slides back inside the final
-      // `slice(0, cap)` and is persisted verbatim. Fifteen digits of a
-      // sixteen-digit number, with the sixteenth recoverable by check digit.
-      //
-      // REACHABLE TODAY, on the Gmail path. `intake.ts` passes `''` for the
-      // IMAP envelope pass, which fetches no body, and the real body for a
-      // Gmail history delta, so this runs on the source automatic selection
-      // prefers once Google is adopted, which is the owner's own path.
-      // `inbound-mail-intake.test.ts` drives a card number through it. The
-      // body-fetch round extends this to IMAP; it does not switch it on.
-      //
-      // This comment previously read "not reachable today: intake.ts passes
-      // body: ''". That was true when the window fix was written and false by
-      // the time it merged, because the Gmail body arm landed in between. It is
-      // recorded rather than quietly corrected because it is the fault class
-      // this file already carries a note about: a comment asserting a property
-      // the code does not have, which is precisely what stops the next reader
-      // checking, and this one would also have read as licence to relax the
-      // double pass on the grounds that nothing exercises it.
-      //
-      // The rule that generalises, because this arrived from a MERGE
-      // RESOLUTION rather than from authorship: a reachability claim is a
-      // claim about the whole tree, and the tree moves under it. The sentence
-      // was accurate against the tree it was written for and false against the
-      // tree it landed in, and nothing about the line itself changed. So a
-      // reachability claim is something to VERIFY, never to inherit, kept
-      // wording carries the same obligation as kept code.
-      //
-      // Verified rather than asserted this time: the multi-span slide below now
-      // has a test. `inbound-mail-card-redaction.test.ts` builds a body whose
-      // second card straddles the removed window and, measured against the
-      // windowed implementation, put ELEVEN readable digits on disk. Restore
-      // the window and that test, and only that test, reddens.
-      //
-      // The fix is to remove the window, not to widen it. The body is already
-      // bounded upstream by the fetch's own byte cap, and `MAX_BODY_EXCERPT_CHARS`
-      // bounds what is kept, so scanning the whole of what we were handed costs
-      // nothing measurable and leaves no boundary to reason about. The second
-      // pass over the truncated result is belt and braces: after this, the
-      // stored string provably contains no detectable card shape, whatever the
-      // first pass did to the offsets.
-      bodyExcerpt: await redactCardShapes(
-        (await redactCardShapes(input.body)).slice(0, this.policy.maxBodyExcerptChars),
-      ),
+      // The intake redacted the whole body before handing it here (one scan
+      // with a reading, see `redactInboundFields`). Card numbers are masked
+      // over the whole body before the cut and again after it, because a cut
+      // can turn a longer digit run into one: local pattern passes, no model.
+      bodyExcerpt: maskCardNumbers(maskCardNumbers(input.body).slice(0, this.policy.maxBodyExcerptChars)),
       receivedAt: input.receivedAt,
     };
     return this.mutate(async (records) => {
@@ -698,4 +674,15 @@ export class InboundMailStore {
   async runRecoverySweep(): Promise<InboundMailRecordSweepReport> {
     return this.sweep('recovery');
   }
+}
+
+/** Replace each card-number shape with the marker `redactCardShapes` uses. Local, no model. */
+function maskCardNumbers(text: string): string {
+  const findings = findCardNumberShapes(text);
+  let result = text;
+  for (let index = findings.length - 1; index >= 0; index -= 1) {
+    const finding = findings[index]!;
+    result = `${result.slice(0, finding.startIndex)}[redacted:pan]${result.slice(finding.startIndex + finding.length)}`;
+  }
+  return result;
 }

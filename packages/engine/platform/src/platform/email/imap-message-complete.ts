@@ -11,13 +11,49 @@ import { completeFetchBodyStructure, completeFetchSection } from './imap-fetch-c
 import {
   extractAuthenticationResults,
   extractDeliveryEvidence,
+  extractDisplayHeader,
   extractHeader,
 } from './imap-headers.js';
 import type { ImapSession } from './imap-session.js';
 import type { ImapCompleteMessageRead, ImapCompleteTextSection, ImapMessageDetail } from './imap-types.js';
 import { MAX_IMAP_UID } from './inbound/source-cursor.js';
 
-const incomplete = (reason: string): ImapCompleteMessageRead => Object.freeze({ outcome: 'incomplete', reason });
+/**
+ * Why a message's own bytes cannot be shown here. Reading it again returns
+ * the same answer, so a reader steps over it instead of waiting on it.
+ */
+export type CompleteMessageUnreadableReason =
+  | 'invalid-uid'
+  | 'headers-incomplete'
+  | 'bodystructure-incomplete-or-unsupported'
+  | 'text-section-incomplete-or-unsupported'
+  | 'complete-source-too-large';
+
+/**
+ * The strict read's answer, with the distinction a caller needs carried on it
+ * rather than re-derived from the reason string: `fromMessage` is true when the
+ * message itself is the cause (step over it), false when the command failed
+ * (try again). `senderDomain` is the claimed From domain when the headers were
+ * readable enough to name one, for telling the owner which message it was.
+ */
+export type CompleteMessageRead =
+  | Exclude<ImapCompleteMessageRead, { readonly outcome: 'incomplete' }>
+  | { readonly outcome: 'incomplete'; readonly reason: CompleteMessageUnreadableReason; readonly fromMessage: true; readonly senderDomain?: string }
+  | { readonly outcome: 'incomplete'; readonly reason: 'source-fetch-failed'; readonly fromMessage: false };
+
+const unreadable = (reason: CompleteMessageUnreadableReason, rawHeaders?: string | null): CompleteMessageRead => {
+  const domain = rawHeaders ? claimedSenderDomain(rawHeaders) : '';
+  return Object.freeze({ outcome: 'incomplete', reason, fromMessage: true, ...(domain ? { senderDomain: domain } : {}) });
+};
+
+/** The claimed sender's domain, only when it is plainly a hostname. Never the local part or the name. */
+function claimedSenderDomain(rawHeaders: string): string {
+  const from = extractHeader(rawHeaders, 'From');
+  const address = /<([^<>]*)>\s*$/.exec(from)?.[1] ?? from;
+  const domain = address.slice(address.lastIndexOf('@') + 1).trim().toLowerCase();
+  return address.includes('@') && /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?)+$/.test(domain)
+    && domain.length <= 253 ? domain : '';
+}
 
 /** Raw source is retained, not reconstructed from the clipped display parser. */
 function completeHeaders(raw: string): boolean {
@@ -40,13 +76,13 @@ function detailFor(uid: number, mailbox: string, rawHeaders: string,
   const deliveryEvidence = Object.freeze(extractDeliveryEvidence(rawHeaders).map(entry => Object.freeze(entry)));
   return Object.freeze({
     uid, mailbox,
-    from: extractHeader(rawHeaders, 'From'),
-    subject: extractHeader(rawHeaders, 'Subject'),
+    from: extractDisplayHeader(rawHeaders, 'From'),
+    subject: extractDisplayHeader(rawHeaders, 'Subject'),
     date: extractHeader(rawHeaders, 'Date'),
     messageId: extractHeader(rawHeaders, 'Message-ID'),
     deliveredTo: Object.freeze(deliveryEvidence.map(entry => entry.address)),
     deliveryEvidence,
-    unverifiedToHeaderClaim: extractHeader(rawHeaders, 'To'),
+    unverifiedToHeaderClaim: extractDisplayHeader(rawHeaders, 'To'),
     authenticationResults: Object.freeze(extractAuthenticationResults(rawHeaders)),
     bodyText: (textSections.find(part => part.contentType === 'text/plain')?.text ?? '').replace(/\r\n/g, '\n'),
     bodyHtml: (textSections.find(part => part.contentType === 'text/html')?.text ?? '').replace(/\r\n/g, '\n'),
@@ -56,26 +92,30 @@ function detailFor(uid: number, mailbox: string, rawHeaders: string,
 
 /**
  * A command must prove exact UID, full section, complete syntax and encoding.
- * Every supported inline text part is read. Attachment bytes are never fetched.
- * Unsupported formats, limits and transport failures are explicit incomplete
- * outcomes, without leaking sender text into their diagnostics.
+ * Every inline text part is read. Attachment bytes are never fetched. A message
+ * whose own bytes cannot be shown and a command that failed are both explicit
+ * incomplete outcomes, told apart by `fromMessage`, without leaking sender text
+ * beyond a plain claimed domain.
  */
 export async function readCompleteMessageDetail(session: ImapSession, uid: number,
-  mailbox: string): Promise<ImapCompleteMessageRead> {
-  if (!Number.isSafeInteger(uid) || uid < 1 || uid > MAX_IMAP_UID) return incomplete('invalid-uid');
+  mailbox: string): Promise<CompleteMessageRead> {
+  if (!Number.isSafeInteger(uid) || uid < 1 || uid > MAX_IMAP_UID) return unreadable('invalid-uid');
   try {
     const headerFrames = await session.commandFrames(`UID FETCH ${uid} BODY.PEEK[HEADER]`,
       { maxResponseBytes: COMPLETE_MESSAGE_HEADER_BYTES + 4_096 });
     if (headerFrames.length === 1 && headerFrames[0]?.literal === undefined
       && /^\S+ OK\b/.test(headerFrames[0]?.syntax ?? '')) return Object.freeze({ outcome: 'gone' });
     const rawHeaders = completeFetchSection(headerFrames, uid, 'HEADER');
-    if (rawHeaders === null || !completeHeaders(rawHeaders)) return incomplete('headers-incomplete');
+    // No header section in the answer is the server's failure to answer; a
+    // header block that is there and unreadable is the message's own bytes.
+    if (rawHeaders === null) return Object.freeze({ outcome: 'incomplete', reason: 'source-fetch-failed', fromMessage: false });
+    if (!completeHeaders(rawHeaders)) return unreadable('headers-incomplete', rawHeaders);
 
     const structureFrames = await session.commandFrames(`UID FETCH ${uid} BODYSTRUCTURE`,
       { maxResponseBytes: COMPLETE_MESSAGE_STRUCTURE_BYTES + 4_096 });
     const structure = completeFetchBodyStructure(structureFrames, uid);
     const parts = structure === null ? null : parseCompleteBodyStructure(structure);
-    if (parts === null || structure === null) return incomplete('bodystructure-incomplete-or-unsupported');
+    if (parts === null || structure === null) return unreadable('bodystructure-incomplete-or-unsupported', rawHeaders);
     const textSections: ImapCompleteTextSection[] = [];
     let sourceBytes = Buffer.byteLength(rawHeaders, 'utf8') + Buffer.byteLength(structure, 'utf8');
     for (const part of parts) {
@@ -83,10 +123,13 @@ export async function readCompleteMessageDetail(session: ImapSession, uid: numbe
       const frames = await session.commandFrames(`UID FETCH ${uid} BODY.PEEK[${part.section}]`,
         { maxResponseBytes: part.sizeBytes + 4_096 });
       const raw = completeFetchSection(frames, uid, part.section);
-      const text = raw === null ? null : decodeCompleteTextPart(raw, part);
-      if (text === null) return incomplete('text-section-incomplete-or-unsupported');
+      // A section the server did not return is a failed command; one it
+      // returned that cannot be decoded exactly is the message's own bytes.
+      if (raw === null) return Object.freeze({ outcome: 'incomplete', reason: 'source-fetch-failed', fromMessage: false });
+      const text = decodeCompleteTextPart(raw, part);
+      if (text === null) return unreadable('text-section-incomplete-or-unsupported', rawHeaders);
       sourceBytes += Buffer.byteLength(text, 'utf8');
-      if (sourceBytes > COMPLETE_MESSAGE_SOURCE_BYTES) return incomplete('complete-source-too-large');
+      if (sourceBytes > COMPLETE_MESSAGE_SOURCE_BYTES) return unreadable('complete-source-too-large', rawHeaders);
       textSections.push(Object.freeze({ section: part.section,
         contentType: part.subtype === 'html' ? 'text/html' : 'text/plain', text }));
     }
@@ -94,6 +137,6 @@ export async function readCompleteMessageDetail(session: ImapSession, uid: numbe
     return Object.freeze({ outcome: 'complete', rawHeaders, rawBodyStructure: structure, textSections: frozenSections,
       detail: detailFor(uid, mailbox, rawHeaders, frozenSections, attachmentsFromParts(parts)) });
   } catch {
-    return incomplete('source-fetch-failed');
+    return Object.freeze({ outcome: 'incomplete', reason: 'source-fetch-failed', fromMessage: false });
   }
 }

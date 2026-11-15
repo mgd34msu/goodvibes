@@ -499,7 +499,7 @@ describe('EmailService.testConnection', () => {
     });
 
     const result = await service.testConnection();
-    expect(result).toEqual({ ok: true });
+    expect(result).toEqual({ ok: true, smtp: 'verified' });
   });
 
   test('returns ok:false stage:config when config is invalid: no connection attempted', async () => {

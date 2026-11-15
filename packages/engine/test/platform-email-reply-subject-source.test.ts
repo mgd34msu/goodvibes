@@ -71,14 +71,23 @@ describe('canonical mail reply subject source', () => {
     ['long', 'x'.repeat(4097)],
     ['protected tail', `${'x'.repeat(4097)} sk-syntheticProtectedTail01234567890123456789`],
     ['folded long', `Visible prefix\r\n ${'x'.repeat(2100)} protected tail`],
-    ['base64 encoded', '=?UTF-8?B?UmU6IFN5bnRoZXRpYw==?='],
-    ['quoted-printable encoded', '=?UTF-8?Q?Re=3A_Synthetic?='],
+    ['undecodable encoded word', '=?X-UNKNOWN-CHARSET?B?UmU6IFN5bnRoZXRpYw==?='],
     ['replacement decoding', 'Synthetic\ufffdsubject'],
     ['duplicate', 'First\r\nSubject: Conflicting duplicate'],
   ] as const)('%s subject remains display-only when complete identity is unproven', async (_label, subject) => {
     const { service } = mailFixture({ plans: [{ subject }] });
     const message = required(await service.readMessage(42));
     expect(service.getReplySubjectSource(message)).toBeUndefined();
+  });
+
+  test.each([
+    ['base64 encoded', '=?UTF-8?B?UmU6IFN5bnRoZXRpYw==?='],
+    ['quoted-printable encoded', '=?UTF-8?Q?Re=3A_Synthetic?='],
+  ] as const)('%s subject is decoded once and keeps its canonical identity', async (_label, subject) => {
+    const { service } = mailFixture({ plans: [{ subject }] });
+    const message = required(await service.readMessage(42));
+    expect(message.subject).toBe('Re: Synthetic');
+    expect(required(service.getReplySubjectSource(message)).subject).toBe('Re: Synthetic');
   });
 
   test('complete Unicode and ordinarily folded subjects preserve their canonical identity', async () => {

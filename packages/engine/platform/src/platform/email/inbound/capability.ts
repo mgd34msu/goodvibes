@@ -34,7 +34,8 @@
  */
 
 import type { JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
-import { assertImapReadingCurrent, imapFailureText, ImapReadingError, readImapCursorFailure } from '../imap-readings.js';
+import { assertImapReadingCurrent, imapFailureText, ImapReadingError } from '../imap-readings.js';
+import { CursorWriteError } from './cursor-store.js';
 import {
   classifyServerRefusalOwned,
   assertImapFailureCurrent,
@@ -178,9 +179,9 @@ const FIX_BY_REASON: Readonly<Record<InboundCapabilityReason, string>> = {
     + 'be handed on. Nothing is lost, the messages are still in the mailbox and '
     + 'the daemon has not marked them handled, but it has stopped asking, '
     + 'because asking again was producing the same unreadable answer several '
-    + 'times a second. The detail above is what could not be read; it is a '
+    + 'times a second. What could not be read is in the daemon log; it is a '
     + 'mismatch between this daemon and this mail server rather than anything '
-    + 'wrong with the account, so it is worth reporting with that detail '
+    + 'wrong with the account, so it is worth reporting with that log entry '
     + 'attached. Inbound mail retries when the daemon restarts or when inbound '
     + 'settings change.',
   'local-store-unwritable':
@@ -190,9 +191,9 @@ const FIX_BY_REASON: Readonly<Record<InboundCapabilityReason, string>> = {
     + 'write permission on the daemon state directory (~/.goodvibes/daemon).',
   'watcher-stopped-unexpectedly':
     'The mailbox watcher stopped with a failure that does not name a cause the '
-    + 'daemon recognises, so it is reported verbatim rather than guessed at. '
-    + 'The detail above is what it said; inbound mail restarts with the daemon '
-    + 'or when inbound settings change.',
+    + 'daemon recognises, so it is not guessed at. The failure itself is in the '
+    + 'daemon log; inbound mail restarts with the daemon or when inbound '
+    + 'settings change.',
   'bodies-unfetchable':
     'This account can sign in but is not permitted to read message content, so '
     + 'check the mailbox access rights for it, and where the provider offers a '
@@ -422,6 +423,9 @@ export interface UncodedRefusalCount {
   readonly giveUpAfter: number;
 }
 
+/** The detail of a read failure that stops the watcher; the watcher logs the server's answer when it reports it. */
+const TERMINAL_READ_DETAIL = 'The mail command failed; the server\'s answer is in the daemon log.';
+
 export async function classifyReadFailure(
   error: unknown,
   phase: 'search' | 'fetch' = 'fetch',
@@ -445,7 +449,7 @@ export async function classifyReadFailure(
   if (named === 'authentication-rejected') {
     return {
       ...retained,
-      verdict: capabilityVerdict('credentials-rejected', 'The mail command failed; server details withheld.'),
+      verdict: capabilityVerdict('credentials-rejected', TERMINAL_READ_DETAIL),
       terminal: true,
       notice: null,
     };
@@ -453,13 +457,13 @@ export async function classifyReadFailure(
   if (named === 'mailbox-unavailable') {
     return {
       ...retained,
-      verdict: capabilityVerdict('mailbox-unreadable', 'The mail command failed; server details withheld.'),
+      verdict: capabilityVerdict('mailbox-unreadable', TERMINAL_READ_DETAIL),
       terminal: true,
       notice: null,
     };
   }
   if (phase === 'fetch' && (uncoded === undefined || uncoded.consecutive + 1 >= uncoded.giveUpAfter)) {
-    return { ...retained, verdict: capabilityVerdict('fetch-refused', 'The mail command failed; server details withheld.'), terminal: true, notice: null };
+    return { ...retained, verdict: capabilityVerdict('fetch-refused', TERMINAL_READ_DETAIL), terminal: true, notice: null };
   }
   return { ...retained, verdict: capabilityVerdict('reconnecting', 'The mail command failed; server details withheld.'), ...transient };
 }
@@ -511,7 +515,6 @@ export async function classifyLocalFailure(
   assertImapReadingCurrent(options);
   if (error instanceof ImapReadingError) return { verdict: capabilityVerdict(
     'reconnecting', error.message), terminal: false, notice: null };
-  const text = imapFailureText(error);
   const errno = errnoOf(error);
   const permanent = PERMANENT_STORE_ERRNOS.has(errno);
   const exhausted = consecutive >= giveUpAfter;
@@ -526,14 +529,13 @@ export async function classifyLocalFailure(
     };
   }
   // A store write is the only local failure with a fix worth naming, so only a
-  // failure that looks like one borrows that advice. Anything else keeps its
-  // own words: sending an owner to check disk space over an unrelated bug is
-  // the same class of mistake as calling a connection limit a bad password.
-  const reading = STORAGE_ERRNOS.has(errno) ? undefined : await readImapCursorFailure(text, options);
-  reading?.assertCurrent();
-  const reason = reading === undefined || reading.value ? 'local-store-unwritable' : 'watcher-stopped-unexpectedly';
-  assertImapReadingCurrent(options);
-  return { assertCurrent: reading?.assertCurrent, verdict: capabilityVerdict(reason, 'The mailbox watcher could not complete a pass; failure details withheld.'), terminal: true, notice: null };
+  // failure that is one borrows that advice: the cursor store says so with its
+  // own error type, the filesystem with its errno. Anything else keeps its own
+  // words: sending an owner to check disk space over an unrelated bug is the
+  // same class of mistake as calling a connection limit a bad password.
+  const reason = error instanceof CursorWriteError || STORAGE_ERRNOS.has(errno)
+    ? 'local-store-unwritable' : 'watcher-stopped-unexpectedly';
+  return { verdict: capabilityVerdict(reason, 'The mailbox watcher could not complete a pass; the reason is in the daemon log.'), terminal: true, notice: null };
 }
 
 export function errorText(error: unknown): string {

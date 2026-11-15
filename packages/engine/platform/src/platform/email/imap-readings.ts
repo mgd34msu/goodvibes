@@ -25,17 +25,6 @@ export const imapRefusalReading = defineBattery({
   ],
 });
 
-export const imapCursorFailureReading = defineBattery({
-  name: 'email.imap.cursor-write-failure', version: 1, accuracyFloor: 0.95,
-  description: 'Whether a local watcher failure actually says its cursor/state could not be written.',
-  items: { write: question('Does the failure say that the mailbox watcher’s own cursor or state file could not be written? A validation failure, an unrelated cursor, or an inability to read is not a write failure.') },
-  fixtures: [
-    { name: 'write refused', state: { message: 'Cannot persist mailbox cursor: writing the state file failed.' }, expect: { write: 'yes' } },
-    { name: 'invalid cursor', state: { message: 'Cursor validation failed: invalid UID.' }, expect: { write: 'no' } },
-    { name: 'read refused', state: { message: 'Cannot read cursor state file.' }, expect: { write: 'no' } },
-  ],
-});
-
 export const imapDraftsReading = defineSelector({
   name: 'email.imap.drafts-mailbox', version: 1, accuracyFloor: 0.95,
   description: 'Select the account’s actual drafts folder from the server’s selectable LIST entries, or none.',
@@ -123,12 +112,34 @@ function readingOwner(site: string, options: ImapReadingOptions) {
   return { owner, port, signal, current };
 }
 
+/**
+ * Settled answers by refusal text, per installed decision port, so a server
+ * that keeps sending the same code-less refusal (every reconnect after a wrong
+ * password) is read once, not once per backoff step. Keyed under the reading
+ * owner's identity, which is new for each installed decision port and each
+ * mail source lifetime, so a changed port or account starts empty and a remembered
+ * answer is leased to the same owner a fresh one would be. Only a model's
+ * settled answer is kept; "unknown" (no model) is not an answer to remember.
+ */
+const settledRefusals = new WeakMap<object, Map<string, 'server' | 'credential' | 'mailbox' | 'none'>>();
+const MAX_SETTLED_REFUSALS = 64;
+
+/** The refusal without its command tag, which differs per connection and says nothing. */
+function refusalKey(message: string): string {
+  return message.replace(/^IMAP command failed:\s*\S+\s+/, '').trim().slice(0, 500);
+}
+
 export async function readImapRefusal(message: string, options: ImapReadingOptions = {}): Promise<ImapReadingLease<'server' | 'credential' | 'mailbox' | 'none' | 'unknown'>> {
   try {
     assertImapReadingCurrent(options);
+    const key = refusalKey(message);
     const state = snapshotJudgmentInput({ message }) as { message: string };
     return await decisionOrClassic<ImapReadingLease<'server' | 'credential' | 'mailbox' | 'none' | 'unknown'>>(async () => {
       const { owner, port, signal, current } = readingOwner('email.imap.refusal', options);
+      let remembered = settledRefusals.get(owner.identity);
+      if (remembered === undefined) { remembered = new Map(); settledRefusals.set(owner.identity, remembered); }
+      const known = remembered.get(key);
+      if (known !== undefined) return imapReadingLease(known, owner);
       const run = await imapRefusalReading.run(port, state, { signal, site: 'email.imap.refusal' });
       current();
       const readings = run.readings;
@@ -137,24 +148,10 @@ export async function readImapRefusal(message: string, options: ImapReadingOptio
         : readings.mailbox.verdict === 'yes' ? 'mailbox' : 'none';
       run.recordAction('returned settled IMAP refusal facts');
       current();
+      remembered.set(key, result);
+      if (remembered.size > MAX_SETTLED_REFUSALS) remembered.delete(remembered.keys().next().value!);
       return imapReadingLease(result, owner);
     }, () => classicLease('unknown' as const, options));
-  } catch { throw new ImapReadingError(); }
-}
-
-export async function readImapCursorFailure(message: string, options: ImapReadingOptions = {}): Promise<ImapReadingLease<boolean | null>> {
-  try {
-    assertImapReadingCurrent(options);
-    const state = snapshotJudgmentInput({ message }) as { message: string };
-    return await decisionOrClassic<ImapReadingLease<boolean | null>>(async () => {
-      const { owner, port, signal, current } = readingOwner('email.imap.cursor-write-failure', options);
-      const run = await imapCursorFailureReading.run(port, state, { signal, site: 'email.imap.cursor-write-failure' });
-      current();
-      if (run.readings.write.outcome !== 'act' || run.readings.write.verdict === 'uncertain') throw new ImapReadingError();
-      run.recordAction('returned settled cursor write fact');
-      current();
-      return imapReadingLease(run.readings.write.verdict === 'yes', owner);
-    }, () => classicLease(null, options));
   } catch { throw new ImapReadingError(); }
 }
 

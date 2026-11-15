@@ -13,6 +13,19 @@ export interface EmailInboxPageInput {
   /** First seed keeps the newest page; later reads take the oldest pending page. */
   readonly limit?: number | undefined;
   readonly signal?: AbortSignal | undefined;
+  /**
+   * UIDs the caller has already seen fail to read on several polls in a row.
+   * A failed read of one of these steps over it as `repeated-read-failure`
+   * instead of ending the page, so no single message holds the mailbox.
+   */
+  readonly stepOver?: readonly number[] | undefined;
+}
+
+/** A message the page stepped over, with why and, when known, the claimed sender's domain. */
+export interface EmailInboxSteppedOver {
+  readonly uid: number;
+  readonly reason: string;
+  readonly senderDomain?: string;
 }
 
 export interface EmailInboxPageSelection {
@@ -47,20 +60,12 @@ export type EmailInboxPageRead =
      * them as suppressed (so the checkpoint moves past them) and show which UID
      * was left out and why; only present when there is one.
      */
-    readonly unsupported?: readonly { readonly uid: number; readonly reason: string }[];
+    readonly unsupported?: readonly EmailInboxSteppedOver[];
   })
-  | { readonly outcome: 'incomplete'; readonly reason: string };
+  /** `uid` names the message the read failed on, when it failed on one. */
+  | { readonly outcome: 'incomplete'; readonly reason: string; readonly uid?: number };
 
 const MAX_PAGE_SOURCE_BYTES = 4 * 1024 * 1024;
-/**
- * Reasons that describe the message itself rather than the connection: the same
- * bytes will be refused the same way next time. Anything else (a failed fetch,
- * a partial header or section) stays a retryable `incomplete` for the page.
- */
-const UNSUPPORTED_CONTENT_REASONS: ReadonlySet<string> = new Set([
-  'bodystructure-incomplete-or-unsupported',
-  'complete-source-too-large',
-]);
 /**
  * How many messages (readable or not) one page examines. It matches the most
  * UIDs one checkpoint advance may cover, so a page of stepped-over messages can
@@ -98,37 +103,41 @@ export async function readEmailInboxPage(deps: EmailServiceDeps, config: EmailCo
     }
     const pending = uids.filter(uid => uid >= checkpoint.history.lowerBoundUid
       && (checkpoint.lastTerminalUid === null || uid > checkpoint.lastTerminalUid));
-    // The page is the oldest `limit` readable messages. One message this reader
-    // cannot prove complete must not hold every later message back forever, so
-    // it is stepped over (never screened, never published) and reported.
+    // The page is the oldest `limit` readable messages. A message whose own
+    // bytes cannot be shown here is stepped over (never screened, reported so
+    // the owner is told it exists), and a read that failed ends the page at
+    // that message, keeping everything read before it.
     const unseen = pending.length === 0 ? new Set<number>() : new Set(await client.searchCompleteUids(true));
     current();
+    const stepOver = new Set(input.stepOver ?? []);
     const examined: number[] = [];
-    const unsupported: { uid: number; reason: string }[] = [];
+    const unsupported: EmailInboxSteppedOver[] = [];
     const readable: number[] = [];
     const messages: EmailInboxBatchMessage[] = [];
     let bytes = 0;
+    let stoppedEarly = false;
     for (const uid of pending) {
       if (readable.length >= limit || examined.length >= MAX_EXAMINED_PER_PAGE) break;
       current();
-      let source = await client.readCompleteMessageDetail(uid);
+      const source = await client.readCompleteMessageDetail(uid);
       current();
-      // One more look before calling a message unsupported, so a single bad
-      // answer from the server cannot cost the owner a message.
-      if (source.outcome === 'incomplete' && UNSUPPORTED_CONTENT_REASONS.has(source.reason)) {
-        const first = source.reason;
-        source = await client.readCompleteMessageDetail(uid);
-        current();
-        if (source.outcome === 'incomplete' && source.reason === first) {
-          examined.push(uid); unsupported.push({ uid, reason: first });
-          continue;
-        }
+      if (source.outcome === 'incomplete' && (source.fromMessage || stepOver.has(uid))) {
+        examined.push(uid);
+        unsupported.push(Object.freeze({ uid, reason: source.fromMessage ? source.reason : 'repeated-read-failure',
+          ...(source.fromMessage && source.senderDomain ? { senderDomain: source.senderDomain } : {}) }));
+        continue;
       }
-      if (source.outcome !== 'complete') return Object.freeze({ outcome: 'incomplete',
-        reason: source.outcome === 'gone' ? 'Mailbox changed during the page read.' : source.reason });
-      bytes += Buffer.byteLength(source.rawHeaders, 'utf8') + Buffer.byteLength(source.rawBodyStructure, 'utf8');
-      for (const section of source.textSections) bytes += Buffer.byteLength(section.text, 'utf8');
-      if (bytes > MAX_PAGE_SOURCE_BYTES) return Object.freeze({ outcome: 'incomplete', reason: 'Mail page exceeds the complete-source limit.' });
+      if (source.outcome !== 'complete') {
+        if (examined.length === 0) return Object.freeze({ outcome: 'incomplete', uid,
+          reason: source.outcome === 'gone' ? 'Mailbox changed during the page read.' : source.reason });
+        stoppedEarly = true;
+        break;
+      }
+      let size = Buffer.byteLength(source.rawHeaders, 'utf8') + Buffer.byteLength(source.rawBodyStructure, 'utf8');
+      for (const section of source.textSections) size += Buffer.byteLength(section.text, 'utf8');
+      // One message is at most a quarter of the page budget, so the first always fits.
+      if (bytes + size > MAX_PAGE_SOURCE_BYTES && readable.length > 0) { stoppedEarly = true; break; }
+      bytes += size;
       examined.push(uid); readable.push(uid);
       messages.push(Object.freeze({ unread: unseen.has(uid), source }));
     }
@@ -138,10 +147,10 @@ export async function readEmailInboxPage(deps: EmailServiceDeps, config: EmailCo
     // and is no longer pending; one above it is still waiting for a later page.
     const lastCovered = readable.at(-1);
     const passed = lastCovered === undefined ? 0 : unsupported.filter(entry => entry.uid < lastCovered).length;
-    for (const entry of unsupported) logger.warn('Inbox message left out: its content cannot be proven complete', { uid: entry.uid, reason: entry.reason });
+    for (const entry of unsupported) logger.warn('Inbox message stepped over: it cannot be read here', { uid: entry.uid, reason: entry.reason });
     return Object.freeze({ outcome: 'complete', checkpoint, messages: Object.freeze(messages),
       total: uids.length, pending: pending.length - passed, selectedUids, coveredUids: Object.freeze(readable),
-      ...(unsupported.length > 0 ? { unsupported: Object.freeze(unsupported.map(entry => Object.freeze({ ...entry }))) } : {}),
-      hasMore: pending.length > examined.length });
+      ...(unsupported.length > 0 ? { unsupported: Object.freeze(unsupported) } : {}),
+      hasMore: stoppedEarly || pending.length > examined.length });
   });
 }

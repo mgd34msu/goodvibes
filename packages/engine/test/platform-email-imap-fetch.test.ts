@@ -503,7 +503,7 @@ describe('ImapClient.appendDraft', () => {
       from: 'owner@example.test',
       subject: 'Hello',
       body: 'Hi there',
-    })).rejects.toThrow('semantic reading');
+    })).rejects.toThrow('email.draftsMailbox');
     expect(fake.state.commands.some(command => command.includes(' APPEND '))).toBe(false);
   });
 

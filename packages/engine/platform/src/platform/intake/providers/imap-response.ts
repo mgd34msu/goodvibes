@@ -1,4 +1,5 @@
 import { fetchSection, parseFetchResponses } from '../../email/imap-fetch-response.js';
+import { decodeHeaderText } from '../../email/imap-headers.js';
 import type { ImapEnvelope } from './imap-client.js';
 
 import { wireLines } from '../../email/imap-wire-frames.js';
@@ -39,8 +40,8 @@ export function parseIntakeFetchResponse(raw: string | Uint8Array): ImapEnvelope
     const date = dateRaw ? Date.parse(dateRaw) : NaN;
     return {
       uid: response.uid,
-      from: /^From:\s*(.*)$/im.exec(headers)?.[1]?.trim() ?? '',
-      subject: decodeHeader(/^Subject:\s*(.*)$/im.exec(headers)?.[1]?.trim() ?? ''),
+      from: decodeHeaderText(/^From:\s*(.*)$/im.exec(headers)?.[1]?.trim() ?? '', 'address'),
+      subject: decodeHeaderText(/^Subject:\s*(.*)$/im.exec(headers)?.[1]?.trim() ?? ''),
       date: Number.isFinite(date) ? date : 0,
       seen: (flags.get(response.seq) ?? '').split(/\s+/).some(flag => flag.toLowerCase() === '\\seen'),
       bodyPreview: fetchSection(response, section => section === 'TEXT') ?? '',
@@ -48,14 +49,5 @@ export function parseIntakeFetchResponse(raw: string | Uint8Array): ImapEnvelope
   });
 }
 
-/** RFC 2047 encoded words; decoding is protocol syntax, never classification. */
-export function decodeHeader(value: string): string {
-  return value.replace(/=\?([^?]+)\?([BbQq])\?([^?]*)\?=/g, (_match, charset: string, enc: string, text: string) => {
-    try {
-      const bytes = enc.toUpperCase() === 'B' ? Buffer.from(text, 'base64')
-        : Buffer.from(text.replace(/_/g, ' ').replace(/=([0-9A-Fa-f]{2})/g,
-          (_escape, hex: string) => String.fromCharCode(Number.parseInt(hex, 16))), 'latin1');
-      return new TextDecoder(charset).decode(bytes);
-    } catch { return text; }
-  });
-}
+/** RFC 2047 encoded words: the mail module's one decoder, under this reader's old name. */
+export { decodeHeaderText as decodeHeader } from '../../email/imap-headers.js';

@@ -61,7 +61,8 @@ async function read(input: Fixture = {}): Promise<ImapCompleteMessageRead> {
 }
 function expectIncomplete(value: ImapCompleteMessageRead): void {
   expect(value.outcome).toBe('incomplete');
-  expect(Object.keys(value).sort()).toEqual(['outcome', 'reason']);
+  // Nothing from the message beyond the reason and, at most, a plain claimed sender domain.
+  expect(Object.keys(value).filter(key => !['outcome', 'reason', 'fromMessage', 'senderDomain'].includes(key))).toEqual([]);
 }
 
 describe('strict whole-message source completeness', () => {
@@ -96,12 +97,19 @@ describe('strict whole-message source completeness', () => {
     } finally { client.close(); }
   });
 
-  test('inline nontext MIME cannot masquerade as a complete attachment-only message', async () => {
+  test('inline nontext MIME is listed as an attachment and never fetched', async () => {
     for (const structure of ['("APPLICATION" "JSON" NIL NIL NIL "8BIT" 42)',
       '("APPLICATION" "XML" NIL NIL NIL "8BIT" 42 NIL ("INLINE" NIL))']) {
       const { client, socket } = await fixture({ structure });
-      try { expectIncomplete(await client.readCompleteMessageDetail(42)); expect(socket.writes.some(line => line.includes('BODY.PEEK[1]'))).toBe(false); }
-      finally { client.close(); }
+      try {
+        const result = await client.readCompleteMessageDetail(42);
+        expect(result.outcome).toBe('complete');
+        if (result.outcome === 'complete') {
+          expect(result.textSections).toEqual([]);
+          expect(result.detail.attachments).toHaveLength(1);
+        }
+        expect(socket.writes.some(line => line.includes('BODY.PEEK[1]'))).toBe(false);
+      } finally { client.close(); }
     }
   });
 
@@ -178,8 +186,8 @@ describe('strict whole-message source completeness', () => {
     finally { client.close(); }
   });
 
-  test('oversized declarations and unsupported text are refused before text fetch', async () => {
-    for (const structure of [leaf('a', 'CALENDAR'), leaf('a').replace(' 1 1)', ' 1048577 1)')]) {
+  test('oversized declarations are refused before text fetch', async () => {
+    for (const structure of [leaf('a').replace(' 1 1)', ' 1048577 1)')]) {
       const { client, socket } = await fixture({ structure });
       try { expectIncomplete(await client.readCompleteMessageDetail(42)); expect(socket.writes.some(line => line.includes('BODY.PEEK[1]'))).toBe(false); }
       finally { client.close(); }
@@ -189,7 +197,7 @@ describe('strict whole-message source completeness', () => {
   test('combined decoded text exceeding source budget is refused without clipping', async () => {
     const body = Buffer.alloc(530_000, 0xe9).toString('base64');
     expect(await read({ body, structure: leaf(body, 'PLAIN', 'BASE64', 'ISO-8859-1') }))
-      .toEqual({ outcome: 'incomplete', reason: 'complete-source-too-large' });
+      .toMatchObject({ outcome: 'incomplete', reason: 'complete-source-too-large', fromMessage: true });
   });
 
   test('a later failed text section refuses the whole message', async () => {
@@ -249,22 +257,29 @@ describe('strict canonical MIME tree and decoding', () => {
     leaf('a').replace('"UTF-8"', '"UTF-8'),
     leaf('a').replace('"UTF-8"', '"UTF-8" "CHARSET" "UTF-8"'),
     leaf('a').replace('1 1)', '"1" 1)'), leaf('a').replace('1 1)', '-1 1)'),
-    leaf('a', 'CALENDAR'), leaf('a').replace('"UTF-8"', '"UTF-8" "FILENAME*" "secret.txt"'),
-    `(${leaf('a')} "ENCRYPTED")`, `(${leaf('a')} "MIXED" NIL ("ATTACHMENT" NIL))`,
     leaf('a').replace(' 1 1)', ' 1048577 1)'),
     `(${'('.repeat(30)}${leaf('a')}${')'.repeat(30)} "MIXED")`,
     `(${'("TEXT" "PLAIN" NIL NIL NIL "7BIT" 0 0)'.repeat(201)} "MIXED")`,
     '("TEXT" "PLAIN" NIL NIL NIL "7BIT" 0 0 NIL NIL NIL NIL "unknown-extension")',
-    '("TEXT" "PLAIN" NIL NIL NIL "7BIT" 0 0 NIL NIL ("attachment"))',
     '("MESSAGE" "RFC822" NIL NIL NIL "7BIT" 42 NIL NIL 1)',
-    '("APPLICATION" "JSON" NIL NIL NIL "8BIT" 42)',
-    '("APPLICATION" "XML" NIL NIL NIL "8BIT" 42 NIL ("INLINE" NIL))',
-    '("IMAGE" "PNG" NIL NIL NIL "BASE64" 42)',
     '("TEXT" "PLAIN" ("NAME" {3}\r\nabc) NIL NIL "7BIT" 0 0)',
     `("TEXT" "PLAIN" ("NAME" "${'x'.repeat(200_000)}") NIL NIL "7BIT" 0 0)`,
   ];
   test.each(malformed)('does not turn a malformed/unsupported tree into completeness (#%#)', raw => {
     expect(parseCompleteBodyStructure(raw)).toBeNull();
+  });
+  // What is shown is proven; every other part is listed, never fetched.
+  test.each([
+    [leaf('a', 'CALENDAR'), [true]],
+    [leaf('a').replace('"UTF-8"', '"UTF-8" "FILENAME*" "secret.txt"'), [true]],
+    [`(${leaf('a')} "ENCRYPTED")`, [false]],
+    [`(${leaf('a')} "MIXED" NIL ("ATTACHMENT" NIL))`, [true]],
+    ['("TEXT" "PLAIN" NIL NIL NIL "7BIT" 0 0 NIL NIL ("attachment"))', [false]],
+    ['("APPLICATION" "JSON" NIL NIL NIL "8BIT" 42)', [true]],
+    ['("APPLICATION" "XML" NIL NIL NIL "8BIT" 42 NIL ("INLINE" NIL))', [true]],
+    ['("IMAGE" "PNG" NIL NIL NIL "BASE64" 42)', [true]],
+  ] as const)('reads the text leaves and lists other parts as attachments (#%#)', (raw, attachments) => {
+    expect(parseCompleteBodyStructure(raw)?.map(part => part.isAttachment)).toEqual([...attachments]);
   });
   test('strict refusals do not change the lenient collector', () => {
     expect(parseBodyStructure(leaf('body').slice(0, -1))).toHaveLength(1);
@@ -279,14 +294,16 @@ describe('strict canonical MIME tree and decoding', () => {
     ['caf=C3=A9=\r\n!', 'quoted-printable', 'utf-8', 'café!'], ['caf=E9', 'quoted-printable', 'latin1', 'café'],
     ['plain\r\n', '7bit', '', 'plain\r\n'], ['é 😀', '8bit', 'utf-8', 'é 😀'],
     ['77u/SGk=', 'base64', 'utf-8', '\ufeffHi'],
+    ['trailing=', 'quoted-printable', 'utf-8', 'trailing'], ['a=\nb', 'quoted-printable', 'utf-8', 'ab'],
+    ['pad  \r\nnext', 'quoted-printable', 'utf-8', 'pad\r\nnext'], ['é', '7bit', 'utf-8', 'é'], ['é', '', '', 'é'],
   ])('exact supported decoding %j (%s, %s)', (raw, encoding, charset, expected) => {
     expect(decodeCompleteTextPart(raw!, part(raw!, encoding!, charset!))).toBe(expected);
   });
   test.each([
     ['SGVsbG8=!', 'base64', 'utf-8'], ['Zh==', 'base64', 'utf-8'], ['Zg', 'base64', 'utf-8'],
-    ['=XX', 'quoted-printable', 'utf-8'], ['trailing=', 'quoted-printable', 'utf-8'], ['a=\nb', 'quoted-printable', 'utf-8'],
+    ['=XX', 'quoted-printable', 'utf-8'],
     ['xx', 'x-unknown', 'utf-8'], ['YWJj', 'base64', 'x-unknown'], ['/w==', 'base64', 'utf-8'],
-    ['wA==', 'base64', 'us-ascii'], ['é', '7bit', 'utf-8'], ['é', '8bit', 'iso-8859-1'],
+    ['wA==', 'base64', 'us-ascii'], ['é', '8bit', 'iso-8859-1'],
     ['\ufffd', '8bit', 'utf-8'], ['AA==', 'base64', 'utf-8'],
   ])('refuses substitutions/unknown decoding %j (%s, %s)', (raw, encoding, charset) => {
     expect(decodeCompleteTextPart(raw!, part(raw!, encoding!, charset!))).toBeNull();

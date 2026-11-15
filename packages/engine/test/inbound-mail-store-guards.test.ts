@@ -31,7 +31,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { classifyLocalFailure } from '../platform/src/platform/email/inbound/capability.ts';
-import { MailboxCursorStore } from '../platform/src/platform/email/inbound/cursor-store.ts';
+import { CursorWriteError, MailboxCursorStore } from '../platform/src/platform/email/inbound/cursor-store.ts';
 import { InboundMailHousekeeper } from '../platform/src/platform/email/inbound/housekeeping.ts';
 import { InboundMailStore } from '../platform/src/platform/email/inbound/record-store.ts';
 import { PersistedExpectationStore } from '../platform/src/platform/email/inbound/expectation-store.ts';
@@ -292,9 +292,9 @@ describe('a local failure is classified by errno, and the set is not editable in
     expect(verdict.reason).toBe('watcher-stopped-unexpectedly');
   });
 
-  test('a settled reading that says the cursor could not be written is store-unwritable', async () => {
-    const { verdict } = await classifyLocalFailure(new Error('the cursor could not be written'), 10, 10);
-    expect(verdict.reason).toBe('local-store-unwritable');
+  test('the cursor store\'s own write error is store-unwritable; other text is not read for it', async () => {
+    expect((await classifyLocalFailure(new CursorWriteError(new Error('disk')), 10, 10)).verdict.reason).toBe('local-store-unwritable');
+    expect((await classifyLocalFailure(new Error('the cursor could not be written'), 10, 10)).verdict.reason).toBe('watcher-stopped-unexpectedly');
   });
 
   test('every permanent errno is also a storage errno: the sets cannot drift apart', async () => {

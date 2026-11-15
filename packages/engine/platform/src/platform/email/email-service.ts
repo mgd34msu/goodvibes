@@ -51,10 +51,10 @@ import { listEmailInbox } from './email-inbox-list.js';
 import { readEmailMessage } from './email-message-reader.js';
 import type { EmailMailboxObservation, EmailReplySubjectSource, EmailReplySubjectSourceOwner } from './reply-subject-source.js';
 import { ensureMailboxConfigDefaults } from '../config/connector-config-sections.js';
-import { ImapClient } from './imap-client.js';
+import { withEmailReadConnection } from './email-read-connection.js';
 import { SmtpClient, validateSmtpAddress, validateSmtpSubject, validateSmtpThreadHeader } from './smtp-client.js';
 import {
-  imapSocketFactoryFor,
+  EmailCredentialUnavailableError,
   readEmailConfig,
   resolveEmailPassword,
   smtpPasswordRefFor,
@@ -220,6 +220,8 @@ export interface EmailConnectionTestResult {
   /** Which stage failed, when ok is false. 'config' means validation failed before any connection was attempted. */
   readonly stage?: 'config' | 'imap' | 'smtp';
   readonly error?: string;
+  /** On success: whether sending was checked, or no SMTP host is configured (a receive-only mailbox). */
+  readonly smtp?: 'verified' | 'not-configured';
 }
 
 export interface SendMailOptions extends DeliveryLifetime {
@@ -512,7 +514,7 @@ export class EmailService {
     const { signal, limit, since, unreadOnly } = input;
     input = { signal, limit, since: since === undefined ? undefined : new Date(since.getTime()), unreadOnly };
     if (input.signal?.aborted) throw new Error('Mail read was cancelled.');
-    const config = this.getValidatedConfig();
+    const config = this.getValidatedConfig('read');
     const sourceRead = this.deps.replySubjectSourceOwner?.beginRead(config);
     const { buildResult, ingest } = await listEmailInbox(this.deps, config, sourceRead, input);
     const current = (): void => {
@@ -567,8 +569,8 @@ export class EmailService {
    * Complete content is still untrusted and requires protected screening.
    */
   async readInboxPage(input: EmailInboxPageInput = {}): Promise<EmailInboxPageRead> {
-    const { signal, limit, checkpoint } = input;
-    input = { signal, limit, checkpoint };
+    const { signal, limit, checkpoint, stepOver } = input;
+    input = { signal, limit, checkpoint, ...(stepOver === undefined ? {} : { stepOver: [...stepOver] }) };
     if (signal?.aborted) throw new Error('Mail read was cancelled.');
     const owner = this.deps.replySubjectSourceOwner;
     if (!owner) throw new Error('Mail page requires an owned account lifetime.');
@@ -630,7 +632,7 @@ export class EmailService {
    */
   async readMessageResult(uid: number): Promise<EmailMessageRead> {
     const read = await readEmailMessage(
-      this.deps, this.getValidatedConfig(), uid, this.#replySubjectSources,
+      this.deps, this.getValidatedConfig('read'), uid, this.#replySubjectSources,
       (messages, current) => this.recordIngest(messages, current),
     );
     if (read.outcome === 'read') this.#noteDetail(read.detail);
@@ -641,52 +643,51 @@ export class EmailService {
    * Save a draft to the Drafts folder. Nothing is sent: a draft is the outcome
    * that leaves the decision to send with the owner.
    *
-   * `from` defaults to the configured `email.fromAddress`. The folder is
-   * discovered from the server's own `\Drafts` flag rather than guessed.
+   * A draft needs what a read needs plus a From address, never an SMTP host:
+   * a receive-only mailbox can save drafts. `from` defaults to the configured
+   * `email.fromAddress`. The folder is, in order: the caller's, then
+   * `email.draftsMailbox`, then the one this account resolved earlier in this
+   * process, then discovery from the server's own `\Drafts` flag.
    */
   async createDraft(input: EmailDraftInput): Promise<ImapAppendDraftResult> {
-    const config = this.getValidatedConfig();
+    const config = this.getValidatedConfig('read');
     input = { ...input };
-    const sourceRead = this.deps.replySubjectSourceOwner?.beginRead(config);
-    const password = await resolveEmailPassword(config.passwordRef, this.deps.secretsManager);
     const from = input.from !== undefined && input.from.trim().length > 0
       ? input.from
       : config.fromAddress;
-
-    const socketFactory = this.deps.imapSocketFactory ?? imapSocketFactoryFor(this.deps.transport, config.imapSecurity);
-    const socket = await socketFactory(config.imapHost, config.imapPort);
-    // A socket error after the answer is read must not become an uncaught event.
-    socket.on('error', () => {});
-    const client = new ImapClient({ socket, username: config.username, password,
-      signal: sourceRead?.signal, assertCurrent: () => {
-        sourceRead?.assertCurrent();
-        if (JSON.stringify(config) !== JSON.stringify(this.getValidatedConfig())) throw new Error('Mail account changed.');
-      } });
-
+    if (from.trim().length === 0) {
+      throw new EmailConfigurationError(
+        'A draft needs a From address and none is set. Pass from, or set email.fromAddress.', 'invalid');
+    }
+    const account = draftsAccountKey(config);
+    // A configured name is an operator saying the server's own answer is wrong
+    // for them, so it outranks discovery but not an explicit call.
+    const chosen = input.mailbox ?? (config.draftsMailbox.length > 0 ? config.draftsMailbox : undefined);
+    const remembered = chosen === undefined ? this.#draftsMailboxes.get(account) : undefined;
+    const sourceRead = this.deps.replySubjectSourceOwner?.beginRead(config);
     try {
-      await client.open();
-      const result = await client.appendDraft({
+      const result = await withEmailReadConnection(this.deps, config, sourceRead, undefined, (client) => client.appendDraft({
         to: input.to,
         subject: input.subject,
         body: input.body,
         from,
         inReplyTo: input.inReplyTo,
         references: input.references,
-        // Caller's choice first, then the configured folder, then discovery.
-        // A configured name is an operator saying the server's own answer is
-        // wrong for them, so it outranks discovery but not an explicit call.
-        mailbox: input.mailbox ?? (config.draftsMailbox.length > 0 ? config.draftsMailbox : undefined),
-      });
-      await client.logout();
+        mailbox: chosen ?? remembered,
+      }));
+      // Discovery costs a LIST (and, on a server that flags nothing, a model
+      // reading); the folder it found does not move between drafts.
+      if (chosen === undefined) this.#draftsMailboxes.set(account, result.mailbox);
       return result;
-    } catch (err) {
-      try { await client.logout(); } catch { /* best-effort */ }
-      throw err;
-    } finally {
-      // Whatever happened, the connection does not outlive the draft.
-      client.close();
+    } catch (error) {
+      // A remembered folder that stopped working is discovered again next time.
+      if (remembered !== undefined) this.#draftsMailboxes.delete(account);
+      throw error;
     }
   }
+
+  /** Drafts folder per account, resolved once by discovery and kept for the life of this service. */
+  readonly #draftsMailboxes = new Map<string, string>();
 
   /**
    * Record that mail text entered the conversation.
@@ -733,49 +734,30 @@ export class EmailService {
    */
   async testConnection(): Promise<EmailConnectionTestResult> {
     const config = readEmailConfig(this.deps.getConfig);
-    const errors = validateEmailConfig(config);
+    // A mailbox set up for reading only is tested for reading only; the send
+    // half is checked when an SMTP host is configured.
+    const sends = config.smtpHost.length > 0;
+    const errors = sends ? validateEmailConfig(config) : validateEmailInboxConfig(config);
     if (errors.length > 0) {
       return { ok: false, stage: 'config', error: errors.join('; ') };
     }
 
     const sourceRead = this.deps.replySubjectSourceOwner?.beginRead(config);
-    let password: string;
     try {
-      password = await resolveEmailPassword(config.passwordRef, this.deps.secretsManager);
+      // EXAMINE the mailbox that will actually be read, so a folder name that
+      // does not exist fails the connection test rather than the first real
+      // listing. The one owned session does that, and closes the socket on
+      // every path.
+      await withEmailReadConnection(this.deps, config, sourceRead, undefined, async () => undefined);
     } catch (err) {
-      return { ok: false, stage: 'config', error: err instanceof Error ? err.message : String(err) };
+      const stage = err instanceof EmailCredentialUnavailableError ? 'config' : 'imap';
+      return { ok: false, stage, error: err instanceof Error ? err.message : String(err) };
     }
-
-    let imapSocket: { destroy(): unknown } | undefined;
-    try {
-      const socketFactory = this.deps.imapSocketFactory ?? imapSocketFactoryFor(this.deps.transport, config.imapSecurity);
-      const socket = await socketFactory(config.imapHost, config.imapPort);
-      imapSocket = socket;
-      socket.on('error', () => {});
-      const client = new ImapClient({
-        socket,
-        username: config.username,
-        password,
-        signal: sourceRead?.signal,
-        assertCurrent: () => sourceRead?.assertCurrent(),
-        // EXAMINE the mailbox that will actually be read, so a folder name
-        // that does not exist fails the connection test rather than the first
-        // real listing.
-        ...(config.mailbox.length > 0 ? { mailbox: config.mailbox } : {}),
-      });
-      await client.open();
-      sourceRead?.observeMailbox(client.mailbox, client.mailboxStatus?.uidValidity ?? null);
-      await client.logout();
-    } catch (err) {
-      return { ok: false, stage: 'imap', error: err instanceof Error ? err.message : String(err) };
-    } finally {
-      // A failed OPEN or LOGIN leaves the socket up until the server's idle timeout.
-      imapSocket?.destroy();
-    }
+    if (!sends) return { ok: true, smtp: 'not-configured' };
 
     let smtpSocket: { destroy(): unknown } | undefined;
     try {
-      const smtpPassword = await resolveEmailPassword(smtpPasswordRefFor(config), this.deps.secretsManager);
+      const smtpPassword = await resolveEmailPassword(smtpPasswordRefFor(config), this.deps.secretsManager, smtpSettingFor(config));
       const socketFactory = this.deps.smtpSocketFactory ?? this.defaultSmtpSocketFactory(config.smtpPort, config.smtpSecurity);
       const socket = await socketFactory(config.smtpHost, config.smtpPort);
       smtpSocket = socket;
@@ -788,7 +770,7 @@ export class EmailService {
       smtpSocket?.destroy();
     }
 
-    return { ok: true };
+    return { ok: true, smtp: 'verified' };
   }
 
   /**
@@ -806,8 +788,8 @@ export class EmailService {
     }
     assertDeliveryCurrent(opts);
 
-    const config = this.getValidatedConfig();
-    const password = await resolveEmailPassword(smtpPasswordRefFor(config), this.deps.secretsManager);
+    const config = this.getValidatedConfig('send');
+    const password = await resolveEmailPassword(smtpPasswordRefFor(config), this.deps.secretsManager, smtpSettingFor(config));
     assertDeliveryCurrent(opts);
     validateSmtpAddress(config.fromAddress, 'from');
     validateSmtpAddress(opts.to, 'to');
@@ -851,12 +833,17 @@ export class EmailService {
     return config;
   }
 
-  private getValidatedConfig(): EmailConfig {
+  /**
+   * The mail config, validated for what the operation needs: a read (listing,
+   * reading, saving a draft) needs the IMAP half only; a send needs SMTP and a
+   * From address as well.
+   */
+  private getValidatedConfig(purpose: 'read' | 'send'): EmailConfig {
     const config = readEmailConfig(this.deps.getConfig);
     if (!config.enabled) {
       throw new EmailConfigurationError('Email is not enabled. Set email.enabled = true in config.', 'disabled');
     }
-    const errors = validateEmailConfig(config);
+    const errors = purpose === 'send' ? validateEmailConfig(config) : validateEmailInboxConfig(config);
     if (errors.length > 0) {
       throw new EmailConfigurationError(`Email config is invalid:\n${errors.map((e) => `  - ${e}`).join('\n')}`, 'invalid');
     }
@@ -874,4 +861,14 @@ export class EmailService {
     if (port === 465) return this.deps.transport.connectSmtpTls;
     return this.deps.transport.connectSmtpStartTls;
   }
+}
+
+/** Which setting holds the SMTP secret reference actually in use, for refusals that name it. */
+function smtpSettingFor(config: EmailConfig): string {
+  return config.smtpPasswordRef.length > 0 ? 'email.smtpPasswordRef' : 'email.passwordRef';
+}
+
+/** The mailbox account a drafts folder belongs to. */
+function draftsAccountKey(config: EmailConfig): string {
+  return JSON.stringify([config.imapHost, config.imapPort, config.username]);
 }

@@ -28,6 +28,7 @@ import {
   type InboundMailStoreOptions,
 } from '../platform/src/platform/email/inbound/record-store.ts';
 import { MAX_BODY_EXCERPT_CHARS } from '../platform/src/platform/email/inbound/types.ts';
+import { redactInboundFields } from '../platform/src/platform/email/inbound/intake.ts';
 import { useSecurityReadings } from './helpers/security-readings.ts';
 
 useSecurityReadings();
@@ -280,9 +281,11 @@ describe('mail is redacted, NOT refused', () => {
     // In card context a bare four-digit run DOES count, so it is redacted here.
     // That is the intended trade for the stored copy; the live body the
     // expectation matcher reads is a different string and is untouched.
+    // The reading-backed redaction runs once, in the intake, on the way to the store.
     const body = 'Your card verification code is 1234.';
     const store = createStore();
-    await store.record(recordInput({ body }));
+    const redacted = await redactInboundFields({ source: 'gmail', body, from: '', subject: '' } as Parameters<typeof redactInboundFields>[0], null);
+    await store.record(recordInput({ body: redacted.body }));
     const excerpt = (await store.list())[0]!.bodyExcerpt;
     expect(excerpt).toContain('[redacted:security-code]');
     expect(excerpt).toContain('Your card verification code is');

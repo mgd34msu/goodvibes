@@ -38,6 +38,7 @@ import { type ImapFetchFrame, parseFetchResponses, hasCompleteFetchSection } fro
 import {
   extractAuthenticationResults,
   extractDeliveryEvidence,
+  extractDisplayHeader,
   extractHeader,
   hasCompleteSubjectHeader,
 } from './imap-headers.js';
@@ -212,15 +213,15 @@ export async function readMessageDetail(
   const deliveryEvidence = extractDeliveryEvidence(rawHeaders);
   const detail: ImapMessageDetail = {
     uid,
-    from: extractHeader(rawHeaders, 'From'),
-    subject: extractHeader(rawHeaders, 'Subject'),
+    from: extractDisplayHeader(rawHeaders, 'From'),
+    subject: extractDisplayHeader(rawHeaders, 'Subject'),
     date: extractHeader(rawHeaders, 'Date'),
     messageId: extractHeader(rawHeaders, 'Message-ID'),
     mailbox,
     deliveredTo: deliveryEvidence.map((entry) => entry.address),
     deliveryEvidence,
     // Display only, see the field docs on ImapEnvelope.
-    unverifiedToHeaderClaim: extractHeader(rawHeaders, 'To'),
+    unverifiedToHeaderClaim: extractDisplayHeader(rawHeaders, 'To'),
     authenticationResults: extractAuthenticationResults(rawHeaders),
     bodyText,
     bodyHtml,

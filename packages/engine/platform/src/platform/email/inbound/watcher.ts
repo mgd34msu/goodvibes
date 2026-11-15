@@ -58,6 +58,8 @@ import {
 import { runIdleLoop, type IdleWakeSummary } from './idle-watcher.js';
 import { InboundNoticeTransportError } from './intake.js';
 import { anySignal } from './any-signal.js';
+import { logger } from '../../utils/logger.js';
+import { summarizeError } from '../../utils/error-display.js';
 import { resolveMailboxStartPosition } from './mailbox-position.js';
 import { drainMailboxDelta, runPollLoop, type MailboxDeltaReport } from './poll-loop.js';
 import type { EmailCapabilityFailureNotice } from '../imap-client.js';
@@ -289,7 +291,7 @@ export class InboundMailboxWatcher {
     if (this.shutdown.signal.aborted) return;
     const { verdict, terminal } = result;
     if (terminal) {
-      this.reportTerminal(verdict, null);
+      this.reportTerminal(verdict, null, error);
       return;
     }
     this.tracker.record(verdict);
@@ -528,21 +530,30 @@ export class InboundMailboxWatcher {
     connection: MailboxConnection,
     via: 'idle' | 'poll',
   ): Promise<MailboxDeltaReport> {
-    const report = await drainMailboxDelta({
-      settings: this.settings,
-      reader: connection.reader,
-      wire: connection.wire,
-      cursors: this.deps.cursors,
-      sink: this.deps.sink,
-      clock: this.deps.clock,
-      observer: this.deps.observer,
-      cursor: this.requireCursor(),
-      via,
-      signal: this.readingOptions(connection).signal,
-    });
-    this.cursor = report.cursor;
-    if (report.outcome === 'complete') this.noteDrainCompleted();
-    return report;
+    const signal = this.readingOptions(connection).signal;
+    for (;;) {
+      const report = await drainMailboxDelta({
+        settings: this.settings,
+        reader: connection.reader,
+        wire: connection.wire,
+        cursors: this.deps.cursors,
+        sink: this.deps.sink,
+        clock: this.deps.clock,
+        observer: this.deps.observer,
+        cursor: this.requireCursor(),
+        via,
+        signal,
+      });
+      this.cursor = report.cursor;
+      if (report.outcome === 'complete') this.noteDrainCompleted();
+      // A notice route that is down is not this connection's problem: wait on
+      // the delivery backoff and drain again on the same connection, with no
+      // new sign-in. The sink sets the message aside after a bounded number of
+      // attempts, so this ends.
+      if (report.outcome !== 'delivery-failed' || !(report.error instanceof InboundNoticeTransportError)) return report;
+      await this.sleep(this.deliveryBackoff.next());
+      if (signal.aborted) return { ...report, outcome: 'aborted' };
+    }
   }
 
   /**
@@ -618,16 +629,17 @@ export class InboundMailboxWatcher {
 
   private async handleDrainFailure(report: MailboxDeltaReport, connection: MailboxConnection): Promise<void> {
     if (report.outcome === 'delivery-failed') {
-      // A notice route that is down is already latched in the notice health
-      // and clears on its own, so it keeps retrying on the delivery backoff.
+      // A notice route that is down is retried on the same connection by the
+      // drain itself; one that reaches here came from the poll loop's last pass.
       if (report.error instanceof InboundNoticeTransportError) {
         await this.sleep(this.deliveryBackoff.next());
         return;
       }
-      // Anything else (a record store that cannot be written, a deterministic
-      // throw for one message) holds the cursor below that message, and every
-      // later message behind it, for as long as it lasts. It is counted like
-      // any other local failure, so the verdict leaves healthy and the owner is
+      // Anything else (a record store that cannot be written) holds the cursor
+      // below that message. One message that fails the same way every time is
+      // set aside by the sink after a bounded number of attempts, so what
+      // reaches here is the store, not the message. It is counted like any
+      // other local failure, so the verdict leaves healthy and the owner is
       // told at the ceiling. A pass that got other messages through is not
       // consecutive with the one before it.
       if (report.delivered > 0) this.localFailures = 0;
@@ -654,7 +666,7 @@ export class InboundMailboxWatcher {
       ? this.uncodedFetchRefusals + 1
       : 0;
     if (terminal) {
-      this.reportTerminal(verdict, notice);
+      this.reportTerminal(verdict, notice, report.error);
       return;
     }
     this.tracker.record(verdict);
@@ -684,7 +696,7 @@ export class InboundMailboxWatcher {
       this.reportTerminal(capabilityVerdict('fetch-unreadable',
         `${text} This has now happened ${String(this.unreadableDrains)} times in a row with no `
         + 'drain completing in between, so the answer is not going to become readable by asking '
-        + 'again.'), null);
+        + 'again.'), null, error);
       return;
     }
     this.tracker.record(capabilityVerdict('reconnecting',
@@ -724,7 +736,7 @@ export class InboundMailboxWatcher {
       return;
     }
     if (terminal) {
-      this.reportTerminal(verdict, notice);
+      this.reportTerminal(verdict, notice, error);
       return;
     }
     this.tracker.record(verdict);
@@ -746,8 +758,16 @@ export class InboundMailboxWatcher {
   private reportTerminal(
     verdict: InboundCapabilityVerdict,
     notice: EmailCapabilityFailureNotice | null,
+    cause?: unknown,
   ): void {
     const announced = this.tracker.record(verdict);
+    // The owner's notice withholds the raw failure (it can carry local paths or
+    // server text); the log keeps it, once per transition, with the mailbox.
+    if (announced && cause !== undefined) {
+      logger.error('Inbound mail watcher stopped', {
+        account: this.settings.account, mailbox: this.settings.mailbox, reason: verdict.reason, error: summarizeError(cause),
+      });
+    }
     this.mode = 'inactive';
     const failure: InboundMailTerminalFailure = {
       account: this.settings.account,

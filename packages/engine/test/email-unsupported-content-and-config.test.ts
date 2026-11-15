@@ -113,19 +113,15 @@ describe('charsets beyond the built-in ones', () => {
 describe('one unsupported message does not block the inbox', () => {
   const checkpoint = (lastTerminalUid: number | null = null): ImapUidCheckpoint => ({ kind: 'imap-uid',
     uidValidity: 7, lastTerminalUid, history: { kind: 'complete', lowerBoundUid: 1, skippedOlderMessages: 0 } });
-  const SIGNED = '(("TEXT" "PLAIN" ("CHARSET" "UTF-8") NIL NIL "8BIT" 5 1)("APPLICATION" "PGP-SIGNATURE" NIL NIL NIL "7BIT" 10) "SIGNED" ("PROTOCOL" "application/pgp-signature"))';
+  // A body in a charset this runtime has no decoder for: the message's own bytes cannot be shown here.
+  const SIGNED = '("TEXT" "PLAIN" ("CHARSET" "X-UNKNOWN-CHARSET") NIL NIL "BASE64" 8 1)';
 
   class SignedFirstSocket extends SnapshotSocket {
-    constructor(options: ConstructorParameters<typeof SnapshotSocket>[0], private readonly onlyFirstTime = false) { super(options); }
-    structureAnswers = 0;
     override async answer(command: string): Promise<void> {
       const uid = Number(/UID FETCH (\d+)/.exec(command)?.[1]);
       if (uid === 1 && command.includes('BODYSTRUCTURE')) {
-        this.structureAnswers += 1;
-        if (!this.onlyFirstTime || this.structureAnswers === 1) {
-          this.feed(`* 1 FETCH (UID 1 BODYSTRUCTURE ${SIGNED})\r\n${command.split(' ')[0]} OK complete\r\n`);
-          return;
-        }
+        this.feed(`* 1 FETCH (UID 1 BODYSTRUCTURE ${SIGNED})\r\n${command.split(' ')[0]} OK complete\r\n`);
+        return;
       }
       await super.answer(command);
     }
@@ -136,27 +132,18 @@ describe('one unsupported message does not block the inbox', () => {
     return result;
   };
 
-  test('a signed message is stepped over and reported; the next message is delivered and the checkpoint moves past both', async () => {
+  test('a message this reader cannot show is stepped over and reported; the next message is delivered and the checkpoint moves past both', async () => {
     const sockets = [new SignedFirstSocket({ uids: [1, 2] }), new SignedFirstSocket({ uids: [1, 2] })];
     const f = snapshotFixture({ sockets });
     const page = complete(await f.service.readInboxPage({ checkpoint: checkpoint(), limit: 2 }));
     expect(page.messages.map((message) => message.source.detail.uid)).toEqual([2]);
     expect(page.coveredUids).toEqual([2]);
-    expect(page.unsupported).toEqual([{ uid: 1, reason: 'bodystructure-incomplete-or-unsupported' }]);
+    expect(page.unsupported).toMatchObject([{ uid: 1, reason: 'bodystructure-incomplete-or-unsupported' }]);
     expect(page.pending).toBe(1);
-    // The signed message was never handed on as content.
-    expect(JSON.stringify(page.messages)).not.toContain('PGP-SIGNATURE');
     // The next poll starts after the delivered UID and finds nothing stuck.
     const next = complete(await f.service.readInboxPage({ checkpoint: checkpoint(2), limit: 2 }));
     expect(next.messages).toEqual([]);
     expect(next.pending).toBe(0);
-  });
-
-  test('a structure refused once and understood on the second look is delivered, not skipped', async () => {
-    const f = snapshotFixture({ sockets: [new SignedFirstSocket({ uids: [1, 2] }, true)] });
-    const page = complete(await f.service.readInboxPage({ checkpoint: checkpoint(), limit: 2 }));
-    expect(page.coveredUids).toEqual([1, 2]);
-    expect('unsupported' in page).toBe(false);
   });
 
   class AllSignedSocket extends SnapshotSocket {

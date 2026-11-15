@@ -53,6 +53,7 @@
  * `hasRefusableCardShapes`.
  */
 import { judgmentPort, runDecisionOrClassic as decisionOrClassic } from '@goodvibes-jev/engine/errors';
+import { createHash } from 'node:crypto';
 import { cardTalk, maskDigits } from './batteries/card-talk.js';
 
 /** The decision site the card-talk reading is logged under. */
@@ -294,6 +295,10 @@ export async function detectCardShapes(text: string): Promise<readonly CardShape
   });
 }
 
+/** Settled card-talk answers by digest of the masked text; bounded, oldest first out. */
+const cardTalkAnswers = new Map<string, { readonly expiry: boolean; readonly securityCode: boolean }>();
+const MAX_CARD_TALK_ANSWERS = 512;
+
 async function detectDecisionCardShapes(text: string): Promise<readonly CardShapeFinding[]> {
   if (text.length === 0) return [];
   const pans = findCardNumberShapes(text);
@@ -304,13 +309,24 @@ async function detectDecisionCardShapes(text: string): Promise<readonly CardShap
   const asked: ('security_code' | 'expiry')[] = [];
   if (securityCodes.length > 0) asked.push('security_code');
   if (expiries.length > 0) asked.push('expiry');
-  const run = await cardTalk.run(judgmentPort(CARD_TALK_SITE), maskDigits(text), { site: CARD_TALK_SITE, only: asked });
-  const gives = (item: 'security_code' | 'expiry'): boolean => {
-    const reading = run.readings[item] as (typeof run.readings)[typeof item] | undefined;
-    return reading !== undefined && !(reading.verdict === 'no' && reading.outcome === 'act');
-  };
-  const kept = [...pans, ...(gives('expiry') ? expiries : []), ...(gives('security_code') ? securityCodes : [])];
-  run.recordAction(kept.length > pans.length ? 'short numbers treated as card details' : 'short numbers left as they are');
+  const masked = maskDigits(text);
+  // The reading depends only on the digit-masked text and what was asked, so
+  // the same text (a subject redacted for the record and shown in the notice)
+  // is read once. Keyed by a digest, so the cache never holds message text.
+  const memoKey = createHash('sha256').update(asked.join(',')).update('\n').update(masked).digest('base64');
+  let answer = cardTalkAnswers.get(memoKey);
+  if (answer === undefined) {
+    const run = await cardTalk.run(judgmentPort(CARD_TALK_SITE), masked, { site: CARD_TALK_SITE, only: asked });
+    const gives = (item: 'security_code' | 'expiry'): boolean => {
+      const reading = run.readings[item] as (typeof run.readings)[typeof item] | undefined;
+      return reading !== undefined && !(reading.verdict === 'no' && reading.outcome === 'act');
+    };
+    answer = { expiry: gives('expiry'), securityCode: gives('security_code') };
+    run.recordAction(answer.expiry || answer.securityCode ? 'short numbers treated as card details' : 'short numbers left as they are');
+    cardTalkAnswers.set(memoKey, answer);
+    if (cardTalkAnswers.size > MAX_CARD_TALK_ANSWERS) cardTalkAnswers.delete(cardTalkAnswers.keys().next().value!);
+  }
+  const kept = [...pans, ...(answer.expiry ? expiries : []), ...(answer.securityCode ? securityCodes : [])];
   return kept.sort((a, b) => a.startIndex - b.startIndex);
 }
 

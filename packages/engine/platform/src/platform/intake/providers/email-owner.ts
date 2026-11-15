@@ -85,6 +85,13 @@ function prefix(text: string, length: number): string {
     && text.charCodeAt(end) >= 0xdc00 && text.charCodeAt(end) <= 0xdfff) end--;
   return text.slice(0, end);
 }
+/** The claimed sender's domain when it is plainly a hostname; '' otherwise. Never the local part or the name. */
+function senderDomainOf(from: string): string | undefined {
+  const address = /<([^<>]*)>\s*$/.exec(from)?.[1] ?? from;
+  const domain = address.slice(address.lastIndexOf('@') + 1).trim().toLowerCase();
+  return address.includes('@') && domain.length <= 253
+    && /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?)+$/.test(domain) ? domain : undefined;
+}
 function sync(assert: () => void): void {
   const result: unknown = assert();
   if (result !== undefined) {
@@ -97,9 +104,28 @@ function unavailable(configured?: boolean): ProviderPollResult {
     ...(configured === undefined ? {} : { configured }) };
 }
 
-/** No credentials or provider calls happen during construction. */
 /** How long a completed read proof may start another read. */
 const READ_PROOF_REUSE_MS = 5_000;
+/**
+ * Polls on which one message may fail to read or to be screened before it is
+ * stepped over and published as a message that could not be read here. The
+ * count lives in memory: after a restart a message gets the same few polls
+ * again, which is the bound that matters, no single message holds the mailbox.
+ */
+const MAX_POLLS_PER_MESSAGE = 3;
+/** Bound on the failure counts held at once; the oldest are forgotten first. */
+const MAX_TRACKED_FAILURES = 256;
+
+const UNREADABLE_REASON_TEXT: Readonly<Record<string, string>> = {
+  'headers-incomplete': 'its header block is not readable',
+  'bodystructure-incomplete-or-unsupported': 'its structure or text encoding is not one this reader can show',
+  'text-section-incomplete-or-unsupported': 'its text could not be decoded exactly',
+  'complete-source-too-large': 'its text is larger than this reader takes',
+  'repeated-read-failure': `the server did not return it readably on ${String(MAX_POLLS_PER_MESSAGE)} polls in a row`,
+  'screening-unsettled': `it could not be checked for unsafe content on ${String(MAX_POLLS_PER_MESSAGE)} polls in a row`,
+};
+
+/** No credentials or provider calls happen during construction. */
 
 export function createEmailInboxOwner(options: EmailInboxOwnerOptions): VerifiedEmailInboxOwner {
   const account = captureAccount(options.account);
@@ -141,6 +167,25 @@ export function createEmailInboxOwner(options: EmailInboxOwnerOptions): Verified
   let commitObservation: EmailMailboxObservation | undefined;
   let pollSignal: AbortSignal | undefined;
   let polling: Promise<ProviderPollResult> | undefined;
+  // Consecutive polls on which a message failed to read or to be screened, by `uidValidity:uid`.
+  const failures = new Map<string, number>();
+  const failureKey = (uidValidity: number, uid: number): string => `${String(uidValidity)}:${String(uid)}`;
+  const noteFailure = (key: string): number => {
+    const count = (failures.get(key) ?? 0) + 1;
+    failures.delete(key); failures.set(key, count);
+    if (failures.size > MAX_TRACKED_FAILURES) failures.delete(failures.keys().next().value!);
+    return count;
+  };
+  /** The item that stands in for a message that could not be read here, so it is not lost. */
+  const unreadableItem = (uidValidity: number, uid: number, reason: string, senderDomain?: string): InboundChannelItem => ({
+    id: `email:${scopeId}:${String(uidValidity).padStart(10, '0')}:${String(uid).padStart(10, '0')}`,
+    provider: 'email', kind: 'dm' as const,
+    fromDigest: digestSender(senderDomain ? `email-domain:${senderDomain}` : 'email:unknown sender'),
+    subjectPreview: 'A message could not be read here',
+    bodyPreview: prefix(`A message${senderDomain ? ` claiming to be from ${senderDomain}` : ''} in ${account.mailbox} `
+      + `could not be read here: ${UNREADABLE_REASON_TEXT[reason] ?? 'it could not be read'}. Open it in your mail client.`, 500),
+    receivedAt: Date.now(), unread: true,
+  });
   const current = (): void => {
     try {
       if (closed || signal.aborted) throw new Error('Email inbox scope is unavailable');
@@ -177,9 +222,17 @@ export function createEmailInboxOwner(options: EmailInboxOwnerOptions): Verified
       const work = own(async (): Promise<ProviderPollResult> => {
         const epoch = identityEpoch;
         if (!service.getInboxReadStatus().ready) return unavailable(false);
-        const result = await service.readInboxPage({ checkpoint: input.checkpoint, limit: input.limit, signal: operationSignal });
+        const validity = input.checkpoint?.uidValidity;
+        const stepOver = validity === undefined ? [] : [...failures]
+          .filter(([key, count]) => key.startsWith(`${String(validity)}:`) && count >= MAX_POLLS_PER_MESSAGE - 1)
+          .map(([key]) => Number(key.slice(key.indexOf(':') + 1)));
+        const result = await service.readInboxPage({ checkpoint: input.checkpoint, limit: input.limit, signal: operationSignal,
+          ...(stepOver.length > 0 ? { stepOver } : {}) });
         current(); if (operationSignal.aborted) return unavailable(true);
-        if (result.outcome === 'incomplete') return unavailable(true);
+        if (result.outcome === 'incomplete') {
+          if (result.uid !== undefined && validity !== undefined) noteFailure(failureKey(validity, result.uid));
+          return unavailable(true);
+        }
         const observation = service.getInboxMailboxObservation(result);
         if (!observation || observation.mailbox !== account.mailbox) return unavailable(true);
         observation.assertCurrent();
@@ -191,10 +244,16 @@ export function createEmailInboxOwner(options: EmailInboxOwnerOptions): Verified
               next: result.next, coveredUids: [], terminal: [] } };
         }
         const items: InboundChannelItem[] = [];
+        const terminal: ImapUidTerminalDisposition[] = [];
+        // Set when a message's screening did not settle and it still has polls
+        // left: the page commits what came before it and the next poll starts there.
+        let stopAt: number | undefined;
         for (const message of result.messages) {
           current(); observation.assertCurrent(); if (operationSignal.aborted) return unavailable(true);
           screeningObservation = observation;
           const source = message.source;
+          const uid = source.detail.uid;
+          const key = failureKey(observation.uidValidity, uid);
           const body = source.detail.bodyText || source.detail.bodyHtml;
           let captured: ProtectedSource | undefined;
           let release: Promise<void> | undefined;
@@ -209,9 +268,14 @@ export function createEmailInboxOwner(options: EmailInboxOwnerOptions): Verified
             if (operationSignal.aborted || observation.signal.aborted) abort();
             const judged = await screening.screen(captured);
             current(); observation.assertCurrent();
-            if (operationSignal.aborted || judged.status !== 'settled') return unavailable(true);
+            if (operationSignal.aborted) return unavailable(true);
+            if (judged.status !== 'settled') {
+              if (noteFailure(key) < MAX_POLLS_PER_MESSAGE) { stopAt = uid; break; }
+              const item = unreadableItem(observation.uidValidity, uid, 'screening-unsettled', senderDomainOf(source.detail.from));
+              items.push(item); terminal.push({ uid, disposition: 'published', itemId: item.id });
+              continue;
+            }
             const projected = screening.project(judged.receipt);
-            const uid = source.detail.uid;
             const fromDigest = digestSender(`email:${source.detail.from.trim().toLowerCase()}`);
             let routeId: string | undefined;
             if (resolveRouteId) {
@@ -228,6 +292,8 @@ export function createEmailInboxOwner(options: EmailInboxOwnerOptions): Verified
               ...(routeId === undefined ? {} : { routeId }),
               subjectPreview: prefix(projected[3]!, 200), bodyPreview: prefix(projected[4]!, 500),
               receivedAt: Date.now(), unread: message.unread });
+            terminal.push({ uid, disposition: 'published', itemId });
+            failures.delete(key);
             if (onMail) {
               try { onMail({ id: itemId, senderAddress: source.detail.from, subject: projected[3]!, body: projected[4]!, receivedAtMs: Date.now() }); }
               catch { /* An observer's failure cannot poison the poll or expose the source. */ }
@@ -238,22 +304,26 @@ export function createEmailInboxOwner(options: EmailInboxOwnerOptions): Verified
           }
         }
         current(); observation.assertCurrent(); if (operationSignal.aborted || epoch !== identityEpoch) return unavailable(true);
+        // A message the reader stepped over is published as an item that says
+        // it could not be read here, so the owner knows it exists, and the
+        // checkpoint moves past it instead of re-reading it on every poll.
+        const skipped = (result.unsupported ?? []).filter((entry) => stopAt === undefined || entry.uid < stopAt);
+        for (const entry of skipped) {
+          const item = unreadableItem(observation.uidValidity, entry.uid, entry.reason, entry.senderDomain);
+          items.push(item); terminal.push({ uid: entry.uid, disposition: 'published', itemId: item.id });
+          failures.delete(failureKey(observation.uidValidity, entry.uid));
+        }
+        if (terminal.length === 0 && stopAt !== undefined) return unavailable(true);
         commitObservation = observation; commitEpoch = identityEpoch;
-        // Messages whose content cannot be proven complete get a terminal
-        // 'suppressed' disposition so the checkpoint moves past them instead of
-        // re-reading them (and holding back every later message) on each poll.
-        const skipped = result.unsupported ?? [];
-        const terminal: ImapUidTerminalDisposition[] = [
-          ...result.coveredUids.map((uid, index) => ({ uid, disposition: 'published' as const, itemId: items[index]!.id })),
-          ...skipped.map((entry) => ({ uid: entry.uid, disposition: 'suppressed' as const })),
-        ].sort((a, b) => a.uid - b.uid);
+        terminal.sort((a, b) => a.uid - b.uid);
         const coveredUids = terminal.map((entry) => entry.uid);
         const finalUid = coveredUids.at(-1) ?? result.checkpoint.lastTerminalUid;
-        // The reader already left page-passed stepped-over messages out of `pending`.
+        // `result.pending` already left out stepped-over messages below the last readable one.
         const lastReadable = result.coveredUids.at(-1);
-        const trailing = skipped.filter((entry) => lastReadable === undefined || entry.uid > lastReadable).length;
+        const passed = lastReadable === undefined ? 0
+          : (result.unsupported ?? []).filter((entry) => entry.uid < lastReadable).length;
         return { items, state: items.length > 0 ? 'ready' : 'empty', configured: true,
-          pendingMessages: result.pending - result.messages.length - trailing,
+          pendingMessages: Math.max(0, result.pending + passed - terminal.length),
           ...(skipped.length > 0 ? { skippedMessages: skipped.map((entry) => ({ uid: entry.uid, reason: entry.reason })) } : {}),
           checkpointAdvance: { kind: 'imap-uid', transition: 'advance', previous: result.checkpoint,
             next: { ...result.checkpoint, lastTerminalUid: finalUid }, coveredUids, terminal } };

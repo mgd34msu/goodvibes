@@ -178,9 +178,12 @@ import { deliveredRecipientFromDeliveryHeaders } from '../../google/delivery-evi
 import {
   receiptTimestamp,
   renderInboundMailNotice,
+  stripControlAndLineBreaks,
   type InboundOutcome,
   type StructuredNotice,
 } from '../inbound-notice.js';
+import { redactCardShapes } from '../../security/card-shapes.js';
+import { logger } from '../../utils/logger.js';
 import { summarizeError } from '../../utils/error-display.js';
 import type { AutomationRouteBinding } from '../../automation/routes.js';
 import type { ExpectationMatcher } from './expectation-registry.js';
@@ -448,6 +451,97 @@ function note(
   }
 }
 
+/**
+ * The sender-written fields of one message, redacted of card shapes ONCE.
+ *
+ * The record and the owner's notice carry the same text, so they are given
+ * the same redaction rather than each scanning again. Line breaks are removed
+ * first: a card number written across two lines becomes one detectable run.
+ * The body is scanned whole, before any cut, so a number straddling the
+ * excerpt cap is redacted whole rather than truncated into a readable prefix.
+ */
+export async function redactInboundFields(message: InboundMailboxMessage, deliveredToAddress: string | null): Promise<{
+  readonly senderDisplay: string;
+  readonly subject: string;
+  readonly deliveredToAddress: string | null;
+  readonly body: string;
+}> {
+  const shown = (raw: string): Promise<string> => redactCardShapes(stripControlAndLineBreaks(raw));
+  const [senderDisplay, subject, address, body] = await Promise.all([
+    shown(message.from),
+    shown(message.subject),
+    deliveredToAddress === null ? Promise.resolve(null) : shown(deliveredToAddress),
+    // The IMAP envelope pass fetched no body, so the empty string is the honest value.
+    message.source === 'gmail' && message.body.length > 0 ? redactCardShapes(message.body) : Promise.resolve(''),
+  ]);
+  return { senderDisplay, subject, deliveredToAddress: address, body };
+}
+
+/** The identity and record key of one message, from its own source. */
+function messageIdentity(message: InboundMailboxMessage): {
+  readonly identity: { source: 'gmail'; resourceId: string; historyId: string } | { source: 'imap'; uidValidity: number; uid: number };
+  readonly key: InboundMailMessageKey;
+} {
+  return message.source === 'gmail'
+    ? { identity: { source: 'gmail', resourceId: message.resourceId, historyId: message.historyId },
+      key: { source: 'gmail', account: message.account, mailbox: message.mailbox, resourceId: message.resourceId } }
+    : { identity: { source: 'imap', uidValidity: message.uidValidity, uid: message.uid },
+      key: { source: 'imap', account: message.account, mailbox: message.mailbox, uidValidity: message.uidValidity, uid: message.uid } };
+}
+
+/**
+ * What happens to a message the sink has failed to hand on several times in a
+ * row: it is recorded as not announced, with why, the owner's status says one
+ * message was set aside, the failure goes to the log, and the cursor passes it
+ * so later mail is read. Throws only when the record itself cannot be written,
+ * in which case the message stays where it is.
+ */
+export function createInboundMailSetAside(deps: {
+  readonly records: Pick<InboundMailStore, 'record'>;
+  readonly now: () => Date;
+  readonly noticeHealth?: Pick<InboundNoticeHealth, 'refused'> | undefined;
+  readonly observer?: InboundMailObserver | undefined;
+}): (message: InboundMailboxMessage, error: unknown, attempts: number) => Promise<void> {
+  return async (message, error, attempts): Promise<void> => {
+    const receivedAt = receiptTimestamp(deps.now());
+    const deliveredTo = deliveredRecipientFromDeliveryHeaders(message.deliveredTo);
+    const fields = await redactInboundFields(message, deliveredTo?.address ?? null);
+    const { identity } = messageIdentity(message);
+    const transport = error instanceof InboundNoticeTransportError;
+    const why = transport
+      ? `the notice could not be delivered on ${String(attempts)} attempts in a row`
+      : `it could not be processed on ${String(attempts)} attempts in a row`;
+    await deps.records.record({
+      ...identity,
+      account: message.account,
+      mailbox: message.mailbox,
+      senderDisplay: fields.senderDisplay,
+      subject: fields.subject,
+      deliveredToAddress: fields.deliveredToAddress,
+      deliveryEvidenceSource: deliveredTo?.source ?? 'none',
+      links: [],
+      outcome: 'no-expectation',
+      noticeStatus: 'delivery-failed',
+      noticeFailureReason: `Set aside: ${why}.`,
+      body: fields.body,
+      receivedAt: receivedAt.iso,
+    });
+    logger.error('Inbound mail message set aside', {
+      account: message.account, mailbox: message.mailbox, attempts, error: summarizeError(error),
+    });
+    const domain = /@([a-z0-9.-]+)>?\s*$/i.exec(message.from)?.[1]?.toLowerCase() ?? 'an unknown sender';
+    deps.noticeHealth?.refused({
+      reason: transport ? 'delivery-failed' : 'could-not-process',
+      detail: `one message from ${domain} was set aside because ${why}; later mail is being read.`,
+      fix: transport
+        ? 'Check that the channel inbound-mail notices go to is reachable; the message is recorded in email.inbound.status and still in the mailbox.'
+        : 'The failure is in the daemon log; the message is still in the mailbox and recorded in email.inbound.status.',
+      at: receivedAt.iso,
+    });
+    note(deps.observer, message, 'notice-refused', `set aside: ${why}`, receivedAt.iso);
+  };
+}
+
 /** Build the handler the `DedupingInboundMailSink` wraps. */
 export function createInboundMailIntake(
   deps: InboundMailIntakeDeps,
@@ -456,6 +550,8 @@ export function createInboundMailIntake(
     const now = deps.now();
     const receivedAt = receiptTimestamp(now);
     const deliveredTo = deliveredRecipientFromDeliveryHeaders(message.deliveredTo);
+    // One redaction of the sender-written fields, carried to the record and the notice.
+    const shown = await redactInboundFields(message, deliveredTo?.address ?? null);
 
     // Read BEFORE anything else, and it throws on an unusable value rather than
     // guessing, see `bodiesWithheldFrom`.
@@ -494,25 +590,7 @@ export function createInboundMailIntake(
       }, now, { consume: false });
 
     // The identity is the message's own, not a shape assumed from one source.
-    // Until the record store carried a discriminated identity, this path
-    // returned early for Gmail and nothing was ever recorded for it.
-    const identity = message.source === 'gmail'
-      ? { source: 'gmail' as const, resourceId: message.resourceId, historyId: message.historyId }
-      : { source: 'imap' as const, uidValidity: message.uidValidity, uid: message.uid };
-    const key: InboundMailMessageKey = message.source === 'gmail'
-      ? {
-        source: 'gmail',
-        account: message.account,
-        mailbox: message.mailbox,
-        resourceId: message.resourceId,
-      }
-      : {
-        source: 'imap',
-        account: message.account,
-        mailbox: message.mailbox,
-        uidValidity: message.uidValidity,
-        uid: message.uid,
-      };
+    const { identity, key } = messageIdentity(message);
 
     /** One write of this message's record, at whatever status is known so far. */
     const write = async (
@@ -523,24 +601,18 @@ export function createInboundMailIntake(
         ...identity,
         account: message.account,
         mailbox: message.mailbox,
-        senderDisplay: message.from,
-        subject: message.subject,
-        deliveredToAddress: deliveredTo?.address ?? null,
+        senderDisplay: shown.senderDisplay,
+        subject: shown.subject,
+        deliveredToAddress: shown.deliveredToAddress,
         deliveryEvidenceSource: deliveredTo?.source ?? 'none',
         links: [],
         outcome: recordOutcome(match),
         noticeStatus: status,
         ...(failureReason === undefined ? {} : { noticeFailureReason: failureReason }),
-        // Whatever the source actually has. Gmail's history delta carries the
-        // body; IMAP's envelope pass does not, and an empty excerpt is the
-        // truth there, a summary assembled from headers would be a
-        // body-shaped field holding something that is not the body.
-        //
-        // The store redacts card shapes out of this before persisting (§11.0),
-        // so passing Gmail's real body is what puts that path in service. It
-        // had never executed: every Gmail record was discarded before reaching
-        // it.
-        body: message.source === 'gmail' ? message.body : '',
+        // Whatever the source actually has, redacted: Gmail's history delta
+        // carries the body; IMAP's envelope pass does not, and an empty excerpt
+        // is the truth there.
+        body: shown.body,
         receivedAt: receivedAt.iso,
       });
     };
@@ -564,7 +636,7 @@ export function createInboundMailIntake(
         ? { kind: 'settled', status: 'suppressed' }
         : await planFor(
           deps.notices.resolveBinding(),
-          message,
+          shown,
           deliveredTo,
           match,
           receivedAt,
@@ -611,7 +683,7 @@ export function createInboundMailIntake(
         deps.noticeHealth?.refused({
           reason: 'delivery-failed',
           detail: `the notice for a new message could not be delivered (${delivery.error ?? 'no detail'}); `
-            + 'the message is kept and retried with backoff, and mail arriving after it waits behind it.',
+            + 'the message is kept and retried with backoff, and after a few attempts it is set aside so later mail is read.',
           fix: 'Check that the channel inbound-mail notices go to is reachable; the waiting notices are '
             + 'sent as soon as delivery works again.',
           at: receivedAt.iso,
@@ -676,7 +748,7 @@ type NoticePlan =
 /** Turn a route resolution into either a notice to send or a refusal to record. */
 async function planFor(
   route: NoticeRouteResolution,
-  message: InboundMailboxMessage,
+  message: { readonly senderDisplay: string; readonly subject: string },
   deliveredTo: ReturnType<typeof deliveredRecipientFromDeliveryHeaders>,
   match: VerificationMatch,
   receivedAt: ReturnType<typeof receiptTimestamp>,
@@ -696,7 +768,7 @@ async function planFor(
   return {
     kind: 'send',
     notice: await renderInboundMailNotice({
-      senderDisplay: message.from,
+      senderDisplay: message.senderDisplay,
       subject: message.subject,
       deliveredTo,
       outcome: noticeOutcome(match, bodiesWithheld),

@@ -260,7 +260,7 @@ function liveConnectionPort(
       const password = await resolveEmailPassword(SURFACE_EMAIL_PASSWORD_REF, secrets);
       assertImapReadingCurrent(reading);
       return imapMailboxConnectionPort({
-        connect: () => imapSocketFactoryFor(deps.transport, settings.imapSecure ? 'tls' : 'plaintext')(settings.imapHost!, settings.imapPort),
+        connect: () => imapSocketFactoryFor(deps.transport, settings.imapSecure ? 'tls' : 'plaintext', 'surfaces.email.imap.secure')(settings.imapHost!, settings.imapPort),
         username: settings.username, password, mailbox, timeoutMs: deps.settings.operationTimeoutMs,
       }).open(reading);
     },

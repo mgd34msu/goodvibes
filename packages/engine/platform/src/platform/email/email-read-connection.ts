@@ -1,4 +1,9 @@
-/** One read-only connection, cancelled and drained without detached work. */
+/**
+ * The one owned IMAP session: sign in, EXAMINE the configured mailbox, run the
+ * caller's commands, and LOGOUT only after they succeeded. Listing, reading,
+ * saving a draft and the connection test all go through it, so every path
+ * closes its socket the same way and none sends LOGOUT onto a failed command.
+ */
 import { ImapClient } from './imap-client.js';
 import { imapSocketFactoryFor, resolveEmailPassword } from './email-config.js';
 import type { EmailConfig, EmailServiceDeps } from './email-service.js';

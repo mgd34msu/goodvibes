@@ -40,6 +40,7 @@
  */
 
 import { createInboundMailDedup, DedupingInboundMailSink } from './sink.js';
+import { createInboundMailSetAside } from './intake.js';
 import { capabilityVerdict } from './capability.js';
 import { describeInboundMailHealth, type InboundMailHealthEntry } from './health.js';
 import {
@@ -174,7 +175,7 @@ export interface InboundMailSupervisorDeps {
    * behaves exactly as before. The composition root passes the same instance it
    * gives the intake.
    */
-  readonly noticeHealth?: (Pick<InboundNoticeHealth, 'get'> & Partial<Pick<InboundNoticeHealth, 'clear'>>) | undefined;
+  readonly noticeHealth?: (Pick<InboundNoticeHealth, 'get'> & Partial<Pick<InboundNoticeHealth, 'clear' | 'refused'>>) | undefined;
   readonly observer?: InboundMailObserver | undefined;
   readonly now?: (() => number) | undefined;
   /**
@@ -445,9 +446,16 @@ export class InboundMailSupervisor {
       return this.settle('inactive', `${selection.detail} ${selection.fix}`);
     }
 
+    const noticeHealth = this.deps.noticeHealth;
     const sink = new DedupingInboundMailSink({
       dedup: createInboundMailDedup(this.dedupTtlMs()),
       handle: this.deps.handle,
+      setAside: createInboundMailSetAside({
+        records: this.deps.records,
+        now: () => new Date(this.deps.now?.() ?? Date.now()),
+        noticeHealth: noticeHealth?.refused === undefined ? undefined : { refused: (event) => noticeHealth.refused?.(event) },
+        observer: this.observer(),
+      }),
     });
     if (!this.wantsRunning) return this.settle('inactive', 'stopped');
     const source = await this.deps.sources.create({

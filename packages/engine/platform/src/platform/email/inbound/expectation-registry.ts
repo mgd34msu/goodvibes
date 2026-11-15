@@ -332,13 +332,11 @@ export class InboundExpectationRegistry {
         // The book drops an elapsed expectation when a late message names it.
         // That is the only record of the ending, so it is reported here.
         if (match.kind === 'expired') this.report([describeExpiry(match.expectation)]);
-        // Written through UNCONDITIONALLY rather than only for the kinds
-        // believed to mutate. Predicting which ones do would couple this line
-        // to the order of the book's internal early returns, and a wrong
-        // prediction is precisely the silent miss this fix exists to close.
-        // A question that changed nothing costs one mirror write of unchanged
-        // content; the intake already writes a record per message.
-        await this.persist();
+        // Written when the book's own live set differs from what was last
+        // mirrored, never on a prediction of which match kinds mutate: the
+        // answer comes from the book's state, so a question that changed
+        // nothing (an empty book above all) writes nothing.
+        await this.persistIfChanged();
         return match;
       },
       consumeMatch: async (match) => {
@@ -468,6 +466,9 @@ export class InboundExpectationRegistry {
       // failed must not stay live and match mail.
       this.book.closeExpectation(expectation.id);
       throw error;
+    }
+    for (const listener of this.openedListeners) {
+      try { listener(); } catch { /* A listener's failure cannot undo an open that was persisted. */ }
     }
     return expectation;
   }
@@ -635,8 +636,37 @@ export class InboundExpectationRegistry {
   }
 
   private async persist(): Promise<void> {
-    await this.store.replaceAll(this.book.list(this.now()));
+    const live = this.book.list(this.now());
+    this.mirrored = null;
+    await this.store.replaceAll(live);
+    this.mirrored = live;
   }
+
+  /**
+   * The live set last written to the store, or null when unknown. The book
+   * replaces an expectation object on every change and never edits one in
+   * place, so element identity is the comparison.
+   */
+  private mirrored: readonly VerificationExpectation[] | null = null;
+
+  private async persistIfChanged(): Promise<void> {
+    const live = this.book.list(this.now());
+    const last = this.mirrored;
+    if (last !== null && last.length === live.length && last.every((entry, index) => entry === live[index])) return;
+    await this.persist();
+  }
+
+  /**
+   * Run `listener` whenever an expectation is opened, so a source polling on a
+   * long idle interval can shorten it at once instead of finding out on its
+   * next slice. Returns the unsubscribe.
+   */
+  onOpened(listener: () => void): () => void {
+    this.openedListeners.add(listener);
+    return () => { this.openedListeners.delete(listener); };
+  }
+
+  private readonly openedListeners = new Set<() => void>();
 
   /** Emit each report, never letting one broken route strand the rest. */
   private report(reports: readonly ExpectationExpiryReport[]): void {

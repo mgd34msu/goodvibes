@@ -114,18 +114,124 @@ export function extractHeader(rawHeaders: string, name: string): string {
   return '';
 }
 
+// ---------------------------------------------------------------------------
+// RFC 2047 encoded words
+// ---------------------------------------------------------------------------
+
+/** One encoded word: `=?charset[*lang]?B|Q?text?=`. */
+const ENCODED_WORD = /=\?([^?\s*]+)(?:\*[^?\s]*)?\?([BbQq])\?([^?\s]*)\?=/g;
+/** What replaces an encoded word this runtime cannot turn back into text. */
+export const UNDECODABLE_HEADER_TEXT = '(undecodable text)';
 /**
- * Ordinary display historically clips long fields and leaves RFC 2047 encoded
- * words undecoded. Neither can stand for a complete subject in a judgment.
- * Duplicate subjects or replacement decoding are ambiguous too. This does not
- * change display; it only fences the optional exact-source capability.
+ * Characters a decoded word may not introduce into an address header. A
+ * display name decoded to `<someone@else>` would otherwise change which
+ * address a parser finds in the field.
+ */
+const ADDRESS_STRUCTURE = /[<>"\\,;:@()\[\]]/g;
+const CONTROL = /[\u0000-\u001f\u007f]/g;
+
+function encodedWordBytes(encoding: string, text: string): Buffer | null {
+  if (encoding.toUpperCase() === 'B') {
+    if (!/^[A-Za-z0-9+/]*={0,2}$/.test(text) || text.length % 4 === 1) return null;
+    return Buffer.from(text, 'base64');
+  }
+  const bytes: number[] = [];
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text.charAt(i);
+    if (ch === '_') { bytes.push(0x20); continue; }
+    if (ch === '=') {
+      const hex = text.slice(i + 1, i + 3);
+      if (!/^[0-9A-Fa-f]{2}$/.test(hex)) return null;
+      bytes.push(parseInt(hex, 16)); i += 2; continue;
+    }
+    const code = ch.charCodeAt(0);
+    if (code > 0x7e) return null;
+    bytes.push(code);
+  }
+  return Buffer.from(bytes);
+}
+
+function decodeCharsetBytes(charset: string, bytes: Buffer): string | null {
+  const label = charset.toLowerCase();
+  if (!/^[a-z0-9][a-z0-9_.:-]{0,39}$/.test(label)) return null;
+  try {
+    const decoder = new TextDecoder(label, { fatal: true, ignoreBOM: true });
+    if (decoder.encoding === 'replacement') return null;
+    return decoder.decode(bytes);
+  } catch { return null; }
+}
+
+/**
+ * Decode the RFC 2047 encoded words in one header value, once, for display.
+ *
+ * Adjacent encoded words are joined (the whitespace between them is not part
+ * of the text), and words of one charset are decoded together so a character
+ * split across two words survives. A word that cannot be decoded becomes
+ * `(undecodable text)` rather than raw base64. Control characters never come
+ * out of a decoded word; in an address header (`kind: 'address'`) neither do
+ * the characters that give the field its structure, so a decoded name cannot
+ * move which address the field names. `exact` is false when anything was
+ * replaced, which is what the reply-subject proof needs to know.
+ */
+export function decodeHeaderWords(value: string, kind: 'text' | 'address' = 'text'): { readonly text: string; readonly exact: boolean } {
+  if (!value.includes('=?')) return { text: value, exact: true };
+  let exact = true;
+  let out = '';
+  let last = 0;
+  // The run of adjacent same-charset words not yet decoded.
+  let runCharset: string | null = null;
+  let runBytes: Buffer[] = [];
+  const flush = (): void => {
+    if (runCharset === null) return;
+    const decoded = decodeCharsetBytes(runCharset, Buffer.concat(runBytes));
+    runCharset = null; runBytes = [];
+    if (decoded === null) { exact = false; out += UNDECODABLE_HEADER_TEXT; return; }
+    let clean = decoded.replace(CONTROL, ' ');
+    if (kind === 'address') clean = clean.replace(ADDRESS_STRUCTURE, ' ');
+    if (clean !== decoded) exact = false;
+    out += clean;
+  };
+  ENCODED_WORD.lastIndex = 0;
+  for (let match = ENCODED_WORD.exec(value); match !== null; match = ENCODED_WORD.exec(value)) {
+    const between = value.slice(last, match.index);
+    const adjacent = last > 0 && /^[ \t]*$/.test(between);
+    if (!adjacent) { flush(); out += between; }
+    const charset = (match[1] ?? '').toLowerCase();
+    const bytes = encodedWordBytes(match[2] ?? '', match[3] ?? '');
+    if (bytes === null) { flush(); exact = false; out += UNDECODABLE_HEADER_TEXT; }
+    else if (runCharset === charset) runBytes.push(bytes);
+    else { flush(); runCharset = charset; runBytes = [bytes]; }
+    last = match.index + match[0].length;
+  }
+  flush();
+  out += value.slice(last);
+  return { text: out, exact };
+}
+
+/** The decoded display text of a header value; see `decodeHeaderWords`. */
+export function decodeHeaderText(value: string, kind: 'text' | 'address' = 'text'): string {
+  return decodeHeaderWords(value, kind).text;
+}
+
+/** The first occurrence of a header, decoded for display: subject, sender, recipient. */
+export function extractDisplayHeader(rawHeaders: string, name: 'Subject' | 'From' | 'To'): string {
+  return decodeHeaderText(extractHeader(rawHeaders, name), name === 'Subject' ? 'text' : 'address');
+}
+
+/**
+ * Whether the raw headers carry exactly one complete Subject that decodes,
+ * without replacement, to `subject`. A clipped field, a duplicate subject or a
+ * word that could not be decoded cannot stand for a complete subject in a
+ * judgment. This does not change display; it only fences the optional
+ * exact-source capability.
  */
 export function hasCompleteSubjectHeader(rawHeaders: string, subject: string): boolean {
   const fields = parseHeaderFields(rawHeaders).filter((field) => field.name === 'subject');
   if (fields.length === 0) return subject === '';
   const field = fields[0]!;
-  return fields.length === 1 && field.complete && field.value === subject
-    && !/=\?|\ufffd/.test(field.value);
+  if (fields.length !== 1 || !field.complete || /\ufffd/.test(field.value)) return false;
+  const decoded = decodeHeaderWords(field.value);
+  return decoded.exact && decoded.text === subject;
 }
 
 const DELIVERY_HEADER_NAMES: readonly DeliveryEvidenceSource[] = [
@@ -287,15 +393,15 @@ export function readEnvelopeBatch(
     const deliveryEvidence = extractDeliveryEvidence(raw);
     envelopes.push({
       uid,
-      from: extractHeader(raw, 'From'),
-      subject: extractHeader(raw, 'Subject'),
+      from: extractDisplayHeader(raw, 'From'),
+      subject: extractDisplayHeader(raw, 'Subject'),
       date: extractHeader(raw, 'Date'),
       messageId: extractHeader(raw, 'Message-ID'),
       mailbox,
       deliveredTo: deliveryEvidence.map((entry) => entry.address),
       deliveryEvidence,
       // Display only, see the field docs on ImapEnvelope.
-      unverifiedToHeaderClaim: extractHeader(raw, 'To'),
+      unverifiedToHeaderClaim: extractDisplayHeader(raw, 'To'),
       authenticationResults: extractAuthenticationResults(raw),
     });
   }

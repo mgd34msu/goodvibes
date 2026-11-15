@@ -94,9 +94,8 @@ registry.register(resolvedProblemEvidence);
 registry.register(compactionEvidenceDependency);
 
 // Email: semantic refusals and mailbox purpose; RFC grammar stays deterministic.
-import { imapRefusalReading, imapCursorFailureReading, imapDraftsReading } from '../email/imap-readings.js';
+import { imapRefusalReading, imapDraftsReading } from '../email/imap-readings.js';
 registry.register(imapRefusalReading);
-registry.register(imapCursorFailureReading);
 registry.register(imapDraftsReading);
 
 // Email writing style; complete protected corpus and actual sender evidence.

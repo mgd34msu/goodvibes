@@ -24,7 +24,13 @@ interface AutomationReconcileContext {
   readonly syncExecutionRoute: (job: AutomationJob, run: AutomationRun) => Promise<void>;
   readonly syncRunToRuntime: (run: AutomationRun, source: string) => void;
   readonly syncJobToRuntime: (job: AutomationJob, source: string) => void;
-  readonly emitRunCompleted: (job: AutomationJob, run: AutomationRun, outcome: 'success' | 'partial' | 'failed' | 'cancelled') => void;
+  /** Announces the end of a run: AUTOMATION_RUN_COMPLETED, the one terminal event, for every outcome. */
+  readonly emitRunCompleted: (
+    job: AutomationJob,
+    run: AutomationRun,
+    outcome: 'success' | 'partial' | 'failed' | 'cancelled',
+    failure?: { readonly error: string; readonly retryable: boolean },
+  ) => void;
   /** Delivers failure notices, emits run-failed and applies the job's retry or cooldown policy. */
   readonly followUp: AutomationFailureFollowUpContext;
   readonly emitJobAutoDisabled: (job: AutomationJob, reason: string) => void;
@@ -51,6 +57,22 @@ const AGENT_STATE_LOST = {
   basis: 'explicit',
   detail: 'the agent state was lost before the run completed',
 } as const;
+
+/**
+ * The failure follow-up for a run this pass ended as failed. The follow-up
+ * classifies the failure before it announces it; at that moment the run's
+ * end is announced once with the reading (AUTOMATION_RUN_COMPLETED, outcome
+ * `failed`), then the run-failed detail event.
+ */
+function failedRunFollowUp(context: AutomationReconcileContext): AutomationFailureFollowUpContext {
+  return {
+    ...context.followUp,
+    emitRunFailed: (job, run, error, retryable) => {
+      context.emitRunCompleted(job, run, 'failed', { error, retryable });
+      context.followUp.emitRunFailed(job, run, error, retryable);
+    },
+  };
+}
 
 export function reconcileAutomationActiveRuns(context: AutomationReconcileContext): void {
   let jobsChanged = false;
@@ -97,7 +119,11 @@ export function reconcileAutomationActiveRuns(context: AutomationReconcileContex
           });
         }
         context.syncJobToRuntime(updatedJob, 'automation.reconcile');
-        settleAutomationRunFailure(context.followUp, updatedJob, updatedRun, updatedRun.error ?? 'Agent state lost', { known: AGENT_STATE_LOST });
+        if (updatedJob.deleteAfterRun && !job.enabled) {
+          context.cancelTimer(updatedJob.id);
+          context.jobs.delete(updatedJob.id);
+        }
+        settleAutomationRunFailure(failedRunFollowUp(context), updatedJob, updatedRun, updatedRun.error ?? 'Agent state lost', { known: AGENT_STATE_LOST });
         jobsChanged = true;
       }
       runsChanged = true;
@@ -169,11 +195,15 @@ export function reconcileAutomationActiveRuns(context: AutomationReconcileContex
     }
     // A failed or cancelled run is announced by its failure notice below.
     if (terminalStatus === 'completed' || !failureNoticeCoversRunDelivery(updatedJob)) context.maybeDeliverRun(updatedJob, updatedRun);
-    if (terminalStatus === 'completed' && updatedJob.deleteAfterRun) {
+    // A one-shot job is done when its run succeeded, or when it was already
+    // disabled (created disabled, or its only occurrence fired): the failure
+    // follow-up never retries a disabled job, so nothing would run it again.
+    if (updatedJob.deleteAfterRun && (terminalStatus === 'completed' || !wasEnabled)) {
       context.cancelTimer(updatedJob.id);
       context.jobs.delete(updatedJob.id);
-    } else if (terminalStatus === 'failed') {
-      settleAutomationRunFailure(context.followUp, updatedJob, updatedRun, updatedRun.error ?? 'Agent failed', { error: agent.error ?? '' });
+    }
+    if (terminalStatus === 'failed') {
+      settleAutomationRunFailure(failedRunFollowUp(context), updatedJob, updatedRun, updatedRun.error ?? 'Agent failed', { error: agent.error ?? '' });
     } else if (terminalStatus === 'cancelled') {
       // A cancellation has no failure to read; the job's policy applies as configured.
       scheduleAutomationFailureFollowUp(context.followUp, updatedJob, updatedRun, true);

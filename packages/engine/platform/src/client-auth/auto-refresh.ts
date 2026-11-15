@@ -17,7 +17,7 @@
  *   [what happened] · [why] · [what to do]
  */
 
-import { GoodVibesError, readFailureTransience } from '@goodvibes-jev/engine/errors';
+import { GoodVibesError, structuredTransience } from '@goodvibes-jev/engine/errors';
 import type { GoodVibesTokenStore } from './types.js';
 import type { PlatformObserver } from '../observer/index.js';
 import { invokeObserver } from '../observer/index.js';
@@ -111,6 +111,13 @@ export interface AutoRefreshCoordinatorOptions {
  */
 export type RefreshOutcome = 'refreshed' | 'cleared' | 'not-refreshed';
 
+/** What one refresh did, with the token it left in the store when that is known without another read. */
+interface RefreshResult {
+  readonly outcome: RefreshOutcome;
+  /** The stored token after the refresh; undefined when someone else changed the store meanwhile. */
+  readonly token: string | null | undefined;
+}
+
 // ---------------------------------------------------------------------------
 // Coordinator implementation
 // ---------------------------------------------------------------------------
@@ -123,7 +130,13 @@ export class AutoRefreshCoordinator {
   readonly #observer: PlatformObserver | undefined;
 
   /** Promise shared across all waiters during an active refresh. */
-  #refreshingPromise: Promise<RefreshOutcome> | null = null;
+  #refreshingPromise: Promise<RefreshResult> | null = null;
+
+  /**
+   * True from the moment a refresh was rejected for good and this coordinator
+   * cleared the store, until a read finds a token in it again.
+   */
+  #sessionCleared = false;
 
   readonly #now: () => number;
 
@@ -153,9 +166,8 @@ export class AutoRefreshCoordinator {
     return { token };
   }
 
-  /** Return true if the token is within the leeway window of expiry. */
-  async #isNearExpiry(): Promise<boolean> {
-    const { expiresAt } = await this.#readEntry();
+  /** True when an expiry falls within the leeway window. */
+  #isNearExpiry(expiresAt: number | undefined): boolean {
     if (expiresAt === undefined) return false;
     return this.#now() + this.#refreshLeewayMs >= expiresAt;
   }
@@ -176,37 +188,43 @@ export class AutoRefreshCoordinator {
    * same promise, no duplicate refresh network calls.
    *
    * After a successful refresh, emits `onAuthTransition` reason='refresh'.
-   * After a failed refresh, reads whether another refresh could succeed
-   * (`readFailureTransience`: the error's HTTP status, errno or timeout class
-   * first, then Jev's reading of its wording). A failure that cannot clear
-   * (rejected or revoked credentials) clears the token and emits
-   * `onAuthTransition` reason='expire'; one that can (a network fault, a
-   * server failure) keeps the token for the next pre-flight or 401 refresh.
-   * Both report the error to `onError`. A failure that cannot be read at all
-   * rejects the refresh with that error and leaves the token as it was.
+   * A failed refresh is classified from its structure alone, with no model:
+   * an HTTP status a retry cannot clear (a 400, 401 or 403 from the auth
+   * server: rejected or revoked credentials), or an error that states it is
+   * not retryable, clears the token and emits `onAuthTransition`
+   * reason='expire'. Anything else (a transient status, a Retry-After, a
+   * network fault, a timeout, a cancellation, a parse error, an error with no
+   * status at all)
+   * keeps the token, which is still valid until it expires, for the next
+   * pre-flight or 401 refresh. Both report the error to `onError`.
+   *
+   * @param knownToken - The stored token the caller has just read, so the
+   *   refresh does not read it again; omitted, the store is read once.
    */
-  async #doRefresh(): Promise<RefreshOutcome> {
+  async #doRefresh(knownToken?: string | null): Promise<RefreshResult> {
     if (this.#refreshingPromise) {
       return this.#refreshingPromise;
     }
 
-    const promise = (async (): Promise<RefreshOutcome> => {
+    const promise = (async (): Promise<RefreshResult> => {
       if (!this.#refresh) {
         // No refresh endpoint, graceful no-op.
-        return 'not-refreshed';
+        return { outcome: 'not-refreshed', token: knownToken };
       }
       // The token this refresh replaces. A logout or a new login while it is
       // in flight changes the stored token; its answer must not overwrite that.
       // An unreadable store at the start leaves nothing to compare (undefined).
-      let startedFrom: string | null | undefined;
-      try { startedFrom = await this.#tokenStore.getToken(); } catch { startedFrom = undefined; }
+      let startedFrom: string | null | undefined = knownToken;
+      if (startedFrom === undefined) {
+        try { startedFrom = await this.#tokenStore.getToken(); } catch { startedFrom = undefined; }
+      }
       const storeChanged = async (): Promise<boolean> => {
         if (startedFrom === undefined) return false;
         try { return (await this.#tokenStore.getToken()) !== startedFrom; } catch { return false; }
       };
       try {
         const { token, expiresAt } = await this.#refresh();
-        if (await storeChanged()) return 'not-refreshed';
+        if (await storeChanged()) return { outcome: 'not-refreshed', token: undefined };
         const store = this.#tokenStore as GoodVibesTokenStore & {
           setTokenEntry?: ((token: string | null, expiresAt?: number) => Promise<void>) | undefined;
         };
@@ -215,6 +233,7 @@ export class AutoRefreshCoordinator {
         } else {
           await this.#tokenStore.setToken(token);
         }
+        this.#sessionCleared = false;
         invokeObserver(() =>
           this.#observer?.onAuthTransition?.({
             from: 'token',
@@ -222,10 +241,14 @@ export class AutoRefreshCoordinator {
             reason: 'refresh',
           }),
         );
-        return 'refreshed';
+        return { outcome: 'refreshed', token };
       } catch (err) {
-        const transience = await readFailureTransience(err, 'client-auth.refresh');
-        const terminal = transience.failureClass === 'terminal';
+        // Only the error's own structure (the auth server's status, a stated
+        // retryable flag or category) can say the credentials are gone. Without
+        // it (a network fault, an HTML error page, a plain Error), or when the
+        // refresh was cancelled, the token stays: it is valid until it expires.
+        const transience = structuredTransience(err);
+        const terminal = transience?.failureClass === 'terminal' && transience.basis !== 'cancelled';
         const refreshError = err instanceof GoodVibesError
           ? err
           : new GoodVibesError(
@@ -240,10 +263,11 @@ export class AutoRefreshCoordinator {
                 cause: err,
               },
             );
-        let outcome: RefreshOutcome = 'not-refreshed';
+        let result: RefreshResult = { outcome: 'not-refreshed', token: startedFrom };
         if (terminal && !await storeChanged()) {
           await this.#tokenStore.clearToken();
-          outcome = 'cleared';
+          this.#sessionCleared = true;
+          result = { outcome: 'cleared', token: null };
           invokeObserver(() =>
             this.#observer?.onAuthTransition?.({
               from: 'token',
@@ -253,7 +277,7 @@ export class AutoRefreshCoordinator {
           );
         }
         invokeObserver(() => this.#observer?.onError?.(refreshError), { label: 'onError' });
-        return outcome;
+        return result;
       }
     })();
 
@@ -280,9 +304,37 @@ export class AutoRefreshCoordinator {
    */
   async ensureFreshToken(): Promise<RefreshOutcome> {
     if (!this.#autoRefresh) return 'not-refreshed';
-    const nearExpiry = await this.#isNearExpiry();
-    if (!nearExpiry) return 'not-refreshed';
-    return this.#doRefresh();
+    const { token, expiresAt } = await this.#readEntry();
+    if (!this.#isNearExpiry(expiresAt)) return 'not-refreshed';
+    return (await this.#doRefresh(token)).outcome;
+  }
+
+  /**
+   * The token to send with a request: the store is read once, and a token
+   * inside the leeway window is refreshed first. This is the one read of the
+   * store an ordinary request makes; the transport builds its Authorization
+   * header from the value returned.
+   *
+   * Returns null when the store holds no token, including when the refresh
+   * was rejected for good and the token was cleared (see `sessionCleared`).
+   */
+  async currentToken(): Promise<string | null> {
+    const { token, expiresAt } = await this.#readEntry();
+    if (token) this.#sessionCleared = false;
+    if (!this.#autoRefresh || !this.#refresh || !this.#isNearExpiry(expiresAt)) return token;
+    const result = await this.#doRefresh(token);
+    // Someone else changed the store while the refresh ran: send what they stored.
+    return result.token === undefined ? this.#tokenStore.getToken() : result.token;
+  }
+
+  /**
+   * True when the store is empty because a refresh was rejected for good and
+   * this coordinator cleared it; false once a token is stored or read again.
+   * A request sent in that state carries no token the daemon could accept,
+   * so a 401 on it is final rather than a reason to refresh again.
+   */
+  get sessionCleared(): boolean {
+    return this.#sessionCleared;
   }
 
   /**

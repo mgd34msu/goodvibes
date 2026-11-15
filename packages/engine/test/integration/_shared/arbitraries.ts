@@ -591,7 +591,7 @@ export const FIXTURE_EVENTS: ReadonlyArray<{ type: string } & Record<string, unk
   // deliveries
   { type: 'DELIVERY_QUEUED', deliveryId: 'd1', jobId: 'j1', runId: 'r1', surfaceKind: 'slack', targetId: 't1', deliveryKind: 'notification' } satisfies DeliveryEvent,
   { type: 'DELIVERY_STARTED', deliveryId: 'd1', jobId: 'j1', runId: 'r1', surfaceKind: 'slack', targetId: 't1', startedAt: Date.now() } satisfies DeliveryEvent,
-  { type: 'DELIVERY_SUCCEEDED', deliveryId: 'd1', jobId: 'j1', runId: 'r1', surfaceKind: 'slack', targetId: 't1', completedAt: Date.now(), durationMs: 50, statusCode: 200 } satisfies DeliveryEvent,
+  { type: 'DELIVERY_SUCCEEDED', deliveryId: 'd1', jobId: 'j1', runId: 'r1', surfaceKind: 'slack', targetId: 't1', completedAt: Date.now(), durationMs: 50 } satisfies DeliveryEvent,
   { type: 'DELIVERY_FAILED', deliveryId: 'd1', jobId: 'j1', runId: 'r1', surfaceKind: 'slack', targetId: 't1', failedAt: Date.now(), error: 'timeout', retryable: true } satisfies DeliveryEvent,
   { type: 'DELIVERY_DEAD_LETTERED', deliveryId: 'd1', jobId: 'j1', runId: 'r1', surfaceKind: 'slack', targetId: 't1', reason: 'max retries', attempts: 3 } satisfies DeliveryEvent,
   // watchers

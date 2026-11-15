@@ -11,46 +11,54 @@
  * authoritative snapshot, the events carry no state the snapshot does not, in
  * keeping with the registry's contract ("a view, not a second source of truth").
  *
- * The kind/state/attention string unions are structural duplicates of
- * ProcessKind / ProcessState / ProcessAttentionReason
- * (platform/runtime/fleet/types.ts), kept inline so this leaf event module stays
- * free of a `platform/` import, the same independence precedent as AgentUsage
- * in ./agents.ts.
+ * This leaf module owns the fleet vocabulary: the node kinds, states and
+ * attention reasons are the runtime arrays below, and every other description
+ * of them (the process registry's types, the operator contract schema, the
+ * fleet.list filter, the clients) reads these arrays or the types derived from
+ * them. It imports nothing from `platform/`.
  */
 
-/** Mirrors ProcessKind. */
-export type FleetNodeKind =
-  | 'agent'
-  | 'contract'
-  | 'contract-group'
-  | 'contract-unit'
-  | 'workflow'
-  | 'trigger'
-  | 'schedule'
-  | 'watcher'
-  | 'background-process'
-  | 'acp-agent'
-  | 'observed-external'
-  | 'code-index';
+/** Every kind of node the fleet shows. */
+export const FLEET_NODE_KINDS = [
+  'agent',
+  'contract',
+  'contract-group',
+  'contract-unit',
+  'workflow',
+  'trigger',
+  'schedule',
+  'watcher',
+  'background-process',
+  'acp-agent',
+  'observed-external',
+  'code-index',
+] as const;
 
-/** Mirrors ProcessState. */
-export type FleetNodeState =
-  | 'thinking'
-  | 'executing-tool'
-  | 'awaiting-approval'
-  | 'streaming'
-  | 'stalled'
-  | 'retrying'
-  | 'done'
-  | 'failed'
-  | 'killed'
-  | 'interrupted'
-  | 'idle'
-  | 'queued'
-  | 'paused';
+/** Every coarse state a fleet node can be in. */
+export const FLEET_NODE_STATES = [
+  'thinking',
+  'executing-tool',
+  'awaiting-approval',
+  'streaming',
+  'stalled',
+  'retrying',
+  'done',
+  'failed',
+  'killed',
+  'interrupted',
+  'idle',
+  'queued',
+  'paused',
+] as const;
 
-/** Mirrors ProcessAttentionReason, every way a node can wait on a human is first-class. */
-export type FleetAttentionReason = 'approval' | 'input' | 'pick' | 'conflict';
+/** Every way a node can wait on a human; each is first-class. */
+export const FLEET_ATTENTION_REASONS = ['approval', 'input', 'pick', 'conflict'] as const;
+
+export type FleetNodeKind = (typeof FLEET_NODE_KINDS)[number];
+
+export type FleetNodeState = (typeof FLEET_NODE_STATES)[number];
+
+export type FleetAttentionReason = (typeof FLEET_ATTENTION_REASONS)[number];
 
 export type FleetEvent =
   /** A node appeared in the fleet for the first time. */

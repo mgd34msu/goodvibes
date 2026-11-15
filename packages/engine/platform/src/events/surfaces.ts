@@ -56,9 +56,12 @@ export function isChannelSurfaceKind(kind: string | undefined): kind is ChannelS
 }
 
 /**
- * Declared, not yet emitted: nothing publishes SURFACE_ENABLED, SURFACE_DISABLED,
- * SURFACE_ACCOUNT_CONNECTED, SURFACE_ACCOUNT_DEGRADED or SURFACE_CAPABILITY_CHANGED
- * today, so a subscriber to the `surfaces` domain receives none of them.
+ * The `surfaces` domain, the poll-free counterpart to `surfaces.list`. The
+ * surface registry publishes SURFACE_ENABLED, SURFACE_DISABLED and
+ * SURFACE_CAPABILITY_CHANGED when a sync finds a surface switched or its
+ * capabilities changed; the channel health watcher publishes
+ * SURFACE_ACCOUNT_CONNECTED and SURFACE_ACCOUNT_DEGRADED when a channel starts
+ * working or starts failing.
  */
 export type SurfaceEvent =
   | {

@@ -118,3 +118,38 @@ test('job lifecycle declares persisted-only states and enabled/status derive fro
   expect(resolveJobEnablement({ enabled: true, status: 'error' })).toEqual({ enabled: true, status: 'error' });
   expect(resolveJobEnablement({ enabled: true })).toEqual({ enabled: true, status: 'enabled' });
 });
+
+test('a run whose agent failed ends with AUTOMATION_RUN_COMPLETED (failed), and a disabled one-shot job is removed', async () => {
+  const { reconcileAutomationActiveRuns } = await import('../platform/src/platform/automation/manager-runtime-reconcile.js');
+  const j = { ...job(), enabled: false, deleteAfterRun: true } as AutomationJob;
+  const jobs = new Map([[j.id, j]]);
+  const run = { id: 'run-1', jobId: j.id, status: 'running', agentId: 'agent-1', startedAt: 10, queuedAt: 5, attempt: 1 } as unknown as AutomationRun;
+  const runs = new Map([[run.id, run]]);
+  const completed: Array<{ outcome: string; error?: string; retryable?: boolean }> = [];
+  const failedDetail: string[] = [];
+  reconcileAutomationActiveRuns({
+    configManager: { get: () => undefined },
+    sessionBroker: {},
+    agentStatusProvider: { getStatus: () => ({ id: 'agent-1', status: 'failed', error: 'HTTP 401 from provider', completedAt: 20 }) },
+    jobs, runs,
+    saveJobs: async () => {}, saveRuns: async () => {},
+    syncExecutionRoute: async () => {}, syncRunToRuntime: () => {}, syncJobToRuntime: () => {},
+    emitRunCompleted: (_j: AutomationJob, _r: AutomationRun, outcome: string, failure?: { error: string; retryable: boolean }) => completed.push({ outcome, ...(failure ?? {}) }),
+    followUp: {
+      jobs, retryTimers: new Map(), deliveryManager: null, activeRunCount: () => 0, maxConcurrentRuns: () => 1,
+      executeJob: async () => run, saveJobs: async () => {}, scheduleJob: () => {}, deliverFailureNotice: () => {},
+      emitRunFailed: (_j: AutomationJob, r: AutomationRun) => failedDetail.push(r.id),
+    },
+    emitJobAutoDisabled: () => {}, maybeDeliverRun: () => {},
+    applyFailureToJob: (x: AutomationJob) => ({ ...x, failureCount: x.failureCount + 1 }),
+    pruneRunHistory: () => {}, cancelTimer: () => {},
+  } as unknown as Parameters<typeof reconcileAutomationActiveRuns>[0]);
+  // The follow-up classifies the failure before announcing it; let it settle.
+  for (let i = 0; i < 50 && completed.length === 0; i += 1) await new Promise<void>((resolve) => setImmediate(resolve));
+  expect(runs.get(run.id)!.status).toBe('failed');
+  expect(jobs.has(j.id)).toBe(false);
+  expect(completed).toHaveLength(1);
+  expect(completed[0]!.outcome).toBe('failed');
+  expect(completed[0]!.error).toContain('HTTP 401');
+  expect(failedDetail).toEqual([run.id]);
+});

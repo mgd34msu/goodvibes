@@ -49,6 +49,11 @@ export type AutomationEvent =
       startedAt: number;
       attempt: number;
     }
+  /**
+   * The one terminal event: every run that ends announces it once, whatever
+   * the outcome. A subscriber that needs "the run is over" listens for this
+   * type only.
+   */
   | {
       type: 'AUTOMATION_RUN_COMPLETED';
       jobId: string;
@@ -57,7 +62,12 @@ export type AutomationEvent =
       completedAt: number;
       durationMs: number;
       outcome: AutomationRunOutcome;
+      /** What went wrong, for a `failed` outcome. */
+      error?: string | undefined;
+      /** Whether another attempt could succeed, for a `failed` outcome whose failure was classified. */
+      retryable?: boolean | undefined;
     }
+  /** Detail of a failed run (its retry reading); the run's end is announced by AUTOMATION_RUN_COMPLETED. */
   | {
       type: 'AUTOMATION_RUN_FAILED';
       jobId: string;

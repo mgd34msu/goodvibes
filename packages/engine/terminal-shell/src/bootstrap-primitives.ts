@@ -11,6 +11,7 @@ import {
   runtimeEventBusOptionsFrom,
 } from '@goodvibes-jev/engine/platform/platform/runtime/state';
 import { createRuntimeStore, createDomainDispatch, type DomainDispatch } from '@goodvibes-jev/engine/platform/platform/runtime/state';
+import { attachSessionRecoveryState } from '@goodvibes-jev/engine/platform/platform/runtime/emitters';
 import type { OrchestratorUserInputOptions } from '@goodvibes-jev/engine/platform/platform/core';
 import type { Notifier } from '@goodvibes-jev/engine/platform/platform/integrations';
 import { companionMessageToOrchestratorInputOptions } from './companion-input.js';
@@ -32,7 +33,11 @@ export function createTerminalEventState(config: Pick<ConfigManager, 'get'>) {
   configureRuntimeEventBusDefaults(runtimeEventBusOptionsFrom((key) => config.get(key)));
   const runtimeBus = new RuntimeEventBus();
   const store = createRuntimeStore();
-  return { runtimeBus, store, domainDispatch: createDomainDispatch(store) };
+  const domainDispatch = createDomainDispatch(store);
+  // The session recovery state the store shows is derived from the session
+  // events (loading, repairing, ready, recovery failed); it lives as long as the bus.
+  attachSessionRecoveryState(runtimeBus, domainDispatch);
+  return { runtimeBus, store, domainDispatch };
 }
 export async function initializeTerminalMemory(
   store: { init(): Promise<unknown>; save(): Promise<unknown>; close(): unknown },

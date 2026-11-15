@@ -62,7 +62,9 @@ export type { RuntimeEventRecord } from './events/index.js';
  * Options for constructing a GoodVibes platform instance.
  *
  * ### Auth token precedence (highest → lowest)
- * 1. **`tokenStore`**, when present, `getToken()` is called on every request.
+ * 1. **`tokenStore`**, when present, is read once per request (`getTokenEntry`
+ *    when the store has it, else `getToken`); with auto-refresh on, that one
+ *    read also decides whether the token is refreshed before the request.
  *    Mutations (`login`, `setToken`, `clearToken`) persist back to the store.
  * 2. **`getAuthToken`**, a read-only async resolver. No persistence; mutations
  *    throw `ConfigurationError`.
@@ -354,10 +356,11 @@ function requireWebSocketImplementation(webSocketImpl?: typeof WebSocket): typeo
 
 function createClientOptions<T extends OperatorApiClientOptions | PeerApiClientOptions>(
   options: GoodVibesPlatformOptions,
+  requestToken?: AuthTokenResolver,
 ): T {
-  const getAuthToken = options.tokenStore
+  const getAuthToken = requestToken ?? (options.tokenStore
     ? () => options.tokenStore!.getToken()
-    : options.getAuthToken;
+    : options.getAuthToken);
   return {
     baseUrl: requireBaseUrl(options.baseUrl),
     authToken: options.authToken ?? null,
@@ -425,20 +428,15 @@ export function createGoodVibesPlatform(
       })
     : null;
 
-  // Single normalized resolver used by realtime connectors. Invoked per-connect
-  // (not once at construction) so the latest token is always used. With
-  // auto-refresh on, a token inside the leeway window is refreshed first, as
-  // the HTTP transport does, so a (re)connect does not present a stale bearer.
-  const tokenResolver: typeof baseTokenResolver = coordinator
-    ? async () => {
-        try {
-          await coordinator.ensureFreshToken();
-        } catch {
-          // A refresh that cannot be read leaves the token as it was; connect with it
-          // and let the daemon's answer decide, as a request would.
-        }
-        return baseTokenResolver();
-      }
+  // The token a request or a (re)connect carries. With auto-refresh on, the
+  // coordinator reads the store once and refreshes a token inside the leeway
+  // window first, so the header is built from that one read and never from a
+  // stale bearer. Invoked per request and per connect, never once at construction.
+  const requestToken: AuthTokenResolver | undefined = coordinator
+    ? () => coordinator.currentToken()
+    : undefined;
+  const tokenResolver: typeof baseTokenResolver = requestToken
+    ? normalizeAuthToken(requestToken)
     : baseTokenResolver;
 
   // Build the merged middleware list: auto-refresh first (if enabled), then
@@ -468,7 +466,7 @@ export function createGoodVibesPlatform(
           return rj(url, opts) as Promise<T>;
         },
       };
-      mws.push(createAutoRefreshMiddleware(coordinator, transportProxy, tokenStore!));
+      mws.push(createAutoRefreshMiddleware(coordinator, transportProxy));
     }
     if (options.middleware) {
       mws.push(...options.middleware);
@@ -480,7 +478,7 @@ export function createGoodVibesPlatform(
     ...options,
     tokenStore: tokenStore ?? undefined,
     middleware: buildMiddleware(() => operatorRequestJson),
-  }));
+  }, requestToken));
   // Populate the lazy reference now that the transport is fully constructed.
   operatorRequestJson = (url, opts) => operator.transport.requestJson(url, opts as never);
 
@@ -488,7 +486,7 @@ export function createGoodVibesPlatform(
     ...options,
     tokenStore: tokenStore ?? undefined,
     middleware: buildMiddleware(() => peerRequestJson),
-  }));
+  }, requestToken));
   // Populate the lazy reference now that the transport is fully constructed.
   peerRequestJson = (url, opts) => peer.transport.requestJson(url, opts as never);
 

@@ -114,22 +114,3 @@ export function validateEventFields(type: string, v: unknown, fields: readonly F
   checkFields(v, fields, '', violations);
   return violations.length ? { valid: false, violations } : OK;
 }
-
-export interface EventEnvelopeShape {
-  readonly traceId: string;
-  readonly sessionId: string;
-  readonly timestamp: number;
-  readonly source: string;
-  readonly event: Record<string, unknown>;
-}
-
-export function validateEnvelope(v: unknown): ContractResult {
-  if (!isObject(v)) return fail('envelope must be an object');
-  const violations: string[] = [];
-  if (!isString(v['traceId'])) violations.push('traceId must be a string');
-  if (!isString(v['sessionId'])) violations.push('sessionId must be a string');
-  if (!isNumber(v['timestamp'])) violations.push('timestamp must be a number');
-  if (!isString(v['source'])) violations.push('source must be a string');
-  if (!isObject(v['event'])) violations.push('event must be an object');
-  return violations.length ? { valid: false, violations } : OK;
-}

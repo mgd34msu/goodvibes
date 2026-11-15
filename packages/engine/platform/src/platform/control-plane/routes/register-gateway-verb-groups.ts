@@ -407,9 +407,10 @@ export function registerGatewayVerbGroups(catalog: GatewayMethodCatalog, deps: G
     };
     attachConflict('fleet.conflicts.list', createFleetConflictsListHandler(conflictsDeps));
     attachConflict('fleet.conflicts.resolve', createFleetConflictsResolveHandler(conflictsDeps));
-    // Reclaim on success: the resolution session's automation run completing
-    // successfully re-attempts the merge through the same integration lane,
-    // a clean merge removes the kept tree; a re-conflict honestly stays flagged.
+    // The resolution run ending, whatever its outcome (AUTOMATION_RUN_COMPLETED
+    // is the one terminal event), releases the item so it can be resolved
+    // again. On success the merge is re-attempted through the same integration
+    // lane: a clean merge removes the kept tree; a re-conflict stays flagged.
     if (deps.runtimeBus) {
       const offAutomation = deps.runtimeBus.onDomain('automation', (envelope) => {
         const payload = envelope.payload as { type?: string; jobId?: string; outcome?: string };

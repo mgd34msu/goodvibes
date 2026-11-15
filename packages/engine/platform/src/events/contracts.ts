@@ -1,12 +1,19 @@
 /**
- * Event schema contracts for runtime event validation.
+ * The runtime event validator: `validateKnownEvent` checks an event payload
+ * (the object with its `type`, not the envelope around it) against the rules
+ * for its type.
+ *
+ * The event unions in this directory are the one description of each event.
+ * The rules here are bound to them by the compiler: every rule table must name
+ * every required field of its event and may name only fields the event has,
+ * and an optional field is marked `optional: true` exactly when the event
+ * declares it optional. Adding, removing or renaming a field of a registered
+ * event therefore fails to compile until its rules say the same thing.
  */
 export {
   type ContractResult,
-  type EventEnvelopeShape,
   type FieldKind,
   type FieldSpec,
-  validateEnvelope,
   validateEventFields,
   isString,
   isNumber,
@@ -14,205 +21,137 @@ export {
   isObject,
 } from './contracts/shared.js';
 
-import { isObject, isString } from './contracts/shared.js';
-
-// The named imports below are used both as public exports (via the `export { ... }`
-// re-export blocks above) and as local references in the EVENT_VALIDATORS registry.
-// Combining import + re-export into a single `export { ... } from '...'` block
-// would require a second local import for registry use, which is equally redundant.
-// Using `import` once and re-exporting the same names is the idiomatic TS pattern.
-export {
-  validateTurnStarted,
-  validateTurnStreaming,
-  validateTurnCompleted,
-  validateTurnFailed,
-  validateTurnCancelled,
-  validateToolReceived,
-  validateToolSucceeded,
-  validateToolFailed,
-} from './contracts/turn-tool.js';
-
-export {
-  validateAgentSpawning,
-  validateAgentCompleted,
-  validateAgentFailed,
-  validateMcpConnected,
-  validateMcpDisconnected,
-  validateMcpReconnecting,
-} from './contracts/agent-mcp.js';
-
-export {
-  validatePluginLoaded,
-  validatePluginError,
-  validateAutomationJobCreated,
-  validateAutomationJobUpdated,
-  validateAutomationJobEnabled,
-  validateAutomationJobDisabled,
-  validateAutomationRunQueued,
-  validateAutomationRunStarted,
-  validateAutomationRunCompleted,
-  validateAutomationRunFailed,
-  validateAutomationRunCancelled,
-  validateAutomationScheduleError,
-  validateAutomationJobAutoDisabled,
-  validateRouteBindingCreated,
-  validateRouteBindingUpdated,
-  validateRouteBindingRemoved,
-  validateRouteBindingResolved,
-  validateRouteReplyTargetCaptured,
-  validateRouteBindingFailed,
-  validateControlPlaneClientConnected,
-  validateControlPlaneClientDisconnected,
-  validateControlPlaneSubscriptionCreated,
-  validateControlPlaneSubscriptionDropped,
-  validateControlPlaneAuthGranted,
-  validateControlPlaneAuthRejected,
-  validateDeliveryQueued,
-  validateDeliveryStarted,
-  validateDeliverySucceeded,
-  validateDeliveryFailed,
-  validateDeliveryDeadLettered,
-  validateWatcherStarted,
-  validateWatcherHeartbeat,
-  validateWatcherCheckpointAdvanced,
-  validateWatcherFailed,
-  validateWatcherStopped,
-  validateSurfaceEnabled,
-  validateSurfaceDisabled,
-  validateSurfaceAccountConnected,
-  validateSurfaceAccountDegraded,
-  validateSurfaceCapabilityChanged,
-} from './contracts/automation-route.js';
-
-import {
-  validateTurnStarted,
-  validateTurnStreaming,
-  validateTurnCompleted,
-  validateTurnFailed,
-  validateTurnCancelled,
-  validateToolReceived,
-  validateToolSucceeded,
-  validateToolFailed,
-} from './contracts/turn-tool.js';
-import { validateAgentSpawning, validateAgentCompleted, validateAgentFailed, validateMcpConnected, validateMcpDisconnected, validateMcpReconnecting } from './contracts/agent-mcp.js';
-import {
-  validatePluginLoaded,
-  validatePluginError,
-  validateAutomationJobCreated,
-  validateAutomationJobUpdated,
-  validateAutomationJobEnabled,
-  validateAutomationJobDisabled,
-  validateAutomationRunQueued,
-  validateAutomationRunStarted,
-  validateAutomationRunCompleted,
-  validateAutomationRunFailed,
-  validateAutomationRunCancelled,
-  validateAutomationScheduleError,
-  validateAutomationJobAutoDisabled,
-  validateRouteBindingCreated,
-  validateRouteBindingUpdated,
-  validateRouteBindingRemoved,
-  validateRouteBindingResolved,
-  validateRouteReplyTargetCaptured,
-  validateRouteBindingFailed,
-  validateControlPlaneClientConnected,
-  validateControlPlaneClientDisconnected,
-  validateControlPlaneSubscriptionCreated,
-  validateControlPlaneSubscriptionDropped,
-  validateControlPlaneAuthGranted,
-  validateControlPlaneAuthRejected,
-  validateDeliveryQueued,
-  validateDeliveryStarted,
-  validateDeliverySucceeded,
-  validateDeliveryFailed,
-  validateDeliveryDeadLettered,
-  validateWatcherStarted,
-  validateWatcherHeartbeat,
-  validateWatcherCheckpointAdvanced,
-  validateWatcherFailed,
-  validateWatcherStopped,
-  validateSurfaceEnabled,
-  validateSurfaceDisabled,
-  validateSurfaceAccountConnected,
-  validateSurfaceAccountDegraded,
-  validateSurfaceCapabilityChanged,
-} from './contracts/automation-route.js';
+import { isObject, isString, validateEventFields, type ContractResult, type FieldKind, type FieldSpec } from './contracts/shared.js';
+import type { AnyRuntimeEvent, RuntimeEventPayload } from './domain-map.js';
+import { AUTOMATION_RUN_OUTCOMES, AUTOMATION_SCHEDULE_KINDS } from './automation.js';
+import { ROUTE_SURFACE_KINDS, ROUTE_TARGET_KINDS } from './routes.js';
+import { CONTROL_PLANE_CLIENT_KINDS, CONTROL_PLANE_PRINCIPAL_KINDS, CONTROL_PLANE_TRANSPORT_KINDS } from './control-plane.js';
+import { DELIVERY_KINDS } from './deliveries.js';
+import { WATCHER_SOURCE_KINDS } from './watchers.js';
+import { SURFACE_KINDS } from './surfaces.js';
 import { CONTRACT_EVENT_VALIDATORS } from './contracts/contract-runner.js';
 import { GATE_EVENT_VALIDATORS } from './contracts/gate.js';
 
 export { CONTRACT_EVENT_FIELD_SPECS, CONTRACT_EVENT_VALIDATORS } from './contracts/contract-runner.js';
 export { GATE_EVENT_FIELD_SPECS, GATE_EVENT_VALIDATORS } from './contracts/gate.js';
 
-// Domain-grouping rule: entries are arranged by event domain (turn/tool, agent,
-// mcp, plugin, automation, route, control-plane, delivery, watcher, surface,
-// contracts).
-// Within each domain group entries are sorted alphabetically by key.
-// Event types without a registered validator are not listed here, they pass
-// through validateKnownEvent as unknown and are documented in that function.
-const EVENT_VALIDATORS: Record<string, (v: unknown) => import('./contracts/shared.js').ContractResult> = {
-  // turn / tool domain
-  STREAM_DELTA: validateTurnStreaming,
-  TOOL_FAILED: validateToolFailed,
-  TOOL_RECEIVED: validateToolReceived,
-  TOOL_SUCCEEDED: validateToolSucceeded,
-  TURN_CANCEL: validateTurnCancelled,
-  TURN_COMPLETED: validateTurnCompleted,
-  TURN_ERROR: validateTurnFailed,
-  TURN_SUBMITTED: validateTurnStarted,
-  // agent / mcp domain
-  AGENT_COMPLETED: validateAgentCompleted,
-  AGENT_FAILED: validateAgentFailed,
-  AGENT_SPAWNING: validateAgentSpawning,
-  MCP_CONNECTED: validateMcpConnected,
-  MCP_DISCONNECTED: validateMcpDisconnected,
-  MCP_RECONNECTING: validateMcpReconnecting,
-  // plugin domain
-  PLUGIN_ERROR: validatePluginError,
-  PLUGIN_LOADED: validatePluginLoaded,
-  // automation domain
-  AUTOMATION_JOB_AUTO_DISABLED: validateAutomationJobAutoDisabled,
-  AUTOMATION_JOB_CREATED: validateAutomationJobCreated,
-  AUTOMATION_JOB_DISABLED: validateAutomationJobDisabled,
-  AUTOMATION_JOB_ENABLED: validateAutomationJobEnabled,
-  AUTOMATION_JOB_UPDATED: validateAutomationJobUpdated,
-  AUTOMATION_RUN_CANCELLED: validateAutomationRunCancelled,
-  AUTOMATION_RUN_COMPLETED: validateAutomationRunCompleted,
-  AUTOMATION_RUN_FAILED: validateAutomationRunFailed,
-  AUTOMATION_RUN_QUEUED: validateAutomationRunQueued,
-  AUTOMATION_RUN_STARTED: validateAutomationRunStarted,
-  AUTOMATION_SCHEDULE_ERROR: validateAutomationScheduleError,
-  // route domain
-  ROUTE_BINDING_CREATED: validateRouteBindingCreated,
-  ROUTE_BINDING_FAILED: validateRouteBindingFailed,
-  ROUTE_BINDING_REMOVED: validateRouteBindingRemoved,
-  ROUTE_BINDING_RESOLVED: validateRouteBindingResolved,
-  ROUTE_BINDING_UPDATED: validateRouteBindingUpdated,
-  ROUTE_REPLY_TARGET_CAPTURED: validateRouteReplyTargetCaptured,
-  // control-plane domain
-  CONTROL_PLANE_AUTH_GRANTED: validateControlPlaneAuthGranted,
-  CONTROL_PLANE_AUTH_REJECTED: validateControlPlaneAuthRejected,
-  CONTROL_PLANE_CLIENT_CONNECTED: validateControlPlaneClientConnected,
-  CONTROL_PLANE_CLIENT_DISCONNECTED: validateControlPlaneClientDisconnected,
-  CONTROL_PLANE_SUBSCRIPTION_CREATED: validateControlPlaneSubscriptionCreated,
-  CONTROL_PLANE_SUBSCRIPTION_DROPPED: validateControlPlaneSubscriptionDropped,
-  // delivery domain
-  DELIVERY_DEAD_LETTERED: validateDeliveryDeadLettered,
-  DELIVERY_FAILED: validateDeliveryFailed,
-  DELIVERY_QUEUED: validateDeliveryQueued,
-  DELIVERY_STARTED: validateDeliveryStarted,
-  DELIVERY_SUCCEEDED: validateDeliverySucceeded,
-  // watcher domain
-  WATCHER_CHECKPOINT_ADVANCED: validateWatcherCheckpointAdvanced,
-  WATCHER_FAILED: validateWatcherFailed,
-  WATCHER_HEARTBEAT: validateWatcherHeartbeat,
-  WATCHER_STARTED: validateWatcherStarted,
-  WATCHER_STOPPED: validateWatcherStopped,
-  // surface domain
-  SURFACE_ACCOUNT_CONNECTED: validateSurfaceAccountConnected,
-  SURFACE_ACCOUNT_DEGRADED: validateSurfaceAccountDegraded,
-  SURFACE_CAPABILITY_CHANGED: validateSurfaceCapabilityChanged,
-  SURFACE_DISABLED: validateSurfaceDisabled,
-  SURFACE_ENABLED: validateSurfaceEnabled,
+type EventTypeName = AnyRuntimeEvent['type'];
+
+/** The keys an event declares optional. */
+type OptionalKey<E> = { [K in keyof E]-?: object extends Pick<E, K> ? K : never }[keyof E];
+
+/** How one field is checked; `key` comes from the table it sits in. */
+interface FieldRule {
+  readonly kind: FieldKind;
+  readonly values?: readonly string[] | undefined;
+  readonly fields?: readonly FieldSpec[] | undefined;
+}
+
+/**
+ * The rules for one event, keyed by field: every required field of the event
+ * must appear, an optional one may, and nothing else can.
+ */
+type EventFieldRules<E> =
+  & { readonly [K in Exclude<keyof E, 'type' | OptionalKey<E>>]-?: FieldRule & { readonly optional?: never } }
+  & { readonly [K in Exclude<OptionalKey<E>, 'type'>]?: FieldRule & { readonly optional: true } };
+
+/** One registered event: its type and the field specs its rules produce. */
+function rules<T extends EventTypeName>(type: T, fields: EventFieldRules<RuntimeEventPayload<T>>): readonly [T, readonly FieldSpec[]] {
+  return [type, Object.entries(fields as Record<string, FieldRule & { optional?: true }>).map(([key, rule]) => ({ key, ...rule }))];
+}
+
+const str = { kind: 'string' } as const;
+const num = { kind: 'number' } as const;
+const bool = { kind: 'boolean' } as const;
+const strs = { kind: 'string[]' } as const;
+const obj = { kind: 'object' } as const;
+const optStr = { kind: 'string', optional: true } as const;
+const optNum = { kind: 'number', optional: true } as const;
+const optBool = { kind: 'boolean', optional: true } as const;
+const optObj = { kind: 'object', optional: true } as const;
+const oneOf = (values: readonly string[]) => ({ kind: 'enum', values }) as const;
+
+const routeSurface = oneOf(ROUTE_SURFACE_KINDS);
+const surfaceKind = oneOf(SURFACE_KINDS);
+const watcherSource = oneOf(WATCHER_SOURCE_KINDS);
+
+const delivery = { deliveryId: str, jobId: str, runId: str, surfaceKind: routeSurface, targetId: str } as const;
+
+// Arranged by event domain (turn/tool, agent, mcp, plugin, automation, route,
+// control-plane, delivery, watcher, surface); the contracts and gate domains
+// have their own exhaustive tables, which feed the generated docs.
+const EVENT_RULES: ReadonlyArray<readonly [EventTypeName, readonly FieldSpec[]]> = [
+  // turn / tool
+  rules('TURN_SUBMITTED', { turnId: str, prompt: str, origin: optObj }),
+  rules('STREAM_DELTA', { turnId: str, content: str, accumulated: str, reasoning: optStr }),
+  rules('TURN_COMPLETED', { turnId: str, response: str, stopReason: str, metadata: optObj }),
+  rules('TURN_ERROR', { turnId: str, error: str, stopReason: str, status: optNum, code: optStr }),
+  rules('TURN_CANCEL', { turnId: str, stopReason: str, reason: optStr }),
+  rules('TOOL_RECEIVED', { callId: str, turnId: str, tool: str, args: obj }),
+  rules('TOOL_SUCCEEDED', { callId: str, turnId: str, tool: str, durationMs: num }),
+  rules('TOOL_FAILED', { callId: str, turnId: str, tool: str, error: str, durationMs: num }),
+  // agent
+  rules('AGENT_SPAWNING', { agentId: str, task: str, contractRole: { kind: 'enum', values: ['owner', 'unit', 'planner'], optional: true } }),
+  rules('AGENT_COMPLETED', { occurrenceId: optStr, agentId: str, durationMs: num }),
+  rules('AGENT_FAILED', { occurrenceId: optStr, agentId: str, error: str, durationMs: num, taskId: optStr }),
+  // mcp
+  rules('MCP_CONNECTED', { serverId: str, toolCount: num, resourceCount: num }),
+  rules('MCP_DISCONNECTED', { serverId: str, willRetry: bool }),
+  rules('MCP_RECONNECTING', { serverId: str, attempt: num, maxAttempts: num }),
+  // plugin
+  rules('PLUGIN_LOADED', { pluginId: str, version: str, capabilities: strs }),
+  rules('PLUGIN_ERROR', { pluginId: str, error: str, fatal: bool }),
+  // automation
+  rules('AUTOMATION_JOB_CREATED', { jobId: str, name: str, scheduleKind: oneOf(AUTOMATION_SCHEDULE_KINDS), enabled: bool }),
+  rules('AUTOMATION_JOB_UPDATED', { jobId: str, changedFields: strs }),
+  rules('AUTOMATION_JOB_ENABLED', { jobId: str }),
+  rules('AUTOMATION_JOB_DISABLED', { jobId: str, reason: str }),
+  rules('AUTOMATION_RUN_QUEUED', { jobId: str, runId: str, scheduledAt: num, forced: bool }),
+  rules('AUTOMATION_RUN_STARTED', { jobId: str, runId: str, startedAt: num, attempt: num }),
+  rules('AUTOMATION_RUN_COMPLETED', {
+    jobId: str, runId: str, startedAt: num, completedAt: num, durationMs: num,
+    outcome: oneOf(AUTOMATION_RUN_OUTCOMES), error: optStr, retryable: optBool,
+  }),
+  rules('AUTOMATION_RUN_FAILED', { jobId: str, runId: str, startedAt: num, failedAt: num, error: str, retryable: bool }),
+  rules('AUTOMATION_RUN_CANCELLED', { jobId: str, runId: str, cancelledAt: num, reason: str }),
+  rules('AUTOMATION_SCHEDULE_ERROR', { jobId: str, scheduleText: str, error: str }),
+  rules('AUTOMATION_JOB_AUTO_DISABLED', { jobId: str, reason: str, consecutiveFailures: num }),
+  // route
+  rules('ROUTE_BINDING_CREATED', { bindingId: str, surfaceKind: routeSurface, externalId: str, targetKind: oneOf(ROUTE_TARGET_KINDS), targetId: str }),
+  rules('ROUTE_BINDING_UPDATED', { bindingId: str, changedFields: strs }),
+  rules('ROUTE_BINDING_REMOVED', { bindingId: str, surfaceKind: routeSurface, externalId: str }),
+  rules('ROUTE_BINDING_RESOLVED', { bindingId: str, surfaceKind: routeSurface, externalId: str, targetKind: oneOf(ROUTE_TARGET_KINDS), targetId: str }),
+  rules('ROUTE_REPLY_TARGET_CAPTURED', { bindingId: str, surfaceKind: routeSurface, externalId: str, replyTargetId: str, threadId: str }),
+  rules('ROUTE_BINDING_FAILED', { surfaceKind: routeSurface, externalId: str, error: str }),
+  // control-plane
+  rules('CONTROL_PLANE_CLIENT_CONNECTED', { clientId: str, clientKind: oneOf(CONTROL_PLANE_CLIENT_KINDS), transport: oneOf(CONTROL_PLANE_TRANSPORT_KINDS) }),
+  rules('CONTROL_PLANE_CLIENT_DISCONNECTED', { clientId: str, reason: str }),
+  rules('CONTROL_PLANE_SUBSCRIPTION_CREATED', { clientId: str, subscriptionId: str, topics: strs }),
+  rules('CONTROL_PLANE_SUBSCRIPTION_DROPPED', { clientId: str, subscriptionId: str, reason: str }),
+  rules('CONTROL_PLANE_AUTH_GRANTED', { clientId: str, principalId: str, principalKind: oneOf(CONTROL_PLANE_PRINCIPAL_KINDS), scopes: strs }),
+  rules('CONTROL_PLANE_AUTH_REJECTED', { clientId: str, principalId: str, reason: str }),
+  // delivery
+  rules('DELIVERY_QUEUED', { ...delivery, deliveryKind: oneOf(DELIVERY_KINDS) }),
+  rules('DELIVERY_STARTED', { ...delivery, startedAt: num }),
+  rules('DELIVERY_SUCCEEDED', { ...delivery, completedAt: num, durationMs: num }),
+  rules('DELIVERY_FAILED', { ...delivery, failedAt: num, error: str, retryable: bool }),
+  rules('DELIVERY_DEAD_LETTERED', { ...delivery, reason: str, attempts: num }),
+  // watcher
+  rules('WATCHER_STARTED', { watcherId: str, sourceKind: watcherSource, name: str }),
+  rules('WATCHER_HEARTBEAT', { watcherId: str, sourceKind: watcherSource, seenAt: num, checkpoint: str }),
+  rules('WATCHER_CHECKPOINT_ADVANCED', { watcherId: str, sourceKind: watcherSource, checkpoint: str }),
+  rules('WATCHER_FAILED', { watcherId: str, sourceKind: watcherSource, error: str, retryable: bool }),
+  rules('WATCHER_STOPPED', { watcherId: str, sourceKind: watcherSource, reason: str }),
+  // surface
+  rules('SURFACE_ENABLED', { surfaceKind, surfaceId: str, accountId: str }),
+  rules('SURFACE_DISABLED', { surfaceKind, surfaceId: str, reason: str }),
+  rules('SURFACE_ACCOUNT_CONNECTED', { surfaceKind, surfaceId: str, accountId: str, displayName: str }),
+  rules('SURFACE_ACCOUNT_DEGRADED', { surfaceKind, surfaceId: str, accountId: str, error: str }),
+  rules('SURFACE_CAPABILITY_CHANGED', { surfaceKind, surfaceId: str, capability: str, enabled: bool }),
+];
+
+const EVENT_VALIDATORS: Readonly<Record<string, (v: unknown) => ContractResult>> = {
+  ...Object.fromEntries(EVENT_RULES.map(([type, fields]) => [type, (v: unknown) => validateEventFields(type, v, fields)])),
   // contracts domain (every CONTRACT_* type; the table is exhaustive by type)
   ...CONTRACT_EVENT_VALIDATORS,
   // gate domain (every gate event type; the table is exhaustive by type)
@@ -220,14 +159,13 @@ const EVENT_VALIDATORS: Record<string, (v: unknown) => import('./contracts/share
 };
 
 /**
- * Validate a runtime event against its registered schema contract.
+ * Validate a runtime event against the rules for its type.
  *
- * Returns `{ valid: false }` for an event type with no registered validator
- * (`registeredEventTypes()` lists the ones that have one; many domains have
- * none). Use `isKnownEventType` to distinguish "unknown type" from
- * "validation failed".
+ * Returns `{ valid: false }` for an event type with no registered rules
+ * (`registeredEventTypes()` lists the ones that have them). Use
+ * `isKnownEventType` to tell "unknown type" from "validation failed".
  */
-export function validateKnownEvent(event: unknown): import('./contracts/shared.js').ContractResult {
+export function validateKnownEvent(event: unknown): ContractResult {
   if (!isObject(event)) return { valid: false, violations: ['event must be an object'] };
   const type = event['type'];
   if (!isString(type)) return { valid: false, violations: ['event.type must be a string'] };

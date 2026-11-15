@@ -17,7 +17,7 @@ function surfaceEvent<T extends SurfaceEvent['type']>(
 }
 
 export function emitSurfaceEnabled(
-  bus: RuntimeEventBus,
+  bus: Pick<RuntimeEventBus, 'emit'>,
   ctx: EmitterContext,
   data: { surfaceKind: SurfaceKind; surfaceId: string; accountId: string },
 ): void {
@@ -25,7 +25,7 @@ export function emitSurfaceEnabled(
 }
 
 export function emitSurfaceDisabled(
-  bus: RuntimeEventBus,
+  bus: Pick<RuntimeEventBus, 'emit'>,
   ctx: EmitterContext,
   data: { surfaceKind: SurfaceKind; surfaceId: string; reason: string },
 ): void {
@@ -33,7 +33,7 @@ export function emitSurfaceDisabled(
 }
 
 export function emitSurfaceAccountConnected(
-  bus: RuntimeEventBus,
+  bus: Pick<RuntimeEventBus, 'emit'>,
   ctx: EmitterContext,
   data: { surfaceKind: SurfaceKind; surfaceId: string; accountId: string; displayName: string },
 ): void {
@@ -41,7 +41,7 @@ export function emitSurfaceAccountConnected(
 }
 
 export function emitSurfaceAccountDegraded(
-  bus: RuntimeEventBus,
+  bus: Pick<RuntimeEventBus, 'emit'>,
   ctx: EmitterContext,
   data: { surfaceKind: SurfaceKind; surfaceId: string; accountId: string; error: string },
 ): void {
@@ -49,7 +49,7 @@ export function emitSurfaceAccountDegraded(
 }
 
 export function emitSurfaceCapabilityChanged(
-  bus: RuntimeEventBus,
+  bus: Pick<RuntimeEventBus, 'emit'>,
   ctx: EmitterContext,
   data: { surfaceKind: SurfaceKind; surfaceId: string; capability: string; enabled: boolean },
 ): void {

@@ -122,7 +122,9 @@ For same-origin web UIs, cookie-backed session auth is often simpler than token 
 
 When you provide a `tokenStore`, the platform wires a built-in `AutoRefreshCoordinator` that handles proactive token refresh and reactive 401 retry automatically. No custom middleware is needed.
 
-**Proactive refresh.** The coordinator checks the token's `expiresAt` field before each request. If the token expires within `refreshLeewayMs` (default: 60 seconds), a refresh call is issued before the request proceeds.
+**Proactive refresh.** Each request reads the token store once; that read gives the token for the `Authorization` header and its `expiresAt`. If the token expires within `refreshLeewayMs` (default: 60 seconds), a refresh call is issued before the request proceeds and the request carries the new token.
+
+**Failed refresh.** When the `refresh` callback throws, the error's HTTP `status` decides what happens to the stored token: a status a retry cannot clear (for example 400, 401 or 403 from your auth server) clears it, and the platform reports `onAuthTransition` to anonymous. Any other failure (a 429 or 5xx, a network fault, a timeout, an error with no `status`) keeps the token, which stays valid until it expires, and the next request tries the refresh again. Either way the error reaches `observer.onError`. To have a rejection clear the token, throw an error that carries the auth server's `status`.
 
 **Reactive 401 retry.** When the server returns 401, the coordinator attempts one refresh and retries the original request with the new token, transparently to the caller.
 
@@ -138,10 +140,12 @@ const platformClient = createGoodVibesPlatform({
   autoRefresh: {
     autoRefresh: true,         // default; set { autoRefresh: false } to disable
     refreshLeewayMs: 60_000,   // refresh this many ms before expiry (default: 60s)
-    refresh: async (store) => {
-      // Call your token refresh endpoint and update the store.
-      const newToken = await myRefreshEndpoint();
-      await store.setToken(newToken);
+    refresh: async () => {
+      // Call your token refresh endpoint; the platform stores what you return.
+      const res = await fetch('/api/auth/refresh', { method: 'POST' });
+      if (!res.ok) throw Object.assign(new Error('refresh refused'), { status: res.status });
+      const { token, expiresAt } = await res.json();
+      return { token, expiresAt };
     },
   },
 });

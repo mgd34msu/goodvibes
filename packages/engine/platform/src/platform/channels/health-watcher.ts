@@ -22,6 +22,8 @@
 import type { ChannelHealthState, ChannelStatusSnapshot, ChannelSurface } from './types.js';
 import { isChannelFailing, isChannelWorking } from './health.js';
 import { logger } from '../utils/logger.js';
+import type { RuntimeEventBus } from '../runtime/events/index.js';
+import { emitSurfaceAccountConnected, emitSurfaceAccountDegraded } from '../runtime/emitters/surfaces.js';
 
 /** What the owner is told, and enough structure to route it sensibly. */
 export interface ChannelHealthAlert {
@@ -51,6 +53,13 @@ export interface ChannelHealthWatcherDeps {
    * stopped, so a delivery that never answers can be cancelled.
    */
   readonly announce?: ((alert: ChannelHealthAlert, signal?: AbortSignal) => Promise<void | boolean> | void | boolean) | undefined;
+  /**
+   * Where a surface's account changes are published (`surfaces` domain):
+   * SURFACE_ACCOUNT_CONNECTED when a surface starts working,
+   * SURFACE_ACCOUNT_DEGRADED when it starts failing. One emit per change,
+   * nothing per sweep. Absent, nothing is published.
+   */
+  readonly runtimeBus?: Pick<RuntimeEventBus, 'emit'> | undefined;
   /** How often to sweep. */
   readonly intervalMs?: number | undefined;
   /** How long a channel must stay failing before it is announced again. */
@@ -203,6 +212,7 @@ export class ChannelHealthWatcher {
         owedRecovery: snapshot.state !== 'disabled' && (previous?.owedRecovery ?? false),
       };
       this.tracked.set(snapshot.surface, tracked);
+      if (changed) this.publishAccountChange(snapshot, failing);
       if (alert) alerts.push(alert);
     }
 
@@ -287,6 +297,31 @@ export class ChannelHealthWatcher {
       };
     }
     return null;
+  }
+
+  /**
+   * Publish a surface whose state just changed into working or failing.
+   * `unknown`, `unconfigured` and `disabled` are neither, so they publish
+   * nothing (enabling and disabling is the surface registry's news).
+   */
+  private publishAccountChange(snapshot: ChannelStatusSnapshot, failing: boolean): void {
+    const bus = this.deps.runtimeBus;
+    if (!bus) return;
+    const working = isChannelWorking(snapshot.state);
+    if (!working && !failing) return;
+    const ctx = { sessionId: 'system', source: 'channel-health-watcher', traceId: `surface:${snapshot.surface}` } as const;
+    const surfaceId = snapshot.id;
+    const accountId = snapshot.accountId ?? snapshot.surface;
+    try {
+      if (working) {
+        emitSurfaceAccountConnected(bus, ctx, { surfaceKind: snapshot.surface, surfaceId, accountId, displayName: snapshot.label });
+      } else {
+        const error = snapshot.runtime?.lastError ?? snapshot.runtime?.reason ?? `the surface is ${snapshot.state}`;
+        emitSurfaceAccountDegraded(bus, ctx, { surfaceKind: snapshot.surface, surfaceId, accountId, error });
+      }
+    } catch (error) {
+      logger.warn('Could not publish a channel state change', { surface: snapshot.surface, error: error instanceof Error ? error.message : String(error) });
+    }
   }
 
   /** Returns whether the owner was actually told. */

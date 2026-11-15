@@ -6,6 +6,7 @@ import { createDomainDispatch } from '../runtime/store/index.js';
 import type { DomainDispatch, RuntimeStore } from '../runtime/store/index.js';
 import type { RuntimeEventBus } from '../runtime/events/index.js';
 import type { RouteSurfaceKind } from '../../events/routes.js';
+import type { DeliveryKind } from '../../events/deliveries.js';
 import {
   emitDeliveryDeadLettered,
   emitDeliveryFailed,
@@ -46,12 +47,39 @@ function buildDeliveryMessage(job: AutomationJob, run: AutomationRun): string {
   return lines.join('\n');
 }
 
-function toDeliveryKind(surfaceKind: string): 'notification' | 'reply' | 'action' | 'callback' {
+function toDeliveryKind(surfaceKind: RouteSurfaceKind, reply: boolean): DeliveryKind {
+  if (reply) return 'reply';
   return surfaceKind === 'webhook' ? 'callback' : 'notification';
 }
 
-function toDeliverySurfaceKind(surfaceKind: AutomationDeliveryTarget['surfaceKind']): RouteSurfaceKind {
-  return surfaceKind ?? 'webhook';
+/**
+ * The surface a delivery goes to, from the target the manager holds: its own
+ * surface kind (a route target gets its binding's), else what its delivery
+ * mode is. A webhook target is a webhook; an integration or link target
+ * without a surface is a service endpoint, never a webhook.
+ */
+function toDeliverySurfaceKind(target: AutomationDeliveryTarget): RouteSurfaceKind {
+  if (target.surfaceKind) return target.surfaceKind;
+  return target.kind === 'webhook' ? 'webhook' : 'service';
+}
+
+/**
+ * The identifier an event names a target by: its route id, then its label,
+ * then the host of a URL address, then its delivery mode. The address itself
+ * is never used: a Slack or Discord incoming-webhook URL is a secret.
+ */
+function toDeliveryTargetId(target: AutomationDeliveryTarget): string {
+  if (target.routeId) return target.routeId;
+  if (target.label) return target.label;
+  if (target.address) {
+    try {
+      const host = new URL(target.address).host;
+      if (host) return host;
+    } catch {
+      // Not a URL (a phone number, an e-mail address): fall through to the mode.
+    }
+  }
+  return target.kind;
 }
 
 function extractArtifactReferences(result: unknown): ArtifactReference[] {
@@ -169,12 +197,13 @@ export class AutomationDeliveryManager {
 
     await this.routeBindings.start();
     const body = buildDeliveryMessage(job, run);
+    const reply = job.delivery.targets.length === 0 && Boolean(job.delivery.replyToRouteId);
     const primaryTargets = this.resolveTargets(job.delivery.targets.length > 0
       ? [...job.delivery.targets]
       : job.delivery.replyToRouteId
         ? [{ kind: 'surface', routeId: job.delivery.replyToRouteId } satisfies AutomationDeliveryTarget]
         : []);
-    const attempts = await this.deliverText(job, run, body, primaryTargets.map((entry) => entry.target));
+    const attempts = await this.deliverText(job, run, body, primaryTargets.map((entry) => entry.target), { reply });
     const needsFallback = attempts.length === 0 || attempts.every((attempt) => attempt.status === 'failed' || attempt.status === 'dead_lettered');
     if (!needsFallback || job.delivery.fallbackTargets.length === 0) {
       return attempts;
@@ -188,7 +217,9 @@ export class AutomationDeliveryManager {
     run: AutomationRun,
     body: string,
     targets: readonly AutomationDeliveryTarget[],
+    options: { readonly reply?: boolean } = {},
   ): Promise<readonly AutomationDeliveryAttempt[]> {
+    const reply = options.reply === true;
     if (!this.isEnabled()) return [];
     await this.routeBindings.start();
     const resolvedTargets = this.resolveTargets(targets).filter((entry) => this.isTargetEnabled(entry.target));
@@ -207,7 +238,7 @@ export class AutomationDeliveryManager {
         status: 'pending',
       };
       attempts.push(attempt);
-      this.syncAttempt(attempt, run, 'queued');
+      this.syncAttempt(attempt, run, 'queued', reply);
 
       const retryPolicy = job.failure.retryPolicy;
       let attemptIndex = 0;
@@ -225,7 +256,7 @@ export class AutomationDeliveryManager {
         attempts[attempts.length - 1] = attempt;
         // Reporting the start is observability: if it throws the send still
         // goes ahead, and the sent/failed report that follows settles the state.
-        try { this.syncAttempt(attempt, run, 'started'); }
+        try { this.syncAttempt(attempt, run, 'started', reply); }
         catch (error) { logger.warn('Delivery started but its start could not be reported', { deliveryId, error: summarizeError(error) }); }
         try {
           const responseId = await this.sendTarget(resolved, body, job, run);
@@ -243,7 +274,7 @@ export class AutomationDeliveryManager {
             responseId: responseId ?? target.address ?? target.routeId ?? target.label ?? target.surfaceKind ?? 'delivered',
           };
           attempts[attempts.length - 1] = attempt;
-          try { this.syncAttempt(attempt, run, 'succeeded'); }
+          try { this.syncAttempt(attempt, run, 'succeeded', reply); }
           catch (error) { logger.warn('Delivery succeeded but its receipt could not be saved', { deliveryId, error: summarizeError(error) }); }
           lastError = '';
           break;
@@ -270,7 +301,7 @@ export class AutomationDeliveryManager {
             attempts[attempts.length - 1] = attempt;
             // Reporting is observability: a throwing report must not stop the
             // remaining targets from being tried.
-            try { this.syncAttempt(attempt, run, 'failed', lastError, retryable, attemptIndex); }
+            try { this.syncAttempt(attempt, run, 'failed', reply, lastError, retryable, attemptIndex); }
             catch (reportError) { logger.warn('Delivery failed and its failure could not be reported', { deliveryId, error: summarizeError(reportError) }); }
             break;
           }
@@ -357,14 +388,15 @@ export class AutomationDeliveryManager {
     attempt: AutomationDeliveryAttempt,
     run: AutomationRun,
     phase: 'queued' | 'started' | 'succeeded' | 'failed',
+    reply: boolean,
     error?: string,
     retryable = false,
     attempts = 1,
   ): void {
     this.runtimeDispatch?.syncDeliveryAttempt(attempt, `deliveries.${phase}`);
     if (!this.runtimeBus) return;
-    const surfaceKind = toDeliverySurfaceKind(attempt.target.surfaceKind);
-    const targetId = attempt.target.address ?? attempt.target.routeId ?? 'unknown';
+    const surfaceKind = toDeliverySurfaceKind(attempt.target);
+    const targetId = toDeliveryTargetId(attempt.target);
     const ctx = {
       sessionId: run.target.sessionId ?? 'automation',
       source: 'automation-delivery-manager',
@@ -377,7 +409,7 @@ export class AutomationDeliveryManager {
         runId: attempt.runId,
         surfaceKind,
         targetId,
-        deliveryKind: toDeliveryKind(surfaceKind),
+        deliveryKind: toDeliveryKind(surfaceKind, reply),
       });
       return;
     }

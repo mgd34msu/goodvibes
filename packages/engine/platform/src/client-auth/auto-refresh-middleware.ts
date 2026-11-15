@@ -6,9 +6,12 @@
  * `auth.current()`.
  *
  * Responsibilities:
- *   1. Pre-flight: call `coordinator.ensureFreshToken()` before dispatching the
- *      request. Updates `ctx.headers.Authorization` with the fresh token so
- *      consumer middleware (which runs after this one) sees the current token.
+ *   1. Pre-flight: the transport builds the Authorization header from
+ *      `coordinator.currentToken()`, which reads the token store once and
+ *      refreshes a token inside the leeway window first, so the header is
+ *      already current when this middleware runs. When that refresh was
+ *      rejected for good and the store cleared, any caller-supplied
+ *      Authorization header is dropped rather than sent.
  *   2. Reactive 401: if `next()` throws a 401-shaped error, trigger a refresh
  *      via `coordinator.refreshAndRetryOnce()` and set `ctx.parsedBody` to the
  *      retry result so the transport can return it to the caller.
@@ -26,7 +29,7 @@ import type { HttpJsonTransport } from '@goodvibes-jev/engine/transport-http/htt
 import type { GoodVibesTokenStore } from './types.js';
 import type { AutoRefreshCoordinator } from './auto-refresh.js';
 import { GoodVibesError } from '@goodvibes-jev/engine/errors';
-import { is401Error, type RefreshOutcome } from './auto-refresh.js';
+import { is401Error } from './auto-refresh.js';
 
 /** Request-local flag key that never conflicts with public HttpJsonRequestOptions fields. */
 const ATTEMPTED_FLAG = '__gv_ar_attempted';
@@ -41,9 +44,13 @@ const ATTEMPTED_FLAG = '__gv_ar_attempted';
  *                      whose middleware chain contains this middleware, so that
  *                      the retry benefits from other middleware (e.g. logging,
  *                      tracing) except for another auto-refresh cycle.
- * @param tokenStore  - The token store from which to read the fresh token after
- *                      pre-flight refresh, so `ctx.headers.Authorization` can
- *                      be updated before consumer middleware runs.
+ * @param _tokenStore - Unused: the transport reads the token through
+ *                      `coordinator.currentToken()`. Kept so existing callers
+ *                      compile.
+ *
+ * The transport the middleware is installed on must resolve its auth token
+ * with `coordinator.currentToken()` (as `createGoodVibesPlatform` does); the
+ * middleware itself never reads the token store.
  *
  * @example
  * const mw = createAutoRefreshMiddleware(coordinator, transport, tokenStore);
@@ -52,7 +59,7 @@ const ATTEMPTED_FLAG = '__gv_ar_attempted';
 export function createAutoRefreshMiddleware(
   coordinator: AutoRefreshCoordinator,
   transport: Pick<HttpJsonTransport, 'requestJson'>,
-  tokenStore: GoodVibesTokenStore,
+  _tokenStore?: GoodVibesTokenStore,
 ): TransportMiddleware {
   return async function autoRefreshMiddleware(
     ctx: TransportContext,
@@ -74,33 +81,16 @@ export function createAutoRefreshMiddleware(
       return;
     }
 
-    // ── Pre-flight refresh ───────────────────────────────────────────────────
-    // Refresh the token before dispatch when it is within the leeway window.
-    // After refresh, update ctx.headers.Authorization with the fresh token so
-    // consumer middleware (which runs after this one in the chain) sees the
-    // current Bearer token, not the stale one that was set when ctx was built.
-    let refreshOutcome: RefreshOutcome;
-    try {
-      refreshOutcome = await coordinator.ensureFreshToken();
-    } catch (error) {
-      ctx.error = error;
-      return;
-    }
-    let freshToken: string | null;
-    try {
-      freshToken = await tokenStore.getToken();
-    } catch (error) {
-      ctx.error = error;
-      return;
-    }
-    // The pre-flight refresh was rejected for good and cleared the store: the
-    // header built before it holds a token the daemon will refuse, so drop it
-    // rather than send it. (A store that simply has no token is left alone: a
-    // caller-supplied Authorization header is not ours to remove.)
-    const sessionCleared = refreshOutcome === 'cleared' && !freshToken;
-    if (freshToken) {
-      ctx.headers['Authorization'] = `Bearer ${freshToken}`;
-    } else if (sessionCleared) {
+    // ── Pre-flight ───────────────────────────────────────────────────────────
+    // The header already carries the token `coordinator.currentToken()` read
+    // (refreshed first when it was inside the leeway window). When that read
+    // found the store empty because a refresh was rejected for good, a
+    // caller-supplied Authorization header would only be refused, so drop it.
+    // (A store that simply has no token is left alone: a caller-supplied
+    // Authorization header is not ours to remove.)
+    const usedToken = bearerTokenOf(ctx.headers);
+    const sessionCleared = coordinator.sessionCleared;
+    if (sessionCleared) {
       for (const key of Object.keys(ctx.headers)) {
         if (key.toLowerCase() === 'authorization') delete ctx.headers[key];
       }
@@ -192,7 +182,7 @@ export function createAutoRefreshMiddleware(
         // transport.requestJson goes through the full middleware chain; the
         // ATTEMPTED_FLAG ensures this middleware is a passthrough on that call.
         return transport.requestJson<unknown>(ctx.url, retryOptions as never);
-      }, freshToken);
+      }, sessionCleared ? null : usedToken);
     } catch (retryErr) {
       // Place onto ctx.error, transport's post-chain check will rethrow it
       // without the middleware-wrapping treatment.
@@ -214,3 +204,13 @@ export function createAutoRefreshMiddleware(
 // ---------------------------------------------------------------------------
 
 // is401Error is shared, import from auto-refresh.ts to avoid divergence.
+
+/** The bearer token a request's headers carry, or null. */
+function bearerTokenOf(headers: Readonly<Record<string, string>>): string | null {
+  for (const [key, value] of Object.entries(headers)) {
+    if (key.toLowerCase() !== 'authorization') continue;
+    const match = /^Bearer\s+(.+)$/i.exec(value);
+    return match ? match[1]!.trim() : null;
+  }
+  return null;
+}

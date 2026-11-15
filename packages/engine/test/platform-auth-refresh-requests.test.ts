@@ -135,3 +135,23 @@ describe('realtime connects', () => {
     expect(headers.get('authorization')).toBe('Bearer fresh-token');
   });
 });
+
+describe('token store reads per request', () => {
+  test('an ordinary request reads the token store once and sends what it read', async () => {
+    const inner = createMemoryTokenStore('current-token');
+    await inner.setTokenEntry('current-token', NOW_MS + 3_600_000);
+    let reads = 0;
+    const store = {
+      ...inner,
+      getToken: async () => { reads += 1; return inner.getToken(); },
+      getTokenEntry: async () => { reads += 1; return inner.getTokenEntry(); },
+    };
+    const { fetch, seen } = recordingFetch(() => jsonResponse(SNAPSHOT));
+    const platform = createGoodVibesPlatform({ baseUrl: 'https://daemon.example.com', tokenStore: store, fetch });
+
+    await platform.operator.accounts.snapshot();
+
+    expect(reads).toBe(1);
+    expect(seen[0]!.headers['Authorization']).toBe('Bearer current-token');
+  });
+});

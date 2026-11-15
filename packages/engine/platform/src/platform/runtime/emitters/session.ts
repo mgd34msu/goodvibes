@@ -8,6 +8,8 @@ import type { RuntimeEventEnvelope } from '../events/envelope.js';
 import type { RuntimeEventBus } from '../events/index.js';
 import type { SessionEvent } from '../../../events/session.js';
 import type { EmitterContext } from './index.js';
+import type { DomainDispatch } from '../store/index.js';
+import { sessionRecoveryPatch } from '../store/domains/session.js';
 
 /**
  * Creates a typed session event envelope, reducing boilerplate across the
@@ -111,4 +113,19 @@ export function emitSessionRecoveryFailed(
   data: { sessionId: string; error: string }
 ): void {
   bus.emit('session', sessionEvent('SESSION_RECOVERY_FAILED', data, ctx));
+}
+
+/**
+ * Keep the store's session recovery machine (`recoveryState`, `recoveryError`,
+ * `wasRepaired`, `isResumed`) in step with the session events on `bus`: the
+ * events are the one owner, the store a view of them. Returns the unsubscribe.
+ */
+export function attachSessionRecoveryState(
+  bus: Pick<RuntimeEventBus, 'onDomain'>,
+  dispatch: Pick<DomainDispatch, 'syncSessionState'>,
+): () => void {
+  return bus.onDomain('session', ({ payload }) => {
+    const patch = sessionRecoveryPatch(payload);
+    if (patch) dispatch.syncSessionState(patch, `session.${payload.type.toLowerCase()}`);
+  });
 }

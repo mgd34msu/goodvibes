@@ -13,33 +13,15 @@
  */
 
 import type { ProcessCheckSummary, ProcessCheckCriterion, ProcessKind } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
+import { FLEET_NODE_KINDS, FLEET_NODE_STATES } from '@goodvibes-jev/engine/platform/events';
 import type { ApprovalRecord, FleetProcessNode } from './goodvibes';
 import { asRecord } from './object';
 
 /**
- * PROCESS_KIND_SCHEMA (operator-contract-schemas-fleet.ts) at the time this was written.
- * 'acp-agent' (platform 1.8.0): a third-party coding agent spawned via acp.spawn, hosted as a
- * daemon session, a steerable/stoppable fleet row like any other agent kind. This client
- * renders it with the same generic KindBadge every other kind gets (kindLabel just prints
- * the string), the honest minimal treatment; a dedicated spawn UX is a later round.
+ * Every kind the engine names, from the engine's one list. Every kind renders
+ * with the same generic KindBadge (kindLabel prints the string).
  */
-const PROCESS_KIND_TABLE: Record<ProcessKind, true> = {
-  agent: true,
-  contract: true,
-  'contract-group': true,
-  'contract-unit': true,
-  workflow: true,
-  trigger: true,
-  schedule: true,
-  watcher: true,
-  'background-process': true,
-  'acp-agent': true,
-  'observed-external': true,
-  'code-index': true,
-};
-
-/** Every kind the engine's ProcessKind names; a kind added there fails to compile here until listed. */
-export const KNOWN_PROCESS_KINDS = Object.keys(PROCESS_KIND_TABLE) as ProcessKind[];
+export const KNOWN_PROCESS_KINDS: readonly ProcessKind[] = FLEET_NODE_KINDS;
 
 /**
  * The one fleet kind goodvibes did not spawn or host, an externally-launched
@@ -55,22 +37,8 @@ export function isObservedKind(kind: string): boolean {
   return kind === 'observed-external';
 }
 
-/** PROCESS_STATE_SCHEMA (operator-contract-schemas-fleet.ts) at the time this was written. */
-export const KNOWN_PROCESS_STATES = [
-  'thinking',
-  'executing-tool',
-  'awaiting-approval',
-  'streaming',
-  'stalled',
-  'retrying',
-  'done',
-  'failed',
-  'killed',
-  'interrupted',
-  'idle',
-  'queued',
-  'paused',
-] as const;
+/** Every state the engine names, from the engine's one list. */
+export const KNOWN_PROCESS_STATES = FLEET_NODE_STATES;
 
 /** States that represent a process no longer live, used for "N active" honesty. */
 const TERMINAL_STATES = new Set(['done', 'failed', 'killed', 'interrupted']);

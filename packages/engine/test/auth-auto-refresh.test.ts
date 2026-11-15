@@ -10,8 +10,7 @@ import {
   createMemoryTokenStore,
 } from '../platform/src/auth.js';
 import type { AutoRefreshOptions } from '../platform/src/auth.js';
-import { forgetFailureReadings, GoodVibesError, installJudgmentPort, JudgmentPortMissingError } from '../errors/src/index.js';
-import { useFailureReadings } from './_helpers/failure-readings.js';
+import { GoodVibesError, installJudgmentPort } from '../errors/src/index.js';
 import type { PlatformObserver } from '../platform/src/observer/index.js';
 import type { OperatorApiClient } from '../operator-client/src/index.js';
 import { installFrozenNow } from './_helpers/test-timeout.js';
@@ -688,16 +687,11 @@ describe('is401Error: broadened error shapes', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Refresh failures: whether another refresh could succeed decides whether the
-// token is cleared (structure first, then Jev's reading of the wording).
+// Refresh failures: only the auth server's status clears the token; nothing
+// is read by a model and no judgment port is needed in a client.
 // ---------------------------------------------------------------------------
 
 describe('refresh failure transience', () => {
-  const readings = useFailureReadings([
-    ['The refresh token has been revoked by the administrator', { category: 'authentication' }],
-    ['socket hang up', { category: 'network', transientNetwork: true }],
-  ]);
-
   async function refreshFailingWith(error: unknown) {
     const store = createMemoryTokenStore('near-expiry-token', Date.now() + 10_000);
     const transitions: unknown[] = [];
@@ -718,57 +712,30 @@ describe('refresh failure transience', () => {
     return { store, transitions, errors, coordinator };
   }
 
-  it('keeps the token when the auth server fails with a status a retry can clear, without a reading', async () => {
+  it('keeps the token when the auth server fails with a status a retry can clear', async () => {
     const run = await refreshFailingWith(Object.assign(new Error('Service Unavailable'), { status: 503 }));
-    await run.coordinator.ensureFreshToken();
+    expect(await run.coordinator.ensureFreshToken()).toBe('not-refreshed');
     expect(await run.store.getToken()).toBe('near-expiry-token');
     expect(run.transitions).toEqual([]);
     expect(run.errors[0]?.message).toContain('keeping the token');
-    expect(readings.requests).toHaveLength(0);
   });
 
-  it('keeps the token on a connection fault named by its errno code', async () => {
-    const cause = Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:443'), { code: 'ECONNREFUSED' });
-    const run = await refreshFailingWith(new TypeError('fetch failed', { cause }));
-    await run.coordinator.ensureFreshToken();
-    expect(await run.store.getToken()).toBe('near-expiry-token');
-    expect(readings.requests).toHaveLength(0);
-  });
-
-  it('reads wording with no status: revoked credentials clear the token', async () => {
-    const run = await refreshFailingWith(new Error('The refresh token has been revoked by the administrator'));
-    await run.coordinator.ensureFreshToken();
+  it('clears the token when the auth server rejects the credentials', async () => {
+    const run = await refreshFailingWith(Object.assign(new Error('invalid_grant'), { status: 401 }));
+    expect(await run.coordinator.ensureFreshToken()).toBe('cleared');
     expect(await run.store.getToken()).toBeNull();
     expect(run.transitions).toContainEqual({ from: 'token', to: 'anonymous', reason: 'expire' });
-    expect(readings.requests).toHaveLength(1);
+    expect(run.errors).toHaveLength(1);
   });
 
-  it('reads wording with no status: a dropped connection keeps the token', async () => {
-    const run = await refreshFailingWith(new Error('socket hang up'));
-    await run.coordinator.ensureFreshToken();
-    expect(await run.store.getToken()).toBe('near-expiry-token');
-    expect(run.transitions).toEqual([]);
-    expect(readings.requests).toHaveLength(1);
-  });
-});
-
-describe('refresh failure with no judgment port', () => {
-  it('rejects the refresh with the port error and leaves the token as it was', async () => {
-    forgetFailureReadings();
+  it('keeps a still-valid token on a failure with no status, with no judgment port installed', async () => {
     const previous = installJudgmentPort(undefined);
     try {
-      const store = createMemoryTokenStore('near-expiry-token', Date.now() + 10_000);
-      const { AutoRefreshCoordinator } = await import('../platform/src/client-auth/auto-refresh.js');
-      const coordinator = new AutoRefreshCoordinator({
-        tokenStore: store,
-        autoRefresh: true,
-        refreshLeewayMs: 60_000,
-        refresh: async () => {
-          throw new Error('something unusual happened');
-        },
-      });
-      await expect(coordinator.ensureFreshToken()).rejects.toBeInstanceOf(JudgmentPortMissingError);
-      expect(await store.getToken()).toBe('near-expiry-token');
+      const run = await refreshFailingWith(new TypeError('Failed to fetch'));
+      expect(await run.coordinator.ensureFreshToken()).toBe('not-refreshed');
+      expect(await run.store.getToken()).toBe('near-expiry-token');
+      expect(run.transitions).toEqual([]);
+      expect(run.errors).toHaveLength(1);
     } finally {
       installJudgmentPort(previous);
     }

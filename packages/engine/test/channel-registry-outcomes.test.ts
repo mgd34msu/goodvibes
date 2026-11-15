@@ -53,6 +53,25 @@ describe('surface registry', () => {
     expect(store.getState().surfaces.surfaces.get('surface:matrix')?.state).toBe('disabled');
   });
 
+  test('switching a surface on in settings publishes SURFACE_ENABLED to subscribers', async () => {
+    const values: Record<string, unknown> = { 'surfaces.slack.enabled': false };
+    const listeners = new Map<string, () => void>();
+    const config = {
+      ...(configManager(values) as object),
+      get: (key: string) => values[key],
+      subscribe: (key: string, cb: () => void) => { listeners.set(key, cb); return () => listeners.delete(key); },
+    } as never;
+    const emitted: Array<{ type: string; surfaceId: string }> = [];
+    const bus = { emit: (_domain: string, envelope: { payload: { type: string; surfaceId: string } }) => { emitted.push(envelope.payload); } };
+    const registry = new SurfaceRegistry(config);
+    registry.syncConfiguredSurfaces();
+    registry.attachRuntimeBus(bus as never);
+    expect(emitted).toEqual([]);
+    values['surfaces.slack.enabled'] = true;
+    listeners.get('surfaces.slack.enabled')?.();
+    expect(emitted.map((event) => [event.type, event.surfaceId])).toEqual([['SURFACE_ENABLED', 'surface:slack']]);
+  });
+
   test('the fallback records leave accountId off when none is configured', () => {
     const registry = new SurfaceRegistry(configManager({ 'surfaces.slack.enabled': true }));
     const slack = registry.syncConfiguredSurfaces().find((record) => record.kind === 'slack')!;

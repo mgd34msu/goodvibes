@@ -5,7 +5,7 @@
  * - `isRuntimeEventDomain(value)`, typeguard for the 28 domain names.
  * - `isKnownEventType(value)`, typeguard for the event types that have a registered validator (a subset of the full event union).
  * - `registeredEventTypes()`, enumerates the event-type strings that have a registered validator.
- * - `validateKnownEvent(event)`, validates an event payload (the object with its `type`, not the envelope around it) against its registered contract.
+ * - `validateKnownEvent(event)`, validates an event payload (the object with its `type`, not the envelope around it) against the rules for its type; the rules are compile-checked against the event unions in this directory.
  */
 export type { SessionEvent, SessionEventType } from './session.js';
 export type { TurnEvent, TurnEventType, TurnInputOrigin, TurnStopReason, PartialToolCall } from './turn.js';
@@ -111,6 +111,8 @@ export type { TransportEvent, TransportEventType } from './transport.js';
 export type { CompactionEvent, CompactionEventType } from './compaction.js';
 export type { GoodVibesUIEvent, GoodVibesUIEventType } from './ui.js';
 export type { OpsEvent, OpsEventType, OpsInterventionReason } from './ops.js';
+export type { FleetAttentionReason, FleetEvent, FleetEventType, FleetNodeKind, FleetNodeState } from './fleet.js';
+export { FLEET_ATTENTION_REASONS, FLEET_NODE_KINDS, FLEET_NODE_STATES } from './fleet.js';
 export { RUNTIME_EVENT_DOMAINS, isRuntimeEventDomain } from './domain-map.js';
 export type {
   AnyRuntimeEvent,
@@ -162,7 +164,6 @@ export {
 } from './contracts.js';
 export type {
   ContractResult,
-  EventEnvelopeShape,
   FieldKind,
   FieldSpec,
 } from './contracts.js';

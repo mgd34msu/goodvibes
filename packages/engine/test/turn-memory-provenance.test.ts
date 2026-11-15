@@ -18,7 +18,7 @@ import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.j
 import type { RuntimeEventEnvelope } from '../platform/src/platform/runtime/events/index.js';
 import { emitTurnCompleted } from '../platform/src/platform/runtime/emitters/turn.js';
 import { handleFinalResponseOutcome } from '../platform/src/platform/core/orchestrator-turn-helpers.js';
-import { validateTurnCompleted } from '../platform/src/events/contracts.js';
+import { validateKnownEvent } from '../platform/src/events/contracts.js';
 import type { TurnEvent } from '../platform/src/events/turn.js';
 import { memoryRecordIdsOf } from '../platform/src/platform/agents/turn-knowledge-injection.js';
 
@@ -74,7 +74,7 @@ describe('emitTurnCompleted: metadata.memory.recordIds stamping', () => {
     });
     expect(payload.metadata).toEqual({ memory: { recordIds: ['mem-1', 'mem-2'] } });
     // The wire event still validates against the turn contract.
-    expect(validateTurnCompleted(payload).valid).toBe(true);
+    expect(validateKnownEvent(payload).valid).toBe(true);
   });
 
   test('a turn without memory injections serves NO metadata field (absent, not [])', async () => {
@@ -82,7 +82,7 @@ describe('emitTurnCompleted: metadata.memory.recordIds stamping', () => {
       emitTurnCompleted(bus, CTX, { turnId: 't-2', response: 'done', stopReason: 'completed' });
     });
     expect('metadata' in payload).toBe(false);
-    expect(validateTurnCompleted(payload).valid).toBe(true);
+    expect(validateKnownEvent(payload).valid).toBe(true);
   });
 
   test('an explicitly empty id list also serves NO metadata field', async () => {

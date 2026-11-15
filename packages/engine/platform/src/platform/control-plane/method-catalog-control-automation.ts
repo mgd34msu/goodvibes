@@ -451,7 +451,7 @@ export const builtinGatewayControlAutomationMethodDescriptors: readonly GatewayM
   methodDescriptor({
     id: 'surfaces.list',
     title: 'List Surfaces',
-    description: 'Return registered channel and control surfaces.',
+    description: 'Return registered channel and control surfaces. Stay current by subscribing to the surfaces event domain: SURFACE_ENABLED and SURFACE_DISABLED when a surface is switched on or off, SURFACE_CAPABILITY_CHANGED when a capability is added or removed, SURFACE_ACCOUNT_CONNECTED and SURFACE_ACCOUNT_DEGRADED when a channel starts working or starts failing.',
     category: 'routes',
     scopes: ['read:routes'],
     http: { method: 'GET', path: '/api/surfaces' },

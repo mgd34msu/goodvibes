@@ -7,6 +7,17 @@ import { ConfigManager } from '../config/manager.js';
 import type { ChannelPluginRegistry } from './plugin-registry.js';
 import type { FeatureFlagReader } from '../runtime/feature-flags/index.js';
 import { isSurfaceFeatureGateEnabled } from '../runtime/feature-flags/index.js';
+import type { RuntimeEventBus } from '../runtime/events/index.js';
+import { emitSurfaceCapabilityChanged, emitSurfaceDisabled, emitSurfaceEnabled } from '../runtime/emitters/surfaces.js';
+import { CONFIG_SCHEMA } from '../config/schema.js';
+import type { ConfigKey } from '../config/schema-types.js';
+import { logger } from '../utils/logger.js';
+import { summarizeError } from '../utils/error-display.js';
+
+/** The settings that switch a surface on or off; a change to one re-syncs the list. */
+const SURFACE_SWITCH_KEYS: readonly ConfigKey[] = CONFIG_SCHEMA
+  .map((setting) => setting.key as ConfigKey)
+  .filter((key) => /^surfaces\.[^.]+\.enabled$/.test(key) || key === 'web.enabled' || key === 'controlPlane.enabled');
 
 function now(): number {
   return Date.now();
@@ -18,6 +29,8 @@ export class SurfaceRegistry {
   private readonly surfaces = new Map<string, SurfaceRecord>();
   private runtimeDispatch: DomainDispatch | null = null;
   private pluginRegistry: ChannelPluginRegistry | null = null;
+  private runtimeBus: Pick<RuntimeEventBus, 'emit'> | null = null;
+  private configUnsubscribes: Array<() => void> = [];
 
   constructor(configManager: ConfigManager, runtimeStore?: RuntimeStore, featureFlags?: FeatureFlagReader) {
     this.configManager = configManager;
@@ -34,6 +47,55 @@ export class SurfaceRegistry {
 
   attachPluginRegistry(pluginRegistry: ChannelPluginRegistry): void {
     this.pluginRegistry = pluginRegistry;
+  }
+
+  /**
+   * Publish surface changes on `bus` (`surfaces` domain), so a client of
+   * `surfaces.list` stays current without polling: switching a surface on or
+   * off re-syncs the list, and each sync announces SURFACE_ENABLED,
+   * SURFACE_DISABLED and SURFACE_CAPABILITY_CHANGED for what actually changed.
+   * Cost: one in-memory re-sync per change of a surface switch, nothing per
+   * request. Returns the detach function.
+   */
+  attachRuntimeBus(bus: Pick<RuntimeEventBus, 'emit'>): () => void {
+    this.detachRuntimeBus();
+    this.runtimeBus = bus;
+    const resync = (): void => {
+      try { this.syncConfiguredSurfaces(); }
+      catch (error) { logger.warn('Surface list could not be re-read after a settings change', { error: summarizeError(error) }); }
+    };
+    this.configUnsubscribes = SURFACE_SWITCH_KEYS.map((key) => this.configManager.subscribe(key, resync));
+    return () => this.detachRuntimeBus();
+  }
+
+  detachRuntimeBus(): void {
+    for (const unsubscribe of this.configUnsubscribes.splice(0)) unsubscribe();
+    this.runtimeBus = null;
+  }
+
+  /** Announce what changed between the last sync's record and this one's. */
+  private publishChange(previous: SurfaceRecord | undefined, next: SurfaceRecord, reason: string): void {
+    const bus = this.runtimeBus;
+    // The first sight of a surface is its starting state, not a change.
+    if (!bus || !previous) return;
+    const ctx = { sessionId: 'system', source: 'surface-registry', traceId: next.id } as const;
+    try {
+      if (!previous.enabled && next.enabled) {
+        emitSurfaceEnabled(bus, ctx, { surfaceKind: next.kind, surfaceId: next.id, accountId: next.accountId ?? next.kind });
+      } else if (previous.enabled && !next.enabled) {
+        emitSurfaceDisabled(bus, ctx, { surfaceKind: next.kind, surfaceId: next.id, reason });
+      }
+      const before = new Set(previous.capabilities);
+      const after = new Set(next.capabilities);
+      for (const capability of after) {
+        if (!before.has(capability)) emitSurfaceCapabilityChanged(bus, ctx, { surfaceKind: next.kind, surfaceId: next.id, capability, enabled: true });
+      }
+      for (const capability of before) {
+        if (!after.has(capability)) emitSurfaceCapabilityChanged(bus, ctx, { surfaceKind: next.kind, surfaceId: next.id, capability, enabled: false });
+      }
+    } catch (error) {
+      logger.warn('Could not publish a surface change', { surface: next.id, error: summarizeError(error) });
+    }
   }
 
   syncConfiguredSurfaces(): SurfaceRecord[] {
@@ -191,12 +253,16 @@ export class SurfaceRegistry {
     const current = new Set(records.map((record) => record.id));
     for (const gone of this.surfaces.values()) {
       if (current.has(gone.id)) continue;
-      this.runtimeDispatch?.syncSurface({ ...gone, enabled: false, state: 'disabled' }, 'surfaces.sync');
+      const disabled: SurfaceRecord = { ...gone, enabled: false, state: 'disabled' };
+      this.runtimeDispatch?.syncSurface(disabled, 'surfaces.sync');
+      this.publishChange(gone, disabled, 'the surface is no longer available (its feature gate or plugin was removed)');
     }
+    const previous = new Map(this.surfaces);
     this.surfaces.clear();
     for (const record of records) {
       this.surfaces.set(record.id, record);
       this.runtimeDispatch?.syncSurface(record, 'surfaces.sync');
+      this.publishChange(previous.get(record.id), record, 'the surface was turned off (its setting, feature gate or ingress policy)');
     }
     return records;
   }

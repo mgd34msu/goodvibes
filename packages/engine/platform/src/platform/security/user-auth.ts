@@ -1,4 +1,4 @@
-import { randomBytes, randomUUID, scryptSync, timingSafeEqual } from 'crypto';
+import { randomBytes, randomUUID, scrypt, scryptSync, timingSafeEqual } from 'crypto';
 import { existsSync, readFileSync, renameSync, rmSync } from 'node:fs';
 import { logger } from '../utils/logger.js';
 import { confirmFileDurable, writeFileAtomic } from '../utils/atomic-json-store.js';
@@ -103,8 +103,19 @@ interface AccountLockState {
  * branch so callers can decide whether to retire the bootstrap credential file.
  */
 export type AuthenticateResult =
-  | { readonly ok: true; readonly user: AuthUser; readonly usedBootstrapCredential: boolean; readonly lockedUntilMs?: undefined }
-  | { readonly ok: false; readonly user?: undefined; readonly usedBootstrapCredential?: undefined; readonly lockedUntilMs?: number };
+  | { readonly ok: true; readonly user: AuthUser; readonly usedBootstrapCredential: boolean; readonly lockedUntilMs?: undefined; readonly busy?: undefined }
+  | {
+    readonly ok: false; readonly user?: undefined; readonly usedBootstrapCredential?: undefined; readonly lockedUntilMs?: number;
+    /** The sign-in queue was full, so the password was not checked; the caller answers "try again shortly". */
+    readonly busy?: true;
+  };
+
+/**
+ * Sign-ins waiting for the password check. The check is memory-hard (about
+ * 128 MiB and 0.2 s each), so attempts run one at a time off the event loop and
+ * a burst beyond this many is refused at once instead of queueing work.
+ */
+const MAX_WAITING_SIGN_INS = 8;
 
 interface AuthUserStore {
   readonly version: 1;
@@ -156,7 +167,43 @@ function generateInitialPassword(): string {
   return randomBytes(16).toString('hex');
 }
 
-function verifyPassword(password: string, passwordHash: string): { readonly params: ScryptParams; readonly legacy: boolean } | undefined {
+type PasswordVerification = { readonly params: ScryptParams; readonly legacy: boolean } | undefined;
+type ParsedPasswordHash = { readonly salt: Buffer; readonly expected: Buffer; readonly params: ScryptParams; readonly legacy: boolean };
+function deriveSync(password: string, salt: Buffer, params: ScryptParams): Buffer {
+  return scryptSync(password, salt, SCRYPT_KEY_LENGTH, { N: params.N, r: params.r, p: params.p, maxmem: SCRYPT_MAXMEM });
+}
+/** The same derivation on the libuv thread pool, so the event loop keeps serving while it runs. */
+const deriveAsync = (password: string, salt: Buffer, params: ScryptParams): Promise<Buffer> => new Promise((resolve, reject) => {
+  scrypt(password, salt, SCRYPT_KEY_LENGTH, { N: params.N, r: params.r, p: params.p, maxmem: SCRYPT_MAXMEM },
+    (error, derived) => { if (error) reject(error); else resolve(derived); });
+});
+
+function compareDerived(parsed: ParsedPasswordHash, actual: Buffer): PasswordVerification {
+  if (actual.length !== parsed.expected.length) return undefined;
+  return timingSafeEqual(actual, parsed.expected) ? { params: parsed.params, legacy: parsed.legacy } : undefined;
+}
+
+function verifyPassword(password: string, passwordHash: string): PasswordVerification {
+  const parsed = parsePasswordHash(passwordHash);
+  if (!parsed) return undefined;
+  try { return compareDerived(parsed, deriveSync(password, parsed.salt, parsed.params)); }
+  catch { return undefined; }
+}
+
+async function verifyPasswordAsync(password: string, passwordHash: string): Promise<PasswordVerification> {
+  const parsed = parsePasswordHash(passwordHash);
+  if (!parsed) return undefined;
+  try { return compareDerived(parsed, await deriveAsync(password, parsed.salt, parsed.params)); }
+  catch { return undefined; }
+}
+
+async function hashPasswordAsync(password: string, params: ScryptParams): Promise<string> {
+  const salt = randomBytes(16);
+  const derived = await deriveAsync(password, salt, params);
+  return `${toBase64(salt)}:${params.N}:${params.r}:${params.p}:${toBase64(derived)}`;
+}
+
+function parsePasswordHash(passwordHash: string): ParsedPasswordHash | undefined {
   const parts = passwordHash.split(':');
   // Legacy format: salt:hash (2 parts), uses the original fixed cost for backward compatibility.
   // New format: salt:N:r:p:hash (5 parts)
@@ -181,16 +228,7 @@ function verifyPassword(password: string, passwordHash: string): { readonly para
   }
 
   if (!saltEncoded || !hashEncoded) return undefined;
-
-  try {
-    const salt = Buffer.from(saltEncoded, 'base64');
-    const expected = Buffer.from(hashEncoded, 'base64');
-    const actual = scryptSync(password, salt, SCRYPT_KEY_LENGTH, { N: params.N, r: params.r, p: params.p, maxmem: SCRYPT_MAXMEM });
-    if (actual.length !== expected.length) return undefined;
-    return timingSafeEqual(actual, expected) ? { params, legacy: parts.length === 2 } : undefined;
-  } catch {
-    return undefined;
-  }
+  return { salt: Buffer.from(saltEncoded, 'base64'), expected: Buffer.from(hashEncoded, 'base64'), params, legacy: parts.length === 2 };
 }
 
 function readBootstrapUsers(filePath: string, observedRecovery?: () => void, freshAbsence = false): AuthUser[] | null {
@@ -389,7 +427,7 @@ export class UserAuthManager {
   private persistFaulted = false;
   private readonly settingsAuthorities = new WeakMap<SettingsSessionAuthority, SettingsSessionAuthorityRecord>();
   private sessions = new Map<string, AuthSession>();
-  /** Per-username failure counters for account-level lockout (independent of IP throttling). */
+  /** Failure counters for lockout, keyed by username (in-process checks) or username and client address (sign-ins). */
   private accountLocks = new Map<string, AccountLockState>();
   private sessionTtlMs: number;
   private readonly maxSessions: number;
@@ -495,66 +533,123 @@ export class UserAuthManager {
   }
 
   /**
-   * Authenticate username/password with per-account lockout.
+   * Authenticate username/password with per-account lockout, synchronously.
+   * For in-process checks; a sign-in that arrives over the network uses
+   * {@link authenticateSignIn}, which keeps the event loop free.
    * - Does NOT leak whether a username exists (same generic error path for unknown users).
-   * - Records failures against the username bucket (not IP) with escalating backoff.
+   * - Records failures with escalating backoff, per username or, when
+   *   `clientAddress` is given, per username and address.
    * - Returns lockedUntilMs when the account is temporarily locked.
    * - Returns usedBootstrapCredential=true when the matched credential originated from
    *   the bootstrap credential file, so callers can defer retirement until a non-bootstrap
    *   login succeeds.
    */
-  authenticate(username: string, password: string): AuthenticateResult {
+  authenticate(username: string, password: string, clientAddress?: string): AuthenticateResult {
+    const attempt = this.beginAttempt(username, clientAddress);
+    if ('result' in attempt) return attempt.result;
+    const settled = this.settleAttempt(attempt, verifyPassword(password, attempt.hashToCheck));
+    if ('ok' in settled) return settled;
+    const user = settled.upgrade ? this.saveUpgradedHash(username, settled.user, hashPassword(password, settled.upgrade)) : settled.user;
+    return this.completeAttempt(attempt, password, user);
+  }
+
+  #signInQueue: Promise<unknown> = Promise.resolve();
+  #signInsWaiting = 0;
+
+  /**
+   * A sign-in from the network: the password check runs on the thread pool,
+   * one at a time, and a lock counts per username and client address, so a
+   * stranger repeating the owner's username locks out only their own address.
+   * A burst beyond {@link MAX_WAITING_SIGN_INS} is answered `busy` without a
+   * password check.
+   */
+  authenticateSignIn(username: string, password: string, clientAddress: string): Promise<AuthenticateResult> {
+    if (this.#signInsWaiting >= MAX_WAITING_SIGN_INS) return Promise.resolve({ ok: false, busy: true });
+    this.#signInsWaiting++;
+    const run = this.#signInQueue.then(async (): Promise<AuthenticateResult> => {
+      const attempt = this.beginAttempt(username, clientAddress);
+      if ('result' in attempt) return attempt.result;
+      const settled = this.settleAttempt(attempt, await verifyPasswordAsync(password, attempt.hashToCheck));
+      if ('ok' in settled) return settled;
+      let user = settled.user;
+      if (settled.upgrade) {
+        try { user = this.saveUpgradedHash(username, user, await hashPasswordAsync(password, settled.upgrade)); }
+        catch (error) { logger.warn('Password hash upgrade could not be computed; the login continues', { username, error: String(error) }); }
+      }
+      return this.completeAttempt(attempt, password, user);
+    });
+    this.#signInQueue = run.then(() => undefined, () => undefined).finally(() => { this.#signInsWaiting--; });
+    return run;
+  }
+
+  private lockKey(username: string, clientAddress: string | undefined): string {
+    return clientAddress === undefined ? username : `${username}\u0000${clientAddress}`;
+  }
+
+  private beginAttempt(username: string, clientAddress: string | undefined):
+    | { readonly result: AuthenticateResult }
+    | { readonly username: string; readonly lockKey: string; readonly now: number; readonly user: AuthUser | undefined; readonly hashToCheck: string } {
     const now = this.nowFn();
     this.refreshFromDisk();
-    const lockState = this.accountLocks.get(username);
+    const lockKey = this.lockKey(username, clientAddress);
+    const lockState = this.accountLocks.get(lockKey);
 
-    // Check account lock (before touching user store; avoids user-existence side-channel).
+    // Check the lock before touching the user store; avoids a user-existence side-channel.
     if (lockState && lockState.lockedUntil > now) {
       // Still locked, record the attempt but keep the lock window intact.
       lockState.failures++;
-      return { ok: false, lockedUntilMs: lockState.lockedUntil };
+      return { result: { ok: false, lockedUntilMs: lockState.lockedUntil } };
     }
 
-    let user = this.users.get(username);
-
+    const user = this.users.get(username);
     // Unknown accounts still perform the configured scrypt work instead of
     // bypassing password derivation. Legacy hashes retain their stored cost.
     const target = this.scryptParams;
     const hashToCheck = user?.passwordHash ?? `Z29vZHZpYmVzLWR1bW15:${target.N}:${target.r}:${target.p}:${Buffer.alloc(SCRYPT_KEY_LENGTH).toString('base64')}`;
-    const verified = verifyPassword(password, hashToCheck);
+    return { username, lockKey, now, user, hashToCheck };
+  }
 
+  /** A failed check records the failure and answers; a passed one says whether the stored hash needs a stronger cost. */
+  private settleAttempt(
+    attempt: { readonly lockKey: string; readonly now: number; readonly user: AuthUser | undefined },
+    verified: PasswordVerification,
+  ): AuthenticateResult | { readonly user: AuthUser; readonly upgrade: ScryptParams | null } {
+    const { lockKey, now, user } = attempt;
     if (!verified || !user) {
-      this._recordLoginFailure(username, now);
-      const newLock = this.accountLocks.get(username);
+      this._recordLoginFailure(lockKey, now);
+      const newLock = this.accountLocks.get(lockKey);
       const lockedUntilMs = newLock && newLock.lockedUntil > now ? newLock.lockedUntil : undefined;
       return lockedUntilMs !== undefined ? { ok: false, lockedUntilMs } : { ok: false };
     }
+    const target = this.scryptParams;
+    if (!(verified.legacy || verified.params.N < target.N || verified.params.r < target.r || verified.params.p < target.p)) return { user, upgrade: null };
+    // Never downgrade a stronger stored dimension during an automatic upgrade.
+    return { user, upgrade: { N: Math.max(target.N, verified.params.N), r: Math.max(target.r, verified.params.r), p: Math.max(target.p, verified.params.p) } };
+  }
 
-    if (verified.legacy || verified.params.N < target.N || verified.params.r < target.r || verified.params.p < target.p) {
-      // Never downgrade a stronger stored dimension during an automatic upgrade.
-      const params = { N: Math.max(target.N, verified.params.N), r: Math.max(target.r, verified.params.r), p: Math.max(target.p, verified.params.p) };
-      const updated = { ...user, passwordHash: hashPassword(password, params) };
-      // The login itself is already verified; a failed upgrade write only keeps the old hash.
-      // A password another writer changed while the scrypt check ran is theirs: the upgrade is dropped, never written over it.
-      try { if (this.persist(new Map(this.users).set(username, updated), { username, passwordHash: user.passwordHash })) user = updated; }
-      catch (error) { logger.warn('Password hash upgrade could not be saved; the login continues', { username, error: String(error) }); }
-    }
+  /** The user with the stronger hash when it was saved, otherwise the user as read. */
+  private saveUpgradedHash(username: string, stored: AuthUser, passwordHash: string): AuthUser {
+    const updated = { ...stored, passwordHash };
+    // The login itself is already verified; a failed upgrade write only keeps the old hash.
+    // A password another writer changed while the scrypt check ran is theirs: the upgrade is dropped, never written over it.
+    try { if (this.persist(new Map(this.users).set(username, updated), { username, passwordHash: stored.passwordHash })) return updated; }
+    catch (error) { logger.warn('Password hash upgrade could not be saved; the login continues', { username, error: String(error) }); }
+    return stored;
+  }
 
-    // Determine whether this login used the bootstrap credential.
-    // Compare against the credential file contents without leaking timing info
-    // (we already confirmed the password is correct at this point).
+  private completeAttempt(attempt: { readonly username: string; readonly lockKey: string }, password: string, user: AuthUser): AuthenticateResult {
+    // Whether this login used the bootstrap credential (the password is already confirmed correct).
     const bootstrapCred = readBootstrapCredentialFile(this.bootstrapCredentialPath);
     const usedBootstrapCredential = bootstrapCred !== null
-      && bootstrapCred.username === username
+      && bootstrapCred.username === attempt.username
       && bootstrapCred.password === password;
-
-    // Success, clear failure count.
-    this.accountLocks.delete(username);
+    this.accountLocks.delete(attempt.lockKey);
     return { ok: true, user, usedBootstrapCredential };
   }
 
   /**
-   * Record a login failure for the given username and apply escalating backoff.
+   * Record a login failure for one lock key (a username, or a username and client
+   * address) and apply escalating backoff.
    *
    * Thresholds are anchored ABOVE the per-IP login budget (default 5/min) so
    * the first account lock cannot fire before the IP limiter has already
@@ -572,8 +667,8 @@ export class UserAuthManager {
    * expiry to jump directly to that tier. This is intentional: repeated attempts
    * during a lock are themselves failures and escalate the penalty schedule.
    */
-  private _recordLoginFailure(username: string, now: number): void {
-    const existing = this.accountLocks.get(username);
+  private _recordLoginFailure(lockKey: string, now: number): void {
+    const existing = this.accountLocks.get(lockKey);
     if (!existing) {
       // New entry, evict if at cap before inserting.
       this._evictAccountLockIfNeeded(now);
@@ -586,7 +681,7 @@ export class UserAuthManager {
     else if (f >= 10) lockDurationMs = 5 * 60_000;
     else if (f >= 6) lockDurationMs = 30_000;
     state.lockedUntil = lockDurationMs > 0 ? now + lockDurationMs : 0;
-    this.accountLocks.set(username, state);
+    this.accountLocks.set(lockKey, state);
   }
 
   /**
@@ -624,8 +719,8 @@ export class UserAuthManager {
    * Returns a defensive copy so callers cannot mutate internal state.
    * Use the injected nowFn (via UserAuthManager constructor) to advance time in tests.
    */
-  getAccountLockState(username: string): AccountLockState | undefined {
-    const state = this.accountLocks.get(username);
+  getAccountLockState(username: string, clientAddress?: string): AccountLockState | undefined {
+    const state = this.accountLocks.get(this.lockKey(username, clientAddress));
     if (!state) return undefined;
     return { failures: state.failures, lockedUntil: state.lockedUntil };
   }

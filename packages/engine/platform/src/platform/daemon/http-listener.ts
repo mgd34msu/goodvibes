@@ -1,161 +1,28 @@
 import { randomUUID } from 'node:crypto';
 import { logger } from '../utils/logger.js';
-import {
-  authFailureTotal,
-  authSuccessTotal,
-  httpRequestDurationMs,
-  httpRequestsTotal,
-} from '../runtime/metrics.js';
+import { httpMethodLabel, httpRequestDurationMs, httpRequestsTotal } from '../runtime/metrics.js';
 import { HookDispatcher } from '../hooks/dispatcher.js';
 import type { HookEvent } from '../hooks/types.js';
 import {
   authenticateOperatorRequest,
-  buildOperatorSessionCookie,
+  extractOperatorAuthToken,
   type PairingTokenAuthenticator,
 } from '../security/http-auth.js';
 import { UserAuthManager } from '../security/user-auth.js';
 import { ConfigManager } from '../config/manager.js';
-import { extractForwardedClientIp, resolveInboundTlsContext, type ResolvedInboundTlsContext } from '../runtime/network/index.js';
+import { resolveInboundTlsContext, type ResolvedInboundTlsContext } from '../runtime/network/index.js';
 import { summarizeError } from '../utils/error-display.js';
 import { requirePortAvailable } from './port-check.js';
 import { resolveHostBinding } from './host-resolver.js';
 import { createHostModeRestartWatcher, RestartController } from './host-mode-watcher.js';
-import { RateLimiter } from './http/rate-limiter.js';
+import { AddressRateLimiter } from '@goodvibes-jev/engine/daemon-api';
+import { resolveClientAddress } from './client-address.js';
+import { handleOperatorLogin, SIGN_IN_ATTEMPTS_PER_MINUTE } from './operator-login.js';
+import { parseDaemonJsonBody } from './http/router-request-body.js';
 import type { RuntimeEventBus } from '../runtime/events/index.js';
-import { emitAuthFailed, emitAuthSucceeded } from '../runtime/emitters/security.js';
-import { readTextBodyWithinLimit } from '../utils/request-body.js';
+import { emitAuthFailed } from '../runtime/emitters/security.js';
 
-// ---------------------------------------------------------------------------
-// Cloudflare IP ranges (maintained constant; do NOT fetch at runtime by default).
-// Source: https://www.cloudflare.com/ips/
-// Last reviewed: 2026-06-11
-// ---------------------------------------------------------------------------
-
-/** Cloudflare published IPv4 CIDR ranges (full list). */
-const CLOUDFLARE_IPV4_CIDRS: ReadonlyArray<[string, number]> = [
-  ['103.21.244.0', 22],
-  ['103.22.200.0', 22],
-  ['103.31.4.0', 22],
-  ['104.16.0.0', 13],
-  ['104.24.0.0', 14],
-  ['108.162.192.0', 18],
-  ['131.0.72.0', 22],
-  ['141.101.64.0', 18],
-  ['162.158.0.0', 15],
-  ['172.64.0.0', 13],
-  ['173.245.48.0', 20],
-  ['188.114.96.0', 20],
-  ['190.93.240.0', 20],
-  ['197.234.240.0', 22],
-  ['198.41.128.0', 17],
-];
-
-/** Cloudflare published IPv6 CIDR prefixes (prefix string, prefix-length pairs). */
-const CLOUDFLARE_IPV6_PREFIXES: ReadonlyArray<[string, number]> = [
-  ['2400:cb00::', 32],
-  ['2606:4700::', 32],
-  ['2803:f800::', 32],
-  ['2405:b500::', 32],
-  ['2405:8100::', 32],
-  ['2a06:98c0::', 29],
-  ['2c0f:f248::', 32],
-];
-
-function ipv4ToUint32(ip: string): number | undefined {
-  const parts = ip.split('.');
-  if (parts.length !== 4) return undefined;
-  let n = 0;
-  for (const part of parts) {
-    const v = Number(part);
-    if (!Number.isInteger(v) || v < 0 || v > 255) return undefined;
-    n = (n << 8) | v;
-  }
-  // Shift result to unsigned 32-bit
-  return n >>> 0;
-}
-
-function isIpInCidr4(ip: string, cidrNet: string, prefixLen: number): boolean {
-  const ipInt = ipv4ToUint32(ip);
-  const netInt = ipv4ToUint32(cidrNet);
-  if (ipInt === undefined || netInt === undefined) return false;
-  const mask = prefixLen === 0 ? 0 : (~0 << (32 - prefixLen)) >>> 0;
-  return (ipInt & mask) === (netInt & mask);
-}
-
-function isIpv6InPrefix(ip: string, prefix: string, prefixLen: number): boolean {
-  try {
-    // Normalize by expanding both to full 128-bit arrays
-    const ipBytes = ipv6ToBytes(ip);
-    const prefixBytes = ipv6ToBytes(prefix);
-    if (!ipBytes || !prefixBytes) return false;
-    const fullBytes = Math.floor(prefixLen / 8);
-    const remainBits = prefixLen % 8;
-    for (let i = 0; i < fullBytes; i++) {
-      if (ipBytes[i] !== prefixBytes[i]) return false;
-    }
-    if (remainBits > 0 && fullBytes < 16) {
-      const mask = (0xff << (8 - remainBits)) & 0xff;
-      if ((ipBytes[fullBytes]! & mask) !== (prefixBytes[fullBytes]! & mask)) return false;
-    }
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function ipv6ToBytes(ip: string): Uint8Array | undefined {
-  try {
-    // Strip brackets if present (e.g. [::1])
-    const clean = ip.replace(/^\[|\]$/g, '');
-    // Reject zone IDs (e.g. fe80::1%eth0), '%' is not valid in a routable address.
-    if (clean.includes('%')) return undefined;
-    const halves = clean.split('::');
-    if (halves.length > 2) return undefined;
-    const leftGroups = halves[0] ? halves[0].split(':') : [];
-    const rightGroups = halves[1] ? halves[1].split(':') : [];
-    const totalGroups = 8;
-    const zeroGroups = totalGroups - leftGroups.length - rightGroups.length;
-    if (zeroGroups < 0) return undefined;
-    const groups = [
-      ...leftGroups,
-      ...Array(zeroGroups).fill('0'),
-      ...rightGroups,
-    ];
-    if (groups.length !== 8) return undefined;
-    const bytes = new Uint8Array(16);
-    for (let i = 0; i < 8; i++) {
-      const g = groups[i]!;
-      // Each group must be 1-4 hex characters, no leading garbage, no zone index fragments.
-      if (!/^[0-9a-fA-F]{1,4}$/.test(g)) return undefined;
-      const v = parseInt(g, 16);
-      // parseInt with a valid hex pattern never exceeds 0xffff, but guard defensively.
-      if (v < 0 || v > 0xffff) return undefined;
-      bytes[i * 2] = (v >> 8) & 0xff;
-      bytes[i * 2 + 1] = v & 0xff;
-    }
-    return bytes;
-  } catch {
-    return undefined;
-  }
-}
-
-/**
- * Returns true when the given IP address belongs to a Cloudflare-owned range.
- * Used to validate CF-Connecting-IP header trust: only trust it when the
- * connecting peer is actually a Cloudflare edge node.
- */
-export function isCloudflareIp(ip: string): boolean {
-  if (!ip) return false;
-  // Strip IPv6-mapped IPv4 prefix (::ffff:a.b.c.d)
-  const v4mapped = ip.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/i);
-  const candidate = v4mapped ? v4mapped[1]! : ip;
-  // Try IPv4 ranges first
-  if (/^\d+\.\d+\.\d+\.\d+$/.test(candidate)) {
-    return CLOUDFLARE_IPV4_CIDRS.some(([net, len]) => isIpInCidr4(candidate, net, len));
-  }
-  // Try IPv6 prefixes
-  return CLOUDFLARE_IPV6_PREFIXES.some(([prefix, len]) => isIpv6InPrefix(candidate, prefix, len));
-}
+export { isCloudflareIp } from './client-address.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -227,6 +94,8 @@ function readCorsAllowedOrigins(configManager: ConfigManager): string[] {
 // ---------------------------------------------------------------------------
 
 const WEBHOOK_HOOK_PHASES: ReadonlySet<string> = new Set(['Pre', 'Post', 'Fail', 'Change', 'Lifecycle']);
+/** The paths this listener answers; anything else is one `unmatched` metric label. */
+const LISTENER_ROUTES: ReadonlySet<string> = new Set(['/login', '/webhook', '/health']);
 
 /** Loopback addresses keep the listener reachable only from this machine. */
 function isLoopbackHost(host: string): boolean {
@@ -254,9 +123,10 @@ export class HttpListener {
   private hookDispatcher: HookDispatcher | null;
   private authToken: string | null = null;
   private userAuth: UserAuthManager;
-  private rateLimiter: RateLimiter;
-  /** Dedicated tight rate-limiter for POST /login. */
-  private loginRateLimiter: RateLimiter;
+  /** Kept across a restart of the listener, so a restart does not hand an address fresh attempts. */
+  private readonly rateLimiter: AddressRateLimiter;
+  /** Dedicated tight limit for POST /login. */
+  private readonly loginRateLimiter: AddressRateLimiter;
   /** Whether to trust x-forwarded-for / x-real-ip for client IP resolution. */
   private trustProxy: boolean;
   /** When true, trust CF-Connecting-IP only from validated Cloudflare edge IPs. */
@@ -297,16 +167,6 @@ export class HttpListener {
       error: summarizeError(err),
     }),
   });
-  /**
-   * True once stop() has released this listener; cleared by a successful bind.
-   *
-   * The two rate limiters are built in the CONSTRUCTOR and each arms a 60s
-   * eviction sweep there, so they are running before start() is ever called and
-   * long after a start() that failed. Gating teardown on `server === null` left
-   * both sweeps with no reachable stop; gating it on "have we already torn down"
-   * releases them exactly once, bound socket or not.
-   */
-  private tornDown = false;
 
   constructor(private config: HttpListenerConfig) {
     this.configManager = config.configManager;
@@ -340,10 +200,8 @@ export class HttpListener {
     }
     this.hookDispatcher = config.hookDispatcher ?? null;
     this.userAuth = config.userAuth;
-    this.rateLimiter = new RateLimiter(config.rateLimit ?? 60);
-    // /login gets its own tight budget (5 attempts/min per IP) to prevent
-    // scrypt-cost-throttled online brute-force attacks.
-    this.loginRateLimiter = new RateLimiter(config.loginRateLimit ?? 5);
+    this.rateLimiter = new AddressRateLimiter(config.rateLimit ?? 60);
+    this.loginRateLimiter = new AddressRateLimiter(config.loginRateLimit ?? SIGN_IN_ATTEMPTS_PER_MINUTE);
     this.trustProxy = config.trustProxy ?? Boolean(this.configManager.get('httpListener.trustProxy'));
     // Falls back to config exactly as trustProxy does. It had no fallback and
     // no config key at all, so the only way to turn it on was to construct the
@@ -391,14 +249,6 @@ export class HttpListener {
     }
     const self = this;
     this.tlsState = resolveInboundTlsContext(this.configManager, 'httpListener');
-    // stop() halted the rate limiters' eviction sweeps; a listener coming back
-    // after a restart needs them again, or their maps only shrink at the LRU cap.
-    if (this.tornDown) {
-      this.rateLimiter = new RateLimiter(this.config.rateLimit ?? 60);
-      this.loginRateLimiter = new RateLimiter(this.config.loginRateLimit ?? 5);
-    }
-    // A listener that is up again is a listener that can be torn down again.
-    this.tornDown = false;
     this.server = this.serveFactory({
       port: this.port,
       hostname: this.host,
@@ -450,28 +300,17 @@ export class HttpListener {
     // Tear down config watcher only on intentional stop, not mid-restart.
     // During a restart cycle the watcher must stay active so
     // config changes that arrive between stop() and the subsequent start() can be
-    // captured by the dirty flag. Done before the torn-down check: a restart
-    // that failed to start again left this listener torn down with its watcher
+    // captured by the dirty flag. Done before the bound check: a restart
+    // that failed to start again left this listener unbound with its watcher
     // still subscribed.
     if (!this.restartCycle.restarting) {
       this.restartCycle.reset();
       this._configWatchUnsub?.();
       this._configWatchUnsub = null;
     }
-    if (this.tornDown) return;
-    this.tornDown = true;
     const boundServer = this.server;
-
-    // Stop rate limiter sweep intervals before tearing down. Unconditional:
-    // these are constructor-owned, so they are exactly what a never-bound
-    // listener still has running.
-    this.rateLimiter.stop();
-    this.loginRateLimiter.stop();
     this.tlsState = null;
-    if (boundServer === null) {
-      logger.debug('HttpListener: released without ever binding a socket');
-      return;
-    }
+    if (boundServer === null) return;
     boundServer.stop(true);
     this.server = null;
     logger.info('HttpListener stopped');
@@ -516,48 +355,25 @@ export class HttpListener {
     }) !== null;
   }
 
-  /** Never carries the attempted username or any credential: the listener's own log omits them too. */
-  private emitAuthFailed(requestId: string, clientIp: string, reason: 'invalid_credentials' | 'rate_limited' | 'unknown'): void {
+  /** A presented credential the listener refused; never carries the credential. */
+  private emitAuthFailed(requestId: string, clientIp: string): void {
     if (!this.config.runtimeBus) return;
     emitAuthFailed(this.config.runtimeBus, { sessionId: 'system', traceId: `auth:${requestId}`, source: 'http-listener' },
-      { usernameAttempted: '', clientIp, reason });
-  }
-
-  private async parseJsonBody(req: Request): Promise<Record<string, unknown> | Response> {
-    // cap inbound JSON bodies at 1 MiB to prevent memory exhaustion.
-    const MAX_JSON_BYTES = 1 * 1024 * 1024; // 1 MiB
-    try {
-      const text = await readTextBodyWithinLimit(req, MAX_JSON_BYTES);
-      if (text instanceof Response) return text;
-      return JSON.parse(text) as Record<string, unknown>;
-    } catch {
-      return Response.json({ error: 'Invalid JSON body' }, { status: 400 });
-    }
+      { usernameAttempted: '', clientIp, reason: 'invalid_credentials' });
   }
 
   // -------------------------------------------------------------------------
   // Request handling
   // -------------------------------------------------------------------------
 
-  private async handleRequest(req: Request, peerIp = 'unknown'): Promise<Response> {
+  private async handleRequest(req: Request, peerIp?: string): Promise<Response> {
     const requestId = randomUUID();
     const startMs = Date.now();
     const url = new URL(req.url);
-    const effectiveTrustProxy = this.trustProxy || (this.tlsState?.trustProxy ?? false);
-    let clientIp: string;
-    if (this.trustCloudflare && effectiveTrustProxy) {
-      // Only the actual socket peer can establish Cloudflare provenance.
-      const cfConnectingIp = req.headers.get('cf-connecting-ip')?.trim();
-      if (cfConnectingIp && isCloudflareIp(peerIp)) {
-        // Peer is a real Cloudflare edge node, trust the CF header.
-        clientIp = cfConnectingIp;
-      } else {
-        // Without a verified Cloudflare peer, forwarded headers cannot establish identity.
-        clientIp = peerIp;
-      }
-    } else {
-      clientIp = extractForwardedClientIp(req, effectiveTrustProxy) ?? peerIp;
-    }
+    const clientIp = resolveClientAddress(req, peerIp, {
+      trustProxy: this.trustProxy || (this.tlsState?.trustProxy ?? false),
+      trustCloudflare: this.trustCloudflare,
+    });
     let response: Response | null = null;
     try {
       response = await this._handleRequestInner(req, url, clientIp, requestId);
@@ -577,9 +393,11 @@ export class HttpListener {
       });
       // The status's own class: a 304 is not a 2xx, and a 101 upgrade is not an answer to count as one.
       const statusClass = `${Math.floor(status / 100)}xx`;
-      const pathPattern = url.pathname.replace(/\/[0-9a-f-]{8,}(?=\/|$)/gi, '/:id');
-      httpRequestsTotal.add(1, { method: req.method, status_class: statusClass });
-      httpRequestDurationMs.record(latencyMs, { method: req.method, path_pattern: pathPattern, status_class: statusClass });
+      // Labelled by the route that answered, never the path as sent, so the label sets stay as few as the routes.
+      const pathPattern = LISTENER_ROUTES.has(url.pathname) ? url.pathname : 'unmatched';
+      const method = httpMethodLabel(req.method);
+      httpRequestsTotal.add(1, { method, status_class: statusClass });
+      httpRequestDurationMs.record(latencyMs, { method, path_pattern: pathPattern, status_class: statusClass });
     }
   }
 
@@ -614,20 +432,23 @@ export class HttpListener {
     // rate-limit budget (5/min per IP) to prevent online brute-force attacks.
     // x-forwarded-for is only trustworthy when running behind a trusted reverse proxy.
     if (url.pathname === '/login' && req.method === 'POST') {
-      if (!this.loginRateLimiter.check(clientIp)) {
-        return Response.json({ error: 'Too many requests' }, { status: 429, headers: { 'Retry-After': '60' } });
-      }
-      return this.handleLogin(req, clientIp, requestId);
+      return handleOperatorLogin(req, clientIp, {
+        userAuth: this.userAuth,
+        limiter: this.loginRateLimiter,
+        runtimeBus: this.config.runtimeBus,
+        source: 'http-listener',
+        trustProxy: this.tlsState?.trustProxy ?? Boolean(this.configManager.get('httpListener.trustProxy')),
+      });
     }
 
     // General rate limiting for all other routes.
-    if (!this.rateLimiter.check(clientIp)) {
+    if (!this.rateLimiter.allow(clientIp)) {
       return Response.json({ error: 'Too many requests' }, { status: 429, headers: { 'Retry-After': '60' } });
     }
 
-    // Auth check
     if (!this.checkAuth(req)) {
-      this.emitAuthFailed(requestId, clientIp, 'unknown');
+      // A request with no credential is a probe, answered 401 and not reported as a failed sign-in.
+      if (extractOperatorAuthToken(req)) this.emitAuthFailed(requestId, clientIp);
       return Response.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
@@ -644,84 +465,8 @@ export class HttpListener {
     return Response.json({ error: 'Not found' }, { status: 404 });
   }
 
-  private async handleLogin(req: Request, clientIp: string, requestId: string): Promise<Response> {
-    const body = await this.parseJsonBody(req);
-    if (body instanceof Response) return body;
-
-    const username = typeof body.username === 'string' ? body.username : '';
-    const password = typeof body.password === 'string' ? body.password : '';
-    const authResult = this.userAuth.authenticate(username, password);
-
-    if (!authResult.ok) {
-      // AUTH_FAILED, never log credential values
-      const lockedUntilMs = authResult.lockedUntilMs;
-      logger.warn('AUTH_FAILED', {
-        type: 'AUTH_FAILED',
-        requestId,
-        clientIp,
-        reason: lockedUntilMs ? 'account_locked' : 'invalid_credentials',
-        // Never log usernameAttempted to avoid associating accounts with IPs in logs
-      });
-      authFailureTotal.add(1);
-      this.emitAuthFailed(requestId, clientIp, lockedUntilMs ? 'rate_limited' : 'invalid_credentials');
-      if (lockedUntilMs) {
-        const retryAfterSeconds = Math.ceil((lockedUntilMs - Date.now()) / 1_000);
-        return Response.json(
-          { error: 'Too many requests' },
-          { status: 429, headers: { 'Retry-After': String(Math.max(1, retryAfterSeconds)) } },
-        );
-      }
-      return Response.json({ error: 'Invalid credentials' }, { status: 401 });
-    }
-
-    const { user } = authResult;
-    const session = this.userAuth.createSession(user.username);
-    // AUTH_SUCCEEDED, never log credential values
-    authSuccessTotal.add(1);
-    logger.info('AUTH_SUCCEEDED', {
-      type: 'AUTH_SUCCEEDED',
-      requestId,
-      username: user.username,
-      clientIp,
-      method: 'password',
-    });
-    if (this.config.runtimeBus) {
-      emitAuthSucceeded(this.config.runtimeBus, { sessionId: 'system', traceId: `auth:${requestId}`, source: 'http-listener' },
-        { username: user.username, sessionId: session.id, clientIp, method: 'password' });
-    }
-
-    // Auto-retire the bootstrap credential file ONLY after the first
-    // NON-bootstrap login. The bootstrap credential is a one-time convenience
-    // artifact; retiring it immediately on a bootstrap login would prevent the
-    // operator from logging in again if the session is lost before a real
-    // account/password is established.
-    if (!authResult.usedBootstrapCredential && this.userAuth.inspect().bootstrapCredentialPresent) {
-      const retired = this.userAuth.clearBootstrapCredentialFile();
-      if (retired) {
-        logger.info('Bootstrap credential file retired after first non-bootstrap login', {
-          username: user.username,
-        });
-      }
-    }
-
-    return Response.json({
-      authenticated: true,
-      token: session.token,
-      username: session.username,
-      expiresAt: session.expiresAt,
-    }, {
-      headers: {
-        'Set-Cookie': buildOperatorSessionCookie(session.token, {
-          req,
-          expiresAt: session.expiresAt,
-          trustProxy: this.tlsState?.trustProxy ?? Boolean(this.configManager.get('httpListener.trustProxy')),
-        }),
-      },
-    });
-  }
-
   private async handleWebhook(req: Request): Promise<Response> {
-    const body = await this.parseJsonBody(req);
+    const body = await parseDaemonJsonBody(req);
     if (body instanceof Response) return body;
 
     // Construct a HookEvent from the incoming payload

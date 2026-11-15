@@ -68,7 +68,7 @@ Users authenticate with a username and password via the login endpoint. On succe
 - Sessions are pruned on access; expired sessions are rejected and cleaned up
 - Local auth status reports expose an independent opaque session `id`, username and expiry. Use that ID to revoke a session; raw session bearer tokens are not returned by status APIs
 - On first boot with no user store, the daemon bootstraps a default admin account and writes a plaintext credential file for initial login; this file should be deleted after the first login
-- Login failures are locked out per account, independent of the per-IP login rate limiter below. Failures are tracked by username and never leak whether the username exists; an unknown username still runs a constant-time password check against a dummy hash. The lockout escalates with repeated failures, 30 seconds at 6-9 failures, 5 minutes at 10-19, and 30 minutes at 20 or more. The thresholds are set above the default 5-per-minute IP login budget so the per-IP limiter throttles an attacker before the account lock engages for a normal in-budget attempt. A successful login clears the failure count.
+- Login failures are locked out per account and client address, independent of the per-address login rate limiter below, so repeated failures from one address never lock the owner out from another. Failures never leak whether the username exists; an unknown username still runs a constant-time password check against a dummy hash. The lockout escalates with repeated failures, 30 seconds at 6-9 failures, 5 minutes at 10-19, and 30 minutes at 20 or more. The thresholds are set above the default 5-per-minute IP login budget so the per-IP limiter throttles an attacker before the account lock engages for a normal in-budget attempt. A successful login clears the failure count.
 
 Session tokens are carried as:
 1. `Authorization: Bearer <token>` header
@@ -231,8 +231,14 @@ CORS policy should be configured at the network edge (reverse proxy) or in the d
 
 The daemon ships two built-in rate limiters:
 
-- **General rate limiter.** 60 requests per minute per IP address (configurable via `rateLimit` option). Applied to all routes except login.
-- **Login rate limiter.** 5 requests per minute per IP address (configurable via `loginRateLimit` option). Applied to `POST /login` to prevent online brute-force attacks.
+- **Login rate limiter.** 5 sign-in attempts per minute per client address, on `POST /login` of both the control-plane port and the optional HTTP listener (`loginRateLimit` option on the listener). It is checked before the body is read or any password work runs; past it the daemon answers `429` with `Retry-After`.
+- **General rate limiter.** 60 requests per minute per client address on the optional HTTP listener (configurable via `rateLimit` option). Applied to all of its routes except login.
+
+The client address is the socket peer, or the forwarded address when `controlPlane.trustProxy` (or `httpListener.trustProxy`) says a trusted reverse proxy is in front. Every failed sign-in event and audit entry carries that address. Limits survive a restart of the listener.
+
+The password check is memory-hard (scrypt, about 128 MiB) and runs off the daemon's event loop, one sign-in at a time; when more than 8 sign-ins are already waiting, a new one is answered `503` with `Retry-After` and no password check, so a burst of attempts cannot stall streams, channels or turns.
+
+A request that carries no credential is answered `401` and is not reported as a failed sign-in: a starting terminal app's identity check is such a request. Only a credential the daemon refused is reported (`AUTH_FAILED`).
 
 For production deployments, place an additional rate-limiting reverse proxy (nginx, Traefik middleware, Cloudflare) **in front of** the daemon to provide a defence-in-depth second layer and to protect against:
 - High-volume denial-of-service via expensive LLM requests that the per-IP limiter alone may not catch

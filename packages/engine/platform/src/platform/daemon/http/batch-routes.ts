@@ -8,8 +8,6 @@ export interface DaemonBatchRouteContext {
   readonly batchManager: DaemonBatchManager;
   readonly parseJsonBody: (req: Request) => Promise<Record<string, unknown> | Response>;
   readonly parseOptionalJsonBody: (req: Request) => Promise<Record<string, unknown> | null | Response>;
-  /** Admin gate for the routes that spend provider budget (create, cancel, tick). Reads stay open to any authenticated caller. */
-  readonly requireAdmin?: ((req: Request) => Response | null) | undefined;
 }
 
 /**
@@ -42,14 +40,6 @@ export async function dispatchBatchRoutes(
   if (pathname === '/api/batch/jobs' && req.method === 'GET') {
     const limit = readBoundedPositiveInteger(url.searchParams.get('limit'), 100, 1_000);
     return Response.json({ jobs: await context.batchManager.listJobs(limit) });
-  }
-
-  const isWrite = req.method === 'POST' && (
-    pathname === '/api/batch/jobs' || pathname === '/api/batch/tick' || /^\/api\/batch\/jobs\/[^/]+\/cancel$/.test(pathname)
-  );
-  if (isWrite) {
-    const adminError = context.requireAdmin?.(req) ?? null;
-    if (adminError) return adminError;
   }
 
   if (pathname === '/api/batch/jobs' && req.method === 'POST') {

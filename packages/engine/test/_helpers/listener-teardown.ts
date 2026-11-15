@@ -1,24 +1,9 @@
 /**
  * Quiesce an `HttpListener` without going through its async `stop()`.
  *
- * `HttpListener`'s constructor builds two `RateLimiter`s, and each one starts a
- * sweep `setInterval` immediately (packages/platform/src/platform/daemon/http/rate-limiter.ts:29),
- * so a listener that was constructed for a constructor-behaviour assertion and
- * never started still has two sweeps running.
- *
- * `stop()` now releases those whether or not a socket was ever bound, it is
- * gated on "already torn down", not on `server === null`, so `disposeListener`
- * below is the complete answer and this helper is no longer the only one. It
- * stays because it is SYNCHRONOUS: a `trackDisposables()` registration that
- * cannot await still needs a way to put those two sweeps down.
- *
- * The limiters expose `stop()` publicly, so a test can shut them down directly.
- * This helper is the single documented place that reaches for those fields, so
- * the cast lives here instead of being repeated in every test that needs it.
- *
- * Pair it with `trackDisposables()`:
- *
- *   const listener = disposables.add(new HttpListener({...}), stopListenerTimers);
+ * The listener's rate limiters own no timer any more, so this has nothing to
+ * stop on a current listener; it stays a synchronous no-op hook for tests that
+ * register it with `trackDisposables()`.
  */
 interface RateLimiterLike {
   stop?(): void;

@@ -251,16 +251,20 @@ export interface GatewayScopePolicyOwner {
   close(): void;
 }
 
-function pathMatchesTemplate(template: string, pathname: string): boolean {
-  const normalize = (value: string) => value.replace(/\/+$/, '') || '/';
-  const templateParts = normalize(template).split('/');
-  const pathParts = normalize(pathname).split('/');
+function pathSegments(value: string): string[] {
+  return (value.replace(/\/+$/, '') || '/').split('/');
+}
+
+function segmentsMatchTemplate(templateParts: readonly string[], pathParts: readonly string[]): boolean {
   if (templateParts.length !== pathParts.length) return false;
   return templateParts.every((segment, index) => {
     if (segment.startsWith('{') && segment.endsWith('}')) return (pathParts[index]?.length ?? 0) > 0;
     return segment === pathParts[index];
   });
 }
+
+/** HTTP bindings grouped by verb and segment count, in registration order. */
+type HttpBindingIndex = Map<string, { readonly parts: readonly string[]; readonly descriptor: GatewayMethodDescriptor }[]>;
 
 export class GatewayMethodCatalog {
   private readonly methods = new Map<string, RegisteredGatewayMethod>();
@@ -275,6 +279,8 @@ export class GatewayMethodCatalog {
   private scopePolicyScopesSnapshot: readonly string[] | undefined;
   /** The admin and non-admin grants, rebuilt only after a method or event changes. */
   private grantCache: { write?: readonly string[]; read?: readonly string[] } = {};
+  /** Every authenticated REST request looks its route up here; rebuilt only after a method changes. */
+  private httpBindingIndex: HttpBindingIndex | undefined;
 
   /**
    * Called after initial host construction. Startup registration is hydration,
@@ -351,6 +357,7 @@ export class GatewayMethodCatalog {
 
   private invalidateScopePolicySnapshot(): void {
     this.grantCache = {};
+    this.httpBindingIndex = undefined;
     if (!this.scopePolicyOwner) return;
     this.scopePolicyState = {};
     this.scopePolicySnapshot = undefined; this.scopePolicyData = undefined; this.scopePolicyLegacySnapshot = undefined;
@@ -487,14 +494,33 @@ export class GatewayMethodCatalog {
     return typeof this.methods.get(id)?.handler === 'function';
   }
 
-  findByHttpBinding(method: string, pathname: string): GatewayMethodDescriptor | null {
-    const normalizedMethod = method.toUpperCase();
+  /** The method bound to this route; with `unique`, null when more than one method binds it. */
+  findByHttpBinding(method: string, pathname: string, options?: { readonly unique?: boolean }): GatewayMethodDescriptor | null {
+    const pathParts = pathSegments(pathname);
+    const bucket = this.bindingIndex().get(`${method.toUpperCase()} ${pathParts.length}`);
+    if (!bucket) return null;
+    let found: GatewayMethodDescriptor | null = null;
+    for (const entry of bucket) {
+      if (!segmentsMatchTemplate(entry.parts, pathParts)) continue;
+      if (!options?.unique) return entry.descriptor;
+      if (found) return null;
+      found = entry.descriptor;
+    }
+    return found;
+  }
+
+  private bindingIndex(): HttpBindingIndex {
+    if (this.httpBindingIndex) return this.httpBindingIndex;
+    const index: HttpBindingIndex = new Map();
     for (const entry of this.methods.values()) {
       const binding = entry.descriptor.http;
-      if (!binding || binding.method !== normalizedMethod) continue;
-      if (pathMatchesTemplate(binding.path, pathname)) return entry.descriptor;
+      if (!binding) continue;
+      const parts = pathSegments(binding.path);
+      const key = `${binding.method} ${parts.length}`;
+      const bucket = index.get(key);
+      if (bucket) bucket.push({ parts, descriptor: entry.descriptor }); else index.set(key, [{ parts, descriptor: entry.descriptor }]);
     }
-    return null;
+    return this.httpBindingIndex = index;
   }
 
   /**

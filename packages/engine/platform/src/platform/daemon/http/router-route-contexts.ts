@@ -1,5 +1,13 @@
 import type { ConfigManager } from '../../config/manager.js';
-import type { ChannelPluginRegistry, ChannelPolicyManager, RouteBindingManager, SurfaceRegistry } from '../../channels/index.js';
+import type {
+  ChannelDirectoryScope,
+  ChannelPluginRegistry,
+  ChannelPolicyManager,
+  ChannelResolvedTarget,
+  ChannelSurface,
+  RouteBindingManager,
+  SurfaceRegistry,
+} from '../../channels/index.js';
 import { logger } from '../../utils/logger.js';
 import type { KnowledgeGraphqlService, KnowledgeService } from '../../knowledge/index.js';
 import type { ArtifactStore } from '../../artifacts/index.js';
@@ -48,6 +56,30 @@ export interface DaemonStatusProviders {
   readonly collectClusterStatus?: (() => unknown) | undefined;
 }
 
+// Exhaustive by type: a surface added to ChannelSurface fails to compile here until it is listed.
+const CHANNEL_SURFACES: Readonly<Record<ChannelSurface, true>> = {
+  tui: true, web: true, slack: true, discord: true, ntfy: true, webhook: true, homeassistant: true,
+  telegram: true, 'google-chat': true, signal: true, whatsapp: true, telephony: true, imessage: true,
+  msteams: true, bluebubbles: true, mattermost: true, matrix: true,
+};
+const CHANNEL_DIRECTORY_SCOPES: Readonly<Record<ChannelDirectoryScope, true>> = {
+  all: true, self: true, users: true, peers: true, groups: true, channels: true, threads: true, services: true, members: true,
+};
+
+function isChannelSurface(value: string): value is ChannelSurface {
+  return Object.hasOwn(CHANNEL_SURFACES, value);
+}
+
+function isChannelDirectoryScope(value: string): value is ChannelDirectoryScope {
+  return Object.hasOwn(CHANNEL_DIRECTORY_SCOPES, value);
+}
+
+/**
+ * The route names a surface as a URL string. A surface no plugin can serve gets
+ * the answer the registry gives for one it has no plugin for (null or empty),
+ * without reaching it; every other argument is passed with its own type, so a
+ * renamed or retyped service field fails to compile here.
+ */
 export function buildChannelRouteContext(input: {
   readonly channelPlugins: ChannelPluginRegistry;
   readonly channelPolicy: ChannelPolicyManager;
@@ -63,85 +95,70 @@ export function buildChannelRouteContext(input: {
       ? {}
       : { inboundMailHealth: input.inboundMailHealth }),
     channelPlugins: {
-      listAccounts: (surface) => input.channelPlugins.listAccounts(
-        surface as Parameters<ChannelPluginRegistry['listAccounts']>[0],
-      ),
-      getAccount: (surface, accountId) => input.channelPlugins.getAccount(
-        surface as Parameters<ChannelPluginRegistry['getAccount']>[0],
-        accountId,
-      ),
-      getSetupSchema: (surface, accountId) => input.channelPlugins.getSetupSchema(
-        surface as Parameters<ChannelPluginRegistry['getSetupSchema']>[0],
-        accountId,
-      ),
-      doctor: (surface, accountId) => input.channelPlugins.doctor(
-        surface as Parameters<ChannelPluginRegistry['doctor']>[0],
-        accountId,
-      ),
-      listRepairActions: (surface, accountId) => input.channelPlugins.listRepairActions(
-        surface as Parameters<ChannelPluginRegistry['listRepairActions']>[0],
-        accountId,
-      ),
-      getLifecycleState: (surface, accountId) => input.channelPlugins.getLifecycleState(
-        surface as Parameters<ChannelPluginRegistry['getLifecycleState']>[0],
-        accountId,
-      ),
-      runAccountAction: (surface, action, accountId, body) => input.channelPlugins.runAccountAction(
-        surface as Parameters<ChannelPluginRegistry['runAccountAction']>[0],
-        action as Parameters<ChannelPluginRegistry['runAccountAction']>[1],
-        accountId,
-        body as Parameters<ChannelPluginRegistry['runAccountAction']>[3],
-      ),
-      listCapabilities: (surface) => input.channelPlugins.listCapabilities(
-        surface as Parameters<ChannelPluginRegistry['listCapabilities']>[0],
-      ),
-      listTools: (surface) => input.channelPlugins.listTools(
-        surface as Parameters<ChannelPluginRegistry['listTools']>[0],
-      ),
-      listAgentTools: (surface) => input.channelPlugins.listAgentTools(
-        surface as Parameters<ChannelPluginRegistry['listAgentTools']>[0],
-      ),
-      runTool: (surface, toolId, body) => input.channelPlugins.runTool(
-        surface as Parameters<ChannelPluginRegistry['runTool']>[0],
-        toolId,
-        body as Parameters<ChannelPluginRegistry['runTool']>[2],
-      ),
-      listOperatorActions: (surface) => input.channelPlugins.listOperatorActions(
-        surface as Parameters<ChannelPluginRegistry['listOperatorActions']>[0],
-      ),
-      runOperatorAction: (surface, actionId, body) => input.channelPlugins.runOperatorAction(
-        surface as Parameters<ChannelPluginRegistry['runOperatorAction']>[0],
-        actionId,
-        body as Parameters<ChannelPluginRegistry['runOperatorAction']>[2],
-      ),
-      resolveTarget: (surface, target) => input.channelPlugins.resolveTarget(
-        surface as Parameters<ChannelPluginRegistry['resolveTarget']>[0],
-        target as Parameters<ChannelPluginRegistry['resolveTarget']>[1],
-      ),
-      authorizeActorAction: (surface, authz) => input.channelPlugins.authorizeActorAction(
-        surface as Parameters<ChannelPluginRegistry['authorizeActorAction']>[0],
-        authz as Parameters<ChannelPluginRegistry['authorizeActorAction']>[1],
-      ),
-      resolveAllowlist: (surface, allowlist) => input.channelPlugins.resolveAllowlist(
-        surface as Parameters<ChannelPluginRegistry['resolveAllowlist']>[0],
-        allowlist as Parameters<ChannelPluginRegistry['resolveAllowlist']>[1],
-      ),
-      editAllowlist: (surface, allowlist) => input.channelPlugins.editAllowlist(
-        surface as Parameters<ChannelPluginRegistry['editAllowlist']>[0],
-        allowlist as Parameters<ChannelPluginRegistry['editAllowlist']>[1],
-      ),
+      listAccounts: async (surface) => {
+        if (surface !== undefined && !isChannelSurface(surface)) return [];
+        return input.channelPlugins.listAccounts(surface);
+      },
+      getAccount: async (surface, accountId) =>
+        isChannelSurface(surface) ? input.channelPlugins.getAccount(surface, accountId) : null,
+      getSetupSchema: async (surface, accountId) =>
+        isChannelSurface(surface) ? input.channelPlugins.getSetupSchema(surface, accountId) : null,
+      doctor: async (surface, accountId) =>
+        isChannelSurface(surface) ? input.channelPlugins.doctor(surface, accountId) : null,
+      listRepairActions: async (surface, accountId) =>
+        isChannelSurface(surface) ? input.channelPlugins.listRepairActions(surface, accountId) : [],
+      getLifecycleState: async (surface, accountId) =>
+        isChannelSurface(surface) ? input.channelPlugins.getLifecycleState(surface, accountId) : null,
+      runAccountAction: async (surface, action, accountId, body) =>
+        isChannelSurface(surface) ? input.channelPlugins.runAccountAction(surface, action, accountId, body) : null,
+      listCapabilities: async (surface) => {
+        if (surface !== undefined && !isChannelSurface(surface)) return [];
+        return input.channelPlugins.listCapabilities(surface);
+      },
+      listTools: async (surface) => {
+        if (surface !== undefined && !isChannelSurface(surface)) return [];
+        return input.channelPlugins.listTools(surface);
+      },
+      listAgentTools: (surface) => {
+        if (surface !== undefined && !isChannelSurface(surface)) return [];
+        return input.channelPlugins.listAgentTools(surface);
+      },
+      runTool: async (surface, toolId, body) =>
+        isChannelSurface(surface) ? input.channelPlugins.runTool(surface, toolId, body) : null,
+      listOperatorActions: async (surface) => {
+        if (surface !== undefined && !isChannelSurface(surface)) return [];
+        return input.channelPlugins.listOperatorActions(surface);
+      },
+      runOperatorAction: async (surface, actionId, body) =>
+        isChannelSurface(surface) ? input.channelPlugins.runOperatorAction(surface, actionId, body) : null,
+      resolveTarget: async (surface, target) =>
+        isChannelSurface(surface) ? input.channelPlugins.resolveTarget(surface, target) : null,
+      authorizeActorAction: async (surface, authz) => {
+        if (!isChannelSurface(surface)) return null;
+        // `target` is the record this registry's resolveTarget returned for the same request.
+        const target = authz.target as ChannelResolvedTarget | undefined;
+        return input.channelPlugins.authorizeActorAction(surface, { ...authz, target });
+      },
+      resolveAllowlist: async (surface, allowlist) =>
+        isChannelSurface(surface) ? input.channelPlugins.resolveAllowlist(surface, allowlist) : null,
+      editAllowlist: async (surface, allowlist) =>
+        isChannelSurface(surface) ? input.channelPlugins.editAllowlist(surface, allowlist) : null,
       listStatus: () => input.channelPlugins.listStatus(),
-      queryDirectory: (surface, query) => input.channelPlugins.queryDirectory(
-        surface as Parameters<ChannelPluginRegistry['queryDirectory']>[0],
-        query as Parameters<ChannelPluginRegistry['queryDirectory']>[1],
-      ),
+      queryDirectory: async (surface, query) => {
+        if (!isChannelSurface(surface)) return [];
+        const { scope, ...rest } = query;
+        // A scope no directory knows matches no entries.
+        if (scope !== undefined && !isChannelDirectoryScope(scope)) return [];
+        return input.channelPlugins.queryDirectory(surface, { ...rest, scope });
+      },
     },
     channelPolicy: {
       listPolicies: () => input.channelPolicy.listPolicies(),
-      upsertPolicy: (surface, policy) => input.channelPolicy.upsertPolicy(
-        surface as Parameters<ChannelPolicyManager['upsertPolicy']>[0],
-        policy as Parameters<ChannelPolicyManager['upsertPolicy']>[1],
-      ),
+      upsertPolicy: async (surface, policy) => {
+        if (!isChannelSurface(surface)) throw new Error(`Unknown channel surface: ${surface}`);
+        // The route checked every field it builds this patch from (channel-routes.ts buildChannelPolicyPatchFields).
+        return input.channelPolicy.upsertPolicy(surface, policy as Parameters<ChannelPolicyManager['upsertPolicy']>[1]);
+      },
       listAudit: (limit) => input.channelPolicy.listAudit(limit),
     },
     parseJsonBody: input.parseJsonBody,

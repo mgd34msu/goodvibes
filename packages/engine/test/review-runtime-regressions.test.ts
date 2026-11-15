@@ -2,20 +2,9 @@ import { expect, test } from 'bun:test';
 import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { RateLimiter } from '../platform/src/platform/daemon/http/rate-limiter.ts';
 import { serveWebuiBundle, type WebuiServingPosture } from '../platform/src/platform/daemon/http/webui-serving.ts';
 import { evaluatePathScopeRule, extractPathArgs } from '../platform/src/platform/runtime/permissions/rules/path-scope.ts';
 import { findSessionCandidates } from '../platform/src/platform/sessions/manager.ts';
-
-test('rejected traffic does not accumulate timestamps inside the rate limiter', () => {
-  const limiter = new RateLimiter(2);
-  try {
-    expect(limiter.check('a')).toBe(true); expect(limiter.check('a')).toBe(true);
-    for (let i = 0; i < 10000; i++) expect(limiter.check('a')).toBe(false);
-    expect((limiter as unknown as { counts: Map<string, number[]> }).counts.get('a')).toHaveLength(2);
-    expect(limiter.check('b')).toBe(true);
-  } finally { limiter.stop(); }
-});
 
 test('bundle files, directory symlinks and the fallback shell stay within the bundle root', async () => {
   const root = mkdtempSync(join(tmpdir(), 'bundle-containment-'));

@@ -85,47 +85,48 @@ function errorFrame(code: RelayErrorCode, message: string, pipe?: PipeId): strin
   return encodeControlFrame(pipe !== undefined ? { t: 'error', code, message, pipe } : { t: 'error', code, message });
 }
 
-/** Most addresses the limiter remembers at once; past it the least recently added are forgotten. */
+/** Most addresses the limiter remembers at once; past it the least recently active are forgotten. */
 const MAX_TRACKED_ADDRESSES = 10_000;
+const RATE_WINDOW_MS = 60_000;
 
 /**
- * A per-address rolling-minute counter for handshake attempts, bounded in the
- * number of addresses it remembers so a public relay probed from many sources
- * cannot grow it without limit. Behind a proxy every client shares the proxy's
- * address, so they also share one allowance.
+ * A per-address rolling-minute counter, bounded in the number of addresses it
+ * remembers so a listener probed from many sources cannot grow it without
+ * limit. It owns no timer: the map is kept in order of last activity, so each
+ * call drops the addresses at its head whose attempts all left the window,
+ * which is constant work per call on average. Behind a proxy every client
+ * shares the proxy's address, so they also share one allowance. Used for relay
+ * handshakes and for daemon sign-ins and requests.
  */
-export class HandshakeRateLimiter {
+export class AddressRateLimiter {
   private readonly hits = new Map<string, number[]>();
   constructor(private readonly perMinute: number, private readonly maxAddresses = MAX_TRACKED_ADDRESSES) {}
   /** Addresses currently remembered. */
   get trackedAddresses(): number {
     return this.hits.size;
   }
-  allow(addr: string, now: number): boolean {
-    const cutoff = now - 60_000;
+  /** True when `addr` may make one more attempt now; the attempt is counted. A refused attempt is not stored. */
+  allow(addr: string, now: number = Date.now()): boolean {
+    const cutoff = now - RATE_WINDOW_MS;
     const list = (this.hits.get(addr) ?? []).filter((t) => t > cutoff);
     // Re-insert so the map stays ordered by most recent activity.
     this.hits.delete(addr);
-    if (list.length >= this.perMinute) {
-      this.hits.set(addr, list);
-      this.trim(cutoff);
-      return false;
-    }
-    list.push(now);
+    const allowed = list.length < this.perMinute;
+    if (allowed) list.push(now);
     this.hits.set(addr, list);
     this.trim(cutoff);
-    return true;
+    return allowed;
   }
   forget(addr: string): void {
     this.hits.delete(addr);
   }
   private trim(cutoff: number): void {
-    if (this.hits.size <= this.maxAddresses) return;
-    // Addresses whose attempts all fell out of the window carry no information.
+    // The head is the least recently active address; once its newest attempt is
+    // inside the window, so is every address after it.
     for (const [addr, list] of this.hits) {
-      if (list[list.length - 1]! <= cutoff) this.hits.delete(addr);
+      if (list[list.length - 1]! > cutoff && this.hits.size <= this.maxAddresses) break;
+      this.hits.delete(addr);
     }
-    while (this.hits.size > this.maxAddresses) this.hits.delete(this.hits.keys().next().value!);
   }
 }
 
@@ -138,12 +139,12 @@ export class RelayHub {
   private readonly pipes = new Map<PipeId, PipeRecord>();
   private readonly limits: RelayServerLimits;
   private readonly logger: RelayServerLogger;
-  private readonly rateLimiter: HandshakeRateLimiter;
+  private readonly rateLimiter: AddressRateLimiter;
 
   constructor(options: { limits?: Partial<RelayServerLimits>; logger?: RelayServerLogger } = {}) {
     this.limits = { ...DEFAULT_RELAY_LIMITS, ...options.limits };
     this.logger = options.logger ?? SILENT_LOGGER;
-    this.rateLimiter = new HandshakeRateLimiter(this.limits.maxHandshakesPerMinutePerAddr);
+    this.rateLimiter = new AddressRateLimiter(this.limits.maxHandshakesPerMinutePerAddr);
   }
 
   /** Current occupancy, surfaces/monitoring can read this. */

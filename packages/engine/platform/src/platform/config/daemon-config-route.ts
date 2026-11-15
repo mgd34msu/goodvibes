@@ -45,6 +45,8 @@ import {
   type ProcessAliveCheck,
 } from '../runtime/detached-daemon-runtime.js';
 import { deriveControlPlaneBaseUrl, type ControlPlaneBinding } from './control-plane-base-url.js';
+import { DAEMON_CHALLENGE_HEADER, DAEMON_PROOF_HEADER, isValidDaemonIdentityProof } from '../daemon/identity-proof.js';
+import { randomBytes } from 'node:crypto';
 
 /** How to reach a daemon's control plane for config reads and writes. */
 export interface DaemonConfigEndpoint {
@@ -359,11 +361,13 @@ export async function resolveLiveConfigWriteRoute(
     }
     if (route.endpoint.certain !== false) return route;
     lastBaseUrl = route.endpoint.baseUrl;
-    if (await daemonAnswers(route.endpoint, deps)) {
+    const identity = await probeDaemonIdentity(route.endpoint, deps);
+    if (identity === 'proven') {
       // It answered, so it is proven, not merely derived: an error reaching it
       // from here on is a real failure rather than an absent daemon.
       return { ...route, endpoint: { ...route.endpoint, certain: true } };
     }
+    if (identity === 'unproven') throw unprovenDaemonError(key, route.endpoint.baseUrl);
     if (route.endpoint.source !== 'running-daemon record') break;
     reapedRecord = route.endpoint;
     reapUnansweringRuntimeRecord(deps, route.endpoint.baseUrl, route.endpoint.runtimeRecord);
@@ -389,29 +393,50 @@ export async function resolveLiveConfigWriteRoute(
 }
 
 /**
- * Ask the daemon whether it is actually there. Used only for an UNCERTAIN
- * endpoint (one derived from configuration rather than observed): a config
- * value describes where a daemon would listen, not that one does.
+ * Ask whatever answers at an UNCERTAIN endpoint (one derived from
+ * configuration or a runtime record) whether it is the daemon.
  *
- * The probe carries NO credential: whatever answers at a derived address may be
- * an unrelated local program, and the operator token goes only to something that
- * has identified itself as a daemon. A daemon identifies itself by refusing the
- * anonymous request with its authentication error; any other status is not an
- * answer, including a 200, which is what an unrelated catch-all server returns.
+ * The probe carries NO credential: whatever answers at that address may be an
+ * unrelated local program, and the operator token goes only to a listener that
+ * proved it holds the same token. The probe sends a fresh random challenge; a
+ * daemon answers its anonymous 401 with an HMAC of the challenge keyed by the
+ * token (identity-proof.ts), which nothing without the token can produce.
+ *
+ *   - `proven`: the proof checks out (or there is no token to protect and the
+ *     daemon's own authentication error came back).
+ *   - `unproven`: something answered with the daemon's authentication error but
+ *     no valid proof; the token is not sent to it.
+ *   - `absent`: nothing answered as a daemon, including a 200, which is what an
+ *     unrelated catch-all server returns.
  */
-async function daemonAnswers(endpoint: DaemonConfigEndpoint, deps: DaemonConfigRouterDeps): Promise<boolean> {
+export async function probeDaemonIdentity(
+  endpoint: DaemonConfigEndpoint,
+  deps: Pick<DaemonConfigRouterDeps, 'fetchImpl' | 'probeTimeoutMs'>,
+): Promise<'proven' | 'unproven' | 'absent'> {
   const fetchImpl = deps.fetchImpl ?? globalThis.fetch;
+  const challenge = randomBytes(16).toString('hex');
   try {
     const response = await fetchImpl(`${endpoint.baseUrl.replace(/\/+$/, '')}/config`, {
       method: 'GET',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', [DAEMON_CHALLENGE_HEADER]: challenge },
       signal: AbortSignal.timeout(deps.probeTimeoutMs ?? 2_000),
     });
-    if (response.status !== 401 && response.status !== 403) return false;
-    return refusesWithDaemonAuthError(await response.text().catch(() => ''));
+    if (response.status !== 401 && response.status !== 403) return 'absent';
+    const token = endpoint.token?.trim();
+    if (token && isValidDaemonIdentityProof(token, challenge, response.headers.get(DAEMON_PROOF_HEADER))) return 'proven';
+    if (!refusesWithDaemonAuthError(await response.text().catch(() => ''))) return 'absent';
+    return token ? 'unproven' : 'proven';
   } catch {
-    return false;
+    return 'absent';
   }
+}
+
+/** A listener that looks like the daemon but did not prove it holds the operator token; the token was withheld. */
+function unprovenDaemonError(key: string, baseUrl: string): DaemonConfigRejectedError {
+  return new DaemonConfigRejectedError(key, 401,
+    `the listener at ${baseUrl} did not prove it holds the operator token, so the token was not sent to it. `
+    + 'If it is the GoodVibes daemon, restart it with this version (an older daemon gives no identity proof); '
+    + 'otherwise stop the program holding that port.');
 }
 
 /** True when a response body is the daemon's own "authentication required" error. */
@@ -548,10 +573,16 @@ async function postDaemonConfig(
  */
 export async function readDaemonConfig(
   endpoint: DaemonConfigEndpoint,
-  deps: Pick<DaemonConfigRouterDeps, 'fetchImpl' | 'timeoutMs'> = {},
+  deps: Pick<DaemonConfigRouterDeps, 'fetchImpl' | 'timeoutMs' | 'probeTimeoutMs'> = {},
 ): Promise<Record<string, unknown>> {
   const fetchImpl = deps.fetchImpl ?? globalThis.fetch;
   const url = `${endpoint.baseUrl.replace(/\/+$/, '')}/config`;
+  if (endpoint.certain === false && endpoint.token) {
+    // An address nobody vouched for gets the token only after it proved it is the daemon.
+    const identity = await probeDaemonIdentity(endpoint, deps);
+    if (identity === 'absent') throw new DaemonConfigUnreachableError('(config read)', endpoint.baseUrl, 'no GoodVibes daemon answered there');
+    if (identity === 'unproven') throw unprovenDaemonError('(config read)', endpoint.baseUrl);
+  }
   let response: Response;
   try {
     response = await fetchImpl(url, {

@@ -2,21 +2,17 @@ import { BROWSER_JUDGMENT_LIMITS, buildErrorResponseBody,
   type AuthenticatedPrincipal, type BrowserJudgmentCapability } from '@goodvibes-jev/engine/daemon-api';
 import type { GatewayMethodCatalog, GatewayMethodDescriptor } from '../../control-plane/method-catalog.js';
 
-/** Match protocol paths against host-owned method descriptors, never error prose. */
+/**
+ * The catalog method a request reached, from protocol paths and the catalog's
+ * own binding index, never error prose. A path two methods bind is no method.
+ */
 export function browserJudgmentErrorMethod(request: Request, methods: GatewayMethodCatalog): GatewayMethodDescriptor | undefined {
   const path = new URL(request.url).pathname;
   const invoke = /^\/api\/(?:control-plane\/methods|control\/gateway-methods)\/([^/]+)\/invoke$/.exec(path);
   if (invoke && request.method === 'POST') {
     try { return methods.get(decodeURIComponent(invoke[1]!)) ?? undefined; } catch { return undefined; }
   }
-  const parts = path.split('/');
-  const matches = methods.list().filter((method) => {
-    if (method.http?.method !== request.method) return false;
-    const template = method.http.path.split('/');
-    return template.length === parts.length && template.every((segment, index) =>
-      /^\{[^{}]+\}$/.test(segment) ? !!parts[index] : segment === parts[index]);
-  });
-  return matches.length === 1 ? matches[0] : undefined;
+  return methods.findByHttpBinding(request.method, path, { unique: true }) ?? undefined;
 }
 
 /**
@@ -27,6 +23,7 @@ export function browserJudgmentErrorMethod(request: Request, methods: GatewayMet
 export async function attachBrowserJudgmentError(request: Request, response: Response, input: {
   readonly service: BrowserJudgmentCapability | undefined;
   readonly methods: GatewayMethodCatalog;
+  /** Resolved when the request arrived, so a catalog replaced while it ran issues nothing. */
   readonly method: GatewayMethodDescriptor | undefined;
   readonly principal: AuthenticatedPrincipal | null;
   readonly currentPrincipal: () => AuthenticatedPrincipal | null;

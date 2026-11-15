@@ -26,6 +26,7 @@ import type { RuntimeEventDomain } from '../runtime/events/index.js';
 import { isRuntimeEventDomain } from '../runtime/events/index.js';
 import type { DistributedRuntimeManager } from '../runtime/remote/index.js';
 import { extractForwardedClientIp } from '../runtime/network/index.js';
+import { clientAddressOf, resolveClientAddress } from './client-address.js';
 import { resolveGatewayPathTemplate } from './helpers.js';
 import { refuseGatewayAccess } from './http/gateway-binding-gate.js';
 import { SYNTHESIZED_DISPATCH_HEADER, guardSelfDispatch, guardSynthesizedDepth } from './gateway-self-dispatch.js';
@@ -36,6 +37,7 @@ import { redactDiagnosticText } from '../utils/redaction.js';
 import { validateInvocationInput } from '../control-plane/invoke-input-validation.js';
 import { readGatewayVerbRefusal } from '../control-plane/routes/gateway-verb-error.js';
 import { buildErrorResponseBody, jsonErrorResponse } from './http/error-response.js';
+import { missingScopes } from './http/route-helpers.js';
 import { EngineErrorCodes } from '@goodvibes-jev/engine/errors';
 import {
   type AuthenticatedPrincipal,
@@ -253,6 +255,16 @@ export class DaemonControlPlaneHelper {
     return this.context.trustProxyEnabled();
   }
 
+  /** The address the listener resolved for this request (see client-address.ts). */
+  private clientAddress(req: Request): string {
+    return clientAddressOf(req) ?? resolveClientAddress(req, undefined, { trustProxy: this.trustProxyEnabled() });
+  }
+
+  /** A presented credential that did not authenticate; a request with none is a probe and is not audited. */
+  private recordRefusedCredential(req: Request): void {
+    if (this.extractAuthToken(req)) this.authFailures.record(this.clientAddress(req), 'control-plane');
+  }
+
   extractAuthToken(req: Request): string {
     return extractOperatorAuthToken(req);
   }
@@ -330,7 +342,7 @@ export class DaemonControlPlaneHelper {
   requireAdmin(req: Request): Response | null {
     const principal = this.authenticateRequest(req)?.principal;
     if (!principal) {
-      this.authFailures.record(extractForwardedClientIp(req, this.trustProxyEnabled()) ?? 'unknown', 'control-plane');
+      this.recordRefusedCredential(req);
       return Response.json({ error: 'Unauthorized' }, { status: 401 });
     }
     if (!principal.admin) {
@@ -466,7 +478,7 @@ export class DaemonControlPlaneHelper {
       extractForwardedClientIp(req, this.trustProxyEnabled()),
     );
     if (!auth) {
-      this.authFailures.record(extractForwardedClientIp(req, this.trustProxyEnabled()) ?? 'unknown', 'control-plane');
+      this.recordRefusedCredential(req);
       return Response.json({ error: 'Unauthorized remote peer' }, { status: 401 });
     }
     if (scope && !auth.token.scopes.includes(scope)) {
@@ -639,7 +651,7 @@ export class DaemonControlPlaneHelper {
     const token = this.extractAuthToken(req);
     const principal = this.authenticateRequest(req)?.principal;
     if (!principal) {
-      this.authFailures.record(extractForwardedClientIp(req, this.trustProxyEnabled()) ?? 'unknown', 'control-plane');
+      this.recordRefusedCredential(req);
       const error = 'Unauthorized: the WebSocket upgrade request itself must authenticate. Send an '
         + 'Authorization: Bearer token header on the upgrade (React Native and server runtimes support '
         + 'WebSocket constructor headers) or present an operator session cookie (same-origin browser '
@@ -678,7 +690,7 @@ export class DaemonControlPlaneHelper {
         admin: principal.admin,
         domains,
         clientKind,
-        remoteAddress: extractForwardedClientIp(req, this.trustProxyEnabled()),
+        remoteAddress: this.clientAddress(req),
         authenticated: true,
         authRevision: principal.authRevision,
         expiresAt: principal.expiresAt,
@@ -1077,8 +1089,8 @@ export class DaemonControlPlaneHelper {
       if (!known || !isPrincipalCurrent(known, this.authRevision())) known = this.describeRequestPrincipal(token);
       const fresh = known;
       return fresh !== null && fresh.principalId === captured.principalId && fresh.principalKind === captured.principalKind
-        && requiredScopes.every(scope => (fresh.scopes.includes('*') || fresh.scopes.includes(scope))
-          && (captured.scopes.includes('*') || captured.scopes.includes(scope)))
+        && missingScopes(fresh.scopes, requiredScopes).length === 0
+        && missingScopes(captured.scopes, requiredScopes).length === 0
         && this.validateGatewayInvocation(descriptor, fresh) === null
         && this.validateGatewayInvocation(descriptor, captured) === null;
     };

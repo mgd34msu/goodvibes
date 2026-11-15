@@ -13,6 +13,7 @@ import { existsSync, mkdirSync, mkdtempSync, renameSync, rmSync, symlinkSync, un
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { resolveLiveConfigWriteRoute } from '../platform/src/platform/config/daemon-config-route.js';
+import { createDaemonIdentityProof, DAEMON_CHALLENGE_HEADER, DAEMON_PROOF_HEADER } from '../platform/src/platform/daemon/identity-proof.js';
 import { readDetachedDaemonRuntime, recordDetachedDaemonRuntime } from '../platform/src/platform/runtime/detached-daemon-runtime.js';
 import { readConfigValue } from '../platform/src/platform/config/daemon-config-read.js';
 import { migrateDaemonNeededCredentials, describeCredentialMigration, type MigratableSecretStore } from '../platform/src/platform/config/daemon-credential-migration.js';
@@ -69,14 +70,26 @@ describe('probing a daemon address found in configuration', () => {
     expect(seen).toEqual([null]);
   });
 
-  test('a daemon that refuses the anonymous probe with its own authentication error is accepted, still without a token on the probe', async () => {
+  test('a daemon that proves it holds the token on the anonymous probe is accepted, still without a token on the probe', async () => {
     const seen: (string | null)[] = [];
     const daemon = (async (_url: string, init?: RequestInit) => {
-      seen.push(new Headers(init?.headers).get('authorization'));
-      return Response.json({ error: 'Authentication required', code: 'AUTH_REQUIRED' }, { status: 401 });
+      const headers = new Headers(init?.headers);
+      seen.push(headers.get('authorization'));
+      const proof = createDaemonIdentityProof('operator-secret-token', headers.get(DAEMON_CHALLENGE_HEADER) ?? '');
+      return Response.json({ error: 'Authentication required', code: 'AUTH_REQUIRED' }, { status: 401, headers: { [DAEMON_PROOF_HEADER]: proof } });
     }) as unknown as typeof fetch;
     const route = await resolveLiveConfigWriteRoute('controlPlane.port', deps(daemon));
     expect(route.mode).toBe('daemon');
+    expect(seen).toEqual([null]);
+  });
+
+  test('a listener that answers with the daemon authentication error but no proof is never sent the token', async () => {
+    const seen: (string | null)[] = [];
+    const impostor = (async (_url: string, init?: RequestInit) => {
+      seen.push(new Headers(init?.headers).get('authorization'));
+      return Response.json({ error: 'Authentication required', code: 'AUTH_REQUIRED' }, { status: 401 });
+    }) as unknown as typeof fetch;
+    await expect(resolveLiveConfigWriteRoute('controlPlane.port', deps(impostor))).rejects.toThrow('did not prove it holds the operator token');
     expect(seen).toEqual([null]);
   });
 });

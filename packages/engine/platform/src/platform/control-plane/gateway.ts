@@ -106,8 +106,8 @@ interface LiveControlPlaneClient {
    */
   domains: ReadonlySet<RuntimeEventDomain> | null;
   readonly send: (event: string, payload: unknown, id?: string) => void;
-  /** The authenticated principal the connection belongs to, for {@link ControlPlaneGateway.closeClientsOf}. */
-  readonly principalId?: string | undefined;
+  /** The authenticated principal the connection belongs to, for {@link ControlPlaneGateway.closeClientsOf}; an in-band auth frame sets it. */
+  principalId?: string | undefined;
   /** Ends the connection from the daemon side. */
   readonly close?: ((reason: string) => void) | undefined;
 }
@@ -545,6 +545,8 @@ export class ControlPlaneGateway {
     const existing = this.clients.get(clientId);
     if (!existing || !this.runtimeBus) return;
     this.regrantClient(clientId, { admin: input.admin === true, scopes: input.scopes ?? [] });
+    const liveClient = this.liveClients.get(clientId);
+    if (liveClient) liveClient.principalId = input.principalId;
     const updated: ControlPlaneClientRecord = {
       ...existing,
       label: input.label ?? existing.label,

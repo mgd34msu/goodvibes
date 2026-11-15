@@ -24,7 +24,7 @@ function post(path: string, body?: unknown, init: { rawBody?: string } = {}): Re
 }
 
 describe('batch routes', () => {
-  function batchContext(requireAdmin?: (req: Request) => Response | null) {
+  function batchContext() {
     const calls: string[] = [];
     const manager = {
       createJob: async () => { calls.push('create'); return { id: 'job-1' }; },
@@ -40,7 +40,6 @@ describe('batch routes', () => {
         batchManager: manager,
         parseJsonBody: parseDaemonJsonBody,
         parseOptionalJsonBody: parseOptionalDaemonJsonBody,
-        ...(requireAdmin ? { requireAdmin } : {}),
       },
     };
   }
@@ -81,17 +80,6 @@ describe('batch routes', () => {
     expect(read?.status).toBe(400);
     expect(cancel?.status).toBe(400);
     expect(calls).toEqual([]);
-  });
-
-  test('a caller without the admin role cannot create, cancel or tick; reads stay open', async () => {
-    const { calls, context } = batchContext(denyAdmin);
-    const create = await dispatchBatchRoutes(post('/api/batch/jobs', { request: { messages: [{ role: 'user', content: 'hi' }] } }), context);
-    const cancel = await dispatchBatchRoutes(post('/api/batch/jobs/job-1/cancel'), context);
-    const tick = await dispatchBatchRoutes(post('/api/batch/tick', { force: true }), context);
-    const read = await dispatchBatchRoutes(new Request('http://daemon.local/api/batch/jobs/job-1'), context);
-    expect([create?.status, cancel?.status, tick?.status]).toEqual([403, 403, 403]);
-    expect(read?.status).toBe(404);
-    expect(calls).toEqual(['get:job-1']);
   });
 });
 

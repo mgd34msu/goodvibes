@@ -79,6 +79,7 @@ import { requirePortAvailable } from './port-check.js';
 import { resolveHostBinding } from './host-resolver.js';
 import { createHostModeRestartWatcher, RestartController } from './host-mode-watcher.js';
 import { configureJudgmentRequestLifetime } from './http/judgment-request-lifetime.js';
+import { bindClientAddress, resolveClientAddress } from './client-address.js';
 import type { ServiceCommandRunner } from './service-handover.js';
 import { inFlightWorkIds } from '../runtime/fleet/registry.js';
 
@@ -96,6 +97,7 @@ export type DaemonServerConfig = DaemonConfig & {
 interface UpgradeCapableServer {
   upgrade(req: Request, options?: { data?: unknown }): boolean;
   timeout?(req: Request, seconds: number): void;
+  requestIP?(req: Request): { readonly address: string } | null;
 }
 
 type JsonBody = Record<string, unknown>;
@@ -779,6 +781,8 @@ export class DaemonServer {
         ...(tlsState.tls ? { tls: tlsState.tls } : {}),
         async fetch(req: Request, server: UpgradeCapableServer): Promise<Response | undefined> {
           configureJudgmentRequestLifetime(req, server);
+          // Resolved once here; every security event, the sign-in limiter and the audit read this one value.
+          bindClientAddress(req, resolveClientAddress(req, server.requestIP?.(req)?.address, { trustProxy: self.trustProxyEnabled() }));
           const upgrade = self.tryUpgradeControlPlaneWebSocket(req, server);
           if (upgrade === 'upgraded') return;
           if (upgrade) return upgrade;

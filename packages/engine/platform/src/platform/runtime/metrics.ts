@@ -183,8 +183,20 @@ function rolledUpHistogram(inner: Histogram): RolledUpHistogram {
 
 /** Counter: total HTTP requests by method and status_class (1xx to 5xx; the snapshot reports 2xx, 4xx and 5xx). */
 export const httpRequestsTotal = rolledUpCounter(platformMeter.counter('http.requests.total'));
-/** Histogram: HTTP request latency in ms by method, path_pattern, status_class. */
+/**
+ * Histogram: HTTP request latency in ms by method, path_pattern, status_class.
+ * `path_pattern` is the route that answered (or `unmatched`), never the path a
+ * client sent: every label set is kept for the life of the process.
+ */
 export const httpRequestDurationMs = rolledUpHistogram(platformMeter.histogram('http.request.duration_ms'));
+
+const HTTP_METHOD_LABELS: ReadonlySet<string> = new Set(['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']);
+
+/** A request method as a metric label: a known verb, or `OTHER`, so a client cannot add label sets. */
+export function httpMethodLabel(method: string): string {
+  const upper = method.toUpperCase();
+  return HTTP_METHOD_LABELS.has(upper) ? upper : 'OTHER';
+}
 
 // ── LLM metrics ──────────────────────────────────────────────────────────────
 

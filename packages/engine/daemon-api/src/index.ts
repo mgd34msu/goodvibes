@@ -192,6 +192,7 @@ export {
 export type { PaginatedResponse } from './pagination.js';
 export type { JsonErrorResponseOptions } from './error-response.js';
 export {
+  AddressRateLimiter,
   RelayHub,
   RelayConnection,
   DEFAULT_RELAY_LIMITS,

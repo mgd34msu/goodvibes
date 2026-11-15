@@ -41,7 +41,7 @@ export function buildRouterSessionBrokerAdapter(
     markInputDelivered: (sessionId, inputId, options) => sessionBroker.markInputDelivered(sessionId, inputId, options),
     closeSession: (sessionId) => sessionBroker.closeSession(sessionId),
     reopenSession: (sessionId) => sessionBroker.reopenSession(sessionId),
-    detachParticipant: (sessionId, surfaceId) => sessionBroker.detachParticipant(sessionId, surfaceId) as never,
+    detachParticipant: (sessionId, surfaceId) => sessionBroker.detachParticipant(sessionId, surfaceId),
     deleteSession: (sessionId) => sessionBroker.deleteSession(sessionId),
     cancelInput: (sessionId, inputId) => sessionBroker.cancelInput(sessionId, inputId),
     failInput: (sessionId, inputId, error) => sessionBroker.failInput(sessionId, inputId, error),

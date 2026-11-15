@@ -3,7 +3,7 @@ import { createServingSettingsPrecondition } from './settings-precondition.js';
 import { createServingSettingsImportPrecondition } from './settings-import-precondition.js';
 import type { ConfigManager } from '../../config/manager.js';
 import { deriveControlPlaneBaseUrl, readControlPlaneBinding } from '../../config/control-plane-base-url.js';
-import { createBrowserJudgmentHttpHandler, type BrowserJudgmentCapability } from '@goodvibes-jev/engine/daemon-api';
+import { AddressRateLimiter, createBrowserJudgmentHttpHandler, type BrowserJudgmentCapability } from '@goodvibes-jev/engine/daemon-api';
 import type { ServiceRegistry } from '../../config/service-registry.js';
 import { CONFIG_SCHEMA, isValidConfigKey } from '../../config/schema.js';
 import { coerceSchemaValue } from '../../config/manager-bootstrap.js';
@@ -15,7 +15,7 @@ import { summarizeError } from '../../utils/error-display.js';
 import { createCredentialStatusProvider } from '../../config/credential-status.js';
 import { buildAutomationEmptyState } from '../../runtime/feature-announcements.js';
 import type { UserAuthManager } from '../../security/user-auth.js';
-import { buildOperatorSessionCookie, OPERATOR_SESSION_COOKIE_NAME } from '../../security/http-auth.js';
+import { OPERATOR_SESSION_COOKIE_NAME } from '../../security/http-auth.js';
 import type { AgentManager } from '../../tools/agent/index.js';
 import {
   normalizeAtSchedule,
@@ -53,8 +53,9 @@ import type { RuntimeEventBus } from '../../runtime/events/index.js';
 import type { DaemonBatchManager } from '../../batch/index.js';
 import { emitCompanionMessageReceived } from '../../runtime/emitters/session.js';
 import { createAuthFailureAudit, type AuthFailureAudit } from '../auth-failure-audit.js';
-import { emitAuthFailed, emitAuthSucceeded, emitCompanionPairRequested, emitCompanionPairVerified } from '../../runtime/emitters/security.js';
-import { extractForwardedClientIp } from '../../runtime/network/index.js';
+import { emitCompanionPairRequested, emitCompanionPairVerified } from '../../runtime/emitters/security.js';
+import { clientAddressOf, resolveClientAddress } from '../client-address.js';
+import { handleOperatorLogin, SIGN_IN_ATTEMPTS_PER_MINUTE } from '../operator-login.js';
 import { correlationCtx } from '../../runtime/correlation.js';
 import { TelemetryApiService } from '../../runtime/telemetry/api.js';
 import { inspectInboundTls, inspectOutboundTls } from '../../runtime/network/index.js';
@@ -117,6 +118,7 @@ import {
   handleCorsPreflight,
   resolveWebuiServingPosture,
   serveWebuiBundle,
+  type WebuiServingPosture,
 } from './webui-serving.js';
 
 interface DaemonHttpRouterContext {
@@ -267,6 +269,9 @@ export class DaemonHttpRouter {
   setClusterGroupVerbs(verbs: ClusterGroupVerbs): void { this.clusterGroupVerbs = verbs; }
 
   private readonly authFailures: AuthFailureAudit;
+  /** Per-address sign-in attempts; kept for the router's life, so a listener rebind does not reset it. */
+  private readonly signInLimiter = new AddressRateLimiter(SIGN_IN_ATTEMPTS_PER_MINUTE);
+  private servingPostureCache: { readonly revision: number; readonly posture: WebuiServingPosture } | null = null;
 
   constructor(private readonly context: DaemonHttpRouterContext) {
     this.authFailures = createAuthFailureAudit(context.runtimeBus);
@@ -306,6 +311,19 @@ export class DaemonHttpRouter {
     this.context.batchManager?.dispose();
   }
 
+  /**
+   * The web UI serving posture, read from settings again only when the settings
+   * revision moved. A config owner without a revision is read every time.
+   */
+  private servingPosture(): WebuiServingPosture {
+    const revision = (this.context.configManager as { readonly revisionSource?: { revision(): number } }).revisionSource?.revision();
+    const cached = this.servingPostureCache;
+    if (cached && revision !== undefined && cached.revision === revision) return cached.posture;
+    const posture = resolveWebuiServingPosture(this.context.configManager, this.context.gatewayMethods);
+    this.servingPostureCache = revision === undefined ? null : { revision, posture };
+    return posture;
+  }
+
   private getConfigValue(key: string): unknown {
     const getter = (this.context.configManager as { readonly get?: unknown }).get;
     return typeof getter === 'function' ? getter.call(this.context.configManager, key) : undefined;
@@ -319,7 +337,7 @@ export class DaemonHttpRouter {
         // no bundle, daemon behaves exactly as before). CORS preflight is answered
         // pre-auth (a browser OPTIONS carries no credentials; only allowlisted
         // origins are granted, never a wildcard).
-        const serving = resolveWebuiServingPosture(this.context.configManager, this.context.gatewayMethods);
+        const serving = this.servingPosture();
         if (serving.cors.enabled && req.method === 'OPTIONS') {
           return applyCorsHeaders(req, handleCorsPreflight(req, serving), serving);
         }
@@ -370,7 +388,9 @@ export class DaemonHttpRouter {
 
     // The one authentication of this request; every check after this reads the bound context.
     if (!this.context.authenticateRequest(req)) {
-      this.authFailures.record(this.clientIpOf(req), 'control-plane-router');
+      // Only a presented credential that was refused is a failed sign-in; a
+      // request with none is a probe (a starting host's identity challenge is one).
+      if (this.context.extractAuthToken(req)) this.authFailures.record(this.clientIpOf(req), 'control-plane-router');
       const refusal = jsonErrorResponse(
         new AppError('Authentication required', 'AUTH_REQUIRED', false, {
           category: 'authentication',
@@ -514,11 +534,6 @@ export class DaemonHttpRouter {
     };
   }
 
-  /** Reads stay open to any authenticated caller; every other verb needs an admin. */
-  private requireAdminForMutation(req: Request): Response | null {
-    return req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS' ? null : this.context.requireAdmin(req);
-  }
-
   async dispatchApiRoutes(req: Request): Promise<Response | null> {
     const url = new URL(req.url);
     const openAICompatibleEnabled = this.getConfigValue('controlPlane.openaiCompatible.enabled') !== false;
@@ -534,10 +549,10 @@ export class DaemonHttpRouter {
       if (response) return response;
     }
 
+    // Creating, ticking or cancelling a batch spends provider money: those
+    // methods are admin-only in the catalog, which gateGatewayBinding enforced
+    // before this point. Listing stays open to any authenticated caller.
     if (url.pathname.startsWith('/api/batch')) {
-      // Creating, ticking or cancelling a batch spends provider money; listing does not.
-      const batchError = this.requireAdminForMutation(req);
-      if (batchError) return batchError;
       if (!this.context.batchManager) {
         return Response.json({ error: 'Batch manager is not available', code: 'BATCH_MANAGER_UNAVAILABLE' }, { status: 503 });
       }
@@ -589,10 +604,10 @@ export class DaemonHttpRouter {
     // Handled before the main API router so they never touch the global control-plane feed.
     // Model catalog + model-switching routes. Provider runtime metadata is owned
     // by the operator contract under /api/providers.
+    // Switching the model rewrites the daemon-wide setting: the catalog method
+    // needs write:providers, which only an admin holds, and gateGatewayBinding
+    // enforced it before this point.
     if (url.pathname === '/api/models' || url.pathname.startsWith('/api/models/')) {
-      // Switching the model rewrites the daemon-wide setting, which the settings routes already keep to admins.
-      const modelError = this.requireAdminForMutation(req);
-      if (modelError) return modelError;
       const providerResponse = await dispatchModelRoutes(req, {
         providerRegistry: this.context.providerRegistry,
         configManager: this.context.configManager,
@@ -851,7 +866,7 @@ export class DaemonHttpRouter {
           catch { return []; }
         });
       },
-      cors: () => resolveWebuiServingPosture(this.context.configManager).cors,
+      cors: () => this.servingPosture().cors,
       service: this.context.browserJudgment,
     });
     this.routeTableCache = {
@@ -971,59 +986,22 @@ export class DaemonHttpRouter {
     return response;
   }
 
+  /** The address the listener resolved for this request; a request handed in without one is resolved from settings alone. */
   private clientIpOf(req: Request): string {
-    return extractForwardedClientIp(req, Boolean(this.context.configManager.get('controlPlane.trustProxy'))) ?? 'unknown';
+    return clientAddressOf(req) ?? resolveClientAddress(req, undefined, { trustProxy: Boolean(this.context.configManager.get('controlPlane.trustProxy')) });
   }
 
   private securityContext(req: Request, kind: string) {
     return { sessionId: 'system', traceId: `${kind}:${req.headers.get('x-request-id') ?? crypto.randomUUID()}`, source: 'control-plane-router' } as const;
   }
 
-  private async handleLogin(req: Request): Promise<Response> {
-    const body = await this.parseJsonBody(req);
-    if (body instanceof Response) return body;
-
-    const username = typeof body.username === 'string' ? body.username : '';
-    const password = typeof body.password === 'string' ? body.password : '';
-    const authResult = this.context.userAuth.authenticate(username, password);
-
-    if (!authResult.ok) {
-      emitAuthFailed(this.context.runtimeBus, this.securityContext(req, 'auth'),
-        { usernameAttempted: '', clientIp: this.clientIpOf(req), reason: authResult.lockedUntilMs ? 'rate_limited' : 'invalid_credentials' });
-      if (authResult.lockedUntilMs) {
-        const retryAfterSeconds = Math.ceil((authResult.lockedUntilMs - Date.now()) / 1_000);
-        return Response.json(
-          { error: 'Too many requests' },
-          { status: 429, headers: { 'Retry-After': String(Math.max(1, retryAfterSeconds)) } },
-        );
-      }
-      return Response.json({ error: 'Invalid credentials' }, { status: 401 });
-    }
-
-    const { user } = authResult;
-    const session = this.context.userAuth.createSession(user.username);
-    emitAuthSucceeded(this.context.runtimeBus, this.securityContext(req, 'auth'),
-      { username: user.username, sessionId: session.id, clientIp: this.clientIpOf(req), method: 'password' });
-
-    // Auto-retire the bootstrap credential file ONLY after the first
-    // NON-bootstrap login (mirrors http-listener.ts handleLogin behaviour).
-    if (!authResult.usedBootstrapCredential && this.context.userAuth.inspect().bootstrapCredentialPresent) {
-      this.context.userAuth.clearBootstrapCredentialFile();
-    }
-
-    return Response.json({
-      authenticated: true,
-      token: session.token,
-      username: session.username,
-      expiresAt: session.expiresAt,
-    }, {
-      headers: {
-        'Set-Cookie': buildOperatorSessionCookie(session.token, {
-          req,
-          expiresAt: session.expiresAt,
-          trustProxy: Boolean(this.context.configManager.get('controlPlane.trustProxy')),
-        }),
-      },
+  private handleLogin(req: Request): Promise<Response> {
+    return handleOperatorLogin(req, this.clientIpOf(req), {
+      userAuth: this.context.userAuth,
+      limiter: this.signInLimiter,
+      runtimeBus: this.context.runtimeBus,
+      source: 'control-plane-router',
+      trustProxy: Boolean(this.context.configManager.get('controlPlane.trustProxy')),
     });
   }
 

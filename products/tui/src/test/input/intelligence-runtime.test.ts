@@ -15,12 +15,13 @@ function setup(dir: string, diagnostics: Map<string, unknown[]> = new Map()) {
     getDocumentSymbols: async () => [],
     getOutline: async () => [],
     hasTreeSitter: () => false,
-    getDefinition: async () => ({
+    lookupDefinition: async () => ({ status: 'ok' as const, items: [{
       uri: 'file:///workspace/target.ts',
       range: { start: { line: 9, character: 3 }, end: { line: 9, character: 8 } },
-    }),
-    getReferences: async () => [],
-    getHover: async () => null,
+    }] }),
+    lookupReferences: async () => ({ status: 'no-server' as const, items: [], reason: 'No language server for typescript: typescript-language-server is not installed.', next: ['Install it: npm install -g typescript-language-server typescript'] }),
+    lookupHover: async () => ({ status: 'ok' as const, items: null }),
+    installLanguageServer: async () => ({ langId: 'typescript', command: 'typescript-language-server', status: 'not-installable' as const, reason: 'cannot be installed by GoodVibes', at: 0 }),
   };
   const ctx = {
     print: (text: string) => { printed.push(text); },
@@ -55,8 +56,21 @@ describe('/intelligence', () => {
       const text = await run(['definition', 'a.ts', '1', '7']);
       expect(text).toContain('target: file:///workspace/target.ts');
       expect(text).toContain('line: 10');
-      expect(text).not.toContain('No definition was returned');
+      expect(text).not.toContain('no-server');
       expect(events).toEqual(['initialize', 'dispose']);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('references with no language server say so instead of reporting none found', async () => {
+    const dir = makeProjectTempDir('gv-intel');
+    try {
+      writeFileSync(join(dir, 'a.ts'), 'const a = 1;\n');
+      const { run } = setup(dir);
+      const text = await run(['references', 'a.ts', '1', '7']);
+      expect(text).toContain('no-server:');
+      expect(text).not.toContain('found no references');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

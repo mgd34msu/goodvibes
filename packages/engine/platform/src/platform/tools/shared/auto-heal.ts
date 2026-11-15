@@ -2,8 +2,9 @@
  * AutoHealer, three-stage pipeline to fix write/edit validation failures.
  *
  * Pipeline (opt-in via tools.autoHeal config):
- *   1. Formatter: prettier --write or biome format
- *   2. Linter fix: eslint --fix
+ *   1. Formatter: the `formatter` a user languages/{id}.json file sets for the
+ *      file's language; otherwise prettier --write or biome format
+ *   2. Linter fix: the language's `linter` from the same file; otherwise eslint --fix
  *   3. ToolLLM: LLM-assisted fix with error context
  *
  * Design constraints:
@@ -32,6 +33,7 @@ import { unifiedDiff } from '../../state/file-cache.js';
 import { executePolicyCheck } from '../../gate/execute-policy-check.js';
 import { hasCapturedToolInvocation } from './captured-input-tools.js';
 import { healAcceptance, MAX_JUDGED_CHANGE_CHARS } from '../batteries/heal-acceptance.js';
+import { languageToolArgv, type CommandSpec, type ResolvedLanguages } from '../../intelligence/config.js';
 
 const HEAL_ACCEPTANCE_SITE = 'tools.auto-heal.acceptance';
 
@@ -77,7 +79,26 @@ export class AutoHealer {
     private readonly assertInvocation?: () => void,
     private readonly invocationSignal?: AbortSignal,
     private readonly reading?: JudgmentPortCapture,
+    /** The workspace's language facts, read only when a heal runs. */
+    private readonly languages?: () => ResolvedLanguages | undefined,
   ) {}
+
+  /**
+   * The formatter or linter a user languages file set for this file's
+   * language, with its command located on PATH (or given as a path).
+   */
+  private languageTool(filePath: string, kind: 'formatter' | 'linter', warnings: string[]): CommandSpec | null | undefined {
+    const languages = this.languages?.();
+    const lang = languages?.detect(filePath);
+    const spec = lang ? languages?.tool(lang, kind) : undefined;
+    if (!spec || !lang) return undefined;
+    const located = spec.command.includes('/') ? (existsSync(spec.command) ? spec.command : null) : Bun.which(spec.command);
+    if (!located) {
+      addWarning(warnings, `Auto-heal ${kind} '${spec.command}' set for ${lang} is not installed; skipped`);
+      return null;
+    }
+    return { command: located, args: spec.args };
+  }
 
   private async check(): Promise<void> {
     this.reading?.assertCurrent();
@@ -176,6 +197,19 @@ export class AutoHealer {
     try {
       await this.check();
       if (this.execution) return await this._tryContained('formatter', filePath, content, errors, warnings);
+      const configured = this.languageTool(filePath, 'formatter', warnings);
+      if (configured === null) return { healed: false, content };
+      if (configured) {
+        this.checkSynchronous();
+        writeFileSync(tmpFile, content, 'utf-8');
+        this.checkSynchronous();
+        const run = Bun.spawnSync(languageToolArgv(configured, tmpFile), { stdout: 'pipe', stderr: 'pipe' });
+        if (run.exitCode !== 0) {
+          addWarning(warnings, `Auto-heal formatter '${configured.command}' exited ${run.exitCode}; continuing to later repair stages`);
+          return { healed: false, content };
+        }
+        return await this._acceptStage('formatter', filePath, content, readFileSync(tmpFile, 'utf-8'), errors, warnings);
+      }
       const prettier = Bun.which('prettier');
       const biome = Bun.which('biome');
 
@@ -243,6 +277,16 @@ export class AutoHealer {
     try {
       await this.check();
       if (this.execution) return await this._tryContained('linter', filePath, content, errors, warnings);
+      const configured = this.languageTool(filePath, 'linter', warnings);
+      if (configured === null) return { healed: false, content };
+      if (configured) {
+        this.checkSynchronous();
+        writeFileSync(tmpFile, content, 'utf-8');
+        this.checkSynchronous();
+        // A linter exits non-zero when problems remain; what it fixed is in the file either way.
+        Bun.spawnSync(languageToolArgv(configured, tmpFile), { stdout: 'pipe', stderr: 'pipe' });
+        return await this._acceptStage('linter', filePath, content, readFileSync(tmpFile, 'utf-8'), errors, warnings);
+      }
       const eslint = Bun.which('eslint');
 
       if (!eslint) {
@@ -280,6 +324,15 @@ export class AutoHealer {
       addWarning(warnings, 'Auto-heal linter stage failed; continuing to LLM repair', err);
       return { healed: false, content };
     }
+  }
+
+  /** A stage's output: no change passes the content on; a change is accepted or passed on to the next stage. */
+  private async _acceptStage(stage: 'formatter' | 'linter', filePath: string, content: string, candidate: string, errors: string[], warnings: string[]): Promise<HealResult> {
+    if (candidate === content) return { healed: false, content };
+    if (await this._accepted(filePath, content, candidate, errors, stage, warnings)) {
+      return { healed: true, content: candidate, method: stage };
+    }
+    return { healed: false, content: candidate };
   }
 
   private async _tryContained(stage: 'formatter' | 'linter', filePath: string, content: string, errors: string[], warnings: string[]): Promise<HealResult> {

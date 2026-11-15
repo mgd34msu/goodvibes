@@ -63,7 +63,6 @@ describe('bundled Bash LSP', () => {
         chmodSync(join(dir, command), 0o755);
       }
       expect(await service.isAvailable('fixture')).toBe(false);
-      expect((await service.detectServers()).has('fixture')).toBe(false);
 
       const userBin = paths.resolveUserPath('bin');
       mkdirSync(userBin, { recursive: true });

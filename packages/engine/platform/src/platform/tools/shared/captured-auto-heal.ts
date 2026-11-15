@@ -9,6 +9,8 @@ import { assertContractInputAuthority } from '../../contract/input-authority.js'
 import { executePolicyCheck } from '../../gate/execute-policy-check.js';
 import { runCapturedCommand, type CapturedExecAuthority } from '../exec/captured-exec.js';
 import { AutoHealer, type HealResult } from './auto-heal.js';
+import { resolveLanguages, type ResolvedLanguages } from '../../intelligence/config.js';
+import { createShellPathService } from '../../runtime/shell-paths.js';
 import { assertCapturedPublicationOwner } from './captured-publication.js';
 import { assertCapturedWriteRevision } from './captured-write-revision.js';
 import { assertCapturedToolAccessCurrent, assertCapturedToolMutationCurrent, assertCapturedToolReadAccess, capturedToolPublicationContext, captureCapturedToolWriteRevision, hasCapturedToolInvocation } from './captured-input-tools.js';
@@ -22,9 +24,27 @@ export function createCapturedAutoHealBackend(binding: CapturedExecAuthority): C
 }
 const quote = (text: string): string => `'${text.replace(/'/g, `'\\''`)}'`;
 
+/**
+ * The workspace's language files, for the formatter and linter they set. The
+ * config manager the tools are built with knows the home and working
+ * directories; a narrower one (tests, embedders) means the built-in tools only.
+ */
+function workspaceLanguages(config: HealConfig): () => ResolvedLanguages | undefined {
+  let resolved: ResolvedLanguages | undefined | null = null;
+  return () => {
+    if (resolved !== null) return resolved;
+    const home = config.getHomeDirectory?.();
+    const workingDirectory = config.getWorkingDirectory?.();
+    resolved = home && workingDirectory ? resolveLanguages(createShellPathService({ workingDirectory, homeDirectory: home })) : undefined;
+    return resolved;
+  };
+}
+
+type HealConfig = Pick<ConfigManager, 'get'> & Partial<Pick<ConfigManager, 'getHomeDirectory' | 'getWorkingDirectory'>>;
+
 /** Returning a repair never itself authorizes a write. Recheck immediately before publication. */
 export async function healToolFile(
-  config: Pick<ConfigManager, 'get'>,
+  config: HealConfig,
   llm: Pick<ToolLLM, 'chat'>,
   path: string,
   content: string,
@@ -43,7 +63,7 @@ export async function healToolFile(
     const monitor = setInterval(() => { try { check(); } catch (error) { controller.abort(error); } }, 50);
     monitor.unref?.();
     try {
-      const result = await executePolicyCheck(() => new AutoHealer(config, llm, undefined, check, signal, reading).heal(path, content, errors), signal);
+      const result = await executePolicyCheck(() => new AutoHealer(config, llm, undefined, check, signal, reading, workspaceLanguages(config)).heal(path, content, errors), signal);
       check();
       return { ...result, assertCurrent: async () => { check(); }, assertCurrentSynchronous: check };
     } finally { clearInterval(monitor); }
@@ -81,6 +101,8 @@ export async function healToolFile(
     const fileArg = quote(relative(binding.root, file));
     // Exact project-local binaries only. No PATH discovery, npm resolution,
     // project configuration, network, or publication of the command's writes.
+    // For the same reason a formatter or linter from the user languages files
+    // is not run here; the uncontained path above runs it.
     const command = stage === 'formatter'
       ? `if [ -x ./node_modules/.bin/prettier ]; then ./node_modules/.bin/prettier --no-config --no-editorconfig --ignore-path /dev/null --write --log-level silent -- ${fileArg}; else exit 127; fi`
       : `if [ -x ./node_modules/.bin/eslint ]; then ./node_modules/.bin/eslint --no-config-lookup --no-ignore --no-cache --fix --rule 'no-extra-semi:error' -- ${fileArg}; else exit 127; fi`;

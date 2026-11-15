@@ -3,13 +3,15 @@
  *
  * Grammar WASM files are embedded in the compiled binary via Bun's
  * `with { type: 'file' }` import assertion (see embedded-wasm.ts).
- * Missing grammars are handled gracefully (returns null, logs warning).
- * Never throws, callers receive null on failure.
+ * Initialisation is lazy: the first parse initialises the WASM runtime, so a
+ * caller never has to remember an initialise step. A language without an
+ * embedded grammar is reported once per language and then answered from
+ * memory. Never throws, callers receive null on failure.
  */
 import { Parser, Language, Query, Tree } from 'web-tree-sitter';
 import type { QueryMatch } from 'web-tree-sitter';
 import { logger } from '../../utils/logger.js';
-import { detectLanguage } from './languages.js';
+import { detectLanguage, grammarFor } from './languages.js';
 import { summarizeError } from '../../utils/error-display.js';
 
 const MAX_CACHE_SIZE = 100;
@@ -37,10 +39,12 @@ export class TreeSitterService {
   private initialized = false;
   private initPromise: Promise<void> | null = null;
   private languages: Map<string, Language> = new Map();
+  /** Grammars that are not embedded or failed to load; looked up once each. */
+  private readonly unavailable = new Set<string>();
   private treeCache: Map<string, CacheEntry> = new Map();
   /**
    * Initialize the WASM module. Safe to call multiple times, only runs once.
-   * Must be called before parse() will work.
+   * parse() and withParsedTree() call it themselves.
    */
   async initialize(): Promise<void> {
     if (this.initialized) return;
@@ -60,8 +64,9 @@ export class TreeSitterService {
         this.initialized = true;
         logger.info('TreeSitterService: WASM initialized');
       } catch (err) {
-        logger.error('TreeSitterService: WASM init failed', { error: summarizeError(err) });
-        this.initPromise = null; // allow retry on next call
+        // Not retried: the runtime cannot load WASM, and every later parse
+        // would log the same failure. Parses answer null from here on.
+        logger.error('TreeSitterService: WASM init failed; files are not parsed', { error: summarizeError(err) });
       }
     })();
 
@@ -75,13 +80,15 @@ export class TreeSitterService {
   async loadLanguage(langId: string): Promise<Language | null> {
     const cached = this.languages.get(langId);
     if (cached) return cached;
+    if (this.unavailable.has(langId)) return null;
 
     // Look up the embedded WASM path. If not present, the grammar package is
     // not installed, return null rather than throwing.
     const { GRAMMAR_WASM } = await loadEmbeddedWasm();
-    const wasmPath = GRAMMAR_WASM[langId]!;
+    const wasmPath = GRAMMAR_WASM[langId];
     if (!wasmPath) {
-      logger.warn('TreeSitterService: grammar WASM not embedded', { langId });
+      this.unavailable.add(langId);
+      logger.info('TreeSitterService: no grammar for this language; its files are not parsed', { langId });
       return null;
     }
 
@@ -91,6 +98,7 @@ export class TreeSitterService {
       logger.info('TreeSitterService: loaded grammar', { langId });
       return language;
     } catch (err) {
+      this.unavailable.add(langId);
       logger.error('TreeSitterService: failed to load grammar', { langId, error: summarizeError(err) });
       return null;
     }
@@ -105,19 +113,17 @@ export class TreeSitterService {
     content: string,
     langId?: string,
   ): Promise<Tree | null> {
-    if (!this.initialized || !this.parser) {
-      logger.warn('TreeSitterService: not initialized, skipping parse', { filePath });
-      return null;
-    }
-
-    const resolvedLangId = langId ?? detectLanguage(filePath);
+    const detected = langId ?? detectLanguage(filePath);
+    const resolvedLangId = detected ? (grammarFor(detected) ?? detected) : null;
     if (!resolvedLangId) {
       logger.debug('TreeSitterService: unknown language for file', { filePath });
       return null;
     }
 
+    await this.initialize();
+    if (!this.parser) return null;
     const language = await this.loadLanguage(resolvedLangId);
-    if (!language) return null;
+    if (!language || !this.parser) return null;
 
     try {
       this.parser.setLanguage(language);
@@ -163,9 +169,10 @@ export class TreeSitterService {
     langId: string,
     use: (tree: Tree, language: Language) => T,
   ): Promise<T | null> {
-    if (!this.initialized || !this.parser) return null;
+    await this.initialize();
+    if (!this.parser) return null;
     const language = await this.loadLanguage(langId);
-    if (!language) return null;
+    if (!language || !this.parser) return null;
     // From here to the end of `use` nothing yields, so the shared parser and
     // the tree cannot be touched by another call.
     this.parser.setLanguage(language);
@@ -212,6 +219,11 @@ export class TreeSitterService {
     return this.treeCache.size;
   }
 
+  /** True when the language has no grammar or its grammar failed to load. */
+  isUnavailable(langId: string): boolean {
+    return this.unavailable.has(langId);
+  }
+
   /** Loaded language IDs. */
   get loadedLanguages(): string[] {
     return Array.from(this.languages.keys());
@@ -226,6 +238,7 @@ export class TreeSitterService {
     }
     this.treeCache.clear();
     this.languages.clear();
+    this.unavailable.clear();
     if (this.parser) {
       this.parser.delete();
       this.parser = null;
@@ -233,4 +246,15 @@ export class TreeSitterService {
     this.initialized = false;
     this.initPromise = null;
   }
+}
+
+let shared: TreeSitterService | null = null;
+
+/**
+ * The process's one tree-sitter service: one WASM runtime, one parser and each
+ * grammar loaded once, whoever asks. A facade built without its own service
+ * uses this one and never disposes it.
+ */
+export function sharedTreeSitterService(): TreeSitterService {
+  return (shared ??= new TreeSitterService());
 }

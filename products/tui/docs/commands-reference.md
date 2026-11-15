@@ -260,7 +260,7 @@ GoodVibes ships **163** built-in slash commands across **75** categories. Every 
 
 | Command | Aliases | Usage | Description |
 | --- | --- | --- | --- |
-| `/intelligence` | `/intel` | `[review\|panel\|diagnostics [file]\|symbols <file>\|outline <file>\|definition <file> <line> <column>\|references <file> <line> <column>\|hover <file> <line> <column>\|repair]` | Review workspace intelligence readiness, diagnostics posture, and symbol search availability |
+| `/intelligence` | `/intel` | `[review\|panel\|diagnostics [file]\|symbols <file>\|outline <file>\|definition <file> <line> <column>\|references <file> <line> <column>\|hover <file> <line> <column>\|install <file\|language>\|repair]` | Review workspace intelligence readiness, diagnostics posture, and symbol search availability; `install` installs a missing language server (rust-analyzer, gopls) into your GoodVibes bin directory |
 
 ## Knowledge
 

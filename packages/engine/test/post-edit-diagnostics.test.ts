@@ -15,7 +15,7 @@ import { createWriteTool } from '../platform/src/platform/tools/write/index.ts';
 import { createEditTool } from '../platform/src/platform/tools/edit/index.ts';
 import { FileStateCache } from '../platform/src/platform/state/file-cache.ts';
 import {
-  TypeScriptSyntaxDiagnosticsProvider,
+  CodeDiagnosticsProvider,
   collectPostEditDiagnostics,
   type DiagnosticsProvider,
 } from '../platform/src/platform/tools/shared/post-edit-diagnostics.ts';
@@ -41,10 +41,10 @@ function onConfig(mode: 'on' | 'off') {
 
 // ── provider unit ────────────────────────────────────────────────────────────
 
-describe('TypeScriptSyntaxDiagnosticsProvider', () => {
+describe('CodeDiagnosticsProvider', () => {
   test('flags a syntax error in a broken .ts file within a TS project', async () => {
     const root = makeProjectDir();
-    const provider = new TypeScriptSyntaxDiagnosticsProvider();
+    const provider = new CodeDiagnosticsProvider();
     const diags = await provider.collect(join(root, 'broken.ts'), BROKEN_TS);
     expect(diags.length).toBeGreaterThan(0);
     expect(diags[0]!.severity).toBe('error');
@@ -53,18 +53,18 @@ describe('TypeScriptSyntaxDiagnosticsProvider', () => {
 
   test('returns [] for clean content (honest absence, not a fabricated pass)', async () => {
     const root = makeProjectDir();
-    const provider = new TypeScriptSyntaxDiagnosticsProvider();
+    const provider = new CodeDiagnosticsProvider();
     expect(await provider.collect(join(root, 'ok.ts'), CLEAN_TS)).toEqual([]);
   });
 
   test('returns [] when no TS project context is detectable', async () => {
     // A path with no tsconfig/jsconfig above it → honest absence.
-    const provider = new TypeScriptSyntaxDiagnosticsProvider();
+    const provider = new CodeDiagnosticsProvider();
     expect(await provider.collect(join(tmpdir(), 'no-project-xyz', 'broken.ts'), BROKEN_TS)).toEqual([]);
   });
 
   test('does not support non-JS/TS files', () => {
-    const provider = new TypeScriptSyntaxDiagnosticsProvider();
+    const provider = new CodeDiagnosticsProvider();
     expect(provider.supports('/x/README.md')).toBe(false);
     expect(provider.supports('/x/a.ts')).toBe(true);
   });
@@ -97,7 +97,7 @@ describe('write tool post-edit diagnostics', () => {
     const tool = createWriteTool({
       projectRoot: root,
       configManager: onConfig('on'),
-      diagnosticsProvider: new TypeScriptSyntaxDiagnosticsProvider(),
+      diagnosticsProvider: new CodeDiagnosticsProvider(),
     });
     const result = await tool.execute({ files: [{ path: 'broken.ts', content: BROKEN_TS }] });
     expect(result.success).toBe(true);
@@ -111,7 +111,7 @@ describe('write tool post-edit diagnostics', () => {
     const tool = createWriteTool({
       projectRoot: root,
       configManager: onConfig('on'),
-      diagnosticsProvider: new TypeScriptSyntaxDiagnosticsProvider(),
+      diagnosticsProvider: new CodeDiagnosticsProvider(),
     });
     const result = await tool.execute({ files: [{ path: 'ok.ts', content: CLEAN_TS }] });
     const output = JSON.parse(result.output as string) as { diagnostics?: unknown };
@@ -123,7 +123,7 @@ describe('write tool post-edit diagnostics', () => {
     const tool = createWriteTool({
       projectRoot: root,
       configManager: onConfig('off'),
-      diagnosticsProvider: new TypeScriptSyntaxDiagnosticsProvider(),
+      diagnosticsProvider: new CodeDiagnosticsProvider(),
     });
     const result = await tool.execute({ files: [{ path: 'broken.ts', content: BROKEN_TS }] });
     const output = JSON.parse(result.output as string) as { diagnostics?: unknown };
@@ -150,7 +150,7 @@ describe('edit tool post-edit diagnostics', () => {
     const tool = createEditTool(fileCache, {
       cwd: root,
       configManager: onConfig('on'),
-      diagnosticsProvider: new TypeScriptSyntaxDiagnosticsProvider(),
+      diagnosticsProvider: new CodeDiagnosticsProvider(),
     });
     const result = await tool.execute({
       edits: [{ path: 'src/a.ts', find: 'export const value = 1;', replace: 'export const value = ;' }],

@@ -6,7 +6,10 @@ export interface LspCapabilities {
   references: boolean;
   hover: boolean;
   rename: boolean;
+  /** The server pushes or answers diagnostics. */
   diagnostics: boolean;
+  /** The server answers `textDocument/diagnostic` (pull) requests. */
+  pullDiagnostics: boolean;
 }
 
 /**
@@ -21,6 +24,7 @@ export function parseCapabilities(initResult: unknown): LspCapabilities {
     hover: false,
     rename: false,
     diagnostics: false,
+    pullDiagnostics: false,
   };
 
   if (typeof initResult !== 'object' || initResult === null) return caps;
@@ -62,9 +66,13 @@ export function parseCapabilities(initResult: unknown): LspCapabilities {
     caps.rename = true;
   }
 
-  // diagnostics: signalled by publishDiagnosticsProvider or textDocumentSync presence
-  if (sc.publishDiagnosticsProvider !== undefined ||
-      sc.diagnosticProvider !== undefined) {
+  // Diagnostics are pushed by any server that syncs documents; a
+  // diagnosticProvider also answers pull requests.
+  if (sc.diagnosticProvider !== undefined && sc.diagnosticProvider !== null && sc.diagnosticProvider !== false) {
+    caps.pullDiagnostics = true;
+    caps.diagnostics = true;
+  }
+  if (sc.textDocumentSync !== undefined || sc.publishDiagnosticsProvider !== undefined) {
     caps.diagnostics = true;
   }
 

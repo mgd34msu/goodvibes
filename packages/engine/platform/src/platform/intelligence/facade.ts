@@ -2,17 +2,21 @@
  * CodeIntelligence, unified facade over tree-sitter and LSP services.
  *
  * Design principles:
- *   - Graceful degradation: never throw, always return safe defaults.
- *   - LSP is optional; falls back to tree-sitter where possible.
- *   - Tree-sitter is optional; falls back to empty arrays/null.
- *   - On initialization, language configs are read and registered with LspService
- *     so user/project overrides in the configured languages directory take effect.
+ *   - Never throw. Tree-sitter answers are empty when a file cannot be parsed.
+ *   - Language-server lookups (`lookup*`) say why an answer is empty: no
+ *     server, the server does not support the request, it timed out, or it
+ *     failed. The `get*` forms return only the items.
+ *   - No setup step: the first call loads the language files (user and project
+ *     languages/{id}.json) and tree-sitter initialises on the first parse.
+ *     `initialize()` remains for callers that want that work done early.
+ *   - Without its own TreeSitterService a facade uses the process's shared one,
+ *     so every tool parses with one parser and loads each grammar once.
  */
 import { readFileSync } from 'fs';
-import { resolve } from 'path';
+import { basename, resolve } from 'path';
 import { pathToFileURL, fileURLToPath } from 'url';
-import { loadLanguageConfigs } from './config.js';
-import { TreeSitterService } from './tree-sitter/service.js';
+import { BUILTIN_LANGUAGES, resolveLanguages, type ResolvedLanguages } from './config.js';
+import { TreeSitterService, sharedTreeSitterService } from './tree-sitter/service.js';
 
 import type { Tree, Language, Node } from 'web-tree-sitter';
 
@@ -56,15 +60,45 @@ function collectSyntaxErrors(tree: Tree, cap = 20): SyntaxDiagnostic[] {
   }
   return out;
 }
-import { LspService } from './lsp/service.js';
-import type { LspClient } from './lsp/client.js';
-import { detectLanguage } from './tree-sitter/languages.js';
+import { LspService, type LanguageServerInstallOutcome } from './lsp/service.js';
+import { LspRequestTimeoutError, type LspClient } from './lsp/client.js';
+import type { LspCapabilities } from './lsp/capabilities.js';
+import { lspLanguageIdFor, symbolFamilyFor } from './tree-sitter/languages.js';
 import { extractSymbols, extractOutline, findEnclosingScope } from './tree-sitter/queries.js';
 import { logger } from '../utils/logger.js';
 import type { SymbolInfo, OutlineEntry } from './tree-sitter/queries.js';
 import type { Location, DocumentSymbol, Diagnostic, Hover } from './lsp/protocol.js';
 import type { ShellPathService } from '../runtime/shell-paths.js';
 import { summarizeError } from '../utils/error-display.js';
+
+/** Why a language-server lookup has nothing, when it has nothing. */
+export type LookupStatus = 'ok' | 'no-server' | 'unsupported' | 'timeout' | 'failed';
+
+/**
+ * A language-server answer. `ok` with empty items means the server looked and
+ * found none; any other status means it was not asked or did not answer, and
+ * `reason` and `next` say why and what to do.
+ */
+export type LookupResult<T> =
+  | { readonly status: 'ok'; readonly items: T }
+  | { readonly status: Exclude<LookupStatus, 'ok'>; readonly items: T; readonly reason: string; readonly next: readonly string[] };
+
+/** Time limit for one lookup request; a server still loading the project can take this long. */
+const LOOKUP_TIMEOUT_MS = 15_000;
+/** Default wait for a server's diagnostics on a document it was just sent. */
+const DEFAULT_DIAGNOSTICS_WAIT_MS = 3_000;
+/** JSON-RPC "method not found". */
+const METHOD_NOT_FOUND = -32601;
+
+type LookupFailure = Exclude<LookupResult<null>, { status: 'ok' }>;
+
+function failure(status: LookupFailure['status'], reason: string, next: readonly string[] = []): LookupFailure {
+  return { status, items: null, reason, next };
+}
+
+function withItems<T>(failed: LookupFailure, items: T): LookupResult<T> {
+  return { status: failed.status, items, reason: failed.reason, next: failed.next };
+}
 
 // ---------------------------------------------------------------------------
 // URI helpers
@@ -90,20 +124,25 @@ export function uriToPath(uri: string): string {
 // CodeIntelligence
 // ---------------------------------------------------------------------------
 
+type ShellPaths = Pick<ShellPathService, 'workingDirectory' | 'homeDirectory' | 'resolveProjectPath' | 'resolveUserPath'>;
+
 export class CodeIntelligence {
   private treeSitter: TreeSitterService;
+  private readonly ownsTreeSitter: boolean;
   private lsp: LspService | null;
-  private readonly shellPaths: Pick<ShellPathService, 'workingDirectory' | 'homeDirectory' | 'resolveProjectPath' | 'resolveUserPath'> | null;
-  /** Documents each server has been told about, with the text and version it last received. */
-  private readonly openedDocuments = new WeakMap<LspClient, Map<string, { text: string; version: number }>>();
+  private readonly shellPaths: ShellPaths | null;
+  /** Built-in language facts until the workspace's language files are loaded. */
+  private languages: ResolvedLanguages = BUILTIN_LANGUAGES;
+  private readyPromise: Promise<void> | null = null;
 
   constructor(options: {
-    shellPaths?: Pick<ShellPathService, 'workingDirectory' | 'homeDirectory' | 'resolveProjectPath' | 'resolveUserPath'> | undefined;
+    shellPaths?: ShellPaths | undefined;
     treeSitter?: TreeSitterService | undefined;
     lsp?: LspService | undefined;
   } = {}) {
     this.shellPaths = options.shellPaths ?? null;
-    this.treeSitter = options.treeSitter ?? new TreeSitterService();
+    this.ownsTreeSitter = options.treeSitter !== undefined;
+    this.treeSitter = options.treeSitter ?? sharedTreeSitterService();
     this.lsp = options.lsp ?? (this.shellPaths ? new LspService(this.shellPaths) : null);
   }
 
@@ -112,54 +151,47 @@ export class CodeIntelligence {
   // -------------------------------------------------------------------------
 
   /**
-   * Initialize all services. Call once at startup.
-   * Loads language configs and registers LSP server commands with LspService
-   * so that user/project overrides in the configured languages directory are respected.
+   * Load the language files and initialise tree-sitter now rather than on the
+   * first call. Optional: every method does what it needs itself.
    */
   async initialize(): Promise<void> {
-    if (!this.shellPaths) {
-      try {
-        await this.treeSitter.initialize();
-      } catch (err) {
-        logger.warn('CodeIntelligence: TreeSitterService init error', { error: summarizeError(err) });
-      }
-      return;
-    }
-
-    // Wire language configs into LspService (resolves config/facade disconnection).
-    // Only register languages that have an LSP command defined, don't overwrite
-    // configs that were already registered via registerServer().
+    await this.ready();
     try {
-      const lsp = this.lsp;
-      if (!lsp) {
-        await this.treeSitter.initialize();
-        return;
-      }
-      const configs = loadLanguageConfigs(this.shellPaths);
-      for (const [langId, cfg] of configs) {
-        if (cfg.lsp) {
+      await this.treeSitter.initialize();
+    } catch (err) {
+      logger.warn('CodeIntelligence: TreeSitterService init error', { error: summarizeError(err) });
+    }
+  }
+
+  /**
+   * Read the language files once and register their servers with the
+   * LspService. A server already registered through registerServer() is kept.
+   */
+  private ready(): Promise<void> {
+    return (this.readyPromise ??= (async () => {
+      if (!this.shellPaths) return;
+      try {
+        this.languages = resolveLanguages(this.shellPaths);
+        const lsp = this.lsp;
+        if (!lsp) return;
+        for (const [langId, cfg] of this.languages.configs) {
+          if (!cfg.lsp || lsp.serverFor(langId)) continue;
           lsp.registerServer(langId, {
             command: cfg.lsp.command,
             args: cfg.lsp.args,
             initializationOptions: cfg.lsp.initializationOptions,
           });
         }
+      } catch (err) {
+        logger.warn('CodeIntelligence: failed to load language configs', { error: summarizeError(err) });
       }
-    } catch (err) {
-      logger.warn('CodeIntelligence: failed to load language configs', { error: summarizeError(err) });
-    }
-
-    try {
-      await this.treeSitter.initialize();
-    } catch (err) {
-      logger.warn('CodeIntelligence: TreeSitterService init error', { error: summarizeError(err) });
-    }
-    // LspService has no async init; LSP servers are started on demand.
+    })());
   }
 
   /** Shutdown all owned services for this facade instance. */
   async dispose(): Promise<void> {
     try { await this.lsp?.shutdown(); } catch (err) { logger.warn('LSP shutdown error', { error: summarizeError(err) }); }
+    if (!this.ownsTreeSitter) return;
     try { this.treeSitter.dispose(); } catch (err) { logger.warn('TreeSitter dispose error', { error: summarizeError(err) }); }
   }
 
@@ -169,71 +201,48 @@ export class CodeIntelligence {
 
   /**
    * Parse a file and run `use` on the tree before anything else can touch it.
-   * Returns null if the language is unknown or grammar unavailable.
+   * `lang` in the parse result is the grammar the file was parsed with.
+   * Returns null if the language is unknown or has no grammar.
    */
   private async _withParsed<T>(
     filePath: string,
     content: string,
     use: (parsed: ParseResult) => T,
+    needsSymbols = false,
   ): Promise<T | null> {
-    const lang = detectLanguage(filePath);
+    await this.ready();
+    const lang = this.languages.detect(filePath);
     if (!lang) return null;
-    return this.treeSitter.withParsedTree(content, lang, (tree, language) => use({ tree, language, lang }));
+    const grammar = this.languages.grammar(lang);
+    if (!grammar) return null;
+    if (needsSymbols && !symbolFamilyFor(grammar)) return null;
+    return this.treeSitter.withParsedTree(content, grammar, (tree, language) => use({ tree, language, lang: grammar }));
   }
 
   // -------------------------------------------------------------------------
   // Tree-sitter operations
   // -------------------------------------------------------------------------
 
-  /**
-   * Tell the server about a document before asking it anything about it: a
-   * server answers only for documents it was opened with. Sends the text once,
-   * and again (as a full change) when it differs from what the server has.
-   * Returns false when the text cannot be read, so the caller can skip the request.
-   */
-  private _syncDocument(client: LspClient, filePath: string, lang: string, content?: string): boolean {
-    let text = content;
-    if (text === undefined) {
-      try { text = readFileSync(filePath, 'utf-8'); }
-      catch (err) {
-        logger.warn('CodeIntelligence: cannot read a document to open it in the language server', { filePath, error: summarizeError(err) });
-        return false;
-      }
-    }
-    const uri = pathToUri(filePath);
-    let documents = this.openedDocuments.get(client);
-    if (!documents) { documents = new Map(); this.openedDocuments.set(client, documents); }
-    const known = documents.get(uri);
-    if (!known) {
-      client.notify('textDocument/didOpen', { textDocument: { uri, languageId: lang, version: 1, text } });
-      documents.set(uri, { text, version: 1 });
-    } else if (known.text !== text) {
-      const version = known.version + 1;
-      client.notify('textDocument/didChange', { textDocument: { uri, version }, contentChanges: [{ text }] });
-      documents.set(uri, { text, version });
-    }
-    return true;
-  }
-
-  /** Detect the language of a file by its extension. */
+  /** Detect the language of a file by its extension (and any extensions a language file added). */
   detectLanguage(filePath: string): string | null {
-    return detectLanguage(filePath);
+    return this.languages.detect(filePath);
   }
 
-  /** Check if a tree-sitter grammar is loaded for a file's language. */
+  /** True when the file's language has a grammar, so it can be parsed. */
   hasTreeSitter(filePath: string): boolean {
-    const lang = detectLanguage(filePath);
+    const lang = this.languages.detect(filePath);
     if (!lang) return false;
-    return this.treeSitter.loadedLanguages.includes(lang);
+    const grammar = this.languages.grammar(lang);
+    return grammar !== undefined && !this.treeSitter.isUnavailable(grammar);
   }
 
   /**
    * Parse a file and extract symbols.
-   * Returns empty array if no grammar is loaded for the language.
+   * Returns an empty array when the language has no grammar or no symbols.
    */
   async getSymbols(filePath: string, content: string): Promise<SymbolInfo[]> {
     try {
-      return await this._withParsed(filePath, content, (parsed) => extractSymbols(parsed.tree, parsed.language, parsed.lang)) ?? [];
+      return await this._withParsed(filePath, content, (parsed) => extractSymbols(parsed.tree, parsed.language, parsed.lang), true) ?? [];
     } catch (err) {
       logger.warn('CodeIntelligence.getSymbols error', { filePath, error: summarizeError(err) });
       return [];
@@ -242,11 +251,11 @@ export class CodeIntelligence {
 
   /**
    * Parse a file and extract an outline (signatures only).
-   * Returns empty array if no grammar is loaded for the language.
+   * Returns an empty array when the language has no grammar or no symbols.
    */
   async getOutline(filePath: string, content: string): Promise<OutlineEntry[]> {
     try {
-      return await this._withParsed(filePath, content, (parsed) => extractOutline(parsed.tree, parsed.language, parsed.lang)) ?? [];
+      return await this._withParsed(filePath, content, (parsed) => extractOutline(parsed.tree, parsed.language, parsed.lang), true) ?? [];
     } catch (err) {
       logger.warn('CodeIntelligence.getOutline error', { filePath, error: summarizeError(err) });
       return [];
@@ -256,8 +265,8 @@ export class CodeIntelligence {
   /**
    * Parse a file and return syntax-level diagnostics (ERROR / MISSING nodes)
    * from the tree-sitter parse. In-process and cheap, this does NOT type-check
-   * and never spawns a language server. Returns [] when no grammar is loaded for
-   * the language or the parse is clean.
+   * and never spawns a language server. Returns [] when the language has no
+   * grammar or the parse is clean.
    */
   async getSyntaxDiagnostics(filePath: string, content: string): Promise<SyntaxDiagnostic[]> {
     try {
@@ -278,7 +287,7 @@ export class CodeIntelligence {
     line: number,
   ): Promise<{ kind: string; name: string; startLine: number; endLine: number } | null> {
     try {
-      return await this._withParsed(filePath, content, (parsed) => findEnclosingScope(parsed.tree, parsed.language, parsed.lang, line));
+      return await this._withParsed(filePath, content, (parsed) => findEnclosingScope(parsed.tree, parsed.language, parsed.lang, line), true);
     } catch (err) {
       logger.warn('CodeIntelligence.getEnclosingScope error', { filePath, error: summarizeError(err) });
       return null;
@@ -289,10 +298,11 @@ export class CodeIntelligence {
   // LSP operations
   // -------------------------------------------------------------------------
 
-  /** Check if an LSP server is available for a file's language. */
+  /** Check if an LSP server is installed for a file's language. */
   async hasLsp(filePath: string): Promise<boolean> {
     if (!this.lsp) return false;
-    const lang = detectLanguage(filePath);
+    await this.ready();
+    const lang = this.languages.detect(filePath);
     if (!lang) return false;
     try {
       return await this.lsp.isAvailable(lang);
@@ -301,61 +311,188 @@ export class CodeIntelligence {
     }
   }
 
-  /**
-   * Get definition location.
-   * Returns null if LSP not available for the file's language.
-   */
-  async getDefinition(
-    filePath: string,
-    line: number,
-    column: number,
-  ): Promise<Location | null> {
-    const lang = detectLanguage(filePath);
-    if (!lang) return null;
-    try {
-      const client = await this.lsp?.getClient(lang);
-      if (!client) return null;
-      if (!this._syncDocument(client, filePath, lang)) return null;
-      const uri = pathToUri(filePath);
-      const result = await client.request<Location | Location[] | null>('textDocument/definition', {
-        textDocument: { uri },
-        position: { line, character: column },
-      });
-      if (!result) return null;
-      if (Array.isArray(result)) return result[0] ?? null;
-      return result;
-    } catch (err) {
-      logger.warn('CodeIntelligence.getDefinition error', { filePath, error: summarizeError(err) });
-      return null;
-    }
+  /** True when a language server is configured for the file's language. */
+  hasServerConfigured(filePath: string): boolean {
+    const lang = this.languages.detect(filePath);
+    return lang !== null && this.languages.configs.get(lang)?.lsp !== undefined;
+  }
+
+  /** True when a language server for the file's language is running now. */
+  async hasRunningServer(filePath: string): Promise<boolean> {
+    if (!this.lsp) return false;
+    await this.ready();
+    const lang = this.languages.detect(filePath);
+    return lang !== null && this.lsp.runningClient(lang) !== null;
   }
 
   /**
-   * Get all references to a symbol.
-   * Returns empty array if LSP not available.
+   * Install the language server for a file's language (or a language id) into
+   * the user's bin directory: an explicit owner action, never part of a lookup.
    */
-  async getReferences(
-    filePath: string,
-    line: number,
-    column: number,
-  ): Promise<Location[]> {
-    const lang = detectLanguage(filePath);
-    if (!lang) return [];
-    try {
-      const client = await this.lsp?.getClient(lang);
-      if (!client) return [];
-      if (!this._syncDocument(client, filePath, lang)) return [];
-      const uri = pathToUri(filePath);
-      const result = await client.request<Location[]>('textDocument/references', {
-        textDocument: { uri },
-        position: { line, character: column },
-        context: { includeDeclaration: true },
-      });
-      return result ?? [];
-    } catch (err) {
-      logger.warn('CodeIntelligence.getReferences error', { filePath, error: summarizeError(err) });
-      return [];
+  async installLanguageServer(
+    fileOrLanguage: string,
+    options: { readonly signal?: AbortSignal | undefined; readonly timeoutMs?: number | undefined } = {},
+  ): Promise<LanguageServerInstallOutcome> {
+    await this.ready();
+    const lang = this.languages.detect(fileOrLanguage) ?? fileOrLanguage;
+    if (!this.lsp) {
+      return { langId: lang, command: '', status: 'not-configured', reason: 'This facade has no language-server service (no workspace paths)', at: Date.now() };
     }
+    return this.lsp.installServer(lang, options);
+  }
+
+  /**
+   * Resolve the client for a file and send it the file's text. `capability`
+   * is checked against what the server said it supports.
+   */
+  private async _prepare(
+    filePath: string,
+    capability: keyof LspCapabilities | null,
+    options: { readonly content?: string | undefined; readonly onlyRunning?: boolean | undefined } = {},
+  ): Promise<{ client: LspClient; lang: string; uri: string; sync: ReturnType<LspClient['syncDocument']> } | LookupFailure> {
+    await this.ready();
+    const lang = this.languages.detect(filePath);
+    if (!lang) {
+      return failure('unsupported', `No language is known for ${basename(filePath)}, so no language server can be asked.`,
+        ['Add its extension to a user languages file with an lsp command.']);
+    }
+    if (!this.lsp) {
+      return failure('no-server', 'This lookup has no language-server service (it was built without workspace paths).');
+    }
+    let client: LspClient;
+    if (options.onlyRunning) {
+      const running = this.lsp.runningClient(lang);
+      if (!running) return failure('no-server', `No ${lang} language server is running.`);
+      client = running;
+    } else {
+      const resolution = await this.lsp.resolveClient(lang);
+      if (resolution.status !== 'ok') return failure(resolution.status, resolution.reason, resolution.next);
+      client = resolution.client;
+    }
+    if (capability && client.capabilities && !client.capabilities[capability]) {
+      return failure('unsupported', `The ${lang} language server does not support ${capability} requests.`);
+    }
+    let text = options.content;
+    if (text === undefined) {
+      try { text = readFileSync(filePath, 'utf-8'); }
+      catch (err) {
+        return failure('failed', `${filePath} could not be read to send to the language server: ${summarizeError(err)}`);
+      }
+    }
+    const uri = pathToUri(filePath);
+    const sync = client.syncDocument(uri, lspLanguageIdFor(lang), text);
+    return { client, lang, uri, sync };
+  }
+
+  /** Map a request failure to its lookup status. */
+  private _requestFailure(lang: string, method: string, err: unknown): LookupFailure {
+    if (err instanceof LspRequestTimeoutError) {
+      return failure('timeout', `The ${lang} language server did not answer ${method} within ${err.timeoutMs} ms.`,
+        ['Try again: a server that is still loading the project answers once it is done.']);
+    }
+    const message = summarizeError(err);
+    if (message.includes(`LSP error ${METHOD_NOT_FOUND}:`)) {
+      return failure('unsupported', `The ${lang} language server does not support ${method}.`);
+    }
+    return failure('failed', `The ${lang} language server failed on ${method}: ${message}`);
+  }
+
+  private async _request<T>(
+    filePath: string,
+    capability: keyof LspCapabilities,
+    method: string,
+    params: (uri: string) => unknown,
+    empty: T,
+    shape: (raw: unknown) => T,
+  ): Promise<LookupResult<T>> {
+    try {
+      const prepared = await this._prepare(filePath, capability);
+      if ('status' in prepared) return withItems(prepared, empty);
+      try {
+        const raw = await prepared.client.request<unknown>(method, params(prepared.uri), { timeoutMs: LOOKUP_TIMEOUT_MS });
+        return { status: 'ok', items: shape(raw) };
+      } catch (err) {
+        return withItems(this._requestFailure(prepared.lang, method, err), empty);
+      }
+    } catch (err) {
+      logger.warn('CodeIntelligence: language-server lookup failed', { filePath, method, error: summarizeError(err) });
+      return withItems(failure('failed', `The lookup failed: ${summarizeError(err)}`), empty);
+    }
+  }
+
+  /** Definition locations at a position, with why the list is empty when it is. */
+  lookupDefinition(filePath: string, line: number, column: number): Promise<LookupResult<Location[]>> {
+    return this._request(filePath, 'definition', 'textDocument/definition',
+      (uri) => ({ textDocument: { uri }, position: { line, character: column } }), [],
+      (raw) => (raw ? (Array.isArray(raw) ? raw as Location[] : [raw as Location]) : []));
+  }
+
+  /** References to the symbol at a position, with why the list is empty when it is. */
+  lookupReferences(filePath: string, line: number, column: number): Promise<LookupResult<Location[]>> {
+    return this._request(filePath, 'references', 'textDocument/references',
+      (uri) => ({ textDocument: { uri }, position: { line, character: column }, context: { includeDeclaration: true } }), [],
+      (raw) => (Array.isArray(raw) ? raw as Location[] : []));
+  }
+
+  /** Hover text at a position, with why there is none when there is none. */
+  lookupHover(filePath: string, line: number, column: number): Promise<LookupResult<Hover | null>> {
+    return this._request<Hover | null>(filePath, 'hover', 'textDocument/hover',
+      (uri) => ({ textDocument: { uri }, position: { line, character: column } }), null,
+      (raw) => (raw ? raw as Hover : null));
+  }
+
+  /**
+   * The language server's diagnostics (type errors included) for a file's
+   * text. `content` is the text to check (default: the file on disk);
+   * `onlyRunning` asks only a server that is already running and never starts
+   * one; `waitMs` bounds the wait for the server's answer to this exact text.
+   */
+  async lookupDiagnostics(
+    filePath: string,
+    options: { readonly content?: string | undefined; readonly onlyRunning?: boolean | undefined; readonly waitMs?: number | undefined } = {},
+  ): Promise<LookupResult<Diagnostic[]>> {
+    const waitMs = options.waitMs ?? DEFAULT_DIAGNOSTICS_WAIT_MS;
+    try {
+      const prepared = await this._prepare(filePath, null, options);
+      if ('status' in prepared) return withItems(prepared, []);
+      const { client, lang, uri, sync } = prepared;
+      if (client.capabilities?.pullDiagnostics) {
+        try {
+          const pulled = await client.request<{ items?: Diagnostic[] } | null>('textDocument/diagnostic', { textDocument: { uri } }, { timeoutMs: waitMs });
+          return { status: 'ok', items: pulled?.items ?? [] };
+        } catch (err) {
+          return withItems(this._requestFailure(lang, 'textDocument/diagnostic', err), []);
+        }
+      }
+      const published = await client.waitForDiagnostics(uri, sync, waitMs);
+      if (published === null) {
+        return withItems(failure('timeout', `The ${lang} language server did not report diagnostics for this text within ${waitMs} ms.`), []);
+      }
+      return { status: 'ok', items: published };
+    } catch (err) {
+      logger.warn('CodeIntelligence.lookupDiagnostics error', { filePath, error: summarizeError(err) });
+      return withItems(failure('failed', `The diagnostics lookup failed: ${summarizeError(err)}`), []);
+    }
+  }
+
+  /** Definition location, or null (see {@link lookupDefinition} for why). */
+  async getDefinition(filePath: string, line: number, column: number): Promise<Location | null> {
+    return (await this.lookupDefinition(filePath, line, column)).items[0] ?? null;
+  }
+
+  /** References, or [] (see {@link lookupReferences} for why). */
+  async getReferences(filePath: string, line: number, column: number): Promise<Location[]> {
+    return (await this.lookupReferences(filePath, line, column)).items;
+  }
+
+  /** Hover information, or null (see {@link lookupHover} for why). */
+  async getHover(filePath: string, line: number, column: number): Promise<Hover | null> {
+    return (await this.lookupHover(filePath, line, column)).items;
+  }
+
+  /** Diagnostics for the file on disk, or [] (see {@link lookupDiagnostics} for why). */
+  async getDiagnostics(filePath: string): Promise<Diagnostic[]> {
+    return (await this.lookupDiagnostics(filePath)).items;
   }
 
   /**
@@ -366,97 +503,19 @@ export class CodeIntelligence {
     filePath: string,
     content: string,
   ): Promise<DocumentSymbol[] | SymbolInfo[]> {
-    const lang = detectLanguage(filePath);
-    // Try LSP first
-    if (lang) {
-      try {
-        const client = await this.lsp?.getClient(lang);
-        if (client && this._syncDocument(client, filePath, lang, content)) {
-          const uri = pathToUri(filePath);
-          const lspSymbols = await client.request<DocumentSymbol[]>(
-            'textDocument/documentSymbol',
-            { textDocument: { uri } },
-          );
-          if (lspSymbols && lspSymbols.length > 0) return lspSymbols;
-        }
-      } catch (err) {
-        logger.warn('CodeIntelligence.getDocumentSymbols LSP error; falling back to tree-sitter', { filePath, error: summarizeError(err) });
-      }
-    }
-    // Fall back to tree-sitter
-    return this.getSymbols(filePath, content);
-  }
-
-  /**
-   * Get hover information.
-   * Returns null if LSP not available.
-   */
-  async getHover(
-    filePath: string,
-    line: number,
-    column: number,
-  ): Promise<Hover | null> {
-    const lang = detectLanguage(filePath);
-    if (!lang) return null;
     try {
-      const client = await this.lsp?.getClient(lang);
-      if (!client) return null;
-      if (!this._syncDocument(client, filePath, lang)) return null;
-      const uri = pathToUri(filePath);
-      return await client.request<Hover | null>('textDocument/hover', {
-        textDocument: { uri },
-        position: { line, character: column },
-      }) ?? null;
-    } catch (err) {
-      logger.warn('CodeIntelligence.getHover error', { filePath, error: summarizeError(err) });
-      return null;
-    }
-  }
-
-  /**
-   * Get diagnostics for a file.
-   * Returns empty array if LSP not available.
-   * Checks queued textDocument/publishDiagnostics notifications first, then asks
-   * servers that implement textDocument/diagnostic.
-   */
-  async getDiagnostics(filePath: string): Promise<Diagnostic[]> {
-    const lang = detectLanguage(filePath);
-    if (!lang) return [];
-    try {
-      const client = await this.lsp?.getClient(lang);
-      if (!client) return [];
-      if (!this._syncDocument(client, filePath, lang)) return [];
-      const uri = pathToUri(filePath);
-      const diagnosticNotifications = client.takeNotifications((notification) => {
-        if (notification.method !== 'textDocument/publishDiagnostics') return false;
-        const params = notification.params;
-        return (
-          typeof params === 'object'
-          && params !== null
-          && (params as { uri?: unknown }).uri === uri
+      const prepared = await this._prepare(filePath, 'documentSymbols', { content });
+      if (!('status' in prepared)) {
+        const lspSymbols = await prepared.client.request<DocumentSymbol[] | null>(
+          'textDocument/documentSymbol',
+          { textDocument: { uri: prepared.uri } },
+          { timeoutMs: LOOKUP_TIMEOUT_MS },
         );
-      });
-      // The server republishes the whole list for a file each time, so the
-      // newest notification is the current one.
-      for (const notification of diagnosticNotifications.reverse()) {
-        const params = notification.params;
-        if (
-          typeof params === 'object'
-          && params !== null
-          && (params as { uri?: unknown }).uri === uri
-          && Array.isArray((params as { diagnostics?: unknown }).diagnostics)
-        ) {
-          return (params as { diagnostics: Diagnostic[] }).diagnostics;
-        }
+        if (lspSymbols && lspSymbols.length > 0) return lspSymbols;
       }
-      const result = await client.request<{ items: Diagnostic[] } | null>(
-        'textDocument/diagnostic',
-        { textDocument: { uri } },
-      );
-      return result?.items ?? [];
     } catch (err) {
-      logger.warn('CodeIntelligence.getDiagnostics error', { filePath, error: summarizeError(err) });
-      return [];
+      logger.warn('CodeIntelligence.getDocumentSymbols LSP error; falling back to tree-sitter', { filePath, error: summarizeError(err) });
     }
+    return this.getSymbols(filePath, content);
   }
 }

@@ -1,18 +1,46 @@
 /**
  * The client side of the language-server protocol: answering the server's own
  * requests, opening documents before asking about them, and reading the
- * newest diagnostics.
+ * diagnostics for the text just sent rather than an older one.
  */
 import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { LspClient, type LspNotificationRecord } from '../platform/src/platform/intelligence/lsp/client.js';
+import { LspClient } from '../platform/src/platform/intelligence/lsp/client.js';
 import { CodeIntelligence, pathToUri } from '../platform/src/platform/intelligence/facade.js';
 import type { LspService } from '../platform/src/platform/intelligence/lsp/service.js';
 
 function dispatch(client: LspClient, payload: unknown): void {
   (client as unknown as { _dispatchMessage(body: string): void })._dispatchMessage(JSON.stringify(payload));
+}
+
+/** A real client whose process is a recorder: every frame it writes is kept. */
+function recordingClient(answer: (method: string, id: number, client: LspClient) => void = () => {}) {
+  const client = new LspClient('unused', []);
+  const sent: Array<{ method: string; params?: unknown }> = [];
+  (client as unknown as { proc: unknown }).proc = {
+    exitCode: null,
+    stdin: {
+      write: (frame: string) => {
+        const message = JSON.parse(frame.slice(frame.indexOf('\r\n\r\n') + 4)) as { id?: number; method?: string; params?: unknown };
+        if (!message.method) return;
+        sent.push({ method: message.method, params: message.params });
+        if (typeof message.id === 'number') queueMicrotask(() => answer(message.method!, message.id!, client));
+      },
+    },
+  };
+  return { client, sent };
+}
+
+function facadeOver(client: LspClient): CodeIntelligence {
+  const lsp = {
+    resolveClient: async () => ({ status: 'ok', client }),
+    runningClient: () => client,
+    serverFor: () => undefined,
+    shutdown: async () => {},
+  } as unknown as LspService;
+  return new CodeIntelligence({ lsp });
 }
 
 describe('LspClient server requests', () => {
@@ -32,35 +60,25 @@ describe('LspClient server requests', () => {
     const reply = JSON.parse(written[0]!.slice(written[0]!.indexOf('\r\n\r\n') + 4)) as { id: number; result: unknown[] };
     expect(reply.id).toBe(1);
     expect(reply.result).toEqual([null, null]);
-    expect(client.takeNotifications(() => true)).toEqual([]);
     clearTimeout((client as unknown as { pendingRequests: Map<number, { timer: ReturnType<typeof setTimeout> }> }).pendingRequests.get(1)!.timer);
   });
 });
-
-function fakeLsp() {
-  const sent: Array<{ kind: 'notify' | 'request'; method: string }> = [];
-  const queued: LspNotificationRecord[] = [];
-  const client = {
-    notify: (method: string) => { sent.push({ kind: 'notify', method }); },
-    request: async (method: string) => { sent.push({ kind: 'request', method }); return null; },
-    takeNotifications: (predicate: (n: LspNotificationRecord) => boolean) => queued.filter(predicate),
-  };
-  const lsp = { getClient: async () => client, isAvailable: async () => true, shutdown: async () => {} } as unknown as LspService;
-  return { sent, queued, intelligence: new CodeIntelligence({ lsp }) };
-}
 
 describe('CodeIntelligence language server use', () => {
   test('a document is opened before the first request about it, and only once', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'lsp-open-'));
     try {
-      const file = join(dir, 'a.ts');
+      const file = join(dir, 'a.tsx');
       writeFileSync(file, 'export const a = 1;\n');
-      const { sent, intelligence } = fakeLsp();
+      const { client, sent } = recordingClient((_method, id, c) => dispatch(c, { jsonrpc: '2.0', id, result: null }));
+      const intelligence = facadeOver(client);
       await intelligence.getHover(file, 0, 7);
       await intelligence.getHover(file, 0, 7);
       expect(sent.map((entry) => entry.method)).toEqual([
         'textDocument/didOpen', 'textDocument/hover', 'textDocument/hover',
       ]);
+      // The protocol's language id for TSX, not the internal one.
+      expect((sent[0]!.params as { textDocument: { languageId: string } }).textDocument.languageId).toBe('typescriptreact');
       writeFileSync(file, 'export const a = 2;\n');
       await intelligence.getHover(file, 0, 7);
       expect(sent.slice(3).map((entry) => entry.method)).toEqual(['textDocument/didChange', 'textDocument/hover']);
@@ -69,21 +87,37 @@ describe('CodeIntelligence language server use', () => {
     }
   });
 
-  test('the newest published diagnostics for a file win', async () => {
+  test('diagnostics are the ones published for the text just sent, not the previous version', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'lsp-diag-'));
     try {
       const file = join(dir, 'a.ts');
       writeFileSync(file, 'let x\n');
-      const { queued, intelligence } = fakeLsp();
+      const { client } = recordingClient();
+      const intelligence = facadeOver(client);
       const uri = pathToUri(file);
-      queued.push(
-        { method: 'textDocument/publishDiagnostics', params: { uri, diagnostics: [{ message: 'old' }] }, receivedAt: 1 },
-        { method: 'textDocument/publishDiagnostics', params: { uri, diagnostics: [{ message: 'new' }] }, receivedAt: 2 },
-      );
-      const diagnostics = await intelligence.getDiagnostics(file);
-      expect(diagnostics.map((d) => (d as { message: string }).message)).toEqual(['new']);
+      client.syncDocument(uri, 'typescript', 'let x\n');
+      dispatch(client, { jsonrpc: '2.0', method: 'textDocument/publishDiagnostics', params: { uri, version: 1, diagnostics: [{ message: 'old' }] } });
+
+      const pending = intelligence.lookupDiagnostics(file, { content: 'let x: number = "a";\n', waitMs: 2_000 });
+      setTimeout(() => dispatch(client, {
+        jsonrpc: '2.0', method: 'textDocument/publishDiagnostics', params: { uri, version: 2, diagnostics: [{ message: 'new' }] },
+      }), 20);
+      const result = await pending;
+      expect(result.status).toBe('ok');
+      expect(result.items.map((d) => d.message)).toEqual(['new']);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  test('an empty answer says why: no server is not the same as none found', async () => {
+    const lsp = {
+      resolveClient: async () => ({ status: 'no-server', reason: 'No language server for rust: rust-analyzer is not installed.', next: ['Install it'] }),
+      serverFor: () => undefined,
+      shutdown: async () => {},
+    } as unknown as LspService;
+    const result = await new CodeIntelligence({ lsp }).lookupReferences('/p/main.rs', 0, 0);
+    expect(result.status).toBe('no-server');
+    expect(result.items).toEqual([]);
   });
 });

@@ -86,7 +86,8 @@ Write files with atomic operations, backup modes, and auto-heal.
 
 - Atomic writes via temp file + rename: no partial writes on crash
 - Overwrite modes: `fail_if_exists`, `overwrite`, `backup` (copies the original to `.goodvibes/.backups/`)
-- Auto-heal pipeline: if a written file has syntax errors and `tools.autoHeal` is enabled, runs formatter -> linter -> LLM fix automatically
+- Auto-heal pipeline: if a written file has syntax errors and `tools.autoHeal` is enabled, runs formatter -> linter -> LLM fix automatically. The formatter and linter are the ones your user `languages/<language>.json` file sets for the file's language (`"formatter": { "command": "black", "args": ["-q", "{file}"] }`), otherwise prettier and eslint
+- Diagnostics after a write or edit: syntax errors from the built-in parser, plus type errors from a language server that is already running for the file's language
 - Base64 content support for files with special characters
 - Batch writes in a single call with per-file mode control
 

@@ -6,7 +6,7 @@
 
 // Facade
 export { CodeIntelligence, pathToUri, uriToPath } from './facade.js';
-export type { ParseResult, SyntaxDiagnostic } from './facade.js';
+export type { ParseResult, SyntaxDiagnostic, LookupResult, LookupStatus } from './facade.js';
 
 // Config
 export {
@@ -15,9 +15,11 @@ export {
   getDefaultConfigs,
 } from './config.js';
 export type { LanguageConfig } from './config.js';
+export { languageToolArgv, resolveLanguages } from './config.js';
+export type { ResolvedLanguages, CommandSpec } from './config.js';
 
 // Tree-sitter
-export { TreeSitterService } from './tree-sitter/service.js';
+export { TreeSitterService, sharedTreeSitterService } from './tree-sitter/service.js';
 export type { SymbolInfo, OutlineEntry } from './tree-sitter/queries.js';
 export { extractSymbols, extractOutline, findEnclosingScope } from './tree-sitter/queries.js';
 export { detectLanguage, getGrammarPackage, getSupportedLanguages } from './tree-sitter/languages.js';
@@ -33,9 +35,9 @@ export {
 
 // LSP
 export { LspService } from './lsp/service.js';
-export { LspClient, parseCapabilities, hasCapability } from './lsp/index.js';
+export { LspClient, LspRequestTimeoutError, parseCapabilities, hasCapability } from './lsp/index.js';
 export type { LspCapabilities } from './lsp/index.js';
-export type { LspServerConfig } from './lsp/service.js';
+export type { LspServerConfig, LspClientResolution, LanguageServerInstallOutcome } from './lsp/service.js';
 export type {
   Position,
   Range,

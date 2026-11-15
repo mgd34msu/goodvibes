@@ -3,13 +3,24 @@ import { dirname, join, resolve } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { logger } from '../../utils/logger.js';
 import { LspClient } from './client.js';
-import { getBinaryPath, ensureBinary } from './binary-downloader.js';
+import { parseCapabilities } from './capabilities.js';
+import {
+  getBinaryPath,
+  installServerBinary,
+  isInstallableServer,
+  manualInstallHint,
+  DEFAULT_INSTALL_TIMEOUT_MS,
+} from './binary-downloader.js';
 import type { ShellPathService } from '../../runtime/shell-paths.js';
 import { summarizeError } from '../../utils/error-display.js';
+import { readDocument, writeDocument } from '../../utils/atomic-json-store.js';
 
 type LspRoots = Pick<ShellPathService, 'workingDirectory' | 'resolveUserPath'>;
 
 const ENGINE_PACKAGE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../../../');
+
+/** A server nobody has asked anything for this long is stopped; the next lookup starts it again. */
+const DEFAULT_IDLE_STOP_MS = 10 * 60_000;
 
 // A server binary inside the opened repository is never chosen: opening a repo
 // must not let it pick the program the editor runs. Only the engine install,
@@ -39,21 +50,19 @@ function bundledCommandPath(command: string): string | null {
 }
 
 /**
- * Resolve a server command: check the engine install's node_modules/.bin/
- * (bundled), then the user download directory, then system PATH via Bun.which().
- * Returns the resolved command path, or the original command if neither found.
+ * Locate a server command: the engine install's node_modules/.bin/ (bundled),
+ * then the user download directory, then PATH. Null when it is not installed.
  */
-function resolveCommand(command: string, userBinaryDir: string): string {
+function locateCommand(command: string, userBinaryDir: string): string | null {
   const bundled = bundledCommandPath(command);
   if (bundled) return bundled;
-  // Try the user's ~/.goodvibes/bin/ (downloaded binaries)
   const downloaded = getBinaryPath(userBinaryDir, command);
   if (existsSync(downloaded)) return downloaded;
-  // Try system PATH
-  const system = Bun.which(command);
-  if (system) return system;
-  // Return as-is, spawn will fail with a clear error
-  return command;
+  try {
+    return Bun.which(command);
+  } catch {
+    return null;
+  }
 }
 
 export interface LspServerConfig {
@@ -62,27 +71,49 @@ export interface LspServerConfig {
   initializationOptions?: Record<string, unknown> | undefined;
 }
 
-/** Well-known LSP server command → language IDs mapping for auto-detection. */
-const WELL_KNOWN_SERVERS: Array<{ command: string; langIds: string[]; args: string[] }> = [
-  { command: 'typescript-language-server', langIds: ['typescript', 'tsx', 'javascript'], args: ['--stdio'] },
-  { command: 'pyright-langserver', langIds: ['python'], args: ['--stdio'] },
-  { command: 'pylsp', langIds: ['python'], args: [] },
-  { command: 'rust-analyzer', langIds: ['rust'], args: [] },
-  { command: 'gopls', langIds: ['go'], args: ['serve'] },
-  { command: 'bash-language-server', langIds: ['bash'], args: ['start'] },
-  { command: 'vscode-css-language-server', langIds: ['css'], args: ['--stdio'] },
-  { command: 'vscode-html-language-server', langIds: ['html'], args: ['--stdio'] },
-  { command: 'vscode-json-language-server', langIds: ['json'], args: ['--stdio'] },
-];
+/** Whether a lookup has a server to ask, and if not, why and what to do. */
+export type LspClientResolution =
+  | { readonly status: 'ok'; readonly client: LspClient }
+  | { readonly status: 'no-server' | 'failed'; readonly reason: string; readonly next: readonly string[] };
 
+/** What one explicit install did; remembered so the next missing-server answer can say it. */
+export interface LanguageServerInstallOutcome {
+  readonly langId: string;
+  readonly command: string;
+  readonly status: 'installed' | 'already-installed' | 'not-installable' | 'not-configured' | 'failed' | 'timeout';
+  readonly reason: string;
+  readonly path?: string | undefined;
+  readonly at: number;
+}
+
+const INSTALL_OUTCOMES_FILE = 'language-server-installs.json';
+
+function serverKey(config: LspServerConfig): string {
+  return JSON.stringify([config.command, config.args, config.initializationOptions ?? null]);
+}
+
+/**
+ * Language servers for one workspace. One process runs per distinct server
+ * command (TypeScript, TSX and JavaScript share one), it is stopped after
+ * {@link DEFAULT_IDLE_STOP_MS} without a lookup, and a lookup never installs
+ * anything: a missing server is answered with the command that installs it.
+ */
 export class LspService {
-  private clients: Map<string, LspClient> = new Map();
   private configs: Map<string, LspServerConfig> = new Map();
-  private initializing: Map<string, Promise<LspClient | null>> = new Map();
+  private clients: Map<string, LspClient> = new Map();
+  private starting: Map<string, Promise<LspClientResolution>> = new Map();
+  private readonly idleTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  /** Start failures, so a server that cannot start is not spawned again on every lookup. */
+  private readonly startFailures = new Map<string, string>();
+  /** Languages whose missing server was already logged. */
+  private readonly missingNoted = new Set<string>();
+  private installOutcomes: Map<string, LanguageServerInstallOutcome> | null = null;
   private readonly roots: LspRoots;
+  private readonly idleStopMs: number;
 
-  constructor(roots: LspRoots) {
+  constructor(roots: LspRoots, options: { readonly idleStopMs?: number | undefined } = {}) {
     this.roots = roots;
+    this.idleStopMs = options.idleStopMs ?? DEFAULT_IDLE_STOP_MS;
   }
 
   /** Register a server configuration for a language. */
@@ -90,50 +121,83 @@ export class LspService {
     this.configs.set(langId, config);
   }
 
+  /** The server configured for a language, if any. */
+  serverFor(langId: string): LspServerConfig | undefined {
+    return this.configs.get(langId);
+  }
+
+  private userBinaryDir(): string {
+    return this.roots.resolveUserPath('bin');
+  }
+
   /**
-   * Get or start a client for a language.
-   * Returns null if no server is configured or if the server fails to start.
+   * The running client for a language, or why there is none. Starts the server
+   * when it is installed and not running; never installs it.
    */
-  async getClient(langId: string): Promise<LspClient | null> {
-    // Return existing running client
-    const existing = this.clients.get(langId);
-    if (existing?.isRunning) return existing;
+  async resolveClient(langId: string): Promise<LspClientResolution> {
+    const config = this.configs.get(langId);
+    if (!config) {
+      return { status: 'no-server', reason: `No language server is configured for ${langId}.`,
+        next: [`Set one in your user languages directory (${this.roots.resolveUserPath('languages', `${langId}.json`)}) with an lsp command.`] };
+    }
+    const key = serverKey(config);
+    const existing = this.clients.get(key);
+    if (existing?.isRunning) {
+      this.touch(key);
+      return { status: 'ok', client: existing };
+    }
+    if (existing) this.clients.delete(key);
 
-    // No config registered
-    if (!this.configs.has(langId)) return null;
+    const failure = this.startFailures.get(key);
+    if (failure) return { status: 'failed', reason: failure, next: [`Check that ${config.command} runs from a terminal, then start a new session.`] };
 
-    // Deduplicate concurrent initialization
-    const inFlight = this.initializing.get(langId);
+    const inFlight = this.starting.get(key);
     if (inFlight) return inFlight;
-
-    const initPromise = this._startClient(langId);
-    this.initializing.set(langId, initPromise);
-
+    const start = this._startClient(langId, key, config);
+    this.starting.set(key, start);
     try {
-      const client = await initPromise;
-      return client;
+      return await start;
     } finally {
-      this.initializing.delete(langId);
+      this.starting.delete(key);
     }
   }
 
-  private async _startClient(langId: string): Promise<LspClient | null> {
-    // Ensure binary is available (may trigger download for rust-analyzer/gopls).
-    // Called here so it's covered by the dedup guard in getClient().
-    await this.ensureServer(langId);
-
+  /** The client for a language when its server is already running; never starts one. */
+  runningClient(langId: string): LspClient | null {
     const config = this.configs.get(langId);
     if (!config) return null;
+    const key = serverKey(config);
+    const client = this.clients.get(key);
+    if (!client?.isRunning) return null;
+    this.touch(key);
+    return client;
+  }
 
-    const resolvedCommand = resolveCommand(config.command, this.roots.resolveUserPath('bin'));
+  /**
+   * Get or start a client for a language.
+   * Returns null if no server is configured, installed, or able to start.
+   */
+  async getClient(langId: string): Promise<LspClient | null> {
+    const resolution = await this.resolveClient(langId);
+    return resolution.status === 'ok' ? resolution.client : null;
+  }
+
+  private async _startClient(langId: string, key: string, config: LspServerConfig): Promise<LspClientResolution> {
+    const resolvedCommand = locateCommand(config.command, this.userBinaryDir());
+    if (!resolvedCommand) return this._missing(langId, config.command);
+
     const client = new LspClient(resolvedCommand, config.args);
     try {
       await client.start();
-      await this._initializeServer(client);
-      this.clients.set(langId, client);
+      await this._initializeServer(client, config);
+      this.clients.set(key, client);
+      this.touch(key);
       logger.info('LspService: started server', { langId, command: config.command });
-      return client;
+      return { status: 'ok', client };
     } catch (err) {
+      const stderr = client.recentStderr;
+      const reason = `The ${config.command} language server did not start: ${summarizeError(err)}${stderr ? ` (${stderr.split('\n').slice(-3).join(' ')})` : ''}`;
+      this.startFailures.set(key, reason);
       logger.error('LspService: failed to start server', { langId, err: summarizeError(err) });
       try {
         await client.stop();
@@ -143,119 +207,165 @@ export class LspService {
           error: summarizeError(stopError),
         });
       }
-      return null;
+      return { status: 'failed', reason, next: [`Check that ${config.command} runs from a terminal, then start a new session.`] };
     }
+  }
+
+  private _missing(langId: string, command: string): LspClientResolution {
+    if (!this.missingNoted.has(langId)) {
+      this.missingNoted.add(langId);
+      logger.info('LspService: no language server installed for this language', { langId, command });
+    }
+    const last = this._installOutcomes().get(command);
+    const hint = manualInstallHint(command);
+    const next = [
+      ...(hint ? [`Install it: ${hint}`] : [`Install ${command} and put it on PATH`]),
+      ...(isInstallableServer(command) ? [`Or let GoodVibes install it into ${this.userBinaryDir()} (in goodvibes: /intelligence install ${langId})`] : []),
+    ];
+    const lastAttempt = last && last.status !== 'installed' && last.status !== 'already-installed'
+      ? ` The last install attempt (${new Date(last.at).toISOString()}) did not succeed: ${last.reason}.` : '';
+    return { status: 'no-server', reason: `No language server for ${langId}: ${command} is not installed.${lastAttempt}`, next };
   }
 
   /**
    * Check if a server is available for a language
-   * (config exists AND command is installed on PATH).
+   * (config exists AND command is installed).
    */
   async isAvailable(langId: string): Promise<boolean> {
     const config = this.configs.get(langId);
     if (!config) return false;
-    // Check bundled first
-    if (bundledCommandPath(config.command)) return true;
-    // Check downloaded binaries
-    const downloaded = getBinaryPath(this.roots.resolveUserPath('bin'), config.command);
-    if (existsSync(downloaded)) return true;
-    // Then system PATH
+    return locateCommand(config.command, this.userBinaryDir()) !== null;
+  }
+
+  /**
+   * Install the server for a language into the user's bin directory: the
+   * explicit owner action behind `/intelligence install`. Bounded by
+   * `timeoutMs` and `signal`; the outcome is remembered in the user directory.
+   */
+  async installServer(
+    langId: string,
+    options: { readonly signal?: AbortSignal | undefined; readonly timeoutMs?: number | undefined } = {},
+  ): Promise<LanguageServerInstallOutcome> {
+    const config = this.configs.get(langId);
+    if (!config) {
+      return { langId, command: '', status: 'not-configured', reason: `No language server is configured for ${langId}`, at: Date.now() };
+    }
+    const command = config.command;
+    const located = locateCommand(command, this.userBinaryDir());
+    let outcome: LanguageServerInstallOutcome;
+    if (located) {
+      outcome = { langId, command, status: 'already-installed', reason: `${command} is already installed`, path: located, at: Date.now() };
+    } else if (!isInstallableServer(command)) {
+      const hint = manualInstallHint(command);
+      outcome = { langId, command, status: 'not-installable',
+        reason: `${command} cannot be installed by GoodVibes${hint ? `; install it with: ${hint}` : ''}`, at: Date.now() };
+    } else {
+      const result = await installServerBinary(this.userBinaryDir(), command, {
+        signal: options.signal,
+        timeoutMs: options.timeoutMs ?? DEFAULT_INSTALL_TIMEOUT_MS,
+      });
+      outcome = result.ok
+        ? { langId, command, status: 'installed', reason: `${command} was installed`, path: result.path, at: Date.now() }
+        : { langId, command, status: result.timedOut ? 'timeout' : 'failed', reason: result.reason, at: Date.now() };
+    }
+    if (outcome.status === 'installed') {
+      // A server that failed to start before the install may start now.
+      this.startFailures.delete(serverKey(config));
+      this.missingNoted.delete(langId);
+    }
+    this._rememberInstall(outcome);
+    return outcome;
+  }
+
+  private _installOutcomesPath(): string {
+    return this.roots.resolveUserPath(INSTALL_OUTCOMES_FILE);
+  }
+
+  private _installOutcomes(): Map<string, LanguageServerInstallOutcome> {
+    if (this.installOutcomes) return this.installOutcomes;
+    const loaded = new Map<string, LanguageServerInstallOutcome>();
     try {
-      const resolved = Bun.which(config.command);
-      return resolved !== null;
-    } catch {
-      return false;
+      const stored = readDocument<LanguageServerInstallOutcome[]>(this._installOutcomesPath(), {
+        label: 'intelligence/language-server-installs',
+        validate: (parsed) => {
+          if (!Array.isArray(parsed)) throw new Error('expected a list of install outcomes');
+          return parsed.filter((entry): entry is LanguageServerInstallOutcome => typeof entry === 'object' && entry !== null
+            && typeof (entry as { command?: unknown }).command === 'string'
+            && typeof (entry as { status?: unknown }).status === 'string'
+            && typeof (entry as { reason?: unknown }).reason === 'string'
+            && typeof (entry as { at?: unknown }).at === 'number');
+        },
+        recovery: 'The record of earlier language-server install attempts starts empty; installing still works.',
+      });
+      for (const entry of stored ?? []) loaded.set(entry.command, entry);
+    } catch (err) {
+      logger.debug('LspService: install record unreadable', { error: summarizeError(err) });
+    }
+    this.installOutcomes = loaded;
+    return loaded;
+  }
+
+  private _rememberInstall(outcome: LanguageServerInstallOutcome): void {
+    if (!outcome.command) return;
+    const outcomes = this._installOutcomes();
+    outcomes.set(outcome.command, outcome);
+    try {
+      writeDocument(this._installOutcomesPath(), [...outcomes.values()]);
+    } catch (err) {
+      logger.warn('LspService: could not record the install outcome', { command: outcome.command, error: summarizeError(err) });
     }
   }
 
-  /** Initialize a server with the LSP handshake. */
-  private async _initializeServer(client: LspClient): Promise<void> {
-    await client.request('initialize', {
+  /** Restart the idle clock of a server that was just used. */
+  private touch(key: string): void {
+    const previous = this.idleTimers.get(key);
+    if (previous) clearTimeout(previous);
+    const timer = setTimeout(() => {
+      this.idleTimers.delete(key);
+      const client = this.clients.get(key);
+      this.clients.delete(key);
+      if (!client) return;
+      logger.debug('LspService: stopping an idle language server', { key });
+      client.stop().catch((error: unknown) => {
+        logger.warn('LSP server stop failed after idle period', { error: summarizeError(error) });
+      });
+    }, this.idleStopMs);
+    timer.unref?.();
+    this.idleTimers.set(key, timer);
+  }
+
+  /** Initialize a server with the LSP handshake and record what it can do. */
+  private async _initializeServer(client: LspClient, config: LspServerConfig): Promise<void> {
+    const result = await client.request('initialize', {
       processId: process.pid,
       rootUri: pathToFileURL(this.roots.workingDirectory).href,
+      ...(config.initializationOptions ? { initializationOptions: config.initializationOptions } : {}),
       capabilities: {
         textDocument: {
+          synchronization: { didSave: false },
           documentSymbol: { hierarchicalDocumentSymbolSupport: true },
           definition: {},
           references: {},
           hover: {},
           rename: { prepareSupport: true },
-          publishDiagnostics: {},
+          publishDiagnostics: { versionSupport: true },
+          diagnostic: {},
         },
       },
     });
+    client.capabilities = parseCapabilities(result);
     client.notify('initialized', {});
   }
 
   /** Stop all running servers. */
   async shutdown(): Promise<void> {
+    for (const timer of this.idleTimers.values()) clearTimeout(timer);
+    this.idleTimers.clear();
     const stops = Array.from(this.clients.values()).map(c => c.stop().catch((error) => {
       logger.warn('LSP server stop failed during shutdown', { error: summarizeError(error) });
     }));
     await Promise.all(stops);
     this.clients.clear();
-    this.initializing.clear();
-  }
-
-  /**
-   * Auto-detect installed LSP servers and return their configs.
-   * Registers detected servers automatically.
-   */
-  async detectServers(): Promise<Map<string, LspServerConfig>> {
-    const detected = new Map<string, LspServerConfig>();
-
-    for (const { command, langIds, args } of WELL_KNOWN_SERVERS) {
-      let found = false;
-      // Check bundled first, then ~/.goodvibes/bin/, then system PATH
-      if (bundledCommandPath(command)) {
-        found = true;
-      }
-      // Check ~/.goodvibes/bin/ (downloaded binaries)
-      if (!found) {
-        const downloaded = getBinaryPath(this.roots.resolveUserPath('bin'), command);
-        found = existsSync(downloaded);
-      }
-      if (!found) {
-        try {
-          found = Bun.which(command) !== null;
-        } catch {
-          found = false;
-        }
-      }
-
-      if (found) {
-        const config: LspServerConfig = { command, args };
-        for (const langId of langIds) {
-          // Don't overwrite already-registered configs
-          if (!this.configs.has(langId)) {
-            this.configs.set(langId, config);
-          }
-          // Add to returned detected map regardless
-          if (!detected.has(langId)) {
-            detected.set(langId, config);
-          }
-        }
-        logger.info('LspService: detected server', { command, langIds });
-      }
-    }
-
-    return detected;
-  }
-
-  /**
-   * Ensure a server binary is available for the given language.
-   * Downloads the binary if it's a known downloadable server (rust-analyzer, gopls)
-   * and not already available. Non-blocking for bundled/PATH servers.
-   */
-  async ensureServer(langId: string): Promise<void> {
-    const config = this.configs.get(langId);
-    if (!config) return;
-
-    // Only try download for servers that aren't already available
-    const available = await this.isAvailable(langId);
-    if (available) return;
-
-    // Try to download/install the binary
-    await ensureBinary(this.roots.resolveUserPath('bin'), config.command);
+    this.starting.clear();
   }
 }

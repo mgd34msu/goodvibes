@@ -18,12 +18,13 @@ import { createAgentReadInputProjector } from './read/admission.js';
 import type { ToolRegistrationOptions } from './input-projection.js';
 import { createWriteTool } from './write/index.js';
 import { createEditTool } from './edit/index.js';
-import { TypeScriptSyntaxDiagnosticsProvider } from './shared/post-edit-diagnostics.js';
+import { CodeDiagnosticsProvider } from './shared/post-edit-diagnostics.js';
 import { createRepoMapTool } from './repo-map/index.js';
 import { ContextAccountingHolder, createContextAccountingTool } from './context-accounting/index.js';
 import { createContractSelfCheckTool } from './contract-self-check/index.js';
 import { createFindTool } from './find/index.js';
 import { CodeIntelligence } from '../intelligence/index.js';
+import { withProjectFilesEpoch } from '../intelligence/project-files-epoch.js';
 import { createShellPathService } from '../runtime/shell-paths.js';
 import { createExecTool } from './exec/index.js';
 import type { CredentialEnvScrubConfig } from './exec/credential-env.js';
@@ -505,15 +506,25 @@ export function registerAllTools(
   }
   const readConfigManager = deps.configManager;
   const allowOutsideProject = () => isEffectiveDangerMode(readConfigManager);
-  registerTool(new ReadTool(projectIndex, fileCache, undefined, deps.capturedReadAccess, allowOutsideProject, () => readConfigManager.get('tools.defaultTokenBudget')),
+  // One code-intelligence facade for read, find and post-edit diagnostics: one
+  // parser, the workspace's language files, and one set of language servers
+  // (started by find references, then also asked for type errors after an
+  // edit). Without a home directory the language files cannot be resolved, so
+  // it parses with the built-in table and has no language servers.
+  const intelligenceHome = deps.configManager.getHomeDirectory();
+  const codeIntelligence = new CodeIntelligence(intelligenceHome
+    ? { shellPaths: createShellPathService({ workingDirectory, homeDirectory: intelligenceHome }) }
+    : {});
+  registerTool(new ReadTool(projectIndex, fileCache, codeIntelligence, deps.capturedReadAccess, allowOutsideProject, () => readConfigManager.get('tools.defaultTokenBudget')),
     deps.readAdmissionPolicy === 'agent-main-conversation'
       ? { inputProjection: createAgentReadInputProjector(projectIndex, allowOutsideProject) } : undefined);
-  // One post-edit diagnostics provider shared by write and edit. Default: the
-  // in-process tree-sitter syntax provider (no process spawn). `null` disables.
+  // One post-edit diagnostics provider shared by write and edit. Default:
+  // syntax errors from the in-process parser, plus type errors from a language
+  // server that is already running (it never starts one). `null` disables.
   const diagnosticsProvider =
     deps.diagnosticsProvider === null
       ? undefined
-      : (deps.diagnosticsProvider ?? new TypeScriptSyntaxDiagnosticsProvider());
+      : (deps.diagnosticsProvider ?? new CodeDiagnosticsProvider(codeIntelligence));
   // Per-command exec sandbox: only probe the host (a bwrap spawn) when the
   // graduation-gated flag AND the sandbox.enabled config switch are both on, so
   // the default path stays zero-cost and byte-for-byte unchanged.
@@ -561,15 +572,8 @@ export function registerAllTools(
       diagnosticsProvider,
     }),
   );
-  // One facade for the find tool: tree-sitter for `expand_to`, and a language server service for
-  // `references`. Without a home directory the language configs cannot be resolved, so find builds
-  // its own tree-sitter-only instance and `references` says it has no language server.
-  const findHomeDirectory = deps.configManager.getHomeDirectory();
-  const findIntelligence = findHomeDirectory
-    ? new CodeIntelligence({ shellPaths: createShellPathService({ workingDirectory, homeDirectory: findHomeDirectory }) })
-    : undefined;
   registerTool(
-    createFindTool(workingDirectory, deps.featureFlags, undefined, deps.readAccessFilter, deps.capturedReadAccess, allowOutsideProject, findIntelligence),
+    createFindTool(workingDirectory, deps.featureFlags, undefined, deps.readAccessFilter, deps.capturedReadAccess, allowOutsideProject, codeIntelligence),
   );
   registerTool(
     createRepoMapTool({
@@ -589,8 +593,10 @@ export function registerAllTools(
         requestPromptAnswer: deps.execPromptAnswerHandler,
       }
     : null;
+  // A command or file operation can change any project file, so each exec
+  // call ends by marking cached project-file facts (the import graph) stale.
   registerTool(
-    createExecTool(processManager, {
+    withProjectFilesEpoch(createExecTool(processManager, {
       ...(deps.capturedExec ? { capturedInput: deps.capturedExec } : {}),
       featureFlags: deps.featureFlags,
       overflowHandler: deps.overflowHandler,
@@ -599,7 +605,7 @@ export function registerAllTools(
       ...(execSandbox ? { sandbox: execSandbox } : {}),
       ...(execInteraction ? { interaction: execInteraction } : {}),
       ...(deps.execContainment ? { containment: deps.execContainment } : {}),
-    }),
+    })),
   );
   registerTool(createAnalyzeTool(deps.toolLLM, deps.featureFlags, workingDirectory));
   registerTool(new InspectTool(deps.featureFlags, workingDirectory, allowOutsideProject));
@@ -648,7 +654,7 @@ export function registerAllTools(
     process.on('beforeExit', () => { for (const live of liveKvStates) void live.dispose(); liveKvStates.clear(); });
   }
   const dispose = async (): Promise<void> => {
-    await findIntelligence?.dispose();
+    await codeIntelligence.dispose();
     await kvBinding.dispose();
   };
   // Only the host's real dispatcher is ever handed over (a private one would accept hooks nothing fires).

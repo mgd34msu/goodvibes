@@ -1,17 +1,32 @@
 /**
- * Per-language configuration for CodeIntelligence.
+ * Per-language configuration for CodeIntelligence and auto-heal.
  *
  * Config is loaded from (in priority order, higher overrides lower):
  *   1. every configured project languages/{langId}.json file
  *   2. every configured user languages/{langId}.json file
- *   3. Built-in defaults (this file)
+ *   3. Built-in defaults (the language table in tree-sitter/languages.ts)
  * A file whose langId has no built-in default adds that language.
+ *
+ * Fields of a languages/{langId}.json file:
+ *   - `extensions`: file extensions (without the dot) that belong to the language.
+ *   - `lsp`: `{ command, args, initializationOptions? }`, the language server.
+ *   - `treeSitter`: the embedded grammar its files are parsed with
+ *     (typescript, tsx, javascript, python, json or css).
+ *   - `formatter`, `linter`: `{ command, args }` that auto-heal runs on a copy
+ *     of a file of the language, in place of prettier and eslint; the command
+ *     rewrites the file it is given. An argument `{file}` is replaced with the
+ *     file's path; without one the path is appended.
+ * A project file cannot set `lsp`, `formatter` or `linter`: each names a
+ * program to run, and a cloned repository is not trusted to choose one.
  */
 import { existsSync, readdirSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { logger } from '../utils/logger.js';
 import type { ShellPathService } from '../runtime/shell-paths.js';
 import { summarizeError } from '../utils/error-display.js';
+import { LANGUAGES, detectLanguage, grammarFor } from './tree-sitter/languages.js';
+
+export interface CommandSpec { command: string; args: string[] }
 
 export interface LanguageConfig {
   lsp?: {
@@ -19,83 +34,39 @@ export interface LanguageConfig {
     args: string[];
     initializationOptions?: Record<string, unknown> | undefined;
   };
-  /** Grammar ID passed to the tree-sitter service (usually the same as langId). */
+  /** Embedded grammar the language's files are parsed with. */
   treeSitter?: string | undefined;
-  formatter?: { command: string; args: string[] };
-  linter?: { command: string; args: string[] };
+  /** File extensions (without the dot) that belong to the language. */
+  extensions?: string[] | undefined;
+  formatter?: CommandSpec;
+  linter?: CommandSpec;
 }
 
 export type IntelligenceRoots = Pick<ShellPathService, 'workingDirectory' | 'homeDirectory'> & Partial<Pick<ShellPathService, 'resolveProjectPath' | 'resolveUserPath'>>;
+
+/** Fields a project languages file may not set: each names a program to run. */
+const PROGRAM_FIELDS = ['lsp', 'formatter', 'linter'] as const;
 
 // ---------------------------------------------------------------------------
 // Default configurations
 // ---------------------------------------------------------------------------
 
-/**
- * Built-in defaults for common languages.
- * These are used when no user or project override exists.
- */
+/** Built-in defaults: every language in the table that has a default language server. */
 export function getDefaultConfigs(): Map<string, LanguageConfig> {
   const defaults = new Map<string, LanguageConfig>();
-
-  defaults.set('typescript', {
-    lsp: { command: 'typescript-language-server', args: ['--stdio'] },
-    treeSitter: 'typescript',
-  });
-
-  defaults.set('tsx', {
-    lsp: { command: 'typescript-language-server', args: ['--stdio'] },
-    treeSitter: 'tsx',
-  });
-
-  defaults.set('javascript', {
-    lsp: { command: 'typescript-language-server', args: ['--stdio'] },
-    treeSitter: 'javascript',
-  });
-
-  defaults.set('python', {
-    lsp: { command: 'pyright-langserver', args: ['--stdio'] },
-    treeSitter: 'python',
-  });
-
-  defaults.set('rust', {
-    lsp: { command: 'rust-analyzer', args: [] },
-    treeSitter: 'rust',
-  });
-
-  defaults.set('go', {
-    lsp: { command: 'gopls', args: ['serve'] },
-    treeSitter: 'go',
-  });
-
-  defaults.set('bash', {
-    lsp: { command: 'bash-language-server', args: ['start'] },
-    treeSitter: 'bash',
-  });
-
-  defaults.set('css', {
-    lsp: { command: 'vscode-css-language-server', args: ['--stdio'] },
-    treeSitter: 'css',
-  });
-
-  defaults.set('html', {
-    lsp: { command: 'vscode-html-language-server', args: ['--stdio'] },
-    treeSitter: 'html',
-  });
-
-  defaults.set('json', {
-    lsp: { command: 'vscode-json-language-server', args: ['--stdio'] },
-    treeSitter: 'json',
-  });
-
+  for (const entry of LANGUAGES) {
+    if (!entry.lsp) continue;
+    defaults.set(entry.id, {
+      lsp: { command: entry.lsp.command, args: [...entry.lsp.args] },
+      ...(entry.grammar ? { treeSitter: entry.grammar } : {}),
+    });
+  }
   return defaults;
 }
 
 // ---------------------------------------------------------------------------
 // Config loading
 // ---------------------------------------------------------------------------
-
-type CommandSpec = { command: string; args: string[] };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -116,17 +87,21 @@ function isCommandSpec(value: unknown): value is CommandSpec {
  */
 function describeLanguageConfigProblem(value: unknown): string | null {
   if (!isRecord(value)) return 'file is not a JSON object';
-  const known = ['lsp', 'treeSitter', 'formatter', 'linter'] as const;
+  const known = ['lsp', 'treeSitter', 'extensions', 'formatter', 'linter'] as const;
   if (!known.some((key) => value[key] !== undefined)) {
-    return 'file sets none of lsp, treeSitter, formatter, linter';
+    return 'file sets none of lsp, treeSitter, extensions, formatter, linter';
   }
   if (value.lsp !== undefined) {
     if (!isCommandSpec(value.lsp)) return 'lsp needs a non-empty command string and an args string array';
-    const init = (value.lsp as Record<string, unknown>).initializationOptions;
+    const init: unknown = (value.lsp as unknown as Record<string, unknown>).initializationOptions;
     if (init !== undefined && !isRecord(init)) return 'lsp.initializationOptions must be an object';
   }
   if (value.treeSitter !== undefined && (typeof value.treeSitter !== 'string' || value.treeSitter.trim().length === 0)) {
     return 'treeSitter must be a non-empty string';
+  }
+  if (value.extensions !== undefined && (!Array.isArray(value.extensions)
+    || !value.extensions.every((ext) => typeof ext === 'string' && ext.replace(/^\./, '').trim().length > 0))) {
+    return 'extensions must be an array of non-empty strings';
   }
   if (value.formatter !== undefined && !isCommandSpec(value.formatter)) {
     return 'formatter needs a non-empty command string and an args string array';
@@ -158,7 +133,11 @@ function readConfigFile(filePath: string): LanguageConfig | null {
     logger.warn('config: skipping invalid language config', { filePath, problem });
     return null;
   }
-  return parsed as LanguageConfig;
+  const config = parsed as LanguageConfig;
+  if (config.extensions) {
+    config.extensions = config.extensions.map((ext) => ext.replace(/^\./, '').trim().toLowerCase());
+  }
+  return config;
 }
 
 /**
@@ -204,15 +183,17 @@ export function loadLanguageConfigs(roots: IntelligenceRoots): Map<string, Langu
     : join(roots.workingDirectory, '.goodvibes', 'languages');
 
   const projectLayer = readConfigDirectory(projectDir);
-  // A language server is a program the project would pick for the user, and a
-  // cloned repository is not trusted to do that. The command comes from the
-  // defaults or the user's own directory; a project file may still describe
-  // the language in every other respect.
+  // A language server, formatter or linter is a program the project would pick
+  // for the user, and a cloned repository is not trusted to do that. Those come
+  // from the defaults or the user's own directory; a project file may still
+  // describe the language in every other respect.
   for (const [langId, cfg] of projectLayer) {
-    if (!cfg.lsp) continue;
-    logger.warn('config: ignoring the language server a project file asks for; set it in your user languages directory instead', { langId, dir: projectDir });
-    const { lsp: _ignored, ...rest } = cfg;
-    projectLayer.set(langId, rest);
+    const refused = PROGRAM_FIELDS.filter((field) => cfg[field] !== undefined);
+    if (refused.length === 0) continue;
+    logger.warn('config: ignoring the programs a project language file asks for; set them in your user languages directory instead', { langId, fields: refused, dir: projectDir });
+    const { lsp: _lsp, formatter: _formatter, linter: _linter, ...rest } = cfg;
+    if (Object.keys(rest).length === 0) projectLayer.delete(langId);
+    else projectLayer.set(langId, rest);
   }
 
   for (const layer of [readConfigDirectory(userDir), projectLayer]) {
@@ -230,4 +211,50 @@ export function loadLanguageConfigs(roots: IntelligenceRoots): Map<string, Langu
  */
 export function getLanguageConfig(langId: string, roots: IntelligenceRoots): LanguageConfig | null {
   return loadLanguageConfigs(roots).get(langId) ?? null;
+}
+
+/** The language facts for one workspace: the table plus the user and project files. */
+export interface ResolvedLanguages {
+  readonly configs: ReadonlyMap<string, LanguageConfig>;
+  /** Language id of a file, with extensions the language files added. */
+  detect(filePath: string): string | null;
+  /** Embedded grammar a language is parsed with, if any. */
+  grammar(langId: string): string | undefined;
+  /** The formatter or linter a language file set for the language. */
+  tool(langId: string, kind: 'formatter' | 'linter'): CommandSpec | undefined;
+}
+
+const EMBEDDED_GRAMMARS = new Set(LANGUAGES.flatMap((entry) => (entry.grammar ? [entry.grammar] : [])));
+
+/** Build the language facts from loaded configs (no file reads). */
+export function resolveLanguagesFrom(configs: ReadonlyMap<string, LanguageConfig>): ResolvedLanguages {
+  const extensions = new Map<string, string>();
+  for (const [langId, cfg] of configs) {
+    for (const ext of cfg.extensions ?? []) extensions.set(ext, langId);
+  }
+  return {
+    configs,
+    detect: (filePath) => detectLanguage(filePath, extensions),
+    grammar: (langId) => {
+      const named = configs.get(langId)?.treeSitter;
+      if (named && EMBEDDED_GRAMMARS.has(named)) return named;
+      return grammarFor(langId);
+    },
+    tool: (langId, kind) => configs.get(langId)?.[kind],
+  };
+}
+
+/** Load the language files for a workspace and resolve them. */
+export function resolveLanguages(roots: IntelligenceRoots): ResolvedLanguages {
+  return resolveLanguagesFrom(loadLanguageConfigs(roots));
+}
+
+/** Built-in language facts only (no workspace, no user files). */
+export const BUILTIN_LANGUAGES: ResolvedLanguages = resolveLanguagesFrom(getDefaultConfigs());
+
+/** The argv for a formatter or linter run on one file: `{file}` replaced, else appended. */
+export function languageToolArgv(spec: CommandSpec, filePath: string): string[] {
+  const hasPlaceholder = spec.args.some((arg) => arg.includes('{file}'));
+  const args = hasPlaceholder ? spec.args.map((arg) => arg.split('{file}').join(filePath)) : [...spec.args, filePath];
+  return [spec.command, ...args];
 }

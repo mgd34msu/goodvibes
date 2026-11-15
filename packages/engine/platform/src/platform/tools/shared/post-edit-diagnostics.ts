@@ -1,12 +1,14 @@
-// Post-edit diagnostics, a pluggable provider that surfaces cheap, in-process
-// diagnostics on a file the model just wrote or edited, appended to the tool
-// result so the model sees a broken edit immediately.
+// Post-edit diagnostics: errors in a file the model just wrote or edited,
+// appended to the tool result so the model sees a broken edit immediately.
 //
-// The first (and only bundled) provider is tree-sitter-backed SYNTAX diagnostics
-// for TypeScript/JavaScript: in-process, no process spawn, no type checking.
-// It is deliberately NOT an LSP/tsc provider, those spawn a language server,
-// which this layer must never do per edit. The DiagnosticsProvider interface is
-// the seam a host can later implement with a full type-checking provider.
+// The bundled provider reports two kinds:
+//   - syntax errors from the in-process tree-sitter parse of TypeScript and
+//     JavaScript (no process spawn, no type checking);
+//   - the language server's errors (type errors included) for the new text,
+//     when a server for the file's language is already running. A server is
+//     started by a lookup (find references, /intelligence), never by an edit.
+// The DiagnosticsProvider interface is the seam a host can implement with
+// another checker.
 import { existsSync } from 'node:fs';
 import { dirname, extname, join } from 'node:path';
 import type { CodeIntelligence, SyntaxDiagnostic } from '../../intelligence/index.js';
@@ -22,6 +24,8 @@ export interface PostEditDiagnostic {
   /** 0-based column. */
   readonly column: number;
   readonly message: string;
+  /** `syntax`: the in-process parser; `types`: the language server. */
+  readonly source?: 'syntax' | 'types' | undefined;
 }
 
 /** A diagnostic tagged with the file it belongs to (output-level shape). */
@@ -30,9 +34,9 @@ export interface PostEditFileDiagnostic extends PostEditDiagnostic {
 }
 
 /**
- * A source of cheap, in-process, error-level diagnostics for a single file.
- * Implementations MUST NOT spawn processes and MUST never throw, return [] on
- * any failure or when they cannot produce diagnostics (honest absence).
+ * A source of error-level diagnostics for a single file. Implementations MUST
+ * NOT spawn processes and MUST never throw: return [] on any failure or when
+ * they cannot produce diagnostics (honest absence).
  */
 export interface DiagnosticsProvider {
   readonly name: string;
@@ -43,6 +47,15 @@ export interface DiagnosticsProvider {
 }
 
 const TS_EXTS = new Set(['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs']);
+
+/**
+ * How long an edit waits for a running server's diagnostics on the new text.
+ * Paid only when a server for the language is running.
+ */
+const TYPE_CHECK_WAIT_MS = 1_500;
+
+/** LSP DiagnosticSeverity.Error. */
+const LSP_ERROR = 1;
 
 /** True when a tsconfig.json / jsconfig.json is present at or above the file. */
 function hasTsProjectContext(filePath: string): boolean {
@@ -57,42 +70,65 @@ function hasTsProjectContext(filePath: string): boolean {
 }
 
 /**
- * Syntax-level TypeScript/JavaScript diagnostics from the in-process tree-sitter
- * parser. Cheap and never spawns a process; surfaces parse errors (unbalanced
- * braces, broken syntax), NOT type errors. Only runs when a TS/JS project
- * context (tsconfig.json / jsconfig.json) is detectable; otherwise returns []
- * (honest absence rather than a fabricated "no errors").
+ * Syntax errors from the in-process parser for TypeScript and JavaScript files
+ * in a TS/JS project (a tsconfig.json or jsconfig.json at or above the file),
+ * and the language server's errors for any file whose server is already
+ * running. Returns [] when neither applies (honest absence rather than a
+ * fabricated "no errors").
  */
-export class TypeScriptSyntaxDiagnosticsProvider implements DiagnosticsProvider {
-  readonly name = 'typescript-syntax';
+export class CodeDiagnosticsProvider implements DiagnosticsProvider {
+  readonly name = 'code-diagnostics';
   private readonly intel: CodeIntelligence;
-  private initPromise: Promise<void> | null = null;
 
-  constructor(intel?: CodeIntelligence) {
+  constructor(intel?: CodeIntelligence, private readonly typeCheckWaitMs = TYPE_CHECK_WAIT_MS) {
     this.intel = intel ?? new CodeIntelligenceImpl();
   }
 
   supports(filePath: string): boolean {
-    return TS_EXTS.has(extname(filePath).toLowerCase());
+    return TS_EXTS.has(extname(filePath).toLowerCase()) || this.intel.hasServerConfigured(filePath);
   }
 
   async collect(filePath: string, content: string): Promise<PostEditDiagnostic[]> {
-    if (!this.supports(filePath) || !hasTsProjectContext(filePath)) return [];
+    if (!this.supports(filePath)) return [];
+    const [syntax, types] = await Promise.all([this.syntax(filePath, content), this.types(filePath, content)]);
+    return [...syntax, ...types];
+  }
+
+  private async syntax(filePath: string, content: string): Promise<PostEditDiagnostic[]> {
+    if (!TS_EXTS.has(extname(filePath).toLowerCase()) || !hasTsProjectContext(filePath)) return [];
     try {
-      // Lazy one-time init. On a non-Bun runtime (or if the WASM grammar is
-      // unavailable) this leaves tree-sitter uninitialized and getSyntaxDiagnostics
-      // returns [], honest absence, never a fake clean bill.
-      this.initPromise ??= this.intel.initialize();
-      await this.initPromise;
       const diagnostics = await this.intel.getSyntaxDiagnostics(filePath, content);
       return diagnostics.map((d: SyntaxDiagnostic): PostEditDiagnostic => ({
         severity: 'error',
         line: d.line,
         column: d.column,
         message: d.message,
+        source: 'syntax',
       }));
     } catch (err) {
-      logger.warn('TypeScriptSyntaxDiagnosticsProvider.collect error', { filePath, error: summarizeError(err) });
+      logger.warn('CodeDiagnosticsProvider: syntax check failed', { filePath, error: summarizeError(err) });
+      return [];
+    }
+  }
+
+  private async types(filePath: string, content: string): Promise<PostEditDiagnostic[]> {
+    try {
+      const result = await this.intel.lookupDiagnostics(filePath, { content, onlyRunning: true, waitMs: this.typeCheckWaitMs });
+      if (result.status !== 'ok') {
+        if (result.status !== 'no-server') logger.debug('CodeDiagnosticsProvider: no type check for this edit', { filePath, reason: result.reason });
+        return [];
+      }
+      return result.items
+        .filter((d) => d.severity === LSP_ERROR)
+        .map((d): PostEditDiagnostic => ({
+          severity: 'error',
+          line: d.range.start.line + 1,
+          column: d.range.start.character,
+          message: d.message,
+          source: 'types',
+        }));
+    } catch (err) {
+      logger.warn('CodeDiagnosticsProvider: type check failed', { filePath, error: summarizeError(err) });
       return [];
     }
   }
@@ -105,8 +141,9 @@ export class TypeScriptSyntaxDiagnosticsProvider implements DiagnosticsProvider 
  */
 export function formatDiagnosticsBlock(diagnostics: readonly PostEditFileDiagnostic[]): string {
   if (diagnostics.length === 0) return '';
-  const lines = diagnostics.map((d) => `  ${d.file}:${d.line}:${d.column} ${d.message}`);
-  return `\n⚠ Syntax diagnostics (${diagnostics.length}, errors only):\n${lines.join('\n')}`;
+  const typed = diagnostics.some((d) => d.source === 'types');
+  const lines = diagnostics.map((d) => `  ${d.file}:${d.line}:${d.column}${typed && d.source ? ` [${d.source}]` : ''} ${d.message}`);
+  return `\n⚠ ${typed ? 'Diagnostics' : 'Syntax diagnostics'} (${diagnostics.length}, errors only):\n${lines.join('\n')}`;
 }
 
 /**

@@ -8,6 +8,7 @@
 import type { Tree, Language, Node } from 'web-tree-sitter';
 import { logger } from '../../utils/logger.js';
 import { summarizeError } from '../../utils/error-display.js';
+import { symbolFamilyFor } from './languages.js';
 
 export interface SymbolInfo {
   name: string;
@@ -98,6 +99,8 @@ const TS_SYMBOL_TYPES = new Set([
   'lexical_declaration', // const/let
   'variable_declaration', // var
 ]);
+
+const PYTHON_SCOPE_TYPES = new Set(['function_definition', 'class_definition']);
 
 const TS_SCOPE_TYPES = new Set([
   'function_declaration',
@@ -357,9 +360,9 @@ function extractPythonSymbols(root: Node): SymbolInfo[] {
 // ---------------------------------------------------------------------------
 
 /**
- * Extract all symbols from a parsed tree.
- * Supports TypeScript, TSX, JavaScript, and Python.
- * Returns empty array with a warning for unsupported languages.
+ * Extract all symbols from a parsed tree. `langId` is the grammar the tree was
+ * parsed with. A grammar without a symbol extractor in the language table
+ * (JSON, CSS) has no symbols: the answer is [], not an error.
  */
 export function extractSymbols(
   tree: Tree,
@@ -367,14 +370,9 @@ export function extractSymbols(
   langId: string,
 ): SymbolInfo[] {
   try {
-    const root = tree.rootNode;
-    if (langId === 'typescript' || langId === 'tsx' || langId === 'javascript') {
-      return extractTSSymbols(root);
-    }
-    if (langId === 'python') {
-      return extractPythonSymbols(root);
-    }
-    logger.warn('extractSymbols: unsupported language', { langId });
+    const family = symbolFamilyFor(langId);
+    if (family === 'ecmascript') return extractTSSymbols(tree.rootNode);
+    if (family === 'python') return extractPythonSymbols(tree.rootNode);
     return [];
   } catch (err) {
     logger.error('extractSymbols: failed', { langId, error: summarizeError(err) });
@@ -425,7 +423,7 @@ export function extractOutline(
 
 /**
  * Find the innermost function/class/block enclosing the given (1-based) line.
- * Returns null if no enclosing scope is found or if the language is unsupported.
+ * Returns null if no enclosing scope is found or the grammar has no scopes.
  */
 export function findEnclosingScope(
   tree: Tree,
@@ -433,17 +431,9 @@ export function findEnclosingScope(
   langId: string,
   line: number,
 ): { kind: string; name: string; startLine: number; endLine: number } | null {
-  const scopeTypes =
-    langId === 'typescript' || langId === 'tsx' || langId === 'javascript'
-      ? TS_SCOPE_TYPES
-      : langId === 'python'
-        ? new Set(['function_definition', 'class_definition'])
-        : null;
-
-  if (!scopeTypes) {
-    logger.warn('findEnclosingScope: unsupported language', { langId });
-    return null;
-  }
+  const family = symbolFamilyFor(langId);
+  const scopeTypes = family === 'ecmascript' ? TS_SCOPE_TYPES : family === 'python' ? PYTHON_SCOPE_TYPES : null;
+  if (!scopeTypes) return null;
 
   const targetRow = line - 1; // tree-sitter rows are 0-based
   let best: { kind: string; name: string; startLine: number; endLine: number } | null = null;

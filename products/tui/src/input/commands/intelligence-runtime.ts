@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { CodeIntelligence } from '@goodvibes-jev/engine/platform/platform/intelligence';
-import type { DocumentSymbol } from '@goodvibes-jev/engine/platform/platform/intelligence';
+import type { DocumentSymbol, LookupResult } from '@goodvibes-jev/engine/platform/platform/intelligence';
 import type { SymbolInfo } from '@goodvibes-jev/engine/platform/platform/intelligence';
 import { openCommandView, requireReadModels, requireShellPaths } from './runtime-services.ts';
 
@@ -48,8 +48,14 @@ function ensureExistingFile(pathArg: string | undefined, ctx: CommandContext): s
 
 type IntelligenceFacade = Pick<
   CodeIntelligence,
-  'initialize' | 'dispose' | 'getDocumentSymbols' | 'getOutline' | 'hasTreeSitter' | 'getDefinition' | 'getReferences' | 'getHover'
+  'initialize' | 'dispose' | 'getDocumentSymbols' | 'getOutline' | 'hasTreeSitter' | 'lookupDefinition' | 'lookupReferences' | 'lookupHover' | 'installLanguageServer'
 >;
+
+/** The lines that say why a lookup has nothing, or nothing when it answered. */
+function lookupStatusLines(result: LookupResult<unknown>): string[] {
+  if (result.status === 'ok') return [];
+  return [`  ${result.status}: ${result.reason}`, ...result.next.map((step) => `  next: ${step}`)];
+}
 
 type IntelligenceState = ReturnType<ReturnType<typeof requireReadModels>['intelligence']['getSnapshot']>;
 
@@ -101,10 +107,10 @@ async function handleIntelligenceQuery(
     }
 
     if (sub === 'definition') {
-      const definition = await intelligence.getDefinition(targetPath, position.line, position.column);
+      const lookup = await intelligence.lookupDefinition(targetPath, position.line, position.column);
+      const definition = lookup.items[0];
       ctx.print([
         `Intelligence Definition: ${targetPath}:${position.line + 1}:${position.column + 1}`,
-        `  status: ${state.hoverStatus === 'ready' || state.symbolSearchStatus === 'ready' ? 'available' : 'best-effort'}`,
         ...(definition
           ? [
               `  target: ${definition.uri}`,
@@ -112,25 +118,29 @@ async function handleIntelligenceQuery(
               `  column: ${definition.range.start.character + 1}`,
               '  next: open the target file or use /intelligence references on the same symbol',
             ]
-          : ['  No definition was returned for that position (the language server may be missing or not ready for this file type).', '  next: /health intelligence']),
+          : lookup.status === 'ok'
+            ? ['  The language server found no definition at that position.']
+            : lookupStatusLines(lookup)),
       ].join('\n'));
       return;
     }
 
     if (sub === 'references') {
-      const references = await intelligence.getReferences(targetPath, position.line, position.column);
+      const lookup = await intelligence.lookupReferences(targetPath, position.line, position.column);
+      const references = lookup.items;
       ctx.print([
         `Intelligence References: ${targetPath}:${position.line + 1}:${position.column + 1}`,
-        `  status: ${state.symbolSearchStatus}`,
         `  results: ${references.length}`,
         ...(references.slice(0, 12).map((reference) => `  ${reference.uri}  ${reference.range.start.line + 1}:${reference.range.start.character + 1}`)),
-        ...(references.length === 0 ? ['  No references were returned for that position.'] : []),
-        '  next: /intelligence definition ' + `${targetPath} ${position.line + 1} ${position.column + 1}`,
+        ...(references.length === 0 && lookup.status === 'ok' ? ['  The language server found no references at that position.'] : []),
+        ...lookupStatusLines(lookup),
+        ...(references.length > 0 ? ['  next: /intelligence definition ' + `${targetPath} ${position.line + 1} ${position.column + 1}`] : []),
       ].join('\n'));
       return;
     }
 
-    const hover = await intelligence.getHover(targetPath, position.line, position.column);
+    const hoverLookup = await intelligence.lookupHover(targetPath, position.line, position.column);
+    const hover = hoverLookup.items;
     const hoverLines = typeof hover?.contents === 'string'
       ? hover.contents.split('\n')
       : Array.isArray(hover?.contents)
@@ -140,9 +150,9 @@ async function handleIntelligenceQuery(
           : [];
     ctx.print([
       `Intelligence Hover: ${targetPath}:${position.line + 1}:${position.column + 1}`,
-      `  status: ${state.hoverStatus}`,
-      ...(hoverLines.length > 0 ? hoverLines.slice(0, 8).map((line) => `  ${line}`) : ['  No hover information was returned for that position.']),
-      '  next: /health intelligence',
+      ...(hoverLines.length > 0
+        ? hoverLines.slice(0, 8).map((line) => `  ${line}`)
+        : hoverLookup.status === 'ok' ? ['  The language server has no hover information for that position.'] : lookupStatusLines(hoverLookup)),
     ].join('\n'));
     return;
   }
@@ -165,13 +175,13 @@ export function registerIntelligenceRuntimeCommands(registry: CommandRegistry, o
     name: 'intelligence',
     aliases: ['intel'],
     description: 'Review workspace intelligence readiness, diagnostics posture, and symbol search availability',
-    usage: '[review|panel|diagnostics [file]|symbols <file>|outline <file>|definition <file> <line> <column>|references <file> <line> <column>|hover <file> <line> <column>|repair]',
+    usage: '[review|panel|diagnostics [file]|symbols <file>|outline <file>|definition <file> <line> <column>|references <file> <line> <column>|hover <file> <line> <column>|install <file|language>|repair]',
     async handler(args, ctx) {
       const sub = (args[0] ?? 'review').toLowerCase();
       if (sub === 'panel' || sub === 'open') {
         // There is no intelligence view; its read model backs every
         // subcommand below. Say so and open Agents rather than failing.
-        ctx.print('There is no intelligence view: use /intelligence review|diagnostics|symbols|outline|definition|references|hover|repair for the live data. Opening Agents.');
+        ctx.print('There is no intelligence view: use /intelligence review|diagnostics|symbols|outline|definition|references|hover|install|repair for the live data. Opening Agents.');
         try {
           openCommandView(ctx, 'agents');
         } catch {
@@ -187,6 +197,30 @@ export function registerIntelligenceRuntimeCommands(registry: CommandRegistry, o
         try {
           await intelligence.initialize();
           await handleIntelligenceQuery(sub, args, ctx, intelligence, state);
+        } finally {
+          await intelligence.dispose();
+        }
+        return;
+      }
+
+      if (sub === 'install') {
+        const target = args[1];
+        if (!target) {
+          ctx.print('Intelligence Install\n  Usage: /intelligence install <file|language>  (installs the language server for that language into your GoodVibes bin directory)');
+          return;
+        }
+        const intelligence = createIntelligence(ctx);
+        try {
+          const subject = target.includes('.') || target.includes('/') ? resolveTargetPath(target, ctx) : target;
+          ctx.print(`Intelligence Install: ${target}\n  installing (up to 3 minutes)...`);
+          const outcome = await intelligence.installLanguageServer(subject);
+          ctx.print([
+            `Intelligence Install: ${outcome.langId}`,
+            `  ${outcome.status}: ${outcome.reason}`,
+            ...(outcome.path ? [`  path: ${outcome.path}`] : []),
+            ...(outcome.status === 'installed' || outcome.status === 'already-installed'
+              ? ['  next: /intelligence references <file> <line> <column>'] : []),
+          ].join('\n'));
         } finally {
           await intelligence.dispose();
         }
@@ -263,6 +297,7 @@ export function registerIntelligenceRuntimeCommands(registry: CommandRegistry, o
         '  next: /intelligence references <file> <line> <column>',
         '  next: /intelligence definition <file> <line> <column>',
         '  next: /intelligence hover <file> <line> <column>',
+        '  next: /intelligence install <file|language>',
         '  next: /intelligence repair',
       ].join('\n'));
     },

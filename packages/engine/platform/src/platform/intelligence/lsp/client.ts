@@ -1,5 +1,6 @@
 import { logger } from '../../utils/logger.js';
-import type { JsonRpcRequest, JsonRpcResponse, JsonRpcNotification } from './protocol.js';
+import type { JsonRpcRequest, JsonRpcResponse, JsonRpcNotification, Diagnostic } from './protocol.js';
+import type { LspCapabilities } from './capabilities.js';
 import { summarizeError } from '../../utils/error-display.js';
 
 interface PendingRequest {
@@ -8,23 +9,67 @@ interface PendingRequest {
   timer: ReturnType<typeof setTimeout>;
 }
 
-export interface LspNotificationRecord {
-  readonly method: string;
-  readonly params?: unknown | undefined;
-  readonly receivedAt: number;
+/** A request the server did not answer within its time limit. */
+export class LspRequestTimeoutError extends Error {
+  constructor(readonly method: string, readonly timeoutMs: number) {
+    super(`LspClient: request '${method}' timed out after ${timeoutMs}ms`);
+    this.name = 'LspRequestTimeoutError';
+  }
+}
+
+/** The newest diagnostics the server published for one document. */
+interface PublishedDiagnostics {
+  readonly version: number | undefined;
+  /** Notification sequence number it arrived at. */
+  readonly seq: number;
+  readonly diagnostics: Diagnostic[];
+}
+
+interface DiagnosticsWaiter {
+  readonly uri: string;
+  readonly version: number;
+  readonly afterSeq: number;
+  /** A publication without a version that may yet be followed by a fuller one. */
+  offer(diagnostics: Diagnostic[]): void;
+  resolve(diagnostics: Diagnostic[] | null): void;
+}
+
+/** What a sync told the server, so a diagnostics wait can match the answer. */
+export interface DocumentSync {
+  readonly version: number;
+  /** Notification sequence at the moment the text was sent. */
+  readonly sentAtSeq: number;
+  /** False when the server already had this exact text. */
+  readonly changed: boolean;
 }
 
 const DEFAULT_TIMEOUT_MS = 30_000;
-const MAX_QUEUED_NOTIFICATIONS = 500;
+/** Documents one server is told about at once; the least recently used is closed past this. */
+const MAX_OPEN_DOCUMENTS = 64;
+/**
+ * A server that does not stamp diagnostics with a version may publish them in
+ * stages (syntax, then types); the answer is the newest publication once none
+ * has followed it for this long.
+ */
+const DIAGNOSTICS_SETTLE_MS = 400;
+/** Server stderr kept for a start-failure message; the rest goes to the debug log. */
+const STDERR_TAIL_BYTES = 2048;
 
 export class LspClient {
   private proc: ReturnType<typeof Bun.spawn> | null = null;
   private nextId = 1;
   private pendingRequests: Map<number, PendingRequest> = new Map();
-  private readonly notifications: LspNotificationRecord[] = [];
   /** Raw stdout bytes not yet framed; Content-Length counts bytes, so framing happens before decoding. */
   private buffer: Uint8Array = new Uint8Array(0);
   private readLoopRunning = false;
+  /** Opened documents in least-recently-used order (a Map keeps insertion order). */
+  private readonly documents = new Map<string, { text: string; version: number }>();
+  private readonly published = new Map<string, PublishedDiagnostics>();
+  private readonly diagnosticsWaiters = new Set<DiagnosticsWaiter>();
+  private notificationSeq = 0;
+  private stderrTail = '';
+  /** What the server said it can do, from its initialize answer. Null until then. */
+  capabilities: LspCapabilities | null = null;
 
   constructor(
     private command: string,
@@ -44,6 +89,7 @@ export class LspClient {
         ...(this.options?.env !== undefined ? { env: { ...process.env, ...this.options.env } } : {}),
       } as Parameters<typeof Bun.spawn>[1]);
       this._startReadLoop();
+      this._drainStderr();
     } catch (err) {
       logger.error('LspClient: failed to start process', { command: this.command, err: summarizeError(err) });
       this.proc = null;
@@ -51,8 +97,13 @@ export class LspClient {
     }
   }
 
+  /** The last lines the server wrote to stderr, for a failure message. */
+  get recentStderr(): string {
+    return this.stderrTail.trim();
+  }
+
   /** Send a request and wait for response. */
-  async request<T = unknown>(method: string, params?: unknown): Promise<T> {
+  async request<T = unknown>(method: string, params?: unknown, options?: { timeoutMs?: number | undefined }): Promise<T> {
     if (!this.proc || !this.isRunning) {
       throw new Error('LspClient: server is not running');
     }
@@ -62,10 +113,10 @@ export class LspClient {
     const frame = LspClient.encodeFrame(json);
 
     return new Promise<T>((resolve, reject) => {
-      const timeoutMs = this.options?.timeout ?? DEFAULT_TIMEOUT_MS;
+      const timeoutMs = options?.timeoutMs ?? this.options?.timeout ?? DEFAULT_TIMEOUT_MS;
       const timer = setTimeout(() => {
         this.pendingRequests.delete(id);
-        reject(new Error(`LspClient: request '${method}' timed out after ${timeoutMs}ms`));
+        reject(new LspRequestTimeoutError(method, timeoutMs));
       }, timeoutMs);
       timer.unref?.();
 
@@ -98,19 +149,79 @@ export class LspClient {
     }
   }
 
-  takeNotifications(predicate: (notification: LspNotificationRecord) => boolean): LspNotificationRecord[] {
-    const taken: LspNotificationRecord[] = [];
-    const retained: LspNotificationRecord[] = [];
-    for (const notification of this.notifications) {
-      if (predicate(notification)) {
-        taken.push(notification);
-      } else {
-        retained.push(notification);
+  /**
+   * Tell the server about a document before asking it anything about it: a
+   * server answers only for documents it was opened with. Sends the text once,
+   * and again (as a full change) when it differs from what the server has.
+   * Past {@link MAX_OPEN_DOCUMENTS} the least recently used document is closed,
+   * so neither process holds every file a long session touched.
+   */
+  syncDocument(uri: string, languageId: string, text: string): DocumentSync {
+    const known = this.documents.get(uri);
+    const sentAtSeq = this.notificationSeq;
+    if (known) {
+      this.documents.delete(uri);
+      if (known.text === text) {
+        this.documents.set(uri, known);
+        return { version: known.version, sentAtSeq, changed: false };
       }
+      const version = known.version + 1;
+      this.notify('textDocument/didChange', { textDocument: { uri, version }, contentChanges: [{ text }] });
+      this.documents.set(uri, { text, version });
+      return { version, sentAtSeq, changed: true };
     }
-    this.notifications.length = 0;
-    this.notifications.push(...retained);
-    return taken;
+    this.notify('textDocument/didOpen', { textDocument: { uri, languageId, version: 1, text } });
+    this.documents.set(uri, { text, version: 1 });
+    while (this.documents.size > MAX_OPEN_DOCUMENTS) {
+      const oldest = this.documents.keys().next().value;
+      if (oldest === undefined) break;
+      this.documents.delete(oldest);
+      this.published.delete(oldest);
+      this.notify('textDocument/didClose', { textDocument: { uri: oldest } });
+    }
+    return { version: 1, sentAtSeq, changed: true };
+  }
+
+  /**
+   * The diagnostics the server publishes for `sync`'s text, waiting at most
+   * `timeoutMs`. A server that stamps its notification with a version is
+   * matched on it. For one that does not, the answer is the newest
+   * publication after the text was sent once {@link DIAGNOSTICS_SETTLE_MS}
+   * pass without another. When the text did not change, the newest
+   * publication already held is the answer. Null when none arrived in time.
+   */
+  waitForDiagnostics(uri: string, sync: DocumentSync, timeoutMs: number): Promise<Diagnostic[] | null> {
+    const current = this.published.get(uri);
+    if (current && (current.version === sync.version || !sync.changed)) {
+      return Promise.resolve(current.diagnostics);
+    }
+    if (!this.isRunning) return Promise.resolve(null);
+    return new Promise((resolve) => {
+      let latest: Diagnostic[] | null = null;
+      let settle: ReturnType<typeof setTimeout> | undefined;
+      const waiter: DiagnosticsWaiter = {
+        uri,
+        version: sync.version,
+        afterSeq: sync.sentAtSeq,
+        offer: (diagnostics) => {
+          latest = diagnostics;
+          if (settle) clearTimeout(settle);
+          settle = setTimeout(() => waiter.resolve(latest), DIAGNOSTICS_SETTLE_MS);
+          settle.unref?.();
+        },
+        resolve: (diagnostics) => {
+          clearTimeout(deadline);
+          if (settle) clearTimeout(settle);
+          this.diagnosticsWaiters.delete(waiter);
+          resolve(diagnostics);
+        },
+      };
+      // At the deadline a version-less server's newest answer still beats none.
+      const deadline = setTimeout(() => waiter.resolve(latest), timeoutMs);
+      deadline.unref?.();
+      this.diagnosticsWaiters.add(waiter);
+      if (current && current.version === undefined && current.seq > sync.sentAtSeq) waiter.offer(current.diagnostics);
+    });
   }
 
   /** Stop the server process. */
@@ -122,6 +233,7 @@ export class LspClient {
       pending.reject(new Error('LspClient: server stopped'));
       this.pendingRequests.delete(id);
     }
+    for (const waiter of [...this.diagnosticsWaiters]) waiter.resolve(null);
     try {
       (this.proc.stdin as import('bun').FileSink).end();
       this.proc.kill();
@@ -131,7 +243,8 @@ export class LspClient {
     } finally {
       this.proc = null;
       this.buffer = new Uint8Array(0);
-      this.notifications.length = 0;
+      this.documents.clear();
+      this.published.clear();
       this.readLoopRunning = false;
     }
   }
@@ -176,6 +289,34 @@ export class LspClient {
           pending.reject(new Error('LspClient: server process exited unexpectedly'));
           this.pendingRequests.delete(id);
         }
+        for (const waiter of [...this.diagnosticsWaiters]) waiter.resolve(null);
+      }
+    })();
+  }
+
+  /**
+   * Read the server's stderr for as long as it runs. A pipe nobody reads fills
+   * and blocks the server on its next write, after which every request times
+   * out. Lines go to the debug log; the last few are kept for failure messages.
+   */
+  private _drainStderr(): void {
+    const proc = this.proc;
+    const stream = proc?.stderr;
+    if (!stream || typeof stream === 'number') return;
+    const command = this.command;
+    (async () => {
+      const decoder = new TextDecoder();
+      try {
+        const reader = (stream as ReadableStream<Uint8Array>).getReader();
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          const text = decoder.decode(value, { stream: true });
+          this.stderrTail = (this.stderrTail + text).slice(-STDERR_TAIL_BYTES);
+          logger.debug('LspClient: server stderr', { command, text: text.slice(0, 500) });
+        }
+      } catch (err) {
+        logger.debug('LspClient: stderr read ended', { command, err: summarizeError(err) });
       }
     })();
   }
@@ -228,23 +369,32 @@ export class LspClient {
 
     const notification = msg as JsonRpcNotification;
     if (notification.jsonrpc === '2.0' && typeof notification.method === 'string') {
-      if (this.notifications.length >= MAX_QUEUED_NOTIFICATIONS) {
-        const evicted = this.notifications.shift();
-        logger.warn('LspClient: evicted queued notification after capacity limit', {
-          evictedMethod: evicted?.method,
-          capacity: MAX_QUEUED_NOTIFICATIONS,
-        });
-      }
-      this.notifications.push({
-        method: notification.method,
-        ...(notification.params !== undefined ? { params: notification.params } : {}),
-        receivedAt: Date.now(),
-      });
-      logger.debug('LspClient: received notification', { method: notification.method });
+      this.notificationSeq += 1;
+      if (notification.method === 'textDocument/publishDiagnostics') this._takeDiagnostics(notification.params);
+      // Every other notification (progress, log and show messages) has no
+      // reader in this client and is dropped rather than kept.
       return;
     }
 
     logger.warn('LspClient: received unrecognized JSON-RPC message', { message: msg });
+  }
+
+  /** Keep the newest diagnostics for an open document and wake whoever waits for them. */
+  private _takeDiagnostics(params: unknown): void {
+    if (typeof params !== 'object' || params === null) return;
+    const { uri, version, diagnostics } = params as { uri?: unknown; version?: unknown; diagnostics?: unknown };
+    if (typeof uri !== 'string' || !Array.isArray(diagnostics) || !this.documents.has(uri)) return;
+    const entry: PublishedDiagnostics = {
+      version: typeof version === 'number' ? version : undefined,
+      seq: this.notificationSeq,
+      diagnostics: diagnostics as Diagnostic[],
+    };
+    this.published.set(uri, entry);
+    for (const waiter of [...this.diagnosticsWaiters]) {
+      if (waiter.uri !== uri) continue;
+      if (entry.version === waiter.version) waiter.resolve(entry.diagnostics);
+      else if (entry.version === undefined && entry.seq > waiter.afterSeq) waiter.offer(entry.diagnostics);
+    }
   }
 
   /**

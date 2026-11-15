@@ -19,8 +19,10 @@ Use `goodvibes --version` and `goodvibes-daemon --version` to inspect the instal
 products. Updates and data-preserving uninstall use the installer you installed with.
 
 For source development, use Bun **1.3.14** and Node **22 or later**. Go is
-optional for Go language-server support, and `rust-analyzer` can be downloaded
-on first use.
+optional for Go language-server support. A missing `rust-analyzer` or `gopls`
+is never installed behind your back: a code lookup says which server is missing
+and how to install it, and `/intelligence install <file|language>` installs it
+into your GoodVibes bin directory when you ask.
 
 ## Configure a model provider
 

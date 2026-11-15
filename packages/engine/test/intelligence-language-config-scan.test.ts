@@ -38,31 +38,32 @@ afterEach(() => {
 describe('loadLanguageConfigs directory scan', () => {
   test('a user or project file for a language with no built-in default adds that language', () => {
     writeLanguage(home, 'zig', { lsp: { command: 'zls', args: [] }, treeSitter: 'zig' });
-    writeLanguage(project, 'elixir', { formatter: { command: 'mix', args: ['format', '-'] } });
+    writeLanguage(project, 'elixir', { extensions: ['.ex', 'exs'] });
 
     const configs = loadLanguageConfigs(roots());
 
     expect(configs.get('zig')).toEqual({ lsp: { command: 'zls', args: [] }, treeSitter: 'zig' });
-    expect(configs.get('elixir')).toEqual({ formatter: { command: 'mix', args: ['format', '-'] } });
+    expect(configs.get('elixir')).toEqual({ extensions: ['ex', 'exs'] });
     expect(getLanguageConfig('zig', roots())?.lsp?.command).toBe('zls');
     // Built-in defaults are still present.
     expect(configs.get('typescript')?.lsp?.command).toBe('typescript-language-server');
   });
 
-  test('precedence is defaults < user < project, except that a project file cannot choose a language server', () => {
+  test('precedence is defaults < user < project, except that a project file cannot choose a program to run', () => {
     writeLanguage(home, 'zig', { lsp: { command: 'zls-user', args: [] }, treeSitter: 'zig' });
     writeLanguage(project, 'zig', { lsp: { command: 'zls-project', args: ['--x'] } });
-    writeLanguage(home, 'python', { lsp: { command: 'pylsp', args: [] } });
-    writeLanguage(project, 'python', { linter: { command: 'ruff', args: ['check'] } });
+    writeLanguage(home, 'python', { lsp: { command: 'pylsp', args: [] }, linter: { command: 'ruff', args: ['check', '--fix'] } });
+    writeLanguage(project, 'python', { linter: { command: './evil', args: [] }, formatter: { command: './evil', args: [] }, extensions: ['pyw'] });
 
     const configs = loadLanguageConfigs(roots());
 
-    // The project file's server command is refused; the user's stands.
+    // The project file's server, formatter and linter are refused; the user's stand.
     expect(configs.get('zig')).toEqual({ lsp: { command: 'zls-user', args: [] }, treeSitter: 'zig' });
     expect(configs.get('python')).toEqual({
       lsp: { command: 'pylsp', args: [] },
       treeSitter: 'python',
-      linter: { command: 'ruff', args: ['check'] },
+      linter: { command: 'ruff', args: ['check', '--fix'] },
+      extensions: ['pyw'],
     });
   });
 
@@ -78,7 +79,7 @@ describe('loadLanguageConfigs directory scan', () => {
     expect(configs.get('zig')).toEqual({ lsp: { command: 'zls', args: [] } });
     expect(configs.has('nim')).toBe(false);
     expect(configs.has('ocaml')).toBe(false);
-    expect(configs.get('rust')?.treeSitter).toBe('rust');
+    expect(configs.get('rust')?.lsp?.command).toBe('rust-analyzer');
     const messages = warnSpy.mock.calls.map((call) => String(call[0]));
     expect(messages.filter((m) => m.includes('skipping invalid language config'))).toHaveLength(3);
     expect(messages.filter((m) => m.includes('failed to read language config'))).toHaveLength(1);

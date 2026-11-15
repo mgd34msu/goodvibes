@@ -19,7 +19,7 @@ describe('refused credentials on the daemon API reach the security domain', () =
   test('a wrong token on the main API answers 401 and emits AUTH_FAILED without the credential', async () => {
     const { bus, seen } = watchedBus();
     const router = new DaemonHttpRouter({
-      checkAuth: () => false,
+      authenticateRequest: () => null,
       authToken: () => 'operator-secret-token',
       runtimeBus: bus,
       configManager: { get: () => undefined },

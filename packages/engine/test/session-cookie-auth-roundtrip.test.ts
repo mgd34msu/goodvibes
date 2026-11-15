@@ -92,10 +92,9 @@ function makeRouter(userAuth: UserAuthManager, sharedToken: string | null, manag
     runtimeStore: null,
     runtimeDispatch: null,
     authToken: () => sharedToken,
-    checkAuth: (req: Request) => helper.checkAuth(req),
+    authenticateRequest: (req: Request) => helper.authenticateRequest(req),
     extractAuthToken: (req: Request) => helper.extractAuthToken(req),
     requireAuthenticatedSession: (req: Request) => helper.requireAuthenticatedSession(req),
-    describeAuthenticatedPrincipal: (token: string) => helper.describeAuthenticatedPrincipal(token),
     companionChatManager: manager,
   } as unknown as ConstructorParameters<typeof DaemonHttpRouter>[0]);
 }

@@ -94,7 +94,8 @@ import { attachBrowserJudgmentError, browserJudgmentErrorMethod } from './browse
 import { AppError } from '../../types/errors.js';
 import { VERSION } from '../../version.js';
 import type { CompanionChatManager } from '../../companion/companion-chat-manager.js';
-import { buildMissingScopeBody } from '../http-policy.js';
+import { buildMissingScopeBody, principalHasScope, type AuthenticatedPrincipal, type RequestContext } from '../http-policy.js';
+import { bindRequestContext, requestContextOf } from '../request-context.js';
 import { dispatchCompanionChatRoutes, isCompanionChatPath } from '../../companion/companion-chat-routes.js';
 import { dispatchModelRoutes } from './model-routes.js';
 import { dispatchBatchRoutes } from './batch-routes.js';
@@ -170,17 +171,16 @@ interface DaemonHttpRouterContext {
   readonly nativeMutationHost?: import('../../permissions/external-request.js').ExternalPermissionHost | undefined;
   readonly buildSurfaceAdapterContext: () => SurfaceAdapterContext;
   readonly buildGenericWebhookAdapterContext: () => GenericWebhookAdapterContext;
-  readonly checkAuth: (req: Request) => boolean;
+  /**
+   * The request's principal, authenticated once where the request entered and
+   * read back by every later check on it (an integer compare while no
+   * credential changed). Null when the request carries no valid credential.
+   */
+  readonly authenticateRequest: (req: Request) => RequestContext | null;
   readonly extractAuthToken: (req: Request) => string;
   readonly requireAuthenticatedSession: (req: Request) => { username: string; roles: readonly string[] } | null;
   readonly requireAdmin: (req: Request) => Response | null;
   readonly requireRemotePeer: (req: Request, scope?: string) => Promise<DistributedPeerAuth | Response>;
-  readonly describeAuthenticatedPrincipal: (token: string) => {
-    principalId: string;
-    principalKind: 'user' | 'bot' | 'service' | 'token';
-    admin: boolean;
-    scopes: readonly string[];
-  } | null;
   readonly validateGatewayInvocation: (
     descriptor: GatewayMethodDescriptor,
     context?: { readonly principalKind?: 'user' | 'bot' | 'service' | 'token' | 'remote-peer' | undefined; readonly scopes?: readonly string[] | undefined; readonly admin?: boolean | undefined },
@@ -260,6 +260,7 @@ export class DaemonHttpRouter {
   /** Wire receipts (update/crash announcements) and the cluster role into /status. */
   setDaemonStatusProviders(providers: import('./router-route-contexts.js').DaemonStatusProviders): void {
     this.statusProviders = { ...this.statusProviders, ...providers };
+    this.routeTableCache = null;
   }
 
   /** Wire the LAN group verbs (`/api/cluster/*`), see cluster-group-routes.ts. */
@@ -326,10 +327,7 @@ export class DaemonHttpRouter {
         // token-authenticates its own API calls; reserved API paths return null
         // here (API precedence) and flow to the normal auth-gated dispatch below.
         const asset = serving.serveBundle ? await serveWebuiBundle(req, serving) : null;
-        const currentPrincipal = () => {
-          const token = this.context.extractAuthToken(req);
-          return token ? this.context.describeAuthenticatedPrincipal(token) : null;
-        };
+        const currentPrincipal = () => this.principalOf(req);
         const principal = currentPrincipal();
         const method = this.context.browserJudgment?.issueErrorReference ? browserJudgmentErrorMethod(req, this.context.gatewayMethods) : undefined;
         const original = asset ?? await this.dispatchAuthedRequest(req).catch((error: unknown) => {
@@ -370,7 +368,8 @@ export class DaemonHttpRouter {
     const preAuth = await this.dispatchPreAuthRoutes(req);
     if (preAuth) return preAuth;
 
-    if (!this.context.checkAuth(req)) {
+    // The one authentication of this request; every check after this reads the bound context.
+    if (!this.context.authenticateRequest(req)) {
       this.authFailures.record(this.clientIpOf(req), 'control-plane-router');
       const refusal = jsonErrorResponse(
         new AppError('Authentication required', 'AUTH_REQUIRED', false, {
@@ -490,11 +489,29 @@ export class DaemonHttpRouter {
    * principal holds none.
    */
   private requireCallerScope(req: Request, scope: string): Response | null {
-    const token = this.context.extractAuthToken(req);
-    const principal = token ? this.context.describeAuthenticatedPrincipal(token) : null;
-    if (principal?.admin) return null;
+    const principal = this.context.authenticateRequest(req)?.principal;
+    if (principal && principalHasScope(principal, scope)) return null;
     const body = buildMissingScopeBody('this request', [scope], principal?.scopes);
     return body ? Response.json(body, { status: 403 }) : null;
+  }
+
+  /** The request's authenticated principal, or null. */
+  private principalOf(req: Request): AuthenticatedPrincipal | null {
+    return this.context.authenticateRequest(req)?.principal ?? null;
+  }
+
+  /**
+   * Who an event stream belongs to and whether its credential still holds,
+   * so a revoked credential's streams close: by `closeClientsOf` at once, or
+   * at the next frame after a single session ended.
+   */
+  private streamAuthority(req: Request): { readonly principalId?: string; readonly isAuthorized?: () => boolean } {
+    const opened = this.context.authenticateRequest(req)?.principal;
+    if (!opened) return {};
+    return {
+      principalId: opened.principalId,
+      isAuthorized: () => this.context.authenticateRequest(req)?.principal.principalId === opened.principalId,
+    };
   }
 
   /** Reads stay open to any authenticated caller; every other verb needs an admin. */
@@ -601,15 +618,35 @@ export class DaemonHttpRouter {
           return openScopedSessionEventStream(gateway, request, {
             clientPrefix: 'companion-chat', sessionId,
             onClientId: (clientId) => chatManager.registerSubscriber(sessionId, clientId),
+            ...this.streamAuthority(request),
           });
         },
       });
       if (companionResponse) return companionResponse;
     }
 
+    const table = this.routeTable();
+    return dispatchDaemonApiRoutes(req, table.handlers, table.extensions);
+  }
+
+  /**
+   * The route handler table, built by the first request and kept: its handlers
+   * reach the router's owners when they run, so nothing in it goes stale.
+   * Rebuilt only when the daemon hands over new status providers, or when
+   * enable() set a different operator token after construction.
+   */
+  private routeTableCache: {
+    readonly authToken: string | null;
+    readonly handlers: Parameters<typeof dispatchDaemonApiRoutes>[1];
+    readonly extensions: NonNullable<Parameters<typeof dispatchDaemonApiRoutes>[2]>;
+  } | null = null;
+
+  private routeTable(): NonNullable<DaemonHttpRouter['routeTableCache']> {
+    const authToken = this.context.authToken();
+    if (this.routeTableCache?.authToken === authToken) return this.routeTableCache;
     const handlers = {
       ...createDaemonControlRouteHandlers({
-        authToken: this.context.authToken(),
+        authToken,
         version: VERSION,
         ...this.statusProviders,
         // Read by every client on the probe it already makes: below this
@@ -619,10 +656,7 @@ export class DaemonHttpRouter {
         sessionCookieName: OPERATOR_SESSION_COOKIE_NAME,
         controlPlaneGateway: this.context.controlPlaneGateway,
         extractAuthToken: this.context.extractAuthToken,
-        resolveAuthenticatedPrincipal: (request) => {
-          const token = this.context.extractAuthToken(request);
-          return token ? this.context.describeAuthenticatedPrincipal(token) : null;
-        },
+        resolveAuthenticatedPrincipal: (request) => this.principalOf(request),
         gatewayMethods: this.context.gatewayMethods,
         getOperatorContract: () => buildOperatorContract(this.context.gatewayMethods),
         invokeGatewayMethodCall: this.context.invokeGatewayMethodCall,
@@ -644,18 +678,12 @@ export class DaemonHttpRouter {
           getUsageSnapshot: (providerId) => getProviderUsageSnapshot(this.context.providerRegistry, providerId),
         },
         requireAdmin: (request) => this.context.requireAdmin(request),
-        resolveAuthenticatedPrincipal: (request) => {
-          const token = this.context.extractAuthToken(request);
-          return token ? this.context.describeAuthenticatedPrincipal(token) : null;
-        },
+        resolveAuthenticatedPrincipal: (request) => this.principalOf(request),
         userAuth: this.context.userAuth,
       }),
       ...createDaemonTelemetryRouteHandlers({
         telemetryApi: this.telemetryApi,
-        resolveAuthenticatedPrincipal: (request) => {
-          const token = this.context.extractAuthToken(request);
-          return token ? this.context.describeAuthenticatedPrincipal(token) : null;
-        },
+        resolveAuthenticatedPrincipal: (request) => this.principalOf(request),
         ingestSink: this.telemetryApi,
       }),
       ...createDaemonChannelRouteHandlers({
@@ -776,11 +804,11 @@ export class DaemonHttpRouter {
         openSessionEventStream: (req, sessionId) => openScopedSessionEventStream(
           this.context.controlPlaneGateway,
           req,
-          { clientPrefix: 'shared-session', sessionId },
+          { clientPrefix: 'shared-session', sessionId, ...this.streamAuthority(req) },
         ),
       }),
       ...createDaemonRemoteRouteHandlers({
-        authToken: this.context.authToken(),
+        authToken,
         parseJsonBody: (request) => this.parseJsonBody(request),
         requireAdmin: (request) => this.context.requireAdmin(request),
         requireRemotePeer: (request, scope) => this.context.requireRemotePeer(request, scope),
@@ -811,10 +839,7 @@ export class DaemonHttpRouter {
       )),
     };
     const postBrowserJudgment = createBrowserJudgmentHttpHandler({
-      authenticate: (request) => {
-        const token = this.context.extractAuthToken(request);
-        return token ? this.context.describeAuthenticatedPrincipal(token) : null;
-      },
+      authenticate: (request) => this.principalOf(request),
       sameOrigins: () => {
         const configured = readControlPlaneBinding((key) => this.getConfigValue(key));
         const listener = this.context.listenerBinding?.();
@@ -829,13 +854,18 @@ export class DaemonHttpRouter {
       cors: () => resolveWebuiServingPosture(this.context.configManager).cors,
       service: this.context.browserJudgment,
     });
-    return dispatchDaemonApiRoutes(req, { ...handlers, postBrowserJudgment }, [
-      (candidate) => dispatchAliasedKnowledgeRoutes(candidate, '/api/goodvibes-agent/knowledge', agentKnowledgeHandlers),
-      clusterGroupRouteExtension(() => this.clusterGroupVerbs, {
-        requireAdmin: (candidate) => this.context.requireAdmin(candidate),
-        parseJsonBody: (candidate) => this.parseJsonBody(candidate),
-      }),
-    ]);
+    this.routeTableCache = {
+      authToken,
+      handlers: { ...handlers, postBrowserJudgment },
+      extensions: [
+        (candidate) => dispatchAliasedKnowledgeRoutes(candidate, '/api/goodvibes-agent/knowledge', agentKnowledgeHandlers),
+        clusterGroupRouteExtension(() => this.clusterGroupVerbs, {
+          requireAdmin: (candidate) => this.context.requireAdmin(candidate),
+          parseJsonBody: (candidate) => this.parseJsonBody(candidate),
+        }),
+      ],
+    };
+    return this.routeTableCache;
   }
 
   /** Knowledge route context for one surface, see router-knowledge-context.ts. */
@@ -878,10 +908,7 @@ export class DaemonHttpRouter {
         parseJsonBody: (request) => this.parseJsonBody(request),
         parseOptionalJsonBody: (request) => this.parseOptionalJsonBody(request),
         requireAdmin: (request) => this.context.requireAdmin(request),
-        callerId: (request) => {
-          const token = this.context.extractAuthToken(request);
-          return (token ? this.context.describeAuthenticatedPrincipal(token) : null)?.principalId;
-        },
+        callerId: (request) => this.principalOf(request)?.principalId,
       });
     }
     return this.homeGraphRoutes;
@@ -1034,5 +1061,9 @@ function dispatchAliasedKnowledgeRoutes(
   if (!url.pathname.startsWith(aliasPrefix)) return null;
   const suffix = url.pathname.slice(aliasPrefix.length);
   url.pathname = `/api/knowledge${suffix}`;
-  return dispatchDaemonApiRoutes(new Request(url.toString(), req), handlers);
+  const aliased = new Request(url.toString(), req);
+  // The same caller: the derived request carries the principal already authenticated.
+  const context = requestContextOf(req);
+  if (context) bindRequestContext(aliased, context);
+  return dispatchDaemonApiRoutes(aliased, handlers);
 }

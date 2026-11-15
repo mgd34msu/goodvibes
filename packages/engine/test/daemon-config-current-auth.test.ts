@@ -9,6 +9,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createDaemonSystemRouteHandlers } from '../daemon-api/src/system-routes.js';
 import { DaemonControlPlaneHelper, type DaemonControlPlaneContext } from '../platform/src/platform/daemon/control-plane.js';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.js';
 import { PairingTokenManager } from '../platform/src/platform/pairing/pairing-token-store.js';
 import { UserAuthManager } from '../platform/src/platform/security/user-auth.js';
 
@@ -29,7 +30,7 @@ function fixture(kind: AuthKind, payload: Record<string, unknown> | Response = {
     users: [{ username: 'synthetic-admin', passwordHash: 'unused-synthetic-hash', roles: admin ? ['admin'] : ['viewer'] },
       { username: 'synthetic-spare', passwordHash: 'unused-synthetic-hash', roles: ['admin'] }] });
   const session = users.createSession('synthetic-admin');
-  const helper = new DaemonControlPlaneHelper({ pairingTokens: pairing, userAuth: users,
+  const helper = new DaemonControlPlaneHelper({ gatewayMethods: new GatewayMethodCatalog(), pairingTokens: pairing, userAuth: users,
     authToken: () => shared, trustProxyEnabled: () => false } as unknown as DaemonControlPlaneContext);
   const token = kind === 'paired' ? paired!.token : kind === 'shared' ? shared : session.token;
   const request = new Request('http://synthetic.invalid/config', { method: 'POST', headers:

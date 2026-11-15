@@ -97,6 +97,7 @@ describe('http auth helpers', () => {
       token: session.token,
       username: 'admin',
       roles: ['admin'],
+      expiresAt: session.expiresAt,
     });
     expect(isOperatorAdmin(authenticated)).toBe(true);
   });
@@ -111,6 +112,7 @@ describe('http auth helpers', () => {
       token: operatorSession.token,
       username: 'operator',
       roles: ['operator'],
+      expiresAt: operatorSession.expiresAt,
     });
     expect(isOperatorAdmin(authenticated)).toBe(false);
   });

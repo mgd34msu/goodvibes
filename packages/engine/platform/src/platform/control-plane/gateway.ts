@@ -14,6 +14,7 @@ import {
   emitStreamSubscriberDisconnected,
 } from '../runtime/emitters/index.js';
 import { renderControlPlaneGatewayWebUi } from './gateway-web-ui.js';
+import { AppError } from '../types/errors.js';
 import { buildGatewayDisabledResponseBody } from './gateway-disabled-response.js';
 import { SSE_HEARTBEAT_INTERVAL_MS } from './sse-timing.js';
 import { CHANNEL_REQUIRED_SCOPE, clientMayReceiveEventDomain, clientMaySeeScopedChannel } from './gateway-scope-enforcement.js';
@@ -69,7 +70,19 @@ export interface ControlPlaneEventStreamOptions {
   readonly capabilities?: readonly string[] | undefined;
   /** SSE keep-alive interval (ms); defaults to SSE_HEARTBEAT_INTERVAL_MS. First heartbeat always fires on open. */
   readonly heartbeatIntervalMs?: number | undefined;
+  /**
+   * Whether the credential the stream opened with is still valid, asked before
+   * every frame (an integer compare until the daemon's authentication moves).
+   * False closes the stream with a `closed` frame naming the reason.
+   */
+  readonly isAuthorized?: (() => boolean) | undefined;
 }
+
+/** What a stream or socket closed for a revoked credential tells its client. */
+const CREDENTIAL_REVOKED_FRAME = Object.freeze({
+  reason: 'credential-revoked',
+  next: 'Sign in again or pair this device again, then reconnect.',
+});
 
 interface LiveControlPlaneClient {
   readonly clientId: string;
@@ -86,6 +99,10 @@ interface LiveControlPlaneClient {
    */
   domains: ReadonlySet<RuntimeEventDomain> | null;
   readonly send: (event: string, payload: unknown, id?: string) => void;
+  /** The authenticated principal the connection belongs to, for {@link ControlPlaneGateway.closeClientsOf}. */
+  readonly principalId?: string | undefined;
+  /** Ends the connection from the daemon side. */
+  readonly close?: ((reason: string) => void) | undefined;
 }
 
 interface WebSocketControlPlaneClient {
@@ -103,6 +120,8 @@ export class ControlPlaneGateway {
   private readonly clients = new Map<string, ControlPlaneClientRecord>();
   private readonly liveClients = new Map<string, LiveControlPlaneClient>();
   private readonly websocketClients = new Map<string, WebSocketControlPlaneClient>();
+  /** One controller per principal that has a signal handed out; removed when revoked. */
+  private readonly principalRevocations = new Map<string, AbortController>();
   private readonly recentMessages: ControlPlaneSurfaceMessage[] = [];
   private readonly _recentEventsRing: (ScopedControlPlaneRecentEvent | undefined)[];
   private _recentEventsHead = 0;
@@ -353,9 +372,43 @@ export class ControlPlaneGateway {
     }, 'control-plane.gateway.state');
   }
 
+  /**
+   * Aborts when {@link closeClientsOf} revokes `principalId`. A request
+   * context joins it to the request's own signal, so work started for a
+   * credential stops when the credential is revoked.
+   */
+  principalSignal(principalId: string): AbortSignal {
+    let revocation = this.principalRevocations.get(principalId);
+    if (!revocation) { revocation = new AbortController(); this.principalRevocations.set(principalId, revocation); }
+    return revocation.signal;
+  }
+
+  /**
+   * The one revocation path: close every socket and event stream of
+   * `principalId` and abort the requests it has in flight. Called by the owner
+   * of the credential (pairing store, local auth) when it stops being valid.
+   * Returns how many connections were closed.
+   */
+  closeClientsOf(principalId: string, reason = CREDENTIAL_REVOKED_FRAME.reason): number {
+    const revocation = this.principalRevocations.get(principalId);
+    this.principalRevocations.delete(principalId);
+    revocation?.abort(new AppError(`The credential for ${principalId} was revoked.`, 'AUTH_REQUIRED', false, {
+      category: 'authentication', source: 'runtime', statusCode: 401, guidance: CREDENTIAL_REVOKED_FRAME.next,
+    }));
+    let closed = 0;
+    for (const client of [...this.liveClients.values()]) {
+      if (client.principalId !== principalId || !client.close) continue;
+      client.close(reason);
+      closed++;
+    }
+    return closed;
+  }
+
   openWebSocketClient(
     options: ControlPlaneEventStreamOptions,
     send: (event: string, payload: unknown, id?: string) => void,
+    /** Ends the socket from the daemon side (revocation). */
+    close?: (reason: string) => void,
   ): { clientId: string; domains: readonly RuntimeEventDomain[] } {
     this.requireEnabled('open websocket client');
     if (!this.runtimeBus) {
@@ -399,6 +452,8 @@ export class ControlPlaneGateway {
       admin: options.admin,
       domains: explicitDomains ? wsDomains : null,
       send,
+      principalId: options.principalId,
+      close,
     });
     this.websocketClients.set(clientId, {
       clientId,
@@ -677,7 +732,13 @@ export class ControlPlaneGateway {
         const write = (event: string, payload: unknown, id?: string): void => {
           controller.enqueue(encoder.encode(`${id ? `id: ${id}\n` : ''}event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`));
         };
+        // Set once the teardown below exists; ends the stream from the daemon side.
+        let closeFromDaemon = (_reason: string): void => {};
         const rawSend = (event: string, payload: unknown, id?: string): void => {
+          if (options.isAuthorized && !options.isAuthorized()) {
+            closeFromDaemon(CREDENTIAL_REVOKED_FRAME.reason);
+            return;
+          }
           // Backpressure guard: drop when the consumer is falling behind (desiredSize<=0).
           if ((controller.desiredSize ?? 1) <= 0) {
             if (dropped === 0) logger.warn('Control-plane stream consumer is behind; dropping events', { clientId, event });
@@ -719,6 +780,8 @@ export class ControlPlaneGateway {
           admin: options.admin,
           domains: sseLiveDomains,
           send,
+          principalId: options.principalId,
+          close: (reason) => closeFromDaemon(reason),
         });
         emitStreamSubscriberConnected(this.runtimeBus!, evtCtx, {
           streamId: clientId,
@@ -776,6 +839,12 @@ export class ControlPlaneGateway {
           teardown();
           // cancel may have already closed the controller; closing twice throws.
           try { controller.close(); } catch { /* already closed by cancel */ }
+        };
+        closeFromDaemon = (reason) => {
+          if (torn) return;
+          // The last frame says why the stream ended and what to do, so the client does not just retry.
+          try { write('closed', { ...CREDENTIAL_REVOKED_FRAME, reason }); } catch { /* consumer already gone */ }
+          onAbort();
         };
         request.signal.addEventListener('abort', onAbort, { once: true });
         // An already-aborted request never fires the event, and the reader that

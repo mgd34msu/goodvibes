@@ -38,7 +38,7 @@ describe('the daemon router answers a challenge on its refusal', () => {
     runtimeStore: null,
     runtimeDispatch: null,
     authToken: () => token,
-    checkAuth: () => false,
+    authenticateRequest: () => null,
     extractAuthToken: () => '',
   } as unknown as ConstructorParameters<typeof DaemonHttpRouter>[0]);
 

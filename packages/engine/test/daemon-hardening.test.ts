@@ -485,7 +485,7 @@ describe('model and batch routes need an admin to change anything', () => {
         return Response.json({ error: 'Admin role required' }, { status: 403 });
       },
       authToken: () => null,
-      checkAuth: () => true,
+      authenticateRequest: () => ({ principal: { principalId: 'reader', principalKind: 'user', admin: false, scopes: [] } }),
       companionChatManager: null,
     };
     return { router: new DaemonHttpRouter(context as never), configWrites };

@@ -65,7 +65,7 @@ test('WebSocket upgrades check browser origins while permitting authenticated na
   expect(upgraded).toBe(3);
 });
 
-test('an open WebSocket loses event and mint authority when its pairing is revoked', async () => {
+test('an open WebSocket is told its pairing was revoked and is served nothing more', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'ws-revocation-'));
   const pairing = new PairingTokenManager(join(dir, 'pairing.json'));
   const device = pairing.mint({ name: 'connected device' });
@@ -93,12 +93,16 @@ test('an open WebSocket loses event and mint authority when its pairing is revok
   const Socket = WebSocket as unknown as { new(url: string, options: Bun.WebSocketOptions): WebSocket };
   const ws = new Socket(`ws://127.0.0.1:${server.port}/api/control-plane/ws`, { headers: { Authorization: `Bearer ${device.token}` } });
   const events: string[] = [];
+  const closedFrames: unknown[] = [];
+  const closedWaiters: Array<() => void> = [];
   const responses = new Map<string, (value: { status: number }) => void>();
   ws.addEventListener('message', event => {
     const frame = JSON.parse(String(event.data));
     if (frame.type === 'event') events.push(frame.event);
+    if (frame.type === 'closed') { closedFrames.push(frame); closedWaiters.shift()?.(); }
     if (frame.type === 'response') responses.get(frame.id)?.(frame);
   });
+  const nextClosedFrame = () => new Promise<void>(resolve => closedWaiters.push(resolve));
   const call = (id: string, methodId: string, body?: unknown) => new Promise<{ status: number }>(resolve => {
     responses.set(id, resolve);
     ws.send(JSON.stringify({ type: 'call', id, methodId, body }));
@@ -106,13 +110,21 @@ test('an open WebSocket loses event and mint authority when its pairing is revok
   try {
     await new Promise<void>((resolve, reject) => { ws.onopen = () => resolve(); ws.onerror = reject; });
     expect((await call('before', 'pairing.tokens.list')).status).toBe(200);
-    pairing.revoke(device.id);
     events.length = 0;
+    pairing.revoke(device.id);
+    const told = nextClosedFrame();
     gateway.publishEvent('session-update', { secret: 'after revocation' });
     gateway.publishEvent('approval-update', { secret: 'after revocation' });
-    expect((await call('after', 'pairing.tokens.create', { name: 'replacement' })).status).toBe(401);
-    expect(pairing.list()).toHaveLength(0);
+    await told;
     expect(events).toEqual([]);
+    expect(closedFrames).toEqual([{ type: 'closed', reason: 'credential-revoked', next: expect.any(String) }]);
+    // A call on the revoked socket is answered with the same refusal, never run.
+    const toldAgain = nextClosedFrame();
+    ws.send(JSON.stringify({ type: 'call', id: 'after', methodId: 'pairing.tokens.create', body: { name: 'replacement' } }));
+    await toldAgain;
+    expect(closedFrames).toHaveLength(2);
+    expect((await helper.invokeGatewayMethodCall({ methodId: 'pairing.tokens.create', authToken: device.token, body: { name: 'replacement' } })).status).toBe(401);
+    expect(pairing.list()).toHaveLength(0);
   } finally {
     ws.close();
     await server.stop(true);
@@ -120,6 +132,60 @@ test('an open WebSocket loses event and mint authority when its pairing is revok
   }
 });
 
+test('a request is authenticated once; revoking its pairing closes that principal\'s streams and aborts its requests at once', async () => {
+  const { root, users } = authFixture();
+  const pairing = new PairingTokenManager(join(root, 'pairing.json'));
+  const device = pairing.mint({ name: 'phone' });
+  const other = pairing.mint({ name: 'laptop' });
+  const gateway = new ControlPlaneGateway({ runtimeBus: new RuntimeEventBus() });
+  const helper = new DaemonControlPlaneHelper({ gatewayMethods: new GatewayMethodCatalog(), controlPlaneGateway: gateway,
+    pairingTokens: pairing, userAuth: users, authToken: () => 'synthetic-operator', trustProxyEnabled: () => false,
+  } as unknown as DaemonControlPlaneContext);
+  helper.watchRevocations();
+  const request = (token: string) => new Request('http://daemon.local/api/sessions/s1/events', { headers: { authorization: `Bearer ${token}` } });
+  const req = request(device.token);
+  const context = helper.authenticateRequest(req);
+  if (!context) throw new Error('Expected the paired device to authenticate');
+  expect(context.principal).toMatchObject({ principalId: `pairing:${device.id}`, credentialKind: 'device-token', admin: true });
+
+  // Every later check on the same request reads the bound context, not the pairing store.
+  let storeReads = 0;
+  const authenticate = pairing.authenticate.bind(pairing);
+  pairing.authenticate = (token: string) => { storeReads++; return authenticate(token); };
+  for (let check = 0; check < 5; check++) expect(helper.authenticateRequest(req)).toBe(context);
+  expect(helper.requireAdmin(req)).toBeNull();
+  expect(helper.checkAuth(req)).toBe(true);
+  expect(storeReads).toBe(0);
+
+  const stream = gateway.createEventStream(req, { principalId: context.principal.principalId });
+  const otherReq = request(other.token);
+  const otherContext = helper.authenticateRequest(otherReq);
+  if (!otherContext) throw new Error('Expected the second device to authenticate');
+  const otherStream = gateway.createEventStream(otherReq, { principalId: otherContext.principal.principalId });
+  const signal = context.signal;
+
+  pairing.revoke(device.id);
+  expect(signal.aborted).toBe(true);
+  expect(otherContext.signal.aborted).toBe(false);
+  expect(await new Response(stream.body).text()).toContain('event: closed');
+  expect(helper.authenticateRequest(req)).toBeNull();
+  expect(helper.authenticateRequest(otherReq)?.principal.principalId).toBe(`pairing:${other.id}`);
+  await otherStream.body?.cancel();
+  helper.dispose();
+});
+
+test('a revocation written by another process is taken in by the next request', () => {
+  const { root, users } = authFixture();
+  const file = join(root, 'pairing.json');
+  const daemonStore = new PairingTokenManager(file);
+  const device = daemonStore.mint({ name: 'tablet' });
+  const helper = new DaemonControlPlaneHelper({ gatewayMethods: new GatewayMethodCatalog(), pairingTokens: daemonStore,
+    userAuth: users, authToken: () => null, trustProxyEnabled: () => false } as unknown as DaemonControlPlaneContext);
+  const request = () => new Request('http://daemon.local/api/status', { headers: { authorization: `Bearer ${device.token}` } });
+  expect(helper.checkAuth(request())).toBe(true);
+  new PairingTokenManager(file).revoke(device.id);
+  expect(helper.checkAuth(request())).toBe(false);
+});
 
 test('a retained handler authority pins the original token after its request returns and the socket aborts', async () => {
   const { root, users } = authFixture(), pairing = new PairingTokenManager(join(root, 'pairing.json'));

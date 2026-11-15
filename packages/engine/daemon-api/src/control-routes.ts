@@ -453,6 +453,8 @@ export function createDaemonControlRouteHandlers(
         // Carry admin so the per-channel scope filter (e.g. read:sessions on
         // session-update) honors the single-admin-token collapse.
         admin: principal.admin,
+        // Asked before each frame; the request's principal is bound, so this is an integer compare until a credential changes.
+        isAuthorized: () => context.resolveAuthenticatedPrincipal(req)?.principalId === principal.principalId,
       });
     },
   };

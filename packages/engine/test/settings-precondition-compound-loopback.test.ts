@@ -7,6 +7,7 @@ import { ConfigManager } from '../platform/src/platform/config/manager.js';
 import { SecretsManager } from '../platform/src/platform/config/secrets.js';
 import { daemonSecretKeyFor } from '../platform/src/platform/config/daemon-secret-keys.js';
 import { DaemonControlPlaneHelper, type DaemonControlPlaneContext } from '../platform/src/platform/daemon/control-plane.js';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.js';
 import { PairingTokenManager } from '../platform/src/platform/pairing/pairing-token-store.js';
 import { UserAuthManager } from '../platform/src/platform/security/user-auth.js';
 import { DaemonHttpRouter } from '../platform/src/platform/daemon/http/router.js';
@@ -36,12 +37,12 @@ function fixture(kind: 'shared' | 'session' = 'shared') {
   const sharedToken = 'synthetic-loopback-settings';
   const session = users.createSession('fixture');
   const token = kind === 'shared' ? sharedToken : session.token;
-  const helper = new DaemonControlPlaneHelper({ authToken: () => sharedToken, trustProxyEnabled: () => false, pairingTokens: pairing, userAuth: users,
+  const helper = new DaemonControlPlaneHelper({ gatewayMethods: new GatewayMethodCatalog(), authToken: () => sharedToken, trustProxyEnabled: () => false, pairingTokens: pairing, userAuth: users,
     settingsLifetime: () => lifetime } as unknown as DaemonControlPlaneContext);
   const authority = { settingsLifetime: () => lifetime, captureSettingsAdminAuthority: helper.captureSettingsAdminAuthority.bind(helper), withSettingsAdminAuthority: helper.withSettingsAdminAuthority.bind(helper) };
   const context = { configManager: config, settingsAuthority: authority, secretsManager: secrets, runtimeStore: null,
     userAuth: users, authToken: () => sharedToken, requireAdmin: (req: Request) => helper.requireAdmin(req),
-    requireAuthenticatedSession: () => null, extractAuthToken: () => token, describeAuthenticatedPrincipal: () => null,
+    requireAuthenticatedSession: () => null, extractAuthToken: () => token, describeAuthenticatedPrincipal: () => null, authenticateRequest: () => null,
     controlPlaneGateway: { recordApiRequest() {} }, swapManager: null };
   const router = new DaemonHttpRouter(context as never); cleanup.push(() => router.dispose());
   const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: async req => await router.dispatchApiRoutes(req) ?? new Response('', { status: 404 }) });

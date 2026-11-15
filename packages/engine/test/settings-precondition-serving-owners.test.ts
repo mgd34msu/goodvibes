@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { ConfigManager } from '../platform/src/platform/config/manager.js';
 import { DaemonControlPlaneHelper, type DaemonControlPlaneContext } from '../platform/src/platform/daemon/control-plane.js';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.js';
 import { PairingTokenManager } from '../platform/src/platform/pairing/pairing-token-store.js';
 import { UserAuthManager } from '../platform/src/platform/security/user-auth.js';
 import { createDaemonSystemRouteHandlers } from '../daemon-api/src/system-routes.js';
@@ -31,7 +32,7 @@ function fixture(kind: 'shared' | 'paired' | 'session' | 'cookie' = 'shared', li
   const session = users.createSession('fixture-admin');
   let shared = 'fixture-shared'; let lifetime: object | null = {};
   const currentLifetime = lifetimeOwner ?? (() => lifetime);
-  const helper = new DaemonControlPlaneHelper({ authToken: () => shared, pairingTokens: pairing, userAuth: users,
+  const helper = new DaemonControlPlaneHelper({ gatewayMethods: new GatewayMethodCatalog(), authToken: () => shared, pairingTokens: pairing, userAuth: users,
     settingsLifetime: currentLifetime } as unknown as DaemonControlPlaneContext);
   const authority: Parameters<typeof createServingSettingsPrecondition>[1] = { settingsLifetime: currentLifetime,
     captureSettingsAdminAuthority: req => helper.captureSettingsAdminAuthority(req),
@@ -118,7 +119,7 @@ function actualRouter(f: ReturnType<typeof fixture>) {
   // started. All SETTINGS configuration/auth owners and dispatchers are real.
   const context = { configManager: f.manager, settingsAuthority: f.authority, runtimeStore: null,
     userAuth: f.users, authToken: () => f.endpoint.token, requireAdmin: (req: Request) => f.helper.requireAdmin(req),
-    requireAuthenticatedSession: () => null, extractAuthToken: () => f.endpoint.token, describeAuthenticatedPrincipal: () => null,
+    requireAuthenticatedSession: () => null, extractAuthToken: () => f.endpoint.token, describeAuthenticatedPrincipal: () => null, authenticateRequest: () => null,
     controlPlaneGateway: { recordApiRequest() {} }, secretsManager: null, swapManager: null,
   };
   const router = new DaemonHttpRouter(context as never);
@@ -206,7 +207,7 @@ function stoppingFacade() {
     _configWatchUnsub() { events.push('watcher'); },
     configManager: { get() { return false; } },
     channelHealth: { stop() {} }, replyPoller: null,
-    surfaceDeliveryHelper: { abandonPendingSurfaceReplies() {} }, httpRouter: { dispose() {} },
+    surfaceDeliveryHelper: { abandonPendingSurfaceReplies() {} }, httpRouter: { dispose() {} }, controlPlaneHelper: { dispose() {} },
     surfaceActionHelper: { closeDelegatedTelegram() {} },
     companionChatManager: { async close() {} },
     clusterCoordinator: { async stop() {} }, automationManager: { stop() {} },

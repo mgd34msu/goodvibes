@@ -178,7 +178,7 @@ describe('DaemonHttpRouter GET /api/models secretsResolutionSkipped integration'
       authToken: () => null,
       buildSurfaceAdapterContext: () => { throw new Error('not expected'); },
       buildGenericWebhookAdapterContext: () => { throw new Error('not expected'); },
-      checkAuth: () => true,
+      authenticateRequest: () => null,
       extractAuthToken: () => '',
       requireAuthenticatedSession: () => null,
       requireAdmin: () => null,

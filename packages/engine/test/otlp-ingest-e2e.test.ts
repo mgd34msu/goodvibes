@@ -50,7 +50,7 @@ function makeProviderRegistry(): ProviderRegistry {
  *
  * The critical fields are:
  *   - runtimeBus + runtimeStore  → TelemetryApiService is constructed
- *   - checkAuth / extractAuthToken / describeAuthenticatedPrincipal → auth
+ *   - authenticateRequest / extractAuthToken → auth
  */
 function makeRouter(): { router: DaemonHttpRouter; dispose: () => void; setRawEnabled: (value: boolean) => void } {
   const bus = new RuntimeEventBus();
@@ -99,9 +99,17 @@ function makeRouter(): { router: DaemonHttpRouter; dispose: () => void; setRawEn
     authToken: () => SHARED_TOKEN,
     buildSurfaceAdapterContext: () => { throw new Error('not expected'); },
     buildGenericWebhookAdapterContext: () => { throw new Error('not expected'); },
-    checkAuth: (req: Request) => {
+    authenticateRequest: (req: Request) => {
       const auth = req.headers.get('authorization') ?? '';
-      return auth === `Bearer ${SHARED_TOKEN}`;
+      if (auth !== `Bearer ${SHARED_TOKEN}`) return null;
+      return {
+        principal: {
+          principalId: 'test-operator',
+          principalKind: 'service' as const,
+          admin: true,
+          scopes: ['read:telemetry', 'read:telemetry-sensitive'],
+        },
+      };
     },
     extractAuthToken: (req: Request): string => {
       const auth = req.headers.get('authorization') ?? '';
@@ -110,15 +118,6 @@ function makeRouter(): { router: DaemonHttpRouter; dispose: () => void; setRawEn
     requireAuthenticatedSession: () => null,
     requireAdmin: () => null,
     requireRemotePeer: async () => { throw new Error('not expected'); },
-    describeAuthenticatedPrincipal: (token: string) => {
-      if (token !== SHARED_TOKEN) return null;
-      return {
-        principalId: 'test-operator',
-        principalKind: 'service' as const,
-        admin: true,
-        scopes: ['read:telemetry', 'read:telemetry-sensitive'],
-      };
-    },
     invokeGatewayMethodCall: async () => { throw new Error('not expected'); },
     queueSurfaceReplyFromBinding: () => {},
     surfaceDeliveryEnabled: () => false,

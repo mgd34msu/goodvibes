@@ -7,7 +7,7 @@
  *   1. Token present at global path → getOrCreateCompanionToken returns it
  *   2. No token anywhere → getOrCreateCompanionToken creates one at global path
  *   3. writeOperatorTokenFile sets mode 0600
- *   4. The token on disk, handed to the daemon's own auth (DaemonControlPlaneHelper.checkAuth)
+ *   4. The token on disk, handed to the daemon's own auth (DaemonControlPlaneHelper.authenticateRequest)
  *      behind DaemonHttpRouter: the stored bearer → 200, a wrong or missing bearer → 401
  *
  * Explicitly: NO test for workspace-scoped fallback. If you find yourself
@@ -32,6 +32,7 @@ import {
   getOrCreateCompanionToken,
 } from '../platform/src/platform/pairing/companion-token.ts';
 import { DaemonHttpRouter } from '../platform/src/platform/daemon/http/router.ts';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.ts';
 import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.ts';
 import type { ProviderRegistry } from '../platform/src/platform/providers/registry.ts';
 import type { ConfigManager } from '../platform/src/platform/config/manager.ts';
@@ -52,7 +53,7 @@ function cleanup(...dirs: string[]): void {
   }
 }
 
-function makeMinimalRouterContext(overrides: { checkAuth?: (req: Request) => boolean } = {}) {
+function makeMinimalRouterContext(overrides: { authenticateRequest?: (req: Request) => unknown } = {}) {
   const bus = new RuntimeEventBus();
   const configManager = { set: () => {}, get: () => undefined } as unknown as ConfigManager;
   const registry = {
@@ -97,7 +98,7 @@ function makeMinimalRouterContext(overrides: { checkAuth?: (req: Request) => boo
     authToken: () => null,
     buildSurfaceAdapterContext: () => { throw new Error('not expected'); },
     buildGenericWebhookAdapterContext: () => { throw new Error('not expected'); },
-    checkAuth: overrides.checkAuth ?? (() => true),
+    authenticateRequest: overrides.authenticateRequest ?? (() => ({ principal: { principalId: 'owner', principalKind: 'user', admin: true, scopes: [] } })),
     extractAuthToken: () => '',
     requireAuthenticatedSession: () => null,
     requireAdmin: () => null,
@@ -218,15 +219,16 @@ describe('operator token file through the daemon auth and router', () => {
   beforeEach(() => { daemonHome = tempDir('real-auth'); });
   afterEach(() => { cleanup(daemonHome); });
 
-  /** The router's checkAuth is the control-plane helper's, authenticating against the token the daemon read from disk. */
+  /** The router's authentication is the control-plane helper's, against the token the daemon read from disk. */
   function makeRouter(): DaemonHttpRouter {
     const { token } = getOrCreateCompanionToken({ daemonHomeDir: daemonHome });
     const helper = new DaemonControlPlaneHelper({
       authToken: () => token,
       trustProxyEnabled: () => false,
       userAuth: { validateSession: () => null },
+      gatewayMethods: new GatewayMethodCatalog(),
     } as unknown as DaemonControlPlaneContext);
-    return new DaemonHttpRouter(makeMinimalRouterContext({ checkAuth: (req) => helper.checkAuth(req) }) as never);
+    return new DaemonHttpRouter(makeMinimalRouterContext({ authenticateRequest: (req) => helper.authenticateRequest(req) }) as never);
   }
 
   function storedToken(): string {

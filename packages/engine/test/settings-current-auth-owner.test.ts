@@ -7,6 +7,7 @@ import { PairingTokenManager, PairingTokenStoreBusyError } from '../platform/src
 import { PairingStoreFaultedError } from '../platform/src/platform/security/settings-authority.js';
 import { UserAuthManager } from '../platform/src/platform/security/user-auth.js';
 import { DaemonControlPlaneHelper, type DaemonControlPlaneContext } from '../platform/src/platform/daemon/control-plane.js';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.js';
 import * as atomic from '../platform/src/platform/utils/atomic-json-store.js';
 import { ConfigManager } from '../platform/src/platform/config/manager.js';
 import { createServingSettingsPrecondition } from '../platform/src/platform/daemon/http/settings-precondition.js';
@@ -34,7 +35,7 @@ function fixture(kind: Kind = 'shared', options: { maxSessions?: number; admin?:
     users: [{ username: 'operator', passwordHash: 'synthetic-unused-hash', roles },
       { username: 'spare', passwordHash: 'synthetic-unused-hash', roles: ['admin'] }] });
   const session = users.createSession('operator');
-  const context = { pairingTokens: pairing, userAuth: users, authToken: () => shared, settingsLifetime: () => lifetime };
+  const context = { gatewayMethods: new GatewayMethodCatalog(), pairingTokens: pairing, userAuth: users, authToken: () => shared, settingsLifetime: () => lifetime };
   const helper = new DaemonControlPlaneHelper(context as unknown as DaemonControlPlaneContext);
   const token = kind === 'paired' ? paired!.token : kind === 'shared' ? shared : session.token;
   const requestFor = (value = token, asCookie = kind === 'cookie') => new Request('http://synthetic.invalid/config', {
@@ -321,7 +322,7 @@ describe('strict SETTINGS serving-owner auth', () => {
     expect(users.captureSettingsAuthority(session.token)).toBeNull();
     const manager = new ConfigManager({ configDir: join(dir, 'config') });
     const lifetime = {};
-    const helper = new DaemonControlPlaneHelper({ userAuth: users, authToken: () => null,
+    const helper = new DaemonControlPlaneHelper({ gatewayMethods: new GatewayMethodCatalog(), userAuth: users, authToken: () => null,
       settingsLifetime: () => lifetime } as unknown as DaemonControlPlaneContext);
     const protocol = createServingSettingsPrecondition(manager, { settingsLifetime: () => lifetime,
       captureSettingsAdminAuthority: req => helper.captureSettingsAdminAuthority(req),

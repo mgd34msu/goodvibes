@@ -36,8 +36,11 @@ import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import type { NativeDataWriteOwner } from '../runtime/native-reader-compatibility.js';
 import { describeOwnerLock, reclaimDeadOwnerLock, recordOwnerLockHolder, removeOwnerLockDirectory, waitWhileLockIsBeingTaken } from '../config/durable-policy-epoch.js';
 import { revisionSource, type RevisionSource } from '../utils/revision.js';
+import { fileObservationIdentity } from '../utils/file-observation.js';
 
 const TOKEN_PREFIX = 'gvp_';
+/** The identity recorded for a pairing file that does not exist. */
+const ABSENT_FILE = 'absent';
 
 /** Whether a presented credential has the pairing-token shape (not whether it is valid). */
 export function isPairingTokenShape(token: string): boolean {
@@ -260,6 +263,14 @@ export function pairingPrincipalId(tokenId: string): string {
   return `pairing:${tokenId}`;
 }
 
+/** Principals whose credential the move from `before` to `after` ended. */
+function revokedPrincipals(before: PairingTokenSnapshot, after: PairingTokenSnapshot): string[] {
+  const kept = new Set(after.tokens.map(token => `${token.id}\0${token.tokenHash}`));
+  const revoked = before.tokens.filter(token => !kept.has(`${token.id}\0${token.tokenHash}`)).map(token => pairingPrincipalId(token.id));
+  if (before.legacyRevoked !== true && after.legacyRevoked === true) revoked.push('shared-token');
+  return revoked;
+}
+
 /**
  * A pairing was refused because the paired-node cap is full.
  *
@@ -332,6 +343,11 @@ export class PairingTokenManager {
   #authorityRevision = 0;
   #publishedAuthority = '';
   readonly #revisionSource = revisionSource('device pairings', () => this.#authorityRevision);
+  /** The file identity the published snapshot was read from or written as; undefined forces the next read. */
+  #observedIdentity: string | undefined;
+  /** The last read of a changed file failed: pairing tokens do not authenticate until a read succeeds. */
+  #readFaulted = false;
+  readonly #revocationListeners = new Set<(principalIds: readonly string[]) => void>();
 
   constructor(filePath: string, options: PairingTokenManagerOptions = {}) {
     this.filePath = filePath;
@@ -370,6 +386,46 @@ export class PairingTokenManager {
    * once this owner reads the file (authenticate, list, a mutation).
    */
   get revisionSource(): RevisionSource { return this.#revisionSource; }
+
+  /**
+   * Told the principal ids whose credential stopped being valid: a revoked or
+   * replaced pairing (`pairing:<id>`) and `shared-token` when the legacy token
+   * is revoked. Fires for this process's changes and for another process's
+   * changes once this owner reads them. Returns the unsubscribe.
+   */
+  onRevoked(listener: (principalIds: readonly string[]) => void): () => void {
+    this.#revocationListeners.add(listener);
+    return () => { this.#revocationListeners.delete(listener); };
+  }
+
+  /** The pairing file's identity now: ABSENT_FILE when missing, undefined when it cannot be stated. */
+  #statIdentity(): string | undefined {
+    try { return fileObservationIdentity(this.filePath); }
+    catch (error) { return (error as NodeJS.ErrnoException).code === 'ENOENT' ? ABSENT_FILE : undefined; }
+  }
+
+  /**
+   * One lstat on the request path. The file is read and published again only
+   * when its identity (inode, size, times) moved since this owner last read or
+   * wrote it, so another process's mint or revoke is still taken in on the
+   * next request. False while the last read failed: pairing tokens then fail
+   * closed until a read succeeds.
+   */
+  private refreshIfChanged(): boolean {
+    const identity = this.#statIdentity();
+    if (identity !== undefined && identity === this.#observedIdentity) return !this.#readFaulted;
+    try {
+      const snapshot = this.readPersisted();
+      // A missing file holds no pairings; a legacy revocation already seen stays revoked.
+      this.publish(snapshot ?? { tokens: [], ...(this.snapshot.legacyRevoked === true ? { legacyRevoked: true } : {}) });
+      this.#readFaulted = false;
+      this.#observedIdentity = identity;
+    } catch {
+      this.#readFaulted = true;
+      this.#observedIdentity = undefined;
+    }
+    return !this.#readFaulted;
+  }
 
   /**
    * The configured cap, or null when there is none / it is unusable.
@@ -495,12 +551,19 @@ export class PairingTokenManager {
 
   private publish(snapshot: PairingTokenSnapshot): void {
     const authority = authorityText(snapshot);
-    if (authority !== this.#publishedAuthority) { this.#publishedAuthority = authority; this.#authorityRevision++; }
+    const moved = authority !== this.#publishedAuthority;
+    const revoked = moved && this.#revocationListeners.size > 0 ? revokedPrincipals(this.snapshot, snapshot) : [];
+    if (moved) { this.#publishedAuthority = authority; this.#authorityRevision++; }
     this.snapshot = snapshot;
     if (snapshot.legacyRevoked === true) this.settingsObservedLegacyRevocation = true;
     this.reindex();
     const ids = new Set(snapshot.tokens.map(token => token.id));
     for (const id of this.publishedTokenRevisions.keys()) if (!ids.has(id)) this.publishedTokenRevisions.delete(id);
+    if (revoked.length === 0) return;
+    for (const listener of [...this.#revocationListeners]) {
+      try { listener(revoked); }
+      catch (error) { logger.warn('Pairing revocation listener failed', { error: String(error) }); }
+    }
   }
 
   /** Reload under ownership, persist, THEN expose a successful mutation. */
@@ -547,6 +610,9 @@ export class PairingTokenManager {
         this.nativePersistenceFailed = false;
       }
       lock.assertOwned();
+      // Read or written under the owner lock, so this is the identity of what is published.
+      this.#observedIdentity = this.#statIdentity();
+      this.#readFaulted = false;
       this.publish(snapshot);
       return result.value;
     } finally { lock.release(); }
@@ -984,11 +1050,7 @@ export class PairingTokenManager {
   authenticate(token: string): AuthenticatedPairingToken | null {
     const normalized = token.trim();
     if (!normalized.startsWith(TOKEN_PREFIX)) return null;
-    let snapshot: PairingTokenSnapshot | null;
-    try { snapshot = this.readPersisted(); } catch { return null; }
-    if (!snapshot) return null;
-    this.publish(snapshot);
-    if (this.index.size === 0) return null;
+    if (!this.refreshIfChanged() || this.index.size === 0) return null;
     const hash = hashToken(normalized);
     let record = this.index.get(hash);
     if (!record) return null;
@@ -1021,7 +1083,7 @@ export class PairingTokenManager {
   /** Every per-pairing token, redacted (name / created / last-seen), never the secret. */
   list(): PublicPairingToken[] {
     // Pick up a mint or revoke made by another process; an unreadable file keeps the last good view.
-    try { const snapshot = this.readPersisted(); if (snapshot) this.publish(snapshot); } catch { /* cached view */ }
+    this.refreshIfChanged();
     return this.snapshot.tokens.map((t) => ({
       id: t.id,
       name: t.name,
@@ -1052,11 +1114,8 @@ export class PairingTokenManager {
 
   /** Whether the legacy single shared token has been revoked here. */
   isLegacyRevoked(): boolean {
-    try {
-      const snapshot = this.readPersisted();
-      if (snapshot) this.publish(snapshot);
-      return snapshot?.legacyRevoked === true || this.snapshot.legacyRevoked === true;
-    } catch { return this.snapshot.legacyRevoked === true; }
+    this.refreshIfChanged();
+    return this.snapshot.legacyRevoked === true;
   }
 
   /** Revoke the legacy single shared token; report only persisted success. */

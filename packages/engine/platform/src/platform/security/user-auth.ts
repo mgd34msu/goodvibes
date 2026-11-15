@@ -411,6 +411,7 @@ export class UserAuthManager {
    */
   #revision = 0;
   readonly #revisionSource = revisionSource('local auth', () => this.#revision);
+  readonly #revocationListeners = new Set<(principalIds: readonly string[]) => void>();
 
   constructor(config: UserAuthConfig) {
     if (!config.bootstrapFilePath) throw new Error('UserAuthManager requires an explicit bootstrapFilePath.');
@@ -729,8 +730,25 @@ export class UserAuthManager {
         removed++;
       }
     }
-    if (removed > 0) this.#revision++;
+    if (removed > 0) {
+      this.#revision++;
+      for (const listener of [...this.#revocationListeners]) {
+        try { listener([username]); }
+        catch (error) { logger.warn('Local auth revocation listener failed', { error: String(error) }); }
+      }
+    }
     return removed;
+  }
+
+  /**
+   * Told the usernames whose every login session just ended (the user was
+   * deleted, its password changed here or in another process, or all its
+   * sessions were revoked). One revoked session of a user that keeps others
+   * moves the revision only. Returns the unsubscribe.
+   */
+  onRevoked(listener: (principalIds: readonly string[]) => void): () => void {
+    this.#revocationListeners.add(listener);
+    return () => { this.#revocationListeners.delete(listener); };
   }
 
   listUsers(): AuthUserRecord[] {

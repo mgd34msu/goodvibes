@@ -9,15 +9,16 @@ import type { SettingsPairingAuthority } from '../pairing/pairing-token-store.js
 import { PairingStoreFaultedError, SettingsAuthorityUnavailableError, runSynchronousSettingsOperation } from '../security/settings-authority.js';
 import { isPairingTokenShape, pairingPrincipalId } from '../pairing/pairing-token-store.js';
 import {
-  authenticateOperatorRequest,
   authenticateOperatorToken,
+  credentialKindOf,
   extractOperatorAuthToken,
-  isOperatorAdmin,
   matchesSharedToken,
+  type AuthenticatedOperatorRequest,
   type PairingTokenAuthenticator,
   type NativeExecutionAuthority,
   type NativePairedSnapshot,
 } from '../security/http-auth.js';
+import { bindRequestContext, createRequestContext, isPrincipalCurrent, requestContextOf } from './request-context.js';
 import type { ControlPlaneGateway, SharedSessionBroker } from '../control-plane/index.js';
 import type { GatewayMethodCatalog, GatewayMethodDescriptor } from '../control-plane/index.js';
 import type { GatewayMethodInvocationContext } from '../control-plane/method-catalog-shared.js';
@@ -39,9 +40,15 @@ import { buildErrorResponseBody } from './http/error-response.js';
 import { EngineErrorCodes } from '@goodvibes-jev/engine/errors';
 import {
   buildMissingScopeBody,
-  resolveAuthenticatedPrincipal,
   type AuthenticatedPrincipal,
+  type RequestContext,
+  type RequestPrincipal,
 } from './http-policy.js';
+
+/** What a socket closed for a revoked credential is told last. */
+const SOCKET_REVOKED_FRAME = JSON.stringify({
+  type: 'closed', reason: 'credential-revoked', next: 'Sign in again or pair this device again, then reconnect.',
+});
 
 export interface ControlPlaneWebSocketData {
   readonly channel: 'control-plane';
@@ -72,6 +79,10 @@ export interface ControlPlaneWebSocketData {
   readonly remoteAddress?: string | undefined;
   clientId?: string | undefined;
   authenticated: boolean;
+  /** The daemon's authentication revision the socket's principal was read under; absent: re-read before each event. */
+  authRevision?: number | undefined;
+  /** When the socket's login session ends by time. */
+  expiresAt?: number | undefined;
 }
 
 export interface DaemonControlPlaneContext {
@@ -222,29 +233,97 @@ export class DaemonControlPlaneHelper {
     };
   }
 
+  #lastSharedToken: string | null | undefined;
+  #sharedTokenEpoch = 0;
+
+  /**
+   * The daemon's authentication revision: local accounts and sessions, device
+   * pairings and the shared operator token. It moves whenever any credential
+   * changes, so a principal read under the current value is still the
+   * principal. An owner without a revision source makes it NaN, which never
+   * compares equal: every check then authenticates again.
+   */
+  authRevision(): number {
+    const shared = this.context.authToken();
+    if (shared !== this.#lastSharedToken) { this.#lastSharedToken = shared; this.#sharedTokenEpoch++; }
+    const users = this.context.userAuth.revisionSource?.revision() ?? Number.NaN;
+    const pairing = this.context.pairingTokens;
+    const paired = pairing ? pairing.revisionSource?.revision() ?? Number.NaN : 0;
+    return users + paired + this.#sharedTokenEpoch;
+  }
+
+  /**
+   * The request's context: authenticated once where the request entered, then
+   * read back. While the authentication revision has not moved this is one
+   * integer compare; otherwise the request is authenticated again (one `stat`
+   * of the pairing file at most) and the new context replaces the old one.
+   * Null when the request carries no valid operator credential.
+   */
+  authenticateRequest(req: Request): RequestContext | null {
+    const bound = requestContextOf(req);
+    if (bound && isPrincipalCurrent(bound.principal, this.authRevision())) return bound;
+    const token = extractOperatorAuthToken(req);
+    const principal = token ? this.describeRequestPrincipal(token) : null;
+    if (!principal) return null;
+    const gateway = this.context.controlPlaneGateway;
+    const context = createRequestContext(principal, req.signal,
+      typeof gateway?.principalSignal === 'function' ? () => gateway.principalSignal(principal.principalId) : undefined);
+    bindRequestContext(req, context);
+    return context;
+  }
+
+  /** True while a context read earlier still names the current principal. */
+  isRequestContextCurrent(context: RequestContext): boolean {
+    return isPrincipalCurrent(context.principal, this.authRevision());
+  }
+
   checkAuth(req: Request): boolean {
-    return authenticateOperatorRequest(req, this.authContext()) !== null;
+    return this.authenticateRequest(req) !== null;
   }
 
   requireAuthenticatedSession(req: Request): { username: string; roles: readonly string[] } | null {
-    const authenticated = authenticateOperatorRequest(req, this.authContext());
-    if (!authenticated || authenticated.kind !== 'session') return null;
+    const principal = this.authenticateRequest(req)?.principal;
+    if (!principal || principal.credentialKind !== 'user-session') return null;
     return {
-      username: authenticated.username,
-      roles: authenticated.roles,
+      username: principal.principalId,
+      roles: principal.roles,
     };
   }
 
   requireAdmin(req: Request): Response | null {
-    const authenticated = authenticateOperatorRequest(req, this.authContext());
-    if (!authenticated) {
+    const principal = this.authenticateRequest(req)?.principal;
+    if (!principal) {
       this.authFailures.record(extractForwardedClientIp(req, this.trustProxyEnabled()) ?? 'unknown', 'control-plane');
       return Response.json({ error: 'Unauthorized' }, { status: 401 });
     }
-    if (!isOperatorAdmin(authenticated)) {
+    if (!principal.admin) {
       return Response.json({ error: 'Admin role required' }, { status: 403 });
     }
     return null;
+  }
+
+  /**
+   * Close every connection and abort every request of a principal whose
+   * credential its owner reports revoked (a pairing, the legacy shared token,
+   * all sessions of a local user), whether the change was made here or by
+   * another process the owner read. Returns the unsubscribe.
+   */
+  watchRevocations(): void {
+    if (this.#stopRevocationWatch) return;
+    const gateway = this.context.controlPlaneGateway;
+    const close = (principalIds: readonly string[]): void => {
+      for (const principalId of principalIds) gateway.closeClientsOf(principalId);
+    };
+    const stops = [this.context.pairingTokens?.onRevoked?.(close), this.context.userAuth.onRevoked?.(close)];
+    this.#stopRevocationWatch = () => { for (const stop of stops) stop?.(); };
+  }
+
+  #stopRevocationWatch: (() => void) | undefined;
+
+  /** Stop following credential revocations; the daemon is stopping. */
+  dispose(): void {
+    this.#stopRevocationWatch?.();
+    this.#stopRevocationWatch = undefined;
   }
 
   /**
@@ -360,7 +439,31 @@ export class DaemonControlPlaneHelper {
 
   describeAuthenticatedPrincipal(token: string): AuthenticatedPrincipal | null {
     const authenticated = authenticateOperatorToken(token, this.authContext());
+    return authenticated ? this.principalFor(authenticated) : null;
+  }
+
+  /**
+   * Authenticate a credential once into the principal a request or a socket
+   * carries: who, with which credential, which scopes, and the authentication
+   * revision it was read under.
+   */
+  describeRequestPrincipal(token: string): RequestPrincipal | null {
+    const authenticated = authenticateOperatorToken(token, this.authContext());
     if (!authenticated) return null;
+    const base = this.principalFor(authenticated);
+    // Read after the credential stores were consulted: this is the state the principal was checked against.
+    const authRevision = this.authRevision();
+    return Object.freeze({
+      ...base,
+      credentialKind: credentialKindOf(authenticated),
+      scopeSet: new Set(base.scopes),
+      roles: authenticated.kind === 'session' ? authenticated.roles : [],
+      authRevision,
+      ...(authenticated.kind === 'session' ? { expiresAt: authenticated.expiresAt } : {}),
+    });
+  }
+
+  private principalFor(authenticated: AuthenticatedOperatorRequest): AuthenticatedPrincipal {
     if (authenticated.kind === 'shared-token') {
       return {
         principalId: 'shared-token',
@@ -510,7 +613,7 @@ export class DaemonControlPlaneHelper {
       return null;
     }
     const token = this.extractAuthToken(req);
-    const principal = resolveAuthenticatedPrincipal(req, this);
+    const principal = this.authenticateRequest(req)?.principal;
     if (!principal) {
       this.authFailures.record(extractForwardedClientIp(req, this.trustProxyEnabled()) ?? 'unknown', 'control-plane');
       const error = 'Unauthorized: the WebSocket upgrade request itself must authenticate. Send an '
@@ -542,14 +645,16 @@ export class DaemonControlPlaneHelper {
       data: {
         channel: 'control-plane',
         authToken: token,
-        principalId: principal?.principalId ?? null,
-        principalKind: principal?.principalKind ?? null,
-        scopes: principal?.scopes ?? [],
-        admin: principal?.admin ?? false,
+        principalId: principal.principalId,
+        principalKind: principal.principalKind,
+        scopes: principal.scopes,
+        admin: principal.admin,
         domains,
         clientKind,
         remoteAddress: extractForwardedClientIp(req, this.trustProxyEnabled()),
         authenticated: true,
+        authRevision: principal.authRevision,
+        expiresAt: principal.expiresAt,
       } satisfies ControlPlaneWebSocketData,
     });
     return upgraded ? 'upgraded' : Response.json({ error: 'WebSocket upgrade failed' }, { status: 400 });
@@ -571,14 +676,53 @@ export class DaemonControlPlaneHelper {
       admin: ws.data.admin,
       remoteAddress: ws.data.remoteAddress,
     }, (event, payload) => {
-      const principal = this.describeAuthenticatedPrincipal(ws.data.authToken);
-      if (!principal || principal.principalId !== ws.data.principalId || principal.principalKind !== ws.data.principalKind) return;
+      // Nothing is delivered before the socket authenticates, and a revoked socket is served nothing.
+      if (!ws.data.authenticated || this.socketSignal(ws).aborted) return;
+      if (!this.socketPrincipalCurrent(ws)) {
+        this.closeRevokedSocket(ws);
+        return;
+      }
       const requiredScope = CHANNEL_REQUIRED_SCOPE[event];
-      if (requiredScope && (!(principal.scopes.includes('*') || principal.scopes.includes(requiredScope))
-        || !(ws.data.scopes.includes('*') || ws.data.scopes.includes(requiredScope)))) return;
+      if (requiredScope && !(ws.data.scopes.includes('*') || ws.data.scopes.includes(requiredScope))) return;
       this.sendFrame(ws, JSON.stringify({ type: 'event', event, payload }));
-    });
+    }, () => this.closeRevokedSocket(ws));
     ws.data.clientId = connection.clientId;
+  }
+
+  /**
+   * One integer compare per event while the authentication revision has not
+   * moved. When it moved, the socket's credential is authenticated once more:
+   * the same principal keeps the socket (its scopes narrowed to what both the
+   * socket and the credential now hold) under the new revision; anything else
+   * ends it.
+   */
+  private socketPrincipalCurrent(ws: { data: ControlPlaneWebSocketData }): boolean {
+    const data = ws.data;
+    if (data.authRevision !== undefined && isPrincipalCurrent({ authRevision: data.authRevision, ...(data.expiresAt === undefined ? {} : { expiresAt: data.expiresAt }) }, this.authRevision())) return true;
+    const fresh = this.describeRequestPrincipal(data.authToken);
+    if (!fresh || fresh.principalId !== data.principalId || fresh.principalKind !== data.principalKind) return false;
+    const held = new Set(data.scopes);
+    data.scopes = held.has('*') ? fresh.scopes : fresh.scopeSet.has('*') ? [...held] : fresh.scopes.filter(scope => held.has(scope));
+    data.admin = data.admin && fresh.admin;
+    data.authRevision = fresh.authRevision;
+    data.expiresAt = fresh.expiresAt;
+    return true;
+  }
+
+  /**
+   * Tell the client its credential was revoked and stop serving the socket:
+   * its in-flight calls are aborted, no further frame is sent, it leaves the
+   * event fan-out, and any frame it still sends is answered with the same
+   * refusal. The client closes the socket (the shared realtime client does on
+   * this frame). The daemon does not close it itself: Bun 1.3 keeps a socket
+   * the server closed counted, after which `server.stop()` never settles.
+   */
+  private closeRevokedSocket(ws: { data: ControlPlaneWebSocketData; send(message: string): void }): void {
+    const lifetime = this.socketLifetimes.get(ws);
+    if (lifetime?.signal.aborted) return;
+    this.sendFrame(ws, SOCKET_REVOKED_FRAME);
+    lifetime?.abort();
+    if (ws.data.clientId) this.context.controlPlaneGateway.closeWebSocketClient(ws.data.clientId, 'credential-revoked');
   }
 
   /** A socket that has not authenticated and was refused cannot do anything else; close it with the reason so the client sees why instead of an idle open socket. */
@@ -597,6 +741,11 @@ export class DaemonControlPlaneHelper {
   ): Promise<void> {
     const clientId = ws.data.clientId;
     if (!clientId) return;
+    // A socket whose credential was revoked is served nothing more; every frame gets the same answer.
+    if (this.socketSignal(ws).aborted) {
+      try { ws.send(SOCKET_REVOKED_FRAME); } catch { /* the client already went */ }
+      return;
+    }
     const text = typeof message === 'string'
       ? message
       : message instanceof Uint8Array
@@ -630,7 +779,7 @@ export class DaemonControlPlaneHelper {
 
     if (frame.type === 'auth') {
       const token = typeof frame.token === 'string' ? frame.token : ws.data.authToken;
-      const principal = this.describeAuthenticatedPrincipal(token);
+      const principal = this.describeRequestPrincipal(token);
       if (!principal) {
         this.authFailures.record(ws.data.remoteAddress ?? 'unknown', 'control-plane');
         this.sendFrame(ws, JSON.stringify({ type: 'auth', ok: false, error: 'Unauthorized' }));
@@ -648,6 +797,8 @@ export class DaemonControlPlaneHelper {
       ws.data.principalKind = principal.principalKind;
       ws.data.scopes = principal.scopes;
       ws.data.admin = principal.admin;
+      ws.data.authRevision = principal.authRevision;
+      ws.data.expiresAt = principal.expiresAt;
       ws.data.authenticated = true;
       this.context.controlPlaneGateway.authenticateClient(clientId, {
         principalId: principal.principalId,

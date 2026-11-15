@@ -32,10 +32,8 @@ export interface KnowledgeRouterContext {
   readonly artifactStore: KnowledgeContextInput['artifactStore'];
   readonly configManager: KnowledgeContextInput['configManager'];
   readonly requireAdmin: KnowledgeContextInput['requireAdmin'];
-  extractAuthToken(request: Request): string | null;
-  describeAuthenticatedPrincipal(
-    token: string,
-  ): ReturnType<KnowledgeContextInput['resolveAuthenticatedPrincipal']>;
+  /** The request's principal, authenticated once; see the router's context. */
+  authenticateRequest(request: Request): { readonly principal: NonNullable<ReturnType<KnowledgeContextInput['resolveAuthenticatedPrincipal']>> } | null;
 }
 
 /** The router's own JSON body helpers, which are instance methods. */
@@ -63,10 +61,8 @@ export function buildRouterKnowledgeContext(
     parseOptionalJsonBody: parsers.parseOptionalJsonBody,
     parseJsonText: parsers.parseJsonText,
     requireAdmin: context.requireAdmin,
-    resolveAuthenticatedPrincipal: (request) => {
-      const token = context.extractAuthToken(request);
-      return token ? context.describeAuthenticatedPrincipal(token) : null;
-    },
+    // Knowledge reads re-check their principal around each await; on a bound context that is an integer compare.
+    resolveAuthenticatedPrincipal: (request) => context.authenticateRequest(request)?.principal ?? null,
     knowledgeService,
     knowledgeGraphqlService,
   });

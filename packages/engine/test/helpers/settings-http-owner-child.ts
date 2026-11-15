@@ -42,7 +42,7 @@ const helper = new DaemonControlPlaneHelper({ authToken: () => 'synthetic-unused
   settingsLifetime: () => lifetime, trustProxyEnabled: () => false } as unknown as DaemonControlPlaneContext);
 const router = new DaemonHttpRouter({ configManager: config, runtimeStore: null, userAuth: users,
   authToken: () => token, requireAdmin: (req: Request) => helper.requireAdmin(req), requireAuthenticatedSession: () => null,
-  extractAuthToken: () => token, describeAuthenticatedPrincipal: () => null, controlPlaneGateway: { recordApiRequest() {} },
+  extractAuthToken: () => token, describeAuthenticatedPrincipal: () => null, authenticateRequest: () => null, controlPlaneGateway: { recordApiRequest() {} },
   secretsManager: secrets, swapManager: null, nativeMutationHost,
   settingsImportAuthority: { settingsLifetime: () => lifetime,
     captureSettingsAdminAuthority: helper.captureSettingsAdminAuthority.bind(helper),

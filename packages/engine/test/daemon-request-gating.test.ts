@@ -24,8 +24,7 @@ const descriptor = (fields: Partial<Descriptor>): Descriptor => ({
 function gate(found: Descriptor | null, principal: { admin: boolean; scopes: readonly string[] } | null) {
   return gateGatewayBinding(new Request('http://daemon.local/api/sessions', { method: 'POST' }), {
     gatewayMethods: { findByHttpBinding: () => found },
-    extractAuthToken: () => 'token',
-    describeAuthenticatedPrincipal: () => principal ? { principalId: 'u', principalKind: 'user', ...principal } : null,
+    authenticateRequest: () => principal ? { principal: { principalId: 'u', principalKind: 'user', ...principal } } : null,
     validateGatewayInvocation: (d, context) => {
       const missing = d.scopes.filter((scope) => !context?.scopes?.includes(scope));
       return missing.length === 0 ? null : { status: 403, ok: false, body: { error: `Missing required scope: ${missing.join(', ')}`, missingScopes: missing } };
@@ -76,9 +75,7 @@ function routerWith(overrides: Record<string, unknown>) {
     runtimeStore: null,
     runtimeDispatch: null,
     authToken: () => null,
-    checkAuth: () => true,
-    extractAuthToken: () => '',
-    describeAuthenticatedPrincipal: () => null,
+    authenticateRequest: () => ({ principal: { principalId: 'owner', principalKind: 'user', admin: true, scopes: [] } }),
     ...overrides,
   } as unknown as ConstructorParameters<typeof DaemonHttpRouter>[0]);
 }
@@ -109,8 +106,7 @@ describe('the daemon HTTP router', () => {
     let routed = false;
     const router = routerWith({
       gatewayMethods: { findByHttpBinding: () => descriptor({ scopes: ['write:sessions'] }), get: () => null, list: () => [] },
-      extractAuthToken: () => 'user-token',
-      describeAuthenticatedPrincipal: () => ({ principalId: 'u', principalKind: 'user', admin: false, scopes: ['read:sessions'] }),
+      authenticateRequest: () => ({ principal: { principalId: 'u', principalKind: 'user', admin: false, scopes: ['read:sessions'] } }),
       validateGatewayInvocation: () => ({ status: 403, ok: false, body: { error: 'Missing required scope for sessions.create: write:sessions' } }),
       dispatchApiRoutes: async () => { routed = true; return null; },
     });

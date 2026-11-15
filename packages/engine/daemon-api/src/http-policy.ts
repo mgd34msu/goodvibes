@@ -16,6 +16,44 @@ export interface AuthenticatedPrincipal {
   readonly scopes: readonly string[];
 }
 
+/**
+ * Which credential a request presented. `local` is the credential the apps on
+ * the owner's own machine hold; `shared-token` is the daemon's operator token;
+ * `device-token` is a named pairing; `user-session` is a login session.
+ */
+export type CredentialKind = 'local' | 'shared-token' | 'device-token' | 'user-session';
+
+/** The caller of one request, authenticated once where the request entered. */
+export interface RequestPrincipal extends AuthenticatedPrincipal {
+  readonly credentialKind: CredentialKind;
+  /** The same scopes as `scopes`, for membership tests. */
+  readonly scopeSet: ReadonlySet<string>;
+  /** Login roles; empty for token credentials. */
+  readonly roles: readonly string[];
+  /**
+   * The daemon's authentication revision when this principal was read. While
+   * the daemon still reports it (and `expiresAt` has not passed), the
+   * principal is current; no store is read again.
+   */
+  readonly authRevision: number;
+  /** When a login session ends by time. Absent for credentials without an expiry. */
+  readonly expiresAt?: number;
+}
+
+/**
+ * What every daemon route handler receives: the authenticated principal and a
+ * signal that aborts when the request ends or its credential is revoked.
+ */
+export interface RequestContext {
+  readonly principal: RequestPrincipal;
+  readonly signal: AbortSignal;
+}
+
+/** True when the principal holds `scope`; an admin holds every scope. */
+export function principalHasScope(principal: Pick<RequestPrincipal, 'admin' | 'scopeSet'>, scope: string): boolean {
+  return principal.admin || principal.scopeSet.has('*') || principal.scopeSet.has(scope);
+}
+
 /** Strategy object for extracting and resolving a daemon auth token to a principal. */
 export interface AuthenticatedPrincipalResolver {
   /** Extract the raw auth token from the incoming request. */

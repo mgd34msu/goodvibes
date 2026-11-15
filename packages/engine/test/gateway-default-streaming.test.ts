@@ -104,7 +104,7 @@ function makeRouterContext(
     authToken: () => null,
     buildSurfaceAdapterContext: () => ({}) as never,
     buildGenericWebhookAdapterContext: () => ({}) as never,
-    checkAuth: () => false,
+    authenticateRequest: () => null,
     extractAuthToken: () => '',
     requireAuthenticatedSession: () => null,
     requireAdmin: () => null,

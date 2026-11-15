@@ -34,6 +34,10 @@ export interface SessionEventStreamOptions {
   readonly sessionId: string;
   /** Called with the connection's client id before the stream opens, for a caller that publishes to that client. */
   readonly onClientId?: (clientId: string) => void;
+  /** Who opened the stream; revoking this principal closes it. */
+  readonly principalId?: string | undefined;
+  /** Whether the opening credential still holds, asked before each frame; false closes the stream. */
+  readonly isAuthorized?: (() => boolean) | undefined;
 }
 
 /** Open a render-grade, session-scoped SSE stream for one session. */
@@ -56,5 +60,7 @@ export function openScopedSessionEventStream(
     sessionScopedDelivery: true,
     domains: RENDER_GRADE_SESSION_DOMAINS,
     label: `${options.clientPrefix}/${options.sessionId}`,
+    ...(options.principalId === undefined ? {} : { principalId: options.principalId }),
+    ...(options.isAuthorized === undefined ? {} : { isAuthorized: options.isAuthorized }),
   });
 }

@@ -36,10 +36,11 @@ export {
 } from './gateway-rest-routes.js';
 export {
   buildMissingScopeBody,
+  principalHasScope,
   resolveAuthenticatedPrincipal,
   resolvePrivateHostFetchOptions,
 } from './http-policy.js';
-export type { AuthenticatedPrincipal, AuthenticatedPrincipalKind, AuthenticatedPrincipalResolver, ElevatedPrivateHostFetchConfig, PrivateHostFetchConfig } from './http-policy.js';
+export type { AuthenticatedPrincipal, AuthenticatedPrincipalKind, AuthenticatedPrincipalResolver, CredentialKind, ElevatedPrivateHostFetchConfig, PrivateHostFetchConfig, RequestContext, RequestPrincipal } from './http-policy.js';
 export {
   createRouteBodySchema,
   createRouteBodySchemaRegistry,

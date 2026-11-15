@@ -92,7 +92,7 @@ function fixture(policy: 'plaintext_allowed' | 'require_secure' = 'plaintext_all
     extractAuthToken: helper.extractAuthToken.bind(helper), requireAdmin: helper.requireAdmin.bind(helper) };
   const context = { configManager: config, settingsImportAuthority: authority, nativeMutationHost, secretsManager: secrets, runtimeStore: null,
     userAuth: users, authToken: () => 'synthetic-shared', requireAdmin: authority.requireAdmin,
-    requireAuthenticatedSession: () => null, extractAuthToken: authority.extractAuthToken, describeAuthenticatedPrincipal: () => null,
+    requireAuthenticatedSession: () => null, extractAuthToken: authority.extractAuthToken, describeAuthenticatedPrincipal: () => null, authenticateRequest: () => null,
     controlPlaneGateway: { recordApiRequest() {} }, swapManager: null };
   const router = new DaemonHttpRouter(context as never); cleanup.push(() => router.dispose());
   const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: async req => await router.dispatchApiRoutes(req) ?? new Response(null, { status: 404 }) });

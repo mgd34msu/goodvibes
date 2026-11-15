@@ -71,6 +71,7 @@ describe('platform/security: operator http-auth helpers', () => {
       token: 'session-token',
       username: 'alice',
       roles: ['admin'],
+      expiresAt: expect.any(Number),
     });
     expect(isOperatorAdmin(session)).toBe(true);
 

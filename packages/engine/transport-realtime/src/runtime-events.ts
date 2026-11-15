@@ -567,6 +567,23 @@ export function createWebSocketConnector<TEvent extends RuntimeEventRecord = Run
           terminate('failed');
           return;
         }
+        if (frame.type === 'closed') {
+          // The daemon stopped serving this socket because its credential was revoked; a
+          // reconnect with the same credential is refused too, so end here and say what to do.
+          const closed = frame as { reason?: unknown; next?: unknown };
+          const reason = typeof closed.reason === 'string' && closed.reason.trim() ? closed.reason.trim() : 'closed by the daemon';
+          const revokedError = new WebSocketTransportError(`The daemon ended this connection: ${reason}`, {
+            code: 'WS_REMOTE_ERROR',
+            category: 'authentication',
+            recoverable: false,
+            hint: typeof closed.next === 'string' && closed.next.trim() ? closed.next.trim() : 'Sign in again, then open a new connection.',
+          });
+          invokeTransportObserver(() => observer?.onError?.(revokedError), observer?.onObserverError);
+          options.onError?.(revokedError);
+          closeSocket();
+          terminate('failed');
+          return;
+        }
         if (frame.type === 'auth' && frame.ok === true && socket) { authenticated = true; flushOutboundQueue(socket); }
         if (!hasReceivedMessage) {
           hasReceivedMessage = true;

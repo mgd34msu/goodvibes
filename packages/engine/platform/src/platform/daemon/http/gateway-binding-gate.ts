@@ -3,8 +3,8 @@ import type { AuthenticatedPrincipal } from '../http-policy.js';
 
 interface GatewayBindingGateDeps {
   readonly gatewayMethods: Pick<GatewayMethodCatalog, 'findByHttpBinding'>;
-  readonly extractAuthToken: (req: Request) => string;
-  readonly describeAuthenticatedPrincipal: (token: string) => AuthenticatedPrincipal | null;
+  /** The request's principal, authenticated once at the router's auth gate. */
+  readonly authenticateRequest: (req: Request) => { readonly principal: AuthenticatedPrincipal } | null;
   readonly validateGatewayInvocation: (
     descriptor: GatewayMethodDescriptor,
     context?: { readonly principalKind?: AuthenticatedPrincipal['principalKind']; readonly scopes?: readonly string[]; readonly admin?: boolean },
@@ -25,8 +25,7 @@ interface GatewayBindingGateDeps {
 export function gateGatewayBinding(req: Request, deps: GatewayBindingGateDeps): Response | null {
   const descriptor = deps.gatewayMethods.findByHttpBinding(req.method, new URL(req.url).pathname);
   if (!descriptor || descriptor.access === 'remote-peer' || descriptor.invokable === false) return null;
-  const token = deps.extractAuthToken(req);
-  const principal = token ? deps.describeAuthenticatedPrincipal(token) : null;
+  const principal = deps.authenticateRequest(req)?.principal ?? null;
   // The auth gate already accepted the credential; a kind this resolver cannot describe is left to the route's own check.
   if (!principal) return null;
   const denied = deps.validateGatewayInvocation(descriptor, {

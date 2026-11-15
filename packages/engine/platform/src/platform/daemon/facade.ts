@@ -303,11 +303,9 @@ export class DaemonServer {
       parseJsonBody: (req) => this.parseJsonBody(req),
       requireAuthenticatedSession: (req) => this.requireAuthenticatedSession(req),
       trySpawnAgent: (input, logLabel, sessionId) => this.trySpawnAgent(input, logLabel, sessionId),
-      checkAuth: (req) => this.checkAuth(req),
       extractAuthToken: (req) => this.extractAuthToken(req),
       requireAdmin: (req) => this.requireAdmin(req),
       requireRemotePeer: (req, scope) => this.requireRemotePeer(req, scope),
-      describeAuthenticatedPrincipal: (token) => this.describeAuthenticatedPrincipal(token),
       invokeGatewayMethodCall: (input) => this.invokeGatewayMethodCall(input),
       syncSpawnedAgentTask: (record, sessionId) => this.syncSpawnedAgentTask(record, sessionId),
       syncFinishedAgentTask: (record) => this.syncFinishedAgentTask(record),
@@ -504,6 +502,8 @@ export class DaemonServer {
       logger.info('DaemonServer: already running');
       return;
     }
+    // A revoked pairing, shared token or user closes that principal's connections at once.
+    this.controlPlaneHelper.watchRevocations();
     this.hostStartupCompleted = false;
     this.nativeStartupHandover = undefined;
     // Crash-loop guard, before anything that can fail: repeated boots that
@@ -1081,6 +1081,7 @@ export class DaemonServer {
     this.relayReachability?.stop();
     this.relayReachability = null;
     this.httpRouter.dispose();
+    this.controlPlaneHelper.dispose();
     this.surfaceActionHelper.closeDelegatedTelegram();
     this.releaseBrowserJudgmentChats?.();
     this.releaseBrowserJudgmentChats = undefined;
@@ -1181,9 +1182,6 @@ export class DaemonServer {
     return this.controlPlaneHelper.extractAuthToken(req);
   }
 
-  private checkAuth(req: Request): boolean {
-    return this.controlPlaneHelper.checkAuth(req);
-  }
 
   private requireAuthenticatedSession(req: Request): { username: string; roles: readonly string[] } | null {
     return this.controlPlaneHelper.requireAuthenticatedSession(req);
@@ -1195,15 +1193,6 @@ export class DaemonServer {
 
   private async requireRemotePeer(req: Request, scope?: string): Promise<DistributedPeerAuth | Response> {
     return await this.controlPlaneHelper.requireRemotePeer(req, scope);
-  }
-
-  private describeAuthenticatedPrincipal(token: string): {
-    principalId: string;
-    principalKind: 'user' | 'bot' | 'service' | 'token';
-    admin: boolean;
-    scopes: readonly string[];
-  } | null {
-    return this.controlPlaneHelper.describeAuthenticatedPrincipal(token);
   }
 
   private getGrantedGatewayScopes(includeWrite: boolean): readonly string[] {

@@ -1,6 +1,7 @@
 import { timingSafeEqual } from 'node:crypto';
 import type { UserAuthManager } from './user-auth.js';
 import type { AuthenticatedNativePairingToken, SettingsPairingAuthority, NativeContinuationGrant, NativeContinuationAuthority } from '../pairing/pairing-token-store.js';
+import type { RevisionSource } from '../utils/revision.js';
 
 export const OPERATOR_SESSION_COOKIE_NAME = 'goodvibes_session';
 
@@ -22,7 +23,14 @@ export type AuthenticatedOperatorRequest =
       readonly token: string;
       readonly username: string;
       readonly roles: readonly string[];
+      /** When the login session ends by time. */
+      readonly expiresAt: number;
     };
+
+/** The credential kind a request context reports for an authenticated operator request. */
+export function credentialKindOf(authenticated: AuthenticatedOperatorRequest): 'shared-token' | 'device-token' | 'user-session' {
+  return authenticated.kind === 'pairing-token' ? 'device-token' : authenticated.kind === 'session' ? 'user-session' : authenticated.kind;
+}
 
 /** Construction-only transport capability, never accepted from a wire payload. */
 export interface NativePairedSnapshot extends AuthenticatedNativePairingToken {
@@ -61,6 +69,14 @@ export interface PairingTokenAuthenticator {
   authenticate(token: string): { readonly id: string; readonly name: string } | null;
   /** Whether the legacy single shared token has been revoked. */
   isLegacyRevoked(): boolean;
+  /** Moves whenever a pairing, a grant or the legacy revocation changes. Absent: every check re-authenticates. */
+  readonly revisionSource?: RevisionSource;
+  /**
+   * Called with the principal ids whose credential stopped being valid (a
+   * revoked or replaced pairing, `shared-token` for the legacy revocation),
+   * whether this process or another one made the change. Returns the unsubscribe.
+   */
+  onRevoked?(listener: (principalIds: readonly string[]) => void): () => void;
 }
 
 interface SessionCookieOptions {
@@ -162,6 +178,7 @@ export function authenticateOperatorToken(
     token: normalized,
     username: user.username,
     roles: user.roles,
+    expiresAt: session.expiresAt,
   };
 }
 

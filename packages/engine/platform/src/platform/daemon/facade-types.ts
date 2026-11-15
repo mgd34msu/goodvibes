@@ -126,16 +126,9 @@ export interface CreateDaemonFacadeCollaboratorsOptions {
   readonly parseJsonBody: (req: Request) => Promise<JsonBody | Response>;
   readonly requireAuthenticatedSession: (req: Request) => { username: string; roles: readonly string[] } | null;
   readonly trySpawnAgent: (input: Parameters<AgentManager['spawn']>[0], logLabel?: string, sessionId?: string) => import('../tools/agent/index.js').AgentRecord | Response;
-  readonly checkAuth: (req: Request) => boolean;
   readonly extractAuthToken: (req: Request) => string;
   readonly requireAdmin: (req: Request) => Response | null;
   readonly requireRemotePeer: (req: Request, scope?: string) => Promise<DistributedPeerAuth | Response>;
-  readonly describeAuthenticatedPrincipal: (token: string) => {
-    principalId: string;
-    principalKind: 'user' | 'bot' | 'service' | 'token';
-    admin: boolean;
-    scopes: readonly string[];
-  } | null;
   readonly invokeGatewayMethodCall: (input: {
     readonly authToken: string;
     readonly methodId: string;

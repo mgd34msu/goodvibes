@@ -404,7 +404,11 @@ Settings, Account holds the supporting workflows:
   operator token; inspect the current sign-in and passkey step-up
 - the owner profile, mail and calendar accounts
 - paired devices with their tokens (revoking one is a deliberate action), power
-  keep-awake, and this browser as a phone node
+  keep-awake, and this browser as a phone node. Revoking a device or the
+  shared token, removing a user or changing its password ends that
+  credential's open connections and event streams at once; a single revoked
+  sign-in session's streams end at their next event. Each is told the
+  credential was revoked and to sign in or pair again
 - People and channels: principals list every identity with its channel
   identities, and create, update and delete each go through a confirm sheet
   (delete is permanent); channel profiles list every surface/channel binding

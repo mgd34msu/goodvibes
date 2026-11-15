@@ -1,5 +1,8 @@
 import { missingScopes } from './http/route-helpers.js';
 
+export type { CredentialKind, RequestContext, RequestPrincipal } from '@goodvibes-jev/engine/daemon-api';
+export { principalHasScope } from '@goodvibes-jev/engine/daemon-api';
+
 export type AuthenticatedPrincipalKind = 'user' | 'bot' | 'service' | 'token';
 
 export interface AuthenticatedPrincipal {

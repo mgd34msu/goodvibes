@@ -56,6 +56,14 @@ describe('check-in config validation', () => {
     expect((error as CheckinConfigError).field).toBe('cadence');
   });
 
+  test('a delivery channel that names no delivery surface is refused before anything is stored', async () => {
+    const { service, values } = makeService(BASE);
+    const error = await service.setConfig({ deliveryChannel: 'slak:C1' }).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(CheckinConfigError);
+    expect((error as CheckinConfigError).field).toBe('deliveryChannel');
+    expect(values.get('checkin.deliveryChannel')).toBe('slack:C1');
+  });
+
   test('enabling without a delivery channel is refused, disabling a half-configured install still works', async () => {
     const { service } = makeService({ ...BASE, 'checkin.deliveryChannel': '' });
     const error = await service.setConfig({ enabled: true }).catch((e: unknown) => e);
@@ -86,6 +94,42 @@ describe('check-in config validation', () => {
     const { service } = makeService({ ...BASE, 'checkin.enabled': true }, automation);
     await Promise.all([service.syncScheduledJob(), service.syncScheduledJob()]);
     expect(jobs).toHaveLength(1);
+  });
+});
+
+describe('one check-in settings update', () => {
+  test('a four-field update is one settings write and one schedule update; repeating it writes no schedule', async () => {
+    const job = { id: 'j0', kind: 'checkin', enabled: false, schedule: { kind: 'cron', expression: '0 */4 * * *' } };
+    let scheduleUpdates = 0, settingsWrites = 0;
+    const automation = {
+      listJobs: () => [job], createJob: async () => { throw new Error('unused'); },
+      updateJob: async (_id: string, patch: { enabled: boolean; schedule: { expression: string } }) => {
+        scheduleUpdates++; job.enabled = patch.enabled; job.schedule = { kind: 'cron', expression: patch.schedule.expression };
+      },
+      attachCheckinEvaluator: () => {},
+    } as unknown as NonNullable<ConstructorParameters<typeof CheckinService>[0]['automation']>;
+    const values = new Map<string, unknown>(Object.entries(BASE));
+    const listeners = new Map<string, Set<() => void>>();
+    const service = new CheckinService({
+      config: {
+        get: (k) => values.get(k), set: () => { throw new Error('one update is one write'); },
+        setMany: (changes) => { settingsWrites++; for (const { key, value } of changes) values.set(key, value); for (const { key } of changes) for (const fn of listeners.get(key) ?? []) fn(); },
+        subscribe: (key, listener) => { (listeners.get(key) ?? listeners.set(key, new Set()).get(key)!).add(listener); return () => listeners.get(key)!.delete(listener); },
+      },
+      stateReader: { snapshot: async () => ({ runningSessions: 0, blockedSessions: 0, unreadChannelItems: 0, recentCompletions: 0, needsAttention: [] }) },
+      judge: { decide: async () => ({ contact: false, reason: 'quiet' }) },
+      deliverer: { deliver: async () => undefined },
+      receipts: new CheckinReceiptStore(':memory:'),
+      automation,
+    });
+    await service.attach();
+    expect(scheduleUpdates).toBe(0);
+    const update = { enabled: true, cadence: '0 * * * *', deliveryChannel: 'telegram', quietHours: '22:00-08:00' };
+    await service.setConfig(update);
+    expect({ settingsWrites, scheduleUpdates }).toEqual({ settingsWrites: 1, scheduleUpdates: 1 });
+    await service.setConfig(update);
+    expect({ settingsWrites, scheduleUpdates }).toEqual({ settingsWrites: 2, scheduleUpdates: 1 });
+    service.dispose();
   });
 });
 

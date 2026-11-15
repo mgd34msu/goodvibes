@@ -26,16 +26,20 @@ function readings(contact = 0.99, fidelity = 'supports', confidence = 0.99) {
   return fake;
 }
 function harness(generate: Parameters<typeof generator>[0] = async () => ({ content: note })) {
-  const values = new Map<string, unknown>([['checkin.enabled', true], ['checkin.deliveryChannel', 'synthetic:owner'], ['checkin.quietHours', ''], ['checkin.cadence', '0 */4 * * *']]);
-  const invalidators = new Set<() => void>();
-  const config = { get: (key: string) => values.get(key), set(key: string, value: unknown) { for (const fn of invalidators) fn(); values.set(key, value); },
-    onDidInvalidate(fn: () => void) { invalidators.add(fn); return () => { invalidators.delete(fn); }; } };
+  const values = new Map<string, unknown>([['checkin.enabled', true], ['checkin.deliveryChannel', 'slack:owner'], ['checkin.quietHours', ''], ['checkin.cadence', '0 */4 * * *']]);
+  const listeners = new Map<string, Set<() => void>>();
+  const config = { get: (key: string) => values.get(key),
+    set(key: string, value: unknown) { values.set(key, value); for (const fn of listeners.get(key) ?? []) fn(); },
+    subscribe(key: string, fn: () => void) {
+      const set = listeners.get(key) ?? new Set<() => void>(); listeners.set(key, set); set.add(fn);
+      return () => { set.delete(fn); };
+    } };
   const sent: string[] = [];
   const receipts = new CheckinReceiptStore(':memory:');
   const service = new CheckinService({ config, stateReader: { snapshot: async () => snapshot },
     judge: createProviderBackedCheckinJudge(generator(generate)), receipts,
     deliverer: { async deliver(_channel, message, lifetime) { lifetime?.assertCurrent(); sent.push(message); return 'synthetic-accepted'; } } });
-  return { service, config, values, sent, receipts, invalidators };
+  return { service, config, values, sent, receipts, listeners };
 }
 
 describe('canonical check-in judgment and verified content', () => {
@@ -88,15 +92,18 @@ describe('canonical check-in judgment and verified content', () => {
     await expect(judge.decide('password: hunter2')).rejects.toThrow();
     expect(fake.requests).toHaveLength(0); expect(generated).toBe(0);
   });
-  test('config ABA invalidation during content generation fences even an abort-ignoring provider', async () => {
+  test('a settings change during content generation stops an abort-ignoring provider and the run repeats once on the new settings', async () => {
     readings(); const entered = Promise.withResolvers<void>(); const held = Promise.withResolvers<{ content: string }>();
     const h = harness(async () => { entered.resolve(); return held.promise; });
     const work = h.service.evaluate('manual'); await entered.promise;
     h.config.set('checkin.enabled', false); h.config.set('checkin.enabled', true); held.resolve({ content: note });
-    expect((await work).outcome).toBe('skipped'); expect(h.sent).toEqual([]);
-    expect((await h.receipts.list())[0]!.outcome).toBe('skipped-stale');
-    expect((await h.receipts.list())[0]!.judgment?.decisionId).toBeTruthy();
-    expect(h.invalidators.size).toBe(0);
+    expect((await work).outcome).toBe('delivered'); expect(h.sent).toEqual([note]);
+    const [rerun, stopped] = await h.receipts.list();
+    expect(rerun!.outcome).toBe('delivered');
+    expect(stopped!.outcome).toBe('skipped-stale');
+    expect(stopped!.judgment?.decisionId).toBeTruthy();
+    h.service.dispose();
+    expect([...h.listeners.values()].every(set => set.size === 0)).toBe(true);
   });
   test('caller cancellation during Jev wait cannot generate or send', async () => {
     const entered = Promise.withResolvers<void>();
@@ -129,16 +136,6 @@ for (const revoke of [false, true]) {
     expect((await h.service.evaluate('manual')).outcome).toBe(revoke ? 'skipped' : 'quiet');
     expect(attempts).toBe(revoke ? 1 : 2); expect(h.sent).toEqual([]);
     if (!revoke) expect(log.query()[0]!.lineage?.attempts).toHaveLength(2);
-  });
-}
-for (const [key, value] of [['checkin.deliveryChannel', 'synthetic:other'], ['checkin.cadence', '0 * * * *'], ['checkin.enabled', false]] as const) {
-  test(`exact config comparison rejects stale ${key} even without invalidation notification`, async () => {
-    readings(); const entered = Promise.withResolvers<void>(); const held = Promise.withResolvers<{ content: string }>();
-    const h = harness(async () => { entered.resolve(); return held.promise; });
-    const work = h.service.evaluate('manual'); await entered.promise;
-    h.values.set(key, value); held.resolve({ content: note });
-    expect((await work).outcome).toBe('skipped'); expect(h.sent).toEqual([]);
-    expect((await h.receipts.list())[0]!.outcome).toBe('skipped-stale');
   });
 }
 test('empty draft cannot send or invent a note', async () => {

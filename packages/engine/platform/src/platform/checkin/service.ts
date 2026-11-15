@@ -11,9 +11,15 @@
  * `kind: 'checkin'` automation job in step with the config, and attach() wires
  * the manager's check-in evaluator to this.evaluate, so when the scheduler
  * fires the job, this loop runs (checkin-execution.ts records the run).
+ *
+ * "Is this run still wanted" has one owner: the run's AbortController. A
+ * change to one of the four checkin.* settings aborts a run whose settings
+ * it changed (and that run is then repeated once on the new settings), and
+ * so do disposal and the caller's own signal. Nothing else re-reads the
+ * settings during a run. The scheduled job is compared once, at the send.
  */
 import type { JudgmentRetryProgress } from '@goodvibes-jev/judgment';
-import { DecisionModelsDisabledError, decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
+import { DecisionModelsDisabledError } from '@goodvibes-jev/engine/errors';
 import { activateClassicFallback, isClassicOperation, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
 import type { CheckinJudgmentReceipt } from './types.js';
 import type { AutomationManager } from '../automation/index.js';
@@ -24,6 +30,7 @@ import { summarizeError } from '../utils/error-display.js';
 import { assembleCheckinBriefing, summarizeCheckinState } from './briefing.js';
 import { validateSchedule } from '../automation/schedules.js';
 import { isQuietHours, parseQuietHours } from './quiet-hours.js';
+import { CHANNEL_DELIVERY_SURFACE_KINDS, parseChannelDeliveryTarget } from '../channels/delivery/types.js';
 import type { CheckinReceiptStore } from './receipts.js';
 import {
   CHECKIN_CONFIG_KEYS,
@@ -47,10 +54,18 @@ const DEFAULT_CADENCE = '0 */4 * * *';
 export interface CheckinConfigAccess {
   get(key: string): unknown;
   set(key: string, value: string | boolean): void;
-  /** Pre-mutation invalidation fences even disable/re-enable and same-value rewrites. */
-  onDidInvalidate?(listener: () => void): () => void;
+  /**
+   * Writes several keys as one update (one settings write). Throws when the
+   * update is refused, and then nothing was written. Absent: `set` per key.
+   */
+  setMany?(changes: readonly CheckinConfigChange[]): void;
   /** Fires after a key changes, including edits made outside this service (settings file, CLI). */
   subscribe?(key: string, listener: () => void): () => void;
+}
+
+export interface CheckinConfigChange {
+  readonly key: string;
+  readonly value: string | boolean;
 }
 
 export interface CheckinServiceDeps {
@@ -60,7 +75,7 @@ export interface CheckinServiceDeps {
   readonly deliverer: CheckinDeliverer;
   readonly receipts: CheckinReceiptStore;
   /** The automation manager the scheduled check-in job is synced onto (optional in tests). */
-  readonly automation?: Pick<AutomationManager, 'listJobs' | 'createJob' | 'updateJob' | 'setEnabled' | 'attachCheckinEvaluator'> | undefined;
+  readonly automation?: Pick<AutomationManager, 'listJobs' | 'createJob' | 'updateJob' | 'attachCheckinEvaluator'> | undefined;
   /** Injectable clock for quiet-hours tests. */
   readonly now?: (() => number) | undefined;
   readonly onRetry?: ((progress: JudgmentRetryProgress) => void) | undefined;
@@ -76,15 +91,47 @@ export interface SetCheckinConfigInput {
 /**
  * A refusal of a check-in setting the owner supplied. It carries the wire
  * status, code and field, so the gateway answers 400 naming the field rather
- * than storing a value that silently does nothing.
+ * than storing a value that silently does nothing. The message is the reason
+ * followed by the next step, because the gateway sends the message; `state`
+ * and `next` are the same facts for a refusal reader (`readRefusal`).
  */
 export class CheckinConfigError extends Error {
   readonly status = 400;
   readonly code = 'INVALID_ARGUMENT';
-  constructor(message: string, readonly field: string) {
-    super(message);
+  readonly state = 'nothing was changed';
+  readonly next: readonly string[];
+  constructor(reason: string, readonly field: string, next: string) {
+    super(`${reason} ${next} Nothing was changed.`);
     this.name = 'CheckinConfigError';
+    this.next = [next];
   }
+}
+
+/** Why a delivery channel names no surface a check-in can be delivered to; undefined when it does. */
+function deliveryChannelProblem(channel: string): string | undefined {
+  const { surfaceKind } = parseChannelDeliveryTarget(channel);
+  if ((CHANNEL_DELIVERY_SURFACE_KINDS as readonly string[]).includes(surfaceKind ?? '')) return undefined;
+  return `deliveryChannel "${channel}" names no delivery surface ("${surfaceKind ?? ''}" is not one of ${CHANNEL_DELIVERY_SURFACE_KINDS.join(', ')})`;
+}
+
+const DELIVERY_CHANNEL_EXAMPLE = 'Set deliveryChannel to a surface, optionally with an address, for example "slack:C123" or "telegram".';
+
+/** A run in flight, and why it was stopped from outside when it was. */
+interface ActiveRun {
+  readonly controller: AbortController;
+  readonly config: CheckinConfig;
+  stoppedBy?: 'settings' | 'job' | 'disposed';
+  /** Set when the run recorded that it was stopped by a settings change and will run again. */
+  rerun?: boolean;
+}
+
+function sameConfig(a: CheckinConfig, b: CheckinConfig): boolean {
+  return a.enabled === b.enabled && a.cadence === b.cadence && a.deliveryChannel === b.deliveryChannel && a.quietHours === b.quietHours;
+}
+
+/** A job record the manager issued carries its revision; any other record stands for itself. */
+function jobRevisionOf(job: { readonly mutationRevision?: string | undefined }): unknown {
+  return job.mutationRevision ?? job;
 }
 
 const AUTOMATION_ENABLED_KEY = 'automation.enabled';
@@ -99,9 +146,11 @@ export interface CheckinScheduleStatus {
 export class CheckinService {
   private evaluating = false;
   private syncChain: Promise<unknown> = Promise.resolve();
+  /** A sync that is queued and has not read the config yet; later requests join it. */
+  private queuedSync: Promise<CheckinScheduleStatus> | null = null;
   private schedule: CheckinScheduleStatus = { state: 'not-needed' };
-  private readonly activeRuns = new Set<AbortController>();
-  private revision = 0;
+  private readonly activeRuns = new Set<ActiveRun>();
+  private attached = false;
   private disposed = false;
   private unsubscribers: Array<() => void> = [];
   constructor(private readonly deps: CheckinServiceDeps) {}
@@ -110,12 +159,40 @@ export class CheckinService {
   dispose(): void {
     this.disposed = true;
     for (const unsubscribe of this.unsubscribers.splice(0)) unsubscribe();
-    this.invalidate();
+    for (const run of this.activeRuns) this.stop(run, 'disposed', 'The check-in service was shut down');
   }
 
-  private invalidate(): void {
-    this.revision++;
-    for (const controller of this.activeRuns) controller.abort();
+  private stop(run: ActiveRun, by: NonNullable<ActiveRun['stoppedBy']>, reason: string): void {
+    if (run.stoppedBy) return;
+    run.stoppedBy = by;
+    run.controller.abort(new Error(reason));
+  }
+
+  /** Stop every run whose settings no longer match the stored ones. */
+  private settingsChanged(): void {
+    if (this.activeRuns.size === 0) return;
+    const config = this.getConfig();
+    for (const run of this.activeRuns) {
+      if (!sameConfig(run.config, config)) this.stop(run, 'settings', 'The check-in settings changed during this run');
+    }
+  }
+
+  /**
+   * One subscription per key for the life of the service. A check-in key
+   * stops the runs it changed and, once attached, re-syncs the schedule; the
+   * automation switch only re-syncs, so enabling the subsystem later installs
+   * a job that could not be created while it was off.
+   */
+  private watchConfig(): void {
+    const subscribe = this.deps.config.subscribe?.bind(this.deps.config);
+    if (!subscribe || this.unsubscribers.length > 0 || this.disposed) return;
+    for (const key of Object.values(CHECKIN_CONFIG_KEYS)) {
+      this.unsubscribers.push(subscribe(key, () => {
+        this.settingsChanged();
+        if (this.attached) void this.syncScheduledJob();
+      }));
+    }
+    this.unsubscribers.push(subscribe(AUTOMATION_ENABLED_KEY, () => { if (this.attached) void this.syncScheduledJob(); }));
   }
 
   private now(): number {
@@ -145,31 +222,43 @@ export class CheckinService {
         validateSchedule({ kind: 'cron', expression: cadence });
       } catch (error) {
         const detail = error instanceof Error ? error.message : String(error);
-        throw new CheckinConfigError(`cadence "${cadence}" is not a valid cron expression (${detail}). Example: "0 */4 * * *".`, 'cadence');
+        throw new CheckinConfigError(`cadence "${cadence}" is not a valid cron expression (${detail}).`, 'cadence',
+          'Use a five-field cron expression, for example "0 */4 * * *" for every four hours.');
       }
     }
     const quietHours = input.quietHours?.trim();
     if (quietHours && !parseQuietHours(quietHours)) {
-      throw new CheckinConfigError(`quietHours "${quietHours}" is not a valid window. Use 24-hour HH:MM-HH:MM in local time, for example "22:00-08:00", or an empty string for none.`, 'quietHours');
+      throw new CheckinConfigError(`quietHours "${quietHours}" is not a valid window.`, 'quietHours',
+        'Use 24-hour HH:MM-HH:MM in local time, for example "22:00-08:00", or an empty string for none.');
     }
+    const named = input.deliveryChannel?.trim();
+    const channelProblem = named ? deliveryChannelProblem(named) : undefined;
+    if (channelProblem) throw new CheckinConfigError(`${channelProblem}.`, 'deliveryChannel', DELIVERY_CHANNEL_EXAMPLE);
     if (input.enabled === true || input.deliveryChannel !== undefined) {
       const current = this.getConfig();
       const enabled = input.enabled ?? current.enabled;
       const channel = (input.deliveryChannel ?? current.deliveryChannel).trim();
       if (enabled && !channel) {
-        throw new CheckinConfigError('deliveryChannel is required to enable check-ins: name the channel the check-in is delivered to, for example "slack:C123". Nothing was changed.', 'deliveryChannel');
+        throw new CheckinConfigError('deliveryChannel is required to enable check-ins.', 'deliveryChannel',
+          'Name the channel the check-in is delivered to, for example "slack:C123", in the same update.');
       }
     }
   }
 
   async setConfig(input: SetCheckinConfigInput): Promise<CheckinConfig> {
     this.validate(input);
-    this.invalidate();
-    const set = this.deps.config.set.bind(this.deps.config);
-    if (input.enabled !== undefined) set(CHECKIN_CONFIG_KEYS.enabled, input.enabled);
-    if (input.cadence !== undefined) set(CHECKIN_CONFIG_KEYS.cadence, input.cadence.trim());
-    if (input.deliveryChannel !== undefined) set(CHECKIN_CONFIG_KEYS.deliveryChannel, input.deliveryChannel.trim());
-    if (input.quietHours !== undefined) set(CHECKIN_CONFIG_KEYS.quietHours, input.quietHours.trim());
+    const changes: CheckinConfigChange[] = [];
+    if (input.enabled !== undefined) changes.push({ key: CHECKIN_CONFIG_KEYS.enabled, value: input.enabled });
+    if (input.cadence !== undefined) changes.push({ key: CHECKIN_CONFIG_KEYS.cadence, value: input.cadence.trim() });
+    if (input.deliveryChannel !== undefined) changes.push({ key: CHECKIN_CONFIG_KEYS.deliveryChannel, value: input.deliveryChannel.trim() });
+    if (input.quietHours !== undefined) changes.push({ key: CHECKIN_CONFIG_KEYS.quietHours, value: input.quietHours.trim() });
+    if (changes.length > 0) {
+      if (this.deps.config.setMany) this.deps.config.setMany(changes);
+      else for (const change of changes) this.deps.config.set(change.key, change.value);
+    }
+    // The key subscriptions already did this when the config access has them.
+    this.settingsChanged();
+    // Joins the sync the subscriptions queued for these writes: one sync per update.
     await this.syncScheduledJob();
     return this.getConfig();
   }
@@ -180,16 +269,11 @@ export class CheckinService {
 
   /** Wire this service as the automation manager's check-in evaluator, then sync the job. */
   async attach(): Promise<void> {
-    this.deps.automation?.attachCheckinEvaluator((job) => this.evaluate('scheduled', job.id));
-    // A settings edit made outside setConfig must reach the scheduler too. Syncs are
-    // serialized and idempotent, so the extra sync after a setConfig finds the job and
-    // does not create a second one.
-    if (this.deps.config.subscribe && this.unsubscribers.length === 0 && !this.disposed) {
-      // Enabling the automation subsystem later must install a job that could not be created while it was off.
-      for (const key of [...Object.values(CHECKIN_CONFIG_KEYS), AUTOMATION_ENABLED_KEY]) {
-        this.unsubscribers.push(this.deps.config.subscribe(key, () => { void this.syncScheduledJob(); }));
-      }
-    }
+    // A run's signal, when the scheduler passes one, stops the run when its job is removed or the run is cancelled.
+    this.deps.automation?.attachCheckinEvaluator((job, signal?: AbortSignal) => this.evaluate('scheduled', job.id, signal));
+    // A settings edit made outside setConfig must reach the scheduler too.
+    this.attached = true;
+    this.watchConfig();
     await this.syncScheduledJob();
   }
 
@@ -199,10 +283,17 @@ export class CheckinService {
    * The automation subsystem must be enabled for a job to exist; when it is off
    * the result is `failed` with the reason, and `attach()` or the next
    * `setConfig` retries. Calls run one at a time so two syncs cannot both see no
-   * job and create two.
+   * job and create two, and a request made while a sync is queued and has not
+   * read the config yet joins that sync, so the four writes of one update cost
+   * one sync.
    */
   syncScheduledJob(): Promise<CheckinScheduleStatus> {
-    const run = this.syncChain.then(() => this.syncOnce());
+    if (this.queuedSync) return this.queuedSync;
+    const run = this.syncChain.then(() => {
+      this.queuedSync = null;
+      return this.syncOnce();
+    });
+    this.queuedSync = run;
     this.syncChain = run;
     return run;
   }
@@ -210,8 +301,8 @@ export class CheckinService {
   private async syncOnce(): Promise<CheckinScheduleStatus> {
     const automation = this.deps.automation;
     if (!automation) return this.schedule = { state: 'not-needed', reason: 'no scheduler is attached' };
-    const config = this.getConfig();
     try {
+      const config = this.getConfig();
       const job = automation.listJobs().find((j) => j.kind === 'checkin');
       if (!job) {
         if (!config.enabled) return this.schedule = { state: 'not-needed' };
@@ -225,12 +316,15 @@ export class CheckinService {
         });
         return this.schedule = { state: 'scheduled' };
       }
-      await automation.updateJob(job.id, {
-        kind: 'checkin',
-        schedule: { kind: 'cron', expression: config.cadence },
-        enabled: config.enabled,
-      });
-      await automation.setEnabled(job.id, config.enabled);
+      const inStep = job.enabled === config.enabled && job.schedule.kind === 'cron' && job.schedule.expression === config.cadence;
+      // One update carries the cadence and the enabled state; a job already in step is not written.
+      if (!inStep) {
+        await automation.updateJob(job.id, {
+          kind: 'checkin',
+          schedule: { kind: 'cron', expression: config.cadence },
+          enabled: config.enabled,
+        });
+      }
       return this.schedule = config.enabled ? { state: 'scheduled' } : { state: 'not-needed' };
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
@@ -241,8 +335,9 @@ export class CheckinService {
 
   /**
    * Run one check-in evaluation and record its receipt. Returns the terminal
-   * outcome the automation run records. A scheduled run binds the current job
-   * revision as well as the check-in config; deletion or ownership changes cannot revive it.
+   * outcome the automation run records. A run whose check-in settings change
+   * while it is in flight is stopped and run once more on the new settings; a
+   * scheduled run whose job was removed, disabled or redefined sends nothing.
    */
   async evaluate(trigger: 'scheduled' | 'manual', jobId?: string, callerSignal?: AbortSignal, assertAuthority?: () => void): Promise<AutomationCheckinOutcome> {
     // One run at a time: a manual run overlapping a scheduled one would each judge
@@ -254,43 +349,46 @@ export class CheckinService {
     }
     this.evaluating = true;
     try {
-      return await this.runEvaluation(trigger, jobId, callerSignal, assertAuthority);
+      this.watchConfig();
+      const first = this.beginRun();
+      const outcome = await this.runEvaluation(first, true, trigger, jobId, callerSignal, assertAuthority);
+      if (first.rerun !== true) return outcome;
+      return await this.runEvaluation(this.beginRun(), false, trigger, jobId, callerSignal, assertAuthority);
     } finally {
       this.evaluating = false;
     }
   }
 
-  private runEvaluation(trigger: 'scheduled' | 'manual', jobId?: string, callerSignal?: AbortSignal, assertAuthority?: () => void): Promise<AutomationCheckinOutcome> {
+  private beginRun(): ActiveRun {
+    const run: ActiveRun = { controller: new AbortController(), config: this.getConfig() };
+    if (this.disposed) this.stop(run, 'disposed', 'The check-in service was shut down');
+    return run;
+  }
+
+  private runEvaluation(run: ActiveRun, mayRerun: boolean, trigger: 'scheduled' | 'manual', jobId?: string, callerSignal?: AbortSignal, assertAuthority?: () => void): Promise<AutomationCheckinOutcome> {
     return withConfiguredDecisionModelPolicy(async () => {
       const ranAt = this.now();
-      const controller = new AbortController();
-      const signal = callerSignal ? AbortSignal.any([controller.signal, callerSignal]) : controller.signal;
-      const revision = this.revision;
-      let invalidated = false;
-      const unsubscribe = this.deps.config.onDidInvalidate?.(() => { invalidated = true; controller.abort(); });
-      this.activeRuns.add(controller);
-      const config = this.getConfig();
-      let jobRevision: string | undefined;
+      const { config } = run;
+      const signal = callerSignal ? AbortSignal.any([run.controller.signal, callerSignal]) : run.controller.signal;
+      this.activeRuns.add(run);
       const readJob = () => jobId === undefined ? undefined : this.deps.automation?.listJobs().find(job => job.id === jobId);
-      let jobIdentity: ReturnType<typeof readJob>;
+      let jobRevision: unknown;
+      // Called before every judgment attempt: the run's own signal and the quiet-hours window.
       const current = () => {
         signal.throwIfAborted();
-        decisionModelPolicyState();
-        assertAuthority?.();
-        if (this.disposed || invalidated || revision !== this.revision || JSON.stringify(this.getConfig()) !== JSON.stringify(config)) {
-          invalidated = true;
-          controller.abort();
-          throw new Error('Check-in configuration or authority changed');
-        }
+        if (isQuietHours(this.now(), config.quietHours)) throw new Error('Quiet hours began during this check-in run');
+      };
+      // The send cannot be undone: the scheduled job and the caller's authority are compared once more here.
+      const beforeSend = () => {
+        current();
         if (jobId !== undefined) {
           const job = readJob();
-          if (!job || job !== jobIdentity || job.kind !== 'checkin' || !job.enabled || job.status !== 'enabled' || !job.source.enabled || JSON.stringify(job) !== jobRevision) {
-            invalidated = true;
-            controller.abort();
-            throw new Error('Scheduled check-in job or ownership changed');
+          if (!job || jobRevisionOf(job) !== jobRevision) {
+            this.stop(run, 'job', 'The scheduled check-in job was removed, disabled or changed during this run');
+            signal.throwIfAborted();
           }
         }
-        if (!config.enabled || isQuietHours(this.now(), config.quietHours)) throw new Error('Check-in is no longer eligible');
+        assertAuthority?.();
       };
       let briefingSummary = 'unavailable';
       let judgment: CheckinJudgmentReceipt | undefined;
@@ -299,7 +397,17 @@ export class CheckinService {
       try {
         if (!config.enabled) return await this.record(trigger, ranAt, 'skipped-disabled', 'check-in disabled', {});
         if (isQuietHours(ranAt, config.quietHours)) return await this.record(trigger, ranAt, 'skipped-quiet-hours', 'quiet hours', {});
-        if (jobId !== undefined) { jobIdentity = readJob(); jobRevision = JSON.stringify(jobIdentity); }
+        const channel = config.deliveryChannel.trim();
+        const channelProblem = channel ? deliveryChannelProblem(channel) : undefined;
+        if (channelProblem) {
+          // Refused before any model is asked: no judgment can be delivered to a surface that does not exist.
+          return await this.record(trigger, ranAt, 'error', 'not assembled', { error: `${channelProblem}. ${DELIVERY_CHANNEL_EXAMPLE}` });
+        }
+        if (jobId !== undefined) {
+          const job = readJob();
+          if (!job || job.kind !== 'checkin' || !job.enabled) this.stop(run, 'job', 'The scheduled check-in job is no longer enabled');
+          else jobRevision = jobRevisionOf(job);
+        }
         current();
         if (isClassicOperation()) return await this.record(trigger, ranAt, 'skipped-decision-models-disabled', 'not assembled', {
           decisionReason: 'Automatic check-ins require decision models; no contact judgment or message was produced.',
@@ -317,9 +425,10 @@ export class CheckinService {
         }
         const message = decision.message?.trim() ?? '';
         if (!message) return await this.record(trigger, ranAt, 'quiet', briefingSummary, { decisionReason: 'No verified note to deliver', judgment });
-        current();
+        // Settles "certainly not sent" before the transport is entered; the router calls it again at its own send boundary.
+        beforeSend();
         deliveryEntered = true;
-        const deliveryId = await this.deps.deliverer.deliver(config.deliveryChannel, message, { signal, assertCurrent: current });
+        const deliveryId = await this.deps.deliverer.deliver(config.deliveryChannel, message, { signal, assertCurrent: beforeSend });
         confirmedDelivery = { deliveryId };
         // Once the transport accepted a send, later revocation cannot erase its delivery receipt.
         return await this.record(trigger, ranAt, 'delivered', briefingSummary, {
@@ -339,13 +448,16 @@ export class CheckinService {
         if (deliveryEntered) return await this.record(trigger, ranAt, 'error', briefingSummary, {
           error: 'Check-in delivery outcome was not confirmed; delivery may have begun', judgment,
         });
-        const stale = invalidated || revision !== this.revision || JSON.stringify(this.getConfig()) !== JSON.stringify(config);
-        if (stale || signal.aborted || this.disposed) {
-          return await this.record(trigger, ranAt, stale ? 'skipped-stale' : 'cancelled', briefingSummary, { judgment });
+        if (run.stoppedBy === 'settings' || run.stoppedBy === 'job') {
+          // A run the settings stopped is repeated once, unless the caller or the service is done.
+          run.rerun = mayRerun && run.stoppedBy === 'settings' && !this.disposed && callerSignal?.aborted !== true;
+          return await this.record(trigger, ranAt, 'skipped-stale', briefingSummary, {
+            decisionReason: staleReason(run.stoppedBy, run.rerun), judgment,
+          });
         }
+        if (signal.aborted || this.disposed) return await this.record(trigger, ranAt, 'cancelled', briefingSummary, { judgment });
         if (isQuietHours(this.now(), config.quietHours)) return await this.record(trigger, ranAt, 'skipped-quiet-hours', briefingSummary, { judgment });
         if (error instanceof DecisionModelsDisabledError && isClassicOperation() || activateClassicFallback(error)) {
-          current();
           return await this.record(trigger, ranAt, 'skipped-decision-models-disabled', briefingSummary, {
             decisionReason: 'Decision models are unavailable; automatic check-in contact and note verification were not completed.', judgment,
           });
@@ -354,8 +466,7 @@ export class CheckinService {
         const detail = error instanceof Error ? error.message : String(error);
         return await this.record(trigger, ranAt, 'error', briefingSummary, { error: detail, judgment });
       } finally {
-        unsubscribe?.();
-        this.activeRuns.delete(controller);
+        this.activeRuns.delete(run);
       }
     });
   }
@@ -401,11 +512,21 @@ function toOutcome(outcome: CheckinReceiptOutcome, receipt: CheckinReceipt): Aut
     case 'error':
       return { outcome: 'error', summary: 'check-in evaluation failed', ...(receipt.error ? { error: receipt.error } : {}) };
     case 'cancelled': return { outcome: 'skipped', summary: receipt.decisionReason ?? 'check-in cancelled' };
-    case 'skipped-stale': return { outcome: 'skipped', summary: 'check-in configuration or authority changed' };
+    case 'skipped-stale': return { outcome: 'skipped', summary: receipt.decisionReason ?? 'the check-in settings or its job changed during the run' };
     case 'skipped-decision-models-disabled': return { outcome: 'skipped', summary: receipt.decisionReason ?? 'automatic check-ins require decision models' };
     default:
       return { outcome: 'skipped', summary: outcome === 'skipped-quiet-hours' ? 'quiet hours' : 'check-in disabled' };
   }
+}
+
+/** What a stopped run's receipt says: what changed, and what happens next. */
+function staleReason(by: 'settings' | 'job', rerun: boolean): string {
+  if (by === 'job') {
+    return 'The scheduled check-in job was removed, disabled or changed during this run, so nothing was sent. The schedule follows the job as it is now; checkin.run runs a check-in at once.';
+  }
+  return rerun
+    ? 'The check-in settings changed during this run, so nothing was sent; it runs again now on the new settings.'
+    : 'The check-in settings changed during this run, so nothing was sent. The next scheduled check-in uses the new settings; checkin.run runs one at once.';
 }
 
 function asString(value: unknown): string {

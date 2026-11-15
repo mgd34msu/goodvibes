@@ -37,7 +37,7 @@ function compose(contact = 0.99, content?: () => Promise<{ content: string }>, a
   return { catalog, configManager, sent, scope, fake };
 }
 async function enable(catalog: GatewayMethodCatalog) {
-  await catalog.invoke('checkin.config.set', { body: { enabled: true, deliveryChannel: 'synthetic:owner' }, context: {} });
+  await catalog.invoke('checkin.config.set', { body: { enabled: true, deliveryChannel: 'slack:owner' }, context: {} });
 }
 test('actual runtime composition is off by default and routes typed no without sending', async () => {
   const h = compose(0.01);
@@ -81,7 +81,7 @@ test('live invocation scope revocation after drafting cannot reach synthetic sen
     expect(await work).toMatchObject({ outcome: 'error' }); expect(h.sent).toEqual([]);
   } finally { h.scope.dispose(); }
 });
-test('merged prepared-setting mutation invalidates a pending check-in before the committed change', async () => {
+test('a change to an unrelated setting during a check-in does not stop it', async () => {
   const entered = Promise.withResolvers<void>(); const held = Promise.withResolvers<{ content: string }>();
   const h = compose(0.99, async () => { entered.resolve(); return held.promise; });
   try {
@@ -91,7 +91,7 @@ test('merged prepared-setting mutation invalidates a pending check-in before the
     const transition = h.configManager.beginPreparedMutation(mutation);
     expect(h.configManager.finishPreparedMutation(mutation, transition).status).toBe('committed');
     held.resolve({ content: 'The release needs your deployment-window choice.' });
-    expect(await work).toMatchObject({ outcome: 'skipped' }); expect(h.sent).toEqual([]);
+    expect(await work).toMatchObject({ outcome: 'delivered' }); expect(h.sent).toEqual(['The release needs your deployment-window choice.']);
   } finally { h.scope.dispose(); }
 });
 

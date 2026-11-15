@@ -403,11 +403,8 @@ function workspacesByRunnerId(workspaces: readonly RemoteWorkspaceEvidenceRecord
 }
 
 function workPlanItems(context: CommandContext): readonly WorkPlanItem[] {
-  try {
-    return context.workspace.workPlanStore?.listItems() ?? [];
-  } catch {
-    throw new ToolInputProjectionError('unavailable');
-  }
+  // A pure read: it takes no lock and writes nothing, and its failure names the plan file.
+  return context.workspace.workPlanStore?.listItems() ?? [];
 }
 
 function workPlanItemsByAgentId(items: readonly WorkPlanItem[]): Map<string, readonly WorkPlanItem[]> {

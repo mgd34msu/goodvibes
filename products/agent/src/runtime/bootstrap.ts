@@ -67,7 +67,7 @@ import { createRuntimeShutdown } from './bootstrap-shutdown.ts';
 import { recordComposedPromptUsage } from './prompt-usage-record.ts';
 import { createMemorySpineRecheck, resolveMemorySpineRecheckMs } from './memory-spine-recheck.ts';
 import '../tools/agent-mcp-call-route.ts';
-import { capabilitySnapshot } from '../capabilities/capability-snapshot.ts';
+import { capabilitySnapshot, refreshCapabilityIndex } from '../capabilities/capability-snapshot.ts';
 import './bootstrap-capability-wiring.ts';
 import '../tools/agent-capability-tool.ts';
 import '../tools/agent-autonomy-tool.ts';
@@ -358,7 +358,9 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
           memoryRegistry: services.memoryRegistry,
           turnText: activePromptTurnText,
           memoryRecallSnapshot: services.memorySpineClient.recallSnapshot(),
-          capabilityIndex: capabilitySnapshot(),
+          // Resolved once per turn (in-memory lookups and a handful of stats), so a credential
+          // connected or removed mid-session is what this turn's prompt says.
+          capabilityIndex: refreshCapabilityIndex() ?? capabilitySnapshot(),
         };
         const composedPrompt = (async () => {
           signal?.throwIfAborted();

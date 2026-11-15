@@ -595,8 +595,10 @@ export function unifiedInboxThirdPartyText(inbox: UnifiedInbox): string {
  * Counts, source states and routes are the product's own words. The messages
  * and errors under them were written by others, so they are emitted only inside
  * the untrusted-content frame (see untrusted-content.ts), never in the open.
+ * `thirdParty: 'elsewhere'` leaves them out and says where they are, for a
+ * caller that hands the model the same text once in its own untrusted envelope.
  */
-export function formatUnifiedInbox(inbox: UnifiedInbox): string {
+export function formatUnifiedInbox(inbox: UnifiedInbox, options: { readonly thirdParty?: 'framed' | 'elsewhere' } = {}): string {
   const { summary, sources } = inbox;
   const feed = inbox.inboundChannelFeed;
   const lines: string[] = [
@@ -617,7 +619,9 @@ export function formatUnifiedInbox(inbox: UnifiedInbox): string {
   }
 
   const thirdParty = thirdPartyInboxLines(inbox);
-  if (thirdParty.length > 0) {
+  if (thirdParty.length > 0 && options.thirdParty === 'elsewhere') {
+    lines.push('', `  Messages, senders and errors written by others (${thirdParty.length} lines): in the untrusted envelope beside this text.`);
+  } else if (thirdParty.length > 0) {
     lines.push('', renderForModel(untrustedFrom({
       surfaceId: 'channel-message',
       origin: 'unified inbox: source and delivery errors, surface messages, route-binding senders and provider inbound messages',

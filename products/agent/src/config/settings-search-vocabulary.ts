@@ -3,21 +3,18 @@
  * domain, and the guided flow that domain has when settings alone cannot finish
  * the job.
  *
- * A settings search reads the key and the description, and both are written in
- * the platform's vocabulary. `payments.budget.dailyItem` describes itself as
- * "Most that may be spent on ITEM PRICES in one calendar day, written the way
- * you would say it", accurate, and it contains neither "spending limit" nor
- * "credit card", which is what was actually asked. The catalog answered "0",
- * the model reported that the platform has no payment settings, and
- * thirty-two live keys went unmentioned.
+ * Setting keys and descriptions are written in the platform's vocabulary:
+ * `payments.budget.dailyItem` says neither "spending limit" nor "credit card",
+ * which is what people ask for. When a settings search is exactly one of the
+ * phrases below, the search is narrowed to that domain's settings before the
+ * reading ranks them (`settingDomainForPhrase`): one map lookup, and the phrases
+ * written down here no longer depend on the reading to find their domain. The
+ * phrases are never shown as if the schema said them, and nothing here can add,
+ * hide, or rename a setting.
  *
- * So each domain carries the words for it as well as its own. These are search
- * aliases only: they are indexed beside the key and never displayed as if the
- * schema said them, and nothing here can add, hide, or rename a setting.
- *
- * Every domain named here must exist in CONFIG_SCHEMA, a test pins that, so an
- * alias for a domain that was renamed or removed fails the build instead of
- * quietly indexing nothing.
+ * Every domain named here must exist in CONFIG_SCHEMA (a test pins that), so a
+ * phrase for a domain that was renamed or removed fails the build instead of
+ * narrowing a search to nothing.
  */
 
 export interface SettingDomainVocabulary {
@@ -76,11 +73,23 @@ export const SETTING_DOMAIN_VOCABULARY: Readonly<Record<string, SettingDomainVoc
   },
 };
 
-/** The alias text indexed beside a setting key, or '' for a domain with none. */
-export function settingDomainAliasText(key: string): string {
-  const domain = key.split('.')[0] ?? '';
-  const vocabulary = SETTING_DOMAIN_VOCABULARY[domain];
-  return vocabulary ? vocabulary.aliases.join('\n') : '';
+const normalizePhrase = (text: string): string => text.trim().toLowerCase().replace(/\s+/g, ' ');
+
+/** Phrase to domain, built once; a phrase listed under two domains belongs to the first. */
+const DOMAIN_BY_PHRASE: ReadonlyMap<string, string> = (() => {
+  const map = new Map<string, string>();
+  for (const [domain, vocabulary] of Object.entries(SETTING_DOMAIN_VOCABULARY)) {
+    for (const alias of vocabulary.aliases) {
+      const phrase = normalizePhrase(alias);
+      if (!map.has(phrase)) map.set(phrase, domain);
+    }
+  }
+  return map;
+})();
+
+/** The settings domain a search names exactly by one of its plain phrases ("spending limit" is payments). */
+export function settingDomainForPhrase(query: string): string | undefined {
+  return DOMAIN_BY_PHRASE.get(normalizePhrase(query));
 }
 
 /** The guided flow for a key's domain, when it has one. */

@@ -50,7 +50,8 @@ import { SettingsModal } from './settings-modal.ts';
 import { McpWorkspace } from './mcp-workspace.ts';
 import { AgentWorkspace } from './agent-workspace.ts';
 import { parseSlashCommand } from './slash-command-parser.ts';
-import { capturedOutputReportsFailure, captureCommandPrint } from './workspace-command-output.ts';
+import { captureCommandPrint } from './workspace-command-output.ts';
+import { formatRefusal, readRefusal } from '@goodvibes-jev/engine/errors';
 import { SessionPickerModal } from './session-picker-modal.ts';
 import { ProfilePickerModal } from './profile-picker-modal.ts';
 import {
@@ -479,10 +480,12 @@ export class InputHandler extends TerminalInputHandlerState {
       const executeCommand = context.executeCommand;
       void captureCommandPrint(context, () => executeCommand(name, [...args])).then((outcome) => {
         if (!outcome.ok) {
+          // A command that refuses throws its refusal: show its reason and next step.
+          const refused = readRefusal(outcome.error);
           this.agentWorkspace.lastActionResult = {
             kind: 'error',
-            title: `${displayCommand} failed`,
-            detail: outcome.error instanceof Error ? outcome.error.message : String(outcome.error),
+            title: refused ? `${displayCommand} was refused` : `${displayCommand} failed`,
+            detail: refused ? formatRefusal(refused) : outcome.error instanceof Error ? outcome.error.message : String(outcome.error),
             command: displayCommand,
           };
         } else if (outcome.value === false) {
@@ -494,13 +497,11 @@ export class InputHandler extends TerminalInputHandlerState {
             safety: 'safe',
           };
         } else {
-          // Most handlers report a failure by printing and returning, so the
-          // outcome is read from what they printed.
-          const failed = capturedOutputReportsFailure(outcome.lines);
+          // It returned, so it did what it says; what it printed is the result, not a verdict.
           printLongOutput(outcome.lines);
           this.agentWorkspace.lastActionResult = {
-            kind: failed ? 'error' : 'dispatched',
-            title: failed ? `${displayCommand} reported a problem` : `Result: ${displayCommand}`,
+            kind: 'dispatched',
+            title: `Result: ${displayCommand}`,
             detail: buildCapturedDetail(outcome.lines),
             command: displayCommand,
             safety: 'safe',

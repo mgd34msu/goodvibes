@@ -86,7 +86,6 @@ describe('CLI service posture', () => {
 
     expect(posture.endpoints.find((endpoint) => endpoint.id === 'controlPlane')?.reachable).toBe(false);
     expect(posture.issues).toContain('runtime connection is enabled but not reachable on 127.0.0.1:1.');
-    expect(posture.managed).toBeUndefined();
   });
 
   test('reads configured service logs with redaction', async () => {

@@ -10,7 +10,7 @@ import { summarizeMemoryItem, summarizeNoteItem, summarizePersonaItem, summarize
 import type { AgentWorkspaceLocalLibraryItem } from '../input/agent-workspace-types.ts';
 import type { CommandContext } from '../input/command-registry.ts';
 import type { MemoryApi } from '@goodvibes-jev/engine/platform/platform/knowledge';
-import { captureWorkPlanItems, captureWorkPlanLocation } from '@goodvibes-jev/engine/platform/platform/workflow';
+import { captureWorkPlanItems, WorkPlanStore } from '@goodvibes-jev/engine/platform/platform/workflow';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { captureCatalogData, captureCatalogMethods, captureCatalogSnapshotGuard, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { modelReadingServicePath, captureModelReadingSnapshotGuard } from './agent-harness-model-reading-source.ts';
@@ -73,7 +73,6 @@ export function acquireLearningCuratorSource(context: LearningCuratorNativeConte
   const shellPaths = context.workspace?.shellPaths;
   if (runtime) guards.push(captureCatalogMethods(runtime, ['sessionId']));
   if (memory) guards.push(captureCatalogMethods(memory, ['getAll']));
-  if (work) guards.push(captureCatalogMethods(work, ['listItems', 'getActivePlan', 'readPlan', 'options', 'homeDirectory']), captureWorkPlanLocation(work));
   if (manager) guards.push(captureCatalogMethods(manager, typeof manager.fingerprint === 'function'
     ? ['list', 'load', 'fingerprint', 'sessionsDir', 'sanitizeName'] : ['list', 'load', 'sessionsDir', 'sanitizeName']));
   if (shellPaths) guards.push(captureCatalogMethods(shellPaths, ['resolveProjectPath', 'resolveUserPath', 'homeDirectory', 'workingDirectory']));
@@ -101,11 +100,12 @@ export function acquireLearningCuratorSource(context: LearningCuratorNativeConte
   };
   const assertReadingBackends = () => { assertNative(); for (const guard of retained) guard(); assertNative(); };
   assertNative();
-  const nativeWorkItems = work && captureWorkPlanItems(work);
-  assertNative();
+  // One read of the plan; later reads compare the plan file's revision (one lstat) and
+  // refuse with the work plan named when it changed.
+  const nativeWorkItems = work instanceof WorkPlanStore ? captureWorkPlanItems(work) : undefined;
   const readWorkItems = () => {
-    if (!nativeWorkItems) return work?.listItems({ readOnly: true }) ?? [];
-    try { nativeWorkItems.assertCurrent(); } catch { throw new ToolInputProjectionError('held'); }
+    if (!nativeWorkItems) return work?.listItems() ?? [];
+    nativeWorkItems.assertCurrent();
     return nativeWorkItems.items;
   };
   // Parsing every saved session on each currentness check grows with the number of sessions.

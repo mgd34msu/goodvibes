@@ -10,7 +10,7 @@ import { captureCatalogData, rankHarnessCatalog, type CatalogRankingOptions } fr
 import { snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
 import { processClassificationOptions, spawnClassifiedBackgroundProcess } from './agent-harness-process-launch.ts';
 import type { ProcessClassificationOptions } from './agent-harness-process-classification.ts';
-import { getOperatorContract } from '@goodvibes-jev/engine/platform/contracts';
+import { operatorContractMethods, type OperatorContractMethodEntry } from '../agent/operator-contract-routes.ts';
 import type { BackgroundProcess, ProcessManager } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { CommandContext } from '../input/command-registry.ts';
 import { sudoExecutionPosture } from './agent-harness-sudo-posture.ts';
@@ -69,25 +69,7 @@ function managerFrom(context: CommandContext): ProcessManager | undefined {
   return context.workspace.processManager;
 }
 
-interface OperatorContractMethod {
-  readonly id: string;
-  readonly title?: string;
-  readonly description?: string;
-  readonly category?: string;
-  readonly access?: string;
-  readonly scopes?: readonly string[];
-  readonly http?: {
-    readonly method?: string;
-    readonly path?: string;
-  };
-}
-
-function operatorContractMethods(): readonly OperatorContractMethod[] {
-  const methods = getOperatorContract().operator?.methods;
-  return Array.isArray(methods)
-    ? methods.filter((method): method is OperatorContractMethod => Boolean(method?.id))
-    : [];
-}
+type OperatorContractMethod = OperatorContractMethodEntry;
 
 function operatorMethodSearchText(method: OperatorContractMethod): string {
   // EXCLUDES title/description prose: discovery keys off what a method IS

@@ -38,32 +38,43 @@ export function moveSettingsSelection(
     if (state.currentCategory === 'subscriptions') state.subscriptionLogoutConfirmationTarget = null;
   }
 }
+/** Where a settings target landed. `not-found`: no category or key has that name, so the text became the search. */
+export type SettingsTargetOutcome = 'category' | 'setting' | 'not-found' | 'none';
+
 export function selectSettingsTarget<Category extends string>(
   state: { categoryIndex: number; selectedIndex: number; contextScroll: number },
   target: string | undefined,
   categories: readonly Category[],
   groups: ReadonlyMap<Category, readonly { readonly setting: { readonly key: string } }[]>,
-  policy: { readonly resetScroll: boolean; readonly focusSettings: () => void },
-): void {
+  policy: {
+    readonly resetScroll: boolean;
+    readonly focusSettings: () => void;
+    /** Show the settings search for `query`; how a prefix such as `fetch.` or a near-miss key still lands somewhere useful. */
+    readonly search?: ((query: string) => void) | undefined;
+  },
+): SettingsTargetOutcome {
   const normalized = target?.trim();
-  if (!normalized) return;
+  if (!normalized) return 'none';
   if (policy.resetScroll) state.contextScroll = 0;
-  const categoryIndex = categories.findIndex((category) => category === normalized);
+  const lower = normalized.toLowerCase();
+  const categoryIndex = categories.findIndex((category) => category.toLowerCase() === lower);
   if (categoryIndex >= 0) {
     state.categoryIndex = categoryIndex;
     state.selectedIndex = 0;
     policy.focusSettings();
-    return;
+    return 'category';
   }
   for (const [index, category] of categories.entries()) {
-    const entryIndex = (groups.get(category) ?? []).findIndex((entry) => entry.setting.key === normalized);
+    const entryIndex = (groups.get(category) ?? []).findIndex((entry) => entry.setting.key.toLowerCase() === lower);
     if (entryIndex >= 0) {
       state.categoryIndex = index;
       state.selectedIndex = entryIndex;
       policy.focusSettings();
-      return;
+      return 'setting';
     }
   }
+  policy.search?.(normalized);
+  return 'not-found';
 }
 
 export function selectedSettingsCategoryEntry<Entry>(

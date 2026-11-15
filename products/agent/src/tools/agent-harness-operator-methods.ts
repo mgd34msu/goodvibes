@@ -1,11 +1,11 @@
 import { snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
-import { getOperatorContract } from '@goodvibes-jev/engine/platform/contracts';
+import { operatorContractMethods as contractMethodIndex, operatorMethodIsReadOnly, type OperatorContractMethodEntry } from '../agent/operator-contract-routes.ts';
 import { previewHarnessText } from './agent-harness-text.ts';
 import { rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { CATALOG_QUERIES } from './agent-harness-catalog-filters.ts';
 import { catalogEnvelope, catalogFilters } from './agent-harness-tool-utils.ts';
 import { EFFECT_ADMISSION_SENTENCE } from './agent-harness-effect-admission.ts';
-import { operatorMethodIsOutward, operatorMethodIsReadOnly } from './agent-operator-input-projector.ts';
+import { operatorMethodIsOutward } from './agent-operator-input-projector.ts';
 import { clampReadLimit } from './agent-harness-read-helpers.ts';
 
 export interface AgentHarnessOperatorMethodArgs {
@@ -24,20 +24,7 @@ type OperatorMethodEffect =
 
 type OperatorMethodLookupSource = 'methodId' | 'target' | 'query';
 
-interface OperatorContractMethod {
-  readonly id: string;
-  readonly title?: string;
-  readonly description?: string;
-  readonly category?: string;
-  readonly access?: string;
-  readonly scopes?: readonly string[];
-  readonly http?: {
-    readonly method?: string;
-    readonly path?: string;
-  };
-  readonly inputSchema?: Record<string, unknown>;
-  readonly invokable?: boolean;
-}
+type OperatorContractMethod = OperatorContractMethodEntry;
 
 interface OperatorMethodDescriptor {
   readonly id: string;
@@ -110,13 +97,10 @@ function readLimit(value: unknown, fallback: number): number {
   return clampReadLimit(value, fallback, 500);
 }
 
+/** The methods served over HTTP, by id; the listing is the route module's one index. */
 function operatorContractMethods(): readonly OperatorContractMethod[] {
-  const contract = getOperatorContract();
-  const methods = Array.isArray(contract.operator?.methods)
-    ? contract.operator.methods as OperatorContractMethod[]
-    : [];
-  return methods
-    .filter((method) => method.id && method.http?.method && method.http.path)
+  return contractMethodIndex()
+    .filter((method) => method.http?.method && method.http.path)
     .sort((a, b) => a.id.localeCompare(b.id));
 }
 

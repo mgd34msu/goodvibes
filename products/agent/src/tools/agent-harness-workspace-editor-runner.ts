@@ -45,6 +45,78 @@ function missingRequiredEditorFields(editor: AgentWorkspaceLocalEditor, fields: 
     .map((field) => field.id);
 }
 
+type FieldReader = (fieldId: string) => string;
+
+/** One workspace form whose work is a single tool call. */
+export interface WorkspaceEditorToolCall {
+  /** The nested call id, stable per form. */
+  readonly callId: string;
+  readonly tool: string;
+  /** Set for a form that changes something: the label its confirmation is asked under. */
+  readonly confirmation?: string;
+  /** The tool's arguments from the form's fields (and the person's request, where the tool records one). */
+  readonly build: (readField: FieldReader, explicitUserRequest: string) => object;
+}
+
+const DOCUMENT_EDITOR_KINDS: ReadonlySet<string> = new Set([
+  'document-browse', 'document-show', 'document-create', 'document-update', 'document-review', 'document-comment',
+  'document-resolve-comment', 'document-suggest', 'document-accept-suggestion', 'document-reject-suggestion',
+  'document-insert-artifact', 'document-attach-artifact', 'document-export',
+]);
+
+const EDITOR_TOOL_CALLS: Readonly<Record<string, WorkspaceEditorToolCall>> = {
+  'artifact-browser': { callId: 'agent-harness-workspace-artifact-browser', tool: 'agent_artifacts', build: (read) => buildAgentArtifactBrowserToolArgs(read) },
+  'artifact-show': { callId: 'agent-harness-workspace-artifact-show', tool: 'agent_artifacts', build: (read) => buildAgentArtifactShowToolArgs(read) },
+  'artifact-export-file': { callId: 'agent-harness-workspace-artifact-export', tool: 'agent_artifacts', confirmation: 'Workspace artifact export',
+    build: (read, request) => buildAgentArtifactExportToolArgs(read, request) },
+  'artifact-export-package': { callId: 'agent-harness-workspace-artifact-package-export', tool: 'agent_artifacts', confirmation: 'Workspace artifact package export',
+    build: (read, request) => buildAgentArtifactPackageToolArgs(read, request) },
+  'artifact-promote-knowledge': { callId: 'agent-harness-workspace-artifact-promote-knowledge', tool: 'agent_knowledge_ingest', confirmation: 'Workspace artifact Knowledge promotion',
+    build: (read, request) => buildAgentArtifactPromoteKnowledgeToolArgs(read, request) },
+  'research-report': { callId: 'agent-harness-workspace-research-report', tool: 'agent_research_report', confirmation: 'Workspace research report artifact save',
+    build: (read, request) => captureAgentResearchReportToolArgs(read, request) },
+  'research-run': { callId: 'agent-harness-workspace-research-run', tool: 'agent_research_runs', confirmation: 'Workspace research run creation',
+    build: (read, request) => buildAgentResearchRunToolArgs(read, request) },
+  'research-source': { callId: 'agent-harness-workspace-research-source', tool: 'agent_research_sources', confirmation: 'Workspace research source queue add',
+    build: (read, request) => buildAgentResearchSourceToolArgs(read, request) },
+  'document-review-packet-preset': { callId: 'agent-harness-workspace-review-packet-preset', tool: 'agent_review_packet_presets', confirmation: 'Workspace review packet preset save',
+    build: (read, request) => buildAgentDocumentReviewPacketPresetToolArgs(read, request) },
+  'document-review-packet-preset-refresh': { callId: 'agent-harness-workspace-review-packet-preset-refresh', tool: 'agent_review_packet_presets', confirmation: 'Workspace review packet preset refresh',
+    build: (read, request) => buildAgentDocumentReviewPacketPresetRefreshToolArgs(read, request) },
+  'document-review-packet-share': { callId: 'agent-harness-workspace-review-packet-share', tool: 'agent_review_packet_share', confirmation: 'Workspace review packet share',
+    build: (read, request) => buildAgentDocumentReviewPacketShareToolArgs(read, request) },
+  'model-compare': { callId: 'agent-harness-workspace-model-compare', tool: 'agent_model_compare', confirmation: 'Workspace blind model comparison',
+    build: (read, request) => buildAgentModelCompareToolArgs(read, request) },
+  'local-model-benchmark': { callId: 'agent-harness-workspace-model-compare', tool: 'agent_model_compare', confirmation: 'Workspace blind model comparison',
+    build: (read, request) => buildAgentModelCompareToolArgs(read, request) },
+  'model-compare-review': { callId: 'agent-harness-workspace-model-compare-review', tool: 'agent_model_compare', build: (read) => buildAgentModelCompareReviewToolArgs(read) },
+  'model-compare-handoff-diff': { callId: 'agent-harness-workspace-model-compare-handoff-diff', tool: 'agent_model_compare', build: (read) => buildAgentModelCompareHandoffDiffToolArgs(read) },
+  'model-compare-judge': { callId: 'agent-harness-workspace-model-compare-judge', tool: 'agent_model_compare', confirmation: 'Workspace comparison judgment',
+    build: (read, request) => buildAgentModelCompareJudgmentToolArgs(read, request) },
+  'model-compare-apply': { callId: 'agent-harness-workspace-model-compare-apply', tool: 'agent_model_compare', confirmation: 'Workspace comparison route update',
+    build: (read, request) => buildAgentModelCompareApplyToolArgs(read, request) },
+  'model-compare-route-decision': { callId: 'agent-harness-workspace-model-compare-route-decision', tool: 'agent_model_compare', confirmation: 'Workspace comparison route decision',
+    build: (read, request) => buildAgentModelCompareRouteDecisionToolArgs(read, request) },
+  'model-compare-export': { callId: 'agent-harness-workspace-model-compare-export', tool: 'agent_model_compare', confirmation: 'Workspace comparison export',
+    build: (read, request) => buildAgentModelCompareExportToolArgs(read, request) },
+  'model-compare-analytics': { callId: 'agent-harness-workspace-model-compare-analytics', tool: 'agent_model_compare', build: (read) => buildAgentModelCompareAnalyticsToolArgs(read) },
+};
+
+/**
+ * The tool call a workspace form stands for, or undefined for a form that is
+ * not one tool call (a lane read, a local editor, a slash command). One table
+ * for every caller: the harness runner (the agent filling a form in) and the
+ * owner's own submit build the same call from the same fields.
+ */
+export function workspaceEditorToolCall(editor: AgentWorkspaceLocalEditor): WorkspaceEditorToolCall | undefined {
+  if (DOCUMENT_EDITOR_KINDS.has(editor.kind)) {
+    const isMutation = editor.kind !== 'document-browse' && editor.kind !== 'document-show';
+    return { callId: 'agent-harness-workspace-document', tool: 'agent_documents', ...(isMutation ? { confirmation: 'Workspace Agent document action' } : {}),
+      build: (read, request) => buildAgentDocumentToolArgs(editor, read, request) };
+  }
+  return Object.hasOwn(EDITOR_TOOL_CALLS, editor.kind) ? EDITOR_TOOL_CALLS[editor.kind] : undefined;
+}
+
 export async function runWorkspaceEditorAction(
   deps: AgentHarnessToolDeps,
   action: AgentWorkspaceAction,
@@ -115,207 +187,18 @@ export async function runWorkspaceEditorAction(
     return runTranslatedWorkspaceCommand(deps, args, command, options);
   }
 
-  if (editor.kind === 'artifact-browser') {
-    const artifactsToolArgs = buildAgentArtifactBrowserToolArgs(fieldReader(editor, fields));
-    const result = await deps.toolRegistry.executeNested(
-      'agent-harness-workspace-artifact-browser',
-      'agent_artifacts',
-      modelEditorToolArgs(artifactsToolArgs, args.explicitUserRequest),
-      options,
-    );
-    return nestedToolOutput(result, {
-      action: action.id,
-      tool: 'agent_artifacts',
-      output: result.output ?? null,
-      error: result.error ?? null,
-      modelExecution: describeWorkspaceEditorModelExecution(editor.kind),
-    });
-  }
-
-  if (editor.kind === 'artifact-show') {
-    const artifactToolArgs = buildAgentArtifactShowToolArgs(fieldReader(editor, fields));
-    const result = await deps.toolRegistry.executeNested(
-      'agent-harness-workspace-artifact-show',
-      'agent_artifacts',
-      modelEditorToolArgs(artifactToolArgs, args.explicitUserRequest),
-      options,
-    );
-    return nestedToolOutput(result, {
-      action: action.id,
-      tool: 'agent_artifacts',
-      output: result.output ?? null,
-      error: result.error ?? null,
-      modelExecution: describeWorkspaceEditorModelExecution(editor.kind),
-    });
-  }
-
-  if (editor.kind === 'artifact-export-file') {
-    const confirmationError = requireConfirmedAction(args, options, 'Workspace artifact export');
-    if (confirmationError) return error(confirmationError);
-    const artifactToolArgs = buildAgentArtifactExportToolArgs(
-      fieldReader(editor, fields),
-      readString(args.explicitUserRequest),
-    );
-    const result = await deps.toolRegistry.executeNested(
-      'agent-harness-workspace-artifact-export',
-      'agent_artifacts',
-      modelEditorToolArgs(artifactToolArgs, args.explicitUserRequest),
-      options,
-    );
-    return nestedToolOutput(result, {
-      action: action.id,
-      tool: 'agent_artifacts',
-      output: result.output ?? null,
-      error: result.error ?? null,
-      modelExecution: describeWorkspaceEditorModelExecution(editor.kind),
-    });
-  }
-
-  if (editor.kind === 'artifact-export-package') {
-    const confirmationError = requireConfirmedAction(args, options, 'Workspace artifact package export');
-    if (confirmationError) return error(confirmationError);
-    const readField = fieldReader(editor, fields);
-    const artifactToolArgs = buildAgentArtifactPackageToolArgs(
-      readField,
-      readString(args.explicitUserRequest),
-    );
-    const result = await deps.toolRegistry.executeNested(
-      'agent-harness-workspace-artifact-package-export',
-      'agent_artifacts',
-      modelEditorToolArgs(artifactToolArgs, args.explicitUserRequest),
-      options,
-    );
-    return nestedToolOutput(result, {
-      action: action.id,
-      tool: 'agent_artifacts',
-      output: result.output ?? null,
-      error: result.error ?? null,
-      modelExecution: describeWorkspaceEditorModelExecution(editor.kind),
-    });
-  }
-
-  if (editor.kind === 'artifact-promote-knowledge') {
-    const confirmationError = requireConfirmedAction(args, options, 'Workspace artifact Knowledge promotion');
-    if (confirmationError) return error(confirmationError);
-    const ingestToolArgs = buildAgentArtifactPromoteKnowledgeToolArgs(
-      fieldReader(editor, fields),
-      readString(args.explicitUserRequest),
-    );
-    const result = await deps.toolRegistry.executeNested(
-      'agent-harness-workspace-artifact-promote-knowledge',
-      'agent_knowledge_ingest',
-      modelEditorToolArgs(ingestToolArgs, args.explicitUserRequest),
-      options,
-    );
-    return nestedToolOutput(result, {
-      action: action.id,
-      tool: 'agent_knowledge_ingest',
-      output: result.output ?? null,
-      error: result.error ?? null,
-      modelExecution: describeWorkspaceEditorModelExecution(editor.kind),
-    });
-  }
-
-  if (editor.kind === 'research-report') {
-    const confirmationError = requireConfirmedAction(args, options, 'Workspace research report artifact save');
-    if (confirmationError) return error(confirmationError);
-    const researchToolArgs = captureAgentResearchReportToolArgs(
-      fieldReader(editor, fields),
-      readString(args.explicitUserRequest),
-    );
-    const result = await deps.toolRegistry.executeNested(
-      'agent-harness-workspace-research-report',
-      'agent_research_report',
-      modelEditorToolArgs(researchToolArgs, args.explicitUserRequest),
-      options,
-    );
-    return nestedToolOutput(result, {
-      action: action.id,
-      tool: 'agent_research_report',
-      output: result.output ?? null,
-      error: result.error ?? null,
-      modelExecution: describeWorkspaceEditorModelExecution(editor.kind),
-    });
-  }
-
-  if (editor.kind === 'research-run') {
-    const confirmationError = requireConfirmedAction(args, options, 'Workspace research run creation');
-    if (confirmationError) return error(confirmationError);
-    const runToolArgs = buildAgentResearchRunToolArgs(
-      fieldReader(editor, fields),
-      readString(args.explicitUserRequest),
-    );
-    const result = await deps.toolRegistry.executeNested(
-      'agent-harness-workspace-research-run',
-      'agent_research_runs',
-      modelEditorToolArgs(runToolArgs, args.explicitUserRequest),
-      options,
-    );
-    return nestedToolOutput(result, {
-      action: action.id,
-      tool: 'agent_research_runs',
-      output: result.output ?? null,
-      error: result.error ?? null,
-      modelExecution: describeWorkspaceEditorModelExecution(editor.kind),
-    });
-  }
-
-  if (editor.kind === 'research-source') {
-    const confirmationError = requireConfirmedAction(args, options, 'Workspace research source queue add');
-    if (confirmationError) return error(confirmationError);
-    const sourceToolArgs = buildAgentResearchSourceToolArgs(
-      fieldReader(editor, fields),
-      readString(args.explicitUserRequest),
-    );
-    const result = await deps.toolRegistry.executeNested(
-      'agent-harness-workspace-research-source',
-      'agent_research_sources',
-      modelEditorToolArgs(sourceToolArgs, args.explicitUserRequest),
-      options,
-    );
-    return nestedToolOutput(result, {
-      action: action.id,
-      tool: 'agent_research_sources',
-      output: result.output ?? null,
-      error: result.error ?? null,
-      modelExecution: describeWorkspaceEditorModelExecution(editor.kind),
-    });
-  }
-
-  if (
-    editor.kind === 'document-browse'
-    || editor.kind === 'document-show'
-    || editor.kind === 'document-create'
-    || editor.kind === 'document-update'
-    || editor.kind === 'document-review'
-    || editor.kind === 'document-comment'
-    || editor.kind === 'document-resolve-comment'
-    || editor.kind === 'document-suggest'
-    || editor.kind === 'document-accept-suggestion'
-    || editor.kind === 'document-reject-suggestion'
-    || editor.kind === 'document-insert-artifact'
-    || editor.kind === 'document-attach-artifact'
-    || editor.kind === 'document-export'
-  ) {
-    const isMutation = editor.kind !== 'document-browse' && editor.kind !== 'document-show';
-    if (isMutation) {
-      const confirmationError = requireConfirmedAction(args, options, 'Workspace Agent document action');
+  // A form whose work is one tool call: the same call the owner's own submit makes.
+  const toolCall = workspaceEditorToolCall(editor);
+  if (toolCall) {
+    if (toolCall.confirmation) {
+      const confirmationError = requireConfirmedAction(args, options, toolCall.confirmation);
       if (confirmationError) return error(confirmationError);
     }
-    const documentToolArgs = buildAgentDocumentToolArgs(
-      editor,
-      fieldReader(editor, fields),
-      readString(args.explicitUserRequest),
-    );
-    const result = await deps.toolRegistry.executeNested(
-      'agent-harness-workspace-document',
-      'agent_documents',
-      modelEditorToolArgs(documentToolArgs, args.explicitUserRequest),
-      options,
-    );
+    const built = toolCall.build(fieldReader(editor, fields), readString(args.explicitUserRequest));
+    const result = await deps.toolRegistry.executeNested(toolCall.callId, toolCall.tool, modelEditorToolArgs(built, args.explicitUserRequest), options);
     return nestedToolOutput(result, {
       action: action.id,
-      tool: 'agent_documents',
+      tool: toolCall.tool,
       output: result.output ?? null,
       error: result.error ?? null,
       modelExecution: describeWorkspaceEditorModelExecution(editor.kind),
@@ -360,231 +243,6 @@ export async function runWorkspaceEditorAction(
       modelExecution: describeWorkspaceEditorModelExecution(editor.kind),
     });
   }
-  if (editor.kind === 'document-review-packet-preset') {
-    const confirmationError = requireConfirmedAction(args, options, 'Workspace review packet preset save');
-    if (confirmationError) return error(confirmationError);
-    const presetArgs = buildAgentDocumentReviewPacketPresetToolArgs(
-      fieldReader(editor, fields),
-      readString(args.explicitUserRequest),
-    );
-    const result = await deps.toolRegistry.executeNested(
-      'agent-harness-workspace-review-packet-preset',
-      'agent_review_packet_presets',
-      modelEditorToolArgs(presetArgs, args.explicitUserRequest),
-      options,
-    );
-    return nestedToolOutput(result, {
-      action: action.id,
-      tool: 'agent_review_packet_presets',
-      output: result.output ?? null,
-      error: result.error ?? null,
-      modelExecution: describeWorkspaceEditorModelExecution(editor.kind),
-    });
-  }
-  if (editor.kind === 'document-review-packet-preset-refresh') {
-    const confirmationError = requireConfirmedAction(args, options, 'Workspace review packet preset refresh');
-    if (confirmationError) return error(confirmationError);
-    const presetArgs = buildAgentDocumentReviewPacketPresetRefreshToolArgs(
-      fieldReader(editor, fields),
-      readString(args.explicitUserRequest),
-    );
-    const result = await deps.toolRegistry.executeNested(
-      'agent-harness-workspace-review-packet-preset-refresh',
-      'agent_review_packet_presets',
-      modelEditorToolArgs(presetArgs, args.explicitUserRequest),
-      options,
-    );
-    return nestedToolOutput(result, {
-      action: action.id,
-      tool: 'agent_review_packet_presets',
-      output: result.output ?? null,
-      error: result.error ?? null,
-      modelExecution: describeWorkspaceEditorModelExecution(editor.kind),
-    });
-  }
-  if (editor.kind === 'document-review-packet-share') {
-    const confirmationError = requireConfirmedAction(args, options, 'Workspace review packet share');
-    if (confirmationError) return error(confirmationError);
-    const shareArgs = buildAgentDocumentReviewPacketShareToolArgs(
-      fieldReader(editor, fields),
-      readString(args.explicitUserRequest),
-    );
-    const result = await deps.toolRegistry.executeNested(
-      'agent-harness-workspace-review-packet-share',
-      'agent_review_packet_share',
-      modelEditorToolArgs(shareArgs, args.explicitUserRequest),
-      options,
-    );
-    return nestedToolOutput(result, {
-      action: action.id,
-      tool: 'agent_review_packet_share',
-      output: result.output ?? null,
-      error: result.error ?? null,
-      modelExecution: describeWorkspaceEditorModelExecution(editor.kind),
-    });
-  }
-
-  if (editor.kind === 'model-compare' || editor.kind === 'local-model-benchmark') {
-    const confirmationError = requireConfirmedAction(args, options, 'Workspace blind model comparison');
-    if (confirmationError) return error(confirmationError);
-    const compareToolArgs = buildAgentModelCompareToolArgs(
-      fieldReader(editor, fields),
-      readString(args.explicitUserRequest),
-    );
-    const result = await deps.toolRegistry.executeNested(
-      'agent-harness-workspace-model-compare',
-      'agent_model_compare',
-      modelEditorToolArgs(compareToolArgs, args.explicitUserRequest),
-      options,
-    );
-    return nestedToolOutput(result, {
-      action: action.id,
-      tool: 'agent_model_compare',
-      output: result.output ?? null,
-      error: result.error ?? null,
-      modelExecution: describeWorkspaceEditorModelExecution(editor.kind),
-    });
-  }
-
-  if (editor.kind === 'model-compare-review') {
-    const reviewToolArgs = buildAgentModelCompareReviewToolArgs(fieldReader(editor, fields));
-    const result = await deps.toolRegistry.executeNested(
-      'agent-harness-workspace-model-compare-review',
-      'agent_model_compare',
-      modelEditorToolArgs(reviewToolArgs, args.explicitUserRequest),
-      options,
-    );
-    return nestedToolOutput(result, {
-      action: action.id,
-      tool: 'agent_model_compare',
-      output: result.output ?? null,
-      error: result.error ?? null,
-      modelExecution: describeWorkspaceEditorModelExecution(editor.kind),
-    });
-  }
-
-  if (editor.kind === 'model-compare-handoff-diff') {
-    const handoffDiffArgs = buildAgentModelCompareHandoffDiffToolArgs(fieldReader(editor, fields));
-    const result = await deps.toolRegistry.executeNested(
-      'agent-harness-workspace-model-compare-handoff-diff',
-      'agent_model_compare',
-      modelEditorToolArgs(handoffDiffArgs, args.explicitUserRequest),
-      options,
-    );
-    return nestedToolOutput(result, {
-      action: action.id,
-      tool: 'agent_model_compare',
-      output: result.output ?? null,
-      error: result.error ?? null,
-      modelExecution: describeWorkspaceEditorModelExecution(editor.kind),
-    });
-  }
-
-  if (editor.kind === 'model-compare-judge') {
-    const confirmationError = requireConfirmedAction(args, options, 'Workspace comparison judgment');
-    if (confirmationError) return error(confirmationError);
-    const judgmentToolArgs = buildAgentModelCompareJudgmentToolArgs(
-      fieldReader(editor, fields),
-      readString(args.explicitUserRequest),
-    );
-    const result = await deps.toolRegistry.executeNested(
-      'agent-harness-workspace-model-compare-judge',
-      'agent_model_compare',
-      modelEditorToolArgs(judgmentToolArgs, args.explicitUserRequest),
-      options,
-    );
-    return nestedToolOutput(result, {
-      action: action.id,
-      tool: 'agent_model_compare',
-      output: result.output ?? null,
-      error: result.error ?? null,
-      modelExecution: describeWorkspaceEditorModelExecution(editor.kind),
-    });
-  }
-
-  if (editor.kind === 'model-compare-apply') {
-    const confirmationError = requireConfirmedAction(args, options, 'Workspace comparison route update');
-    if (confirmationError) return error(confirmationError);
-    const applyToolArgs = buildAgentModelCompareApplyToolArgs(
-      fieldReader(editor, fields),
-      readString(args.explicitUserRequest),
-    );
-    const result = await deps.toolRegistry.executeNested(
-      'agent-harness-workspace-model-compare-apply',
-      'agent_model_compare',
-      modelEditorToolArgs(applyToolArgs, args.explicitUserRequest),
-      options,
-    );
-    return nestedToolOutput(result, {
-      action: action.id,
-      tool: 'agent_model_compare',
-      output: result.output ?? null,
-      error: result.error ?? null,
-      modelExecution: describeWorkspaceEditorModelExecution(editor.kind),
-    });
-  }
-
-  if (editor.kind === 'model-compare-route-decision') {
-    const confirmationError = requireConfirmedAction(args, options, 'Workspace comparison route decision');
-    if (confirmationError) return error(confirmationError);
-    const routeDecisionToolArgs = buildAgentModelCompareRouteDecisionToolArgs(
-      fieldReader(editor, fields),
-      readString(args.explicitUserRequest),
-    );
-    const result = await deps.toolRegistry.executeNested(
-      'agent-harness-workspace-model-compare-route-decision',
-      'agent_model_compare',
-      modelEditorToolArgs(routeDecisionToolArgs, args.explicitUserRequest),
-      options,
-    );
-    return nestedToolOutput(result, {
-      action: action.id,
-      tool: 'agent_model_compare',
-      output: result.output ?? null,
-      error: result.error ?? null,
-      modelExecution: describeWorkspaceEditorModelExecution(editor.kind),
-    });
-  }
-
-  if (editor.kind === 'model-compare-export') {
-    const confirmationError = requireConfirmedAction(args, options, 'Workspace comparison export');
-    if (confirmationError) return error(confirmationError);
-    const exportToolArgs = buildAgentModelCompareExportToolArgs(
-      fieldReader(editor, fields),
-      readString(args.explicitUserRequest),
-    );
-    const result = await deps.toolRegistry.executeNested(
-      'agent-harness-workspace-model-compare-export',
-      'agent_model_compare',
-      modelEditorToolArgs(exportToolArgs, args.explicitUserRequest),
-      options,
-    );
-    return nestedToolOutput(result, {
-      action: action.id,
-      tool: 'agent_model_compare',
-      output: result.output ?? null,
-      error: result.error ?? null,
-      modelExecution: describeWorkspaceEditorModelExecution(editor.kind),
-    });
-  }
-
-  if (editor.kind === 'model-compare-analytics') {
-    const analyticsToolArgs = buildAgentModelCompareAnalyticsToolArgs(fieldReader(editor, fields));
-    const result = await deps.toolRegistry.executeNested(
-      'agent-harness-workspace-model-compare-analytics',
-      'agent_model_compare',
-      modelEditorToolArgs(analyticsToolArgs, args.explicitUserRequest),
-      options,
-    );
-    return nestedToolOutput(result, {
-      action: action.id,
-      tool: 'agent_model_compare',
-      output: result.output ?? null,
-      error: result.error ?? null,
-      modelExecution: describeWorkspaceEditorModelExecution(editor.kind),
-    });
-  }
-
   if (!isAgentWorkspaceCommandEditorKind(editor.kind)) {
     if (
       editor.kind === 'memory'

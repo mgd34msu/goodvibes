@@ -1,6 +1,6 @@
 import { ordinaryResearchOwner, cleanupResearchScreeningFixtures } from '../helpers/research-screening.ts';
 import { afterAll, afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
-import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
+import { installJudgmentPort, RefusalError, refusal } from '@goodvibes-jev/engine/errors';
 import { resetAgentMcpCallRouteForTests } from '../../tools/agent-mcp-call-route.ts';
 import { SqliteDecisionLog, withDecisionLog, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -164,29 +164,22 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
   });
 
 
-  test('a handler that prints a refusal and returns is not reported as a completed command', async () => {
+  test('a command that throws its refusal is reported as refused, whatever it printed', async () => {
     const fixture = makeFixture();
     try {
       const run = (commandName: string) => fixture.admittedTool.execute({
         mode: 'run_command', commandName, confirm: true, explicitUserRequest: `Run ${commandName}.`,
       });
-      fixture.commandRegistry.register({ name: 'refusesit', description: 'Prints a refusal', handler: (_args, ctx) => { ctx.print('Refused: no recorded admission for this change.'); } });
-      fixture.commandRegistry.register({ name: 'wantsargs', description: 'Prints usage', handler: (_args, ctx) => { ctx.print('\nUsage: /wantsargs <id>'); } });
+      fixture.commandRegistry.register({ name: 'refusesit', description: 'Throws a refusal', handler: (_args, ctx) => {
+        ctx.print('Checking...');
+        throw new RefusalError(refusal({ code: 'NO_ADMISSION', state: 'nothing was changed', reason: 'There is no recorded admission for this change', next: ['Ask the owner to run it'] }));
+      } });
       fixture.commandRegistry.register({ name: 'mentionsrefused', description: 'Mentions a refusal mid-text', handler: (_args, ctx) => { ctx.print('All done. Refused: 0 items.'); } });
 
       const refused = await run('refusesit');
       expect(refused.success).toBe(false);
-      expect(refused.error).toContain('ran but did not apply');
-      expect(refused.error).toContain('Refused: no recorded admission');
-
-      const usage = await run('wantsargs');
-      expect(usage.success).toBe(false);
-      expect(usage.error).toContain('ran but did not apply');
-
-      fixture.commandRegistry.register({ name: 'refuseslater', description: 'Refuses after a progress line', handler: (_args, ctx) => { ctx.print('Checking...'); ctx.print('Refused: the second step needs admission.'); } });
-      const later = await run('refuseslater');
-      expect(later.success).toBe(false);
-      expect(later.error).toContain('the second step needs admission');
+      expect(refused.error).toContain('was refused and did not apply');
+      expect(refused.error).toContain('There is no recorded admission for this change');
 
       const completed = await run('mentionsrefused');
       expect(completed.success).toBe(true);

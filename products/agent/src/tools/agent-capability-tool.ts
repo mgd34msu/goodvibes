@@ -37,6 +37,7 @@ import { buildProbeContext } from '../capabilities/capability-boot-check.ts';
 import { resolveCapabilityIndex } from '../capabilities/capability-index.ts';
 import { configValueIsPresent, safeMcpServerPosture, secretValueIsPresent, servedOperatorMethodIds } from '../capabilities/capability-sources.ts';
 import type { CapabilityIndexReport, ResolvedCapability } from '../capabilities/capability-types.ts';
+import { refreshCapabilityIndex, setCapabilitySnapshot } from '../capabilities/capability-snapshot.ts';
 import { describeGoogleConnection } from '../input/commands/google-connection-actions.ts';
 import { requirePlatform, requireShellPaths } from '../input/commands/runtime-services.ts';
 import type { CommandContext } from '../input/command-registry.ts';
@@ -206,9 +207,15 @@ export interface AgentCapabilityToolOptions {
 }
 
 export function createAgentCapabilityTool(options: AgentCapabilityToolOptions): Tool {
-  /** A fresh resolution every call: credentials can be connected mid-session. */
+  /**
+   * A fresh resolution every call, stored as the session's index so the system
+   * prompt says what this tool says: credentials can be connected mid-session.
+   * The session's own resolver is used when the boot check installed one.
+   */
   function resolveNow(): CapabilityIndexReport {
-    return resolveCapabilityIndex(
+    const refreshed = refreshCapabilityIndex();
+    if (refreshed) return refreshed;
+    const report = resolveCapabilityIndex(
       buildProbeContext({
         toolRegistry: options.toolRegistry,
         homeDirectory: requireShellPaths(options.commandContext).homeDirectory,
@@ -220,6 +227,8 @@ export function createAgentCapabilityTool(options: AgentCapabilityToolOptions): 
       }),
       { homeDirectory: requireShellPaths(options.commandContext).homeDirectory },
     );
+    setCapabilitySnapshot(report);
+    return report;
   }
 
   function googleToolRegistered(): boolean {

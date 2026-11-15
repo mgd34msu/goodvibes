@@ -7,7 +7,7 @@ import { AgentPersonaRegistry, buildActivePersonaPrompt } from '../agent/persona
 import { buildProjectContextPrompt, discoverProjectContextFiles } from '../agent/project-context-files.ts';
 import { AgentRoutineRegistry, buildEnabledRoutinesPrompt, evaluateAgentRoutineReadiness } from '../agent/routine-registry.ts';
 import { AgentSkillRegistry, buildEnabledSkillsPrompt, evaluateAgentSkillBundleReadiness, evaluateAgentSkillReadiness } from '../agent/skill-registry.ts';
-import { buildVibeProjectionPrompt, discoverVibeFiles } from '../agent/vibe-file.ts';
+import { buildVibePrompt, discoverVibeFiles } from '../agent/vibe-file.ts';
 import { buildCapabilitySummaryPrompt } from '../agent/capability-summary-prompt.ts';
 import type { PromptContextReceipt } from '../agent/prompt-context-receipts.ts';
 import { capabilitySnapshot } from '../capabilities/capability-snapshot.ts';
@@ -434,12 +434,9 @@ async function promptContextSegments(context: CommandContext, includeParameters:
     ];
   }
 
+  // Mirror the runtime: the VIBE prompt is the files on disk, read once for both the prompt and the receipt.
   const vibe = discoverVibeFiles(shellPaths);
-  // Mirror the runtime, the VIBE prompt is a PROJECTION of persona records,
-  // not a file re-read (discoverVibeFiles stays for the file-discovery receipt below).
-  // The runtime projects from the local registry even when the memory segment reads the spine's recall snapshot.
-  const vibeMemory = promptMemoryApi(context.clients?.agentKnowledgeApi?.memory);
-  const vibePrompt = (vibeMemory ? buildVibeProjectionPrompt(vibeMemory) : null) ?? '';
+  const vibePrompt = buildVibePrompt(shellPaths, vibe) ?? '';
   const projectContext = discoverProjectContextFiles(shellPaths);
   const projectContextPrompt = buildProjectContextPrompt(shellPaths) ?? '';
   const personaSnapshot = AgentPersonaRegistry.fromShellPaths(shellPaths).snapshot();

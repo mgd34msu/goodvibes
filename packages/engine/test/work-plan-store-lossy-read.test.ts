@@ -10,7 +10,6 @@ function makeStore(): WorkPlanStore {
 }
 
 function seed(store: WorkPlanStore, items: unknown[]): string {
-  store.getActivePlan();
   mkdirSync(dirname(store.filePath), { recursive: true });
   const text = JSON.stringify({ id: 'wp-fixture', projectId: 'project:test-workspace', projectRoot: '/tmp/test-workspace', title: 'Work Plan', createdAt: 1, updatedAt: 1, items });
   writeFileSync(store.filePath, text, 'utf8');
@@ -35,10 +34,10 @@ describe('work plan with items this version cannot fully read', () => {
     expect(store.toMarkdown(plan)).toContain('could not read');
   });
 
-  test('a readonly read reports the loss and leaves the file untouched', () => {
+  test('a read reports the loss and leaves the file untouched', () => {
     const store = makeStore();
     const original = seed(store, [{ id: 'b', title: 'newer status', status: 'review', createdAt: 1, updatedAt: 1 }]);
-    const plan = store.getActivePlan({ readOnly: true });
+    const plan = store.getActivePlan();
     expect(plan.housekeeping).toMatchObject({ recoveryRequired: true, coercedItems: 1 });
     expect(readFileSync(store.filePath, 'utf8')).toBe(original);
   });

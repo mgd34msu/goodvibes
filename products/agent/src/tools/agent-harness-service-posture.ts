@@ -169,10 +169,14 @@ export async function servicePostureSummary(
     lifecycle: 'GoodVibes Agent reports service posture here. Lifecycle/listener changes require setup or confirmed daemon operator methods.',
     modelRoute: serviceEndpointModelRoute(),
     config: posture.config,
-    managed: posture.managed,
+    // The connected host's lifecycle is not observed from here: no installed/running
+    // booleans are reported. Whether it answers is `endpoints[].reachable`; whether it
+    // is installed and running is the daemon's own `services.status`.
+    managed: { owner: 'connected-host', lifecycle: 'not managed by goodvibes-agent', status: 'agent_operator_method methodId:"services.status"' },
     endpoints: posture.endpoints.map((endpoint) => describeEndpoint(endpoint, { includeParameters: includeDetails })),
     log: summarizeLog(posture, includeDetails),
     issues: posture.issues,
+    advisories: posture.advisories,
     ...(includeDetails ? { modelAccess: {
       endpointLookup: 'Use host action:"service" with endpointId, target, or query to inspect one endpoint.',
       settings: 'Use settings action:"list" includeHidden:true for endpoint setting descriptors. Host-owned listener settings remain read-only.',

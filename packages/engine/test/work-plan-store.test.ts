@@ -1,5 +1,5 @@
 import { quarantineCorruptFile } from '../platform/src/platform/utils/atomic-json-store.ts';
-import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { describe, expect, test } from 'bun:test';
 import {
@@ -27,7 +27,6 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** Write raw bytes at the store's plan path, simulating whatever a crash left behind. */
 function writeRawPlanFile(store: WorkPlanStore, contents: string): void {
-  store.getActivePlan(); // Explicitly activate the actual assignment before injecting a damaged saved file.
   mkdirSync(dirname(store.filePath), { recursive: true });
   writeFileSync(store.filePath, contents, 'utf8');
 }
@@ -64,11 +63,15 @@ function writePlanWithItems(store: WorkPlanStore, items: readonly RawItem[], sta
 }
 
 describe('WorkPlanStore', () => {
-  test('a native plan identity stays owned until it is written and survives reopening', () => {
+  test('a read writes nothing; the first change saves the plan and its id survives reopening', () => {
     const store = makeStore();
-    const original = store.getActivePlan().id;
-    expect(store.getActivePlan().id).toBe(original);
+    const unsaved = store.getActivePlan();
+    expect(unsaved.id).toBe('');
+    expect(unsaved.registration).toBe('unregistered');
+    expect(existsSync(dirname(store.filePath))).toBe(false);
     store.addItem('Persist this actual plan');
+    const original = store.getActivePlan().id;
+    expect(original).toMatch(/^wp-/);
     const reloaded = new WorkPlanStore({ homeDirectory: store.homeDirectory, surfaceRoot: SURFACE_ROOT,
       projectId: 'project:test-workspace', projectRoot: '/tmp/test-workspace' });
     expect(reloaded.getActivePlan().id).toBe(original);
@@ -143,13 +146,15 @@ describe('WorkPlanStore crash recovery (content, not existence)', () => {
     const store = makeStore();
     writeRawPlanFile(store, '');
 
-    // A file that EXISTS is not a file that is VALID.
+    // A file that EXISTS is not a file that is VALID; a read reports it and changes nothing.
     expect(() => store.listItems()).not.toThrow();
     expect(store.listItems()).toHaveLength(0);
-    expect(() => store.getActivePlan()).not.toThrow();
+    expect(store.getActivePlan().housekeeping?.recoveryRequired).toBe(true);
     expect(() => store.toMarkdown()).not.toThrow();
-    expect(() => store.clearCompleted()).not.toThrow();
     expect(() => store.exportMarkdown()).not.toThrow();
+    expect(readFileSync(store.filePath, 'utf8')).toBe('');
+    // The next change resets it.
+    expect(() => store.clearCompleted()).not.toThrow();
 
     // Nothing was worth preserving, so no quarantine copy is left behind.
     expect(quarantineFiles(store)).toHaveLength(0);
@@ -168,6 +173,8 @@ describe('WorkPlanStore crash recovery (content, not existence)', () => {
 
     expect(() => store.listItems()).not.toThrow();
     expect(store.listItems()).toHaveLength(0);
+    expect(quarantineFiles(store)).toHaveLength(0);
+    store.clearCompleted();
 
     const quarantined = quarantineFiles(store);
     expect(quarantined).toHaveLength(1);
@@ -185,27 +192,28 @@ describe('WorkPlanStore crash recovery (content, not existence)', () => {
     const store = makeStore();
     writeRawPlanFile(store, '"not a plan"');
     expect(store.listItems()).toHaveLength(0);
+    store.clearCompleted();
     expect(store.getActivePlan().housekeeping?.resetFromUnreadableFile).toBe(true);
   });
 
   test('unverified historical quarantine names remain intact and are disclosed', () => {
-    const store = makeStore(); store.getActivePlan();
+    const store = makeStore(); store.addItem('open work');
     const directory = dirname(store.filePath), prefix = `${basename(store.filePath)}.corrupt-`, now = Date.now();
     const originals = Array.from({ length: WORK_PLAN_QUARANTINE_CAP + 3 }, (_, index) => `${prefix}${now - (index + 15) * DAY_MS}-historical-${index}`);
     for (const name of originals) writeFileSync(join(directory, name), 'unverified historical bytes');
     const reopened = new WorkPlanStore({ homeDirectory: store.homeDirectory, surfaceRoot: SURFACE_ROOT, projectId: 'project:test-workspace', projectRoot: '/tmp/test-workspace' });
-    const plan = reopened.getActivePlan(); expect(quarantineFiles(reopened).sort()).toEqual(originals.sort());
+    reopened.clearCompleted(); const plan = reopened.getActivePlan(); expect(quarantineFiles(reopened).sort()).toEqual(originals.sort());
     expect(plan.housekeeping?.preservedUnverifiedQuarantines).toBe(originals.length); expect(reopened.toMarkdown()).toContain('unverified historical recovery');
   });
 
   test('real native receipt/payload pairs are bounded by age and count across reopen', () => {
-    const store = makeStore(); store.getActivePlan(); const now = Date.now();
+    const store = makeStore(); store.addItem('open work'); const now = Date.now();
     for (let index = 0; index < WORK_PLAN_QUARANTINE_CAP + 3; index++) {
       writeFileSync(store.filePath, `damaged saved source ${index}`);
       quarantineCorruptFile(store.filePath, { label: 'test/work-plan', reason: 'damaged fixture', recovery: 'fixture recovery', maxFiles: 100, now: index === 0 ? now - 15 * DAY_MS : now - index * 1000 });
     }
     const reopened = new WorkPlanStore({ homeDirectory: store.homeDirectory, surfaceRoot: SURFACE_ROOT, projectId: 'project:test-workspace', projectRoot: '/tmp/test-workspace' });
-    const plan = reopened.getActivePlan(); expect(quarantineFiles(reopened)).toHaveLength(WORK_PLAN_QUARANTINE_CAP); expect(plan.housekeeping?.quarantinesRemoved).toBe(3);
+    reopened.clearCompleted(); const plan = reopened.getActivePlan(); expect(quarantineFiles(reopened)).toHaveLength(WORK_PLAN_QUARANTINE_CAP); expect(plan.housekeeping?.quarantinesRemoved).toBe(3);
   });
 
 });
@@ -228,8 +236,10 @@ describe('WorkPlanStore retention bounds', () => {
     return store;
   }
 
-  test('terminal items age out while every open item survives', () => {
+  test('terminal items age out at the next change while every open item survives', () => {
     const store = agedPlanStore();
+    expect(store.listItems()).toHaveLength(7);
+    store.setItemStatus('wpi-pending', 'pending');
 
     expect(store.listItems().map((item) => item.id)).toEqual([
       'wpi-pending',
@@ -244,12 +254,30 @@ describe('WorkPlanStore retention bounds', () => {
     expect(store.toMarkdown()).toContain('2 completed item(s) aged out');
   });
 
+  test('every preserved copy stays disclosed after later sweeps', () => {
+    const store = makeStore();
+    writeRawPlanFile(store, '{"items":[');
+    store.addItem('first');
+    const first = store.getActivePlan().housekeeping?.quarantinePath;
+    expect(first).toContain('.corrupt-');
+    writeFileSync(store.filePath, '{"items":[');
+    store.addItem('second');
+    writeFileSync(store.filePath, JSON.stringify({ ...store.getActivePlan(), items: [{ id: 'wpi-old', title: 'old', status: 'done', createdAt: stale, updatedAt: stale, completedAt: stale }] }));
+    store.addItem('third');
+    const plan = store.getActivePlan();
+    expect(plan.housekeeping?.expiredItems).toBe(1);
+    expect(plan.recoveries?.map((entry) => entry.path)).toContain(first);
+    expect(store.toMarkdown()).toContain(first!);
+  });
+
   test('reaping twice is a no-op the second time, in-process and on reopen', () => {
     const store = agedPlanStore();
+    store.setItemStatus('wpi-pending', 'pending');
     const first = store.getActivePlan().housekeeping;
     expect(first?.expiredItems).toBe(2);
 
     // Same instance: nothing further to reclaim, so the disclosure is unchanged.
+    store.setItemStatus('wpi-pending', 'pending');
     const second = store.getActivePlan().housekeeping;
     expect(second?.at).toBe(first?.at);
     expect(second?.expiredItems).toBe(2);
@@ -283,8 +311,9 @@ describe('WorkPlanStore retention bounds', () => {
     // An open item older than every completion must still survive the cap.
     items.push({ id: 'wpi-open', title: 'still open', status: 'pending', createdAt: now - 900_000, updatedAt: now - 900_000 });
     writePlanWithItems(store, items, now);
+    store.addItem('new work');
 
-    const kept = store.listItems();
+    const kept = store.listItems().filter((item) => item.title !== 'new work');
     expect(kept).toHaveLength(WORK_PLAN_TERMINAL_ITEM_CAP + 1);
     expect(kept.some((item) => item.id === 'wpi-open')).toBe(true);
     expect(kept.some((item) => item.id === `wpi-done-${WORK_PLAN_TERMINAL_ITEM_CAP + 4}`)).toBe(false);

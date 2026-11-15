@@ -717,7 +717,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
           clock.mockRestore();
         }
       })();
-      const nativePlan = fixture.context.workspace.workPlanStore!.getActivePlan({ readOnly: true });
+      const nativePlan = fixture.context.workspace.workPlanStore!.getActivePlan();
       // Orchestration owns native items, not the unused outer plan metadata.
       // Its producer clock projection precedes every actual privacy reading.
       expect(judgmentInputCardProblem({

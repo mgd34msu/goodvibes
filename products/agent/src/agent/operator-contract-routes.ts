@@ -61,6 +61,7 @@ export interface PreparedOperatorRequest {
 export const READ_ONLY_HTTP_METHODS: ReadonlySet<string> = new Set(['GET', 'HEAD', 'OPTIONS']);
 
 let methodIndex: Map<string, OperatorContractMethodEntry> | null = null;
+let lowerCaseIndex: Map<string, OperatorContractMethodEntry> | null = null;
 
 function buildMethodIndex(): Map<string, OperatorContractMethodEntry> {
   const contract = getOperatorContract();
@@ -79,17 +80,7 @@ function operatorMethodIndex(): Map<string, OperatorContractMethodEntry> {
   return methodIndex;
 }
 
-/**
- * Drop the memoized contract index.
- *
- * The contract is a build artifact and does not change while the process runs,
- * so the index is built once. Tests that swap contracts call this.
- */
-export function resetOperatorContractCache(): void {
-  methodIndex = null;
-}
-
-/** Every method the contract publishes, by id. Read-only view. */
+/** Every method the contract publishes, by id. Read-only view; callers filter it. */
 export function operatorContractMethods(): readonly OperatorContractMethodEntry[] {
   return [...operatorMethodIndex().values()];
 }
@@ -97,6 +88,24 @@ export function operatorContractMethods(): readonly OperatorContractMethodEntry[
 /** The contract entry for a method id, or null when the contract has no such id. */
 export function findOperatorContractMethod(methodId: string): OperatorContractMethodEntry | null {
   return operatorMethodIndex().get(methodId) ?? null;
+}
+
+/**
+ * The contract entry a model-supplied id names: the exact id, else the one id
+ * that matches ignoring case. Both are lookups in indexes built once (the
+ * contract is a build artifact and does not change while the process runs).
+ */
+export function resolveOperatorContractMethod(methodId: string): OperatorContractMethodEntry | null {
+  const exact = findOperatorContractMethod(methodId);
+  if (exact) return exact;
+  if (!lowerCaseIndex) {
+    lowerCaseIndex = new Map();
+    for (const [id, method] of operatorMethodIndex()) {
+      const key = id.toLowerCase();
+      if (!lowerCaseIndex.has(key)) lowerCaseIndex.set(key, method);
+    }
+  }
+  return lowerCaseIndex.get(methodId.toLowerCase()) ?? null;
 }
 
 /** A method's HTTP binding, or null when the id is unknown or has no HTTP route. */
@@ -197,11 +206,18 @@ export function prepareOperatorRequest(methodId: string, input: unknown): Prepar
   return { methodId, httpMethod: binding.httpMethod, path, payload };
 }
 
-/** True when the method's verb reads rather than writes. */
-export function operatorMethodIsReadOnly(methodId: string): boolean {
-  const binding = findOperatorHttpBinding(methodId);
-  if (!binding) return false;
-  return READ_ONLY_HTTP_METHODS.has(binding.httpMethod);
+/**
+ * True when calling the method only reads. The contract's scopes are its closed
+ * authorization grammar and decide first (`knowledge.ask` is a read-scoped
+ * POST); the HTTP verb decides only for a method that declares no scopes.
+ */
+export function operatorMethodIsReadOnly(method: OperatorContractMethodEntry, input?: unknown): boolean {
+  // The screenshot route writes the file when the caller names a destination;
+  // its default owned observation artifact is an ordinary read.
+  if (method.id === 'browser.screenshot' && input && typeof input === 'object' && !Array.isArray(input)
+    && typeof (input as JsonRecord).path === 'string' && ((input as JsonRecord).path as string).trim()) return false;
+  const scopes = method.scopes ?? [], httpMethod = method.http?.method?.toUpperCase();
+  return scopes.length > 0 ? scopes.every(scope => scope.startsWith('read:')) : httpMethod !== undefined && READ_ONLY_HTTP_METHODS.has(httpMethod);
 }
 
 /**

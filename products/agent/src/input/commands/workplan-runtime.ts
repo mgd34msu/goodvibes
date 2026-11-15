@@ -1,6 +1,5 @@
-import { captureWorkPlanLocation, type WorkPlanItemStatus } from '@goodvibes-jev/engine/platform/platform/workflow';
+import type { WorkPlanItemStatus } from '@goodvibes-jev/engine/platform/platform/workflow';
 import { createAgentWorkPlanTool } from '../../tools/agent-work-plan-tool.ts';
-import { captureCatalogMethods } from '../../tools/agent-harness-catalog-ranking.ts';
 import { captureAgentExportPath } from '../../tools/agent-artifact-effect.ts';
 import { isDirectOwnerCommandContext, type CommandRegistry } from '../command-registry.ts';
 
@@ -63,15 +62,11 @@ export function registerWorkPlanRuntimeCommands(registry: CommandRegistry): void
       if (!isDirectOwnerCommandContext(ctx, 'workplan')) {
         ctx.print('Local work-plan edits require a fresh terminal owner command.'); return;
       }
-      const location = captureWorkPlanLocation(store);
-      const originalMethods = captureCatalogMethods(store, ['homeDirectory', 'options', ...Object.getOwnPropertyNames(Object.getPrototypeOf(store)).filter(key => key !== 'filePath')]);
-      const methods = () => { location(); originalMethods(); };
-      methods();
       const root = captureAgentExportPath(store.homeDirectory, store.homeDirectory);
       let target = captureAgentExportPath(store.homeDirectory, store.filePath);
       const assertOwner = () => {
         if (!isDirectOwnerCommandContext(ctx, 'workplan') || ctx.workspace?.workPlanStore !== store) throw new Error('Local work-plan owner changed.');
-        methods(); root.assertCurrent();
+        root.assertCurrent();
       };
       const effects = { assertCurrent() { assertOwner(); target.assertCurrent(); },
         onEffect() { assertOwner(); target = captureAgentExportPath(store.homeDirectory, store.filePath); } };

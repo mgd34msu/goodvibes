@@ -2,7 +2,7 @@ import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { registerBuiltinCapabilities } from './builtin-capabilities.ts';
 import { resolveCapabilityIndex } from './capability-index.ts';
-import { setCapabilitySnapshot } from './capability-snapshot.ts';
+import { installCapabilityResolver, refreshCapabilityIndex } from './capability-snapshot.ts';
 import type { ProbeContext } from './capability-probe-runner.ts';
 import type { CapabilityIndexReport } from './capability-types.ts';
 
@@ -57,8 +57,10 @@ export function runCapabilityBootCheck(input: CapabilityBootCheckInput): Capabil
     homeDirectory: input.homeDirectory,
     workingDirectory: input.workingDirectory,
   });
-  const report = resolveCapabilityIndex(buildProbeContext(input), { homeDirectory: input.homeDirectory });
-  setCapabilitySnapshot(report);
+  // Sources are read live on each resolution: registered tools, MCP posture and
+  // served methods through the input's own getters, config and secrets by key.
+  installCapabilityResolver(() => resolveCapabilityIndex(buildProbeContext(input), { homeDirectory: input.homeDirectory }));
+  const report = refreshCapabilityIndex()!;
 
   for (const disagreement of report.disagreements) {
     // Loud on purpose. A capability the agent will refuse while its service is

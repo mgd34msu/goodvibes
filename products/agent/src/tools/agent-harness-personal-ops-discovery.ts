@@ -6,6 +6,7 @@ import { captureCatalogData, captureCatalogMethods, prepareHarnessCatalog, type 
 import { LANE_DEPENDENCY_METHODS, personalOpsLaneMembers, readPersonalOpsSampleField, readPersonalOpsTool, type DiscoveryLane, type PersonalOpsToolContract } from './agent-harness-personal-ops-readings.ts';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { getOperatorContract, OPERATOR_CONTRACT } from '@goodvibes-jev/engine/platform/contracts';
+import { operatorContractMethods as contractMethodIndex } from '../agent/operator-contract-routes.ts';
 import type { CommandContext } from '../input/command-registry.ts';
 import { EFFECT_ADMISSION_SENTENCE } from './agent-harness-effect-admission.ts';
 import { mcpSchemaRoute } from './agent-harness-personal-ops-routes.ts';
@@ -25,8 +26,9 @@ export function readLimit(value: unknown, fallback: number): number {
   return clampReadLimit(value, fallback, 12);
 }
 
+/** The contract's methods, from the one memoized index (operator-contract-routes.ts). */
 export function operatorContractMethods(): readonly OperatorContractMethod[] {
-  return getOperatorContract().operator.methods.filter(method => Boolean(method.id));
+  return contractMethodIndex();
 }
 
 export function isInvokableContractMethod(method: OperatorContractMethod): boolean {

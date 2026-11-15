@@ -180,6 +180,7 @@ type ShellPaths = Pick<ShellPathService, 'resolveUserPath'>;
 
 const DRAFT_VERSION = 1 as const;
 const DRAFT_FILE_VERSION = 1 as const;
+/** The most drafts the outbox keeps; past it the oldest sent drafts go first, and an unsent one never does. */
 const DRAFT_LIMIT = 200;
 
 // ---------------------------------------------------------------------------
@@ -297,26 +298,42 @@ function writableDraftSnapshot(paths: ShellPaths): ChannelDraftSnapshot {
   return snapshot;
 }
 
-/** Write `drafts` over the file `from` was read from; drafts this version cannot read are written back as found. */
+/**
+ * The drafts to keep when a write adds one past `DRAFT_LIMIT`: the oldest sent
+ * drafts are dropped first. A write that would have to drop a draft not yet sent
+ * is refused instead, with the count and how to make room.
+ */
+function outboxFull(unsent: number): Error {
+  return new Error(`The draft outbox holds ${unsent} drafts that are not sent and keeps at most ${DRAFT_LIMIT}, so this draft was not saved and none was dropped. Send or delete some (agent_harness mode:"channel_drafts" lists them), then save again.`);
+}
+
+function boundDrafts(before: number, drafts: readonly ChannelDraft[]): { readonly kept: readonly ChannelDraft[]; readonly dropped: readonly ChannelDraft[] } {
+  // Only a write that adds a draft is bounded; one that changes or removes a draft never drops another.
+  if (drafts.length <= DRAFT_LIMIT || drafts.length <= before) return { kept: drafts, dropped: [] };
+  const excess = drafts.length - DRAFT_LIMIT;
+  const sentOldestFirst = drafts.filter((draft) => draft.status === 'sent').sort((a, b) => a.updatedAt.localeCompare(b.updatedAt));
+  if (sentOldestFirst.length < excess) throw outboxFull(drafts.length - sentOldestFirst.length);
+  const dropped = new Set(sentOldestFirst.slice(0, excess));
+  return { kept: drafts.filter((draft) => !dropped.has(draft)), dropped: [...dropped] };
+}
+
+/**
+ * Write `drafts` over the file `from` was read from, under the store lock the
+ * caller holds; drafts this version cannot read are written back as found. The
+ * caller's currency check runs once, right before the rename. Returns the sent
+ * drafts the bound dropped, so their webhook secrets can go with them.
+ */
 function writeDrafts(from: ChannelDraftSnapshot, drafts: readonly ChannelDraft[], assertCurrent?: () => void,
-  options: ChannelStoreEffectOptions = {}): void {
+  options: ChannelStoreEffectOptions = {}): readonly ChannelDraft[] {
   const path = from.path;
   const read = snapshotSources.get(from) ?? readJsonStore(path, DRAFT_STORE);
-  const contents = prepareJsonStoreWrite(read, DRAFT_STORE, { entries: drafts.slice(0, DRAFT_LIMIT).map(persistableDraft) }).text;
-  const prepare = options.preparePublication;
-  assertCurrent?.();
-  const adoption = prepare?.(path, contents);
-  if (prepare && typeof adoption !== 'function') throw new ToolInputProjectionError('held');
-  const assertOwner = () => {
-    if (options.preparePublication !== prepare) throw new ToolInputProjectionError('stale');
-    assertCurrent?.();
-  };
-  writeStoreFile(path, contents, { assertCurrent: assertOwner, onEffect(published) {
-    if (!published) return;
-    if (options.preparePublication !== prepare) throw new ToolInputProjectionError('stale');
-    const outcome: unknown = adoption?.();
-    if (outcome !== undefined) throw new ToolInputProjectionError('held');
+  const { kept, dropped } = boundDrafts(from.drafts.length, drafts);
+  const contents = prepareJsonStoreWrite(read, DRAFT_STORE, { entries: kept.map(persistableDraft) }).text;
+  const adoption = options.preparePublication?.(path, contents);
+  writeStoreFile(path, contents, { ...(assertCurrent ? { assertCurrent } : {}), onEffect(published) {
+    if (published) adoption?.();
   } });
+  return dropped;
 }
 
 function generateDraftId(): string {
@@ -447,6 +464,7 @@ export async function saveDraft(
   },
   options: ChannelDraftStoreOptions = {},
 ): Promise<ChannelDraftSaveResult> {
+  // Checked here, before the request leaves (inside the invoke) and before the rename: nowhere else.
   options.signal?.throwIfAborted(); options.assertCurrent?.();
   const message = input.message.trim();
   if (!message) throw new Error('Draft message is required.');
@@ -458,6 +476,9 @@ export async function saveDraft(
 
   const existingIndex = input.id ? matchingDraftIndex(snapshot.drafts, input.id) : -1;
   const existing = existingIndex >= 0 ? snapshot.drafts[existingIndex] : null;
+  // Refused before the daemon is offered it, so a draft that cannot be kept here is not kept there either.
+  const unsent = snapshot.drafts.filter((draft) => draft.status !== 'sent').length;
+  if (!existing && unsent >= DRAFT_LIMIT) throw outboxFull(unsent);
 
   // `sent` is final: saveDraft may set most statuses, but it must not undo one.
   if (existing?.status === 'sent' && input.status !== undefined && input.status !== 'sent') {
@@ -502,14 +523,13 @@ export async function saveDraft(
 
   const daemon = await offerDraftToDaemon(options.invoke, drafted, { ...options, assertCurrent,
     ...(existing && existing.wireReference === undefined ? { historicalId: existing.id } : {}) });
-  assertCurrent();
   const draft = withDraftSyncOutcome(drafted, daemon);
 
   // The daemon call above can take a while, and other writers use the file in
   // the meantime (a draft marked sent, saved or deleted). Merge this one draft
   // into the file as it is now rather than writing back the snapshot from before
   // the await, which would undo their changes.
-  const stored = runStoreFileUpdateSync(path, () => {
+  const { stored, dropped } = runStoreFileUpdateSync(path, () => {
     const fresh = writableDraftSnapshot(shellPaths);
     const freshIndex = fresh.drafts.findIndex((d) => d.id === id);
     const current = freshIndex >= 0 ? fresh.drafts[freshIndex]! : null;
@@ -521,11 +541,15 @@ export async function saveDraft(
       ? fresh.drafts.map((d, i) => (i === freshIndex ? merged : d))
       // Prepend new draft (most recent first)
       : [merged, ...fresh.drafts];
-    writeDrafts(fresh, updatedDrafts, assertCurrent, options);
-    return merged;
+    return { stored: merged, dropped: writeDrafts(fresh, updatedDrafts, assertCurrent, options) };
   });
-  if (webhook.discardKey && webhook.discardKey !== stored.webhookSecretKey) {
-    try { await options.webhookSecrets?.delete?.(webhook.discardKey); } catch { /* the draft no longer references it; a leftover secret is harmless */ }
+  // Secrets the drafts no longer reference; a leftover one is harmless, so a failed delete is not an error.
+  const discard = [
+    ...(webhook.discardKey && webhook.discardKey !== stored.webhookSecretKey ? [webhook.discardKey] : []),
+    ...dropped.flatMap((gone) => gone.webhookSecretKey ? [gone.webhookSecretKey] : []),
+  ];
+  for (const key of discard) {
+    try { await options.webhookSecrets?.delete?.(key); } catch { /* see above */ }
   }
   return { draft: stored, path, daemon };
 }
@@ -602,13 +626,16 @@ export async function adoptDaemonDraft(
   const assertCurrent = retainChannelStoreSource(path, options);
   const { origin: _origin, bodyUnavailable: _body, ...rest } = held;
   const adopted: ChannelDraft = { ...rest, daemonSyncState: 'synced' };
-  return runStoreFileUpdateSync(path, () => {
+  const { draft, dropped } = runStoreFileUpdateSync(path, () => {
     const fresh = writableDraftSnapshot(shellPaths);
     const index = matchingDraftIndex(fresh.drafts, draftId);
-    if (index >= 0) return fresh.drafts[index]!;
-    writeDrafts(fresh, [adopted, ...fresh.drafts], assertCurrent, options);
-    return adopted;
+    if (index >= 0) return { draft: fresh.drafts[index]!, dropped: [] };
+    return { draft: adopted, dropped: writeDrafts(fresh, [adopted, ...fresh.drafts], assertCurrent, options) };
   });
+  for (const gone of dropped) {
+    if (gone.webhookSecretKey) { try { await options.webhookSecrets?.delete?.(gone.webhookSecretKey); } catch { /* nothing refers to it any more */ } }
+  }
+  return draft;
 }
 
 /**

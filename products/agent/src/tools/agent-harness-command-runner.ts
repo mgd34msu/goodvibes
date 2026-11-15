@@ -1,5 +1,6 @@
 import type { CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
+import { formatRefusal, readRefusal, type Refusal } from '@goodvibes-jev/engine/errors';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import type { CommandContext } from '../input/command-registry.ts';
 import { nativeSettingsCommandMutation } from '../input/commands/operator-runtime.ts';
@@ -124,24 +125,25 @@ export async function runCommand(deps: AgentHarnessToolDeps, args: Record<string
   const commandArgs = invocationArgsFromLookup(resolved.lookup);
   assertCommandEffect(resolved.command.name, commandArgs);
   if (deps.commandRegistry.get(resolved.command.name) !== resolved.command) throw new ToolInputProjectionError('stale');
-  const handled = await executeModelCommand(resolved.command.name, commandArgs);
+  // The command's own result decides: a command that refuses throws its refusal
+  // (state, reason and next step); one that returns did what it says. Its
+  // printed wording is never read for that.
+  let handled: boolean;
+  let refused: Refusal | undefined;
+  try {
+    handled = await executeModelCommand(resolved.command.name, commandArgs);
+  } catch (thrown) {
+    refused = readRefusal(thrown);
+    if (!refused) throw thrown;
+    handled = true;
+  }
   options.signal?.throwIfAborted(); options.assertCurrent?.(); resolved.assertCurrent?.();
   if (!handled) return error(`Unknown slash command /${resolved.command.name}.`);
-  const raw = printed.length > 0 ? printed.join('\n') : '(no text output)';
-  const printedText = raw;
-  // A handler that refuses or rejects its arguments prints that and returns
-  // normally, so returning is not evidence the command did anything. The
-  // owners' `Refused:` and `Usage:` openings are the signal; their text is not changed.
-  // A refusal printed after earlier output still means the change did not apply,
-  // so every printed chunk is checked for `Refused:`; `Usage:` only opens a
-  // refused call, so only the first chunk counts for it.
-  const opening = (chunk: string) => chunk.split('\n').find((line) => line.trim() !== '')?.trim() ?? '';
-  const refused = /^(Refused|Usage):/.test(opening(printed[0] ?? ''))
-    || printed.some((chunk) => /^Refused:/.test(opening(chunk)));
+  const printedText = printed.length > 0 ? printed.join('\n') : '(no text output)';
   const body = [
-    `Command ${safeCommandDisplay(resolved.command.name)} ${refused ? 'ran but did not apply; it printed' : 'ran and printed'}:`,
+    `Command ${safeCommandDisplay(resolved.command.name)} ${refused ? 'was refused and did not apply' : 'ran and printed'}:`,
     `Resolved by ${resolved.lookup.source} ${resolved.lookup.resolvedBy}.`,
-    printedText,
+    ...(refused ? [formatRefusal(refused), ...(printed.length > 0 ? ['It printed:', printedText] : [])] : [printedText]),
   ].join('\n');
   return refused ? error(body) : output(body);
 }

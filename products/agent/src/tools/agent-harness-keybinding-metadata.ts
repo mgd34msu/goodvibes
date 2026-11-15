@@ -1,7 +1,3 @@
-import { existsSync, readFileSync, renameSync } from 'node:fs';
-import { basename } from 'node:path';
-import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-import { writeStoreJson } from '@/utils/store-file.ts';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { captureCatalogData, rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { readHarnessBoolean } from './agent-harness-boolean-reading.ts';
@@ -16,17 +12,23 @@ import {
 } from '../input/keybindings.ts';
 import { clampReadLimit } from './agent-harness-read-helpers.ts';
 
-const FIXED_SHORTCUTS: readonly { readonly key: string; readonly description: string }[] = [
-  { key: 'Enter', description: 'Send prompt' },
-  { key: 'Shift+Enter / Ctrl+J', description: 'Insert newline' },
-  { key: 'Up / Down', description: 'Navigate input history, lists, and scrollable overlays' },
-  { key: 'Tab', description: 'Autocomplete slash command or file mention' },
-  { key: 'Esc', description: 'Close overlays, pickers, and transient input modes' },
-  { key: '? / F1', description: 'Toggle help overlay' },
-  { key: 'F2', description: 'Open runtime activity monitor' },
-  { key: '/shortcuts', description: 'Open keyboard shortcut reference' },
-  { key: '/keybindings', description: 'List configurable keybindings and config path' },
+/**
+ * Keys the shell handles itself before configurable bindings are consulted, and
+ * the two commands that show them. One table: the shortcut listing shows `key`,
+ * and a new binding is checked for a clash against `chords`.
+ */
+const FIXED_KEYS: readonly { readonly key: string; readonly description: string; readonly chords: readonly KeyCombo[] }[] = [
+  { key: 'Enter', description: 'Send prompt', chords: [{ key: 'enter' }] },
+  { key: 'Shift+Enter / Ctrl+J', description: 'Insert newline', chords: [{ key: 'enter', shift: true }, { key: 'j', ctrl: true }] },
+  { key: 'Up / Down', description: 'Navigate input history, lists, and scrollable overlays', chords: [{ key: 'up' }, { key: 'down' }] },
+  { key: 'Tab', description: 'Autocomplete slash command or file mention', chords: [{ key: 'tab' }] },
+  { key: 'Esc', description: 'Close overlays, pickers, and transient input modes', chords: [{ key: 'escape' }] },
+  { key: '? / F1', description: 'Toggle help overlay', chords: [{ key: '?' }, { key: 'f1' }] },
+  { key: 'F2', description: 'Open runtime activity monitor', chords: [{ key: 'f2' }] },
+  { key: '/shortcuts', description: 'Open keyboard shortcut reference', chords: [] },
+  { key: '/keybindings', description: 'List configurable keybindings and config path', chords: [] },
 ];
+const FIXED_SHORTCUTS: readonly { readonly key: string; readonly description: string }[] = FIXED_KEYS.map(({ key, description }) => ({ key, description }));
 
 interface HarnessKeybindingArgs {
   readonly query?: unknown;
@@ -59,7 +61,6 @@ interface KeybindingOperationRoute {
   readonly note: string;
 }
 
-type KeybindingsOverrideFile = Record<string, unknown>;
 type KeybindingEntry = { readonly action: KeyAction; readonly description: string; readonly combos: KeyCombo[] };
 type KeybindingContext = Pick<CommandContext, 'workspace'>;
 type KeybindingExecutionContext = KeybindingContext & Pick<CommandContext,
@@ -497,91 +498,6 @@ function keybindingOperationRoute(action: KeyAction): KeybindingOperationRoute {
   }
 }
 
-/**
- * Preserve an unreadable keybindings file instead of overwriting it: it is
- * renamed to the first free `.corrupt` slot, so an earlier quarantine is never
- * overwritten. Paths and byte counts are logged, never contents.
- */
-function quarantineOverrideFile(configPath: string, bytes: number, reason: string): { readonly preserved: boolean; readonly quarantinePath?: string } {
-  const slots = [`${configPath}.corrupt`, ...[1, 2, 3, 4].map((index) => `${configPath}.corrupt.${index}`)];
-  // With every slot taken there is nowhere safe to move it: refusing keeps both the new file and all earlier quarantines.
-  const quarantinePath = slots.find((slot) => !existsSync(slot));
-  let preserved = false;
-  if (quarantinePath !== undefined) {
-    try {
-      renameSync(configPath, quarantinePath);
-      preserved = true;
-    } catch {
-      preserved = false;
-    }
-  }
-  logger.error('Keybindings config was unreadable; continuing with no overrides', {
-    configPath,
-    bytes,
-    preserved,
-    ...(preserved ? { quarantinePath } : {}),
-    reason,
-  });
-  return preserved ? { preserved, quarantinePath } : { preserved };
-}
-
-interface OverrideRead {
-  readonly overrides: KeybindingsOverrideFile;
-  /** What happened to a file that could not be used as it was; shown to the caller of a write. */
-  readonly notice?: string;
-  /** Set when writing now would destroy the user's file; the write must not go ahead. */
-  readonly blocked?: string;
-}
-
-/**
- * Read the user's keybinding overrides, degrading to "no overrides" for anything
- * a crash can leave behind, an unreadable file, a zero-byte file, a truncated
- * JSON body, or a body that is not a JSON object. Existence is not validity, and
- * a torn file must not take down every read path that touches keybindings.
- */
-function readOverrideFile(configPath: string): OverrideRead {
-  if (!existsSync(configPath)) return { overrides: {} };
-  let raw = '';
-  try {
-    raw = readFileSync(configPath, 'utf-8');
-  } catch (error) {
-    logger.warn('Keybindings config could not be read; continuing with no overrides', {
-      configPath,
-      error: summarizeError(error),
-    });
-    return { overrides: {}, blocked: `${basename(configPath)} could not be read, so it was left unchanged and no binding was written. Fix its permissions or move it aside, then retry.` };
-  }
-  if (!raw.trim()) {
-    logger.warn('Keybindings config is empty (torn or interrupted write); continuing with no overrides', {
-      configPath,
-      bytes: Buffer.byteLength(raw, 'utf-8'),
-    });
-    return { overrides: {} };
-  }
-  let parsed: unknown;
-  let reason: string;
-  try {
-    parsed = JSON.parse(raw) as unknown;
-    reason = 'keybindings config is not a JSON object';
-  } catch (error) {
-    parsed = undefined;
-    reason = summarizeError(error);
-  }
-  if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) return { overrides: parsed as KeybindingsOverrideFile };
-  const moved = quarantineOverrideFile(configPath, Buffer.byteLength(raw, 'utf-8'), reason);
-  if (!moved.preserved) {
-    return { overrides: {}, blocked: `${basename(configPath)} is not valid JSON and could not be moved aside (it was left unchanged, and the five earlier .corrupt copies may all be taken), so no binding was written. Repair or move it, then retry.` };
-  }
-  return {
-    overrides: {},
-    notice: `${basename(configPath)} was not valid JSON. It was moved to ${basename(moved.quarantinePath ?? configPath)}, and the custom bindings it held were not carried over; copy them back from that file if you want them.`,
-  };
-}
-
-function writeOverrideFile(configPath: string, overrides: KeybindingsOverrideFile): void {
-  writeStoreJson(configPath, overrides);
-}
-
 export function totalHarnessKeybindings(context: KeybindingContext): number {
   return context.workspace.keybindingsManager?.getAll().length ?? Object.keys(DEFAULT_KEYBINDINGS).length;
 }
@@ -825,18 +741,6 @@ export async function runHarnessKeybinding(context: KeybindingExecutionContext, 
   }
 }
 
-/** Chords the shell handles itself before configurable bindings are consulted. */
-const FIXED_CHORDS: readonly { readonly key: string; readonly ctrl?: boolean; readonly shift?: boolean; readonly description: string }[] = [
-  { key: 'enter', description: 'Send prompt' },
-  { key: 'enter', shift: true, description: 'Insert newline' },
-  { key: 'j', ctrl: true, description: 'Insert newline' },
-  { key: 'tab', description: 'Autocomplete slash command or file mention' },
-  { key: 'escape', description: 'Close overlays, pickers, and transient input modes' },
-  { key: '?', description: 'Toggle help overlay' },
-  { key: 'f1', description: 'Toggle help overlay' },
-  { key: 'f2', description: 'Open runtime activity monitor' },
-];
-
 /** Other actions that use one of `combos`, and which of the two wins (the later action in catalog order takes the chord). */
 function chordConflicts(manager: KeybindingsManager, action: KeyAction, combos: readonly KeyCombo[]): Record<string, unknown>[] {
   const mine = new Set(combos.map(comboFingerprint));
@@ -850,15 +754,10 @@ function chordConflicts(manager: KeybindingsManager, action: KeyAction, combos: 
     conflicts.push({ action: entry.action, chord: formatCombo(manager, shared[0]!), takesTheChord: index > position ? entry.action : action });
   });
   for (const combo of combos) {
-    const fixed = FIXED_CHORDS.find((entry) => entry.key === combo.key.toLowerCase() && !!entry.ctrl === !!combo.ctrl && !!entry.shift === !!combo.shift && !combo.alt);
+    const fixed = FIXED_KEYS.find((entry) => entry.chords.some((chord) => comboFingerprint(chord) === comboFingerprint(combo)));
     if (fixed) conflicts.push({ fixedShortcut: fixed.description, chord: formatCombo(manager, combo) });
   }
   return conflicts;
-}
-
-/** Entries in the override file that are not an action name; a legacy alias for an action is one of these and can override the canonical entry. */
-function unrecognizedOverrideKeys(overrides: KeybindingsOverrideFile): string[] {
-  return Object.keys(overrides).filter((key) => !isKeyAction(key));
 }
 
 export async function setHarnessKeybinding(context: KeybindingContext, args: HarnessKeybindingArgs, options: CatalogRankingOptions = {}): Promise<Record<string, unknown>> {
@@ -869,44 +768,21 @@ export async function setHarnessKeybinding(context: KeybindingContext, args: Har
   if (resolved?.status === 'ambiguous') throw new Error(`Ambiguous keybinding action ${resolved.input}. Candidates: ${JSON.stringify(resolved.candidates)}`);
   if (!resolved) throw new Error('set_keybinding requires a valid keybinding actionId, key, target or query.');
   const modifierGuards = new Set<() => void>();
-  // The guards compare against the keybindings as they were before this call; once the file is written they would
-  // report the call's own change as an outside edit and fail a write that already happened.
-  let written = false;
-  const assertModifiersCurrent = () => { if (!written) sources.assertCurrent(); for (const guard of modifierGuards) guard(); };
+  const assertModifiersCurrent = () => { sources.assertCurrent(); for (const guard of modifierGuards) guard(); };
   const combos = await combosFromArgs(sources.input, { ...options, assertCurrent: assertModifiersCurrent,
     retainCurrent(guard, key) { modifierGuards.add(guard); options.retainCurrent?.(guard, key); } });
   assertModifiersCurrent();
   const configPath = manager.getConfigPath();
-  const existing = readOverrideFile(configPath);
-  if (existing.blocked) throw new Error(`set_keybinding was not applied: ${existing.blocked}`);
-  const overrides = existing.overrides;
-  overrides[resolved.action] = combos.length === 1 ? combos[0] : combos;
-  assertModifiersCurrent();
-  writeOverrideFile(configPath, overrides);
-  written = true;
-  const loadNotices = manager.loadFromDisk() ?? [];
-  options.signal?.throwIfAborted(); options.assertCurrent?.();
-  const keybinding = await describeHarnessKeybinding(context, { actionId: resolved.action }, options);
-  options.signal?.throwIfAborted(); options.assertCurrent?.();
-  const live = manager.getAll().find((entry) => entry.action === resolved.action);
-  const applied = live !== undefined && combosEqual(live.combos, combos);
-  const other = unrecognizedOverrideKeys(overrides);
-  if (!applied) {
-    return {
-      status: 'not_applied',
-      configPath,
-      keybinding,
-      requested: combos.map((combo) => describeCombo(manager, combo)),
-      reason: `The binding was written to ${basename(configPath)} but the live keybindings do not hold it.${other.length > 0
-        ? ` The file also has entries under other names (${other.join(', ')}); a legacy name for this action there can override the one just written. Remove it from the file.`
-        : ''}${loadNotices.length > 0 ? ` Loader notices: ${loadNotices.join(' ')}` : ''}`,
-      lookup: resolved.lookup,
-      ...(existing.notice ? { warnings: [existing.notice] } : {}),
-    };
+  // The manager reads, drops any legacy-name entry for this action, writes once and reloads;
+  // a file it cannot read or parse is left as it is and the call is refused with the reason.
+  let loadNotices: readonly string[];
+  try { loadNotices = manager.setOverride(resolved.action, combos); } catch (error) {
+    throw new Error(`set_keybinding was not applied: ${error instanceof Error ? error.message : String(error)}`);
   }
+  options.signal?.throwIfAborted();
+  const keybinding = await describeHarnessKeybinding(context, { actionId: resolved.action }, options);
   const conflicts = chordConflicts(manager, resolved.action, combos);
   const warnings = [
-    ...(existing.notice ? [existing.notice] : []),
     ...loadNotices,
     // The loader already names a chord two actions share; only a clash it cannot see (a fixed shortcut) needs this text.
     ...(conflicts.some((conflict) => 'fixedShortcut' in conflict) || (conflicts.length > 0 && !loadNotices.some((notice) => notice.includes(' is bound to '))) ? ['The chord is also used elsewhere (see conflicts); only one binding takes it. Rebind the other action, or reset this one, if that was not intended.'] : []),
@@ -930,31 +806,14 @@ export async function resetHarnessKeybinding(context: KeybindingContext, args: H
   if (resolved?.status === 'ambiguous') throw new Error(`Ambiguous keybinding action ${resolved.input}. Candidates: ${JSON.stringify(resolved.candidates)}`);
   if (!resolved) throw new Error('reset_keybinding requires a valid keybinding actionId, key, target or query.');
   const configPath = manager.getConfigPath();
-  const existing = readOverrideFile(configPath);
-  if (existing.blocked) throw new Error(`reset_keybinding was not applied: ${existing.blocked}`);
-  const overrides = existing.overrides;
-  delete overrides[resolved.action];
   sources.assertCurrent();
-  writeOverrideFile(configPath, overrides);
-  const loadNotices = manager.loadFromDisk() ?? [];
-  options.signal?.throwIfAborted(); options.assertCurrent?.();
-  const keybinding = await describeHarnessKeybinding(context, { actionId: resolved.action }, options);
-  options.signal?.throwIfAborted(); options.assertCurrent?.();
-  const live = manager.getAll().find((entry) => entry.action === resolved.action);
-  const other = unrecognizedOverrideKeys(overrides);
-  if (live === undefined || !combosEqual(live.combos, DEFAULT_KEYBINDINGS[resolved.action])) {
-    return {
-      status: 'not_applied',
-      configPath,
-      keybinding,
-      reason: `The override was removed from ${basename(configPath)} but the live binding is still not the default.${other.length > 0
-        ? ` The file also has entries under other names (${other.join(', ')}); a legacy name for this action there keeps applying. Remove it from the file.`
-        : ''}${loadNotices.length > 0 ? ` Loader notices: ${loadNotices.join(' ')}` : ''}`,
-      lookup: resolved.lookup,
-      ...(existing.notice ? { warnings: [existing.notice] } : {}),
-    };
+  let loadNotices: readonly string[];
+  try { loadNotices = manager.clearOverride(resolved.action); } catch (error) {
+    throw new Error(`reset_keybinding was not applied: ${error instanceof Error ? error.message : String(error)}`);
   }
-  const warnings = [...(existing.notice ? [existing.notice] : []), ...loadNotices];
+  options.signal?.throwIfAborted();
+  const keybinding = await describeHarnessKeybinding(context, { actionId: resolved.action }, options);
+  const warnings = [...loadNotices];
   return {
     status: 'reset',
     configPath,

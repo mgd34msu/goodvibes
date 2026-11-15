@@ -203,17 +203,15 @@ function draftHoldingDaemon(count: number) {
   });
 }
 
-test('a draft only the daemon holds is named with the step that gets it sent, not a dead "not found"', async () => {
+test('a draft only the daemon holds whose text it withholds is named with the reason, not a dead "not found"', async () => {
   const daemon = draftHoldingDaemon(1);
   try {
     const listed = await channelDraftsSummary(daemon.context, {});
     expect(JSON.stringify(listed.drafts)).toContain('daemon-draft-0');
     const inspected = await channelDraftsSummary(daemon.context, { draftId: 'daemon-draft-0' });
     expect(inspected.status).toBe('daemon_only');
-    expect(String(inspected.policy)).toContain('channel_draft_save');
     const sent = await effect(daemon.root, (args, options) => channelDraftSendHandoff(daemon.context, args, options)).run({ draftId: 'daemon-draft-0' });
     expect(sent.success).toBe(false);
-    expect(sent.output).toContain('held by the daemon only');
     const missing = await channelDraftsSummary(daemon.context, { draftId: 'nobody-has-this' });
     expect(missing.status).toBe('not_found');
   } finally { daemon.restore(); }

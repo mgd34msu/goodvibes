@@ -52,7 +52,6 @@ import { createRuntimeServices, foldAgentLegacyMemory, type RuntimeServices } fr
 import { createHostPowerSeam } from '@goodvibes-jev/engine/platform/platform/power';
 import { formatMemoryFoldReport } from '@goodvibes-jev/engine/platform/platform/state';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-import { importVibeFilesIntoMemoryOnce } from '../agent/vibe-file.ts';
 import { createUiRuntimeServices, type UiRuntimeServices } from './ui-services.ts';
 import { getTerminalSize } from '../shell/terminal-size.ts';
 import { installPermissionManagerSafetyGuard } from '@goodvibes-jev/engine/platform/platform/gate/policy';
@@ -297,19 +296,6 @@ export async function initializeBootstrapCore(
     logger.info('agent legacy memory fold report', { report: formatMemoryFoldReport(foldReport) });
   } catch (err) {
     logger.warn('agent legacy memory fold failed (non-fatal)', { error: summarizeError(err) });
-  }
-
-  // ONE-TIME migration of discovered VIBE.md files into persona/constraint
-  // records, guarded by a persisted path→hash marker so it never re-imports the same
-  // file (which would create near-duplicate persona records). After this, the VIBE
-  // prompt is a PROJECTION of those records (buildVibeProjectionPrompt).
-  try {
-    const importedPersona = await importVibeFilesIntoMemoryOnce(services.memorySpineClient, services.shellPaths);
-    if (importedPersona > 0) {
-      logger.info('agent VIBE.md persona migration', { records: importedPersona });
-    }
-  } catch (err) {
-    logger.warn('agent VIBE.md persona migration failed (non-fatal)', { error: summarizeError(err) });
   }
 
   const {

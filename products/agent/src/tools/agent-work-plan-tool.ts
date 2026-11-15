@@ -1,10 +1,9 @@
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { assertCurrentToolExecution, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
-import { captureCatalogData, captureCatalogMethods } from './agent-harness-catalog-ranking.ts';
+import { captureCatalogData } from './agent-harness-catalog-ranking.ts';
 import { failureMessage } from './agent-projection-failure.ts';
 import { agentLocalStateWrite, assertAgentLocalStateCurrent, createAgentLocalStateInputProjector } from './agent-local-state-admission.ts';
 import {
-  captureWorkPlanLocation,
   WORK_PLAN_STATUSES,
   type WorkPlanItem,
   type WorkPlanItemStatus,
@@ -17,7 +16,6 @@ export type AgentWorkPlanAction =
   | 'create'
   | 'update'
   | 'set_status'
-  | 'dispatch_agents'
   | 'remove'
   | 'clear_completed';
 
@@ -31,26 +29,8 @@ export interface AgentWorkPlanToolArgs {
   readonly owner?: unknown;
   readonly source?: unknown;
   readonly notes?: unknown;
-  readonly template?: unknown;
-  readonly model?: unknown;
-  readonly provider?: unknown;
-  readonly reasoningEffort?: unknown;
-  readonly tools?: unknown;
-  readonly successCriteria?: unknown;
-  readonly requiredEvidence?: unknown;
-  readonly writeScope?: unknown;
-  readonly executionProtocol?: unknown;
-  readonly reviewMode?: unknown;
-  readonly communicationLane?: unknown;
-  readonly cohort?: unknown;
-  readonly agentContext?: unknown;
   readonly confirm?: unknown;
   readonly explicitUserRequest?: unknown;
-}
-
-/** Compatibility only: the registry is never used to dispatch legacy todos. */
-interface AgentWorkPlanToolOptions {
-  readonly toolRegistry?: Pick<ToolRegistry, 'has' | 'execute'>;
 }
 
 const ACTIONS: readonly AgentWorkPlanAction[] = [
@@ -59,7 +39,6 @@ const ACTIONS: readonly AgentWorkPlanAction[] = [
   'create',
   'update',
   'set_status',
-  'dispatch_agents',
   'remove',
   'clear_completed',
 ];
@@ -117,10 +96,6 @@ function routeArg(value: string): string {
   return JSON.stringify(value);
 }
 
-function agentRoute(mode: string, agentId: string): string {
-  return `agent { mode: ${routeArg(mode)}, agentId: ${routeArg(agentId)} }`;
-}
-
 function workPlanRoute(action: string, id?: string, status?: WorkPlanItemStatus): string {
   return [
     `agent_work_plan action:${routeArg(action)}`,
@@ -129,44 +104,24 @@ function workPlanRoute(action: string, id?: string, status?: WorkPlanItemStatus)
   ].filter(Boolean).join(' ');
 }
 
-function linkedAgentId(item: WorkPlanItem): string {
-  const value = item.linked?.agentId;
-  return typeof value === 'string' && value.trim() ? value.trim() : '';
-}
-
 function nextRouteLine(id: string, route: string): string {
   return `    ${id} ${route}`;
 }
 
 function workPlanNextRouteLines(item: WorkPlanItem): readonly string[] {
-  const agentId = linkedAgentId(item);
-  const lines = [
+  return [
     '  nextRoutes',
-    nextRouteLine('inspectWorkItem', workPlanRoute('get', item.id)),
     nextRouteLine('markDone', workPlanRoute('set_status', item.id, 'done')),
     nextRouteLine('markBlocked', workPlanRoute('set_status', item.id, 'blocked')),
   ];
-  if (agentId) {
-    lines.push(
-      nextRouteLine('inspectAgent', agentRoute('get', agentId)),
-      nextRouteLine('waitAgent', agentRoute('wait', agentId)),
-      nextRouteLine('messageAgent', agentRoute('message', agentId)),
-      nextRouteLine('cancelAgent', agentRoute('cancel', agentId)),
-      nextRouteLine('orchestrationDetail', `agent_harness mode:"agent_orchestration_agent" agentId:${routeArg(agentId)} includeParameters:true`),
-    );
-  }
-  return lines;
 }
 
 function formatItemDetail(item: WorkPlanItem): string {
   return [
     formatItem(item),
-    'Local status only; done is not native verified completion.',
     `created ${new Date(item.createdAt).toISOString()}`,
     `updated ${new Date(item.updatedAt).toISOString()}`,
-    item.linked
-      ? `linked ${Object.entries(item.linked).map(([key, value]) => `${key} ${String(value)}`).join(', ')}`
-      : 'linked (none)',
+    ...(item.linked ? [`linked ${Object.entries(item.linked).map(([key, value]) => `${key} ${String(value)}`).join(', ')}`] : []),
     '',
     item.notes || '(no notes)',
     '',
@@ -177,7 +132,7 @@ function formatItemDetail(item: WorkPlanItem): string {
 function resolveItem(store: WorkPlanStore, idOrPrefix: string): WorkPlanItem {
   const needle = idOrPrefix.trim();
   if (!needle) throw new Error('id is required.');
-  const items = store.listItems({ readOnly: true });
+  const items = store.listItems();
   const exact = items.find((item) => item.id === needle);
   if (exact) return exact;
   const matches = items.filter((item) => item.id.startsWith(needle));
@@ -199,13 +154,12 @@ function readListLimit(value: unknown): number {
 }
 
 function listOutput(store: WorkPlanStore, filter?: WorkPlanItemStatus, limit = DEFAULT_LIST_LIMIT): string {
-  const plan = store.getActivePlan({ readOnly: true });
+  const plan = store.getActivePlan();
   const counts = new Map<WorkPlanItemStatus, number>(WORK_PLAN_STATUSES.map((status) => [status, 0]));
   for (const item of plan.items) counts.set(item.status, (counts.get(item.status) ?? 0) + 1);
   const matching = filter ? plan.items.filter((item) => item.status === filter) : plan.items;
   const lines = [
-    'Agent local work plan',
-    '  Local todos only. Adding or updating does not execute work; local done is not native verified completion.',
+    'Agent todo list',
     plan.registration === 'unregistered' && !plan.id ? '  plan not saved; adding the first item creates it' : `  plan ${plan.id}`,
     `  project ${plan.projectRoot}`,
     `  items ${plan.items.length}; pending ${counts.get('pending') ?? 0}; active ${counts.get('in_progress') ?? 0}; blocked ${counts.get('blocked') ?? 0}; done ${counts.get('done') ?? 0}; failed ${counts.get('failed') ?? 0}; cancelled ${counts.get('cancelled') ?? 0}`,
@@ -225,7 +179,6 @@ function listOutput(store: WorkPlanStore, filter?: WorkPlanItemStatus, limit = D
     lines.push('', ...matching.slice(0, limit).map(formatItem));
     if (matching.length > limit) lines.push(`${matching.length - limit} more ${filter ? `${formatStatus(filter)} ` : ''}item(s) omitted; raise limit (at most ${MAX_LIST_LIMIT}) or filter with status to see them.`);
   }
-  lines.push('', 'Native owner route: /work submit-file <JSON-path>; submission does not start execution.');
   return lines.join('\n');
 }
 
@@ -240,15 +193,15 @@ function updatePatch(args: AgentWorkPlanToolArgs): Parameters<WorkPlanStore['upd
   };
 }
 
-export function createAgentWorkPlanTool(store: WorkPlanStore, _options: AgentWorkPlanToolOptions = {}): Tool {
+export function createAgentWorkPlanTool(store: WorkPlanStore): Tool {
   return {
     definition: {
       name: 'agent_work_plan',
-      description: 'Manage local, non-executing Agent todo records. Local done is not native verified completion. clear_completed removes done and cancelled items; failed items stay.',
+      description: 'The Agent\'s todo list for this project: track items and their status. It records work; it does not run it (the owner starts work with /work). clear_completed removes done and cancelled items; failed items stay.',
       parameters: {
         type: 'object',
         properties: {
-          action: { type: 'string', enum: ACTIONS.filter(action => action !== 'dispatch_agents') },
+          action: { type: 'string', enum: [...ACTIONS] },
           id: { type: 'string', description: 'Work plan item id or unique id prefix for get/update/set_status/remove.' },
           title: { type: 'string', description: 'Work plan item title for create/update.' },
           status: { type: 'string', enum: [...WORK_PLAN_STATUSES], description: 'Work plan item status; with action:list it shows only items in that status.' },
@@ -268,12 +221,11 @@ export function createAgentWorkPlanTool(store: WorkPlanStore, _options: AgentWor
       try {
         const args = captureCatalogData(rawArgs);
         options?.signal?.throwIfAborted(); assertCurrentToolExecution(rawArgs, options);
-        if (!isAction(args.action)) return failure(`Unknown Agent work plan action. Valid values ${ACTIONS.join(', ')}.`);
+        if (!isAction(args.action)) return failure(`Unknown agent_work_plan action. Valid values ${ACTIONS.join(', ')}.`);
         if (args.action === 'list' || args.action === 'get') {
           const result = args.action === 'list' ? listOutput(store, readOptionalStatus(args.status), readListLimit(args.limit)) : formatItemDetail(resolveItem(store, requireId(args)));
           assertAgentLocalStateCurrent(rawArgs, options); return output(result);
         }
-        if (args.action === 'dispatch_agents') return failure('Legacy work-plan dispatch is unavailable: model fields, labels, and explicitUserRequest are not original owner authority. Keep this as a local todo, or have the owner submit exact source through /work submit-file <JSON-path> (recover with /work submission-status or /work submission-retry). Submission does not start execution.');
         const effects = agentLocalStateWrite(rawArgs, options);
         if (args.action === 'create') {
           const item = store.addItem(requireTitle(args), {
@@ -283,8 +235,7 @@ export function createAgentWorkPlanTool(store: WorkPlanStore, _options: AgentWor
             notes: readString(args.notes) || undefined,
           }, effects);
           return output([
-            'Created Agent work plan item',
-            '  Local todo only; no native work was submitted or executed.',
+            'Created Agent todo',
             `  id ${item.id}`,
             `  title ${item.title}`,
           ].join('\n'));
@@ -294,8 +245,7 @@ export function createAgentWorkPlanTool(store: WorkPlanStore, _options: AgentWor
           if (Object.keys(patch).length === 0) return failure('Nothing to update: give at least one of title, status, owner, source or notes.');
           const item = store.updateItem(requireId(args), patch, effects);
           return output([
-            'Updated Agent work plan item',
-            '  Local record only; no execution. Local done is not native verified completion.',
+            'Updated Agent todo',
             `  id ${item.id}`,
             `  title ${item.title}`,
           ].join('\n'));
@@ -305,8 +255,7 @@ export function createAgentWorkPlanTool(store: WorkPlanStore, _options: AgentWor
           if (!status) throw new Error('status is required.');
           const item = store.setItemStatus(requireId(args), status, effects);
           return output([
-            'Set Agent work plan item status',
-            '  Local status only; done is not native verified completion.',
+            'Set Agent todo status',
             `  id ${item.id}`,
             `  status ${formatStatus(item.status)}`,
             `  title ${item.title}`,
@@ -315,14 +264,14 @@ export function createAgentWorkPlanTool(store: WorkPlanStore, _options: AgentWor
         if (args.action === 'remove') {
           const item = store.removeItem(requireId(args), effects);
           return output([
-            'Removed Agent work plan item',
+            'Removed Agent todo',
             `  id ${item.id}`,
             `  title ${item.title}`,
           ].join('\n'));
         }
         const count = store.clearCompleted(effects);
         return output([
-          `Cleared ${count} completed/cancelled Agent work plan items`,
+          `Cleared ${count} done or cancelled Agent todos`,
           `  count ${count}`,
         ].join('\n'));
       } catch (error) {
@@ -333,11 +282,8 @@ export function createAgentWorkPlanTool(store: WorkPlanStore, _options: AgentWor
 }
 
 export function registerAgentWorkPlanTool(registry: ToolRegistry, store: WorkPlanStore): void {
-  registry.register(createAgentWorkPlanTool(store), { inputProjection: createAgentLocalStateInputProjector(() => {
-    const location = captureWorkPlanLocation(store);
-    const methods = captureCatalogMethods(store, ['homeDirectory', 'options', ...Object.getOwnPropertyNames(Object.getPrototypeOf(store)).filter(key => key !== 'filePath')]);
-    const assertDescriptors = () => { location(); methods(); };
-    assertDescriptors();
-    return { targets: [{ root: store.homeDirectory, path: store.filePath, access: 'write' }], assertDescriptors };
-  }, args => args.action === 'list' || args.action === 'get') });
+  // The store's home and plan file are fixed when it is built, so the target needs no re-check.
+  registry.register(createAgentWorkPlanTool(store), { inputProjection: createAgentLocalStateInputProjector(() => ({
+    targets: [{ root: store.homeDirectory, path: store.filePath, access: 'write' }], assertDescriptors: () => {},
+  }), args => args.action === 'list' || args.action === 'get') });
 }

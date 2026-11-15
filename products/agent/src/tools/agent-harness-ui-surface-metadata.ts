@@ -288,8 +288,14 @@ const UI_SURFACES: readonly UiSurfaceDefinition[] = [
       const surface = findSurfaceById('settings')!;
       if (!context.openSettingsModal) return routeUnavailable(surface);
       const target = settingsTarget(args);
-      context.openSettingsModal(target);
-      return opened(surface, { target: target ?? 'default' });
+      // The opener says where it landed; a name that is no category or key becomes the settings search.
+      const landed: unknown = context.openSettingsModal(target);
+      const selected = typeof landed === 'string' ? landed : 'unreported';
+      if (selected === 'not-found') {
+        return opened(surface, { target, selected,
+          next: `No setting or category is named "${target}"; the settings workspace is showing a search for it. Use settings action:"list" with a query to find the exact key.` });
+      }
+      return opened(surface, { target: target ?? 'default', selected });
     },
   },
   {

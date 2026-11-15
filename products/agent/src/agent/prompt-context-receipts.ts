@@ -35,7 +35,7 @@ import {
   evaluateAgentSkillBundleReadiness,
   evaluateAgentSkillReadiness,
 } from './skill-registry.ts';
-import { buildVibeProjectionPrompt, discoverVibeFiles } from './vibe-file.ts';
+import { buildVibePrompt, discoverVibeFiles, type AgentVibeSnapshot } from './vibe-file.ts';
 
 export type PromptContextReceiptStatus = 'active' | 'attention' | 'empty' | 'unavailable';
 export type PromptContextReceiptSource = 'turn' | 'follow_up' | 'manual';
@@ -249,6 +249,7 @@ function resolveMemoryRecords(input: RuntimePromptCompositionInput): readonly Me
  */
 interface ComposedPromptParts {
   readonly vibe: string;
+  readonly vibeSnapshot: AgentVibeSnapshot;
   readonly projectContext: string;
   readonly routines: string;
   readonly skills: string;
@@ -268,9 +269,8 @@ function buildRuntimePromptReceiptSegments(
   memoryPrompt: string,
   composed: ComposedPromptParts,
 ): readonly PromptContextReceiptSegment[] {
-  const vibe = discoverVibeFiles(input.shellPaths);
-  // The VIBE prompt is a PROJECTION of persona/constraint records, not a
-  // re-read of the files (discoverVibeFiles above stays for the file-discovery receipt).
+  // The receipt reports the same VIBE.md reading the prompt was built from.
+  const vibe = composed.vibeSnapshot;
   const vibePrompt = composed.vibe;
   const projectContext = composed.projectContextFiles;
   const projectContextPrompt = composed.projectContext;
@@ -553,8 +553,10 @@ export async function composeRuntimePromptWithReceipt(
     skillStoreError = error;
   }
   const personaSnapshot = AgentPersonaRegistry.fromShellPaths(input.shellPaths).snapshot();
+  const vibeSnapshot = discoverVibeFiles(input.shellPaths);
   const composed: ComposedPromptParts = {
-    vibe: buildVibeProjectionPrompt(input.memoryRegistry) ?? '',
+    vibe: buildVibePrompt(input.shellPaths, vibeSnapshot) ?? '',
+    vibeSnapshot,
     projectContext: buildProjectContextPrompt(input.shellPaths, projectContextFiles) ?? '',
     routines: buildEnabledRoutinesPrompt(input.shellPaths, routineSnapshot) ?? '',
     // An unreadable store has no snapshot to hand over, so the builder reads it itself and returns the repair notice.

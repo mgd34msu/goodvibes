@@ -1,7 +1,7 @@
 /** Shared keybinding storage and matching; product action catalogs remain explicit. */
 import { existsSync, readFileSync } from 'node:fs';
 import { resolveSurfaceDirectory } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
-import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { logger, summarizeError, writeDocument } from '@goodvibes-jev/engine/platform/platform/utils';
 
 export interface KeyCombo {
   key: string;
@@ -103,6 +103,50 @@ export class KeybindingsManager<Action extends string> {
     notices.push(...this.buildLookupMap());
     if (notices.length > 0) logger.warn('keybindings: some overrides were not applied', { path: this.configPath, notices });
     return notices;
+  }
+  /**
+   * Bind `action` to `combos` in the user's file and reload. Entries for the
+   * same action under a legacy name are dropped, so the one written is the one
+   * that applies. Returns the reload's notices.
+   */
+  setOverride(action: Action, combos: readonly KeyCombo[]): readonly string[] {
+    if (combos.length === 0 || !combos.every(isKeyCombo)) throw new Error(`keybindings: a binding for "${action}" needs at least one key combination with a key name.`);
+    return this.writeOverride(action, combos.map(combo => ({ ...combo })));
+  }
+  /** Remove every entry for `action` (canonical or legacy name) from the user's file and reload, so the default applies. */
+  clearOverride(action: Action): readonly string[] {
+    return this.writeOverride(action, undefined);
+  }
+  /**
+   * The one writer of the file, reading it with the same rules as
+   * loadFromDisk(). A file that cannot be read or parsed is left exactly as it
+   * is and nothing is written: it may be a hand edit the user is in the middle of.
+   */
+  private writeOverride(action: Action, combos: KeyCombo[] | undefined): readonly string[] {
+    let overrides: Record<string, unknown> = {};
+    if (existsSync(this.configPath)) {
+      let raw: string;
+      try { raw = readFileSync(this.configPath, 'utf-8'); } catch (error) {
+        throw new Error(`keybindings: ${this.configPath} could not be read (${summarizeError(error)}); it was left unchanged and no binding was written. Fix its permissions, then try again.`);
+      }
+      if (raw.trim()) {
+        let parsed: unknown;
+        try { parsed = JSON.parse(raw); } catch (error) {
+          throw new Error(`keybindings: ${this.configPath} is not valid JSON (${summarizeError(error)}); it was left unchanged and no binding was written. Fix the file, or delete it to start from the defaults, then try again.`);
+        }
+        if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+          throw new Error(`keybindings: ${this.configPath} is not a JSON object; it was left unchanged and no binding was written. Fix the file, or delete it to start from the defaults, then try again.`);
+        }
+        overrides = parsed as Record<string, unknown>;
+      }
+    }
+    const aliases = this.catalog.aliases;
+    for (const name of Object.keys(overrides)) {
+      if ((aliases && Object.hasOwn(aliases, name) ? aliases[name] : name) === action) delete overrides[name];
+    }
+    if (combos) overrides[action] = combos.length === 1 ? combos[0] : combos;
+    writeDocument(this.configPath, overrides);
+    return this.loadFromDisk();
   }
   /** Rebuild the single chord table that both lookup() and matches() read, and describe every chord two actions share. */
   private buildLookupMap(): string[] {

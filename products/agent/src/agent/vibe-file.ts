@@ -1,22 +1,13 @@
-import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+// VIBE.md is the source of the persona prompt: the files found on disk are read
+// when a prompt is composed, so an edit to the file applies to the next turn, and
+// what `/vibe status` and the prompt receipt report is what the prompt carries.
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { atomicWriteFileSync, type AtomicWriteOptions } from '@goodvibes-jev/engine/platform/platform/config';
 import type { ShellPathService } from '@/runtime/index.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import { assertNoSecretLikeText } from './persona-registry.ts';
 import { parseMarkdownFrontmatter, stripMarkdownFrontmatter } from './markdown-frontmatter.ts';
-// VIBE.md is now a PROJECTION of persona/constraint records in the
-// canonical memory store, not a separate source of truth. renderVibeProjection emits
-// the same '## VIBE.md' block from those records (caveat preserved); the file is
-// demoted to an import/export FORMAT folded in via vibeBodyToConstraintOptions.
-import { renderVibeProjection, vibeBodyToConstraintOptions } from '@goodvibes-jev/engine/platform/platform/state';
-import { withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime';
-import { decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
-import type { MemoryRecord, MemoryScope } from '@goodvibes-jev/engine/platform/platform/state';
-// Writes go through the memory-spine's MemoryAccess surface (add), not the raw
-// MemoryRegistry, so this import folds correctly whether the agent is local or has
-// adopted a daemon, see services.ts's memorySpineClient.
-import type { MemoryAccess } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
 
 export type AgentVibeScope = 'project' | 'global';
 
@@ -60,6 +51,10 @@ export interface AgentVibeImportSource {
   readonly scope: AgentVibeScope;
 }
 
+/** What one VIBE.md may add to the prompt sent with every turn; the rest is cut and the file reported `truncated`. */
+export const MAX_VIBE_FILE_CHARS = 16_000;
+/** A file this large is not a personality note; it is not read at all. */
+const MAX_VIBE_FILE_BYTES = 1_048_576;
 
 const DEFAULT_VIBE_BODY = [
   '# VIBE.md',
@@ -80,6 +75,10 @@ function readVibeCandidate(path: string, scope: AgentVibeScope): AgentVibeFile |
   if (!existsSync(path)) return null;
   let content = '';
   try {
+    const size = statSync(path).size;
+    if (size > MAX_VIBE_FILE_BYTES) {
+      return { path, scope, reason: `File is ${size} bytes, over the ${MAX_VIBE_FILE_BYTES} byte limit; not loaded. Keep VIBE.md to the instructions themselves.` };
+    }
     content = readFileSync(path, 'utf-8');
   } catch (error) {
     return {
@@ -107,12 +106,13 @@ function readVibeCandidate(path: string, scope: AgentVibeScope): AgentVibeFile |
     };
   }
 
+  const truncated = rawBody.length > MAX_VIBE_FILE_CHARS;
   return {
     path,
     scope,
-    body: rawBody,
+    body: truncated ? rawBody.slice(0, MAX_VIBE_FILE_CHARS) : rawBody,
     frontmatter,
-    truncated: false,
+    truncated,
   };
 }
 
@@ -191,8 +191,13 @@ function vibeHeading(file: AgentVibeFile): string {
   return `${label} VIBE.md${name ? ` - ${name}` : ''}`;
 }
 
-export function buildVibePrompt(shellPaths: AgentVibePaths): string | null {
-  const snapshot = discoverVibeFiles(shellPaths);
+/**
+ * The VIBE.md prompt block, from the files on disk. A caller that already
+ * discovered them (for the prompt receipt) passes that snapshot, so the files are
+ * read once per composition.
+ */
+export function buildVibePrompt(shellPaths: AgentVibePaths, discovered?: AgentVibeSnapshot): string | null {
+  const snapshot = discovered ?? discoverVibeFiles(shellPaths);
   if (snapshot.files.length === 0 && snapshot.blocked.length === 0) return null;
 
   const lines: string[] = [
@@ -202,6 +207,7 @@ export function buildVibePrompt(shellPaths: AgentVibePaths): string | null {
 
   for (const file of snapshot.files) {
     lines.push('', `### ${vibeHeading(file)}`, `Source: ${file.path}`, '', file.body);
+    if (file.truncated) lines.push('', `[This VIBE.md is longer than ${MAX_VIBE_FILE_CHARS} characters; the rest was not loaded.]`);
   }
 
   if (snapshot.blocked.length > 0) {
@@ -215,151 +221,6 @@ export function buildVibePrompt(shellPaths: AgentVibePaths): string | null {
   return lines.join('\n');
 }
 
-/**
- * The VIBE.md prompt block as a PROJECTION of persona/constraint records.
- *
- * This is the store-sourced replacement for buildVibePrompt (which reads the file
- * directly). It renders the same '## GoodVibes Agent VIBE.md' block, including the
- * precedence caveat, from the cls:'constraint' persona records in the canonical
- * store, so persona instructions have a single source of truth alongside every other
- * durable fact. Returns null when there are no persona records to project.
- */
-export function buildVibeProjectionPrompt(memoryRecords: { getAll(): readonly MemoryRecord[] }): string | null {
-  return renderVibeProjection(memoryRecords.getAll());
-}
-
-/** A literal import retains the same file and memory backend through publication. */
-function captureVibeImport(file: AgentVibeFile, memory: MemoryAccess): () => void {
-  const original = readFileSync(file.path, 'utf8');
-  if (JSON.stringify(readVibeCandidate(file.path, file.scope)) !== JSON.stringify(file)) throw new Error('VIBE.md changed before import.');
-  const backend = memory.captureOperationScope?.();
-  return () => {
-    decisionModelPolicyState(); backend?.();
-    if (readFileSync(file.path, 'utf8') !== original) throw new Error('VIBE.md changed during import.');
-  };
-}
-
-/**
- * Fold discovered VIBE.md files into the store as persona/constraint
- * records, the file demoted to an IMPORT FORMAT. Each bullet becomes one record so a
- * later single-record edit changes exactly one projected line. Secret-like content is
- * already rejected by discoverVibeFiles (readVibeCandidate → assertNoSecretLikeText),
- * so only clean bodies reach here. Idempotent enough for boot: importing the same body
- * twice creates duplicate records only if their summaries differ, so callers should run
- * this as a one-time migration, not every boot (mirrors the memory fold precedent).
- */
-export async function importVibeFilesIntoMemory(
-  memorySpine: MemoryAccess,
-  shellPaths: AgentVibePaths,
-): Promise<number> {
-  return withConfiguredDecisionModelPolicy(async () => {
-    const snapshot = discoverVibeFiles(shellPaths);
-    let created = 0;
-    for (const file of snapshot.files) {
-      const current = captureVibeImport(file, memorySpine);
-      current();
-      const scope: MemoryScope = file.scope === 'global' ? 'team' : 'project';
-      const name = file.frontmatter.name?.trim();
-      const options = await vibeBodyToConstraintOptions(file.body, {
-        scope,
-        ...(name ? { name } : {}),
-        sourceRef: file.path,
-      }, { assertCurrent: current });
-      for (const opts of options) {
-        current();
-        await memorySpine.add(opts, { assertCurrent: current });
-        created += 1;
-        current();
-      }
-    }
-    return created;
-  });
-}
-
-/**
- * The persisted marker that makes the VIBE.md → memory import a strictly
- * ONE-TIME migration. Keyed by absolute file path → completed, so importing the same
- * VIBE.md twice is a no-op (re-import would create near-duplicate persona records), while
- * a NEW project's VIBE.md still migrates exactly once. Mirrors the sessions.spine-folded
- * marker precedent (bootstrap.ts), a small JSON sidecar, read before and written after.
- */
-interface VibeImportMarker {
-  readonly migrated: Record<string, true>;
-}
-
-function vibeImportMarkerPath(shellPaths: Pick<ShellPathService, 'resolveUserPath'>): string {
-  return shellPaths.resolveUserPath(GOODVIBES_AGENT_SURFACE_ROOT, 'vibe-import.migrated.json');
-}
-
-function readVibeImportMarker(path: string): VibeImportMarker {
-  if (!existsSync(path)) return { migrated: {} };
-  try {
-    const parsed = JSON.parse(readFileSync(path, 'utf-8')) as unknown;
-    const migrated = (parsed as { migrated?: unknown })?.migrated;
-    if (migrated && typeof migrated === 'object' && !Array.isArray(migrated)) {
-      const out: Record<string, true> = Object.create(null) as Record<string, true>;
-      for (const [key, value] of Object.entries(migrated as Record<string, unknown>)) {
-        // Earlier markers stored a body digest after the same successful import.
-        if (value === true || (typeof value === 'string' && /^[a-f0-9]{64}$/.test(value))) out[key] = true;
-      }
-      return { migrated: out };
-    }
-  } catch {
-    // An unreadable marker establishes no completed import. The file is
-    // still subject to ordinary source/currentness checks before any write.
-  }
-  return { migrated: {} };
-}
-
-function writeVibeImportMarker(path: string, marker: VibeImportMarker): void {
-  mkdirSync(dirname(path), { recursive: true });
-  atomicWriteFileSync(path, `${JSON.stringify(marker, null, 2)}\n`);
-}
-
-/**
- * Fold discovered VIBE.md files into persona/constraint records ONCE.
- * Guarded by a persisted completion marker so boot never re-imports the same file (which
- * would create near-duplicate persona records). Called at boot AFTER memoryStore.init().
- * Returns the number of records created this run (0 when everything is already migrated).
- */
-export async function importVibeFilesIntoMemoryOnce(
-  memorySpine: MemoryAccess,
-  shellPaths: AgentVibePaths,
-): Promise<number> {
-  return withConfiguredDecisionModelPolicy(async () => {
-    const markerPath = vibeImportMarkerPath(shellPaths);
-    const marker = readVibeImportMarker(markerPath);
-    const snapshot = discoverVibeFiles(shellPaths);
-    let created = 0;
-    let changed = false;
-    for (const file of snapshot.files) {
-      const key = resolve(file.path);
-      // This is a one-time boot import, not an automatic synchronization job.
-      // Later edits require the explicit import route, avoiding duplicate records.
-      if (Object.hasOwn(marker.migrated, key)) continue;
-      const current = captureVibeImport(file, memorySpine);
-      current();
-      const scope: MemoryScope = file.scope === 'global' ? 'team' : 'project';
-      const name = file.frontmatter.name?.trim();
-      const options = await vibeBodyToConstraintOptions(file.body, {
-        scope,
-        ...(name ? { name } : {}),
-        sourceRef: file.path,
-      }, { assertCurrent: current });
-      for (const opts of options) {
-        current();
-        await memorySpine.add(opts, { assertCurrent: current });
-        created += 1;
-        current();
-      }
-      marker.migrated[key] = true;
-      changed = true;
-    }
-    if (changed) writeVibeImportMarker(markerPath, marker);
-    return created;
-  });
-}
-
 export function formatVibeStatus(snapshot: AgentVibeSnapshot): string {
   const lines: string[] = [
     'GoodVibes Agent VIBE.md',
@@ -369,9 +230,9 @@ export function formatVibeStatus(snapshot: AgentVibeSnapshot): string {
     `  global init ${snapshot.globalInitPath}`,
   ];
   if (snapshot.files.length > 0) {
-    lines.push('', 'Applied files');
+    lines.push('', 'Applied files (read into the prompt each turn; an edit applies to the next turn)');
     for (const file of snapshot.files) {
-      const suffix = file.truncated ? ' truncated' : '';
+      const suffix = file.truncated ? `  truncated: only the first ${MAX_VIBE_FILE_CHARS} characters are applied` : '';
       lines.push(`  ${file.scope}  ${file.path}${suffix}`);
     }
   }

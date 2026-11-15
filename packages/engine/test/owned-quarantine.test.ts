@@ -90,7 +90,7 @@ test('native lifecycle parsing cannot quarantine or overwrite a different marker
 test('readonly malformed local plan reports recovery required without quarantine, reset or byte changes', () => {
   const f = fixture(), options = { homeDirectory: f.root, surfaceRoot: 'test', projectId: 'saved-project', projectRoot: '/actual/workspace' }, store = new WorkPlanStore(options); store.addItem('Saved work'); writeFileSync(store.filePath, '{"items":[');
   const raw = readFileSync(store.filePath), members = readdirSync(dirname(store.filePath)).sort();
-  const projected = store.getActivePlan({ readOnly: true }); expect(projected.housekeeping?.recoveryRequired).toBe(true); expect(projected.housekeeping?.resetFromUnreadableFile).not.toBe(true); expect(readFileSync(store.filePath)).toEqual(raw); expect(readdirSync(dirname(store.filePath)).sort()).toEqual(members);
+  const projected = store.getActivePlan(); expect(projected.housekeeping?.recoveryRequired).toBe(true); expect(projected.housekeeping?.resetFromUnreadableFile).not.toBe(true); expect(readFileSync(store.filePath)).toEqual(raw); expect(readdirSync(dirname(store.filePath)).sort()).toEqual(members);
 });
 
 test('requesting source close during an actual async FD read holds the descriptor until callback drainage', async () => {

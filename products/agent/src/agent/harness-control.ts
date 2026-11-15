@@ -19,9 +19,9 @@ import {
   isAgentHiddenSettingKey,
 } from '../config/agent-settings-policy.ts';
 import { rankHarnessCatalog, captureCatalogData, type CatalogRankingOptions } from '../tools/agent-harness-catalog-ranking.ts';
+import { settingDomainForPhrase } from '../config/settings-search-vocabulary.ts';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import {
-  agentDaemonConfigClient,
   agentDaemonConfigClientInstalled,
   agentDaemonConfigClientRevision,
   configKeyScope,
@@ -161,17 +161,6 @@ export interface HarnessSettingMutationResult {
 }
 
 /**
- * The most settings one listing can return, and the page size when the caller
- * names none. It is deliberately unbounded: a fixed ceiling (500, then 2000)
- * kept being overtaken by the catalog, and a listing that stops at a ceiling
- * drops its tail rows, which reads to whoever asked as "that setting does not
- * exist". The catalog is a few hundred rows, so one response stays small.
- * {@link countHarnessSettings} still reports how many settings matched, and
- * every caller must say when it returned fewer.
- */
-export const MAX_SETTING_LIMIT = Number.MAX_SAFE_INTEGER;
-const DEFAULT_SETTING_LIMIT = MAX_SETTING_LIMIT;
-/**
  * Credential-looking LEAF names. Matched against the last dot segment only, and
  * never against the whole key, so an unrelated ancestor cannot drag a plain
  * value into redaction.
@@ -205,15 +194,14 @@ function previewText(value: string, maxLength = 56): string {
 
 /**
  * The settings catalog is a fixed, enumerable set the caller is entitled to see
- * all of, not a feed. A fixed 500 silently truncated the default listing the
- * moment the schema passed 500 keys (the `profile.*` domain took it past): the
- * payload's `returned` came back short of its own `total` with nothing saying
- * the list had been cut. The ceiling is now MAX_SETTING_LIMIT, and every
- * caller states in words when it returned fewer than matched.
+ * all of, not a feed, so there is no ceiling: a listing returns every match
+ * unless the caller names a page size. A ceiling kept being overtaken by the
+ * catalog and silently dropped its tail rows. Every caller states in words when
+ * it returned fewer than matched.
  */
-function clampLimit(value: unknown, fallback = DEFAULT_SETTING_LIMIT): number {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return fallback;
-  return Math.max(1, Math.min(MAX_SETTING_LIMIT, Math.trunc(value)));
+function pageSize(value: unknown): number | undefined {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return undefined;
+  return Math.max(1, Math.trunc(value));
 }
 
 function findSetting(configManager: AgentSettingsCatalog, rawKey: string): AgentConfigSetting | null {
@@ -391,11 +379,8 @@ function filterHarnessSettingSchema(configManager: AgentSettingsCatalog, filters
 }
 
 function captureSettingsReadingOptions(options: CatalogRankingOptions) {
-  const { signal, sourceOwner, assertCurrent, retainCurrent } = options;
-  const assertIdentity = () => {
-    signal?.throwIfAborted();
-    if (options.signal !== signal || options.sourceOwner !== sourceOwner || options.assertCurrent !== assertCurrent || options.retainCurrent !== retainCurrent) throw new ToolInputProjectionError('stale');
-  };
+  const { signal, assertCurrent } = options;
+  const assertIdentity = () => { signal?.throwIfAborted(); };
   return { assertIdentity, assertCurrent: () => { assertIdentity(); assertCurrent?.(); } };
 }
 
@@ -435,17 +420,18 @@ export function bindSettingSchemaDescriptors(roots: readonly unknown[]): () => v
   };
 }
 
-/** One complete immutable metadata snapshot, with executable validators bound separately. */
+/**
+ * One immutable metadata snapshot for a prose search, with executable validators
+ * bound separately. The schema is replaced, never edited in place, when it
+ * changes, so whether it is still current is the identity of the two schema
+ * arrays plus the configuration incarnation: three compares.
+ */
 function captureSettingCatalog(configManager: AgentSettingsCatalog, options: CatalogRankingOptions) {
   const caller = captureSettingsReadingOptions(options); caller.assertCurrent();
-  const owner = configManager as AgentSettingsCatalog & Partial<Pick<ConfigManager, 'getConfigurationIncarnation' | 'getHomeDirectory'>>;
-  const methods = [configManager.getSchema, configManager.getHostSettingsSchema, owner.getConfigurationIncarnation, owner.getHomeDirectory];
+  const owner = configManager as AgentSettingsCatalog & Partial<Pick<ConfigManager, 'getConfigurationIncarnation'>>;
   const incarnation = owner.getConfigurationIncarnation?.();
-  const home = owner.getHomeDirectory?.();
   const builtin = configManager.getSchema(), hosts = configManager.getHostSettingsSchema?.();
-  const assertDescriptors = bindSettingSchemaDescriptors([builtin, hosts]);
   // Preserve hidden metadata for every registered Agent host row.
-  // The original complete descriptor binding remains current during screening.
   const normalizedHosts: AgentConfigSetting[] = [];
   for (const host of hosts ?? []) {
     if (!isAgentHostSettingKey(host.key)) continue;
@@ -463,13 +449,9 @@ function captureSettingCatalog(configManager: AgentSettingsCatalog, options: Cat
   }));
   const assertCurrent = () => {
     caller.assertIdentity();
-    if (configManager.getSchema !== methods[0] || configManager.getHostSettingsSchema !== methods[1]
-      || owner.getConfigurationIncarnation !== methods[2] || owner.getHomeDirectory !== methods[3]
-      || owner.getConfigurationIncarnation?.() !== incarnation || owner.getHomeDirectory?.() !== home
+    if (owner.getConfigurationIncarnation?.() !== incarnation
       || configManager.getSchema() !== builtin || configManager.getHostSettingsSchema?.() !== hosts) throw new ToolInputProjectionError('stale');
-    assertDescriptors();
   };
-  assertCurrent();
   return { schema, assertCurrent };
 }
 
@@ -479,22 +461,19 @@ type SettingCatalogSnapshot = ReturnType<typeof captureSettingCatalog>;
 async function readHarnessSettingSchema(configManager: AgentSettingsCatalog, filters: HarnessSettingFilters,
   options: CatalogRankingOptions, captured: SettingCatalogSnapshot = captureSettingCatalog(configManager, options)) {
   const capturedFilters = captureModelReadingInput(filters);
-  const filtersJson = JSON.stringify(capturedFilters);
-  const assertFiltersCurrent = () => {
-    if (JSON.stringify(captureModelReadingInput(filters)) !== filtersJson) throw new ToolInputProjectionError('stale');
-  };
-  const assertCurrent = () => { options.assertCurrent?.(); captured.assertCurrent(); assertFiltersCurrent(); };
-  // During ranking the scoped guard already checks the entire schema. Register
-  // the same guard for later consumers only after ranking, avoiding reentrant
-  // outer guards walking the same source again for every candidate callback.
-  const retainSource = () => {
-    options.retainCurrent?.(captured.assertCurrent);
-    options.retainCurrent?.(assertFiltersCurrent);
-  };
+  const assertCurrent = () => { options.assertCurrent?.(); captured.assertCurrent(); };
+  // Registered for later consumers only after ranking, so the outer guard does
+  // not run it again for every candidate the reading looks at.
+  const retainSource = () => { options.retainCurrent?.(captured.assertCurrent); };
   const catalog = filterSettingCatalog(captured.schema, capturedFilters);
   const query = capturedFilters.query?.trim();
   if (!query) { retainSource(); return { matches: catalog.map(entry => ({ entry, judgment: undefined })), total: catalog.length, assertCurrent }; }
-  const ranked = await rankHarnessCatalog(catalog, query, setting => ({
+  // A search that is exactly one of a domain's plain phrases ("spending limit")
+  // ranks only that domain's settings.
+  const phraseDomain = settingDomainForPhrase(query);
+  const inDomain = phraseDomain ? catalog.filter(setting => setting.key.split('.')[0] === phraseDomain) : [];
+  const candidates = inDomain.length > 0 ? inDomain : catalog;
+  const ranked = await rankHarnessCatalog(candidates, query, setting => ({
     id: setting.key,
     description: [setting.description, setting.type, ...(setting.enumValues ?? []), setting.validationHint ?? ''].join('\n'),
     evidence: setting,
@@ -521,21 +500,12 @@ export function countHarnessSettingCatalog(
   return harnessSettingCatalog(configManager, filters).length;
 }
 
-/** Structural compatibility only. Semantic pages expose their recorded judgments. */
-export function harnessSettingQueryRelaxed(
-  configManager: AgentSettingsCatalog,
-  filters: HarnessSettingFilters = {},
-): boolean {
-  filterHarnessSettingSchema(configManager, filters);
-  return false;
-}
-
 export function listHarnessSettings(
   configManager: Pick<ConfigManager, 'get'> & AgentSettingsCatalog,
   filters: HarnessSettingFilters = {},
   options: { readonly includeParameters?: boolean; readonly view?: EffectiveConfigView } = {},
 ): readonly (HarnessSettingDescriptor | HarnessSettingSummary)[] {
-  const limit = clampLimit(filters.limit);
+  const limit = pageSize(filters.limit);
   const view = options.view;
 
   return filterHarnessSettingSchema(configManager, filters)
@@ -562,21 +532,18 @@ export async function listEffectiveHarnessSettingsPage(
   const caller = captureSettingsReadingOptions(options); caller.assertCurrent();
   const incarnation = configManager.getConfigurationIncarnation();
   const home = configManager.getHomeDirectory();
-  const client = agentDaemonConfigClient(); const clientRevision = agentDaemonConfigClientRevision();
+  const clientRevision = agentDaemonConfigClientRevision();
   const includeParameters = options.includeParameters;
   const routing = captureCatalogData(options.routing ?? {});
-  const routingJson = JSON.stringify(routing);
   const assertOwner = () => {
     caller.assertCurrent();
-    if (options.includeParameters !== includeParameters || JSON.stringify(captureCatalogData(options.routing ?? {})) !== routingJson) throw new ToolInputProjectionError('stale');
-    if (configManager.getConfigurationIncarnation() !== incarnation || configManager.getHomeDirectory() !== home
-      || agentDaemonConfigClient() !== client || agentDaemonConfigClientRevision() !== clientRevision) throw new ToolInputProjectionError('stale');
+    if (configManager.getConfigurationIncarnation() !== incarnation || agentDaemonConfigClientRevision() !== clientRevision) throw new ToolInputProjectionError('stale');
   };
   const selected = await readHarnessSettingSchema(configManager, filters, { ...options, assertCurrent: assertOwner });
   selected.assertCurrent();
   const view = await openEffectiveConfigView(configManager, { homeDir: home ?? undefined, ...routing });
   selected.assertCurrent();
-  const settings = selected.matches.slice(0, clampLimit(filters.limit)).map(({ entry, judgment }) => ({
+  const settings = selected.matches.slice(0, pageSize(filters.limit)).map(({ entry, judgment }) => ({
     ...(includeParameters ? describeHarnessSetting(configManager, entry, { view }) : describeHarnessSettingSummary(configManager, entry, { view })),
     ...(judgment ? { judgment } : {}),
   }));
@@ -701,11 +668,7 @@ async function resolveHarnessSettingReading(
   if (exact) return exact;
   const lookup = settingLookupFromArgs(args);
   if (!lookup) return null;
-  const argsJson = JSON.stringify(captureModelReadingInput(args));
-  const assertArgs = () => {
-    caller.assertCurrent();
-    if (JSON.stringify(captureModelReadingInput(args)) !== argsJson) throw new ToolInputProjectionError('stale');
-  };
+  const assertArgs = caller.assertCurrent;
   const selected = await readHarnessSettingSchema(configManager, {
     ...(args.category === undefined ? {} : { category: args.category }),
     ...(args.prefix === undefined ? {} : { prefix: args.prefix }),
@@ -961,7 +924,7 @@ export function formatHarnessSettingList(
   return [
     shortOf === null
       ? `Settings (${settings.length})`
-      : `Settings (${settings.length} of ${shortOf}, this page is short; re-run with --limit ${Math.min(shortOf, MAX_SETTING_LIMIT)} or narrow it with --category/--prefix)`,
+      : `Settings (${settings.length} of ${shortOf}, this page is short; re-run with --limit ${shortOf} or narrow it with --category/--prefix)`,
     ...settings.map((setting) => {
       const status = setting.writable ? 'writable' : 'read-only';
       const visible = setting.visibleInWorkspace ? 'workspace' : 'scriptable';
@@ -1003,6 +966,10 @@ export function formatHarnessError(error: unknown): string {
  * Ownership-aware `resolveHarnessSetting`: a daemon-owned key resolves to the
  * DAEMON's live value, with the store named on the descriptor. The
  * synchronous overload above is kept for callers that have no daemon context.
+ *
+ * An exact or case-insensitive key is a plain schema lookup and returns at once;
+ * the catalogue snapshot and its currency checks exist only for a prose search
+ * that goes to the reading.
  */
 export async function resolveEffectiveHarnessSetting(
   configManager: ConfigManager,
@@ -1011,23 +978,27 @@ export async function resolveEffectiveHarnessSetting(
   options: CatalogRankingOptions = {},
 ): Promise<HarnessSettingResolution | null> {
   const caller = captureSettingsReadingOptions(options); caller.assertCurrent();
+  const lookup = settingLookupFromArgs(args);
+  if (!lookup) return null;
   const incarnation = configManager.getConfigurationIncarnation();
   const home = configManager.getHomeDirectory();
-  const client = agentDaemonConfigClient(); const clientRevision = agentDaemonConfigClientRevision();
-  const captured = captureSettingCatalog(configManager, options);
-  const argsJson = JSON.stringify(captureModelReadingInput(args));
-  const capturedRouting = captureCatalogData(routing); const routingJson = JSON.stringify(capturedRouting);
-  const retained: (() => void)[] = [];
+  const clientRevision = agentDaemonConfigClientRevision();
+  const capturedRouting = captureCatalogData(routing);
   const assertOwner = () => {
     caller.assertIdentity();
-    if (configManager.getConfigurationIncarnation() !== incarnation || configManager.getHomeDirectory() !== home
-      || agentDaemonConfigClient() !== client || agentDaemonConfigClientRevision() !== clientRevision
-      || JSON.stringify(captureModelReadingInput(args)) !== argsJson || JSON.stringify(captureCatalogData(routing)) !== routingJson) throw new ToolInputProjectionError('stale');
+    if (configManager.getConfigurationIncarnation() !== incarnation || agentDaemonConfigClientRevision() !== clientRevision) throw new ToolInputProjectionError('stale');
   };
+  const keyed = resolveHarnessSettingKey(configManager, args);
+  const view = await openEffectiveConfigView(configManager, { homeDir: home ?? undefined, ...capturedRouting });
+  if (keyed) {
+    assertOwner();
+    // Described again over the view so a daemon-owned key carries the daemon's value.
+    return resolveHarnessSettingKey(configManager, args, view);
+  }
+  const captured = captureSettingCatalog(configManager, options);
+  const retained: (() => void)[] = [];
   const assertCurrent = () => { caller.assertCurrent(); assertOwner(); captured.assertCurrent(); for (const guard of retained) guard(); };
   options.retainCurrent?.(assertOwner);
-  assertCurrent();
-  const view = await openEffectiveConfigView(configManager, { homeDir: home ?? undefined, ...capturedRouting });
   assertCurrent();
   const selected = await resolveHarnessSettingReading(configManager, args, view, { ...options,
     assertCurrent: () => { caller.assertCurrent(); assertOwner(); },

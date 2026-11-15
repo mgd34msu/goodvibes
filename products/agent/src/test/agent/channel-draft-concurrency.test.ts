@@ -8,8 +8,8 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 import {
   channelDraftFilePath,
@@ -368,5 +368,33 @@ describe('persisted shape', () => {
     const raw = readFileSync(channelDraftFilePath(shellPaths), 'utf8');
     expect(raw).not.toContain('bodyUnavailable');
     expect(raw).not.toContain('origin');
+  });
+});
+
+describe('the outbox bound never drops an unsent draft', () => {
+  function seed(drafts: readonly Record<string, unknown>[]): void {
+    const path = channelDraftFilePath(shellPaths);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, JSON.stringify({ version: 1, drafts }));
+  }
+  const row = (index: number, status: 'draft' | 'sent', updatedAt: string) => ({
+    version: 1, id: `draft-${status}-${index}`, createdAt: updatedAt, updatedAt, status, message: `m${index}`, daemonSyncState: 'synced',
+  });
+
+  test('past the bound the oldest sent draft goes and an older unsent draft stays', async () => {
+    seed([
+      ...Array.from({ length: 199 }, (_, index) => row(index, 'sent', `2026-02-01T00:00:${String(index % 60).padStart(2, '0')}.${String(index).padStart(3, '0')}Z`)),
+      row(0, 'draft', '2025-01-01T00:00:00.000Z'),
+    ]);
+    await saveDraft(shellPaths, { message: 'one more' });
+    const ids = readChannelDrafts(shellPaths).drafts.map((draft) => draft.id);
+    expect(ids).toHaveLength(200);
+    expect(ids).toContain('draft-draft-0');
+  });
+
+  test('a save that would have to drop an unsent draft is refused and nothing is dropped', async () => {
+    seed(Array.from({ length: 200 }, (_, index) => row(index, 'draft', `2026-02-01T00:00:00.${String(index).padStart(3, '0')}Z`)));
+    await expect(saveDraft(shellPaths, { message: 'no room' })).rejects.toThrow(/not sent/);
+    expect(readChannelDrafts(shellPaths).drafts).toHaveLength(200);
   });
 });

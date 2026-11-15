@@ -7,8 +7,8 @@ import type { ShellPathService } from '@/runtime/index.ts';
 import type { AgentConnectedHostConfigReader } from '../agent/routine-schedule-promotion.ts';
 import { assertOperatorEffect, captureOperatorConnection } from '../agent/operator-connection-owner.ts';
 import { publishOperatorMethodReceipt } from '../agent/operator-method-receipt.ts';
-import { appendOperatorQuery, substituteOperatorPath } from '../agent/operator-contract-routes.ts';
-import { createOperatorInputProjector, findConnectedOperatorMethod, operatorExecutionConnection, operatorExecutionWireInput, operatorExecutionRequestPolicy, operatorMethodIsReadOnly, operatorMethodIsOutward } from './agent-operator-input-projector.ts';
+import { appendOperatorQuery, operatorMethodIsReadOnly, READ_ONLY_HTTP_METHODS, resolveOperatorContractMethod, substituteOperatorPath } from '../agent/operator-contract-routes.ts';
+import { createOperatorInputProjector, operatorExecutionConnection, operatorExecutionWireInput, operatorExecutionRequestPolicy, operatorMethodIsOutward } from './agent-operator-input-projector.ts';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -51,7 +51,6 @@ type WatcherMethodId =
   | 'watchers.stop'
   | 'watchers.delete';
 
-const READ_ONLY_HTTP_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 // The owner's own acts: answering a purchase window over his limits, typing a card's security code,
 // recording what the merchant history shows, and approving a purchase in advance. Refused here with
 // the way the owner does each one.
@@ -567,7 +566,7 @@ export function createAgentOperatorMethodTool(
       options?.signal?.throwIfAborted();
       const methodId = readString(args.methodId);
       if (!methodId) return { success: false, error: 'methodId is required.' };
-      const method = findConnectedOperatorMethod(methodId);
+      const method = resolveOperatorContractMethod(methodId);
       if (!method) {
         return {
           success: false,
@@ -618,7 +617,6 @@ export function createAgentOperatorMethodTool(
         try {
           const output = await stringifyOutput({ preview, dryRun: true }, { declaredFields: operatorResultFields(methodSnapshot), signal: options?.signal, assertCurrent: () => {
             options?.signal?.throwIfAborted(); assertCurrentToolInvocation(rawArgs, options);
-            if (findConnectedOperatorMethod(methodId) !== method || !isDeepStrictEqual(captureStrictJudgmentJson(method), methodSnapshot)) throw new Error('Connected operator method changed.');
           } });
           return { success: true, output };
         } catch { return { success: false, error: 'Connected operator preview could not be projected safely.' }; }
@@ -638,9 +636,6 @@ export function createAgentOperatorMethodTool(
           options?.signal?.throwIfAborted();
           if (requiresEffect) assertOperatorEffect(rawArgs, options, operatorMethodIsOutward(methodSnapshot.id));
           else assertCurrentToolInvocation(rawArgs, options);
-          if (findConnectedOperatorMethod(methodId) !== method || !isDeepStrictEqual(captureStrictJudgmentJson(method), methodSnapshot)) {
-            throw new Error('Connected operator method changed.');
-          }
         };
         assertInvocation();
         const projectedConnection = operatorExecutionConnection(rawArgs, options, shellPaths, configManager, 'method');

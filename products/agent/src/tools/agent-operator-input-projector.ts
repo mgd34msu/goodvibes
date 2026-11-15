@@ -1,4 +1,3 @@
-import { getOperatorContract } from '@goodvibes-jev/engine/platform/contracts';
 import { GatewayMethodCatalog } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import { captureStrictJudgmentJson } from '@goodvibes-jev/engine/platform/platform/gate';
 import { assertProjectionExecution, ToolInputProjectionError, type ToolInputProjector } from '@goodvibes-jev/engine/platform/platform/tools';
@@ -6,7 +5,7 @@ import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { isDeepStrictEqual } from 'node:util';
 import type { ShellPathService } from '@/runtime/index.ts';
 import type { AgentConnectedHostConfigReader } from '../agent/routine-schedule-promotion.ts';
-import type { OperatorContractMethodEntry } from '../agent/operator-contract-routes.ts';
+import { operatorMethodIsReadOnly, resolveOperatorContractMethod } from '../agent/operator-contract-routes.ts';
 import { getOperatorActions, isOperatorActionId, targetValue } from '../agent/operator-actions.ts';
 import { captureOperatorConnection } from '../agent/operator-connection-owner.ts';
 import { captureOperatorAutomationTarget, type OperatorAutomationTarget } from '../agent/operator-automation-target.ts';
@@ -31,23 +30,7 @@ const contexts = new WeakMap<object, { readonly connection: CapturedConnection |
   readonly automation: OperatorAutomationTarget; readonly requestPolicy: ReturnType<typeof captureOperatorRequestPolicy> | undefined;
   readonly shellPaths: ShellPathService; readonly reader: AgentConnectedHostConfigReader; readonly kind: 'method' | 'action' }>();
 
-export function findConnectedOperatorMethod(methodId: string): OperatorContractMethodEntry | null {
-  const methods = getOperatorContract().operator.methods;
-  const named = methods.map(method => ({ method, descriptor: Object.getOwnPropertyDescriptor(method, 'id') }));
-  return named.find(entry => entry.descriptor && 'value' in entry.descriptor && entry.descriptor.value === methodId)?.method
-    ?? named.find(entry => entry.descriptor && 'value' in entry.descriptor && typeof entry.descriptor.value === 'string'
-      && entry.descriptor.value.toLowerCase() === methodId.toLowerCase())?.method ?? null;
-}
-
-/** Scopes are the contract's closed authorization grammar, never prose inference. */
-export function operatorMethodIsReadOnly(method: OperatorContractMethodEntry, input?: unknown): boolean {
-  // The native screenshot route trims an optional caller-selected destination.
-  // Its default owned observation artifact remains an ordinary read.
-  if (method.id === 'browser.screenshot' && isRecord(input) && typeof input.path === 'string' && input.path.trim()) return false;
-  const scopes = method.scopes ?? [], httpMethod = method.http?.method?.toUpperCase();
-  return scopes.length > 0 ? scopes.every(scope => scope.startsWith('read:'))
-    : httpMethod === 'GET' || httpMethod === 'HEAD' || httpMethod === 'OPTIONS';
-}
+export { operatorMethodIsReadOnly };
 
 /** Capture connection authority before any repair or admission reading. */
 export function createOperatorInputProjector(shellPaths: ShellPathService, reader: AgentConnectedHostConfigReader,
@@ -57,21 +40,19 @@ export function createOperatorInputProjector(shellPaths: ShellPathService, reade
     const args = captureStrictJudgmentJson(request.args);
     const id = kind === 'method' ? args.methodId : args.action;
     if (typeof id !== 'string' || !id.trim()) throw new ToolInputProjectionError('held');
-    const method = findConnectedOperatorMethod(id.trim());
+    const method = resolveOperatorContractMethod(id.trim());
     if (!method) throw new ToolInputProjectionError('held');
     const snapshot = captureStrictJudgmentJson(method);
     const descriptor = kind === 'action' && isOperatorActionId(id) ? getOperatorActions()[id] : undefined;
     if (kind === 'action' && !descriptor) throw new ToolInputProjectionError('held');
-    const descriptorSnapshot = captureStrictJudgmentJson(descriptor);
     const preview = kind === 'method' && args.dryRun === true;
     const requestPolicy = !preview && (kind === 'action' || !operatorMethodIsReadOnly(snapshot, args.input) || operatorMethodIsOutward(snapshot.id))
       ? captureOperatorRequestPolicy() : undefined;
+    // The contract and the action table are fixed for the life of the process, so the method and
+    // descriptor read above stay what they are; only the call itself and the request policy can change.
     const assertSource = () => {
       request.signal?.throwIfAborted();
       requestPolicy?.assertCurrent();
-      if (findConnectedOperatorMethod(id.trim()) !== method || !isDeepStrictEqual(captureStrictJudgmentJson(method), snapshot)
-        || (descriptor && (!isOperatorActionId(id) || getOperatorActions()[id] !== descriptor
-          || !isDeepStrictEqual(captureStrictJudgmentJson(descriptor), descriptorSnapshot)))) throw new ToolInputProjectionError('stale');
     };
     const connection = preview ? undefined : captureOperatorConnection(shellPaths, reader, assertSource);
     let automation: OperatorAutomationTarget = { wireFields: {} };

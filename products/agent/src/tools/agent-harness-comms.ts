@@ -3,7 +3,6 @@ import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { captureCatalogData, captureCatalogMethods } from './agent-harness-catalog-ranking.ts';
 import { dirname } from 'node:path';
-import { readFileSync } from 'node:fs';
 import { captureHarnessLocalEffect } from './agent-harness-local-effect.ts';
 import { captureAgentExportPath } from './agent-artifact-effect.ts';
 import { harnessCatalogInvocationAuthority, retainHarnessCatalogCurrent } from './agent-harness-catalog-ingress.ts';
@@ -166,11 +165,9 @@ function guardedCommsInvoke(context: CommandContext, args: Record<string, unknow
 }
 
 /**
- * A draft id the local file does not hold: is it one only the daemon holds?
- *
- * The daemon never serves a draft's text, so a daemon-only draft can be named
- * but not read or sent from here. The answer says which state it is in and the
- * step that gets it sent.
+ * A draft id the local file does not hold: one only the daemon holds, composed
+ * on another surface. The daemon serves its text to the owner's credential, so
+ * it can be read here and `channel_draft_send` brings it into this outbox.
  */
 async function daemonOnlyDraft(context: CommandContext, draftId: string): Promise<ChannelDraft | null> {
   const invoke = commsDaemonInvoke(context);
@@ -180,7 +177,7 @@ async function daemonOnlyDraft(context: CommandContext, draftId: string): Promis
   return 'draft' in result && result.draft ? redactDraftWebhook(result.draft) : null;
 }
 
-const DAEMON_ONLY_DRAFT_STEP = 'its text is not served back through this API, so it cannot be inspected in full or sent from here. Re-create it with channel_draft_save (draftId and draftMessage), then channel_draft_send, or send it from the surface that composed it.';
+const DAEMON_DRAFT_TEXT_WITHHELD = 'the daemon serves a draft\'s text only to the owner\'s credential, and this Agent is not connected with it, so its text cannot be read or sent from here. Connect this Agent with the owner\'s pairing, or send it from the surface that composed it.';
 
 /** Redact a draft's webhook (which can embed a token) in any structured display payload. */
 function redactDraftWebhook<T extends { readonly webhook?: string; readonly webhookSecretKey?: string }>(draft: T): T {
@@ -269,7 +266,8 @@ export async function unifiedInboxSummary(
     inboundChannelFeed: inbox.inboundChannelFeed.available
       ? { available: true, methodId: inbox.inboundChannelFeed.methodId, total: inbox.inboundChannelFeed.total, truncated: inbox.inboundChannelFeed.truncated }
       : { available: false, methodId: inbox.inboundChannelFeed.methodId, reason: inbox.inboundChannelFeed.reason },
-    formatted: formatUnifiedInbox(inbox),
+    // The third-party text goes to the model once, in `untrusted`; `formatted` names where it is.
+    formatted: formatUnifiedInbox(inbox, { thirdParty: 'elsewhere' }),
     untrusted: labelUntrustedContent({ surface: 'channel-message', origin: 'unified inbox', text: thirdPartyText }),
     policy: inbox.policy,
   };
@@ -297,13 +295,24 @@ export async function channelDraftsSummary(
     const draft = getDraft(shellPaths, draftId);
     if (!draft) {
       const held = await daemonOnlyDraft(context, draftId);
-      if (held) {
+      if (held?.bodyUnavailable) {
         return {
           mode: 'channel_drafts',
           status: 'daemon_only',
           draftId,
           draft: held,
-          policy: `Draft ${draftId} is held by the daemon only (not in the local mirror); ${DAEMON_ONLY_DRAFT_STEP}`,
+          policy: `Draft ${draftId} is held by the daemon only; ${DAEMON_DRAFT_TEXT_WITHHELD}`,
+        };
+      }
+      if (held) {
+        return {
+          mode: 'channel_drafts',
+          status: 'found',
+          origin: 'daemon',
+          draft: held,
+          formatted: formatChannelDraft(held),
+          next: { send: `agent_harness mode:"channel_draft_send" draftId:"${draftId}"` },
+          policy: `Draft ${draftId} was composed on another surface and is held by the daemon; channel_draft_send brings it into this outbox and sends it.`,
         };
       }
       return {
@@ -452,11 +461,9 @@ export async function channelDraftSendHandoff(
 
   const owner = captureCommsEffect(context, args, options, channelDraftFilePath, true);
   const shellPaths = owner.paths;
-  if (!getDraft(shellPaths, draftId)) {
-    const held = await daemonOnlyDraft(context, draftId);
-    return publicText(held
-      ? `Draft ${draftId} is held by the daemon only (not in the local mirror); ${DAEMON_ONLY_DRAFT_STEP}`
-      : `Draft not found: ${draftId}. Use channel_drafts without draftId to list all drafts.`);
+  // A draft only the daemon holds is brought into this outbox by the send itself (queueDraftToSend).
+  if (!getDraft(shellPaths, draftId) && !commsDaemonInvoke(context)) {
+    return publicText(`Draft not found: ${draftId}. Use channel_drafts without draftId to list all drafts.`);
   }
   const router = context.platform.channelDeliveryRouter;
   if (!router) {
@@ -472,13 +479,12 @@ export async function channelDraftSendHandoff(
     const assertMethods = captureCatalogMethods(strategy, ['deliver', 'canHandle']);
     return { strategy, assertMethods, deliver: strategy.deliver, canHandle: strategy.canHandle };
   });
-  let expectedDraft = JSON.stringify(getDraft(shellPaths, draftId));
+  // The draft itself is not re-read here: every store write merges under the store lock.
   const assertSelectedSourceCurrent = () => {
     owner.assertSourceCurrent();
     assertRouter(); assertListed();
     for (const strategy of strategies) strategy.assertMethods();
-    if (context.platform.channelDeliveryRouter !== router || router.deliver !== deliver || router.listStrategies !== listStrategies
-      || JSON.stringify(getDraft(shellPaths, draftId)) !== expectedDraft) throw new ToolInputProjectionError('stale');
+    if (context.platform.channelDeliveryRouter !== router || router.deliver !== deliver || router.listStrategies !== listStrategies) throw new ToolInputProjectionError('stale');
     const current = listStrategies.call(router);
     captureCatalogMethods(current, ['length']);
     captureCatalogMethods(current, ['length', ...Object.getOwnPropertyNames(current)]);
@@ -490,7 +496,6 @@ export async function channelDraftSendHandoff(
   retainHarnessCatalogCurrent(args)(assertSelectedSourceCurrent, `agent.comms.draft:${publicReference}`);
   const invoke = guardedCommsInvoke(context, args, options, { ...owner, assertCurrent }, nativeReference);
   const preparePublication = (path: string, contents: string) => {
-    assertCurrent();
     if (path !== channelDraftFilePath(shellPaths)) throw new ToolInputProjectionError('stale');
     const planned: unknown = JSON.parse(contents);
     if (!planned || typeof planned !== 'object' || !('drafts' in planned) || !Array.isArray(planned.drafts)
@@ -498,13 +503,7 @@ export async function channelDraftSendHandoff(
       throw new ToolInputProjectionError('held');
     }
     const adoptReference = nativeReference?.preparePublication(path, contents);
-    return () => {
-      options?.signal?.throwIfAborted(); owner.assertSourceCurrent();
-      if (readFileSync(path, 'utf8') !== contents) throw new ToolInputProjectionError('stale');
-      expectedDraft = JSON.stringify(getDraft(shellPaths, draftId));
-      adoptReference?.();
-      assertCurrent();
-    };
+    return () => { adoptReference?.(); };
   };
   const storeOptions = { ...(invoke ? { invoke } : {}), webhookSecrets: commsWebhookSecrets(context), signal: options?.signal, assertCurrent, preparePublication, explicitUserRequest: false };
   // The daemon's copy of a draft learns the delivery outcome here; a daemon that
@@ -513,8 +512,6 @@ export async function channelDraftSendHandoff(
     if (!invoke) return draft;
     try {
       await syncChannelDrafts(shellPaths, invoke, { ...storeOptions, draftId });
-      // The sync rewrote the draft's own row; the retained source check must expect that.
-      expectedDraft = JSON.stringify(getDraft(shellPaths, draftId));
       return getDraft(shellPaths, draftId) ?? draft;
     } catch {
       return draft;

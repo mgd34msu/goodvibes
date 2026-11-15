@@ -27,21 +27,6 @@ import { retainCliConfig } from '@goodvibes-jev/engine/terminal-shell';
 import { dialHostForConfiguredHost } from '../config/connected-host-dial.ts';
 import { isClassicOperation } from '@goodvibes-jev/engine/platform/platform/runtime';
 
-export interface CliExternalHostLifecyclePosture {
-  readonly platform: 'manual';
-  readonly path: string;
-  readonly installed: false;
-  readonly autostart: false;
-  readonly running: false;
-  readonly logPath?: string;
-  readonly commandPreview: string;
-  readonly suggestedCommands: readonly string[];
-  readonly lastAction: 'status';
-  readonly actionError?: string;
-  readonly pidPath: string;
-  readonly lastError: null;
-}
-
 export interface CliServicePosture {
   readonly config: {
     readonly enabled: boolean;
@@ -57,12 +42,6 @@ export interface CliServicePosture {
      */
     readonly connectedHostDialEnabled: boolean;
   };
-  /**
-   * Not produced: the connected host's lifecycle is not observed from here, and
-   * constant "not running" values sat beside a live `reachable: true`.
-   * Whether the host answers is `endpoints[].reachable`.
-   */
-  readonly managed?: CliExternalHostLifecyclePosture;
   readonly endpoints: readonly CliServiceEndpointPosture[];
   readonly log: CliServiceLogPosture;
   readonly issues: readonly string[];
@@ -199,5 +178,6 @@ export function formatCliServicePosture(posture: CliServicePosture, json = false
     '',
     posture.issues.length === 0 ? 'Readiness ready' : 'Readiness needs attention',
     ...posture.issues.map((issue) => `  - ${issue}`),
+    ...(posture.advisories.length > 0 ? ['', 'Notes', ...posture.advisories.map((advisory) => `  - ${advisory}`)] : []),
   ].join('\n');
 }

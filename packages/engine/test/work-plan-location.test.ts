@@ -32,11 +32,11 @@ describe('work-plan location', () => {
     writeFileSync(join(dir, 'unattributed.json'), '{"items":[]}');
 
     const store = new WorkPlanStore(o);
-    expect(store.listItems({ readOnly: true }).map(item => item.title)).toEqual(['Saved in a numbered slot']);
-    expect(new WorkPlanStore(other).listItems({ readOnly: true }).map(item => item.title)).toEqual(['Saved before the table']);
+    expect(store.listItems().map(item => item.title)).toEqual(['Saved in a numbered slot']);
+    expect(new WorkPlanStore(other).listItems().map(item => item.title)).toEqual(['Saved before the table']);
     expect(existsSync(join(dir, '.project-owners'))).toBe(false);
     expect(existsSync(join(dir, '.native-plans'))).toBe(false);
-    expect(store.getActivePlan({ readOnly: true }).unassignedPlanPaths).toEqual([join(dir, 'unattributed.json')]);
+    expect(store.getActivePlan().unassignedPlanPaths).toEqual([join(dir, 'unattributed.json')]);
     expect(readdirSync(dir).filter(name => name.endsWith('.json')).length).toBe(3);
   });
 });

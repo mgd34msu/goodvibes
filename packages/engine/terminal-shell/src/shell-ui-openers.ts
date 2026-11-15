@@ -1,4 +1,5 @@
 import type { OpenSelection } from './selection-modal.js';
+import type { SettingsTargetOutcome } from './settings-navigation.js';
 interface CommonModal {
   open(): unknown;
 }
@@ -22,7 +23,8 @@ export function createCommonShellUiOpeners<Context>(options: {
   readonly input: CommonUiInput<Context>;
   readonly commandContext: Context;
   readonly render: () => void;
-  readonly renderHelpToggle: boolean;
+  /** Not read: both overlays open and repaint the same way in every product. */
+  readonly renderHelpToggle?: boolean;
 }) {
   const { input, render, commandContext } = options;
   const open = (name: 'contextInspector' | 'bookmark' | 'profilePicker' | 'sessionPicker', modal: CommonModal) => {
@@ -36,16 +38,18 @@ export function createCommonShellUiOpeners<Context>(options: {
     openBookmarkModal: () => open('bookmark', input.bookmarkModal),
     openProfilePicker: () => open('profilePicker', input.profilePickerModal),
     openSessionPicker: () => open('sessionPicker', input.sessionPickerModal),
+    // Open, never toggle: asked twice, the overlay is open. Esc (and the
+    // overlay's own key routes) close it.
     openHelpOverlay: () => {
       if (!input.helpOverlayActive) input.modalOpened('help');
-      input.helpOverlayActive = !input.helpOverlayActive;
+      input.helpOverlayActive = true;
       input.helpScrollOffset = 0;
       input.overlayFilters.help.clear();
-      if (options.renderHelpToggle) render();
+      render();
     },
     openShortcutsOverlay: () => {
       if (!input.shortcutsOverlayActive) input.modalOpened('shortcuts');
-      input.shortcutsOverlayActive = !input.shortcutsOverlayActive;
+      input.shortcutsOverlayActive = true;
       input.shortcutsScrollOffset = 0;
       input.overlayFilters.shortcuts.clear();
       render();
@@ -61,16 +65,23 @@ export function createCommonShellUiOpeners<Context>(options: {
   };
 }
 
+/**
+ * Opens the settings workspace and says where it landed: on a category, on a
+ * setting, on a search for text that names neither (`not-found`), or nowhere in
+ * particular (`none`, no target given; `unreported` when the product's modal does
+ * not say what its selection did).
+ */
 export function createSettingsWorkspaceOpener(options: {
   readonly activate: () => void;
   readonly configure: () => void;
-  readonly selectTarget: (target?: string) => void;
+  readonly selectTarget: (target?: string) => SettingsTargetOutcome | void;
   readonly render: () => void;
-}): (target?: string) => void {
+}): (target?: string) => SettingsTargetOutcome | 'unreported' {
   return (target) => {
     options.activate();
     options.configure();
-    options.selectTarget(target);
+    const outcome = options.selectTarget(target);
     options.render();
+    return outcome ?? (target?.trim() ? 'unreported' : 'none');
   };
 }

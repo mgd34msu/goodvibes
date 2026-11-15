@@ -3,10 +3,7 @@ import { catalogRoutingInput } from './agent-harness-catalog-ingress.ts';
 import { isAgentWorkspaceSettingsImportPreview } from './agent-settings-import-admission.ts';
 import type { CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import {
-  MAX_SETTING_LIMIT,
-  listEffectiveHarnessSettingsPage,
-} from '../agent/harness-control.ts';
+import { listEffectiveHarnessSettingsPage } from '../agent/harness-control.ts';
 import { settingDomainRelatedCommand } from '../config/settings-search-vocabulary.ts';
 import { settingsPolicySummary } from './agent-harness-metadata.ts';
 import { CATALOG_QUERIES } from './agent-harness-catalog-filters.ts';
@@ -27,13 +24,10 @@ export function isHarnessSettingsQuery(input: Record<string, unknown>, config?: 
 /**
  * The `settings` catalog page, with the count of what matched beside it.
  *
- * This mode used to return `{ settings, returned, total }` built by hand, with
- * the page ceiling wired to the shared 500 that the settings catalog had almost
- * outgrown. A page that stopped at the ceiling was indistinguishable from the
- * complete catalog, so a real setting past the cut read as a setting that does
- * not exist. It now takes the settings-specific ceiling and goes out through
- * {@link catalogEnvelope}, which states in words when the page is short of
- * `total` and how to ask for the rest.
+ * There is no page ceiling: a page that stopped at one was indistinguishable
+ * from the complete catalog, so a real setting past the cut read as a setting
+ * that does not exist. The page goes out through {@link catalogEnvelope}, which
+ * states in words when it is short of `total` and how to ask for the rest.
  *
  * `total` is the size of the catalog the filters name, NOT the number that
  * matched the query. It used to be the latter, which is how a search for
@@ -52,7 +46,8 @@ export async function harnessSettingsCatalog(
     ...(readString(args.prefix) ? { prefix: readString(args.prefix) } : {}),
     ...(readString(args.query) ? { query: readString(args.query) } : {}),
     includeHidden: args.includeHidden === true,
-    limit: readLimit(args.limit, MAX_SETTING_LIMIT, MAX_SETTING_LIMIT),
+    // No page size unless the caller names one: the catalog is listed whole.
+    ...(args.limit === undefined || args.limit === null || args.limit === '' ? {} : { limit: readLimit(args.limit, 1, Number.MAX_SAFE_INTEGER) }),
   };
   // Ownership-aware: daemon-owned keys carry the DAEMON's live value.
   const page = await listEffectiveHarnessSettingsPage(configManager, filters, {

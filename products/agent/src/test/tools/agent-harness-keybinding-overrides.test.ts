@@ -51,14 +51,26 @@ describe('agent harness keybinding override file', () => {
     });
   });
 
-  test('degrades a crash-truncated overrides file to no overrides instead of throwing', async () => {
+  test('a damaged overrides file is left exactly as it is and nothing is written', async () => {
     await withKeybindings(async ({ configPath, context }) => {
-      writeFileSync(configPath, '{"search": [{"key": "g", "ctr');
+      const damaged = '{"search": [{"key": "g", "ctr';
+      writeFileSync(configPath, damaged);
 
-      await expect(setHarnessKeybinding(context, { actionId: 'search', combo: { key: 'j', ctrl: true } })).resolves.toMatchObject({ status: 'updated' });
-      expect(readOverrides(configPath)).toEqual({ search: { key: 'j', ctrl: true } });
-      // The unreadable file was preserved rather than silently discarded.
-      expect(existsSync(`${configPath}.corrupt`)).toBe(true);
+      await expect(setHarnessKeybinding(context, { actionId: 'search', combo: { key: 'j', ctrl: true } })).rejects.toThrow('not applied');
+      expect(readFileSync(configPath, 'utf8')).toBe(damaged);
+      expect(existsSync(`${configPath}.corrupt`)).toBe(false);
+    });
+  });
+
+  test('a legacy-name entry for the same action is replaced, so the new binding applies', async () => {
+    await withKeybindings(async ({ configPath, manager, context }) => {
+      // 'panel-picker' is the earlier name of 'workspace-picker'.
+      writeFileSync(configPath, JSON.stringify({ 'panel-picker': { key: 'q', ctrl: true } }));
+      manager.loadFromDisk();
+
+      await expect(setHarnessKeybinding(context, { actionId: 'workspace-picker', combo: { key: 'j', ctrl: true, alt: true } })).resolves.toMatchObject({ status: 'updated' });
+      expect(readOverrides(configPath)).toEqual({ 'workspace-picker': { key: 'j', ctrl: true, alt: true } });
+      expect(manager.matches('workspace-picker', { logicalName: 'j', ctrl: true, alt: true })).toBe(true);
     });
   });
 
@@ -74,15 +86,7 @@ describe('agent harness keybinding override file', () => {
     });
   });
 
-  test('degrades an overrides file that is valid JSON but not an object', async () => {
-    await withKeybindings(async ({ configPath, context }) => {
-      writeFileSync(configPath, '["search"]\n');
 
-      await expect(resetHarnessKeybinding(context, { actionId: 'search' })).resolves.toMatchObject({ status: 'reset' });
-      expect(readOverrides(configPath)).toEqual({});
-      expect(existsSync(`${configPath}.corrupt`)).toBe(true);
-    });
-  });
 
   test('keeps unrelated overrides when resetting one action', async () => {
     await withKeybindings(async ({ configPath, context }) => {

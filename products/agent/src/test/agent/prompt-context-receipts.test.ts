@@ -4,10 +4,9 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { MemoryEmbeddingProviderRegistry, MemoryRegistry, MemoryStore } from '@goodvibes-jev/engine/platform/platform/state';
-import { buildRecallSnapshot, createLocalMemoryAccess } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
+import { buildRecallSnapshot } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
 import { AgentPromptContextReceiptStore, composeRuntimePromptWithReceipt } from '../../agent/prompt-context-receipts.ts';
 import { skillStorePath } from '../../agent/skill-registry.ts';
-import { importVibeFilesIntoMemoryOnce } from '../../agent/vibe-file.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../../config/surface.ts';
 import { createShellPathService } from '@/runtime/index.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
@@ -56,12 +55,7 @@ describe('prompt context receipts', () => {
       ].join('\n'));
       writeFileSync(join(shellPaths.workingDirectory, 'AGENTS.md'), 'Prefer visible autonomous work and reviewable local records.');
 
-      // VIBE.md is now a PROJECTION of persona records, migrate the file into
-      // the store (as boot does) so the projected '## GoodVibes Agent VIBE.md' block renders.
-      // importVibeFilesIntoMemoryOnce writes through the memory-spine's MemoryAccess
-      // surface in production (services.memorySpineClient); wrap the local registry
-      // the same way here.
-      await importVibeFilesIntoMemoryOnce(createLocalMemoryAccess(memoryRegistry), shellPaths);
+      // The prompt reads VIBE.md from disk; nothing is imported first.
 
       const reviewed = await memoryRegistry.add({
         scope: 'project',

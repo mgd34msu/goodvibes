@@ -4,13 +4,10 @@ import { completeJudgmentView } from './complete-view.js';
  * fails, which kind of failure is it? The options are the exec tool's
  * retry-on categories (tools/exec/schema.ts `retry.on`) plus `lasting`, a
  * failure that would happen again on a rerun. exec/runtime.ts retries only
- * when the reading acts on a category the caller listed. Read by Jev in
- * place of isRetryableExecResult's fixed patterns over stdout and stderr
- * (ENOENT, EACCES, "command not found" and "syntax error" as terminal;
- * ECONNRESET, ENOTFOUND, ETIMEDOUT, EHOSTUNREACH, ENETUNREACH as network;
- * ECONNREFUSED, EAGAIN as lock; EBUSY, "Resource temporarily unavailable" as
- * busy; ENOMEM, "Cannot allocate memory", "Out of memory" as oom) and its
- * exit-code shortcut (124 and 75 counted as network or busy).
+ * when the category is one the caller listed. Code names the failures it can
+ * from structure first (exit codes 126, 127 and 75; errno codes such as
+ * ECONNRESET, EBUSY, ENOMEM and ENOENT; a held index.lock), with no request;
+ * Jev reads only the failures none of those name, from the end of the output.
  *
  * Not the errors failure reading (`engine.failure-reading`): that battery
  * reads a provider or transport error message and has no lock, busy or
@@ -42,12 +39,9 @@ export const EXEC_FAILURE_OPTIONS = {
 export type ExecFailureCategory = keyof typeof EXEC_FAILURE_OPTIONS;
 
 /** Most characters of stderr and of stdout one request carries, from the end, where failures are reported. */
-export const MAX_JUDGED_STDERR_CHARS = Number.POSITIVE_INFINITY;
-export const MAX_JUDGED_STDOUT_CHARS = Number.POSITIVE_INFINITY;
+export const MAX_JUDGED_STDERR_CHARS = 4_000;
 
-
-
-/** What the reading sees of a failed run: the command, its exit code, and its complete output. */
+/** What the reading sees of a failed run: the command, its exit code, and the end of its output. */
 export function execFailureView(command: string, exitCode: number | null, stdout: string, stderr: string): { command: string; exitCode: number | null; stderr: string; stdout: string } {
   return completeJudgmentView({ command, exitCode, stderr, stdout });
 }
@@ -61,7 +55,7 @@ export const execRetry = defineBattery({
   accuracyFloor: 0.85,
   items: {
     category: oneOf(
-      '`command` is a shell command that just failed with exit code `exitCode`; `stderr` and `stdout` are the complete output it printed. Which kind of failure is this?',
+      '`command` is a shell command that just failed with exit code `exitCode`; `stderr` and `stdout` are the output it printed (the end of it, when it printed a lot). Which kind of failure is this?',
       EXEC_FAILURE_OPTIONS,
       STAKES_BANDS.low.confidence,
     ),

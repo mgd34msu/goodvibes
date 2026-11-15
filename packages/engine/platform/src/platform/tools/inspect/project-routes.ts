@@ -5,16 +5,19 @@ import { assertCapturedToolAccessCurrent } from '../shared/captured-input-tools.
  * framework's file convention (a route.ts exporting a function named after
  * the method). A Next.js pages/api handler's methods, and whether a verb
  * method call registers an Express, Fastify or Hono route, are read by
- * `engine.tools.api-routes` (tools/batteries/api-routes.ts). A route is
- * listed unless its reading is a no; an uncertain one carries
- * `reading: 'uncertain'`.
+ * `engine.tools.api-routes` (tools/batteries/api-routes.ts): one request per
+ * handler, and one request per source file for all of its verb calls. A route
+ * is listed unless its reading is a no; an uncertain one, and one no reading
+ * assessed (decision models off, a failed request), carries
+ * `reading: 'uncertain'` and the scan notes say how many were unassessed.
  */
 import { existsSync } from 'node:fs';
 import { basename, dirname, join, relative, sep } from 'node:path';
-import { DecisionModelsDisabledError, judgmentPort } from '@goodvibes-jev/engine/errors';
-import { decisionOrClassic } from '../../runtime/decision-policy.js';
+import { judgmentPort } from '@goodvibes-jev/engine/errors';
+import { isClassicOperation } from '../../runtime/decision-policy.js';
 import type { YesNoReading } from '@goodvibes-jev/judgment';
 import { mapWithConcurrency } from '../../utils/concurrency.js';
+import { readFileCandidates } from './candidate-readings.js';
 import { apiRoutes, HANDLER_METHODS, handlerView, routeLineView, servesQuestion } from '../batteries/api-routes.js';
 import { scanRead, walk } from './shared.js';
 import type { ApiFramework, ApiRoute } from './schema.js';
@@ -78,11 +81,16 @@ async function findNextjsAppRoutes(root: string, unavailable: string[], notes: s
 }
 
 /** Each pages/api handler is read once for all seven methods (one request); each method it serves is a route. */
-async function findNextjsPagesRoutes(root: string, unavailable: string[], notes: string[], current?: () => void): Promise<ApiRoute[]> {
+async function findNextjsPagesRoutes(root: string, unavailable: string[], notes: string[], current?: () => void, signal?: AbortSignal): Promise<ApiRoute[]> {
   const apiDir = join(root, 'pages', 'api');
   if (!existsSync(apiDir)) return [];
 
   const files = await walk(apiDir, (p) => /\.[tj]sx?$/.test(p), ROUTE_TREE_SKIPS, 0, notes, current);
+  if (isClassicOperation()) {
+    // The file convention says each handler is a route; which methods it serves needs a reading.
+    if (files.length > 0) notes.push(`Decision models are off, so the methods of ${files.length} pages/api handlers are unassessed and each is listed as ANY.`);
+    return files.map((file) => route('ANY', '/' + relative(join(root, 'pages'), file).replace(/\.[tj]sx?$/, '').replace(/\[(.+?)\]/g, ':$1'), relative(root, file), 1, 'uncertain'));
+  }
   const perFile = await mapWithConcurrency(files, READ_CONCURRENCY, async (file) => {
     const relFile = relative(root, file);
     const routePath =
@@ -94,10 +102,18 @@ async function findNextjsPagesRoutes(root: string, unavailable: string[], notes:
     const content = await scanRead(file, unavailable);
     if (!content) return [];
     await assertCapturedToolAccessCurrent();
-    const run = await apiRoutes.run(judgmentPort(SITE), handlerView(relFile, content), {
-      site: SITE,
-      only: HANDLER_METHODS.map(servesQuestion),
-    });
+    let run: Awaited<ReturnType<typeof apiRoutes.run>>;
+    try {
+      run = await apiRoutes.run(judgmentPort(SITE), handlerView(relFile, content), {
+        site: SITE,
+        only: HANDLER_METHODS.map(servesQuestion),
+        ...(signal === undefined ? {} : { signal }),
+      });
+    } catch {
+      signal?.throwIfAborted();
+      notes.push(`The methods of pages/api handler ${relFile} could not be read; it is listed as ANY, unassessed.`);
+      return [route('ANY', routePath, relFile, 1, 'uncertain')];
+    }
     const routes = HANDLER_METHODS.flatMap((method) => {
       const reading = routeReading(run.readings[servesQuestion(method)]);
       return reading === 'dismissed' ? [] : [route(method, routePath, relFile, 1, reading)];
@@ -116,7 +132,7 @@ async function findNextjsPagesRoutes(root: string, unavailable: string[], notes:
  */
 const VERB_CALL = /\.(get|post|put|delete|patch|options|head)\s*\(\s*(['"`])(.*?)\2\s*(?:,|$)/;
 
-/** Most verb-call candidates read for one inspection; each is one decision-model request. */
+/** Most verb-call candidates read for one inspection; one request covers every candidate of a file. */
 const MAX_CALL_CANDIDATES = 300;
 
 interface CallCandidate { relFile: string; lines: string[]; index: number; method: string; path: string }
@@ -143,37 +159,31 @@ async function collectCallCandidates(root: string, files: readonly string[], una
 }
 
 /**
- * Verb calls read by `route_registration`, each once, with every framework in play named in the question
- * (a call is a route when it registers with any of them); each is a route unless the reading is a no.
- * A candidate whose reading fails is listed as uncertain and counted in a note; when every reading fails
- * the failure is raised, since nothing was learned.
+ * Verb calls read by `route_registration`, every candidate of one file in one request, with every
+ * framework in play named in the question (a call is a route when it registers with any of them);
+ * each is a route unless the reading is a no. A candidate no reading assessed is listed as uncertain
+ * and counted in a note.
  */
-async function findCallRoutes(candidates: readonly CallCandidate[], frameworks: readonly ConcreteFramework[], notes: string[], current?: () => void): Promise<ApiRoute[]> {
+async function findCallRoutes(candidates: readonly CallCandidate[], frameworks: readonly ConcreteFramework[], notes: string[], current?: () => void, signal?: AbortSignal): Promise<ApiRoute[]> {
   const framework = frameworks.length > 1 ? `${frameworks.slice(0, -1).join(', ')} or ${frameworks[frameworks.length - 1]}` : frameworks[0]!;
-  const failures: unknown[] = [];
-  const readings = await mapWithConcurrency(candidates, READ_CONCURRENCY, async ({ relFile, lines, index }): Promise<RouteReading> => {
+  const byFile = new Map<string, CallCandidate[]>();
+  for (const candidate of candidates) byFile.set(candidate.relFile, [...(byFile.get(candidate.relFile) ?? []), candidate]);
+  const readings = new Map<CallCandidate, string>();
+  const fileNotes = await mapWithConcurrency([...byFile], READ_CONCURRENCY, async ([relFile, fileCandidates]) => {
     current?.();
-    await assertCapturedToolAccessCurrent();
-    try {
-      const run = await apiRoutes.run(judgmentPort(SITE), routeLineView(framework, relFile, lines, index), {
-        site: SITE,
-        only: ['route_registration'],
-      });
-      const reading = routeReading(run.readings.route_registration);
-      run.recordAction(`${relFile}:${index + 1} ${framework}: ${reading}`);
-      return reading;
-    } catch (error) {
-      current?.();
-      await assertCapturedToolAccessCurrent();
-      failures.push(error);
-      return 'uncertain';
-    }
+    const { readings: read, note } = await readFileCandidates({
+      site: SITE, battery: apiRoutes, question: 'route_registration', file: relFile, signal,
+      candidates: fileCandidates.map((candidate) => ({ id: `L${candidate.index + 1}`, view: routeLineView(framework, relFile, candidate.lines, candidate.index) })),
+    });
+    for (const candidate of fileCandidates) readings.set(candidate, read.get(`L${candidate.index + 1}`) ?? 'unassessed');
+    return note;
   });
-  if (failures.length > 0 && failures.length === candidates.length) throw failures[0];
-  if (failures.length > 0) notes.push(`${failures.length} of ${candidates.length} possible route registrations could not be read and are listed as uncertain.`);
-  return candidates.flatMap(({ relFile, index, method, path }, i) => {
-    const reading = readings[i]!;
-    return reading === 'dismissed' ? [] : [route(method, path, relFile, index + 1, reading)];
+  const unassessed = [...readings.values()].filter((reading) => reading === 'unassessed').length;
+  if (unassessed > 0) notes.push(`${unassessed} of ${candidates.length} possible route registrations were not assessed${fileNotes.some((note) => note?.startsWith('Decision models are off')) ? ' (decision models are off)' : ''} and are listed as uncertain.`);
+  return candidates.flatMap((candidate) => {
+    const reading = readings.get(candidate);
+    if (reading === 'dismissed') return [];
+    return [route(candidate.method, candidate.path, candidate.relFile, candidate.index + 1, reading === 'real' ? 'listed' : 'uncertain')];
   });
 }
 
@@ -212,17 +222,16 @@ export async function inspectApi(
   current?: () => void,
   /** The project's source files when the caller has already walked the tree. */
   sourceFiles?: readonly string[],
+  signal?: AbortSignal,
 ): Promise<ApiRoute[]> {
-  return decisionOrClassic(() => inspectDecisionApi(root, framework, unavailable, notes, current, sourceFiles), () => {
-    throw new DecisionModelsDisabledError('infer and verify API registrations from source code');
-  });
+  return inspectDecisionApi(root, framework, unavailable, notes, current, sourceFiles, signal);
 }
 /** The project's `.js`, `.jsx`, `.ts` and `.tsx` files, outside build output and dependencies. */
 export function walkSourceFiles(root: string, notes: string[], current?: () => void): Promise<string[]> {
   return walk(root, (p) => /\.[tj]sx?$/.test(p), undefined, 0, notes, current);
 }
 
-async function inspectDecisionApi(root: string, framework: ApiFramework, unavailable: string[], notes: string[], current?: () => void, sourceFiles?: readonly string[]): Promise<ApiRoute[]> {
+async function inspectDecisionApi(root: string, framework: ApiFramework, unavailable: string[], notes: string[], current?: () => void, sourceFiles?: readonly string[], signal?: AbortSignal): Promise<ApiRoute[]> {
   let frameworks: ConcreteFramework[];
   if (framework !== 'auto') frameworks = [framework];
   else {
@@ -239,13 +248,13 @@ async function inspectDecisionApi(root: string, framework: ApiFramework, unavail
     }
   };
   if (frameworks.includes('nextjs')) {
-    add([...(await findNextjsAppRoutes(root, unavailable, notes, current)), ...(await findNextjsPagesRoutes(root, unavailable, notes, current))]);
+    add([...(await findNextjsAppRoutes(root, unavailable, notes, current)), ...(await findNextjsPagesRoutes(root, unavailable, notes, current, signal))]);
   }
   // Every other framework shares one reading per candidate, so asking about three costs no more than asking about one.
   const calling = frameworks.filter((fw) => fw !== 'nextjs');
   if (calling.length > 0) {
     const files = sourceFiles ?? await walkSourceFiles(root, notes, current);
-    add(await findCallRoutes(await collectCallCandidates(root, files, unavailable, notes, current), calling, notes, current));
+    add(await findCallRoutes(await collectCallCandidates(root, files, unavailable, notes, current), calling, notes, current, signal));
   }
   return [...found.values()];
 }

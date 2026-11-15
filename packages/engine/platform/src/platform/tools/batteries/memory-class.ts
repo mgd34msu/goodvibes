@@ -9,16 +9,17 @@
  *
  * Band: low stakes. The class files a fresh, unreviewed record for retrieval
  * and review; a wrong class is corrected in review and never changes what
- * the flat memory file holds. Only a reading that acts can select a class;
- * an unsettled reading leaves the full memory available for later classification.
+ * the flat memory file holds. The reading runs after the memory is saved and
+ * the tool call has returned. Only a reading that acts refiles the record; an
+ * unsettled one leaves it tagged classification-pending for review.
  */
 import { defineBattery, oneOf, STAKES_BANDS } from '@goodvibes-jev/judgment';
 import type { MemoryClass } from '../../state/memory-store.js';
 import { assertJudgmentInput } from '../../gate/judgment-input.js';
 import { ToolInputProjectionError } from '../input-projection.js';
 
-/** Maximum complete memory value admitted to the reading; never a clipping limit. */
-export const MAX_JUDGED_MEMORY_CHARS = Number.POSITIVE_INFINITY;
+/** Most characters of a memory value one reading carries; a longer memory is never clipped, it stays pending for review. */
+export const MAX_JUDGED_MEMORY_CHARS = 20_000;
 
 export const MEMORY_CLASS_OPTIONS = {
   decision: 'A choice that was made and why (a library, design or approach picked over others).',

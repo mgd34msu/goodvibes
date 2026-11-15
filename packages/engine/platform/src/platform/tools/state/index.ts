@@ -16,7 +16,7 @@ import { STATE_TOOL_SCHEMA } from './schema.js';
 import type { StateInput } from './schema.js';
 import { toRecord } from '../../utils/record-coerce.js';
 import { summarizeError } from '../../utils/error-display.js';
-import { mirrorMemoryRecord, planMemoryMirror } from './memory-mirror.js';
+import { mirrorMemoryRecord } from './memory-mirror.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -896,25 +896,20 @@ async function runMemory(
       return { success: false, error: 'memory action "set" requires "memoryValue"' };
     }
     try {
-      // The mirror is planned first: a new record's class is read before anything is written.
-      const plan = await planMemoryMirror(memoryRegistry, safeKey, value, options);
-      plan?.assertCurrent();
       options.signal?.throwIfAborted(); options.assertCurrent?.();
-      const classic = isClassicOperation();
       mkdirSync(memoryDir, { recursive: true });
       const filePath = join(memoryDir, `${safeKey}.json`);
-      // Write as-is; allow caller to pass JSON string or plain text
+      // Write as-is; allow caller to pass JSON string or plain text. The file is the source of truth and is written first.
       writeFileSync(filePath, value, 'utf-8');
       // Mirror the write into the retrievable memory store so passive per-turn knowledge injection
-      // can surface it. Best-effort and deduped per key, a registry failure never fails the file
-      // write, which remains the source of truth for `mode=memory list/get`.
-      const indexed = await mirrorMemoryRecord(memoryRegistry, safeKey, value, plan);
+      // can surface it. Best-effort and deduped per key; its class is read after this call returns.
+      const mirror = await mirrorMemoryRecord(memoryRegistry, safeKey, value);
       // When the new text was not indexed, an earlier record of this key (if any) keeps being retrieved.
-      const staleRecords = !indexed && memoryRegistry ? recordsForKey(memoryRegistry, safeKey)?.length ?? 0 : 0;
+      const staleRecords = !mirror.indexed && memoryRegistry ? recordsForKey(memoryRegistry, safeKey)?.length ?? 0 : 0;
       return {
         success: true,
-        output: JSON.stringify({ mode: 'memory', action: 'set', key: safeKey, bytes_written: Buffer.byteLength(value), retrievable: indexed,
-          classification: plan?.classification ?? 'not-indexed', ...(classic ? { provenance: 'classic' } : {}),
+        output: JSON.stringify({ mode: 'memory', action: 'set', key: safeKey, bytes_written: Buffer.byteLength(value), retrievable: mirror.indexed,
+          classification: mirror.classification, ...(isClassicOperation() ? { provenance: 'classic' } : {}),
           ...(routedOverWire ? { note: 'Memory is served by the connected host, so this value was saved to the memory file only and is not retrievable in prompts from this process.' } : {}),
           ...(staleRecords > 0 ? { note: 'The new value is saved in the memory file but was not indexed, so an earlier version of this key stays retrievable in prompts. Use memoryAction=delete to remove the key and its retrieval record.' } : {}) }),
       };

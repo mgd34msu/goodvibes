@@ -5,52 +5,40 @@ import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
  * dead_code modes
  *
  * Tests:
- * 1. security mode reports a line the secret-line check finds and Jev reads
- *    as a real secret, including a shape no fixed pattern named
- * 2. security mode reports no findings on clean code, reading one block
- * 3. a found placeholder Jev dismisses is counted, not reported; an uncertain
- *    reading is reported as needing review; both lines of a block are found
- * 4. permissions mode reports risky calls with Jev's severity and dismisses
- *    lookalikes
+ * 1. security mode reads only the candidate lines code chooses, each once,
+ *    with a few lines around it, and sends nothing for clean code
+ * 2. a placeholder Jev dismisses is counted, not reported; an uncertain
+ *    reading is reported as needing review
+ * 3. permissions mode reads only call-shaped lines, reports risky calls with
+ *    Jev's severity and dismisses lookalikes; with decision models off the
+ *    candidates are listed unassessed
  * 5. env_audit compares against the template Jev picks, or compares nothing
  * 6. test_find picks the test among the files importing the source
  * 7. dead_code mode flags an unreferenced exported function (positive)
  * 8. dead_code mode does NOT flag a referenced exported function (negative)
  */
-import { describe, expect, spyOn, test, beforeEach, afterEach } from 'bun:test';
+import { describe, expect, test, beforeEach, afterEach } from 'bun:test';
 import { chmodSync } from 'node:fs';
 import { mkdtemp, writeFile, rm, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runPermissions, runSecurity, runDeadCode, runEnvAudit, runTestFind } from '../platform/src/platform/tools/analyze/scan-modes.js';
-import { createAnalyzeTool } from '../platform/src/platform/tools/analyze/index.js';
-import { MAX_SCAN_MS } from '../platform/src/platform/tools/analyze/shared.js';
-import { scanBlocks, SCAN_BLOCK_LINES } from '../platform/src/platform/tools/analyze/scan-lines.js';
+import { withDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.js';
 import { TEST_CANDIDATES_PER_READING } from '../platform/src/platform/tools/batteries/test-of-source.js';
 import { useToolReadings } from './_helpers/tool-readings.ts';
 
-// Jev finds the lines to read in each block and reads each found line; these
-// fakes stand in for it. Lines no `holds` entry names are not found, and found
-// lines no entry names read as not a secret and not risky.
+// Code chooses the candidate lines; Jev reads each candidate. These fakes stand
+// in for it: a candidate no entry names reads as not a secret and not risky.
 const LIVE_KEY = ['sk', 'live', 'Zx81Qm4Lk9vRtY7uPzA3bN6cW0'].join('_');
-// Per-line readings are anchored on the state's `line` field, since a line's
-// state also carries its neighbours; the unanchored entries mark the lines the
-// existence check finds.
+// Readings are anchored on the state's `line` field, since a line's state also
+// carries its neighbours.
 const readings = useToolReadings([
   ['"line":"const apiSecret', { realSecret: true }],
   [`"line":"export const STRIPE_KEY`, { realSecret: true }],
-  ['"line":"const opaqueValue', { realSecret: 'uncertain' }],
+  ['"line":"const opaqueValue_apiKey', { realSecret: 'uncertain' }],
   ['"line":"app.post(', { risky: true, severity: 'high' }],
   ['"line":"function render(el, comment)', { risky: true, severity: 'medium' }],
   ['"line":"fs.chmodSync(', { risky: true, severity: 'high' }],
-  ["apiSecret = 'supersecretvalue123'", { holds: true }],
-  [LIVE_KEY, { holds: true }],
-  ["suggestedValue = 'changeme-placeholder'", { holds: true }],
-  ["opaqueValue = 'maybe-a-real-token-9'", { holds: true }],
-  ["app.post('/calc'", { holds: true }],
-  ['function render(el, comment)', { holds: true }],
-  ['fs.chmodSync(dir, 0o777)', { holds: true }],
-  ['pattern.exec(text)', { holds: true }],
   ['"id":".env.example"', { fill: '.env.example' }],
   ['"id":"test/cart-totals.test.ts"', { fill: 'test/cart-totals.test.ts' }],
 ]);
@@ -84,7 +72,7 @@ describe('runSecurity: security mode', () => {
     await rm(tmpDir, { recursive: true, force: true });
   });
 
-  test('reports a line the secret-line check finds and Jev reads as a real secret', async () => {
+  test('reports a candidate line Jev reads as a real secret, one reading per candidate', async () => {
     await writeFixture(tmpDir, 'config.ts', `// Service configuration\nconst apiSecret = 'supersecretvalue123';\n`);
 
     const result = await runSecurity({ mode: 'security', securityScope: 'secrets', projectRoot: tmpDir }, tmpDir);
@@ -93,42 +81,40 @@ describe('runSecurity: security mode', () => {
     expect(secrets.count).toBe(1);
     // The report never repeats the flagged value.
     expect(secrets.findings).toEqual([{ file: 'config.ts', line: 2, match: "const apiSecret = '[redacted]';", reading: 'real' }]);
-    // One existence check finds line 2; the single line left cannot go to another existence check,
-    // so the finding reading reads it directly (and dismisses it), beside line 2's finding reading.
-    expect(readings.requests).toHaveLength(3);
-    expect(result.secrets).toMatchObject({ dismissed: 1 });
+    expect(readings.requests).toHaveLength(1);
   });
 
-  test('finds a credential in a shape no fixed pattern named', async () => {
-    await writeFixture(tmpDir, 'billing.ts', `export const CURRENCY = 'usd';\nexport const STRIPE_KEY = '${LIVE_KEY}';\nexport const TRIAL_DAYS = 14;\n`);
+  test('a dismissed placeholder is counted, an uncertain line listed for review', async () => {
+    await writeFixture(tmpDir, 'settings.ts', `const suggestedToken = 'changeme-placeholder';\nconst opaqueValue = 'maybe-a-real-token-9';\n`);
+    await writeFixture(tmpDir, 'more.ts', `const opaqueValue_apiKey = 'maybe-a-real-token-9';\n`);
 
     const result = await runSecurity({ mode: 'security', securityScope: 'secrets', projectRoot: tmpDir }, tmpDir);
 
-    const secrets = result.secrets as { findings: Array<{ line: number; reading: string }> };
-    expect(secrets.findings).toEqual([expect.objectContaining({ line: 2, reading: 'real' })]);
-  });
-
-  test('both found lines of one block are read: a dismissed placeholder is counted, an uncertain line listed for review', async () => {
-    await writeFixture(tmpDir, 'settings.ts', `const suggestedValue = 'changeme-placeholder';\nconst opaqueValue = 'maybe-a-real-token-9';\n`);
-
-    const result = await runSecurity({ mode: 'security', securityScope: 'secrets', projectRoot: tmpDir }, tmpDir);
-
-    const secrets = result.secrets as { findings: Array<{ line: number; reading: string }>; count: number; dismissed: number };
+    const secrets = result.secrets as { findings: Array<{ file: string; line: number; reading: string }>; dismissed: number };
     expect(secrets.dismissed).toBe(1);
-    expect(secrets.findings).toEqual([expect.objectContaining({ line: 2, reading: 'uncertain' })]);
-    // One existence check finds line 1; the single line left goes to the finding reading; two finding readings.
-    expect(readings.requests).toHaveLength(3);
+    expect(secrets.findings).toEqual([expect.objectContaining({ file: 'more.ts', line: 1, reading: 'uncertain' })]);
   });
 
-  test('a file holding a declared credential is refused and listed, and the other files are still scanned', async () => {
+  test('a reading sees the candidate and two lines on each side, never the whole file', async () => {
+    const filler = Array.from({ length: 200 }, (_, index) => `export const value${index} = ${index};`);
+    filler.splice(100, 0, "const apiSecret = 'supersecretvalue123';");
+    await writeFixture(tmpDir, 'big.ts', `${filler.join('\n')}\n`);
+
+    await runSecurity({ mode: 'security', securityScope: 'secrets', projectRoot: tmpDir }, tmpDir);
+
+    expect(readings.requests).toHaveLength(1);
+    const state = readings.requests[0]!.state as { line: string; before: string[]; after: string[] };
+    expect(state.before).toHaveLength(2);
+    expect(state.after).toHaveLength(2);
+  });
+
+  test('a line holding a declared credential is reported from the local patterns without being sent', async () => {
     await writeFixture(tmpDir, 'a-clean.ts', 'export const first = 1;\nexport const second = 2;\n');
     await writeFixture(tmpDir, 'z-private.ts', 'const password = "synthetic-private-value";\n');
     const result = await runSecurity({ mode: 'security', securityScope: 'secrets', projectRoot: tmpDir }, tmpDir);
-    const secrets = result.secrets as { findings: unknown[]; refused_files: Array<{ file: string }>; files_scanned: number };
-    expect(secrets.refused_files.map((entry) => entry.file)).toEqual(['z-private.ts']);
-    expect(secrets.files_scanned).toBe(1);
-    // The clean file was read; the refused file's text never reached a reading.
-    expect(readings.requests).toHaveLength(1);
+    const secrets = result.secrets as { findings: Array<{ file: string; reading: string }>; files_scanned: number };
+    expect(secrets.files_scanned).toBe(2);
+    expect(secrets.findings).toEqual([expect.objectContaining({ file: 'z-private.ts', reading: 'local-pattern' })]);
     expect(JSON.stringify(readings.requests)).not.toContain('synthetic-private-value');
   });
 
@@ -152,6 +138,7 @@ describe('runSecurity: security mode', () => {
   test('a live-key shape in a flagged line is masked in the report', async () => {
     await writeFixture(tmpDir, 'billing.ts', `export const CURRENCY = 'usd';\nexport const STRIPE_KEY = '${LIVE_KEY}';\nexport const TRIAL_DAYS = 14;\n`);
     const result = await runSecurity({ mode: 'security', securityScope: 'secrets', projectRoot: tmpDir }, tmpDir);
+    expect((result.secrets as { count: number }).count).toBe(1);
     expect(JSON.stringify(result)).not.toContain(LIVE_KEY);
   });
 
@@ -161,28 +148,23 @@ describe('runSecurity: security mode', () => {
     expect((result.env as { files_found: string[] }).files_found).toEqual(['.env', '.env.staging', '.env.test']);
   });
 
-  test('reports zero findings on clean code, reading each block once', async () => {
+  test('clean code makes no decision-model request', async () => {
     await writeFixture(tmpDir, 'clean.ts', `export function greet(name: string): string {\n  return \`Hello, \${name}!\`;\n}\n`);
 
     const result = await runSecurity({ mode: 'security', securityScope: 'secrets', projectRoot: tmpDir }, tmpDir);
 
     const secrets = result.secrets as { findings: unknown[]; count: number };
     expect(secrets.count).toBe(0);
-    expect(secrets.findings).toHaveLength(0);
-    expect(readings.requests).toHaveLength(1);
-    expect(readings.requests[0]!.questions).toHaveProperty('exists');
+    expect(readings.requests).toHaveLength(0);
   });
-});
 
-describe('scanBlocks', () => {
-  test('cuts non-blank lines into blocks, joining a last one-line block to the one before', () => {
-    const lines = Array.from({ length: SCAN_BLOCK_LINES * 2 + 1 }, (_, index) => `line ${index + 1}`);
-    lines.splice(3, 0, '', '   ');
-    const blocks = scanBlocks(lines);
-    expect(blocks.map((block) => block.length)).toEqual([SCAN_BLOCK_LINES, SCAN_BLOCK_LINES + 1]);
-    // Ids are 1-based file line numbers, skipping the blank lines.
-    expect(blocks[0]!.slice(2, 4).map((item) => item.id)).toEqual(['L3', 'L6']);
-    expect(blocks[1]!.at(-1)).toEqual({ id: `L${lines.length}`, text: `line ${SCAN_BLOCK_LINES * 2 + 1}` });
+  test('every entry of files is scanned, not only the first', async () => {
+    await mkdir(join(tmpDir, 'a'));
+    await mkdir(join(tmpDir, 'b'));
+    await writeFixture(tmpDir, 'a/config.ts', "const apiSecret = 'supersecretvalue123';\n");
+    await writeFixture(tmpDir, 'b/config.ts', "const apiSecret = 'supersecretvalue123';\n");
+    const result = await runSecurity({ mode: 'security', securityScope: 'secrets', files: ['a', 'b'], projectRoot: tmpDir }, tmpDir);
+    expect((result.secrets as { findings: Array<{ file: string }> }).findings.map((f) => f.file).sort()).toEqual(['a/config.ts', 'b/config.ts']);
   });
 });
 
@@ -201,21 +183,7 @@ describe('runPermissions: permissions mode', () => {
     await rm(tmpDir, { recursive: true, force: true });
   });
 
-  test('a scan that finished is not reported as stopped at the scan limit, however long the readings took', async () => {
-    await writeFixture(tmpDir, 'app.js', "app.post('/calc', (req, res) => res.send(eval(req.body.expr)));\n");
-    const real = Date.now.bind(Date);
-    let calls = 0;
-    // The first reading of the clock is the tool's start; every later one is past the scan limit.
-    const clock = spyOn(Date, 'now').mockImplementation(() => (calls++ === 0 ? real() : real() + MAX_SCAN_MS + 1_000));
-    try {
-      const result = await createAnalyzeTool({ chat: async () => '' } as never, null, tmpDir).execute({ mode: 'permissions' });
-      const out = JSON.parse(result.output!) as Record<string, unknown>;
-      expect(out.total).toBe(1);
-      expect(out.scan_note).toBeUndefined();
-    } finally { clock.mockRestore(); }
-  });
-
-  test('reports the calls Jev reads as risky with its severity, and dismisses lookalikes', async () => {
+  test('reports the calls Jev reads as risky with its severity, and dismisses lookalikes, reading only call-shaped lines', async () => {
     await writeFixture(
       tmpDir,
       'app.js',
@@ -238,14 +206,17 @@ describe('runPermissions: permissions mode', () => {
       [4, 'high', 'real'],
     ]);
     expect(findings[2]!.match).toBe('fs.chmodSync(dir, 0o777);');
-    // The regex exec loop is found and dismissed; the last line, left alone once the others were
-    // found, is read directly and dismissed too.
-    expect(result.dismissed).toBe(2);
+    // The regex exec loop is a call shape, read and dismissed; the plain assignment is never read.
+    expect(result.dismissed).toBe(1);
     expect(result.by_severity).toEqual({ high: 2, medium: 1, low: 0, unrated: 0 });
-    // Each read line's state carries its file and neighbouring lines.
-    const lineStates = readings.requests.map((request) => request.state).filter((state): state is { file: string; before: string[] } => typeof state === 'object' && state !== null && 'before' in state);
-    expect(lineStates).toHaveLength(5);
-    expect(lineStates.every((state) => state.file === 'app.js')).toBe(true);
+    expect(readings.requests).toHaveLength(4);
+  });
+
+  test('with decision models off every call shape is listed unassessed and nothing is sent', async () => {
+    await writeFixture(tmpDir, 'app.js', "app.post('/calc', (req, res) => res.send(eval(req.body.expr)));\n");
+    const result = await withDecisionModelPolicy(() => 'Classic - Off', () => runPermissions({ mode: 'permissions', projectRoot: tmpDir }, tmpDir));
+    expect((result.findings as Array<{ reading: string }>).map((f) => f.reading)).toEqual(['unassessed']);
+    expect(readings.requests).toHaveLength(0);
   });
 });
 

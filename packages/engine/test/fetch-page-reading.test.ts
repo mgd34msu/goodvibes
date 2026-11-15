@@ -142,12 +142,12 @@ describe('summary: the paragraph read as saying what the page is about', () => {
     expect(summary).toBe(NO_SUMMARY_NOTE);
   });
 
-  test('a page with more paragraphs than one request offers is read in groups, then the picks compete', async () => {
+  test('every paragraph of a long page is offered to the selector in one call', async () => {
     summaryMarker = 'says what this is';
-    const body = Array.from({ length: 90 }, (_, index) => (index === 12 || index === 57 ? `paragraph ${index} says what this is` : `filler ${index}`)).join('\n\n');
+    const body = Array.from({ length: 90 }, (_, index) => (index === 12 ? `paragraph ${index} says what this is` : `filler ${index}`)).join('\n\n');
     expect(await applyExtract(body, 'text/plain', 'summary')).toBe('paragraph 12 says what this is');
-    // Three groups of at most forty, then one final between the two groups' picks.
-    expect(requests.map((request) => (request.state as unknown as Candidates).candidates.length)).toEqual([40, 40, 10, 2]);
+    // The selector splits by the port's own limits; ninety paragraphs fit one request.
+    expect(requests.map((request) => (request.state as unknown as Candidates).candidates.length)).toEqual([90]);
   });
 });
 
@@ -165,6 +165,13 @@ describe('headers at a redirect to another origin', () => {
     const kept = await headersForOtherOrigin({ 'X-Auth-Token': 't', 'X-Maybe': 'm', 'X-Trace-Id': 'abc' }, new Set());
     expect(kept).toEqual({ 'X-Trace-Id': 'abc' });
     expect(requests.map((request) => request.state)).toEqual([{ header: 'X-Auth-Token' }, { header: 'X-Maybe' }, { header: 'X-Trace-Id' }]);
+  });
+
+  test('public request headers follow with no reading, and a name is read once for the process', async () => {
+    const headers = { Accept: 'application/json', 'Content-Type': 'application/json', 'X-Trace-Id': 'abc' };
+    expect(await headersForOtherOrigin(headers, new Set())).toEqual(headers);
+    expect(await headersForOtherOrigin(headers, new Set())).toEqual(headers);
+    expect(requests.map((request) => request.state)).toEqual([{ header: 'X-Trace-Id' }]);
   });
 });
 

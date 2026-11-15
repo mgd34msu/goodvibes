@@ -9,8 +9,6 @@ import { summarizeError } from '../../utils/error-display.js';
 import { DEFAULT_CEILING_TOKENS, capToolText } from '../../runtime/tools/output-policy.js';
 
 export const BINARY_CHECK_BYTES = 8192;
-/** Default discovery covers the requested scope; callers may supply a finite page budget. */
-export const MAX_SCAN_FILES = Number.POSITIVE_INFINITY;
 /** A project scan stops by itself after this long and says it did, instead of holding the turn on a very large tree. */
 export const MAX_SCAN_MS = 60_000;
 export const ANALYZE_SUMMARY_SAMPLE_LIMIT = 5;
@@ -37,10 +35,12 @@ export async function isBinary(filePath: string): Promise<boolean> {
 }
 
 /**
- * The text files under a directory. A file that cannot be read is not text and not binary: when
- * `unreadable` is given its path is added there, so the caller can say it was not scanned.
+ * The text files under a directory: every one unless a caller passes a finite `limit` (the walk is
+ * local work, so the default is unbounded; `deadline` is what bounds a project scan). A file that
+ * cannot be read is not text and not binary: when `unreadable` is given its path is added there, so
+ * the caller can say it was not scanned.
  */
-export async function collectTextFiles(dirPath: string, limit = MAX_SCAN_FILES, deadline?: number, walkOptions: WalkDirOptions = {}, unreadable?: string[]): Promise<string[]> {
+export async function collectTextFiles(dirPath: string, limit = Number.POSITIVE_INFINITY, deadline?: number, walkOptions: WalkDirOptions = {}, unreadable?: string[]): Promise<string[]> {
   const files: string[] = [];
   for await (const filePath of walkDir(dirPath, {
     ...walkOptions, beforeAttempt: () => {
@@ -113,7 +113,7 @@ export async function collectInputFiles(
   } = {},
 ): Promise<string[]> {
   const expandDirectories = options.expandDirectories ?? false;
-  const limit = options.limit ?? MAX_SCAN_FILES;
+  const limit = options.limit ?? Number.POSITIVE_INFINITY;
   const deadline = options.deadline;
 
   if (!inputFiles || inputFiles.length === 0) {
@@ -382,8 +382,35 @@ export async function readJsonFile<T extends JsonObject = JsonObject>(filePath: 
   }
 }
 
-export function resolveScanRoot(input: AnalyzeInput, projectRoot: string): string {
-  return input.files && input.files.length > 0 ? resolveInsideRoot(input.files[0]!, projectRoot) : projectRoot;
+/** Every root a scan covers: each entry of `files` (a file or a directory inside the project), or the project root. */
+export function resolveScanRoots(input: AnalyzeInput, projectRoot: string): string[] {
+  return input.files && input.files.length > 0 ? [...new Set(input.files.map((file) => resolveInsideRoot(file, projectRoot)))] : [projectRoot];
+}
+
+/** The text files under every scan root, each once, stopping at `deadline`. */
+export async function collectScanFiles(input: AnalyzeInput, projectRoot: string, deadline: number | undefined, walkOptions: WalkDirOptions, unreadable: string[]): Promise<string[]> {
+  const files = new Set<string>();
+  for (const root of resolveScanRoots(input, projectRoot)) {
+    if (deadline !== undefined && Date.now() > deadline) break;
+    let info: Awaited<ReturnType<typeof stat>>;
+    try { info = await stat(root); } catch { unreadable.push(root); continue; }
+    if (!info.isDirectory()) {
+      if ((await probeFile(root)) === 'text') files.add(root); else unreadable.push(root);
+      continue;
+    }
+    for (const file of await collectTextFiles(root, Number.POSITIVE_INFINITY, deadline, walkOptions, unreadable)) files.add(file);
+  }
+  return [...files];
+}
+
+/**
+ * A mode result that did nothing: the reason, what to pass instead, and any detail. The tool
+ * reports it as a failed call (`success: false`), never as a result that happens to hold `error`.
+ */
+export interface AnalyzeRefusal { readonly error: string; readonly hint: string; readonly [detail: string]: unknown }
+
+export function analyzeRefusal(error: string, hint: string, detail: Record<string, unknown> = {}): AnalyzeRefusal {
+  return { ...detail, error, hint };
 }
 
 export function collectExistingPaths(projectRoot: string, names: string[]): string[] {
@@ -452,14 +479,14 @@ export function findEntryPoint(targetDir: string, candidates: string[]): string 
 export function validateGitRefs(
   before: string,
   after: string,
-): { error: string; before: string; after: string } | null {
+): AnalyzeRefusal | null {
   const safeRefPattern = /^[a-zA-Z0-9_.\-~/^@{}:]+$/;
   if (!safeRefPattern.test(before) || !safeRefPattern.test(after)) {
-    return { error: 'Invalid git ref format', before, after };
+    return analyzeRefusal('Invalid git ref format', 'Pass before and after as branch names, tags, commit ids or forms like HEAD~1.', { before, after });
   }
   // A leading dash would be read by git as an option (`--output <path>` writes a file), never as a revision.
   if (before.startsWith('-') || after.startsWith('-')) {
-    return { error: "Invalid git ref: a ref must not start with '-'", before, after };
+    return analyzeRefusal("Invalid git ref: a ref must not start with '-'", 'Pass before and after as branch names, tags, commit ids or forms like HEAD~1.', { before, after });
   }
   return null;
 }

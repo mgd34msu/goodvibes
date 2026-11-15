@@ -1,4 +1,4 @@
-import { planMemoryMirror } from '../platform/src/platform/tools/state/memory-mirror.js';
+import { memoryClassificationsSettled } from '../platform/src/platform/tools/state/memory-mirror.js';
 /**
  * memory ingest/retrieval gap.
  *
@@ -35,7 +35,6 @@ import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { JudgmentError, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { fakePort } from '@goodvibes-jev/judgment/testing';
 import { withDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.js';
-import { decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
 
 // Memory search and knowledge ranking read through the judgment port, and so
 // does the class a new mirrored record is filed under
@@ -128,8 +127,10 @@ describe('state tool: mode=memory set mirrors into the retrievable memory store'
     // 2. Provenance honesty: reviewState 'fresh' (not stamped reviewed), retrievable confidence,
     //    and a file link back to the flat-file twin.
     expect(rec!.reviewState).toBe('fresh');
-    // The class is the memory-class reading's, not a fixed class.
-    expect(rec!.cls).toBe('constraint');
+    // The class is the memory-class reading's, not a fixed class; it is read after the call returned.
+    await memoryClassificationsSettled();
+    expect(memoryRegistry.get(rec!.id)!.cls).toBe('constraint');
+    expect(memoryRegistry.get(rec!.id)!.tags).not.toContain('classification-pending');
     expect(rec!.confidence).toBeGreaterThanOrEqual(55);
     expect(rec!.provenance.some((link) => link.kind === 'file' && link.ref.includes('dashboard_prefs'))).toBe(true);
 
@@ -200,6 +201,7 @@ describe('state tool: mode=memory set mirrors into the retrievable memory store'
     const result = await tool.execute({ mode: 'memory', memoryAction: 'set', memoryKey: 'long_note', memoryValue });
     expect(result.success).toBe(true);
     expect(existsSync(join(memoryDir, 'long_note.json'))).toBe(true);
+    await memoryClassificationsSettled();
     if (memoryValue.includes('apiKey=')) {
       expect(calls).toBe(0);
       expect(memoryRegistry.getAll()).toHaveLength(0);
@@ -225,6 +227,20 @@ describe('state tool: mode=memory set mirrors into the retrievable memory store'
     expect(memoryRegistry.getAll().some((r) => r.tags.includes('state-memory:owner'))).toBe(true);
   });
 
+  test('the memory is saved and the call returns without waiting for the class reading', async () => {
+    let asked = 0;
+    installJudgmentPort(statePort({ model: 'jev-1.13.0', ask: () => { asked++; return new Promise(() => {}); } }));
+    const { tool, memoryRegistry, memoryDir } = await makeHarness({ withRegistry: true });
+
+    const result = await tool.execute({ mode: 'memory', memoryAction: 'set', memoryKey: 'slow_reader', memoryValue: 'Always run the linter before pushing.' });
+
+    expect(result.success).toBe(true);
+    expect(JSON.parse(result.output!)).toMatchObject({ retrievable: true, classification: 'pending' });
+    expect(existsSync(join(memoryDir, 'slow_reader.json'))).toBe(true);
+    expect(memoryRegistry.getAll()[0]?.tags).toContain('classification-pending');
+    expect(asked).toBe(1);
+  });
+
   test('with no registry wired, set still writes the flat file and reports retrievable:false (back-compat)', async () => {
     const { tool, memoryDir } = await makeHarness({ withRegistry: false });
 
@@ -240,7 +256,7 @@ describe('state tool: mode=memory set mirrors into the retrievable memory store'
   });
 });
 
-for (const policy of ['Classic - Off', 'Preferred'] as const) {
+for (const policy of ['Classic - Off'] as const) {
   test(`${policy} memory set/get/update retains raw content and pending-class provenance without reusing a prior review`, async () => {
     const fake = fakePort(() => { throw new JudgmentError('unavailable', 'Synthetic exhausted chain'); }); installJudgmentPort(fake.port);
     await withDecisionModelPolicy(() => policy, async () => {
@@ -305,36 +321,6 @@ test('Classic cancellation and native owner revocation stop memory writes before
       expect(h.memoryRegistry.getAll()).toEqual([]); expect(fake.requests).toHaveLength(0);
     } finally { h.memoryStore.close(); }
   });
-});
-
-test('Preferred cancellation during a failed class reading cannot activate Classic or persist the value', async () => {
-  const controller = new AbortController();
-  const fake = fakePort(() => { controller.abort(); throw new JudgmentError('unavailable', 'Synthetic availability failure concurrent with cancellation'); }); installJudgmentPort(fake.port);
-  await withDecisionModelPolicy(() => 'Preferred', async () => {
-    const h = await makeHarness({ withRegistry: true });
-    try {
-      const result = await h.tool.execute({ mode: 'memory', memoryAction: 'set', memoryKey: 'cancelled', memoryValue: 'Original content.' }, { signal: controller.signal });
-      expect(result.success).toBe(false); expect(decisionModelPolicyState().operation).toBe('decision');
-      expect(existsSync(join(h.memoryDir, 'cancelled.json'))).toBe(false); expect(h.memoryRegistry.getAll()).toEqual([]);
-    } finally { h.memoryStore.close(); }
-  });
-});
-
-
-test('an internal memory classifier fault stops before a mirror plan or flat-file publication', async () => {
-  const h = await makeHarness({ withRegistry: true });
-  const fake = fakePort(() => { throw new JudgmentError('internal', 'Private classifier client fault'); });
-  installJudgmentPort(fake.port);
-  try {
-    await withDecisionModelPolicy(() => 'Preferred', async () => {
-      await expect(planMemoryMirror(h.memoryRegistry, 'synthetic_key', 'Synthetic remembered preference'))
-        .rejects.toMatchObject({ kind: 'internal' });
-    });
-    expect(fake.requests).toHaveLength(1);
-    expect(h.memoryRegistry.getAll()).toHaveLength(0);
-    expect(existsSync(join(h.memoryDir, 'synthetic_key.json'))).toBe(false);
-  } finally { h.memoryStore.close(); }
-
 });
 
 test('while memory is served by a connected host the local registry is not written, and the result says why', async () => {

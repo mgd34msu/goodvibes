@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs';
 import { join, relative } from 'node:path';
-import { capturedAnalyzeSignal, createAnalyzeGitReader } from './captured-git.js';
+import { capturedAnalyzeSignal, createAnalyzeGitReader, type AnalyzeGitReader } from './captured-git.js';
 import { assertCapturedToolAccessCurrent, assertCapturedToolReadAccess } from '../shared/captured-input-tools.js';
 import type { ToolLLM } from '../../config/tool-llm.js';
 import type { AnalyzeInput, SemanticDiffSummary } from './types.js';
@@ -16,6 +16,8 @@ import {
   readJsonFile,
   truncateDiffAtBoundary,
   validateGitRefs,
+  analyzeRefusal,
+  type AnalyzeRefusal,
 } from './shared.js';
 import { instrumentedFetch } from '../../utils/fetch-with-timeout.js';
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
@@ -104,22 +106,44 @@ export async function trySemanticDiffLlm(
   toolLLM: Pick<ToolLLM, 'chat'>,
   prompt: string,
   timeoutMs = SEMANTIC_DIFF_LLM_TIMEOUT_MS,
+  signal?: AbortSignal,
 ): Promise<string> {
-  // The request is aborted at the deadline, so an abandoned call stops spending tokens.
+  // The request is aborted at the deadline or when the call is cancelled, so an abandoned call stops spending tokens.
   const abort = new AbortController();
+  const chatSignal = signal === undefined ? abort.signal : AbortSignal.any([abort.signal, signal]);
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
+    signal?.throwIfAborted();
     return await Promise.race([
-      toolLLM.chat(prompt, { signal: abort.signal }),
+      toolLLM.chat(prompt, { signal: chatSignal }),
       new Promise<string>((resolve) => {
         timer = setTimeout(() => { abort.abort(); resolve(''); }, timeoutMs);
         timer.unref?.();
       }),
     ]);
   } catch {
+    // A cancelled call stops here; any other failure leaves the summary to the readings.
+    signal?.throwIfAborted();
     return '';
   } finally {
     if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
+const GIT_FAILURE_HINT = 'Check that both refs exist in this repository (git log --oneline shows them) and that the project root is inside a git work tree.';
+
+function gitFailure(err: unknown, before: string, after: string): AnalyzeRefusal {
+  return analyzeRefusal(`git diff failed: ${summarizeError(err)}`, GIT_FAILURE_HINT, { before, after });
+}
+
+/** The stat and the patch of a range: in one pass when the reader can, otherwise one call each. */
+async function statAndPatch(git: AnalyzeGitReader, before: string, after: string, files: string[] | undefined): Promise<{ stat: string; patch: string; patchError?: unknown }> {
+  if (git.diffWithStat) return git.diffWithStat(before, after, files);
+  const stat = await git.diffStat(before, after, files);
+  try { return { stat, patch: await git.diffBetween(before, after, files) }; }
+  catch (patchError) {
+    if (git.comparisonInputs) throw patchError;
+    return { stat, patch: '', patchError };
   }
 }
 
@@ -179,21 +203,16 @@ export async function runDiff(
   const git = await createAnalyzeGitReader(projectRoot, before, after);
 
   let statOutput: string;
-  try {
-    statOutput = await git.diffStat(before, after, input.files);
-  } catch (err) {
-    if (git.comparisonInputs) throw err;
-    return { error: `git diff failed: ${summarizeError(err)}`, before, after };
-  }
-
   let fullDiff: string;
   let diffError: string | undefined;
   try {
-    fullDiff = await git.diffBetween(before, after, input.files);
+    const read = await statAndPatch(git, before, after, input.files);
+    statOutput = read.stat;
+    fullDiff = read.patch;
+    if (read.patchError !== undefined) diffError = `git diff failed after the stat succeeded: ${summarizeError(read.patchError)}`;
   } catch (err) {
     if (git.comparisonInputs) throw err;
-    fullDiff = '';
-    diffError = `git diff failed after the stat succeeded: ${summarizeError(err)}`;
+    return gitFailure(err, before, after);
   }
   if (diffError === undefined) statOutput = narrowStatToDiff(statOutput, fullDiff, input.files);
 
@@ -333,7 +352,7 @@ async function runDecisionBreaking(input: AnalyzeInput, projectRoot: string): Pr
     fullDiff = await git.diffBetween(before, after, input.files);
   } catch (err) {
     if (git.comparisonInputs) throw err;
-    return { error: `git diff failed: ${summarizeError(err)}`, before, after };
+    return gitFailure(err, before, after);
   }
 
   const { before: beforeSigs, after: afterSigs } = extractSignaturesFromDiff(fullDiff);
@@ -391,13 +410,14 @@ export async function runSemanticDiff(
   input: AnalyzeInput,
   projectRoot: string,
   toolLLM: Pick<ToolLLM, 'chat'>,
+  signal?: AbortSignal,
 ): Promise<Record<string, unknown>> {
-  return decisionOrClassic(() => runDecisionSemanticDiff(input, projectRoot, toolLLM), async () => ({
+  return decisionOrClassic(() => runDecisionSemanticDiff(input, projectRoot, toolLLM, signal), async () => ({
     ...await runDiff(input, projectRoot), provenance: 'classic', risk: 'unassessed', summary_source: 'classic',
     message: 'Classic exposes the actual diff. Semantic behavior and risk assessment require a decision model.',
   }));
 }
-async function runDecisionSemanticDiff(input: AnalyzeInput, projectRoot: string, toolLLM: Pick<ToolLLM, 'chat'>): Promise<Record<string, unknown>> {
+async function runDecisionSemanticDiff(input: AnalyzeInput, projectRoot: string, toolLLM: Pick<ToolLLM, 'chat'>, signal: AbortSignal | undefined): Promise<Record<string, unknown>> {
   const before = input.before ?? 'HEAD~1';
   const after = input.after ?? 'HEAD';
 
@@ -409,11 +429,13 @@ async function runDecisionSemanticDiff(input: AnalyzeInput, projectRoot: string,
   let fullDiff: string;
   let statOutput: string;
   try {
-    fullDiff = await git.diffBetween(before, after, input.files);
-    statOutput = narrowStatToDiff(await git.diffStat(before, after, input.files), fullDiff, input.files);
+    const read = await statAndPatch(git, before, after, input.files);
+    if (read.patchError !== undefined) throw read.patchError;
+    fullDiff = read.patch;
+    statOutput = narrowStatToDiff(read.stat, fullDiff, input.files);
   } catch (err) {
     if (git.comparisonInputs) throw err;
-    return { error: `git diff failed: ${summarizeError(err)}`, before, after };
+    return gitFailure(err, before, after);
   }
 
   const changedFiles = parseDiffStats(statOutput).map((file) => file.file);
@@ -439,7 +461,7 @@ Diff (${range}):
 ${truncateDiffAtBoundary(fullDiff, 6000)}`;
 
   await assertCapturedToolAccessCurrent();
-  const reply = await trySemanticDiffLlm(toolLLM, prompt);
+  const reply = await trySemanticDiffLlm(toolLLM, prompt, SEMANTIC_DIFF_LLM_TIMEOUT_MS, signal);
   const prose = reply ? parseSemanticDiffProse(reply) : {};
 
   return {
@@ -471,11 +493,11 @@ export async function runUpgrade(
   } else {
     const pkgPath = join(projectRoot, 'package.json');
     if (!existsSync(pkgPath)) {
-      return { error: 'No package.json found and no packages specified', projectRoot };
+      return analyzeRefusal('No package.json found and no packages specified', 'Pass packages with the package names to check, or point projectRoot at a directory holding package.json.', { projectRoot });
     }
     const pkgJson = await readJsonFile(pkgPath);
     if (pkgJson === null) {
-      return { error: 'Failed to parse package.json' };
+      return analyzeRefusal('Failed to parse package.json', 'Fix the JSON in package.json, or pass packages with the package names to check.');
     }
     const deps = loadDependencyVersions(pkgJson);
     packageNames = Object.keys(deps);
@@ -518,13 +540,13 @@ export async function runUpgrade(
         signal: invocationSignal ? AbortSignal.any([invocationSignal, AbortSignal.timeout(8000)]) : AbortSignal.timeout(8000),
         headers: { Accept: 'application/json' },
       });
-      if (!res.ok) return { name, current, latest: 'unknown', breaking: false };
+      if (!res.ok) return { name, current, latest: LOOKUP_UNKNOWN, breaking: false };
       const data = await res.json() as { version?: string };
-      const latest = data.version ?? 'unknown';
-      const breaking = hasVersion(current) && latest !== 'unknown' ? isBreakingUpgrade(current, latest) : false;
+      const latest = data.version ?? LOOKUP_UNKNOWN;
+      const breaking = hasVersion(current) && latest !== LOOKUP_UNKNOWN ? isBreakingUpgrade(current, latest) : false;
       return { name, current, latest, breaking };
     } catch {
-      return { name, current, latest: 'fetch_failed', breaking: false };
+      return { name, current, latest: LOOKUP_FAILED, breaking: false };
     }
   });
 
@@ -534,16 +556,30 @@ export async function runUpgrade(
   });
 
   const notFromRegistry = results.filter((r) => r.latest === NOT_FROM_REGISTRY).length;
+  // A lookup that failed is not "up to date": it is counted apart, and the survey says it is incomplete.
+  const lookedUp = results.length - notFromRegistry;
+  const lookupFailed = results.filter((r) => r.latest === LOOKUP_UNKNOWN || r.latest === LOOKUP_FAILED).length;
+  if (lookedUp > 0 && lookupFailed === lookedUp) {
+    return analyzeRefusal(`No registry lookup succeeded (${lookupFailed} failed)`, 'Check the network connection to registry.npmjs.org and run upgrade again.', { packages: results });
+  }
   return {
     packages: results,
     total: results.length,
     outdated: results.filter((r) => isOutdated(r.current, r.latest)).length,
     breaking: results.filter((r) => r.breaking).length,
+    ...(lookupFailed > 0 ? {
+      lookup_failed: lookupFailed,
+      message: `${lookupFailed} registry lookups failed, so this survey is incomplete: those packages may be outdated. Run upgrade again when the registry answers.`,
+    } : {}),
     ...(notFromRegistry > 0 ? { not_from_registry: notFromRegistry, note: `${notFromRegistry} dependencies were not looked up: workspace, git, file, alias and own-scope specs are not registry versions.` } : {}),
   };
 }
 
 const NOT_FROM_REGISTRY = 'not_from_registry';
+/** The registry answered without a version (a non-2xx status or no `version`). */
+const LOOKUP_UNKNOWN = 'unknown';
+/** The registry could not be reached. */
+const LOOKUP_FAILED = 'fetch_failed';
 
 /** A spec the public registry can answer for: a semver range or a dist-tag, not a link, URL, alias or workspace form. */
 function isRegistrySpec(spec: string): boolean {

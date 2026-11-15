@@ -25,7 +25,6 @@ import type { JudgmentPort, Question, Questions } from '@goodvibes-jev/judgment'
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { forgetGateReadings, gateReadingsPort, type GateReadingTable } from './gate-readings.ts';
-import { forgetServerOnlyReadings } from '../../platform/src/platform/tools/inspect/frontend-readings.ts';
 import type { ExecFailureCategory } from '../../platform/src/platform/tools/batteries/exec-retry.ts';
 import type { ChildFailureReading } from '../../platform/src/platform/tools/batteries/child-failure-reason.ts';
 
@@ -58,7 +57,7 @@ export interface ToolReading {
   readonly onlyTheFix?: boolean;
   /** engine.tools.output-keep (and any other rerank's `match`): the block or candidate is wanted. */
   readonly needed?: boolean;
-  /** An existence check over numbered lines (engine.tools.secret-line, dangerous-line): the line matching this entry is the one it finds. */
+  /** An existence check over numbered items: the item matching this entry is the one it finds. */
   readonly holds?: boolean;
   /** engine.tools.boolean-value. */
   readonly booleanValue?: 'true' | 'false' | 'neither';
@@ -91,7 +90,10 @@ function fitCandidate(question: Question): string | undefined {
 /** The question names the tools batteries ask. */
 const FINDING_QUESTIONS = new Set(['a11y_violation', 'omits_dependency', 'overflow_problem', 'fixed_size_problem', 'server_only', 'stacking_conflict']);
 const TOOL_QUESTIONS = new Set(['backtracking', 'credential', 'will_prompt', 'awaiting_input', 'category', 'reason', 'breaks_callers', 'changes_behavior', 'pick', 'real_secret', 'risky', 'acts_on_session', 'owned_targets', 'severity', 'project_type', 'package_manager', 'test_framework', 'entry_point', 'route_registration', 'fixes_errors', 'only_the_fix', 'match', 'where', 'exists', 'boolean_value', 'memory_class', 'inputs_break', 'output_breaks', ...FINDING_QUESTIONS]);
-const isToolQuestion = (name: string): boolean => TOOL_QUESTIONS.has(name) || name.startsWith('fits_') || name.startsWith('serves_');
+const isToolQuestion = (name: string): boolean => {
+  const base = name.split('__')[0]!;
+  return TOOL_QUESTIONS.has(base) || base.startsWith('fits_') || base.startsWith('serves_');
+};
 
 /**
  * A port answering the tools batteries from `table` and every other question
@@ -125,7 +127,10 @@ function heldLine(table: ToolReadingTable, state: unknown): string | undefined {
 }
 
 function toolAnswers(table: ToolReadingTable) {
-  return fakePort((name: string, question: Question, state: unknown) => {
+  return fakePort((asked: string, question: Question, whole: unknown) => {
+    // A per-file request asks `<question>__<candidate id>` about the candidate it points at.
+    const [name, candidate] = asked.split('__') as [string, string | undefined];
+    const state = candidate === undefined ? whole : (whole as { candidates?: Record<string, unknown> }).candidates?.[candidate];
     const text = JSON.stringify(state);
     const reading = table.find(([match]) => text.includes(match))?.[1] ?? {};
     switch (name) {
@@ -173,7 +178,6 @@ export function useToolReadings(table: ToolReadingTable = [], gateTable: GateRea
   const log: { requests: ReadonlyArray<ToolReadingRequest> } = { requests: [] };
   let previous: ReturnType<typeof installJudgmentPort>;
   beforeEach(() => {
-    forgetServerOnlyReadings();
     forgetGateReadings();
     const { port, requests } = toolReadingsPort(table, gateTable);
     log.requests = requests;
@@ -181,7 +185,6 @@ export function useToolReadings(table: ToolReadingTable = [], gateTable: GateRea
   });
   afterEach(() => {
     installJudgmentPort(previous);
-    forgetServerOnlyReadings();
     forgetGateReadings();
   });
   return log;

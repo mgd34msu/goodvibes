@@ -1,8 +1,7 @@
 /** Historical comparison inputs are pinned objects, never a mount of the owner's Git directory. */
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { spawnSync } from 'node:child_process';
-import { closeSync, fstatSync, lstatSync, mkdtempSync, openSync, readFileSync, realpathSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { spawn } from 'node:child_process';
+import { lstatSync, realpathSync } from 'node:fs';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import {
   assertCapturedInputPathContext,
@@ -49,21 +48,24 @@ export interface AnalyzeGitReader {
   diffBetween(before: string, after: string, files?: string[]): Promise<string>;
   /** `files` narrows a captured reader's stat; the live reader reports the whole range and callers narrow it. */
   diffStat(before: string, after: string, files?: string[]): Promise<string>;
+  /** The stat and the patch from one pass (one name listing, one authorization sweep), when the reader can. */
+  diffWithStat?(before: string, after: string, files?: string[]): Promise<{ readonly stat: string; readonly patch: string }>;
 }
 
 /** Longest a fixed Git read may run, and the most output it may produce. */
 const GIT_READ_TIMEOUT_MS = 60_000;
 const GIT_READ_MAX_BYTES = 64 * 1024 * 1024;
 
-/** Only fixed metadata/diff commands reach this helper. Never inherit Git routing or executable diff drivers. */
-function git(cwd: string, args: readonly string[], gitDir?: string): string {
+/**
+ * Only fixed metadata/diff commands reach this helper. Never inherit Git routing or executable diff drivers.
+ * Git runs asynchronously, so a slow or locked repository holds this call, never the process; it is killed at
+ * GIT_READ_TIMEOUT_MS or as soon as its output passes GIT_READ_MAX_BYTES, and when `signal` aborts.
+ */
+function git(cwd: string, args: readonly string[], gitDir?: string, signal?: AbortSignal): Promise<string> {
+  signal?.throwIfAborted();
   const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_')));
-  const scratch = mkdtempSync(join(tmpdir(), 'goodvibes-git-read-'));
-  let fd: number | undefined;
-  try {
-    const outputPath = join(scratch, 'output');
-    fd = openSync(outputPath, 'wx', 0o600);
-    const result = spawnSync('git', [
+  return new Promise<string>((resolvePromise, reject) => {
+    const child = spawn('git', [
       '--no-replace-objects', '--no-optional-locks', '-C', cwd,
       '-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor=false',
       '-c', 'core.attributesFile=/dev/null', '-c', 'core.quotePath=false',
@@ -74,22 +76,34 @@ function git(cwd: string, args: readonly string[], gitDir?: string): string {
         ...env, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_SYSTEM: '/dev/null', GIT_CONFIG_GLOBAL: '/dev/null',
         GIT_ATTR_NOSYSTEM: '1', GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0', GIT_NO_LAZY_FETCH: '1',
       },
-      stdio: ['ignore', fd, 'ignore'],
-      // A stuck Git must not hold the event loop; the output goes to a file, so its size is checked before it is read.
-      timeout: GIT_READ_TIMEOUT_MS,
-      killSignal: 'SIGKILL',
+      stdio: ['ignore', 'pipe', 'ignore'],
     });
-    // Neither subprocess diagnostics nor partially read bytes are deliverable on failure.
-    if (result.status !== 0) throw new Error('captured historical Git read failed');
-    if (fstatSync(fd).size > GIT_READ_MAX_BYTES) throw new Error('captured historical Git output is too large');
-    const bytes = readFileSync(outputPath);
-    const output = bytes.toString('utf8');
-    if (!Buffer.from(output).equals(bytes)) throw new Error('captured historical Git output is not UTF-8');
-    return output;
-  } finally {
-    if (fd !== undefined) closeSync(fd);
-    rmSync(scratch, { recursive: true, force: true });
-  }
+    const chunks: Buffer[] = [];
+    let size = 0;
+    let failure: Error | undefined;
+    const stop = (error: Error): void => { failure ??= error; child.kill('SIGKILL'); };
+    const timer = setTimeout(() => stop(new Error('captured historical Git read timed out')), GIT_READ_TIMEOUT_MS);
+    const abort = (): void => stop(signal?.reason instanceof Error ? signal.reason : new Error('captured historical Git read was cancelled'));
+    signal?.addEventListener('abort', abort, { once: true });
+    child.stdout.on('data', (chunk: Buffer) => {
+      size += chunk.length;
+      if (size > GIT_READ_MAX_BYTES) stop(new Error('captured historical Git output is too large'));
+      else chunks.push(chunk);
+    });
+    const settle = (code: number | null): void => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', abort);
+      // Neither subprocess diagnostics nor partially read bytes are deliverable on failure.
+      if (failure) { reject(failure); return; }
+      if (code !== 0) { reject(new Error('captured historical Git read failed')); return; }
+      const bytes = Buffer.concat(chunks);
+      const output = bytes.toString('utf8');
+      if (!Buffer.from(output).equals(bytes)) { reject(new Error('captured historical Git output is not UTF-8')); return; }
+      resolvePromise(output);
+    };
+    child.on('error', (error) => { failure ??= error; settle(null); });
+    child.on('close', settle);
+  });
 }
 
 const registeredGitAssertions = new WeakMap<ContractInputAuthority, Set<string>>();
@@ -154,23 +168,27 @@ export async function createAnalyzeGitReader(projectRoot: string, before: string
   if (isAbsolute(prefix) || prefix === '..' || prefix.startsWith(`..${sep}`))
     throw new Error('captured Git analysis belongs to another view');
   const source = contractInputAuthoritySourceRoot(context.authority);
-  const gitDir = realpathSync(git(source, ['rev-parse', '--path-format=absolute', '--git-common-dir']).trim());
-  if (realpathSync(git(context.root, ['rev-parse', '--path-format=absolute', '--git-common-dir']).trim()) !== gitDir)
+  const signal = context.signal;
+  const [sourceDir, viewDir, head] = await Promise.all([
+    git(source, ['rev-parse', '--path-format=absolute', '--git-common-dir'], undefined, signal),
+    git(context.root, ['rev-parse', '--path-format=absolute', '--git-common-dir'], undefined, signal),
+    git(context.root, ['rev-parse', '--verify', '--end-of-options', 'HEAD^{commit}'], undefined, signal).then((text) => text.trim()),
+  ]);
+  const gitDir = realpathSync(sourceDir.trim());
+  if (realpathSync(viewDir.trim()) !== gitDir)
     throw new Error('captured Git view belongs to another repository');
   const directoryIdentity = identity(gitDir);
-  const head = git(context.root, ['rev-parse', '--verify', '--end-of-options', 'HEAD^{commit}']).trim();
-  const pin = (ref: string): string => {
+  const pin = async (ref: string): Promise<string> => {
     if (ref.length > 512 || ref.startsWith('-')) throw new Error('invalid captured comparison ref');
     const anchored = ref.replace(/^(?:HEAD|@)(?=$|[~^])/, head);
     // Worktree-local explicit refs/reflogs retain their ordinary meaning, then become immutable OIDs.
-    const oid = git(context.root, ['rev-parse', '--verify', '--end-of-options', `${anchored}^{commit}`]).trim();
+    const oid = (await git(context.root, ['rev-parse', '--verify', '--end-of-options', `${anchored}^{commit}`], undefined, signal)).trim();
     if (!OID.test(oid)) throw new Error('captured comparison ref is not a commit');
     return oid;
   };
-  // Pin both refs synchronously before any path-permission callback can move them.
+  // Pin both refs to commits before any path-permission callback runs, so none can move them.
   if (!OID.test(head)) throw new Error('captured view HEAD is not a commit');
-  const beforeCommit = pin(before);
-  const afterCommit = pin(after);
+  const [beforeCommit, afterCommit] = await Promise.all([pin(before), pin(after)]);
   const comparisonInputs: ComparisonInputs = Object.freeze({
     kind: 'captured-git-comparison', captured_head: head,
     before: Object.freeze({ ref: before, commit: beforeCommit }),
@@ -196,13 +214,14 @@ export async function createAnalyzeGitReader(projectRoot: string, before: string
     await assertObjectsCurrent();
     await assertCapturedToolAccessCurrent();
   };
-  const diff = async (stat: boolean, files?: string[]): Promise<string> => {
+  /** One name listing and one authorization sweep, then the requested output in one Git run. */
+  const diff = async (output: '--stat' | '-p' | '--patch-with-stat', files?: string[]): Promise<string> => {
     await assertCurrent();
     const selection = files?.map((file) => capturedSelector(file, projectRoot, context.root));
     const base = ['diff-tree', '--no-commit-id', '-r', '--no-ext-diff', '--no-textconv', '--no-renames'];
     // --name-only does not open blobs. Authorize both sides of every selected change before diff/stat reads them.
-    const names = git(source, [...base, '--name-only', '-z', beforeCommit, afterCommit,
-      ...(selection?.length ? ['--', ...selection] : [])], gitDir).split('\0').filter(Boolean);
+    const names = (await git(source, [...base, '--name-only', '-z', beforeCommit, afterCommit,
+      ...(selection?.length ? ['--', ...selection] : [])], gitDir, signal)).split('\0').filter(Boolean);
     for (const path of names) {
       if (!safeRelativePath(path)) throw new Error('captured comparison contains an excluded or ambiguous path');
       await assertCapturedToolReadAccess(join(context.root, path));
@@ -211,14 +230,19 @@ export async function createAnalyzeGitReader(projectRoot: string, before: string
     if (names.length === 0) return '';
     // Reuse the pinned comparison selectors after authorizing every selected
     // path. Expanding names into argv would hit the OS argument-size limit.
-    const output = git(source, [...base, '--submodule=short', stat ? '--stat' : '-p', beforeCommit, afterCommit,
-      ...(selection?.length ? ['--', ...selection] : [])], gitDir);
+    const text = await git(source, [...base, '--submodule=short', output, beforeCommit, afterCommit,
+      ...(selection?.length ? ['--', ...selection] : [])], gitDir, signal);
     await assertCurrent();
-    return output;
+    return text;
   };
   return {
     comparisonInputs,
-    diffBetween: async (_before: string, _after: string, files?: string[]) => diff(false, files),
-    diffStat: async (_before: string, _after: string, files?: string[]) => diff(true, files),
+    diffBetween: async (_before: string, _after: string, files?: string[]) => diff('-p', files),
+    diffStat: async (_before: string, _after: string, files?: string[]) => diff('--stat', files),
+    diffWithStat: async (_before: string, _after: string, files?: string[]) => {
+      const text = await diff('--patch-with-stat', files);
+      const at = text.startsWith('diff --git') ? 0 : text.indexOf('\ndiff --git');
+      return at < 0 ? { stat: text, patch: '' } : { stat: text.slice(0, at).replace(/\n---\n?$/, '\n'), patch: text.slice(at === 0 ? 0 : at + 1) };
+    },
   };
 }

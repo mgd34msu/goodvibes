@@ -1,12 +1,13 @@
 import { completeJudgmentView } from './complete-view.js';
 /**
  * `engine.tools.secret-finding`: analyze mode `security` (scope secrets)
- * finds candidate lines with the `engine.tools.secret-line` existence check
- * over each block of a file's lines (analyze/scan-lines.ts); this reading
- * decides whether a candidate is a real credential committed to the source.
- * It replaces reporting every pattern match as a finding, which listed
- * placeholders, examples, test fixtures and documentation alongside real
- * keys.
+ * chooses candidate lines in code (the local credential detectors and
+ * assignments to a secret-named field, analyze/scan-findings.ts); this
+ * reading decides whether a candidate is a real credential committed to the
+ * source. It replaces reporting every pattern match as a finding, which
+ * listed placeholders, examples, test fixtures and documentation alongside
+ * real keys. `scanCandidateView` is also the view `engine.tools.dangerous-call`
+ * reads.
  *
  * Band: medium stakes. A wrong no hides a committed secret from the report; a
  * wrong yes sends someone to check a harmless line. Code reports a candidate
@@ -17,17 +18,18 @@ import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes-jev/judgment';
 
 /** Lines of context carried on each side of the candidate line. */
 export const SECRET_CONTEXT_LINES = 2;
-/** Most characters of one line the reading carries. */
-export const MAX_JUDGED_SCAN_LINE_CHARS = Number.POSITIVE_INFINITY;
+/** Most characters of one line the reading carries; a longer line (minified code) is cut with a marker. */
+export const MAX_JUDGED_SCAN_LINE_CHARS = 400;
 
+const carried = (line: string): string => line.length > MAX_JUDGED_SCAN_LINE_CHARS ? `${line.slice(0, MAX_JUDGED_SCAN_LINE_CHARS)}…` : line;
 
-/** What a scan reading sees: the file, the candidate line, and the lines around it. */
-export function scanCandidateView(file: string, lines: readonly string[], index: number, _context = SECRET_CONTEXT_LINES): { file: string; line: string; before: string[]; after: string[] } {
+/** What a scan reading sees: the file, the candidate line, and `context` lines on each side of it. */
+export function scanCandidateView(file: string, lines: readonly string[], index: number, context = SECRET_CONTEXT_LINES): { file: string; line: string; before: string[]; after: string[] } {
   return completeJudgmentView({
     file,
-    line: lines[index] ?? '',
-    before: lines.slice(0, index),
-    after: lines.slice(index + 1),
+    line: carried(lines[index] ?? ''),
+    before: lines.slice(Math.max(0, index - context), index).map(carried),
+    after: lines.slice(index + 1, index + 1 + context).map(carried),
   });
 }
 

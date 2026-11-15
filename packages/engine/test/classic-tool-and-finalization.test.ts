@@ -30,7 +30,7 @@ test('Classic edit, command preparation, output delivery and finalization use no
     const edit = await computeSingleEdit('const value = 1;\n', { path: 'example.ts', find: 'value = 1', replace: 'value = 2' }, 'exact', true, true, false, { signal });
     expect(edit).toEqual({ newContent: 'const value = 2;\n', occurrencesReplaced: 1, warning: undefined });
     expect(await computeSingleEdit('const value = 1;\n', { path: 'example.ts', find: 'wrong target', replace: 'value = 2' }, 'exact', true, true, false, { signal }))
-      .toMatchObject({ error: 'Find string not found unambiguously in file' });
+      .toMatchObject({ error: 'Find string not found in file' });
     expect(await readWillPrompt('printf done', signal)).toBe(false);
     expect(await readPendingPrompt('interactive-command', 'Continue? ', signal)).toBe('Continue?');
     expect(await keepForCall('first\n' + 'middle'.repeat(50) + '\nlast', 20, 'exec')).toContain('omitted');

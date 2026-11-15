@@ -62,6 +62,10 @@ interface ToolJson {
   agentId: string;
   status?: string;
   timedOut?: boolean;
+  waitedMs?: number;
+  requestedMs?: number;
+  limitMs?: number;
+  reason?: string;
   hint: string;
   count?: number;
   skipped?: number;
@@ -347,34 +351,54 @@ describe('modes and parameters', () => {
     expect(plan.tools?.length).toBeGreaterThan(0);
   });
 
-  test('wait on a running agent returns timedOut with the poll hint once the timeout passes', async () => {
-    const h = harness();
+  /** A harness whose next spawned agent keeps running until `release` is called. */
+  function runningAgent(h: ReturnType<typeof harness>) {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    h.exec.runAgent = async (record) => { record.status = 'running'; await gate; };
     const record = h.manager.spawn({ mode: 'spawn', task: 'x', outsideContract: true });
-    const real = Date.now.bind(Date);
+    return { record, release };
+  }
+
+  test('wait awaits the agent and returns as soon as it ends, reading its status a fixed number of times', async () => {
+    const h = harness();
+    const { record, release } = runningAgent(h);
     let statusReads = 0;
     const read = h.manager.getStatus.bind(h.manager);
     const statusSpy = spyOn(h.manager, 'getStatus').mockImplementation((id: string) => { statusReads += 1; return read(id); });
-    // The clock passes the requested timeout right after the loop starts, so no poll interval is slept.
-    const clock = spyOn(Date, 'now').mockImplementation(() => real() + (statusReads >= 2 ? 5_000 : 0));
     try {
-      const result = parse(await h.tool.execute({ mode: 'wait', agentId: record.id, timeoutMs: 1_000 }));
-      expect(result).toMatchObject({ status: 'running', timedOut: true });
-      expect(result.hint).toContain('mode=status');
-    } finally { clock.mockRestore(); statusSpy.mockRestore(); }
+      const waiting = h.tool.execute({ mode: 'wait', agentId: record.id, timeoutMs: 600_000 });
+      h.exec.finish(record, 'completed');
+      release();
+      expect(parse(await waiting)).toMatchObject({ status: 'completed', timedOut: false });
+      expect(statusReads).toBeLessThanOrEqual(3);
+    } finally { statusSpy.mockRestore(); }
   });
 
-  test('wait never blocks longer than 30 seconds however long a timeout is asked for', async () => {
+  test('wait on a running agent returns timedOut with a hint to wait again once the timeout passes', async () => {
     const h = harness();
-    const record = h.manager.spawn({ mode: 'spawn', task: 'x', outsideContract: true });
-    const real = Date.now.bind(Date);
-    let statusReads = 0;
-    const read = h.manager.getStatus.bind(h.manager);
-    const statusSpy = spyOn(h.manager, 'getStatus').mockImplementation((id: string) => { statusReads += 1; return read(id); });
-    // The clock jumps past the cap right after the wait loop starts; a longer timeout would keep it polling.
-    const clock = spyOn(Date, 'now').mockImplementation(() => real() + (statusReads >= 2 ? 31_000 : 0));
+    const { record, release } = runningAgent(h);
     try {
-      const result = parse(await h.tool.execute({ mode: 'wait', agentId: record.id, timeoutMs: 600_000 }));
-      expect(result.timedOut).toBe(true);
-    } finally { clock.mockRestore(); statusSpy.mockRestore(); }
+      const result = parse(await h.tool.execute({ mode: 'wait', agentId: record.id, timeoutMs: 20 }));
+      expect(result).toMatchObject({ status: 'running', timedOut: true });
+      expect(result.hint).toContain('mode=wait');
+      expect(result.requestedMs).toBeUndefined();
+    } finally { release(); }
+  });
+
+  test('a wait longer than the silence limit is reduced to it, and the result says so', async () => {
+    const h = harness();
+    const { record, release } = runningAgent(h);
+    const tool = createAgentTool({
+      manager: h.manager, messageBus: h.messageBus, archetypeLoader: { loadArchetype: () => null },
+      configManager: { get: ((key: string) => (key === 'contract.heartbeatTimeoutMs' ? 25 : undefined)) as ConfigManager['get'] },
+      contractRunner: { start: async () => { throw new Error('no contract in this test'); }, list: () => [], get: () => null },
+      projectRoot: '/work/agent-hardening', resolveSessionId: () => 'session-hardening',
+    });
+    try {
+      const result = parse(await tool.execute({ mode: 'wait', agentId: record.id, timeoutMs: 600_000 }));
+      expect(result).toMatchObject({ status: 'running', timedOut: true, requestedMs: 600_000, limitMs: 25 });
+      expect(result.reason).toContain('contract.heartbeatTimeoutMs');
+    } finally { release(); }
   });
 });

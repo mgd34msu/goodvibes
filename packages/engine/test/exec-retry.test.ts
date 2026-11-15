@@ -18,6 +18,7 @@ import { ProcessManager } from '../platform/src/platform/tools/shared/process-ma
 import { OverflowHandler } from '../platform/src/platform/tools/shared/overflow.js';
 import { EXEC_GATE_TABLE } from './_helpers/gate-readings.ts';
 import { useToolReadings } from './_helpers/tool-readings.ts';
+import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 
 // Jev reads which kind of failure a run hit; these fakes stand in for it.
 // Output no entry names reads as a lasting failure.
@@ -76,9 +77,20 @@ describe('isRetryableExecResult', () => {
     expect(await isRetryableExecResult(makeResult({ stderr: 'EBUSY: locked' }), ['network'])).toBe(false);
   });
 
-  test('the reading sees the command, exit code and output ends', async () => {
-    await isRetryableExecResult(makeResult({ exit_code: 7, stdout: 'partial', stderr: 'Error: read ECONNRESET' }));
-    expect(readings.requests[0]!.state).toEqual({ command: 'test', exitCode: 7, stderr: 'Error: read ECONNRESET', stdout: 'partial' });
+  test('failures named by errno or exit code are decided without a reading', async () => {
+    const before = readings.requests.length;
+    await isRetryableExecResult(makeResult({ stderr: 'Error: read ECONNRESET' }));
+    await isRetryableExecResult(makeResult({ exit_code: 127, stderr: 'sh: 1: rg: not found' }));
+    expect(readings.requests).toHaveLength(before);
+  });
+
+  test('the reading sees the command, exit code and the end of the output', async () => {
+    const before = readings.requests.length;
+    await isRetryableExecResult(makeResult({ exit_code: 7, stdout: 'partial', stderr: `${'x'.repeat(10_000)}upload interrupted` }));
+    const state = readings.requests[before]!.state as { command: string; exitCode: number; stderr: string; stdout: string };
+    expect(state).toMatchObject({ command: 'test', exitCode: 7, stdout: 'partial' });
+    expect(state.stderr.endsWith('upload interrupted')).toBe(true);
+    expect(state.stderr.length).toBe(4_000);
   });
 });
 
@@ -159,6 +171,22 @@ describe('exec retry loop', () => {
     expect(result.success).toBe(false);
     expect(runs).toBe(1);
     expect(retries).toBe(0);
+  });
+
+  test('a failure no reading can classify keeps the command result and says it was not retried', async () => {
+    const installed = installJudgmentPort(undefined)!;
+    installJudgmentPort({ ...installed, ask: (request) => request.context?.battery === 'engine.tools.exec-retry'
+      ? Promise.reject(new Error('decision model unavailable')) : installed.ask(request) });
+    try {
+      const { result, runs } = await run(10, 'upload-interrupted', { max: 5 });
+      expect(runs).toBe(1);
+      const output = JSON.parse(result.output ?? '{}') as { exit_code?: number; stderr?: string; warnings?: string[] };
+      expect(output.exit_code).toBe(1);
+      expect(output.stderr).toContain('upload-interrupted');
+      expect(output.warnings?.some((warning) => warning.includes('could not be classified'))).toBe(true);
+    } finally {
+      installJudgmentPort(installed);
+    }
   });
 
   test('a failure category the caller did not list is not retried', async () => {

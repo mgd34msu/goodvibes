@@ -2,7 +2,7 @@ import type { WalkDirOptions } from '../../utils/walk-dir.js';
 import { assertCapturedToolReadAccess, assertCapturedToolAccessCurrent } from '../shared/captured-input-tools.js';
 import { existsSync } from 'node:fs';
 import { stat } from 'node:fs/promises';
-import { dirname, join, relative, resolve } from 'node:path';
+import { basename, dirname, extname, join, relative, resolve } from 'node:path';
 import { isBuiltin } from 'node:module';
 import { unifiedDiff } from '../../state/file-cache.js';
 import { CodeIntelligence } from '../../intelligence/facade.js';
@@ -10,7 +10,9 @@ import { judgmentPort } from '@goodvibes-jev/engine/errors';
 import type { Candidate } from '@goodvibes-jev/judgment';
 import { mapWithConcurrency } from '../../utils/concurrency.js';
 import { envTemplate, envTemplateCandidate, envTemplateContext } from '../batteries/env-template.js';
+import { JudgmentInputError } from '../../gate/judgment-input.js';
 import {
+  TEST_CANDIDATE_HEAD_LINES,
   TEST_CANDIDATES_PER_READING,
   testOfSource,
   testOfSourceCandidate,
@@ -23,7 +25,6 @@ import { listProjectEnvFiles } from './scan-findings.js';
 
 export { runPermissions, runSecurity } from './scan-findings.js';
 import {
-  MAX_SCAN_FILES,
   MAX_SCAN_MS,
   collectExistingPaths,
   collectInputFiles,
@@ -36,6 +37,8 @@ import {
   readTextFile,
   resolveRelativeImport,
   resolveInsideRoot,
+  analyzeRefusal,
+  collectScanFiles,
 } from './shared.js';
 
 function extractExportedSymbols(content: string): Array<{ name: string; kind: string; line: number }> {
@@ -65,28 +68,21 @@ function extractExportedSymbols(content: string): Array<{ name: string; kind: st
   return symbols;
 }
 
+/** The exported symbols of one file's text: from the code-intelligence parser, or the export-statement patterns when it finds none. */
+async function exportedSymbolsOf(file: string, content: string, intelligence: CodeIntelligence): Promise<ExportedSymbol[]> {
+  const symbols = await intelligence.getSymbols(file, content);
+  if (symbols.length > 0) {
+    return symbols.filter((sym) => sym.exported).map((sym) => ({ name: sym.name, file, line: sym.line ?? 0, kind: sym.kind ?? 'unknown' }));
+  }
+  return extractExportedSymbols(content).map((sym) => ({ ...sym, file }));
+}
+
 async function collectExportedSymbols(files: string[], intelligence: CodeIntelligence): Promise<ExportedSymbol[]> {
   const exported: ExportedSymbol[] = [];
-
   for (const file of files) {
     const content = await readTextFile(file);
-    if (content === null) continue;
-
-    const symbols = await intelligence.getSymbols(file, content);
-    if (symbols.length > 0) {
-      for (const sym of symbols) {
-        if (sym.exported) {
-          exported.push({ name: sym.name, file, line: sym.line ?? 0, kind: sym.kind ?? 'unknown' });
-        }
-      }
-      continue;
-    }
-
-    for (const sym of extractExportedSymbols(content)) {
-      exported.push({ ...sym, file });
-    }
+    if (content !== null) exported.push(...await exportedSymbolsOf(file, content, intelligence));
   }
-
   return exported;
 }
 
@@ -98,7 +94,7 @@ export async function runImpact(
 ): Promise<Record<string, unknown>> {
   const targetFiles = input.files ?? [];
   if (targetFiles.length === 0) {
-    return { error: 'impact mode requires at least one file in files[]' };
+    return analyzeRefusal('impact mode requires at least one file in files[]', 'Pass files with the source file or files whose exports you are changing.');
   }
 
   const deadline = Date.now() + MAX_SCAN_MS;
@@ -114,7 +110,9 @@ export async function runImpact(
   }
 
   const unreadable: string[] = [];
-  const allProjectFiles = await collectTextFiles(projectRoot, MAX_SCAN_FILES, deadline, walkOptions, unreadable);
+  const allProjectFiles = await collectTextFiles(projectRoot, Number.POSITIVE_INFINITY, deadline, walkOptions, unreadable);
+  // One pattern per exported name, compiled once; a file is searched only for the names it holds.
+  const patterns = exportedNames.map((exported) => ({ name: exported.name, regex: new RegExp(`\\b${escapeRegex(exported.name)}\\b`) }));
   const targetSet = new Set(exportedNames.map((e) => e.file));
   const affected = new Map<string, Array<{ name: string; line: number }>>();
   // A scan cut short lists only the files read before the cut, so the result must not read as complete.
@@ -122,18 +120,20 @@ export async function runImpact(
 
   for (const file of allProjectFiles) {
     if (targetSet.has(file)) continue;
+    walkOptions.signal?.throwIfAborted();
     if (expired()) { stopped = true; break; }
 
     const content = await readTextFile(file);
     if (content === null) continue;
 
+    const named = identifiersOf(content);
     const lines = content.split('\n');
-    for (const exported of exportedNames) {
-      const nameRegex = new RegExp(`\\b${escapeRegex(exported.name)}\\b`);
+    for (const { name, regex } of patterns) {
+      if (!named.has(name)) continue;
       for (let i = 0; i < lines.length; i++) {
-        if (nameRegex.test(lines[i]!)) {
+        if (regex.test(lines[i]!)) {
           const entry = affected.get(file) ?? [];
-          entry.push({ name: exported.name, line: i + 1 });
+          entry.push({ name, line: i + 1 });
           affected.set(file, entry);
           break;
         }
@@ -256,9 +256,22 @@ export async function runDependencies(input: AnalyzeInput, projectRoot: string, 
     return { packages: Array.from(packages).sort(), count: packages.size };
   }
 
-  return { error: `Unknown dependencies submode: ${submode}` };
+  return analyzeRefusal(`Unknown dependencies submode: ${submode}`, "Pass submode 'analyze', 'circular' or 'upgrade'.");
 }
 
+/** Every identifier-shaped word of a source text, each once. */
+function identifiersOf(content: string): Set<string> {
+  return new Set(content.match(/[A-Za-z_$][\w$]*/g) ?? []);
+}
+
+/**
+ * Exports no other file names. Each file is read once: its exports are listed
+ * and its identifiers counted into one index (name -> files naming it), so an
+ * export is referenced when a file other than its own names it. The pass is
+ * linear in the source read, yields at every file, checks the call's signal
+ * between files, and stops reading at the scan limit; an export that a file
+ * left unread might name is listed as unverified, never as dead.
+ */
 export async function runDeadCode(
   input: AnalyzeInput,
   projectRoot: string,
@@ -268,52 +281,32 @@ export async function runDeadCode(
   const deadline = Date.now() + MAX_SCAN_MS;
   const expired = pastDeadline ?? (() => Date.now() > deadline);
   const intelligence = new CodeIntelligence({});
-  const scanRoot = input.files && input.files.length > 0 ? resolveInsideRoot(input.files[0]!, projectRoot) : projectRoot;
-
   const unreadable: string[] = [];
-  const allFiles = await collectTextFiles(scanRoot, MAX_SCAN_FILES, deadline, walkOptions, unreadable);
-  const exports = await collectExportedSymbols(allFiles, intelligence);
+  const allFiles = await collectScanFiles(input, projectRoot, deadline, walkOptions, unreadable);
 
-  const fileContentCache = new Map<string, string>();
+  const exports: ExportedSymbol[] = [];
+  const filesNaming = new Map<string, number>();
   // Every file must be read for "no reference" to mean anything. A file left unread may hold the reference.
   let referencesComplete = true;
   for (const file of allFiles) {
+    walkOptions.signal?.throwIfAborted();
     if (expired()) { referencesComplete = false; break; }
     const content = await readTextFile(file);
-    if (content !== null) fileContentCache.set(file, content);
+    if (content === null) { unreadable.push(file); continue; }
+    exports.push(...await exportedSymbolsOf(file, content, intelligence));
+    for (const name of identifiersOf(content)) filesNaming.set(name, (filesNaming.get(name) ?? 0) + 1);
   }
 
   const dead: Array<{ name: string; file: string; line: number }> = [];
   const unverified: Array<{ name: string; file: string; line: number }> = [];
   for (const exp of exports) {
-    let hasReference = false;
-    let searched = referencesComplete;
-
-    if (!expired()) {
-      for (const file of allFiles) {
-        if (file === exp.file) continue;
-        if (expired()) { searched = false; break; }
-
-        const content = fileContentCache.get(file);
-        if (content === undefined) continue;
-
-        const nameRegex = new RegExp(`\\b${escapeRegex(exp.name)}\\b`);
-        if (nameRegex.test(content)) {
-          hasReference = true;
-          break;
-        }
-      }
-    } else {
-      searched = false;
-    }
-
-    if (hasReference) continue;
-    // Only an export whose whole search finished is dead; the rest are unknown, never reported dead.
+    // The export's own file names it once; any further file is a reference.
+    if ((filesNaming.get(exp.name) ?? 0) > 1) continue;
     const entry = { name: exp.name, file: relative(projectRoot, exp.file), line: exp.line };
-    (searched ? dead : unverified).push(entry);
+    (referencesComplete ? dead : unverified).push(entry);
   }
 
-  const stopped = unverified.length > 0 || !referencesComplete;
+  const stopped = !referencesComplete;
   return {
     dead_exports: dead,
     total_exports: exports.length,
@@ -385,7 +378,8 @@ export async function runCoverage(_input: AnalyzeInput, projectRoot: string): Pr
     }
   }
 
-  return { error: 'No coverage data found', searched: ['coverage/coverage-summary.json', 'coverage/lcov.info'] };
+  return analyzeRefusal('No coverage data found', 'Run the tests with coverage first (it writes coverage/coverage-summary.json or coverage/lcov.info), then call coverage again.',
+    { searched: ['coverage/coverage-summary.json', 'coverage/lcov.info'] });
 }
 
 export async function runBundle(_input: AnalyzeInput, projectRoot: string): Promise<Record<string, unknown>> {
@@ -404,10 +398,8 @@ export async function runBundle(_input: AnalyzeInput, projectRoot: string): Prom
     }
   }
 
-  return {
-    error: 'No bundle stats found',
-    searched: candidates.map((c) => relative(projectRoot, c)),
-  };
+  return analyzeRefusal('No bundle stats found', 'Build with a stats file first (for example stats.json from the bundler), then call bundle again.',
+    { searched: candidates.map((c) => relative(projectRoot, c)) });
 }
 
 export async function runSurface(input: AnalyzeInput, projectRoot: string): Promise<Record<string, unknown>> {
@@ -441,7 +433,7 @@ export async function runSurface(input: AnalyzeInput, projectRoot: string): Prom
   }
 
   if (targetFiles.length === 0) {
-    return { error: 'No entry point files found', files_checked: input.files ?? [] };
+    return analyzeRefusal('No entry point files found', 'Pass files with the module entry file, or a directory holding index.ts, index.tsx, index.js or mod.ts.', { files_checked: input.files ?? [] });
   }
 
   const surface: Array<{
@@ -466,10 +458,13 @@ export async function runSurface(input: AnalyzeInput, projectRoot: string): Prom
 
 export async function runPreview(input: AnalyzeInput, projectRoot: string): Promise<Record<string, unknown>> {
   if (!input.files || input.files.length === 0) {
-    return { error: 'preview mode requires files[]' };
+    return analyzeRefusal('preview mode requires files[]', 'Pass files with the one file to preview and find with the text to replace.');
+  }
+  if (input.files.length > 1) {
+    return analyzeRefusal(`preview mode previews one file; got ${input.files.length}`, 'Call preview once per file.');
   }
   if (input.find === undefined) {
-    return { error: 'preview mode requires find string' };
+    return analyzeRefusal('preview mode requires find string', 'Pass find with the exact text to replace.');
   }
 
   const filePath = resolveInsideRoot(input.files[0]!, projectRoot);
@@ -484,14 +479,14 @@ export async function runPreview(input: AnalyzeInput, projectRoot: string): Prom
   try {
     original = await Bun.file(filePath).text();
   } catch {
-    return { error: `Cannot read file: ${relPath}` };
+    return analyzeRefusal(`Cannot read file: ${relPath}`, 'Pass a readable text file inside the project.');
   }
 
   if (findStr === '') {
-    return { error: 'preview mode requires a non-empty find string' };
+    return analyzeRefusal('preview mode requires a non-empty find string', 'Pass find with the exact text to replace.');
   }
   if (!original.includes(findStr)) {
-    return { error: `String not found in ${relPath}`, find: findStr };
+    return analyzeRefusal(`String not found in ${relPath}`, 'Read the file and copy the exact text into find.', { find: findStr });
   }
 
   // A replacer function keeps `$&`, `$1` and `$$` in the replacement literal, as the edit tool writes them.
@@ -595,21 +590,54 @@ export async function runEnvAudit(_input: AnalyzeInput, projectRoot: string): Pr
   return { files, reference: reference.name, missing, extra, ...(selected.provenance ? { provenance: selected.provenance, reference_source: 'filename-convention' } : {}) };
 }
 
-/** Each project file's relative imports, resolved to the files they name. */
-async function resolvedImports(
+/** One project file that imports a requested source: the lines importing it and the file's opening lines. */
+interface Importer { readonly file: string; readonly importLines: readonly string[]; readonly head: readonly string[] }
+
+/** A path without a source extension, and a directory's index file as the directory: the forms a relative specifier names it by. */
+function importBases(source: string): string[] {
+  const ext = extname(source);
+  const bare = ext ? source.slice(0, -ext.length) : source;
+  return basename(bare) === 'index' ? [bare, dirname(bare)] : [bare];
+}
+
+/**
+ * The importers of each requested source, from one walk of the project: every file is read once
+ * and only a specifier that could name a requested source is resolved on disk. Reading stops at
+ * `deadline`; `read` says how many of the files were covered.
+ */
+async function importersOf(
+  sources: readonly string[],
   files: readonly string[],
-): Promise<Array<{ file: string; lines: string[]; imports: Array<{ target: string; line: number }> }>> {
-  const read: Array<{ file: string; lines: string[]; imports: Array<{ target: string; line: number }> }> = [];
+  deadline: number,
+  signal: AbortSignal | undefined,
+): Promise<{ importers: Map<string, Importer[]>; read: number; stopped: boolean }> {
+  const wanted = new Set(sources);
+  const bases = new Set(sources.flatMap(importBases));
+  const importers = new Map<string, Importer[]>(sources.map((source) => [source, []]));
+  let read = 0;
   for (const file of files) {
+    signal?.throwIfAborted();
+    if (Date.now() > deadline) return { importers, read, stopped: true };
     const content = await readTextFile(file);
+    read++;
     if (content === null) continue;
-    const imports = importSpecifiers(content).flatMap(({ specifier, line }) => {
+    const byTarget = new Map<string, number[]>();
+    for (const { specifier, line } of importSpecifiers(content)) {
+      if (!specifier.startsWith('.')) continue;
+      const base = resolve(dirname(file), specifier);
+      const ext = extname(base);
+      if (!bases.has(base) && !bases.has(ext ? base.slice(0, -ext.length) : base)) continue;
       const target = resolveRelativeImport(file, specifier);
-      return target ? [{ target, line }] : [];
-    });
-    if (imports.length > 0) read.push({ file, lines: content.split('\n'), imports });
+      if (target === null || target === file || !wanted.has(target)) continue;
+      byTarget.set(target, [...(byTarget.get(target) ?? []), line]);
+    }
+    if (byTarget.size === 0) continue;
+    const lines = content.split('\n');
+    for (const [target, lineNumbers] of byTarget) {
+      importers.get(target)!.push({ file, importLines: lineNumbers.map((line) => lines[line - 1] ?? ''), head: lines.slice(0, TEST_CANDIDATE_HEAD_LINES) });
+    }
   }
-  return read;
+  return { importers, read, stopped: false };
 }
 
 /**
@@ -659,27 +687,35 @@ export async function runTestFind(input: AnalyzeInput, projectRoot: string, walk
   const sourceFiles = input.files ?? [];
 
   if (sourceFiles.length === 0) {
-    return { error: 'test_find mode requires at least one file in files[]' };
+    return analyzeRefusal('test_find mode requires at least one file in files[]', 'Pass files with the source file or files whose tests you want.');
   }
 
-  // Every project file is read for its imports, so a test is found wherever it lives.
-  const importing = await resolvedImports(await collectTextFiles(projectRoot, Number.POSITIVE_INFINITY, undefined, walkOptions));
+  // Every project file is read for its imports, once, so a test is found wherever it lives.
+  const deadline = Date.now() + MAX_SCAN_MS;
+  const sources = sourceFiles.map((srcFile) => resolveInsideRoot(srcFile, projectRoot));
+  const files = await collectTextFiles(projectRoot, Number.POSITIVE_INFINITY, deadline, walkOptions);
+  const { importers, read, stopped } = await importersOf(sources, files, deadline, walkOptions.signal);
   const mappings: Array<{
     source: string;
     test: string | null;
     exists: boolean;
     candidates_checked: number;
+    refused_candidates?: string[];
     reading?: 'uncertain' | 'not-evaluated';
     provenance?: 'classic';
   }> = [];
 
-  for (const srcFile of sourceFiles) {
-    const source = resolveInsideRoot(srcFile, projectRoot);
-    const candidates = importing.flatMap(({ file, lines, imports }) => {
-      const importLines = imports.filter(({ target }) => target === source).map(({ line }) => lines[line - 1] ?? '');
-      return file !== source && importLines.length > 0
-        ? [testOfSourceCandidate(relative(projectRoot, file), importLines, lines)]
-        : [];
+  for (const [index, srcFile] of sourceFiles.entries()) {
+    const source = sources[index]!;
+    const refused: string[] = [];
+    const candidates = (importers.get(source) ?? []).flatMap(({ file, importLines, head }) => {
+      const relFile = relative(projectRoot, file);
+      try { return [testOfSourceCandidate(relFile, importLines, head)]; }
+      catch (error) {
+        if (!(error instanceof JudgmentInputError)) throw error;
+        refused.push(relFile);
+        return [];
+      }
     });
     const { test, uncertain, provenance } =
       candidates.length === 0
@@ -690,14 +726,23 @@ export async function runTestFind(input: AnalyzeInput, projectRoot: string, walk
       test,
       exists: test !== null,
       candidates_checked: candidates.length,
+      ...(refused.length > 0 ? { refused_candidates: refused } : {}),
       ...(provenance ? { provenance, reading: 'not-evaluated' as const } : uncertain ? { reading: 'uncertain' as const } : {}),
     });
   }
 
+  const refusedCandidates = mappings.flatMap((mapping) => mapping.refused_candidates ?? []);
   return {
     mappings,
     total: mappings.length,
     found: mappings.filter((m) => m.exists).length,
     missing: mappings.filter((m) => !m.exists).length,
+    files_read: read,
+    files_total: files.length,
+    stopped_by_deadline: stopped,
+    ...(refusedCandidates.length > 0 ? {
+      refused_candidates: refusedCandidates,
+      refused_note: 'These importers hold text the decision model is not shown (credential-shaped material), so they were not considered as tests.',
+    } : {}),
   };
 }

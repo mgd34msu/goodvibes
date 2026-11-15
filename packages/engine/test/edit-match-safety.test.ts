@@ -6,7 +6,7 @@ import { createEditTool } from '@goodvibes-jev/engine/platform/platform/tools';
 import { FileStateCache } from '@goodvibes-jev/engine/platform/platform/state';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { computeAstPatternEdit, computeSingleEdit, findAllPositions, MAX_FUZZY_LINE_WINDOWS } from '../platform/src/platform/tools/edit/match.ts';
+import { computeAstPatternEdit, computeSingleEdit, findAllPositions } from '../platform/src/platform/tools/edit/match.ts';
 import { buildImportGraphWarning } from '../platform/src/platform/tools/edit/core.ts';
 
 let root: string;
@@ -193,20 +193,13 @@ describe('hints bind ast and ast_pattern modes', () => {
   });
 });
 
-describe('approximate line search stays bounded', () => {
-  test('a file with more candidate lines than the cap sends nothing to the model', async () => {
-    const lines = Array.from({ length: MAX_FUZZY_LINE_WINDOWS + 50 }, (_, i) => `const v${i} = ${i};`);
-    const result = await computeSingleEdit(lines.join('\n'), { path: 'big.ts', find: 'const missing = true;', replace: 'x' }, 'exact', true);
-    expect('error' in result && result.error).toContain('Find string not found');
-    expect('error' in result && result.error).toContain('too large');
+describe('a find text that is not in the file', () => {
+  test('exact mode answers at once from code with the closest lines, asking nothing, however large the file', async () => {
+    const lines = Array.from({ length: 5_000 }, (_, i) => `const v${i} = ${i};`);
+    const result = await computeSingleEdit(lines.join('\n'), { path: 'big.ts', find: 'const v2500 = 25OO;', replace: 'x' }, 'exact', true);
+    expect('error' in result && result.error).toContain('Find string not found in file. Closest text:');
+    expect('error' in result && result.error).toContain('line 2501');
     expect(selectorCalls).toBe(0);
-  });
-
-  test('a file within the cap still asks about its windows', async () => {
-    const lines = Array.from({ length: 20 }, (_, i) => `const v${i} = ${i};`);
-    const result = await computeSingleEdit(lines.join('\n'), { path: 'small.ts', find: 'const missing = true;', replace: 'x' }, 'exact', true);
-    expect('error' in result).toBe(true);
-    expect(selectorCalls).toBeGreaterThan(0);
   });
 });
 

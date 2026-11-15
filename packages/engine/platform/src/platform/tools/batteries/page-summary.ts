@@ -16,11 +16,6 @@ import { completeJudgmentView } from './complete-view.js';
  */
 import { defineSelector, STAKES_BANDS, type Candidate } from '@goodvibes-jev/judgment';
 
-/** Most characters of one paragraph a candidate carries. */
-export const MAX_JUDGED_PARAGRAPH_CHARS = Number.POSITIVE_INFINITY;
-
-
-
 /** One paragraph as a candidate. */
 export function paragraphCandidate(id: string, text: string): Candidate {
   return completeJudgmentView({ id, content: text });

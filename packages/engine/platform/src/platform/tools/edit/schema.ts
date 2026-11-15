@@ -94,7 +94,7 @@ export const editSchema = {
           type: 'string',
           enum: ['exact', 'fuzzy', 'regex', 'ast', 'ast_pattern'],
           description:
-            'Match mode. exact: literal string match. fuzzy: whitespace-insensitive. regex: treat find as regex. ' +
+            'Match mode. exact: literal string match (whitespace differences are tolerated); text not in the file fails at once with the closest lines to copy. fuzzy: whitespace-insensitive, and when nothing matches the single closest run of lines is applied if a decision-model check reads it as the intended code. regex: treat find as regex. ' +
             'ast: structural match using tree-sitter; if unavailable, exact fallback is reported as a warning. ' +
             'ast_pattern: pattern matching using @ast-grep/napi metavariables like $VAR or $$$ARGS; if unavailable, exact fallback is reported as a warning.',
           default: 'exact',

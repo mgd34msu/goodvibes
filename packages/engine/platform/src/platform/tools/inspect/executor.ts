@@ -64,6 +64,8 @@ export async function executeInspectMode(
   current?: () => void,
   /** Where scaffold may write: the working directory the tool was configured with. */
   writeRoot?: string | null,
+  /** The call's signal: a cancelled call stops the decision-model requests it started. */
+  signal?: AbortSignal,
 ): Promise<InspectToolResult> {
   try {
     current?.();
@@ -75,7 +77,7 @@ export async function executeInspectMode(
         const framework: ApiFramework = (input.framework ?? 'auto') as ApiFramework;
         const unavailable: string[] = [];
         const notes: string[] = [];
-        const routes = await inspectApi(projectRoot, framework, unavailable, notes, current);
+        const routes = await inspectApi(projectRoot, framework, unavailable, notes, current, undefined, signal);
         return createInspectSuccess({ routes, count: routes.length, ...coverage(unavailable, notes) }, format, input.mode);
       }
 
@@ -106,15 +108,15 @@ export async function executeInspectMode(
       case 'accessibility': {
         const file = await readRequiredFile(projectRoot, input.file, 'accessibility', 'File not found');
         if ('success' in file) return file;
-        const a11yIssues = await inspectAccessibility(file.content, input.file!);
-        return createInspectSuccess({ issues: a11yIssues, count: a11yIssues.length }, format, input.mode);
+        const { issues, ...note } = await inspectAccessibility(file.content, input.file!, signal);
+        return createInspectSuccess({ issues, count: issues.length, ...note }, format, input.mode);
       }
 
       case 'api_spec': {
         const framework: ApiFramework = (input.framework ?? 'auto') as ApiFramework;
         const unavailable: string[] = [];
         const notes: string[] = [];
-        const routes = await inspectApi(projectRoot, framework, unavailable, notes, current);
+        const routes = await inspectApi(projectRoot, framework, unavailable, notes, current, undefined, signal);
         return createInspectSuccess({ ...generateApiSpec(routes), ...coverage(unavailable, notes) }, format, input.mode);
       }
 
@@ -132,7 +134,7 @@ export async function executeInspectMode(
         const framework: ApiFramework = (input.framework ?? 'auto') as ApiFramework;
         const unavailable: string[] = [];
         const notes: string[] = [];
-        const routes = await inspectApi(projectRoot, framework, unavailable, notes, current);
+        const routes = await inspectApi(projectRoot, framework, unavailable, notes, current, undefined, signal);
         return createInspectSuccess({ ...validateApiSpec(resolvedSpec.content, routes), ...coverage(unavailable, notes) }, format, input.mode);
       }
 
@@ -167,25 +169,25 @@ export async function executeInspectMode(
       case 'hooks': {
         const file = await readRequiredFile(projectRoot, input.file, 'hooks', 'File not found');
         if ('success' in file) return file;
-        return createInspectSuccess(await inspectHooks(file.content, input.file!), format, input.mode);
+        return createInspectSuccess(await inspectHooks(file.content, input.file!, signal), format, input.mode);
       }
 
       case 'overflow': {
         const file = await readRequiredFile(projectRoot, input.file, 'overflow', 'File not found');
         if ('success' in file) return file;
-        return createInspectSuccess(await inspectOverflow(file.content, input.file!), format, input.mode);
+        return createInspectSuccess(await inspectOverflow(file.content, input.file!, signal), format, input.mode);
       }
 
       case 'sizing': {
         const file = await readRequiredFile(projectRoot, input.file, 'sizing', 'File not found');
         if ('success' in file) return file;
-        return createInspectSuccess(await inspectSizing(file.content, input.file!), format, input.mode);
+        return createInspectSuccess(await inspectSizing(file.content, input.file!, signal), format, input.mode);
       }
 
       case 'stacking': {
         const file = await readRequiredFile(projectRoot, input.file, 'stacking', 'File not found');
         if ('success' in file) return file;
-        return createInspectSuccess(await inspectStacking(file.content, input.file!), format, input.mode);
+        return createInspectSuccess(await inspectStacking(file.content, input.file!, signal), format, input.mode);
       }
 
       case 'responsive': {
@@ -209,7 +211,7 @@ export async function executeInspectMode(
       case 'client_boundary': {
         const file = await readRequiredFile(projectRoot, input.file, 'client_boundary', 'File not found');
         if ('success' in file) return file;
-        return createInspectSuccess(await inspectClientBoundary(file.content, input.file!), format, input.mode);
+        return createInspectSuccess(await inspectClientBoundary(file.content, input.file!, signal), format, input.mode);
       }
 
       case 'error_boundary': {

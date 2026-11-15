@@ -1,23 +1,23 @@
-import { completeJudgmentView } from '../batteries/complete-view.js';
-import { assertCapturedToolAccessCurrent } from '../shared/captured-input-tools.js';
 /**
  * The frontend analyzers whose findings are read by Jev
  * (`engine.tools.frontend-finding`, tools/batteries/frontend-finding.ts).
  * Code finds each candidate from syntax (an element start, a hook call, an
  * overflow or fixed-size utility, an import specifier, a z-index value set on
- * more than one line); the reading decides
- * whether it is an issue. A candidate is reported unless the reading is a
- * no, so an uncertain one is shown with `reading: 'uncertain'`.
+ * more than one line); one request per file reads all of them
+ * (inspect/candidate-readings.ts). A candidate is reported unless the reading
+ * is a no, so an uncertain one is shown with `reading: 'uncertain'`, and one
+ * no reading assessed (decision models off, a failed request) with
+ * `reading: 'unassessed'` or, where the report has no such value, as
+ * uncertain with the result's `assessment_note` saying why.
  */
-import { DecisionModelsDisabledError, judgmentPort } from '@goodvibes-jev/engine/errors';
-import { decisionOrClassic, isClassicOperation } from '../../runtime/decision-policy.js';
-import type { YesNoReading } from '@goodvibes-jev/judgment';
-import { mapWithConcurrency } from '../../utils/concurrency.js';
+import { judge } from '../../runtime/judge.js';
 import {
   frontendFinding,
   frontendLineView,
+  hookCode,
   stackingView,
 } from '../batteries/frontend-finding.js';
+import { readFileCandidates, type CandidateReading, type InspectCandidate } from './candidate-readings.js';
 import type {
   A11yIssue,
   ClientBoundaryInfo,
@@ -33,34 +33,22 @@ import type {
 } from './schema.js';
 
 const SITE = 'tools.inspect.frontend-finding';
-const READ_CONCURRENCY = 8;
 
 type Question =
   | 'a11y_violation'
   | 'omits_dependency'
   | 'overflow_problem'
   | 'fixed_size_problem'
-  | 'server_only'
   | 'stacking_conflict';
-export type FindingReading = 'real' | 'uncertain';
+export type FindingReading = 'real' | 'uncertain' | 'unassessed';
 
-/** A yes is real, a no dismisses, anything else is shown as uncertain. */
-function findingReading(reading: YesNoReading): FindingReading | 'dismissed' {
-  if (reading.verdict === 'yes') return 'real';
-  return reading.verdict === 'no' ? 'dismissed' : 'uncertain';
-}
+/** What an analyzer reports beside its findings when some candidates were not assessed. */
+export type AssessmentNote = { assessment_note?: string };
 
-async function read(question: Question, state: Record<string, unknown>): Promise<FindingReading | 'dismissed'> {
-  return decisionOrClassic(() => readDecisionFinding(question, state), () => {
-    throw new DecisionModelsDisabledError('semantic frontend issue assessment');
-  });
-}
-async function readDecisionFinding(question: Question, state: Record<string, unknown>): Promise<FindingReading | 'dismissed'> {
-  await assertCapturedToolAccessCurrent();
-  const run = await frontendFinding.run(judgmentPort(SITE), state as never, { site: SITE, only: [question] });
-  const reading = findingReading(run.readings[question]);
-  run.recordAction(`${question}: ${reading}`);
-  return reading;
+/** Reads one question for every candidate of a file, in one request. */
+async function readAll(question: Question, file: string, candidates: readonly InspectCandidate[], signal?: AbortSignal): Promise<{ readings: Map<string, CandidateReading>; note: AssessmentNote }> {
+  const { readings, note } = await readFileCandidates({ site: SITE, battery: frontendFinding, question, file, candidates, signal });
+  return { readings, note: note === undefined ? {} : { assessment_note: note } };
 }
 
 // ── Accessibility ─────────────────────────────────────────────────────────────
@@ -118,21 +106,22 @@ function a11yCandidate(lines: readonly string[], index: number): A11yCode | null
 export async function inspectAccessibility(
   content: string,
   file = '',
-): Promise<Array<A11yIssue & { reading: FindingReading }>> {
+  signal?: AbortSignal,
+): Promise<{ issues: Array<A11yIssue & { reading: FindingReading }> } & AssessmentNote> {
   const lines = content.split('\n');
   const candidates = lines.flatMap((_, index) => {
     const code = a11yCandidate(lines, index);
     return code === null ? [] : [{ index, code }];
   });
-  const readings = await mapWithConcurrency(candidates, READ_CONCURRENCY, ({ index, code }) =>
-    read('a11y_violation', frontendLineView(file, lines, index, { rule: A11Y_RULES[code].rule })),
-  );
-  return candidates.flatMap(({ index, code }, i) => {
-    const reading = readings[i]!;
+  const { readings, note } = await readAll('a11y_violation', file,
+    candidates.map(({ index, code }) => ({ id: `L${index + 1}`, view: frontendLineView(file, lines, index, { rule: A11Y_RULES[code].rule }) })), signal);
+  const issues = candidates.flatMap(({ index, code }) => {
+    const reading = readings.get(`L${index + 1}`)!;
     if (reading === 'dismissed') return [];
     const { message, wcag } = A11Y_RULES[code];
     return [{ line: index + 1, code, message, wcag, reading }];
   });
+  return { issues, ...note };
 }
 
 // ── Hooks ─────────────────────────────────────────────────────────────────────
@@ -152,17 +141,16 @@ function hookCall(lines: readonly string[], index: number, start: number): strin
   return parts.join('\n');
 }
 
-export async function inspectHooks(content: string, file: string): Promise<HooksInfo> {
+export async function inspectHooks(content: string, file: string, signal?: AbortSignal): Promise<HooksInfo & AssessmentNote> {
   const lines = content.split('\n');
   const hookRe = /\b(useEffect|useMemo|useCallback)\s*\(/;
   const calls = lines.flatMap((line, index) => {
     const m = hookRe.exec(line);
     return m ? [{ index, kind: m[1] as HookDep['hookKind'], code: hookCall(lines, index, m.index) }] : [];
   });
-  const readings = await mapWithConcurrency(calls, READ_CONCURRENCY, ({ code, index }) =>
-    read('omits_dependency', completeJudgmentView({ file, code, completeFile: content, targetLine: index + 1 })),
-  );
-  const hooks: HookDep[] = calls.map(({ index, kind, code }, i) => {
+  const { readings, note } = await readAll('omits_dependency', file,
+    calls.map(({ code, index }) => ({ id: `L${index + 1}`, view: { file, code: hookCode(code) } })), signal);
+  const hooks: HookDep[] = calls.map(({ index, kind, code }) => {
     // The dependency array is the last array literal before the call closes (syntax).
     const deps =
       /\[([^\]]*)\]\s*\)\s*;?\s*$/
@@ -170,7 +158,7 @@ export async function inspectHooks(content: string, file: string): Promise<Hooks
         ?.split(',')
         .map((dep) => dep.trim())
         .filter(Boolean) ?? [];
-    const reading = readings[i]!;
+    const reading = readings.get(`L${index + 1}`)!;
     return {
       hookKind: kind,
       line: index + 1,
@@ -178,12 +166,12 @@ export async function inspectHooks(content: string, file: string): Promise<Hooks
       omitsDependency: reading === 'dismissed' ? 'no' : reading === 'real' ? 'yes' : 'uncertain',
     };
   });
-  return { file, hooks, missingDepsCount: hooks.filter((hook) => hook.omitsDependency === 'yes').length };
+  return { file, hooks, missingDepsCount: hooks.filter((hook) => hook.omitsDependency === 'yes').length, ...note };
 }
 
 // ── Overflow ──────────────────────────────────────────────────────────────────
 
-export async function inspectOverflow(content: string, file: string): Promise<OverflowInfo> {
+export async function inspectOverflow(content: string, file: string, signal?: AbortSignal): Promise<OverflowInfo & AssessmentNote> {
   const lines = content.split('\n');
   const candidates = lines.flatMap((line, index): Array<{ index: number; kind: OverflowIssue['kind'] }> => {
     if (/\boverflow-hidden\b/.test(line) || /overflow\s*:\s*hidden/.test(line)) return [{ index, kind: 'hidden_clip' }];
@@ -191,21 +179,20 @@ export async function inspectOverflow(content: string, file: string): Promise<Ov
       return [{ index, kind: 'scroll_no_height' }];
     return [];
   });
-  const readings = await mapWithConcurrency(candidates, READ_CONCURRENCY, ({ index }) =>
-    read('overflow_problem', frontendLineView(file, lines, index)),
-  );
-  const issues: Array<OverflowIssue & { reading: FindingReading }> = candidates.flatMap(({ index, kind }, i) => {
-    const reading = readings[i]!;
+  const { readings, note } = await readAll('overflow_problem', file,
+    candidates.map(({ index }) => ({ id: `L${index + 1}`, view: frontendLineView(file, lines, index) })), signal);
+  const issues: Array<OverflowIssue & { reading: FindingReading }> = candidates.flatMap(({ index, kind }) => {
+    const reading = readings.get(`L${index + 1}`)!;
     return reading === 'dismissed'
       ? []
       : [{ line: index + 1, kind, snippet: lines[index]!.trim().slice(0, 80), reading }];
   });
-  return { file, issues, count: issues.length };
+  return { file, issues, count: issues.length, ...note };
 }
 
 // ── Sizing ────────────────────────────────────────────────────────────────────
 
-export async function inspectSizing(content: string, file: string): Promise<SizingInfo> {
+export async function inspectSizing(content: string, file: string, signal?: AbortSignal): Promise<SizingInfo & AssessmentNote> {
   const lines = content.split('\n');
   const items: SizingItem[] = [];
   const patterns: ReadonlyArray<readonly [RegExp, SizingItem['kind']]> = [
@@ -224,12 +211,11 @@ export async function inspectSizing(content: string, file: string): Promise<Sizi
   });
   // Each line holding a fixed size is read once; its fixed items are flagged unless the reading is a no.
   const fixedLines = [...new Set(items.filter((item) => item.kind === 'fixed_px').map((item) => item.line))];
-  const readings = await mapWithConcurrency(fixedLines, READ_CONCURRENCY, (line) =>
-    read('fixed_size_problem', frontendLineView(file, lines, line - 1)),
-  );
-  const flaggedLines = new Set(fixedLines.filter((_, i) => readings[i] !== 'dismissed'));
+  const { readings, note } = await readAll('fixed_size_problem', file,
+    fixedLines.map((line) => ({ id: `L${line}`, view: frontendLineView(file, lines, line - 1) })), signal);
+  const flaggedLines = new Set(fixedLines.filter((line) => readings.get(`L${line}`) !== 'dismissed'));
   for (const item of items) item.flagged = item.kind === 'fixed_px' && flaggedLines.has(item.line);
-  return { file, items, hardcodedCount: items.filter((item) => item.flagged).length };
+  return { file, items, hardcodedCount: items.filter((item) => item.flagged).length, ...note };
 }
 
 // ── Stacking ──────────────────────────────────────────────────────────────────
@@ -251,7 +237,7 @@ function zIndexOf(match: string): string {
  * value set on more than one line is read by `stacking_conflict` with every
  * line that sets it; it is a conflict unless the reading is a no.
  */
-export async function inspectStacking(content: string, file: string): Promise<StackingInfo> {
+export async function inspectStacking(content: string, file: string, signal?: AbortSignal): Promise<StackingInfo & AssessmentNote> {
   const lines = content.split('\n');
   const zIndexItems: ZIndexItem[] = [];
   lines.forEach((line, index) => {
@@ -270,43 +256,34 @@ export async function inspectStacking(content: string, file: string): Promise<St
   const shared = [...byIndex.values()]
     .filter((group) => group.lines.size > 1)
     .map((group) => ({ values: [...group.values], lines: [...group.lines] }));
-  const readings = await mapWithConcurrency(shared, READ_CONCURRENCY, ({ values, lines: lineNumbers }) =>
-    read('stacking_conflict', stackingView(file, lines, values.join(' / '), lineNumbers)),
-  );
+  const { readings, note } = await readAll('stacking_conflict', file,
+    shared.map(({ values, lines: lineNumbers }, i) => ({ id: `Z${i + 1}`, view: stackingView(file, lines, values.join(' / '), lineNumbers) })), signal);
   const potentialConflicts: StackingConflict[] = shared.flatMap((group, i) => {
-    const reading = readings[i]!;
-    return reading === 'dismissed' ? [] : [{ ...group, reading }];
+    const reading = readings.get(`Z${i + 1}`)!;
+    return reading === 'dismissed' ? [] : [{ ...group, reading: reading === 'real' ? 'real' as const : 'uncertain' as const }];
   });
-  return { file, zIndexItems, potentialConflicts };
+  return { file, zIndexItems, potentialConflicts, ...note };
 }
 
 // ── Client boundary ───────────────────────────────────────────────────────────
 
 /**
- * Definite server-only readings by module specifier (a module's nature does not change within a
- * process). An uncertain or failed reading is never kept, so it is asked again next time.
+ * Whether a module can only run on the server, read by its specifier alone and kept for the process
+ * (a module's nature does not change); an unsure, late or unavailable reading lists it as uncertain.
  */
-const serverOnlyReadings = new Map<string, Promise<FindingReading | 'dismissed'>>();
-const SERVER_ONLY_CACHE_MAX = 500;
-
-function readServerOnly(module: string): Promise<FindingReading | 'dismissed'> {
-  if (isClassicOperation()) return read('server_only', { module });
-  const known = serverOnlyReadings.get(module);
-  if (known !== undefined) return known;
-  const reading = read('server_only', { module });
-  if (serverOnlyReadings.size >= SERVER_ONLY_CACHE_MAX) {
-    const oldest = serverOnlyReadings.keys().next().value;
-    if (oldest !== undefined) serverOnlyReadings.delete(oldest);
-  }
-  serverOnlyReadings.set(module, reading);
-  const forget = (): void => { if (serverOnlyReadings.get(module) === reading) serverOnlyReadings.delete(module); };
-  reading.then((verdict) => { if (verdict === 'uncertain') forget(); }, forget);
-  return reading;
-}
-
-/** Forgets remembered server-only readings; for tests that swap the judgment port. */
-export function forgetServerOnlyReadings(): void {
-  serverOnlyReadings.clear();
+async function readServerOnly(module: string, signal?: AbortSignal): Promise<CandidateReading> {
+  const { value } = await judge<typeof frontendFinding.items, CandidateReading>({
+    site: SITE,
+    battery: frontendFinding,
+    only: ['server_only'],
+    state: { module },
+    cache: { key: module, scope: 'process' },
+    settle: ({ server_only: reading }) => reading.verdict === 'yes' ? 'real' : reading.verdict === 'no' ? 'dismissed' : undefined,
+    fallback: (why) => why === 'off' ? 'unassessed' : 'uncertain',
+    describe: (reading) => `server_only: ${reading}`,
+    ...(signal === undefined ? {} : { signal }),
+  });
+  return value;
 }
 
 /**
@@ -314,18 +291,20 @@ export function forgetServerOnlyReadings(): void {
  * rule); its imports are listed from syntax and each module is read for
  * whether it can only run on the server.
  */
-export async function inspectClientBoundary(content: string, file: string): Promise<ClientBoundaryInfo> {
+export async function inspectClientBoundary(content: string, file: string, signal?: AbortSignal): Promise<ClientBoundaryInfo & AssessmentNote> {
   const code = content.replace(/^(?:\s*(?:\/\/[^\n]*|\/\*[\s\S]*?\*\/))*\s*/, '');
   const directive = /^(['"])use (client|server)\1\s*;?/.exec(code);
   const modules = [
     ...new Set([...content.matchAll(/import\s+(?:[\s\S]*?from\s+)?['"]([^'"]+)['"]/g)].map((m) => m[1]!)),
   ];
-  const readings = await mapWithConcurrency(modules, READ_CONCURRENCY, readServerOnly);
+  const readings = await Promise.all(modules.map((module) => readServerOnly(module, signal)));
   const serverOnlyImports = modules.filter((_, i) => readings[i] !== 'dismissed');
+  const unassessed = readings.filter((reading) => reading === 'unassessed').length;
   return {
     file,
     directive: directive ? (`use ${directive[2]}` as ClientBoundaryInfo['directive']) : null,
     importsServerOnly: serverOnlyImports.length > 0,
     serverOnlyImports,
+    ...(unassessed > 0 ? { assessment_note: `Decision models are off, so ${unassessed} imports are listed as possibly server-only, unassessed.` } : {}),
   };
 }

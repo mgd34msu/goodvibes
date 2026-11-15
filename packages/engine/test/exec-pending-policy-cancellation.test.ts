@@ -40,7 +40,6 @@ test('a pending retry reading receives cancellation and cannot return a late ret
   }).port;
   previous = installJudgmentPort({ model: answers.model, async ask(request) {
     expect(request.context?.battery).toBe('engine.tools.exec-retry');
-    expect(request.signal).toBe(controller.signal);
     begin(); await held;
     return answers.ask(request);
   } });

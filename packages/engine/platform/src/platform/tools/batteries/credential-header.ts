@@ -2,7 +2,9 @@
  * `engine.tools.credential-header`: does an HTTP request header, by its NAME,
  * carry a credential? Asked by the fetch tool when a redirect leaves the
  * request's origin, about each header the caller set that neither the
- * protocol nor the tool already marks as a credential. It replaces stripping
+ * protocol nor the tool already marks as a credential and that is not public
+ * request metadata (Accept, Content-Type, User-Agent and the like, decided in
+ * code). One answer per name is kept for the process. It replaces stripping
  * only Authorization, Cookie and Proxy-Authorization, which let a caller's
  * X-Auth-Token or X-API-Key follow the redirect to the other origin.
  *
@@ -13,7 +15,7 @@
  * side); a wrong yes drops a harmless header from one redirected request,
  * which the caller can send to the new origin directly, so dropping acts on a
  * medium yes. Code drops every header the reading does not clear with an
- * acting no.
+ * acting no, including when no reading arrives in time.
  */
 import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes-jev/judgment';
 

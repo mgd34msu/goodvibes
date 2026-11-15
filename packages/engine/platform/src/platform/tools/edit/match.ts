@@ -5,12 +5,9 @@ import { CodeIntelligence } from '../../intelligence/index.js';
 import type { EditItem, OccurrenceSpec, EditResult, EditResultStatus } from './types.js';
 import { summarizeError } from '../../utils/error-display.js';
 import { assertSafeRegexInput, compileSafeRegExp, createSafeRegex, safeRegExpExec } from '../../utils/safe-regex.js';
-import { judgmentPort, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
-import { editWindow } from '../batteries/edit-window.js';
-import { assertJudgmentInput } from '../../gate/judgment-input.js';
-import { requireActingReading, JudgmentHeldError } from '../../types/judgment-held.js';
+import type { JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
 import { editTarget, editTargetView } from '../batteries/edit-target.js';
-import { decisionOrClassic } from '../../runtime/decision-policy.js';
+import { judge } from '../../runtime/judge.js';
 import { resolveEditText } from './edit-text.js';
 
 type AstGrepModule = typeof import('@ast-grep/napi');
@@ -609,72 +606,108 @@ export function buildFailedEditResult(item: EditItem, error: string, status: Edi
   };
 }
 
-/**
- * Most candidate windows one failed edit may put to the model. Every window of
- * a file at or under this participates (similarity never hides a target); a
- * larger file is refused before anything is sent, because each request carries
- * file content off the machine and a long file would mean hundreds of calls.
- */
-export const MAX_FUZZY_LINE_WINDOWS = 1024;
-
-/** Returns the unique verified window, null for none, or 'too-large' when the file has too many windows to ask about. */
-async function selectEditWindow(file: string, find: string) {
-  return decisionOrClassic(() => selectDecisionEditWindow(file, find), () => null);
+/** A run of file lines, as long as the find text, ranked by how closely it matches it. */
+interface NearWindow {
+  readonly startLine: number;
+  readonly start: number;
+  readonly end: number;
+  readonly lines: readonly string[];
+  readonly score: number;
 }
 
-async function selectDecisionEditWindow(file: string, find: string) {
-  // Check every byte before any batch is sent, including protected material
-  // beyond the first candidate window. Exact local edits need no remote read.
-  assertJudgmentInput({ source: file, find });
-  const lines = file.split('\n'), size = find.split('\n').length;
-  if (lines.length - size + 1 > MAX_FUZZY_LINE_WINDOWS) return 'too-large' as const;
-  // Each reading sees the complete candidate and its neighboring lines. Do not
-  // send the whole file with every candidate or reject files by line count.
-  const context = { find, totalLines: lines.length, scope: 'Candidates include neighboring lines; other file locations are evaluated in separate batches.' };
-  assertJudgmentInput(context);
-  type Window = { id: string; content: { startLine: number; text: string; before: string; after: string }; start: number; end: number; candidateLines: string[] };
-  const port = judgmentPort(EDIT_TARGET_SITE), model = port.model;
-  const current = () => { if (judgmentPort(EDIT_TARGET_SITE) !== port || port.model !== model) throw new JudgmentHeldError(); };
-  const matches: Window[] = [];
-  const evaluate = async (candidates: Window[]) => {
-    await assertCapturedToolAccessCurrent(); current();
-    const selection = await editWindow.select(port, context, candidates, { site: EDIT_TARGET_SITE, beforeAttempt: current, beforeAsyncAttempt: assertCapturedToolAccessCurrent });
-    current(); await assertCapturedToolAccessCurrent();
-    requireActingReading(selection);
-    for (const candidate of candidates) {
-      const fit = requireActingReading(selection.fits[candidate.id]!);
-      if (fit.verdict === 'yes') matches.push(candidate);
-    }
-    selection.recordAction('Evaluate candidate locations; only one unambiguous target may proceed.');
-  };
+/** Windows shown with a not-found result. */
+const NEAR_WINDOWS_SHOWN = 3;
+/** Line starts kept after the first-line ranking for a full window score. */
+const NEAR_WINDOW_ANCHORS = 48;
+/** Below this similarity a window is not shown as close text: it shares too little to help. */
+const NEAR_WINDOW_SHOW_SCORE = 0.3;
+
+function bigrams(text: string): Set<string> {
+  const normalized = text.replace(/\s+/g, ' ').trim();
+  const grams = new Set<string>();
+  for (let i = 0; i < normalized.length - 1; i++) grams.add(normalized.slice(i, i + 2));
+  return grams;
+}
+
+/** Dice similarity of two lines' character pairs, ignoring whitespace runs: 1 for equal text, 0 for nothing shared. */
+function lineSimilarity(a: Set<string>, b: Set<string>): number {
+  if (a.size === 0 && b.size === 0) return 1;
+  if (a.size === 0 || b.size === 0) return 0;
+  let shared = 0;
+  for (const gram of a) if (b.has(gram)) shared++;
+  return (2 * shared) / (a.size + b.size);
+}
+
+/**
+ * The windows of the file closest to the find text, best first, decided in
+ * code: each line start is ranked by its first line, the best few are scored
+ * over every line of the window. Cost follows the file's length once plus a
+ * fixed number of full window scores.
+ */
+export function nearestWindows(file: string, find: string, count = NEAR_WINDOWS_SHOWN): NearWindow[] {
+  const lines = file.split('\n');
+  const findLines = find.replace(/\n$/, '').split('\n');
+  const size = findLines.length;
+  if (lines.length < size) return [];
+  const findGrams = findLines.map(bigrams);
+  const fileGrams = lines.map(bigrams);
+  const offsets: number[] = [];
   let offset = 0;
-  let batch: Window[] = [];
-  let batchChars = JSON.stringify(context).length;
-  for (let i = 0; i + size <= lines.length; i++) {
-    const start = offset; offset += lines[i]!.length + 1;
-    const candidateLines = lines.slice(i, i + size), text = candidateLines.join('\n');
-    const candidate = { id: `line-${i + 1}`, content: { startLine: i + 1, text,
-      before: lines.slice(Math.max(0, i - 2), i).join('\n'), after: lines.slice(i + size, i + size + 2).join('\n') }, start, end: start + text.length, candidateLines };
-    const chars = JSON.stringify(candidate).length;
-    // An oversized individual target cannot be safely inferred by a bounded
-    // model request. Exact replacement remains available for the entire file.
-    if (batch.length && (batch.length >= 64 || batchChars + chars > 160_000)) {
-      await evaluate(batch);
-      if (matches.length > 1) return null;
-      batch = []; batchChars = JSON.stringify(context).length;
-    }
-    batch.push(candidate); batchChars += chars;
-  }
-  if (batch.length) await evaluate(batch);
-  if (matches.length !== 1) return null;
-  const match = matches[0]!;
-  // A separate same-target reading independently verifies the selected bytes.
-  const run = await editTarget.run(port, editTargetView(find, match.candidateLines), { site: EDIT_TARGET_SITE,
-    beforeAttempt: current, beforeAsyncAttempt: assertCapturedToolAccessCurrent });
-  current(); await assertCapturedToolAccessCurrent();
-  const target = requireActingReading(run.readings.same_target);
-  run.recordAction(target.verdict === 'yes' ? 'Apply the unique verified edit target.' : 'Hold the proposed edit target.');
-  return target.verdict === 'yes' ? { ...match, probability: target.probability } : null;
+  for (const line of lines) { offsets.push(offset); offset += line.length + 1; }
+  const anchors = Array.from({ length: lines.length - size + 1 }, (_, start) => ({ start, first: lineSimilarity(findGrams[0]!, fileGrams[start]!) }))
+    .sort((a, b) => b.first - a.first)
+    .slice(0, NEAR_WINDOW_ANCHORS);
+  return anchors
+    .map(({ start }) => {
+      let total = 0;
+      for (let i = 0; i < size; i++) total += lineSimilarity(findGrams[i]!, fileGrams[start + i]!);
+      const windowLines = lines.slice(start, start + size);
+      const begin = offsets[start]!;
+      return { startLine: start + 1, start: begin, end: begin + windowLines.join('\n').length, lines: windowLines, score: total / size };
+    })
+    .sort((a, b) => b.score - a.score || a.startLine - b.startLine)
+    .slice(0, count);
+}
+
+/** The closest text, for a not-found answer: line numbers and lines the caller can copy into find. */
+function describeNearWindows(windows: readonly NearWindow[]): string {
+  return windows
+    .map((window) => `line ${window.startLine} (${Math.round(window.score * 100)}% alike):\n${window.lines.map((line) => `  ${line}`).join('\n')}`)
+    .join('\n');
+}
+
+function notFoundAnswer(windows: readonly NearWindow[], hintsWarning: string | undefined): { error: string; hint: string } {
+  const nearest = windows.filter((window) => window.score >= NEAR_WINDOW_SHOW_SCORE);
+  return {
+    error: nearest.length > 0
+      ? `Find string not found in file. Closest text:\n${describeNearWindows(nearest)}`
+      : 'Find string not found in file',
+    hint: hintsWarning ?? 'Copy the exact text from the file into find (read the lines above), or pass match.mode "fuzzy" to let the closest near-match be applied after a check.',
+  };
+}
+
+/**
+ * The near-match fuzzy mode may apply: the closest window when it is the one
+ * best window and Jev reads it as the code the find text was copied from
+ * (`engine.tools.edit-target`, one request within the decision deadline); no
+ * similarity cutoff decides. Two windows tied for best stay ambiguous. An
+ * unsure, late or unavailable reading applies nothing.
+ */
+async function confirmNearWindow(find: string, windows: readonly NearWindow[], options: JudgmentReadingOptions): Promise<NearWindow | null> {
+  const [best, second] = windows;
+  if (!best || best.score === 0 || (second !== undefined && second.score >= best.score)) return null;
+  let state: ReturnType<typeof editTargetView>;
+  try { state = editTargetView(find, best.lines); } catch { return null; }
+  const { value } = await judge({
+    site: EDIT_TARGET_SITE,
+    battery: editTarget,
+    state,
+    settle: ({ same_target: reading }) => reading.outcome === 'act' && reading.verdict !== 'uncertain' ? reading.verdict === 'yes' : undefined,
+    fallback: () => false,
+    describe: (same) => same ? 'Apply the closest window.' : 'Hold the closest window.',
+    ...(options.signal === undefined ? {} : { signal: options.signal }),
+  });
+  return value ? best : null;
 }
 
 export async function computeSingleEdit(
@@ -726,23 +759,20 @@ export async function computeSingleEdit(
   }
 
   let usedFallback: 'whitespace' | 'fuzzy-lines' | null = null;
-  if (positions.length === 0 && mode === 'exact') {
-    let fallback: { start: number; end: number }[] = findAllPositions(fileContent, findStr, 'fuzzy', caseSensitive, true);
-    if (fallback.length > 0) {
-      usedFallback = 'whitespace';
-    } else {
-      const fuzzyMatch = await selectEditWindow(fileContent, findStr);
+  if (positions.length === 0 && (mode === 'exact' || mode === 'fuzzy')) {
+    let fallback: { start: number; end: number }[] = mode === 'exact' ? findAllPositions(fileContent, findStr, 'fuzzy', caseSensitive, true) : [];
+    if (fallback.length > 0) usedFallback = 'whitespace';
+    else {
+      // Not in the file: answer from code with the closest text. Only fuzzy mode may apply a near match.
+      const windows = nearestWindows(fileContent, findStr);
+      const near = mode === 'fuzzy' ? await confirmNearWindow(findStr, windows, options) : null;
       current(); await assertCapturedToolAccessCurrent();
-      if (fuzzyMatch === 'too-large') {
-        return {
-          error: `Find string not found in file; the file is too large (over ${MAX_FUZZY_LINE_WINDOWS} candidate lines) for the approximate line search`,
-          hint: 'Read the part of the file you are editing and copy the exact text into find, or narrow the edit with hints.',
-        };
-      }
-      if (fuzzyMatch) {
-        fallback = [{ start: fuzzyMatch.start, end: fuzzyMatch.end }];
+      if (near) {
+        fallback = [{ start: near.start, end: near.end }];
         usedFallback = 'fuzzy-lines';
-        logger.warn('[edit] Fuzzy line match used', { probability: fuzzyMatch.probability, file: item.path });
+        logger.warn('[edit] Fuzzy line match used', { score: near.score, file: item.path });
+      } else if (!item.hints) {
+        return notFoundAnswer(windows, hintsWarning);
       }
     }
     // The fallbacks search the whole file; hints still bind what they find.
@@ -754,7 +784,7 @@ export async function computeSingleEdit(
     if (fallback.length === 0) {
       return item.hints && usedFallback
         ? { error: 'Find string not found within the requested hints', hint: hintsWarning ?? 'The closest match lies outside the hints; loosen them or read the file.' }
-        : { error: 'Find string not found unambiguously in file', hint: hintsWarning ?? 'Read the file and provide the exact replacement target.' };
+        : { error: 'Find string not found in file', hint: hintsWarning ?? 'Read the file and provide the exact replacement target.' };
     }
     positions = fallback;
   }

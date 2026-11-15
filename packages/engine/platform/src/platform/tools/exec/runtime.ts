@@ -46,10 +46,8 @@ import {
   sandboxWorkspaceRefusal,
   type ExecRunPolicy,
 } from './policy.js';
-import { judgmentPort } from '@goodvibes-jev/engine/errors';
-import { decisionOrClassic } from '../../runtime/decision-policy.js';
-import { executePolicyCheck } from '../../gate/execute-policy-check.js';
-import { execFailureView, execRetry, type ExecFailureCategory } from '../batteries/exec-retry.js';
+import { judge } from '../../runtime/judge.js';
+import { execFailureView, execRetry, MAX_JUDGED_STDERR_CHARS, type ExecFailureCategory } from '../batteries/exec-retry.js';
 
 const DEFAULT_TIMEOUT_MS = 0;
 const PROGRESS_AUTO_THRESHOLD_MS = 30_000;
@@ -807,12 +805,73 @@ export type ExecRetryCategory = Exclude<ExecFailureCategory, 'lasting'>;
 const DEFAULT_RETRY_ON: readonly ExecRetryCategory[] = ['network', 'lock', 'busy'];
 
 /**
+ * The failure kinds the program can name from structure: the exit code, or an
+ * errno code or lock message the failing tool printed. Checked against the
+ * end of the output, where failures are reported. A failure none of these
+ * name is read by Jev.
+ */
+const KNOWN_FAILURES: ReadonlyArray<readonly [ExecFailureCategory, RegExp]> = [
+  ['network', /\b(?:ECONNRESET|ECONNREFUSED|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|EHOSTUNREACH|ENETUNREACH|EPIPE)\b/],
+  ['lock', /index\.lock'?:? File exists|Could not get lock|database is locked/],
+  ['busy', /\bEBUSY\b|Resource temporarily unavailable/],
+  ['oom', /\bENOMEM\b|Cannot allocate memory|heap out of memory/],
+  ['lasting', /\b(?:ENOENT|EACCES|EPERM)\b|command not found|No such file or directory|Permission denied/],
+];
+
+/** Output read from the end; the reading and the table look only at this much of each stream. */
+function outputTail(text: string): string {
+  return text.length > MAX_JUDGED_STDERR_CHARS ? text.slice(-MAX_JUDGED_STDERR_CHARS) : text;
+}
+
+function knownFailure(result: ExecCommandResult): ExecFailureCategory | undefined {
+  if (result.exit_code === 126 || result.exit_code === 127) return 'lasting';
+  if (result.exit_code === 75) return 'busy';
+  const output = `${outputTail(result.stderr)}\n${outputTail(result.stdout)}`;
+  return KNOWN_FAILURES.find(([, pattern]) => pattern.test(output))?.[0];
+}
+
+/** Whether a failed run is retried, and why not when it is not. */
+interface RetryDecision { readonly retry: boolean; readonly note?: string }
+
+/**
  * Whether a failed exec result is retried. A timed-out or cancelled run never
- * is (structure: the caller or an operator stopped it). Otherwise Jev reads
- * which kind of failure it is (`engine.tools.exec-retry`), and the run is
- * retried only when that reading acts on a category the caller listed in
- * `retry.on` (default network, lock, busy). A lasting failure, an unlisted
- * category, or a reading that does not act returns the failure as it is.
+ * is (structure: the caller or an operator stopped it). A failure the program
+ * can name from its exit code or errno is decided in code; any other is read
+ * by Jev (`engine.tools.exec-retry`) within the decision deadline. The run is
+ * retried only when the category is one the caller listed in `retry.on`
+ * (default network, lock, busy). A failure no one could classify is not
+ * retried and the result says so; the command's own result is never replaced.
+ */
+async function decideRetry(
+  result: ExecCommandResult,
+  allowed: ReadonlyArray<ExecRetryCategory> | undefined,
+  signal: AbortSignal | undefined,
+): Promise<RetryDecision> {
+  signal?.throwIfAborted();
+  if (result.timed_out || result.cancelled) return { retry: false };
+  const retryOn = allowed ?? DEFAULT_RETRY_ON;
+  const known = knownFailure(result);
+  if (known !== undefined) return { retry: known !== 'lasting' && retryOn.includes(known) };
+  const outcome = await judge({
+    site: EXEC_RETRY_SITE,
+    battery: execRetry,
+    state: execFailureView(result.cmd, result.exit_code, outputTail(result.stdout), outputTail(result.stderr)),
+    settle: ({ category }) => category.outcome === 'act' ? category.choice : undefined,
+    fallback: () => undefined,
+    describe: (category) => category !== undefined && category !== 'lasting' && retryOn.includes(category) ? `retried on ${category}` : `stopped (${category})`,
+    ...(signal === undefined ? {} : { signal }),
+  });
+  const category = outcome.value;
+  if (category === undefined) {
+    const reason = outcome.why === 'off' ? 'decision models are off'
+      : outcome.why === 'unsure' ? 'the reading was not sure' : outcome.detail ?? 'no reading arrived';
+    return { retry: false, note: `retry: the failure could not be classified (${reason}); not retried. Rerun the command if the failure is temporary.` };
+  }
+  return { retry: category !== 'lasting' && retryOn.includes(category) };
+}
+
+/**
+ * Whether a failed exec result would be retried (see decideRetry).
  *
  * @param result - The failed command result.
  * @param allowed - The caller's retry-on categories.
@@ -822,31 +881,7 @@ export async function isRetryableExecResult(
   allowed?: ReadonlyArray<ExecRetryCategory>,
   signal?: AbortSignal,
 ): Promise<boolean> {
-  return decisionOrClassic(() => isDecisionRetryableExecResult(result, allowed, signal), () => {
-    signal?.throwIfAborted();
-    // An executed command's failure is not proof that repeating its effects is safe.
-    return false;
-  });
-}
-
-async function isDecisionRetryableExecResult(result: ExecCommandResult, allowed?: ReadonlyArray<ExecRetryCategory>, signal?: AbortSignal): Promise<boolean> {
-  signal?.throwIfAborted();
-  if (result.timed_out) return false;
-  // Cancelled commands must never be retried, retrying
-  // after an operator/engine kill would defeat the cancellation entirely.
-  if (result.cancelled) return false;
-
-  const run = await executePolicyCheck(() => execRetry.run(
-    judgmentPort(EXEC_RETRY_SITE),
-    execFailureView(result.cmd, result.exit_code, result.stdout, result.stderr),
-    { site: EXEC_RETRY_SITE, ...(signal === undefined ? {} : { signal }) },
-  ), signal);
-  signal?.throwIfAborted();
-  const reading = run.readings.category;
-  const retryOn = allowed ?? DEFAULT_RETRY_ON;
-  const retry = reading.outcome === 'act' && reading.choice !== 'lasting' && retryOn.includes(reading.choice);
-  run.recordAction(retry ? `retried on ${reading.choice}` : `stopped (${reading.choice}, ${reading.outcome})`);
-  return retry;
+  return (await decideRetry(result, allowed, signal)).retry;
 }
 
 async function runWithRetry(
@@ -879,10 +914,11 @@ async function runWithRetry(
       return { ...lastResult, retries: attempt };
     }
     if (attempt < maxRetries) {
-      // Classify error: if we can determine it's terminal, stop immediately
-      if (!(await isRetryableExecResult(lastResult, retryOn, signal))) {
-        logger.debug('exec: terminal error, not retrying', { cmd: cmdStr, attempt, stderr: lastResult.stderr.slice(0, 200) });
-        return { ...lastResult, retries: attempt };
+      const decision = await decideRetry(lastResult, retryOn, signal);
+      if (!decision.retry) {
+        logger.debug('exec: not retrying', { cmd: cmdStr, attempt, stderr: lastResult.stderr.slice(0, 200) });
+        return { ...lastResult, retries: attempt,
+          ...(decision.note === undefined ? {} : { warnings: [...(lastResult.warnings ?? []), decision.note] }) };
       }
       const delay = computeRetryDelay(attempt, delayMs, backoff, maxDelayMs);
       logger.debug('exec: retrying after jittered delay', { cmd: cmdStr, attempt, delay: Math.round(delay) });

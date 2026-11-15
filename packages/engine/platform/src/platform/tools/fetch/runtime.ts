@@ -454,7 +454,7 @@ async function fetchWithValidatedRedirects(input: {
       currentHeaders = removeContentHeaders(currentHeaders);
     }
     if (new URL(nextUrl).origin !== new URL(currentUrl).origin) {
-      currentHeaders = await headersForOtherOrigin(currentHeaders, input.credentialHeaders);
+      currentHeaders = await headersForOtherOrigin(currentHeaders, input.credentialHeaders, input.signal);
     }
     currentUrl = nextUrl;
   }

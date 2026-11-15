@@ -4,7 +4,6 @@ import { decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
 import { delegationPlanHolds, delegationPlanKey } from '../../agents/delegation-plan-holds.js';
 import { readAgentSessionHistory } from '../../agents/session-history.js';
 import { readCompletionRepairContext } from '../../core/completion-repair-context.js';
-import { types as nodeTypes } from 'node:util';
 import type { Tool, ToolExecuteOptions } from '../../types/tools.js';
 import { assertCurrentToolInvocation } from '../registry.js';
 import type { ConfigManager } from '../../config/manager.js';
@@ -241,36 +240,29 @@ export interface AgentToolConfig {
   readonly resolveSessionId: () => string;
 }
 
-/** Pins the owner slot without invoking a replacement property getter at dispatch. */
-function retainContractProperty(object: object, key: 'contractRunner' | 'start' | 'cancel' | 'join'): () => void {
-  const path: { object: object; prototype: object | null; descriptor: PropertyDescriptor | undefined }[] = [];
-  const visited = new Set<object>();
-  let current: object | null = object;
-  while (current !== null) {
-    if (nodeTypes.isProxy(current) || visited.has(current)) throw new Error('Unsupported Agent contract owner');
-    visited.add(current);
-    const descriptor = Object.getOwnPropertyDescriptor(current, key);
-    if (descriptor !== undefined && !('value' in descriptor)) throw new Error('Unsupported accessor-backed Agent contract owner');
-    const prototype: object | null = Object.getPrototypeOf(current);
-    path.push({ object: current, prototype, descriptor });
-    if (descriptor !== undefined) break;
-    current = prototype;
-  }
-  return () => {
-    for (const entry of path) {
-      if (nodeTypes.isProxy(entry.object) || Object.getPrototypeOf(entry.object) !== entry.prototype) {
-        throw new Error('Agent contract owner changed before dispatch');
-      }
-      const actual = Object.getOwnPropertyDescriptor(entry.object, key);
-      const original = entry.descriptor;
-      if (original === undefined ? actual !== undefined : actual === undefined
-        || actual.configurable !== original.configurable || actual.enumerable !== original.enumerable
-        || actual.writable !== original.writable || actual.get !== original.get || actual.set !== original.set
-        || !Object.is(actual.value, original.value)) {
-        throw new Error('Agent contract owner changed before dispatch');
-      }
-    }
-  };
+/** Longest one wait call blocks when no silence limit applies. */
+const MAX_WAIT_MS = 30 * 60_000;
+
+/**
+ * The longest one wait may block: the silence after which a running unit agent
+ * is restarted (`contract.heartbeatTimeoutMs`), so a waiting worker is never
+ * taken for a hung one; 30 minutes when that limit is off.
+ */
+function waitLimitMs(configManager: Pick<ConfigManager, 'get'>): number {
+  const heartbeat = configManager.get('contract.heartbeatTimeoutMs');
+  return typeof heartbeat === 'number' && Number.isFinite(heartbeat) && heartbeat > 0 ? Math.min(heartbeat, MAX_WAIT_MS) : MAX_WAIT_MS;
+}
+
+/** True when `work` settles within `ms`, false at the deadline; rejects with the abort reason when `signal` aborts. */
+function awaitWithin(work: Promise<unknown>, ms: number, signal: AbortSignal | undefined): Promise<boolean> {
+  signal?.throwIfAborted();
+  return new Promise<boolean>((resolve, reject) => {
+    const finish = (settle: () => void): void => { clearTimeout(timer); signal?.removeEventListener('abort', abort); settle(); };
+    const abort = (): void => finish(() => reject(signal!.reason));
+    const timer = setTimeout(() => finish(() => resolve(false)), ms);
+    signal?.addEventListener('abort', abort, { once: true });
+    work.then(() => finish(() => resolve(true)), () => finish(() => resolve(true)));
+  });
 }
 
 export function createAgentTool(config: AgentToolConfig): Tool {
@@ -342,13 +334,8 @@ export function createAgentTool(config: AgentToolConfig): Tool {
       if (options === undefined) {
         return startContract(input, ask, units, assertCurrent, (contractInput) => config.contractRunner.start(contractInput));
       }
-      const assertRunnerHolder = retainContractProperty(config, 'contractRunner');
       const runner = config.contractRunner;
-      const assertStart = retainContractProperty(runner, 'start');
-      const assertCancel = retainContractProperty(runner, 'cancel');
-      const assertJoin = retainContractProperty(runner, 'join');
       const start = runner.start, cancel = runner.cancel, join = runner.join;
-      const assertRunner = () => { assertRunnerHolder(); assertStart(); assertCancel(); assertJoin(); };
       if ((signal !== undefined || options?.assertCurrent !== undefined)
         && (typeof cancel !== 'function' || typeof join !== 'function')) {
         throw new Error('Agent caller cancellation requires contract cancellation and settlement');
@@ -368,9 +355,8 @@ export function createAgentTool(config: AgentToolConfig): Tool {
       try {
         assertCurrent();
         started = await startContract(input, ask, units, assertCurrent, (contractInput) => {
-          assertRunner();
           signal?.throwIfAborted();
-          return start.call(runner, contractInput, { signal, assertCurrent: () => { assertRunner(); assertCurrent(); } });
+          return start.call(runner, contractInput, { signal, assertCurrent });
         });
         contractId = started.contract.id;
         ownedContracts.push(cancelStarted);
@@ -384,24 +370,6 @@ export function createAgentTool(config: AgentToolConfig): Tool {
         try { if (started) cancelStarted(); } finally { if (!settlementTracked) cleanup(); }
         throw error;
       }
-    };
-    const waitForPoll = (milliseconds: number): Promise<void> => {
-      signal?.throwIfAborted();
-      return new Promise<void>((resolve, reject) => {
-        let timer: ReturnType<typeof setTimeout> | undefined;
-        const cleanup = () => {
-          if (timer !== undefined) clearTimeout(timer);
-          signal?.removeEventListener('abort', abort);
-        };
-        const abort = () => {
-          cleanup();
-          try { signal?.throwIfAborted(); } catch (error) { reject(error); }
-        };
-        signal?.addEventListener('abort', abort, { once: true });
-        if (signal?.aborted) { abort(); return; }
-        timer = setTimeout(() => { cleanup(); resolve(); }, milliseconds);
-        if (signal?.aborted) abort();
-      });
     };
     assertCurrent();
     // Validate required fields before casting
@@ -768,9 +736,8 @@ export function createAgentTool(config: AgentToolConfig): Tool {
           return { success: false, error: `Unknown agent: '${input.agentId}'` };
         }
 
-        // Non-blocking: return current status immediately if already in a terminal state.
-        // For polls (timeoutMs > 0), wait at most that duration, capped at 30000ms: long enough
-        // that a parent does not spend a turn per few seconds, short enough to stay cancellable and visible.
+        // A terminal agent is answered at once; otherwise the call awaits the agent's run (no polling)
+        // for the requested time, up to the limit a waiting turn may stay silent.
         const terminalStatuses = new Set(['completed', 'failed', 'cancelled']);
 
         if (terminalStatuses.has(record.status)) {
@@ -787,41 +754,34 @@ export function createAgentTool(config: AgentToolConfig): Tool {
           });
         }
 
-        // If a timeoutMs is requested, wait for the agent to end or the timeout, whichever is first.
-        const requestedTimeout = typeof input.timeoutMs === 'number' ? input.timeoutMs : 0;
-        const MAX_BLOCKING_MS = 30_000;
-        const timeoutMs = Math.min(requestedTimeout, MAX_BLOCKING_MS);
-
-        if (timeoutMs > 0) {
-          const start = Date.now();
-          const pollIntervalMs = 50;
-          while (true) {
-            assertCurrent();
-            const current = manager.getStatus(input.agentId);
-            assertCurrent();
-            if (!current || terminalStatuses.has(current.status)) break;
-            if (Date.now() - start >= timeoutMs) break;
-            await waitForPoll(pollIntervalMs);
-            assertCurrent();
-          }
-        }
+        const requestedMs = typeof input.timeoutMs === 'number' && Number.isFinite(input.timeoutMs) ? Math.max(0, input.timeoutMs) : 0;
+        const limitMs = waitLimitMs(config.configManager);
+        const timeoutMs = Math.min(requestedMs, limitMs);
+        const startedAt = Date.now();
+        const joined = timeoutMs > 0 ? await awaitWithin(manager.join(input.agentId), timeoutMs, signal) : false;
+        const waitedMs = Date.now() - startedAt;
 
         assertCurrent();
         const finalRecord = manager.getStatus(input.agentId);
-        assertCurrent();
         if (!finalRecord) {
           return publish({ success: true, output: JSON.stringify({ agentId: input.agentId, status: 'deleted', error: 'Agent was removed during wait' }) });
         }
         const finalStatus = finalRecord.status;
+        const ended = terminalStatuses.has(finalStatus);
         const finalFailure = await childFailureFor(manager, finalRecord, { signal, assertCurrent });
         assertCurrent();
+        const reduced = requestedMs > limitMs;
         return publish({
           success: true,
           output: JSON.stringify({
             agentId: input.agentId,
             status: finalStatus,
-            timedOut: !terminalStatuses.has(finalStatus),
-            hint: terminalStatuses.has(finalStatus) ? undefined : 'Agent still running. Use mode=status to poll again.',
+            timedOut: !ended && !joined,
+            waitedMs,
+            ...(reduced ? { requestedMs, limitMs, reason: `A wait is capped at ${limitMs} ms, the time a turn may stay silent (contract.heartbeatTimeoutMs); the agent may still be running.` } : {}),
+            ...(ended ? {} : joined
+              ? { hint: 'No run of this agent is executing in this process now; it will not end by itself. Use mode=message to wake it or mode=cancel to stop it.' }
+              : { hint: 'Agent still running. Call mode=wait again with timeoutMs to keep waiting.' }),
             ...(finalFailure ? { failure: finalFailure } : {}),
           }),
         });

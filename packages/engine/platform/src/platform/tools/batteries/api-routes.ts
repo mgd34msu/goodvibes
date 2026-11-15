@@ -4,7 +4,8 @@ import { completeJudgmentView } from './complete-view.js';
  * `api_spec`, `api_validate` and `api_sync` (tools/inspect/project-routes.ts)
  * where syntax alone does not say what a route is.
  *
- * - `route_registration` (one candidate line): does this call register an
+ * - `route_registration` (each candidate line, every candidate of one file in
+ *   one request, inspect/candidate-readings.ts): does this call register an
  *   HTTP route handler with the named framework (Express, Fastify or Hono)?
  *   Code finds the candidates from syntax: a call of a method named after an
  *   HTTP verb whose first argument is a string literal followed by more
@@ -25,8 +26,8 @@ import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes-jev/judgment';
 
 /** Lines of context carried on each side of a candidate route line. */
 export const ROUTE_CONTEXT_LINES = 3;
-/** Most characters of a pages/api handler file the method readings carry. */
-export const MAX_HANDLER_CHARS = Number.POSITIVE_INFINITY;
+/** Most import lines of the file a route reading carries. */
+const MAX_IMPORT_LINES = 30;
 
 /** The HTTP methods a pages/api handler is read for, in the order they are reported. */
 export const HANDLER_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'] as const;
@@ -34,19 +35,19 @@ export type HandlerMethod = (typeof HANDLER_METHODS)[number];
 export type ServesQuestion = `serves_${Lowercase<HandlerMethod>}`;
 export const servesQuestion = (method: HandlerMethod): ServesQuestion => `serves_${method.toLowerCase() as Lowercase<HandlerMethod>}`;
 
-/** What the route_registration reading sees: the framework asked about, the file's import lines, the candidate line and the lines around it. */
+/** What the route_registration reading sees: the framework asked about, the file's import lines, the candidate line and ROUTE_CONTEXT_LINES lines on each side of it. */
 export function routeLineView(framework: string, file: string, lines: readonly string[], index: number): { framework: string; file: string; imports: string[]; line: string; before: string[]; after: string[] } {
   return completeJudgmentView({
     framework,
     file,
-    imports: lines.filter((line) => /^\s*import\b|\brequire\s*\(/.test(line)),
+    imports: lines.filter((line) => /^\s*import\b|\brequire\s*\(/.test(line)).slice(0, MAX_IMPORT_LINES),
     line: lines[index] ?? '',
-    before: lines.slice(0, index),
-    after: lines.slice(index + 1),
+    before: lines.slice(Math.max(0, index - ROUTE_CONTEXT_LINES), index),
+    after: lines.slice(index + 1, index + 1 + ROUTE_CONTEXT_LINES),
   });
 }
 
-/** What the method readings see: the handler file, up to MAX_HANDLER_CHARS. */
+/** What the method readings see: the whole handler file (whether it serves a method can depend on any of it). */
 export function handlerView(file: string, content: string): { file: string; code: string } {
   return completeJudgmentView({ file, code: content });
 }

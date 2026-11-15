@@ -7,7 +7,7 @@
  * the fetch reports it as that URL's error.
  */
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
-import { mapLimit, type Candidate } from '@goodvibes-jev/judgment';
+import type { Candidate } from '@goodvibes-jev/judgment';
 import { pageContent } from '../batteries/page-content.js';
 import { pageSummary, paragraphCandidate } from '../batteries/page-summary.js';
 import { pageBlocks, pageTitle, pageUnits } from './page-blocks.js';
@@ -15,14 +15,6 @@ import { decisionOrClassic } from '../../runtime/decision-policy.js';
 
 const READABLE_SITE = 'tools.fetch.readable';
 const SUMMARY_SITE = 'tools.fetch.summary';
-
-/**
- * Paragraphs one summary request offers. A page with more is read in groups
- * and the groups' picks compete in a final request; the size keeps each
- * request well inside the port's request limits.
- */
-const SUMMARY_CANDIDATES_PER_REQUEST = 40;
-const SUMMARY_REQUEST_CONCURRENCY = 4;
 
 /** Stated when Jev reads no paragraph as saying what the page is about. */
 export const NO_SUMMARY_NOTE = 'No paragraph on this page reads as saying what the page is about.';
@@ -43,23 +35,18 @@ async function readDecisionReadable(html: string): Promise<string> {
   return kept.map((block) => block.text).join('\n\n');
 }
 
-/** The id of the paragraph that best says what the page is about, when the reading acts on one. */
+/**
+ * The id of the paragraph that best says what the page is about, when the
+ * reading acts on one. The selector splits a page larger than one request by
+ * the port's own limits and holds the final itself, so every paragraph is
+ * offered in one call and the action is recorded once, after the final pick.
+ */
 async function pickSummary(title: string, candidates: readonly Candidate[]): Promise<string | undefined> {
-  const port = judgmentPort(SUMMARY_SITE);
-  const select = async (group: readonly Candidate[]): Promise<string | undefined> => {
-    const selection = await pageSummary.select(port, { title }, group, { site: SUMMARY_SITE });
-    const picked = selection.outcome === 'act' ? selection.chosen : undefined;
-    selection.recordAction(picked === undefined ? 'no summary paragraph' : `summarized by ${picked}`);
-    return picked;
-  };
-  if (candidates.length <= SUMMARY_CANDIDATES_PER_REQUEST) return candidates.length > 0 ? select(candidates) : undefined;
-  const groups: Candidate[][] = [];
-  for (let start = 0; start < candidates.length; start += SUMMARY_CANDIDATES_PER_REQUEST) {
-    groups.push(candidates.slice(start, start + SUMMARY_CANDIDATES_PER_REQUEST));
-  }
-  const picks = new Set((await mapLimit(groups, SUMMARY_REQUEST_CONCURRENCY, select)).filter((id): id is string => id !== undefined));
-  const finalists = candidates.filter((candidate) => picks.has(candidate.id));
-  return finalists.length > 1 ? pickSummary(title, finalists) : finalists[0]?.id;
+  if (candidates.length === 0) return undefined;
+  const selection = await pageSummary.select(judgmentPort(SUMMARY_SITE), { title }, candidates, { site: SUMMARY_SITE });
+  const picked = selection.outcome === 'act' ? selection.chosen : undefined;
+  selection.recordAction(picked === undefined ? 'no summary paragraph' : `summarized by ${picked}`);
+  return picked;
 }
 
 /**

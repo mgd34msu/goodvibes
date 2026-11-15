@@ -69,19 +69,23 @@ test('Classic env comparisons use an explicit filename convention and local secr
     expect(JSON.stringify(security)).not.toContain(candidate);
     expect(summarizeAnalyzeResult('security', security)).toMatchObject({ provenance: 'classic', secret_assessment: 'local-patterns-only' });
     const permissions = await runPermissions({ mode: 'permissions' }, root);
-    expect(permissions).toMatchObject({ provenance: 'classic', assessment: 'unavailable', reason: 'decision-model-required' });
-    const summary = summarizeAnalyzeResult('permissions', permissions);
-    expect(summary.assessment).toBe('unavailable');
-    expect(summary.total_findings).toBeUndefined();
+    expect(permissions).toMatchObject({ provenance: 'classic', assessment: 'call-shapes-only', findings: [] });
+    expect(summarizeAnalyzeResult('permissions', permissions)).toMatchObject({ provenance: 'classic', assessment: 'call-shapes-only' });
   });
   expect(requests).toHaveLength(0);
 });
 
-test('Classic semantic-only inspection reports its requirement instead of returning a clean report', async () => {
+test('Classic inspection lists the candidates code found as unassessed instead of returning a clean report', async () => {
   const requests = outage();
   await withDecisionModelPolicy(() => 'Classic - Off', async () => {
-    await expect(inspectAccessibility('<img src="test.png">')).rejects.toMatchObject({ code: 'decision-models-disabled' });
-    await expect(inspectApi('/synthetic/classic-api', 'express')).rejects.toMatchObject({ code: 'decision-models-disabled' });
+    const accessibility = await inspectAccessibility('<img src="test.png">');
+    expect(accessibility.issues).toEqual([expect.objectContaining({ line: 1, code: 'img-alt', reading: 'unassessed' })]);
+    expect(accessibility.assessment_note).toContain('unassessed');
+    const notes: string[] = [];
+    const root = makeProjectTempDir('classic-api');
+    writeFileSync(join(root, 'server.ts'), "app.get('/health', handler);\n");
+    expect(await inspectApi(root, 'express', [], notes)).toEqual([{ method: 'GET', path: '/health', file: 'server.ts', line: 1, reading: 'uncertain' }]);
+    expect(notes.join(' ')).toContain('decision models are off');
   });
   expect(requests).toHaveLength(0);
 });

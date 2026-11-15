@@ -17,7 +17,7 @@ export const AGENT_TOOL_SCHEMA: ToolDefinition = {
     'get (detailed agent info including messages), ' +
     'budget (token usage for an agent), ' +
     'plan (execution plan: task + template + tools), ' +
-    'wait (returns current status immediately if terminal, or waits up to timeoutMs capped at 30000ms, returning as soon as the agent ends), ' +
+    'wait (returns current status immediately if terminal, or waits up to timeoutMs, returning as soon as the agent ends; one wait is capped at contract.heartbeatTimeoutMs, default 10 minutes, and says so when it was), ' +
     'message (send a message to an agent), ' +
     'contracts (list the contracts of the current session with their status, goal, units and criteria met), ' +
     'contract-history (the decisions, checks and escalations of one contract, by contractId), ' +
@@ -233,7 +233,7 @@ export const AGENT_TOOL_SCHEMA: ToolDefinition = {
       // mode: wait
       timeoutMs: {
         type: 'number',
-        description: 'Timeout in milliseconds for the wait action (mode: wait). Default: 0 (non-blocking, returns immediately). Max: 30000ms; returns as soon as the agent ends. If the agent is still running at the timeout, returns its current status with a hint to wait or poll again.',
+        description: 'Timeout in milliseconds for the wait action (mode: wait). Default: 0 (non-blocking, returns immediately). Returns as soon as the agent ends. One wait is capped at contract.heartbeatTimeoutMs (default 600000, 10 minutes; 30 minutes when that is 0); a reduced wait reports requestedMs and limitMs. If the agent is still running at the timeout, returns its current status with waitedMs and a hint to wait again.',
       },
       // mode: message
       message: {

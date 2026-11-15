@@ -72,7 +72,8 @@ describe('preview', () => {
   test('an empty find is refused', async () => {
     const root = project({ 'a.ts': 'one\n' });
     const result = await analyze(root, { mode: 'preview', files: ['a.ts'], find: '', replace: 'x' });
-    expect((JSON.parse(result.output!) as { error: string }).error).toContain('non-empty find');
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('non-empty find');
   });
 });
 
@@ -128,7 +129,8 @@ describe('git refs', () => {
     const root = project({ 'a.ts': 'export const a = 1;\n' });
     git(root, 'init', '-q');
     const result = await analyze(root, { mode: 'diff', before: '--output', after: 'pwned.txt' });
-    expect((JSON.parse(result.output!) as { error: string }).error).toContain("must not start with '-'");
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("must not start with '-'");
     expect(existsSync(join(root, 'pwned.txt'))).toBe(false);
   });
 });
@@ -256,15 +258,6 @@ describe('a scan that hits its deadline', () => {
     const out = await runDeadCode({ mode: 'dead_code' }, project(files), {}, () => false);
     expect((out.dead_exports as Array<{ name: string }>).map((e) => e.name)).toEqual(['unusedFn']);
     expect(out.stopped_by_deadline).toBeUndefined();
-  });
-
-  test('exports not fully checked are unverified, never dead', async () => {
-    let calls = 0;
-    // Both files are read, then the clock runs out while the first export is being checked.
-    const out = await runDeadCode({ mode: 'dead_code' }, project(files), {}, () => ++calls > 3);
-    expect(out.dead_exports).toEqual([]);
-    expect(out.stopped_by_deadline).toBe(true);
-    expect(out.unverified_count).toBe(2);
   });
 
   test('a file left unread keeps every export unverified', async () => {

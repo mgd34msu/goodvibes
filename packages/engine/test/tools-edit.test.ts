@@ -329,12 +329,13 @@ describe('edit tool', () => {
         installJudgmentPort(previous);
       });
 
-      test('an aligned window is edited, with the fuzzy line warning', async () => {
+      test('in fuzzy mode the closest window is edited after one reading, with the fuzzy line warning', async () => {
         const file = writeFile(tmpDir, 'fuzz_line.ts', 'line one\nline two\nline three\nline four\n');
         const find = 'line one\nline two\nline TYPO\nline four';
         sameTarget.set(find, 0.95);
         const result = await tool.execute({
           edits: [{ path: relPath(file), find, replace: 'line one\nline two\nreplaced line\nline four' }],
+          match: { mode: 'fuzzy' },
         });
         expect(result.success).toBe(true);
         expect(readFileSync(file, 'utf-8')).toBe('line one\nline two\nreplaced line\nline four\n');
@@ -343,16 +344,29 @@ describe('edit tool', () => {
         expect(targetRequests()[0]!.state).toEqual({ find, window: 'line one\nline two\nline three\nline four' });
       });
 
-      test('a window read as a different target is refused and the file is untouched', async () => {
+      test('in exact mode a miss fails at once with the closest lines and no reading', async () => {
         const content = 'const x = 1;\nconst y = 2;\nconst z = 3;\n';
-        const file = writeFile(tmpDir, 'fuzz_warn.ts', content);
+        const file = writeFile(tmpDir, 'fuzz_exact.ts', content);
         const result = await tool.execute({
           edits: [{ path: relPath(file), find: 'const x = 1;\nconst y = 2;\nconst w = 4;', replace: 'replaced' }],
         });
         expect(result.success).toBe(false);
         expect(readFileSync(file, 'utf-8')).toBe(content);
-        const text = JSON.stringify(result);
-        expect(text).toMatch(/not found unambiguously/);
+        expect(JSON.stringify(result)).toMatch(/\[not_found\]/);
+        expect(result.error).toContain('Closest text:\nline 1');
+        expect(requests).toHaveLength(0);
+      });
+
+      test('a window read as a different target is refused and the file is untouched', async () => {
+        const content = 'const x = 1;\nconst y = 2;\nconst z = 3;\n';
+        const file = writeFile(tmpDir, 'fuzz_warn.ts', content);
+        const result = await tool.execute({
+          edits: [{ path: relPath(file), find: 'const x = 1;\nconst y = 2;\nconst w = 4;', replace: 'replaced' }],
+          match: { mode: 'fuzzy' },
+        });
+        expect(result.success).toBe(false);
+        expect(readFileSync(file, 'utf-8')).toBe(content);
+        expect(JSON.stringify(result)).toMatch(/not found in file/);
         expect(targetRequests()).toHaveLength(1);
       });
 
@@ -361,31 +375,21 @@ describe('edit tool', () => {
         const file = writeFile(tmpDir, 'fuzz_confirm.ts', content);
         const find = 'alpha();\nbeta();\ngama();';
         sameTarget.set(find, 0.65);
-        const result = await tool.execute({ edits: [{ path: relPath(file), find, replace: 'replaced' }] });
+        const result = await tool.execute({ edits: [{ path: relPath(file), find, replace: 'replaced' }], match: { mode: 'fuzzy' } });
         expect(result.success).toBe(false);
         expect(readFileSync(file, 'utf-8')).toBe(content);
         expect(result.error).toBeString();
         expect(targetRequests()).toHaveLength(1);
       });
 
-      test('the selected window is independently verified, however low its line share', async () => {
+      test('the closest window is read, however low its line share', async () => {
         // 1 of 4 lines matches: no fixed cutoff decides, the reading does.
         const file = writeFile(tmpDir, 'fuzz_low_share.ts', 'function a() {\n  one();\n  two();\n}\n');
         const find = 'function a() {\n  uno();\n  dos();\n};';
         sameTarget.set(find, 0.9);
-        const result = await tool.execute({ edits: [{ path: relPath(file), find, replace: 'function a() {}' }] });
+        const result = await tool.execute({ edits: [{ path: relPath(file), find, replace: 'function a() {}' }], match: { mode: 'fuzzy' } });
         expect(result.success).toBe(true);
         expect(readFileSync(file, 'utf-8')).toBe('function a() {}\n');
-        expect(targetRequests()).toHaveLength(1);
-      });
-
-      test('no equal lines still receives a semantic reading before returning not found', async () => {
-        const file = writeFile(tmpDir, 'fuzz_low.ts', 'alpha beta\ngamma delta\nepsilon zeta\n');
-        const result = await tool.execute({
-          edits: [{ path: relPath(file), find: 'XXXX YYYY\nZZZZ WWWW\nAAAA BBBB', replace: 'replaced' }],
-        });
-        expect(result.success).toBe(false);
-        expect(JSON.stringify(result)).toMatch(/not found/);
         expect(targetRequests()).toHaveLength(1);
       });
     });
@@ -656,8 +660,7 @@ describe('edit tool', () => {
         edits: [{ path: relPath(file), find: 'before', replace: 'after' }],
       });
       // Cache should now reflect new content
-      const cacheResult = fileCache.lookup(file);
-      expect(cacheResult.status).toBe('unchanged');
+      expect(fileCache.compare(file, readFileSync(file, 'utf-8'))).toBe('unchanged');
     });
   });
 

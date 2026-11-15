@@ -3,8 +3,9 @@ import { completeJudgmentView } from './complete-view.js';
  * `engine.tools.frontend-finding`: the readings behind the inspect tool's
  * frontend analyzers (tools/inspect/frontend.ts). Code finds the candidates
  * from syntax (an element, a hook call, an overflow or fixed-size utility, an
- * import); each analyzer asks only its own question (`only`) about one
- * candidate with the lines around it:
+ * import); each analyzer asks only its own question about its candidates,
+ * every candidate of one file in one request (inspect/candidate-readings.ts),
+ * each with the FRONTEND_CONTEXT_LINES lines around it:
  *
  * - `a11y_violation` (accessibility): does this element break the named WCAG
  *   rule? Replaces the single-line regexes that reported a missing alt,
@@ -36,8 +37,14 @@ import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes-jev/judgment';
 
 /** Lines of context carried on each side of a candidate line. */
 export const FRONTEND_CONTEXT_LINES = 3;
-/** Most lines of a hook call the omits_dependency reading carries. */
-export const MAX_JUDGED_HOOK_LINES = Number.POSITIVE_INFINITY;
+/** Most lines of a hook call the omits_dependency reading carries; a longer call is cut with a marker line. */
+export const MAX_JUDGED_HOOK_LINES = 80;
+
+/** A hook call as the reading carries it: at most MAX_JUDGED_HOOK_LINES lines. */
+export function hookCode(code: string): string {
+  const lines = code.split('\n');
+  return lines.length <= MAX_JUDGED_HOOK_LINES ? code : [...lines.slice(0, MAX_JUDGED_HOOK_LINES), `// … ${lines.length - MAX_JUDGED_HOOK_LINES} more lines`].join('\n');
+}
 
 /** One line that sets a z-index value, with the lines around it. */
 export type ZIndexUse = { line: number; text: string; before: string[]; after: string[] };
@@ -50,20 +57,20 @@ export function stackingView(file: string, lines: readonly string[], value: stri
     uses: lineNumbers.map((line) => ({
       line,
       text: lines[line - 1] ?? '',
-      before: lines.slice(0, line - 1),
-      after: lines.slice(line),
+      before: lines.slice(Math.max(0, line - 1 - FRONTEND_CONTEXT_LINES), line - 1),
+      after: lines.slice(line, line + FRONTEND_CONTEXT_LINES),
     })),
   });
 }
 
-/** What a line reading sees: the file, the candidate line, and the lines around it. */
+/** What a line reading sees: the file, the candidate line, and FRONTEND_CONTEXT_LINES lines on each side of it. */
 export function frontendLineView(file: string, lines: readonly string[], index: number, extra: Record<string, string> = {}): Record<string, string | string[]> {
   return completeJudgmentView({
     file,
     ...extra,
     line: lines[index] ?? '',
-    before: lines.slice(0, index),
-    after: lines.slice(index + 1),
+    before: lines.slice(Math.max(0, index - FRONTEND_CONTEXT_LINES), index),
+    after: lines.slice(index + 1, index + 1 + FRONTEND_CONTEXT_LINES),
   });
 }
 
@@ -121,7 +128,7 @@ const TWO_ROUTES = [
 
 export const frontendFinding = defineBattery({
   name: 'engine.tools.frontend-finding',
-  version: 2,
+  version: 3,
   description: 'Whether a frontend inspection candidate is a real issue: an accessibility violation, a missing hook dependency, an overflow problem, a fixed size that breaks narrow layouts, a server-only import, or a z-index value shared by overlapping elements.',
   accuracyFloor: 0.85,
   items: {
@@ -130,7 +137,7 @@ export const frontendFinding = defineBattery({
       LOW,
     ),
     omits_dependency: yesNo(
-      '`code` is a React useEffect, useMemo or useCallback call from `file`. When supplied, read `completeFile` and `targetLine` to resolve the target call and its bindings; context elsewhere is not another target. Does its dependency array leave out a value from the component scope that the callback reads: a prop, state value, or variable or function declared in the component body? Values declared inside the callback, imports, module constants, globals, and state setter functions do not need to be listed.',
+      '`code` is a React useEffect, useMemo or useCallback call from `file`. Does its dependency array leave out a value from the component scope that the callback reads: a prop, state value, or variable or function declared in the component body? Values declared inside the callback, imports, module constants, globals, and state setter functions do not need to be listed.',
       LOW,
     ),
     overflow_problem: yesNo(

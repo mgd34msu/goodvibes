@@ -36,7 +36,7 @@ const readings = useToolReadings([
   ['"line":"<img src={photo} />"', { finding: true }],
   ['"line":"<div className=\\"overflow-y-auto\\">"', { finding: 'uncertain' }],
   ['"line":"<main className=\\"w-[1200px]\\">"', { finding: true }],
-  ['"targetLine":1', { finding: true }],
+  ['"code":"useEffect(() => {\\n  fetchResults(query)', { finding: true }],
   ['"module":"next/headers"', { finding: true }],
   ['"value":"z-50 / z-index: 50"', { finding: true }],
   ['"file":"server/app.js"', { entryPoint: true }],
@@ -174,13 +174,15 @@ describe('route readings', () => {
       { method: 'GET', path: '/health', file: 'server.ts', line: 3 },
       { method: 'POST', path: '/login', file: 'server.ts', line: 4, reading: 'uncertain' },
     ]);
-    const lines = readings.requests.map((request) => request.state as { line: string; framework: string });
-    expect(lines.map((state) => state.line)).toEqual([
+    // Every verb call of the file rides one request, each with only the lines around it.
+    expect(readings.requests).toHaveLength(1);
+    const candidates = Object.values((readings.requests[0]!.state as { candidates: Record<string, { line: string; framework: string; before: string[] }> }).candidates);
+    expect(candidates.map((state) => state.line)).toEqual([
       "app.get('/health', handler);",
       "router.post('/login', login);",
       "const users = cache.get('users', { fresh: true });",
     ]);
-    expect(lines.every((state) => state.framework === 'express')).toBe(true);
+    expect(candidates.every((state) => state.framework === 'express' && state.before.length <= 3)).toBe(true);
   });
 
   test('a pages/api handler is read for all seven methods in one request', async () => {
@@ -225,12 +227,14 @@ describe('route readings', () => {
 
 describe('frontend readings', () => {
   test('accessibility: every element of a checked kind is read; a no is dismissed', async () => {
-    const issues = await inspectAccessibility(
+    const { issues } = await inspectAccessibility(
       '<img src={photo} />\n<img\n  src={logo}\n  alt="Logo"\n/>\n<input type="hidden" name="id" />\n',
       'Card.tsx',
     );
     expect(issues).toEqual([expect.objectContaining({ line: 1, code: 'img-alt', reading: 'real' })]);
-    expect(readings.requests).toHaveLength(2); // the hidden input is not a candidate
+    // One request for the file; the hidden input is not a candidate.
+    expect(readings.requests).toHaveLength(1);
+    expect(Object.keys(readings.requests[0]!.questions ?? {})).toEqual(['a11y_violation__L1', 'a11y_violation__L2']);
   });
 
   test('hooks: the reading decides whether a dependency is missing', async () => {
@@ -265,7 +269,7 @@ describe('frontend readings', () => {
     );
     expect(info.zIndexItems).toHaveLength(6);
     expect(info.potentialConflicts).toEqual([{ values: ['z-50', 'z-index: 50'], lines: [1, 2], reading: 'real' }]);
-    expect(readings.requests).toHaveLength(2);
+    expect(readings.requests).toHaveLength(1);
   });
 
   test('client boundary: directive after comments, and each import is read once', async () => {

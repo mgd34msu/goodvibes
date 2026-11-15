@@ -31,10 +31,10 @@ import { summarizeError } from '../../utils/error-display.js';
 export type { AnalyzeInput } from './types.js';
 
 /** The modes that stop by themselves at MAX_SCAN_MS. */
-const DEADLINE_MODES: ReadonlySet<AnalyzeInput['mode']> = new Set(['impact', 'dead_code', 'permissions']);
+const DEADLINE_MODES: ReadonlySet<AnalyzeInput['mode']> = new Set(['impact', 'dead_code', 'permissions', 'security', 'test_find']);
 
-/** The fields that say a result is a refusal or partial; the short form keeps them so it cannot read as an empty success. */
-const NOTE_KEYS = ['error', 'scan_note', 'message', 'unavailable', 'refused_files', 'unreadable_files', 'skipped', 'truncated', 'diff_truncated'] as const;
+/** The fields that say a result is partial; the short form keeps them so it cannot read as an empty success. */
+const NOTE_KEYS = ['scan_note', 'message', 'unavailable', 'refused_files', 'unreadable_files', 'refused_candidates', 'skipped', 'truncated', 'diff_truncated', 'lookup_failed'] as const;
 function carriedNotes(result: Record<string, unknown>): Record<string, unknown> {
   const carried = Object.fromEntries(NOTE_KEYS.filter((key) => result[key] !== undefined).map((key) => [key, result[key]]));
   // The security scan nests its coverage under `secrets`.
@@ -118,7 +118,7 @@ export function createAnalyzeTool(
             result = await runBreaking(input, resolvedProjectRoot);
             break;
           case 'semantic_diff':
-            result = await runSemanticDiff(input, resolvedProjectRoot, toolLLM);
+            result = await runSemanticDiff(input, resolvedProjectRoot, toolLLM, options?.signal);
             break;
           case 'upgrade':
             result = await runUpgrade(input, resolvedProjectRoot);
@@ -139,12 +139,21 @@ export function createAnalyzeTool(
         }
 
         assertCurrent();
+        // A mode that did nothing says why and what to pass instead; that is a failed call, not a success holding `error`.
+        if (typeof result.error === 'string') {
+          const { error, hint, ...detail } = result;
+          return {
+            success: false,
+            error: typeof hint === 'string' ? `${error}. ${hint}` : error,
+            ...(Object.keys(detail).length > 0 ? { output: JSON.stringify(detail) } : {}),
+          };
+        }
         // Only the modes that carry their own deadline stop at MAX_SCAN_MS; a result from one of them that took that long covers only part of the tree.
         // A mode that reports its own stop (`stopped_by_deadline`) is believed over the clock.
         const stopped = typeof result.stopped_by_deadline === 'boolean'
           ? result.stopped_by_deadline
           : DEADLINE_MODES.has(input.mode) && now() - scanStartedAt >= MAX_SCAN_MS;
-        if (stopped) {
+        if (stopped && typeof result.scan_note !== 'string') {
           result = { ...result, scan_note: `Stopped at the ${Math.round(MAX_SCAN_MS / 1000)}s scan limit: the results cover only the files read in that time. Narrow 'files' or use a more specific mode to see the rest.` };
         }
         const fingerprinted = appendSchemaFingerprint(result, 'analyze', input.mode, { featureFlags });

@@ -16,19 +16,21 @@
  *   - A string value under a key that is not a credential is read by Jev
  *     (`engine.tools.credential-value`) and shown only on a no that acts. Not
  *     read: an empty value, a `goodvibes://` reference (it names a stored
- *     secret rather than holding one), and the schema's own default (fixed
- *     text in config/schema.ts, the same on every install).
- * A failed reading throws, and the tool reports it as its error.
+ *     secret rather than holding one), and any value the schema already
+ *     fixes: the default, one of the setting's `enumValues`, or a value of a
+ *     boolean or number setting (fixed text in config/schema*.ts, the same on
+ *     every install).
+ * A reading that is unsure, late or unavailable redacts that one row with
+ * `source: 'reading-unavailable'`; the listing still completes.
  */
-import { captureJudgmentPort, decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
-import { captureOwnedJson, snapshotJudgmentInput } from '../../gate/judgment-input.js';
-import { prepareJudgmentResult } from '../../gate/judgment-result.js';
-import { isValidConfigKey } from '../../config/schema.js';
+import { createHash } from 'node:crypto';
+import { snapshotJudgmentInput, captureOwnedJson } from '../../gate/judgment-input.js';
+import { CONFIG_SCHEMA, isValidConfigKey, type ConfigSetting } from '../../config/schema.js';
 import { configKeyDescription, holdsCredential } from '../../config/credential-key-reading.js';
 import { isSecretBearingConfigKey } from '../../config/secret-bearing-config-keys.js';
 import { isStructuredCredentialReferenceConfigKey, captureStructuredCredentialReferenceConfigValue } from '../../config/structured-credential-config.js';
 import { credentialValue, credentialValueState } from '../batteries/credential-value.js';
-import { decisionOrClassic } from '../../runtime/decision-policy.js';
+import { judge } from '../../runtime/judge.js';
 import { redactSensitiveData } from '../../utils/redaction.js';
 
 const KEY_SITE = 'tools.goodvibes-runtime.credential-key';
@@ -42,47 +44,53 @@ export async function isCredentialConfigKey(key: string): Promise<boolean> {
   return holdsCredential(key, configKeyDescription(key), KEY_SITE);
 }
 
+type ValueReading = 'shown' | 'redacted' | 'reading-unavailable';
+
 /**
- * Readings already made, by key and value: a full config dump asks once per distinct value, not once per call.
- * A reading made while decision models were off is a different answer from one made with them on, so the
- * operation is part of the key. A hit makes no new reading, so there is no run to record an action on.
+ * Whether a stored value is shown as it is: only a no that acts clears it.
+ * Settled answers are kept for the process, keyed by the key and a hash of
+ * the value, so a full config dump asks once per distinct value and no raw
+ * value is held as a cache key.
  */
-const valueReadings = new Map<string, boolean>();
-const VALUE_READINGS_MAX = 500;
-
-/** Whether a stored value is shown as it is: only a no that acts clears it. */
-async function valueMayShow(key: string, value: string): Promise<boolean> {
-  const cacheKey = `${decisionModelPolicyState().operation}\u0000${key}\u0000${value}`;
-  const known = valueReadings.get(cacheKey);
-  if (known !== undefined) return known;
-  const shown = await readValueMayShow(key, value);
-  if (valueReadings.size >= VALUE_READINGS_MAX) valueReadings.delete(valueReadings.keys().next().value!);
-  valueReadings.set(cacheKey, shown);
-  return shown;
+async function readValue(key: string, value: string): Promise<ValueReading> {
+  let state: ReturnType<typeof credentialValueState>;
+  // A value the input check refuses to send is credential material by that check.
+  try { state = credentialValueState(key, configKeyDescription(key), value); } catch { return 'redacted'; }
+  const { value: reading } = await judge<typeof credentialValue.items, ValueReading>({
+    site: VALUE_SITE,
+    battery: credentialValue,
+    state,
+    cache: { key: `${key}\u0000${createHash('sha256').update(value).digest('hex')}`, scope: 'process' },
+    settle: ({ credential_material: reading }) => reading.outcome !== 'act' || reading.verdict === 'uncertain'
+      ? undefined : reading.verdict === 'no' ? 'shown' : 'redacted',
+    // With decision models off the local credential patterns decide; otherwise an answer that did not come is not a no.
+    fallback: (why) => why === 'off' ? (redactSensitiveData(value) === value ? 'shown' : 'redacted') : why === 'unsure' ? 'redacted' : 'reading-unavailable',
+    describe: (reading) => reading,
+  });
+  return reading;
 }
 
-async function readValueMayShow(key: string, value: string): Promise<boolean> {
-  return decisionOrClassic(async () => {
-    const state = credentialValueState(key, configKeyDescription(key), value);
-    const owner = captureJudgmentPort(VALUE_SITE, { prepareResultCapture: prepareJudgmentResult });
-    const run = await credentialValue.run(owner.port, state, { site: VALUE_SITE,
-      signal: owner.signal, beforeAttempt: owner.assertCurrent });
-    owner.assertCurrent();
-    const { verdict, outcome } = run.readings.credential_material;
-    const shown = verdict === 'no' && outcome === 'act';
-    run.recordAction(shown ? 'shown' : 'redacted');
-    owner.assertCurrent();
-    return shown;
-  }, () => redactSensitiveData(value) === value);
-}
-
-function redacted(value: unknown): Record<string, unknown> {
+function redacted(value: unknown, source?: 'reading-unavailable'): Record<string, unknown> {
   if (value === null || value === undefined || value === '') return { redacted: true, configured: false };
   return {
     redacted: true,
     configured: true,
-    source: typeof value === 'string' && value.startsWith(SECRET_REFERENCE_SCHEME) ? 'goodvibes-secret-ref' : 'credential-like-value',
+    source: source ?? (typeof value === 'string' && value.startsWith(SECRET_REFERENCE_SCHEME) ? 'goodvibes-secret-ref' : 'credential-like-value'),
   };
+}
+
+let settingsByKey: ReadonlyMap<string, ConfigSetting> | undefined;
+function schemaSetting(key: string): ConfigSetting | undefined {
+  settingsByKey ??= new Map(CONFIG_SCHEMA.map((setting) => [setting.key, setting]));
+  return settingsByKey.get(key);
+}
+
+/** A value the schema itself fixes (its default, one of its enum values, or a non-text setting) is not credential material. */
+function fixedBySchema(key: string, value: string, schemaDefault: unknown): boolean {
+  if (schemaDefault !== undefined && value === schemaDefault) return true;
+  const setting = schemaSetting(key);
+  if (setting === undefined) return false;
+  return value === setting.default || setting.enumValues?.includes(value) === true || setting.type === 'boolean' || setting.type === 'number';
 }
 
 /**
@@ -90,7 +98,7 @@ function redacted(value: unknown): Record<string, unknown> {
  *
  * @param key - The dotted config key the value is stored under.
  * @param value - The stored value.
- * @param schemaDefault - The key's schema default when it has one; a value equal to it is not read.
+ * @param schemaDefault - The key's default when the caller holds a schema the static one does not; a value equal to it is not read.
  */
 export async function redactConfigValue(key: string, value: unknown, schemaDefault?: unknown): Promise<unknown> {
   if (isStructuredCredentialReferenceConfigKey(key)) {
@@ -104,8 +112,9 @@ export async function redactConfigValue(key: string, value: unknown, schemaDefau
   if (await isCredentialConfigKey(key)) return redacted(value);
   if (value && typeof value === 'object') return redactObjectByPath(key, value);
   if (typeof value !== 'string' || value.trim() === '' || value.trim().startsWith(SECRET_REFERENCE_SCHEME)) return value;
-  if (schemaDefault !== undefined && value === schemaDefault) return value;
-  return (await valueMayShow(key, value)) ? value : redacted(value);
+  if (fixedBySchema(key, value, schemaDefault)) return value;
+  const reading = await readValue(key, value);
+  return reading === 'shown' ? value : redacted(value, reading === 'reading-unavailable' ? 'reading-unavailable' : undefined);
 }
 
 /** Every leaf of a nested object, each redacted under its dotted path below `prefix`. */

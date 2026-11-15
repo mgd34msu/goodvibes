@@ -19,10 +19,12 @@ function project(): string {
 }
 const llm = { chat: async () => '' } as never;
 
-test('a refused call in the short form still carries the refusal text', async () => {
+test('a call that did nothing fails with the reason and what to pass instead', async () => {
   const tool = createAnalyzeTool(llm, null, project());
   const result = await tool.execute({ mode: 'impact', output: { format: 'summary' } });
-  expect(JSON.parse(result.output!).error).toContain('requires at least one file');
+  expect(result.success).toBe(false);
+  expect(result.error).toContain('requires at least one file');
+  expect(result.error).toContain('Pass files');
 });
 
 test('a mode with no deadline never claims it stopped at the scan limit, however long it took', async () => {

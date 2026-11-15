@@ -24,22 +24,25 @@ import { defineSelector, NONE, STAKES_BANDS, type Candidate, type JsonValue } fr
 export const TEST_CANDIDATES_PER_READING = 16;
 /** Opening lines of an importer the reading carries. */
 export const TEST_CANDIDATE_HEAD_LINES = 12;
-/** Most characters of one carried line. */
-export const MAX_JUDGED_TEST_LINE_CHARS = Number.POSITIVE_INFINITY;
+/** Most characters of one carried line; a longer line (minified code, an inline fixture) is cut with a marker. */
+export const MAX_JUDGED_TEST_LINE_CHARS = 400;
 
+const carried = (line: string): string => line.length > MAX_JUDGED_TEST_LINE_CHARS ? `${line.slice(0, MAX_JUDGED_TEST_LINE_CHARS)}…` : line;
 
 /** What the selection sees about the source: its path relative to the project. */
 export function testOfSourceContext(source: string): JsonValue {
   return { source };
 }
 
-/** One importer as a candidate: its path, the lines importing the source, and its opening lines. */
+/**
+ * One importer as a candidate: its path, the lines importing the source, and its first
+ * TEST_CANDIDATE_HEAD_LINES lines. Throws JudgmentInputError when that text holds material the
+ * judgment input check refuses to send.
+ */
 export function testOfSourceCandidate(file: string, importLines: readonly string[], lines: readonly string[]): Candidate {
-  assertJudgmentInput({ file, importLines, lines });
-  return {
-    id: file,
-    content: { file, importsSource: [...importLines], opening: [...lines] },
-  };
+  const content = { file, importsSource: importLines.map(carried), opening: lines.slice(0, TEST_CANDIDATE_HEAD_LINES).map(carried) };
+  assertJudgmentInput(content);
+  return { id: file, content };
 }
 
 const importer = (file: string, importLine: string, ...opening: string[]) => testOfSourceCandidate(file, [importLine], [importLine, ...opening]);

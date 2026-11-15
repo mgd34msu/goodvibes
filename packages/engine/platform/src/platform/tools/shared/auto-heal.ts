@@ -32,10 +32,17 @@ import { summarizeError } from '../../utils/error-display.js';
 import { unifiedDiff } from '../../state/file-cache.js';
 import { executePolicyCheck } from '../../gate/execute-policy-check.js';
 import { hasCapturedToolInvocation } from './captured-input-tools.js';
-import { healAcceptance, MAX_JUDGED_CHANGE_CHARS } from '../batteries/heal-acceptance.js';
+import { healAcceptance } from '../batteries/heal-acceptance.js';
 import { languageToolArgv, type CommandSpec, type ResolvedLanguages } from '../../intelligence/config.js';
 
 const HEAL_ACCEPTANCE_SITE = 'tools.auto-heal.acceptance';
+
+/**
+ * Most characters of a repair's diff the acceptance readings carry. A larger change cannot be read
+ * whole inside one decision request (about 32,000 tokens of state and question), so it is not
+ * accepted and the warning says so.
+ */
+const MAX_CHECKED_CHANGE_CHARS = 80_000;
 
 /** Internal execution boundary supplied by the captured repair owner. */
 export interface AutoHealExecution {
@@ -430,7 +437,7 @@ export class AutoHealer {
       }
     }
     const change = unifiedDiff(before, after, filePath);
-    if (change.length > MAX_JUDGED_CHANGE_CHARS) {
+    if (change.length > MAX_CHECKED_CHANGE_CHARS) {
       addWarning(warnings, `Auto-heal ${stage} change to '${filePath}' is ${change.length} characters, too large to check whole; not applied`);
       return false;
     }

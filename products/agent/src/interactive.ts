@@ -10,7 +10,7 @@ import { captureNativeConversationInput, type NativeConversationInput, type Prod
 import { formatRefusal, refusal } from '@goodvibes-jev/engine/errors';
 import { routeNativeConversationInput, dispatchNativeConversationTurn, describeFailedNativeDispatch } from './runtime/native-conversation-ingress.ts';
 import { createNativeWorkLedgerView } from './runtime/native-work-ledger-host.ts';
-import { resolveConnectedHostConnection as resolveNativeLedgerHost } from './runtime/client/daemon-verbs.ts';
+import { createAgentNativeHostSelection } from './runtime/agent-local-host-pairing.ts';
 import { homedir } from 'node:os';
 import { SetupPairingController } from './shell/setup-pairing-controller.ts';
 import { parseSlashCommand } from './input/slash-command-parser.ts';
@@ -344,11 +344,11 @@ async function main() {
   const scrollToEnd = (vHeight: number) => transcript.followTail(conversation.history.getLineCount(), vHeight);
 
   const unsubs: Array<() => void> = [];
-  const nativeLedgerHostSelection = { configManager, homeDirectory: () => ctx.services.shellPaths.homeDirectory,
-    observation: new OwnedSelectionObservation() };
+  const nativeLedgerHost = createAgentNativeHostSelection({ configManager, homeDirectory: () => ctx.services.shellPaths.homeDirectory,
+    observation: new OwnedSelectionObservation() });
   commandContext.nativeWorkLedger = createNativeWorkLedgerView(
     () => {
-      const host = resolveNativeLedgerHost(nativeLedgerHostSelection);
+      const host = nativeLedgerHost.resolve();
       return 'reason' in host
         ? host
         : {
@@ -359,6 +359,10 @@ async function main() {
           };
     },
     () => render(),
+    undefined,
+    undefined,
+    undefined,
+    nativeLedgerHost.prepare,
   );
   commandContext.nativeConversationIntake = commandContext.nativeWorkLedger.intake;
   unsubs.push(() => commandContext.nativeWorkLedger?.dispose());

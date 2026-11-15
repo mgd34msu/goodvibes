@@ -10,6 +10,7 @@ import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { NativeHeadlessMode } from './native-headless-options.ts';
 import { resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/platform/platform/config';
 import { resolveNativeHostCredential } from '../runtime/client/native-host-credential.ts';
+import { pairLocalTuiHostAutomatically } from '../runtime/tui-host-pairing.ts';
 import { restoreHeadlessSession } from '@goodvibes-jev/engine/terminal-shell/startup-lifecycle';
 
 export async function runNativeHeadlessCommand(runtime: HeadlessCommandRuntime, mode: NativeHeadlessMode = 'submit', limits: HeadlessRunFlags = {}): Promise<number> {
@@ -17,6 +18,8 @@ export async function runNativeHeadlessCommand(runtime: HeadlessCommandRuntime, 
   const { cli, configManager, homeDirectory, workingDirectory } = runtime;
   const shellPaths = createShellPathService({ workingDirectory, homeDirectory });
   const journalPath = `${shellPaths.resolveUserPath('tui', 'native-work-submission.json')}.intake`;
+  // Why the automatic local pairing gave this terminal no credential.
+  let localPairingReason = '';
   const resolveHost = (): NativeHeadlessHost => {
     const credential = resolveNativeHostCredential({ configManager, homeDirectory, observation: credentialObservation });
     return credential.available
@@ -27,7 +30,7 @@ export async function runNativeHeadlessCommand(runtime: HeadlessCommandRuntime, 
           workspace: workingDirectory,
           journalPath,
         }
-      : { reason: credential.reason };
+      : { reason: localPairingReason || credential.reason };
   };
   return runHeadlessCommand(runtime, mode, {
     write: writeNativeHeadlessResult,
@@ -83,6 +86,11 @@ export async function runNativeHeadlessCommand(runtime: HeadlessCommandRuntime, 
           }
         }
       } else {
+        // On this machine the first native run creates this terminal's device credential (no pairing step).
+        if ('reason' in resolveHost()) {
+          const paired = await pairLocalTuiHostAutomatically({ configManager, homeDirectory }, signal);
+          localPairingReason = paired && paired.status !== 'paired' ? paired.message : '';
+        }
         result = await executeNativeHeadless({ mode, prompt, resolveHost, signal: signal, runTurn });
       }
       return result;

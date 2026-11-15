@@ -46,7 +46,7 @@ import { resolveConnectedHostDialEnabled, captureRemoteSettingsImportPreconditio
   assertImportFileCurrent } from '@goodvibes-jev/engine/platform/platform/config';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { DaemonReachability, DaemonVerbCaller } from '@goodvibes-jev/engine/platform/platform/runtime/client';
-import { readConnectedHostOperatorToken, connectedHostTokenRequiredMessage } from '../connected-host-auth.ts';
+import { readConnectedHostOperatorToken, connectedHostTokenRequiredMessage, type ConnectedHostCredentialSource } from '../connected-host-auth.ts';
 import { resolveConnectedHostBaseUrl } from '../../config/connected-host-dial.ts';
 
 export interface AgentDaemonVerbCallerOptions {
@@ -80,6 +80,8 @@ interface ResolvedConnection {
   readonly token: string;
   readonly selectionIdentity: string;
   readonly expectedPrincipalId?: string;
+  /** Where the token came from: native work presents only a pairing or an environment token. */
+  readonly source: ConnectedHostCredentialSource;
 }
 
 // A retained options object identifies the caller's live connection, not a
@@ -128,7 +130,7 @@ function resolveConnection(options: AgentDaemonVerbCallerOptions): ResolvedConne
     if (!token.token) {
       return unavailable(token.error ?? connectedHostTokenRequiredMessage(token.path));
     }
-    return { baseUrl, token: token.token, selectionIdentity: token.selectionIdentity,
+    return { baseUrl, token: token.token, selectionIdentity: token.selectionIdentity, source: token.source,
       ...(token.expectedPrincipalId === undefined ? {} : { expectedPrincipalId: token.expectedPrincipalId }) };
   } catch (error) { observation?.retire(); throw error; }
 }

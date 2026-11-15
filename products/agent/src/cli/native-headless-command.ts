@@ -8,7 +8,7 @@ import type { HeadlessRunFlags } from '@goodvibes-jev/engine/terminal-shell/head
 import { executeAdmittedHeadlessTurn, settleHeadlessTurn } from './native-headless-turn.ts';
 import type { NativeHeadlessMode } from './native-headless-options.ts';
 
-import { resolveConnectedHostConnection } from '../runtime/client/daemon-verbs.ts';
+import { createAgentNativeHostSelection } from '../runtime/agent-local-host-pairing.ts';
 import { type SessionSnapshot } from '@/runtime/index.ts';
 import { conversationMessagesAsSessionRecords } from '../core/conversation-message-snapshot.ts';
 import { restoreHeadlessSession } from '@goodvibes-jev/engine/terminal-shell/startup-lifecycle';
@@ -37,16 +37,18 @@ export function discardUnusedSession(
 
 export async function runNativeHeadlessCommand(runtime: HeadlessCommandRuntime, mode: NativeHeadlessMode = 'submit', limits: HeadlessRunFlags = {}): Promise<number> {
   const { cli, configManager, homeDirectory, workingDirectory } = runtime;
-  const hostSelection = { configManager, homeDirectory, observation: new OwnedSelectionObservation() };
+  const nativeHost = createAgentNativeHostSelection({ configManager, homeDirectory, observation: new OwnedSelectionObservation() });
   const shellPaths = createShellPathService({ workingDirectory, homeDirectory });
   const journalPath = `${shellPaths.resolveUserPath('agent', 'native-work-submission.json')}.intake`;
   const resolveHost = (): NativeHeadlessHost => {
-    const host = resolveConnectedHostConnection(hostSelection);
+    const host = nativeHost.resolve();
     return 'reason' in host ? host : { ...host, workspace: workingDirectory, journalPath };
   };
   return runHeadlessCommand(runtime, mode, {
     write: writeNativeHeadlessResult,
     run: (prompt, mode, outer) => runWithHeadlessTimeout(outer, limits.timeoutMs, async (signal) => {
+      // On this machine the first native run creates the Agent's device credential (no pairing step).
+      if ('reason' in resolveHost()) await nativeHost.prepare(signal);
       const result = await executeNativeHeadless({
         mode,
         prompt,

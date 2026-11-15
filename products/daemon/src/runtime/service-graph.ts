@@ -429,7 +429,6 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
       configManager,
       distributedRuntime,
       approvals: approvalBroker,
-      judgmentPort: judgment.port,
       signal: AbortSignal.any([deviceLifetime.signal, autonomousLifetime.signal]),
       stateDirectory: shellPaths.resolveProjectPath(GOODVIBES_DAEMON_SURFACE_ROOT, 'devices'),
       gatewayMethods,

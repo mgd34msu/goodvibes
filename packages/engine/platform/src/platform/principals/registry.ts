@@ -100,20 +100,18 @@ export class PrincipalRegistry {
    * identity against, so a lost or resurrected one is a person attributed to the
    * wrong identity.
    */
-  private mutate<T>(
+  private async mutate<T>(
     change: (records: readonly PrincipalRecord[]) => { readonly next: PrincipalRecord[] | null; readonly result: T },
   ): Promise<T> {
-    return (async () => {
-      let outcome: T | undefined;
-      await this.writes.run(async () => {
-        const { next, result } = change(await this.all());
-        outcome = result;
-        if (next === null) return;
-        await this.store.save(next);
-        this.records = next;
-      });
-      return outcome as T;
-    })();
+    let outcome: T | undefined;
+    await this.writes.run(async () => {
+      const { next, result } = change(await this.all());
+      outcome = result;
+      if (next === null) return;
+      await this.store.save(next);
+      this.records = next;
+    });
+    return outcome as T;
   }
 
   private async all(): Promise<readonly PrincipalRecord[]> {

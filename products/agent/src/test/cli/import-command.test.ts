@@ -94,7 +94,7 @@ describe('goodvibes-agent import openclaw', () => {
     expect(AgentPersonaRegistry.fromShellPaths({ resolveUserPath: (...parts) => join(home, '.goodvibes', ...parts) }).list()).toHaveLength(0);
   });
 
-  test('--apply writes through the persona and skill registries and permission settings', async () => {
+  test('--apply --apply-permissions writes through the persona and skill registries and permission settings', async () => {
     const home = freshHome();
     const configManager = new ConfigManager({ workingDir: home, homeDir: home, surfaceRoot: 'agent' });
     const output: string[] = [];
@@ -102,12 +102,12 @@ describe('goodvibes-agent import openclaw', () => {
     try {
       console.log = (value?: unknown) => { output.push(String(value)); };
       const result = await handleGoodVibesCliCommand({
-        cli: parseGoodVibesCli(['import', 'openclaw', FIXTURE, '--apply']),
+        cli: parseGoodVibesCli(['import', 'openclaw', FIXTURE, '--apply', '--apply-permissions']),
         configManager,
         workingDirectory: home,
         homeDirectory: home,
       });
-      expect(result.exitCode).toBe(0);
+      expect({ exitCode: result.exitCode, output: output.join('\n') }).toMatchObject({ exitCode: 0 });
     } finally {
       console.log = originalLog;
     }
@@ -116,7 +116,9 @@ describe('goodvibes-agent import openclaw', () => {
     expect(text).toContain('personas created 2');
     expect(text).toContain('memory records created 3');
     expect(text).toContain('skills created 2');
-    expect(text).toContain('permission categories recorded 3');
+    // read and find are allowed by default; write is the one grant this import adds.
+    expect(text).toContain('permission grants applied 1');
+    expect(text).toContain('/settings reset permissions.tools.write --yes');
     expect(text).toContain('execution mode safe-owner');
 
     const resolveUserPath = (...parts: string[]) => join(home, '.goodvibes', ...parts);
@@ -132,17 +134,18 @@ describe('goodvibes-agent import openclaw', () => {
     expect(String(configManager.get('permissions.tools.read' as never))).toBe('allow');
   });
 
-  test('applying the same workspace twice does not duplicate memories and reports the repeat as partial', async () => {
+  test('applying the same workspace twice duplicates nothing, reports the repeat as unchanged and grants nothing without --apply-permissions', async () => {
     const home = freshHome();
     const first = await runCli(['import', 'openclaw', FIXTURE, '--apply'], home);
-    expect(first.exitCode).toBe(0);
+    expect(first).toMatchObject({ exitCode: 0 });
     expect(first.output).toContain('memory records created 3');
+    expect(first.output).toContain('permission grants not applied');
 
     const second = await runCli(['import', 'openclaw', FIXTURE, '--apply'], home);
-    expect(second.output).toContain('memory records created 0 (skipped 3)');
-    expect(second.output).toContain('already imported');
-    expect(second.output).toContain('result partial');
-    expect(second.exitCode).toBe(1);
+    expect(second.output).toContain('memory records created 0 (unchanged 3)');
+    expect(second.output).toContain('personas created 0 (unchanged 2)');
+    expect(second.output).not.toContain('result partial');
+    expect(second.exitCode).toBe(0);
 
     const configManager = new ConfigManager({ workingDir: home, homeDir: home, surfaceRoot: 'agent' });
     const store = new MemoryStore(resolveCanonicalMemoryDbPath(home), { embeddingRegistry: new MemoryEmbeddingProviderRegistry({ configManager }) });

@@ -180,6 +180,35 @@ export function narrowProfileRead(value: unknown): ProfileReadResponse | null {
   return value as unknown as ProfileReadResponse;
 }
 
+/** The People section of a read, reduced to its size: what a model-visible copy carries. */
+export interface WithheldProfileSection {
+  readonly heading: string;
+  readonly count: number;
+  readonly withheld: true;
+}
+
+export type ContainedProfileRead = Omit<ProfileReadResponse, 'sections'> & {
+  readonly sections: ReadonlyArray<ProfileSectionResponse | WithheldProfileSection>;
+};
+
+export function isWithheldProfileSection(section: ProfileSectionResponse | WithheldProfileSection): section is WithheldProfileSection {
+  return 'withheld' in section && section.withheld === true;
+}
+
+/**
+ * Facts about other people are counted, never listed, wherever a model can read
+ * the output. Applied to the data, so every rendering of it (text or JSON)
+ * carries the same disclosure.
+ */
+export function withholdPeople(response: ProfileReadResponse): ContainedProfileRead {
+  return {
+    ...response,
+    sections: response.sections.map((section) => section.heading.trim().toLowerCase() === 'people'
+      ? { heading: section.heading, count: section.prose.length + section.fields.length, withheld: true as const }
+      : section),
+  };
+}
+
 export function narrowProfileGet(value: unknown): ProfileGetResponse | null {
   if (!isRecord(value)) return null;
   if (typeof value.fieldId !== 'string' || typeof value.present !== 'boolean') return null;

@@ -306,7 +306,7 @@ async function handleRoutinePromotion(runtime: CliCommandRuntime, args: readonly
   const preview = buildRoutineSchedulePreview(routine, parsed);
   // An imported routine starts disabled and unreviewed, and a schedule turns its steps into a
   // standing prompt, so the same gate the terminal command applies holds here.
-  const blockers = routinePromotionBlockers(routine);
+  const blockers = routinePromotionBlockers(routine, 'cli');
   if (parsed.yes && blockers.length > 0) {
     return commandFailure(
       runtime,
@@ -372,6 +372,73 @@ async function handleRoutinePromotion(runtime: CliCommandRuntime, args: readonly
     output: jsonOrText(runtime, value, `${formatRoutineScheduleSuccess(result)}\n  ${receiptLine}`),
     exitCode: 0,
   };
+}
+
+/**
+ * enable, disable, review, stale and update: the same registry methods the
+ * terminal `/routines` command calls, so a routine created or imported from the
+ * shell can be made ready for promotion from the shell.
+ */
+function handleRoutineChange(
+  runtime: CliCommandRuntime,
+  registry: AgentRoutineRegistry,
+  sub: 'enable' | 'disable' | 'review' | 'stale' | 'update',
+  rest: readonly string[],
+): CliCommandOutput {
+  const options = parseRoutineOptions(rest);
+  const id = options.positionals[0];
+  const usage: Record<typeof sub, string> = {
+    enable: 'Usage: goodvibes-agent routines enable <id>',
+    disable: 'Usage: goodvibes-agent routines disable <id>',
+    review: 'Usage: goodvibes-agent routines review <id>',
+    stale: 'Usage: goodvibes-agent routines stale <id> <reason>',
+    update: 'Usage: goodvibes-agent routines update <id> [--name <name>] [--description <summary>] [--steps <steps>] [--tags a,b] [--triggers a,b] [--requires-env A,B] [--requires-command gh,jq]',
+  };
+  if (!id) return commandFailure(runtime, 'invalid_routine_command', usage[sub], 2);
+  if (!registry.get(id)) return commandFailure(runtime, 'routine_not_found', `Unknown Agent routine ${id}. List them with: goodvibes-agent routines list`, 1);
+  try {
+    let routine: AgentRoutineRecord;
+    let headline: string;
+    if (sub === 'enable' || sub === 'disable') {
+      routine = registry.setEnabled(id, sub === 'enable');
+      headline = `Agent routine ${sub === 'enable' ? 'enabled' : 'disabled'}`;
+    } else if (sub === 'review') {
+      routine = registry.markReviewed(id);
+      headline = 'Agent routine reviewed';
+    } else if (sub === 'stale') {
+      const reason = options.positionals.slice(1).join(' ').trim();
+      if (!reason) return commandFailure(runtime, 'invalid_routine_command', usage.stale, 2);
+      routine = registry.markStale(id, reason);
+      headline = 'Agent routine marked stale';
+    } else {
+      const requiresEnv = optionValue(options, 'requires-env');
+      const requiresCommand = optionValue(options, 'requires-command') ?? optionValue(options, 'requires-commands');
+      routine = registry.update(id, {
+        name: optionValue(options, 'name'),
+        description: optionValue(options, 'description'),
+        steps: optionValue(options, 'steps'),
+        tags: optionValue(options, 'tags') === undefined ? undefined : splitList(optionValue(options, 'tags')),
+        triggers: optionValue(options, 'triggers') === undefined ? undefined : splitList(optionValue(options, 'triggers')),
+        requirements: requiresEnv === undefined && requiresCommand === undefined
+          ? undefined
+          : buildAgentSkillRequirements({ env: splitList(requiresEnv), commands: splitList(requiresCommand) }),
+      });
+      // An edit changes what a schedule would run, so the registry marks it for review again.
+      headline = 'Agent routine updated (review it again before promoting)';
+    }
+    const value: RoutinesCommandSuccess<AgentRoutineRecord> = { ok: true, kind: `agent.routines.${sub}`, data: routine };
+    return {
+      output: jsonOrText(runtime, value, [
+        headline,
+        `  id ${routine.id}`,
+        `  enabled ${routine.enabled ? 'yes' : 'no'}`,
+        `  review ${formatAgentRecordReviewState(routine.reviewState)}`,
+      ].join('\n')),
+      exitCode: 0,
+    };
+  } catch (error) {
+    return commandFailure(runtime, `agent.routines.${sub}.error`, error instanceof Error ? error.message : String(error), 1);
+  }
 }
 
 function latestAttemptFor(
@@ -593,12 +660,15 @@ export async function handleRoutinesCommand(runtime: CliCommandRuntime): Promise
       exitCode: 0,
     };
   }
+  if (normalized === 'enable' || normalized === 'disable' || normalized === 'review' || normalized === 'stale' || normalized === 'update') {
+    return handleRoutineChange(runtime, registry, normalized, rest);
+  }
   if (normalized === 'delete' || normalized === 'remove') {
     const options = parseRoutineOptions(rest);
     const id = options.positionals[0];
-    if (!id) return { output: 'Usage: goodvibes-agent routines delete <id> --yes', exitCode: 2 };
+    if (!id) return commandFailure(runtime, 'invalid_routine_command', 'Usage: goodvibes-agent routines delete <id> --yes', 2);
     if (!options.yes) {
-      return { output: `Refusing to delete Agent routine ${id} without --yes.`, exitCode: 2 };
+      return commandFailure(runtime, 'confirmation_required', `Refusing to delete Agent routine ${id} without --yes.`, 2);
     }
     try {
       const routine = registry.deleteRoutine(id);
@@ -663,7 +733,7 @@ export async function handleRoutinesCommand(runtime: CliCommandRuntime): Promise
     return handleRoutinePromotion(runtime, rest);
   }
   return {
-    output: `Usage: goodvibes-agent routines [list|enabled|attention|discover|import-discovered <name> --yes|create --name <name> --description <summary> --steps <steps>|show <id>|delete <id> --yes|receipts|reconcile|receipt <id>|promote <id> (--cron <expr>|--every <interval>|--at <iso-time>) [--delivery-channel <channel>|--delivery-route <route>|--delivery-webhook <url>] --yes]`,
+    output: `Usage: goodvibes-agent routines [list|enabled|attention|discover|import-discovered <name> --yes|create --name <name> --description <summary> --steps <steps>|show <id>|enable <id>|disable <id>|review <id>|stale <id> <reason>|update <id> [--name ...] [--description ...] [--steps ...]|delete <id> --yes|receipts|reconcile|receipt <id>|promote <id> (--cron <expr>|--every <interval>|--at <iso-time>) [--delivery-channel <channel>|--delivery-route <route>|--delivery-webhook <url>] --yes]`,
     exitCode: 2,
   };
 }

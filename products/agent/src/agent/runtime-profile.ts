@@ -130,14 +130,27 @@ export function normalizeAgentRuntimeProfileId(value: string): string {
     .replace(/[-_]{2,}/g, '-');
 }
 
+/** A name or template the command cannot take: a usage error, not a missing profile or a failed write. */
+export class AgentProfileUsageError extends Error {
+  override readonly name = 'AgentProfileUsageError';
+}
+
+/** A well-formed profile name with no profile home behind it. */
+export class AgentProfileNotFoundError extends Error {
+  override readonly name = 'AgentProfileNotFoundError';
+  constructor(readonly profileId: string, message: string) {
+    super(message);
+  }
+}
+
 export function assertValidAgentRuntimeProfileId(value: string): string {
   const raw = value.trim();
   if (raw.includes('..') || raw.includes('/') || raw.includes('\\')) {
-    throw new Error('Agent profile names cannot contain path traversal sequences.');
+    throw new AgentProfileUsageError('Agent profile names cannot contain path traversal sequences.');
   }
   const normalized = normalizeAgentRuntimeProfileId(value);
   if (!PROFILE_ID_PATTERN.test(normalized)) {
-    throw new Error('Agent profile names must normalize to 1-64 lowercase letters, numbers, dots, underscores, or dashes.');
+    throw new AgentProfileUsageError('Agent profile names must normalize to 1-64 lowercase letters, numbers, dots, underscores, or dashes.');
   }
   return normalized;
 }
@@ -154,12 +167,32 @@ export function getAgentRuntimeProfileSelectionPath(baseHomeDirectory: string): 
   return join(baseHomeDirectory, '.goodvibes', GOODVIBES_AGENT_SURFACE_ROOT, PROFILE_SELECTION_FILE);
 }
 
-export function resolveAgentRuntimeProfileHome(baseHomeDirectory: string, profileName: string): AgentRuntimeProfileResolution {
+/**
+ * Where a profile's home is. With `mustExist`, a name with no profile behind it
+ * is refused (AgentProfileNotFoundError) instead of naming a home that start-up
+ * would then create empty: a misspelt `--agent-profile` must not become a new
+ * profile.
+ */
+export function resolveAgentRuntimeProfileHome(
+  baseHomeDirectory: string,
+  profileName: string,
+  options: { readonly mustExist?: boolean } = {},
+): AgentRuntimeProfileResolution {
   const id = assertValidAgentRuntimeProfileId(profileName);
-  return {
-    id,
-    homeDirectory: join(getAgentRuntimeProfilesRoot(baseHomeDirectory), id),
-  };
+  const homeDirectory = join(getAgentRuntimeProfilesRoot(baseHomeDirectory), id);
+  if (options.mustExist && !existsSync(homeDirectory)) {
+    throw new AgentProfileNotFoundError(id, missingProfileMessage(baseHomeDirectory, id));
+  }
+  return { id, homeDirectory };
+}
+
+function missingProfileMessage(baseHomeDirectory: string, id: string): string {
+  const existing = listAgentRuntimeProfiles(baseHomeDirectory).map((profile) => profile.id);
+  return [
+    `No Agent profile named ${id}.`,
+    `Existing: ${existing.length > 0 ? existing.join(', ') : 'none'}.`,
+    `Create it with: goodvibes-agent profiles create ${id} --yes`,
+  ].join(' ');
 }
 
 export function readAgentRuntimeProfileSelection(baseHomeDirectory: string): AgentRuntimeProfileSelection | null {
@@ -191,7 +224,15 @@ export function readAgentRuntimeProfileSelection(baseHomeDirectory: string): Age
 
 export function resolveSelectedAgentRuntimeProfileHome(baseHomeDirectory: string): AgentRuntimeProfileResolution | null {
   const selection = readAgentRuntimeProfileSelection(baseHomeDirectory);
-  if (!selection?.exists) return null;
+  if (!selection) return null;
+  if (!selection.exists) {
+    // The owner chose this profile; starting in another home without a word
+    // would look like every session and memory had gone.
+    throw new AgentProfileNotFoundError(selection.id, [
+      `The default Agent profile ${selection.id} no longer exists.`,
+      `Clear the default with: goodvibes-agent profiles default clear --yes, or create it again with: goodvibes-agent profiles create ${selection.id} --yes`,
+    ].join(' '));
+  }
   return {
     id: selection.id,
     homeDirectory: selection.homeDirectory,
@@ -523,7 +564,7 @@ function resolveAgentRuntimeProfileTemplate(templateId: AgentRuntimeProfileTempl
   const problem = baseHomeDirectory ? localTemplateProblem(baseHomeDirectory, id) : null;
   if (problem) throw new Error(`Agent starter profile template ${templateId} is unusable: ${problem}`);
   const suffix = baseHomeDirectory ? ' Use profiles templates to list starters.' : '';
-  throw new Error(`Unknown Agent starter profile template ${templateId}.${suffix}`);
+  throw new AgentProfileUsageError(`Unknown Agent starter profile template ${templateId}.${suffix}`);
 }
 
 export function listAgentRuntimeProfileTemplates(baseHomeDirectory?: string): readonly AgentRuntimeProfileTemplateSummary[] {

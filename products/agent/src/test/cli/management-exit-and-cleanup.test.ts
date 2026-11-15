@@ -3,7 +3,7 @@ import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { ConfigManager } from '../../config/index.ts';
 import { handleGoodVibesCliCommand, parseGoodVibesCli } from '../../cli/index.ts';
-import { closeHeadlessSession, discardUnusedSession } from '../../cli/native-headless-command.ts';
+import { discardUnusedSession } from '../../cli/native-headless-command.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
 const roots: string[] = [];
@@ -59,32 +59,6 @@ describe('a run that could not start', () => {
     expect(discardUnusedSession(manager, 'ran', true, 0)).toBe(false);
     expect(discardUnusedSession(manager, 'has-messages', false, 2)).toBe(false);
     expect(deleted).toEqual([]);
-  });
-
-  test('a run that never got a session discards the empty one after shutdown and writes no pointer', async () => {
-    const events: string[] = [];
-    await closeHeadlessSession({
-      shutdown: async () => { events.push('shutdown'); },
-      sessionManager: { delete(name: string) { events.push(`delete ${name}`); } },
-      sessionId: 'fresh-id',
-      sessionReady: false,
-      messageCount: 0,
-      writeSessionPointer: () => { events.push('pointer'); },
-    });
-    expect(events).toEqual(['shutdown', 'delete fresh-id']);
-  });
-
-  test('a run with a session writes the pointer and keeps the session', async () => {
-    const events: string[] = [];
-    await closeHeadlessSession({
-      shutdown: async () => { events.push('shutdown'); },
-      sessionManager: { delete(name: string) { events.push(`delete ${name}`); } },
-      sessionId: 'ran',
-      sessionReady: true,
-      messageCount: 2,
-      writeSessionPointer: () => { events.push('pointer'); },
-    });
-    expect(events).toEqual(['shutdown', 'pointer']);
   });
 
   test('a delete that finds nothing is not an error', () => {

@@ -26,38 +26,17 @@ describe('relay CLI command', () => {
     expect(parseGoodVibesCli(['relay', 'status']).command).toBe('relay');
   });
 
-  test('status reports the stock default-on config and is explicit that it is not a live check', async () => {
+  test('status and pair ask the connected host and, with none to ask, say so as JSON', async () => {
     const home = makeProjectTempDir('goodvibes-agent-relay-cli');
     const work = makeProjectTempDir('goodvibes-agent-relay-cli-work');
-
-    const { result, output } = await runRelayCli(['relay', 'status'], work, home);
-    expect(result.exitCode).toBe(0);
-    // relay.enabled defaults true now (dissolved feature model, default-on).
-    expect(output).toContain('relay.enabled: true');
-    expect(output).toContain('not live-verified');
-  });
-
-  test('status --output-format=json reports the honest liveVerified:false shape', async () => {
-    const home = makeProjectTempDir('goodvibes-agent-relay-cli');
-    const work = makeProjectTempDir('goodvibes-agent-relay-cli-work');
-
-    const { result, output } = await runRelayCli(['relay', 'status', '--output-format=json'], work, home);
-    expect(result.exitCode).toBe(0);
-    const parsed = JSON.parse(output) as { liveVerified: boolean; config: { enabled: boolean }; flag: { id: string } };
-    // Config state is honestly reported, but never presented as live relay
-    // registration, that belongs to the daemon holding the relay identity.
-    expect(parsed.liveVerified).toBe(false);
-    expect(parsed.config.enabled).toBe(true);
-    expect(parsed.flag.id).toBe('relay-connect');
-  });
-
-  test('pair honestly refuses rather than fabricating a pairing payload', async () => {
-    const home = makeProjectTempDir('goodvibes-agent-relay-cli');
-    const work = makeProjectTempDir('goodvibes-agent-relay-cli-work');
-
-    const { result, output } = await runRelayCli(['relay', 'pair'], work, home);
-    expect(result.exitCode).toBe(1);
-    expect(output).toContain('cannot mint a relay pairing payload');
+    for (const sub of ['status', 'pair']) {
+      const { result, output } = await runRelayCli(['relay', sub, '--output-format=json'], work, home);
+      expect(result.exitCode).toBe(1);
+      const parsed = JSON.parse(output) as { ok: boolean; kind: string; next: readonly string[] };
+      expect(parsed.ok).toBe(false);
+      expect(parsed.kind).toBe('connected_host_unavailable');
+      expect(parsed.next.length).toBeGreaterThan(0);
+    }
   });
 
   test('unknown relay subcommand is a usage error, not a silent success', async () => {

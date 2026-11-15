@@ -6,6 +6,7 @@ export interface AgentKnowledgeFailureLike {
   readonly error: string;
   readonly baseUrl: string;
   readonly route: string;
+  readonly next?: readonly string[];
 }
 
 export function isRecord(value: unknown): value is JsonRecord {
@@ -47,7 +48,6 @@ export function formatAgentKnowledgeFailureKind(kind: string): string {
   if (kind === 'connected_host_route_unavailable') return 'connected host route unavailable';
   if (kind === 'connected_host_error') return 'connected host error';
   if (kind === 'not_found') return 'not found';
-  if (kind === 'scope_contamination') return 'scope contamination';
   return kind.replace(/[_-]+/g, ' ');
 }
 
@@ -425,14 +425,6 @@ export function formatFailure(failure: AgentKnowledgeFailureLike, json: boolean)
     `  ${failure.error}`,
     `  connected host ${failure.baseUrl}`,
     `  route ${failure.route}`,
-    failure.kind === 'connected_host_incompatible'
-      ? '  next update the connected GoodVibes host so its public Agent routes are compatible.'
-      : null,
-    failure.kind === 'connected_host_route_unavailable'
-      ? '  next update the connected GoodVibes host so Agent Knowledge routes are available.'
-      : null,
-    failure.kind === 'scope_contamination'
-      ? '  next update the connected GoodVibes host so Agent Knowledge routes return only Agent-owned scope data.'
-      : null,
+    ...(failure.next ?? []).map(step => `  next ${step}`),
   ].filter((line): line is string => Boolean(line)).join('\n');
 }

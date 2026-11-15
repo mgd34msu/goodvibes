@@ -35,20 +35,6 @@ export function discardUnusedSession(
   }
 }
 
-/** Shuts the runtime down, then either records the session pointer or takes back an empty session. */
-export async function closeHeadlessSession(close: {
-  readonly shutdown: () => Promise<unknown>;
-  readonly sessionManager: { delete(name: string): void };
-  readonly sessionId: string;
-  readonly sessionReady: boolean;
-  readonly messageCount: number;
-  readonly writeSessionPointer: () => void;
-}): Promise<void> {
-  await close.shutdown();
-  discardUnusedSession(close.sessionManager, close.sessionId, close.sessionReady, close.messageCount);
-  if (close.sessionReady) close.writeSessionPointer();
-}
-
 export async function runNativeHeadlessCommand(runtime: HeadlessCommandRuntime, mode: NativeHeadlessMode = 'submit', limits: HeadlessRunFlags = {}): Promise<number> {
   const { cli, configManager, homeDirectory, workingDirectory } = runtime;
   const hostSelection = { configManager, homeDirectory, observation: new OwnedSelectionObservation() };

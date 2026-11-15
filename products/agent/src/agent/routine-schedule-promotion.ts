@@ -334,10 +334,12 @@ const SCHEDULE_CREATE_INCOMPATIBLE_MESSAGE =
  * a routine imported from a project file starts disabled and unreviewed, and its steps become a
  * standing scheduled prompt, so the review has to have happened.
  */
-export function routinePromotionBlockers(routine: AgentRoutineRecord): readonly string[] {
+export function routinePromotionBlockers(routine: AgentRoutineRecord, surface: 'slash' | 'cli' = 'slash'): readonly string[] {
+  // Each blocker names the command that clears it in the program the refusal is read in.
+  const command = surface === 'cli' ? 'goodvibes-agent routines' : '/routines';
   const blockers: string[] = [];
-  if (!routine.enabled) blockers.push(`it is disabled (run /routines enable ${routine.id})`);
-  if (routine.reviewState !== 'reviewed') blockers.push(`it has not been reviewed (read its steps, then run /routines review ${routine.id})`);
+  if (!routine.enabled) blockers.push(`it is disabled (run ${command} enable ${routine.id})`);
+  if (routine.reviewState !== 'reviewed') blockers.push(`it has not been reviewed (read its steps with ${command} show ${routine.id}, then run ${command} review ${routine.id})`);
   const readiness = evaluateAgentRoutineReadiness(routine);
   if (!readiness.ready) blockers.push(`setup is missing: ${readiness.missing.map(formatAgentSkillRequirement).join(', ')}`);
   return blockers;

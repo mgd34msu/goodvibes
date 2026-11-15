@@ -3,12 +3,12 @@ import { resolveConnectedHostBaseUrl } from '../config/connected-host-dial.ts';
 import { existsSync } from 'node:fs';
 import 'node:path';
 import { createShellPathService } from '@/runtime/index.ts';
-import type { RuntimeServices } from '../runtime/services.ts';
+import { withProviderServices, type OneShotProviderServices } from './one-shot-services.ts';
 import { readConnectedHostOperatorToken } from '../runtime/connected-host-auth.ts';
 import { getOnboardingCheckMarkerPath } from '../runtime/onboarding/index.ts';
 import { CONFIG_SCHEMA } from '../config/index.ts';
 import { SecretsManager } from '../config/secrets.ts';
-import { withReadOnlyRuntimeServices, type CliCommandRuntime } from './management.ts';
+import type { CliCommandRuntime } from './management.ts';
 
 import { getPackageVersion } from './help.ts';
 import { classifyProviderSetup } from './provider-classification.ts';
@@ -35,7 +35,7 @@ function readAuthPosture(runtime: CliCommandRuntime) {
 }
 export const handleBundleCommand = createSupportBundleCommand<
   CliCommandRuntime,
-  RuntimeServices,
+  OneShotProviderServices,
   Awaited<ReturnType<typeof buildCliServicePosture>>
 >(
   {
@@ -46,7 +46,7 @@ export const handleBundleCommand = createSupportBundleCommand<
         globalHome: runtime.homeDirectory,
         configManager: runtime.configManager,
       }),
-    withServices: withReadOnlyRuntimeServices,
+    withServices: withProviderServices,
     providerRegistry: (services) => services.providerRegistry,
     classifyProvider: classifyProviderSetup,
     servicePosture: buildCliServicePosture,

@@ -7,12 +7,17 @@ import type {
 } from '@goodvibes-jev/engine/platform/platform/orchestration';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { operatorFlagValue, parseOperatorCommandArgs } from './operator-command-args.ts';
-import { withReadOnlyRuntimeServices, withRuntimeServices } from './management.ts';
+import { createAgentDaemonVerbCaller, ConnectedHostVerbError } from '../runtime/client/daemon-verbs.ts';
 import type { CliCommandOutput } from './types.ts';
 import type { CliCommandRuntime } from './management.ts';
 
-/** Fleet attempt controls use the published contract runner's composed engines.
- * The in-process CLI and gateway verbs address the same runner-owned groups.
+/**
+ * Best-of-N groups live in the contract runner that runs their contract. A
+ * one-shot command runs none, so it asks the connected host's runner through
+ * the `fleet.attempts.*` verbs; it never starts a runner of its own (that would
+ * take up another process's contracts and show groups only by racing it).
+ * Groups held by contracts an open Agent is running are reviewed from that
+ * Agent.
  */
 
 const FLEET_ATTEMPTS_PICK_USAGE = 'Usage: goodvibes-agent fleet attempts pick <groupId> <winnerItemId> --yes';
@@ -27,12 +32,25 @@ function usageFailure(runtime: CliCommandRuntime, error: string): CliCommandOutp
   };
 }
 
+const HOST_NEXT = 'Start the GoodVibes daemon (goodvibes-daemon) or check controlPlane.host and controlPlane.port; groups held by an open Agent are reviewed in that Agent.';
+
 function errorFailure(runtime: CliCommandRuntime, error: unknown): CliCommandOutput {
   const message = summarizeError(error);
+  const status = error instanceof ConnectedHostVerbError ? error.status : undefined;
+  const kind = status === undefined ? 'connected_host_unavailable' : status === 404 ? 'connected_host_incompatible' : 'fleet_attempts_error';
+  const next = status === undefined ? HOST_NEXT
+    : status === 404 ? 'The connected host does not run best-of-N contracts; update GoodVibes on the host.'
+      : status === 409 ? 'List the groups again (fleet attempts list) and use an id it shows.'
+        : undefined;
   return {
-    output: jsonOrText(runtime, { ok: false, kind: 'fleet_attempts_error', error: message }, message),
+    output: jsonOrText(runtime, { ok: false, kind, error: message, ...(status === undefined ? {} : { status }), ...(next ? { next: [next] } : {}) },
+      next ? `${message}\n  next ${next}` : message),
     exitCode: 1,
   };
+}
+
+function hostVerbs(runtime: CliCommandRuntime) {
+  return createAgentDaemonVerbCaller({ configManager: runtime.configManager, homeDirectory: runtime.homeDirectory, invokeTimeoutMs: 30_000 });
 }
 
 /** The model proposal is clearly labeled at every point it renders, never presented as a decision. */
@@ -99,10 +117,8 @@ async function handleFleetAttemptsList(runtime: CliCommandRuntime, args: readonl
   const parsed = parseOperatorCommandArgs(args, ['workstream']);
   const workstreamId = operatorFlagValue(parsed, 'workstream');
   try {
-    const groups = await withReadOnlyRuntimeServices(
-      runtime,
-      (services) => services.contractRunner.fleetControls().listHeldMergeGroups(workstreamId),
-      { modelData: 'skip' },
+    const { groups } = await hostVerbs(runtime).invoke<{ readonly groups: readonly HeldMergeGroup[] }>(
+      'fleet.attempts.list', workstreamId ? { workstreamId } : {},
     );
     return { output: jsonOrText(runtime, { ok: true, groups }, renderGroupList(groups)), exitCode: 0 };
   } catch (error) {
@@ -116,17 +132,17 @@ async function handleFleetAttemptsPick(runtime: CliCommandRuntime, args: readonl
   const winnerItemId = parsed.positionals[1];
   if (!groupId || !winnerItemId) return usageFailure(runtime, FLEET_ATTEMPTS_PICK_USAGE);
   if (!parsed.yes) {
+    const error = `Refusing to pick a winner for group ${groupId} without --yes. Losing siblings' worktrees are cleaned on pick.`;
     return {
-      output: `Refusing to pick a winner for group ${groupId} without --yes. Losing siblings' worktrees are cleaned on pick.`,
+      output: jsonOrText(runtime, { ok: false, kind: 'confirmation_required', error, next: [`fleet attempts pick ${groupId} ${winnerItemId} --yes`] }, error),
       exitCode: 2,
     };
   }
   try {
-    const result: AttemptPickResult = await withRuntimeServices(
-      runtime,
-      (services) => services.contractRunner.fleetControls().pickAttemptWinner(groupId, winnerItemId),
-      { modelData: 'skip' },
+    const answer = await hostVerbs(runtime).invoke<AttemptPickResult & { readonly applied?: boolean }>(
+      'fleet.attempts.pick', { groupId, winnerItemId, confirm: true },
     );
+    const { applied: _applied, ...result } = answer;
     return { output: jsonOrText(runtime, { ok: true, ...result }, renderPickResult(result)), exitCode: 0 };
   } catch (error) {
     return errorFailure(runtime, error);
@@ -138,11 +154,7 @@ async function handleFleetAttemptsJudge(runtime: CliCommandRuntime, args: readon
   const groupId = parsed.positionals[0];
   if (!groupId) return usageFailure(runtime, FLEET_ATTEMPTS_JUDGE_USAGE);
   try {
-    const judgment: AttemptJudgment = await withRuntimeServices(
-      runtime,
-      (services) => services.contractRunner.fleetControls().proposeAttemptWinner(groupId),
-      { modelData: 'skip' },
-    );
+    const judgment = await hostVerbs(runtime).invoke<AttemptJudgment>('fleet.attempts.judge', { groupId });
     return { output: jsonOrText(runtime, { ok: true, judgment }, renderJudgeProposal(groupId, judgment)), exitCode: 0 };
   } catch (error) {
     return errorFailure(runtime, error);

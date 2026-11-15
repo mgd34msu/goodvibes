@@ -243,10 +243,7 @@ describe('CLI status and doctor output', () => {
 
     expect(text).toContain('Connected GoodVibes host:');
     expect(text).toContain('Readiness Checks:');
-    expect(text).toContain('companion chat route');
     expect(text).toContain('isolated Agent Knowledge route');
-    expect(text).toContain('approvals and automation status routes');
-    expect(text).toContain('explicit build delegation route');
     expect(text).not.toContain('Connected Host Config Signals:');
     expect(text).not.toContain('host config present:');
     expect(text).not.toContain('host autostart:');

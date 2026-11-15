@@ -1,35 +1,28 @@
 import { commandJsonOrText as jsonOrText } from '@goodvibes-jev/engine/terminal-shell/cli-output';
 import { FEATURE_SETTINGS } from '@goodvibes-jev/engine/platform/platform/runtime/state';
+import { createAgentDaemonVerbCaller, ConnectedHostVerbError, describeConnectedHostVerbError } from '../runtime/client/daemon-verbs.ts';
 import type { CliCommandOutput } from './types.ts';
 import type { CliCommandRuntime } from './management.ts';
 
 /**
- * `goodvibes-agent relay status|pair`, the outbound zero-knowledge relay
- * (platform 1.6.1, platform/relay) that lets a daemon register with a
- * self-hostable rendezvous relay so surfaces can reach it from outside the
- * LAN. Relay reachability (RelayReachability, the live registration
- * lifecycle, and the relay identity keypair a pairing payload is minted
- * from) is owned entirely by the platform's DaemonServer facade
- * (buildDaemonRelayReachability, started at boot in facade.ts), the daemon
- * process holding the relay identity's private key material.
- *
- * GoodVibes Agent does not host that daemon. Its product boundary is
- * explicit and enforced elsewhere in this CLI (see parser.ts's
- * BLOCKED_PRODUCT_COMMAND_HINTS: "GoodVibes Agent connects to an externally
- * managed GoodVibes host and does not start or manage host processes" /
- * "does not start listeners or expose inbound host endpoints"). Relay is the
- * same shape of concern as those blocked commands, so this command reports
- * what is honestly knowable from here, the connected host's imported
- * relay.* configuration and the relay-connect feature flag's static
- * definition, and refuses to fabricate a live registration status or a
- * pairing payload neither of which this process can observe or mint. The
- * platform's operator wire ships no remote relay-status/pairing route yet (relay
- * reuses the existing REST surface for tunneled traffic, not a status
- * query), so there is no live check to perform even for a genuinely
- * connected host.
+ * `goodvibes-agent relay status|pair`, the outbound zero-knowledge relay that
+ * lets a daemon register with a rendezvous relay so surfaces can reach it from
+ * outside the LAN. The relay registration and the relay identity key belong to
+ * the connected GoodVibes daemon; this command asks it through the
+ * `relay.reachability.get` and `relay.pairing.mint` verbs (the control plane's
+ * invoke-by-id endpoint) and shows this Agent's imported relay.* settings
+ * beside the live answer.
  */
 
 const RELAY_USAGE = 'Usage: goodvibes-agent relay [status|pair]';
+const HOST_NEXT = 'Start the GoodVibes daemon (goodvibes-daemon) or check controlPlane.host and controlPlane.port, then retry.';
+
+interface RelayPairing {
+  readonly protocol?: string;
+  readonly relayUrl?: string;
+  readonly rid?: string;
+  readonly daemonPublicKey?: string;
+}
 
 function relayConnectFlagSummary(): { readonly id: string; readonly name: string; readonly defaultState: string } {
   const feature = FEATURE_SETTINGS.find((entry) => entry.id === 'relay-connect');
@@ -40,55 +33,94 @@ function relayConnectFlagSummary(): { readonly id: string; readonly name: string
   };
 }
 
-function handleRelayStatus(runtime: CliCommandRuntime): CliCommandOutput {
-  const config = runtime.configManager;
-  const enabled = config.get('relay.enabled') === true;
-  const url = String(config.get('relay.url') ?? '');
-  const rendezvousId = String(config.get('relay.rendezvousId') ?? '');
-  const label = String(config.get('relay.label') ?? '');
-  const requireStepUpForMutations = config.get('relay.requireStepUpForMutations') === true;
-  const flag = relayConnectFlagSummary();
+function hostVerbs(runtime: CliCommandRuntime) {
+  return createAgentDaemonVerbCaller({ configManager: runtime.configManager, homeDirectory: runtime.homeDirectory, invokeTimeoutMs: 15_000 });
+}
 
-  const payload = {
-    ok: true,
-    source: 'agent-local-config' as const,
-    liveVerified: false,
-    config: { enabled, url, rendezvousId, label, requireStepUpForMutations },
-    flag,
-    note: "This reflects goodvibes-agent's own imported copy of relay.* settings, not a live check of the connected GoodVibes daemon's actual relay registration, Agent hosts no daemon and the platform has no remote relay-status route yet.",
+function hostFailure(runtime: CliCommandRuntime, what: string, error: unknown): CliCommandOutput {
+  const reason = describeConnectedHostVerbError(error);
+  const status = error instanceof ConnectedHostVerbError ? error.status : undefined;
+  const next = status === 404 ? 'Update GoodVibes on the connected host; it does not serve the relay verbs yet.' : HOST_NEXT;
+  const message = `${what} failed: ${reason}\n  next ${next}`;
+  return {
+    output: jsonOrText(runtime, { ok: false, kind: status === undefined ? 'connected_host_unavailable' : 'connected_host_error', error: reason, ...(status === undefined ? {} : { status }), next: [next] }, message),
+    exitCode: 1,
   };
+}
 
+/** What a relay status means for the person reading it, and what to do. */
+function statusMeaning(status: string, configured: boolean): string {
+  if (!configured || status === 'disabled') return 'off: relay.enabled, the relay-connect capability or relay.url is not set on the host';
+  if (status === 'registered') return 'registered with the relay; surfaces can reach the host through it';
+  if (status === 'connecting' || status === 'reconnecting') return `${status} to the relay`;
+  if (status === 'idle') return 'configured, not started yet';
+  return status;
+}
+
+async function handleRelayStatus(runtime: CliCommandRuntime): Promise<CliCommandOutput> {
+  const config = runtime.configManager;
+  const local = {
+    enabled: config.get('relay.enabled') === true,
+    url: String(config.get('relay.url') ?? ''),
+    rendezvousId: String(config.get('relay.rendezvousId') ?? ''),
+    label: String(config.get('relay.label') ?? ''),
+    requireStepUpForMutations: config.get('relay.requireStepUpForMutations') === true,
+  };
+  const flag = relayConnectFlagSummary();
+  let live: { readonly status: string; readonly configured: boolean };
+  try {
+    live = await hostVerbs(runtime).invoke<{ readonly status: string; readonly configured: boolean }>('relay.reachability.get', {});
+  } catch (error) {
+    return hostFailure(runtime, 'Reading the connected host\'s relay status', error);
+  }
+  const payload = { ok: true, source: 'connected-host' as const, live, config: local, flag };
   const lines = [
-    'GoodVibes relay (connected-host configuration; not live-verified)',
-    `  relay.enabled: ${enabled ? 'true' : 'false'}`,
-    `  relay.url: ${url || '(empty)'}`,
-    `  relay.rendezvousId: ${rendezvousId || '(not generated yet)'}`,
-    `  relay.label: ${label || '(empty)'}`,
-    `  relay.requireStepUpForMutations: ${requireStepUpForMutations ? 'true' : 'false'}`,
-    `  ${flag.id} feature flag: ${flag.name} (default ${flag.defaultState})`,
+    'GoodVibes relay (connected host)',
+    `  status: ${live.status} (${statusMeaning(live.status, live.configured)})`,
+    `  configured: ${live.configured ? 'yes' : 'no'}`,
     '',
-    'disabled/registered/offline is a property of the daemon that actually holds the relay',
-    'identity and dials the relay server, that daemon is managed outside goodvibes-agent.',
-    'Check its own status/doctor output, or the connected host directly.',
+    "  this Agent's imported relay settings:",
+    `  relay.enabled: ${local.enabled ? 'true' : 'false'}`,
+    `  relay.url: ${local.url || '(empty)'}`,
+    `  relay.rendezvousId: ${local.rendezvousId || '(not generated yet)'}`,
+    `  relay.label: ${local.label || '(empty)'}`,
+    `  relay.requireStepUpForMutations: ${local.requireStepUpForMutations ? 'true' : 'false'}`,
+    `  ${flag.id} feature flag: ${flag.name} (default ${flag.defaultState})`,
   ];
-
   return { output: jsonOrText(runtime, payload, lines.join('\n')), exitCode: 0 };
 }
 
-function handleRelayPair(runtime: CliCommandRuntime): CliCommandOutput {
-  const message = [
-    'GoodVibes Agent cannot mint a relay pairing payload.',
-    'A pairing payload (relay URL + rendezvous id + pinned daemon public key) is minted',
-    "in-process by the daemon that holds the relay identity's private key, Agent never",
-    'holds that key material because it does not host the daemon (see "goodvibes-agent',
-    'relay status"). Run the pairing step on the machine hosting the connected GoodVibes',
-    "daemon, or use that host's own relay pairing surface once it ships one.",
-  ].join('\n');
-  const payload = { ok: false, available: false, reason: 'relay-identity-not-hosted-here', error: message };
-  return { output: jsonOrText(runtime, payload, message), exitCode: 1 };
+async function handleRelayPair(runtime: CliCommandRuntime): Promise<CliCommandOutput> {
+  let answer: { readonly pairing: RelayPairing | null; readonly status: string };
+  try {
+    answer = await hostVerbs(runtime).invoke<{ readonly pairing: RelayPairing | null; readonly status: string }>('relay.pairing.mint', {});
+  } catch (error) {
+    return hostFailure(runtime, 'Minting a relay pairing payload on the connected host', error);
+  }
+  if (!answer.pairing) {
+    const error = `The connected host has no live relay registration to pair against (relay status ${answer.status}).`;
+    const next = answer.status === 'disabled'
+      ? 'Turn the relay on for the host (relay.enabled, relay.url and the relay-connect capability), then run goodvibes-agent relay pair again.'
+      : 'Wait for the host to register with the relay (goodvibes-agent relay status shows registered), then run goodvibes-agent relay pair again.';
+    return {
+      output: jsonOrText(runtime, { ok: false, kind: 'relay_not_registered', error, status: answer.status, next: [next] }, `${error}\n  next ${next}`),
+      exitCode: 1,
+    };
+  }
+  const pairing = answer.pairing;
+  const lines = [
+    'GoodVibes relay pairing (from the connected host)',
+    `  relay URL: ${pairing.relayUrl ?? '(not given)'}`,
+    `  rendezvous id: ${pairing.rid ?? '(not given)'}`,
+    `  daemon public key: ${pairing.daemonPublicKey ?? '(not given)'}`,
+    ...(pairing.protocol ? [`  protocol: ${pairing.protocol}`] : []),
+    '',
+    `  payload ${JSON.stringify(pairing)}`,
+  ];
+  return { output: jsonOrText(runtime, { ok: true, pairing, status: answer.status }, lines.join('\n')), exitCode: 0 };
 }
 
-export function handleRelayCommand(runtime: CliCommandRuntime): CliCommandOutput {
+export async function handleRelayCommand(runtime: CliCommandRuntime): Promise<CliCommandOutput> {
   const [sub = 'status'] = runtime.cli.commandArgs;
   if (sub === 'status') return handleRelayStatus(runtime);
   if (sub === 'pair' || sub === 'pairing' || sub === 'qr' || sub === 'qrcode') return handleRelayPair(runtime);

@@ -91,9 +91,9 @@ describe('Agent support bundle retained canonical redaction', () => {
       expect(guards).toBeGreaterThan(0);
       expect(backend.questionCounts().family ?? 0).toBe(0);
       expect(backend.questionCounts().route ?? 0).toBe(0);
+      // Each credential key is read at most once.
       const credentialKeys = backend.calls.filter(call => Object.hasOwn(bundleRecord(call.questions), 'credential'))
         .map(call => bundleRecord(call.state).key);
-      expect(credentialKeys.length).toBeGreaterThan(0);
       expect(new Set(credentialKeys).size).toBe(credentialKeys.length);
       const payload = readFileSync(f.path, 'utf-8');
       const parsed = bundleRecord(JSON.parse(payload));

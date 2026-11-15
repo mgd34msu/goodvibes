@@ -46,9 +46,6 @@ describe('CLI service posture', () => {
     });
     const text = formatCliServicePosture(posture);
 
-    expect(posture.managed.path).toBe('connected GoodVibes host');
-    expect(posture.managed.commandPreview).toBe('managed outside goodvibes-agent');
-    expect(posture.managed.suggestedCommands).toEqual([]);
     expect(posture.issues).toEqual([]);
     expect(posture.issues).not.toContain('Connected-host config is enabled, but no platform service definition is installed.');
     expect(text).toContain('GoodVibes Agent connected-host diagnostics');
@@ -89,7 +86,7 @@ describe('CLI service posture', () => {
 
     expect(posture.endpoints.find((endpoint) => endpoint.id === 'controlPlane')?.reachable).toBe(false);
     expect(posture.issues).toContain('runtime connection is enabled but not reachable on 127.0.0.1:1.');
-    expect(posture.managed.commandPreview).toBe('managed outside goodvibes-agent');
+    expect(posture.managed).toBeUndefined();
   });
 
   test('reads configured service logs with redaction', async () => {
@@ -149,14 +146,11 @@ describe('CLI service posture', () => {
       homeDirectory: join(root, 'home'),
     });
     const parsed = JSON.parse(formatCliServicePosture(posture, true)) as {
-      managed: { commandPreview: string; path: string };
       endpoints: Array<{ id: string }>;
       issues: string[];
       advisories: string[];
     };
 
-    expect(parsed.managed.path).toBe('connected GoodVibes host');
-    expect(parsed.managed.commandPreview).toBe('managed outside goodvibes-agent');
     expect(parsed.endpoints.map((endpoint) => endpoint.id)).toContain('controlPlane');
     // Reported as an ADVISORY, not an issue: the Agent is designed not to own
     // the host, so this describes the intended arrangement rather than a fault.

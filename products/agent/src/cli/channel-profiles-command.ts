@@ -28,6 +28,14 @@ function usageFailure(runtime: CliCommandRuntime, error: string): CliCommandOutp
   };
 }
 
+/** A refusal for a missing --yes: JSON under --json, the sentence otherwise. */
+function confirmationRequired(runtime: CliCommandRuntime, error: string): CliCommandOutput {
+  return {
+    output: jsonOrText(runtime, { ok: false, kind: 'confirmation_required', error, next: ['repeat the command with --yes'] }, error),
+    exitCode: 2,
+  };
+}
+
 function parsePermissionMode(value: string | undefined, usage: string): PermissionMode | undefined {
   if (value === undefined) return undefined;
   const normalized = value.trim().toLowerCase();
@@ -99,7 +107,7 @@ async function handleChannelProfilesSet(runtime: CliCommandRuntime, args: readon
     return usageFailure(runtime, error instanceof Error ? error.message : String(error));
   }
   if (!parsed.yes) {
-    return { output: `Refusing to set channel profile ${surfaceKind} without --yes.`, exitCode: 2 };
+    return confirmationRequired(runtime, `Refusing to set channel profile ${surfaceKind} without --yes.`);
   }
   const payload: OperatorMethodInput<'channels.profiles.set'> = {
     surfaceKind,
@@ -128,7 +136,7 @@ async function handleChannelProfilesDelete(runtime: CliCommandRuntime, args: rea
   const surfaceKind = parsed.positionals[0];
   if (!surfaceKind) return usageFailure(runtime, CHANNEL_PROFILES_DELETE_USAGE);
   if (!parsed.yes) {
-    return { output: `Refusing to delete channel profile ${surfaceKind} without --yes.`, exitCode: 2 };
+    return confirmationRequired(runtime, `Refusing to delete channel profile ${surfaceKind} without --yes.`);
   }
   const payload: OperatorMethodInput<'channels.profiles.delete'> = {
     surfaceKind,

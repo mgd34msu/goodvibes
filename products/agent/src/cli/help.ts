@@ -73,8 +73,8 @@ export function renderGoodVibesHelp(binary = 'goodvibes-agent'): string {
     '  channel-profiles           Manage per-channel model/provider/permission-mode defaults',
     '  workspaces                 Manage which workspaces get automatic checkpoints',
     '  browser                    Drive a real browser from the shell (status|provision|open <url>|read <url>)',
-    "  relay                      Report the connected host's outbound relay configuration (status|pair)",
-    "  fleet                      Review and resolve this Agent's best-of-N attempt groups",
+    "  relay                      Show the connected host's relay registration and pairing (status|pair)",
+    "  fleet                      Review and resolve the connected host's best-of-N attempt groups",
     '  auth                       Inspect Agent auth posture and connection token state',
     '  compat                     Inspect connected-host compatibility and Agent Knowledge route readiness',
     '  knowledge                  Use isolated Agent Knowledge routes',
@@ -329,6 +329,11 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
       'routines import-discovered <name> [--enabled] --yes',
       'routines show <id>',
       'routines create --name <name> --description <summary> --steps <steps> [--tags a,b] [--triggers a,b] [--requires-env A,B] [--requires-command gh,jq] [--enabled]',
+      'routines enable <id>',
+      'routines disable <id>',
+      'routines review <id>',
+      'routines stale <id> <reason>',
+      'routines update <id> [--name <name>] [--description <summary>] [--steps <steps>] [--tags a,b] [--triggers a,b] [--requires-env A,B] [--requires-command gh,jq]',
       'routines delete <id> --yes',
       'routines receipts',
       'routines reconcile',
@@ -336,7 +341,7 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
       'routines promote <id> (--cron <expr>|--every <interval>|--at <iso-time>) [--timezone <tz>] [--name <schedule-name>] [--provider <id>] [--model <model>] [--delivery-channel <channel[:route[:label]]>|--delivery-route <route[:label]>|--delivery-webhook <url>|--delivery-link <url>] [--disabled] --yes',
     ],
     summary:
-      'Inspect, create, and import Agent-local routines with setup readiness. The TUI /routines command and the Agent workspace also enable, disable, and update routines; the shell command cannot. GoodVibes schedule promotion is explicit. Without --yes, promotion only prints the preview.',
+      'Inspect, create, import, enable, disable, review, mark stale and update Agent-local routines with setup readiness. A routine is promoted to a GoodVibes schedule only once it is enabled and reviewed; an update marks it for review again. Schedule promotion is explicit. Without --yes, promotion only prints the preview.',
     examples: [
       'routines list',
       'routines attention',
@@ -448,7 +453,7 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
   relay: {
     usage: ['relay status', 'relay pair'],
     summary:
-      "Report the connected GoodVibes host's imported relay.* configuration and the relay-connect feature flag. Agent hosts no daemon itself, so this is not a live check, and relay pair honestly refuses, pairing payloads are minted by whichever daemon holds the relay identity key.",
+      "Ask the connected GoodVibes host for its live relay registration (status) and mint the pairing payload a surface scans to reach it through the relay (pair: relay URL, rendezvous id and the daemon's public key). The host holds the relay identity; status also shows this Agent's imported relay.* settings and the relay-connect feature flag.",
     examples: ['relay status', 'relay pair'],
   },
   fleet: {
@@ -458,7 +463,7 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
       'fleet attempts judge <groupId>',
     ],
     summary:
-      "Review and resolve this Agent's own best-of-N attempt groups (orchestration engine state, disk-persisted, not a connected-host call): siblings that ran in isolated worktrees and are held for a winner pick instead of auto-merging. judge runs the optional judge model and PROPOSES a winner (clearly labeled as a model proposal, never an auto-decision); pick is the confirm-gated action that actually merges the winner and cleans losing worktrees.",
+      "Review and resolve the best-of-N attempt groups held by the connected host's running contracts (a connected-host call; groups of contracts an open Agent is running are reviewed in that Agent): siblings that ran in isolated worktrees and are held for a winner pick instead of auto-merging. judge runs the optional judge model and PROPOSES a winner (clearly labeled as a model proposal, never an auto-decision); pick is the confirm-gated action that actually merges the winner and cleans losing worktrees.",
     examples: [
       'fleet attempts list',
       'fleet attempts list --workstream workstream-1',
@@ -556,10 +561,10 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
   },
   pair: COMMON_COMMAND_HELP['pair'],
   import: {
-    usage: ['import openclaw [path] [--apply]'],
+    usage: ['import openclaw [path] [--apply] [--apply-permissions]'],
     summary:
-      'Migrate an OpenClaw workspace into the Agent registries. Dry-run is the default; it prints the personas, memory records, skills, and permission allowlist categories that would be created, plus any skipped files with reasons. Re-run with --apply to write through the persona registry, the canonical memory store, the skill registry, and the permission settings. Reads ~/.openclaw by default, or a supplied path.',
-    examples: ['import openclaw', 'import openclaw ~/.openclaw', 'import openclaw ~/.openclaw --apply'],
+      'Migrate an OpenClaw workspace into the Agent registries. Dry-run is the default; it prints the personas, memory records, skills, and permission allowlist categories that would be created, plus any skipped files with reasons. Re-run with --apply to write the memory records (to the connected host store when it answers, else to this machine), personas and skills; records already imported are reported as unchanged. Permission categories are granted only with --apply-permissions: each pre-allows every tool in the category for this Agent profile, so the output lists what each grant covers and the /settings reset commands that undo it. Reads ~/.openclaw by default, or a supplied path.',
+    examples: ['import openclaw', 'import openclaw ~/.openclaw', 'import openclaw ~/.openclaw --apply', 'import openclaw ~/.openclaw --apply --apply-permissions'],
   },
   completion: COMMON_COMMAND_HELP['completion'],
 };

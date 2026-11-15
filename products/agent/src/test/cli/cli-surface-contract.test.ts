@@ -91,9 +91,10 @@ describe('doctor exit code', () => {
     expect(resolveDoctorExitCode(findings, true)).toBe(1);
   });
 
-  test('a must-fix risk fails, a posture advisory does not', () => {
+  test('a must-fix risk fails, a note does not, even under strict', () => {
     expect(resolveDoctorExitCode([finding('allow-all-permissions', 'risk')])).toBe(1);
-    expect(resolveDoctorExitCode([finding('runtime-posture-0', 'risk')])).toBe(0);
+    expect(resolveDoctorExitCode([finding('runtime-posture-0', 'note')])).toBe(0);
+    expect(resolveDoctorExitCode([finding('runtime-posture-0', 'note')], true)).toBe(0);
     expect(resolveDoctorExitCode([])).toBe(0);
   });
 });

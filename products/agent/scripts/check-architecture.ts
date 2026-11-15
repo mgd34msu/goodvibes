@@ -305,20 +305,6 @@ const LAYER_BOUNDARY_RULES: readonly LayerBoundaryRule[] = [
  * cyclic binding at module scope. Break one, then delete its entry.
  */
 const KNOWN_CYCLES: readonly (readonly string[])[] = [
-  [
-    'src/cli/memory-command-wire.ts',
-    'src/cli/memory-command.ts',
-  ],
-  [
-    'src/cli/agent-knowledge-command.ts',
-    'src/cli/fleet-command.ts',
-    'src/cli/management-commands.ts',
-    'src/cli/management.ts',
-    'src/input/commands.ts',
-    'src/input/commands/compat-runtime.ts',
-    'src/runtime/bootstrap-shell.ts',
-    'src/runtime/bootstrap.ts',
-  ],
 ];
 
 /** Agent may copy/adapt TUI source, but never import it at run time. */

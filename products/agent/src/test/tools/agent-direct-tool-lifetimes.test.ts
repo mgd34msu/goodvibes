@@ -7,7 +7,7 @@ import { createShellPathService } from '@/runtime/index.ts';
 import { createProfileGatewayInvoke } from '../../agent/owner-profile-gateway.ts';
 import { createAgentProfileTool, registerAgentProfileTool } from '../../tools/agent-profile-tool.ts';
 import { createAgentKnowledgeTool, registerAgentKnowledgeTool } from '../../tools/agent-knowledge-tool.ts';
-import { createAgentPlatform, getAgentKnowledgeJson } from '../../cli/agent-knowledge-runtime.ts';
+import { createAgentPlatform } from '../../cli/agent-knowledge-runtime.ts';
 import { admitLocalState } from '../helpers/local-state-admission.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 import { mockFetch } from '../helpers/typed-fetch-mock.ts';
@@ -138,45 +138,6 @@ describe('Agent direct tool caller lifetime', () => {
     });
   }
 
-  test('a replaced selected host holds a pending Knowledge read', async () => {
-    const f = knowledgeFixture(), entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
-    const original = globalThis.fetch; let calls = 0;
-    globalThis.fetch = mockFetch(async () => { calls++; entered.resolve(); await release.promise; return response('status'); });
-    const pending = createAgentKnowledgeTool(f.paths, f.config).execute({ action: 'status' });
-    try {
-      await Promise.race([entered.promise, pending.then(() => { throw new Error('Knowledge returned before transport entry.'); })]);
-      f.changeHost(); release.resolve();
-      expect((await pending).success).toBe(false); expect(calls).toBe(1);
-    } finally { release.resolve(); await pending; globalThis.fetch = original; }
-  });
-
-  test('retirement before a Knowledge 404 prevents compatibility probing', async () => {
-    const f = knowledgeFixture(), original = globalThis.fetch; let alive = true, calls = 0;
-    globalThis.fetch = mockFetch(async () => { calls++; alive = false; return new Response('{}', { status: 404 }); });
-    try {
-      const result = await createAgentKnowledgeTool(f.paths, f.config).execute({ action: 'sources' },
-        { assertCurrent() { if (!alive) throw new Error('Caller retired.'); } });
-      expect(result.success).toBe(false); expect(calls).toBe(1);
-    } finally { globalThis.fetch = original; }
-  });
-
-  test('the GET adapter checks the original caller after its response body completes', async () => {
-    const f = knowledgeFixture(), original = globalThis.fetch, entered = Promise.withResolvers<void>();
-    const body = Promise.withResolvers<void>(); let alive = true;
-    class DeferredResponse extends Response {
-      override async text() { entered.resolve(); await body.promise; return super.text(); }
-    }
-    globalThis.fetch = mockFetch(async () => new DeferredResponse('{"sources":[]}', { status: 200 }));
-    const pending = getAgentKnowledgeJson({ baseUrl: 'http://127.0.0.1:3421', token: 'synthetic-token', tokenPath: f.tokenPath },
-      '/api/goodvibes-agent/knowledge/sources', {}, { assertCurrent() { if (!alive) throw new Error('Caller retired.'); } });
-    const observed = pending.then(() => false, () => true);
-    try {
-      await Promise.race([entered.promise, observed.then(() => { throw new Error('Knowledge returned before response-body entry.'); })]);
-      alive = false; body.resolve();
-      expect(await observed).toBe(true);
-    } finally { body.resolve(); await observed; globalThis.fetch = original; }
-  });
-
   test('registered Knowledge capture cannot adopt a changed host after preparation', async () => {
     const f = knowledgeFixture(), original = globalThis.fetch; let calls = 0;
     globalThis.fetch = mockFetch(async () => { calls++; return response('status'); });
@@ -219,15 +180,6 @@ describe('direct gateway and platform synchronous lifetime ingress', () => {
       } finally { await guard.drain(); await observed; }
     });
 
-    test(`direct Knowledge platform refuses a ${kind} guard before fetch`, async () => {
-      const guard = unfinishedGuard(kind), original = globalThis.fetch; let requests = 0;
-      globalThis.fetch = mockFetch(async () => { requests++; return response('status'); });
-      try {
-        expect(() => createAgentPlatform({ baseUrl: 'http://127.0.0.1:3421', token: 'synthetic-token', tokenPath: 'synthetic-token-file' },
-          { assertCurrent: guard.assertCurrent })).toThrow();
-        expect(requests).toBe(0); expect(guard.calls()).toBe(1); expect(guard.thenReads()).toBe(0);
-      } finally { await guard.drain(); globalThis.fetch = original; }
-    });
   }
 
   test('direct profile gateway accepts a synchronous void lifetime and checks it through dispatch', async () => {
@@ -237,14 +189,14 @@ describe('direct gateway and platform synchronous lifetime ingress', () => {
     expect(result.ok).toBe(true); expect(dispatches).toBe(1); expect(checks).toBeGreaterThan(1);
   });
 
-  test('direct Knowledge platform accepts a synchronous void lifetime and checks the actual response', async () => {
+  test('direct Knowledge platform checks the caller once, before the request leaves', async () => {
     const original = globalThis.fetch; let checks = 0, requests = 0;
-    globalThis.fetch = mockFetch(async () => { requests++; expect(checks).toBeGreaterThan(0); return response('status'); });
+    globalThis.fetch = mockFetch(async () => { requests++; expect(checks).toBe(1); return response('status'); });
     try {
       const platformClient = createAgentPlatform({ baseUrl: 'http://127.0.0.1:3421', token: 'synthetic-token', tokenPath: 'synthetic-token-file' },
         { assertCurrent() { checks++; } });
       const result = await platformClient.knowledge.status();
-      expect(result.ready).toBe(true); expect(requests).toBe(1); expect(checks).toBeGreaterThan(1);
+      expect(result.ready).toBe(true); expect(requests).toBe(1); expect(checks).toBe(1);
     } finally { globalThis.fetch = original; }
   });
 });

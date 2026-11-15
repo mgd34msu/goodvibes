@@ -24,6 +24,9 @@ import {
   narrowProfilePerson,
   narrowProfileProvenance,
   narrowProfileRead,
+  isWithheldProfileSection,
+  withholdPeople,
+  type ContainedProfileRead,
   narrowProfileStatus,
   narrowProfileWrite,
   PROFILE_METHOD_IDS,
@@ -68,12 +71,17 @@ const OWNER_PROFILE_USAGE = [
  */
 const CLI_EDIT_SAID = '(edited from the command line)';
 
-/** The section holding facts about other people. Counted, never listed (§10). */
-const PEOPLE_SECTION = 'people';
-
 function usageFailure(runtime: CliCommandRuntime, error: string): CliCommandOutput {
   return {
     output: jsonOrText(runtime, { ok: false, kind: 'invalid_owner_profile_command', error }, error),
+    exitCode: 2,
+  };
+}
+
+/** A refusal for a missing --yes: JSON under --json, the sentence otherwise. */
+function confirmationRequired(runtime: CliCommandRuntime, error: string): CliCommandOutput {
+  return {
+    output: jsonOrText(runtime, { ok: false, kind: 'confirmation_required', error, next: ['repeat the command with --yes'] }, error),
     exitCode: 2,
   };
 }
@@ -106,24 +114,19 @@ async function handleRead(
       exitCode: 1,
     };
   }
-  const lines: string[] = [`Owner profile (${response.state.path})`];
-  if (response.state.exists === false) lines.push('  The file does not exist yet; nothing has been recorded.');
-  for (const section of response.sections) {
+  // §10, keyed on the one thing that decides whether it applies: does this
+  // output reach a model. Run as `/owner-profile` or through the workspace card
+  // (or with stdout captured) it can land where a later turn composes from, so
+  // People are counted and `person <name>` is the way through; at a terminal it
+  // is his own file, listed in full. The containment is applied to the data, so
+  // `--json` discloses exactly what the text does.
+  const shown: ContainedProfileRead = outputEntersModelContext ? withholdPeople(response) : response;
+  const lines: string[] = [`Owner profile (${shown.state.path})`];
+  if (shown.state.exists === false) lines.push('  The file does not exist yet; nothing has been recorded.');
+  for (const section of shown.sections) {
     lines.push(`  ## ${section.heading}`);
-    // §10, keyed on the one thing that decides whether it applies: does this
-    // output reach a model. Run as `/owner-profile` or through the workspace
-    // card it lands in the transcript, which a later turn can compose from, so
-    // People are counted and `person <name>` is the way through. Run at a shell
-    // it goes to his terminal and nowhere else, so withholding his own list
-    // would be friction with nothing gained, it is his file.
-    //
-    // One implementation, one predicate, and the predicate is a fact the caller
-    // genuinely knows about itself rather than a guess. The default is the safe
-    // answer (see OwnerProfileCommandOptions), so a call site that never thought
-    // about it counts rather than lists.
-    if (outputEntersModelContext && section.heading.trim().toLowerCase() === PEOPLE_SECTION) {
-      const count = section.prose.length + section.fields.length;
-      lines.push(`    ${count} ${count === 1 ? 'person' : 'people'} recorded; not listed here.`);
+    if (isWithheldProfileSection(section)) {
+      lines.push(`    ${section.count} ${section.count === 1 ? 'person' : 'people'} recorded; not listed here.`);
       lines.push('    Use `owner-profile person <name>` to see one.');
       continue;
     }
@@ -145,7 +148,7 @@ async function handleRead(
       lines.push(`    ${line.text}${suffix}`);
     }
   }
-  return { output: jsonOrText(runtime, response, lines.join('\n')), exitCode: 0 };
+  return { output: jsonOrText(runtime, shown, lines.join('\n')), exitCode: 0 };
 }
 
 async function handleProvenance(
@@ -246,7 +249,7 @@ async function handleSet(runtime: CliCommandRuntime, invoke: ProfileGatewayInvok
   const value = parsed.positionals.slice(1).join(' ').trim();
   if (!fieldId || !value) return usageFailure(runtime, SET_USAGE);
   if (!parsed.yes) {
-    return { output: `Refusing to write ${fieldId} without --yes.`, exitCode: 2 };
+    return confirmationRequired(runtime, `Refusing to write ${fieldId} without --yes.`);
   }
   const said = operatorFlagValue(parsed, 'said') ?? CLI_EDIT_SAID;
   const result = await invoke(PROFILE_METHOD_IDS.set, {
@@ -275,7 +278,7 @@ async function handleNote(runtime: CliCommandRuntime, invoke: ProfileGatewayInvo
   const section = operatorFlagValue(parsed, 'section');
   const text = operatorFlagValue(parsed, 'text');
   if (!section || !text) return usageFailure(runtime, NOTE_USAGE);
-  if (!parsed.yes) return { output: `Refusing to add a line to ${section} without --yes.`, exitCode: 2 };
+  if (!parsed.yes) return confirmationRequired(runtime, `Refusing to add a line to ${section} without --yes.`);
   const result = await invoke(PROFILE_METHOD_IDS.append, {
     section,
     text,
@@ -298,7 +301,7 @@ async function handleUndo(runtime: CliCommandRuntime, invoke: ProfileGatewayInvo
   const parsed = parseOperatorCommandArgs(args);
   const fieldId = parsed.positionals[0];
   if (!fieldId) return usageFailure(runtime, UNDO_USAGE);
-  if (!parsed.yes) return { output: `Refusing to undo ${fieldId} without --yes.`, exitCode: 2 };
+  if (!parsed.yes) return confirmationRequired(runtime, `Refusing to undo ${fieldId} without --yes.`);
   const result = await invoke(PROFILE_METHOD_IDS.undo, { fieldId, authority: 'owner-direct' });
   if (!result.ok) return { output: jsonOrText(runtime, result, result.error ?? 'Profile undo failed.'), exitCode: 1 };
   const response = narrowProfileWrite(result.data);
@@ -325,7 +328,7 @@ async function handleForget(runtime: CliCommandRuntime, invoke: ProfileGatewayIn
   if (!fieldId && !(section && text)) return usageFailure(runtime, FORGET_USAGE);
   const target = fieldId ?? `the line "${String(text)}" under ${String(section)}`;
   if (!parsed.yes) {
-    return { output: `Refusing to forget ${target} without --yes.`, exitCode: 2 };
+    return confirmationRequired(runtime, `Refusing to forget ${target} without --yes.`);
   }
   // Two plain literals, not one spread. A field written inline in a spread
   // literal is still checked; one carried in by the spread source's type is

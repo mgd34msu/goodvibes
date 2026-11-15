@@ -54,7 +54,11 @@ export interface CliAuthStatus {
 export interface CliDoctorFinding {
   readonly id: string;
   readonly area: 'auth' | 'onboarding' | 'runtime' | 'security' | 'secrets';
-  readonly severity: 'warning' | 'risk';
+  /**
+   * `risk` must be fixed and fails `doctor`; `warning` is a note on a usable
+   * install; `note` states how the installation is arranged and asks for nothing.
+   */
+  readonly severity: 'note' | 'warning' | 'risk';
   readonly summary: string;
   readonly cause: string;
   readonly impact: string;
@@ -246,15 +250,14 @@ export function buildCliDoctorFindings(options: CliStatusOptions): readonly CliD
   }
 
   if (options.service) {
-    // Advisories describe the arrangement the operator chose, so they are
-    // reported at risk severity, printed, never silent, and never a release
-    // defect. See doctorRiskAdvisoryOnlyCount in verification/live-verifier.ts.
+    // Advisories describe the arrangement the operator chose: printed under
+    // Notes, never silent, and never a reason for doctor to fail.
     for (const advisory of options.service.advisories) {
       if (findings.some((finding) => finding.summary === advisory)) continue;
       findings.push({
         id: `runtime-posture-${findingSlug(advisory)}`,
         area: 'runtime',
-        severity: 'risk',
+        severity: 'note',
         summary: advisory,
         cause: 'The connected-host inspection found a deliberate arrangement worth stating.',
         impact: 'None on its own; it describes how this installation is set up.',
@@ -369,9 +372,8 @@ export function buildCliStatusSnapshot(options: CliStatusOptions): CliStatusSnap
   };
 }
 
-export function renderCliStatus(options: CliStatusOptions): string {
+export function renderCliStatus(options: CliStatusOptions, snapshot: CliStatusSnapshot = buildCliStatusSnapshot(options)): string {
   const config = options.configManager;
-  const snapshot = buildCliStatusSnapshot(options);
   const marker = options.onboardingMarkers?.effective;
   const findings = snapshot.findings;
   const externalRuntime = snapshot.externalRuntime;
@@ -451,15 +453,14 @@ export function renderCliStatus(options: CliStatusOptions): string {
       '',
       'Readiness Checks:',
       `  isolated Agent Knowledge route: ${!externalRuntime || externalRuntime.agentKnowledge.probed === false ? 'not checked' : externalRuntime.agentKnowledge.ready ? 'ready' : 'not ready'}`,
-      '  companion chat route: not checked',
-      '  approvals and automation status routes: not checked',
-      '  explicit build delegation route: not checked',
     );
+    const problems = findings.filter((finding) => finding.severity !== 'note');
+    const notes = findings.filter((finding) => finding.severity === 'note');
     lines.push('', 'Warnings');
-    if (findings.length === 0) {
+    if (problems.length === 0) {
       lines.push('  none');
     } else {
-      for (const finding of findings) {
+      for (const finding of problems) {
         lines.push(
           `  - [${finding.severity}:${finding.area}:${finding.id}] ${finding.summary}`,
           `    cause: ${finding.cause}`,
@@ -467,6 +468,10 @@ export function renderCliStatus(options: CliStatusOptions): string {
           `    action: ${finding.action}`,
         );
       }
+    }
+    if (notes.length > 0) {
+      lines.push('', 'Notes');
+      for (const finding of notes) lines.push(`  - [note:${finding.area}:${finding.id}] ${finding.summary}`, `    ${finding.impact}`);
     }
   }
 

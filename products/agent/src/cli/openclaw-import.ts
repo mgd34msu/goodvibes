@@ -15,7 +15,7 @@ import { parseMarkdownFrontmatter, stripMarkdownFrontmatter } from '../agent/mar
  *     memory.md | memory/*.md                     memory markdown            -> memory records
  *     skills/<name>.md | skills/<name>/SKILL.md   skill definitions          -> skills
  *     allowed-tools.json | allowlist.json |       tool allowlist config      -> permission settings
- *       tools.json | permissions.json
+ *       permissions.json                           (applied only with --apply-permissions)
  *
  * Frontmatter conventions honored (all optional):
  *   persona: name, description (or summary/title)
@@ -177,6 +177,8 @@ function collectPersonas(root: string, skipped: SkippedEntry[]): PlannedPersona[
     if (!entry.toLowerCase().endsWith('.md')) continue;
     const full = join(root, entry);
     if (isDirectory(full)) continue;
+    // memory.md is read by the memory pass.
+    if (entry.toLowerCase() === 'memory.md') continue;
     if (INSTRUCTION_FILENAMES.has(entry.toLowerCase())) {
       const persona = personaFromFile(full, skipped);
       if (persona) personas.push(persona);

@@ -13,7 +13,7 @@ const roots: string[] = [];
 
 // The `memory` CLI command now probes for a reachable connected daemon (the
 // default controlPlane.host:port) before every wire-eligible subcommand and
-// routes over the wire when one answers (see memory-command-wire.ts). These
+// routes over the wire when one answers (see memory-command-access.ts). These
 // fixtures deliberately have no daemon and exercise the local-direct fallback,
 // so `fetch` is stubbed to fail fast for the whole file. This must NEVER dial a
 // real daemon that happens to be running on the developer's machine at the

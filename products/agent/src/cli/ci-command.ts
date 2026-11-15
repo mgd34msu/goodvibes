@@ -36,6 +36,14 @@ function usageFailure(runtime: CliCommandRuntime, error: string): CliCommandOutp
   };
 }
 
+/** A refusal for a missing --yes: JSON under --json, the sentence otherwise. */
+function confirmationRequired(runtime: CliCommandRuntime, error: string): CliCommandOutput {
+  return {
+    output: jsonOrText(runtime, { ok: false, kind: 'confirmation_required', error, next: ['repeat the command with --yes'] }, error),
+    exitCode: 2,
+  };
+}
+
 function renderCiJobs(report: CiReport): readonly string[] {
   if (report.jobs.length === 0) return ['  jobs (none reported)'];
   return [
@@ -121,7 +129,7 @@ async function handleCiWatchesCreate(runtime: CliCommandRuntime, args: readonly 
     return usageFailure(runtime, error instanceof Error ? error.message : String(error));
   }
   if (!parsed.yes) {
-    return { output: `Refusing to create a CI watch for ${repo} without --yes.`, exitCode: 2 };
+    return confirmationRequired(runtime, `Refusing to create a CI watch for ${repo} without --yes.`);
   }
   const payload: OperatorMethodInput<'ci.watches.create'> = {
     repo,
@@ -146,7 +154,7 @@ async function handleCiWatchesDelete(runtime: CliCommandRuntime, args: readonly 
   const watchId = parsed.positionals[0];
   if (!watchId) return usageFailure(runtime, CI_WATCHES_DELETE_USAGE);
   if (!parsed.yes) {
-    return { output: `Refusing to delete CI watch ${watchId} without --yes.`, exitCode: 2 };
+    return confirmationRequired(runtime, `Refusing to delete CI watch ${watchId} without --yes.`);
   }
   const payload: OperatorMethodInput<'ci.watches.delete'> = { watchId };
   const connection = resolveAgentConnectedHostConnection(runtime.configManager, runtime.homeDirectory);
@@ -166,7 +174,7 @@ async function handleCiWatchesRun(runtime: CliCommandRuntime, args: readonly str
   if (!watchId) return usageFailure(runtime, CI_WATCHES_RUN_USAGE);
   // A run sends a notification and may start a fix session, like create and delete it changes state outside this process.
   if (!parsed.yes) {
-    return { output: `Refusing to run CI watch ${watchId} without --yes: a run sends a notification and may start a fix session.`, exitCode: 2 };
+    return confirmationRequired(runtime, `Refusing to run CI watch ${watchId} without --yes: a run sends a notification and may start a fix session.`);
   }
   const payload: OperatorMethodInput<'ci.watches.run'> = { watchId };
   const connection = resolveAgentConnectedHostConnection(runtime.configManager, runtime.homeDirectory);

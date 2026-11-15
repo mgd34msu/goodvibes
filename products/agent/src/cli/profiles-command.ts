@@ -11,11 +11,15 @@ import {
   listAgentRuntimeProfileTemplates,
   readAgentRuntimeProfileSelection,
   resolveAgentRuntimeProfileHome,
+  AgentProfileUsageError,
   setAgentRuntimeProfileSelection,
   type AgentRuntimeProfileTemplateId,
   type AgentRuntimeProfileCommandResult,
   type AgentRuntimeProfileInfo,
 } from '../agent/runtime-profile.ts';
+import { existsSync } from 'node:fs';
+import { claimSurfaceHome, SurfaceHomeInUseError } from '@goodvibes-jev/engine/platform/platform/runtime/bootstrap';
+import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import { formatAgentRecordSource } from '../agent/record-labels.ts';
 import type { CliCommandOutput, GoodVibesCliParseResult } from './types.ts';
 import { appendTemporalLabel } from './temporal-label.ts';
@@ -468,7 +472,7 @@ export async function handleProfilesCommand(runtime: ProfilesCommandRuntime): Pr
           exitCode: 2,
         };
       }
-      const profile = resolveAgentRuntimeProfileHome(runtime.homeDirectory, name);
+      const profile = resolveAgentRuntimeProfileHome(runtime.homeDirectory, name, { mustExist: true });
       const info = listAgentRuntimeProfiles(runtime.homeDirectory).find((entry) => entry.id === profile.id) ?? { ...profile, createdAt: null };
       const result: AgentRuntimeProfileCommandResult = {
         ok: true,
@@ -603,7 +607,29 @@ export async function handleProfilesCommand(runtime: ProfilesCommandRuntime): Pr
         };
       }
       const resolution = resolveAgentRuntimeProfileHome(runtime.homeDirectory, name);
-      const deleted = deleteAgentRuntimeProfile(runtime.homeDirectory, name);
+      // An Agent running on this profile holds its home as the single writer;
+      // deleting the home under it would destroy the sessions it is writing.
+      let claim: { release(): void } | null = null;
+      try {
+        if (existsSync(resolution.homeDirectory)) {
+          claim = claimSurfaceHome({ homeDirectory: resolution.homeDirectory, surfaceRoot: GOODVIBES_AGENT_SURFACE_ROOT });
+        }
+      } catch (error) {
+        if (!(error instanceof SurfaceHomeInUseError)) throw error;
+        const result: AgentRuntimeProfileCommandResult = {
+          ok: false,
+          kind: 'agent.profiles.error',
+          error: `Agent profile ${resolution.id} is in use: ${error.message} Close that Agent, then delete the profile.`,
+        };
+        return { output: renderProfilesOutput(result, runtime.cli.flags.outputFormat), exitCode: 1 };
+      }
+      let deleted: boolean;
+      try {
+        deleted = deleteAgentRuntimeProfile(runtime.homeDirectory, name);
+      } finally {
+        // The claim file went with the home; releasing is only for a delete that failed part way.
+        try { claim?.release(); } catch { /* the home is gone */ }
+      }
       const result: AgentRuntimeProfileCommandResult = deleted
         ? {
           ok: true,
@@ -638,7 +664,9 @@ export async function handleProfilesCommand(runtime: ProfilesCommandRuntime): Pr
     };
     return {
       output: renderProfilesOutput(result, runtime.cli.flags.outputFormat),
-      exitCode: 2,
+      // A malformed name is a usage error; anything else (a missing profile, a
+      // full disk, an unreadable file) is a failure of the request.
+      exitCode: error instanceof AgentProfileUsageError ? 2 : 1,
     };
   }
 }

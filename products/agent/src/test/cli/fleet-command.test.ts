@@ -47,29 +47,15 @@ describe('fleet CLI command', () => {
     expect(result.output).toContain('Usage: goodvibes-agent fleet attempts');
   });
 
-  test('attempts list reports no held groups on a fresh engine', async () => {
-    const result = await handleFleetCommand(runtime(['attempts', 'list']));
-    expect(result.exitCode).toBe(0);
-    expect(result.output).toContain('No groups are currently held for a winner pick.');
-  }, 15000);
-
-  test('attempts (bare) defaults to list', async () => {
-    const result = await handleFleetCommand(runtime(['attempts']));
-    expect(result.exitCode).toBe(0);
-    expect(result.output).toContain('No groups are currently held for a winner pick.');
-  }, 15000);
-
-  test('attempts list --json reports an empty groups array', async () => {
+  test('attempts list asks the connected host and, with none to ask, says so as JSON under --json', async () => {
     const rt = runtime(['attempts', 'list']);
-    const result = await handleFleetCommand({
-      ...rt,
-      cli: parseGoodVibesCli(['fleet', 'attempts', 'list', '--json']),
-    });
-    expect(result.exitCode).toBe(0);
-    const payload = JSON.parse(result.output) as { readonly ok?: unknown; readonly groups?: unknown };
-    expect(payload.ok).toBe(true);
-    expect(payload.groups).toEqual([]);
-  }, 15000);
+    const result = await handleFleetCommand({ ...rt, cli: parseGoodVibesCli(['fleet', 'attempts', 'list', '--json']) });
+    expect(result.exitCode).toBe(1);
+    const payload = JSON.parse(result.output) as { readonly ok?: unknown; readonly kind?: unknown; readonly next?: unknown };
+    expect(payload.ok).toBe(false);
+    expect(payload.kind).toBe('connected_host_unavailable');
+    expect(Array.isArray(payload.next)).toBe(true);
+  });
 
   test('attempts pick requires both a groupId and a winnerItemId', async () => {
     const result = await handleFleetCommand(runtime(['attempts', 'pick', 'group-1']));
@@ -83,30 +69,11 @@ describe('fleet CLI command', () => {
     expect(result.output).toContain('without --yes');
   });
 
-  test('attempts pick surfaces an honest error for an unknown group', async () => {
-    const rt = runtime(['attempts', 'pick', 'missing-contract:group-1', 'missing-contract:item-1', '--yes']);
-    const result = await handleFleetCommand(rt);
-    expect(result.exitCode).toBe(1);
-    expect(result.output).toBe("contract missing-contract is not running; only a running contract's attempts and conflicts can be acted on");
-    expect(result.output).not.toContain('Picked winner');
-  }, 15000);
-
   test('attempts judge requires a groupId', async () => {
     const result = await handleFleetCommand(runtime(['attempts', 'judge']));
     expect(result.exitCode).toBe(2);
     expect(result.output).toContain('Usage: goodvibes-agent fleet attempts judge');
   });
-
-  // The composition root now always wires the provider-backed attempt judge
-  // (mirroring the platform's runtime services), so "no judge is configured" can
-  // no longer occur, the honest refusal for this call is the unknown group.
-  test('attempts judge refuses an unknown group honestly', async () => {
-    const rt = runtime(['attempts', 'judge', 'missing-contract:group-1']);
-    const result = await handleFleetCommand(rt);
-    expect(result.exitCode).toBe(1);
-    expect(result.output).toBe("contract missing-contract is not running; only a running contract's attempts and conflicts can be acted on");
-    expect(result.output).not.toContain('Judge proposal');
-  }, 15000);
 
   describe('success output', () => {
     const usage = {

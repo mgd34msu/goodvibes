@@ -8,7 +8,6 @@ import {
   classifyKnowledgeError,
   getAgentKnowledgeJson,
   resolveConnectedHostConnection,
-  validateAgentKnowledgeData,
   type AgentKnowledgeFailure,
   type AgentKnowledgeConnectionRuntime,
   type AgentKnowledgeRequestOptions,
@@ -109,15 +108,9 @@ async function classifyToolKnowledgeError(
   return toolFailure(formatKnowledgeFailure(await classifyKnowledgeError(error, connection, method.route, options)));
 }
 
-function validatedToolOutput<TData>(
-  data: TData,
-  connection: ReturnType<typeof resolveConnectedHostConnection>,
-  method: ConnectedHostCallMethod,
-  format: (validatedData: TData) => string,
-): { readonly success: true; readonly output: string } | { readonly success: false; readonly error: string } {
-  const validated = validateAgentKnowledgeData(data, connection, method);
-  if (!validated.ok) return toolFailure(formatKnowledgeFailure(validated));
-  return toolOutput(format(validated.data));
+// The routes are the Agent's own knowledge space, so an answer is shown as the host gave it.
+function formattedToolOutput<TData>(data: TData, format: (data: TData) => string): { readonly success: true; readonly output: string } {
+  return toolOutput(format(data));
 }
 
 interface AgentKnowledgeCapture {
@@ -232,7 +225,7 @@ export function createAgentKnowledgeTool(
             if (args.action === 'status') {
               method = AGENT_KNOWLEDGE_METHODS.status;
               const data = await platformClient.knowledge.status();
-              return validatedToolOutput(data, connection, method, formatStatus);
+              return formattedToolOutput(data, formatStatus);
             }
             if (args.action === 'ask') {
               method = AGENT_KNOWLEDGE_METHODS.ask;
@@ -246,14 +239,14 @@ export function createAgentKnowledgeTool(
                 includeConfidence: true,
                 includeLinkedObjects: true,
               });
-              return validatedToolOutput(data, connection, method, (validatedData) => formatAsk(validatedData, query));
+              return formattedToolOutput(data, (validatedData) => formatAsk(validatedData, query));
             }
             if (args.action === 'search') {
               method = AGENT_KNOWLEDGE_METHODS.search;
               const query = readString(args.query);
               if (!query) return toolFailure('query is required for Agent Knowledge search.');
               const data = await platformClient.knowledge.search({ query, limit: readLimit(args.limit, 10) });
-              return validatedToolOutput(data, connection, method, (validatedData) => labelSearchCut(formatSearch(validatedData, query), validatedData));
+              return formattedToolOutput(data, (validatedData) => labelSearchCut(formatSearch(validatedData, query), validatedData));
             }
             if (args.action === 'sources' || args.action === 'nodes' || args.action === 'issues') {
               const kind = args.action;
@@ -264,7 +257,7 @@ export function createAgentKnowledgeTool(
                   ? AGENT_KNOWLEDGE_METHODS.nodesList
                   : AGENT_KNOWLEDGE_METHODS.issuesList;
               const data = await getAgentKnowledgeJson(connection, method.route, { limit }, restrictions);
-              return validatedToolOutput(data, connection, method, (validatedData) => formatEntityList(validatedData, kind, limit).replaceAll('--limit', 'limit'));
+              return formattedToolOutput(data, (validatedData) => formatEntityList(validatedData, kind, limit).replaceAll('--limit', 'limit'));
             }
             if (args.action === 'item') {
               method = AGENT_KNOWLEDGE_METHODS.itemGet;
@@ -272,7 +265,7 @@ export function createAgentKnowledgeTool(
               if (!id) return toolFailure('id is required for Agent Knowledge item lookup.');
               const route = `/api/goodvibes-agent/knowledge/items/${encodeURIComponent(id)}`;
               const data = await getAgentKnowledgeJson(connection, route, {}, restrictions);
-              return validatedToolOutput(data, connection, { ...method, route }, (validatedData) => formatItem(validatedData, id));
+              return formattedToolOutput(data, (validatedData) => formatItem(validatedData, id));
             }
             if (args.action === 'map') {
               method = AGENT_KNOWLEDGE_METHODS.map;
@@ -280,12 +273,12 @@ export function createAgentKnowledgeTool(
                 limit: readLimit(args.limit, 50, 500),
                 query: readString(args.query),
               }, restrictions);
-              return validatedToolOutput(data, connection, method, formatMap);
+              return formattedToolOutput(data, formatMap);
             }
             if (args.action === 'connectors') {
               method = AGENT_KNOWLEDGE_METHODS.connectorsList;
               const data = await getAgentKnowledgeJson(connection, method.route, {}, restrictions);
-              return validatedToolOutput(data, connection, method, formatConnectors);
+              return formattedToolOutput(data, formatConnectors);
             }
             if (args.action === 'connector' || args.action === 'connector_doctor') {
               method = args.action === 'connector'
@@ -296,7 +289,7 @@ export function createAgentKnowledgeTool(
               const suffix = args.action === 'connector_doctor' ? '/doctor' : '';
               const route = `/api/goodvibes-agent/knowledge/connectors/${encodeURIComponent(connectorId)}${suffix}`;
               const data = await getAgentKnowledgeJson(connection, route, {}, restrictions);
-              return validatedToolOutput(data, connection, { ...method, route }, (validatedData) => (
+              return formattedToolOutput(data, (validatedData) => (
                 args.action === 'connector'
                   ? formatConnector(validatedData, connectorId)
                   : formatConnectorDoctor(validatedData, connectorId)

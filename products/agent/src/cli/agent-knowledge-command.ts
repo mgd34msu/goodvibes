@@ -32,20 +32,18 @@ import {
   formatStatus,
 } from './agent-knowledge-format.ts';
 import { AGENT_KNOWLEDGE_METHODS, DELEGATION_METHOD } from './agent-knowledge-methods.ts';
+import { inspectCliExternalRuntime } from './external-runtime.ts';
 import {
   createAgentPlatform,
-  fetchConnectedHostStatus,
   findDisallowedKnowledgeScopeFlag,
   formatScopeFlagRejection,
   getAgentKnowledgeJson,
   isRecord,
   postAgentKnowledgeJson,
   readPackageMetadata,
-  readString,
-  resolveConnectedHostConnection,
   runKnowledgeCall,
 } from './agent-knowledge-runtime.ts';
-import { formatJsonOrText, yesNo } from './management.ts';
+import { formatJsonOrText, yesNo } from '@goodvibes-jev/engine/terminal-shell/cli-output';
 
 interface DelegationResult {
   readonly sessionId: string;
@@ -538,42 +536,53 @@ export async function handleAgentKnowledgeShortcutCommand(
   });
 }
 
+/**
+ * Whether the connected host is reachable and serves the Agent Knowledge routes:
+ * the same inspection `status` and `doctor` print, with its deadline, so the
+ * two never disagree about one host.
+ */
 export async function handleCompatCommand(runtime: CliCommandRuntime): Promise<CliCommandOutput> {
-  const connection = resolveConnectedHostConnection(runtime);
   const metadata = readPackageMetadata();
-  const connectedHost = await fetchConnectedHostStatus(connection);
-  const knowledgeRoute = await runKnowledgeCall(runtime, AGENT_KNOWLEDGE_METHODS.status, async (routeConnection) => (
-    await createAgentPlatform(routeConnection).knowledge.status()
-  ));
-  const knowledgeRouteReady = knowledgeRoute.ok;
-  const hostCompatible = connectedHost.ok && knowledgeRouteReady;
+  const inspected = await inspectCliExternalRuntime({ configManager: runtime.configManager, homeDirectory: runtime.homeDirectory });
+  const knowledgeRouteReady = inspected.agentKnowledge.ready;
+  const hostCompatible = inspected.reachable && inspected.compatible;
+  const next = !inspected.reachable
+    ? 'start the GoodVibes daemon (goodvibes-daemon) or check controlPlane.host and controlPlane.port.'
+    : !inspected.operatorToken.present
+      ? 'pair this Agent with the host (goodvibes-agent setup pair --apply).'
+      : hostCompatible
+        ? null
+        : 'update the connected GoodVibes host so its public Agent routes are compatible.';
   const value = {
     ok: hostCompatible && knowledgeRouteReady,
     packageVersion: metadata.version,
     connectedHost: {
-      baseUrl: connection.baseUrl,
-      status: connectedHost.status,
-      reachable: connectedHost.ok,
+      baseUrl: inspected.baseUrl,
+      status: inspected.statusCode ?? 0,
+      reachable: inspected.reachable,
       compatible: hostCompatible,
     },
     auth: {
-      tokenPresent: Boolean(connection.token),
-      tokenPath: connection.tokenPath,
+      tokenPresent: inspected.operatorToken.present,
+      tokenPath: inspected.operatorToken.path,
     },
     agentKnowledge: {
-      route: '/api/goodvibes-agent/knowledge/status',
+      route: inspected.agentKnowledge.route,
       ready: knowledgeRouteReady,
-      kind: knowledgeRoute.ok ? 'ok' : knowledgeRoute.kind,
+      kind: inspected.agentKnowledge.kind,
     },
+    ...(inspected.error ? { error: inspected.error } : {}),
+    ...(next ? { next: [next] } : {}),
   };
   const text = [
     'GoodVibes Agent compatibility',
     `  package ${metadata.version}`,
-    `  connected host ${connection.baseUrl} (${connectedHost.ok ? 'reachable' : 'unreachable'})`,
+    `  connected host ${inspected.baseUrl} (${inspected.reachable ? 'reachable' : 'unreachable'})`,
     `  host compatible ${yesNo(hostCompatible)}`,
-    `  operator token ${connection.token ? 'present' : 'missing'} (${connection.tokenPath})`,
-    `  Agent Knowledge route ${knowledgeRouteReady ? 'ready' : `not ready (${knowledgeRoute.ok ? 'unknown' : formatAgentKnowledgeFailureKind(knowledgeRoute.kind)})`}`,
-    ...(hostCompatible ? [] : ['  next update the connected GoodVibes host so its public Agent routes are compatible.']),
+    `  operator token ${inspected.operatorToken.present ? 'present' : 'missing'} (${inspected.operatorToken.path})`,
+    `  Agent Knowledge route ${knowledgeRouteReady ? 'ready' : `not ready (${formatAgentKnowledgeFailureKind(inspected.agentKnowledge.kind)})`}`,
+    ...(inspected.error ? [`  error ${inspected.error}`] : []),
+    ...(next ? [`  next ${next}`] : []),
   ].join('\n');
   return {
     output: runtime.cli.flags.outputFormat === 'json' ? JSON.stringify(value, null, 2) : text,
@@ -623,7 +632,7 @@ export async function handleDelegateCommand(runtime: CliCommandRuntime): Promise
       },
     });
     return { sessionId, message, task, reviewRequested };
-  }, { scanScope: false });
+  });
   if (!result.ok) {
     const json = runtime.cli.flags.outputFormat === 'json';
     // The session exists on the host even though the task message did not land;

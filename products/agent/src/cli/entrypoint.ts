@@ -54,7 +54,7 @@ import {
   migrateLegacyWorkspaceRegistryIfNeeded,
   resolveCheckpointEligibilitySync,
 } from '../config/workspace-registration.ts';
-import { resolveAgentRuntimeProfileHome, resolveSelectedAgentRuntimeProfileHome } from '../agent/runtime-profile.ts';
+import { AgentProfileUsageError, resolveAgentRuntimeProfileHome, resolveSelectedAgentRuntimeProfileHome } from '../agent/runtime-profile.ts';
 
 function readEnvRuntimeUrl(): { readonly source: string; readonly value: string } | null {
   const runtimeUrl = process.env['GOODVIBES_AGENT_RUNTIME_URL'];
@@ -80,7 +80,7 @@ export function resolveShellEntrypointOwnership(
   } = { useSelectedProfile: true },
 ): ShellEntrypointOwnership {
   const selectedProfile = options.agentProfile
-    ? resolveAgentRuntimeProfileHome(roots.homeDirectory, options.agentProfile)
+    ? resolveAgentRuntimeProfileHome(roots.homeDirectory, options.agentProfile, { mustExist: true })
     : options.useSelectedProfile
       ? resolveSelectedAgentRuntimeProfileHome(roots.homeDirectory)
       : null;
@@ -122,7 +122,8 @@ export async function prepareShellCliRuntime(
     });
   } catch (error) {
     writeFatalLine(error instanceof Error ? error.message : String(error));
-    process.exit(2);
+    // A malformed name is a usage error; a profile that does not exist is a refusal.
+    process.exit(error instanceof AgentProfileUsageError ? 2 : 1);
   }
   const { workingDirectory: bootstrapWorkingDir, homeDirectory: bootstrapHomeDirectory } = ownership;
   configureActivityLogger(join(bootstrapWorkingDir, '.goodvibes', 'logs'));
@@ -276,7 +277,7 @@ export async function prepareShellCliRuntime(
       outputFormat: cli.flags.outputFormat,
     };
     const snapshot = buildCliStatusSnapshot(statusOptions);
-    writeExitingStdoutLine(renderCliStatus(statusOptions));
+    writeExitingStdoutLine(renderCliStatus(statusOptions, snapshot));
     process.exit(cli.command === 'doctor' ? resolveDoctorExitCode(snapshot.findings, cli.commandArgs.includes('--strict')) : 0);
   }
 

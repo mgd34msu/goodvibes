@@ -57,7 +57,12 @@ export interface CliServicePosture {
      */
     readonly connectedHostDialEnabled: boolean;
   };
-  readonly managed: CliExternalHostLifecyclePosture;
+  /**
+   * Not produced: the connected host's lifecycle is not observed from here, and
+   * constant "not running" values sat beside a live `reachable: true`.
+   * Whether the host answers is `endpoints[].reachable`.
+   */
+  readonly managed?: CliExternalHostLifecyclePosture;
   readonly endpoints: readonly CliServiceEndpointPosture[];
   readonly log: CliServiceLogPosture;
   readonly issues: readonly string[];
@@ -97,22 +102,6 @@ function resolveConfiguredLogPath(runtime: CliServiceRuntime): string | undefine
   const trimmed = value.trim();
   if (!trimmed) return undefined;
   return isAbsolute(trimmed) ? trimmed : join(runtime.homeDirectory, trimmed);
-}
-
-function createExternalHostLifecycle(logPath: string | undefined): CliExternalHostLifecyclePosture {
-  return {
-    platform: 'manual',
-    path: 'connected GoodVibes host',
-    installed: false,
-    autostart: false,
-    running: false,
-    ...(logPath ? { logPath } : {}),
-    commandPreview: 'managed outside goodvibes-agent',
-    suggestedCommands: [],
-    lastAction: 'status',
-    pidPath: 'connected GoodVibes host',
-    lastError: null,
-  };
 }
 
 export async function buildCliServicePosture(
@@ -182,7 +171,6 @@ export async function buildCliServicePosture(
   if (!isClassicOperation()) logOwner?.assertCurrent();
   return {
     config,
-    managed: createExternalHostLifecycle(configuredLogPath),
     endpoints,
     log,
     issues,

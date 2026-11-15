@@ -2,10 +2,6 @@ import { commandJsonOrText as jsonOrText } from '@goodvibes-jev/engine/terminal-
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import {
-  MemoryEmbeddingProviderRegistry,
-  MemoryRegistry,
-  MemoryStore,
-  resolveCanonicalMemoryDbPath,
   type MemoryBundle,
   type MemoryClass,
   type MemoryLink,
@@ -21,9 +17,9 @@ import { assertNoSecretLikeMemoryText } from '../agent/memory-safety.ts';
 import { formatAgentRecordReference, formatAgentRecordReviewState } from '../agent/record-labels.ts';
 import type { CliCommandOutput } from './types.ts';
 import type { CliCommandRuntime } from './management.ts';
-// Split out to stay under the architecture line cap; see its file header for the
-// CLI ruling on when a memory subcommand goes over the wire vs local-direct.
-import { tryWireMemoryCommand } from './memory-command-wire.ts';
+// Which store a command uses (the host's over the wire, or this machine's file) is decided once there.
+import { MemoryHostUnavailableError, withMemoryCommandStore, type MemoryCommandStore } from './memory-command-access.ts';
+export { withMemory } from './memory-command-access.ts';
 import { appendTemporalLabel } from './temporal-label.ts';
 
 const VALID_CLASSES: readonly MemoryClass[] = [
@@ -72,12 +68,6 @@ export interface ParsedOptions {
   readonly values: ReadonlyMap<string, string>;
   readonly flags: ReadonlySet<string>;
   readonly positionals: readonly string[];
-}
-
-interface MemoryContext {
-  readonly registry: MemoryRegistry;
-  readonly store: MemoryStore;
-  readonly path: string;
 }
 
 export interface MemoryListData {
@@ -158,14 +148,14 @@ export function csvOption(options: ParsedOptions, name: string): readonly string
 function parseLimit(value: string | undefined, fallback: number): number {
   if (value === undefined) return fallback;
   const parsed = Number.parseInt(value, 10);
-  if (!Number.isInteger(parsed) || parsed < 1) throw new Error('--limit must be a positive integer.');
+  if (!Number.isInteger(parsed) || parsed < 1) throw new MemoryUsageError('--limit must be a positive integer.');
   return Math.min(parsed, 200);
 }
 
 export function parseConfidence(value: string | undefined): number | undefined {
   if (value === undefined) return undefined;
   const parsed = Number.parseInt(value, 10);
-  if (!Number.isInteger(parsed) || parsed < 0 || parsed > 100) throw new Error('--confidence must be an integer from 0 to 100.');
+  if (!Number.isInteger(parsed) || parsed < 0 || parsed > 100) throw new MemoryUsageError('--confidence must be an integer from 0 to 100.');
   return parsed;
 }
 
@@ -186,12 +176,12 @@ function isProvenanceKind(value: string): value is ProvenanceLinkKind {
 }
 
 export function requireClass(value: string | undefined): MemoryClass {
-  if (!value || !isMemoryClass(value)) throw new Error(`Invalid memory class "${value ?? ''}". Valid values ${VALID_CLASSES.join(', ')}`);
+  if (!value || !isMemoryClass(value)) throw new MemoryUsageError(`Invalid memory class "${value ?? ''}". Valid values ${VALID_CLASSES.join(', ')}`);
   return value;
 }
 
 export function requireScope(value: string | undefined): MemoryScope {
-  if (!value || !isMemoryScope(value)) throw new Error(`Invalid memory scope "${value ?? ''}". Valid values ${VALID_SCOPES.join(', ')}`);
+  if (!value || !isMemoryScope(value)) throw new MemoryUsageError(`Invalid memory scope "${value ?? ''}". Valid values ${VALID_SCOPES.join(', ')}`);
   return value;
 }
 
@@ -209,48 +199,21 @@ function timestamp(value: number): string {
   return new Date(value).toISOString().slice(0, 19).replace('T', ' ');
 }
 
-// The CLI no longer opens a private per-surface agent/memory.sqlite. It opens the
-// ONE canonical cross-surface store (~/.goodvibes/shared/memory.sqlite) so a memory
-// added via `goodvibes-agent memory add` is visible to the runtime, the TUI, and the
-// platform, and vice-versa. The old CLI-written store is folded into the canonical store
-// (loss-free, idempotent) by the runtime's foldAgentLegacyMemory at boot, since that
-// fold already sources shellPaths.resolveUserPath('agent', 'memory.sqlite'), the exact
-// path this function used to write to.
-function memoryDbPath(runtime: CliCommandRuntime): string {
-  return resolveCanonicalMemoryDbPath(runtime.homeDirectory);
-}
-
-// Subcommands that only read. They never save: a save is the step that refuses
-// when another process (the daemon) wrote the file in the meantime, and a read
-// that already produced its answer must not be turned into an error by it.
-const READ_ONLY_SUBCOMMANDS: ReadonlySet<string> = new Set([
-  'list', 'ls', 'search', 'find', 'show', 'get', 'queue', 'export', 'handoff-export', 'share',
+// Subcommands that change memory. Only these save a local file, and only these
+// are refused when the configured host is another machine that did not answer.
+const WRITING_SUBCOMMANDS: ReadonlySet<string> = new Set([
+  'add', 'create', 'review', 'stale', 'contradict', 'contradicted', 'promote', 'link',
+  'delete', 'remove', 'rm', 'import', 'handoff-import',
 ]);
 
-function isReadOnlySubcommand(normalized: string, rest: readonly string[]): boolean {
-  if (normalized === 'vector' || normalized === 'vectors') return (rest[0] ?? 'status').toLowerCase() !== 'rebuild';
-  return READ_ONLY_SUBCOMMANDS.has(normalized);
+function isWritingSubcommand(normalized: string, rest: readonly string[]): boolean {
+  if (normalized === 'vector' || normalized === 'vectors') return (rest[0] ?? 'status').toLowerCase() === 'rebuild';
+  return WRITING_SUBCOMMANDS.has(normalized);
 }
 
-export async function withMemory<T>(
-  runtime: CliCommandRuntime,
-  fn: (context: MemoryContext) => Promise<T> | T,
-  options: { readonly save: boolean } = { save: true },
-): Promise<T> {
-  const path = memoryDbPath(runtime);
-  const embeddingRegistry = new MemoryEmbeddingProviderRegistry({ configManager: runtime.configManager });
-  const store = new MemoryStore(path, { embeddingRegistry });
-  await store.init();
-  const registry = new MemoryRegistry(store);
-  try {
-    return await fn({ registry, store, path });
-  } finally {
-    try {
-      if (options.save) await store.save();
-    } finally {
-      store.close();
-    }
-  }
+/** The store line a listing prints: says when a configured host did not answer and this machine's file was read instead. */
+function storeLine(store: MemoryCommandStore): string {
+  return store.hostUnanswered ? `${store.label} (connected host ${store.hostUnanswered} did not answer; this machine's store)` : store.label;
 }
 
 function renderRecordLine(record: MemoryRecord, semanticEntry?: MemorySemanticSearchResult): string {
@@ -335,7 +298,7 @@ export function exportFilterFromOptions(options: ParsedOptions): MemorySearchFil
   const requested = optionValue(options, 'limit');
   if (requested !== undefined) {
     const parsed = Number.parseInt(requested, 10);
-    if (!Number.isInteger(parsed) || parsed < 1) throw new Error('--limit must be a positive integer.');
+    if (!Number.isInteger(parsed) || parsed < 1) throw new MemoryUsageError('--limit must be a positive integer.');
     filter.limit = parsed;
   }
   return filter;
@@ -478,24 +441,31 @@ function renderBundleInspection(path: string, bundle: MemoryBundle): string {
     .join('\n');
 }
 
-function errorOutput(runtime: CliCommandRuntime, error: unknown): CliCommandOutput {
-  const changedOnDisk = error instanceof Error && error.name === 'MemoryStoreChangedOnDiskError';
-  const message = (error instanceof Error ? error.message : String(error)) + (changedOnDisk ? ' Rerun the command.' : '');
-  const exitCode = message.startsWith('Usage:') || message.startsWith('Invalid ') || message.startsWith('--') ? 2 : 1;
-  return failure(runtime, 'agent.memory.error', message, exitCode);
+/** A thrown usage error from the shared option parsers (class, scope, limit, confidence). */
+class MemoryUsageError extends Error {
+  override readonly name = 'MemoryUsageError';
 }
 
-async function handleList(runtime: CliCommandRuntime, context: MemoryContext, args: readonly string[]): Promise<CliCommandOutput> {
+function errorOutput(runtime: CliCommandRuntime, error: unknown): CliCommandOutput {
+  if (error instanceof MemoryHostUnavailableError) return failure(runtime, 'connected_host_unavailable', error.message, 1);
+  // The store refuses to overwrite a file another process (the daemon) saved meanwhile; nothing was written.
+  const changedOnDisk = error instanceof Error && error.name === 'MemoryStoreChangedOnDiskError';
+  const message = (error instanceof Error ? error.message : String(error)) + (changedOnDisk ? ' Nothing was written; rerun the command.' : '');
+  return failure(runtime, changedOnDisk ? 'memory_store_changed' : 'agent.memory.error', message, error instanceof MemoryUsageError ? 2 : 1);
+}
+
+async function handleList(runtime: CliCommandRuntime, store: MemoryCommandStore, args: readonly string[]): Promise<CliCommandOutput> {
   const options = parseOptions(args);
   const positionalClass = options.positionals[0];
   const filter = filterFromOptions(options, 50);
   if (positionalClass !== undefined) filter.cls = requireClass(positionalClass);
-  const records = await context.registry.search(filter);
-  const data: MemoryListData = { path: context.path, records, filter };
-  return success(runtime, 'agent.memory.list', data, renderRecordList('Agent memory', context.path, records));
+  // A listing has no query: a literal read on either store, nothing ranked.
+  const records = await store.access.list(filter);
+  const data: MemoryListData = { path: store.label, records, filter };
+  return success(runtime, 'agent.memory.list', data, renderRecordList('Agent memory', storeLine(store), records));
 }
 
-async function handleSearch(runtime: CliCommandRuntime, context: MemoryContext, args: readonly string[]): Promise<CliCommandOutput> {
+async function handleSearch(runtime: CliCommandRuntime, store: MemoryCommandStore, args: readonly string[]): Promise<CliCommandOutput> {
   const options = parseOptions(args);
   const query = options.positionals.join(' ').trim();
   if (!query)
@@ -509,18 +479,18 @@ async function handleSearch(runtime: CliCommandRuntime, context: MemoryContext, 
   filter.query = query;
   const semantic = hasFlag(options, 'semantic') || hasFlag(options, 'vector');
   if (semantic) filter.semantic = true;
-  const semanticResults = semantic ? await context.registry.searchSemantic(filter) : [];
-  const records = semantic ? semanticResults.map((entry) => entry.record) : await context.registry.search(filter);
-  const data: MemorySearchData = { path: context.path, records, filter, semantic, semanticResults };
+  const semanticResults = semantic ? await store.access.searchSemantic(filter) : [];
+  const records = semantic ? semanticResults.map((entry) => entry.record) : (await store.access.honestSearch(filter)).records;
+  const data: MemorySearchData = { path: store.label, records, filter, semantic, semanticResults };
   return success(
     runtime,
     'agent.memory.search',
     data,
-    renderRecordList(`Agent memory matching "${query}"`, context.path, records, semanticResults),
+    renderRecordList(`Agent memory matching "${query}"`, storeLine(store), records, semanticResults),
   );
 }
 
-async function handleAdd(runtime: CliCommandRuntime, context: MemoryContext, args: readonly string[]): Promise<CliCommandOutput> {
+async function handleAdd(runtime: CliCommandRuntime, store: MemoryCommandStore, args: readonly string[]): Promise<CliCommandOutput> {
   const options = parseOptions(args);
   const [classRaw, ...summaryParts] = options.positionals;
   const cls = requireClass(classRaw);
@@ -544,7 +514,7 @@ async function handleAdd(runtime: CliCommandRuntime, context: MemoryContext, arg
       2,
     );
   }
-  const record = await context.registry.add({
+  const record = await store.access.add({
     scope: optionalScope(optionValue(options, 'scope')) ?? 'project',
     cls,
     summary,
@@ -560,31 +530,27 @@ async function handleAdd(runtime: CliCommandRuntime, context: MemoryContext, arg
   return success(runtime, 'agent.memory.add', record, ['Agent memory added', `  id ${record.id}`].join('\n'));
 }
 
-async function handleShow(runtime: CliCommandRuntime, context: MemoryContext, args: readonly string[]): Promise<CliCommandOutput> {
+async function handleShow(runtime: CliCommandRuntime, store: MemoryCommandStore, args: readonly string[]): Promise<CliCommandOutput> {
   const id = args[0];
   if (!id) return failure(runtime, 'invalid_memory_command', 'Usage: goodvibes-agent memory show <id>', 2);
-  const record = context.registry.get(id);
+  const record = await store.access.get(id);
   if (!record) return failure(runtime, 'memory_not_found', `Memory record not found ${id}`, 1);
-  return success(
-    runtime,
-    'agent.memory.show',
-    { record, links: context.registry.linksFor(id) },
-    renderRecord(record, context.registry.linksFor(id)),
-  );
+  const links = await store.access.linksFor(id);
+  return success(runtime, 'agent.memory.show', { record, links }, renderRecord(record, links));
 }
 
-async function handleQueue(runtime: CliCommandRuntime, context: MemoryContext, args: readonly string[]): Promise<CliCommandOutput> {
+async function handleQueue(runtime: CliCommandRuntime, store: MemoryCommandStore, args: readonly string[]): Promise<CliCommandOutput> {
   const limit = parseLimit(args[0], 10);
-  const records = await context.registry.reviewQueue(limit);
+  const records = await store.access.reviewQueue(limit);
   return success(
     runtime,
     'agent.memory.queue',
-    { path: context.path, records, limit },
-    renderRecordList('Agent memory review queue', context.path, records),
+    { path: store.label, records, limit },
+    renderRecordList('Agent memory review queue', storeLine(store), records),
   );
 }
 
-async function handleReview(runtime: CliCommandRuntime, context: MemoryContext, args: readonly string[]): Promise<CliCommandOutput> {
+async function handleReview(runtime: CliCommandRuntime, store: MemoryCommandStore, args: readonly string[]): Promise<CliCommandOutput> {
   const options = parseOptions(args);
   const [id, stateRaw] = options.positionals;
   if (!id || !stateRaw || !isReviewState(stateRaw)) {
@@ -595,7 +561,7 @@ async function handleReview(runtime: CliCommandRuntime, context: MemoryContext, 
       2,
     );
   }
-  const record = context.registry.review(id, {
+  const record = await store.access.updateReview(id, {
     state: stateRaw,
     confidence: parseConfidence(optionValue(options, 'confidence')),
     reviewedBy: optionValue(options, 'by') ?? 'operator',
@@ -617,7 +583,7 @@ async function handleReview(runtime: CliCommandRuntime, context: MemoryContext, 
 
 async function handleReviewShortcut(
   runtime: CliCommandRuntime,
-  context: MemoryContext,
+  store: MemoryCommandStore,
   state: Extract<MemoryReviewState, 'stale' | 'contradicted'>,
   args: readonly string[],
 ): Promise<CliCommandOutput> {
@@ -630,7 +596,7 @@ async function handleReviewShortcut(
       2,
     );
   }
-  const record = context.registry.review(id, {
+  const record = await store.access.updateReview(id, {
     state,
     reviewedBy: 'operator',
     staleReason: reasonParts.join(' '),
@@ -639,14 +605,14 @@ async function handleReviewShortcut(
   return success(runtime, `agent.memory.${state}`, record, [`Agent memory marked ${state}`, `  id ${record.id}`].join('\n'));
 }
 
-async function handlePromote(runtime: CliCommandRuntime, context: MemoryContext, args: readonly string[]): Promise<CliCommandOutput> {
+async function handlePromote(runtime: CliCommandRuntime, store: MemoryCommandStore, args: readonly string[]): Promise<CliCommandOutput> {
   const options = parseOptions(args);
   const [id, scopeRaw] = options.positionals;
   if (!id || !scopeRaw)
     return failure(runtime, 'invalid_memory_command', 'Usage: goodvibes-agent memory promote <id> <session|project|team> --yes', 2);
   if (!hasFlag(options, 'yes'))
     return failure(runtime, 'confirmation_required', `Refusing to promote memory record ${id} without --yes.`, 2);
-  const record = context.registry.update(id, { scope: requireScope(scopeRaw) });
+  const record = await store.access.update(id, { scope: requireScope(scopeRaw) });
   if (!record) return failure(runtime, 'memory_not_found', `Memory record not found ${id}`, 1);
   return success(
     runtime,
@@ -656,14 +622,14 @@ async function handlePromote(runtime: CliCommandRuntime, context: MemoryContext,
   );
 }
 
-async function handleLink(runtime: CliCommandRuntime, context: MemoryContext, args: readonly string[]): Promise<CliCommandOutput> {
+async function handleLink(runtime: CliCommandRuntime, store: MemoryCommandStore, args: readonly string[]): Promise<CliCommandOutput> {
   const options = parseOptions(args);
   const [fromId, toId, relation] = options.positionals;
   if (!fromId || !toId || !relation)
     return failure(runtime, 'invalid_memory_command', 'Usage: goodvibes-agent memory link <fromId> <toId> <relation> --yes', 2);
   if (!hasFlag(options, 'yes'))
     return failure(runtime, 'confirmation_required', `Refusing to link memory records ${fromId} and ${toId} without --yes.`, 2);
-  const link = await context.registry.link(fromId, toId, relation);
+  const link = await store.access.link(fromId, toId, relation);
   if (!link) return failure(runtime, 'memory_link_failed', 'Memory link failed; check that both records exist.', 1);
   return success(
     runtime,
@@ -673,17 +639,17 @@ async function handleLink(runtime: CliCommandRuntime, context: MemoryContext, ar
   );
 }
 
-async function handleDelete(runtime: CliCommandRuntime, context: MemoryContext, args: readonly string[]): Promise<CliCommandOutput> {
+async function handleDelete(runtime: CliCommandRuntime, store: MemoryCommandStore, args: readonly string[]): Promise<CliCommandOutput> {
   const options = parseOptions(args);
   const id = options.positionals[0];
   if (!id) return failure(runtime, 'invalid_memory_command', 'Usage: goodvibes-agent memory delete <id> --yes', 2);
   if (!hasFlag(options, 'yes'))
     return failure(runtime, 'confirmation_required', `Refusing to delete memory record ${id} without --yes.`, 2);
-  if (!context.registry.delete(id)) return failure(runtime, 'memory_not_found', `Memory record not found ${id}`, 1);
+  if (!(await store.access.delete(id))) return failure(runtime, 'memory_not_found', `Memory record not found ${id}`, 1);
   return success(runtime, 'agent.memory.delete', { id }, [`Agent memory deleted: ${id}`, `  id ${id}`].join('\n'));
 }
 
-async function handleExport(runtime: CliCommandRuntime, context: MemoryContext, args: readonly string[]): Promise<CliCommandOutput> {
+async function handleExport(runtime: CliCommandRuntime, store: MemoryCommandStore, args: readonly string[]): Promise<CliCommandOutput> {
   const options = parseOptions(args);
   const pathArg = options.positionals[0];
   if (!pathArg)
@@ -697,7 +663,7 @@ async function handleExport(runtime: CliCommandRuntime, context: MemoryContext, 
     return failure(runtime, 'confirmation_required', `Refusing to export Agent memory bundle to ${pathArg} without --yes.`, 2);
   const filter = exportFilterFromOptions(options);
   const path = resolvePath(runtime, pathArg);
-  const bundle = context.registry.exportBundle(filter);
+  const bundle = await store.access.exportBundle(filter);
   writeBundle(path, bundle);
   return success(
     runtime,
@@ -707,7 +673,7 @@ async function handleExport(runtime: CliCommandRuntime, context: MemoryContext, 
   );
 }
 
-async function handleImport(runtime: CliCommandRuntime, context: MemoryContext, args: readonly string[]): Promise<CliCommandOutput> {
+async function handleImport(runtime: CliCommandRuntime, store: MemoryCommandStore, args: readonly string[]): Promise<CliCommandOutput> {
   const options = parseOptions(args);
   const pathArg = options.positionals[0];
   if (!pathArg) return failure(runtime, 'invalid_memory_command', 'Usage: goodvibes-agent memory import <path> --yes', 2);
@@ -715,7 +681,7 @@ async function handleImport(runtime: CliCommandRuntime, context: MemoryContext, 
     return failure(runtime, 'confirmation_required', `Refusing to import Agent memory bundle from ${pathArg} without --yes.`, 2);
   const path = resolvePath(runtime, pathArg);
   const bundle = readBundle(path);
-  const result = await context.registry.importBundle(bundle);
+  const result = await store.access.importBundle(bundle);
   return success(
     runtime,
     'agent.memory.import',
@@ -737,10 +703,10 @@ async function handleInspect(runtime: CliCommandRuntime, args: readonly string[]
   return success(runtime, 'agent.memory.handoffInspect', { path, bundle }, renderBundleInspection(path, bundle));
 }
 
-async function handleVector(runtime: CliCommandRuntime, context: MemoryContext, args: readonly string[]): Promise<CliCommandOutput> {
+async function handleVector(runtime: CliCommandRuntime, store: MemoryCommandStore, args: readonly string[]): Promise<CliCommandOutput> {
   const sub = (args[0] ?? 'status').toLowerCase();
   if (sub === 'status') {
-    const stats = context.registry.vectorStats();
+    const stats = await store.access.vectorStats();
     return success(
       runtime,
       'agent.memory.vector.status',
@@ -758,7 +724,7 @@ async function handleVector(runtime: CliCommandRuntime, context: MemoryContext, 
     );
   }
   if (sub === 'doctor') {
-    const report = await context.registry.doctor();
+    const report = await store.access.doctor();
     return success(
       runtime,
       'agent.memory.vector.doctor',
@@ -775,7 +741,13 @@ async function handleVector(runtime: CliCommandRuntime, context: MemoryContext, 
     );
   }
   if (sub === 'rebuild') {
-    const stats = await context.registry.rebuildVectorsAsync();
+    if (!store.local) {
+      return failure(runtime, 'memory_rebuild_host_owned', [
+        'The connected host owns the memory index and keeps it current on every write; this command does not rebuild an index it does not hold.',
+        'A forced rebuild is the host\'s own admin action (POST /api/memory/vector/rebuild on the host).',
+      ].join(' '), 1);
+    }
+    const stats = await store.local.rebuildVectorsAsync();
     return success(
       runtime,
       'agent.memory.vector.rebuild',
@@ -796,29 +768,23 @@ export async function handleMemoryCommand(runtime: CliCommandRuntime): Promise<C
     const [sub = 'list', ...rest] = runtime.cli.commandArgs;
     const normalized = sub.toLowerCase();
     if (normalized === 'handoff-inspect' || normalized === 'inspect') return await handleInspect(runtime, rest);
-    // Wire-first: try the memory spine when a daemon is reachable and the
-    // subcommand has a wire-covered equivalent, see the CLI ruling in
-    // memory-command-wire.ts. Falls through (null) to the unchanged local-direct
-    // path below for everything else, or when no daemon answers.
-    const wireResult = await tryWireMemoryCommand(runtime, normalized, rest);
-    if (wireResult) return wireResult;
-    return await withMemory(runtime, async (context) => {
-      if (normalized === 'list' || normalized === 'ls') return handleList(runtime, context, rest);
-      if (normalized === 'search' || normalized === 'find') return handleSearch(runtime, context, rest);
-      if (normalized === 'add' || normalized === 'create') return handleAdd(runtime, context, rest);
-      if (normalized === 'show' || normalized === 'get') return handleShow(runtime, context, rest);
-      if (normalized === 'queue') return handleQueue(runtime, context, rest);
-      if (normalized === 'review') return handleReview(runtime, context, rest);
-      if (normalized === 'stale') return handleReviewShortcut(runtime, context, 'stale', rest);
-      if (normalized === 'contradict' || normalized === 'contradicted') return handleReviewShortcut(runtime, context, 'contradicted', rest);
-      if (normalized === 'promote') return handlePromote(runtime, context, rest);
-      if (normalized === 'link') return handleLink(runtime, context, rest);
-      if (normalized === 'delete' || normalized === 'remove' || normalized === 'rm') return handleDelete(runtime, context, rest);
-      if (normalized === 'export' || normalized === 'handoff-export' || normalized === 'share') return handleExport(runtime, context, rest);
-      if (normalized === 'import' || normalized === 'handoff-import') return handleImport(runtime, context, rest);
-      if (normalized === 'vector' || normalized === 'vectors') return handleVector(runtime, context, rest);
+    return await withMemoryCommandStore(runtime, isWritingSubcommand(normalized, rest), async (store) => {
+      if (normalized === 'list' || normalized === 'ls') return handleList(runtime, store, rest);
+      if (normalized === 'search' || normalized === 'find') return handleSearch(runtime, store, rest);
+      if (normalized === 'add' || normalized === 'create') return handleAdd(runtime, store, rest);
+      if (normalized === 'show' || normalized === 'get') return handleShow(runtime, store, rest);
+      if (normalized === 'queue') return handleQueue(runtime, store, rest);
+      if (normalized === 'review') return handleReview(runtime, store, rest);
+      if (normalized === 'stale') return handleReviewShortcut(runtime, store, 'stale', rest);
+      if (normalized === 'contradict' || normalized === 'contradicted') return handleReviewShortcut(runtime, store, 'contradicted', rest);
+      if (normalized === 'promote') return handlePromote(runtime, store, rest);
+      if (normalized === 'link') return handleLink(runtime, store, rest);
+      if (normalized === 'delete' || normalized === 'remove' || normalized === 'rm') return handleDelete(runtime, store, rest);
+      if (normalized === 'export' || normalized === 'handoff-export' || normalized === 'share') return handleExport(runtime, store, rest);
+      if (normalized === 'import' || normalized === 'handoff-import') return handleImport(runtime, store, rest);
+      if (normalized === 'vector' || normalized === 'vectors') return handleVector(runtime, store, rest);
       return failure(runtime, 'invalid_memory_command', usage(), 2);
-    }, { save: !isReadOnlySubcommand(normalized, rest) });
+    });
   } catch (error) {
     return errorOutput(runtime, error);
   }

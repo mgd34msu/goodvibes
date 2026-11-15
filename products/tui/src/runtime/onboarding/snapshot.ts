@@ -77,6 +77,7 @@ export async function collectOnboardingSnapshot(deps: OnboardingSnapshotDependen
       controlPlane: config.controlPlane,
       httpListener: config.httpListener,
       web: config.web,
+      connectedDaemonUrl: String(deps.config.get('daemon.connectedHost.url') ?? ''),
     },
     legacyDaemon: extra.value,
   };

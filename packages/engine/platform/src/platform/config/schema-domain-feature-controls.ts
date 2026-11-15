@@ -38,7 +38,7 @@ export const featureControlSettings: ConfigSetting[] = [
     type: 'enum',
     default: 'ast',
     description:
-      'Compound shell command evaluation: ast (default, per-segment safe/unsafe verdicts with specific denial explanations, automatic fallback to flat on any parser failure) or flat (baseline segmentation). The frozen catastrophic command block is enforced identically in both modes.',
+      'Shell parse before an exec command runs: ast (default) parses the command into segments and refuses one in which a segment has nothing to run, naming it; a command the parser cannot read runs as the permission gate decided. flat skips the parse. The permission gate decides risk, including the catastrophic-command block, identically in both modes.',
     enumValues: ['ast', 'flat'],
   },
   {

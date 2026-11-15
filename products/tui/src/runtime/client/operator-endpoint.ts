@@ -34,7 +34,7 @@ import { createGoodVibesPlatform, isOperatorMethodId } from '@goodvibes-jev/engi
 import type { GoodVibesPlatform } from '@goodvibes-jev/engine/platform';
 import { GoodVibesError } from '@goodvibes-jev/engine/platform';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { resolveDaemonEnabled } from '@goodvibes-jev/engine/platform/platform/config';
+import { readConnectedDaemonOrigin, resolveDaemonEnabled } from '@goodvibes-jev/engine/platform/platform/config';
 import { resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/platform/platform/config';
 import { getOrCreateCompanionToken } from '@goodvibes-jev/engine/platform/platform/pairing';
 import { operatorTokenPath } from '@goodvibes-jev/engine/platform/platform/workspace';
@@ -62,12 +62,15 @@ export type OperatorRpc = OperatorRpcUnavailable | OperatorRpcAvailable;
 /**
  * Derive the dial address of the configured control-plane daemon.
  *
- * An explicitly declared external address wins; otherwise the URL is DERIVED
+ * The daemon this terminal was pointed at (`daemon.connectedHost.url`) wins,
+ * then an explicitly declared external address; otherwise the URL is DERIVED
  * from hostMode/host/port/tls.mode. This deliberately does not prefer a stored
  * `controlPlane.baseUrl`: that key had no writers and so drifted from the bind
  * on port, scheme, and host at once.
  */
 export function resolveControlPlaneBaseUrl(configManager: Pick<ConfigManager, 'get'>): string | null {
+  const connected = readConnectedDaemonOrigin((key) => configManager.get(key));
+  if (connected) return connected.baseUrl;
   const explicit = String(configManager.get('controlPlane.publicBaseUrl' as never) ?? '').trim();
   if (explicit) return explicit.replace(/\/+$/, '');
   const host = String(configManager.get('controlPlane.host') ?? '').trim();
@@ -153,7 +156,7 @@ export function resolveDaemonEndpoint(deps: {
   }
   const baseUrl = resolveControlPlaneBaseUrl(configManager);
   if (!baseUrl) {
-    return { available: false, reason: 'no control-plane base URL is configured (controlPlane.publicBaseUrl / controlPlane.host+port): cannot reach the operator surface.' };
+    return { available: false, reason: 'no control-plane base URL is configured (daemon.connectedHost.url, controlPlane.publicBaseUrl or controlPlane.host+port): cannot reach the operator surface.' };
   }
   // Resolve the home directory only AFTER the static refusals, a caller whose
   // shell paths are not wired (a disabled-daemon path) must still get the honest

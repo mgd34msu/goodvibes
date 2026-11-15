@@ -43,6 +43,12 @@ export function isLoopbackAddress(value: string): boolean {
   return isLoopbackHostValue(value);
 }
 
+/** The `daemon.connectedHost.url` value for a daemon adopted at host:port. */
+export function adoptedDaemonUrl(host: string, port: number): string {
+  const bare = host.trim().replace(/^\[(.*)\]$/, '$1');
+  return `http://${bare.includes(':') ? `[${bare}]` : bare}:${port}`;
+}
+
 export function uniqueNonEmpty(values: readonly string[]): readonly string[] {
   return [...new Set(values.map((value) => normalizeText(value)).filter((value) => value.length > 0))];
 }

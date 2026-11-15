@@ -37,6 +37,16 @@ function harness(restart: () => Promise<unknown>, blockers: readonly string[] = 
 }
 
 describe('Connect to existing daemon', () => {
+  test('a verified daemon becomes this terminal\'s target and the local bind is not moved', async () => {
+    const { handler, configManager } = harness(async () => ({ daemonStatus: { mode: 'external', host: 'wrong.example.test', port: 4999, baseUrl: 'http://wrong.example.test:4999' } }));
+    const bind = { host: configManager.get('controlPlane.host'), port: configManager.get('controlPlane.port') };
+
+    await handleConnectExistingDaemonForHandler(handler);
+
+    expect(configManager.get('daemon.connectedHost.url')).toBe('http://wrong.example.test:4999');
+    expect({ host: configManager.get('controlPlane.host'), port: configManager.get('controlPlane.port') }).toEqual(bind);
+  });
+
   test('a daemon that cannot be verified leaves host, port and token as they were', async () => {
     let restarts = 0;
     const { handler, configManager, printed, daemonHome } = harness(async () => { restarts++; return {}; });
@@ -48,6 +58,7 @@ describe('Connect to existing daemon', () => {
       hostMode: configManager.get('controlPlane.hostMode'),
       host: configManager.get('controlPlane.host'),
       port: configManager.get('controlPlane.port'),
+      url: configManager.get('daemon.connectedHost.url'),
     };
 
     await handleConnectExistingDaemonForHandler(handler);
@@ -56,6 +67,7 @@ describe('Connect to existing daemon', () => {
       hostMode: configManager.get('controlPlane.hostMode'),
       host: configManager.get('controlPlane.host'),
       port: configManager.get('controlPlane.port'),
+      url: configManager.get('daemon.connectedHost.url'),
     }).toEqual(before);
     expect(readFileSync(tokenFile, 'utf8')).toBe(original);
     expect(printed.join('\n')).toContain('could not verify');
@@ -71,6 +83,7 @@ describe('Connect to existing daemon', () => {
     await handleConnectExistingDaemonForHandler(handler);
 
     expect(configManager.get('controlPlane.port')).toBe(before);
+    expect(configManager.get('daemon.connectedHost.url')).toBe('');
     expect(existsSync(join(daemonHome, 'operator-tokens.json'))).toBe(false);
     expect(printed.join('\n')).toContain('restart refused');
     expect(printed.join('\n')).toContain('were restored, but restarting the connection on them failed');

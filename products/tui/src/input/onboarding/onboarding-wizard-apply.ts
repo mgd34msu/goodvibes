@@ -20,7 +20,7 @@ import {
 } from './onboarding-wizard-external-surfaces.ts';
 import { getDaemonSource } from './onboarding-wizard-network-adopt.ts';
 import { applyFeatureUnitOperations } from './onboarding-feature-units.ts';
-import { buildGoodVibesSecretKey, buildGoodVibesSecretRef, isLoopbackAddress, isSecretReferenceValue } from './onboarding-wizard-helpers.ts';
+import { adoptedDaemonUrl, buildGoodVibesSecretKey, buildGoodVibesSecretRef, isSecretReferenceValue } from './onboarding-wizard-helpers.ts';
 import { deriveProviderKeyCaptureTargets, providerKeyFieldId } from '../../runtime/onboarding/provider-key-capture.ts';
 import type { OnboardingWizardControllerLike } from './onboarding-wizard-types.ts';
 
@@ -120,6 +120,10 @@ export function buildOnboardingApplyRequest(controller: OnboardingWizardControll
     setConfig('danger.httpListener', httpListener);
     setConfig('web.enabled', browserAccess);
 
+    // Which daemon this terminal dials is its own setting, apart from how a daemon on
+    // this machine binds: connecting to an existing one points there, starting one here clears it.
+    setConfig('daemon.connectedHost.url', getDaemonSource(controller) === 'adopt' ? readAdoptedDaemonUrl(controller) : '');
+
     if (hasServers) {
       addNetworkOperations(controller, operations, customNetwork, {
         controlPlane: hasServers,
@@ -128,15 +132,8 @@ export function buildOnboardingApplyRequest(controller: OnboardingWizardControll
         web: browserAccess,
       });
     } else {
-      // No local servers chosen. When this terminal was pointed at an existing
-      // daemon, that target stays: writing the local bind here would dial loopback
-      // after the restart and drop the connection just made.
-      if (getDaemonSource(controller) === 'adopt') {
-        writeAdoptedDaemonTarget(controller, setConfig);
-      } else {
-        setConfig('controlPlane.hostMode', 'local');
-        setConfig('controlPlane.host', controller.runtimeSnapshot?.bindSettings.controlPlane.host || '127.0.0.1');
-      }
+      setConfig('controlPlane.hostMode', 'local');
+      setConfig('controlPlane.host', controller.runtimeSnapshot?.bindSettings.controlPlane.host || '127.0.0.1');
       setConfig('httpListener.hostMode', 'local');
       setConfig('httpListener.host', controller.runtimeSnapshot?.bindSettings.httpListener.host || '127.0.0.1');
       setConfig('web.hostMode', 'local');
@@ -348,14 +345,9 @@ function addCloudflareOperations(
   }
 
 /** The existing daemon this terminal was pointed at, as "Connect to an existing daemon" applied it. */
-function writeAdoptedDaemonTarget(
-  controller: OnboardingWizardControllerLike,
-  setConfig: (key: Extract<OnboardingApplyOperation, { kind: 'set-config' }>['key'], value: unknown) => void,
-): void {
-  const adoptHost = controller.getStringFieldValue('network.adopt-daemon-host', '127.0.0.1') || '127.0.0.1';
-  setConfig('controlPlane.hostMode', isLoopbackAddress(adoptHost) ? 'local' : 'custom');
-  setConfig('controlPlane.host', adoptHost);
-  setConfig('controlPlane.port', controller.getPortFieldValue('network.adopt-daemon-port', 3421));
+function readAdoptedDaemonUrl(controller: OnboardingWizardControllerLike): string {
+  const adoptHost = controller.getStringFieldValue('network.adopt-daemon-host', '127.0.0.1').trim() || '127.0.0.1';
+  return adoptedDaemonUrl(adoptHost, controller.getPortFieldValue('network.adopt-daemon-port', 3421));
 }
 
 export function addNetworkOperations(
@@ -394,15 +386,9 @@ export function addNetworkOperations(
       : controller.getStringFieldValue('network.browser-ip', controller.runtimeSnapshot?.bindSettings.web.host ?? '0.0.0.0');
 
     if (enabled.controlPlane) {
-      if (getDaemonSource(controller) === 'adopt') {
-        // "Connect to an existing daemon" already pointed this TUI at that daemon and promised Apply keeps it;
-        // writing this machine's own bind values here would silently dial loopback again after the restart.
-        writeAdoptedDaemonTarget(controller, setConfig);
-      } else {
-        setConfig('controlPlane.hostMode', enabled.controlPlaneRemote ? (customNetwork ? 'custom' : 'network') : 'local');
-        setConfig('controlPlane.host', enabled.controlPlaneRemote ? (customNetwork ? controlPlaneHost : '0.0.0.0') : '127.0.0.1');
-        setConfig('controlPlane.port', controller.getPortFieldValue('network.service-port', controller.runtimeSnapshot?.bindSettings.controlPlane.port ?? 3421));
-      }
+      setConfig('controlPlane.hostMode', enabled.controlPlaneRemote ? (customNetwork ? 'custom' : 'network') : 'local');
+      setConfig('controlPlane.host', enabled.controlPlaneRemote ? (customNetwork ? controlPlaneHost : '0.0.0.0') : '127.0.0.1');
+      setConfig('controlPlane.port', controller.getPortFieldValue('network.service-port', controller.runtimeSnapshot?.bindSettings.controlPlane.port ?? 3421));
     }
 
     if (enabled.httpListener) {

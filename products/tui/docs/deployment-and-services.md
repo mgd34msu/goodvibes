@@ -62,11 +62,11 @@ The installed package also exposes a `goodvibes-daemon` launcher. The suite inst
 
 ## Connecting the TUI to an already-running daemon
 
-The TUI normally adopts a compatible GoodVibes daemon it finds already listening at its configured `controlPlane.host`/`controlPlane.port`, or starts an installed-but-stopped one, as described above. Adoption authenticates with a bearer token read from `<homeDirectory>/.goodvibes/daemon/operator-tokens.json`; if that file does not already hold the *same* token the target daemon was started with, the TUI cannot tell the two apart from a token it has never seen and will not adopt it.
+The TUI normally adopts a compatible GoodVibes daemon it finds already listening at `daemon.connectedHost.url` when that is set, otherwise at the local bind address `controlPlane.host`/`controlPlane.port`, or starts an installed-but-stopped one, as described above. Adoption authenticates with a bearer token read from `<homeDirectory>/.goodvibes/daemon/operator-tokens.json`; if that file does not already hold the *same* token the target daemon was started with, the TUI cannot tell the two apart from a token it has never seen and will not adopt it.
 
 Two ways to point a TUI instance at a daemon it did not start itself:
 
-**Interactive.** In the onboarding wizard's Network step, set "GoodVibes daemon source" to "Connect to an existing running daemon," fill in that daemon's host, port, and token, and select "Connect to this daemon now." This installs the token into `operator-tokens.json`, applies the host/port, and restarts the external-services controller immediately so you see whether the connection succeeded before finishing the rest of onboarding.
+**Interactive.** In the onboarding wizard's Network step, set "GoodVibes daemon source" to "Connect to an existing running daemon," fill in that daemon's host, port, and token, and select "Connect to this daemon now." This installs the token into `operator-tokens.json`, saves the address as `daemon.connectedHost.url`, and restarts the external-services controller immediately so you see whether the connection succeeded before finishing the rest of onboarding. The local bind settings (`controlPlane.*`) are left alone, so finishing onboarding keeps the connection, and running onboarding again starts from it. Choosing "Start a new daemon" clears `daemon.connectedHost.url` and the TUI goes back to the daemon on this machine.
 
 **Non-interactive.** Set the `GOODVIBES_DAEMON_TOKEN` environment variable to run the daemon with a fixed, known token, and point the TUI at the same host/port and token:
 
@@ -76,8 +76,7 @@ GOODVIBES_DAEMON_TOKEN=gv_shared_token goodvibes-daemon --hostname 0.0.0.0 --por
 
 # Point a TUI at it (any home directory, no shared operator-tokens.json needed):
 GOODVIBES_DAEMON_TOKEN=gv_shared_token bun run dev \
-  --config controlPlane.host=<daemon-host> \
-  --config controlPlane.port=3421
+  --config daemon.connectedHost.url=http://<daemon-host>:3421
 ```
 
 `GOODVIBES_DAEMON_TOKEN` is read by both sides. The daemon uses it as the bearer token every route requires, and the TUI runtime uses it to install (or confirm) the matching entry in its own `operator-tokens.json` before probing that host/port, so adoption succeeds without hand-editing any files. This mirrors `src/verification/live-verifier.ts`'s existing fallback to the same variable when probing a daemon's HTTP surface from the outside.

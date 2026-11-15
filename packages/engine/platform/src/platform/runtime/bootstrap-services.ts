@@ -10,6 +10,7 @@ import { createTimeoutController } from '../utils/fetch-with-timeout.js';
 import { VERSION } from '../version.js';
 import { isDaemonVersionCompatible, describeVersionIncompatibility } from './daemon-version-compat.js';
 import { resolveDaemonEnabled } from '../config/index.js';
+import type { DaemonOrigin } from '../config/control-plane-base-url.js';
 import {
   classifyDaemonProbe,
   decideDaemonAdoption,
@@ -41,7 +42,14 @@ interface ServiceFactories {
     host: string,
     port: number,
     token?: string,
+    scheme?: 'http' | 'https',
   ) => Promise<DaemonIdentityProbeResult>;
+  /**
+   * The daemon this surface was pointed at (`readConnectedDaemonOrigin`). When
+   * set, discovery probes it instead of `controlPlane.host`/`controlPlane.port`,
+   * which then describe only how a local daemon would bind.
+   */
+  daemonTarget?: Pick<DaemonOrigin, 'scheme' | 'host' | 'port'> | null | undefined;
   probeHttpListenerPortInUse?: ((host: string, port: number) => Promise<boolean>) | undefined;
   /**
    * Shared bearer token sent to the daemon's identity probe once the daemon has
@@ -213,10 +221,10 @@ function normalizeProbeHost(host: string): string {
   return host;
 }
 
-function formatBaseUrl(host: string, port: number): string {
+function formatBaseUrl(host: string, port: number, scheme: 'http' | 'https' = 'http'): string {
   const normalized = normalizeProbeHost(host);
   const urlHost = normalized.includes(':') && !normalized.startsWith('[') ? `[${normalized}]` : normalized;
-  return `http://${urlHost}:${port}`;
+  return `${scheme}://${urlHost}:${port}`;
 }
 
 function createServiceStatus(
@@ -224,12 +232,13 @@ function createServiceStatus(
   host: string,
   port: number,
   details: Omit<HostServiceStatus, 'mode' | 'host' | 'port' | 'baseUrl'> = {},
+  scheme: 'http' | 'https' = 'http',
 ): HostServiceStatus {
   return {
     mode,
     host,
     port,
-    baseUrl: formatBaseUrl(host, port),
+    baseUrl: formatBaseUrl(host, port, scheme),
     ...details,
   };
 }
@@ -238,8 +247,9 @@ async function probeGoodVibesDaemonIdentity(
   host: string,
   port: number,
   token?: string,
+  scheme: 'http' | 'https' = 'http',
 ): Promise<DaemonIdentityProbeResult> {
-  const url = `${formatBaseUrl(host, port)}/status`;
+  const url = `${formatBaseUrl(host, port, scheme)}/status`;
   const bearer = token?.trim();
   // Each request has its own timeout, kept until the body is read.
   const disposers: Array<() => void> = [];
@@ -378,8 +388,15 @@ export async function startHostServices(
 ): Promise<HostServicesHandle> {
   const sharedUserAuth = runtimeServices.localUserAuthManager;
   const startupTimeoutMs = factories.startupTimeoutMs ?? DEFAULT_SERVICE_START_TIMEOUT_MS;
-  const daemonHost = readHostSetting(config, 'controlPlane.host', '127.0.0.1');
-  const daemonPort = readPortSetting(config, 'controlPlane.port', 3421);
+  // A surface pointed at a daemon elsewhere looks there; otherwise at the local bind.
+  const daemonTarget = factories.daemonTarget ?? null;
+  const daemonHost = daemonTarget?.host ?? readHostSetting(config, 'controlPlane.host', '127.0.0.1');
+  const daemonPort = daemonTarget?.port ?? readPortSetting(config, 'controlPlane.port', 3421);
+  const daemonScheme = daemonTarget?.scheme ?? 'http';
+  const daemonServiceStatus = (
+    mode: HostServiceMode,
+    details: Omit<HostServiceStatus, 'mode' | 'host' | 'port' | 'baseUrl'> = {},
+  ): HostServiceStatus => createServiceStatus(mode, daemonHost, daemonPort, details, daemonScheme);
   const httpListenerHost = readHostSetting(config, 'httpListener.host', '127.0.0.1');
   const httpListenerPort = readPortSetting(config, 'httpListener.port', 3422);
   const probeDaemonPortInUse = factories.probeDaemonPortInUse ?? ((host: string, port: number) => isTcpPortInUse(host, port));
@@ -391,7 +408,7 @@ export async function startHostServices(
   const httpListenerEnabled = config.get('danger.httpListener') === true;
 
   let embeddedHttpListener: HttpListenerService | null = null;
-  let daemonStatus = createServiceStatus('disabled', daemonHost, daemonPort, { reason: 'daemon.enabled is false' });
+  let daemonStatus = daemonServiceStatus('disabled', { reason: 'daemon.enabled is false' });
   let httpListenerStatus = createServiceStatus('disabled', httpListenerHost, httpListenerPort, {
     reason: 'danger.httpListener is disabled',
   });
@@ -402,7 +419,7 @@ export async function startHostServices(
     // inside the policy and is applied before any adopt.
     const portInUse = await probeDaemonPortInUse(daemonHost, daemonPort);
     const identity = portInUse
-      ? await probeDaemonIdentity(daemonHost, daemonPort, factories.sharedDaemonToken)
+      ? await probeDaemonIdentity(daemonHost, daemonPort, factories.sharedDaemonToken, daemonScheme)
       : null;
     const decision = decideDaemonAdoption({
       enabled: true,
@@ -419,7 +436,7 @@ export async function startHostServices(
         // With a token configured the probe adopts only a daemon that proved it holds it; without one nothing was proven.
         const authenticated = Boolean(factories.sharedDaemonToken?.trim());
         if (classifyDaemonProbe({ identity: found, localVersion: localDaemonVersion, versionCompatible }) === 'adopt') {
-          daemonStatus = createServiceStatus('external', daemonHost, daemonPort, {
+          daemonStatus = daemonServiceStatus('external', {
             authenticated,
             status: found.status,
             version: found.version,
@@ -435,7 +452,7 @@ export async function startHostServices(
             foundVersion: found.version,
             localVersion: localDaemonVersion,
           });
-          daemonStatus = createServiceStatus('incompatible', daemonHost, daemonPort, {
+          daemonStatus = daemonServiceStatus('incompatible', {
             authenticated,
             status: found.status,
             version: found.version,
@@ -445,7 +462,7 @@ export async function startHostServices(
         break;
       }
       case 'blocked': {
-        daemonStatus = createServiceStatus('blocked', daemonHost, daemonPort, {
+        daemonStatus = daemonServiceStatus('blocked', {
           authenticated: decision.identity?.kind !== 'unauthorized' ? undefined : false,
           reason: decision.identity?.reason ?? 'Configured daemon port is occupied by an unverified process',
         });
@@ -455,7 +472,7 @@ export async function startHostServices(
       }
       case 'adopt-only-idle':
       case 'spawn': {
-        daemonStatus = createServiceStatus('unavailable', daemonHost, daemonPort, {
+        daemonStatus = daemonServiceStatus('unavailable', {
           reason: 'No GoodVibes daemon is running on the configured host/port; install and start it with: goodvibes-daemon install-service',
         });
         logger.info('No daemon reachable on the configured host/port; running without a daemon', { host: daemonHost, port: daemonPort });

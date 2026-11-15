@@ -98,6 +98,8 @@ export interface OnboardingBindSettingsSnapshot {
   readonly controlPlane: GoodVibesConfig['controlPlane'];
   readonly httpListener: GoodVibesConfig['httpListener'];
   readonly web: GoodVibesConfig['web'];
+  /** `daemon.connectedHost.url`: the daemon this terminal was pointed at; empty for the one on this machine. */
+  readonly connectedDaemonUrl?: string;
 }
 
 /**

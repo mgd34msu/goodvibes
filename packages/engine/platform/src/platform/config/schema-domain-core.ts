@@ -1,6 +1,7 @@
 import type { ConfigSetting } from './schema-types.js';
 import { DEFAULT_DECISION_ROUTER_SETTINGS, validDecisionRouterSettings } from './decision-router-settings.js';
 import { type ConfigSettingDefinition, intRange, numRange, optionalWorkLimit, reasoningEffortSetting } from './schema-shared.js';
+import { parseDaemonOrigin } from './control-plane-base-url.js';
 
 export const coreConfigDefaults = {
   display: {
@@ -112,6 +113,7 @@ export const coreConfigDefaults = {
     timezone: '',
     connectedHost: {
       enabled: true,
+      url: '',
     },
   },
   danger: {
@@ -642,6 +644,15 @@ export const coreTailConfigSettings: ConfigSettingDefinition[] = [
     default: true,
     description:
       'Whether this surface may DIAL the daemon it is connected to. On (the default), the features that reach a connected host work: the session-inputs poll that delivers inbound messages, conversation rewind registration, the live approvals stream, daemon-routed conversation turns, and the operator verbs. Off, each of those refuses plainly rather than failing at a connection. This is separate from daemon.enabled on purpose: adopting a daemon of your own and talking to one that is already there are different decisions, and while they shared a single key, turning adoption off silently stopped the inputs poll, the approvals stream and rewind registration on machines whose connected host was live and answering, the session and memory spines kept dialing the same host perfectly well, which is how the split showed itself.',
+  },
+  {
+    key: 'daemon.connectedHost.url',
+    type: 'string',
+    default: '',
+    description:
+      'Where the terminal (goodvibes) dials its daemon, as an origin such as http://10.0.0.7:3421. Empty (the default) means the daemon on this machine, at the address derived from controlPlane.hostMode, controlPlane.host and controlPlane.port; those settings describe only how a local daemon listens. Setup\'s "Connect to an existing daemon" writes this, so finishing setup or changing the local bind does not move the terminal off the daemon it connected to. Clear it to go back to the daemon on this machine.',
+    validate: (value: unknown): boolean => typeof value === 'string' && (value.trim().length === 0 || parseDaemonOrigin(value) !== null),
+    validationHint: 'empty, or an http(s) origin with no path, user name or password, e.g. http://10.0.0.7:3421',
   },
   {
     key: 'danger.httpListener',

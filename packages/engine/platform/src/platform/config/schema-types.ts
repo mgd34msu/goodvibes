@@ -100,7 +100,7 @@ export interface GoodVibesConfig {
     engine: 'baseline' | 'policy-engine'; // default: 'baseline'. Layered tool/path policy evaluator (restart to apply)
     simulation: boolean;        // default: true. Dual-evaluator shadow pipeline recording divergence (restart to apply)
     divergenceDashboard: boolean; // default: true. Divergence aggregation + enforce-mode gate
-    commandParser: 'ast' | 'flat'; // default: 'ast'. Shell AST per-segment verdicts vs flat segmentation
+    commandParser: 'ast' | 'flat'; // default: 'ast'. ast refuses a command with an empty segment before it runs; flat skips that parse
     divergenceThreshold: number; // default: 0.05. Divergence-gate max divergence rate
     maxDivergenceRecords: number; // default: 500. Retained divergence records for the simulation dashboard
   };
@@ -151,7 +151,7 @@ export interface GoodVibesConfig {
   service: ServiceConfig;
   network: NetworkConfig;
   relay: RelayConfig;
-  daemon: { enabled: boolean; timezone: string; connectedHost: { enabled: boolean } };
+  daemon: { enabled: boolean; timezone: string; connectedHost: { enabled: boolean; url: string } };
   payments: PaymentsConfig;
   contract: ContractSettings;
   judgment: JudgmentSettings;

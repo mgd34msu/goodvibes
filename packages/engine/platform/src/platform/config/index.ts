@@ -47,9 +47,11 @@ export {
   deriveControlPlaneBaseUrl,
   describeBaseUrlDrift,
   describeDerivedBindMismatch,
+  parseDaemonOrigin,
+  readConnectedDaemonOrigin,
   readControlPlaneBinding,
 } from './control-plane-base-url.js';
-export type { BaseUrlAudience, ControlPlaneBinding } from './control-plane-base-url.js';
+export type { BaseUrlAudience, ControlPlaneBinding, DaemonOrigin } from './control-plane-base-url.js';
 export { readDotPath, raiseReaderFloorInFile } from './shared-config-tier.js';
 // Settings ingestion: what a reader does with a setting it cannot ingest, and
 // the reader-version floor a migration records when it rewrites shared state.

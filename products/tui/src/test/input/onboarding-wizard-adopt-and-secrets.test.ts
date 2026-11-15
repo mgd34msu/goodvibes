@@ -31,11 +31,10 @@ describe('adopting an existing daemon', () => {
     return wizard;
   }
 
-  test('Apply keeps the adopted host, port and mode instead of this machine\'s own bind values', () => {
+  test('Apply points this terminal at the adopted daemon without moving the local bind', () => {
     const wizard = adoptingWizard('10.0.0.5', '4000');
-    expect(setConfigValues(wizard, 'controlPlane.host')).toEqual(['10.0.0.5']);
-    expect(setConfigValues(wizard, 'controlPlane.port')).toEqual([4000]);
-    expect(setConfigValues(wizard, 'controlPlane.hostMode')).toEqual(['custom']);
+    expect(setConfigValues(wizard, 'daemon.connectedHost.url')).toEqual(['http://10.0.0.5:4000']);
+    expect(setConfigValues(wizard, 'controlPlane.host')).not.toContain('10.0.0.5');
   });
 
   test('Apply with no local servers chosen keeps the adopted remote daemon as the target', () => {
@@ -46,21 +45,15 @@ describe('adopting an existing daemon', () => {
     wizard.setFieldValue('network.daemon-source', 'adopt');
     wizard.setFieldValue('network.adopt-daemon-host', '10.0.0.5');
     wizard.setFieldValue('network.adopt-daemon-port', '4000');
-    expect(setConfigValues(wizard, 'controlPlane.host')).toEqual(['10.0.0.5']);
-    expect(setConfigValues(wizard, 'controlPlane.port')).toEqual([4000]);
-    expect(setConfigValues(wizard, 'controlPlane.hostMode')).toEqual(['custom']);
-  });
-
-  test('adopting a loopback daemon stays local', () => {
-    const wizard = adoptingWizard('127.0.0.1', '4000');
+    expect(setConfigValues(wizard, 'daemon.connectedHost.url')).toEqual(['http://10.0.0.5:4000']);
     expect(setConfigValues(wizard, 'controlPlane.hostMode')).toEqual(['local']);
   });
 
-  test('starting a new daemon still writes the wizard\'s own network values', () => {
+  test('starting a new daemon clears the target and writes the wizard\'s own network values', () => {
     const wizard = new OnboardingWizardController();
     wizard.open('new');
     wizard.setFieldValue('capabilities.browser-access', true);
-    expect(setConfigValues(wizard, 'controlPlane.host')).not.toEqual(['10.0.0.5']);
+    expect(setConfigValues(wizard, 'daemon.connectedHost.url')).toEqual(['']);
     expect(setConfigValues(wizard, 'controlPlane.port')).toEqual([3421]);
   });
 

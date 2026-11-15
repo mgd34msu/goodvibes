@@ -15,7 +15,7 @@ export {
  */
 
 import type { HostServiceStatus } from '@/runtime/index.ts';
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { readConnectedDaemonOrigin, type ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 
 /** Which of the two background services a question is about. */
 import type { HostServiceName } from '@goodvibes-jev/engine/terminal-shell/host-service-status';
@@ -32,6 +32,10 @@ export type { HostServiceName } from '@goodvibes-jev/engine/terminal-shell/host-
  * where it WOULD be, and the honest reason nothing is known about it yet.
  */
 export function createPendingServiceStatus(configManager: Pick<ConfigManager, 'get'>, service: HostServiceName): HostServiceStatus {
+  const connected = service === 'daemon' ? readConnectedDaemonOrigin((key) => configManager.get(key)) : null;
+  if (connected) {
+    return { mode: 'unavailable', host: connected.host, port: connected.port, baseUrl: connected.baseUrl, reason: 'Background service startup has not completed yet' };
+  }
   return pendingHostServiceStatus(configManager, service, {
     url: formatHostServiceBaseUrl,
     reason: 'Background service startup has not completed yet',

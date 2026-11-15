@@ -35,7 +35,7 @@
  * verbs mean. It resolves a target, makes a request, and returns the parsed
  * body. Every decision about what the answer MEANS belongs to the daemon.
  */
-import { readControlPlaneBinding } from '@goodvibes-jev/engine/platform/platform/config';
+import { readConnectedDaemonOrigin, readControlPlaneBinding } from '@goodvibes-jev/engine/platform/platform/config';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { readOperatorTokenFile } from '@goodvibes-jev/engine/platform/platform/workspace';
 
@@ -123,8 +123,10 @@ export function resolveRemoteDaemonTarget(input: ResolveRemoteTargetInput): Remo
   const binding = readControlPlaneBinding((key) => input.configManager.get(key as never));
   const typed = parseHostFlag(input.flags.host?.trim() ?? '', input.flags.port);
   if (!typed.ok) return typed;
-  const host = typed.host || binding.host;
-  const port = typed.port ?? input.flags.port ?? binding.port;
+  // Without --host, the daemon this surface was pointed at, if any, then the local bind.
+  const connected = typed.host ? null : readConnectedDaemonOrigin((key) => input.configManager.get(key));
+  const host = typed.host || connected?.host || binding.host;
+  const port = typed.port ?? input.flags.port ?? connected?.port ?? binding.port;
   if (!Number.isInteger(port) || port <= 0 || port > 65_535) {
     return {
       ok: false,
@@ -158,7 +160,7 @@ export function resolveRemoteDaemonTarget(input: ResolveRemoteTargetInput): Remo
     };
   }
 
-  return { ok: true, target: { baseUrl: buildBaseUrl(host, port, binding.tlsMode, typed.scheme), token, isLocal } };
+  return { ok: true, target: { baseUrl: buildBaseUrl(host, port, binding.tlsMode, typed.scheme ?? connected?.scheme), token, isLocal } };
 }
 
 type ParsedHostFlag =

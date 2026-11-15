@@ -38,6 +38,46 @@ export interface ControlPlaneBinding {
 /** The port the daemon falls back to when none is configured. */
 export const DEFAULT_CONTROL_PLANE_PORT = 3421;
 
+/** A daemon origin a client dials: scheme, host and port, nothing else. */
+export interface DaemonOrigin {
+  /** `scheme://host[:port]`, no trailing slash; an IPv6 host is bracketed. */
+  readonly baseUrl: string;
+  readonly scheme: 'http' | 'https';
+  /** The host without IPv6 brackets, as a socket connect takes it. */
+  readonly host: string;
+  readonly port: number;
+}
+
+/**
+ * Parse a stated daemon origin (`http://10.0.0.7:3421`). Null for anything that
+ * is not one: another scheme, a path, a query, a user name or password.
+ */
+export function parseDaemonOrigin(value: unknown): DaemonOrigin | null {
+  if (typeof value !== 'string' || !value.trim()) return null;
+  let url: URL;
+  try {
+    url = new URL(value.trim());
+  } catch {
+    return null;
+  }
+  const scheme = url.protocol === 'https:' ? 'https' : url.protocol === 'http:' ? 'http' : null;
+  if (!scheme || url.username || url.password || url.search || url.hash) return null;
+  if (url.pathname !== '/' && url.pathname !== '') return null;
+  const host = url.hostname.replace(/^\[(.*)\]$/, '$1');
+  if (!host) return null;
+  const port = url.port ? Number(url.port) : scheme === 'https' ? 443 : 80;
+  return { baseUrl: url.origin, scheme, host, port };
+}
+
+/**
+ * The daemon a client was pointed at (`daemon.connectedHost.url`), or null when
+ * it dials the daemon on this machine through the control-plane bind settings.
+ * The one reader of that setting, so every dial site agrees on it.
+ */
+export function readConnectedDaemonOrigin(read: (key: 'daemon.connectedHost.url') => unknown): DaemonOrigin | null {
+  return parseDaemonOrigin(read('daemon.connectedHost.url'));
+}
+
 /** Read a binding from any `get(key)` config reader. */
 export function readControlPlaneBinding(
   read: (key: string) => unknown,

@@ -1,4 +1,4 @@
-import { createOAuthLocalListener, resolveDaemonEnabled } from '@goodvibes-jev/engine/platform/platform/config';
+import { createOAuthLocalListener, readConnectedDaemonOrigin, resolveDaemonEnabled } from '@goodvibes-jev/engine/platform/platform/config';
 import { getBuiltinSubscriptionProvider, type OAuthProviderConfig } from '@goodvibes-jev/engine/platform/platform/config';
 import { summarizeError, openExternalUrl } from '@goodvibes-jev/engine/platform/platform/utils';
 import { getProviderIdFromModel } from '@goodvibes-jev/engine/platform/platform/providers';
@@ -34,6 +34,11 @@ function getRuntimeEndpointBinding(
   request: OnboardingApplyRequest,
   endpoint: OnboardingRuntimeEndpoint,
 ): { readonly label: string; readonly host: string; readonly port: number } {
+  // A daemon this terminal was pointed at is where it looks, not the local bind.
+  const connected = endpoint === 'daemon'
+    ? readConnectedDaemonOrigin((key) => handler.getOnboardingConfigValue(request, key))
+    : null;
+  if (connected) return { label: 'GoodVibes daemon', host: connected.host, port: connected.port };
   const hostKey = endpoint === 'daemon' ? 'controlPlane.host' : 'httpListener.host';
   const portKey = endpoint === 'daemon' ? 'controlPlane.port' : 'httpListener.port';
   const fallbackHost = '127.0.0.1';

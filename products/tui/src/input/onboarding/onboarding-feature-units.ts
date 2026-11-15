@@ -164,7 +164,7 @@ export const FEATURE_ONBOARDING_SECTIONS: readonly FeatureSection[] = [
       {
         flagId: 'shell-ast-normalization',
         label: 'Shell AST command analysis',
-        hint: 'Per-segment verdicts for compound commands with more specific denial explanations. Default on; falls back to the flat matcher on parser failure.',
+        hint: 'Refuses a command with an empty segment before it runs, naming the segment. Default on; risk is decided by the permission gate either way, and a command it cannot parse runs as the gate decided.',
       },
     ],
   },

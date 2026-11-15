@@ -4,6 +4,7 @@ import { createNativeWorkLedgerHost, registerNativeWorkLedgerCommand } from './n
 import { registerTuiLegacyImportCommands } from '../input/commands/legacy-work-ledger-import-runtime.ts';
 import 'node:path';
 import { refreshMemoryRecallSnapshot } from './orchestrator-core-services.ts';
+import { ownerInputFor } from './owner-input.ts';
 import type { ConversationManager } from '../core/conversation';
 import { hydrateConversationUsage } from '../core/conversation-usage.ts';
 import type { Orchestrator } from '@goodvibes-jev/engine/platform/platform/core';
@@ -270,9 +271,15 @@ export function createBootstrapShell(options: BootstrapShellOptions): BootstrapS
     loadSystemPrompt: () => loadBootstrapSystemPrompt(configManager),
     activatePlan: (_planId, task) => {
       setTimeout(() => {
+        // The composer's turn path once the shell bound it, so the plan's first
+        // turn has the same retry context and failure status as a typed message.
+        const route = ownerInputFor(orchestrator);
+        if (route) {
+          route(task);
+          return;
+        }
         void (async () => {
-          // Refresh the recall snapshot before this plan-driven turn, see
-          // the matching comment in main.ts's submitInput.
+          // Refresh the recall snapshot before this plan-driven turn, as the composer does.
           await refreshMemoryRecallSnapshot(services);
           orchestrator.handleUserInput(task).catch((err) => {
             logger.debug('activatePlan handler failed', { error: summarizeError(err) });

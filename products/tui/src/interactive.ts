@@ -24,6 +24,8 @@ import '@goodvibes-jev/engine/platform/platform/core';
 import { InputHandler } from './input/handler.ts';
 import '@goodvibes-jev/engine/terminal-shell';
 import type { ContentPart } from '@goodvibes-jev/engine/platform/platform/providers';
+import type { OrchestratorUserInputOptions } from '@goodvibes-jev/engine/platform/platform/core';
+import { bindOwnerInput } from './runtime/owner-input.ts';
 import '@goodvibes-jev/engine/platform/platform/tools';
 import '@goodvibes-jev/engine/platform/platform/tools';
 import '@goodvibes-jev/engine/platform/platform/state';
@@ -545,28 +547,35 @@ async function main() {
     });
     processedText = capture.text;
     if (shouldSendAfterCapture(capture, Boolean(content))) {
-      // A fresh prompt supersedes provider recovery for the previous submission.
-      streamResult.startNewTurn();
-      actionOffers.retry = null;
-      const epoch = ++inputEpoch;
-      submissionStatus = null;
-      const inputOptions = options.spokenOutput ? createSpokenTurnInputOptions() : undefined;
-      retryCtx = { count: conversation.getMessageCount(), text: processedText, content, opts: inputOptions };
-      // Chat accepts the user's message directly. Native admission belongs to
-      // explicit work submission, never to deciding whether a model may see it.
-      // Optional memory refresh must not delay displaying or sending the prompt.
-      void refreshMemoryRecallSnapshot(ctx.services);
-      void orchestrator
-        .handleUserInput(processedText, content, inputOptions)
-        .catch((error) => {
-          if (epoch === inputEpoch) submissionStatus = `Prompt failed: ${summarizeError(error)}`;
-        })
-        .finally(render);
-      render();
+      sendOwnerTurn(processedText, content, options.spokenOutput ? createSpokenTurnInputOptions() : undefined);
     } else {
       render();
     }
   };
+
+  /**
+   * The owner-input path: typed, spoken, companion and plan input all start their
+   * turn here, with the same retry context, failure status and memory refresh.
+   * Chat accepts the owner's message directly. Native admission belongs to
+   * explicit work submission, never to deciding whether a model may see it.
+   */
+  function sendOwnerTurn(text: string, content?: ContentPart[], inputOptions?: OrchestratorUserInputOptions): void {
+    // A fresh prompt supersedes provider recovery for the previous submission.
+    streamResult.startNewTurn();
+    actionOffers.retry = null;
+    const epoch = ++inputEpoch;
+    submissionStatus = null;
+    retryCtx = { count: conversation.getMessageCount(), text, content, opts: inputOptions };
+    // Optional memory refresh must not delay displaying or sending the prompt.
+    void refreshMemoryRecallSnapshot(ctx.services);
+    void orchestrator
+      .handleUserInput(text, content, inputOptions)
+      .catch((error) => {
+        if (epoch === inputEpoch) submissionStatus = `Prompt failed: ${summarizeError(error)}`;
+      })
+      .finally(render);
+    render();
+  }
 
   const cancelGeneration = commandReadings.withCancellation(
     createCancelGeneration(orchestrator, spokenTurns, () => streamResult.cancelPendingRecovery()),
@@ -1319,6 +1328,13 @@ async function main() {
   unsubs.push(...streamResult.unsubs);
   // Offer Alt+R when a user-visible error surfaces and the turn can be sent again.
   wireRetryOfferOnError(streamResult.onErrorSurfaced, actionOffers, () => retryCtx !== null, render);
+  // Companion messages and an activated plan take the composer's turn path as sent
+  // (no composer grammar), carrying their origin. Bound once that path's state exists.
+  unsubs.push(bindOwnerInput(orchestrator, (text, inputOptions) => {
+    transcript.toBottom();
+    conversation.dismissSplash();
+    sendOwnerTurn(text, undefined, inputOptions);
+  }));
 
   // Crash/termination handlers register BEFORE raw mode so a throw during setup or the initial
   // render still restores the terminal; 'exit' is the final safety net.

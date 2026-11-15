@@ -3748,6 +3748,13 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "description": "Whether this surface may DIAL the daemon it is connected to. On (the default), the features that reach a connected host work: the session-inputs poll that delivers inbound messages, conversation rewind registration, the live approvals stream, daemon-routed conversation turns, and the operator verbs. Off, each of those refuses plainly rather than failing at a connection. This is separate from daemon.enabled on purpose: adopting a daemon of your own and talking to one that is already there are different decisions, and while they shared a single key, turning adoption off silently stopped the inputs poll, the approvals stream and rewind registration on machines whose connected host was live and answering, the session and memory spines kept dialing the same host perfectly well, which is how the split showed itself."
   },
   {
+    "key": "daemon.connectedHost.url",
+    "type": "string",
+    "default": "",
+    "description": "Where the terminal (goodvibes) dials its daemon, as an origin such as http://10.0.0.7:3421. Empty (the default) means the daemon on this machine, at the address derived from controlPlane.hostMode, controlPlane.host and controlPlane.port; those settings describe only how a local daemon listens. Setup's \"Connect to an existing daemon\" writes this, so finishing setup or changing the local bind does not move the terminal off the daemon it connected to. Clear it to go back to the daemon on this machine.",
+    "validationHint": "empty, or an http(s) origin with no path, user name or password, e.g. http://10.0.0.7:3421"
+  },
+  {
     "key": "danger.httpListener",
     "type": "boolean",
     "default": false,
@@ -4313,7 +4320,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "permissions.commandParser",
     "type": "enum",
     "default": "ast",
-    "description": "Compound shell command evaluation: ast (default, per-segment safe/unsafe verdicts with specific denial explanations, automatic fallback to flat on any parser failure) or flat (baseline segmentation). The frozen catastrophic command block is enforced identically in both modes.",
+    "description": "Shell parse before an exec command runs: ast (default) parses the command into segments and refuses one in which a segment has nothing to run, naming it; a command the parser cannot read runs as the permission gate decided. flat skips the parse. The permission gate decides risk, including the catastrophic-command block, identically in both modes.",
     "enumValues": [
       "ast",
       "flat"

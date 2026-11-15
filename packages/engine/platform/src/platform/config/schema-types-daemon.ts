@@ -116,16 +116,24 @@ export interface DaemonProcessConfig {
    * delivery, rewind registration, the approvals stream and daemon-routed turns
    * on machines whose connected host was live.
    */
-  connectedHost: { enabled: boolean };  // default: true
+  /**
+   * `url`: where this terminal dials its daemon when it was pointed at one
+   * (setup's "connect to an existing daemon"). Empty means the daemon on this
+   * machine, derived from the control-plane bind settings, which describe only
+   * how a local daemon listens.
+   */
+  connectedHost: { enabled: boolean; url: string };  // default: enabled true, url ''
 }
 
 export type DaemonProcessConfigKey =
   | 'daemon.enabled'
   | 'daemon.connectedHost.enabled'
+  | 'daemon.connectedHost.url'
   | 'daemon.timezone';
 
 export interface DaemonProcessConfigValueMap {
   'daemon.enabled': boolean;
   'daemon.connectedHost.enabled': boolean;
+  'daemon.connectedHost.url': string;
   'daemon.timezone': string;
 }

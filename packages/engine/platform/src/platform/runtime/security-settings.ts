@@ -201,18 +201,18 @@ const SECURITY_FEATURE_SETTINGS: readonly Omit<SecuritySettingReport, 'currentSt
     featureId: 'shell-ast-normalization',
     defaultState: FEATURE_FLAG_MAP.get('shell-ast-normalization')?.defaultState ?? 'enabled',
     securityRelevant: true,
-    summary: 'Controls AST-aware shell command evaluation for exec permission review (default ast).',
+    summary: 'Controls the parse that refuses an exec command with nothing to run, just before it runs (default ast).',
     insecureWhen:
-      'At flat, exec command review uses baseline flat segmentation for every command and may provide less precise command verdicts.',
+      'At flat, the parse is skipped: a command in which a segment has nothing to run reaches the shell and fails there instead of being refused with that segment named. Risk decisions do not change; the permission gate makes them in both modes.',
     enablementEffect:
-      'At ast (the default), compound shell commands are decomposed into per-segment verdicts with more specific denial explanations. A parser failure falls back automatically to the baseline flat-segmentation matcher, never a hard error and never a blanket allow, and the permission gate reads the catastrophic case before the call in both modes.',
+      'At ast (the default), each exec command is parsed into segments just before it runs, and a command in which a segment (or the whole command) has nothing to run is refused, naming that segment. The parse does not decide risk: the permission gate has already decided every command, including the catastrophic-command block, in both modes. When the parser cannot read a command (a parse error), the command runs as the gate decided.',
     enablementRequirements: [
       'None, ast is the default and remains runtime-switchable.',
-      'Set permissions.commandParser to flat to force the baseline matcher for every command.',
+      'Set permissions.commandParser to flat to skip the parse.',
     ],
     operationalNotes: [
-      'Complex shell syntax receives more granular per-segment verdicts in ast mode.',
-      'Denial explanations come from the AST verdict when the parse succeeds; on parse failure the baseline matcher produces the denial instead.',
+      'A refusal from this parse lists every segment and says which one has nothing to run.',
+      'Permission verdicts and their denial explanations come from the permission gate and are the same at ast and flat.',
     ],
   },
 ];

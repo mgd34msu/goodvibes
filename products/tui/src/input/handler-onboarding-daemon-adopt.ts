@@ -10,7 +10,7 @@ import { homedir } from 'node:os';
 import { resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/platform/platform/config';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { resolveDaemonCompanionToken } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
-import { isLoopbackAddress } from './onboarding/onboarding-wizard-helpers.ts';
+import { adoptedDaemonUrl } from './onboarding/onboarding-wizard-helpers.ts';
 import {
   buildManagedDaemonServiceManager,
   detectLegacyUnit,
@@ -33,7 +33,9 @@ import { runDaemonConfigMigration } from '../config/run-daemon-config-migration.
  *   1. Installs the pasted token into <homeDirectory>/.goodvibes/daemon/operator-tokens.json
  *      via `resolveDaemonCompanionToken`, the same durable-persistence logic
  *      the `GOODVIBES_DAEMON_TOKEN` non-interactive override uses.
- *   2. Points `controlPlane.host`/`controlPlane.port` at the pasted host/port.
+ *   2. Points this terminal at the pasted host/port (`daemon.connectedHost.url`),
+ *      leaving the control-plane bind settings, which describe only how a
+ *      daemon on this machine listens, as they are.
  *   3. Restarts the external-services controller and reports back, honestly,
  *      whether the daemon at that host/port was actually adopted, reusing
  *      the same `onboarding-runtime-status.ts` helpers the normal
@@ -76,42 +78,30 @@ export async function handleConnectExistingDaemonForHandler(handler: InputHandle
   // What the attempt changes is written before the daemon is known to be reachable,
   // so a failed attempt puts it back instead of leaving the TUI on a dead endpoint.
   const previous = {
-    hostMode: configManager.get('controlPlane.hostMode'),
-    host: configManager.get('controlPlane.host'),
-    port: configManager.get('controlPlane.port'),
+    url: configManager.get('daemon.connectedHost.url'),
     tokenFile: existsSync(tokenFile) ? readFileSync(tokenFile) : undefined,
   };
   const restorePrevious = async (): Promise<string> => {
     try {
-      configManager.setDynamic('controlPlane.hostMode', previous.hostMode);
-      configManager.setDynamic('controlPlane.host', previous.host);
-      configManager.setDynamic('controlPlane.port', previous.port);
+      configManager.setDynamic('daemon.connectedHost.url', previous.url);
       if (previous.tokenFile === undefined) rmSync(tokenFile, { force: true });
       else writeFileSync(tokenFile, previous.tokenFile, { mode: 0o600 });
     } catch (restoreError) {
-      return `The previous host, port and token could not be restored (${summarizeError(restoreError)}); check controlPlane.host, controlPlane.port and operator-tokens.json.`;
+      return `The previous daemon address and token could not be restored (${summarizeError(restoreError)}); check daemon.connectedHost.url and operator-tokens.json.`;
     }
     // The failed attempt's restart already moved the live connection to the new endpoint, so it has to move back too.
     try {
       await externalServices.restart();
-      return 'The previous host, port and token were restored and the connection was restarted on them.';
+      return 'The previous daemon address and token were restored and the connection was restarted on them.';
     } catch (restartError) {
-      return `The previous host, port and token were restored, but restarting the connection on them failed (${summarizeError(restartError)}); the live connection may still be on the failed endpoint until the TUI restarts.`;
+      return `The previous daemon address and token were restored, but restarting the connection on them failed (${summarizeError(restartError)}); the live connection may still be on the failed endpoint until the TUI restarts.`;
     }
   };
   try {
     resolveDaemonCompanionToken(daemonHomeDir, GOODVIBES_TUI_SURFACE_ROOT, token);
-    // hostMode has to move with the host. The control-plane URL is DERIVED from
-    // hostMode/host/port, and 'local' pins the dial target to 127.0.0.1 no
-    // matter what host is stored, so adopting a daemon on another machine
-    // while leaving hostMode alone would derive a loopback URL for a remote
-    // daemon. Adopting a loopback address stays 'local'.
-    configManager.setDynamic(
-      'controlPlane.hostMode',
-      isLoopbackAddress(host) ? 'local' : 'custom',
-    );
-    configManager.setDynamic('controlPlane.host', host);
-    configManager.setDynamic('controlPlane.port', port);
+    // The dial target is this terminal's own setting; the daemon-owned bind
+    // settings (controlPlane.*) are not this terminal's to move.
+    configManager.setDynamic('daemon.connectedHost.url', adoptedDaemonUrl(host, port));
 
     const state = await externalServices.restart();
     const binding = { label: 'GoodVibes daemon', host, port };

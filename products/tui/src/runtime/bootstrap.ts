@@ -8,6 +8,7 @@ import {
 import { createTerminalOrchestrator, terminalCompanionInputHandler } from '@goodvibes-jev/engine/terminal-shell/bootstrap-orchestrator';
 import { buildPluginStartupContext } from '@goodvibes-jev/engine/terminal-shell/plugin-startup';
 import { createPluginStartupTask } from '@goodvibes-jev/engine/terminal-shell/plugin-startup';
+import { ownerInputFor } from './owner-input.ts';
 /**
  * Bootstrap composition root for goodvibes-tui.
  *
@@ -20,7 +21,7 @@ import { createPluginStartupTask } from '@goodvibes-jev/engine/terminal-shell/pl
  *   - lifecycle.ts: save/shutdown helpers
  */
 import { join } from 'node:path';
-import { resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/platform/platform/config';
+import { readConnectedDaemonOrigin, resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/platform/platform/config';
 import '@goodvibes-jev/engine/platform/platform/core';
 import { AcpManager } from '@goodvibes-jev/engine/platform/platform/acp';
 import { readTierPromptSupplement } from '@goodvibes-jev/engine/platform/platform/providers';
@@ -252,8 +253,10 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
     requestRender,
   );
   conversationFollowUpRef.value = (item) => orchestrator.enqueueConversationFollowUp(item);
-  // Companion messages follow the same direct conversation path as the composer.
-  orchestratorHandleUserInputRef.value = terminalCompanionInputHandler(
+  // A companion message is the owner speaking from another device: once the shell
+  // has bound the owner-input route it takes the composer's turn path (retry
+  // context, failure status, memory refresh); before that it runs a local turn.
+  const localCompanionInput = terminalCompanionInputHandler(
     orchestrator,
     (err) => {
       logger.debug('companion handleUserInput safety catch', { error: String(err) });
@@ -262,6 +265,11 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
       void refreshMemoryRecallSnapshot(services);
     },
   );
+  orchestratorHandleUserInputRef.value = (text, inputOptions) => {
+    const route = ownerInputFor(orchestrator);
+    if (route) route(text, inputOptions);
+    else localCompanionInput(text, inputOptions);
+  };
   // Shared payload (single source of truth, includes the memoryRegistry,
   // see orchestrator-core-services.ts) plus this site's cacheHitTracker.
   orchestrator.setCoreServices({
@@ -428,6 +436,8 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
   // shared bearer so an adopted daemon is authenticated the same way it always was.
   const createExternalServiceFactories = (token: string): ExternalServiceFactories => ({
     sharedDaemonToken: token,
+    // Read at every start, so a restart after "connect to an existing daemon" looks there.
+    daemonTarget: readConnectedDaemonOrigin((key) => configManager.get(key)),
   });
 
   // Replacing the external-services handle is one step at a time and always
@@ -439,6 +449,8 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
   // and simply stopped gets started once and waited for, rather than becoming
   // the user's homework. Every boundary is in the platform's client/daemon-autostart.ts.
   const maybeStartInstalledDaemon = async (): Promise<void> => {
+    // Pointed at a daemon elsewhere: starting this machine's daemon would not reach it.
+    if (readConnectedDaemonOrigin((key) => configManager.get(key))) return;
     try {
       const outcome = await autostartInstalledDaemon({
         daemonMode: externalServices.daemonStatus.mode,

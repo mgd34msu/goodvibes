@@ -1,5 +1,5 @@
 /**
- * A unit's evidence (docs/design/contract-runner.md section 4.3): what Jev
+ * A unit's evidence: what Jev
  * reads when it checks the unit. The diff of the paths the unit touched, the
  * claim verification and gate results (at the triggers that run them), the
  * agent's complete output and the commands it ran.
@@ -28,7 +28,7 @@ import { compareJsonReadReferences, compareReadReferences } from './read-referen
 import { commandObservation } from './command-observation.js';
 import { acceptedResearchIds } from './accepted-research.js';
 import { currentFileObservationsAsync } from './current-file-observations.js';
-import { reviewProjectPath, reviewInventoryObservationAsync } from './review-inventory.js';
+import { assignedReviewPaths, reviewProjectPath, reviewInventoryObservationAsync } from './review-inventory.js';
 import { projectCheckEvidence } from './check-evidence-projection.js';
 export { currentFileObservations } from './current-file-observations.js';
 import { parseCompletionReport } from '../agents/completion-report.js';
@@ -300,7 +300,7 @@ export function writtenPaths(turns: readonly ContractTurnRecord[]): string[] {
 
 async function git(cwd: string, args: readonly string[]): Promise<string | null> {
   try {
-    const proc = Bun.spawn(['git', '-C', cwd, ...args], { stdout: 'pipe', stderr: 'pipe' });
+    const proc = Bun.spawn(['git', '-C', cwd, '--literal-pathspecs', ...args], { stdout: 'pipe', stderr: 'pipe' });
     const [code, stdout] = await Promise.all([proc.exited, new Response(proc.stdout).text()]);
     return code === 0 ? stdout : null;
   } catch (error) {
@@ -324,31 +324,51 @@ function fileText(cwd: string, path: string): string {
 export function splitUnifiedDiff(unifiedDiff: string): FileChange[] {
   const changes: FileChange[] = [];
   for (const chunk of unifiedDiff.split(/^(?=diff --git )/m)) {
+    if (!chunk.startsWith('diff --git ')) continue;
+    const line = chunk.slice(0, chunk.indexOf('\n') === -1 ? chunk.length : chunk.indexOf('\n'));
+    // An unrenamed file names one path twice; reading it by length keeps a name containing " b/" whole.
+    const rest = line.slice('diff --git '.length), length = (rest.length - 5) / 2;
+    const same = Number.isInteger(length) && length > 0 ? rest.slice(2, 2 + length) : undefined;
+    if (same !== undefined && rest === `a/${same} b/${same}`) { changes.push({ path: same, diff: chunk.trimEnd() }); continue; }
     const header = /^diff --git a\/(.+?) b\/(.+)$/m.exec(chunk);
     if (header !== null) changes.push({ path: header[2]!, diff: chunk.trimEnd() });
   }
   return changes;
 }
 
-/** Shared mode: what changed in `cwd` since the unit's baseline, with each path's diff. */
+/** Paths per `git diff` argument list, so a large change never exceeds the system's argument limit. */
+const DIFF_PATHS_PER_CALL = 1_000;
+
+/**
+ * Shared mode: what changed in `cwd` since the unit's baseline, with each
+ * path's diff. One `git diff` covers every changed path (split per file);
+ * a path the combined diff does not attribute (an unusual name git quotes)
+ * is diffed on its own. The tree root is checked once before and once after.
+ */
 async function sharedTreeChanges(cwd: string, baseline: ContractUnit['baseline']): Promise<FileChange[]> {
   const root = captureDirtyTreeRoot(cwd);
   const assertCurrent = () => { root.assertCurrent(); if (baseline) assertBaselineExecutionRootCurrent(cwd, baseline); };
-  const readGit = async (args: readonly string[]) => { assertCurrent(); const result = await git(cwd, args); assertCurrent(); return result; };
   assertCurrent();
   const paths = new Set(baselineChangedPaths(cwd, listDirtyTreePaths(cwd), baseline));
-  const head = (await readGit(['rev-parse', 'HEAD']))?.trim() || null;
+  const head = (await git(cwd, ['rev-parse', 'HEAD']))?.trim() || null;
   const base = baseline?.head ?? head;
   if (baseline?.head && head !== null && head !== baseline.head) {
-    const committed = await readGit(['diff', '--name-only', baseline.head, head]);
+    const committed = await git(cwd, ['diff', '--name-only', '--no-renames', baseline.head, head]);
     for (const path of (committed ?? '').split('\n').filter(Boolean)) paths.add(path);
   }
+  const ordered = [...paths];
+  const diffs = new Map<string, string>();
+  if (base !== null) {
+    for (let start = 0; start < ordered.length; start += DIFF_PATHS_PER_CALL) {
+      const combined = await git(cwd, ['diff', '--no-renames', base, '--', ...ordered.slice(start, start + DIFF_PATHS_PER_CALL)]);
+      for (const change of splitUnifiedDiff(combined ?? '')) if (paths.has(change.path)) diffs.set(change.path, change.diff);
+    }
+  }
   const changes: FileChange[] = [];
-  for (const path of paths) {
-    const diff = base === null ? '' : ((await readGit(['diff', base, '--', path])) ?? '');
-    assertCurrent();
-    changes.push({ path, diff: diff.trim().length > 0 ? diff.trimEnd() : `new file ${path}\n${fileText(cwd, path)}` });
-    assertCurrent();
+  for (const path of ordered) {
+    let diff = diffs.get(path);
+    if (diff === undefined && base !== null) diff = (await git(cwd, ['diff', '--no-renames', base, '--', path]))?.trimEnd() ?? '';
+    changes.push({ path, diff: diff !== undefined && diff.trim().length > 0 ? diff : `new file ${path}\n${fileText(cwd, path)}` });
   }
   assertCurrent(); return changes;
 }
@@ -401,7 +421,7 @@ export async function collectChanges(unit: Pick<ContractUnit, 'baseline'>, sourc
  * always; claims at completion and at resume; gates at every trigger but turn-end.
  */
 export async function collectUnitEvidence(
-  contract: Pick<ContractView, 'id' | 'sessionId'> & Partial<Pick<ContractView, 'status' | 'decisions' | 'createdAt' | 'origin' | 'criteria' | 'groups' | 'units' | 'proposedUnits' | 'projectRoot' | 'inputSnapshot' | 'reviewInventory' | 'reviewExclusions'>>,
+  contract: Pick<ContractView, 'id' | 'sessionId'> & Partial<Pick<ContractView, 'status' | 'decisions' | 'createdAt' | 'origin' | 'criteria' | 'groups' | 'units' | 'proposedUnits' | 'projectRoot' | 'inputSnapshot' | 'reviewInventory' | 'reviewExclusions' | 'isolation'>>,
   unit: Pick<ContractUnit, 'id' | 'goal' | 'brief' | 'files' | 'baseline' | 'readEvidence' | 'commandEvidence'>,
   trigger: CheckTrigger,
   sources: UnitEvidenceSources,
@@ -421,6 +441,8 @@ export async function collectUnitEvidence(
       sessionId: contract.sessionId,
       contractId: contract.id,
       targetId: unit.id,
+      // In a shared tree the results are evidence for this unit's files only, so the owner's other saves leave them current.
+      ...(contract.isolation === 'shared' ? { scope: changes.map((change) => change.path) } : {}),
       signal: sources.signal,
     })
     : undefined;
@@ -432,16 +454,19 @@ export async function collectUnitEvidence(
   const currentReads = sourceReadsFromTurns(sources.turns, sources.mustWrite ? [] : unit.files, sources.output);
   const observedReads = sources.mustWrite ? currentReads : mergeSourceReads(unit.readEvidence ?? [], currentReads);
   const currentUnit = contract.units?.find(planned => planned.id === unit.id);
-  // Assignment is not inspection. Unread assigned files remain in the complete
-  // review inventory, but cannot enter check.reviewedFiles without an actual
-  // returned read. Capture versions needed by those reads and existing proofs.
+  // Assignment is not inspection. Unread assigned files remain in the
+  // unit's review inventory slice, but cannot enter check.reviewedFiles
+  // without an actual returned read. Only the files this check is about are
+  // observed: the unit's own files, reads and changes, and the earlier reviews
+  // of files inside its assigned slice.
+  const slice = contract.reviewInventory ? new Set(assignedReviewPaths(contract.reviewInventory, unit.files)) : undefined;
   const currentFiles = planChecks.length ? await currentFileObservationsAsync(sources.cwd, [...unit.files,
     ...observedReads.filter(read => read.returnedLines > 0).flatMap(read => {
       const path = reviewProjectPath(sources.cwd, read.path);
       return path === undefined ? [] : [path];
     }), ...changes.map(change => change.path),
-    ...(contract.units ?? []).flatMap(planned => planned.checks.at(-1)?.reviewedFiles?.map(file => file.path) ?? []),
-    ...(contract.units ?? []).filter(planned => planned.status === 'passed').flatMap(planned => planned.touchedPaths ?? [])], { owner: contract }, sources.signal) : [];
+    ...(slice === undefined ? [] : (contract.units ?? []).flatMap(planned => planned.checks.at(-1)?.reviewedFiles?.map(file => file.path) ?? []).filter(path => slice.has(path)))],
+  { owner: contract }, sources.signal) : [];
   const owner = sources.ownerEvidence;
   const ownerReads = owner && typeof owner === 'object' && !Array.isArray(owner) && Array.isArray(owner['sourceReads'])
     ? owner['sourceReads'].flatMap(read => read && typeof read === 'object' && !Array.isArray(read) && typeof read['path'] === 'string'
@@ -474,7 +499,6 @@ export async function collectUnitEvidence(
       ...referencedCriteria.map(criterion => ({ field: `criterion ${criterion.id}`, text: criterion.text }))],
       observationSources.flatMap(source => source.reads), observationSources),
     sourceJsonReferenceComparisons: compareJsonReadReferences(observedReads, currentFiles, observationSources),
-    meaning: 'Actual host-owned requirements referenced by this unit acceptance check, including transitive references. They resolve requirement ids; they do not expand this unit into the whole contract or approve its work. Judge the assigned unit goal and criteria against their referenced obligations and actual evidence.',
   };
   const repairing = currentUnit?.criteria.some(criterion => criterion.origin === 'fix') === true;
   const dependencyIds = new Set(currentUnit?.dependsOn ?? []);
@@ -489,7 +513,7 @@ export async function collectUnitEvidence(
       requirements,
       ...(sources.ownerEvidence === undefined ? {} : { ownerPriorReads: sources.ownerEvidence }),
       currentFiles,
-      ...(contract.reviewInventory && contract.projectRoot && contract.units ? { reviewInventory: await reviewInventoryObservationAsync({ ...contract, projectRoot: contract.projectRoot, units: contract.units }, currentFiles, sources.signal) as unknown as JsonValue } : {}),
+      ...(contract.reviewInventory && contract.projectRoot && contract.units ? { reviewInventory: await reviewInventoryObservationAsync({ ...contract, projectRoot: contract.projectRoot, units: contract.units }, currentFiles, sources.signal, unit.files) as unknown as JsonValue } : {}),
       ...(privateArtifacts.length ? { privateArtifacts } : {}),
       ...(contract.createdAt === undefined ? {} : { createdAt: contract.createdAt }),
       ...(contract.origin === undefined ? {} : { origin: contract.origin }),
@@ -513,18 +537,29 @@ export async function collectUnitEvidence(
                   ? { exitCode: observed.exitCode, executionSucceeded: observed.executionSucceeded, toolCallSucceeded: command.success } : {}),
                 commandBytes: Buffer.byteLength(script),
                 captureBytes: Buffer.byteLength(head),
-                bodySource: { storage: 'native-contract-store', contractId: contract.id, unitId: planned.id, field: 'commandEvidence', index },
-                meaning: 'Actual receipt identity and available child exit status retained; this command is outside the assigned dependency closure and its execution id is not referenced by this candidate. Command/result bodies remain unchanged at bodySource in their original native record and are not supplied in this check view. Metadata or a prior pass does not prove an unshown command body, purpose or asserted verification result. Declared dependency or explicitly execution-id-referenced receipts are supplied in full.' };
+                bodySource: { storage: 'native-contract-store', contractId: contract.id, unitId: planned.id, field: 'commandEvidence', index } };
             }),
             ...(currentUnit?.role === 'integration' || (repairing && (planned.role === 'integration' || dependencyIds.has(planned.id) || researchIds.has(planned.id)))
               ? { acceptedAnswer: planned.answer ?? '' } : {}) } : {}) }),
         criteria: planned.criteria.map(criterion => ({ id: criterion.id, text: criterion.text, serves: [...criterion.serves],
           ...(criterion.contribution ? { contribution: { ...criterion.contribution } } : {}),
           ...(planned.id !== unit.id && planned.status === 'passed' ? { verdict: criterion.status } : {}) })) })) }),
+      readingRules: CHECK_READING_RULES,
       meaning: 'Host records for this current contract. The complete assigned unit brief and exact referenced requirements are supplied in requirements. Other units are represented by their goals, exact criteria, actual scoped checks, observations, command receipts and accepted results. Integration checks receive prior commands in full. Other checks receive full command/result bodies for their dependency closure or explicitly referenced execution ids; unrelated prior commands retain their identities, statuses and native storage locations, not proof of unshown results. Old worker instructions remain unchanged at briefSource; they are not this unit\'s requirements. A passed peer criterion verdict establishes only its checked scope. Plan and prior-unit acceptance do not approve the unit now being checked.' } } : {}) }, unit);
 }
 
 // ── What Jev reads ────────────────────────────────────────────────────────────
+
+/**
+ * How the rows of a check state are read, stated once per request rather than
+ * on every row.
+ */
+export const CHECK_READING_RULES: JsonValue = {
+  requirements: 'requirements: actual host-owned requirements referenced by this unit acceptance check, including transitive references. They resolve requirement ids; they do not expand this unit into the whole contract or approve its work. Judge the assigned unit goal and criteria against their referenced obligations and actual evidence.',
+  currentFiles: 'read-current-file rows: a native read from the original current physical tree, with text when requested and representable. The observation ID labels this owner\'s latest observed physical file version; it proves neither byte equality nor semantic correctness, worker inspection, execution or native approval. A row with success false means the file\'s identity could not be established.',
+  retainedCommandReceipts: 'retained-command-receipt-index rows: actual receipt identity and available child exit status retained; the command is outside the assigned dependency closure and its execution id is not referenced by this candidate. Command/result bodies remain unchanged at bodySource in their original native record and are not supplied in this check view. Metadata or a prior pass does not prove an unshown command body, purpose or asserted verification result. Declared dependency or explicitly execution-id-referenced receipts are supplied in full.',
+  gates: 'gate rows: process success and assertion verification are separate observations. Unverified required checks leave acceptance open; a skipped check proves no behavior. A command-exit completion means the configured command completed with this exit code; it establishes no assertion count or test coverage.',
+};
 
 /** A path list for the state: at most MAX_LISTED_PATHS, then a count of the rest. */
 export function listedPaths(paths: readonly string[]): string[] {
@@ -540,11 +575,9 @@ function gateEvidence(gates: NonNullable<UnitEvidence['gates']>): JsonValue {
     if (gate.outcome === undefined) return record;
     record['outcome'] = gate.outcome;
     record['required'] = gate.required === true;
-    record['meaning'] = 'Process success and assertion verification are separate observations. Unverified required checks leave acceptance open; a skipped check proves no behavior.';
     if (gate.reason !== undefined) record['reason'] = gate.reason;
     if (gate.completion?.kind === 'assertions') record['completion'] = { kind: gate.completion.kind, runner: gate.completion.runner, checks: { ...gate.completion.checks } };
-    else if (gate.completion?.kind === 'command-exit') record['completion'] = { kind: gate.completion.kind, exitCode: gate.completion.exitCode,
-      meaning: 'This configured command completed with this exit code. It establishes no assertion count or test coverage.' };
+    else if (gate.completion?.kind === 'command-exit') record['completion'] = { kind: gate.completion.kind, exitCode: gate.completion.exitCode };
     if (gate.provenance) record['provenance'] = { ...gate.provenance };
     return record;
   });
@@ -610,15 +643,19 @@ export function qualityState(unit: Pick<ContractUnit, 'goal' | 'brief'>, evidenc
   });
 }
 
+/**
+ * Host operations not already in the state: the owner-read validation and the
+ * private archive reads. The current-file reads are in `orchestration.currentFiles`
+ * once and are not repeated here.
+ */
 function actualHostOperations(evidence: UnitEvidence): JsonValue[] {
   const orchestration = evidence.orchestration;
   if (!orchestration || typeof orchestration !== 'object' || Array.isArray(orchestration)) return [];
   const archives = orchestration['privateArtifacts'];
-  const files = orchestration['currentFiles'];
   const owner = orchestration['ownerPriorReads'];
   const ownerValidation = owner && typeof owner === 'object' && !Array.isArray(owner)
     && owner['kind'] === 'original-owner-read-observations' ? owner['hostValidation'] : undefined;
-  return [...(ownerValidation ? [ownerValidation] : []), ...(Array.isArray(files) ? files : []), ...(Array.isArray(archives) ? archives : []).flatMap(archive => archive && typeof archive === 'object' && !Array.isArray(archive)
+  return [...(ownerValidation ? [ownerValidation] : []), ...(Array.isArray(archives) ? archives : []).flatMap(archive => archive && typeof archive === 'object' && !Array.isArray(archive)
     && archive['kind'] === 'contract-read-receipts' && archive['hostFileRead'] ? [archive['hostFileRead']] : [])];
 }
 

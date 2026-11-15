@@ -1,13 +1,12 @@
 /**
  * A reply being read does not stop the question being answered or the
- * contract ending by another surface: the operator's pick is refused while
- * the reading runs, a contract that ended meanwhile keeps the reply
- * unrecorded, and the refusals a caller can cause are typed.
+ * contract ending by another surface: the operator's pick answers it at once
+ * and the reply then applies nothing, a contract that ended meanwhile keeps the
+ * reply unrecorded, and the refusals a caller can cause are typed.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
 import { choiceAnswer, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { OwnerReplyRefusedError } from '../../platform/src/platform/contract/escalation.js';
-import { AttemptError } from '../../platform/src/platform/orchestration/attempts.js';
 import type { AnswerContext } from './plan-support.js';
 import { makeHarness, oneUnitPlan, startContract, waitFor, type Harness } from './runner-support.js';
 import { contractOf, finishes, terminal } from './steps-support.js';
@@ -55,7 +54,7 @@ function attemptsScenario(onReading: (h: () => Harness, contractId: () => string
 }
 
 describe('owner replies racing other surfaces', () => {
-  test('an operator pick during a reading is refused, and the reply then takes the attempt', async () => {
+  test('an operator pick during a reading takes effect, and the reply then applies nothing', async () => {
     let pick: Promise<unknown> | undefined;
     let groupId = '';
     const s = attemptsScenario((h, id) => {
@@ -63,15 +62,14 @@ describe('owner replies racing other surfaces', () => {
     });
     const id = await s.reach();
     groupId = (await s.h.runner.fleetControls().listHeldMergeGroups())[0]!.groupId;
-    const outcome = await s.h.runner.reply(id, s.questionOf(id), 'Yes, go with the proposal.');
-    const refused = await pick;
-    expect(refused).toBeInstanceOf(AttemptError);
-    expect((refused as Error).message).toContain('is being read');
-    expect(outcome.action).toBe('approved');
+    const refused = await s.h.runner.reply(id, s.questionOf(id), 'Yes, go with the proposal.').then(() => undefined, (caught: unknown) => caught);
+    expect(await pick).toBe('picked');
+    expect(refused).toBeInstanceOf(OwnerReplyRefusedError);
+    expect((refused as OwnerReplyRefusedError).refusal).toBe('not-open');
     await waitFor(() => terminal(s.h, id), 'the contract to end', 15_000);
     const done = contractOf(s.h, id);
     expect(done.status).toBe('passed');
-    expect(done.units[0]!.attemptSelection?.pickedId).toBe('u1#a0');
+    expect(done.units[0]!.attemptSelection?.pickedId).toBe('u1#a1');
   }, 30_000);
 
   test('a contract cancelled while the reply is read aborts the read, keeps the question unanswered and refuses the reply', async () => {

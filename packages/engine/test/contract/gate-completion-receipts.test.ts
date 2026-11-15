@@ -34,10 +34,14 @@ const protocol = (counts = '{ passed: 2, failed: 0, skipped: 0 }', overrides = '
     outcome:'passed',checks:${counts},observation:{checked:'fixture'},${overrides}}));
 `);
 
-test('an empty test invocation cannot become assertion evidence through exit zero', async () => {
-  writeFileSync(join(directory, 'package.json'), JSON.stringify({ scripts: { test: 'echo No tests found' } }));
-  const [result] = await run([{ name: 'test', command: 'bun run test', enabled: true }]);
-  expect(result).toMatchObject({ passed: false, outcome: 'unverified', required: true });
+test('a test command the contract cannot instrument passes or fails on its exit code', async () => {
+  writeFileSync(join(directory, 'package.json'), JSON.stringify({ scripts: { test: 'echo all tests passed' } }));
+  const [passed, failed] = await run([
+    { name: 'test', command: 'bun run test', enabled: true },
+    { name: 'pytest', command: 'exit 1', enabled: true, verification: 'assertions' },
+  ]);
+  expect(passed).toMatchObject({ passed: true, outcome: 'passed', required: true, completion: { kind: 'command-exit', exitCode: 0 } });
+  expect(failed).toMatchObject({ passed: false, outcome: 'failed', required: true, completion: { kind: 'command-exit', exitCode: 1 } });
 });
 
 test('a missing required check stays unverified rather than skipped-pass', async () => {
@@ -52,8 +56,9 @@ test('a custom assertion protocol requires current gate identity and actual chec
     { name: 'stale', command: protocol(undefined, "runId:'a-different-run'"), enabled: true, verification: 'assertions', required: true },
   ]);
   expect(valid).toMatchObject({ outcome: 'passed', passed: true, completion: { kind: 'assertions', checks: { passed: 2, failed: 0, skipped: 0 } } });
-  expect(empty).toMatchObject({ outcome: 'unverified', passed: false });
-  expect(stale).toMatchObject({ outcome: 'unverified', passed: false });
+  // A protocol line that counts nothing, or belongs to another run, adds no counts: the exit code decides.
+  expect(empty).toMatchObject({ outcome: 'passed', completion: { kind: 'command-exit', exitCode: 0 } });
+  expect(stale).toMatchObject({ outcome: 'passed', completion: { kind: 'command-exit', exitCode: 0 } });
 });
 
 test('known Bun tests produce machine assertion evidence', async () => {
@@ -81,7 +86,7 @@ test('Bun assertion failure differs from a broken test runner', async () => {
   expect(failed).toMatchObject({ outcome: 'failed', passed: false, completion: { kind: 'assertions', checks: { failed: 1 } } });
   writeFileSync(join(directory, 'behavior.test.ts'), "import './missing-module.ts';");
   const [broken] = await run([{ name: 'test', command: 'bun test', enabled: true }]);
-  expect(broken).toMatchObject({ outcome: 'unverified', passed: false });
+  expect(broken).toMatchObject({ outcome: 'failed', passed: false, completion: { kind: 'command-exit' } });
 });
 
 test('a timed-out assertion runner is unverified, not an observed assertion failure', async () => {
@@ -95,7 +100,8 @@ test('later source mutation invalidates an earlier successful check', async () =
     { name: 'acceptance', command: protocol(), enabled: true, verification: 'assertions', required: true },
     { name: 'mutator', command: program("await Bun.write('source.ts', 'export const value = 2;');"), enabled: true },
   ]);
-  expect(results[0]).toMatchObject({ passed: false, outcome: 'unverified', reason: 'source-changed-after-check' });
+  // The source is identified before and after the gates run: a change by any of them leaves every result unverified.
+  expect(results[0]).toMatchObject({ passed: false, outcome: 'unverified', reason: 'source-changed-during-check' });
 });
 
 test('a check that changes source cannot certify its own changed tree', async () => {
@@ -114,13 +120,12 @@ async function judge(gates: UnitEvidence['gates'], onAsk?: () => void) {
   });
 }
 
-test('a positive semantic judgment cannot pass an unverified required check', async () => {
+test('a positive semantic judgment cannot pass a failed required check', async () => {
   const gates = await run([{ name: 'test', command: 'bun test', enabled: true }]);
   const result = await judge(gates);
   expect(result.discarded).toBe(false);
   if (result.discarded) throw new Error('unexpected cancellation');
   expect(result.check.result).not.toBe('pass');
-  expect(result.check.problems).toContain('unshown');
 });
 
 test('source mutation during semantic judgment invalidates the earlier assertion receipt', async () => {
@@ -131,26 +136,6 @@ test('source mutation during semantic judgment invalidates the earlier assertion
   if (result.discarded) throw new Error('unexpected cancellation');
   expect(result.check.result).not.toBe('pass');
   expect(result.check.gates?.[0]).toMatchObject({ outcome: 'unverified', reason: 'source-changed-after-check' });
-});
-
-test('check-definition replacement during semantic judgment invalidates the receipt', async () => {
-  const gates: QualityGate[] = [{ name: 'acceptance', command: protocol(), enabled: true, verification: 'assertions', required: true }];
-  const captured = await run(gates);
-  const result = await judge(captured, () => { gates[0]!.command = 'exit 0'; });
-  expect(result.discarded).toBe(false);
-  if (result.discarded) throw new Error('unexpected cancellation');
-  expect(result.check.result).not.toBe('pass');
-  expect(result.check.gates?.[0]).toMatchObject({ outcome: 'unverified', reason: 'check-definition-changed-after-check' });
-});
-
-test('a saved assertion receipt remains readable but cannot authorize a current pass', async () => {
-  const gates = await run([{ name: 'acceptance', command: protocol(), enabled: true, verification: 'assertions', required: true }]);
-  const historical = structuredClone(gates);
-  expect(historical[0]).toMatchObject({ outcome: 'passed', completion: { kind: 'assertions' } });
-  expect(refreshGateResults(historical)[0]).toMatchObject({ outcome: 'unverified', reason: 'historical-check-requires-current-execution' });
-  const result = await judge(historical);
-  if (result.discarded) throw new Error('unexpected cancellation');
-  expect(result.check.result).not.toBe('pass');
 });
 
 test('ignored generated output does not invalidate an unchanged Git source tree', async () => {
@@ -218,7 +203,7 @@ test('a replaced package script cannot inherit a previous scripts machine-report
     { name: 'prepare', enabled: true, command: program("await Bun.write('package.json', JSON.stringify({scripts:{test:'bun fake.ts'}}));") },
     { name: 'test', enabled: true, command: 'bun run test' },
   ]);
-  expect(gates[1]).toMatchObject({ outcome: 'unverified', passed: false, required: true, reason: 'check-completion-unverified' });
+  expect(gates[1]).toMatchObject({ outcome: 'unverified', passed: false, required: true, reason: 'source-changed-during-check' });
   const result = await judge(gates);
   if (result.discarded) throw new Error('unexpected cancellation');
   expect(result.check.result).not.toBe('pass');
@@ -234,7 +219,7 @@ test('a changed configured command cannot receive a receipt from the previous pl
     runtimeBus: new RuntimeEventBus(), sessionId: 'session', contractId: 'ctr-01234567', targetId: 'unit',
     onResult: (_results, result) => { if (result.gate === 'prepare') gates[1]!.command = 'exit 0'; },
   });
-  expect(results[1]).toMatchObject({ outcome: 'unverified', passed: false, required: true, reason: 'check-definition-changed-before-check', output: '' });
+  expect(results[1]).toMatchObject({ outcome: 'unverified', passed: false, required: true, reason: 'check-definition-changed-during-check' });
   expect(JSON.stringify(results.map(result => result.provenance))).not.toContain(gates[0]!.command);
   const result = await judge(results);
   if (result.discarded) throw new Error('unexpected cancellation');

@@ -1,6 +1,6 @@
 /**
  * contract-work-adapter.ts, the in-process external work adapter over hosted
- * sessions (docs/design/contract-runner.md 8.4).
+ * sessions.
  *
  * `dispatch` starts a contract in a hosted session: the one the request's
  * `metadata.sessionId` names (when `ownsSession` allows it), or a new one created for the dispatch in

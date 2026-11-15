@@ -122,7 +122,7 @@ describe('the runner when the route planner finds no route', () => {
     expect(eventsOf(h, 'CONTRACT_UNIT_SPAWNED')).toEqual([]);
   });
 
-  test('no route for the planner an owner\'s amendment needs fails the contract, rather than leaving it waiting on a reply already given', async () => {
+  test('no route for the planner an owner\'s amendment needs asks the same question again with what failed, and the contract keeps its work', async () => {
     let plannerRoutes = 0;
     const routeSelector: ContractRouteSelector = async ({ purpose }) => {
       if (purpose !== 'planner') return { model: 'provider-a:unit', provider: 'provider-a', reason: 'unit route' };
@@ -144,11 +144,15 @@ describe('the runner when the route planner finds no route', () => {
     await waitFor(() => contractOf(h, contract.id).status === 'awaiting-owner' || terminal(h, contract.id), 'the stalled escalation', 15_000);
     const escalation = contractOf(h, contract.id).escalations.at(-1)!;
     expect(escalation.reason).toBe('stalled');
-    await expect(h.runner.reply(contract.id, escalation.id, 'Relax the first property.')).rejects.toBe(noRoute);
+    const outcome = await h.runner.reply(contract.id, escalation.id, 'Relax the first property.');
+    expect(outcome.action).toBe('asked-again');
     const done = h.store.get(contract.id)!;
-    expect(done.status).toBe('failed');
-    expect(done.failureKind).toBe('other');
-    expect(done.error).toBe(`the owner's reply to ${escalation.id} could not be acted on: ${noRoute.message}`);
+    expect(done.status).toBe('awaiting-owner');
+    const again = done.escalations.at(-1)!;
+    expect(outcome.nextEscalationId).toBe(again.id);
+    expect(again.resolvedAt).toBeUndefined();
+    expect(again.reason).toBe('stalled');
+    expect(again.question).toContain(noRoute.message);
     expect(plannerRoutes).toBe(2);
     expect(planner.of('amend')).toEqual([]);
   });

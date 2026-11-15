@@ -3,10 +3,10 @@ import { setAgentProgress } from '../agents/progress-audience.js';
 import { requireDecisionFeature } from '../runtime/decision-policy.js';
 import { nativeContractSourceData } from './native-source.js';
 import { reviewInventoryObservationAsync, compactReviewInventory } from './review-inventory.js';
+import { projectCheckEvidence } from './check-evidence-projection.js';
 import { assertOwnedContractSource, hasDerivedAcceptanceChecks } from './owned-source.js';
 /**
- * Groups, the deliverable, and finishing (docs/design/contract-runner.md
- * sections 6.4 and 6.5).
+ * Groups, the deliverable, and finishing.
  *
  * - Group check: when every unit of a group passed (and merged), Jev judges the
  *   group (`contract.group-judge`) against its criteria: its goal, its units'
@@ -69,8 +69,8 @@ import { readContractConfig } from './config.js';
 import type { Correction } from './correction.js';
 import { nativeContractPort } from './native-decisions.js';
 import { assertNativeContractSource } from './native-source.js';
-import { collectChanges, commandsFromTurns, judgeEvidence, trimEvidence, type ContractTurnRecord, type EvidenceCommand } from './evidence.js';
-import { failedGates, gateEventSummary, refreshGateResults, runContractGates, unverifiedGates, type QualityGateResult } from './gates.js';
+import { CHECK_READING_RULES, collectChanges, commandsFromTurns, judgeEvidence, trimEvidence, type ContractTurnRecord, type EvidenceCommand } from './evidence.js';
+import { failedGates, gateEventSummary, gateSourceKey, refreshGateResults, runContractGates, unverifiedGates, type QualityGateResult } from './gates.js';
 import { workingTreeIdentity } from './tree-identity.js';
 import { captureGateInput, type GateSourceInputIdentity } from './gate-input.js';
 import { failureFromError, isAbortError, type ContractRun } from './run-context.js';
@@ -111,6 +111,15 @@ export interface Completion {
 /** The tree the contract's work sits in: the contract worktree, or the project root. */
 export function contractTree(contract: Pick<Contract, 'worktreePath' | 'projectRoot'>): string {
   return contract.worktreePath ?? contract.projectRoot;
+}
+
+/**
+ * The paths a gate's source identity covers: in a shared tree, the files the
+ * contract touched, so the owner's unrelated saves do not change it; in a
+ * contract worktree, the whole tree (absent).
+ */
+export function gateScope(contract: Pick<Contract, 'isolation' | 'units'>): readonly string[] | undefined {
+  return contract.isolation === 'shared' ? [...new Set(contract.units.flatMap((unit) => unit.touchedPaths))].sort() : undefined;
 }
 
 function judged(criteria: readonly Criterion[]): Criterion[] {
@@ -335,12 +344,13 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
     const bindNativeInput = contract.nativeSource !== undefined;
     assertOwnedContractSource(contract);
     const tree = contractTree(contract);
-    const source = input.scope === 'deliverable' ? captureGateInput(tree) : undefined;
+    const scope = gateScope(contract);
+    const source = input.scope === 'deliverable' ? captureGateInput(tree, undefined, scope) : undefined;
     if (input.scope === 'deliverable') acceptedSources.delete(run);
     preserveDeclaredReadReceipts(contract, context.readOwnerEvidence?.(contract, ''));
     const paths = new Set(contract.units.filter((unit) => input.unitIds.has(unit.id)).flatMap((unit) => unit.touchedPaths));
     const changes = (await collectChanges({ baseline: input.baseline }, { cwd: tree, turns: turnsOf(run, input.unitIds) })).filter((change) => paths.has(change.path));
-    const gates = await runContractGates({ configManager: context.configManager, cwd: tree, runtimeBus: context.runtimeBus, sessionId: contract.sessionId, contractId: contract.id, targetId: input.targetId, signal: run.abort.signal });
+    const gates = await runContractGates({ configManager: context.configManager, cwd: tree, runtimeBus: context.runtimeBus, sessionId: contract.sessionId, contractId: contract.id, targetId: input.targetId, scope, signal: run.abort.signal });
     for (const unit of contract.units.filter(unit => input.unitIds.has(unit.id))) {
       const preservation = verifyPrivateReceiptPreservation(contract, unit, tree);
       if (preservation) gates.push(preservation);
@@ -383,8 +393,9 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
       sourceJsonReferenceComparisons: sourceScope.sourceJsonReferenceComparisons,
       sourceReferenceComparisons: sourceScope.sourceReferenceComparisons,
       repairPlanAdmissions: contract.decisions.filter(decision => decision.action === 'fix-planned' && decision.decisionIds.length > 0)
-        .map(decision => ({ id: decision.id, targetId: decision.targetId, at: decision.at, reason: decision.reason, decisionIds: [...decision.decisionIds],
-          meaning: 'Actual host admission of this repair plan with its validation decision identities; this is not approval of the repaired result or final answer.' })),
+        .map(decision => ({ id: decision.id, targetId: decision.targetId, at: decision.at, reason: decision.reason, decisionIds: [...decision.decisionIds] })),
+      readingRules: CHECK_READING_RULES,
+      repairPlanAdmissionsMeaning: 'Each repairPlanAdmissions row is the actual host admission of a repair plan with its validation decision identities; it is not approval of the repaired result or final answer.',
       currentFiles: await currentFileObservationsAsync(tree, changes.map(change => change.path), { includeText: input.scope === 'deliverable', owner: contract }, run.abort.signal),
       ...(contract.reviewInventory ? { reviewInventory: compactReviewInventory((await reviewInventoryObservationAsync(contract,
         await currentFileObservationsAsync(tree, contract.units.flatMap(unit => unit.checks.at(-1)?.reviewedFiles?.map(file => file.path) ?? []), { owner: contract }, run.abort.signal), run.abort.signal))!) as unknown as JsonValue } : {}),
@@ -433,7 +444,8 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
     let retainedOutput: AnswerClaimOutput | undefined;
     const outputOwnerForCurrentAnswer = (): AnswerClaimOutput => retainedOutput ??= captureAnswerClaimOutput(evidence.output);
     const outputDigestForCurrentAnswer = (): string => outputOwnerForCurrentAnswer().digest;
-    const acceptanceEvidence = primary?.evidence ?? rawEvidence;
+    // The one model-facing rendering (current-file rows as a lossless table); the native rows stay in rawEvidence.
+    const acceptanceEvidence = projectCheckEvidence(primary?.evidence ?? rawEvidence);
     const judgedCriteria = judged(input.criteria);
     const site = input.scope === 'group' ? COMPLETION_SITES.group : COMPLETION_SITES.deliverable;
     const judges = input.scope === 'group' ? GROUP_JUDGES : DELIVERABLE_JUDGES;
@@ -496,7 +508,7 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
         if (receipt.passed === false) refusedReview = review.reason;
       }
       assertOwnedContractSource(contract);
-      if (source !== undefined && captureGateInput(tree, source).source !== source.source)
+      if (source !== undefined && captureGateInput(tree, source, scope).source !== source.source)
         throw new PublicationPending('The result source changed while checking its retained refusal.');
       return { check: prior, verdicts: new Map(input.criteria.filter(criterion => criterion.disposition === 'judged').map(criterion => [criterion.id, criterion.status === 'unread' ? 'unshown' : criterion.status])), passed: false,
         output: evidence.output + (refusedReview ? '\n\nRetained native final-answer refusal; unchanged evidence cannot resample it into approval:\n' + refusedReview : '') };
@@ -626,11 +638,22 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
               const { probability, verdict, outcome } = reading;
               return [recordAnswerClaimReview(scope, { ...(stateHash === undefined ? {} : { stateHash }), decisionId: review.result.decisionId, reading: { probability, verdict, outcome } })];
             };
+            // At most MAX_ANSWER_PASSAGES requests (answerClaimScopes lengthens
+            // passages of a long answer). Only the worst reading is used, so a
+            // passage read decisively unsupported settles the answer and the
+            // passages not yet started are skipped.
             const pending = new Set<Promise<AnswerClaimReview[]>>();
+            let settled: AnswerClaimReview | undefined;
+            const decisive = (review: AnswerClaimReview): boolean => review.reading.probability > 0.5 && review.reading.outcome === 'act';
             try {
-              claimReviews = (await mapLimit(answerClaimScopes(evidence.output, 0, evidence.output.length, 4_000, outputOwnerForCurrentAnswer()), 4, async scope => {
+              claimReviews = (await mapLimit(answerClaimScopes(evidence.output, 0, evidence.output.length, undefined, outputOwnerForCurrentAnswer()), 4, async scope => {
+                if (settled !== undefined) return [];
                 const job = inspect(scope); pending.add(job);
-                try { return await job; }
+                try {
+                  const reviewed = await job;
+                  settled ??= reviewed.find(decisive);
+                  return reviewed;
+                }
                 catch (error) { claimAbort.abort(error); throw error; }
                 finally { pending.delete(job); }
               })).flat();
@@ -639,7 +662,7 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
               while (pending.size) await Promise.allSettled([...pending]);
               throw error;
             }
-            if (!completeAnswerClaimCoverage(evidence.output, claimReviews, outputOwnerForCurrentAnswer())) throw new Error('Scoped answer checks do not cover the complete answer');
+            if (settled === undefined && !completeAnswerClaimCoverage(evidence.output, claimReviews, outputOwnerForCurrentAnswer())) throw new Error('Scoped answer checks do not cover the complete answer');
             const worst = claimReviews.reduce((previous, current) => current.reading.probability > previous.reading.probability ? current : previous);
             readings.unsupported = { kind: 'yes-no', ...worst.reading };
           }
@@ -788,7 +811,9 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
     }
     // Only a deliverable otherwise ready for publication needs this distinct
     // original-source assessment. Units continue to judge their assigned goal.
-    const beforeCoverageGates = refreshGateResults(evidence.gates);
+    // Gates are compared with the tree once, at acceptance below; here the source read at the start stands.
+    const beforeCoverageGates = refreshGateResults(evidence.gates, context.configManager,
+      source === undefined ? undefined : new Map([[gateSourceKey(tree, scope), source.source]]));
     if (input.scope === 'deliverable' && answerReview?.passed && criterionVerdict(effectiveGoal) === 'met'
       && failedGates(beforeCoverageGates).length === 0 && unverifiedGates(beforeCoverageGates).length === 0
       && judgment.criteria.every(reading => criterionVerdict(reading) === 'met')) {
@@ -851,13 +876,16 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
         judgment.recordAction('discarded: the contract already ended');
         return null;
       }
-      if (source !== undefined && captureGateInput(tree, source).source !== source.source)
+      // The one comparison at acceptance: the source the gates and readings saw is still the tree's.
+      const currentSource = source === undefined ? undefined : captureGateInput(tree, source, scope).source;
+      if (source !== undefined && currentSource !== source.source)
         throw new PublicationPending('The result source changed during acceptance; verify its current contents before publication.');
       const checkId = `${input.targetId}.k${input.checks.length + 1}`;
       const now = run.env.now();
       const verdicts = new Map(judgedCriteria.map((criterion, index) => [criterion.id, criterionVerdict(judgment.criteria[index]!)]));
       const goalVerdict = criterionVerdict(effectiveGoal);
-      const currentGates = refreshGateResults(evidence.gates);
+      const currentGates = refreshGateResults(evidence.gates, context.configManager,
+        currentSource === undefined ? undefined : new Map([[gateSourceKey(tree, scope), currentSource]]));
       const failing = failedGates(currentGates);
       const unverified = unverifiedGates(currentGates);
       judgedCriteria.forEach((criterion, index) => {
@@ -892,7 +920,7 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
       input.checks.push(check);
       if (passed && source !== undefined) {
         acceptedSources.set(run, { checkId, tree, source });
-        const treeId = workingTreeIdentity(tree);
+        const treeId = source.source.startsWith('tree:') ? source.source.slice('tree:'.length) : workingTreeIdentity(tree);
         if (treeId !== null) {
           const record: AcceptanceRecord = { version: 1, checkId, tree: treeId, fixRounds: contract.fixRounds };
           run.decide('checked', acceptanceTarget(contract.id), JSON.stringify(record), check.decisionIds);
@@ -1036,8 +1064,9 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
     if (acceptedSources.get(run)?.checkId !== check.id) {
       const tree = contractTree(contract);
       if (workingTreeIdentity(tree) !== record.tree) return false;
-      const source = captureGateInput(tree);
-      const gates = await runContractGates({ configManager: context.configManager, cwd: tree, runtimeBus: context.runtimeBus, sessionId: contract.sessionId, contractId: contract.id, targetId: contract.id, signal: run.abort.signal });
+      const scope = gateScope(contract);
+      const source = captureGateInput(tree, undefined, scope);
+      const gates = await runContractGates({ configManager: context.configManager, cwd: tree, runtimeBus: context.runtimeBus, sessionId: contract.sessionId, contractId: contract.id, targetId: contract.id, scope, signal: run.abort.signal });
       if (run.terminal) return true;
       if (failedGates(gates).length > 0 || unverifiedGates(gates).length > 0) return false;
       acceptedSources.set(run, { checkId: check.id, tree, source, gates });
@@ -1057,12 +1086,13 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
   function assertAcceptedResultCurrent(run: ContractRun): void {
     const check = run.contract.checks.at(-1);
     const accepted = acceptedSources.get(run);
+    const scope = gateScope(run.contract);
     let current: string | undefined;
-    try { if (accepted) current = captureGateInput(accepted.tree, accepted.source).source; }
+    try { if (accepted) current = captureGateInput(accepted.tree, accepted.source, scope).source; }
     catch { throw new PublicationPending('The accepted result source is unavailable; verify its current contents before publication.'); }
     if (!accepted || accepted.checkId !== check?.id || accepted.tree !== contractTree(run.contract) || accepted.source.source !== current)
       throw new PublicationPending('The result source changed after acceptance; verify its current contents before publication.');
-    const gates = refreshGateResults(accepted.gates ?? check?.gates);
+    const gates = refreshGateResults(accepted.gates ?? check?.gates, context.configManager, new Map([[gateSourceKey(accepted.tree, scope), current!]]));
     if (failedGates(gates).length || unverifiedGates(gates).length) {
       throw new PublicationPending('Required check evidence changed after acceptance; verify the current result before publication.');
     }
@@ -1083,7 +1113,6 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
       return;
     }
     assertOwnedContractSource(contract);
-    if (contract.isolation !== 'worktree') assertAcceptedResultCurrent(run);
     contract.commit = commit;
     run.decide('committed', contract.id, commit.note);
     run.emit({ type: 'CONTRACT_COMMITTED', contractId: contract.id, status: commit.status, ...(commit.hash === undefined ? {} : { hash: commit.hash }), note: commit.note });
@@ -1273,9 +1302,7 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
         return outcome;
       }
       if (!commitOn) return { status: 'skipped', note: 'commit off: the changes are left in the working tree' };
-      const outcome = await commitShared(run, settings.commitScope === 'all' ? 'all' : 'scoped');
-      assertAcceptedResultCurrent(run);
-      return outcome;
+      return await commitShared(run, settings.commitScope === 'all' ? 'all' : 'scoped');
     } catch (error) {
       if (error instanceof PublicationPending || error instanceof PublicationImpossible) throw error;
       const where = contract.branch === undefined ? 'the changes are left in the working tree' : `the work stays on branch ${contract.branch}`;

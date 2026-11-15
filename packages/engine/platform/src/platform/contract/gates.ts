@@ -1,15 +1,14 @@
 /**
  * Quality gates: the configured commands (`contract.gates`) whose results are
- * contract evidence and a deterministic input to a check's outcome
- * (docs/design/contract-runner.md sections 4.3 and 4.6). A failing gate that
- * was not skipped means the unit cannot pass, whatever the readings say.
+ * contract evidence and a deterministic input to a check's outcome. A failing
+ * gate that was not skipped means the unit cannot pass, whatever the readings say.
  *
  * Whether a gate applies (a tsconfig, an ESLint config, a package script) and
  * whether its command exited zero are file-system and process facts, so all
  * of this is code.
  */
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { RuntimeEventBus } from '../runtime/events/index.js';
@@ -18,7 +17,6 @@ import { logger } from '../utils/logger.js';
 import { CONTRACT_CONFIG_DEFAULTS, getContractGateTimeoutMs, getEnabledContractGates, type ContractConfigReader } from './config.js';
 import { emitContractEvent } from './events.js';
 import { captureGateInput, type GateSourceInputIdentity } from './gate-input.js';
-import { isDeepStrictEqual } from 'node:util';
 import { bunTestCommand, junitCompletion, protocolCompletion, type GateCompletion } from './gate-receipts.js';
 import type { ContractCheckedGate, GateResultOutcome } from '../../events/contract.js';
 
@@ -30,8 +28,10 @@ export interface QualityGate {
   /** Required unavailable checks leave their acceptance obligation unverified. Tests are required by default. */
   required?: boolean;
   /**
-   * Assertion checks require a supported machine reporter (`bun test`) or the registered completion protocol
-   * (see `unverifiedGateAdvice`). A gate named `test` is always an assertion check, whatever this says.
+   * An assertion check passes or fails on its command's exit code, like any
+   * other gate; under `bun test` (instrumented) or the registered completion
+   * protocol its assertion counts are kept as well. A gate named `test` is an
+   * assertion check, whatever this says.
    */
   verification?: 'command' | 'assertions';
 }
@@ -55,6 +55,9 @@ export interface QualityGateResult {
     readonly sourceAfter: string;
     readonly definitionBefore: string;
     readonly definitionAfter: string;
+    /** The tree the gate ran in, and the paths its source identity covers (absent: the whole tree). */
+    readonly root?: string;
+    readonly scope?: readonly string[];
   };
 }
 
@@ -67,18 +70,14 @@ interface GateCommandResult {
 }
 
 type GateInputIdentity = GateSourceInputIdentity & { readonly definition: string };
-let definitionSequence = 0;
-function nextDefinitionId(): string {
-  if (!Number.isSafeInteger(++definitionSequence)) throw new Error('Gate definition identity exhausted');
-  return `gate-definition-${definitionSequence}`;
-}
-const gateDefinitions = (gates: readonly QualityGate[]) => gates.map(gate => Object.freeze({
-  name: gate.name, command: gate.command, enabled: gate.enabled, required: gate.required, verification: gate.verification,
-}));
 
-const liveGateInputs = new WeakMap<QualityGateResult, () => GateInputIdentity>();
-const gateInvalidations = new WeakMap<QualityGateResult, (result: QualityGateResult) => void>();
-const invalidatedGates = new WeakMap<QualityGateResult, QualityGateResult>();
+// Gate definitions are identified by a salted digest: equal definitions compare
+// equal within this process, and a command that embeds a credential never
+// enters a stored record. After a restart the salt differs, so a stored result
+// reads as needing a fresh run, as it should.
+const DEFINITION_SALT = randomBytes(16);
+const gateDefinitionId = (gates: readonly QualityGate[]): string => `gate-definition-${createHash('sha256').update(DEFINITION_SALT)
+  .update(JSON.stringify(gates.map(gate => [gate.name, gate.command, gate.enabled, gate.required ?? null, gate.verification ?? null]))).digest('hex').slice(0, 32)}`;
 
 const requiredGate = (gate: QualityGate): boolean => gate.required ?? (gate.name === 'test' || gate.verification === 'assertions');
 
@@ -90,18 +89,11 @@ export function gateOutcome(result: QualityGateResult): GateResultOutcome {
 }
 
 function unknownResult(result: QualityGateResult, reason: string): QualityGateResult {
-  const existing = invalidatedGates.get(result);
-  if (existing) return existing;
-  const revised: QualityGateResult = { ...result, outcome: 'unverified', passed: false, reason,
+  return { ...result, outcome: 'unverified', passed: false, reason,
     // Earlier receipts omitted this field. Preserve the same native defaults
     // rather than turning their missing obligation into an optional check.
     ...(result.required === undefined && (result.gate === 'test' || result.completion?.kind === 'assertions') ? { required: true } : {}),
   };
-  const current = liveGateInputs.get(result);
-  if (current) liveGateInputs.set(revised, current);
-  invalidatedGates.set(result, revised);
-  gateInvalidations.get(result)?.(revised);
-  return revised;
 }
 
 export function gateEventSummary(result: QualityGateResult): ContractCheckedGate {
@@ -112,24 +104,36 @@ export function gateEventSummary(result: QualityGateResult): ContractCheckedGate
   };
 }
 
-/** Revalidate after asynchronous judgment; a saved receipt alone is not live evidence. */
-export function refreshGateResults(results: readonly QualityGateResult[] | undefined): QualityGateResult[] {
-  const captures = new Map<() => GateInputIdentity, GateInputIdentity | undefined>();
+/**
+ * Gate results still current: a passed result keeps its outcome while its tree
+ * reads the same source identity it ran against (one capture per tree and
+ * scope) and the gate definitions are the ones it ran with. A result with no
+ * comparable identity (a record from before this process) reads unverified.
+ */
+export function refreshGateResults(results: readonly QualityGateResult[] | undefined, configManager?: ContractConfigReader,
+  /** Source identities the caller has just read, by `gateSourceKey`: compared without reading them again. */
+  known?: ReadonlyMap<string, string>): QualityGateResult[] {
+  const captures = new Map<string, string | undefined>(known);
+  const definition = configManager === undefined ? undefined : gateDefinitionId(getEnabledContractGates(configManager));
   return (results ?? []).map(result => {
-    const invalidated = invalidatedGates.get(result);
-    if (invalidated) return invalidated;
     if (gateOutcome(result) !== 'passed') return result;
-    const capture = liveGateInputs.get(result);
-    if (!result.provenance || !capture) return unknownResult(result, 'historical-check-requires-current-execution');
-    try {
-      if (!captures.has(capture)) captures.set(capture, capture());
-      const current = captures.get(capture);
-      if (!current) return unknownResult(result, 'source-identity-unavailable');
-      if (current.source !== result.provenance.sourceAfter) return unknownResult(result, 'source-changed-after-check');
-      if (current.definition !== result.provenance.definitionAfter) return unknownResult(result, 'check-definition-changed-after-check');
-      return result;
-    } catch { return unknownResult(result, 'source-identity-unavailable'); }
+    const provenance = result.provenance;
+    if (!provenance?.root || !/^(?:tree|paths|stat):/.test(provenance.sourceAfter)) return unknownResult(result, 'historical-check-requires-current-execution');
+    if (definition !== undefined && definition !== provenance.definitionAfter) return unknownResult(result, 'check-definition-changed-after-check');
+    const key = gateSourceKey(provenance.root, provenance.scope);
+    if (!captures.has(key)) {
+      try { captures.set(key, captureGateInput(provenance.root, undefined, provenance.scope).source); }
+      catch { captures.set(key, undefined); }
+    }
+    const current = captures.get(key);
+    if (current === undefined) return unknownResult(result, 'source-identity-unavailable');
+    return current === provenance.sourceAfter ? result : unknownResult(result, 'source-changed-after-check');
   });
+}
+
+/** The key of one tree's source identity (its root and the paths it covers) for `refreshGateResults`. */
+export function gateSourceKey(root: string, scope?: readonly string[]): string {
+  return JSON.stringify([root, scope ?? null]);
 }
 
 /** Required unknown checks cannot be promoted by a semantic reading. */
@@ -139,11 +143,12 @@ export function unverifiedGates(results: readonly QualityGateResult[] | undefine
 
 /** What the nudge tells a worker about a required gate that has no current evidence, including how to supply it when that is possible. */
 export function unverifiedGateAdvice(result: QualityGateResult): string {
-  if (result.reason !== 'check-completion-unverified') return result.reason ?? 'unverified check completion';
-  return 'check-completion-unverified: the command finished, but its output is not a test result the contract can read. '
-    + 'Run the tests with `bun test`, or make the last line the command prints to stdout one JSON object: '
-    + `{"kind":"goodvibes-gate-result","schemaVersion":1,"gate":"${result.gate}","runId":"<the value of $GOODVIBES_GATE_RUN_ID>","outcome":"passed" or "failed",`
-    + '"checks":{"passed":N,"failed":N,"skipped":N},"observation":{}} with at least one passed or failed check counted.';
+  switch (result.reason) {
+    case 'timeout': return 'timeout: the gate command did not finish within contract.gateTimeoutMs and was stopped; a test runner in watch mode never finishes';
+    case 'source-changed-during-check': return 'source-changed-during-check: files the check covers changed while the gate ran; the gate runs again at the next check';
+    case 'inconsistent-check-result': return 'inconsistent-check-result: the command\'s exit code and its reported assertion counts disagree';
+    default: return result.reason ?? 'unverified check completion';
+  }
 }
 
 /** The `scripts` of `cwd`'s package.json; empty when there is none or it cannot be read. */
@@ -251,33 +256,31 @@ export interface RunContractGatesOptions {
   readonly contractId: string;
   /** The unit, group or contract the gates are evidence for; carried by CONTRACT_GATE_RESULT. */
   readonly targetId: string;
+  /**
+   * The paths, relative to `cwd`, whose content the results are evidence for
+   * (a shared tree the owner keeps working in). Absent: the whole tree.
+   */
+  readonly scope?: readonly string[] | undefined;
   readonly onResult?: ((results: readonly QualityGateResult[], result: QualityGateResult) => void) | undefined;
 }
 
 /**
  * Runs every enabled `contract.gates` entry in order against `cwd`, each under
- * `contract.gateTimeoutMs`. A gate that does not apply is recorded as a
- * unverified result when unavailable. Every result is emitted as CONTRACT_GATE_RESULT.
+ * `contract.gateTimeoutMs`. The source is identified once before the gates
+ * and once after; when it changed meanwhile, every result reads unverified.
+ * A gate passes or fails on its command's exit code; an assertion gate under
+ * `bun test` or the completion protocol also carries its counts, and fails
+ * on a failed assertion. Every result is emitted as CONTRACT_GATE_RESULT.
  */
 export async function runContractGates(options: RunContractGatesOptions): Promise<QualityGateResult[]> {
   const gates = getEnabledContractGates(options.configManager).map(gate => Object.freeze({ ...gate }));
   if (gates.length === 0) return [];
-  let definitionSnapshot = gateDefinitions(gates), definition = nextDefinitionId();
-  const expectedDefinition = definition;
   const timeoutMs = getContractGateTimeoutMs(options.configManager);
+  const definitionBefore = gateDefinitionId(gates);
+  let before: GateInputIdentity | undefined;
+  try { before = { ...captureGateInput(options.cwd, undefined, options.scope), definition: definitionBefore }; }
+  catch { /* No source identity: every result is unverified below. */ }
   const results: QualityGateResult[] = [];
-  let sourceObservation: GateSourceInputIdentity | undefined;
-  const capture = (): GateInputIdentity => {
-    const current = gateDefinitions(getEnabledContractGates(options.configManager));
-    if (!isDeepStrictEqual(current, definitionSnapshot)) {
-      definitionSnapshot = current;
-      definition = nextDefinitionId();
-    }
-    // Compare configured command bytes privately. The receipt carries only an
-    // owned label, so credentials embedded in commands cannot enter provenance.
-    sourceObservation = captureGateInput(options.cwd, sourceObservation);
-    return { ...sourceObservation, definition };
-  };
   const emitResult = (result: QualityGateResult): void => {
     emitContractEvent(options.runtimeBus, options.sessionId, {
       type: 'CONTRACT_GATE_RESULT', contractId: options.contractId, targetId: options.targetId,
@@ -288,59 +291,68 @@ export async function runContractGates(options: RunContractGatesOptions): Promis
   for (const gate of gates) {
     options.signal?.throwIfAborted();
     const startedAt = Date.now();
-    let before: GateInputIdentity | undefined;
-    try { before = capture(); } catch { /* An incomplete source inventory never proves current check evidence. */ }
     const skipReason = before ? getSkippedGateReason(gate.name, options.cwd, { ...before.packageScripts }, gate.command) : null;
-    let result: QualityGateResult = { gate: gate.name, passed: false, outcome: 'unverified', required: requiredGate(gate),
+    const result: QualityGateResult = { gate: gate.name, passed: false, outcome: 'unverified', required: requiredGate(gate),
       output: skipReason ?? '', durationMs: 0, skipped: skipReason !== null,
       ...(before ? {} : { reason: 'source-identity-unavailable' }),
     };
-    if (before && before.definition !== expectedDefinition) result.reason = 'check-definition-changed-before-check';
-    else if (skipReason !== null) result.reason = 'not-applicable';
-    else {
-      if (before) {
-        const directory = mkdtempSync(join(tmpdir(), 'goodvibes-gate-'));
-        const report = join(directory, 'result.xml');
-        try {
-          const assertions = gate.verification === 'assertions' || gate.name === 'test';
-          const instrumented = assertions ? bunTestCommand(gate.command, before.packageScripts, report) : undefined;
-          const runId = randomUUID();
-          const run = await executeGateCommand(instrumented ?? gate.command, options.cwd, timeoutMs, options.signal,
-            { GOODVIBES_GATE_NAME: gate.name, GOODVIBES_GATE_RUN_ID: runId });
-          result.output = run.output;
-          result.durationMs = Date.now() - startedAt;
-          let completion: GateCompletion | undefined;
-          if (run.kind === 'completed') {
-            if (assertions) {
-              try { completion = instrumented ? junitCompletion(readFileSync(report, 'utf8')) : protocolCompletion(run.stdout, gate.name, runId); }
-              catch { /* Missing reporter output is unverified execution. */ }
-            } else if (run.exitCode !== null) completion = { kind: 'command-exit', exitCode: run.exitCode };
-          }
-          if (completion) result.completion = completion;
-          if (run.kind !== 'completed') result.reason = run.kind;
-          else if (!completion) result.reason = 'check-completion-unverified';
-          else if (completion.kind === 'assertions') {
-            if (completion.checks.failed > 0 && run.exitCode !== 0) { result.outcome = 'failed'; result.reason = 'assertion-failure'; }
-            else if (completion.checks.failed === 0 && run.exitCode === 0) { result.outcome = 'passed'; result.passed = true; }
-            else result.reason = 'inconsistent-check-result';
-          } else { result.outcome = run.passed ? 'passed' : 'failed'; result.passed = run.passed; }
-          try {
-            const after = capture();
-            result.provenance = { sourceBefore: before.source, sourceAfter: after.source, definitionBefore: before.definition, definitionAfter: after.definition };
-            if (before.source !== after.source) result = unknownResult(result, 'source-changed-during-check');
-            else if (before.definition !== after.definition) result = unknownResult(result, 'check-definition-changed-during-check');
-            liveGateInputs.set(result, capture);
-          } catch { result = unknownResult(result, 'source-identity-unavailable'); }
-        } finally { rmSync(directory, { recursive: true, force: true }); }
-      }
+    if (skipReason !== null) result.reason = 'not-applicable';
+    else if (before) {
+      const directory = mkdtempSync(join(tmpdir(), 'goodvibes-gate-'));
+      const report = join(directory, 'result.xml');
+      try {
+        const assertions = gate.verification === 'assertions' || gate.name === 'test';
+        const instrumented = assertions ? bunTestCommand(gate.command, before.packageScripts, report) : undefined;
+        const runId = randomUUID();
+        const run = await executeGateCommand(instrumented ?? gate.command, options.cwd, timeoutMs, options.signal,
+          { GOODVIBES_GATE_NAME: gate.name, GOODVIBES_GATE_RUN_ID: runId });
+        result.output = run.output;
+        result.durationMs = Date.now() - startedAt;
+        let counted: GateCompletion | undefined;
+        if (run.kind === 'completed' && assertions) {
+          try { counted = instrumented ? junitCompletion(readFileSync(report, 'utf8')) : protocolCompletion(run.stdout, gate.name, runId); }
+          catch { /* No reporter output: the exit code decides. */ }
+        }
+        if (run.kind !== 'completed' || run.exitCode === null) result.reason = run.kind;
+        else if (counted?.kind === 'assertions') {
+          result.completion = counted;
+          if (counted.checks.failed > 0 && run.exitCode !== 0) { result.outcome = 'failed'; result.reason = 'assertion-failure'; }
+          else if (counted.checks.failed === 0 && run.exitCode === 0) { result.outcome = 'passed'; result.passed = true; }
+          else result.reason = 'inconsistent-check-result';
+        } else {
+          // Any test command (npm, pytest, cargo, go, vitest...) reports by its exit code.
+          result.completion = { kind: 'command-exit', exitCode: run.exitCode };
+          result.outcome = run.exitCode === 0 ? 'passed' : 'failed';
+          result.passed = run.exitCode === 0;
+          if (run.exitCode !== 0) result.reason = assertions ? 'test-command-failed' : 'command-failed';
+        }
+      } finally { rmSync(directory, { recursive: true, force: true }); }
     }
     results.push(result);
-    gateInvalidations.set(result, emitResult);
     emitResult(result);
     options.onResult?.(results.slice(), result);
     logger.debug('contract gates: gate result', { contractId: options.contractId, targetId: options.targetId, gate: gate.name, passed: result.passed, skipped: result.skipped });
   }
-  return refreshGateResults(results);
+
+  // One identity after every gate ran: the results are evidence only for the source they all saw.
+  let after: GateInputIdentity | undefined;
+  if (before) {
+    try { after = { ...captureGateInput(options.cwd, before, options.scope), definition: gateDefinitionId(getEnabledContractGates(options.configManager)) }; }
+    catch { /* Unverified below. */ }
+  }
+  const settled = results.map((result): QualityGateResult => {
+    if (!before || result.skipped === true) return result;
+    if (!after) return unknownResult(result, 'source-identity-unavailable');
+    const stamped: QualityGateResult = { ...result, provenance: { sourceBefore: before.source, sourceAfter: after.source,
+      definitionBefore: before.definition, definitionAfter: after.definition, root: options.cwd,
+      ...(options.scope === undefined ? {} : { scope: [...options.scope] }) } };
+    if (before.source !== after.source) return unknownResult(stamped, 'source-changed-during-check');
+    if (before.definition !== after.definition) return unknownResult(stamped, 'check-definition-changed-during-check');
+    return stamped;
+  });
+  // A result the source change turned unverified is reported again with its new outcome.
+  settled.forEach((result, index) => { if (result.outcome !== results[index]!.outcome) emitResult(result); });
+  return settled;
 }
 
 /** Gates that ran and failed; a skipped gate never fails. */

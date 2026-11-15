@@ -115,7 +115,7 @@ export function finalAnswerEvidence(contract: Pick<ContractView, 'id' | 'ask' | 
   if (!object(host) || !Array.isArray(host['currentFiles'])) return undefined;
   const files = host['currentFiles'].filter(object);
   if (!files.length || files.some(file => file['success'] !== true || typeof file['binary'] !== 'boolean' || !isCurrentNativeFileObservation(file))) return undefined;
-  const artifacts: { path: string; observationId: string; sha256?: string; sourceUnitId?: string; sourceCheckId?: string; content: string; decisionIds: string[]; sourceHostOperation?: JsonValue }[] = [];
+  const artifacts: { path: string; observationId: string; sha256?: string; sourceUnitId?: string; sourceCheckId?: string; content: string; decisionIds: string[] }[] = [];
   const currentChanges: { path: string; observationId: string; sha256?: string; diff: string }[] = [];
   for (const file of files) {
     if (file['binary'] === true) continue;
@@ -123,7 +123,8 @@ export function finalAnswerEvidence(contract: Pick<ContractView, 'id' | 'ask' | 
     const reference = { observationId: file['observationId'], ...(typeof file['sha256'] === 'string' ? { sha256: file['sha256'] } : {}) };
     if (file['operation'] === 'read-current-file' && file['source'] === 'native-host-filesystem' && typeof file['text'] === 'string') {
       if (!currentFileMatchesText(file, file['text'])) return undefined;
-      artifacts.push({ path: file['path'], ...reference, content: file['text'], decisionIds: [], sourceHostOperation: metadata(file) });
+      // The artifact names its current-file row by path and observation id; the row itself is in orchestration.currentFiles once.
+      artifacts.push({ path: file['path'], ...reference, content: file['text'], decisionIds: [] });
       continue;
     }
     let found: typeof artifacts[number] | undefined;
@@ -180,6 +181,7 @@ export function finalAnswerEvidence(contract: Pick<ContractView, 'id' | 'ask' | 
     criteriaReferenceMeaning: 'A servedBy criterionRef resolves by exact id to orchestration.units[].criteria, including its complete literal text and recorded verdict. Only identical complete criterion values are referenced; conflicting or additional fields remain inline. All original root criteria remain separately supplied unchanged. These references are native evidence links, not new approval.',
     readValidationReferenceMeaning: 'A read observation with nativeCheckRef=latestCheck retains its original validation through the enclosing unit latestCheck: expand validatedByCheckId from latestCheck.id and decisionIds from latestCheck.decisionIds. Only exact matches to that actual passed check are referenced. Read contents, digests, byte counts, paths, ranges and unit attribution remain unchanged. This is provenance for earlier reads, not approval of the current answer.',
     orchestration: { contractId: host['contractId'] ?? null, planChecks: host['planChecks'] ?? [],
+      ...(host['readingRules'] === undefined ? {} : { readingRules: host['readingRules'] }),
       ...(host['reviewInventory'] === undefined ? {} : { reviewInventory: host['reviewInventory'] }),
       currentAnswerSource: host['currentAnswerSource'] ?? null,
       repairPlanAdmissions: host['repairPlanAdmissions'] ?? [], referenceOperations: host['referenceOperations'] ?? [],
@@ -190,7 +192,7 @@ export function finalAnswerEvidence(contract: Pick<ContractView, 'id' | 'ask' | 
       inputGeneration: host['inputGeneration'] ?? null, firstUnitStartedAt: host['firstUnitStartedAt'] ?? null,
       currentFiles: host['currentFiles'].map(metadata), privateArtifacts: host['privateArtifacts'] ?? [],
       historicalContextSource: { storage: 'native-contract-store', contractId: host['contractId'] ?? contract.id, field: 'taskEvidence' },
-      meaning: 'Current artifact contents are complete actual host filesystem reads bound to their original bytes and physical owner, or retained successful worker reads matching those exact bytes and their real passed native checks. An observation ID only names its native read; copied labels are not proof. A sourceHostOperation records a fresh host read for this review, never a worker inspection, execution or earlier acceptance. The native reviewer must judge those actual contents now. Current textual changes retain the exact native-collected diff already supplied in the original evidence beside a fresh original file observation; a diff does not establish unchanged whole-file contents or semantic approval. No textual change is omitted. Prior native checks establish only their checked scope; they do not approve this new answer or later changes. Every original requirement remains unchanged in the separate mandatory fulfillment check. Complete source records remain retained. Historical task progress and superseded answer drafts are not the current final answer.',
+      meaning: 'Current artifact contents are complete actual host filesystem reads bound to their original bytes and physical owner, or retained successful worker reads matching those exact bytes and their real passed native checks. An observation ID only names its native read; copied labels are not proof. An artifact without sourceUnitId comes from a fresh host read for this review (its row in currentFiles), never a worker inspection, execution or earlier acceptance. The native reviewer must judge those actual contents now. Current textual changes retain the exact native-collected diff already supplied in the original evidence beside a fresh original file observation; a diff does not establish unchanged whole-file contents or semantic approval. No textual change is omitted. Prior native checks establish only their checked scope; they do not approve this new answer or later changes. Every original requirement remains unchanged in the separate mandatory fulfillment check. Complete source records remain retained. Historical task progress and superseded answer drafts are not the current final answer.',
     },
   };
   return files.every(isCurrentNativeFileObservation) ? { evidence: view, artifacts } : undefined;

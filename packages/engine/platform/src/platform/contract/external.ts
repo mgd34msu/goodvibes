@@ -1,5 +1,5 @@
 /**
- * The external work seam (docs/design/contract-runner.md 8.4): surfaces and
+ * The external work seam: surfaces and
  * partner apps that do not embed the contract runner dispatch, poll, cancel
  * and fetch contract work through an adapter with these four methods. The
  * in-process hosted adapter (hosted-sessions/contract-work-adapter.ts) and

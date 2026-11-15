@@ -1,7 +1,6 @@
 /**
  * contract-work-adapter.ts, the external work adapter for partner surfaces
- * over the daemon's `contracts.*` operator methods
- * (docs/design/contract-runner.md 8.4 and 10.2).
+ * over the daemon's `contracts.*` operator methods.
  *
  * `dispatch` calls `contracts.start` with the task as the ask (and the
  * request's `metadata.sessionId`, `metadata.workspaceRoot` and

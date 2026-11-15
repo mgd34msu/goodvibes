@@ -1,5 +1,5 @@
 /**
- * The `contract.*` settings (docs/design/contract-runner.md section 9.1), read
+ * The `contract.*` settings, read
  * once per call from the config manager. Each value is taken from its dotted
  * key, then from the category object (the only path for `contract.gates`,
  * which is an array and so not a dotted key), then from the default below.
@@ -74,7 +74,8 @@ export const CONTRACT_CONFIG_DEFAULTS: ContractConfig = {
     { name: 'lint', command: 'npx eslint . --max-warnings 0', enabled: false },
     { name: 'build', command: 'npm run build', enabled: false },
   ],
-  gateTimeoutMs: 0,
+  // A gate that never exits (a runner left in watch mode) is stopped and reported, not waited on.
+  gateTimeoutMs: 900_000,
   acceptanceStakes: 'high',
   midRunChecks: true,
   evidenceNudgeLimit: 0,
@@ -184,6 +185,31 @@ export function getContractCommitScope(configManager: ContractConfigReader): Con
 /** Every configured gate, enabled or not. */
 export function getContractGates(configManager: ContractConfigReader): readonly QualityGate[] {
   return readContractConfig(configManager).gates;
+}
+
+/**
+ * What is wrong with the `contract.gates` setting, one sentence each with the
+ * fix: entries the reader leaves out and enabled gates that cannot run. Empty
+ * when every gate can run. For the owner, at save time and when a contract
+ * starts; reading it costs one pass over the setting.
+ */
+export function contractGateProblems(configManager: ContractConfigReader): string[] {
+  const raw = (configManager.getCategory('contract') as Readonly<Record<string, unknown>> | undefined)?.['gates'];
+  if (raw === undefined) return [];
+  if (!Array.isArray(raw)) return ['contract.gates is not a list of gates, so no gate runs; set it to a list of { name, command, enabled }.'];
+  const problems: string[] = [], names = new Set<string>();
+  raw.forEach((value, index) => {
+    const label = value !== null && typeof value === 'object' && typeof (value as Record<string, unknown>)['name'] === 'string'
+      ? `the gate "${(value as Record<string, unknown>)['name'] as string}"` : `gate ${index + 1}`;
+    if (!isQualityGate(value)) {
+      problems.push(`${label} is ignored: it needs a name and a command (text) and enabled (true or false), required must be true or false, and verification "command" or "assertions".`);
+      return;
+    }
+    if (names.has(value.name)) problems.push(`${label} is listed twice; both run, under one name in the results. Give each gate its own name.`);
+    names.add(value.name);
+    if (value.enabled && value.command.trim().length === 0) problems.push(`${label} is enabled with an empty command, so it fails every check; give it a command or disable it.`);
+  });
+  return problems;
 }
 
 /** The gates a check runs. */

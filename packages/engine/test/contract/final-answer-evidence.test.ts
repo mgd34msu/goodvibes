@@ -324,7 +324,8 @@ test('final artifact review receives complete actual current text when the diff 
       diff: '-Old attribution\n+Updated execution attribution.' };
     const view = finalAnswerEvidence(contract, evidence, {})!;
     expect(view.artifacts).toMatchObject([{ path: 'review.md', observationId: expect.any(String), content: text,
-      decisionIds: [], sourceHostOperation: { operation: 'read-current-file', source: 'native-host-filesystem', success: true } }]);
+      decisionIds: [] }]);
+    expect(view.artifacts[0]).not.toHaveProperty('sourceHostOperation');
     expect(JSON.stringify(view.evidence).split('Unchanged findings and source assessments.')).toHaveLength(2);
     expect(view.artifacts[0]).not.toHaveProperty('sourceCheckId');
     expect(view.evidence['orchestration']).toMatchObject({ currentFiles: [{ observationId: expect.any(String) }] });

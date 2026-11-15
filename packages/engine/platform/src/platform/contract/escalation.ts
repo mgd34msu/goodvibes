@@ -1,6 +1,6 @@
 import { requireDecisionFeature } from '../runtime/decision-policy.js';
 /**
- * Owner escalations (docs/design/contract-runner.md section 6.3): the question
+ * Owner escalations: the question
  * put to the owner, built in code, and the owner's free-text reply, read with
  * `contract.owner-reply` (the reply pattern) against that question.
  *
@@ -25,8 +25,7 @@ import { readForbidsWriting, REQUEST_SHAPE_SITE, saysNoAtAct, saysYesAtAct } fro
 import { acceptAttempt, assertAttemptTakeable } from './best-of-n.js';
 import { emptyJudgmentUsage, meteredPort, type DecidedCheck } from './check.js';
 import { amendTarget } from './amendment.js';
-import { AttemptError } from '../orchestration/attempts.js';
-import { assertJudgmentInput, JudgmentInputError } from '../gate/judgment-input.js';
+import { assertJudgmentInput } from '../gate/judgment-input.js';
 import { latestSeverity, QUALITY_EVIDENCE_SENTENCES } from './nudge.js';
 import { lastFencedBlock } from './plan-schema.js';
 import { acceptEscalatedPlan, planContract, withOwnerWritingDecision } from './planner.js';
@@ -85,9 +84,11 @@ export const NAME_AN_ATTEMPT_LINE = (candidateIds: readonly string[]): string =>
 export const PLAN_UNRUNNABLE_LINE = (problems: string): string => `The plan cannot run as it stands (${problems}); change what is required, or stop the contract.`;
 /** Said when the owner's change could not be made into criteria. */
 export const AMENDMENT_FAILED_LINE = (problems: string): string => `That change could not be applied (${problems}); say it another way, or stop the contract.`;
+/** Added when a reply was read but acting on it failed (a provider outage, no route): nothing it asked for was applied. */
+export const REPLY_NOT_APPLIED_LINE = (reason: string): string => `That could not be applied right now (${reason}); reply again to retry, or stop the contract.`;
 
 /** Lines the runner adds under a question it asks again; they are dropped before another is added. */
-const ADDED_LINE_PREFIXES = [ASK_AGAIN_LINE, APPROVAL_REFUSED_LINE, 'Say which attempt to take', 'The plan cannot run as it stands', 'That change could not be applied'];
+const ADDED_LINE_PREFIXES = [ASK_AGAIN_LINE, APPROVAL_REFUSED_LINE, 'Say which attempt to take', 'The plan cannot run as it stands', 'That change could not be applied', 'That could not be applied right now'];
 
 /**
  * The failure pause: what a native session contract asks when its turn keeps
@@ -294,6 +295,14 @@ export function buildAttemptsQuestion(contract: Contract, unitId: string, select
       ? 'Reply naming the attempt to take, or to stop the contract.'
       : `Reply to approve taking ${selection.proposedId}, to name another attempt, or to stop the contract.`,
   ].join('\n');
+}
+
+/** How much of an attempt's answer the owner-pick reading sees. */
+const ATTEMPT_ANSWER_HEAD = 2_000;
+
+function answerHead(answer: string | undefined): string {
+  if (answer === undefined) return '(no answer recorded)';
+  return answer.length <= ATTEMPT_ANSWER_HEAD ? answer : `${answer.slice(0, ATTEMPT_ANSWER_HEAD)}...`;
 }
 
 /** The question without the lines the runner added when it asked before. */
@@ -586,13 +595,13 @@ export function createEscalations(context: StepContext, rejudge: Rejudge): Escal
     const unit = run.unit(escalation.targetId);
     const selection = unit?.attemptSelection;
     if (unit === undefined || selection === undefined) return { id: undefined, decisionId: undefined };
+    // Each candidate is its position and the head of its answer, as the
+    // question showed it, so the reading's size does not grow with the answers.
     const candidates = selection.candidateIds.map((id, index) => ({
       id,
-      content: { position: index + 1, answer: unit.attemptUnits?.find((attempt) => attempt.id === id)?.answer ?? '(no answer recorded)' },
+      content: { position: index + 1, answer: answerHead(unit.attemptUnits?.find((attempt) => attempt.id === id)?.answer) },
     }));
-    const evidence = { reply: text, question: escalation.question, candidates };
-    assertJudgmentInput(evidence);
-    if (JSON.stringify(evidence).length > 160_000) throw new JudgmentInputError('unsupported-input');
+    assertJudgmentInput({ reply: text, question: escalation.question, candidates });
     const usage = emptyJudgmentUsage();
     try {
       const read = await ownerPick.select(meteredPort(judgmentPort(OWNER_PICK_SITE), usage), { reply: text, question: escalation.question }, candidates, { site: OWNER_PICK_SITE, signal: run.abort.signal });
@@ -757,14 +766,17 @@ export function createEscalations(context: StepContext, rejudge: Rejudge): Escal
       try {
         handled = reading === 'approve' ? await approve(run, escalation, read.decisionId) : await amend(run, escalation, text, read.decisionId);
       } catch (error) {
-        // The escalation is already answered, so a step that cannot run (no
-        // route for the amendment planner, a Jev outage) fails the contract
-        // rather than leaving it waiting on an owner who has replied.
-        if (!run.terminal && !isAbortError(error, run.abort.signal)) {
-          const failure = failureFromError(error);
+        if (run.terminal || isAbortError(error, run.abort.signal)) throw error;
+        // A step that cannot run (no route for the amendment planner, a Jev
+        // outage) leaves the owner's question standing: it is asked again with
+        // what failed, and the contract keeps its work.
+        const failure = failureFromError(error);
+        try {
+          handled = { action: 'asked-again', next: askAgain(run, escalation, REPLY_NOT_APPLIED_LINE(failure.reason)) };
+        } catch {
           run.control.fail(failure.kind, `the owner's reply to ${escalation.id} could not be acted on: ${failure.reason}`);
+          throw error;
         }
-        throw error;
       }
       replied(handled.action);
     }
@@ -780,11 +792,8 @@ export function createEscalations(context: StepContext, rejudge: Rejudge): Escal
   async function operatorPick(run: ContractRun, unitId: string, attemptId: string): Promise<void> {
     requireDecisionFeature('autonomous contract semantic checks, planning or continuation; use ordinary Classic tools for explicit work');
     if (run.contract.nativeSource !== undefined) throw new Error('Native attempts require a fresh Jev decision');
-    // A reply to this question that is being read would find the unit already taken and fail the contract.
-    const beingRead = open(run).find((escalation) => escalation.reason === 'attempts-undecided' && escalation.targetId === unitId && run.replying.has(escalation.id));
-    if (beingRead !== undefined) {
-      throw new AttemptError(`a reply to ${beingRead.id}, the question about unit ${unitId}'s attempts, is being read; wait for its result, then pick if the question is still open`);
-    }
+    // The pick answers the question at once. A reply to it still being read
+    // finds the question answered when its reading returns and applies nothing.
     // A refused pick leaves the owner's question open.
     assertAttemptTakeable(run, unitId, attemptId);
     for (const escalation of open(run)) {

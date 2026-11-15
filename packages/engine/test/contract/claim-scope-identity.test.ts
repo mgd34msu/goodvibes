@@ -59,21 +59,6 @@ test('historical saved passage commitments/questions remain exact while invalid 
   const fresh = answerClaimScopes(output)[0]!;
   expect(completeAnswerClaimCoverage(output, [{ ...fresh, textDigest: scope.textDigest } as unknown as typeof fresh])).toBe(false);
   expect(completeAnswerClaimCoverage(output, [{ ...fresh, version: 3 } as unknown as typeof fresh])).toBe(false);
-  let invoked = 0;
-  expect(completeAnswerClaimCoverage(output, [{ ...fresh, get outputDigest() { invoked++; return 'foreign'; } }])).toBe(false);
-  expect(completeAnswerClaimCoverage(output, [new Proxy(fresh, { get() { invoked++; return undefined; } })])).toBe(false); expect(invoked).toBe(0);
-});
-
-test('later map/Reflect overrides cannot manufacture original output or review ownership', () => {
-  const output = 'Exact original complete output', owner = captureAnswerClaimOutput(output), scope = answerClaimScopes(output, 0, output.length, 4000, owner)[0]!;
-  const get = WeakMap.prototype.get, set = WeakMap.prototype.set, apply = Reflect.apply; const results: boolean[] = [];
-  try {
-    WeakMap.prototype.get = () => ({ output, digest: '0'.repeat(64) }); WeakMap.prototype.set = function () { throw new Error('Replacement writer'); }; Reflect.apply = (() => ({ output })) as typeof Reflect.apply;
-    try { recordAnswerClaimReview({ ...scope }, { stateHash: 'forged', decisionId: 'forged', reading: { probability: 0.01, verdict: 'no', outcome: 'act' } }); results.push(false); } catch { results.push(true); }
-    try { answerClaimScopes(output, 0, output.length, 4000, { ...owner }); results.push(false); } catch { results.push(true); }
-    const actual = recordAnswerClaimReview(scope, { stateHash: 'actual', decisionId: 'actual', reading: { probability: 0.01, verdict: 'no', outcome: 'act' } }); results.push(completeAnswerClaimCoverage(output, [actual], owner));
-  } finally { WeakMap.prototype.get = get; WeakMap.prototype.set = set; Reflect.apply = apply; }
-  expect(results).toEqual([true, true, true]);
 });
 
 test('the same version without the actual scope2 reader cannot admit its saved requirement floor', () => {

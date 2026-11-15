@@ -4,8 +4,7 @@
  * model selection is never changed. Wait for catalog discovery before routing.
  */
 import type { PlannedRoute, RoutePlanRequest } from '../routing/route-planner.js';
-import type { ContractRouteSelector, UnitRoute } from './types.js';
-import { nativeContractSourceForAdmission } from './native-source.js';
+import type { ContractRouteSelector, ContractRouteSubject, UnitRoute } from './types.js';
 
 /** What the selector reads from the route planner's answer. */
 export type ContractPlannedRoute = Pick<PlannedRoute, 'model' | 'provider' | 'fallbackModels' | 'reason'>;
@@ -37,6 +36,18 @@ function briefFor(request: RouteRequest): string {
   return [`${unit.title}: ${unit.goal}`, unit.brief].filter((part) => part.length > 0).join('\n\n');
 }
 
+/**
+ * The request in the owner's words. A native contract's source was checked
+ * against its roots by `nativeContractRoute` before the pick and is frozen, so
+ * it is read here as it is.
+ */
+function originalSource(contract: ContractRouteSubject): { readonly goal: string; readonly criteria: readonly string[] } {
+  const source = contract.nativeSource;
+  return source === undefined
+    ? { goal: contract.ask, criteria: contract.criteria.map((criterion) => criterion.text) }
+    : { goal: source.goal, criteria: source.criteria };
+}
+
 export interface ContractSelectorOptions {
   /** Only for older contracts that predate captured user selections. */
   readonly getSelectedModel?: (() => Pick<import('../providers/registry-types.js').ModelDefinition, 'id' | 'provider' | 'registryKey' | 'displayName'>) | undefined;
@@ -51,9 +62,7 @@ export function createRoutePlannerContractSelector(planner: ContractRoutePlanner
     request.signal?.throwIfAborted();
     const planned = await planner.planRoute({ purpose: routingPurpose(request), brief: briefFor(request),
       selectedModel: request.contract.selectedModel ?? options.getSelectedModel?.(),
-      originalSource: request.contract.nativeSource === undefined
-        ? { goal: request.contract.ask, criteria: request.contract.criteria.map((criterion) => criterion.text) }
-        : nativeContractSourceForAdmission(request.contract),
+      originalSource: originalSource(request.contract),
       requires: { toolCalling: true }, signal: request.signal, beforeAttempt: request.beforeAttempt, onRetry: request.onRetry });
     const route: UnitRoute = {
       model: planned.model,

@@ -127,14 +127,23 @@ export interface UnitRoute {
   readonly reason: string;
 }
 
+/**
+ * The fields of a contract a route pick reads. Callers pass the live contract
+ * (read-only), never a copy: a group's routes are picked side by side, and a
+ * copy of the whole record per pick grows with the file manifest.
+ */
+export type ContractRouteSubject = Pick<ContractView, 'id' | 'ask' | 'goal' | 'criteria' | 'selectedModel' | 'nativeSource'>;
+/** The fields of a unit a route pick reads. */
+export type ContractRouteUnit = Pick<ContractUnitView, 'id' | 'role' | 'title' | 'goal' | 'brief'>;
+
 /** Picks the route for the planner, a unit, a fresh unit agent, or an integration unit. Required: there is no default model. */
 export type ContractRouteSelector = (request: {
   readonly purpose: 'planner' | 'unit' | 'fresh-unit' | 'integration';
   readonly signal?: AbortSignal | undefined;
   readonly beforeAttempt?: (() => void) | undefined;
   readonly onRetry?: ((progress: import('@goodvibes-jev/judgment').JudgmentRetryProgress) => void) | undefined;
-  readonly contract: ContractView;
-  readonly unit?: ContractUnitView | undefined;
+  readonly contract: ContractRouteSubject;
+  readonly unit?: ContractRouteUnit | undefined;
 }) => Promise<UnitRoute>;
 
 // ── Starting a contract ───────────────────────────────────────────────────────

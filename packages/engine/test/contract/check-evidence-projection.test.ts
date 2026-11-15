@@ -36,23 +36,16 @@ test('packed evidence round-trips every path, optional value, failure and assess
     inspection: index === 7 ? 'inspected' : 'uninspected', observations: index === 7 ? [{ unitId: 'u1', ranges: ['1-2'] }] : [],
     assessment: 'unreviewed', assessments: [] }));
   const remainingFiles = [...files.map(file => file.path), files[0]!.path, files[2]!.path];
-  const state = { hostOperations: [{ kind: 'owner-validation' }, ...currentFiles, { kind: 'archive-read' }],
+  const state = { hostOperations: [{ kind: 'owner-validation' }, { kind: 'archive-read' }],
     orchestration: { currentFiles, reviewInventory: { files, remainingFiles, versionChecksPending: [] } } };
   const before = JSON.stringify(state), projected = projectCheckEvidence(state) as JsonObject;
   const host = projected['orchestration'] as JsonObject, inventory = host['reviewInventory'] as JsonObject;
   expect(expandTable(host['currentFiles']!)).toEqual(currentFiles);
   expect(expandTable(inventory['files']!)).toEqual(files);
   expect(expandPaths(inventory['remainingFiles']!, files)).toEqual(remainingFiles);
-  expect(projected['hostOperations']).toEqual([{ kind: 'owner-validation' }, expect.objectContaining({
-    representation: 'same-state-reference', path: ['orchestration', 'currentFiles'] }), { kind: 'archive-read' }]);
+  expect(projected['hostOperations']).toEqual([{ kind: 'owner-validation' }, { kind: 'archive-read' }]);
   expect(JSON.stringify(state)).toBe(before);
   expect(JSON.stringify(projected).length).toBeLessThan(before.length / 2);
-});
-
-test('does not replace unrelated host operations or small observations with references', () => {
-  const file = { operation: 'read-current-file', path: 'a.ts' };
-  const state = { hostOperations: [{ ...file }], orchestration: { currentFiles: [file] } };
-  expect(projectCheckEvidence(state)).toEqual(state);
 });
 
 test('both actual check states retain all 11923 review paths within long context sizing', () => {

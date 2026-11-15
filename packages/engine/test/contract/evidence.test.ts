@@ -242,7 +242,8 @@ describe('what each trigger collects', () => {
       toolCalls: [{ name: 'write', arguments: { files: [{ path: 'changed.ts' }] } }] }];
     const evidence = await collectUnitEvidence(planned, current, 'turn-end', { ...sources(), turns, mustWrite: false });
     const host = evidence.orchestration as { currentFiles: { path: string }[]; reviewInventory: { files: { path: string; assessment: string }[] } };
-    expect(host.currentFiles.map(file => file.path).sort()).toEqual(['changed.ts', 'prior.ts', 'read.ts']);
+    // A peer's touched files are not this check's business: only this unit's reads and changes are observed.
+    expect(host.currentFiles.map(file => file.path).sort()).toEqual(['changed.ts', 'read.ts']);
     expect(host.reviewInventory.files.map(file => file.path)).toEqual(paths);
     expect(host.reviewInventory.files.every(file => file.assessment === 'unreviewed')).toBe(true);
   });
@@ -254,12 +255,13 @@ describe('what each trigger collects', () => {
     writeFileSync(join(dir, 'artifact.zip'), 'abc');
     const read = () => collectUnitEvidence(planned, current, 'resume', { ...sources(), turns: [], mustWrite: false });
     const evidence = await read();
-    expect(judgeEvidence(evidence)).toMatchObject({ hostOperations: [{ operation: 'read-current-file', success: true,
-      path: 'artifact.zip', bytes: 3, observationId: expect.any(String) }] });
+    expect(judgeEvidence(evidence)).toMatchObject({ orchestration: { currentFiles: [{ operation: 'read-current-file', success: true,
+      path: 'artifact.zip', bytes: 3, observationId: expect.any(String) }] } });
+    expect(judgeEvidence(evidence)).not.toHaveProperty('hostOperations');
     expect(qualityState(current, evidence).commands).toEqual([]);
     writeFileSync(join(dir, 'artifact.zip'), 'abcd');
-    expect(judgeEvidence(await read())).toMatchObject({ hostOperations: [{ bytes: 4,
-      observationId: expect.any(String) }] });
+    expect(judgeEvidence(await read())).toMatchObject({ orchestration: { currentFiles: [{ bytes: 4,
+      observationId: expect.any(String) }] } });
   });
 
   test('actual plan acceptance reaches the unit checks without claiming unit completion', async () => {

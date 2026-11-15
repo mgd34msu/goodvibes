@@ -83,6 +83,26 @@ export function reviewInventoryPlannerView(inventory: ReviewInventory, _budget?:
   };
 }
 
+/** Inventories up to this many files are shown to the planner by name; larger ones by directory counts. */
+export const PLANNER_INVENTORY_NAME_LIMIT = 400;
+
+/**
+ * The inventory as the planner reads it: every name when it is small, else the
+ * total and file counts per directory, with exact names available through the
+ * planner's read-only tools. Coverage is still checked by the host against the
+ * complete inventory, and a plan that leaves files out is told which.
+ */
+export function reviewInventoryForPlanner(inventory: ReviewInventory): JsonValue {
+  if (inventory.paths.length <= PLANNER_INVENTORY_NAME_LIMIT) return reviewInventoryPlannerView(inventory);
+  return {
+    source: inventory.source,
+    errors: [...inventory.errors],
+    totalFiles: inventory.paths.length,
+    directoryCounts: directoryFileCounts(inventory.paths),
+    meaning: 'File counts per directory ("." is the project root); the names are not listed here. List a directory with your read-only tools when you need exact names. Assign scope with exact paths, directories or globs; "**" assigns the whole project. The host checks coverage against the complete inventory and names any file left out.',
+  };
+}
+
 export function reviewProjectPath(root: string, path: string): string | undefined {
   const normalized = relative(root, resolve(root, path)).replaceAll('\\', '/');
   return normalized && normalized !== '..' && !normalized.startsWith('../') ? normalized : undefined;
@@ -145,9 +165,11 @@ export function briefPathList(paths: readonly string[]): JsonValue {
 /** Reads and native accepted assessments are separate facts. A prior check
  * applies only to the exact file version it received, never a changed file. */
 function* observeReviewInventory(contract: Pick<ContractView, 'projectRoot' | 'units' | 'reviewInventory'> & Partial<Pick<ContractView, 'reviewExclusions'>>,
-  currentFiles: readonly JsonValue[] = []) {
-  const inventory = contract.reviewInventory;
-  if (!inventory) return undefined;
+  currentFiles: readonly JsonValue[] = [], slice?: readonly string[]) {
+  const whole = contract.reviewInventory;
+  if (!whole) return undefined;
+  // A unit check reads its own assigned files; the project's other files are a count.
+  const inventory = slice === undefined ? whole : { ...whole, paths: assignedReviewPaths(whole, slice) };
   const versions = new Map<string, JsonValue | null>();
   for (const value of currentFiles) if (value && typeof value === 'object' && !Array.isArray(value)
     && value['operation'] === 'read-current-file' && value['source'] === 'native-host-filesystem' && typeof value['path'] === 'string') {
@@ -188,6 +210,7 @@ function* observeReviewInventory(contract: Pick<ContractView, 'projectRoot' | 'u
         : assessments.some(assessment => assessment.state === 'version-unchecked') ? 'version-unchecked' : assessments.length ? 'changed' : 'unreviewed', assessments };
   });
   return { source: inventory.source, errors: [...inventory.errors],
+    ...(slice === undefined ? {} : { scope: 'assigned-to-this-unit', projectFiles: whole.paths.length }),
     totalFiles: files.length, inspectedFiles: files.filter(file => file.inspection === 'inspected').length,
     reviewedFiles: files.filter(file => file.assessment === 'reviewed').length,
     remainingFiles: files.filter(file => file.scope === 'included' && ['unreviewed', 'changed'].includes(file.assessment)).map(file => file.path),
@@ -206,9 +229,9 @@ export function reviewInventoryObservation(contract: Pick<ContractView, 'project
 
 /** Retain every file and assessment while yielding between physical checks. */
 export async function reviewInventoryObservationAsync(contract: Parameters<typeof observeReviewInventory>[0],
-  currentFiles: readonly JsonValue[] = [], signal?: AbortSignal) {
+  currentFiles: readonly JsonValue[] = [], signal?: AbortSignal, slice?: readonly string[]) {
   signal?.throwIfAborted();
-  const observations = observeReviewInventory(contract, currentFiles);
+  const observations = observeReviewInventory(contract, currentFiles, slice);
   let next = observations.next();
   while (!next.done) {
     await yieldToEventLoop(undefined, { signal });

@@ -1,19 +1,79 @@
-/** Read-only identities for the exact source and check definitions observed by a gate. */
-import { randomUUID } from 'node:crypto';
-import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync, readdirSync, realpathSync, type BigIntStats } from 'node:fs';
+/**
+ * The identity of the source a gate ran against, as plain data that can be
+ * stored on a check and compared after a restart.
+ *
+ * In git the identity is the content: the tree id of the working tree
+ * (`tree-identity.ts`), or, when a check names the paths it is about (a shared
+ * tree the owner keeps working in), the blob ids of exactly those paths. An
+ * unrelated save elsewhere does not change it; a touch that leaves the bytes
+ * alone does not either. Outside git a stat walk of the tree gives a digest of
+ * every file's stat facts. Git runs without the caller's GIT_* routing.
+ */
+import { createHash } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
+import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync, readdirSync, readlinkSync, realpathSync, type BigIntStats } from 'node:fs';
 import { join } from 'node:path';
 import { CONTRACT_INPUT_EXCLUSIONS, listContractInputPaths } from './input-snapshot.js';
+import { workingTreeIdentity } from './tree-identity.js';
 
 export interface GateSourceInputIdentity {
+  /** `tree:<id>` or `paths:<sha256>` (content), or outside git `stat:<sha256>` of the files' stat facts. */
   readonly source: string;
   readonly packageScripts: Readonly<Record<string, string>>;
 }
 
-// Local check observations are not content addresses. Keep the actual file
-// metadata private and let only the owning observation retain its label.
-// Nothing is interned globally by project name or retained after its owner dies.
-interface SourceObservation { readonly root: string; readonly entries: readonly string[] }
-const observations = new WeakMap<GateSourceInputIdentity, SourceObservation>();
+/** The scripts of `root`'s package.json, read once; empty when absent or unreadable. */
+function readPackageScripts(root: string): Readonly<Record<string, string>> {
+  try { return packageScripts(readFileSync(join(root, 'package.json'))); } catch { return Object.freeze({}); }
+}
+
+/**
+ * Content id of `paths` under `root`: each path's git blob id (a symlink by its
+ * target text), or "missing". One `git hash-object` for all existing files.
+ */
+/** The environment for git here: the caller's GIT_* routing (a hook's GIT_DIR, an index override) never redirects it. */
+function gitEnv(): NodeJS.ProcessEnv {
+  return Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_')));
+}
+
+function pathsIdentity(root: string, paths: readonly string[]): string | null {
+  const sorted = [...new Set(paths)].sort();
+  const files: string[] = [], rows = new Map<string, string>();
+  for (const path of sorted) {
+    const stat = lstatSync(join(root, path), { throwIfNoEntry: false });
+    if (stat === undefined) rows.set(path, 'missing');
+    else if (stat.isSymbolicLink()) rows.set(path, `link:${readlinkSync(join(root, path))}`);
+    else if (stat.isFile()) files.push(path);
+    else rows.set(path, 'not-a-file');
+  }
+  if (files.length > 0) {
+    const hashed = spawnSync('git', ['-C', root, 'hash-object', '--stdin-paths'], { input: files.join('\n') + '\n', encoding: 'utf-8', maxBuffer: 64 * 1024 * 1024, env: gitEnv() });
+    const ids = hashed.status === 0 ? hashed.stdout.trim().split('\n') : [];
+    if (ids.length !== files.length) return null;
+    files.forEach((path, index) => rows.set(path, ids[index]!));
+  }
+  return createHash('sha256').update(JSON.stringify(sorted.map(path => [path, rows.get(path)]))).digest('hex');
+}
+
+/**
+ * The source identity of `cwd`. With `scope`, only those paths (relative to
+ * `cwd`) are identified; package.json is always read for the scripts a gate
+ * selects. Outside git, falls back to the stat walk. `_previous` is accepted
+ * from callers that hold an earlier identity; identities compare as strings.
+ */
+export function captureGateInput(cwd: string, _previous?: GateSourceInputIdentity, scope?: readonly string[]): GateSourceInputIdentity {
+  const root = realpathSync(cwd);
+  const content = scope === undefined ? workingTreeIdentity(root) : isGitWorkTree(root) ? pathsIdentity(root, scope) : null;
+  if (content !== null) {
+    return Object.freeze({ source: scope === undefined ? `tree:${content}` : `paths:${content}`, packageScripts: readPackageScripts(root) });
+  }
+  return captureStatIdentity(cwd);
+}
+
+function isGitWorkTree(root: string): boolean {
+  return spawnSync('git', ['-C', root, 'rev-parse', '--is-inside-work-tree'], { encoding: 'utf-8', env: gitEnv() }).stdout?.trim() === 'true';
+}
+
 const fileIdentity = (stat: BigIntStats): string =>
   `${stat.dev}:${stat.ino}:${stat.mode}:${stat.uid}:${stat.gid}:${stat.nlink}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`;
 const directoryIdentity = (stat: BigIntStats): string =>
@@ -58,14 +118,14 @@ function packageScripts(bytes: Buffer): Readonly<Record<string, string>> {
   } catch { return {}; }
 }
 
-/** Observe the current physical tree under a running check's original owner.
+/** Outside git: observe the current physical tree under a running check's original owner.
  * Same-byte replacement and a rewrite followed by restored mtime both retire
  * the observation (inode/ctime are included). Only package.json is read, for
  * selecting the actual script; ordinary source bytes are never scanned here.
  * The label is meaningful only with its private prior observation. Historical
  * receipts have no such owner and must execute their checks again.
  * Ignored Git outputs and runtime/dependency directories remain excluded. */
-export function captureGateInput(cwd: string, previous?: GateSourceInputIdentity): GateSourceInputIdentity {
+function captureStatIdentity(cwd: string): GateSourceInputIdentity {
   const root = realpathSync(cwd);
   const rootStat = lstatSync(root, { bigint: true });
   if (!rootStat.isDirectory()) throw new Error('Gate source root is not a directory');
@@ -136,11 +196,7 @@ export function captureGateInput(cwd: string, previous?: GateSourceInputIdentity
     entries.push(JSON.stringify([directory, expected]));
   }
   if (realpathSync(cwd) !== root) throw new Error('Gate source root changed during capture');
-  const retained = previous && observations.get(previous);
-  const unchanged = retained && retained.root === root && retained.entries.length === entries.length
-    && retained.entries.every((entry, index) => entry === entries[index]);
-  const source = unchanged && previous ? previous.source : `gate-source-${randomUUID()}`;
-  const captured = Object.freeze({ source, packageScripts: Object.freeze(scripts) });
-  observations.set(captured, { root, entries });
-  return captured;
+  // The label is a digest of the stat facts: equal while nothing was touched, comparable as plain data.
+  const source = `stat:${createHash('sha256').update(root).update('\0').update(entries.join('\n')).digest('hex')}`;
+  return Object.freeze({ source, packageScripts: Object.freeze(scripts) });
 }

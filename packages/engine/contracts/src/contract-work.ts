@@ -1,6 +1,5 @@
 /**
- * contract-work.ts, the external work seam of the contract runner
- * (docs/design/contract-runner.md 8.4).
+ * contract-work.ts, the external work seam of the contract runner.
  *
  * Surfaces and partner apps that do not embed the runner dispatch, poll,
  * cancel and fetch contract work through an adapter with these four methods.

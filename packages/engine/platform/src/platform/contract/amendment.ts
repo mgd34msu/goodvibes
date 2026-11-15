@@ -2,7 +2,7 @@ import { createContractInputAuthority, bindContractInputAuthority, assertContrac
 import { nativeContractRoute } from './native-decisions.js';
 import { bindContractPlanConsumer } from '../tools/agent/contract-binding.js';
 /**
- * An owner's amendment (docs/design/contract-runner.md section 6.3): the
+ * An owner's amendment: the
  * owner's reply read as "change what is required" goes to the planning model
  * as an instruction for the escalation's target (a unit, a group or the
  * deliverable). The planner may reword, drop or add criteria and, for a unit,
@@ -206,7 +206,7 @@ export async function amendTarget(run: ContractRun, escalation: Escalation, inst
   const workingDirectory = snapshot === undefined ? contract.projectRoot : contractInputPath(snapshot);
   const authority = snapshot === undefined ? undefined : await createContractInputAuthority(contract, workingDirectory, { signal: run.abort.signal, snapshot });
   const config = readContractConfig(context.configManager);
-  const route = await nativeContractRoute(context.routeSelector, contract, context.native, { purpose: 'planner', contract: run.view() }, run.abort.signal);
+  const route = await nativeContractRoute(context.routeSelector, contract, context.native, { purpose: 'planner', contract: run.contract }, run.abort.signal);
   const servable = servableCriteria(run, escalation);
   const servableIds = new Set(servable.map((criterion) => criterion.id));
   let problems: string[] = [];

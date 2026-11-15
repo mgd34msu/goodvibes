@@ -8,8 +8,17 @@ export interface ContractLookup {
 }
 
 /**
+ * The contract a fix planner's view belongs to: the directory is
+ * `<contract id>-<view id>`; an older view named by the contract id alone is
+ * read as before.
+ */
+function plannerContractId(name: string): string {
+  return /^(ctr-(?:[0-9a-f]{8}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}))-./.exec(name)?.[1] ?? name;
+}
+
+/**
  * Resolve the owner of a worktree under `.goodvibes/.worktrees` from the
- * contract that created it (`contract/<short>`, `contract-planner/<id>`).
+ * contract that created it (`contract/<short>`, `contract-planner/<id>-<view>`).
  * Other shapes, and any contract that cannot be read, are `unknown`: the
  * retention sweep never treats unknown as ended.
  */
@@ -18,7 +27,7 @@ export function createContractOwnerResolver(workingDirectory: string, contracts:
   return (path) => {
     const parts = relative(base, path).split(sep);
     const id = parts[0] === 'contract' && parts.length === 2 ? `ctr-${parts[1]}`
-      : parts[0] === 'contract-planner' && parts.length === 2 ? parts[1]
+      : parts[0] === 'contract-planner' && parts.length === 2 ? plannerContractId(parts[1]!)
         : undefined;
     if (id === undefined || !isContractId(id)) return { state: 'unknown' };
     try {

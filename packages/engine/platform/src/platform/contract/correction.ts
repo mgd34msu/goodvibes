@@ -4,7 +4,7 @@ import { bindContractInputAuthority } from './input-authority.js';
 import { bindContractActionSource, bindContractPlanConsumer } from '../tools/agent/contract-binding.js';
 import { nativeContractActionSource } from './native-decisions.js';
 /**
- * Correction when nudging stalls (docs/design/contract-runner.md section 5):
+ * Correction when nudging stalls:
  * stall routing, planned-fix groups and fresh agents, for units, groups and
  * the deliverable.
  *
@@ -252,11 +252,17 @@ export function createCorrection(context: StepContext, escalations: Pick<Escalat
    * run fails the contract with `planning`.
    */
   async function planFix(run: ContractRun, brief: FixBrief, round: number): Promise<void> {
-    const { contract } = run;
     const input = await prepareFixPlannerInput(run);
+    // The planner's checkout and branch exist only while it plans.
+    try { await planFixIn(run, brief, round, input); }
+    finally { await input.dispose(); }
+  }
+
+  async function planFixIn(run: ContractRun, brief: FixBrief, round: number, input: FixPlannerInput): Promise<void> {
+    const { contract } = run;
     assertNativeContractSource(contract);
     const route = await readOwned(run, brief.targetId, 'fix planner routing',
-      () => nativeContractRoute(context.routeSelector, contract, context.native, { purpose: 'planner', contract: run.view() }, run.abort.signal));
+      () => nativeContractRoute(context.routeSelector, contract, context.native, { purpose: 'planner', contract: run.contract }, run.abort.signal));
     if (contract.nativeSource !== undefined) { await planNativeFix(run, brief, round, route, input); return; }
     let repair: { problems: readonly PlanProblem[]; previousPlan: string } | undefined;
     const candidateId = `${brief.targetId}.f${round}.candidate`;
@@ -296,7 +302,6 @@ export function createCorrection(context: StepContext, escalations: Pick<Escalat
         }, input.authority)));
         if (result.agentId !== undefined) contract.plannerAgentIds.push(result.agentId);
         if (run.terminal) return;
-        await input.assertCurrent();
         if (result.status !== 'completed') {
           run.control.fail('planning', `the fix for ${brief.scope} ${brief.targetId} could not be planned: the planner agent ${result.status === 'cancelled' ? 'was stopped' : 'failed'}${result.detail === undefined ? '' : `: ${result.detail}`}`);
           return;
@@ -331,8 +336,14 @@ export function createCorrection(context: StepContext, escalations: Pick<Escalat
   }
 
   async function planNativeFix(run: ContractRun, brief: FixBrief, round: number, route: Parameters<ContractRun['decide']>[4], prepared?: FixPlannerInput): Promise<void> {
+    if (prepared !== undefined) { await planNativeFixIn(run, brief, round, route, prepared); return; }
+    const input = await prepareFixPlannerInput(run);
+    try { await planNativeFixIn(run, brief, round, route, input); }
+    finally { await input.dispose(); }
+  }
+
+  async function planNativeFixIn(run: ContractRun, brief: FixBrief, round: number, route: Parameters<ContractRun['decide']>[4], input: FixPlannerInput): Promise<void> {
     const contract = run.contract;
-    const input = prepared ?? await prepareFixPlannerInput(run);
     const sourceOf = nativeContractActionSource(contract, context.native, run.abort.signal);
     const state = nativeDecisionState(contract);
     const key = `fix:${brief.targetId}:${round}`;
@@ -354,12 +365,10 @@ export function createCorrection(context: StepContext, escalations: Pick<Escalat
           attempt: attempt === 1 ? 'initial' : 'repair', route: route!, signal: run.abort.signal }, input.authority), sourceOf, port => nativeContractPort(contract, context.native, port, run.abort.signal))));
         if (result.agentId !== undefined) contract.plannerAgentIds.push(result.agentId);
         if (run.terminal) return;
-        await input.assertCurrent();
         if (result.status !== 'completed') { run.control.fail('planning', 'Native fix planner did not finish'); return; }
         output = result.output; state.plannerOutputs[key] = output; context.native?.changed(contract);
       }
       const checked = await checkFixPlan(run, brief, output!);
-      await input.assertCurrent();
       const valid = checked.problems.length === 0 && checked.group !== undefined;
       const canRepair = config().planRepairLimit === 0 || nativeSpent(contract, key) < config().planRepairLimit + 1;
       const decision = await readDecision(run, { stage: 'fix-plan', targetId: brief.targetId,
@@ -466,7 +475,7 @@ export function createCorrection(context: StepContext, escalations: Pick<Escalat
 
   async function freshUnit(run: ContractRun, unit: ContractUnit, reason: string, decisionIds: readonly string[]): Promise<void> {
     const route = await readOwned(run, unit.id, 'fresh worker routing',
-      () => nativeContractRoute(context.routeSelector, run.contract, context.native, { purpose: 'fresh-unit', contract: run.view(), unit: structuredClone(unit) }, run.abort.signal));
+      () => nativeContractRoute(context.routeSelector, run.contract, context.native, { purpose: 'fresh-unit', contract: run.contract, unit }, run.abort.signal));
     if (run.contract.nativeSource !== undefined) {
       const cost = itemClosed(run, unit) ? 2 : 1;
       const decision = await readDecision(run, { stage: 'stall', targetId: unit.id, action: 'Start a fresh worker with this exact unit brief, criteria and selected route',

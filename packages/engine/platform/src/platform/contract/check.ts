@@ -1,6 +1,6 @@
 import { requireDecisionFeature } from '../runtime/decision-policy.js';
 /**
- * One check of a unit (docs/design/contract-runner.md sections 4.4 to 4.6):
+ * One check of a unit:
  * evidence in, Jev readings, an outcome out.
  *
  * Jev reads each criterion and the goal (`contract.unit-judge`) and the
@@ -301,7 +301,8 @@ function nudgedCriteria(findings: Findings, kinds: readonly NudgeKind[]): string
 export async function runUnitCheck(input: UnitCheckInput): Promise<UnitCheckOutcome> {
   requireDecisionFeature('autonomous contract semantic checks, planning or continuation; use ordinary Classic tools for explicit work');
   const { unit, settings } = input;
-  let evidence = input.evidence.gates === undefined ? input.evidence : { ...input.evidence, gates: refreshGateResults(input.evidence.gates) };
+  // Gate results were identified when they ran; they are compared once, after the readings returned.
+  let evidence = input.evidence;
   const usage = emptyJudgmentUsage();
   const judged = unit.criteria.filter((criterion) => criterion.disposition === 'judged');
   const signal = input.signal === undefined ? {} : { signal: input.signal };

@@ -1,8 +1,7 @@
 import { createContractInputAuthority, type ContractInputAuthority } from './input-authority.js';
 import { nativeContractRoute } from './native-decisions.js';
 /**
- * Groups on the orchestration engine (docs/design/contract-runner.md sections
- * 6.1, 7.3 and 7.4): one engine per contract, a workstream per group started
+ * Groups on the orchestration engine: one engine per contract, a workstream per group started
  * once every group it depends on passed, and the engine's events translated
  * into the contract tree.
  *
@@ -24,6 +23,7 @@ import { nativeContractRoute } from './native-decisions.js';
  *   runs once and the decision says so.
  */
 import { initializeContractMemberWorktree } from './input-snapshot.js';
+import { mapLimit } from '@goodvibes-jev/judgment';
 
 import { spawnSync } from 'node:child_process';
 import type { CreateWorkstreamInput, OrchestrationEngine } from '../orchestration/engine.js';
@@ -106,6 +106,9 @@ export interface GroupRunner {
   /** Reads the selection over a best-of-N unit's attempts again (its reading did not finish before a restart). */
   selectAttempts(run: ContractRun, unitId: string): void;
 }
+
+/** Route picks of one group in flight at once. */
+const GROUP_ROUTE_CONCURRENCY = 8;
 
 /** HEAD plus the actual original baseline; only restart commitments are saved. */
 export function takeBaseline(cwd: string): ContractUnit['baseline'] {
@@ -202,13 +205,15 @@ export function createGroupRunner(deps: GroupRunnerDeps): GroupRunner {
       for (const unit of units) expandAttempts(run, unit);
       // Every unit that runs an agent is routed before it spawns: a unit on its
       // own, or each attempt of a best-of-N unit (each its own pick). A plan
-      // unit with attempts runs no agent, so it is not routed.
-      const runsAgent = units.flatMap((unit) => unit.attemptUnits ?? [unit]);
-      for (const unit of runsAgent) {
-        if (unit.route !== undefined) continue;
-        unit.route = await nativeContractRoute(deps.routeSelector, run.contract, run.env.native, { purpose: unit.role === 'integration' ? 'integration' : 'unit', contract: run.view(), unit: structuredClone(unit) }, run.abort.signal);
-        if (run.terminal) return;
-      }
+      // unit with attempts runs no agent, so it is not routed. The picks are
+      // independent, so they run side by side; the selector reads the live
+      // contract and unit, never a copy.
+      const unrouted = units.flatMap((unit) => unit.attemptUnits ?? [unit]).filter((unit) => unit.route === undefined);
+      await mapLimit(unrouted, GROUP_ROUTE_CONCURRENCY, async (unit) => {
+        const route = await nativeContractRoute(deps.routeSelector, run.contract, run.env.native, { purpose: unit.role === 'integration' ? 'integration' : 'unit', contract: run.contract, unit }, run.abort.signal);
+        if (!run.terminal) unit.route = route;
+      });
+      if (run.terminal) return;
       rollUpContractUsage(contract, deps.getStatus, deps.pricing);
       // The group check's diff is measured from here (6.4).
       group.baseline ??= takeBaseline(contract.worktreePath ?? contract.projectRoot);
@@ -247,6 +252,14 @@ export function createGroupRunner(deps: GroupRunnerDeps): GroupRunner {
     const unit = run.unit(item?.contractUnitId ?? itemId);
     if (unit === undefined || run.terminal) return;
     const runtime = run.runtime(unit);
+    // The steps that can fail run before the unit records its agent, so a
+    // failure leaves the unit as it was and the caller fails it with the reason.
+    const route = unit.route;
+    if (route === undefined) throw new Error(`unit ${unit.id} spawned without a route`);
+    const cwd = item?.worktreePath ?? run.contract.worktreePath ?? run.contract.projectRoot;
+    unit.baseline ??= takeBaseline(cwd);
+    selectBaselineExecutionRoot(unit.baseline, cwd);
+    runtime.cwd = cwd;
     unit.agentIds.push(agentId);
     const planUnit = planUnitOf(run, unit);
     if (planUnit !== undefined) {
@@ -257,14 +270,9 @@ export function createGroupRunner(deps: GroupRunnerDeps): GroupRunner {
     unit.activeAgentId = agentId;
     runtime.agentLost = false;
     runtime.agentStartedAt = run.env.now();
-    runtime.cwd = item?.worktreePath ?? run.contract.worktreePath ?? run.contract.projectRoot;
-    unit.baseline ??= takeBaseline(runtime.cwd);
-    selectBaselineExecutionRoot(unit.baseline, runtime.cwd);
     const purpose = runtime.nextSpawnPurpose;
     runtime.nextSpawnPurpose = 'unit';
     run.moveUnit(unit, 'running');
-    const route = unit.route;
-    if (route === undefined) throw new Error(`unit ${unit.id} spawned without a route`);
     run.decide('spawned', unit.id, `agent ${agentId} (${purpose}): ${route.reason}`, [], route);
     run.emit({
       type: 'CONTRACT_UNIT_SPAWNED',
@@ -312,9 +320,19 @@ export function createGroupRunner(deps: GroupRunnerDeps): GroupRunner {
     try {
       translateEngineEvent(run, event);
     } catch (error) {
-      // The engine only logs a listener's throw; a unit that silently diverged from its item would never finish.
-      if (!(error instanceof IllegalContractTransitionError)) throw error;
-      deps.failContract(run, 'other', `the contract could not follow its work (${event.type}${'itemId' in event ? ` for ${event.itemId}` : ''}): ${error.message}`);
+      // The engine only logs a listener's throw; a unit that silently diverged
+      // from its item would never finish, so every error ends the unit it is
+      // about, or the contract when the event names no live unit.
+      if (run.terminal) return;
+      const itemId = 'itemId' in event ? event.itemId : undefined;
+      const failure = error instanceof IllegalContractTransitionError ? { kind: 'other' as const, reason: error.message } : failureFromError(error);
+      const what = `${event.type}${itemId === undefined ? '' : ` for ${itemId}`}`;
+      const unit = itemId === undefined ? undefined : unitOfItem(run, itemId);
+      if (unit !== undefined && !isTerminalUnitStatus(unit.status) && !(error instanceof IllegalContractTransitionError)) {
+        deps.failUnit(run, unit, failure.kind, `unit ${unit.id} could not follow its work (${what}): ${failure.reason}`);
+        return;
+      }
+      deps.failContract(run, failure.kind, `the contract could not follow its work (${what}): ${failure.reason}`);
     }
   }
 

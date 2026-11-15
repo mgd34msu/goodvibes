@@ -1,5 +1,4 @@
 import { hashState, type NoulQuestion, type YesNoReading } from '@goodvibes-jev/judgment';
-import { types as nodeTypes } from 'node:util';
 
 interface ClaimRange { readonly start: number; readonly end: number }
 /** Compatibility-only saved passage binding. Fresh scopes use the complete
@@ -17,22 +16,32 @@ export type AnswerClaimReview = AnswerClaimScope & ClaimReviewDetails;
  * object can reuse its privately bound whole-output commitment. */
 export interface AnswerClaimOutput { readonly digest: string }
 interface OutputOwner { readonly output: string; readonly digest: string }
-const apply = Reflect.apply, get = WeakMap.prototype.get, set = WeakMap.prototype.set, freeze = Object.freeze;
-const descriptor = Object.getOwnPropertyDescriptor, prototype = Object.getPrototypeOf, isProxy = nodeTypes.isProxy;
+const freeze = Object.freeze;
 const outputOwners = new WeakMap<AnswerClaimOutput, OutputOwner>(), scopeOutputs = new WeakMap<object, OutputOwner>();
-const ownerOf = (value: AnswerClaimOutput | undefined) => value && apply(get, outputOwners, [value]) as OutputOwner | undefined;
-const scopeOwner = (value: object) => apply(get, scopeOutputs, [value]) as OutputOwner | undefined;
+const ownerOf = (value: AnswerClaimOutput | undefined) => value === undefined ? undefined : outputOwners.get(value);
+const scopeOwner = (value: object) => scopeOutputs.get(value);
+
+/**
+ * Most passages one answer is read in. An answer longer than this many
+ * 4,000-character passages is read in longer passages, so the scoped review of
+ * one answer costs at most this many requests whatever its length.
+ */
+export const MAX_ANSWER_PASSAGES = 8;
+const MIN_PASSAGE_LENGTH = 4_000;
+
+/** The passage length for an answer of `length` characters. */
+export function answerPassageLimit(length: number): number {
+  return Math.max(MIN_PASSAGE_LENGTH, Math.ceil(length / MAX_ANSWER_PASSAGES));
+}
+
+/** A saved scope read back as data: its offsets and exactly one of the two digest forms. */
 function scopeData(value: AnswerClaimScope): AnswerClaimScope | undefined {
-  if (!value || typeof value !== 'object' || isProxy(value) || ![null, Object.prototype].includes(prototype(value))) return undefined;
-  const fields: Record<string, unknown> = {};
-  for (const key of ['start', 'end', 'version', 'textDigest', 'outputDigest']) {
-    const field = descriptor(value, key); if (!field) continue; if (!('value' in field)) return undefined; fields[key] = field.value;
-  }
-  if (typeof fields['start'] !== 'number' || typeof fields['end'] !== 'number') return undefined;
-  if (fields['version'] === 2 && typeof fields['outputDigest'] === 'string' && !Object.hasOwn(fields, 'textDigest'))
-    return { version: 2, start: fields['start'], end: fields['end'], outputDigest: fields['outputDigest'] };
-  if (fields['version'] === undefined && typeof fields['textDigest'] === 'string' && !Object.hasOwn(fields, 'outputDigest'))
-    return { start: fields['start'], end: fields['end'], textDigest: fields['textDigest'] };
+  if (value === null || typeof value !== 'object') return undefined;
+  const fields = value as { readonly [key in 'start' | 'end' | 'version' | 'textDigest' | 'outputDigest']?: unknown };
+  const { start, end, version, textDigest, outputDigest } = fields;
+  if (typeof start !== 'number' || typeof end !== 'number') return undefined;
+  if (version === 2 && typeof outputDigest === 'string' && textDigest === undefined) return { version: 2, start, end, outputDigest };
+  if (version === undefined && typeof textDigest === 'string' && outputDigest === undefined) return { start, end, textDigest };
   return undefined;
 }
 
@@ -42,7 +51,7 @@ function scopeData(value: AnswerClaimScope): AnswerClaimScope | undefined {
 export function captureAnswerClaimOutput(output: string): AnswerClaimOutput {
   if (typeof output !== 'string') throw new TypeError('Answer claim output requires text');
   const digest = hashState(output), handle = freeze({ digest });
-  apply(set, outputOwners, [handle, freeze({ output, digest })]); return handle;
+  outputOwners.set(handle, freeze({ output, digest })); return handle;
 }
 function originalOutput(output: string, supplied?: AnswerClaimOutput): OutputOwner {
   if (supplied === undefined) { const actual = captureAnswerClaimOutput(output); return ownerOf(actual)!; }
@@ -56,7 +65,7 @@ export function recordAnswerClaimReview(scope: AnswerClaimScope, details: ClaimR
   const output = scopeOwner(scope);
   if (output === undefined) throw new Error('Answer claim review requires its original host scope');
   const review = freeze({ ...scope, ...(details.stateHash === undefined ? {} : { stateHash: details.stateHash }), decisionId: details.decisionId, reading: freeze({ ...details.reading }) });
-  apply(set, scopeOutputs, [review, output]); return review;
+  scopeOutputs.set(review, output); return review;
 }
 
 /** Bind exact offsets and complete original answer in the independently logged
@@ -72,10 +81,11 @@ export function scopedClaimQuestion(question: NoulQuestion, scope: AnswerClaimSc
 }
 
 /** Contiguous exact text, retaining whitespace and surrounding context. The
- * actual completion owner supplies its existing whole-answer commitment. */
-export function answerClaimScopes(output: string, start = 0, end = output.length, limit = 4_000, supplied?: AnswerClaimOutput): AnswerClaimScope[] {
+ * actual completion owner supplies its existing whole-answer commitment. The
+ * default passage length keeps a whole answer to `MAX_ANSWER_PASSAGES`. */
+export function answerClaimScopes(output: string, start = 0, end = output.length, limit = answerPassageLimit(output.length), supplied?: AnswerClaimOutput): AnswerClaimScope[] {
   if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 || end < start || end > output.length
-    || !Number.isInteger(limit) || limit < 1 || limit > 4_000) throw new RangeError('Answer claim scope requires a valid range and chunk limit');
+    || !Number.isInteger(limit) || limit < 1 || limit > answerPassageLimit(output.length)) throw new RangeError('Answer claim scope requires a valid range and chunk limit');
   const owner = originalOutput(output, supplied), scopes: AnswerClaimScope[] = [];
   let offset = start;
   do {
@@ -86,7 +96,7 @@ export function answerClaimScopes(output: string, start = 0, end = output.length
       else { const space = output.lastIndexOf(' ', boundary); if (space > offset + limit / 2) boundary = space + 1; }
     }
     const scope = freeze({ version: 2 as const, start: offset, end: boundary, outputDigest: owner.digest });
-    apply(set, scopeOutputs, [scope, owner]); scopes.push(scope); offset = boundary;
+    scopeOutputs.set(scope, owner); scopes.push(scope); offset = boundary;
   } while (offset < end);
   return scopes;
 }
@@ -98,12 +108,13 @@ export function answerClaimScopes(output: string, start = 0, end = output.length
 export function completeAnswerClaimCoverage(output: string, scopes: readonly AnswerClaimScope[], supplied?: AnswerClaimOutput): boolean {
   const actual = ownerOf(supplied); let expectedDigest = actual?.output === output ? actual.digest : undefined;
   let offset = 0;
+  const longest = answerPassageLimit(output.length) + 1;
   if (!scopes.length) return false;
   for (const scope of scopes) {
     const original = scope && scopeOwner(scope);
     const data = scopeData(scope);
     if (!data || !Number.isInteger(data.start) || !Number.isInteger(data.end) || data.start !== offset
-      || data.end < data.start || data.end > output.length || data.end - data.start > 4_001
+      || data.end < data.start || data.end > output.length || data.end - data.start > longest
       || (data.end === data.start && output.length !== 0)) return false;
     if (original !== undefined) {
       if (original.output !== output || data.version !== 2 || data.outputDigest !== original.digest) return false;

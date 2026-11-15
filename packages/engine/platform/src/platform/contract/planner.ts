@@ -3,12 +3,12 @@ import { bindContractPlanConsumer } from '../tools/agent/contract-binding.js';
 import { waitForTaskRecovery } from '../core/response-completion.js';
 import { assertOwnedContractSource, checkOwnedSourcePlan, hasDerivedAcceptanceChecks } from './owned-source.js';
 import { nativeContractTaskSource } from './native-source.js';
-import { captureReviewInventory, assignedReviewPaths, reviewInventoryPlannerView, type ReviewInventory } from './review-inventory.js';
+import { captureReviewInventory, assignedReviewPaths, reviewInventoryForPlanner, type ReviewInventory } from './review-inventory.js';
 import { ContractInputReadDeniedError, withContractInputReadBatch, createContractInputAuthority, bindContractInputAuthority, assertContractInputAdmission, pinContractInputAdmission, authorizeContractInputPath, assertContractInputReadAccess, withContractInputAuthority, type ContractInputAuthority } from './input-authority.js';
 import { bindContractActionSource, getContractActionSource } from '../tools/agent/contract-binding.js';
 import { nativeContractActionSource } from './native-decisions.js';
 /**
- * Planning (docs/design/contract-runner.md section 3): read the request's
+ * Planning: read the request's
  * shape, run the planning model as a read-only sub-agent, check its plan in
  * code and with Jev, send every problem back for repair up to
  * `contract.planRepairLimit`, and either accept the plan into the contract tree
@@ -34,7 +34,7 @@ import { delegationForbidden, readRequestShape, REQUEST_SHAPE_SITE, saysYesAtAct
 import { readContractConfig, type ContractConfig, type ContractConfigReader } from './config.js';
 import { nativeContractRoute, decideNativeContract, nativeContractPort, nativeDecisionState, nativeSpent, spendNative, type NativeContractServices } from './native-decisions.js';
 import { assertNativeContractSource, nativeSourcePlan } from './native-source.js';
-import { checkDraftFidelity, draftSection } from './draft-plan.js';
+import { checkDraftFidelity, draftSection, joinDraft } from './draft-plan.js';
 import { createPlanCheckCache, readCriterionDispositions, runPlanChecks, type CriterionDispositionRuling, type PlanCheckCache, type PlanCheckUsage, type PlanVerdict } from './plan-checks.js';
 import {
   effectiveAttempts,
@@ -256,7 +256,7 @@ export function buildContractPlannerRequest(input: PlannerRequestInput): string 
   sections.push(input.repair === undefined
     ? '## Repository\n' + input.repositoryMap
     : '## Repair scope\nKeep the previous plan and original requirements. Correct the listed problems instead of planning the whole task again. Repository details remain available through your read-only tools.');
-  if (input.reviewInventory && input.repair === undefined) sections.push('## Native review inventory\n' + JSON.stringify(reviewInventoryPlannerView(input.reviewInventory))
+  if (input.reviewInventory && input.repair === undefined) sections.push('## Native review inventory\n' + JSON.stringify(reviewInventoryForPlanner(input.reviewInventory))
     + '\nAssign every file in the requested review scope to unit.files using exact paths or globs. Give independently checkable assessment criteria for those files. For inventory files outside the original requested scope, add reviewExclusions entries {files:[paths or globs],reason:"why the original request excludes these"}. Exclusions are checked against the original request. Reading a file does not complete its assessment. Do not replace this inventory with a sample or require another review of already accepted unchanged parts.');
   if (input.repair !== undefined) {
     sections.push(
@@ -499,7 +499,7 @@ async function checkPlanText(context: PlanningContext, output: string, repair: n
     deps.emit({ type: 'CONTRACT_PLAN_CHECKED', contractId: contract.id, check: 'structure', passed: false, problems: parsed.problems, decisionIds: [] });
     return { plan: undefined, text: output, problems: parsed.problems, verdict: undefined };
   }
-  const { plan } = parsed;
+  const plan = contract.draftPlan === undefined ? parsed.plan : joinDraft(parsed.plan, contract.draftPlan);
   const text = renderContractPlan(plan);
   context.move('checking-plan');
   context.decide('planned', repair === 0 ? 'the planner wrote a plan' : `the planner wrote repair ${repair}`);
@@ -513,7 +513,7 @@ async function checkPlanText(context: PlanningContext, output: string, repair: n
     const excluded = new Set((plan.reviewExclusions ?? []).flatMap(exclusion => assignedReviewPaths(contract.reviewInventory!, exclusion.files)));
     const unassigned = contract.reviewInventory.paths.filter(path => !allocated.has(path) && !excluded.has(path));
     if (unassigned.length) {
-      codeProblems.push({ code: 'uncovered-requirement', message: `Assign or justify scope exclusions for these ${unassigned.length} actual inventory files: ${JSON.stringify(reviewInventoryPlannerView({ source: contract.reviewInventory.source, errors: [], paths: unassigned }))}. This is the complete missing scope, including dotfiles and extensionless files. Keep the original requested scope unchanged.` });
+      codeProblems.push({ code: 'uncovered-requirement', message: `Assign or justify scope exclusions for these ${unassigned.length} actual inventory files: ${JSON.stringify(reviewInventoryForPlanner({ source: contract.reviewInventory.source, errors: [], paths: unassigned }))}. This is the complete missing scope, including dotfiles and extensionless files. Keep the original requested scope unchanged.` });
     }
     if (contract.reviewInventory.errors.length) codeProblems.push({ code: 'uncovered-requirement', message: `The project inventory is incomplete: ${JSON.stringify(contract.reviewInventory.errors)}. Resolve inventory access before claiming the project scope is assigned.` });
   }
@@ -637,7 +637,7 @@ export async function planContract(contract: Contract, deps: ContractPlannerDeps
     }
   };
   const map = () => deps.repositoryMap !== undefined ? deps.repositoryMap(workingDirectory)
-    : contract.reviewInventory ? Promise.resolve('The complete repository filename catalog is supplied in Native review inventory below. Use read-only tools for source bodies, symbols or dependency details as needed.')
+    : contract.reviewInventory ? Promise.resolve('The repository\'s files are summarized in Native review inventory below. Use read-only tools for exact names, source bodies, symbols or dependency details as needed.')
     : defaultRepositoryMap(workingDirectory, readAccessFilter, authority ? readAccessFilter : undefined);
   const repositoryMap = await (authority ? withContractInputReadBatch(authority, () => withContractInputAuthority(authority, map)) : map());
   await assertReadAccess();

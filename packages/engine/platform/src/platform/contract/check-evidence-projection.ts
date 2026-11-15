@@ -53,7 +53,11 @@ function pathReferences(value: JsonValue | undefined, files: readonly JsonObject
   return JSON.stringify(reference).length < JSON.stringify(value).length ? reference : value;
 }
 
-/** Keep native evidence untouched; pack only the state sent for judgment. */
+/**
+ * The one rendering of a check state for judgment: current-file rows and the
+ * review inventory's file rows become lossless tables. Native evidence objects
+ * are left untouched.
+ */
 export function projectCheckEvidence(state: JsonObject): JsonObject {
   const host = state['orchestration'];
   if (!object(host)) return state;
@@ -66,19 +70,6 @@ export function projectCheckEvidence(state: JsonObject): JsonObject {
       ...(inventory['remainingFiles'] === undefined ? {} : { remainingFiles: pathReferences(inventory['remainingFiles'], inventory['files'])! }),
       ...(inventory['versionChecksPending'] === undefined ? {} : { versionChecksPending: pathReferences(inventory['versionChecksPending'], inventory['files'])! }) };
   }
-  // actualHostOperations prefixes owner validation and then repeats these exact
-  // currentFiles objects. Replace only this proven contiguous duplicate, never
-  // an unrelated or merely similarly labelled operation.
-  let hostOperations = state['hostOperations'];
-  if (currentFiles !== host['currentFiles'] && Array.isArray(host['currentFiles']) && Array.isArray(hostOperations)) {
-    const files = host['currentFiles'], operations = hostOperations;
-    const start = hostOperations.findIndex(entry => entry === files[0]);
-    if (start >= 0 && files.every((entry, index) => operations[start + index] === entry)) {
-      hostOperations = [...hostOperations.slice(0, start), {
-        representation: 'same-state-reference', path: ['orchestration', 'currentFiles'],
-        meaning: 'The complete current-file operations at this position are supplied once in orchestration.currentFiles in this same state. Expand its lossless table here; no operation is omitted.' }, ...hostOperations.slice(start + files.length)];
-    }
-  }
-  return { ...state, ...(hostOperations === undefined ? {} : { hostOperations }), orchestration: { ...host,
+  return { ...state, orchestration: { ...host,
     ...(currentFiles === undefined ? {} : { currentFiles }), ...(reviewInventory === undefined ? {} : { reviewInventory }) } };
 }

@@ -1,13 +1,14 @@
 /**
- * Plans drafted before a contract started (docs/design/contract-runner.md
- * 10.4): the runner numbers the drafted units, the planner is shown the draft
- * and keeps it, a code check holds the planner to it, and `startFromPlan` runs
- * the kept plan to a pass.
+ * Plans drafted before a contract started:
+ * the runner numbers the drafted units, the planner is shown the draft, the
+ * host joins the drafted text to the planner's plan, a code check holds the
+ * graph to it, and `startFromPlan` runs the joined plan to a pass.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
 import type { DecompositionRunner, DecompositionRunnerRequest } from '../../platform/src/platform/core/plan-decomposition.js';
 import { buildContractPlannerRequest } from '../../platform/src/platform/contract/planner.js';
 import { checkDraftFidelity, numberDraft, type DraftedPlan } from '../../platform/src/platform/contract/index.js';
+import { joinDraft } from '../../platform/src/platform/contract/draft-plan.js';
 import { asPlan, draftUnit, plannerOutput, shapeOf, type DraftPlan } from './plan-support.js';
 import { ASK, makeHarness, twoUnitPlan, waitFor, type Harness } from './runner-support.js';
 
@@ -58,18 +59,17 @@ describe('the draft fidelity check', () => {
     expect(checkDraftFidelity(asPlan(twoUnitPlan()), onlyParser)).toEqual([]);
   });
 
-  test('a changed brief or title, a missing unit, and changed attempts are each named', () => {
+  test('the drafted title, brief, files and attempts replace what the planner wrote; a missing unit is named', () => {
     const plan = twoUnitPlan();
-    plan.groups[0]!.units[0]!.brief = 'Write a parser somewhere.';
+    plan.groups[0]!.units[0]!.brief = 'Write a parser somewhere.\n';
     plan.groups[0]!.units[0]!.title = 'Parser';
-    const problems = checkDraftFidelity(asPlan(plan), { ...draft(), units: [...draft().units, { id: 'u3', title: 'Docs', brief: 'Document it.', dependsOn: [] }] });
-    expect(problems.map((problem) => [problem.code, problem.targetId])).toEqual([
-      ['draft-changed', 'u1'],
-      ['draft-changed', 'u1'],
-      ['draft-changed', 'u3'],
-    ]);
-    const attempts: DraftedPlan = { goal: 'g', units: [{ ...draft().units[0]!, attempts: 3 }] };
-    expect(checkDraftFidelity(asPlan(twoUnitPlan()), attempts).map((problem) => problem.message)).toEqual(['Unit u1 was drafted with 3 attempts.']);
+    plan.groups[0]!.units[0]!.files = ['src/elsewhere.ts'];
+    const drafted: DraftedPlan = { goal: 'g', units: [{ ...draft().units[0]!, files: ['src/csv.ts'], attempts: 3 }] };
+    const joined = joinDraft(asPlan(plan), drafted);
+    expect(joined.groups[0]!.units[0]).toMatchObject({ title: 'CSV parser', brief: 'Write src/csv.ts.', files: ['src/csv.ts'], attempts: 3 });
+    expect(checkDraftFidelity(joined, drafted)).toEqual([]);
+    const missing = checkDraftFidelity(joined, { ...draft(), units: [...draft().units, { id: 'u3', title: 'Docs', brief: 'Document it.', dependsOn: [] }] });
+    expect(missing.map((problem) => [problem.code, problem.targetId])).toEqual([['draft-changed', 'u3']]);
   });
 
   test('an added unit that is not the integration unit is refused', () => {
@@ -91,9 +91,14 @@ describe('the draft fidelity check', () => {
       }],
     };
     expect(checkDraftFidelity(asPlan(sameGroupKept), draft())).toEqual([]);
-    const lost = structuredClone(sameGroupKept);
-    lost.groups[0]!.units[1]!.dependsOn = [];
-    expect(checkDraftFidelity(asPlan(lost), draft()).map((problem) => problem.message)).toEqual(['Unit u2 depends on u1 in the draft; the plan must keep that order.']);
+    const sameGroupJoined = structuredClone(sameGroupKept);
+    sameGroupJoined.groups[0]!.units[1]!.dependsOn = [];
+    expect(joinDraft(asPlan(sameGroupJoined), draft()).groups[0]!.units[1]!.dependsOn).toEqual(['u1']);
+    const apart: DraftPlan = structuredClone(sameGroupKept);
+    const second = apart.groups[0]!.units.pop()!;
+    second.dependsOn = [];
+    apart.groups.push({ id: 'g2', title: 'Wire', goal: 'Wire', kind: 'work', dependsOn: [], criteria: [], units: [second] });
+    expect(checkDraftFidelity(joinDraft(asPlan(apart), draft()), draft()).map((problem) => problem.targetId)).toEqual(['u2']);
   });
 });
 
@@ -113,14 +118,14 @@ describe('the planner request', () => {
 });
 
 describe('startFromPlan', () => {
-  test('runs the kept plan to a pass; a planner that changed the draft is sent back to repair it', async () => {
+  test('runs the joined plan to a pass; a planner that reworded a drafted brief is not sent back', async () => {
     const prompts: string[] = [];
     const changed = twoUnitPlan();
     changed.groups[0]!.units[0]!.brief = 'Write a parser.';
     const planner: DecompositionRunner = {
       run: async (request: DecompositionRunnerRequest) => {
         prompts.push(request.userPrompt);
-        const plan = prompts.length === 1 ? changed : twoUnitPlan();
+        const plan = changed;
         return { status: 'completed', output: plannerOutput(plan), elapsedMs: 1, agentId: `planner-${prompts.length}` };
       },
     };
@@ -150,9 +155,8 @@ describe('startFromPlan', () => {
     await waitFor(() => ['passed', 'failed', 'cancelled', 'awaiting-owner'].includes(h.store.get(contract.id)?.status ?? ''), 'the contract to settle', 15_000);
     expect(h.store.get(contract.id)?.escalations).toEqual([]);
     expect(h.store.get(contract.id)?.status).toBe('passed');
-    expect(prompts).toHaveLength(2);
+    expect(prompts).toHaveLength(1);
     expect(prompts[0]).toContain('## The plan already drafted');
-    expect(prompts[1]).toContain('[draft-changed u1] Unit u1 must keep its drafted brief word for word.');
     const done = h.store.get(contract.id)!;
     expect(done.origin).toBe('proposal');
     expect(done.decisions[0]!.reason).toContain('2 drafted units');

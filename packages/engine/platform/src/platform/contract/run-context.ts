@@ -1,7 +1,6 @@
 import { pinContractInputAdmission } from './input-authority.js';
 /**
- * One running contract's state and bookkeeping (docs/design/contract-runner.md
- * sections 2.3 and 4): the live contract tree, its orchestration engine, and
+ * One running contract's state and bookkeeping: the live contract tree, its orchestration engine, and
  * what the runner keeps in memory per unit (the agent's turns, a pending
  * completion hold, the check in flight, the phase's settlement).
  *

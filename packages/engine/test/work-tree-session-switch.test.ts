@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import type { ConversationMessageSnapshot } from '@goodvibes-jev/engine/platform/platform/core';
-import { wireWorkTree, type WorkTreeConversation, type WorkTreeWiringDeps } from '../terminal-shell/src/work-tree-wiring.ts';
+import { createSessionContractViews, wireWorkTree, type WorkTreeConversation, type WorkTreeWiringDeps } from '../terminal-shell/src/work-tree-wiring.ts';
 import { loadWorkTreeFolds, saveWorkTreeFolds } from '../terminal-shell/src/work-tree-fold-store.ts';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
@@ -26,7 +26,7 @@ describe('work tree folds when the session id moves without a resume', () => {
     let sessionId = 'boot';
     wireWorkTree({
       conversation, events: { turns: { on: () => () => {} }, tools: { on: () => () => {} } }, agentManager: {},
-      listContracts: () => [], fleetNodes: () => [], pendingCallId: () => undefined, turnActive: () => false,
+      contracts: createSessionContractViews({ list: () => [], on: () => () => {} }, () => 's1'), fleetNodes: () => [], pendingCallId: () => undefined, turnActive: () => false,
       sessionsDir, sessionId: () => sessionId, requestRender() {},
     } as unknown as WorkTreeWiringDeps);
 

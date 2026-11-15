@@ -3,11 +3,13 @@
 //
 // The daemon-backed verbs the /voice setup + /voice status surfaces read:
 // voice.local.status (GET /api/voice/local/status), the no-network installed
-// snapshot, and voice.local.install (POST /api/voice/local/install), the
-// one-act managed install. Neither has a named facade on the in-process
-// OperatorClient, so, exactly like the memory-consolidation gateway, they go
-// over the generic operator invoke path (operator-rpc.ts's resolveOperatorRpc
-// -> platform.operator.invoke), reaching the SAME daemon the command layer does.
+// snapshot that also carries the running install's progress and the last
+// install's receipt, and voice.local.install (POST /api/voice/local/install),
+// which starts the one-act managed install and answers at once. Neither has a
+// named facade on the in-process OperatorClient, so, exactly like the
+// memory-consolidation gateway, they go over the generic operator invoke path
+// (operator-rpc.ts's resolveOperatorRpc -> platform.operator.invoke), reaching
+// the SAME daemon the command layer does.
 //
 // A daemon that predates managed voice provisioning answers an honest 501 (verb
 // cataloged but no handler) or a 404 (older daemon without the route), both
@@ -22,12 +24,42 @@ import { resolveOperatorRpc, describeOperatorRpcError } from '../input/commands/
 import type { VoiceRuntimeStatusResult, VoiceLocalInstallResult } from './voice-provision-status.ts';
 import { voiceStatusLines, voiceInstallReceiptLines, voiceInstallComponentLine } from './voice-provision-status.ts';
 
+/** The last install the daemon finished, as voice.local.status serves it once a run ends. */
+export interface VoiceInstallOutcome {
+  readonly startedAt: number;
+  readonly finishedAt: number;
+  readonly receipt?: VoiceLocalInstallResult | undefined;
+  /** Why the run stopped without a receipt. */
+  readonly error?: string | undefined;
+}
+
+/** voice.local.status with the last install's outcome. */
+export type VoiceStatusRead = VoiceRuntimeStatusResult & { readonly lastInstall?: VoiceInstallOutcome | undefined };
+
+/**
+ * What voice.local.install answers: the run it started (or joined), at once.
+ * A daemon from before the start-then-read install still answers with the
+ * finished receipt; that answer is printed as it is.
+ */
+export type VoiceInstallStartRead =
+  | { readonly kind: 'started'; readonly startedAt: number; readonly joined: boolean }
+  | { readonly kind: 'finished'; readonly receipt: VoiceLocalInstallResult };
+
 /** The narrow async verb surface the /voice setup + /voice status surfaces drive. */
 export interface VoiceProvisionGateway {
   /** Read the no-network managed-runtime snapshot (voice.local.status). */
-  fetchStatus(): Promise<VoiceRuntimeStatusResult>;
-  /** Run the one-act managed install (voice.local.install); resolves to the receipt. */
-  runInstall(): Promise<VoiceLocalInstallResult>;
+  fetchStatus(): Promise<VoiceStatusRead>;
+  /** Start the one-act managed install (voice.local.install); answers at once. */
+  startInstall(): Promise<VoiceInstallStartRead>;
+}
+
+function readInstallStart(value: unknown): VoiceInstallStartRead {
+  const record = value !== null && typeof value === 'object' ? value as Record<string, unknown> : {};
+  if (record['state'] === 'running' && typeof record['startedAt'] === 'number') {
+    return { kind: 'started', startedAt: record['startedAt'], joined: record['joined'] === true };
+  }
+  if (typeof record['provisioned'] === 'boolean') return { kind: 'finished', receipt: value as VoiceLocalInstallResult };
+  throw new Error('the daemon answered voice.local.install with neither a started run nor a receipt');
 }
 
 /**
@@ -57,8 +89,8 @@ export function createVoiceProvisionGateway(deps: VoiceProvisionGatewayDeps): Vo
   return {
     available: true,
     gateway: {
-      fetchStatus: () => platformClient.operator.invoke('voice.local.status', {}),
-      runInstall: () => platformClient.operator.invoke('voice.local.install', {}),
+      fetchStatus: async () => await platformClient.operator.invoke('voice.local.status', {}) as VoiceStatusRead,
+      startInstall: async () => readInstallStart(await platformClient.operator.invoke('voice.local.install', {})),
     },
   };
 }
@@ -93,14 +125,14 @@ export const VOICE_SETUP_ANNOUNCEMENT = [
  * Render the /voice status or /voice setup RESULT block from an already-resolved
  * gateway resolution, the testable core the command wraps. Kept separate from
  * the live gateway construction so a wire test injects a fake resolution
- * (available / unavailable / failing) with no HTTP, mirroring the Memory modal's
- * injectable resolveConsolidationGateway seam. The caller prints
- * VOICE_SETUP_ANNOUNCEMENT itself before awaiting a setup so the up-front notice
- * shows during the (possibly long, multi-hundred-MB) install.
+ * (available / unavailable / failing) with no HTTP. `/voice setup` with live
+ * progress goes through runVoiceSetupWithProgress; the setup branch here runs
+ * the same flow and returns what it printed as one block.
  */
 export async function renderVoiceProvision(
   sub: 'status' | 'setup',
   resolution: VoiceProvisionGatewayResolution,
+  options: Pick<VoiceSetupProgressOptions, 'pollMs' | 'sleep'> = {},
 ): Promise<string> {
   if (!resolution.available) {
     const label = sub === 'status' ? 'Local Voice Runtime' : 'Local Voice Setup';
@@ -117,16 +149,9 @@ export async function renderVoiceProvision(
         : `Local Voice Runtime\n  could not read status: ${failure.message}`;
     }
   }
-  // setup
-  try {
-    const receipt = await resolution.gateway.runInstall();
-    return ['Local Voice Setup: receipt', ...voiceInstallReceiptLines(receipt)].join('\n');
-  } catch (error) {
-    const failure = classifyVoiceProvisionError(error);
-    return failure.kind === 'unavailable'
-      ? `Local Voice Setup\n  ${failure.reason}`
-      : `Local Voice Setup\n  install failed: ${failure.message}`;
-  }
+  const blocks: string[] = [];
+  await runVoiceSetupWithProgress(resolution, { ...options, print: (block) => blocks.push(block) });
+  return blocks.join('\n');
 }
 
 export interface VoiceSetupProgressOptions {
@@ -140,17 +165,27 @@ export interface VoiceSetupProgressOptions {
 
 const realSleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
+/** Status reads in a row that may fail before the surface stops waiting and says so (about 5 s at the default poll). */
+const MAX_STATUS_READ_FAILURES = 6;
+
+function installFailureBlock(error: unknown): string {
+  const failure = classifyVoiceProvisionError(error);
+  return failure.kind === 'unavailable'
+    ? `Local Voice Setup\n  ${failure.reason}`
+    : `Local Voice Setup\n  install failed: ${failure.message}`;
+}
+
 /**
- * Run /voice setup with LIVE progress: kick off the (long, request/response)
- * install and, while it is in flight, poll voice.local.status for its
- * `installInProgress` snapshot, printing a per-component line each time a
- * component's phase advances (download → verify → extract → done). When the
- * install settles, print the final receipt (or an honest failure). The install
- * verb streams nothing itself, this polling is exactly how the platform intends
- * surfaces to render real progress instead of busy→receipt.
+ * Run /voice setup with LIVE progress. voice.local.install starts the run and
+ * answers at once; the run goes on in the daemon. This polls voice.local.status,
+ * printing a per-component line each time a component's phase advances
+ * (download → verify → extract → done), until the run has ended and its
+ * outcome is on the status read as `lastInstall`; then it prints that receipt
+ * or the reason the run stopped. No request is held open for the download, so
+ * a long install is never reported failed because the connection idled out.
  *
  * The caller prints VOICE_SETUP_ANNOUNCEMENT before calling this. gateway
- * fetchStatus/runInstall and sleep are injectable so a wire test drives the
+ * fetchStatus/startInstall and sleep are injectable so a wire test drives the
  * whole flow with no real timers or HTTP.
  */
 export async function runVoiceSetupWithProgress(
@@ -165,38 +200,65 @@ export async function runVoiceSetupWithProgress(
   const pollMs = opts.pollMs ?? 800;
   const sleep = opts.sleep ?? realSleep;
 
-  let settled = false;
-  const installPromise = gateway.runInstall().then(
-    (receipt) => { settled = true; return { ok: true as const, receipt }; },
-    (error) => { settled = true; return { ok: false as const, error }; },
-  );
+  let started: VoiceInstallStartRead;
+  try {
+    started = await gateway.startInstall();
+  } catch (error) {
+    opts.print(installFailureBlock(error));
+    return;
+  }
+  if (started.kind === 'finished') {
+    opts.print(['Local Voice Setup: receipt', ...voiceInstallReceiptLines(started.receipt)].join('\n'));
+    return;
+  }
+  if (started.joined) opts.print('  an install was already running; following it to its receipt.');
 
   // Print a component line only when its phase changes, so a slow install does
   // not spam identical lines each poll.
   const lastPhase = new Map<string, string>();
-  while (!settled) {
+  let failures = 0;
+  let unreported = 0;
+  let lastError: unknown;
+  for (;;) {
     await sleep(pollMs);
-    if (settled) break;
+    let status: VoiceStatusRead;
     try {
-      const status = await gateway.fetchStatus();
-      const progress = status.installInProgress;
-      if (!progress) continue;
+      status = await gateway.fetchStatus();
+      failures = 0;
+    } catch (error) {
+      lastError = error;
+      if (++failures < MAX_STATUS_READ_FAILURES) continue;
+      opts.print([
+        'Local Voice Setup',
+        `  could not read the install's progress: ${classifyVoiceProvisionError(lastError).kind === 'unavailable' ? 'the daemon no longer serves voice status' : describeOperatorRpcError(lastError)}`,
+        '  the install may still be running in the daemon; /voice status shows its state and, once it ends, its receipt.',
+      ].join('\n'));
+      return;
+    }
+    const progress = status.installInProgress;
+    if (progress) {
+      unreported = 0;
       const changed = progress.components.filter((c) => lastPhase.get(c.component) !== c.phase);
       for (const c of changed) lastPhase.set(c.component, c.phase);
       if (changed.length > 0) opts.print(changed.map(voiceInstallComponentLine).join('\n'));
-    } catch {
-      // A transient poll failure never aborts the install; the receipt/failure
-      // block below is the authoritative outcome.
+      continue;
     }
-  }
-
-  const result = await installPromise;
-  if (result.ok) {
-    opts.print(['Local Voice Setup: receipt', ...voiceInstallReceiptLines(result.receipt)].join('\n'));
-  } else {
-    const failure = classifyVoiceProvisionError(result.error);
-    opts.print(failure.kind === 'unavailable'
-      ? `Local Voice Setup\n  ${failure.reason}`
-      : `Local Voice Setup\n  install failed: ${failure.message}`);
+    const outcome = status.lastInstall;
+    if (outcome === undefined || outcome.startedAt < started.startedAt) {
+      // Neither running nor finished: the daemon lost the run (a restart drops both).
+      if (++unreported < MAX_STATUS_READ_FAILURES) continue;
+      opts.print([
+        'Local Voice Setup',
+        '  the daemon no longer reports this install as running or finished (it may have restarted while installing).',
+        '  /voice status shows what is installed; re-run /voice setup to finish any missing component.',
+      ].join('\n'));
+      return;
+    }
+    if (outcome.receipt) {
+      opts.print(['Local Voice Setup: receipt', ...voiceInstallReceiptLines(outcome.receipt)].join('\n'));
+    } else {
+      opts.print(`Local Voice Setup\n  install failed: ${outcome.error ?? 'the daemon recorded no reason'}. Re-run /voice setup to retry any failed component.`);
+    }
+    return;
   }
 }

@@ -1,9 +1,10 @@
 import type { UiRuntimeEvents } from '@/runtime/index.ts';
 import type { StreamMetrics } from './stream-metrics.ts';
 import { createStreamStallWatchdog, type StallTimers } from './stream-stall-watchdog.ts';
-import { buildRoutingChip, FALLBACK_CORRELATION_WINDOW_MS } from './model-routing-chip.ts';
-import { createErrorNoticeOwner, unavailableErrorLine, userErrorLine, type ErrorNoticeTimers } from './format-user-error.ts';
-import type { PendingFailoverNotice } from './turn-event-wiring.ts';
+import { buildRoutingChip } from './model-routing-chip.ts';
+import { userErrorLine } from './format-user-error.ts';
+import { describeUserError, readUserErrorClass, type UserFacingError } from '@goodvibes-jev/engine/platform/platform/routing';
+import { createUserTurnOwner, type FailoverRetry, type UserTurnOwner } from './user-turn.ts';
 import { ProviderSetupReadings, describeProviderSetup, type ProviderSetupClassification } from '../providers/provider-classification.ts';
 import type { FailoverTurnState } from './active-model-identity.ts';
 import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
@@ -112,15 +113,16 @@ export interface WireStreamEventMetricsOptions {
    * so the render closure can read it without a forward-reference issue.
    */
   readonly metrics: StreamMetrics;
-  /** The active session and terminal lifetime are rechecked before async delivery. */
+  /** The active session and terminal lifetime are rechecked before a late line is added. */
   readonly getSessionId?: () => string;
   readonly isActive?: () => boolean;
-  /** Holds the one-turn failure notice while the error wording is being read. */
-  readonly beginFailoverNotice?: (turnId: string) => PendingFailoverNotice;
-  /** Narration deadline; does not affect semantic classification. */
-  readonly errorNoticeTimeoutMs?: number;
-  /** Timer seam for the error-notice deadline so tests can drive it; production callers omit it. */
-  readonly errorNoticeTimers?: ErrorNoticeTimers;
+  /**
+   * The shell's one user-turn owner (core/user-turn.ts), shared with the
+   * turn-event wiring: it decides when a user turn starts, fails over and
+   * ends, and hands each failed attempt to this wiring. Omitted, this wiring
+   * owns a private one on the same feed (a caller that wires it alone).
+   */
+  readonly userTurn?: UserTurnOwner;
   /**
    * When provided and enabled, the optimizer is consulted on TURN_ERROR to
    * attempt the next viable provider before surfacing the error to the user.
@@ -140,24 +142,19 @@ export interface WireStreamEventMetricsOptions {
    * it survives to be read. Implementations that do not roll back may ignore
    * the argument, but must then post the notice themselves.
    *
-   * A deferred submit must recheck isCurrent after its preparatory await; a
-   * cancelled/superseded turn must never be started late.
+   * The retry is the user turn's own (FailoverRetry): a deferred submit
+   * rechecks `retry.isCurrent()` after its preparatory await, calls
+   * `retry.submitting()` right before it submits so that submission continues
+   * the same user turn, and calls `retry.abandon()` when it never submitted,
+   * which ends the turn as failed.
    *
    * Returns whether the retry was accepted for submission. False means there was
    * nothing to retry (no pre-submission snapshot, the failed turn did not
-   * come from the composer) and the notice was NOT posted, so the caller must
-   * narrate the switch and surface the error itself rather than let a turn end
+   * come from the composer) and the notice was NOT posted, so this wiring
+   * narrates the switch and surfaces the error itself rather than let a turn end
    * in silence on a backend the user did not choose.
    */
-  readonly retryTurn?: (notice?: string, isCurrent?: () => boolean, recoverySignal?: AbortSignal) => boolean;
-  /**
-   * Called synchronously, inside the TURN_ERROR handler, when failover has
-   * re-submitted the turn (retryTurn returned true). main.ts passes
-   * turn-event-wiring's continueTurnAfterFailover, so the failed attempt is
-   * not told as its own turn: one notice per user turn, for how it finally
-   * ended.
-   */
-  readonly onFailoverRetry?: () => void;
+  readonly retryTurn?: (notice: string, retry: FailoverRetry) => boolean;
   /**
    * Optional cost catalog for attaching per-1M-token cost information to
    * the failover notice.  When provided and both models have non-zero pricing,
@@ -213,15 +210,13 @@ export interface WireStreamEventMetricsResult {
   /** Unsubscribe functions; push into the parent unsubs array for cleanup on exit. */
   readonly unsubs: ReadonlyArray<() => void>;
   /**
-   * Clear the per-turn failover visited-provider set AND restore the user's
-   * configured model selection if a failover left serving somewhere else.
-   * Call this on every new user submission so neither the visited set nor a
-   * per-turn provider switch bleeds across independent turns (both are also
-   * handled on TURN_COMPLETED/TURN_CANCEL, but a new submission may arrive
-   * before either fires).
+   * A new prompt is about to be submitted: a user turn that has not ended
+   * (one failing over, or one whose stream stopped without a terminal event)
+   * is replaced, and serving is put back on the user's configured selection
+   * if a failover left it elsewhere, before the new turn picks its model.
    */
-  readonly clearFailoverVisited: () => void;
-  /** Cancel recovery during async reading/preparation, even when the platform is idle. */
+  readonly startNewTurn: () => void;
+  /** Cancel a failover retry that has not started yet (no attempt is running, so the platform has nothing to abort). */
   readonly cancelPendingRecovery: () => boolean;
   /**
    * Register a callback that fires whenever a TURN_ERROR is surfaced to the
@@ -275,8 +270,8 @@ function buildCostDeltaSuffix(
 }
 
 /**
- * Build the billing-class segment of a failover notice, e.g.
- * ` [billing: API key → Subscription, billing class changed]`.
+ * The suffix of the failover billing line, e.g. `[Failover] billing: API key →
+ * Subscription: billing class changed`, when both classes are known and differ.
  *
  * This path is NOT the synthetic provider's tier-isolated failover, which is
  * where the documented "free, paid and subscription tiers never mix" contract
@@ -294,12 +289,9 @@ function buildCostDeltaSuffix(
  * Missing, stale or unavailable facts say Unknown, including familiar ids.
  * This display result never chooses or authorizes the fallback.
  */
-function buildBillingSuffix(fromProviderId: string, toProviderId: string, setups: ReadonlyMap<string, ProviderSetupClassification>): string {
-  const from = setups.get(fromProviderId) ?? describeProviderSetup('unknown');
-  const to = setups.get(toProviderId) ?? describeProviderSetup('unknown');
-  const changed = from.setupClass !== 'unknown' && to.setupClass !== 'unknown' && from.setupClass !== to.setupClass
+function billingChangedSuffix(from: ProviderSetupClassification, to: ProviderSetupClassification): string {
+  return from.setupClass !== 'unknown' && to.setupClass !== 'unknown' && from.setupClass !== to.setupClass
     ? ': billing class changed' : '';
-  return ` [billing: ${from.setupLabel} → ${to.setupLabel}${changed}]`;
 }
 
 /**
@@ -308,7 +300,7 @@ function buildBillingSuffix(fromProviderId: string, toProviderId: string, setups
  * and declares it before render() so both the render closure and the returned
  * event handlers share the same reference.
  *
- * Returns an object with unsubscribe functions and a clearFailoverVisited helper.
+ * Returns an object with unsubscribe functions and the new-turn and cancel helpers.
  *
  * Responsibilities:
  *   - Track stream start time, delta count, token speed, and TTFT
@@ -321,13 +313,16 @@ export function wireStreamEventMetrics(
 ): WireStreamEventMetricsResult {
   const {
     events, metrics, orchestrator, providerRegistry,
-    systemMessageRouter, render, providerOptimizer, retryTurn, onFailoverRetry, costLookup,
+    systemMessageRouter, render, providerOptimizer, retryTurn, costLookup,
     isApprovalPending, stallThresholdMs, stallTimers, failoverState, getConfiguredRegistryKey,
     getConfiguredReasoningEffort,
   } = options;
 
   const unsubs: Array<() => void> = [];
-  const errorNotices = createErrorNoticeOwner(options.errorNoticeTimeoutMs, options.errorNoticeTimers);
+  let closed = false;
+  unsubs.push(() => { closed = true; });
+  const userTurn = options.userTurn ?? createUserTurnOwner({ turns: events.turns, sessionId: () => options.getSessionId?.() ?? '' });
+  if (options.userTurn === undefined) unsubs.push(() => userTurn.dispose());
   const setupReadings = new ProviderSetupReadings();
   let setupGeneration = 0;
   // Both custom-provider reload and credential refresh emit this owner event.
@@ -335,25 +330,9 @@ export function wireStreamEventMetrics(
   if (events.providers) unsubs.push(events.providers.on('PROVIDERS_CHANGED', () => {
     setupGeneration++; setupReadings.invalidate();
   }));
-  let noticeGeneration = 0;
-  let currentTurnId: string | undefined;
-  let settledTurnId: string | undefined;
-  // A tool started in this user turn. Re-submitting the turn on another provider would run it again.
+  // A tool started in this attempt. Re-submitting the turn on another provider would run it again.
   let toolStartedInTurn = false;
-  let pendingRecovery: { readonly isCurrent: () => boolean; readonly hold: PendingFailoverNotice | undefined; registryKey: string | undefined } | undefined;
-  const invalidateErrorNotices = (): void => {
-    noticeGeneration++;
-    errorNotices.cancel();
-    pendingRecovery?.hold?.cancel();
-    pendingRecovery = undefined;
-  };
-  unsubs.push(() => { invalidateErrorNotices(); errorNotices.dispose(); });
-  unsubs.push(events.turns.on('TURN_SUBMITTED', (event) => {
-    invalidateErrorNotices();
-    currentTurnId = event.turnId;
-    settledTurnId = undefined;
-    toolStartedInTurn = false;
-  }));
+  unsubs.push(userTurn.onStart(() => { toolStartedInTurn = false; }));
 
   /**
    * Deliver a provider-switch notice to the conversation unconditionally.
@@ -368,39 +347,14 @@ export function wireStreamEventMetrics(
   };
 
   /**
-   * Put serving back on the user's configured selection after a failed-over
-   * turn ends.
-   *
-   * Failover is per-turn recovery, not a permanent re-selection. Without this,
-   * the one setCurrentModel() call that rescued a single failed turn stayed in
-   * force for the rest of the session: every later turn ran on the fallback
-   * backend while nothing in the session state or the footer had changed to
-   * say so. The user's configured selection is authoritative, so the NEXT turn
-   * starts from it again. If that backend is still unhealthy, the normal
-   * per-turn failover handles it again, visibly, with a fresh notice, which
-   * is exactly the behaviour a sticky override was hiding.
-   *
-   * The record is kept (not cleared) when the restore itself fails, so the
-   * header and footer keep reporting the real serving backend rather than
-   * claiming a revert that did not happen.
-   */
-  /**
-   * Registry keys THIS module switched to and narrated itself, with the time
-   * of the switch. The MODEL_CHANGED listener consumes an entry instead of
-   * emitting the generic routing chip, so neither half of a failover is
-   * narrated twice: the switch out is announced by `[Failover] from -> to
-   * (reason)` and the switch back by `[Failover] Restored …`, and a second
-   * line reading "(reason unknown)" for the same event would be both a
-   * duplicate and a lie, the reason is known in both cases.
-   *
-   * A timestamped map rather than a flag cleared around the setCurrentModel
-   * call, because MODEL_CHANGED does NOT arrive synchronously: the TUI reads
-   * it through the runtime event feed, which delivers after the emitting call
-   * has returned (observed live, a flag cleared in a finally block was always
-   * already null by the time the listener ran, and both failover halves got a
-   * duplicate chip). Entries expire on the same window the fallback-log
-   * correlation uses, so a switch whose event never arrives cannot silence an
-   * unrelated later change to the same model.
+   * Registry keys THIS module switched to and narrated itself, counted. The
+   * MODEL_CHANGED listener consumes one instead of emitting the generic
+   * routing chip, so neither half of a failover is narrated twice: the switch
+   * out is announced by `[Failover] from -> to (reason)` and the switch back by
+   * `[Failover] Restored …`. The key is the one the registry reports after the
+   * switch, which is the key its MODEL_CHANGED carries; the registry emits that
+   * event for every switch it makes, so each entry is consumed by its own event
+   * and no time window is needed.
    */
   const selfNarratedSwitches = new Map<string, number>();
 
@@ -410,13 +364,20 @@ export function wireStreamEventMetrics(
    * that goes on the wire, for the CALLER to place, see
    * reconcileEffortWithServingModel for why it is not announced here.
    */
+  let switchInProgress: { seen: boolean } | undefined;
   const switchNarrated = (registryKey: string): string | undefined => {
-    selfNarratedSwitches.set(registryKey, Date.now());
+    // A feed that delivers MODEL_CHANGED inside setCurrentModel is matched by
+    // this marker; one that delivers it later, by the recorded key.
+    const marker = { seen: false };
+    switchInProgress = marker;
     try {
       providerRegistry.setCurrentModel(registryKey);
-    } catch (err) {
-      selfNarratedSwitches.delete(registryKey); // no switch happened, nothing to suppress
-      throw err;
+    } finally {
+      switchInProgress = undefined;
+    }
+    if (!marker.seen) {
+      const switched = providerRegistry.getCurrentModel().registryKey ?? registryKey;
+      selfNarratedSwitches.set(switched, (selfNarratedSwitches.get(switched) ?? 0) + 1);
     }
     return reconcileEffortWithServingModel();
   };
@@ -458,12 +419,30 @@ export function wireStreamEventMetrics(
 
   /** True when this MODEL_CHANGED is one of our own narrated switches (consumes the record). */
   const wasSelfNarrated = (registryKey: string): boolean => {
-    const narratedAt = selfNarratedSwitches.get(registryKey);
-    if (narratedAt === undefined) return false;
-    selfNarratedSwitches.delete(registryKey);
-    return Date.now() - narratedAt <= FALLBACK_CORRELATION_WINDOW_MS;
+    const pending = selfNarratedSwitches.get(registryKey);
+    if (pending === undefined) return false;
+    if (pending <= 1) selfNarratedSwitches.delete(registryKey);
+    else selfNarratedSwitches.set(registryKey, pending - 1);
+    return true;
   };
 
+  /**
+   * Put serving back on the user's configured selection after a failed-over
+   * turn ends.
+   *
+   * Failover is per-turn recovery, not a permanent re-selection. Without this,
+   * the one setCurrentModel() call that rescued a single failed turn stayed in
+   * force for the rest of the session: every later turn ran on the fallback
+   * backend while nothing in the session state or the footer had changed to
+   * say so. The user's configured selection is authoritative, so the NEXT turn
+   * starts from it again. If that backend is still unhealthy, the normal
+   * per-turn failover handles it again, visibly, with a fresh notice, which
+   * is exactly the behaviour a sticky override was hiding.
+   *
+   * The record is kept (not cleared) when the restore itself fails, so the
+   * header and footer keep reporting the real serving backend rather than
+   * claiming a revert that did not happen.
+   */
   const restoreConfiguredSelection = (): void => {
     const record = failoverState?.current();
     if (!record || !failoverState) return;
@@ -529,34 +508,17 @@ export function wireStreamEventMetrics(
     metrics.tokenSpeed = elapsed > 0 ? tokenCount / elapsed : 0;
   }));
 
-  // Per-turn visited-provider set: tracks providers already attempted this turn
-  // so failover cannot ping-pong between two mutually-failing providers.
-  // True invariant: at most one retry per provider per turn; exhaustion fires
-  // after the chain is consumed.
-  // Cleared on TURN_COMPLETED (see handler below) and on new user submission
-  // (caller clears via clearFailoverVisited(), wired in main.ts).
+  // Per-user-turn visited-provider set: tracks providers already attempted this
+  // turn so failover cannot ping-pong between two mutually-failing providers.
+  // True invariant: at most one retry per provider per user turn; exhaustion
+  // fires after the chain is consumed. Cleared when the user turn ends.
   const failoverVisited = new Set<string>();
 
-  // Both terminal turn outcomes end the failover's authority over the
-  // registry: a completed turn got its answer, a cancelled one will not.
-  // (TURN_COMPLETED and TURN_ERROR are mutually exclusive per turn in the platform
-  //, TURN_COMPLETED is emitted only on the success path in
-  // orchestrator-turn-helpers, TURN_ERROR only from the orchestrator's catch,
-  // so restoring here can never undo a switch whose retry has not run yet.)
-  unsubs.push(events.turns.on('TURN_COMPLETED', (event) => {
-    if (currentTurnId !== undefined && event?.turnId !== undefined && event.turnId !== currentTurnId) return;
+  // However the user turn ended (completed, failed, cancelled while failing
+  // over, or replaced by a new prompt), the failover's authority over the
+  // registry ends with it.
+  unsubs.push(userTurn.onEnd(() => {
     metrics.modelActive = false;
-    settledTurnId = event?.turnId;
-    invalidateErrorNotices();
-    failoverVisited.clear();
-    restoreConfiguredSelection();
-  }));
-
-  unsubs.push(events.turns.on('TURN_CANCEL', (event) => {
-    if (currentTurnId !== undefined && event?.turnId !== undefined && event.turnId !== currentTurnId) return;
-    metrics.modelActive = false;
-    settledTurnId = event?.turnId;
-    invalidateErrorNotices();
     failoverVisited.clear();
     restoreConfiguredSelection();
   }));
@@ -569,8 +531,8 @@ export function wireStreamEventMetrics(
   // Degrade gracefully when a bare test double omits the providers feed.
   if (events.providers) {
     unsubs.push(events.providers.on('MODEL_CHANGED', (change) => {
-      if (wasSelfNarrated(change.registryKey)) return; // a [Failover] line already said this, with its reason
-      if (pendingRecovery && change.registryKey !== pendingRecovery.registryKey) invalidateErrorNotices();
+      if (switchInProgress) { switchInProgress.seen = true; return; } // a [Failover] line says this, with its reason
+      if (wasSelfNarrated(change.registryKey)) return;
       queueMicrotask(() => {
         const chip = buildRoutingChip(change, providerOptimizer?.fallbackLog ?? [], Date.now());
         if (chip === null) return;
@@ -580,193 +542,159 @@ export function wireStreamEventMetrics(
     }));
   }
 
-  unsubs.push(events.turns.on('TURN_ERROR', (event) => {
-    if (currentTurnId !== undefined && event.turnId !== currentTurnId) return;
-    if (event.turnId !== undefined && event.turnId === settledTurnId) return;
+  /**
+   * The billing class of each side of a switch, read after the switch is made
+   * and announced on its own line, so failover never waits on it. The cached
+   * reading answers at once on a later hop. A side whose facts are missing or
+   * were replaced while they were read says Unknown, never a guessed class.
+   */
+  const narrateBilling = (fromProvider: string, toProvider: string, stillCurrent: () => boolean): void => {
+    const readingSetupGeneration = setupGeneration;
+    const readSide = async (providerId: string): Promise<ProviderSetupClassification> => {
+      const unknown = describeProviderSetup('unknown');
+      try {
+        const instance = providerRegistry.getRegistered?.(providerId);
+        if (instance === null || typeof instance !== 'object' || !providerRegistry.describeRuntime) return unknown;
+        const runtime = await providerRegistry.describeRuntime(providerId);
+        if (readingSetupGeneration !== setupGeneration) return unknown;
+        const value = await setupReadings.read({ providerId, runtime: runtime ?? undefined }, { site: 'tui.failover.setup' });
+        // A provider replaced while its facts were read is not the one that serves.
+        return instance === providerRegistry.getRegistered?.(providerId) ? value : unknown;
+      } catch { return unknown; }
+    };
+    void Promise.all([readSide(fromProvider), readSide(toProvider)]).then(([from, to]) => {
+      // A credential or config change while the facts were read makes them stale: say nothing.
+      if (closed || readingSetupGeneration !== setupGeneration || !stillCurrent()) return;
+      announce(`[Failover] billing: ${from.setupLabel} → ${to.setupLabel}${billingChangedSuffix(from, to)}`);
+      render();
+    });
+  };
+
+  /**
+   * The error line was printed from structure at once. A reading of the
+   * wording may say more (a context overflow, a subscription session that
+   * ended); then it adds one line, never replaces or delays the first.
+   */
+  const refineErrorLater = (errVal: unknown, shown: UserFacingError, stillCurrent: () => boolean): void => {
+    void readUserErrorClass(errVal, 'tui.stream-error').then((reading) => {
+      if (reading.kind === shown.kind && !reading.sessionEnded) return;
+      if (closed || !stillCurrent() || options.isActive?.() === false) return;
+      systemMessageRouter.high(`[Error] ${userErrorLine(describeUserError(errVal, reading))}`);
+      render();
+    }, (error: unknown) => logger.debug('error reading failed', { error: String(error) }));
+  };
+
+  /**
+   * One failed attempt. Everything here is decided from facts already held,
+   * at once: the error line from the status and errno, whether failover may
+   * run, the next provider, the switch. The user turn ends failed unless this
+   * starts a failover retry (userTurn decides that from failOver()).
+   */
+  unsubs.push(userTurn.onFailure((failure) => {
+    const event = failure.event;
     metrics.modelActive = false;
     // The wire text alone can only be read by wording. When the emitter also carries the
-    // provider's status or errno code, the reader fixes 401, 429 and network failures from those.
-    const facts = event as { readonly status?: unknown; readonly code?: unknown };
-    const status = typeof facts.status === 'number' ? facts.status : undefined;
-    const code = typeof facts.code === 'string' ? facts.code : undefined;
-    const errVal: unknown = status === undefined && code === undefined
+    // provider's status or errno code, the line fixes 401, 429 and network failures from those.
+    const errVal: unknown = event.status === undefined && event.code === undefined
       ? event.error
-      : { message: event.error, ...(status === undefined ? {} : { status }), ...(code === undefined ? {} : { code }) };
-    const generation = noticeGeneration;
-    const sessionId = options.getSessionId?.();
-    const registryKey = providerRegistry.getCurrentModel().registryKey;
+      : { message: event.error, ...(event.status === undefined ? {} : { status: event.status }), ...(event.code === undefined ? {} : { code: event.code }) };
+    const shown = describeUserError(errVal);
+    const errorClass = userErrorLine(shown);
+    const stillCurrent = () => failure.isCurrent() && options.isActive?.() !== false;
+    if (options.isActive?.() === false) return;
+    // Only a shown error line is refined: a failover notice already names the
+    // class, and an [Error] line beside a running retry would read as the end.
+    const surface = (exhausted: boolean): void => {
+      systemMessageRouter.high(`[Error] ${errorClass}`);
+      notifyErrorSurfaced(exhausted);
+      render();
+      refineErrorLater(errVal, shown, failure.isLatestAttempt);
+    };
     // Failover re-submits the whole user turn, which is only safe when the failure was the
     // provider's and nothing has run yet: a denied call would be asked again, and tools
     // already executed would run a second time with their results rolled out of the transcript.
     // An event without a stop reason comes from an older emitter and is read as a provider failure.
     const providerFailure = event.stopReason === undefined || event.stopReason === 'provider_error' || event.stopReason === 'provider_exhausted';
-    const failoverAllowed = providerFailure && !toolStartedInTurn;
-    const failoverEligible = providerOptimizer?.enabled === true && retryTurn !== undefined && failoverAllowed;
-    const hold = failoverEligible ? options.beginFailoverNotice?.(event.turnId) : undefined;
-    const isTurnCurrent = () => generation === noticeGeneration && sessionId === options.getSessionId?.()
-      && options.isActive?.() !== false && (hold?.isCurrent() ?? true);
-    const recovery = failoverEligible ? { isCurrent: isTurnCurrent, hold, registryKey } : undefined;
-    if (recovery) pendingRecovery = recovery;
-    const readingSetupGeneration = setupGeneration;
-    let setups: ReadonlyMap<string, ProviderSetupClassification> = new Map();
-    const setupInstances = new Map<string, object>();
-    const currentSetups = (values: ReadonlyMap<string, ProviderSetupClassification>): ReadonlyMap<string, ProviderSetupClassification> => {
-      if (readingSetupGeneration !== setupGeneration) return new Map();
-      return new Map([...values].filter(([id]) => {
-        try {
-          const instance = setupInstances.get(id);
-          return instance !== null && typeof instance === 'object' && instance === providerRegistry.getRegistered?.(id);
-        }
-        catch { return false; }
-      }));
+    if (!providerFailure || toolStartedInTurn || providerOptimizer?.enabled !== true || retryTurn === undefined) {
+      surface(false);
+      return;
+    }
+    const fromProvider = providerRegistry.getCurrentModel().provider;
+    // Mark the failing provider as visited so it will never be selected again
+    // in this user turn, even if a later attempt fails on another one.
+    failoverVisited.add(fromProvider);
+    // Find the first capable node that is NOT already visited this turn and
+    // is NOT synthetic. Synthetic nodes are skipped permanently by design:
+    // a synthetic model is itself a fallback ladder over real backends, so
+    // failing over INTO one after a real backend already failed is unsound
+    // double-indirection (it can route straight back to the failed provider).
+    const next = providerOptimizer.testFallback({}).chain.find(
+      (node) => node.capable && !failoverVisited.has(node.providerId) && node.providerId !== 'synthetic',
+    );
+    if (!next) {
+      // Chain exhausted, all capable candidates have been visited or none exist.
+      // The user turn ends here, and its end restores the configured selection.
+      announce(`[Failover] Chain exhausted: no alternative provider available. Original error: ${errorClass}`);
+      notifyErrorSurfaced(true);
+      render();
+      refineErrorLater(errVal, shown, failure.isLatestAttempt);
+      return;
+    }
+    const toRegistryKey = `${next.providerId}:${next.modelId}`;
+    // Capture FROM registry key before switching, needed for cost comparison.
+    const fromRegistryKey = providerRegistry.getCurrentModel().registryKey;
+    // The effort remap that comes with the switch is carried, not announced:
+    // retryTurn's rollback below would delete it (see reconcileEffortWithServingModel).
+    let effortNote: string | undefined;
+    try {
+      effortNote = switchNarrated(toRegistryKey);
+    } catch (switchErr) {
+      // Switch failed: the honest error stands and the user turn ends.
+      logger.debug('failover setCurrentModel failed', { toRegistryKey, error: String(switchErr) });
+      surface(false);
+      return;
+    }
+    // Record the selected provider as visited before the retry fires so a
+    // later failure from that provider also skips it.
+    failoverVisited.add(next.providerId);
+    // Remember the user's configured selection so the turn-end restore
+    // targets it, and so both shell surfaces can name it while the switch
+    // is in force. Sticky across a second hop within the same turn.
+    const configuredRegistryKey = getConfiguredRegistryKey?.();
+    if (configuredRegistryKey) {
+      failoverState?.begin({ configuredRegistryKey, servingRegistryKey: toRegistryKey });
+    }
+    providerOptimizer.recordFallbackTransition(fromProvider, next.providerId, errorClass);
+    const costSuffix = buildCostDeltaSuffix(costLookup, fromRegistryKey, toRegistryKey);
+    // Handed to retryTurn so it outlives that call's transcript rollback (see
+    // the retryTurn option doc). Emitting it here instead would delete it.
+    const failoverNotice = `[Failover] ${fromProvider} -> ${next.providerId} (${errorClass})${costSuffix}`
+      + (effortNote ? `\n[Failover] ${effortNote}` : '');
+    const retry = failure.failOver();
+    const guarded: FailoverRetry = {
+      signal: retry.signal,
+      isCurrent: () => retry.isCurrent() && options.isActive?.() !== false
+        && providerRegistry.getCurrentModel().registryKey === toRegistryKey,
+      submitting: retry.submitting,
+      abandon: retry.abandon,
     };
-    errorNotices.enqueue(errVal, 'tui.stream-error', {
-      isCurrent: () => isTurnCurrent()
-        && registryKey === providerRegistry.getCurrentModel().registryKey,
-      discard: () => hold?.cancel(),
-      prepare: failoverEligible && providerRegistry.describeRuntime ? async (signal) => {
-        const from = providerRegistry.getCurrentModel().provider;
-        // Reading a candidate's declared setup is not selection/authorization.
-        // Delivery still uses the optimizer's current chain and existing fences.
-        const next = providerOptimizer.testFallback({}).chain.find(node => node.capable
-          && node.providerId !== from && !failoverVisited.has(node.providerId) && node.providerId !== 'synthetic');
-        const ids = next ? [from, next.providerId] : [from];
-        const entries = await Promise.all(ids.map(async (providerId): Promise<readonly [string, ProviderSetupClassification]> => {
-          try {
-            const instance = providerRegistry.getRegistered?.(providerId);
-            if (instance === null || typeof instance !== 'object') return [providerId, describeProviderSetup('unknown')];
-            setupInstances.set(providerId, instance);
-            const runtime = await providerRegistry.describeRuntime!(providerId);
-            if (signal.aborted || readingSetupGeneration !== setupGeneration) return [providerId, describeProviderSetup('unknown')];
-            const value = await setupReadings.read({ providerId, runtime: runtime ?? undefined }, { signal, site: 'tui.failover.setup' });
-            return [providerId, instance === providerRegistry.getRegistered?.(providerId) ? value : describeProviderSetup('unknown')];
-          } catch { return [providerId, describeProviderSetup('unknown')]; }
-        }));
-        // A side that completed early can have been replaced while its peer
-        // was pending. Keep identities for the later ordered delivery fence too.
-        if (!signal.aborted) setups = currentSetups(new Map(entries));
-      } : undefined,
-      deliver: (reading) => {
-        const errorClass = reading === null ? unavailableErrorLine(errVal) : userErrorLine(reading);
-        let retried = false;
-        try {
-          // --- Optimizer-gated failover path ---
-          // When the optimizer is present and enabled, attempt to advance to the next
-          // viable provider in the fallback chain before surfacing the error.  When
-          // the optimizer is absent or disabled, behaviour is identical to baseline:
-          // error surfaces after its bounded reading.
-          if (failoverAllowed && providerOptimizer?.enabled && retryTurn) {
-            const fromProvider = providerRegistry.getCurrentModel().provider;
-            // Mark the failing provider as visited so it will never be selected again
-            // in this turn, even if a second TURN_ERROR arrives (e.g. ping-pong).
-            failoverVisited.add(fromProvider);
-            const result = providerOptimizer.testFallback({});
-            // Find the first capable node that is NOT already visited this turn and
-            // is NOT synthetic. Synthetic nodes are skipped permanently by design:
-            // a synthetic model is itself a fallback ladder over real backends, so
-            // failing over INTO one after a real backend already failed is unsound
-            // double-indirection (it can route straight back to the failed provider).
-            const next = result.chain.find(
-              (node) =>
-                node.capable &&
-                !failoverVisited.has(node.providerId) &&
-                node.providerId !== 'synthetic',
-            );
-
-            if (next) {
-              const toRegistryKey = `${next.providerId}:${next.modelId}`;
-              // Capture FROM registry key before switching, needed for cost comparison.
-              const fromRegistryKey = providerRegistry.getCurrentModel().registryKey;
-              // The effort remap that comes with the switch is carried, not announced:
-              // retryTurn's rollback below would delete it (see
-              // reconcileEffortWithServingModel).
-              let effortNote: string | undefined;
-              try {
-                effortNote = switchNarrated(toRegistryKey);
-                if (recovery) recovery.registryKey = toRegistryKey;
-              } catch (switchErr) {
-                // Switch failed, fall through to honest error display. This ends the
-                // turn, so an EARLIER hop's switch (if this is a second failover
-                // within the same turn) loses its authority here just as it would on
-                // any other terminal outcome.
-                logger.debug('failover setCurrentModel failed', { toRegistryKey, error: String(switchErr) });
-                systemMessageRouter.high(`[Error] ${errorClass}`);
-                restoreConfiguredSelection();
-                notifyErrorSurfaced(false);
-                render();
-                return;
-              }
-              // Record the selected provider as visited before the retry fires so
-              // a subsequent TURN_ERROR from that provider also skips it.
-              failoverVisited.add(next.providerId);
-              // Remember the user's configured selection so the turn-end restore
-              // targets it, and so both shell surfaces can name it while the switch
-              // is in force. Sticky across a second hop within the same turn.
-              const configuredRegistryKey = getConfiguredRegistryKey?.();
-              if (configuredRegistryKey) {
-                failoverState?.begin({ configuredRegistryKey, servingRegistryKey: toRegistryKey });
-              }
-              providerOptimizer.recordFallbackTransition(fromProvider, next.providerId, errorClass);
-              const costSuffix = buildCostDeltaSuffix(costLookup, fromRegistryKey, toRegistryKey);
-              const billingSuffix = buildBillingSuffix(fromProvider, next.providerId, currentSetups(setups));
-              // Re-submit the last user turn on the new provider, handing the notice
-              // to retryTurn so it outlives that call's transcript rollback (see the
-              // retryTurn option doc). Emitting it here instead would delete it.
-              const failoverNotice = `[Failover] ${fromProvider} -> ${next.providerId} (${errorClass})${billingSuffix}${costSuffix}`
-                + (effortNote ? `\n[Failover] ${effortNote}` : '');
-              if (retryTurn(failoverNotice, () => isTurnCurrent() && providerRegistry.getCurrentModel().registryKey === toRegistryKey, hold?.signal)) {
-                retried = true;
-                // The hold was acquired before the read, so a synchronous retry's
-                // TURN_SUBMITTED can consume it too. Never re-arm that consumed turn.
-                if (!hold) onFailoverRetry?.();
-              } else {
-                // No turn to re-submit (the failed turn did not come from the
-                // composer, so there is no pre-submission snapshot to roll back to).
-                // The registry has still MOVED, so the switch gets narrated here and
-                // the original error surfaces, silence would leave the user on a
-                // different backend with no turn running and nothing said about it.
-                announce(failoverNotice);
-                systemMessageRouter.high(`[Error] ${errorClass}`);
-                restoreConfiguredSelection();
-                notifyErrorSurfaced(false);
-              }
-              render();
-              return;
-            }
-
-            // Chain exhausted, all capable candidates have been visited or none exist.
-            // The turn is over, so any switch made earlier in it loses its authority:
-            // restore the configured selection before surfacing the error, or the
-            // user's next turn would silently start on the last fallback tried.
-            announce(
-              `[Failover] Chain exhausted: no alternative provider available. Original error: ${errorClass}`,
-            );
-            restoreConfiguredSelection();
-            notifyErrorSurfaced(true);
-            render();
-            return;
-          }
-
-          // Baseline: optimizer disabled, not wired, or failover would repeat work or hide a
-          // denial. The turn is over, so a switch made on an earlier hop loses its authority.
-          if (providerOptimizer?.enabled) restoreConfiguredSelection();
-          systemMessageRouter.high(`[Error] ${errorClass}`);
-          notifyErrorSurfaced(false);
-          render();
-        } catch (error) {
-          // The notice owns its continuation too. An operational failure must
-          // not disappear merely because the promise is deliberately contained.
-          logger.debug('failover delivery failed', { error: String(error) });
-          restoreConfiguredSelection();
-          systemMessageRouter.high(`[Error] ${errorClass}`);
-          notifyErrorSurfaced(false);
-          render();
-        } finally {
-          hold?.finish(retried);
-          if (!retried && pendingRecovery === recovery) pendingRecovery = undefined;
-        }
-      },
-    });
+    try {
+      if (retryTurn(failoverNotice, guarded)) {
+        narrateBilling(fromProvider, next.providerId, stillCurrent);
+        render();
+        return;
+      }
+    } catch (error) {
+      logger.debug('failover retry failed to start', { error: String(error) });
+    }
+    // No turn to re-submit (the failed turn did not come from the composer,
+    // so there is no pre-submission snapshot to roll back to). The registry
+    // has still MOVED, so the switch is narrated and the original error
+    // surfaces; abandoning the retry ends the user turn, which restores the
+    // configured selection.
+    announce(failoverNotice);
+    surface(false);
+    retry.abandon();
   }));
 
   // --- Stream stall watchdog: emit a low hint each time a no-delta gap (at
@@ -863,13 +791,9 @@ export function wireStreamEventMetrics(
     // turn that ended without any terminal event (an aborted stream that
     // emitted neither TURN_COMPLETED nor TURN_CANCEL) still cannot leave the
     // next turn silently pinned to a fallback backend.
-    clearFailoverVisited: () => { invalidateErrorNotices(); currentTurnId = undefined; settledTurnId = undefined; failoverVisited.clear(); restoreConfiguredSelection(); },
+    startNewTurn: () => { userTurn.supersede(); restoreConfiguredSelection(); },
     cancelPendingRecovery: () => {
-      if (!pendingRecovery?.isCurrent()) return false;
-      pendingRecovery.hold?.cancelTurn();
-      invalidateErrorNotices();
-      failoverVisited.clear();
-      restoreConfiguredSelection();
+      if (!userTurn.cancel()) return false;
       render();
       return true;
     },

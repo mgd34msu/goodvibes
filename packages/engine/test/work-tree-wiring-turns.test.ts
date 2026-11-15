@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import type { ConversationMessageSnapshot } from '@goodvibes-jev/engine/platform/platform/core';
-import { wireWorkTree, type WorkTreeConversation, type WorkTreeWiringDeps } from '../terminal-shell/src/work-tree-wiring.ts';
+import { createSessionContractViews, wireWorkTree, type WorkTreeConversation, type WorkTreeWiringDeps } from '../terminal-shell/src/work-tree-wiring.ts';
 import type { WorkTreeSources } from '../terminal-shell/src/work-tree-sources.ts';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
@@ -34,7 +34,7 @@ function harness() {
     getConversationSnapshot: () => { snapshotReads++; return []; },
   };
   const deps = {
-    conversation, events: { turns: { on }, tools: { on } }, agentManager, listContracts: () => [], fleetNodes: () => [],
+    conversation, events: { turns: { on }, tools: { on } }, agentManager, contracts: createSessionContractViews({ list: () => [], on: () => () => {} }, () => 's1'), fleetNodes: () => [],
     pendingCallId: () => undefined, turnActive: () => false, sessionsDir: makeProjectTempDir('work-tree-wiring-'), sessionId: () => 's1', requestRender() {},
   } as unknown as WorkTreeWiringDeps;
   const wiring = wireWorkTree(deps);

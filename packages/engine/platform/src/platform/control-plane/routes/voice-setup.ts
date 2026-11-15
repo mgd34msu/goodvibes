@@ -42,6 +42,22 @@ export interface VoiceLocalInstallResult {
   };
 }
 
+/** What voice.local.install answers at once: the run it started, or the one already running that it joined. */
+export interface VoiceLocalInstallStart {
+  readonly state: 'running';
+  readonly startedAt: number;
+  readonly joined: boolean;
+}
+
+/** The last install run that ended, served by voice.local.status as `lastInstall`. */
+export interface VoiceLocalInstallOutcome {
+  readonly startedAt: number;
+  readonly finishedAt: number;
+  readonly receipt?: VoiceLocalInstallResult | undefined;
+  /** Why the run stopped without a receipt. */
+  readonly error?: string | undefined;
+}
+
 /** One bounded chunk of a provisioned wake artifact. */
 export interface WakeModelChunkPayload {
   readonly component: string;
@@ -56,7 +72,11 @@ export interface WakeModelChunkPayload {
 /** The narrow provisioning slice the verbs need. */
 export interface VoiceSetupGatewayService {
   status(): unknown;
-  install(options?: { readonly signal?: AbortSignal | undefined; readonly assertCurrent?: (() => void) | undefined }): Promise<VoiceLocalInstallResult>;
+  /**
+   * Start the install (or join the one running) and return at once. The run
+   * outlives the request; its receipt is read from status() as `lastInstall`.
+   */
+  startInstall(options?: { readonly assertCurrent?: (() => void) | undefined }): VoiceLocalInstallStart;
   /** Content-verified state of the pinned wake artifacts. */
   wakeStatus(): unknown;
   /** Download + verify the pinned wake artifacts. Explicit act, single-flight. */
@@ -69,12 +89,18 @@ export function createVoiceStatusHandler(service: VoiceSetupGatewayService): Gat
   return () => service.status();
 }
 
+/**
+ * The install answers as soon as the run has started: a multi-hundred-MB
+ * download held open as one request would outlive the server's idle limit and
+ * be reported failed while the daemon finished it. The run no longer follows
+ * the request's signal (the request ends at once); it still stops before its
+ * next config write when the caller's write:config authority is revoked.
+ */
 export function createVoiceInstallHandler(service: VoiceSetupGatewayService): GatewayMethodHandler {
-  return (invocation) => service.install({
-    signal: invocation.signal,
+  return (invocation) => service.startInstall({
     assertCurrent: () => {
-      if (invocation.signal?.aborted || invocation.isAuthorized?.(['write:config']) === false) {
-        throw new GatewayVerbError('The voice install request is no longer authorized: its write:config authority was revoked or the request was cancelled. Nothing further was changed; send it again with current authority.', 'FORBIDDEN', 403);
+      if (invocation.isAuthorized?.(['write:config']) === false) {
+        throw new GatewayVerbError('The voice install stopped: the write:config authority that started it was revoked. Nothing further was changed; start it again with /voice setup or voice.local.install from a caller that holds write:config.', 'FORBIDDEN', 403);
       }
     },
   });

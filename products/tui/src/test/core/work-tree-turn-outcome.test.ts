@@ -17,7 +17,7 @@ import { ConversationManager } from '../../core/conversation.ts';
 import { buildTurnModel, transcriptUnits, type TurnModel } from '../../core/work-tree-model.ts';
 import { userMessageFingerprint, WorkTreeTimingStore, type TurnTiming, type WorkTreeSources } from '../../core/work-tree-sources.ts';
 import { loadWorkTreeTurnOutcomes, saveWorkTreeFolds } from '../../core/work-tree-fold-store.ts';
-import { restoreWorkTreeFolds, wireWorkTree } from '../../core/work-tree-wiring.ts';
+import { restoreWorkTreeFolds, createSessionContractViews, wireWorkTree } from '../../core/work-tree-wiring.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
 type Message = ConversationMessageSnapshot;
@@ -153,7 +153,7 @@ describe('turn-end events drive the header and the sidecar', () => {
       conversation: cm,
       events: { turns, tools } as unknown as Parameters<typeof wireWorkTree>[0]['events'],
       agentManager: { getStatus: () => null, getConversationSnapshot: () => [] } as unknown as Parameters<typeof wireWorkTree>[0]['agentManager'],
-      listContracts: () => [],
+      contracts: createSessionContractViews({ list: () => [], on: () => () => {} }, () => 'user-live'),
       fleetNodes: () => [],
       pendingCallId: () => undefined,
       turnActive: () => active.value,

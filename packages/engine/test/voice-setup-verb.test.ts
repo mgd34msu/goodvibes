@@ -12,7 +12,7 @@
  * answers with no CORS header).
  */
 import { describe, expect, test } from 'bun:test';
-import { mkdtempSync, rmSync, unlinkSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createVoiceSetupService } from '@goodvibes-jev/engine/platform/platform/runtime/voice-setup';
@@ -31,7 +31,6 @@ import { firstJsonSchemaFailure } from '../transport-http/src/client-plumbing.ts
 import { createDaemonApiRouteProbe, reconcileHttpDescriptor } from '../platform/src/platform/control-plane/method-catalog-route-reconcile.ts';
 
 const stubStatus = { platform: 'linux-x64', state: 'not-provisioned', tts: { engine: 'piper', binaryPresent: false, voicePresent: false, binaryPath: '/m/piper', modelPath: '/m/voice.onnx' }, stt: { engine: 'whisper-cpp', supported: false, reason: 'no prebuilt' }, offerBytes: 89666641 };
-const stubInstall = { provisioned: true, platform: 'linux-x64', tts: { engine: 'piper', state: 'provisioned', binaryPath: '/m/piper', modelPath: '/m/voice.onnx' }, stt: { engine: 'whisper-cpp', state: 'unsupported-platform', reason: 'no prebuilt' }, components: [], configured: { set: [{ key: 'voice.local.ttsEngine', value: 'piper' }], skipped: [] } };
 
 const stubArtifact = { path: '/m/wake/x', verified: true, corrupt: false, bytes: 10 };
 const stubWakeStatus = { ready: true, reason: null, classifier: stubArtifact, mobileClassifier: stubArtifact, notice: stubArtifact, embedding: stubArtifact, embeddingNotice: stubArtifact, vad: stubArtifact, vadNotice: stubArtifact, vadReady: true, downloadBytes: 0, modelVersion: '1.0.0', recallIsSyntheticOnly: true };
@@ -40,7 +39,7 @@ const stubChunk = { component: 'classifier', offset: 0, bytes: 4, totalBytes: 4,
 
 const service: VoiceSetupGatewayService = {
   status: () => stubStatus,
-  install: async () => stubInstall,
+  startInstall: () => ({ state: 'running', startedAt: 1, joined: false }),
   wakeStatus: () => stubWakeStatus,
   wakeProvision: async () => stubWakeProvision,
   wakeModelChunk: () => stubChunk,
@@ -54,7 +53,7 @@ function restInvocation(query: Record<string, unknown>): Parameters<ReturnType<t
 describe('voice.local provisioning verbs are wired', () => {
   test('handlers return the provisioner service output', async () => {
     expect(createVoiceStatusHandler(service)({} as never)).toEqual(stubStatus);
-    expect(await createVoiceInstallHandler(service)({} as never)).toEqual(stubInstall);
+    expect(await createVoiceInstallHandler(service)({} as never)).toEqual({ state: 'running', startedAt: 1, joined: false });
   });
 
   test('both verbs are in the live catalog with the expected REST bindings', () => {
@@ -345,19 +344,46 @@ describe('the install/boot provisioning path on the setup service', () => {
 });
 
 
-test('voice install forwards trusted cancellation and rechecks write authorization', async () => {
-  const controller = new AbortController();
-  let lifetime: Parameters<VoiceSetupGatewayService['install']>[0];
+test('voice install answers at once and rechecks write authorization before the run\'s effects', async () => {
+  let lifetime: Parameters<VoiceSetupGatewayService['startInstall']>[0];
   let allowed = true;
-  const handler = createVoiceInstallHandler({ ...service, install: async options => {
-    lifetime = options; return stubInstall;
+  const handler = createVoiceInstallHandler({ ...service, startInstall: options => {
+    lifetime = options; return { state: 'running', startedAt: 1, joined: false };
   } });
-  await handler({ context: {}, signal: controller.signal, isAuthorized: scopes => {
+  expect(await handler({ context: {}, isAuthorized: scopes => {
     expect(scopes).toEqual(['write:config']); return allowed;
-  } });
-  expect(lifetime?.signal).toBe(controller.signal);
+  } })).toEqual({ state: 'running', startedAt: 1, joined: false });
   lifetime?.assertCurrent?.(); allowed = false;
-  expect(() => lifetime?.assertCurrent?.()).toThrow('no longer authorized');
+  expect(() => lifetime?.assertCurrent?.()).toThrow('was revoked');
+});
+
+test('an install run outlives its request: status serves progress while it runs and its receipt once it ends', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'voice-install-start-'));
+  let finish!: () => void;
+  const gate = new Promise<void>((resolve) => { finish = resolve; });
+  try {
+    const voice = createVoiceSetupService({
+      managedVoiceRoot: root, getConfig: () => '', setConfig() {}, resetLocalEngineFailureState() {},
+      admitExpensiveWork: () => ({ allowed: true }),
+      provision: async () => {
+        await gate;
+        return { platform: 'linux-x64', tts: { engine: 'piper', state: 'download-failed', reason: 'offline' }, stt: { engine: 'whisper-cpp', state: 'unsupported-platform', reason: 'no prebuilt' }, components: [] };
+      },
+    });
+    const start = voice.startInstall();
+    expect(start.state).toBe('running');
+    expect(voice.startInstall().joined).toBe(true);
+    expect(voice.status().installInProgress).toBeDefined();
+    expect(voice.status().lastInstall).toBeUndefined();
+    finish();
+    await voice.install();
+    const after = voice.status();
+    expect(after.installInProgress).toBeUndefined();
+    expect(after.lastInstall?.startedAt).toBe(start.startedAt);
+    expect(after.lastInstall?.receipt?.provisioned).toBe(false);
+    const schema = new GatewayMethodCatalog().get('voice.local.status')!.outputSchema!;
+    expect(firstJsonSchemaFailure(schema, JSON.parse(JSON.stringify(after)))).toBeUndefined();
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
 
@@ -380,8 +406,9 @@ describe('the install receipt validates against the published schema', () => {
       });
       const receipt = await service.install();
       expect(receipt.configured.superseded.map((entry) => entry.key)).toEqual(['voice.local.ttsBinary']);
-      const schema = new GatewayMethodCatalog().get('voice.local.install')!.outputSchema!;
-      expect(firstJsonSchemaFailure(schema, JSON.parse(JSON.stringify(receipt)))).toBeUndefined();
+      // The receipt is served on the status read once the run has ended.
+      const schema = new GatewayMethodCatalog().get('voice.local.status')!.outputSchema!;
+      expect(firstJsonSchemaFailure(schema, JSON.parse(JSON.stringify(service.status())))).toBeUndefined();
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 });

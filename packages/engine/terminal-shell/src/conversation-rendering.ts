@@ -36,11 +36,11 @@ import type { SystemMessageKind } from '@goodvibes-jev/engine/platform/platform/
  */
 const NAVIGABLE_KINDS: ReadonlySet<SystemMessageKind> = new Set(['system', 'contract']);
 type Message = ConversationMessageSnapshot;
-// The render context and its pure derivations live in a type-only leaf module
+// The render context lives in a type-only leaf module
 // (conversation-render-context.ts) so per-row render modules can depend on the
 // SHAPE of a render without depending on this drawing module. Re-exported here
 // because this file remains the transcript renderer's entry point.
-export { collectCompletedToolCallIds, collectToolCallOutcomes, type ConversationRenderContext, type ToolCallOutcome, } from './conversation-render-context.js';
+export type { ConversationRenderContext } from './conversation-render-context.js';
 export interface ConversationPresentation {
     readonly getSplashLines: (width: number, options: SplashOptions) => string[];
     readonly systemNavigation: 'kind' | 'severity';

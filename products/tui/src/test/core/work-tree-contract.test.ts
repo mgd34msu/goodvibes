@@ -4,7 +4,7 @@ import type { AgentManager } from '@goodvibes-jev/engine/platform/platform/tools
 import type { ConversationMessageSnapshot } from '@goodvibes-jev/engine/platform/platform/core';
 import type { ContractView } from '@goodvibes-jev/engine/platform/platform/contract';
 import { ConversationManager } from '../../core/conversation.ts';
-import { wireWorkTree } from '../../core/work-tree-wiring.ts';
+import { createSessionContractViews, wireWorkTree } from '../../core/work-tree-wiring.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 import { renderAgentView } from '../../core/agent-view-render.ts';
 import { buildContractOwnerModel, buildTurnModel, orphanResultBead, transcriptUnits, turnSignature } from '../../core/work-tree-model.ts';
@@ -113,9 +113,11 @@ describe('live contract source wiring', () => {
     const record: NonNullable<ReturnType<AgentManager['getStatus']>> = { id: 'owner', template: 'engineer', task: contract.ask, status: 'completed', startedAt: 1000, completedAt: 2000, tools: [], toolCallCount: 0,
       orchestrationDepth: 0, executionProtocol: 'direct', reviewMode: 'contract', communicationLane: 'parent-only', contractId: contract.id, contractRole: 'owner' };
     const events = { on: () => () => {} };
+    const contracts = createSessionContractViews({ list: () => [contract], on: () => () => {} }, () => 'test-session',
+      (listener) => { notify = listener; return () => { unsubscribed = true; }; });
     const wired = wireWorkTree({ conversation: cm, events: { tools: events, turns: events } as unknown as Parameters<typeof wireWorkTree>[0]['events'],
       agentManager: { getStatus: (id) => id === record.id ? record : null, getConversationSnapshot: () => [] },
-      listContracts: () => [contract], onContractsChanged: (listener) => { notify = listener; return () => { unsubscribed = true; }; },
+      contracts,
       fleetNodes: () => [], pendingCallId: () => undefined, turnActive: () => false, sessionsDir: dir, sessionId: () => 'test-session', requestRender: () => { renders++; } });
     const before = text(cm.getDisplayBlocks());
     expect(before).toContain('passed');
@@ -128,6 +130,7 @@ describe('live contract source wiring', () => {
     expect(renders).toBe(1);
     expect(text(cm.getDisplayBlocks())).toContain('passed · commit failed: not applied');
     for (const unsub of wired.unsubs) unsub();
+    contracts.dispose();
     expect(unsubscribed).toBe(true);
   });
 });

@@ -1,9 +1,13 @@
-import { JudgmentError } from '@goodvibes-jev/judgment';
+/**
+ * The failover billing line: which billing class the switch left and joined,
+ * read from the providers' declared setup after the switch, on its own line.
+ * Failover never waits for it; facts that are missing, replaced or invalidated
+ * while they were read say Unknown or nothing, never a guessed class.
+ */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { wireStreamEventMetrics, createStreamMetrics, type WireStreamEventMetricsOptions } from '../../core/stream-event-wiring.ts';
-import { createErrorNoticeOwner } from '../../core/format-user-error.ts';
 
 let previous: ReturnType<typeof installJudgmentPort>;
 beforeEach(() => { previous = installJudgmentPort(undefined); });
@@ -17,165 +21,98 @@ function bus() {
     emit(type: string, value: Record<string, unknown> = {}) { for (const callback of [...callbacks.get(type) ?? []]) callback({ type, ...value }); },
   };
 }
-function installSetupReader(wait?: Promise<void>, reject = false) {
+function installSetupReader(wait?: Promise<void>) {
   const fake = fakePort((name, _q, state) => noulAnswer((name === 'api_key' && String(state).includes('Direct provider API key')) || (name === 'subscription' && String(state).includes('Stored subscription session')) ? 0.99 : 0.01));
-  const signals: AbortSignal[] = [];
-  installJudgmentPort({ ...fake.port, async ask(request) { if (request.signal) signals.push(request.signal); await wait; if (reject) throw new JudgmentError('unavailable', 'unavailable'); return fake.port.ask(request); } });
-  return { ...fake, signals };
+  installJudgmentPort({ ...fake.port, async ask(request) { await wait; return fake.port.ask(request); } });
+  return fake;
 }
-/** Deadline timers that fire only when the test says the deadline has passed. */
-function manualTimers() {
-  const pending = new Map<number, () => void>(); let next = 1;
-  return {
-    timers: { setTimeout: (callback: () => void) => { pending.set(next, callback); return next++; }, clearTimeout: (handle: unknown) => { pending.delete(handle as number); } },
-    expire: () => { for (const [id, callback] of [...pending]) { pending.delete(id); callback(); } },
-  };
-}
-function fixture(options: { timeout?: number; metadataWait?: Promise<void>; noIdentity?: boolean } = {}) {
-  const deadline = manualTimers();
+function fixture(options: { noIdentity?: boolean } = {}) {
   const turns = bus(), tools = bus(), providers = bus(); const messages: string[] = [], retries: string[] = [];
   const instances = { first: {}, second: {} };
-  let model = 'first:one', session = 'session-a', switches = 0, renders = 0, enabled = true;
+  let model = 'first:one', session = 'session-a';
   const wiring = wireStreamEventMetrics({
     events: { turns, tools, providers } as unknown as WireStreamEventMetricsOptions['events'],
-    orchestrator: { streamingOutputTokens: 0 }, metrics: createStreamMetrics(), render: () => { renders++; },
-    getSessionId: () => session, errorNoticeTimeoutMs: options.timeout ?? 100, errorNoticeTimers: deadline.timers,
+    orchestrator: { streamingOutputTokens: 0 }, metrics: createStreamMetrics(), render: () => {},
+    getSessionId: () => session,
     providerRegistry: {
       getCurrentModel: () => ({ provider: model.split(':')[0]!, registryKey: model }),
-      setCurrentModel: key => { model = key; switches++; },
+      setCurrentModel: key => { model = key; },
       getRegistered: options.noIdentity ? undefined : id => instances[id as keyof typeof instances],
-      describeRuntime: async id => { await options.metadataWait; return { setup: { description: id === 'first' ? 'Direct provider API key' : 'Stored subscription session' } }; },
+      describeRuntime: async id => ({ setup: { description: id === 'first' ? 'Direct provider API key' : 'Stored subscription session' } }),
     },
-    providerOptimizer: { get enabled() { return enabled; }, fallbackLog: [], testFallback: () => ({ chain: [{ providerId: 'first', modelId: 'one', capable: true, position: 0 }, { providerId: 'second', modelId: 'two', capable: true, position: 1 }] }), recordFallbackTransition() {} },
+    providerOptimizer: { enabled: true, fallbackLog: [], testFallback: () => ({ chain: [{ providerId: 'first', modelId: 'one', capable: true, position: 0 }, { providerId: 'second', modelId: 'two', capable: true, position: 1 }] }), recordFallbackTransition() {} },
     systemMessageRouter: { high: text => { messages.push(text); }, low() {}, userReceipt: text => { messages.push(text); } },
-    retryTurn: notice => { messages.length = 0; messages.push(notice ?? ''); retries.push(notice ?? ''); return true; },
+    // As in main.ts: the rollback clears the transcript, then the notice is posted.
+    retryTurn: notice => { messages.length = 0; messages.push(notice); retries.push(notice); return true; },
   });
   turns.emit('TURN_SUBMITTED', { turnId: 'a' });
-  return { turns, providers, expire: deadline.expire, messages, retries, instances, wiring, switches: () => switches, renders: () => renders,
-    error: () => turns.emit('TURN_ERROR', { turnId: 'a', error: { status: 429, message: '' } }), session: () => { session = 'b'; },
-    enable: (value: boolean) => { enabled = value; },
+  return { turns, providers, messages, retries, instances, wiring,
+    error: () => turns.emit('TURN_ERROR', { turnId: 'a', error: 'throttled', status: 429, stopReason: 'provider_error' }),
+    session: () => { session = 'b'; },
+    billing: () => messages.filter(m => m.startsWith('[Failover] billing:')),
     close: () => { for (const unsubscribe of wiring.unsubs) unsubscribe(); } };
 }
 
-describe('real failover caller joins setup facts to owned error delivery', () => {
-  test('delayed provider facts arrive before one retry and survive its transcript rollback', async () => {
+describe('the failover billing line', () => {
+  test('failover does not wait for setup facts; the billing line follows it', async () => {
     const held = gate(); installSetupReader(held.promise); const f = fixture();
-    try { f.error(); await flush(); expect(f.retries).toHaveLength(0); expect(f.switches()).toBe(0);
-      held.release(); await flush(); expect(f.retries).toHaveLength(1);
-      expect(f.messages).toEqual(f.retries); expect(f.messages[0]).toContain('billing: API key → Subscription: billing class changed');
-      expect(f.messages[0]).toContain('Rate limit reached');
+    try {
+      f.error();
+      expect(f.retries).toHaveLength(1);
+      expect(f.messages).toEqual(f.retries);
+      held.release(); await flush();
+      expect(f.billing()).toEqual(['[Failover] billing: API key → Subscription: billing class changed']);
     } finally { f.close(); }
   });
-  for (const boundary of ['cancel', 'new-turn', 'new-session', 'dispose'] as const) {
-    test(`delayed setup cannot narrate or retry after ${boundary}`, async () => {
-      const held = gate(); const reader = installSetupReader(held.promise); const f = fixture(); f.error(); await flush();
-      if (boundary === 'cancel') f.turns.emit('TURN_CANCEL', { turnId: 'a' });
-      if (boundary === 'new-turn') f.turns.emit('TURN_SUBMITTED', { turnId: 'b' });
-      if (boundary === 'new-session') f.session();
-      if (boundary === 'dispose') f.close();
-      const renders = f.renders(); held.release(); await flush();
-      expect(f.messages).toEqual([]); expect(f.retries).toEqual([]); expect(f.switches()).toBe(0); expect(f.renders()).toBe(renders);
-      if (boundary !== 'new-session') expect(reader.signals.every(signal => signal.aborted)).toBe(true);
-      f.close();
+
+  for (const boundary of ['new-turn', 'new-session', 'dispose', 'providers-changed'] as const) {
+    test(`a billing reading still pending at ${boundary} adds nothing`, async () => {
+      const held = gate(); installSetupReader(held.promise); const f = fixture();
+      try {
+        f.error();
+        if (boundary === 'new-turn') { f.wiring.startNewTurn(); f.turns.emit('TURN_SUBMITTED', { turnId: 'b' }); }
+        if (boundary === 'new-session') f.session();
+        if (boundary === 'dispose') f.close();
+        if (boundary === 'providers-changed') f.providers.emit('PROVIDERS_CHANGED', { added: [], removed: [], updated: ['second'] });
+        held.release(); await flush();
+        expect(f.billing()).toEqual([]);
+      } finally { f.close(); }
     });
   }
-  test('setup deadline keeps a successful error reading and uses explicit Unknown without a late update', async () => {
-    const held = gate(); const reader = installSetupReader(held.promise); const f = fixture({ timeout: 10 });
-    try { f.error(); await flush(); f.expire(); await flush();
-      expect(f.retries).toHaveLength(1); expect(f.messages[0]).toContain('Rate limit reached');
-      expect(f.messages[0]).toContain('billing: Unknown → Unknown'); expect(f.messages[0]).not.toContain('Error details unavailable');
-      expect(reader.signals.every(signal => signal.aborted)).toBe(true);
-      const before = [...f.messages]; held.release(); await flush(); expect(f.messages).toEqual(before); expect(f.retries).toHaveLength(1);
-    } finally { f.close(); }
-  });
-  test('unavailable setup does not change existing optimizer dispatch permission', async () => {
-    installSetupReader(undefined, true); const f = fixture();
-    try { f.error(); await flush(); expect(f.retries).toHaveLength(1); expect(f.switches()).toBe(1); expect(f.messages[0]).toContain('Unknown'); }
-    finally { f.close(); }
-  });
-  test('a hanging metadata provider is bounded by the same total notice deadline', async () => {
-    const held = gate(); const reader = installSetupReader(); const f = fixture({ timeout: 10, metadataWait: held.promise });
-    try { f.error(); await flush(); f.expire(); await flush(); expect(f.retries).toHaveLength(1); expect(f.messages[0]).toContain('Unknown');
-      held.release(); await flush(); expect(reader.requests).toHaveLength(0); expect(f.retries).toHaveLength(1);
-    } finally { f.close(); }
-  });
-  test('credential/config generation replacement invalidates only stale billing narration', async () => {
-    const held = gate(); installSetupReader(held.promise); const f = fixture();
-    try { f.error(); await flush(); f.providers.emit('PROVIDERS_CHANGED', { added: [], removed: [], updated: ['second'] });
-      held.release(); await flush(); expect(f.retries).toHaveLength(1); expect(f.messages[0]).toContain('billing: Unknown → Unknown');
-      expect(f.messages[0]).not.toContain('Subscription');
-    } finally { f.close(); }
-  });
-  test('a completed side is rechecked after the other provider finishes its delayed setup read', async () => {
-    const held = gate(); const fake = installSetupReader();
-    installJudgmentPort({ ...fake.port, async ask(request) {
-      if (String(request.state).includes('Stored subscription session')) await held.promise;
-      return fake.port.ask(request);
-    } });
-    const f = fixture();
-    try { f.error(); await flush(); f.instances.first = {}; held.release(); await flush();
-      expect(f.retries).toHaveLength(1); expect(f.messages[0]).toContain('billing: Unknown → Subscription');
-    } finally { f.close(); }
-  });
-  test('prepared setup identities are rechecked at delivery after waiting behind another notice', async () => {
-    const held = gate(); const fake = installSetupReader();
-    installJudgmentPort({ ...fake.port, async ask(request) {
-      if (request.context?.site === 'tui.stream-error') await held.promise;
-      return fake.port.ask(request);
-    } });
-    const f = fixture();
-    try {
-      f.turns.emit('TURN_ERROR', { turnId: 'a', error: 'first notice holds the ordered queue' });
-      f.error(); await flush();
-      f.instances.first = {};
-      // Let the first notice surface without switching; its completed callback
-      // restores the already-authorized optimizer for the queued second notice.
-      f.enable(false); f.wiring.onErrorSurfaced(() => f.enable(true));
-      held.release(); await flush();
-      expect(f.retries).toHaveLength(1); expect(f.messages.at(-1)).toContain('billing: Unknown → Subscription');
-    } finally { f.close(); }
-  });
-  test('missing live instance lookup cannot establish current setup narration', async () => {
+
+  test('without a live instance lookup both sides are Unknown and nothing is read', async () => {
     const reader = installSetupReader(); const f = fixture({ noIdentity: true });
-    try { f.error(); await flush(); expect(f.retries).toHaveLength(1);
-      expect(f.messages[0]).toContain('billing: Unknown → Unknown'); expect(reader.requests).toHaveLength(0);
+    try {
+      f.error(); await flush();
+      expect(f.billing()).toEqual(['[Failover] billing: Unknown → Unknown']);
+      expect(reader.requests).toHaveLength(0);
     } finally { f.close(); }
   });
-  test('a missing instance is not current merely because both lookups returned undefined', async () => {
-    const reader = installSetupReader(); const f = fixture();
-    f.instances.second = undefined as unknown as object;
-    try { f.error(); await flush(); expect(f.retries).toHaveLength(1);
-      expect(f.messages[0]).toContain('billing: API key → Unknown'); expect(reader.requests).toHaveLength(1);
+
+  test('a provider replaced while its facts were read is Unknown', async () => {
+    const held = gate(); installSetupReader(held.promise); const f = fixture();
+    try {
+      f.error(); f.instances.second = {}; held.release(); await flush();
+      expect(f.billing()).toEqual(['[Failover] billing: API key → Unknown']);
     } finally { f.close(); }
   });
-  for (const [variant, labels, changed] of [
-    ['unknown-from', 'Unknown → Subscription', false],
-    ['unknown-to', 'API key → Unknown', false],
-    ['known-same', 'API key → API key', false],
-    ['known-different', 'API key → Subscription', true],
+
+  for (const [variant, line] of [
+    ['unknown-from', '[Failover] billing: Unknown → Subscription'],
+    ['unknown-to', '[Failover] billing: API key → Unknown'],
+    ['known-same', '[Failover] billing: API key → API key'],
+    ['known-different', '[Failover] billing: API key → Subscription: billing class changed'],
   ] as const) {
-    test(`billing change assertion requires known different classes: ${variant}`, async () => {
+    test(`a billing change is claimed only between two known, different classes: ${variant}`, async () => {
       if (variant === 'known-same') installJudgmentPort(fakePort(name => noulAnswer(name === 'api_key' ? 0.99 : 0.01)).port);
       else installSetupReader();
       const f = fixture();
       if (variant === 'unknown-from') f.instances.first = undefined as unknown as object;
       if (variant === 'unknown-to') f.instances.second = undefined as unknown as object;
-      try { f.error(); await flush(); expect(f.retries).toHaveLength(1);
-        expect(f.messages[0]).toContain('billing: ' + labels);
-        expect(f.messages[0]!.includes('billing class changed')).toBe(changed);
+      try {
+        f.error(); await flush();
+        expect(f.billing()).toEqual([line]);
       } finally { f.close(); }
     });
   }
-  test('provider instance replacement cannot inherit a delayed setup reading before its event arrives', async () => {
-    const held = gate(); installSetupReader(held.promise); const f = fixture();
-    try { f.error(); await flush(); f.instances.second = {}; held.release(); await flush();
-      expect(f.retries).toHaveLength(1); expect(f.messages[0]).toContain('billing: API key → Unknown');
-    } finally { f.close(); }
-  });
-});
-
-test('the shared notice queue contains preparation rejection without losing a successful error', async () => {
-  const owner = createErrorNoticeOwner(10, manualTimers().timers); const messages: string[] = [];
-  owner.enqueue({ status: 429 }, 'test', { isCurrent: () => true, prepare: async () => { throw new Error('failed setup'); }, deliver: reading => { messages.push(reading?.kind ?? 'missing'); } });
-  await flush(); expect(messages).toEqual(['rate-limit']); owner.dispose();
 });

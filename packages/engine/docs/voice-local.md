@@ -91,8 +91,12 @@ STT per the sources above.
 `voice.local.install` installs text-to-speech (piper and a default voice) and
 speech-to-text (whisper.cpp and its model) as two independent halves: a failed
 voice download never stops speech-to-text, which the wake word and dictation
-need, and the receipt reports each half's own state. Every download streams to
-disk with progress in `voice.local.status`, fails only after 60 s with no data,
+need, and the receipt reports each half's own state. The verb answers at once
+with the run it started (or the run already in progress it joined) and the
+install goes on in the daemon: `voice.local.status` carries its progress as
+`installInProgress` while it runs and its receipt as `lastInstall` once it ends,
+so a long install is never cut off by a request timeout. Every download streams to
+disk, fails only after 60 s with no data,
 and keeps what it received: the next attempt resumes from there. The install
 ends by speaking a test phrase and reading it back; the transcript proves the
 round trip when its words match the phrase, allowing one differing word. A

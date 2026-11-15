@@ -147,16 +147,17 @@ for (const boundary of ['terminal restore', 'session switch'] as const) {
   });
 }
 
-test('a rejecting rejection reader has one neutral delivery and no unhandled recursion', async () => {
+test('a rejecting rejection reader still delivers the structural line once, with no unhandled recursion', async () => {
   const reason = new Error('401 timeout');
   const reading = await installRejectionReading([reason], { rejection: new Error('reader failed') });
   const f = makeHandler(); f.handle(reason);
   await flushErrorNotices(); await flushErrorNotices();
-  expect(reading.requests).toHaveLength(1); expect(f.messages).toEqual(['[Error] Error details unavailable. Original error: 401 timeout']);
+  expect(reading.requests).toHaveLength(1); expect(f.messages).toHaveLength(1);
+  expect(f.messages[0]).toContain('401 timeout'); expect(f.messages[0]).not.toContain('Error details unavailable');
   f.restoreTerminal();
 });
 
-test('an indefinitely pending rejection reader has a bounded neutral delivery', async () => {
+test('an indefinitely pending rejection reader has a bounded delivery of the structural line', async () => {
   const reason = new Error('pending failure');
   const reading = await installRejectionReading([reason], { pending: new Promise<never>(() => {}) });
   // The notice arrives when the narration deadline gives up on the reader; the
@@ -165,7 +166,8 @@ test('an indefinitely pending rejection reader has a bounded neutral delivery', 
   const f = makeHandler(5, () => delivered.resolve()); f.handle(reason);
   await delivered.promise;
   expect(reading.requests).toHaveLength(1);
-  expect(f.messages).toEqual(['[Error] Error details unavailable. Original error: pending failure']); f.restoreTerminal();
+  expect(f.messages).toHaveLength(1); expect(f.messages[0]).toContain('pending failure');
+  expect(f.messages[0]).not.toContain('Error details unavailable'); f.restoreTerminal();
 });
 
 test('cascading critical rejection supersedes pending individual readings', async () => {

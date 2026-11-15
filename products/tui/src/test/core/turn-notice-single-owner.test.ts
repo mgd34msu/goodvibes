@@ -12,9 +12,8 @@
  *    a failover that then succeeds says it finished, a failover whose retry
  *    also fails says it failed, never a failure and then a success.
  *
- * The turn wiring and the stream wiring are linked here the way main.ts links
- * them (onFailoverRetry: continueTurnAfterFailover), on one shared bus, with
- * the turn wiring subscribed first as in main.ts.
+ * The turn wiring and the stream wiring share one user-turn owner here the way
+ * main.ts shares it (core/user-turn.ts), on one shared bus.
  */
 import { describe, expect, mock, spyOn, test } from 'bun:test';
 import { installFullScreenTerminalOutputGuard } from '@goodvibes-jev/engine/terminal-shell/terminal-output-guard';
@@ -22,14 +21,14 @@ import { wireTurnEventHandlers, type WireTurnEventHandlersOptions } from '../../
 import { wireStreamEventMetrics, type WireStreamEventMetricsOptions, type StreamMetrics } from '../../core/stream-event-wiring.ts';
 import type { WebhookNotifier } from '@goodvibes-jev/engine/platform/platform/integrations';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
+import { fakePort } from '@goodvibes-jev/judgment/testing';
 import { FocusTracker } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { makeTestSurface } from '../helpers/session-surface.ts';
-import { holdTimers } from '../helpers/held-timers.ts';
+import { createUserTurnOwner, type FailoverRetry } from '../../core/user-turn.ts';
 import { createCancelGeneration } from '../../core/turn-cancellation.ts';
 import type { Orchestrator } from '@goodvibes-jev/engine/platform/platform/core';
 
 const ASK = 'Migrate the billing tables to the new schema';
-const GRACE_MS = 61_234;
 
 type Bus = { on(type: string, h: (e: unknown) => void): () => void; emit(type: string, e: unknown): void };
 function bus(): Bus {
@@ -61,8 +60,6 @@ interface HarnessOptions {
   /** The failover chain; empty means the optimizer is off. */
   readonly chain?: Array<{ providerId: string; modelId: string }>;
   readonly handOff?: () => () => void;
-  /** Held, not real: fire it with `fireGrace()`. Must differ from any other timer delay. */
-  readonly graceMs?: number;
   readonly synchronousRetry?: boolean;
   readonly retryMissing?: boolean;
   readonly memory?: Promise<void>;
@@ -77,12 +74,9 @@ function harness(opts: HarnessOptions = {}) {
   const bells: number[] = [];
   const retries: string[] = [];
   let submittedAfterMemory = 0;
-  let capturedAuthority: (() => boolean) | undefined;
-  let capturedSignal: AbortSignal | undefined;
+  let capturedRetry: FailoverRetry | undefined;
   const turns = bus(); const tools = bus(); const agents = bus(); const contracts = bus();
   let now = 1_000;
-  // A grace period is held and fired by the test, never raced against the wall clock.
-  const grace = opts.graceMs === undefined ? undefined : holdTimers(opts.graceMs);
   const tracker = new FocusTracker();
   tracker.setFocused(false);
   // These named-notice routing tests explicitly use the public content-enabled setting.
@@ -97,7 +91,9 @@ function harness(opts: HarnessOptions = {}) {
     () => streamWiring.cancelPendingRecovery(),
   );
   if (opts.handOff) orchestrator['turnEndNotice'] = { handOff: opts.handOff };
+  const userTurn = createUserTurnOwner({ turns: turns as never, sessionId: () => 'test-sess-id-001', clock: () => now });
   const turnOptions = {
+    userTurn,
     events: { turns, tools, agents, contracts },
     conversation: {
       toJSON: () => { throw new Error('stub: no persistence in this test'); },
@@ -128,12 +124,9 @@ function harness(opts: HarnessOptions = {}) {
     terminalNotifier: { notify: (_signal: string, message: string) => { terminal.push(message); } },
     ...(opts.nativeNotify ? {} : { notifyDesktop: (title: string, body: string) => { desktop.push({ title, body }); } }),
     ...(opts.nativeBell ? {} : { ringBell: () => { bells.push(now); } }),
-    _failoverRetryGraceMs: opts.graceMs ?? 5_000,
     _clock: () => now,
   } as unknown as WireTurnEventHandlersOptions;
-  const turnWiring = wireTurnEventHandlers(turnOptions) as ReturnType<typeof wireTurnEventHandlers> & {
-    continueTurnAfterFailover?: () => void;
-  };
+  const turnWiring = wireTurnEventHandlers(turnOptions);
 
   let currentKey = 'anthropic:claude-sonnet';
   const chain = opts.chain ?? [];
@@ -153,30 +146,33 @@ function harness(opts: HarnessOptions = {}) {
       recordFallbackTransition: () => {},
       fallbackLog: [],
     } : undefined,
+    userTurn,
     // As in main.ts: a pre-submission snapshot exists, so the turn is re-submitted.
-    retryTurn: (notice?: string, isCurrent?: () => boolean, signal?: AbortSignal) => {
+    // Without a memory hold the retry submits at once; the test emits its TURN_SUBMITTED.
+    retryTurn: (notice: string, retry: FailoverRetry) => {
       if (opts.retryMissing) return false;
-      retries.push(notice ?? '');
-      capturedAuthority = isCurrent;
-      capturedSignal = signal;
-      if (opts.memory) void opts.memory.then(() => {
-        if (!isCurrent?.()) return;
-        submittedAfterMemory++;
-        turns.emit('TURN_SUBMITTED', { turnId: 'late-retry', prompt: ASK });
-      });
+      retries.push(notice);
+      capturedRetry = retry;
+      if (opts.memory) {
+        void opts.memory.then(() => {
+          if (!retry.isCurrent()) { retry.abandon(); return; }
+          submittedAfterMemory++;
+          retry.submitting();
+          turns.emit('TURN_SUBMITTED', { turnId: 'late-retry', prompt: ASK });
+        });
+        return true;
+      }
+      retry.submitting();
       if (opts.synchronousRetry) turns.emit('TURN_SUBMITTED', { turnId: 'sync-retry', prompt: ASK });
       return true;
     },
-    onFailoverRetry: turnWiring.continueTurnAfterFailover,
-    beginFailoverNotice: turnWiring.beginFailoverNotice,
   } as unknown as WireStreamEventMetricsOptions;
   const streamWiring = wireStreamEventMetrics(streamOptions);
 
   return {
-    desktop, terminal, webhook, bells, retries, turnWiring, streamWiring, cancelGeneration, abort,
-    submittedAfterMemory: () => submittedAfterMemory, authority: () => capturedAuthority?.(), signal: () => capturedSignal,
-    fireGrace: () => { grace?.fire(); },
-    close: () => { for (const unsub of [...streamWiring.unsubs, ...turnWiring.unsubs]) unsub(); grace?.restore(); },
+    desktop, terminal, webhook, bells, retries, turnWiring, streamWiring, cancelGeneration, abort, userTurn,
+    submittedAfterMemory: () => submittedAfterMemory, retry: () => capturedRetry,
+    close: () => { for (const unsub of [...streamWiring.unsubs, ...turnWiring.unsubs]) unsub(); userTurn.dispose(); },
     advance: (ms: number) => { now += ms; },
     turn: (type: string, payload: Record<string, unknown>) => turns.emit(type, { type, ...payload }),
   };
@@ -335,15 +331,17 @@ describe('one notice per user turn across a provider failover', () => {
     expect(h.terminal).toHaveLength(1);
   });
 
-  test('a retry that never starts still gets its failure told, after the grace period', async () => {
-    const h = harness({ chain: [{ providerId: 'anthropic', modelId: 'claude-sonnet' }, { providerId: 'openai', modelId: 'gpt-5' }], graceMs: GRACE_MS });
+  test('a retry that never starts tells the failure once, when it is abandoned', async () => {
+    const memory = new Promise<void>(() => {});
+    const h = harness({ chain: [{ providerId: 'anthropic', modelId: 'claude-sonnet' }, { providerId: 'openai', modelId: 'gpt-5' }], memory });
     try {
       h.turn('TURN_SUBMITTED', { turnId: 't1', prompt: ASK });
       h.advance(40_000);
       h.turn('TURN_ERROR', { turnId: 't1', error: 'Provider returned HTTP 502', stopReason: 'provider_error' });
-      await flush();
+      expect(h.retries).toHaveLength(1);
       expect(h.desktop).toHaveLength(0);
-      h.fireGrace();
+      h.retry()?.abandon();
+      h.retry()?.abandon();
       expect(h.desktop).toEqual([{ title: ASK, body: 'Failed after 40s: Provider returned HTTP 502' }]);
       expect(h.terminal).toHaveLength(1);
     } finally { h.close(); }
@@ -371,137 +369,76 @@ describe('one notice per user turn across a provider failover', () => {
 });
 
 
-describe('async error reading shares the one-turn notice owner', () => {
+describe('failover does not wait on a reading of the error', () => {
   const chain = [{ providerId: 'openai', modelId: 'gpt-5' }];
-  function delayedReading() {
-    let release!: () => void;
-    const pending = new Promise<void>(resolve => { release = resolve; });
-    const previous = installJudgmentPort({ model: 'jev-1.13.0', async ask() { await pending; throw new Error('reader unavailable'); } });
-    return { release, restore: () => { release(); installJudgmentPort(previous); } };
+  /** A decision model that never answers: nothing on the failover path may wait for it. */
+  function silentModel() {
+    const previous = installJudgmentPort({ ...fakePort(() => { throw new Error('unexpected question'); }).port, ask: () => new Promise<never>(() => {}) });
+    return () => { installJudgmentPort(previous); };
   }
   for (const synchronousRetry of [false, true]) {
-    test(`a delayed reading with ${synchronousRetry ? 'synchronous' : 'asynchronous'} retry keeps one timed user turn`, async () => {
-      const read = delayedReading(); const h = harness({ chain, synchronousRetry });
+    test(`a ${synchronousRetry ? 'synchronous' : 'later'} retry starts at once and keeps one timed user turn`, async () => {
+      const restore = silentModel(); const h = harness({ chain, synchronousRetry });
       try {
         h.turn('TURN_SUBMITTED', { turnId: 'first', prompt: ASK }); h.advance(40_000);
-        h.turn('TURN_ERROR', { turnId: 'first', error: 'first provider failed' }); await flush();
-        expect(h.desktop).toEqual([]); expect(h.terminal).toEqual([]); expect(h.retries).toEqual([]);
-        read.release(); await flush(); expect(h.retries).toHaveLength(1); expect(h.desktop).toEqual([]);
+        h.turn('TURN_ERROR', { turnId: 'first', error: 'first provider failed' });
+        expect(h.retries).toHaveLength(1); expect(h.desktop).toEqual([]); expect(h.terminal).toEqual([]);
         if (!synchronousRetry) h.turn('TURN_SUBMITTED', { turnId: 'later-retry', prompt: ASK });
         h.advance(20_000);
         h.turn('TURN_COMPLETED', { turnId: synchronousRetry ? 'sync-retry' : 'later-retry', response: 'done', stopReason: 'completed' }); await flush();
         expect(h.desktop).toEqual([{ title: ASK, body: 'Done in 1m' }]); expect(h.terminal).toHaveLength(1);
-      } finally { h.close(); read.restore(); }
+      } finally { h.close(); restore(); }
     });
   }
-  test('cancelling while the read is pending emits only cancellation and never retries', async () => {
-    const read = delayedReading(); const h = harness({ chain });
+  test('the real cancel action ends a failover whose retry has not submitted, and it never submits', async () => {
+    let release!: () => void;
+    const memory = new Promise<void>(resolve => { release = resolve; });
+    const h = harness({ chain, memory });
     try {
       h.turn('TURN_SUBMITTED', { turnId: 'first', prompt: ASK }); h.advance(40_000);
-      h.turn('TURN_ERROR', { turnId: 'first', error: 'first failed' }); await flush();
-      h.turn('TURN_CANCEL', { turnId: 'first', reason: 'User cancelled' });
-      read.release(); await flush();
-      expect(h.retries).toEqual([]); expect(h.desktop).toHaveLength(1); expect(h.desktop[0]?.body).toContain('Cancelled');
-    } finally { h.close(); read.restore(); }
+      h.turn('TURN_ERROR', { turnId: 'first', error: 'first failed', stopReason: 'provider_error' });
+      expect(h.retries).toHaveLength(1);
+      h.cancelGeneration();
+      expect(h.abort).toHaveBeenCalledTimes(1);
+      expect(h.retry()?.signal.aborted).toBe(true);
+      release(); await flush();
+      expect(h.submittedAfterMemory()).toBe(0);
+      expect(h.desktop).toHaveLength(1); expect(h.desktop[0]?.body).toContain('Cancelled');
+    } finally { release(); h.close(); }
   });
-  test('a new user submission cancels the old hold and owns its own completion', async () => {
-    const read = delayedReading(); const h = harness({ chain });
+  test('a new user submission replaces the failing-over turn, which is not told', async () => {
+    let release!: () => void;
+    const memory = new Promise<void>(resolve => { release = resolve; });
+    const h = harness({ chain, memory });
     try {
       h.turn('TURN_SUBMITTED', { turnId: 'first', prompt: ASK }); h.advance(40_000);
-      h.turn('TURN_ERROR', { turnId: 'first', error: 'first failed' }); await flush();
-      h.streamWiring.clearFailoverVisited(); h.turn('TURN_SUBMITTED', { turnId: 'new', prompt: 'New work' });
-      read.release(); await flush(); h.advance(35_000);
+      h.turn('TURN_ERROR', { turnId: 'first', error: 'first failed', stopReason: 'provider_error' });
+      h.streamWiring.startNewTurn(); h.turn('TURN_SUBMITTED', { turnId: 'new', prompt: 'New work' });
+      release(); await flush(); h.advance(35_000);
       h.turn('TURN_COMPLETED', { turnId: 'new', response: 'done', stopReason: 'completed' }); await flush();
-      expect(h.retries).toEqual([]); expect(h.desktop).toEqual([{ title: 'New work', body: 'Done in 35s' }]);
-    } finally { h.close(); read.restore(); }
+      expect(h.submittedAfterMemory()).toBe(0);
+      expect(h.desktop).toEqual([{ title: 'New work', body: 'Done in 35s' }]);
+    } finally { release(); h.close(); }
   });
-  test('a retry that cannot be submitted releases its held failure exactly once', async () => {
-    const read = delayedReading(); const h = harness({ chain, retryMissing: true });
+  test('a retry that cannot be submitted tells the failure once, at once', () => {
+    const h = harness({ chain, retryMissing: true });
     try {
       h.turn('TURN_SUBMITTED', { turnId: 'first', prompt: ASK }); h.advance(40_000);
-      h.turn('TURN_ERROR', { turnId: 'first', error: 'first failed' }); await flush(); expect(h.desktop).toEqual([]);
-      read.release(); await flush(); expect(h.desktop).toEqual([{ title: ASK, body: 'Failed after 40s: first failed' }]);
-    } finally { h.close(); read.restore(); }
+      h.turn('TURN_ERROR', { turnId: 'first', error: 'first failed', stopReason: 'provider_error' });
+      expect(h.desktop).toEqual([{ title: ASK, body: 'Failed after 40s: first failed' }]);
+    } finally { h.close(); }
   });
-  test('the turn owner grace deadline revokes a still-pending retry', async () => {
-    const read = delayedReading(); const h = harness({ chain, graceMs: GRACE_MS });
+  test('a submitted retry keeps its turn: a stale cancel of the failed attempt changes nothing', async () => {
+    const h = harness({ chain, synchronousRetry: true });
     try {
       h.turn('TURN_SUBMITTED', { turnId: 'first', prompt: ASK }); h.advance(40_000);
-      h.turn('TURN_ERROR', { turnId: 'first', error: 'first failed' }); await flush();
-      expect(h.desktop).toHaveLength(0); h.fireGrace(); expect(h.desktop).toHaveLength(1); read.release(); await flush();
-      expect(h.retries).toEqual([]); expect(h.desktop).toHaveLength(1);
-    } finally { h.close(); read.restore(); }
+      h.turn('TURN_ERROR', { turnId: 'first', error: 'failed', stopReason: 'provider_error' });
+      expect(h.retries).toHaveLength(1); expect(h.retry()?.signal.aborted).toBe(false);
+      expect(h.streamWiring.cancelPendingRecovery()).toBe(false);
+      h.turn('TURN_CANCEL', { turnId: 'first', reason: 'stale cancel' });
+      expect(h.terminal).toEqual([]);
+      h.advance(20_000); h.turn('TURN_COMPLETED', { turnId: 'sync-retry', response: 'done', stopReason: 'completed' }); await flush();
+      expect(h.retry()?.signal.aborted).toBe(false); expect(h.desktop).toEqual([{ title: ASK, body: 'Done in 1m' }]);
+    } finally { h.close(); }
   });
-});
-
-test('an accepted failover cannot submit after terminal grace while memory preparation was pending', async () => {
-  const previous = installJudgmentPort({ model: 'jev-1.13.0', async ask() { throw new Error('Synthetic reading unavailable'); } });
-  let release!: () => void;
-  const memory = new Promise<void>(resolve => { release = resolve; });
-  const h = harness({ chain: [{ providerId: 'openai', modelId: 'gpt-5' }], graceMs: GRACE_MS, memory });
-  try {
-    h.turn('TURN_SUBMITTED', { turnId: 'first', prompt: ASK }); h.advance(40_000);
-    h.turn('TURN_ERROR', { turnId: 'first', error: 'Synthetic provider error' });
-    await flush();
-    expect(h.retries).toHaveLength(1);
-    expect(h.authority()).toBe(true);
-    expect(h.submittedAfterMemory()).toBe(0);
-    h.fireGrace();
-    expect(h.terminal).toHaveLength(1);
-    expect(h.desktop).toHaveLength(1);
-    expect(h.desktop[0]?.body).toContain('Failed');
-    expect(h.signal()?.aborted).toBe(true);
-    release(); await flush();
-    expect(h.submittedAfterMemory()).toBe(0);
-  } finally { release(); h.close(); installJudgmentPort(previous); }
-});
-
-
-test('the real cancel action revokes an accepted failover while memory preparation is pending', async () => {
-  const previous = installJudgmentPort({ model: 'jev-1.13.0', async ask() { throw new Error('Synthetic reading unavailable'); } });
-  let release!: () => void;
-  const memory = new Promise<void>(resolve => { release = resolve; });
-  const h = harness({ chain: [{ providerId: 'openai', modelId: 'gpt-5' }], graceMs: GRACE_MS, memory });
-  try {
-    h.turn('TURN_SUBMITTED', { turnId: 'first', prompt: ASK }); h.advance(40_000);
-    h.turn('TURN_ERROR', { turnId: 'first', error: 'Synthetic provider error' });
-    await flush();
-    expect(h.retries).toHaveLength(1);
-    expect(h.submittedAfterMemory()).toBe(0);
-    h.cancelGeneration();
-    expect(h.abort).toHaveBeenCalledTimes(1);
-    release(); await flush();
-    expect(h.submittedAfterMemory()).toBe(0);
-  } finally { release(); h.close(); installJudgmentPort(previous); }
-});
-
-
-test('the real cancel action revokes the pending reading while the platform is idle', async () => {
-  let release!: () => void;
-  const pending = new Promise<void>(resolve => { release = resolve; });
-  const previous = installJudgmentPort({ model: 'jev-1.13.0', async ask() { await pending; throw new Error('reading unavailable'); } });
-  const h = harness({ chain: [{ providerId: 'openai', modelId: 'gpt-5' }] });
-  try {
-    h.turn('TURN_SUBMITTED', { turnId: 'first', prompt: ASK }); h.advance(40_000);
-    h.turn('TURN_ERROR', { turnId: 'first', error: 'provider failed' }); await flush();
-    expect(h.retries).toEqual([]); h.cancelGeneration(); expect(h.abort).toHaveBeenCalledTimes(1);
-    release(); await flush();
-    expect(h.retries).toEqual([]); expect(h.terminal).toHaveLength(1); expect(h.desktop[0]?.body).toContain('Cancelled');
-  } finally { release(); h.close(); installJudgmentPort(previous); }
-});
-
-
-test('successful synchronous submission transfers the old hold without aborting the newer turn', async () => {
-  const previous = installJudgmentPort({ model: 'jev-1.13.0', async ask() { throw new Error('reading unavailable'); } });
-  const h = harness({ chain: [{ providerId: 'openai', modelId: 'gpt-5' }], synchronousRetry: true });
-  try {
-    h.turn('TURN_SUBMITTED', { turnId: 'first', prompt: ASK }); h.advance(40_000);
-    h.turn('TURN_ERROR', { turnId: 'first', error: 'failed' }); await flush();
-    expect(h.retries).toHaveLength(1); expect(h.signal()?.aborted).toBe(false);
-    expect(h.streamWiring.cancelPendingRecovery()).toBe(false);
-    h.turn('TURN_CANCEL', { turnId: 'first', reason: 'stale cancel' });
-    expect(h.signal()?.aborted).toBe(false); expect(h.terminal).toEqual([]);
-    h.advance(20_000); h.turn('TURN_COMPLETED', { turnId: 'sync-retry', response: 'done', stopReason: 'completed' }); await flush();
-    expect(h.signal()?.aborted).toBe(false); expect(h.desktop).toEqual([{ title: ASK, body: 'Done in 1m' }]);
-  } finally { h.close(); installJudgmentPort(previous); }
 });

@@ -25,6 +25,7 @@ import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
 import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
 import type { ContractRunner, ContractView } from '@goodvibes-jev/engine/platform/platform/contract';
 import { contractIsActive } from './work-tree-contract.js';
+import type { SessionContractViews } from './work-tree-wiring.js';
 import type { ConversationMessageSnapshot } from '@goodvibes-jev/engine/platform/platform/core';
 import type { AgentManager, ProcessManager } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { ProcessNode, SteerResult } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
@@ -52,7 +53,9 @@ export interface SessionViewsDeps {
     /** Stop an agent and the agents it started. */
     readonly killAgent: (agentId: string) => readonly string[];
     /** Owner views stop/reply through the contract runner, never by killing a synthetic owner agent. */
-    readonly contractRunner?: Pick<ContractRunner, 'cancel' | 'reply'> & Partial<Pick<ContractRunner, 'get'>> | undefined;
+    readonly contractRunner?: Pick<ContractRunner, 'cancel' | 'reply'> | undefined;
+    /** The session's cached contract snapshot; an owner record resolves the contract it names here. */
+    readonly contracts?: Pick<SessionContractViews, 'byId'> | undefined;
     readonly mainBusy: () => boolean;
     /** The model main is serving (an agent with no model of its own runs on it). */
     readonly mainModel: () => string;
@@ -101,7 +104,7 @@ export interface SessionViewsPresentation {
     readonly createLineCache: () => Pick<MessageLineCache<ConversationRenderContext>, 'renderInto' | 'clear'>;
     /** TUI work-tree snapshots can include live hosted messages. */
     readonly preferSourceMessages: boolean;
-    /** The Agent's owner controls resolve the current runner view before its transcript adapter. */
+    /** The Agent's owner controls resolve the contract an owner record names before the owner-agent lookup. */
     readonly preferRunnerContract: boolean;
 }
 export class SessionViews implements SessionViewControls {
@@ -405,12 +408,12 @@ export class SessionViews implements SessionViewControls {
         return true;
     }
     private contractOf(agentId: string): ContractView | undefined {
-        // Chips, breadcrumbs and tab cycling call this repeatedly. The work-tree
-        // source omits the repository input snapshot; runner.get clones it in full.
+        // Chips, breadcrumbs and tab cycling call this several times per agent per
+        // frame: every path is a map read into the cached snapshot, never a copy.
         const sources = this.deps.conversation.getWorkTreeSources();
         if (this.presentation.preferRunnerContract) {
             const record = this.deps.agentManager.getStatus(agentId);
-            const current = record?.contractRole === 'owner' && record.contractId ? this.deps.contractRunner?.get?.(record.contractId) : null;
+            const current = record?.contractRole === 'owner' && record.contractId ? this.deps.contracts?.byId(record.contractId) : undefined;
             if (current)
                 return current;
         }

@@ -23,6 +23,8 @@ import type { WireStreamEventMetricsOptions, StreamMetrics } from '../../core/st
 import { wireStreamEventMetrics } from '../../core/stream-event-wiring.ts';
 import { createFailoverTurnState } from '../../core/active-model-identity.ts';
 
+type RetryArgs = Parameters<NonNullable<WireStreamEventMetricsOptions['retryTurn']>>;
+
 // ---------------------------------------------------------------------------
 // Minimal event bus stub
 // ---------------------------------------------------------------------------
@@ -195,9 +197,10 @@ function makeRestoringOptions(
     // As in main.ts: retryTurn posts the notice through the userReceipt
     // channel after rolling the failed turn's transcript back.
     retryTurn: overrides.retryTurn
-      ? (notice?: string) => {
+      ? (...args: RetryArgs) => {
+        const [notice] = args;
         if (notice) { messages.push(notice); receipts.push(notice); }
-        overrides.retryTurn!(notice);
+        overrides.retryTurn!(...args);
         return true; // as in main.ts: a pre-submission snapshot existed, the turn was re-submitted
       }
       : undefined,
@@ -227,7 +230,7 @@ function makeOptions(
     // by the wiring beforehand. Wrapping AFTER the spread keeps each test's own
     // retryTurn mock, and its call-count assertions, intact.
     retryTurn: overrides.retryTurn
-      ? (notice?: string) => { if (notice) messages.push(notice); overrides.retryTurn!(notice); return true; }
+      ? (...args: RetryArgs) => { const [notice] = args; if (notice) messages.push(notice); overrides.retryTurn!(...args); return true; }
       : undefined,
   };
 }
@@ -606,8 +609,8 @@ describe('wireStreamEventMetrics: synthetic node skipped in failover', () => {
 // Tests: retryTurn context + no duplicate message (Issue 2 + 4)
 // ---------------------------------------------------------------------------
 
-describe('wireStreamEventMetrics: clearFailoverVisited on new submission', () => {
-  test('clearFailoverVisited resets visited set so a new turn can failover normally', async () => {
+describe('wireStreamEventMetrics: startNewTurn on new submission', () => {
+  test('startNewTurn resets the visited set so a new turn can failover normally', async () => {
     const turns = makeTurnBus();
     const tools = makeToolBus();
     const retryTurn = makeRetryTurnMock();
@@ -619,7 +622,7 @@ describe('wireStreamEventMetrics: clearFailoverVisited on new submission', () =>
       ],
     });
     const opts = makeOptions(turns, tools, { providerOptimizer: optimizer, retryTurn });
-    const { clearFailoverVisited } = wireStreamEventMetrics(opts);
+    const { startNewTurn } = wireStreamEventMetrics(opts);
 
     // Turn 1: failover to openai (visited: anthropic + openai).
     turns.emitTurnError('error 1');
@@ -627,7 +630,7 @@ describe('wireStreamEventMetrics: clearFailoverVisited on new submission', () =>
     expect(retryTurn).toHaveBeenCalledTimes(1);
 
     // Simulate new user submission clearing the set (without TURN_COMPLETED).
-    clearFailoverVisited();
+    startNewTurn();
 
     // Turn 2: should be able to failover to openai again (fresh visited set).
     turns.emitTurnError('error 2');
@@ -829,13 +832,13 @@ describe('wireStreamEventMetrics: configured selection is restored at turn end',
     const optimizer = makeOptimizer({ enabled: true, chain: twoProviderChain() });
     const { options, providerRegistry, configuredRegistryKey } =
       makeRestoringOptions(turns, tools, { providerOptimizer: optimizer, retryTurn: () => true });
-    const { clearFailoverVisited } = wireStreamEventMetrics(options);
+    const { startNewTurn } = wireStreamEventMetrics(options);
 
     turns.emitTurnError('provider error');
     await flushErrorNotices();
     expect(providerRegistry.currentKey).toBe('openai:gpt-5');
 
-    clearFailoverVisited();
+    startNewTurn();
 
     expect(providerRegistry.currentKey).toBe(configuredRegistryKey);
   });
@@ -1029,8 +1032,8 @@ describe('wireStreamEventMetrics: failover notice reaches the conversation uncon
     turns.emitTurnError('rate limit exceeded');
     await flushErrorNotices();
 
-    const notice = messages.find((m) => m.startsWith('[Failover] anthropic ->'));
-    expect(notice).toContain('billing:');
+    // The billing line follows the switch on its own line; failover does not wait for it.
+    const notice = messages.find((m) => m.startsWith('[Failover] billing:'));
     expect(notice).toContain('Subscription');
     expect(notice).toContain('billing class changed');
   });
@@ -1052,7 +1055,7 @@ describe('wireStreamEventMetrics: failover notice reaches the conversation uncon
     turns.emitTurnError('rate limit exceeded');
     await flushErrorNotices();
 
-    expect(messages.find((m) => m.startsWith('[Failover] anthropic ->'))).toContain('Unknown');
+    expect(messages.find((m) => m.startsWith('[Failover] billing:'))).toBe('[Failover] billing: Unknown → Unknown');
   });
 });
 

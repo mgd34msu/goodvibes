@@ -7,6 +7,7 @@ import {
   runVoiceSetupWithProgress,
   VOICE_SETUP_ANNOUNCEMENT,
   type VoiceProvisionGatewayResolution,
+  type VoiceStatusRead,
 } from '../../core/voice-provision-gateway.ts';
 import type { VoiceRuntimeStatusResult, VoiceLocalInstallResult } from '../../core/voice-provision-status.ts';
 import { resolveWakeRuntimeSettings } from '@goodvibes-jev/engine/platform/platform/voice/wake/runtime';
@@ -33,12 +34,16 @@ const RECEIPT: VoiceLocalInstallResult = {
   configured: { set: [{ key: 'voice.local.ttsEngine', value: 'piper' }], skipped: [] },
 } as VoiceLocalInstallResult;
 
-function readyResolution(over: { status?: VoiceRuntimeStatusResult; install?: VoiceLocalInstallResult } = {}): VoiceProvisionGatewayResolution {
+const finished = (receipt: VoiceLocalInstallResult = RECEIPT): VoiceStatusRead => ({ ...STATUS, lastInstall: { startedAt: 1, finishedAt: 2, receipt } });
+const started = async () => ({ kind: 'started', startedAt: 1, joined: false }) as const;
+const noWait = { pollMs: 0, sleep: async () => {} };
+
+function readyResolution(over: { status?: VoiceStatusRead } = {}): VoiceProvisionGatewayResolution {
   return {
     available: true,
     gateway: {
-      fetchStatus: async () => over.status ?? STATUS,
-      runInstall: async () => over.install ?? RECEIPT,
+      fetchStatus: async () => over.status ?? finished(),
+      startInstall: started,
     },
   };
 }
@@ -48,7 +53,7 @@ function failingResolution(error: unknown): VoiceProvisionGatewayResolution {
     available: true,
     gateway: {
       fetchStatus: async () => { throw error; },
-      runInstall: async () => { throw error; },
+      startInstall: async () => { throw error; },
     },
   };
 }
@@ -66,13 +71,13 @@ describe('classifyVoiceProvisionError', () => {
 
 describe('renderVoiceProvision: mocked daemon (injected resolution)', () => {
   test('status: available renders the runtime snapshot', async () => {
-    const out = await renderVoiceProvision('status', readyResolution());
+    const out = await renderVoiceProvision('status', readyResolution({ status: STATUS }));
     expect(out).toContain('Local Voice Runtime');
     expect(out).toContain('setup download: 86 MB');
   });
 
   test('setup: available renders the install receipt', async () => {
-    const out = await renderVoiceProvision('setup', readyResolution());
+    const out = await renderVoiceProvision('setup', readyResolution(), noWait);
     expect(out).toContain('Local Voice Setup: receipt');
     expect(out).toContain('result: local voice provisioned');
     expect(out).toContain('piper-engine: installed (25 MB)');
@@ -84,7 +89,7 @@ describe('renderVoiceProvision: mocked daemon (injected resolution)', () => {
   });
 
   test('a 501 during install renders "does not serve managed voice provisioning yet"', async () => {
-    const out = await renderVoiceProvision('setup', failingResolution(new GoodVibesError('no handler', { status: 501 })));
+    const out = await renderVoiceProvision('setup', failingResolution(new GoodVibesError('no handler', { status: 501 })), noWait);
     expect(out).toContain('does not serve managed voice provisioning yet');
   });
 
@@ -100,28 +105,22 @@ describe('runVoiceSetupWithProgress: live progress polling (no real timers)', ()
     return { ...STATUS, installInProgress: { startedAt: 1, components: [{ component, phase, ...(bytesTotal !== undefined ? { bytesTotal } : {}), ...(bytesDone !== undefined ? { bytesDone } : {}) }] } } as VoiceRuntimeStatusResult;
   }
 
-  test('polls status while the install runs and prints per-component progress, then the receipt', async () => {
+  test('starts the install, polls status for per-component progress, then prints the receipt from the status read', async () => {
     const printed: string[] = [];
-    let resolveInstall!: (r: VoiceLocalInstallResult) => void;
-    const installPromise = new Promise<VoiceLocalInstallResult>((r) => { resolveInstall = r; });
     let step = 0;
     const resolution: VoiceProvisionGatewayResolution = {
       available: true,
       gateway: {
-        runInstall: () => installPromise,
+        startInstall: started,
         fetchStatus: async () => {
           step += 1;
           if (step === 1) return progressStatus('piper-engine', 'download', 100, 50);
           if (step === 2) return progressStatus('piper-engine', 'done', 100, 100);
-          return STATUS;
+          return finished();
         },
       },
     };
-    // Fake sleep: on the 3rd tick, settle the install so the loop exits.
-    let sleeps = 0;
-    const sleep = async (): Promise<void> => { sleeps += 1; if (sleeps === 3) resolveInstall(RECEIPT); };
-
-    await runVoiceSetupWithProgress(resolution, { print: (b) => printed.push(b), sleep, pollMs: 0 });
+    await runVoiceSetupWithProgress(resolution, { print: (b) => printed.push(b), ...noWait });
 
     const text = printed.join('\n');
     expect(text).toContain('piper-engine: downloading (50 B/100 B)');
@@ -132,21 +131,46 @@ describe('runVoiceSetupWithProgress: live progress polling (no real timers)', ()
 
   test('a phase that has not changed is not re-printed (no per-poll spam)', async () => {
     const printed: string[] = [];
-    let resolveInstall!: (r: VoiceLocalInstallResult) => void;
-    const installPromise = new Promise<VoiceLocalInstallResult>((r) => { resolveInstall = r; });
+    let polls = 0;
     const resolution: VoiceProvisionGatewayResolution = {
       available: true,
       gateway: {
-        runInstall: () => installPromise,
-        // Always the SAME phase, only the first observation prints.
-        fetchStatus: async () => progressStatus('piper-engine', 'download', 100, 50),
+        startInstall: started,
+        // The SAME phase three times, then the finished run: only the first observation prints.
+        fetchStatus: async () => (++polls <= 3 ? progressStatus('piper-engine', 'download', 100, 50) : finished()),
       },
     };
-    let sleeps = 0;
-    const sleep = async (): Promise<void> => { sleeps += 1; if (sleeps === 3) resolveInstall(RECEIPT); };
-    await runVoiceSetupWithProgress(resolution, { print: (b) => printed.push(b), sleep, pollMs: 0 });
+    await runVoiceSetupWithProgress(resolution, { print: (b) => printed.push(b), ...noWait });
     const downloadingLines = printed.filter((b) => b.includes('piper-engine: downloading'));
     expect(downloadingLines).toHaveLength(1);
+  });
+
+  test('a run that stops without a receipt prints its reason', async () => {
+    const printed: string[] = [];
+    const resolution: VoiceProvisionGatewayResolution = {
+      available: true,
+      gateway: {
+        startInstall: started,
+        fetchStatus: async () => ({ ...STATUS, lastInstall: { startedAt: 1, finishedAt: 2, error: 'disk full' } }),
+      },
+    };
+    await runVoiceSetupWithProgress(resolution, { print: (b) => printed.push(b), ...noWait });
+    expect(printed.join('\n')).toContain('install failed: disk full');
+  });
+
+  test('a daemon that answers with the finished receipt (older daemon) prints it without polling', async () => {
+    const printed: string[] = [];
+    let polls = 0;
+    const resolution: VoiceProvisionGatewayResolution = {
+      available: true,
+      gateway: {
+        startInstall: async () => ({ kind: 'finished', receipt: RECEIPT }),
+        fetchStatus: async () => { polls++; return STATUS; },
+      },
+    };
+    await runVoiceSetupWithProgress(resolution, { print: (b) => printed.push(b), ...noWait });
+    expect(printed.join('\n')).toContain('Local Voice Setup: receipt');
+    expect(polls).toBe(0);
   });
 
   test('unavailable resolution prints the honest reason and never polls', async () => {
@@ -160,7 +184,7 @@ describe('runVoiceSetupWithProgress: live progress polling (no real timers)', ()
     const resolution: VoiceProvisionGatewayResolution = {
       available: true,
       gateway: {
-        runInstall: async () => { throw new GoodVibesError('no handler', { status: 501 }); },
+        startInstall: async () => { throw new GoodVibesError('no handler', { status: 501 }); },
         fetchStatus: async () => STATUS,
       },
     };

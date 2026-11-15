@@ -3,9 +3,11 @@
  *
  * `voice.local.status` reads the managed runtime state (not-provisioned /
  * partial / provisioned / unsupported-platform, with a size-labeled offer).
- * `voice.local.install` is the one-act setup: it provisions the piper engine +
- * a default voice and pre-configures the voice.local.* keys (never overwriting a
- * user-set value), so local voice works immediately after.
+ * `voice.local.install` starts the one-act setup and answers at once: the run
+ * provisions the piper engine + a default voice and pre-configures the
+ * voice.local.* keys (never overwriting a user-set value), and its receipt is
+ * read from `voice.local.status` (`lastInstall`). No request is held open for
+ * the download, so a long install is never cut off by the server's idle limit.
  *
  * The three `voice.wake.*` verbs are here rather than in their own group because
  * they are the same capability, provisioning a pinned, checksum-verified voice
@@ -29,9 +31,8 @@ const NULLABLE_STRING = { anyOf: [STRING_SCHEMA, { type: 'null' }] };
 
 /**
  * Live progress of the ACTIVE voice.local.install run, served inside the
- * status read while, and only while, an install is running. The install verb
- * is plain request/response, so surfaces poll status during the provision to
- * render real per-component progress instead of busy→receipt.
+ * status read while, and only while, an install is running. Surfaces poll
+ * status during the provision to render real per-component progress.
  */
 const INSTALL_IN_PROGRESS_SCHEMA = objectSchema({
   startedAt: NUMBER_SCHEMA,
@@ -46,30 +47,6 @@ const INSTALL_IN_PROGRESS_SCHEMA = objectSchema({
     }, ['component', 'phase']),
   },
 }, ['startedAt', 'components']);
-
-const RUNTIME_STATUS_SCHEMA = objectSchema({
-  platform: NULLABLE_STRING,
-  state: { type: 'string', enum: ['not-provisioned', 'partial', 'provisioned', 'unsupported-platform'] },
-  tts: objectSchema({
-    engine: STRING_SCHEMA,
-    binaryPresent: BOOLEAN_SCHEMA,
-    voicePresent: BOOLEAN_SCHEMA,
-    binaryPath: STRING_SCHEMA,
-    modelPath: STRING_SCHEMA,
-  }, ['engine', 'binaryPresent', 'voicePresent', 'binaryPath', 'modelPath']),
-  stt: objectSchema({
-    engine: STRING_SCHEMA,
-    supported: BOOLEAN_SCHEMA,
-    state: { type: 'string', enum: ['not-provisioned', 'partial', 'provisioned', 'unsupported-platform'] },
-    binaryPresent: BOOLEAN_SCHEMA,
-    modelPresent: BOOLEAN_SCHEMA,
-    binaryPath: STRING_SCHEMA,
-    modelPath: STRING_SCHEMA,
-    reason: STRING_SCHEMA,
-  }, ['engine', 'supported', 'state', 'binaryPresent', 'modelPresent', 'binaryPath', 'modelPath']),
-  offerBytes: NULLABLE_NUMBER,
-  installInProgress: INSTALL_IN_PROGRESS_SCHEMA,
-}, ['platform', 'state', 'tts', 'stt', 'offerBytes']);
 
 const INSTALL_RESULT_SCHEMA = objectSchema({
   operationProvenance: { type: 'string', enum: ['classic'] },
@@ -120,6 +97,51 @@ const INSTALL_RESULT_SCHEMA = objectSchema({
     superseded: { type: 'array', items: objectSchema({ key: STRING_SCHEMA, previousValue: STRING_SCHEMA, value: STRING_SCHEMA }, ['key', 'previousValue', 'value']) },
   }, ['set', 'skipped']),
 }, ['provisioned', 'platform', 'tts', 'stt', 'components', 'configured']);
+
+/**
+ * The most recent install run this daemon finished, served on the status read
+ * after the run ends: its receipt, or why it stopped without one. An install
+ * answers at once and runs on in the daemon, so this is where its result is read.
+ */
+const LAST_INSTALL_SCHEMA = objectSchema({
+  startedAt: NUMBER_SCHEMA,
+  finishedAt: NUMBER_SCHEMA,
+  receipt: INSTALL_RESULT_SCHEMA,
+  error: STRING_SCHEMA,
+}, ['startedAt', 'finishedAt']);
+
+/** What voice.local.install answers at once: the run it started, or the one already running that it joined. */
+const INSTALL_START_SCHEMA = objectSchema({
+  state: { type: 'string', enum: ['running'] },
+  startedAt: NUMBER_SCHEMA,
+  joined: BOOLEAN_SCHEMA,
+}, ['state', 'startedAt', 'joined']);
+
+const RUNTIME_STATUS_SCHEMA = objectSchema({
+  platform: NULLABLE_STRING,
+  state: { type: 'string', enum: ['not-provisioned', 'partial', 'provisioned', 'unsupported-platform'] },
+  tts: objectSchema({
+    engine: STRING_SCHEMA,
+    binaryPresent: BOOLEAN_SCHEMA,
+    voicePresent: BOOLEAN_SCHEMA,
+    binaryPath: STRING_SCHEMA,
+    modelPath: STRING_SCHEMA,
+  }, ['engine', 'binaryPresent', 'voicePresent', 'binaryPath', 'modelPath']),
+  stt: objectSchema({
+    engine: STRING_SCHEMA,
+    supported: BOOLEAN_SCHEMA,
+    state: { type: 'string', enum: ['not-provisioned', 'partial', 'provisioned', 'unsupported-platform'] },
+    binaryPresent: BOOLEAN_SCHEMA,
+    modelPresent: BOOLEAN_SCHEMA,
+    binaryPath: STRING_SCHEMA,
+    modelPath: STRING_SCHEMA,
+    reason: STRING_SCHEMA,
+  }, ['engine', 'supported', 'state', 'binaryPresent', 'modelPresent', 'binaryPath', 'modelPath']),
+  offerBytes: NULLABLE_NUMBER,
+  installInProgress: INSTALL_IN_PROGRESS_SCHEMA,
+  lastInstall: LAST_INSTALL_SCHEMA,
+}, ['platform', 'state', 'tts', 'stt', 'offerBytes']);
+
 
 /** Content-verified state of one wake artifact on disk. */
 const WAKE_ARTIFACT_SCHEMA = objectSchema({
@@ -192,7 +214,7 @@ export const builtinGatewayVoiceSetupMethodDescriptors: readonly GatewayMethodDe
     id: 'voice.local.status',
     title: 'Get Managed Local-Voice Runtime State',
     description:
-      'Whether the managed local voice runtime (piper TTS + a default voice) is installed: not-provisioned (with a size-labeled offer), partial, provisioned, or unsupported-platform. STT (whisper.cpp) reports its own managed state: goodvibes builds and pins the whisper.cpp bundle per platform (no official prebuilt exists; provisioning never compiles on your machine), so where a pinned bundle exists STT provisions like TTS, and elsewhere it reports unsupported honestly. While a voice.local.install run is active, the response also carries installInProgress, the live per-component progress (phase, byte sizes where known) of that run, so surfaces poll this read during the install to render real progress; the section is absent when no install is running. Read-only.',
+      'Whether the managed local voice runtime (piper TTS + a default voice) is installed: not-provisioned (with a size-labeled offer), partial, provisioned, or unsupported-platform. STT (whisper.cpp) reports its own managed state: goodvibes builds and pins the whisper.cpp bundle per platform (no official prebuilt exists; provisioning never compiles on your machine), so where a pinned bundle exists STT provisions like TTS, and elsewhere it reports unsupported honestly. While a voice.local.install run is active, the response also carries installInProgress, the live per-component progress (phase, byte sizes where known) of that run, so surfaces poll this read during the install to render real progress; the section is absent when no install is running. Once a run ends, lastInstall carries its receipt (or the reason it stopped without one) with the run\'s start and finish times; a surface that started an install reads its result here. Read-only.',
     category: 'health',
     scopes: ['read:health'],
     http: { method: 'GET', path: '/api/voice/local/status' },
@@ -203,14 +225,14 @@ export const builtinGatewayVoiceSetupMethodDescriptors: readonly GatewayMethodDe
     id: 'voice.local.install',
     title: 'Install the Managed Local-Voice Runtime',
     description:
-      'One-act setup: download + checksum-verify the piper TTS engine, a default voice, and (where a pinned goodvibes-built bundle exists) the whisper.cpp STT engine with its default model into the goodvibes-managed directory, then point the voice.local.* config keys at the managed install, never overwriting a key you already set to a custom value (skipped keys are reported). The physical round trip reports its actual transcript and comparison basis; Classic uses native ordered word tokens without semantic verification. Downloads only when you ask; a failed or checksum-mismatched download keeps nothing.',
+      'Starts the one-act setup and answers at once with the run it started (or the run already in progress it joined); the install runs on in the daemon, voice.local.status serves its live progress as installInProgress and, when it ends, its receipt as lastInstall. The setup: download + checksum-verify the piper TTS engine, a default voice, and (where a pinned goodvibes-built bundle exists) the whisper.cpp STT engine with its default model into the goodvibes-managed directory, then point the voice.local.* config keys at the managed install, never overwriting a key you already set to a custom value (skipped keys are reported). The physical round trip reports its actual transcript and comparison basis; Classic uses native ordered word tokens without semantic verification. Downloads only when you ask; a failed or checksum-mismatched download keeps nothing.',
     category: 'health',
     scopes: ['write:config'],
     // Downloads and installs executables and rewrites voice.* config: admin, like config.set.
     access: 'admin',
     http: { method: 'POST', path: '/api/voice/local/install' },
     inputSchema: objectSchema({}, []),
-    outputSchema: INSTALL_RESULT_SCHEMA,
+    outputSchema: INSTALL_START_SCHEMA,
   }),
   methodDescriptor({
     id: 'voice.wake.status',

@@ -5,10 +5,11 @@
  *
  * What stays code: a 401 is auth, a 429 is a rate limit, and a connection
  * errno (ECONNREFUSED, ETIMEDOUT, ENOTFOUND and the rest of the fixed errno
- * table) is a network failure. What the wording means is read in one request:
- * the engine failure reading (engine.failure-reading) fanned out with
- * routing.user-error, which asks whether a subscription session has ended.
- * The regex ladder over a status, name, message and cause probe is gone.
+ * table) is a network failure. `describeUserError(err)` with no reading is that
+ * structural line, available at once, so a surface never waits on a model to
+ * show an error. What the wording means is read in one request, which may only
+ * add to that line: the engine failure reading (engine.failure-reading) fanned
+ * out with routing.user-error, which asks whether a subscription session has ended.
  */
 import { categoryForCode, failureReading, failureState, judgmentPort, type FailureEvidence } from '@goodvibes-jev/engine/errors';
 import { defineBattery, fanOut, STAKES_BANDS, yesNo, type YesNoReading } from '@goodvibes-jev/judgment';
@@ -94,9 +95,11 @@ export interface UserErrorReading {
 export async function readUserErrorClass(err: unknown, site = 'routing.user-error'): Promise<UserErrorReading> {
   const { evidence, causeCode } = userErrorEvidence(err);
   const fixed = structuralClass(evidence, causeCode);
-  return decisionOrClassic(() => readDecisionUserErrorClass(evidence, fixed, site), () => ({
-    kind: fixed ?? 'generic', sessionEnded: false, operationProvenance: 'classic', semanticAssessment: 'not-evaluated',
-  }));
+  return decisionOrClassic(() => readDecisionUserErrorClass(evidence, fixed, site), () => structuralReading(fixed));
+}
+
+function structuralReading(fixed: ErrorClass | undefined): UserErrorReading {
+  return { kind: fixed ?? 'generic', sessionEnded: false, operationProvenance: 'classic', semanticAssessment: 'not-evaluated' };
 }
 
 async function readDecisionUserErrorClass(evidence: FailureEvidence, fixed: ErrorClass | undefined, site: string): Promise<UserErrorReading> {
@@ -115,8 +118,16 @@ async function readDecisionUserErrorClass(evidence: FailureEvidence, fixed: Erro
   return { kind, sessionEnded: kind === 'auth' && sessionEnded };
 }
 
-/** The TUI's line and action for each class. */
-export function describeUserError(err: unknown, reading: UserErrorReading): UserFacingError {
+/**
+ * The TUI's line and action for each class. Without a reading, the class is the
+ * one structure fixes (status and errno), with no model request: the line a
+ * surface shows the moment the error arrives.
+ */
+export function describeUserError(err: unknown, reading?: UserErrorReading): UserFacingError {
+  if (reading === undefined) {
+    const { evidence, causeCode } = userErrorEvidence(err);
+    reading = structuralReading(structuralClass(evidence, causeCode));
+  }
   switch (reading.kind) {
     case 'auth':
       if (reading.operationProvenance === 'classic') return {

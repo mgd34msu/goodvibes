@@ -93,7 +93,7 @@ describe('tailscale verbs never block the daemon', () => {
 describe('voice setup refusals carry caller-error statuses', () => {
   const service: VoiceSetupGatewayService = {
     status: () => ({}) as never,
-    install: async (options) => { options?.assertCurrent?.(); return {} as never; },
+    startInstall: (options) => { options?.assertCurrent?.(); return { state: 'running', startedAt: 1, joined: false }; },
     wakeStatus: () => ({}),
     wakeProvision: async () => ({}),
     wakeModelChunk: () => ({}) as never,
@@ -112,7 +112,7 @@ describe('voice setup refusals carry caller-error statuses', () => {
     expect(error.field).toBe('offset');
   });
 
-  test('an install whose write authority was revoked mid-run is a 403', async () => {
+  test('an install whose write authority was revoked is a 403', async () => {
     const invocation = { signal: undefined, isAuthorized: () => false, context: {}, body: {} } as unknown as GatewayMethodInvocation;
     const error = await refusal(() => createVoiceInstallHandler(service)(invocation));
     expect(error.status).toBe(403);

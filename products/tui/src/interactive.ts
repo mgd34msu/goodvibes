@@ -39,8 +39,7 @@ import {
 import './input/command-registry.ts';
 
 import { requestedEffortLevel } from './providers/reasoning-effort-surface.ts';
-import { wireWorkTree } from './core/work-tree-wiring.ts';
-import { createSessionContractViews } from './core/session-contract-views.ts';
+import { createSessionContractViews, wireWorkTree } from './core/work-tree-wiring.ts';
 import './input/commands.ts';
 import '@goodvibes-jev/engine/platform/platform/tools';
 import './input/input-history.ts';
@@ -97,6 +96,7 @@ import { footerTargetRows } from './renderer/footer-targets.ts';
 import { wireStreamEventMetrics, type WireStreamEventMetricsResult } from './core/stream-event-wiring.ts';
 import { createStreamMetrics, type StreamMetrics } from './core/stream-metrics.ts';
 import { wireTurnEventHandlers } from './core/turn-event-wiring.ts';
+import { createUserTurnOwner, type FailoverRetry } from './core/user-turn.ts';
 import { resolveContextStatusHint } from './renderer/context-status-hint.ts';
 import { isEffectiveDangerMode } from '@goodvibes-jev/engine/platform/platform/config';
 import { applyComposerCapture, applyAtModelDirective, shouldSendAfterCapture } from './input/composer-capture.ts';
@@ -354,8 +354,7 @@ async function main() {
     conversation,
     events: uiServices.events,
     agentManager,
-    listContracts: sessionContractViews.read,
-    onContractsChanged: (listener) => ctx.services.contractRunner.on(listener),
+    contracts: sessionContractViews,
     fleetNodes,
     pendingCallId: () => pendingPermission?.callId,
     turnActive: () => orchestrator.isThinking,
@@ -503,7 +502,7 @@ async function main() {
     const inputOptions = nativeConversationTurnInputOptions(state, spokenOutput ? createSpokenTurnInputOptions() : undefined);
     // Provider failover retains the exact same source identity and opaque permit.
     retryCtx = { count: conversation.getMessageCount(), text: state.result.text, opts: inputOptions };
-    streamResult.clearFailoverVisited();
+    streamResult.startNewTurn();
     await runNativeTurnDispatch({
       prepare: () => refreshMemoryRecallSnapshot(ctx.services),
       current,
@@ -554,7 +553,7 @@ async function main() {
     processedText = capture.text;
     if (shouldSendAfterCapture(capture, Boolean(content))) {
       // A fresh prompt supersedes provider recovery for the previous submission.
-      streamResult.clearFailoverVisited();
+      streamResult.startNewTurn();
       actionOffers.retry = null;
       const epoch = ++inputEpoch;
       submissionStatus = null;
@@ -725,6 +724,7 @@ async function main() {
   orchestratorRefs.scrollToEnd = scrollToEnd;
   const views = new SessionViews({
     contractRunner: ctx.services.contractRunner,
+    contracts: sessionContractViews,
     conversation,
     agentManager,
     processManager,
@@ -1229,12 +1229,15 @@ async function main() {
     trustPromptRef,
   });
 
+  // One owner of the user turn and its failover retries, read by the turn-end
+  // notices and the failover path alike (core/user-turn.ts).
+  const userTurn = createUserTurnOwner({ turns: uiServices.events.turns, sessionId: () => runtime.sessionId });
+  unsubs.push(() => userTurn.dispose());
   const {
     refreshGit,
     unsubs: turnUnsubs,
-    continueTurnAfterFailover,
-    beginFailoverNotice,
   } = wireTurnEventHandlers({
+    userTurn,
     events: uiServices.events,
     conversation,
     runtime,
@@ -1263,7 +1266,13 @@ async function main() {
   // Stable turn context for failover retry, set in submitInput, read by retryTurn.
   let retryCtx: { count: number; text: string; content?: ContentPart[]; opts?: Parameters<typeof orchestrator.handleUserInput>[2] } | null =
     null;
-  const retryTurn = (notice?: string, isCurrent: () => boolean = () => true, recoverySignal?: AbortSignal): boolean => {
+  /**
+   * Roll the conversation back to before the last prompt and submit it again.
+   * `failover` is the user turn's own retry when the failover path asks (the
+   * submission then continues the same user turn); without it, as from the
+   * Alt+R retry, the submission is a new user turn.
+   */
+  const resubmitLastTurn = (failover?: { readonly notice: string; readonly retry: FailoverRetry }): boolean => {
     if (!retryCtx) return false; // nothing to roll back to; the caller narrates instead
     const { count, text, content: rContent, opts: rOpts } = retryCtx;
     if (rOpts?.nativeConversationTurnPermit && !orchestrator.canRetryNativeConversationTurn(rOpts.nativeConversationTurnPermit)) {
@@ -1278,16 +1287,28 @@ async function main() {
     // that notice used to vanish before anyone could read it. The caller hands it over instead, and
     // it is posted here: after the rollback, above the prompt it explains.
     conversation.removeMessagesAfter(count);
-    if (notice) systemMessageRouter.userReceipt(notice);
+    if (failover) systemMessageRouter.userReceipt(failover.notice);
+    const retry = failover?.retry;
+    // A failover retry that never submits (cancelled, superseded, or its
+    // preparation failed) ends the user turn as failed instead of leaving it open.
+    let submitted = false;
     void runOwnedTurnRetry({
       prepare: () => refreshMemoryRecallSnapshot(ctx.services),
-      submit: () => orchestrator.handleUserInput(text, rContent, rOpts),
+      submit: () => {
+        submitted = true;
+        retry?.submitting();
+        return orchestrator.handleUserInput(text, rContent, rOpts);
+      },
       abort: () => orchestrator.abort(),
-      isCurrent,
-      signal: recoverySignal,
-    }).catch((e: unknown) => logger.debug('retryTurn', { error: summarizeError(e) }));
+      isCurrent: retry?.isCurrent ?? (() => true),
+      signal: retry?.signal,
+    }).then(() => { if (!submitted) retry?.abandon(); }, (e: unknown) => {
+      logger.debug('retryTurn', { error: summarizeError(e) });
+      retry?.abandon();
+    });
     return true;
   };
+  const retryTurn = (notice: string, retry: FailoverRetry): boolean => resubmitLastTurn({ notice, retry });
   const streamResult: WireStreamEventMetricsResult = wireStreamEventMetrics({
     events: uiServices.events,
     orchestrator,
@@ -1297,11 +1318,10 @@ async function main() {
     metrics: streamMetrics,
     getSessionId: () => runtime.sessionId,
     isActive: () => !lifecycle.isTerminalRestored(),
-    beginFailoverNotice,
+    userTurn,
     providerOptimizer: ctx.services.providerOptimizer,
     costLookup: providerRegistry,
     retryTurn,
-    onFailoverRetry: continueTurnAfterFailover,
     failoverState,
     getConfiguredRegistryKey: () => configManager.get('provider.model') as string | undefined,
     // The REQUESTED level, through the one helper every remap site reads from.
@@ -1395,7 +1415,7 @@ async function main() {
     // Alt+R retries a failed turn, Alt+J opens a started fix session; plain
     // letters always go to the composer or the open view.
     if (handleShellActionChord(data, actionOffers, {
-      retry: () => { retryTurn(); },
+      retry: () => { resubmitLastTurn(); },
       openSession: (sessionId) => { void commandContext.executeCommand?.('session', ['resume', sessionId]); },
       render,
     })) return;

@@ -6,12 +6,13 @@
  * second (and every further) concurrent caller joins the in-progress install's
  * promise instead of starting parallel multi-hundred-MB downloads.
  *
- * `status()` carries LIVE INSTALL PROGRESS: the install verb is plain
- * request/response, so during a ~209MB provision a surface would otherwise only
- * render busy→receipt. While an install runs, the provisioner's onProgress
- * stream (bytes as they land) is folded into a poll-able snapshot and status()
- * returns it as `installInProgress` (absent otherwise), surfaces poll status
- * during install; no streaming infrastructure involved.
+ * `status()` carries LIVE INSTALL PROGRESS and the LAST RESULT: while an
+ * install runs, the provisioner's onProgress stream (bytes as they land) is
+ * folded into a poll-able snapshot returned as `installInProgress`; once a run
+ * ends, its receipt (or why it stopped) is returned as `lastInstall`.
+ * `startInstall()` is what the daemon verb calls: it starts the run and returns
+ * at once, so no request is held open for a download that can outlast the
+ * server's idle limit; the surface polls status() for progress and the receipt.
  *
  * `setup()` is the one entry point for "set up voice" and "turn on the wake
  * word": it plans from what the host already has (voice/setup-chain.ts), does
@@ -78,6 +79,26 @@ export interface VoiceInstallReceipt {
   readonly notes: readonly string[];
 }
 
+/** What {@link VoiceSetupService.startInstall} returns at once: the run it started, or the one it joined. */
+export interface VoiceInstallStart {
+  readonly state: 'running';
+  /** Epoch ms the run began. */
+  readonly startedAt: number;
+  /** True when an install was already running and this call joined it. */
+  readonly joined: boolean;
+}
+
+/** The last install run that ended: its receipt, or why it stopped without one. */
+export interface VoiceInstallOutcome {
+  readonly startedAt: number;
+  readonly finishedAt: number;
+  readonly receipt?: VoiceInstallReceipt | undefined;
+  readonly error?: string | undefined;
+}
+
+/** The status read: the runtime on disk, the running install's progress, the last install's result. */
+export type VoiceSetupStatus = VoiceRuntimeStatus & { readonly lastInstall?: VoiceInstallOutcome | undefined };
+
 /** A request to set voice up, from a terminal product, the daemon or an agent. */
 export interface VoiceSetupRequest extends VoiceProofLifetime {
   readonly intent: VoiceSetupIntent;
@@ -122,8 +143,15 @@ export interface VoiceSetupServiceDeps {
 }
 
 export interface VoiceSetupService {
-  status(): VoiceRuntimeStatus;
+  status(): VoiceSetupStatus;
   install(options?: VoiceProofLifetime): Promise<VoiceInstallReceipt>;
+  /**
+   * Start the install, or join the one running, and return at once. The run's
+   * result is read from status() as `lastInstall`. `assertCurrent` is checked
+   * before the run's effects, as for install(); it throws at once when it
+   * already fails.
+   */
+  startInstall(options?: Pick<VoiceProofLifetime, 'assertCurrent'>): VoiceInstallStart;
   /** Plan voice setup from the host's facts, do what the plan says, and return the plan with what happened. */
   setup(request: VoiceSetupRequest): Promise<VoiceSetupOutcome>;
   /** Wake-word artifact state, verified by content. See runtime/wake-setup.ts. */
@@ -153,7 +181,17 @@ export function createVoiceSetupService(deps: VoiceSetupServiceDeps): VoiceSetup
   // subdirectory, so they share this service's ownership of that tree.
   const wake = createWakeSetupService({ managedVoiceRoot: deps.managedVoiceRoot });
 
-  let inFlight: Promise<VoiceInstallReceipt> | undefined;
+  let inFlight: { readonly run: Promise<VoiceInstallReceipt>; readonly startedAt: number } | undefined;
+  let lastInstall: VoiceInstallOutcome | undefined;
+  // The first request owns the shared work; its outcome is kept for status().
+  const beginRun = (request: VoiceProofLifetime): { readonly run: Promise<VoiceInstallReceipt>; readonly startedAt: number } => {
+    const startedAt = Date.now();
+    const run = runInstall(request).then(
+      (receipt) => { lastInstall = { startedAt, finishedAt: Date.now(), receipt }; return receipt; },
+      (error: unknown) => { lastInstall = { startedAt, finishedAt: Date.now(), error: error instanceof Error ? error.message : String(error) }; throw error; },
+    ).finally(() => { inFlight = undefined; });
+    return { run, startedAt };
+  };
   const runInstall = async (request: VoiceProofLifetime): Promise<VoiceInstallReceipt> => {
     assertVoiceProofCurrent(request);
     progress.begin();
@@ -363,23 +401,36 @@ export function createVoiceSetupService(deps: VoiceSetupServiceDeps): VoiceSetup
   };
 
   const service: VoiceSetupService = {
-    status(): VoiceRuntimeStatus {
+    status(): VoiceSetupStatus {
       const status = readStatus({ managedRoot: deps.managedVoiceRoot });
       const installInProgress = progress.snapshot();
-      return installInProgress ? { ...status, installInProgress } : status;
+      return {
+        ...status,
+        ...(installInProgress ? { installInProgress } : {}),
+        ...(lastInstall ? { lastInstall } : {}),
+      };
     },
     async install(options: VoiceProofLifetime = {}): Promise<VoiceInstallReceipt> {
       const request = Object.freeze({ ...options });
       assertVoiceProofCurrent(request);
       // Downloads stream to disk a network chunk at a time, so an install
       // holds no file in memory and needs no memory-pressure admission.
-      // The first request owns the shared work. Joining callers may cancel their
-      // wait, but cannot lend new authority to the original installation.
-      if (!inFlight) inFlight = runInstall(request).finally(() => { inFlight = undefined; });
-      const ownedRun = inFlight;
+      // Joining callers may cancel their wait, but cannot lend new authority
+      // to the original installation.
+      inFlight ??= beginRun(request);
+      const ownedRun = inFlight.run;
       const receipt = await executePolicyCheck(() => ownedRun, request.signal);
       assertVoiceProofCurrent(request);
       return receipt;
+    },
+    startInstall(options = {}): VoiceInstallStart {
+      const request = Object.freeze({ ...options });
+      assertVoiceProofCurrent(request);
+      const joined = inFlight !== undefined;
+      inFlight ??= beginRun(request);
+      // The outcome is read through status(); nobody awaits this run here.
+      inFlight.run.catch(() => undefined);
+      return { state: 'running', startedAt: inFlight.startedAt, joined };
     },
     setup: (request) => runSetup(request),
     wakeStatus: () => wake.status(),

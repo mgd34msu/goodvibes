@@ -158,7 +158,7 @@ When this happens, the transcript shows a notice naming both the source and dest
 [Failover] anthropic -> openai (Network error: could not reach the provider. Check your connection and retry, or switch models with /model.) [cost/1M: input $3.00→$10.00, output $15.00→$30.00]
 ```
 
-If pricing data is unavailable for either model, the notice says `[cost data unavailable]` instead of fabricating a number. When the fallback chain is exhausted (every candidate already tried this turn, or none exist), the transcript shows `[Failover] Chain exhausted: no alternative provider available.` followed by the original error, and the model selection reverts to what the user had configured for the next turn.
+If pricing data is unavailable for either model, the notice says `[cost data unavailable]` instead of fabricating a number. The error class in the notice comes from what the error itself carries (an HTTP 401 or 429, a connection error code), so the switch and the resubmission start the moment the turn fails, without waiting on any model. A second line follows once the providers' declared setup has been read, naming the billing class the switch left and joined, for example `[Failover] billing: API key → Subscription: billing class changed`; a side whose setup is not established says `Unknown`. When the fallback chain is exhausted (every candidate already tried this turn, or none exist), the transcript shows `[Failover] Chain exhausted: no alternative provider available.` followed by the original error, and the model selection reverts to what the user had configured for the next turn.
 
 ### Chain visibility in the model picker
 

@@ -6,7 +6,6 @@ import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { proveVoiceRoundTrip, type ProofEngineRunner } from '../platform/src/platform/voice/provisioning/round-trip-proof.js';
 import { createVoiceSetupService } from '../platform/src/platform/runtime/voice-setup.js';
-import { createVoiceInstallHandler } from '../platform/src/platform/control-plane/routes/voice-setup.js';
 import { readVoiceDiagnostics } from '../platform/src/platform/voice/diagnostics.js';
 
 const engine = { ttsEngine: 'piper', ttsBinary: '/managed/piper', ttsModelPath: '/managed/voice.onnx',
@@ -80,7 +79,7 @@ describe('the setup service reports the proof', () => {
     const model = decisionModel(), root = mkdtempSync(join(tmpdir(), 'voice-proof-setup-'));
     try {
       const setup = service(root, 'provisioned');
-      const receipt = await createVoiceInstallHandler(setup)({ context: {} }) as Awaited<ReturnType<typeof setup.install>>;
+      const receipt = await setup.install();
       expect(receipt).toMatchObject({ provisioned: true, proof: { proved: true, proofBasis: 'native-word-sequence' } });
       expect(readVoiceDiagnostics(root).at(-1)).toMatchObject({ ok: true, operation: 'provision-proof', proofBasis: 'native-word-sequence' });
       expect(model.requests).toHaveLength(0);

@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { createSessionContractViews } from '../../core/session-contract-views.ts';
+import { createSessionContractViews } from '../../core/work-tree-wiring.ts';
 import type { ContractRunner, ContractView } from '@goodvibes-jev/engine/platform/platform/contract';
 
 test('agent lookups reuse a detached snapshot and refresh after events and session changes', () => {
@@ -11,13 +11,17 @@ test('agent lookups reuse a detached snapshot and refresh after events and sessi
     list(filter: { sessionId?: string; includeInputSnapshot?: boolean }) {
       reads++;
       expect(filter.includeInputSnapshot).toBe(false);
-      return [{ id: 'ctr-12345678', sessionId: filter.sessionId, status }] as ContractView[];
+      return [{ id: 'ctr-12345678', ownerAgentId: 'owner', sessionId: filter.sessionId, status }] as ContractView[];
     },
     on(listener: () => void) { changed = listener; return () => { changed = undefined; }; },
   } as Pick<ContractRunner, 'list' | 'on'>;
   const views = createSessionContractViews(runner, () => selectedSession);
   const first = views.read();
-  for (let agent = 0; agent < 100; agent++) expect(views.read()).toBe(first);
+  for (let agent = 0; agent < 100; agent++) {
+    expect(views.read()).toBe(first);
+    expect(views.byOwner('owner')).toBe(first[0]);
+    expect(views.byId('ctr-12345678')).toBe(first[0]);
+  }
   expect(reads).toBe(1);
   status = 'passed'; changed!();
   expect(views.read()[0]!.status).toBe('passed');

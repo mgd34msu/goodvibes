@@ -4,6 +4,8 @@
  * A CiStatusSource backed by the `gh` CLI. It reads PER-JOB check results from
  * the GitHub Checks API (repos/{repo}/commits/{ref}/check-runs), which is the
  * per-job conclusion surface the doctrine requires, never a single rollup.
+ * The workflow runs on the commit (actions/runs?head_sha=) say only whether
+ * the run is over: a job waiting on another has no check run yet.
  *
  * SHELL SAFETY: every `gh` invocation runs through execFile (no shell) with a
  * hard timeout, so a hung or slow gh call cannot wedge the caller.
@@ -16,8 +18,7 @@
 import { execFile } from 'node:child_process';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
-import type { CiJob, CiStatusSource } from './types.js';
-import { isGitHubRepoName, isGitRefName } from './git-names.js';
+import { CiTargetGoneError, type CiJob, type CiStatusSource, type CiWorkflowRun } from './types.js';
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 
@@ -45,44 +46,67 @@ function tailLog(raw: string): string {
 }
 
 
-/**
- * `repo` and `ref` come from callers (and, for refs, from model-authored
- * command text) and are interpolated into the path of an authenticated GitHub
- * API call. Anything that could change which endpoint is read is refused, and
- * each ref segment is encoded.
- */
-function checkRepo(repo: string): string {
-  if (!isGitHubRepoName(repo)) {
-    throw new Error(`repo "${repo}" is not a GitHub owner/name`);
-  }
-  return repo;
+interface GhWorkflowRun {
+  readonly name?: string;
+  readonly status?: string;
+  readonly conclusion?: string | null;
+  readonly html_url?: string;
 }
 
+/**
+ * The repo, ref and PR number were refused at the service's entry when they
+ * could steer this path (`git-names.ts`); here each ref segment is encoded.
+ */
 function refPath(ref: string): string {
-  if (!isGitRefName(ref)) throw new Error(`ref "${ref}" is not a valid git ref`);
   return ref.split('/').map(encodeURIComponent).join('/');
 }
 
-function parseCheckRuns(out: string): GhCheckRun[] {
-  // --paginate --jq '.check_runs' may emit several JSON arrays (one per page); join them.
+const HEAD_SHA = /^[0-9a-f]{7,64}$/i;
+
+/** `--paginate --jq '.<list>'` emits one JSON array per page; join them. */
+function parsePagedList<T>(out: string, list: string): T[] {
   const chunks = out.trim().split('\n').filter((line) => line.trim().length > 0);
   return chunks.flatMap((chunk) => {
     const parsed: unknown = JSON.parse(chunk);
-    if (!Array.isArray(parsed)) throw new Error('the response had no check_runs list');
-    return parsed as GhCheckRun[];
+    if (!Array.isArray(parsed)) throw new Error(`the response had no ${list} list`);
+    return parsed as T[];
   });
+}
+
+/** A failed `gh api` call, with the HTTP status gh reports as `(HTTP nnn)` when the API answered. */
+class GhApiError extends Error {
+  constructor(message: string, readonly status: number | undefined) {
+    super(message);
+    this.name = 'GhApiError';
+  }
 }
 
 function runGh(args: readonly string[], timeoutMs: number): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile('gh', [...args], { timeout: timeoutMs, maxBuffer: 8 * 1024 * 1024 }, (error, stdout) => {
+    execFile('gh', [...args], { timeout: timeoutMs, maxBuffer: 8 * 1024 * 1024 }, (error, stdout, stderr) => {
       if (error) {
-        reject(new Error(`gh ${args[0]} failed: ${summarizeError(error)}`));
+        const status = /\(HTTP (\d{3})\)/.exec(String(stderr ?? ''))?.[1];
+        reject(new GhApiError(`gh ${args[0]} failed: ${summarizeError(error)}`, status ? Number(status) : undefined));
         return;
       }
       resolve(stdout);
     });
   });
+}
+
+/**
+ * 404 (no such repo or PR, or not readable with this login) and 422 (no
+ * commit for the ref: the branch was deleted) mean no verdict will ever come.
+ */
+async function readTarget(args: readonly string[], timeoutMs: number, what: string): Promise<string> {
+  try {
+    return await runGh(args, timeoutMs);
+  } catch (error) {
+    if (error instanceof GhApiError && (error.status === 404 || error.status === 422)) {
+      throw new CiTargetGoneError(`GitHub has no ${what} (HTTP ${error.status})`, error.status);
+    }
+    throw error;
+  }
 }
 
 function toCiJob(run: GhCheckRun): CiJob {
@@ -110,8 +134,7 @@ export function createGhCliCiSource(options: GhCliCiSourceOptions = {}): CiStatu
 
   async function resolveRef(repo: string, ref?: string, prNumber?: number): Promise<string> {
     if (prNumber !== undefined) {
-      if (!Number.isSafeInteger(prNumber) || prNumber <= 0) throw new Error(`PR number ${prNumber} is not valid`);
-      const out = await runGh(['api', `repos/${checkRepo(repo)}/pulls/${prNumber}`, '--jq', '.head.sha'], timeoutMs);
+      const out = await readTarget(['api', `repos/${repo}/pulls/${prNumber}`, '--jq', '.head.sha'], timeoutMs, `pull request #${prNumber} in ${repo} that this login can read`);
       const sha = out.trim();
       if (!sha) throw new Error(`could not resolve head sha for ${repo} PR #${prNumber}`);
       return sha;
@@ -123,17 +146,41 @@ export function createGhCliCiSource(options: GhCliCiSourceOptions = {}): CiStatu
   return {
     fetchJobs: async ({ repo, ref, prNumber }): Promise<readonly CiJob[]> => {
       const resolvedRef = await resolveRef(repo, ref, prNumber);
-      const out = await runGh(
-        ['api', `repos/${checkRepo(repo)}/commits/${resolvedRef}/check-runs`, '--paginate', '--jq', '.check_runs'],
+      const out = await readTarget(
+        ['api', `repos/${repo}/commits/${resolvedRef}/check-runs`, '--paginate', '--jq', '.check_runs'],
         timeoutMs,
+        prNumber !== undefined ? `commit for pull request #${prNumber} in ${repo}` : `commit for "${ref}" in ${repo} that this login can read`,
       );
       let runs: GhCheckRun[];
       try {
-        runs = parseCheckRuns(out);
+        runs = parsePagedList<GhCheckRun>(out, 'check_runs');
       } catch (error) {
         throw new Error(`could not parse gh check-runs output: ${summarizeError(error)}`);
       }
       return runs.map(toCiJob);
+    },
+    fetchWorkflowRuns: async ({ repo, headSha }): Promise<readonly CiWorkflowRun[]> => {
+      if (!HEAD_SHA.test(headSha)) throw new Error(`"${headSha}" is not a commit sha`);
+      let out: string;
+      try {
+        out = await runGh(['api', `repos/${repo}/actions/runs?head_sha=${headSha}&per_page=100`, '--paginate', '--jq', '.workflow_runs'], timeoutMs);
+      } catch (error) {
+        // Actions not available on the repository: there is no run to wait for.
+        if (error instanceof GhApiError && error.status === 404) return [];
+        throw error;
+      }
+      let runs: GhWorkflowRun[];
+      try {
+        runs = parsePagedList<GhWorkflowRun>(out, 'workflow_runs');
+      } catch (error) {
+        throw new Error(`could not parse gh workflow-runs output: ${summarizeError(error)}`);
+      }
+      return runs.map((run) => ({
+        name: run.name ?? 'unnamed workflow',
+        status: run.status ?? 'in_progress',
+        conclusion: run.conclusion ?? null,
+        ...(run.html_url ? { url: run.html_url } : {}),
+      }));
     },
     fetchFailureLogs: async ({ repo, ref, prNumber, jobNames, jobs }): Promise<string> => {
       // Seed the fix-session with the ACTUAL failing logs, bounded: the
@@ -152,7 +199,7 @@ export function createGhCliCiSource(options: GhCliCiSourceOptions = {}): CiStatu
         const sections: string[] = [];
         for (const job of jobs.slice(0, MAX_LOG_JOBS)) {
           if (!job.jobId || !/^[0-9]+$/.test(job.jobId)) { sections.push(`--- ${job.name}: exact Actions job identity unavailable ---`); continue; }
-          try { sections.push(`--- ${job.name} (job ${job.jobId}, log tail) ---\n${tailLog(await runGh(['api', `repos/${checkRepo(repo)}/actions/jobs/${job.jobId}/logs`], timeoutMs))}`); }
+          try { sections.push(`--- ${job.name} (job ${job.jobId}, log tail) ---\n${tailLog(await runGh(['api', `repos/${repo}/actions/jobs/${job.jobId}/logs`], timeoutMs))}`); }
           catch (error) { sections.push(`--- ${job.name}: log fetch failed (${summarizeError(error)}) ---`); }
         }
         if (jobs.length > MAX_LOG_JOBS) sections.push(`(+${jobs.length - MAX_LOG_JOBS} more failing jobs, logs omitted)`);
@@ -162,16 +209,16 @@ export function createGhCliCiSource(options: GhCliCiSourceOptions = {}): CiStatu
       try {
         const resolvedRef = await resolveRef(repo, ref, prNumber);
         const out = await runGh(
-          ['api', `repos/${checkRepo(repo)}/commits/${resolvedRef}/check-runs`, '--paginate', '--jq', '.check_runs'],
+          ['api', `repos/${repo}/commits/${resolvedRef}/check-runs`, '--paginate', '--jq', '.check_runs'],
           timeoutMs,
         );
-        const runs = parseCheckRuns(out);
+        const runs = parsePagedList<GhCheckRun>(out, 'check_runs');
         const wanted = new Set(jobNames);
         const failingRuns = runs.filter((run) => run.id !== undefined && run.name !== undefined && wanted.has(run.name));
         const sections: string[] = [];
         for (const run of failingRuns.slice(0, MAX_LOG_JOBS)) {
           try {
-            const raw = await runGh(['api', `repos/${checkRepo(repo)}/actions/jobs/${run.id}/logs`], timeoutMs);
+            const raw = await runGh(['api', `repos/${repo}/actions/jobs/${run.id}/logs`], timeoutMs);
             sections.push(`--- ${run.name} (log tail) ---\n${tailLog(raw)}`);
           } catch (error) {
             sections.push(`--- ${run.name}: log fetch failed (${summarizeError(error)}); expand with: gh run view --log-failed (in a clone of ${repo}) ---`);

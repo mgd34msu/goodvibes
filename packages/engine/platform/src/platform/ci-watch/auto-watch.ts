@@ -15,7 +15,8 @@ import type { ExternalOperationSource } from '../permissions/external-request.js
  * Delivery defaults to the daemon's own operator-surface channel ('web', the
  * control-plane delivery the existing push-notification path rides), and the
  * verdict notification plus verdict-retirement behavior come free from
- * CiWatchService: the watch EXPIRES once its terminal verdict is delivered.
+ * CiWatchService: the watch ends once its terminal verdict is delivered, or
+ * with a "no verdict" notice when the branch is gone or no verdict came in time.
  * The scripted path (/ci watch → ci.watches.create) is untouched.
  */
 import { execFile } from 'node:child_process';
@@ -34,8 +35,8 @@ export interface DetectedCiPush {
   readonly branch?: string | undefined;
 }
 
-/** Push flags after which there is no branch worth a CI watch. */
-const PUSH_FLAG_NO_BRANCH = new Set(['--delete', '--tags']);
+/** Push flags after which there is no branch worth a CI watch: a delete, tags only, or a dry run that pushes nothing. */
+const PUSH_FLAG_NO_BRANCH = new Set(['--delete', '--tags', '--dry-run']);
 
 const PUSH_FLAG_WITH_VALUE = new Set(['-o', '--push-option', '--receive-pack', '--repo', '--exec']);
 
@@ -77,8 +78,8 @@ export function detectCiPushInCommand(command: string): DetectedCiPush | null {
     for (let i = pushIndex + 1; i < tokens.length; i++) {
       const token = tokens[i]!;
       if (token.startsWith('-')) {
-        // Deleting a ref or pushing only tags leaves no branch whose CI could be watched.
-        if (PUSH_FLAG_NO_BRANCH.has(token) || /^-[a-zA-Z]*d[a-zA-Z]*$/.test(token)) skipped = true;
+        // Deleting a ref, pushing only tags or a dry run leaves no branch whose CI will run.
+        if (PUSH_FLAG_NO_BRANCH.has(token) || /^-[a-zA-Z]*[dn][a-zA-Z]*$/.test(token)) skipped = true;
         if (PUSH_FLAG_WITH_VALUE.has(token)) i += 1;
         continue;
       }

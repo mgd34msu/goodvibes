@@ -13,6 +13,7 @@ import {
   type CiJob,
   type CiOverall,
   type CiReport,
+  type CiWorkflowRun,
 } from './types.js';
 
 export interface DeriveCiReportInput {
@@ -20,6 +21,12 @@ export interface DeriveCiReportInput {
   readonly ref?: string | undefined;
   readonly prNumber?: number | undefined;
   readonly jobs: readonly CiJob[];
+  /**
+   * The workflow runs on the jobs' commit, when the source can list them. A
+   * job that waits on another has no check run until it starts, so every job
+   * passing says nothing about the run being over; only these runs do.
+   */
+  readonly workflowRuns?: readonly CiWorkflowRun[] | undefined;
   readonly now?: number | undefined;
 }
 
@@ -38,7 +45,7 @@ export function deriveCiReport(input: DeriveCiReportInput): CiReport {
     }
   }
 
-  const overall = deriveOverall(jobs, violations.length > 0);
+  const overall = settleOnWorkflowRuns(deriveOverall(jobs, violations.length > 0), input.workflowRuns, violations);
   return {
     repo: input.repo,
     ...(input.ref ? { ref: input.ref } : {}),
@@ -67,11 +74,39 @@ export function deriveOverall(jobs: readonly CiJob[], hasBlockingViolation: bool
   return 'passed';
 }
 
-/** The names of the jobs that did not pass (for notifications and fix-session briefs). */
+/**
+ * A per-job `passed` stands only when every workflow run on the commit has
+ * completed. A run that ended badly with no failing job listed (a workflow
+ * that failed to start, or one waiting on approval) makes the verdict
+ * `failed` and says which. Never turns anything green.
+ */
+function settleOnWorkflowRuns(overall: CiOverall, runs: readonly CiWorkflowRun[] | undefined, violations: string[]): CiOverall {
+  if (overall !== 'passed' || runs === undefined) return overall;
+  if (runs.some((run) => run.status !== 'completed')) return 'pending';
+  const ended = runs.filter((run) => !PASSING_CONCLUSIONS.has(run.conclusion ?? ''));
+  for (const run of ended) {
+    violations.push(`workflow "${run.name}" ended "${run.conclusion ?? 'without a conclusion'}" and lists no failing job`);
+  }
+  return ended.length > 0 ? 'failed' : 'passed';
+}
+
+/** The jobs that did not pass (for notifications and fix-session briefs). */
+export function failingJobs(report: CiReport): readonly CiJob[] {
+  return report.jobs.filter((j) => j.status === 'completed' && (j.continueOnError || !PASSING_CONCLUSIONS.has(j.conclusion ?? '')));
+}
+
+/** The names of the jobs that did not pass. */
 export function failingJobNames(report: CiReport): string[] {
-  return report.jobs
-    .filter((j) => j.status === 'completed' && (j.continueOnError || !PASSING_CONCLUSIONS.has(j.conclusion ?? '')))
-    .map((j) => j.name);
+  return failingJobs(report).map((j) => j.name);
+}
+
+/**
+ * A job GitHub Actions ran, identified down to its commit, run and job. Only
+ * such a job's log can be read and its failure repaired from here; a check
+ * posted by another app has none of the three.
+ */
+export function hasActionsIdentity(job: CiJob): boolean {
+  return Boolean(job.headSha && job.runId && job.jobId);
 }
 
 /** A compact one-line-per-job rendering for a channel notification. */

@@ -1,8 +1,8 @@
 /**
  * Validation of the repo and ref names that are interpolated into the path of
- * an authenticated GitHub API call. Shared by the service (which refuses bad
- * input up front, as an invalid argument) and the gh source (which refuses it
- * again before any call).
+ * an authenticated GitHub API call. The service checks them once, where they
+ * enter (a status call or a new watch), and refuses bad input as an invalid
+ * argument; the gh source only encodes what passed.
  */
 const REPO_PATTERN = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 /** Characters git forbids in a ref name, plus the ones that would steer a URL path (`?`, `#`, `\`). */

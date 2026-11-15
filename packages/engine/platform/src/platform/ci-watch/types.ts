@@ -54,6 +54,29 @@ export const FAILING_CONCLUSIONS: ReadonlySet<string> = new Set([
 /** A conclusion string that counts as a per-job pass. */
 export const PASSING_CONCLUSIONS: ReadonlySet<string> = new Set(['success', 'skipped', 'neutral']);
 
+/** A workflow run on the watched commit; a verdict waits until every one is completed. */
+export interface CiWorkflowRun {
+  readonly name: string;
+  /** GitHub's run status: `completed` once it ended, anything else while it is queued, waiting or running. */
+  readonly status: string;
+  readonly conclusion: string | null;
+  readonly url?: string | undefined;
+}
+
+/**
+ * What happened the last time a repair was tried for one failure (one set of
+ * failing jobs on one commit). `started` and `denied` are final for that
+ * failure; `error` is tried again at `retryAt`.
+ */
+export interface CiRepairRecord {
+  readonly failureKey: string;
+  readonly outcome: 'started' | 'denied' | 'error';
+  readonly at: number;
+  readonly attempts: number;
+  readonly retryAt?: number | undefined;
+  readonly reason?: string | undefined;
+}
+
 /** A standing watch on a repo/PR. */
 export interface CiWatchSubscription {
   /** Lookup only; an issued native host record and live private owner remain mandatory. */
@@ -70,6 +93,14 @@ export interface CiWatchSubscription {
   readonly lastOverall?: CiOverall | undefined;
   readonly createdAt: number;
   readonly updatedAt: number;
+  /**
+   * When the watch ends without a verdict. Pushed forward while CI is pending,
+   * never past seven days from creation. Absent on watches saved before it
+   * existed, which end one day after creation.
+   */
+  readonly expiresAt?: number | undefined;
+  /** The last repair attempt for the current failure. */
+  readonly repair?: CiRepairRecord | undefined;
 }
 
 /** The source that fetches CI state (a gh-CLI or REST implementation; a fake in tests). */
@@ -83,6 +114,25 @@ export interface CiStatusSource {
     readonly jobNames: readonly string[];
     readonly jobs?: readonly CiJob[] | undefined;
   }): Promise<string>;
+  /**
+   * Optional: the workflow runs for one commit. When present, a verdict is
+   * `passed` only once every run on the commit has completed, because jobs
+   * that wait on earlier ones (and later workflows) have no check run yet.
+   */
+  fetchWorkflowRuns?(input: { readonly repo: string; readonly headSha: string }): Promise<readonly CiWorkflowRun[]>;
+}
+
+/**
+ * The watched ref, pull request or repository no longer exists on the forge
+ * (or cannot be read with the current login), so no verdict will ever come.
+ */
+export class CiTargetGoneError extends Error {
+  readonly status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = 'CiTargetGoneError';
+    this.status = status;
+  }
 }
 
 /** The brief handed to a fix-session starter when a watched CI run fails. */
@@ -103,7 +153,8 @@ export interface FixSessionBrief {
  */
 export type FixSessionStartOutcome =
   | { readonly sessionId: string }
-  | { readonly error: string };
+  /** `refused`: the same answer would come for this failure every time, so it is not tried again. */
+  | { readonly error: string; readonly refused?: boolean | undefined };
 
 /** Starts a fix-session pre-briefed with the failing jobs' context. */
 export type FixSessionStarter = (brief: FixSessionBrief) => Promise<FixSessionStartOutcome | string | undefined>;

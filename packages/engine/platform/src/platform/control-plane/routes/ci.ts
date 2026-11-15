@@ -120,6 +120,7 @@ function createRunHandler(service: CiWatchGatewayService): GatewayMethodHandler 
         ...(result.fixSessionId ? { fixSessionId: result.fixSessionId } : {}),
         ...(result.fixSessionError ? { fixSessionError: result.fixSessionError } : {}),
         ...(result.retired ? { retired: true } : {}),
+        ...(result.endedReason ? { endedReason: result.endedReason } : {}),
       };
     } catch (error) {
       rethrow(error);

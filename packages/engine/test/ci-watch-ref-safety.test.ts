@@ -1,7 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { detectCiPushInCommand } from '../platform/src/platform/ci-watch/auto-watch.ts';
 import { startAdmittedCiRepair } from '../platform/src/platform/ci-watch/autonomous.ts';
-import { createGhCliCiSource } from '../platform/src/platform/ci-watch/gh-source.ts';
 import type { CiRepairRequest } from '../platform/src/platform/ci-watch/autonomous.ts';
 import { CiWatchService } from '../platform/src/platform/ci-watch/service.ts';
 import { CiWatchStore } from '../platform/src/platform/ci-watch/subscriptions.ts';
@@ -30,38 +29,24 @@ describe('push detection refspecs', () => {
 });
 
 describe('CI repair evidence', () => {
-  test('a failing check without a GitHub Actions identity is named in the refusal', async () => {
+  test('failing checks with no GitHub Actions identity are named in a final refusal', async () => {
     const operation = { assertCurrent: () => {}, sourceOf: () => { throw new Error('unused'); } };
     const input = {
       subscription: { id: 'w1', repo: 'o/r' } as CiWatchSubscription,
       brief: {
-        repo: 'o/r', failingJobs: ['build', 'vendor-scan'], logs: '',
+        repo: 'o/r', failingJobs: ['license-check', 'vendor-scan'], logs: '',
         jobs: [
-          { name: 'build', status: 'completed', conclusion: 'failure', headSha: 'abc', runId: '1', jobId: '2' },
+          { name: 'license-check', status: 'completed', conclusion: 'failure' },
           { name: 'vendor-scan', status: 'completed', conclusion: 'failure', headSha: 'abc' },
         ],
       },
       operation, signal: new AbortController().signal, assertCurrent: () => {},
       claimRepair: () => {}, refreshCurrent: async () => {},
     } as unknown as CiRepairRequest;
-    const result = await startAdmittedCiRepair({} as never, input, async () => { throw new Error('must not start'); }) as { error?: string };
-    expect(result.error).toContain('vendor-scan');
-    expect(result.error).not.toContain('build,');
+    const result = await startAdmittedCiRepair({} as never, input, async () => { throw new Error('must not start'); }) as { error?: string; refused?: boolean };
+    expect(result.error).toContain('license-check, vendor-scan');
+    expect(result.refused).toBe(true);
   });
-});
-
-describe('gh status source path safety', () => {
-  const source = createGhCliCiSource();
-  for (const repo of ['a/b/../c', 'a/b?x=1', 'a', 'a/b/c']) {
-    test(`repo ${repo} is refused before any request`, async () => {
-      await expect(source.fetchJobs({ repo, ref: 'main' })).rejects.toThrow('not a GitHub owner/name');
-    });
-  }
-  for (const ref of ['../../orgs/x', 'a?b', 'a#b', 'a b']) {
-    test(`ref ${ref} is refused before any request`, async () => {
-      await expect(source.fetchJobs({ repo: 'o/r', ref })).rejects.toThrow('not a valid git ref');
-    });
-  }
 });
 
 describe('repo and ref are validated before a watch or a status call', () => {
@@ -80,11 +65,13 @@ describe('repo and ref are validated before a watch or a status call', () => {
     expect((await service.createWatch({ repo: 'o/r', ref: 'feature/x', deliveryChannel: 'slack:C1' })).ref).toBe('feature/x');
   });
 
-  test('ci.status with a path-steering repo answers 400 and never reaches the source', async () => {
+  test('ci.status with a path-steering repo or ref answers 400 and never reaches the source', async () => {
     const fetched: unknown[] = [];
     const catalog = new GatewayMethodCatalog();
     registerCiGatewayMethods(catalog, serviceWith(fetched));
-    await expect(catalog.invoke('ci.status', { context: { admin: true }, body: { repo: 'a/b/../c' } })).rejects.toMatchObject({ status: 400, code: 'INVALID_ARGUMENT' });
+    for (const body of [{ repo: 'a/b/../c' }, { repo: 'a/b?x=1' }, { repo: 'o/r', ref: '../../orgs/x' }, { repo: 'o/r', ref: 'a#b' }, { repo: 'o/r', prNumber: -1 }]) {
+      await expect(catalog.invoke('ci.status', { context: { admin: true }, body })).rejects.toMatchObject({ status: 400, code: 'INVALID_ARGUMENT' });
+    }
     expect(fetched).toEqual([]);
   });
 });

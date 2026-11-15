@@ -5,7 +5,8 @@ import { snapshotJudgmentInput } from '../gate/judgment-input.js';
 import { captureAutonomousSource, retainAutonomousSource } from '../permissions/autonomous.js';
 import { admitExternalRequest, type ExternalOperationSource, type ExternalPermissionHost } from '../permissions/external-request.js';
 import { withExternalOperationSource } from '../permissions/external-operation-scope.js';
-import type { CiWatchSubscription, FixSessionBrief, FixSessionStarter } from './types.js';
+import { hasActionsIdentity } from './report.js';
+import type { CiWatchSubscription, FixSessionBrief, FixSessionStartOutcome, FixSessionStarter } from './types.js';
 
 /** Capture while the triggering operation still owns its source, before any detached await. */
 export function captureCiWatchOwner(operation: ExternalOperationSource | undefined): ExternalOperationSource | undefined {
@@ -34,17 +35,26 @@ export interface CiRepairRequest {
   readonly refreshCurrent: () => Promise<void>;
 }
 
-export async function startAdmittedCiRepair(host: ExternalPermissionHost | undefined, input: CiRepairRequest, starter: FixSessionStarter) {
-  if (!host || !input.operation) return { error: 'CI repair has no current original-source admission owner' };
+/**
+ * The repair is admitted for exactly the jobs it will work on, each pinned to
+ * its commit, run and job, so the decision binds to one failure. A failing
+ * check from another app carries no such identity; it is left out of the
+ * admitted brief and named in the start notice, and refused only when nothing
+ * else failed. A refusal here is `refused`: it would come again for the same failure.
+ */
+export async function startAdmittedCiRepair(host: ExternalPermissionHost | undefined, input: CiRepairRequest, starter: FixSessionStarter): Promise<FixSessionStartOutcome> {
+  if (!host || !input.operation) return { error: 'CI repair has no current original-source admission owner', refused: true };
   const operation = input.operation;
   const assertCurrent = () => { input.signal.throwIfAborted(); input.assertCurrent(); operation.assertCurrent(); };
   assertCurrent();
-  if (!input.brief.jobs?.length) return { error: 'CI repair needs the failing jobs with exact commit, run, and job identities, and the brief names none' };
-  const unidentified = input.brief.jobs.filter(job => !job.headSha || !job.runId || !job.jobId).map(job => job.name);
-  if (unidentified.length > 0) {
-    // Only GitHub Actions jobs carry a run and job identity; a failing check from another app cannot be repaired from its logs.
-    return { error: `CI repair needs exact commit, run, and job identities for every failing job, and ${unidentified.join(', ')} ${unidentified.length === 1 ? 'has' : 'have'} none (not a GitHub Actions job). Fix ${unidentified.length === 1 ? 'that check' : 'those checks'} in its own system, then the repair can be offered for the remaining failures.` };
+  if (!input.brief.jobs?.length) return { error: 'CI repair needs the failing jobs with exact commit, run, and job identities, and the brief names none', refused: true };
+  const repairable = input.brief.jobs.filter(hasActionsIdentity);
+  if (repairable.length === 0) {
+    const names = input.brief.jobs.map(job => job.name);
+    return { error: `CI repair works on GitHub Actions jobs, and ${names.join(', ')} ${names.length === 1 ? 'is a check' : 'are checks'} from another app with no Actions run or job. Fix ${names.length === 1 ? 'it' : 'them'} in ${names.length === 1 ? 'its' : 'their'} own system.`, refused: true };
   }
+  const brief: FixSessionBrief = repairable.length === input.brief.jobs.length ? input.brief
+    : Object.freeze({ ...input.brief, failingJobs: Object.freeze(repairable.map(job => job.name)), jobs: Object.freeze(repairable) });
   const invalidation = new AbortController();
   const unsubscribe = host.config.onDidInvalidate(() => invalidation.abort());
   const signal = AbortSignal.any([host.signal, input.signal, invalidation.signal, ...(operation.signal ? [operation.signal] : [])]);
@@ -52,21 +62,23 @@ export async function startAdmittedCiRepair(host: ExternalPermissionHost | undef
   try {
     admission = await admitExternalRequest(host, { connectionId: input.subscription.id,
     destination: `ci-watch:${input.subscription.repo}`, signal, assertCurrent }, operation, {
-    tool: 'agent', args: { mode: 'spawn', task: ciRepairPrompt(input.brief),
+    tool: 'agent', args: { mode: 'spawn', task: ciRepairPrompt(brief),
       triggeringOperationEvidence: operation.inputFacts ?? [],
       ciWatch: { watchId: input.subscription.id, repo: input.subscription.repo, ref: input.subscription.ref,
-        prNumber: input.subscription.prNumber, triggerFixSession: input.subscription.triggerFixSession, failure: input.brief } },
+        prNumber: input.subscription.prNumber, triggerFixSession: input.subscription.triggerFixSession, failure: brief } },
   });
     assertCurrent();
-    if (!admission.result.approved) return { error: `CI repair denied by owner policy (${admission.result.reasonCode})` };
+    if (!admission.result.approved) return { error: `CI repair denied by owner policy (${admission.result.reasonCode})`, refused: true };
     await input.refreshCurrent();
     assertCurrent();
     // One claim immediately precedes the owned starter; neither the flag nor logs are authority.
     admission.claim(); assertCurrent(); input.claimRepair();
     const nativeOwner = nativeCiWatchOwner(operation);
-    if (nativeOwner) return nativeOwner.startRepair(input.brief);
-    return await withExternalOperationSource({ ...operation,
+    if (nativeOwner) return nativeOwner.startRepair(brief);
+    const started = await withExternalOperationSource({ ...operation,
       assertCurrent: () => { signal.throwIfAborted(); operation.assertCurrent(); },
-      signal }, () => starter(input.brief));
+      signal }, () => starter(brief));
+    if (started === undefined) return { error: 'the fix session failed to start' };
+    return typeof started === 'string' ? { sessionId: started } : started;
   } finally { admission?.close(); unsubscribe(); }
 }

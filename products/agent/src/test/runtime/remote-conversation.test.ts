@@ -1,341 +1,104 @@
 /**
  * remote-conversation.test.ts
  *
- * The owner's ruling is that this surface should be passing its LLM turns
- * through the connected daemon. These tests cover the decision that implements
- * it: which verb a submission becomes, what happens when the daemon will not
- * take it, and, the part that must never regress, that a turn which ends up
- * running locally SAYS so, naming the reason.
+ * The hosted session a native turn is observed in: its event-stream address,
+ * and the attachment this surface holds on it (renewed while in use, left on
+ * detach or reset, never thrown on failure).
  */
 
-import { afterEach, describe, expect, test } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { SharedSessionBroker } from '@goodvibes-jev/engine/platform/platform/control-plane';
-import { AutomationRouteStore } from '@goodvibes-jev/engine/platform/platform/automation';
-import { RouteBindingManager } from '@goodvibes-jev/engine/platform/platform/channels';
+import { describe, expect, test } from 'bun:test';
+import type { NativeHostedTurnSnapshot } from '@goodvibes-jev/engine/platform/platform/hosted-sessions/native-turn-client';
 import {
   createRemoteConversationRouter,
   hostedSessionEventStreamUrl,
-  ROUTING_DISABLED_REASON,
   type ConnectedHostResolution,
 } from '../../runtime/client/remote-conversation.ts';
-import { ConnectedHostVerbError } from '../../runtime/client/daemon-verbs.ts';
-import type { HostedFrameConversation } from '../../runtime/client/hosted-frame-render.ts';
 
-const HOSTED_ID = 'hosted-1111';
 const LIVE_HOST: ConnectedHostResolution = { baseUrl: 'http://127.0.0.1:3421', token: 'operator-token' };
-
-/** A conversation that ignores everything, these tests are about routing. */
-function inertConversation(): HostedFrameConversation {
-  return {
-    addAssistantMessage: () => {},
-    addToolResults: () => {},
-    addSystemMessage: () => {},
-    startStreamingBlock: () => {},
-    updateStreamingBlock: () => {},
-    finalizeStreamingBlock: () => {},
-  };
-}
-
-/** A fetch that answers an SSE open with an empty, immediately-ended stream. */
-function stubStreamFetch(): typeof fetch {
-  return (async () => new Response(new ReadableStream<Uint8Array>({
-    start: (controller) => { controller.close(); },
-  }), { headers: { 'content-type': 'text/event-stream' } })) as unknown as typeof fetch;
-}
+const snapshot = (sessionId: string): NativeHostedTurnSnapshot => ({
+  projectId: 'project', requestId: `request-${sessionId}`, inputId: `input-${sessionId}`, sourceRevision: 'revision',
+  state: 'running', sessionId, brokerInputId: `broker-${sessionId}`, correlationId: `correlation-${sessionId}`,
+});
 
 interface Call { readonly methodId: string; readonly input: Record<string, unknown> }
 
 function harness(input: {
-  readonly invoke: (methodId: string, input: unknown, call: number) => unknown;
-  readonly connection?: ConnectedHostResolution;
-  readonly routeTurns?: boolean;
-  readonly workspaceRoot?: string;
-  readonly conversation?: HostedFrameConversation;
-}): { router: ReturnType<typeof createRemoteConversationRouter>; calls: Call[] } {
+  readonly invoke?: (methodId: string) => unknown;
+  readonly scheduleRenewal?: (run: () => void, ms: number) => () => void;
+} = {}) {
   const calls: Call[] = [];
   const router = createRemoteConversationRouter({
     verbs: {
       probe: () => ({ available: true }),
       invoke: async <T,>(methodId: string, payload?: unknown): Promise<T> => {
         calls.push({ methodId, input: (payload ?? {}) as Record<string, unknown> });
-        const result = input.invoke(methodId, payload, calls.length);
+        const result = input.invoke?.(methodId) ?? {};
         if (result instanceof Error) throw result;
         return result as T;
       },
     },
-    configManager: {
-      get: ((key: string) => (
-        key === 'hostedSessions.routeConversationTurns' ? input.routeTurns ?? true : undefined
-      )) as never,
+    resolveConnection: () => LIVE_HOST,
+    conversation: {
+      addAssistantMessage: () => {}, addToolResults: () => {}, addSystemMessage: () => {},
+      startStreamingBlock: () => {}, updateStreamingBlock: () => {}, finalizeStreamingBlock: () => {},
     },
-    resolveConnection: () => input.connection ?? LIVE_HOST,
-    conversation: input.conversation ?? inertConversation(),
     requestRender: () => {},
-    workspaceRoot: input.workspaceRoot ?? '/home/someone/project',
     clientId: 'goodvibes-agent:test',
-    fetchImpl: stubStreamFetch(),
+    reconnect: { enabled: false },
+    ...(input.scheduleRenewal ? { scheduleRenewal: input.scheduleRenewal } : {}),
+    fetchImpl: (async (request: string | URL | Request) => {
+      if (String(request instanceof Request ? request.url : request).endsWith('/permission-mode')) return Response.json({ sessionId: 'hosted-1', mode: 'safe-owner' });
+      return new Response(new ReadableStream<Uint8Array>({ start: (controller) => { controller.close(); } }), { headers: { 'content-type': 'text/event-stream' } });
+    }) as unknown as typeof fetch,
   });
   return { router, calls };
 }
 
-describe('routing a conversation turn to the connected daemon', () => {
-  test('the first message creates a hosted session rooted at this working directory', async () => {
-    const { router, calls } = harness({
-      invoke: () => ({ session: { id: HOSTED_ID } }),
-      workspaceRoot: '/home/someone/project',
-    });
+describe('the attachment to the hosted session', () => {
+  test('is renewed on the schedule while the session is in use, and stops at dispose', async () => {
+    let run: () => void = () => {};
+    let stopped = 0;
+    const { router, calls } = harness({ scheduleRenewal: (fn) => { run = fn; return () => { stopped += 1; }; } });
 
-    const outcome = await router.submit('hello');
+    await router.observeNative(snapshot('hosted-1'), async () => {});
+    run();
 
-    expect(outcome).toMatchObject({ routed: true, hostedSessionId: HOSTED_ID, action: 'created' });
-    // Create carries NO prompt: `initialPrompt` would start the turn inside the
-    // create call, before the event stream this surface renders from exists, and
-    // those frames are live traffic that cannot be replayed. So the first
-    // message takes the same create-then-steer path every later one takes.
-    expect(calls.map((call) => call.methodId)).toEqual(['sessions.hosted.create', 'sessions.steer']);
-    expect(calls[0]?.input.workspaceRoot).toBe('/home/someone/project');
-    expect(calls[0]?.input.initialPrompt).toBeUndefined();
-    expect(calls[1]?.input.body).toBe('hello');
-    expect(router.hostedSessionId()).toBe(HOSTED_ID);
+    const renewals = calls.filter((call) => call.methodId === 'sessions.hosted.attach');
+    expect(renewals).toHaveLength(1);
+    expect(renewals[0]?.input).toEqual({ sessionId: 'hosted-1', clientId: 'goodvibes-agent:test' });
+    router.dispose();
+    expect(stopped).toBe(1);
   });
 
-  test('the second message steers the session the first one opened: it does not create another', async () => {
-    const { router, calls } = harness({
-      invoke: (methodId) => (methodId === 'sessions.hosted.create' ? { session: { id: HOSTED_ID } } : {}),
-    });
+  test('detach tells the host this surface is leaving, and says when there was nothing to leave', async () => {
+    const { router, calls } = harness();
 
-    await router.submit('first');
-    const second = await router.submit('second');
+    expect(await router.detach()).toBe('none');
+    await router.observeNative(snapshot('hosted-1'), async () => {});
+    expect(await router.detach()).toBe('detached');
 
-    expect(second).toMatchObject({ routed: true, hostedSessionId: HOSTED_ID, action: 'steered' });
-    expect(calls.map((call) => call.methodId))
-      .toEqual(['sessions.hosted.create', 'sessions.steer', 'sessions.steer']);
-    expect(calls[2]?.input.sessionId).toBe(HOSTED_ID);
-    expect(calls[2]?.input.body).toBe('second');
+    expect(calls.find((call) => call.methodId === 'sessions.hosted.detach')?.input).toEqual({ sessionId: 'hosted-1', clientId: 'goodvibes-agent:test' });
+    router.dispose();
   });
 
-  test('a steer into a session the daemon no longer has opens a new one and carries the message', async () => {
-    // The daemon restarted, or the session was killed. Recoverable: the person
-    // should not have to notice, and their message must not be dropped.
-    let steers = 0;
-    const notices: string[] = [];
-    const { router, calls } = harness({
-      conversation: { ...inertConversation(), addSystemMessage: (text: string) => { notices.push(text); } },
-      invoke: (methodId, _payload, call) => {
-        if (methodId === 'sessions.hosted.create') return { session: { id: `${HOSTED_ID}-${call}` } };
-        steers += 1;
-        // The first message's steer lands; the second finds the session gone.
-        return steers === 2 ? new ConnectedHostVerbError('gone', 404) : {};
-      },
-    });
+  test('a reset leaves the old session and forgets it', async () => {
+    const { router, calls } = harness();
 
-    await router.submit('first');
-    const second = await router.submit('second');
-
-    expect(second).toMatchObject({ routed: true, action: 'recreated' });
-    expect(calls.map((call) => call.methodId)).toEqual([
-      'sessions.hosted.create', 'sessions.steer',
-      'sessions.steer',
-      'sessions.hosted.create', 'sessions.steer',
-    ]);
-    // The message is carried into the freshly opened session, not dropped.
-    expect(calls[4]?.input.body).toBe('second');
-    // The person is told the model starts without the earlier conversation.
-    expect(notices.filter(text => text.includes('no memory of what came before'))).toHaveLength(1);
+    await router.observeNative(snapshot('hosted-1'), async () => {});
+    expect(router.hostedSessionId()).toBe('hosted-1');
+    router.reset();
+    expect(router.hostedSessionId()).toBeNull();
+    expect(calls.find((call) => call.methodId === 'sessions.hosted.detach')?.input).toEqual({ sessionId: 'hosted-1', clientId: 'goodvibes-agent:test' });
+    router.dispose();
   });
 
-  describe('against the daemon broker\'s own refusals', () => {
-    const cleanups: Array<() => void | Promise<void>> = [];
-    afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
+  test('a refused detach is reported as failed, not thrown', async () => {
+    const { router } = harness({ invoke: (methodId) => methodId === 'sessions.hosted.detach' ? new Error('host unreachable') : {} });
 
-    async function realBroker() {
-      const dir = mkdtempSync(join(tmpdir(), 'remote-conversation-broker-'));
-      const broker = new SharedSessionBroker({
-        storePath: join(dir, 'broker.json'),
-        routeBindings: new RouteBindingManager({ store: new AutomationRouteStore(join(dir, 'routes.json')) }),
-        agentStatusProvider: { getStatus: () => null }, messageSender: { send: () => false },
-      });
-      cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
-      cleanups.push(async () => { await broker.stop(); });
-      return broker;
-    }
+    await router.observeNative(snapshot('hosted-1'), async () => {});
 
-    // The first message's steer lands on a stand-in; the second reaches the real
-    // broker with the id this surface remembers, and the broker's own error is
-    // what the daemon route turns into the response status.
-    async function secondSteerRefusedBy(broker: SharedSessionBroker, rememberedId: string) {
-      let steers = 0;
-      const created: string[] = [];
-      const notices: string[] = [];
-      const { router, calls } = harness({
-        conversation: { ...inertConversation(), addSystemMessage: (text: string) => { notices.push(text); } },
-        invoke: async (methodId, payload) => {
-          if (methodId === 'sessions.hosted.create') {
-            const id = created.length === 0 ? rememberedId : `${HOSTED_ID}-fresh`;
-            created.push(id);
-            return { session: { id } };
-          }
-          steers += 1;
-          if (steers !== 2) return {};
-          const input = payload as { sessionId: string; body: string };
-          try {
-            await broker.steerMessage({ sessionId: input.sessionId, body: input.body, surfaceKind: 'service', surfaceId: 'agent-test' });
-            return {};
-          } catch (error) {
-            const status = (error as { status?: unknown }).status;
-            if (typeof status !== 'number') throw error;
-            throw new ConnectedHostVerbError(String((error as Error).message), status);
-          }
-        },
-      });
-      await router.submit('first');
-      const second = await router.submit('second');
-      return { second, calls, created, notices };
-    }
-
-    test('a session the broker has closed is replaced, with the lost context said out loud', async () => {
-      const broker = await realBroker();
-      const closed = await broker.createSession({ id: 'closed-hosted-session' });
-      await broker.closeSession(closed.id);
-      const { second, created, notices } = await secondSteerRefusedBy(broker, closed.id);
-      expect(second).toMatchObject({ routed: true, action: 'recreated' });
-      expect(created).toEqual([closed.id, `${HOSTED_ID}-fresh`]);
-      expect(notices.filter(text => text.includes('no memory of what came before'))).toHaveLength(1);
-    });
-
-    test('a session id the broker does not hold is replaced, not answered with a silent empty session', async () => {
-      const broker = await realBroker();
-      const { second, created, notices } = await secondSteerRefusedBy(broker, 'never-created-session');
-      expect(second).toMatchObject({ routed: true, action: 'recreated' });
-      expect(created).toEqual(['never-created-session', `${HOSTED_ID}-fresh`]);
-      expect(notices.filter(text => text.includes('no memory of what came before'))).toHaveLength(1);
-      // The broker did not mint a session for the stale id on the way.
-      expect(broker.getSession('never-created-session')).toBeNull();
-    });
-  });
-
-  test('a refusal that is NOT a stale session does not open a second one', async () => {
-    // A session cap or a 5xx is a real refusal. Retrying into it turns one
-    // failure into two, and the second one counts against the same cap.
-    let steers = 0;
-    const { router, calls } = harness({
-      invoke: (methodId) => {
-        if (methodId === 'sessions.hosted.create') return { session: { id: HOSTED_ID } };
-        steers += 1;
-        return steers === 2 ? new ConnectedHostVerbError('at capacity', 429) : {};
-      },
-    });
-
-    await router.submit('first');
-    const second = await router.submit('second');
-
-    expect(second.routed).toBe(false);
-    if (second.routed) throw new Error('unreachable');
-    expect(second.reason).toContain('429');
-    // One create, not two: the refusal was not a recoverable stale session.
-    expect(calls.filter((call) => call.methodId === 'sessions.hosted.create')).toHaveLength(1);
-  });
-});
-
-describe('a turn that runs locally always says so, and why', () => {
-  test('no connected host: the reason names what could not be resolved', async () => {
-    const { router, calls } = harness({
-      invoke: () => ({ session: { id: HOSTED_ID } }),
-      connection: { reason: 'no operator token has been written yet.' },
-    });
-
-    const outcome = await router.submit('hello');
-
-    expect(outcome.routed).toBe(false);
-    if (outcome.routed) throw new Error('unreachable');
-    expect(outcome.reason).toContain('no operator token has been written yet.');
-    expect(outcome.chosen).toBe(false);
-    // Nothing was attempted against a host that is not there.
-    expect(calls).toHaveLength(0);
-  });
-
-  test('the create failing: the reason names the daemon\'s own refusal', async () => {
-    const { router } = harness({
-      invoke: () => new ConnectedHostVerbError('hostedSessions.maxSessions reached', 429),
-    });
-
-    const outcome = await router.submit('hello');
-
-    expect(outcome.routed).toBe(false);
-    if (outcome.routed) throw new Error('unreachable');
-    expect(outcome.reason).toContain('429');
-    expect(outcome.chosen).toBe(false);
-  });
-
-  test('a host that answers with no session id is reported, not treated as success', async () => {
-    const { router } = harness({ invoke: () => ({ session: {} }) });
-    const outcome = await router.submit('hello');
-    expect(outcome.routed).toBe(false);
-    if (outcome.routed) throw new Error('unreachable');
-    expect(outcome.reason).toContain('no session id');
-  });
-
-  test('a relative workspace path is refused here rather than sent to be misresolved', async () => {
-    // The daemon would resolve a relative path against ITS own directory, which
-    // is never the directory the person is working in.
-    const { router, calls } = harness({
-      invoke: () => ({ session: { id: HOSTED_ID } }),
-      workspaceRoot: 'project',
-    });
-    const outcome = await router.submit('hello');
-    expect(outcome.routed).toBe(false);
-    if (outcome.routed) throw new Error('unreachable');
-    expect(outcome.reason).toContain('absolute');
-    expect(calls).toHaveLength(0);
-  });
-
-  test('attachments keep the turn local rather than being silently dropped', async () => {
-    const { router, calls } = harness({ invoke: () => ({ session: { id: HOSTED_ID } }) });
-    const outcome = await router.submit('look at this', { hasAttachments: true });
-    expect(outcome.routed).toBe(false);
-    if (outcome.routed) throw new Error('unreachable');
-    expect(outcome.reason).toContain('attachments');
-    expect(calls).toHaveLength(0);
-  });
-});
-
-describe('the setting that forces every turn to run locally', () => {
-  test('routeConversationTurns off routes nothing and dials nothing', async () => {
-    const { router, calls } = harness({
-      invoke: () => ({ session: { id: HOSTED_ID } }),
-      routeTurns: false,
-    });
-
-    const outcome = await router.submit('hello');
-
-    expect(outcome.routed).toBe(false);
-    if (outcome.routed) throw new Error('unreachable');
-    expect(outcome.reason).toBe(ROUTING_DISABLED_REASON);
-    // `chosen` is what stops the surface warning about a state the person asked for.
-    expect(outcome.chosen).toBe(true);
-    expect(calls).toHaveLength(0);
-  });
-
-  test('routing is on when the setting is absent: on by default, per the ruling', async () => {
-    const router = createRemoteConversationRouter({
-      verbs: {
-        probe: () => ({ available: true }),
-        invoke: async <T,>(): Promise<T> => ({ session: { id: HOSTED_ID } } as T),
-      },
-      // A config that answers `undefined` for everything: nothing configured.
-      configManager: { get: (() => undefined) as never },
-      resolveConnection: () => LIVE_HOST,
-      conversation: inertConversation(),
-      requestRender: () => {},
-      workspaceRoot: '/home/someone/project',
-      clientId: 'goodvibes-agent:test',
-      fetchImpl: stubStreamFetch(),
-    });
-
-    expect((await router.submit('hello')).routed).toBe(true);
+    expect(await router.detach()).toBe('failed');
+    router.dispose();
   });
 });
 

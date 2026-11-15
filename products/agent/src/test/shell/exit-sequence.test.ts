@@ -14,7 +14,7 @@ function harness(overrides: Partial<ExitSequenceDeps<Snap>> = {}) {
     closePaintWindow: () => { events.push('paint-close'); },
     stopSpokenOutput: () => { events.push('speech'); return undefined; },
     unsubs: [],
-    stopAutonomy: async () => { events.push('autonomy'); },
+    stopAutonomy: () => { events.push('autonomy'); },
     detachHostedSession: async () => { events.push('hosted-detach'); return 'detached'; },
     buildSnapshot: () => ({ messages: ['full'] }),
     buildMessagesSnapshot: () => ({ messages: ['messages-only'] }),
@@ -53,18 +53,13 @@ describe('runExitSequence', () => {
     expect(h.warnings).toContain('Paint window could not be closed during exitApp');
   });
 
-  test('a rejecting or synchronously throwing autonomy stop is reported and the session is still saved', async () => {
-    for (const stopAutonomy of [
-      async () => { throw new Error('autonomy'); },
-      (): Promise<void> => { throw new Error('autonomy sync'); },
-    ]) {
-      const h = harness({ stopAutonomy });
-      runExitSequence(h.deps);
-      await h.exited;
-      expect(h.events).toContain('shutdown full');
-      expect(h.events.indexOf('recovery-removed')).toBeGreaterThan(h.events.indexOf('shutdown full'));
-      expect(h.warnings).toContain('Autonomy could not be stopped during exitApp');
-    }
+  test('a throwing autonomy stop is reported and the session is still saved', async () => {
+    const h = harness({ stopAutonomy: () => { throw new Error('autonomy sync'); } });
+    runExitSequence(h.deps);
+    await h.exited;
+    expect(h.events).toContain('shutdown full');
+    expect(h.events.indexOf('recovery-removed')).toBeGreaterThan(h.events.indexOf('shutdown full'));
+    expect(h.warnings).toContain('Autonomy could not be stopped during exitApp');
   });
 
   test('a snapshot that cannot carry its session context falls back to the messages and still shuts down', async () => {

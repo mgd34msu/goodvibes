@@ -1,20 +1,18 @@
 /**
- * Ambient autonomy surfacing module.
+ * Ambient autonomy surfacing: the launch "While you were away" digest, the
+ * Activity view's "Coming up", and the skill-draft pass that follows a digest
+ * which found completed work.
  *
- * HISTORY: this factory was extracted from main.ts to keep that file under the
- * 800-line cap. After extraction it gained two capabilities:
- *   1. Calendar merging, listCalendarEvents callback merges upcoming events
- *      into the Activity modal's Coming up alongside scheduled jobs (buildCalendarEventsLister).
- *   2. Skill-draft accrual, onAwayDigest callback runs skill-draft proposal
- *      once per away-digest pass and appends a feed line when drafts are created
- *      (buildSkillDraftProposer).
- * These additions are NOT "no behavior change" refactors; they add real surface.
+ * Both halves of the Activity view read the connected host, where schedules
+ * live and run: Coming up lists its enabled schedules, the digest its run
+ * outcomes. Local calendar events are merged into Coming up.
  */
 
 import { buildAwayDigest, formatDigestTime, formatRelativeTime } from '../core/away-digest.ts';
 import type { AwayDigestScheduleItem } from '../core/away-digest.ts';
 import { LastSeenStore } from '../core/last-seen-store.ts';
 import type { AutomationRunsSinceResult } from '../agent/automation-runs-source.ts';
+import type { UpcomingSchedulesResult } from '../agent/automation-schedules-source.ts';
 import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import { AgentCalendarRegistry } from '../agent/calendar-registry.ts';
 import { executeToolCalls, toolBudgetFromConfig } from '@goodvibes-jev/engine/platform/platform/core';
@@ -22,16 +20,6 @@ import type { RuntimeServices } from '../runtime/services.ts';
 import type { CommandContext } from '../input/command-registry.ts';
 import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
-import { captureCatalogMethods } from '../tools/agent-harness-catalog-ranking.ts';
-import { modelReadingServicePath } from '../tools/agent-harness-model-reading-source.ts';
-
-interface AutomationJobLike {
-  readonly name: string;
-  readonly enabled: boolean;
-  readonly nextRunAt?: number;
-  readonly lastRunAt?: number;
-  readonly runCount?: number;
-}
 
 interface ApprovalLike {
   readonly status: string;
@@ -44,18 +32,18 @@ interface AutonomyMessageRouter {
 
 export interface AutonomySurfacingOptions {
   readonly shellPaths: Parameters<typeof LastSeenStore.fromShellPaths>[0];
-  /** Feeds the Activity modal's Coming-up next-run entries only, the local automation
-   * manager's job list (local execution is disabled by design; see
-   * src/runtime/bootstrap.ts). The away digest's run OUTCOMES never read this;
-   * see listAutomationRunsSince below. */
-  readonly listAutomationJobs: () => readonly AutomationJobLike[];
+  /**
+   * Coming up: the connected host's enabled schedules with a next run after
+   * `now` (automation.schedules.list), the same host the digest reads run
+   * outcomes from. Never throws; an unreadable host is named in the result.
+   */
+  readonly listUpcomingSchedules: (now: number, signal: AbortSignal) => Promise<UpcomingSchedulesResult>;
   /**
    * The away digest's automation source of truth: connected-host runs
    * (completed/failed/missed) since the given epoch-ms timestamp, read over
-   * the wire via automation.runs.list. Never falls back to the local
-   * automation manager.
+   * the wire via automation.runs.list.
    */
-  readonly listAutomationRunsSince: (since: number) => Promise<AutomationRunsSinceResult>;
+  readonly listAutomationRunsSince: (since: number, signal: AbortSignal) => Promise<AutomationRunsSinceResult>;
   /**
    * Every ask waiting for this owner, the daemon's record unioned with the
    * asks still held in this process, NOT the local broker alone. A surface
@@ -74,27 +62,36 @@ export interface AutonomySurfacingOptions {
   /**
    * Optional callback to list upcoming local calendar events.
    * Each item carries a formatted label and a numeric sort key (ms since epoch)
-   * so the Coming up section merges calendar and job entries chronologically.
+   * so the Coming up section merges calendar and schedule entries chronologically.
    */
   readonly listCalendarEvents?: () => readonly { label: string; start: number }[];
   /**
-   * Optional callback invoked once per announceAwayDigest pass.
-   * Should run skill draft proposal and return the count of drafts created.
-   * When > 0, a line is appended to the digest feed.
+   * The skill-draft pass: returns the count of drafts created; when > 0 a feed
+   * line says so. Run at most once per launch, only when the digest found
+   * completed work since the person was last here, and only once the shell is idle.
    */
   readonly onAwayDigest?: (signal: AbortSignal) => Promise<number>;
+  /** False while a turn runs or something waits on the person. Absent means always idle. */
+  readonly isIdle?: (() => boolean) | undefined;
+  /**
+   * Starts `run` once the shell is idle. The default checks `isIdle` every
+   * IDLE_CHECK_MS until it holds; a test passes a scheduler that runs it at once.
+   */
+  readonly scheduleIdle?: ((run: () => Promise<void>) => void) | undefined;
 }
 
 const COMING_UP_TTL_MS = 60_000;
 const FETCH_TIMEOUT_MS = 2500;
 const LAST_SEEN_REFRESH_MS = 5 * 60_000;
+const IDLE_CHECK_MS = 20_000;
+const NO_RUNS: AutomationRunsSinceResult = { runs: [], deliveries: [] };
+
+const describeError = (error: unknown): string => error instanceof Error ? error.message : String(error);
 
 /**
  * Group completed connected-host runs by job name into the digest's
- * { name, lastRunAt, runCount } shape, the same shape the digest previously
- * derived from the local automation manager's per-job runCount/lastRunAt,
- * but now counting only runs that actually completed since lastSeenAt on the
- * connected host.
+ * { name, lastRunAt, runCount } shape, counting only runs that completed
+ * since lastSeenAt on the connected host.
  */
 function aggregateFiredSchedules(
   completedRuns: readonly { readonly jobName: string; readonly endedAt?: number }[],
@@ -113,14 +110,15 @@ function aggregateFiredSchedules(
 }
 
 /**
- * Ambient autonomy surfacing for the shell: the launch "While you were away"
- * digest and the Activity modal's Coming up entries. Everything here is best-effort
- * and offline-tolerant, failures are silent and renders are never blocked.
+ * Ambient autonomy surfacing for the shell. Everything here is best-effort and
+ * never blocks a render; each source degrades on its own and an unreadable one
+ * is named where its absence would otherwise read as "nothing happened".
  */
 export function createAutonomySurfacing(options: AutonomySurfacingOptions) {
   const lifetime = new AbortController();
-  const pendingDigests = new Set<Promise<void>>();
   const lastSeenStore = LastSeenStore.fromShellPaths(options.shellPaths);
+  let idleTimer: ReturnType<typeof setTimeout> | undefined;
+  let draftPassArmed = false;
 
   // Refresh lastSeenAt every 5 minutes so rapid restarts still detect activity.
   const lastSeenRefreshInterval = setInterval(() => {
@@ -134,169 +132,191 @@ export function createAutonomySurfacing(options: AutonomySurfacingOptions) {
     fetching: false,
   };
 
+  const readSignal = (): AbortSignal => AbortSignal.any([lifetime.signal, AbortSignal.timeout(FETCH_TIMEOUT_MS)]);
+
+  async function fillComingUp(now: number): Promise<void> {
+    let upcoming: UpcomingSchedulesResult;
+    try {
+      upcoming = await options.listUpcomingSchedules(now, readSignal());
+    } catch (error) {
+      upcoming = { schedules: [], unavailable: describeError(error), unavailableKind: 'no_answer' };
+    }
+    if (lifetime.signal.aborted) return;
+    const items: Array<{ label: string; sortKey: number }> = upcoming.schedules.map((schedule) => {
+      const name = schedule.name.length > 22 ? `${schedule.name.slice(0, 20)}…` : schedule.name;
+      return { label: `${name}, ${formatRelativeTime(schedule.nextRunAt, now)}`, sortKey: schedule.nextRunAt };
+    });
+    if (options.listCalendarEvents) {
+      try {
+        for (const ev of options.listCalendarEvents()) items.push({ label: ev.label, sortKey: ev.start });
+      } catch (error) {
+        logger.debug('coming-up calendar read failed (non-fatal)', { error: describeError(error) });
+      }
+    }
+    const soonest = items.sort((a, b) => a.sortKey - b.sortKey).slice(0, 3).map((item) => item.label);
+    // A configured host that could not be read is said, not shown as an empty plan.
+    comingUpCache.items = upcoming.unavailableKind === 'no_answer'
+      ? [`Schedules unavailable: ${upcoming.unavailable ?? 'the connected host did not answer'}`, ...soonest]
+      : soonest;
+    comingUpCache.fetchedAt = Date.now();
+  }
+
+  /** Refill Coming up when its 60 s cache has lapsed; one host request per minute while it is wanted. */
   function refreshComingUp(): void {
-    if (comingUpCache.fetching) return;
+    if (comingUpCache.fetching || lifetime.signal.aborted) return;
     const now = Date.now();
     if (comingUpCache.fetchedAt !== null && now - comingUpCache.fetchedAt < COMING_UP_TTL_MS) return;
     comingUpCache.fetching = true;
-    Promise.resolve().then(() => {
-      try {
-        const jobs = options.listAutomationJobs();
-        const jobItems: Array<{ label: string; sortKey: number }> = jobs
-          .filter((job) => job.enabled && job.nextRunAt !== undefined && job.nextRunAt > now)
-          .sort((a, b) => (a.nextRunAt ?? 0) - (b.nextRunAt ?? 0))
-          .map((job) => {
-            const when = job.nextRunAt ? formatRelativeTime(job.nextRunAt, now) : '';
-            const name = job.name.length > 22 ? `${job.name.slice(0, 20)}…` : job.name;
-            return { label: when ? `${name}, ${when}` : name, sortKey: job.nextRunAt ?? 0 };
-          });
-
-        const calItems: Array<{ label: string; sortKey: number }> = [];
-        if (options.listCalendarEvents) {
-          try {
-            for (const ev of options.listCalendarEvents()) {
-              calItems.push({ label: ev.label, sortKey: ev.start });
-            }
-          } catch {
-            // Calendar unavailable, skip silently.
-          }
-        }
-
-        comingUpCache.items = [...jobItems, ...calItems]
-          .sort((a, b) => a.sortKey - b.sortKey)
-          .slice(0, 3)
-          .map((item) => item.label);
-        comingUpCache.fetchedAt = Date.now();
-      } catch {
-        // Offline or manager unavailable, leave cache as-is.
-      } finally {
-        comingUpCache.fetching = false;
-      }
-    }).catch(() => {
+    void fillComingUp(now).then(() => {
       comingUpCache.fetching = false;
+      if (!lifetime.signal.aborted) options.render();
+    }, (error: unknown) => {
+      comingUpCache.fetching = false;
+      logger.debug('coming-up refresh failed (non-fatal)', { error: describeError(error) });
     });
   }
 
-  function announceAwayDigest(): void {
-    if (lifetime.signal.aborted) return;
-    const work = (async () => {
-      try {
-        const lastSeenAt = lastSeenStore.read();
-        const withTimeout = <T>(get: () => T) => Promise.race([
-          Promise.resolve(get()),
-          new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), FETCH_TIMEOUT_MS)),
-        ]);
-
-        // The automation source of truth is the connected host's run outcomes,
-        // never the agent's local automation manager (local execution is
-        // disabled by design). Only queried once there's a real lastSeenAt to
-        // query since; first run suppresses the whole digest anyway.
-        const [runsResult, tasksResult] = await Promise.allSettled([
-          lastSeenAt !== null
-            ? withTimeout(() => options.listAutomationRunsSince(lastSeenAt))
-            : Promise.resolve<AutomationRunsSinceResult>({ runs: [], deliveries: [] }),
-          withTimeout(options.getTasksSnapshot),
-        ]);
-        lifetime.signal.throwIfAborted();
-        const runsSince: AutomationRunsSinceResult = runsResult.status === 'fulfilled'
-          ? runsResult.value
-          : { runs: [], deliveries: [], unavailable: 'the connected host did not answer in time', unavailableKind: 'no_answer' };
-        const allTasks = tasksResult.status === 'fulfilled' ? tasksResult.value : [];
-
-        const firedSchedules = aggregateFiredSchedules(
-          runsSince.runs.filter((run) => run.status === 'completed'),
+  async function runDraftPass(): Promise<void> {
+    const propose = options.onAwayDigest;
+    if (!propose || lifetime.signal.aborted) return;
+    try {
+      const drafted = await propose(lifetime.signal);
+      lifetime.signal.throwIfAborted();
+      if (drafted > 0) {
+        options.router.getFeed()?.push(
+          `[Status] I drafted ${drafted} skill${drafted !== 1 ? 's' : ''} from recent work, review them under Memory`,
+          'low',
+          'schedule',
         );
-
-        const failedRuns = runsSince.runs
-          .filter((run) => run.status === 'failed')
-          .map((run) => ({ name: run.jobName, at: run.endedAt }));
-
-        const missedRuns = runsSince.runs
-          .filter((run) => run.status === 'missed')
-          .map((run) => ({ name: run.jobName, at: run.endedAt }));
-
-        const changedTasks = lastSeenAt !== null
-          ? allTasks
-            .filter((task) => {
-              const completedAt = (task as { completedAt?: number }).completedAt;
-              return completedAt !== undefined ? completedAt > lastSeenAt : false;
-            })
-            .map((task) => ({
-              title: (task as { title?: string; name?: string }).title
-                ?? (task as { name?: string }).name
-                ?? 'Task',
-              status: (task as { status?: string }).status ?? 'done',
-              completedAt: (task as { completedAt?: number }).completedAt,
-            }))
-          : [];
-
-        const pendingApprovals = options.listApprovals()
-          .filter((approval) => approval.status === 'pending').length;
-        const approvalsUnavailableReason = options.describeApprovalsUnavailable?.() ?? null;
-
-        const digest = buildAwayDigest({
-          lastSeenAt,
-          schedules: firedSchedules,
-          tasks: changedTasks,
-          pendingApprovals,
-          approvalsUnavailableReason,
-          deliveries: runsSince.deliveries,
-          failedRuns,
-          missedRuns,
-          runsUnavailableReason: runsSince.unavailableKind === 'no_answer' ? runsSince.unavailable : null,
-        });
-
-        if (digest !== null) {
-          const full = [digest.headline, ...digest.lines].join('\n  ');
-          options.router.high(`[Status] ${full}`);
-          for (const line of digest.lines) {
-            options.router.getFeed()?.push(`[Status] ${line}`, 'low', 'schedule');
-          }
-          options.render();
-        }
-
-        // Invoke optional skill-draft hook once per pass.
-        if (options.onAwayDigest) {
-          try {
-            lifetime.signal.throwIfAborted();
-            const drafted = await options.onAwayDigest(lifetime.signal);
-            lifetime.signal.throwIfAborted();
-            if (drafted > 0) {
-              options.router.getFeed()?.push(
-                `[Status] I drafted ${drafted} skill${drafted !== 1 ? 's' : ''} from recent work, review them under Memory`,
-                'low',
-                'schedule',
-              );
-            }
-          } catch (err) {
-            // A failed draft pass adds no digest line, but the cause stays in the log.
-            logger.debug('away-digest skill-draft hook failed (non-fatal)', { error: err instanceof Error ? err.message : String(err) });
-          }
-        }
-      } catch (err) {
-        logger.debug('away-digest failed (non-fatal)', { error: err instanceof Error ? err.message : String(err) });
+        options.render();
       }
-    })();
-    pendingDigests.add(work);
-    void work.then(() => pendingDigests.delete(work), () => pendingDigests.delete(work));
+    } catch (err) {
+      // A failed draft pass adds no digest line, but the cause stays in the log.
+      logger.debug('away-digest skill-draft hook failed (non-fatal)', { error: describeError(err) });
+    }
   }
 
-  /** Resolves once every digest pass started so far has finished, without cancelling any. */
-  function whenIdle(): Promise<void> {
-    return Promise.allSettled([...pendingDigests]).then(() => undefined);
+  function scheduleWhenIdle(run: () => Promise<void>): void {
+    const check = (): void => {
+      idleTimer = undefined;
+      if (lifetime.signal.aborted) return;
+      if (options.isIdle?.() === false) { arm(); return; }
+      void run();
+    };
+    const arm = (): void => {
+      idleTimer = setTimeout(check, IDLE_CHECK_MS);
+      idleTimer.unref?.();
+    };
+    arm();
   }
 
-  function stop(): Promise<void> {
+  function armDraftPass(): void {
+    if (draftPassArmed || !options.onAwayDigest || lifetime.signal.aborted) return;
+    draftPassArmed = true;
+    (options.scheduleIdle ?? scheduleWhenIdle)(runDraftPass);
+  }
+
+  /**
+   * Announce what happened while the person was away. Resolves when the pass
+   * has finished; callers on the render path discard the promise.
+   */
+  async function announceAwayDigest(): Promise<void> {
+    if (lifetime.signal.aborted) return;
+    try {
+      const lastSeenAt = lastSeenStore.read();
+      // Started first so the synchronous reads below overlap the host request.
+      // Only asked once there is a lastSeenAt; a first run suppresses the digest.
+      const runsRead: Promise<AutomationRunsSinceResult> = lastSeenAt === null
+        ? Promise.resolve(NO_RUNS)
+        : options.listAutomationRunsSince(lastSeenAt, readSignal()).catch((error: unknown) => (
+          { runs: [], deliveries: [], unavailable: describeError(error), unavailableKind: 'no_answer' as const }));
+
+      let allTasks: readonly unknown[] = [];
+      let tasksUnavailableReason: string | null = null;
+      try { allTasks = options.getTasksSnapshot(); } catch (error) { tasksUnavailableReason = describeError(error); }
+
+      let pendingApprovals = 0;
+      let approvalsUnavailableReason: string | null = null;
+      try {
+        pendingApprovals = options.listApprovals().filter((approval) => approval.status === 'pending').length;
+        approvalsUnavailableReason = options.describeApprovalsUnavailable?.() ?? null;
+      } catch (error) {
+        approvalsUnavailableReason = describeError(error);
+      }
+
+      const runsSince = await runsRead;
+      lifetime.signal.throwIfAborted();
+
+      const completedRuns = runsSince.runs.filter((run) => run.status === 'completed');
+      const firedSchedules = aggregateFiredSchedules(completedRuns);
+      const failedRuns = runsSince.runs
+        .filter((run) => run.status === 'failed')
+        .map((run) => ({ name: run.jobName, at: run.endedAt }));
+      const missedRuns = runsSince.runs
+        .filter((run) => run.status === 'missed')
+        .map((run) => ({ name: run.jobName, at: run.endedAt }));
+
+      const changedTasks = lastSeenAt !== null
+        ? allTasks
+          .filter((task) => {
+            const completedAt = (task as { completedAt?: number }).completedAt;
+            return completedAt !== undefined ? completedAt > lastSeenAt : false;
+          })
+          .map((task) => ({
+            title: (task as { title?: string; name?: string }).title
+              ?? (task as { name?: string }).name
+              ?? 'Task',
+            status: (task as { status?: string }).status ?? 'done',
+            completedAt: (task as { completedAt?: number }).completedAt,
+          }))
+        : [];
+
+      const digest = buildAwayDigest({
+        lastSeenAt,
+        schedules: firedSchedules,
+        tasks: changedTasks,
+        pendingApprovals,
+        approvalsUnavailableReason,
+        deliveries: runsSince.deliveries,
+        failedRuns,
+        missedRuns,
+        runsUnavailableReason: runsSince.unavailableKind === 'no_answer' ? runsSince.unavailable : null,
+      });
+
+      if (digest !== null) {
+        const lines = tasksUnavailableReason
+          ? [...digest.lines, `Tasks could not be read, so finished tasks may be missing above: ${tasksUnavailableReason}`]
+          : digest.lines;
+        options.router.high(`[Status] ${[digest.headline, ...lines].join('\n  ')}`);
+        for (const line of lines) {
+          options.router.getFeed()?.push(`[Status] ${line}`, 'low', 'schedule');
+        }
+        options.render();
+      }
+
+      // Drafting skills only has material when something finished since the
+      // person was last here; it waits for an idle shell so it never competes
+      // with the first keystrokes.
+      if (completedRuns.length > 0 || changedTasks.length > 0) armDraftPass();
+    } catch (err) {
+      logger.debug('away-digest failed (non-fatal)', { error: describeError(err) });
+    }
+  }
+
+  /**
+   * Abort every pending read and the draft pass, and record the last-seen
+   * time. Synchronous: an exit saves the session without waiting on any of it.
+   */
+  function stop(): void {
     lifetime.abort();
     clearInterval(lastSeenRefreshInterval);
+    if (idleTimer !== undefined) { clearTimeout(idleTimer); idleTimer = undefined; }
     lastSeenStore.save();
-    return whenIdle();
   }
 
   return {
     refreshComingUp,
     announceAwayDigest,
-    whenIdle,
     stop,
     // Return a defensive copy so callers cannot mutate internal cache state.
     comingUpItems: (): readonly string[] => [...comingUpCache.items],
@@ -304,9 +324,11 @@ export function createAutonomySurfacing(options: AutonomySurfacingOptions) {
 }
 
 /**
- * Build the onAwayDigest callback for the given shellPaths and command context.
- * Extracted so main.ts can pass a single symbol instead of an inline lambda.
- * (See module-header note for history.)
+ * Build the skill-draft pass the digest runs: one `agent_harness`
+ * `propose_skill_drafts` call through the ordinary tool path, under the
+ * configured permission manager. The pass ends with its signal, and is refused
+ * as stale when the host, session, configuration or harness it was built for
+ * has been replaced (identity and integer compares, nothing re-read).
  */
 export function buildSkillDraftProposer(
   registry: ToolRegistry,
@@ -316,19 +338,9 @@ export function buildSkillDraftProposer(
   const manager = services.permissionManager, config = services.configManager;
   const session = context.session, runtime = session.runtime, sessionId = runtime.sessionId;
   const incarnation = config.getConfigurationIncarnation();
-  const guards = [
-    captureCatalogMethods(host, ['services', 'commandContext', 'toolRegistry']),
-    captureCatalogMethods(services, ['permissionManager', 'configManager']),
-    captureCatalogMethods(config, ['getConfigurationIncarnation']),
-    captureCatalogMethods(context, ['session', 'workspace', 'clients']),
-    // The runtime's session id is an accessor on the native runtime, so it is compared by value in assertCurrent, not guarded by descriptor.
-    captureCatalogMethods(session, ['runtime']),
-    captureCatalogMethods(registry, ['list', 'prepareCall', 'projectCall', 'executePrepared', 'assertPrepared', 'releaseProjected']),
-    captureCatalogMethods(manager, ['prepareAutonomousOwner', 'autonomousPreparation', 'projectAutonomousChoices', 'releaseAutonomousChoices', 'admitAutonomous']),
-  ];
-  const currentHarness = () => registry.list().find(candidate => modelReadingServicePath(candidate, ['definition', 'name']) === 'agent_harness');
-  const tool = currentHarness();
-  if (!tool) throw new ToolInputProjectionError('unavailable');
+  // Looked up per pass, not at construction, so launch never depends on the
+  // harness being registered; a missing harness ends that pass only.
+  const currentHarness = () => registry.list().find((candidate) => candidate.definition.name === 'agent_harness');
   // This is the existing configured background operation's source, not a user
   // request or an admission. The configured manager still owns every effect.
   const source = Object.freeze({
@@ -341,14 +353,16 @@ export function buildSkillDraftProposer(
   });
   let sequence = 0;
   return async signal => {
+    signal.throwIfAborted();
+    const tool = currentHarness();
+    if (!tool) throw new ToolInputProjectionError('unavailable');
     const assertCurrent = () => {
-      signal.throwIfAborted(); for (const guard of guards) guard();
+      signal.throwIfAborted();
       if (host.services !== services || host.commandContext !== context || host.toolRegistry !== registry
         || services.permissionManager !== manager || services.configManager !== config
         || config.getConfigurationIncarnation() !== incarnation || context.session !== session
         || session.runtime !== runtime || runtime.sessionId !== sessionId || currentHarness() !== tool)
         throw new ToolInputProjectionError('stale');
-      signal.throwIfAborted();
     };
     assertCurrent();
     const callId = `ambient-skill-drafts:${++sequence}`;

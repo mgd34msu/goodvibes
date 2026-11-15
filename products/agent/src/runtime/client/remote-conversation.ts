@@ -1,89 +1,40 @@
-import { effectivePermissionMode, isGatePresetName, type GatePresetName } from '@goodvibes-jev/engine/platform/platform/gate/presets';
+import { isGatePresetName, type GatePresetName } from '@goodvibes-jev/engine/platform/platform/gate/presets';
 /**
- * remote-conversation.ts, running this surface's own conversation turns inside
- * the connected daemon.
+ * remote-conversation.ts, observing this surface's own conversation turns
+ * running inside the connected host.
  *
- * ── What this changes ─────────────────────────────────────────────────────
- *
- * A turn used to run here: the composer handed text to the in-process
- * Orchestrator, which called a provider over HTTPS from this process. The
- * daemon already hosts complete conversation loops for other callers, so the
- * loop host and the surface were two different things depending on who asked.
- *
- * With routing on, the first message of a conversation creates a daemon-hosted
- * session rooted at this surface's working directory, every later message is
- * steered into it, and this surface renders the turn from the hosted session's
- * event stream. The turn no longer depends on this process staying open, and
- * every surface attached to that session sees one conversation.
+ * Native intake hands the original input to the host, which runs the turn in a
+ * hosted session rooted at this surface's working directory. This router never
+ * creates a session or sends a message body: `observeNative` opens that
+ * session's event stream for the verified dispatch and renders the turn into
+ * the local conversation as frames arrive.
  *
  * ── Transcript authority ──────────────────────────────────────────────────
  *
- * The daemon holds the authoritative transcript: it ran the loop, and its
- * ConversationManager is the one that saw every message. What this surface
- * writes locally is a MIRROR of what the stream delivered, kept, because it is
- * the offline record a person still has when the daemon is not running, and
- * because the existing local persistence path is what makes a session
- * resumable here. It is deliberately not treated as the source of truth: on
- * any disagreement the daemon's transcript is the one that ran.
+ * The host holds the authoritative transcript. What this surface writes
+ * locally is a MIRROR of what the stream delivered, kept because it is the
+ * offline record a person still has when the host is not running. On any
+ * disagreement the host's transcript is the one that ran.
  *
- * ── Fallback is stated, never silent ──────────────────────────────────────
- *
- * Every path that cannot route says so, in one line, in the transcript, naming
- * the reason. A turn that quietly ran somewhere other than where the settings
- * say it should is the failure this contract exists to prevent, the person
- * needs to know which machine just read their files. The `promote()` seam in
- * hosted-handoff.ts already established this shape for inbound channel
- * conversations; this is the same contract for the composer.
- *
- * ── What is deliberately NOT here ─────────────────────────────────────────
- *
- * No second SSE implementation. `openServerSentEventStream` is the platform's, with
- * its reconnect policy and auth handling already proven by the approvals
- * stream, and it is what this opens.
- *
- * ── Why this file states a position and a turn ────────────────────────────
- *
- * This router opens a FRESH stream per turn (see `watch`), which is exactly the
- * client shape the daemon's catch-up replay hurts: a stream that claims no
- * position is handed the tail of the previous turn, that turn's
- * `TURN_COMPLETED` included, and the renderer, new, and therefore having never
- * seen that turn run, finishes on it. Every real frame of the turn actually
- * running is then dropped as post-terminal noise, on a turn that has already
- * been billed for.
- *
- * The platform ships both halves of the answer, but they live on
- * `createEventSourceConnector`, the runtime-event connector, which addresses
- * `/api/control-plane/events` and hands typed envelopes to a store. This router
- * addresses one session's own stream and renders it into a conversation, so it
- * opens the raw stream directly and states the same two things itself:
+ * ── Position and turn identity ────────────────────────────────────────────
  *
  *  1. POSITION. Every `id:` this router reads is remembered for the life of the
- *     ROUTER, not the life of one stream, and presented as `Last-Event-ID` when
- *     the next turn's stream opens. The daemon then replays only what this
- *     router has not already been given.
- *  2. TURN IDENTITY. `createTurnLifecycleGate` is the second line, for the
- *     replays position cannot prevent, a daemon that predates the resume, a
- *     position that has aged out of the ring, a frame that genuinely arrives
- *     twice. A terminal frame addressed to a turn this renderer is not
- *     rendering is refused instead of ending the turn that is.
- *  3. SUBMISSION CORRELATION. The fresh correlation id sent with sessions.steer
- *     must be echoed in TURN_SUBMITTED.origin.metadata. A replayed or queued
- *     turn is not this submission merely because it is the first stream frame.
- *     Older hosts without this echo remain unconfirmed rather than granting
- *     this surface ownership of somebody else's execution.
+ *     ROUTER and presented as `Last-Event-ID` when the same input's stream is
+ *     opened again, so the host replays only what this router has not seen.
+ *  2. TURN IDENTITY. `createTurnLifecycleGate` refuses a terminal frame
+ *     addressed to a turn this renderer is not rendering.
+ *  3. SUBMISSION CORRELATION. The dispatch's correlation id must be echoed in
+ *     TURN_SUBMITTED.origin.metadata. A replayed or queued turn is not this
+ *     input merely because it is the first stream frame.
  */
 
-import { randomUUID } from 'node:crypto';
 import { buildUrl } from '@goodvibes-jev/engine/transport-http';
 import { nativeHostedTurnSnapshotSchema, type NativeHostedTurnSnapshot } from '@goodvibes-jev/engine/platform/platform/hosted-sessions/native-turn-client';
-import { createOperatorApiClient, type OperatorApiClient } from '@goodvibes-jev/engine/operator-client';
-import type { OperatorMethodOutput } from '@goodvibes-jev/engine/contracts';
+import { createOperatorApiClient } from '@goodvibes-jev/engine/operator-client';
 import { transport } from '@goodvibes-jev/engine/platform/platform/runtime';
 import { TERMINAL_TURN_EVENT_TYPES, createTurnLifecycleGate, readTurnLifecycleFrame } from '@goodvibes-jev/engine/platform/transport-realtime';
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { DaemonVerbCaller } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
-import { ConnectedHostVerbError, describeConnectedHostVerbError, isDefiniteHostRefusal } from './daemon-verbs.ts';
 import {
   createHostedFrameRenderer,
   type HostedFrameConversation,
@@ -95,25 +46,16 @@ import {
 /** The reason given when the person has turned routing off themselves. */
 class HostedExecutionModeError extends Error {}
 
-export const ROUTING_DISABLED_REASON =
-  'hostedSessions.routeConversationTurns is off, so this turn ran in this process.';
-
-/** What happened to one submitted message. */
+/** What happened to one observed input. */
 export type RemoteTurnOutcome =
   | {
     readonly routed: true;
     readonly hostedSessionId: string;
-    /** Whether this message opened the session, steered it, or reopened it. */
-    readonly action: 'created' | 'steered' | 'recreated';
     /**
      * Resolves when the hosted turn ENDS, with its final text and stop reason.
-     *
-     * `submit` deliberately resolves as soon as the daemon has the turn, so an
-     * interactive composer is not blocked on a whole turn. A headless run needs
-     * the other thing, one final answer and an exit code, and this is where
-     * it waits, since a hosted turn emits no local turn events for it to watch.
-     *
-     * Ignoring it is fine and is what the composer does.
+     * `observeNative` resolves as soon as the stream is open, so an interactive
+     * composer is not blocked on a whole turn; a caller that needs one final
+     * answer waits here. Ignoring it is fine and is what the composer does.
      */
     readonly completion: Promise<HostedTurnCompletion>;
   }
@@ -126,7 +68,7 @@ export type RemoteTurnOutcome =
     readonly reason: string;
     /** True when the person chose local, so nothing is wrong and nothing warns. */
     readonly chosen: boolean;
-    /** Stop won before submission; the caller must not fall back locally. */
+    /** Observation was stopped or its selection changed; the caller must not fall back locally. */
     readonly cancelled?: boolean;
   };
 
@@ -143,17 +85,10 @@ export function sameNativeRemoteConnection(left: ConnectedHostResolution, right:
 
 export interface RemoteConversationRouterOptions {
   readonly verbs: DaemonVerbCaller;
-  readonly configManager: Pick<ConfigManager, 'get'>;
   /** The same resolution the verb caller uses, so calls and the stream agree. */
   readonly resolveConnection: () => ConnectedHostResolution;
   readonly conversation: HostedFrameConversation;
   readonly requestRender: () => void;
-  /**
-   * The workspace the hosted session's tools operate in, this surface's own
-   * working directory. Must be absolute; the daemon refuses a relative path
-   * rather than resolving it against its own directory, and it is right to.
-   */
-  readonly workspaceRoot: string;
   /** Identifies this surface's attachment to the hosted session. */
   readonly clientId: string;
   readonly fetchImpl?: typeof fetch | undefined;
@@ -187,37 +122,18 @@ export interface RemoteConversationRouterOptions {
   readonly scheduleRenewal?: ((run: () => void, ms: number) => () => void) | undefined;
 }
 
-/** What else the caller knows about this submission. */
-export interface RemoteTurnContext {
-  /**
-   * Whether the person attached files to this message. `sessions.hosted.create`
-   * carries text only, so a message with attachments runs locally and says so
-   *, dropping a file someone attached would be worse than not routing.
-   */
-  readonly hasAttachments?: boolean | undefined;
-}
-
 export interface RemoteConversationRouter {
   /**
-   * Route one submitted message.
-   *
-   * Resolves when the turn has been HANDED to the daemon and its stream is
-   * open, not when the turn finishes. A routed turn then renders itself
-   * through the frame renderer as frames arrive, exactly as a local turn
-   * renders itself as the provider streams.
-   *
-   * Never throws: a failure is an outcome with a reason, because the caller is
-   * a keystroke path and a thrown error there loses the person's message.
+   * Observe a verified native delivery. Never creates a session or sends a body.
+   * Never throws: a failure is an outcome with a reason.
    */
-  submit(text: string, context?: RemoteTurnContext): Promise<RemoteTurnOutcome>;
-  /** Observe a verified native delivery. Never creates a session or sends a body. */
   observeNative(snapshot: NativeHostedTurnSnapshot, cancel: () => Promise<void>, current?: () => boolean): Promise<RemoteTurnOutcome>;
   /** The hosted session this conversation is bound to, if any. */
   hostedSessionId(): string | null;
   executionMode(): GatePresetName | undefined;
   refreshExecutionMode(): Promise<void>;
   setExecutionMode(mode: GatePresetName): Promise<void>;
-  /** Request Stop for this submission only; true means the hosted path owns it. */
+  /** Request Stop for the observed input only; true means the hosted path owns it. */
   cancelTurn(): boolean;
   /**
    * Leave the hosted session: tell the daemon this surface is gone, bounded so a
@@ -235,36 +151,6 @@ export interface RemoteConversationRouter {
   dispose(): void;
 }
 
-/** The daemon's reply to `sessions.hosted.create`. Only the id is read. */
-interface HostedCreateReply {
-  readonly session?: { readonly id?: unknown; readonly permissionMode?: unknown } | undefined;
-}
-
-/**
- * A 404 or 409 from a steer means the hosted session this surface remembers is
- * gone or no longer accepts work, the daemon restarted, it was killed, its
- * retention lapsed. That is recoverable by opening a new one. Anything else
- * (a session cap, a 5xx) is a real refusal and must not trigger a second
- * create; retrying into a cap is how one failure becomes two.
- */
-function isStaleHostedSession(error: unknown): boolean {
-  return error instanceof ConnectedHostVerbError && (error.status === 404 || error.status === 409);
-}
-
-/** The part of a `sessions.steer` reply the router checks. */
-interface HostedSteerReply {
-  readonly session?: { readonly id?: unknown } | undefined;
-  readonly mode?: unknown;
-}
-
-/**
- * The daemon accepted the message but not into the hosted session: it minted a
- * different session, or spawned a daemon agent for it. Such an agent does not
- * run under the hosted session's execution mode, so the turn is not treated as
- * routed.
- */
-class HostedSteerMisroutedError extends Error {}
-
 const DEFAULT_LEASE_RENEW_INTERVAL_MS = 120_000;
 const DEFAULT_DETACH_TIMEOUT_MS = 2_000;
 
@@ -277,28 +163,23 @@ export function createRemoteConversationRouter(
   options: RemoteConversationRouterOptions,
 ): RemoteConversationRouter {
   interface WatchedTurn {
-    readonly operator: OperatorApiClient;
     readonly correlationId: string;
-    sessionId: string | null;
+    readonly sessionId: string;
     turnId: string | null;
     renderer: HostedFrameRenderer | null;
     closeStream: (() => void) | null;
     finished: boolean;
-    submissionPending: boolean;
     settledByHost: boolean;
-    steerAttempted: boolean;
-    cancelRequested: boolean;
     cancelQueued: boolean;
     cancellationAcknowledged: boolean;
     identityNoticeShown: boolean;
     cancelRequest: Promise<void> | null;
-    cancelController: AbortController | null;
-    nativeCancel?: (() => Promise<void>) | undefined;
-    nativeCurrent?: (() => boolean) | undefined;
-    nativeKey?: string | undefined;
-    nativeBrokerInputId?: string | undefined;
+    readonly nativeCancel: () => Promise<void>;
+    readonly nativeCurrent: () => boolean;
+    readonly nativeKey: string;
+    readonly nativeBrokerInputId: string;
     nativeTerminal?: 'completed' | 'cancelled' | undefined;
-    connection?: Extract<ConnectedHostResolution, { readonly baseUrl: string }> | undefined;
+    readonly connection: Extract<ConnectedHostResolution, { readonly baseUrl: string }>;
     selectionTimer?: ReturnType<typeof setInterval> | undefined;
   }
   let hostedId: string | null = null;
@@ -327,8 +208,8 @@ export function createRemoteConversationRouter(
     stopRenewal = () => clearInterval(timer);
   };
   const endRenewal = (): void => { stopRenewal?.(); stopRenewal = null; };
-  // A session this surface will not use: leave it so it does not hold a slot
-  // until its lease lapses. Best effort; the outcome of the message is already decided.
+  // A session this surface no longer uses: leave it so it does not hold a slot
+  // until its lease lapses. Best effort.
   const detachQuietly = (sessionId: string): void => {
     options.verbs.invoke<unknown>('sessions.hosted.detach', { sessionId, clientId: options.clientId }).catch((error: unknown) => {
       logger.debug('[remote-conversation] detaching an unused hosted session failed', { sessionId, error: String(error) });
@@ -380,14 +261,13 @@ export function createRemoteConversationRouter(
   };
   let active: WatchedTurn | null = null;
   let disposed = false;
-  let submissionGeneration = 0;
   const streamPositions = new Map<string, string>();
   const nativeTurnIds = new Map<string, string>();
   const nativeObservations = new Map<string, { readonly turn: WatchedTurn; readonly outcome: Extract<RemoteTurnOutcome, { routed: true }> }>();
   const refuse = (reason: string, chosen = false): RemoteTurnOutcome => ({ routed: false, reason, chosen });
   const stopped = (): RemoteTurnOutcome => ({
     routed: false, chosen: true, cancelled: true,
-    reason: 'Stopped before this message was submitted; it was not run locally.',
+    reason: 'Observation stopped: this surface closed or its host selection changed. The input was not run locally.',
   });
   const notice = (turn: WatchedTurn, message: string): void => {
     if (active !== turn || turn.finished || disposed) return;
@@ -399,102 +279,46 @@ export function createRemoteConversationRouter(
     if (turn.finished) return;
     turn.finished = true;
     if (active === turn) active = null;
-    turn.cancelController?.abort();
     if (turn.selectionTimer) clearInterval(turn.selectionTimer);
     const close = turn.closeStream;
     turn.closeStream = null;
     try { close?.(); } catch (error) {
       logger.debug('[remote-conversation] closing the hosted event stream raised', { error: String(error) });
     }
-    turn.operator.dispose();
   };
   const abandon = (turn: WatchedTurn, reason: string): void => {
     turn.renderer?.abandon(reason);
-    if (!turn.submissionPending) release(turn);
+    release(turn);
   };
   const isCurrent = (turn: WatchedTurn): boolean => {
-    if (active !== turn || turn.finished || disposed || (turn.nativeCurrent && !turn.nativeCurrent())) return false;
-    if (turn.connection) {
-      const now = options.resolveConnection();
-      if (!sameNativeRemoteConnection(now, turn.connection)) return false;
-    }
-    return true;
+    if (active !== turn || turn.finished || disposed || !turn.nativeCurrent()) return false;
+    return sameNativeRemoteConnection(options.resolveConnection(), turn.connection);
   };
 
   const sendCancellation = (turn: WatchedTurn): void => {
-    if (turn.nativeCancel) {
-      if (!isCurrent(turn) || !turn.cancelQueued || turn.cancelRequest || turn.cancellationAcknowledged) return;
-      turn.cancelQueued = false;
-      turn.cancelRequest = Promise.resolve().then(async () => {
-        if (!isCurrent(turn)) return;
-        try {
-          await turn.nativeCancel!();
-          if (isCurrent(turn)) {
-            turn.cancellationAcknowledged = true;
-            notice(turn, '[Stop] Native cancellation recorded for this original input; waiting for its terminal event.');
-          }
-        } catch {
-          notice(turn, '[Stop] Native cancellation is unconfirmed. Inspect /work intake-status or press Stop to retry the same input.');
-        } finally { turn.cancelRequest = null; }
-      });
-      return;
-    }
-    if (!isCurrent(turn) || !turn.cancelQueued || turn.cancelRequest || turn.cancellationAcknowledged
-      || !turn.sessionId || !turn.turnId) return;
-    const sessionId = turn.sessionId;
-    const expectedTurnId = turn.turnId;
-    const controller = new AbortController();
-    turn.cancelController = controller;
+    if (!isCurrent(turn) || !turn.cancelQueued || turn.cancelRequest || turn.cancellationAcknowledged) return;
     turn.cancelQueued = false;
-    // Set ownership before invoking the client, including an observer that
-    // re-enters Stop synchronously. POST retries remain explicit and same-ID.
     turn.cancelRequest = Promise.resolve().then(async () => {
       if (!isCurrent(turn)) return;
-      notice(turn, '[Stop] Requesting cancellation of the hosted turn; waiting for the host.');
-      if (!isCurrent(turn)) return;
       try {
-        const receipt: OperatorMethodOutput<'sessions.turns.cancel'> = await turn.operator.sessions.turns.cancel(
-          { sessionId, expectedTurnId }, { signal: controller.signal },
-        );
-        if (!isCurrent(turn) || turn.turnId !== expectedTurnId) return;
-        if (receipt.sessionId !== sessionId || receipt.expectedTurnId !== expectedTurnId) {
-          throw new Error('The cancellation response did not match the requested hosted turn.');
+        await turn.nativeCancel();
+        if (isCurrent(turn)) {
+          turn.cancellationAcknowledged = true;
+          notice(turn, '[Stop] Native cancellation recorded for this original input; waiting for its terminal event.');
         }
-        switch (receipt.status) {
-          case 'cancellation-requested':
-            turn.cancellationAcknowledged = true;
-            notice(turn, '[Stop] The host accepted cancellation; waiting for this turn to finish.');
-            break;
-          case 'already-ended':
-            notice(turn, '[Stop] The host reports this turn already ended; waiting for its terminal event.');
-            break;
-          case 'stale-turn':
-            notice(turn, '[Stop] This request refers to an older turn. No different turn was cancelled; watching for the original outcome.');
-            break;
-          case 'turn-not-found':
-            notice(turn, '[Stop] The host could not find this turn. Cancellation is unconfirmed; the stream remains attached.');
-            break;
-        }
-      } catch (error) {
-        if (isCurrent(turn) && turn.turnId === expectedTurnId) {
-          notice(turn, `[Stop] Cancellation could not be confirmed: ${describeConnectedHostVerbError(error)} `
-            + 'The stream remains attached. Press Stop again to retry this same turn.');
-        }
-      } finally {
-        turn.cancelController = null;
-        turn.cancelRequest = null;
-      }
+      } catch {
+        notice(turn, '[Stop] Native cancellation is unconfirmed. Inspect /work intake-status or press Stop to retry the same input.');
+      } finally { turn.cancelRequest = null; }
     });
   };
 
   const watch = async (turn: WatchedTurn, baseUrl: string, token: string, sessionId: string): Promise<HostedFrameRenderer> => {
-    turn.sessionId = sessionId;
     const renderer = createHostedFrameRenderer(options.conversation, options.requestRender);
     turn.renderer = renderer;
     const isCurrentWatch = (): boolean => isCurrent(turn) && turn.renderer === renderer;
     const gate = createTurnLifecycleGate(turn.turnId ? { turnId: turn.turnId } : undefined);
     const streamUrl = hostedSessionEventStreamUrl(baseUrl, sessionId);
-    const positionKey = turn.nativeKey ?? streamUrl;
+    const positionKey = turn.nativeKey;
     const terminalTypes = new Set(TERMINAL_TURN_EVENT_TYPES);
     const close = await transport.openServerSentEventStream(options.fetchImpl ?? globalThis.fetch, streamUrl, {
       // The platform parses id: before dispatching its event. After terminal release
@@ -530,7 +354,7 @@ export function createRemoteConversationRouter(
           }
           if (turn.turnId !== null && turn.turnId !== frameTurnId) return;
           turn.turnId = frameTurnId;
-          if (turn.nativeKey) nativeTurnIds.set(turn.nativeKey, frameTurnId);
+          nativeTurnIds.set(turn.nativeKey, frameTurnId);
         }
         // Neither rendering nor terminal settlement can use unrelated work
         // while this submission is still queued. Non-turn session notices may
@@ -579,176 +403,6 @@ export function createRemoteConversationRouter(
     return renderer;
   };
 
-  const submit = async (text: string, context?: RemoteTurnContext): Promise<RemoteTurnOutcome> => {
-    if (disposed) return stopped();
-    const generation = ++submissionGeneration;
-    if (active) { active.submissionPending = false; abandon(active, 'This surface switched to a newer submission before the previous turn settled. '
-      + 'Its remote outcome is unconfirmed; switching did not cancel it.'); }
-    if (options.configManager.get('hostedSessions.routeConversationTurns') === false) return refuse(ROUTING_DISABLED_REASON, true);
-    if (context?.hasAttachments) return refuse('this turn ran in this process because it carries attachments, and a daemon-hosted '
-      + 'conversation takes text only, routing it would have dropped them.');
-    const connection = options.resolveConnection();
-    if ('reason' in connection) return refuse(`this turn ran in this process because ${connection.reason}`);
-    if (hostedConnection && !sameNativeRemoteConnection(hostedConnection, connection)) {
-      hostedId = null; hostedConnection = undefined; hostedMode = undefined;
-      modeObservation++; modeRequest++;
-    }
-    if (!options.workspaceRoot.startsWith('/')) return refuse('a hosted conversation needs an absolute workspace path and this process resolved '
-      + `'${options.workspaceRoot}', so this turn ran here.`);
-    let operator: OperatorApiClient;
-    try {
-      operator = createOperatorApiClient({ baseUrl: connection.baseUrl, authToken: connection.token, fetchImpl: options.fetchImpl ?? globalThis.fetch });
-    } catch (error) {
-      return refuse(`the connected host client could not be opened, so this turn ran here, ${describeConnectedHostVerbError(error)}`);
-    }
-    const turn: WatchedTurn = {
-      operator,
-      correlationId: randomUUID(),
-      sessionId: null, turnId: null, renderer: null, closeStream: null, finished: false, submissionPending: true, settledByHost: false, steerAttempted: false,
-      cancelRequested: false, cancelQueued: false, cancellationAcknowledged: false, identityNoticeShown: false, cancelRequest: null, cancelController: null,
-    };
-    active = turn;
-    let action: 'created' | 'steered' | 'recreated' = hostedId ? 'steered' : 'created';
-    const create = async (): Promise<string> => {
-      const reply = await options.verbs.invoke<HostedCreateReply>('sessions.hosted.create', {
-        originSurface: 'agent', workspaceRoot: options.workspaceRoot, clientId: options.clientId,
-      });
-      const id = reply.session?.id;
-      if (typeof id !== 'string' || id.length === 0) throw new Error('the connected host returned no session id this build could read');
-      if (!isCurrent(turn)) {
-        // Stop, dispose or a newer submission won while the daemon was creating
-        // this session. The router cannot adopt it, so leave it rather than
-        // let it hold a slot (and, under a surviving policy, hold it for good).
-        detachQuietly(id);
-        return id;
-      }
-      modeObservation++; modeRequest++;
-      hostedId = id;
-      hostedConnection = connection;
-      const createdMode = reply.session?.permissionMode;
-      hostedMode = typeof createdMode === 'string' && isGatePresetName(createdMode) ? createdMode : undefined;
-      const configuredMode = options.configManager.get('permissions.mode');
-      const autoApprove = options.configManager.get('behavior.autoApprove') === true;
-      if (typeof configuredMode === 'string' || autoApprove) {
-        // A new legacy-hosted session has not received input yet. Apply the
-        // surface's explicit choice before its first steer can run tools.
-        try {
-          await setRemoteExecutionMode(effectivePermissionMode(configuredMode, autoApprove));
-        } catch (error) {
-          // The session exists but is not under the mode this surface chose.
-          // Forget it, so the next message creates a session and applies the
-          // mode again instead of steering into one that runs under the
-          // daemon's own default.
-          if (hostedId === id) { hostedId = null; hostedConnection = undefined; hostedMode = undefined; }
-          modeObservation++; modeRequest++;
-          detachQuietly(id);
-          throw error;
-        }
-      } else if (hostedMode === undefined) void refreshExecutionMode().catch(() => undefined);
-      startRenewal();
-      return id;
-    };
-    const steer = async (sessionId: string): Promise<void> => {
-      turn.steerAttempted = true;
-      const reply = await options.verbs.invoke<HostedSteerReply | undefined>(
-        'sessions.steer', { sessionId, body: text, metadata: { correlationId: turn.correlationId } },
-      );
-      const replySessionId = reply?.session?.id;
-      if ((typeof replySessionId === 'string' && replySessionId !== sessionId) || reply?.mode === 'spawn') {
-        throw new HostedSteerMisroutedError('the host took the message into a different session than the hosted conversation');
-      }
-    };
-    const stopBeforeSteer = (): RemoteTurnOutcome | null => {
-      // A synchronous catch-up may have rendered its terminal frame while the
-      // stream was opening. Preserve submission unless Stop/dispose/replacement won.
-      if (turn.settledByHost && !turn.cancelRequested && !disposed
-        && active === null && generation === submissionGeneration) return null;
-      if (turn.cancelRequested || !isCurrent(turn)) { turn.submissionPending = false; release(turn); return stopped(); }
-      return null;
-    };
-    try {
-      let id = hostedId ?? await create();
-      let cancelled = stopBeforeSteer();
-      if (cancelled) return cancelled;
-      let renderer = await watch(turn, connection.baseUrl, connection.token, id);
-      cancelled = stopBeforeSteer();
-      if (cancelled) return cancelled;
-      try {
-        await steer(id);
-      } catch (error) {
-        if (turn.cancelRequested) {
-          turn.submissionPending = false;
-          abandon(turn, 'Stop was requested while submission was awaiting the host. The submission response failed; '
-            + 'whether the host admitted or cancelled this turn is unconfirmed. It was not run locally.');
-          return { routed: true, hostedSessionId: id, action, completion: renderer.completion() };
-        }
-        if (action !== 'steered' || !isStaleHostedSession(error) || !isCurrent(turn)) throw error;
-        // Only a stale existing session can recreate. Stop arriving during any
-        // of these waits still prevents the next admission/fallback.
-        const close = turn.closeStream;
-        turn.closeStream = null;
-        turn.renderer = null;
-        turn.turnId = null;
-        turn.steerAttempted = false;
-        close?.();
-        if (!isCurrent(turn)) return stopped();
-        hostedId = null;
-        id = await create();
-        action = 'recreated';
-        cancelled = stopBeforeSteer();
-        if (cancelled) return cancelled;
-        // Never silent: the screen still shows the whole conversation, but the
-        // model answering from here has none of it.
-        options.conversation.addSystemMessage('The hosted conversation this session was using is no longer on the daemon. '
-          + 'This message started a new one, and the model has no memory of what came before.');
-        options.requestRender();
-        renderer = await watch(turn, connection.baseUrl, connection.token, id);
-        cancelled = stopBeforeSteer();
-        if (cancelled) return cancelled;
-        await steer(id);
-      }
-      turn.submissionPending = false;
-      if (renderer.isTurnFinished()) release(turn);
-      return { routed: true, hostedSessionId: id, action, completion: renderer.completion() };
-    } catch (error) {
-      turn.submissionPending = false;
-      if (error instanceof HostedExecutionModeError) {
-        release(turn);
-        return { routed: false, chosen: true, cancelled: true, reason: 'The hosted execution mode could not be confirmed. This message was not run locally or remotely.' };
-      }
-      if (turn.cancelRequested && turn.steerAttempted && turn.sessionId && turn.renderer && !turn.settledByHost) {
-        abandon(turn, 'The submission response failed after Stop; remote admission and cancellation are unconfirmed. The message was not run locally.');
-        return { routed: true, hostedSessionId: turn.sessionId, action, completion: turn.renderer.completion() };
-      }
-      if (turn.sessionId && turn.settledByHost && turn.renderer) {
-        return { routed: true, hostedSessionId: turn.sessionId, action, completion: turn.renderer.completion() };
-      }
-      if (turn.cancelRequested || !isCurrent(turn)) {
-        release(turn);
-        return stopped();
-      }
-      if (error instanceof HostedSteerMisroutedError) {
-        // The session this surface remembers is not one the daemon serves.
-        if (hostedId === turn.sessionId) { hostedId = null; hostedConnection = undefined; hostedMode = undefined; modeObservation++; modeRequest++; }
-        release(turn);
-        return { routed: false, chosen: true, cancelled: true,
-          reason: 'The host accepted this message but not into the hosted conversation, so it may be running elsewhere on the daemon outside this conversation. '
-            + 'It was not run locally. The next message opens a new hosted conversation.' };
-      }
-      if (turn.steerAttempted && !isDefiniteHostRefusal(error)) {
-        // The request left this process and no definite answer came back, so the
-        // daemon may already have queued the turn. Running it here too would run
-        // it twice, with tool side effects both places.
-        release(turn);
-        return { routed: false, chosen: true, cancelled: true,
-          reason: `This message was sent to the daemon but its reply was lost (${describeConnectedHostVerbError(error)}), so it may be running there. `
-            + 'It was not run locally, to avoid running it twice. Check the hosted conversation before sending it again.' };
-      }
-      release(turn);
-      return refuse(`the connected host would not take this message into the hosted conversation, so it ran here, ${describeConnectedHostVerbError(error)}`);
-    }
-  };
-
   const observeNative = async (raw: NativeHostedTurnSnapshot, cancel: () => Promise<void>, current: () => boolean = () => true): Promise<RemoteTurnOutcome> => {
     const parsed = nativeHostedTurnSnapshotSchema.safeParse(raw);
     if (!parsed.success) return refuse('Native hosted delivery identity is invalid. No legacy turn was started.', true);
@@ -771,14 +425,12 @@ export function createRemoteConversationRouter(
       nativeObservations.delete(key);
       abandon(observed.turn, 'The previous native observation was detached. Reopening the saved original with current selection.');
     }
-    ++submissionGeneration;
-    if (active) { active.submissionPending = false; abandon(active, 'This surface switched observations. The original remote outcome is unconfirmed; switching did not cancel it.'); }
-    const operator = createOperatorApiClient({ baseUrl: connection.baseUrl, authToken: connection.token, fetchImpl: options.fetchImpl ?? globalThis.fetch });
+    if (active) { abandon(active, 'This surface switched observations. The original remote outcome is unconfirmed; switching did not cancel it.'); }
     const turn: WatchedTurn = {
-      operator, correlationId: snapshot.correlationId, sessionId: snapshot.sessionId,
-      turnId: nativeTurnIds.get(key) ?? null, renderer: null, closeStream: null, finished: false, submissionPending: false,
-      settledByHost: false, steerAttempted: false, cancelRequested: false, cancelQueued: false,
-      cancellationAcknowledged: false, identityNoticeShown: false, cancelRequest: null, cancelController: null,
+      correlationId: snapshot.correlationId, sessionId: snapshot.sessionId,
+      turnId: nativeTurnIds.get(key) ?? null, renderer: null, closeStream: null, finished: false,
+      settledByHost: false, cancelQueued: false,
+      cancellationAcknowledged: false, identityNoticeShown: false, cancelRequest: null,
       nativeCancel: cancel, nativeCurrent: current, nativeKey: key, nativeBrokerInputId: snapshot.brokerInputId, connection,
       ...(snapshot.state === 'completed' || snapshot.state === 'cancelled' ? { nativeTerminal: snapshot.state } : {}),
     };
@@ -798,20 +450,18 @@ export function createRemoteConversationRouter(
     try {
       const renderer = await watch(turn, connection.baseUrl, connection.token, snapshot.sessionId);
       const outcome: Extract<RemoteTurnOutcome, { routed: true }> = {
-        routed: true, hostedSessionId: snapshot.sessionId, action: 'steered', completion: renderer.completion(),
+        routed: true, hostedSessionId: snapshot.sessionId, completion: renderer.completion(),
       };
       nativeObservations.set(key, { turn, outcome });
       void outcome.completion.then(value => { if (value.status === 'abandoned' && nativeObservations.get(key)?.outcome === outcome) nativeObservations.delete(key); });
       return outcome;
     } catch {
       abandon(turn, 'Native turn observation could not be opened. The original hosted dispatch remains authoritative; inspect /work intake-status.');
-      release(turn);
       return refuse('Native turn observation is unavailable. No legacy turn was started.', true);
     }
   };
 
   return {
-    submit,
     observeNative,
     hostedSessionId: () => hostedId,
     executionMode: () => {
@@ -821,18 +471,7 @@ export function createRemoteConversationRouter(
     refreshExecutionMode,
     cancelTurn: () => {
       const turn = active;
-      if (!turn || !isCurrent(turn) || (!turn.submissionPending && turn.renderer?.isTurnFinished())) return false;
-      // A host that never echoes this submission's correlation never lets the
-      // queued cancellation fire. A second Stop is the way out: stop waiting.
-      if (turn.cancelRequested && !turn.turnId && !turn.nativeCancel && !turn.submissionPending) {
-        abandon(turn, 'Stopped waiting for the host to identify this submission. Its remote outcome and cancellation are unconfirmed; '
-          + 'it was not run locally. Reopen this conversation to see how it ended.');
-        return true;
-      }
-      if (!turn.cancelRequested) {
-        turn.cancelRequested = true;
-        if (!turn.turnId && !turn.nativeCancel) notice(turn, '[Stop] Waiting for hosted submission identity; cancellation is pending and is sent when the host starts this turn. Press Stop again to stop waiting without cancelling it.');
-      }
+      if (!turn || !isCurrent(turn) || turn.renderer?.isTurnFinished()) return false;
       if (!turn.cancelRequest && !turn.cancellationAcknowledged) turn.cancelQueued = true;
       sendCancellation(turn);
       return true;
@@ -860,14 +499,13 @@ export function createRemoteConversationRouter(
       endRenewal();
       hostedId = null; hostedConnection = undefined; hostedMode = undefined;
       modeObservation++; modeRequest++;
-      // A create still in flight finds its turn no longer current and leaves its session.
-      if (active) { active.submissionPending = false; abandon(active, 'The conversation was cleared before the hosted turn settled. Clearing did not cancel the remote turn.'); }
+      if (active) { abandon(active, 'The conversation was cleared before the hosted turn settled. Clearing did not cancel the remote turn.'); }
       if (id) detachQuietly(id);
     },
     dispose: () => {
       disposed = true;
       endRenewal();
-      if (active) { active.submissionPending = false; abandon(active, 'This surface detached before the hosted turn settled. Detaching does not cancel the remote turn.'); }
+      if (active) { abandon(active, 'This surface detached before the hosted turn settled. Detaching does not cancel the remote turn.'); }
     },
   };
 }

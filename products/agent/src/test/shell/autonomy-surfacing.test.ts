@@ -26,7 +26,7 @@ function makeOptions(overrides: Partial<Parameters<typeof createAutonomySurfacin
   return {
     options: {
       shellPaths,
-      listAutomationJobs: () => [],
+      listUpcomingSchedules: async () => ({ schedules: [] }),
       listAutomationRunsSince: async () => ({ runs: [], deliveries: [] }),
       listApprovals: () => [],
       getTasksSnapshot: () => [],
@@ -47,83 +47,118 @@ function makeOptions(overrides: Partial<Parameters<typeof createAutonomySurfacin
 }
 
 // ---------------------------------------------------------------------------
-// onAwayDigest wiring in announceAwayDigest
+// The skill-draft pass: only after completed work, only once idle
 // ---------------------------------------------------------------------------
 
-describe('announceAwayDigest: onAwayDigest wiring', () => {
-  test('stub returning > 0 appends the skill-draft feed line', async () => {
-    const { options, feedPushes } = makeOptions({
-      onAwayDigest: async () => 2,
-    });
+function completedRun(): AutomationRunOutcome {
+  return { id: 'run-done', jobId: 'job-done', jobName: 'Nightly backup', status: 'completed', queuedAt: Date.now() - 1_800_000, endedAt: Date.now() - 1_700_000 };
+}
+
+/** Options whose digest finds one completed run, with the idle pass captured instead of timed. */
+function draftOptions(onAwayDigest: (signal: AbortSignal) => Promise<number>) {
+  const idlePasses: Array<() => Promise<void>> = [];
+  const made = makeOptions({
+    listAutomationRunsSince: async () => ({ runs: [completedRun()], deliveries: [] }),
+    onAwayDigest,
+    scheduleIdle: (run) => { idlePasses.push(run); },
+  });
+  LastSeenStore.fromShellPaths(made.options.shellPaths).save(Date.now() - 3_600_000);
+  return { ...made, idlePasses };
+}
+
+describe('announceAwayDigest: the skill-draft pass', () => {
+  test('runs once idle after completed work and reports the drafts', async () => {
+    const { options, feedPushes, idlePasses } = draftOptions(async () => 2);
     const autonomy = createAutonomySurfacing(options);
-    autonomy.announceAwayDigest();
-    // announceAwayDigest is a void call over an async pass; whenIdle() waits for that pass.
-    await autonomy.whenIdle();
-    await autonomy.stop();
+    await autonomy.announceAwayDigest();
+    expect(feedPushes.some((p) => p.text.includes('drafted'))).toBe(false);
+    expect(idlePasses).toHaveLength(1);
+    await idlePasses[0]!();
+    autonomy.stop();
 
     const draftLine = feedPushes.find((p) => p.text.includes('drafted') && p.text.includes('skill'));
-    expect(draftLine).toBeDefined();
-    expect(draftLine?.text).toContain('2');
+    expect(draftLine?.text).toContain('2 skills');
     expect(draftLine?.text).toContain('review them under Memory');
   });
 
-  test('stub returning 1 uses singular "skill" (not "skills")', async () => {
-    const { options, feedPushes } = makeOptions({
-      onAwayDigest: async () => 1,
-    });
+  test('with nothing completed since last seen the proposer is never called', async () => {
+    let calls = 0;
+    const idlePasses: Array<() => Promise<void>> = [];
+    const { options } = makeOptions({ onAwayDigest: async () => { calls += 1; return 1; }, scheduleIdle: (run) => { idlePasses.push(run); } });
+    LastSeenStore.fromShellPaths(options.shellPaths).save(Date.now() - 3_600_000);
     const autonomy = createAutonomySurfacing(options);
-    autonomy.announceAwayDigest();
-    await autonomy.whenIdle();
-    await autonomy.stop();
-
-    const draftLine = feedPushes.find((p) => p.text.includes('drafted'));
-    expect(draftLine).toBeDefined();
-    // Should say "1 skill" not "1 skills"
-    expect(draftLine?.text).toMatch(/1 skill[^s]/u);
+    await autonomy.announceAwayDigest();
+    autonomy.stop();
+    expect(idlePasses).toHaveLength(0);
+    expect(calls).toBe(0);
   });
 
-  test('stub returning 0 appends no skill-draft feed line', async () => {
-    const { options, feedPushes } = makeOptions({
-      onAwayDigest: async () => 0,
-    });
-    const autonomy = createAutonomySurfacing(options);
-    autonomy.announceAwayDigest();
-    await autonomy.whenIdle();
-    await autonomy.stop();
-
-    const draftLine = feedPushes.find((p) => p.text.includes('drafted') && p.text.includes('skill'));
-    expect(draftLine).toBeUndefined();
-  });
-
-  test('omitting onAwayDigest appends no skill-draft feed line', async () => {
-    const { options, feedPushes } = makeOptions();
-    // No onAwayDigest provided
-    const autonomy = createAutonomySurfacing(options);
-    autonomy.announceAwayDigest();
-    await autonomy.whenIdle();
-    await autonomy.stop();
-
-    const draftLine = feedPushes.find((p) => p.text.includes('drafted') && p.text.includes('skill'));
-    expect(draftLine).toBeUndefined();
-  });
-
-  test('throwing onAwayDigest adds no feed line and is logged', async () => {
+  test('a throwing proposer adds no feed line and is logged', async () => {
     const debug = spyOn(logger, 'debug').mockImplementation(() => {});
-    const { options, feedPushes } = makeOptions({
-      onAwayDigest: async () => { throw new Error('proposer exploded'); },
-    });
+    const { options, feedPushes, idlePasses } = draftOptions(async () => { throw new Error('proposer exploded'); });
     const autonomy = createAutonomySurfacing(options);
-    // Should not throw
-    expect(() => autonomy.announceAwayDigest()).not.toThrow();
-    await autonomy.whenIdle();
-    await autonomy.stop();
-
+    await autonomy.announceAwayDigest();
+    await idlePasses[0]!();
+    autonomy.stop();
     try {
-      const draftLine = feedPushes.find((p) => p.text.includes('drafted'));
-      expect(draftLine).toBeUndefined();
+      expect(feedPushes.find((p) => p.text.includes('drafted'))).toBeUndefined();
       expect(debug.mock.calls.some(([message, meta]) => String(message).includes('skill-draft hook failed')
         && (meta as { error?: string } | undefined)?.error === 'proposer exploded')).toBe(true);
     } finally { debug.mockRestore(); }
+  });
+
+  test('stop aborts a pending pass without waiting for it', async () => {
+    let seen: AbortSignal | undefined;
+    const never = Promise.withResolvers<number>();
+    const { options, feedPushes, idlePasses } = draftOptions((signal) => { seen = signal; return never.promise; });
+    const autonomy = createAutonomySurfacing(options);
+    await autonomy.announceAwayDigest();
+    const pass = idlePasses[0]!();
+    autonomy.stop();
+    expect(seen?.aborted).toBe(true);
+    never.resolve(3); await pass;
+    expect(feedPushes.some((p) => p.text.includes('drafted'))).toBe(false);
+  });
+});
+
+describe('announceAwayDigest: each source degrades on its own', () => {
+  test('a throwing task read still announces the run outcomes and says the tasks were not read', async () => {
+    const { options, highMessages } = makeOptions({
+      getTasksSnapshot: () => { throw new Error('tasks read model not attached'); },
+      listAutomationRunsSince: async () => ({ runs: [completedRun()], deliveries: [] }),
+    });
+    LastSeenStore.fromShellPaths(options.shellPaths).save(Date.now() - 3_600_000);
+    const autonomy = createAutonomySurfacing(options);
+    await autonomy.announceAwayDigest();
+    autonomy.stop();
+    expect(highMessages).toHaveLength(1);
+    expect(highMessages[0]).toContain('reminder fired');
+    expect(highMessages[0]).toContain('Tasks could not be read');
+  });
+
+  test('a throwing approvals read is reported as unreadable, not as zero', async () => {
+    const { options, highMessages } = makeOptions({
+      listApprovals: () => { throw new Error('approvals binding gone'); },
+      listAutomationRunsSince: async () => ({ runs: [completedRun()], deliveries: [] }),
+    });
+    LastSeenStore.fromShellPaths(options.shellPaths).save(Date.now() - 3_600_000);
+    const autonomy = createAutonomySurfacing(options);
+    await autonomy.announceAwayDigest();
+    autonomy.stop();
+    expect(highMessages[0]).toContain('approvals binding gone');
+  });
+
+  test('the run read gets an abort signal that stop() fires', async () => {
+    let seen: AbortSignal | undefined;
+    const { options } = makeOptions({
+      listAutomationRunsSince: (_since, signal) => { seen = signal; return new Promise((resolve) => signal.addEventListener('abort', () => resolve({ runs: [], deliveries: [] }))); },
+    });
+    LastSeenStore.fromShellPaths(options.shellPaths).save(Date.now() - 3_600_000);
+    const autonomy = createAutonomySurfacing(options);
+    const pass = autonomy.announceAwayDigest();
+    autonomy.stop();
+    await pass;
+    expect(seen?.aborted).toBe(true);
   });
 });
 
@@ -154,9 +189,8 @@ describe('announceAwayDigest: connected-host run outcomes', () => {
     LastSeenStore.fromShellPaths(options.shellPaths).save(Date.now() - 3_600_000);
 
     const autonomy = createAutonomySurfacing(options);
-    autonomy.announceAwayDigest();
-    await autonomy.whenIdle();
-    await autonomy.stop();
+    await autonomy.announceAwayDigest();
+    autonomy.stop();
 
     const failLine = feedPushes.find((p) => p.text.includes('scheduled run failed'));
     expect(failLine).toBeDefined();
@@ -173,9 +207,8 @@ describe('announceAwayDigest: connected-host run outcomes', () => {
     LastSeenStore.fromShellPaths(options.shellPaths).save(Date.now() - 3_600_000);
 
     const autonomy = createAutonomySurfacing(options);
-    autonomy.announceAwayDigest();
-    await autonomy.whenIdle();
-    await autonomy.stop();
+    await autonomy.announceAwayDigest();
+    autonomy.stop();
 
     const missedLine = feedPushes.find((p) => p.text.includes('missed while asleep'));
     expect(missedLine).toBeDefined();
@@ -195,9 +228,8 @@ describe('announceAwayDigest: connected-host run outcomes', () => {
     LastSeenStore.fromShellPaths(options.shellPaths).save(Date.now() - 3_600_000);
 
     const autonomy = createAutonomySurfacing(options);
-    autonomy.announceAwayDigest();
-    await autonomy.whenIdle();
-    await autonomy.stop();
+    await autonomy.announceAwayDigest();
+    autonomy.stop();
 
     const joined = feedPushes.map((p) => p.text).join('\n');
     expect(joined).toContain('Overnight sync');
@@ -211,9 +243,8 @@ describe('announceAwayDigest: connected-host run outcomes', () => {
     LastSeenStore.fromShellPaths(options.shellPaths).save(Date.now() - 3_600_000);
 
     const autonomy = createAutonomySurfacing(options);
-    autonomy.announceAwayDigest();
-    await autonomy.whenIdle();
-    await autonomy.stop();
+    await autonomy.announceAwayDigest();
+    autonomy.stop();
 
     expect(feedPushes.some((p) => p.text.includes('Could not check for failed or missed scheduled runs: the connected host did not answer'))).toBe(true);
   });
@@ -225,37 +256,10 @@ describe('announceAwayDigest: connected-host run outcomes', () => {
     LastSeenStore.fromShellPaths(options.shellPaths).save(Date.now() - 3_600_000);
 
     const autonomy = createAutonomySurfacing(options);
-    autonomy.announceAwayDigest();
-    await autonomy.whenIdle();
-    await autonomy.stop();
+    await autonomy.announceAwayDigest();
+    autonomy.stop();
 
     expect(feedPushes).toEqual([]);
-  });
-
-  test('the local automation manager is never consulted for the digest, even when it would throw', async () => {
-    const { options, feedPushes } = makeOptions({
-      listAutomationJobs: () => {
-        throw new Error('local automation manager must not be read for the digest');
-      },
-      listAutomationRunsSince: async () => ({
-        runs: [makeRun({ status: 'failed', jobName: 'Poison-guard job' })],
-        deliveries: [],
-      }),
-    });
-    LastSeenStore.fromShellPaths(options.shellPaths).save(Date.now() - 3_600_000);
-
-    const autonomy = createAutonomySurfacing(options);
-    // If announceAwayDigest ever called the poisoned listAutomationJobs, the
-    // throw would be caught by the outer try/catch and the whole digest pass
-    // would silently produce zero feed lines, so a rendered line here proves
-    // the local manager path was never exercised.
-    expect(() => autonomy.announceAwayDigest()).not.toThrow();
-    await autonomy.whenIdle();
-    await autonomy.stop();
-
-    const failLine = feedPushes.find((p) => p.text.includes('scheduled run failed'));
-    expect(failLine).toBeDefined();
-    expect(failLine?.text).toContain('Poison-guard job');
   });
 
   test('completed wire runs still populate the "reminder fired" schedules line', async () => {
@@ -268,9 +272,8 @@ describe('announceAwayDigest: connected-host run outcomes', () => {
     LastSeenStore.fromShellPaths(options.shellPaths).save(Date.now() - 3_600_000);
 
     const autonomy = createAutonomySurfacing(options);
-    autonomy.announceAwayDigest();
-    await autonomy.whenIdle();
-    await autonomy.stop();
+    await autonomy.announceAwayDigest();
+    autonomy.stop();
 
     const firedLine = feedPushes.find((p) => p.text.includes('reminder fired'));
     expect(firedLine).toBeDefined();
@@ -279,41 +282,36 @@ describe('announceAwayDigest: connected-host run outcomes', () => {
 });
 
 // ---------------------------------------------------------------------------
-// F7, comingUpItems returns a defensive copy
+// Coming up reads the connected host's schedules
 // ---------------------------------------------------------------------------
 
-describe('comingUpItems: defensive copy', () => {
-  test('mutating the returned array does not affect subsequent calls', async () => {
-    const shellPaths = tempShellPaths();
-    const autonomy = createAutonomySurfacing({
-      shellPaths,
-      listAutomationJobs: () => [{
-        name: 'Test job',
-        enabled: true,
-        nextRunAt: Date.now() + 3_600_000, // 1 hour from now
-      }],
-      listAutomationRunsSince: async () => ({ runs: [], deliveries: [] }),
-      listApprovals: () => [],
-      getTasksSnapshot: () => [],
-      router: { high: () => {}, getFeed: () => null },
-      render: () => {},
-    });
-
-    // Force a cache fill
+describe('comingUpItems', () => {
+  async function filled(listUpcomingSchedules: Parameters<typeof createAutonomySurfacing>[0]['listUpcomingSchedules']) {
+    let rendered!: () => void;
+    const painted = new Promise<void>((resolve) => { rendered = resolve; });
+    const autonomy = createAutonomySurfacing({ ...makeOptions().options, listUpcomingSchedules, render: () => rendered() });
     autonomy.refreshComingUp();
-    // The refresh runs on a microtask; a macrotask turn guarantees it finished.
-    await new Promise<void>((resolve) => setImmediate(resolve));
+    await painted;
+    return autonomy;
+  }
 
+  test('lists an enabled host schedule with its next run', async () => {
+    const autonomy = await filled(async () => ({ schedules: [{ name: 'Water the plants', nextRunAt: Date.now() + 3_600_000 }] }));
+    expect(autonomy.comingUpItems()).toEqual(['Water the plants, in 1h']);
+    autonomy.stop();
+  });
+
+  test('a configured host that did not answer is said, not shown as an empty plan', async () => {
+    const autonomy = await filled(async () => ({ schedules: [], unavailable: 'connection refused', unavailableKind: 'no_answer' }));
+    expect(autonomy.comingUpItems()).toEqual(['Schedules unavailable: connection refused']);
+    autonomy.stop();
+  });
+
+  test('mutating the returned array does not affect subsequent calls', async () => {
+    const autonomy = await filled(async () => ({ schedules: [{ name: 'Test job', nextRunAt: Date.now() + 3_600_000 }] }));
     const first = autonomy.comingUpItems();
-    expect(first.length).toBeGreaterThan(0);
-
-    // Mutate the returned array (cast away readonly for the test)
     (first as string[]).push('injected item');
-
-    // Second call must not include the injected item
-    const second = autonomy.comingUpItems();
-    expect(second).not.toContain('injected item');
-
+    expect(autonomy.comingUpItems()).not.toContain('injected item');
     autonomy.stop();
   });
 });

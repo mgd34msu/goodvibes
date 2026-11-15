@@ -23,7 +23,7 @@ export interface FirstRenderFollowupDeps extends Omit<SessionPersistenceAndRecov
   readonly shellPaths: Parameters<typeof wireSetupIncompleteHint>[0]['shellPaths'];
   readonly providerRegistry: { readonly getCurrentModel: () => { readonly id?: string } | null | undefined };
   readonly commandContext: Parameters<typeof localModelCookbook>[0];
-  readonly autonomy: { readonly announceAwayDigest: () => void };
+  readonly autonomy: { readonly announceAwayDigest: () => Promise<void> };
   readonly uiServicesTurns: SessionPersistenceAndRecoveryDeps['uiServicesTurns'];
 }
 
@@ -54,8 +54,8 @@ export function startFirstRenderFollowups(deps: FirstRenderFollowupDeps): Sessio
   startHardwareProbe();
 
   // Away digest runs after the first render so it lands as ambient context,
-  // never a startup blocker.
-  autonomy.announceAwayDigest();
+  // never a startup blocker. A skill-draft pass it may arm waits for an idle shell.
+  void autonomy.announceAwayDigest();
 
   // If setup is in-progress (user has opened /agent but not finished), show a
   // gentle plain-language reminder and point them back to /agent.

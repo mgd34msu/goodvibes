@@ -1,9 +1,20 @@
 import { expect, test } from 'bun:test';
 import type { GatePresetName } from '@goodvibes-jev/engine/platform/platform/gate';
+import type { NativeHostedTurnSnapshot } from '@goodvibes-jev/engine/platform/platform/hosted-sessions/native-turn-client';
 import { createRemoteConversationRouter, type ConnectedHostResolution } from '../../runtime/client/remote-conversation.ts';
 import { mockFetch } from '../helpers/typed-fetch-mock.ts';
 
-function fixture(options: { initial?: GatePresetName; wrongSession?: boolean; failSet?: boolean; keepStream?: boolean } = {}) {
+const snapshot: NativeHostedTurnSnapshot = { projectId: 'project', requestId: 'request', inputId: 'input', sourceRevision: 'revision', state: 'running', sessionId: 'hosted-one', brokerInputId: 'broker', correlationId: 'correlation' };
+
+/** Observing a native turn binds the router to its hosted session and reads that session's mode. */
+async function observe(f: ReturnType<typeof fixture>): Promise<void> {
+  await f.router.observeNative(snapshot, async () => {});
+  for (let turn = 0; f.router.executionMode() === undefined && turn < 2_000; turn += 1) {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+}
+
+function fixture(options: { wrongSession?: boolean; keepStream?: boolean } = {}) {
   let connection: ConnectedHostResolution = { baseUrl: 'http://127.0.0.1:3421', token: 'fixture-token', selectionIdentity: 'fixture-host' };
   let actualMode: GatePresetName = 'safe-owner';
   let wrong = options.wrongSession ?? false;
@@ -18,12 +29,11 @@ function fixture(options: { initial?: GatePresetName; wrongSession?: boolean; fa
   const router = createRemoteConversationRouter({
     verbs: { probe: () => ({ available: true }), invoke: async <T,>(method: string): Promise<T> => {
       calls.push(method);
-      return (method === 'sessions.hosted.create' ? { session: { id: 'hosted-one', permissionMode: actualMode } } : {}) as T;
+      return {} as T;
     } },
-    configManager: { get: ((key: string) => key === 'hostedSessions.routeConversationTurns' ? true : key === 'permissions.mode' ? options.initial : undefined) as never },
     resolveConnection: () => connection,
     conversation: { addAssistantMessage() {}, addToolResults() {}, addSystemMessage() {}, startStreamingBlock() {}, updateStreamingBlock() {}, finalizeStreamingBlock() {} },
-    requestRender() {}, workspaceRoot: '/workspace', clientId: 'agent-test', reconnect: { enabled: false },
+    requestRender() {}, clientId: 'agent-test', reconnect: { enabled: false },
     fetchImpl: mockFetch(async (input, init) => {
       const url = new URL(input instanceof Request ? input.url : String(input));
       if (url.pathname.endsWith('/permission-mode')) {
@@ -33,7 +43,6 @@ function fixture(options: { initial?: GatePresetName; wrongSession?: boolean; fa
           const packet = JSON.parse(String(init.body));
           const body = packet.body ?? packet;
           mutations.push({ sessionId, mode: body.mode });
-          if (options.failSet) return Response.json({ error: 'unconfirmed' }, { status: 503 });
           actualMode = body.mode;
           const selectedMode = actualMode;
           writeStarted?.();
@@ -55,47 +64,10 @@ function fixture(options: { initial?: GatePresetName; wrongSession?: boolean; fa
   }, resetMode: (mode: GatePresetName) => { actualMode = mode; }, holdWrite: (hold: Promise<void>, started: () => void) => { holdWrite = hold; writeStarted = started; }, mode: () => actualMode, wrong: (value: boolean) => { wrong = value; }, changeConnection: () => { connection = { baseUrl: 'http://127.0.0.1:3422', token: 'other', selectionIdentity: 'replacement' }; }, holdRead: (hold: Promise<void>, started: () => void) => { holdRead = hold; readStarted = started; } };
 }
 
-test('the first legacy-hosted turn applies its chosen mode before any steer', async () => {
-  const f = fixture({ initial: 'yolo' });
-  try {
-    const result = await f.router.submit('hello');
-    expect(result.routed).toBe(true);
-    expect(f.mutations).toEqual([{ sessionId: 'hosted-one', mode: 'yolo' }]);
-    expect(f.calls).toEqual(['sessions.hosted.create', 'sessions.steer']);
-    expect(f.router.executionMode()).toBe('yolo');
-  } finally { f.router.dispose(); }
-});
-
-test('first-turn mode setup failure never steers or falls back to local execution', async () => {
-  const f = fixture({ initial: 'yolo', failSet: true });
-  try {
-    const result = await f.router.submit('hello');
-    expect(result).toMatchObject({ routed: false, chosen: true, cancelled: true });
-    // The session that never got the chosen mode is left, not kept.
-    expect(f.calls).toEqual(['sessions.hosted.create', 'sessions.hosted.detach']);
-    expect(f.router.executionMode()).toBeUndefined();
-  } finally { f.router.dispose(); }
-});
-
-test('a session whose mode was never applied is not steered into by the next message', async () => {
-  const f = fixture({ initial: 'yolo', failSet: true });
-  try {
-    await f.router.submit('first');
-    expect(f.router.hostedSessionId()).toBeNull();
-    const second = await f.router.submit('second');
-    expect(second).toMatchObject({ routed: false, chosen: true, cancelled: true });
-    // The mode is applied again on a fresh session; nothing is ever steered
-    // into a session that runs under the daemon's own default.
-    expect(f.calls.filter((call) => call === 'sessions.steer')).toEqual([]);
-    expect(f.calls.filter((call) => call === 'sessions.hosted.create')).toHaveLength(2);
-    expect(f.mutations).toHaveLength(2);
-  } finally { f.router.dispose(); }
-});
-
 test('wrong-session mode acknowledgements fail and clear the unconfirmed cached choice', async () => {
   const f = fixture();
   try {
-    await f.router.submit('hello');
+    await observe(f);
     expect(f.router.executionMode()).toBe('safe-owner');
     f.wrong(true);
     await expect(f.router.setExecutionMode('safe-jev')).rejects.toThrow('unconfirmed');
@@ -113,7 +85,7 @@ test('a mode refresh started before a successful mutation cannot overwrite its c
   const release = Promise.withResolvers<void>();
   const started = Promise.withResolvers<void>();
   try {
-    await f.router.submit('hello');
+    await observe(f);
     f.holdRead(release.promise, () => started.resolve());
     const oldRead = f.router.refreshExecutionMode();
     await started.promise;
@@ -126,22 +98,11 @@ test('a mode refresh started before a successful mutation cannot overwrite its c
 test('host selection changes invalidate the displayed owner and reject further mutations', async () => {
   const f = fixture();
   try {
-    await f.router.submit('hello');
+    await observe(f);
     f.changeConnection();
     expect(f.router.executionMode()).toBeUndefined();
     await expect(f.router.setExecutionMode('yolo')).rejects.toThrow('owner');
     expect(f.mutations).toEqual([]);
-  } finally { f.router.dispose(); }
-});
-
-test('routing on a replacement host creates its own session instead of steering an old-host identity', async () => {
-  const f = fixture();
-  try {
-    await f.router.submit('first host');
-    f.changeConnection();
-    const result = await f.router.submit('replacement host');
-    expect(result.routed).toBe(true);
-    expect(f.calls).toEqual(['sessions.hosted.create', 'sessions.steer', 'sessions.hosted.create', 'sessions.steer']);
   } finally { f.router.dispose(); }
 });
 
@@ -150,12 +111,12 @@ test('an old-host mutation response cannot overwrite a replacement host using th
   const release = Promise.withResolvers<void>();
   const started = Promise.withResolvers<void>();
   try {
-    await f.router.submit('first host');
+    await observe(f);
     f.holdWrite(release.promise, () => started.resolve());
     const oldWrite = f.router.setExecutionMode('yolo').then(() => null, error => error);
     await started.promise;
     f.changeConnection(); f.resetMode('safe-jev');
-    await f.router.submit('replacement host');
+    await observe(f);
     release.resolve();
     expect(await oldWrite).toBeInstanceOf(Error);
     expect(f.router.executionMode()).toBe('safe-jev');
@@ -166,7 +127,7 @@ test('an old-host mutation response cannot overwrite a replacement host using th
 test('a replayed preset event refreshes the actual owner instead of overwriting its newer confirmed mode', async () => {
   const f = fixture({ keepStream: true });
   try {
-    await f.router.submit('hello');
+    await observe(f);
     await f.router.setExecutionMode('yolo');
     const reads = f.modeReads();
     f.staleModeEvent('safe-owner');

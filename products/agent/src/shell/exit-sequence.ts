@@ -16,7 +16,8 @@ export interface ExitSequenceDeps<Snapshot> {
   /** Starts the bounded spoken-output drain. */
   readonly stopSpokenOutput: () => Promise<void> | undefined;
   readonly unsubs: readonly (() => void)[];
-  readonly stopAutonomy: () => Promise<void>;
+  /** Aborts ambient reads and the skill-draft pass; the save never waits on them. */
+  readonly stopAutonomy: () => void;
   /**
    * Leaves the hosted session so the daemon applies its detach policy; a
    * terminal that only exits stays attached forever. Bounded by its owner.
@@ -74,10 +75,9 @@ export function runExitSequence<Snapshot>(
       .catch((error: unknown) => { deps.warn('Hosted session could not be left during exitApp', error); });
     // One throwing unsubscribe must not skip autonomy.stop() or the session-saving shutdown below.
     runUnsubscribes(deps.unsubs, (error) => deps.warn('Unsubscribe failed during exitApp', error));
-    // A failed autonomy stop is reported but never keeps the session from being saved and released.
-    const autonomyDrain = Promise.resolve()
-      .then(() => deps.stopAutonomy())
-      .catch((error: unknown) => { deps.warn('Autonomy could not be stopped during exitApp', error); });
+    // Autonomy work is aborted, not awaited: the session save is never ordered
+    // behind a background pass, and a failed stop is only reported.
+    try { deps.stopAutonomy(); } catch (error) { deps.warn('Autonomy could not be stopped during exitApp', error); }
     // A failure in the session-context half of the snapshot must not skip the
     // shutdown that releases every owner and saves the session: fall back to
     // the messages alone. When even those cannot be read nothing is saved (an
@@ -100,7 +100,7 @@ export function runExitSequence<Snapshot>(
     // once that shutdown has finished: if the deadline wins, it stays and the
     // next launch can restore from it.
     const runtimeShutdown = (saved !== undefined
-      ? withShutdownDeadline(Promise.all([autonomyDrain, hostedDetach]).then(() => deps.shutdown(saved)))
+      ? withShutdownDeadline(hostedDetach.then(() => deps.shutdown(saved)))
       : Promise.reject(new Error('The session snapshot could not be built; shutdown was not run.')))
       .then(() => {
         deps.removeRecoveryPoint();

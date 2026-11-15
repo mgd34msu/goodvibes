@@ -7,7 +7,6 @@ import { RuntimeEventBus } from '@/runtime/index.ts';
 import { createRuntimeStore } from '@goodvibes-jev/engine/platform/platform/runtime/store';
 import { createHostedSessionRuntime, type HostedSessionRuntime } from '@goodvibes-jev/engine/platform/platform/hosted-sessions';
 import type { DaemonVerbCaller } from '@goodvibes-jev/engine/platform/platform/runtime/client';
-import { createRemoteConversationRouter } from '../../runtime/client/remote-conversation.ts';
 import { createHostedConversationHandoff } from '../../runtime/client/hosted-handoff.ts';
 import { ConnectedHostVerbError } from '../../runtime/client/daemon-verbs.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
@@ -22,8 +21,7 @@ afterEach(async () => {
   if (failures.length) throw new AggregateError(failures, 'Hosted origin fixtures did not close');
 });
 
-for (const surface of ['composer', 'inbound'] as const) {
-  test(`${surface} initial and recreated sessions write only Agent-owned settings`, async () => {
+test('inbound initial and recreated sessions write only Agent-owned settings', async () => {
     const home = makeProjectTempDir('agent-hosted-origin');
     const workspace = join(home, 'workspace'); mkdirSync(workspace);
     const hostDir = join(home, '.goodvibes', 'goodvibes'); mkdirSync(hostDir, { recursive: true });
@@ -50,10 +48,8 @@ for (const surface of ['composer', 'inbound'] as const) {
         return {} as T;
       },
     };
-    const router = createRemoteConversationRouter({ verbs, configManager, resolveConnection: () => ({ baseUrl: 'http://127.0.0.1:1', token: 'synthetic' }), workspaceRoot: workspace, clientId: 'agent:ownership', conversation: { addAssistantMessage() {}, addToolResults() {}, addSystemMessage() {}, startStreamingBlock() {}, updateStreamingBlock() {}, finalizeStreamingBlock() {} }, requestRender() {}, fetchImpl: Object.assign(async () => new Response(new ReadableStream({ start(controller) { controller.close(); } }), { headers: { 'content-type': 'text/event-stream' } }), { preconnect() {} }), reconnect: { enabled: false } });
-    disposals.push(() => router.dispose());
     const handoff = createHostedConversationHandoff({ verbs, isEnabled: () => true, workspaceRoot: () => workspace, clientId: 'agent:ownership' });
-    const submit = async () => surface === 'composer' ? router.submit('synthetic input') : handoff.promote({ sessionId: 'inbound-1', task: 'synthetic input', body: 'synthetic input' });
+    const submit = async () => handoff.promote({ sessionId: 'inbound-1', task: 'synthetic input', body: 'synthetic input' });
     await submit();
     expect(sessions).toHaveLength(1);
     for (const iteration of [0, 1]) {
@@ -68,4 +64,3 @@ for (const surface of ['composer', 'inbound'] as const) {
       expect(readFileSync(hostPath, 'utf8')).toBe(hostBefore);
     }
   });
-}

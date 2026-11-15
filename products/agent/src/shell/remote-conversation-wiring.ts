@@ -3,10 +3,11 @@ import { bindActiveExecutionMode } from '../permissions/execution-mode.ts';
  * remote-conversation-wiring.ts, the composer's one decision about WHERE a
  * turn runs.
  *
- * The router itself (runtime/client/remote-conversation.ts) knows how to open
- * and steer a daemon-hosted session and how to render it. This is the surface
- * half: what the composer does with the answer, mirror the user's message when
- * the daemon took the turn, and say one honest line when it did not.
+ * The router itself (runtime/client/remote-conversation.ts) knows how to
+ * observe a hosted turn that native intake delivered and how to render it.
+ * This is the surface half: what the composer does with the answer, mirror the
+ * user's message when the host took the turn, and say one honest line when it
+ * did not.
  *
  * It lives beside main.ts rather than inside it so the composer keeps one call
  * where it used to have one call.
@@ -37,19 +38,6 @@ export interface RemoteConversationWiringOptions {
 }
 
 export interface RemoteConversationWiring {
-  /**
-   * Decide where this turn runs and act on it.
-   *
-   * Returns a HANDLE when the connected daemon has the turn: an interactive
-   * caller can discard it, because the turn renders itself from the hosted
-   * session's event stream as frames arrive. A caller that has to WAIT for one
-   * answer, a headless `run` choosing an exit code, awaits `completion`.
-   *
-   * Returns `null` when the caller should run the turn locally, having already
-   * been told why. Both shapes stay truthy/falsy, so `if (await …) return;`
-   * reads the same as it did when this returned a boolean.
-   */
-  routeOrExplain(text: string, hasAttachments: boolean): Promise<RoutedTurnHandle | null>;
   /** Request cancellation while retaining observation until terminal settlement. */
   cancelHostedTurn(): boolean;
   /**
@@ -70,8 +58,13 @@ export interface RemoteConversationWiring {
 }
 
 export interface NativeRemoteConversationWiring extends RemoteConversationWiring {
-  /** Native admission always precedes delivery; null only when local routing was chosen. */
-  /** `onNotSent` runs when the message is refused before anything was submitted, so the caller can give back what it took for it. */
+  /**
+   * Decide where this turn runs and act on it. Native admission always
+   * precedes delivery. Returns a HANDLE when the connected host has the turn:
+   * an interactive caller discards it, because the turn renders itself from
+   * the hosted session's event stream; a caller that must wait for one answer
+   * awaits `completion`. Returns `null` only when local routing was chosen.
+   * `onNotSent` runs when the message is refused before anything was submitted, so the caller can give back what it took for it. */
   routeNativeOrExplain(source: NativeConversationInput, intake: NativeConversationIntakeActions | undefined, onNotSent?: () => void): Promise<RoutedTurnHandle | null>;
   /** Explicit recovery observes the exact saved original without submitting it again. */
   observeNative(state: NativeConversationIntakeState, intake: NativeConversationIntakeActions): Promise<RoutedTurnHandle>;
@@ -126,6 +119,9 @@ export function installRemoteConversationRouting(
   // The observed native turn's claim on the shared indicator. Stop can hand that
   // claim forward to its own sequence when it leaves the observation running.
   let observedIndicator: { sequence: number } | undefined;
+  // Inputs whose user message is already in the transcript, so a recovery that
+  // observes the same input again does not repeat it. Keyed by request and
+  // input id only; an entry ends when its turn settles.
   const nativeMirrored = new Set<string>();
   // The waiting state a hosted turn shows is the orchestrator's own, driven on
   // the orchestrator's own cadence, see hosted-turn-activity.ts. Nothing in
@@ -143,21 +139,21 @@ export function installRemoteConversationRouting(
    * could not be written.
    */
   const mirrorHostedSession = async (
-    hostedSessionId: string, current: () => boolean = () => !disposed,
-    connection?: Extract<ConnectedHostResolution, { readonly baseUrl: string }>,
+    hostedSessionId: string, current: () => boolean,
+    connection: Extract<ConnectedHostResolution, { readonly baseUrl: string }>,
   ): Promise<void> => {
     if (!current()) return;
     const outcome = await mirrorHostedSessionToStore(hostedSessionId, {
       // A native completion never re-resolves a different host or token while
       // its asynchronous attachment is in flight.
-      verbs: connection ? { async invoke<T>(method: string): Promise<T> {
+      verbs: { async invoke<T>(method: string): Promise<T> {
         if (!current() || method !== 'sessions.hosted.attach') throw new Error('Native mirror selection changed');
         const attached = await postNativeMirrorAttach(connection, { sessionId: hostedSessionId, clientId }, AbortSignal.timeout(NATIVE_MIRROR_ATTACH_TIMEOUT_MS));
         if (!current() || !attached.ok) throw new Error('Native mirror attachment was not confirmed');
         const reply = attached.reply as HostedAttachReply;
         if (!current() || reply.session.id !== hostedSessionId) throw new Error('Native mirror identity changed');
         return reply as T;
-      } } : ctx.services.daemonVerbs,
+      } },
       clientId,
       persist: (sessionId, snapshot, model, provider, title) => {
         if (!current()) throw new Error('Hosted mirror selection changed');
@@ -197,14 +193,11 @@ export function installRemoteConversationRouting(
 
   const router = createRemoteConversationRouter({
     verbs: ctx.services.daemonVerbs,
-    configManager: ctx.services.configManager,
     // The SAME resolution the verb caller uses, so this surface never calls one
     // daemon and streams from another.
     resolveConnection: () => ctx.services.resolveConnectedHost(),
     conversation,
     requestRender: options.render,
-    // The hosted session's tools operate where this surface is working.
-    workspaceRoot: ctx.services.workingDirectory,
     clientId,
     onCancellationNotice: (message) => { options.notify(message); options.render(); },
     onFrame: (frame: HostedSessionFrame) => {
@@ -278,7 +271,7 @@ export function installRemoteConversationRouting(
       && sameNativeRemoteConnection(connection, ctx.services.resolveConnectedHost());
     const sequence = ++routeSequence;
     const request = { ...state.request };
-    const key = JSON.stringify([connection, ctx.services.workingDirectory, snapshot.projectId, request.requestId, request.inputId, snapshot.sourceRevision]);
+    const key = `${request.requestId}:${request.inputId}`;
     // Render the original before opening catch-up. A complete fast reply can
     // arrive synchronously while the stream opens; it must follow its user.
     if (!nativeMirrored.has(key)) {
@@ -295,6 +288,7 @@ export function installRemoteConversationRouting(
       report(result);
     }, current);
     if (!outcome.routed) {
+      nativeMirrored.delete(key);
       if (sequence === routeSequence) activity.end();
       options.notify(outcome.reason); options.render();
       return detachedHandle();
@@ -302,14 +296,17 @@ export function installRemoteConversationRouting(
     nativeOwnerUnconfirmed = false;
     const indicator = { sequence };
     observedIndicator = indicator;
-    const finish = (): void => {
+    const finish = (completion?: HostedTurnCompletion): void => {
+      // An abandoned observation may be recovered, and must not repeat the
+      // user's message; any other ending is final for this input.
+      if (completion?.status !== 'abandoned') nativeMirrored.delete(key);
       // The indicator ends with the turn even when the selection changed under
       // it; only the transcript mirror needs the selection to still hold.
       if (indicator.sequence === routeSequence) activity.end();
       if (observedIndicator === indicator) observedIndicator = undefined;
       if (current()) void mirrorHostedSession(outcome.hostedSessionId, current, connection);
     };
-    void outcome.completion.then(finish, finish);
+    void outcome.completion.then(finish, () => finish());
     return { hostedSessionId: outcome.hostedSessionId, completion: outcome.completion };
   };
 
@@ -363,59 +360,8 @@ export function installRemoteConversationRouting(
         return detachedHandle();
       } finally { if (nativePending === pending) nativePending = undefined; }
     },
-    routeOrExplain: async (text: string, hasAttachments: boolean): Promise<RoutedTurnHandle | null> => {
-      // Before the round trip, not after: the waiting state has to appear on
-      // the keystroke. Opening or steering a hosted session is a network call,
-      // and a shell that shows nothing until it returns reads as frozen.
-      if (disposed) return detachedHandle();
-      const sequence = ++routeSequence;
-      activity.begin();
-      const outcome = await router.submit(text, { hasAttachments });
-      if (outcome.routed) {
-        // Keep the original terminal mirror for superseded replies while the
-        // surface is alive. Only the current generation may end its indicator.
-        if (!disposed) {
-          const finish = (): void => {
-            if (disposed) return;
-            if (sequence === routeSequence) activity.end();
-            void mirrorHostedSession(outcome.hostedSessionId);
-          };
-          void outcome.completion.then(finish, finish);
-        }
-        if (disposed || sequence !== routeSequence) {
-          return { hostedSessionId: outcome.hostedSessionId, completion: outcome.completion };
-        }
-        // The daemon's transcript is authoritative; this is the local mirror,
-        // and the user's own message is the one part of it the stream does not
-        // send back (the daemon received it directly).
-        conversation.addUserMessage(text);
-        options.render();
-        return { hostedSessionId: outcome.hostedSessionId, completion: outcome.completion };
-      }
-      if (disposed || sequence !== routeSequence) return detachedHandle();
-      // Not routed: the local turn owns the indicator from here.
-      if (sequence === routeSequence) activity.end();
-      if (outcome.cancelled) {
-        options.notify(`[Stop] ${outcome.reason}`);
-        options.render();
-        return {
-          hostedSessionId: router.hostedSessionId(),
-          completion: Promise.resolve({ status: 'cancelled', response: '', error: outcome.reason, stopReason: 'cancelled_before_submission' }),
-        };
-      }
-      // Never silent. A turn that ran somewhere other than where the settings
-      // say it should is exactly what the person needs told, unless running
-      // here is what they asked for, in which case there is nothing to report.
-      if (!outcome.chosen) {
-        options.notify(`[Turn] ${outcome.reason}`);
-        options.render();
-      }
-      return null;
-    },
-    // A terminal can arrive before the submission HTTP reply. The router has
-    // settled observation, but this controller still owns the shared indicator
-    // until routeOrExplain receives that reply. Never abort the local runtime
-    // merely because the hosted observer has already reached its terminal.
+    // Never abort the local runtime merely because the hosted observer has
+    // already reached its terminal.
     cancelHostedTurn: () => {
       const pending = nativePending;
       if (pending) {

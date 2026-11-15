@@ -15,6 +15,7 @@ import { AgentNoteRegistry } from '../../agent/note-registry.ts';
 import { AgentSkillRegistry } from '../../agent/skill-registry.ts';
 import { readSkillDraftLedger } from '../../agent/skill-draft-runner.ts';
 import { buildSkillDraftProposer, createAutonomySurfacing } from '../../shell/autonomy-surfacing.ts';
+import { LastSeenStore } from '../../core/last-seen-store.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 import { ordinaryResearchOwner, cleanupResearchScreeningFixtures } from '../helpers/research-screening.ts';
 
@@ -101,20 +102,24 @@ test.each(['configuration', 'host', 'session'])('original ambient %s retirement 
   } finally { f.release(); await work.catch(() => {}); await f.close(); }
 });
 
-test('the real away-digest owner aborts and drains its pending registered draft call', async () => {
+test('the real away-digest owner aborts its pending registered draft call at stop', async () => {
   const f = fixture({ suspend: true });
   const surfaced: string[] = [];
+  const idlePasses: Array<() => Promise<void>> = [];
+  LastSeenStore.fromShellPaths(f.paths).save(Date.now() - 3_600_000);
   const owner = createAutonomySurfacing({ shellPaths: f.paths,
-    listAutomationJobs: () => [], listAutomationRunsSince: async () => ({ runs: [], deliveries: [] }),
+    listUpcomingSchedules: async () => ({ schedules: [] }),
+    listAutomationRunsSince: async () => ({ runs: [{ id: 'run', jobId: 'job', jobName: 'Backup', status: 'completed', queuedAt: Date.now() - 60_000, endedAt: Date.now() - 30_000 }], deliveries: [] }),
     listApprovals: () => [], getTasksSnapshot: () => [], render: () => {},
     router: { high: () => {}, getFeed: () => ({ push: text => { surfaced.push(text); } }) }, onAwayDigest: f.propose,
+    scheduleIdle: run => { idlePasses.push(run); },
   });
   try {
-    owner.announceAwayDigest(); await f.entered;
-    const stopped = owner.stop(); let settled = false; void stopped.then(() => { settled = true; });
-    await Promise.resolve(); expect(settled).toBe(false);
-    f.release(); await stopped;
+    await owner.announceAwayDigest();
+    const pass = idlePasses[0]!(); await f.entered;
+    owner.stop();
+    f.release(); await pass;
     expect(f.skills.list()).toEqual([]); expect(readSkillDraftLedger(f.skills)).toEqual([]);
-    expect(surfaced.some(line => line.includes('Drafted'))).toBe(false);
-  } finally { f.release(); await owner.stop(); await f.close(); }
+    expect(surfaced.some(line => line.includes('drafted'))).toBe(false);
+  } finally { f.release(); owner.stop(); await f.close(); }
 });

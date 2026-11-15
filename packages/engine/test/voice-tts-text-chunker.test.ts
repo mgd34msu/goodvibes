@@ -22,7 +22,28 @@ describe('TtsTextChunker', () => {
     now += 499;
     expect(await chunker.flushDue()).toEqual([]);
     now += 1;
-    expect(await chunker.flushDue()).toEqual(['short phrase']);
+    expect(await chunker.flushDue()).toEqual(['short']);
+    expect(await chunker.flushAll()).toEqual(['phrase']);
+  });
+
+  test('a latency release never splits a word', () => {
+    let now = 1_000;
+    const chunker = new TtsTextChunker({ maxLatencyMs: 500, now: () => now });
+
+    expect(chunker.push('This is an interna')).toEqual([]);
+    now += 500;
+    expect(chunker.flushDue()).toEqual(['This is an']);
+    expect(chunker.push('tional agreement. It has two parts.')).toEqual(['international agreement.']);
+  });
+
+  test('a latency release holds a buffer without whitespace', () => {
+    let now = 1_000;
+    const chunker = new TtsTextChunker({ maxLatencyMs: 500, now: () => now });
+
+    expect(chunker.push('Supercalifragi')).toEqual([]);
+    now += 500;
+    expect(chunker.flushDue()).toEqual([]);
+    expect(chunker.flushAll()).toEqual(['Supercalifragi']);
   });
 
   test('splits long chunks at a word boundary', async () => {

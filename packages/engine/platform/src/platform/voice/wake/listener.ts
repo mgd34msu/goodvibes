@@ -96,7 +96,10 @@ const MAX_QUEUED_FRAMES = 4;
 /**
  * How long scoring one frame may take before inference counts as hung and the
  * capture is restarted. A frame costs milliseconds; a call that has not
- * returned in seconds will not, and every later frame queues behind it.
+ * returned in seconds will not, and every later frame queues behind it. Read
+ * when the next frame arrives (every 80 ms while capture works), so no timer
+ * is armed per frame; a stream that also stops delivering is the frame-gap
+ * watchdog's.
  */
 const FRAME_SCORING_TIMEOUT_MS = 5_000;
 
@@ -142,6 +145,8 @@ export class WakeListener {
   #recordingFor: WakeDetection | null = null;
   #queued = 0;
   #chain: Promise<void> = Promise.resolve();
+  /** When the frame being scored now was handed to the engine; null while none is. */
+  #scoringSince: number | null = null;
   #restartTimer: unknown = null;
   /** True while paused on a machine with no capture device; gates the announce-once and the gentle retry. */
   #waitingForDevice = false;
@@ -665,7 +670,8 @@ export class WakeListener {
     // machine dies a beat later, so open-success proves nothing.
     this.#waitingForDevice = false;
     this.#framesSeen += 1;
-    this.#lastFrameAt = this.#now();
+    const arrivedAt = this.#now();
+    this.#lastFrameAt = arrivedAt;
     if (this.#firstFrameTimer !== null) this.#clearFirstFrameWatchdog();
     if (this.#frameGapTimer === null) this.#armFrameGapWatchdog();
     // While the utterance after a wake is being recorded, frames belong to it and
@@ -677,6 +683,17 @@ export class WakeListener {
       return;
     }
     if (this.#engine === null) return;
+    if (this.#scoringSince !== null && arrivedAt - this.#scoringSince >= FRAME_SCORING_TIMEOUT_MS) {
+      // Scoring that never returns would hold the chain, and so every later
+      // frame, for good while frames kept arriving and the surface said
+      // "listening". It becomes a capture failure and a restart, which opens a
+      // new generation with a fresh chain and engine.
+      const detail = `wake-word scoring did not finish within ${FRAME_SCORING_TIMEOUT_MS} ms`;
+      this.#scoringSince = null;
+      this.#options.warn?.('wake frame scoring hung; restarting capture', { error: detail });
+      this.#onStreamStopped('failed', new AudioCaptureError('stream-ended', detail));
+      return;
+    }
     if (this.#queued >= MAX_QUEUED_FRAMES) {
       // DROPPING IS THE CHEAP PART; SAYING SO EVERY TIME WAS NOT.
       //
@@ -698,37 +715,23 @@ export class WakeListener {
     const generation = this.#captureGeneration;
     const engine = this.#engine;
     this.#chain = this.#chain.then(async () => {
-      let hungTimer: unknown = null;
-      let hung = false;
       try {
         if (generation !== this.#captureGeneration || engine === null) return;
-        // Scoring that never returns would hold this chain, and so every later
-        // frame, for good while frames kept arriving and the surface said
-        // "listening". The timeout turns it into a capture failure and a restart.
-        const deadline = new Promise<never>((_resolve, reject) => {
-          hungTimer = this.#setTimer(() => {
-            hung = true;
-            reject(new Error(`wake-word scoring did not finish within ${FRAME_SCORING_TIMEOUT_MS} ms`));
-          }, FRAME_SCORING_TIMEOUT_MS);
-        });
-        const result = await Promise.race([engine.pushFrame(frame), deadline]);
+        this.#scoringSince = this.#now();
+        const result = await engine.pushFrame(frame);
         if (generation !== this.#captureGeneration) return;
         for (const detection of result.detections) this.#onDetection(detection);
       } catch (error) {
         if (generation !== this.#captureGeneration) return;
-        if (hung) {
-          const detail = error instanceof Error ? error.message : String(error);
-          this.#options.warn?.('wake frame scoring hung; restarting capture', { error: detail });
-          this.#onStreamStopped('failed', new AudioCaptureError('stream-ended', detail));
-          return;
-        }
         this.#options.warn?.('wake frame scoring failed', {
           error: error instanceof Error ? error.message : String(error),
         });
       } finally {
-        if (hungTimer !== null) this.#clearTimer(hungTimer);
         // A chain from an earlier generation was replaced; its count is not this one's.
-        if (generation === this.#captureGeneration) this.#queued -= 1;
+        if (generation === this.#captureGeneration) {
+          this.#queued -= 1;
+          this.#scoringSince = null;
+        }
       }
     });
   }
@@ -740,6 +743,7 @@ export class WakeListener {
   #resetScoring(): void {
     this.#chain = Promise.resolve();
     this.#queued = 0;
+    this.#scoringSince = null;
   }
 
   /**

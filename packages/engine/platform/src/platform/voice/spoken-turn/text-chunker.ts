@@ -5,9 +5,11 @@ import { classicSpeechEndOffsets } from '../../../browser-decision-policy.js';
 /**
  * Streaming speech policy: a reply is cut at its sentence ends, found by the
  * local punctuation splitter. A chunk is also released at the size cap (at a
- * word boundary) and when text has waited `maxLatencyMs`, so first audio never
- * waits on anything but the text itself. A wrong cut costs an odd pause;
- * nothing is authorised on it.
+ * word boundary) and, up to its last whole word, when text has waited
+ * `maxLatencyMs`, so first audio never waits on anything but the text itself.
+ * A chunk never ends inside a word except at the size cap when a single word
+ * exceeds it, so the controller may join chunks with a space. A wrong cut
+ * costs an odd pause; nothing is authorised on it.
  */
 export interface TtsTextChunkerOptions {
   readonly minBoundaryChars?: number | undefined;
@@ -87,7 +89,10 @@ export class TtsTextChunker {
       const sentence = this.findLatestSentenceBoundary();
       const boundary = sentence > 0 ? sentence
         : this.buffer.length >= this.maxChunkChars ? this.findWordBoundaryBefore(this.maxChunkChars) || this.maxChunkChars
-        : forceLatencyFlush ? this.buffer.length : -1;
+        // Stream deltas are tokens, so the buffer may end inside a word: the
+        // latency release stops at the last whitespace and keeps the partial
+        // word for the next piece. Every chunk is whole words.
+        : forceLatencyFlush ? this.findWordBoundaryBefore(this.buffer.length) : -1;
       if (boundary <= 0) break;
       const chunk = this.takeChunk(boundary);
       if (chunk) chunks.push(chunk);

@@ -26,6 +26,7 @@ function harness(options: { devices?: () => readonly AudioInputDevice[]; engines
   const failures: Array<{ restarting: boolean; detail: string }> = [];
   let engineCount = 0;
   const pushes: number[] = [];
+  const clock = { now: 1_000 };
   const listener = new WakeListener({
     settings,
     openCapture: async (_request: AudioCaptureRequest, handlers: AudioCaptureHandlers) => {
@@ -49,6 +50,7 @@ function harness(options: { devices?: () => readonly AudioInputDevice[]; engines
     startTimeoutMs: 9_001,
     firstFrameTimeoutMs: 9_002,
     frameGapTimeoutMs: 9_003,
+    now: () => clock.now,
     handlers: { onFailure: (_error, restarting, detail) => { failures.push({ restarting, detail }); } },
     setTimeout: (run: () => void, ms: number) => { const id = nextTimer++; pending.set(id, { run, ms }); return id; },
     clearTimeout: (handle: unknown) => { pending.delete(handle as number); },
@@ -61,7 +63,7 @@ function harness(options: { devices?: () => readonly AudioInputDevice[]; engines
     entry![1].run();
   };
   return {
-    listener, pending, failures, frame, fire, pushes, handlersSeen,
+    listener, pending, failures, frame, fire, pushes, handlersSeen, clock,
     failOpenWith: (error: AudioCaptureError | null) => { openError = error; },
   };
 }
@@ -73,9 +75,15 @@ describe('hung scoring', () => {
     h.frame();
     await flush();
     expect(h.pushes).toEqual([0]);
-    // Later frames queue behind the hung call; the deadline is the only way out.
+    // Later frames queue behind the hung call; the first frame past the
+    // deadline is the way out. No timer is armed per frame.
+    h.clock.now += 4_999;
     h.frame();
-    h.fire(5_000);
+    await flush();
+    expect(h.failures).toEqual([]);
+    expect([...h.pending.values()].some((t) => t.ms === 5_000)).toBe(false);
+    h.clock.now += 1;
+    h.frame();
     await flush();
     expect(h.failures.some((f) => f.restarting)).toBe(true);
     expect(h.listener.state().phase).toBe('restarting');

@@ -357,7 +357,10 @@ export class SpokenTurnController {
     this.maybeReleaseTurn();
   }
 
-  /** Merge everything pending into one request, capped at the per-request text limit. */
+  /**
+   * Merge everything pending into one request, capped at the per-request text
+   * limit. Chunker pieces end on whole words, so a space joins them.
+   */
   private takeMergedText(): string {
     let merged = '';
     while (this.pendingTexts.length > 0) {

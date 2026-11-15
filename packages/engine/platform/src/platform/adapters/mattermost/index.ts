@@ -1,6 +1,7 @@
 import { constantTimeEquals, parseJsonRecord, readBearerOrHeaderToken, readTextBodyWithinLimit, readRecord, readString, declaredMention, ingressMetadata, noticeUnsupportedAttachment, hasAttachments } from '../helpers.js';
 import { duplicateDeliveryResponse, inboundDedupKey, runOncePerMessage } from '../inbound-dedup.js';
 import { resolveSurfaceCredential, surfaceCredentialUnavailable } from '../surface-credential.js';
+import { runSurfaceMessage, surfaceOutcomeResponse } from '../surface-message.js';
 import type { SurfaceAdapterContext } from '../types.js';
 
 async function readBody(req: Request): Promise<Record<string, unknown> | Response | null> {
@@ -78,45 +79,53 @@ export async function handleMattermostSurfaceWebhook(req: Request, context: Surf
   if (!channelId) return Response.json({ error: 'Missing channel id' }, { status: 400 });
 
   const dedupKey = inboundDedupKey('mattermost', channelId, readString(post?.id) ?? readString(body.post_id));
+  const direct = readString(body.channel_type) === 'D' || readString(post?.channel_type) === 'D';
   return runOncePerMessage(dedupKey, duplicateDeliveryResponse, async (committed) => {
     const task = message;
-    const policy = await context.authorizeSurfaceIngress({
-      surface: 'mattermost',
-      userId,
-      channelId,
-      groupId: teamId ?? channelId,
-      threadId,
-      workspaceId: teamId,
-      conversationKind: threadId ? 'thread' : 'channel',
+    const outcome = await runSurfaceMessage(context, {
+      ingress: {
+        surface: 'mattermost',
+        userId,
+        channelId,
+        groupId: teamId ?? channelId,
+        threadId,
+        workspaceId: teamId,
+        conversationKind: threadId ? 'thread' : 'channel',
+        text: task,
+        // An outgoing webhook only fires on its trigger word, which is the mention;
+        // a direct message is addressed to the bot by definition.
+        mentioned: declaredMention(body, Boolean(readString(body.trigger_word)) || direct),
+        metadata: {
+          ...body,
+          ...(post ? { post } : {}),
+        },
+      },
+      binding: {
+        kind: threadId ? 'thread' : 'channel',
+        surfaceKind: 'mattermost',
+        surfaceId: teamId ?? 'mattermost',
+        externalId: threadId ?? channelId,
+        channelId,
+        threadId,
+        title: readString(body.channel_name) ?? channelId,
+        metadata: {
+          ...ingressMetadata(body),
+          ...(post ? { post } : {}),
+        },
+      },
       text: task,
-      // An outgoing webhook only fires on its trigger word, which is the mention;
-      // a direct message is addressed to the bot by definition.
-      mentioned: declaredMention(body, Boolean(readString(body.trigger_word)) || readString(body.channel_type) === 'D' || readString(post?.channel_type) === 'D'),
-      metadata: {
-        ...body,
-        ...(post ? { post } : {}),
-      },
+      logLabel: 'handleMattermostSurfaceWebhook',
+      // An outgoing webhook shows the `text` of its answer in the channel.
+      control: 'response',
+      ...(dedupKey ? { providerMessageId: dedupKey } : {}),
+      userId,
+      displayName: readString(body.user_name) ?? userId,
+      signal: req.signal,
+      committed,
     });
-    if (!policy.allowed) {
-      return Response.json({ error: `Blocked by channel policy: ${policy.reason}` }, { status: 403 });
-    }
-
-    const binding = await context.routeBindings.upsertBinding({
-      kind: threadId ? 'thread' : 'channel',
-      surfaceKind: 'mattermost',
-      surfaceId: teamId ?? 'mattermost',
-      externalId: threadId ?? channelId,
-      channelId,
-      threadId,
-      title: readString(body.channel_name) ?? channelId,
-      metadata: {
-        ...ingressMetadata(body),
-        ...(post ? { post } : {}),
-      },
-    });
-    if (!task) {
+    if (outcome.kind === 'no-text') {
       const attachment = hasAttachments(post?.file_ids) ? 'attachment' : undefined;
-      const notified = attachment ? await noticeUnsupportedAttachment(context, binding, attachment, readString(body.channel_type) === 'D' || readString(post?.channel_type) === 'D') : false;
+      const notified = attachment ? await noticeUnsupportedAttachment(context, outcome.binding, attachment, direct) : false;
       return Response.json({
         ok: true,
         acknowledged: true,
@@ -124,60 +133,16 @@ export async function handleMattermostSurfaceWebhook(req: Request, context: Surf
         outcome: 'ignored',
         reason: attachment ? 'unsupported-attachment' : 'no-actionable-text',
         ...(attachment ? { attachment, notified } : {}),
-        bindingId: binding.id,
+        bindingId: outcome.binding.id,
       });
     }
-
-    const controlCommand = await context.parseSurfaceControlCommand(task, { signal: req.signal });
-    if (controlCommand) {
-      const message = await context.performSurfaceControlCommand(controlCommand, { surface: 'mattermost', routeId: binding.id });
-      return Response.json({ ok: true, acknowledged: true, message });
-    }
-
-    const submission = await context.sessionBroker.submitMessage({
-      routeId: binding.id,
-      ...(dedupKey ? { providerMessageId: dedupKey } : {}),
-      surfaceKind: 'mattermost',
-      surfaceId: binding.surfaceId,
-      externalId: binding.externalId,
-      threadId: binding.threadId ?? binding.channelId,
-      userId,
-      displayName: readString(body.user_name) ?? userId,
-      title: binding.title ?? 'Mattermost',
-      body: task,
-      metadata: binding.metadata,
-    });
-    if (submission.mode === 'continued-live' || submission.mode === 'queued-follow-up') {
-      committed();
-      return Response.json({ ok: true, continued: true, sessionId: submission.session.id, agentId: submission.activeAgentId ?? null });
-    }
-
-    const spawnResult = await context.trySpawnAgent(
-      { mode: 'spawn', task: submission.task! },
-      'handleMattermostSurfaceWebhook',
-      submission.session.id,
-    );
-    if (spawnResult instanceof Response) return spawnResult;
-    committed();
-    await context.sessionBroker.bindAgent(submission.session.id, spawnResult.id, submission.input.id);
-    context.queueSurfaceReplyFromBinding(submission.routeBinding ?? binding, {
-      agentId: spawnResult.id,
-      task,
-      sessionId: submission.session.id,
-    });
-
-    if ((req.headers.get('content-type') ?? '').includes('application/x-www-form-urlencoded')) {
+    if (outcome.kind === 'control') return surfaceOutcomeResponse(outcome, { text: outcome.message });
+    if (outcome.kind === 'started' && (req.headers.get('content-type') ?? '').includes('application/x-www-form-urlencoded')) {
       return Response.json({
         response_type: 'ephemeral',
         text: 'GoodVibes accepted the request and is processing it.',
       });
     }
-    return Response.json({
-      ok: true,
-      queued: true,
-      bindingId: binding.id,
-      sessionId: submission.session.id,
-      agentId: spawnResult.id,
-    });
+    return surfaceOutcomeResponse(outcome);
   });
 }

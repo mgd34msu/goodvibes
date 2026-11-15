@@ -2,6 +2,7 @@ import type { GenericWebhookAdapterContext } from '../types.js';
 import { validatePublicWebhookUrl } from '../../utils/url-safety.js';
 import { constantTimeEquals, readTextBodyWithinLimit } from '../helpers.js';
 import { resolveSurfaceCredential, surfaceCredentialUnavailable } from '../surface-credential.js';
+import { submitSurfaceMessage, surfaceOutcomeResponse } from '../surface-message.js';
 
 function parseJsonRecord(rawBody: string): Record<string, unknown> | Response {
   try {
@@ -146,68 +147,46 @@ export async function handleGenericWebhookSurface(req: Request, context: Generic
     });
   }
 
-  const submission = await context.sessionBroker.submitMessage({
-    sessionId: typeof body.sessionId === 'string' ? body.sessionId : undefined,
-    routeId: binding.id,
-    surfaceKind: 'webhook',
-    surfaceId,
+  const callbackSignature = typeof body.callbackSignature === 'string'
+    ? body.callbackSignature as 'shared-secret' | 'hmac-sha256'
+    : undefined;
+  const callbackFields = { callbackUrl: callbackUrl ?? null, correlationId: correlationId ?? null };
+  let callbackDelivery: Record<string, unknown> = { status: 'skipped', reason: callbackUrl ? 'webhook-delivery-disabled' : 'no-callback-url' };
+  const outcome = await submitSurfaceMessage(context, binding, {
+    surface: 'webhook',
+    text: task,
+    logLabel: 'handleGenericWebhookSurface',
+    // The caller reads the answer to its own request.
+    control: 'response',
+    sessionId: requestedSessionId,
     externalId,
     threadId,
     userId: typeof body.userId === 'string' ? body.userId : undefined,
     displayName: typeof body.displayName === 'string' ? body.displayName : undefined,
+    channelId,
     title: typeof body.title === 'string' ? body.title : externalId,
-    body: task,
     metadata: { ...withoutReservedMetadata(body.metadata), ...(correlationId ? { correlationId } : {}) },
+    signal: req.signal,
+    queueReply: ({ agentId, sessionId }) => {
+      if (!callbackUrl || !context.surfaceDeliveryEnabled('webhook')) return;
+      context.queueWebhookReply({
+        agentId,
+        task,
+        sessionId,
+        routeId: binding.id,
+        callbackUrl,
+        callbackCorrelationId: correlationId,
+        callbackSignature,
+      });
+      callbackDelivery = { status: 'queued' };
+    },
   });
-  if (submission.mode === 'continued-live' || submission.mode === 'queued-follow-up') {
-    return Response.json({
-      acknowledged: true,
-      queued: true,
-      continued: true,
-      bindingId: binding.id,
-      sessionId: submission.session.id,
-      agentId: submission.activeAgentId ?? null,
-      callbackUrl: callbackUrl ?? null,
-      correlationId: correlationId ?? null,
-    });
+  switch (outcome.kind) {
+    case 'continued':
+      return surfaceOutcomeResponse(outcome, { queued: true, ...callbackFields });
+    case 'started':
+      return surfaceOutcomeResponse(outcome, { ...callbackFields, callbackDelivery });
+    default:
+      return surfaceOutcomeResponse(outcome);
   }
-
-  const spawnResult = await context.trySpawnAgent(
-    { mode: 'spawn', task: submission.task! },
-    'handleGenericWebhookSurface',
-    submission.session.id,
-  );
-  if (spawnResult instanceof Response) return spawnResult;
-  await context.sessionBroker.bindAgent(submission.session.id, spawnResult.id, submission.input.id);
-  let callbackDelivery: Record<string, unknown>;
-  if (callbackUrl && context.surfaceDeliveryEnabled('webhook')) {
-    context.queueWebhookReply({
-      agentId: spawnResult.id,
-      task,
-      sessionId: submission.session.id,
-      routeId: binding.id,
-      callbackUrl,
-      callbackCorrelationId: correlationId,
-      callbackSignature: typeof body.callbackSignature === 'string'
-        ? body.callbackSignature as 'shared-secret' | 'hmac-sha256'
-        : undefined,
-    });
-    callbackDelivery = { status: 'queued' };
-  } else {
-    callbackDelivery = {
-      status: 'skipped',
-      reason: callbackUrl ? 'webhook-delivery-disabled' : 'no-callback-url',
-    };
-  }
-
-  return Response.json({
-    acknowledged: true,
-    queued: true,
-    bindingId: binding.id,
-    sessionId: submission.session.id,
-    agentId: spawnResult.id,
-    callbackUrl: callbackUrl ?? null,
-    correlationId: correlationId ?? null,
-    callbackDelivery,
-  });
 }

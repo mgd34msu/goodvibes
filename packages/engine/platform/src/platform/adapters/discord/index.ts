@@ -4,6 +4,7 @@ import { DiscordIntegration, DiscordInteractionResponseType, DiscordInteractionT
 import type { SurfaceAdapterContext } from '../types.js';
 import { summarizeError } from '../../utils/error-display.js';
 import { policyReplyText, readTextBodyWithinLimit } from '../helpers.js';
+import { answerSurfaceControl, gateAnswerText, runSurfaceMessage, submitSurfaceMessage, surfaceOutcomeResponse } from '../surface-message.js';
 
 /** Discord message flag: only the user who ran the command sees the reply. */
 const EPHEMERAL_MESSAGE_FLAG = 64;
@@ -135,98 +136,75 @@ async function dispatchDiscordInteraction(
       return deferredResponse;
     }
 
-    const controlCommand = await context.parseSurfaceControlCommand(task, { signal: req.signal });
-    if (controlCommand) {
-      const message = await context.performSurfaceControlCommand(controlCommand, { surface: 'discord', routeId: binding.id });
+    const control = await answerSurfaceControl(context, {
+      surface: 'discord', text: task, binding, userId: interaction.userId, channelId: interaction.channelId, answer: 'response', signal: req.signal,
+    });
+    if (control) {
       committed(); finished();
       return Response.json({
         type: DiscordInteractionResponseType.ChannelMessageWithSource,
-        data: { content: message },
+        data: { content: control.message },
       });
     }
 
     const appId = interaction.applicationId;
     const token = interaction.token;
+    const editResponse = async (content: string, embeds?: Parameters<DiscordIntegration['editOriginalResponse']>[3]): Promise<void> => {
+      await discord.editOriginalResponse(appId, token, content, embeds).catch((error: unknown) => {
+        logger.warn('handleDiscordSurfaceWebhook: the deferred response could not be edited', { error: summarizeError(error) });
+      });
+    };
 
     setImmediate(() => {
       void (async () => {
-        const submission = await context.sessionBroker.submitMessage({
-          routeId: binding.id,
+        const outcome = await submitSurfaceMessage(context, binding, {
+          surface: 'discord',
+          text: task,
+          logLabel: 'handleDiscordSurfaceWebhook',
+          control: false,
           ...(interaction.id ? { providerMessageId: interaction.id } : {}),
-          surfaceKind: 'discord',
-          surfaceId: binding.surfaceId,
           externalId: interaction.channelId ?? interaction.id,
           threadId: interaction.channelId,
           userId: interaction.userId,
           displayName: interaction.userId,
           title: interaction.commandName ?? 'discord',
-          body: task,
-          metadata: {
-            applicationId: appId,
-          },
+          metadata: { applicationId: appId },
+          committed,
+          replyBinding: (replyTo) => ({ ...replyTo, metadata: { ...replyTo.metadata, interactionToken: token } }),
         });
-        if (submission.mode === 'continued-live' || submission.mode === 'queued-follow-up') {
-          committed();
-          await discord
-            .editOriginalResponse(appId, token, submission.activeAgentId ? `Continuing session ${submission.session.id} via agent ${submission.activeAgentId}.` : `Queued for session ${submission.session.id}; it will run when the agent now starting finishes.`)
-            .catch((error) => logger.warn('handleDiscordSurfaceWebhook: failed to edit continuation response', {
-              error: summarizeError(error),
-            }));
-          return;
+        switch (outcome.kind) {
+          case 'continued':
+            await editResponse(outcome.agentId ? `Continuing session ${outcome.sessionId} via agent ${outcome.agentId}.` : `Queued for session ${outcome.sessionId}; it will run when the agent now starting finishes.`);
+            return;
+          case 'started':
+            await editResponse('', [discord.formatAgentResult(
+              outcome.agentId,
+              task,
+              `Session ${outcome.sessionId} active. Result will be posted here when complete.`,
+            )]);
+            return;
+          case 'answered':
+            // The gate already answered in the channel; the deferred "thinking" reply says what happened.
+            await editResponse(gateAnswerText(outcome.outcome));
+            return;
+          case 'not-started':
+            logger.error('handleDiscordSurfaceWebhook: the agent was not started', { error: outcome.error });
+            context.reportIngressFailure?.('discord', outcome.error);
+            await editResponse(`Nothing was started: ${outcome.error}`);
+            return;
+          case 'control':
+            return;
         }
-
-        const spawnResult = await context.trySpawnAgent(
-          { mode: 'spawn', task: submission.task! },
-          'handleDiscordSurfaceWebhook',
-          submission.session.id,
-        );
-        if (spawnResult instanceof Response) {
-          const payload = await spawnResult.json() as { error?: string };
-          const message = payload.error ?? 'Agent spawn failed';
-          logger.error('handleDiscordSurfaceWebhook: spawn failed', { error: message });
-          await discord.editOriginalResponse(appId, token, `Agent spawn failed: ${message}`).catch((error) => {
-            logger.warn('handleDiscordSurfaceWebhook: failed to edit spawn failure response', {
-              error: summarizeError(error),
-            });
-          });
-          return;
-        }
-
-        committed();
-        await context.sessionBroker.bindAgent(submission.session.id, spawnResult.id, submission.input.id);
-        const replyBinding = submission.routeBinding ?? binding;
-        context.queueSurfaceReplyFromBinding(
-          { ...replyBinding, metadata: { ...replyBinding.metadata, interactionToken: token } },
-          {
-            agentId: spawnResult.id,
-            task,
-            sessionId: submission.session.id,
-          },
-        );
-        const embed = discord.formatAgentResult(
-          spawnResult.id,
-          task,
-          `Session ${submission.session.id} active. Result will be posted here when complete.`,
-        );
-        await discord
-          .editOriginalResponse(appId, token, '', [embed])
-          .catch((error: unknown) => {
-            logger.warn('handleDiscordSurfaceWebhook: follow-up failed', {
-              error: summarizeError(error),
-            });
-          });
       })().catch((error: unknown) => {
-        // The slash-command path answers Discord immediately with a deferred
-        // response and then does the work detached, so nothing downstream can
-        // observe a failure here, this block had no catch at all, which made a
-        // throw an unhandled rejection with not one line logged, and left the
-        // user staring at "working…" forever. It reports through the same
-        // per-surface ingress alarm every other inbound path uses.
+        // The slash command was answered with a deferred response before this
+        // ran, so a throw has no caller; it is logged, reported on the
+        // surface's ingress alarm, and the deferred reply is not left waiting.
         const detail = summarizeError(error);
         logger.error('handleDiscordSurfaceWebhook: slash-command processing failed after the deferred reply', {
           error: detail,
         });
         context.reportIngressFailure?.('discord', detail);
+        return editResponse('Nothing was started: the request failed after it was received. Send it again.');
       }).finally(finished);
     });
 
@@ -292,76 +270,48 @@ export async function handleDiscordGatewayDispatchPayload(
   const mentioned = typeof applicationId === 'string' && applicationId.length > 0
     && Array.isArray(dispatch.d.mentions)
     && dispatch.d.mentions.some((mention) => (mention as { readonly id?: unknown } | null)?.id === applicationId);
-  const policy = await context.authorizeSurfaceIngress({
-    surface: 'discord',
-    userId,
-    channelId,
-    groupId: channelId,
-    workspaceId: guildId,
-    conversationKind: channelId ? 'channel' : 'service',
-    text: content,
-    mentioned,
-    metadata: {
-      gatewayEvent: dispatch.t,
-      messageId,
-    },
-  });
-  if (!policy.allowed) {
-    return Response.json({ ok: false, error: `Blocked by channel policy: ${policy.reason}` }, { status: 403 });
-  }
-  const binding = await context.routeBindings.upsertBinding({
-    kind: 'channel',
-    surfaceKind: 'discord',
-    surfaceId: guildId ?? 'discord',
-    externalId: channelId ?? messageId ?? 'discord',
-    channelId,
-    title: 'Discord message',
-    metadata: {
+  const outcome = await runSurfaceMessage(context, {
+    ingress: {
+      surface: 'discord',
       userId,
-      messageId,
-      gatewayEvent: dispatch.t,
+      channelId,
+      groupId: channelId,
+      workspaceId: guildId,
+      conversationKind: channelId ? 'channel' : 'service',
+      text: content,
+      mentioned,
+      metadata: {
+        gatewayEvent: dispatch.t,
+        messageId,
+      },
     },
-  });
-  const submission = await context.sessionBroker.submitMessage({
-    routeId: binding.id,
+    binding: {
+      kind: 'channel',
+      surfaceKind: 'discord',
+      surfaceId: guildId ?? 'discord',
+      externalId: channelId ?? messageId ?? 'discord',
+      channelId,
+      title: 'Discord message',
+      metadata: {
+        userId,
+        messageId,
+        gatewayEvent: dispatch.t,
+      },
+    },
+    text: content,
+    logLabel: 'handleDiscordGatewayDispatchPayload',
+    // The gateway has no answer channel; a command's answer is posted to the conversation.
+    control: 'notice',
     ...(messageId ? { providerMessageId: messageId } : {}),
-    surfaceKind: 'discord',
-    surfaceId: binding.surfaceId,
-    externalId: binding.externalId,
-    threadId: binding.channelId,
+    threadId: channelId,
     userId,
     displayName: typeof author.username === 'string' ? author.username : userId,
     title: 'Discord message',
-    body: content,
     metadata: {
       messageId,
       gatewayEvent: dispatch.t,
     },
   });
-  if (submission.mode === 'continued-live' || submission.mode === 'queued-follow-up') {
-    return Response.json({
-      ok: true,
-      continued: true,
-      sessionId: submission.session.id,
-      agentId: submission.activeAgentId,
-    });
-  }
-  const spawnResult = await context.trySpawnAgent(
-    { mode: 'spawn', task: submission.task! },
-    'handleDiscordGatewayDispatchPayload',
-    submission.session.id,
-  );
-  if (spawnResult instanceof Response) return spawnResult;
-  await context.sessionBroker.bindAgent(submission.session.id, spawnResult.id, submission.input.id);
-  context.queueSurfaceReplyFromBinding(submission.routeBinding ?? binding, {
-    agentId: spawnResult.id,
-    task: content,
-    sessionId: submission.session.id,
-  });
-  return Response.json({
-    ok: true,
-    queued: true,
-    sessionId: submission.session.id,
-    agentId: spawnResult.id,
-  });
+  if (outcome.kind === 'no-text') return new Response(null, { status: 204 });
+  return surfaceOutcomeResponse(outcome);
 }

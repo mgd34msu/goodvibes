@@ -8,6 +8,7 @@ import { fetchWithTimeout } from '../../utils/fetch-with-timeout.js';
 import { resolveSecretInput, type SecretRefResolutionOptions } from '../../config/secret-refs.js';
 import { hasAttachments, noticeUnsupportedAttachment, policyReplyText, readRecord, readTextBodyWithinLimit } from '../helpers.js';
 import { duplicateDeliveryResponse, inboundDedupKey, runOncePerMessage } from '../inbound-dedup.js';
+import { answerSurfaceControl, runSurfaceMessage, submitSurfaceMessage, surfaceOutcomeResponse } from '../surface-message.js';
 
 export async function handleSlackSurfaceWebhook(req: Request, context: SurfaceAdapterContext): Promise<Response> {
   const signingSecret =
@@ -117,12 +118,13 @@ export async function handleSlackSurfacePayload(
       });
     }
 
-    const controlCommand = await context.parseSurfaceControlCommand(task, { signal: req.signal });
-    if (controlCommand) {
-      const message = await context.performSurfaceControlCommand(controlCommand, { surface: 'slack', routeId: binding.id });
+    const control = await answerSurfaceControl(context, {
+      surface: 'slack', text: task, binding, userId: event.userId, channelId: event.channelId, answer: 'response', signal: req.signal,
+    });
+    if (control) {
       return Response.json({
         response_type: 'ephemeral',
-        text: message,
+        text: control.message,
       });
     }
 
@@ -131,94 +133,62 @@ export async function handleSlackSurfacePayload(
       logger.warn('handleSlackSurfaceWebhook: suspicious responseUrl, ignoring');
       responseUrl = undefined;
     }
+    const postToResponseUrl = async (body: Record<string, unknown>, what: string): Promise<void> => {
+      if (!responseUrl) return;
+      await fetchWithTimeout(responseUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      }).catch((error: unknown) => logger.warn(`handleSlackSurfaceWebhook: ${what} could not be posted`, {
+        error: summarizeError(error),
+      }));
+    };
     setImmediate(() => {
       void (async () => {
-        const submission = await context.sessionBroker.submitMessage({
-          routeId: binding.id,
-          surfaceKind: 'slack',
-          surfaceId: binding.surfaceId,
+        const outcome = await submitSurfaceMessage(context, binding, {
+          surface: 'slack',
+          text: task,
+          logLabel: 'handleSlackSurfaceWebhook',
+          control: false,
           externalId: event.channelId,
           threadId: event.channelId,
           userId: event.userId,
           displayName: event.userName,
           title: event.channelName || event.command,
-          body: task,
-          metadata: {
-            command: event.command,
-          },
+          metadata: { command: event.command },
+          replyBinding: (replyTo) => responseUrl ? { ...replyTo, metadata: { ...replyTo.metadata, responseUrl } } : replyTo,
         });
-        if (submission.mode === 'continued-live' || submission.mode === 'queued-follow-up') {
-          if (responseUrl) {
-            await fetchWithTimeout(responseUrl, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                response_type: 'in_channel',
-                text: submission.activeAgentId ? `Continuing session ${submission.session.id} via agent ${submission.activeAgentId}.` : `Queued for session ${submission.session.id}; it will run when the agent now starting finishes.`,
-              }),
-            }).catch((error) => logger.warn('handleSlackSurfaceWebhook: failed to send continuation response', {
-              error: summarizeError(error),
-            }));
-          }
-          return;
-        }
-
-        const spawnResult = await context.trySpawnAgent(
-          { mode: 'spawn', task: submission.task! },
-          'handleSlackSurfaceWebhook',
-          submission.session.id,
-        );
-        if (spawnResult instanceof Response) {
-          const payload = await spawnResult.json() as { error?: string };
-          const message = payload.error ?? 'Agent spawn failed';
-          logger.error('handleSlackSurfaceWebhook: spawn failed', { error: message });
-          if (responseUrl) {
-            await fetchWithTimeout(responseUrl, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                response_type: 'in_channel',
-                text: `Agent spawn failed: ${message}`,
-              }),
-            }).catch((error) => logger.warn('handleSlackSurfaceWebhook: failed to send spawn failure response', {
-              error: summarizeError(error),
-            }));
-          }
-          return;
-        }
-
-        await context.sessionBroker.bindAgent(submission.session.id, spawnResult.id, submission.input.id);
-        const replyBinding = submission.routeBinding ?? binding;
-        context.queueSurfaceReplyFromBinding(
-          responseUrl ? { ...replyBinding, metadata: { ...replyBinding.metadata, responseUrl } } : replyBinding,
-          {
-            agentId: spawnResult.id,
-            task,
-            sessionId: submission.session.id,
-          },
-        );
-        if (responseUrl) {
-          await fetchWithTimeout(responseUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
+        switch (outcome.kind) {
+          case 'continued':
+            await postToResponseUrl({
+              response_type: 'in_channel',
+              text: outcome.agentId ? `Continuing session ${outcome.sessionId} via agent ${outcome.agentId}.` : `Queued for session ${outcome.sessionId}; it will run when the agent now starting finishes.`,
+            }, 'continuation response');
+            return;
+          case 'started':
+            await postToResponseUrl({
               response_type: 'in_channel',
               blocks: slack.formatAgentResult(
-                spawnResult.id,
+                outcome.agentId,
                 task,
-                `Session ${submission.session.id} active. Agent ${spawnResult.id} will reply in-channel when complete.`,
+                `Session ${outcome.sessionId} active. Agent ${outcome.agentId} will reply in-channel when complete.`,
               ),
-            }),
-          }).catch((error: unknown) => {
-            logger.warn('handleSlackSurfaceWebhook: follow-up post failed', {
-              error: summarizeError(error),
-            });
-          });
+            }, 'follow-up');
+            return;
+          case 'answered':
+            // The conversation gate already answered in the channel (a work proposal, or why nothing started).
+            return;
+          case 'not-started':
+            logger.error('handleSlackSurfaceWebhook: the agent was not started', { error: outcome.error });
+            context.reportIngressFailure?.('slack', outcome.error);
+            await postToResponseUrl({ response_type: 'ephemeral', text: `Nothing was started: ${outcome.error}` }, 'start failure response');
+            return;
+          case 'control':
+            return;
         }
       })().catch((error: unknown) => {
-        // Same shape as Discord's slash command, same absent catch: the HTTP
-        // response is already sent, so a throw here was an unhandled rejection
-        // with no log line and no way to notice.
+        // The HTTP response is already sent, so a throw here has no caller to
+        // reach; it is logged and reported on the surface's ingress alarm.
         const detail = summarizeError(error);
         logger.error('handleSlackSurfaceWebhook: slash-command processing failed after the ack', { error: detail });
         context.reportIngressFailure?.('slack', detail);
@@ -227,7 +197,7 @@ export async function handleSlackSurfacePayload(
 
     return Response.json({
       response_type: 'in_channel',
-      text: `Running: _${task}_`,
+      text: `Received: _${task}_`,
     });
   }
 
@@ -254,46 +224,62 @@ export async function handleSlackSurfacePayload(
     // and message timestamp name the message across all of those deliveries.
     const dedupKey = inboundDedupKey('slack', event.channelId, event.eventTs);
     return runOncePerMessage(dedupKey, duplicateDeliveryResponse, async (committed) => {
-      const policy = await context.authorizeSurfaceIngress({
-        surface: 'slack',
-        userId: event.userId,
-        channelId: event.channelId,
-        groupId: event.channelId,
-        threadId: event.threadTs ?? event.eventTs,
-        workspaceId: event.teamId,
-        conversationKind: event.threadTs ? 'thread' : 'channel',
-        parentConversationKind: 'channel',
-        text: task,
-        mentioned,
-        metadata: {
-          eventType: event.eventType,
-          eventTs: event.eventTs,
+      const outcome = await runSurfaceMessage(context, {
+        ingress: {
+          surface: 'slack',
+          userId: event.userId,
+          channelId: event.channelId,
+          groupId: event.channelId,
+          threadId: event.threadTs ?? event.eventTs,
+          workspaceId: event.teamId,
+          conversationKind: event.threadTs ? 'thread' : 'channel',
+          parentConversationKind: 'channel',
+          text: task,
+          mentioned,
+          metadata: {
+            eventType: event.eventType,
+            eventTs: event.eventTs,
+          },
         },
-      });
-      if (!policy.allowed) {
-        // An attachment-only message is not worth a redelivery: acknowledge it.
-        if (!task) return Response.json({ ok: true, acknowledged: true, queued: false, outcome: 'ignored', policyReason: policy.reason });
-        return Response.json({ ok: false, error: `Blocked by channel policy: ${policy.reason}` }, { status: 403 });
-      }
-      const binding = await context.routeBindings.upsertBinding({
-        kind: event.threadTs ? 'thread' : 'channel',
-        surfaceKind: 'slack',
-        surfaceId: event.teamId || 'slack',
-        externalId: event.threadTs ?? event.channelId,
-        channelId: event.channelId,
-        threadId: event.threadTs,
+        binding: {
+          kind: event.threadTs ? 'thread' : 'channel',
+          surfaceKind: 'slack',
+          surfaceId: event.teamId || 'slack',
+          externalId: event.threadTs ?? event.channelId,
+          channelId: event.channelId,
+          threadId: event.threadTs,
+          title: `Slack ${event.eventType}`,
+          metadata: {
+            userId: event.userId,
+            eventType: event.eventType,
+            eventTs: event.eventTs,
+            // Clears a one-shot reply URL an earlier release stored on this binding.
+            responseUrl: undefined,
+          },
+        },
+        text: task,
+        logLabel: 'handleSlackSurfacePayload',
+        // Slack does not show the answer to an event; a command's answer goes to the conversation.
+        control: 'notice',
+        ...(dedupKey ? { providerMessageId: dedupKey } : {}),
+        userId: event.userId,
+        displayName: event.userId,
         title: `Slack ${event.eventType}`,
         metadata: {
-          userId: event.userId,
           eventType: event.eventType,
           eventTs: event.eventTs,
-          // Clears a one-shot reply URL an earlier release stored on this binding.
-          responseUrl: undefined,
         },
+        signal: req.signal,
+        committed,
       });
-      if (!task) {
+      if (outcome.kind === 'refused') {
+        // An attachment-only message is not worth a redelivery: acknowledge it.
+        if (!task) return Response.json({ ok: true, acknowledged: true, queued: false, outcome: 'ignored', policyReason: outcome.reason });
+        return Response.json({ ok: false, error: `Blocked by channel policy: ${outcome.reason}` }, { status: 403 });
+      }
+      if (outcome.kind === 'no-text') {
         // A message that is only a file: say so in a one-to-one conversation; in a channel it is chatter.
-        const notified = attachment ? await noticeUnsupportedAttachment(context, binding, attachment, rawEvent?.channel_type === 'im') : false;
+        const notified = attachment ? await noticeUnsupportedAttachment(context, outcome.binding, attachment, rawEvent?.channel_type === 'im') : false;
         committed();
         return Response.json({
           ok: true,
@@ -303,54 +289,10 @@ export async function handleSlackSurfacePayload(
           reason: 'unsupported-attachment',
           attachment,
           notified,
-          bindingId: binding.id,
+          bindingId: outcome.binding.id,
         });
       }
-      const submission = await context.sessionBroker.submitMessage({
-        routeId: binding.id,
-        ...(dedupKey ? { providerMessageId: dedupKey } : {}),
-        surfaceKind: 'slack',
-        surfaceId: binding.surfaceId,
-        externalId: binding.externalId,
-        threadId: binding.threadId ?? binding.channelId,
-        userId: event.userId,
-        displayName: event.userId,
-        title: `Slack ${event.eventType}`,
-        body: task,
-        metadata: {
-          eventType: event.eventType,
-          eventTs: event.eventTs,
-        },
-      });
-      if (submission.mode === 'continued-live' || submission.mode === 'queued-follow-up') {
-        committed();
-        return Response.json({
-          ok: true,
-          continued: true,
-          sessionId: submission.session.id,
-          agentId: submission.activeAgentId,
-        });
-      }
-      const spawnResult = await context.trySpawnAgent(
-        { mode: 'spawn', task: submission.task! },
-        'handleSlackSurfacePayload',
-        submission.session.id,
-      );
-      if (spawnResult instanceof Response) return spawnResult;
-      committed();
-      await context.sessionBroker.bindAgent(submission.session.id, spawnResult.id, submission.input.id);
-      context.queueSurfaceReplyFromBinding(submission.routeBinding ?? binding, {
-        agentId: spawnResult.id,
-        task,
-        sessionId: submission.session.id,
-      });
-      return Response.json({
-        ok: true,
-        queued: true,
-        sessionId: submission.session.id,
-        agentId: spawnResult.id,
-      });
-  
+      return surfaceOutcomeResponse(outcome);
     });
   }
 

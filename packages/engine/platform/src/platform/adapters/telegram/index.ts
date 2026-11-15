@@ -3,6 +3,7 @@ import { isOrdinaryIngressRefusal, type SurfaceAdapterContext } from '../types.j
 import { constantTimeEquals, parseJsonRecord, readTextBodyWithinLimit } from '../helpers.js';
 import { resolveSurfaceCredential, surfaceCredentialUnavailable } from '../surface-credential.js';
 import { logger } from '../../utils/logger.js';
+import { submitSurfaceMessage, surfaceOutcomeResponse } from '../surface-message.js';
 import { parseTelegramBotCommand, telegramBotCommandReply } from './commands.js';
 import type { TelegramReceiveScope } from '../../channels/telegram/receive-progress.js';
 
@@ -367,51 +368,22 @@ export async function processTelegramUpdate(
     });
   }
 
-  const controlCommand = await context.parseSurfaceControlCommand(task, deps.signal ? { signal: deps.signal } : {});
-  if (controlCommand) {
-    const message = await context.performSurfaceControlCommand(controlCommand, {
-      surface: 'telegram', routeId: binding.id, channelId: chatId, ...(readNumberString(from?.id) ? { userId: readNumberString(from?.id)! } : {}),
-    });
-    return Response.json({ ok: true, acknowledged: true, message });
-  }
-
-  const submission = await context.sessionBroker.submitMessage({
-    routeId: binding.id,
+  const outcome = await submitSurfaceMessage(context, binding, {
+    surface: 'telegram',
+    text: task,
+    logLabel: 'handleTelegramSurfaceWebhook',
+    // Telegram reads neither the webhook answer nor the poller's result as a reply.
+    control: 'notice',
     ...(readNumberString(payload.update_id) ? { providerMessageId: readNumberString(payload.update_id) } : {}),
-    surfaceKind: 'telegram',
-    surfaceId: binding.surfaceId,
-    externalId: binding.externalId,
-    threadId: binding.threadId ?? binding.channelId,
     userId: readNumberString(from?.id),
+    channelId: chatId,
     displayName: readString(from?.username) ?? readString(from?.first_name),
     title: binding.title ?? 'Telegram',
-    body: task,
     metadata: {
       chatType: readString(chat?.type),
       updateId: readNumberString(payload.update_id),
     },
+    signal: deps.signal,
   });
-  if (submission.mode === 'continued-live' || submission.mode === 'queued-follow-up') {
-    return Response.json({ ok: true, continued: true, sessionId: submission.session.id, agentId: submission.activeAgentId ?? null });
-  }
-
-  const spawnResult = await context.trySpawnAgent(
-    { mode: 'spawn', task: submission.task! },
-    'handleTelegramSurfaceWebhook',
-    submission.session.id,
-  );
-  if (spawnResult instanceof Response) return spawnResult;
-  await context.sessionBroker.bindAgent(submission.session.id, spawnResult.id, submission.input.id);
-  context.queueSurfaceReplyFromBinding(submission.routeBinding ?? binding, {
-    agentId: spawnResult.id,
-    task,
-    sessionId: submission.session.id,
-  });
-  return Response.json({
-    ok: true,
-    queued: true,
-    bindingId: binding.id,
-    sessionId: submission.session.id,
-    agentId: spawnResult.id,
-  });
+  return surfaceOutcomeResponse(outcome);
 }

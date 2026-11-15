@@ -956,7 +956,9 @@ Assistant's side while the turn is still running.
 Control commands are supported through the same webhook. They address an
 automation run, an agent, or a shared-broker session by its id, and only an id the
 daemon already knows is read as a command; `cancel` stops runs and agents, and
-`status` also reports shared sessions:
+`status` also reports shared sessions. A command acts only on work started from
+the same Home Assistant conversation (`conversationId`, with its thread); for
+anything else the answer says it was refused and where to send it:
 
 ```text
 status <run-id | agent-id | session-id>

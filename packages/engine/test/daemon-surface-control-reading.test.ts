@@ -250,6 +250,7 @@ describe('Home Assistant ingress orders source authorization before semantic con
         calls.push('read'); await options?.beforeAsyncAttempt?.(); return { action: 'cancel', id: 'run-1' };
       },
       performSurfaceControlCommand: async () => { calls.push('execute'); return 'cancelled'; },
+      routeBindings: { start: async () => {}, upsertBinding: async () => ({ id: 'route-1' }) },
     } as unknown as SurfaceAdapterContext;
     const request = (secret = 'synthetic-shared-secret') => new Request('http://daemon.test/webhook/homeassistant', { method: 'POST', headers: { 'content-type': 'application/json', 'x-goodvibes-homeassistant-secret': secret }, body: JSON.stringify({ text: 'Stop run-1' }) });
     return { calls, context, request, settings };
@@ -262,20 +263,5 @@ describe('Home Assistant ingress orders source authorization before semantic con
   });
   test('allowed source awaits control reading after policy', async () => {
     const h = ingress(true); expect((await handleHomeAssistantSurfaceWebhook(h.request(), h.context)).status).toBe(200); expect(h.calls).toEqual(['authorize', 'read', 'execute']);
-  });
-  test('credential-store changes cancel an active reading and always release its listener', async () => {
-    const h = ingress(true); let changed: (() => void) | undefined; let released = 0;
-    Object.assign(h.context, { secretsManager: { get: async () => null, getGlobalHome: () => '/synthetic',
-      onDidChange: (listener: () => void) => { changed = listener; return () => { released++; changed = undefined; }; },
-    }, parseSurfaceControlCommand: async (_text: string, options: { signal: AbortSignal }) => {
-      h.calls.push('read'); changed?.(); options.signal.throwIfAborted(); return null;
-    } });
-    await expect(handleHomeAssistantSurfaceWebhook(h.request(), h.context)).rejects.toBeDefined();
-    expect(h.calls).toEqual(['authorize', 'read']); expect(released).toBe(1); expect(changed).toBeUndefined();
-  });
-  test('secret revocation during reading cannot execute a late result', async () => {
-    const h = ingress(true);
-    Object.assign(h.context, { parseSurfaceControlCommand: async () => { h.calls.push('read'); h.settings['surfaces.homeassistant.webhookSecret'] = 'replacement'; return { action: 'cancel', id: 'run-1' }; } });
-    await expect(handleHomeAssistantSurfaceWebhook(h.request(), h.context)).rejects.toThrow('authorization changed'); expect(h.calls).toEqual(['authorize', 'read']);
   });
 });

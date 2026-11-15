@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { SurfaceAdapterContext } from '../types.js';
+import { answerSurfaceControl } from '../surface-message.js';
+import type { UpsertRouteBindingInput } from '../../channels/route-manager.js';
 import { constantTimeEquals, declaredMention, parseJsonRecord, readString, readTextBodyWithinLimit } from '../helpers.js';
 import {
   HOME_ASSISTANT_SURFACE,
@@ -70,67 +72,42 @@ export async function handleHomeAssistantSurfaceWebhook(
     return Response.json({ error: `Blocked by channel policy: ${policy.reason}` }, { status: 403 });
   }
 
-  // The authenticated source remains live while Jev may be retrying. Local
-  // credential writes cancel the read; configuration/registry/env changes are
-  // checked synchronously before transmission, retention and consumption.
-  const credentialAbort = new AbortController();
-  const signal = AbortSignal.any([req.signal, credentialAbort.signal]);
-  const sourceState = () => JSON.stringify([
-    context.configManager.get('surfaces.homeassistant.enabled'),
-    context.configManager.get('surfaces.homeassistant.webhookSecret'),
-    context.serviceRegistry.get?.('homeassistant'),
-    process.env.HOMEASSISTANT_WEBHOOK_SECRET, process.env.HOME_ASSISTANT_WEBHOOK_SECRET, process.env.HA_GOODVIBES_WEBHOOK_SECRET,
-  ]);
-  const capturedSource = sourceState();
-  const assertSourceCurrentSync = () => {
-    signal.throwIfAborted();
-    if (sourceState() !== capturedSource) throw new Error('Home Assistant source authorization changed');
-  };
-  const assertSourceCurrent = async () => {
-    assertSourceCurrentSync();
-    const currentSecret = await resolveHomeAssistantWebhookSecret(context);
-    assertSourceCurrentSync();
-    if (!context.configManager.get('surfaces.homeassistant.enabled') || !currentSecret
-      || !constantTimeEquals(currentSecret, secret) || !isAuthorizedHomeAssistantRequest(req, currentSecret)) {
-      credentialAbort.abort();
-      throw new Error('Home Assistant source authorization changed');
-    }
-  };
-  let unsubscribe: (() => void) | undefined;
-  try {
-    unsubscribe = context.secretsManager?.onDidChange?.(() => credentialAbort.abort());
-    await assertSourceCurrent();
-    const controlCommand = text ? await context.parseSurfaceControlCommand(text, {
-      signal, beforeAttempt: assertSourceCurrentSync, beforeAsyncAttempt: assertSourceCurrent,
-    }) : null;
-    await assertSourceCurrent();
-    if (controlCommand) {
-      const message = await context.performSurfaceControlCommand(controlCommand);
-      return Response.json({ acknowledged: true, control: true, message });
-    }
-  } finally { unsubscribe?.(); }
+  // The conversation this request belongs to; the remote chat binds the same one.
+  const conversationBinding = (): UpsertRouteBindingInput => ({
+    kind: threadId ? 'thread' : 'channel',
+    surfaceKind: HOME_ASSISTANT_SURFACE,
+    surfaceId,
+    externalId: conversationId,
+    threadId,
+    channelId,
+    title: readString(body.title) ?? 'Home Assistant',
+    metadata: {
+      ...body,
+      directoryKind: conversationKind === 'direct' ? 'user' : conversationKind,
+      source: 'homeassistant',
+      messageId,
+      conversationId,
+    },
+  });
+
+  // A command acts only on what this Home Assistant conversation started.
+  const control = await answerSurfaceControl(context, {
+    surface: HOME_ASSISTANT_SURFACE,
+    text,
+    binding: async () => {
+      await context.routeBindings.start();
+      return context.routeBindings.upsertBinding(conversationBinding());
+    },
+    userId: readString(body.userId ?? body.user_id),
+    channelId,
+    answer: 'response',
+    signal: req.signal,
+  });
+  if (control) return Response.json({ acknowledged: true, control: true, message: control.message, bindingId: control.bindingId });
 
   if (!text.trim()) {
     await context.routeBindings.start();
-    // A credential rotated or disabled while the request was waiting must not
-    // still store the conversation.
-    await assertSourceCurrent();
-    const binding = await context.routeBindings.upsertBinding({
-      kind: threadId ? 'thread' : 'channel',
-      surfaceKind: HOME_ASSISTANT_SURFACE,
-      surfaceId,
-      externalId: conversationId,
-      threadId,
-      channelId,
-      title: readString(body.title) ?? 'Home Assistant',
-      metadata: {
-        ...body,
-        directoryKind: conversationKind === 'direct' ? 'user' : conversationKind,
-        source: 'homeassistant',
-        messageId,
-        conversationId,
-      },
-    });
+    const binding = await context.routeBindings.upsertBinding(conversationBinding());
     await context.routeBindings.patchBinding(binding.id, {
       sessionId: null,
       jobId: null,
@@ -158,7 +135,6 @@ export async function handleHomeAssistantSurfaceWebhook(
   if (!context.postHomeAssistantChatMessage) {
     return Response.json({ error: 'Home Assistant remote chat is unavailable in this runtime' }, { status: 503 });
   }
-  await assertSourceCurrent();
   const result = await context.postHomeAssistantChatMessage({
     body: text,
     messageId,

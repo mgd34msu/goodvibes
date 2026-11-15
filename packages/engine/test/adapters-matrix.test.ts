@@ -92,7 +92,7 @@ describe('matrix adapter: contract surface', () => {
           content: {
             msgtype: 'm.text',
             body: 'hello matrix',
-            'm.relates_to': { event_id: '$thread' },
+            'm.relates_to': { rel_type: 'm.thread', event_id: '$thread' },
           },
         },
       }),

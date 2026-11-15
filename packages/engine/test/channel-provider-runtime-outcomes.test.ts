@@ -86,7 +86,7 @@ describe('Slack mention that could not be started', () => {
       buildSurfaceAdapterContext: () => ({
         authorizeSurfaceIngress: async () => ({ allowed: true, reason: 'allowed' }),
         routeBindings: { upsertBinding: async () => ({ id: 'b1', surfaceId: 'T1', externalId: 'C1', channelId: 'C1' }) },
-        sessionBroker: { submitMessage: async () => ({ mode: 'new', session: { id: 's1' }, task: 'do it', input: { id: 'i1' } }) },
+        sessionBroker: { submitMessage: async () => ({ mode: 'spawn', session: { id: 's1' }, task: 'do it', input: { id: 'i1' } }) },
         trySpawnAgent: async () => Response.json({ error: 'at capacity' }, { status: 503 }),
       }),
     });
@@ -107,7 +107,7 @@ describe('requests refused for capacity or failure', () => {
       configManager: { get: () => '' },
       authorizeSurfaceIngress: async () => ({ allowed: true, reason: 'allowed' }),
       routeBindings: { upsertBinding: async () => ({ id: 'b1', surfaceId: 'T1', externalId: 'C1', channelId: 'C1' }) },
-      sessionBroker: { submitMessage: async () => ({ mode: 'new', session: { id: 's1' }, task: 'do it', input: { id: 'i1' } }) },
+      sessionBroker: { submitMessage: async () => ({ mode: 'spawn', session: { id: 's1' }, task: 'do it', input: { id: 'i1' } }) },
       trySpawnAgent: async () => Response.json(body, { status }),
     }),
   });

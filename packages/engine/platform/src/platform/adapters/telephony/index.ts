@@ -3,6 +3,7 @@ import { constantTimeEquals, parseJsonRecord, readBearerOrHeaderToken, readTextB
 import { resolveSurfaceCredential, surfaceCredentialUnavailable } from '../surface-credential.js';
 import { isOrdinaryIngressRefusal, type SurfaceAdapterContext } from '../types.js';
 import { logger } from '../../utils/logger.js';
+import { runSurfaceMessage, surfaceOutcomeResponse } from '../surface-message.js';
 
 function readRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' ? value as Record<string, unknown> : null;
@@ -134,83 +135,53 @@ export async function handleTelephonySurfaceWebhook(req: Request, context: Surfa
   // A voice call sends one webhook per spoken turn, all with the same CallSid and
   // no message id, so the call id is not a per-message key and must not dedupe turns.
   const messageId = deliveryId ?? readString(payload.CallSid);
-  const policy = await context.authorizeSurfaceIngress({
-    surface: 'telephony',
-    userId: from,
-    channelId: from,
-    groupId: from,
-    conversationKind: 'direct',
+  const outcome = await runSurfaceMessage(context, {
+    ingress: {
+      surface: 'telephony',
+      userId: from,
+      channelId: from,
+      groupId: from,
+      conversationKind: 'direct',
+      text,
+      mentioned: true,
+      metadata: { ...payload, messageId, to },
+    },
+    binding: {
+      kind: 'channel',
+      surfaceKind: 'telephony',
+      surfaceId: to,
+      externalId: from,
+      channelId: from,
+      title: from,
+      metadata: { ...payload, messageId, to },
+    },
     text,
-    mentioned: true,
-    metadata: {
-      ...payload,
-      messageId,
-      to,
-    },
-  });
-  if (!policy.allowed) {
-    // An ordinary refusal will not change on redelivery, so it is acknowledged rather than failed.
-    if (isOrdinaryIngressRefusal(policy.reason)) {
-      logger.info('handleTelephonySurfaceWebhook: message ignored by channel policy', { reason: policy.reason });
-      return Response.json({ acknowledged: true, queued: false, outcome: 'ignored', reason: 'blocked-by-channel-policy', policyReason: policy.reason });
-    }
-    return Response.json({ error: `Blocked by channel policy: ${policy.reason}` }, { status: 403 });
-  }
-
-  const binding = await context.routeBindings.upsertBinding({
-    kind: 'channel',
-    surfaceKind: 'telephony',
-    surfaceId: to,
-    externalId: from,
-    channelId: from,
+    logLabel: 'handleTelephonySurfaceWebhook',
+    // Neither Twilio nor a bridge reads the answer to this webhook as a reply.
+    control: 'notice',
+    ...(deliveryId ? { providerMessageId: deliveryId } : {}),
+    userId: from,
+    displayName: from,
     title: from,
-    metadata: {
-      ...payload,
-      messageId,
-      to,
-    },
+    metadata: { messageId, to },
+    signal: req.signal,
   });
-  if (!text) {
+  if (outcome.kind === 'refused') {
+    // An ordinary refusal will not change on redelivery, so it is acknowledged rather than failed.
+    if (isOrdinaryIngressRefusal(outcome.reason)) {
+      logger.info('handleTelephonySurfaceWebhook: message ignored by channel policy', { reason: outcome.reason });
+      return Response.json({ acknowledged: true, queued: false, outcome: 'ignored', reason: 'blocked-by-channel-policy', policyReason: outcome.reason });
+    }
+    return surfaceOutcomeResponse(outcome);
+  }
+  if (outcome.kind === 'no-text') {
     return Response.json({
       acknowledged: true,
       queued: false,
       outcome: 'ignored',
       reason: 'no-actionable-text',
-      bindingId: binding.id,
+      bindingId: outcome.binding.id,
     });
   }
-
-  const submission = await context.sessionBroker.submitMessage({
-    routeId: binding.id,
-    ...(deliveryId ? { providerMessageId: deliveryId } : {}),
-    surfaceKind: 'telephony',
-    surfaceId: binding.surfaceId,
-    externalId: binding.externalId,
-    threadId: binding.channelId,
-    userId: from,
-    displayName: from,
-    title: from,
-    body: text,
-    metadata: {
-      messageId,
-      to,
-    },
-  });
-  if (submission.mode === 'continued-live' || submission.mode === 'queued-follow-up') {
-    return Response.json({ acknowledged: true, continued: true, sessionId: submission.session.id, agentId: submission.activeAgentId ?? null });
-  }
-
-  const spawnResult = await context.trySpawnAgent(
-    { mode: 'spawn', task: submission.task! },
-    'handleTelephonySurfaceWebhook',
-    submission.session.id,
-  );
-  if (spawnResult instanceof Response) return spawnResult;
-  await context.sessionBroker.bindAgent(submission.session.id, spawnResult.id, submission.input.id);
-  context.queueSurfaceReplyFromBinding(submission.routeBinding ?? binding, {
-    agentId: spawnResult.id,
-    task: text,
-    sessionId: submission.session.id,
-  });
-  return Response.json({ acknowledged: true, queued: true, bindingId: binding.id, sessionId: submission.session.id, agentId: spawnResult.id });
+  return surfaceOutcomeResponse(outcome);
 }

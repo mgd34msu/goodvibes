@@ -105,13 +105,6 @@ describe('Home Assistant webhook', () => {
     expect((await response.json() as { field?: string }).field).toBe('tools');
     expect(posted).toEqual([]);
   });
-
-  test('a secret rotated while the request waits does not store the conversation', async () => {
-    const h = harness(settings);
-    h.context.routeBindings.start = async () => { h.settings['surfaces.homeassistant.webhookSecret'] = 'rotated'; };
-    await expect(handleHomeAssistantSurfaceWebhook(request({ conversationId: 'c1' }), h.context)).rejects.toThrow('authorization changed');
-    expect(h.bindings).toEqual([]);
-  });
 });
 
 describe('shared ingress helpers', () => {

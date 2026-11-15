@@ -114,9 +114,26 @@ slash command's one-shot reply credential (Slack `response_url`, Discord
 interaction token) is not stored on the channel's route binding; the reply to
 that command carries it.
 
-A GitHub automation webhook acts only on issues and pull requests whose author
-is the repository's `OWNER`, a `MEMBER` or a `COLLABORATOR`; an event from any
-other author is acknowledged as `untrusted-author` and starts no agent.
+A GitHub automation webhook starts an agent only from text written by the
+repository's `OWNER`, a `MEMBER` or a `COLLABORATOR`: the opener of an issue or
+pull request, or the writer of a comment. A maintainer's comment on an issue an
+outside contributor opened is therefore answered, and text from anyone else is
+acknowledged as `untrusted-author` and starts no agent. A comment counts only
+when it mentions the bot as a whole handle: the login of the configured GitHub
+token, `@goodvibes` or `@bot`. A comment that names no handle is ignored without
+any request to GitHub, and the token's login is looked up once per token. When
+the daemon posts results, the agent's answer is posted to the issue or pull
+request for it (a review comment on a pull request), marked so it never starts
+another agent.
+
+Every chat surface (Slack, Discord, Telegram, Google Chat, Microsoft Teams,
+Mattermost, Matrix, Signal, WhatsApp, Telephony, iMessage, BlueBubbles, ntfy,
+Home Assistant and the generic webhook) answers `status <id>`, `cancel <id>` and
+`retry <id>` for a run, agent or session the daemon knows. A command acts only
+on work started from the same conversation; for anything else the answer says
+so and names where to send it. Where the provider shows the answer to its
+request (a slash command, Google Chat, Mattermost, Home Assistant, a webhook
+caller) the answer comes back in it; elsewhere it is sent to the conversation.
 
 ## Conversation kinds
 
@@ -131,6 +148,12 @@ Channel conversation kinds are:
 Policies can match at surface or group scope. The default policy posture is
 allow/deny/inherit by conversation kind, with command allowlists and actor
 authorization records available for managed surfaces.
+
+A Matrix reply to an earlier message stays in the room's conversation and
+session; only an `m.thread` relation starts a thread. A Signal message that
+carries a group id (`groupId`, or `dataMessage.groupInfo.groupId`) is a `group`
+conversation: group policies apply, the sender is read from `source`, and the
+answer goes to the group.
 
 ## Route bindings
 

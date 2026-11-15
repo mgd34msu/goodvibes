@@ -1,12 +1,19 @@
-import { constantTimeEquals, parseJsonRecord, readBearerOrHeaderToken, readTextBodyWithinLimit, readRecord, readString, declaredMention, ingressMetadata } from '../helpers.js';
+import { constantTimeEquals, parseJsonRecord, readBearerOrHeaderToken, readTextBodyWithinLimit, readRecord, readString, ingressMetadata } from '../helpers.js';
 import { duplicateDeliveryResponse, inboundDedupKey, runOncePerMessage } from '../inbound-dedup.js';
 import { resolveSurfaceCredential, surfaceCredentialUnavailable } from '../surface-credential.js';
+import { runSurfaceMessage, surfaceOutcomeResponse } from '../surface-message.js';
 import type { SurfaceAdapterContext } from '../types.js';
 
-function readThreadId(content: Record<string, unknown> | null): string | undefined {
+/**
+ * Only an `m.thread` relation opens a thread. A plain reply (`m.in_reply_to`
+ * alone) stays in the room's conversation; the event it answers is kept as
+ * `replyToMessageId` so a reply to a notice can still be matched to it.
+ */
+function readRelation(content: Record<string, unknown> | null): { threadId?: string | undefined; replyToMessageId?: string | undefined } {
   const relatesTo = readRecord(content?.['m.relates_to']);
-  const reply = readRecord(relatesTo?.['m.in_reply_to']);
-  return readString(relatesTo?.event_id) ?? readString(reply?.event_id);
+  const replyToMessageId = readString(readRecord(relatesTo?.['m.in_reply_to'])?.event_id);
+  const threadId = readString(relatesTo?.rel_type) === 'm.thread' ? readString(relatesTo?.event_id) : undefined;
+  return { ...(threadId ? { threadId } : {}), ...(replyToMessageId ? { replyToMessageId } : {}) };
 }
 /**
  * Whether the event addresses the bot. The bridge's own `mentioned` flag wins;
@@ -60,42 +67,52 @@ export async function handleMatrixSurfaceWebhook(req: Request, context: SurfaceA
   if (relationType === 'm.replace' || relationType === 'm.annotation') {
     return Response.json({ ok: true, acknowledged: true, queued: false, outcome: 'ignored', reason: relationType === 'm.replace' ? 'edited-message' : 'annotation' });
   }
-  const threadId = readThreadId(content);
+  const { threadId, replyToMessageId } = readRelation(content);
+  const sender = readString(event.sender) ?? readString(payload.sender);
+  const eventId = readString(event.event_id);
+  const msgtype = readString(content?.msgtype);
 
-  const dedupKey = inboundDedupKey('matrix', roomId, readString(event.event_id));
+  const dedupKey = inboundDedupKey('matrix', roomId, eventId);
   return runOncePerMessage(dedupKey, duplicateDeliveryResponse, async (committed) => {
-    const policy = await context.authorizeSurfaceIngress({
-      surface: 'matrix',
-      userId: readString(event.sender) ?? readString(payload.sender),
-      channelId: roomId,
-      groupId: roomId,
-      threadId,
-      workspaceId: readString(payload.homeserver) ?? readString(context.configManager.get('surfaces.matrix.homeserverUrl')),
-      conversationKind: threadId ? 'thread' : 'channel',
-      text,
-      mentioned: matrixMentioned(payload, content, readString(context.configManager.get('surfaces.matrix.userId')), text),
-      metadata: payload,
-    });
-    if (!policy.allowed) {
-      return Response.json({ error: `Blocked by channel policy: ${policy.reason}` }, { status: 403 });
-    }
-
-    const binding = await context.routeBindings.upsertBinding({
-      kind: threadId ? 'thread' : 'channel',
-      surfaceKind: 'matrix',
-      surfaceId: readString(context.configManager.get('surfaces.matrix.userId')) ?? 'matrix',
-      externalId: threadId ?? roomId,
-      channelId: roomId,
-      threadId,
-      title: roomId,
-      metadata: {
-        ...ingressMetadata(payload),
-        ...(readString(event.event_id) ? { eventId: readString(event.event_id) } : {}),
-        ...(readString(content?.msgtype) ? { msgtype: readString(content?.msgtype) } : {}),
+    const surfaceId = readString(context.configManager.get('surfaces.matrix.userId')) ?? 'matrix';
+    const outcome = await runSurfaceMessage(context, {
+      ingress: {
+        surface: 'matrix',
+        userId: sender,
+        channelId: roomId,
+        groupId: roomId,
+        threadId,
+        workspaceId: readString(payload.homeserver) ?? readString(context.configManager.get('surfaces.matrix.homeserverUrl')),
+        conversationKind: threadId ? 'thread' : 'channel',
+        text,
+        mentioned: matrixMentioned(payload, content, readString(context.configManager.get('surfaces.matrix.userId')), text),
+        metadata: { ...payload, ...(replyToMessageId ? { replyToMessageId } : {}) },
       },
+      binding: {
+        kind: threadId ? 'thread' : 'channel',
+        surfaceKind: 'matrix',
+        surfaceId,
+        externalId: threadId ?? roomId,
+        channelId: roomId,
+        threadId,
+        title: roomId,
+        metadata: {
+          ...ingressMetadata(payload),
+          ...(eventId ? { eventId } : {}),
+          ...(msgtype ? { msgtype } : {}),
+          ...(replyToMessageId ? { replyToMessageId } : {}),
+        },
+      },
+      text,
+      logLabel: 'handleMatrixSurfaceWebhook',
+      control: 'notice',
+      ...(dedupKey ? { providerMessageId: dedupKey } : {}),
+      userId: sender,
+      displayName: readString(payload.displayName) ?? sender,
+      signal: req.signal,
+      committed,
     });
-    if (!text) {
-      const msgtype = readString(content?.msgtype);
+    if (outcome.kind === 'no-text') {
       // Whether a room is one-to-one is not in the event, so the sender is not answered here.
       const attachment = msgtype === 'm.image' || msgtype === 'm.audio' || msgtype === 'm.video' || msgtype === 'm.file' ? msgtype.slice(2) : undefined;
       return Response.json({
@@ -105,53 +122,9 @@ export async function handleMatrixSurfaceWebhook(req: Request, context: SurfaceA
         outcome: 'ignored',
         reason: attachment ? 'unsupported-attachment' : 'no-actionable-text',
         ...(attachment ? { attachment } : {}),
-        bindingId: binding.id,
+        bindingId: outcome.binding.id,
       });
     }
-
-    const controlCommand = await context.parseSurfaceControlCommand(text, { signal: req.signal });
-    if (controlCommand) {
-      const message = await context.performSurfaceControlCommand(controlCommand, { surface: 'matrix', routeId: binding.id });
-      return Response.json({ ok: true, acknowledged: true, message });
-    }
-
-    const submission = await context.sessionBroker.submitMessage({
-      routeId: binding.id,
-      ...(dedupKey ? { providerMessageId: dedupKey } : {}),
-      surfaceKind: 'matrix',
-      surfaceId: binding.surfaceId,
-      externalId: binding.externalId,
-      threadId: binding.threadId ?? binding.channelId,
-      userId: readString(event.sender) ?? readString(payload.sender),
-      displayName: readString(payload.displayName) ?? readString(event.sender),
-      title: binding.title ?? 'Matrix',
-      body: text,
-      metadata: binding.metadata,
-    });
-    if (submission.mode === 'continued-live' || submission.mode === 'queued-follow-up') {
-      committed();
-      return Response.json({ ok: true, continued: true, sessionId: submission.session.id, agentId: submission.activeAgentId ?? null });
-    }
-
-    const spawnResult = await context.trySpawnAgent(
-      { mode: 'spawn', task: submission.task! },
-      'handleMatrixSurfaceWebhook',
-      submission.session.id,
-    );
-    if (spawnResult instanceof Response) return spawnResult;
-    committed();
-    await context.sessionBroker.bindAgent(submission.session.id, spawnResult.id, submission.input.id);
-    context.queueSurfaceReplyFromBinding(submission.routeBinding ?? binding, {
-      agentId: spawnResult.id,
-      task: text,
-      sessionId: submission.session.id,
-    });
-    return Response.json({
-      ok: true,
-      queued: true,
-      bindingId: binding.id,
-      sessionId: submission.session.id,
-      agentId: spawnResult.id,
-    });
+    return surfaceOutcomeResponse(outcome);
   });
 }

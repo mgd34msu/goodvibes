@@ -2,6 +2,7 @@ import { constantTimeEquals, noticeUnsupportedAttachment, parseJsonRecord, readB
 import { resolveSurfaceCredential, surfaceCredentialUnavailable } from '../surface-credential.js';
 import { isOrdinaryIngressRefusal, type SurfaceAdapterContext } from '../types.js';
 import { logger } from '../../utils/logger.js';
+import { runSurfaceMessage, surfaceOutcomeResponse } from '../surface-message.js';
 
 function readRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' ? value as Record<string, unknown> : null;
@@ -154,53 +155,55 @@ async function processWhatsAppMessage(value: Record<string, unknown>, message: R
   const text = readMessageText(message);
   if (!from) return Response.json({ error: 'Missing sender' }, { status: 400 });
 
-  const policy = await context.authorizeSurfaceIngress({
-    surface: 'whatsapp',
-    userId: from,
-    channelId: from,
-    groupId: from,
-    conversationKind: 'direct',
-    text,
-    mentioned: true,
-    metadata: {
-      messageId: readString(message.id),
-      profileName: readString(contact?.profile && readRecord(contact.profile)?.name),
-      phoneNumberId: readString(value?.metadata && readRecord(value.metadata)?.phone_number_id),
+  const messageId = readString(message.id);
+  const phoneNumberId = readString(value?.metadata && readRecord(value.metadata)?.phone_number_id);
+  const profileName = readString(contact?.profile && readRecord(contact.profile)?.name);
+  const outcome = await runSurfaceMessage(context, {
+    ingress: {
+      surface: 'whatsapp',
+      userId: from,
+      channelId: from,
+      groupId: from,
+      conversationKind: 'direct',
+      text,
+      mentioned: true,
+      metadata: { messageId, profileName, phoneNumberId },
     },
+    binding: {
+      kind: 'channel',
+      surfaceKind: 'whatsapp',
+      surfaceId: phoneNumberId ?? readString(context.configManager.get('surfaces.whatsapp.phoneNumberId')) ?? 'whatsapp',
+      externalId: from,
+      channelId: from,
+      title: profileName ?? from,
+      metadata: { messageId, from },
+    },
+    text,
+    logLabel: 'handleWhatsAppSurfaceWebhook',
+    control: 'notice',
+    ...(messageId ? { providerMessageId: messageId } : {}),
+    userId: from,
+    displayName: profileName ?? from,
+    metadata: { messageId },
   });
-  if (!policy.allowed) {
+  if (outcome.kind === 'refused') {
     // Meta redelivers a payload it was answered with a failure status, and a refusal will not change on
     // redelivery. Acknowledge it so a blocked sender cannot cause the allowed messages beside it to repeat.
-    if (isOrdinaryIngressRefusal(policy.reason)) {
-      logger.info('handleWhatsAppSurfaceWebhook: message ignored by channel policy', { reason: policy.reason, messageId: readString(message.id) });
-      return Response.json({ acknowledged: true, queued: false, outcome: 'ignored', reason: 'blocked-by-channel-policy', policyReason: policy.reason });
+    if (isOrdinaryIngressRefusal(outcome.reason)) {
+      logger.info('handleWhatsAppSurfaceWebhook: message ignored by channel policy', { reason: outcome.reason, messageId });
+      return Response.json({ acknowledged: true, queued: false, outcome: 'ignored', reason: 'blocked-by-channel-policy', policyReason: outcome.reason });
     }
-    return Response.json({ error: `Blocked by channel policy: ${policy.reason}` }, { status: 403 });
+    return surfaceOutcomeResponse(outcome);
   }
-
-  const binding = await context.routeBindings.upsertBinding({
-    kind: 'channel',
-    surfaceKind: 'whatsapp',
-    surfaceId: readString(value?.metadata && readRecord(value.metadata)?.phone_number_id)
-      ?? readString(context.configManager.get('surfaces.whatsapp.phoneNumberId'))
-      ?? 'whatsapp',
-    externalId: from,
-    channelId: from,
-    title: readString(contact?.profile && readRecord(contact.profile)?.name) ?? from,
-    metadata: {
-      messageId: readString(message.id),
-      from,
-    },
-  });
-  if (!text) {
+  if (outcome.kind === 'no-text') {
     const media = readMediaKind(message);
     // Every WhatsApp conversation this webhook sees is one-to-one.
-    const notified = media ? await noticeUnsupportedAttachment(context, binding, media, true) : false;
+    const notified = media ? await noticeUnsupportedAttachment(context, outcome.binding, media, true) : false;
     logger.info('handleWhatsAppSurfaceWebhook: message acknowledged without queueing', {
       reason: media ? 'unsupported-attachment' : 'no-actionable-text',
       ...(media ? { attachment: media } : {}),
-      bindingId: binding.id,
-      messageId: readString(message.id),
+      bindingId: outcome.binding.id,
+      messageId,
     });
     return Response.json({
       acknowledged: true,
@@ -208,40 +211,8 @@ async function processWhatsAppMessage(value: Record<string, unknown>, message: R
       outcome: 'ignored',
       reason: media ? 'unsupported-attachment' : 'no-actionable-text',
       ...(media ? { attachment: media, notified } : {}),
-      bindingId: binding.id,
+      bindingId: outcome.binding.id,
     });
   }
-
-  const submission = await context.sessionBroker.submitMessage({
-    routeId: binding.id,
-    ...(readString(message.id) ? { providerMessageId: readString(message.id) } : {}),
-    surfaceKind: 'whatsapp',
-    surfaceId: binding.surfaceId,
-    externalId: binding.externalId,
-    threadId: binding.channelId,
-    userId: from,
-    displayName: binding.title,
-    title: binding.title ?? from,
-    body: text,
-    metadata: {
-      messageId: readString(message.id),
-    },
-  });
-  if (submission.mode === 'continued-live' || submission.mode === 'queued-follow-up') {
-    return Response.json({ acknowledged: true, continued: true, sessionId: submission.session.id, agentId: submission.activeAgentId ?? null });
-  }
-
-  const spawnResult = await context.trySpawnAgent(
-    { mode: 'spawn', task: submission.task! },
-    'handleWhatsAppSurfaceWebhook',
-    submission.session.id,
-  );
-  if (spawnResult instanceof Response) return spawnResult;
-  await context.sessionBroker.bindAgent(submission.session.id, spawnResult.id, submission.input.id);
-  context.queueSurfaceReplyFromBinding(submission.routeBinding ?? binding, {
-    agentId: spawnResult.id,
-    task: text,
-    sessionId: submission.session.id,
-  });
-  return Response.json({ acknowledged: true, queued: true, bindingId: binding.id, sessionId: submission.session.id, agentId: spawnResult.id });
+  return surfaceOutcomeResponse(outcome);
 }

@@ -1,7 +1,31 @@
 import { constantTimeEquals, parseJsonRecord, readBearerOrHeaderToken, readTextBodyWithinLimit, readRecord, readString, declaredMention, ingressMetadata, readIdentifier, noticeUnsupportedAttachment, hasAttachments } from '../helpers.js';
+import { runSurfaceMessage, surfaceOutcomeResponse } from '../surface-message.js';
 import { duplicateDeliveryResponse, inboundDedupKey, runOncePerMessage } from '../inbound-dedup.js';
 import { resolveSurfaceCredential, surfaceCredentialUnavailable } from '../surface-credential.js';
 import type { SurfaceAdapterContext } from '../types.js';
+
+/** The data message a bridge forwards, at the top level or inside a signal-cli style envelope. */
+function readDataMessage(payload: Record<string, unknown>): Record<string, unknown> | null {
+  return readRecord(payload.dataMessage) ?? readRecord(readRecord(payload.envelope)?.dataMessage);
+}
+
+/** The group a message was written in, or undefined for a one-to-one message. */
+function readGroupId(payload: Record<string, unknown>): string | undefined {
+  const dataMessage = readDataMessage(payload);
+  return readString(payload.groupId) ?? readString(dataMessage?.groupId) ?? readString(readRecord(dataMessage?.groupInfo)?.groupId);
+}
+
+/**
+ * Who wrote the message. `source` names the sender; `recipient` is the
+ * account the bridge delivered to, so it is only a fallback for a bridge that
+ * sends nothing else.
+ */
+function readSender(payload: Record<string, unknown>): string | undefined {
+  const envelope = readRecord(payload.envelope);
+  return readString(payload.source) ?? readString(payload.sourceNumber) ?? readString(payload.sourceUuid)
+    ?? readString(envelope?.source) ?? readString(envelope?.sourceNumber) ?? readString(envelope?.sourceUuid)
+    ?? readString(payload.recipient) ?? readString(payload.phoneNumber);
+}
 
 /**
  * Native evidence that a Signal message names the bot: a `mentions` entry (the
@@ -10,9 +34,7 @@ import type { SurfaceAdapterContext } from '../types.js';
  * the bot, as on Telegram and Google Chat. Without a configured account a group
  * message cannot be matched.
  */
-function signalMentionsAccount(payload: Record<string, unknown>, message: string, account: string | undefined): boolean {
-  const dataMessage = readRecord(payload.dataMessage) ?? readRecord(readRecord(payload.envelope)?.dataMessage);
-  const groupId = readString(payload.groupId) ?? readString(dataMessage?.groupId) ?? readString(readRecord(dataMessage?.groupInfo)?.groupId);
+function signalMentionsAccount(payload: Record<string, unknown>, message: string, account: string | undefined, groupId: string | undefined): boolean {
   if (!groupId && !readString(payload.threadId)) return true;
   if (!account) return false;
   const lists = [payload.mentions, readRecord(payload.dataMessage)?.mentions, readRecord(readRecord(payload.envelope)?.dataMessage)?.mentions];
@@ -47,81 +69,63 @@ export async function handleSignalSurfaceWebhook(req: Request, context: SurfaceA
   if (body instanceof Response) return body;
   const payload = readRecord(body);
   if (!payload) return Response.json({ error: 'Invalid JSON body' }, { status: 400 });
-  const recipient = readString(payload.recipient) ?? readString(payload.source) ?? readString(payload.phoneNumber);
-  const message = readString(payload.message) ?? readString(payload.text) ?? '';
-  if (!recipient) return Response.json({ error: 'Missing recipient/source' }, { status: 400 });
+  const sender = readSender(payload);
+  const groupId = readGroupId(payload);
+  const threadId = readString(payload.threadId);
+  const message = readString(payload.message) ?? readString(payload.text) ?? readString(readDataMessage(payload)?.message) ?? '';
+  if (!sender) return Response.json({ error: 'Missing recipient/source' }, { status: 400 });
+  // One conversation value for policy, binding and reply: the group when the
+  // message was written in one, otherwise the sender.
+  const conversationId = groupId ?? sender;
 
-  const dedupKey = inboundDedupKey('signal', recipient, readIdentifier(payload.messageId ?? payload.id ?? payload.timestamp));
+  const dedupKey = inboundDedupKey('signal', conversationId, readIdentifier(payload.messageId ?? payload.id ?? payload.timestamp));
   return runOncePerMessage(dedupKey, duplicateDeliveryResponse, async (committed) => {
-    const policy = await context.authorizeSurfaceIngress({
-      surface: 'signal',
-      userId: recipient,
-      channelId: recipient,
-      groupId: recipient,
-      threadId: readString(payload.threadId),
-      conversationKind: readString(payload.threadId) ? 'thread' : 'direct',
+    const outcome = await runSurfaceMessage(context, {
+      ingress: {
+        surface: 'signal',
+        userId: sender,
+        channelId: conversationId,
+        groupId: conversationId,
+        threadId,
+        conversationKind: threadId ? 'thread' : groupId ? 'group' : 'direct',
+        ...(threadId ? { parentConversationKind: groupId ? 'group' as const : 'direct' as const } : {}),
+        text: message,
+        mentioned: declaredMention(payload, signalMentionsAccount(payload, message, readString(context.configManager.get('surfaces.signal.account')), groupId)),
+        metadata: payload,
+      },
+      binding: {
+        kind: threadId ? 'thread' : 'channel',
+        surfaceKind: 'signal',
+        surfaceId: readString(payload.account) ?? readString(context.configManager.get('surfaces.signal.account')) ?? 'signal',
+        externalId: threadId ?? conversationId,
+        channelId: conversationId,
+        threadId,
+        title: conversationId,
+        metadata: { ...ingressMetadata(payload), ...(groupId ? { groupId } : {}), senderId: sender },
+      },
       text: message,
-      mentioned: declaredMention(payload, signalMentionsAccount(payload, message, readString(context.configManager.get('surfaces.signal.account')))),
-      metadata: payload,
-    });
-    if (!policy.allowed) {
-      return Response.json({ error: `Blocked by channel policy: ${policy.reason}` }, { status: 403 });
-    }
-
-    const binding = await context.routeBindings.upsertBinding({
-      kind: readString(payload.threadId) ? 'thread' : 'channel',
-      surfaceKind: 'signal',
-      surfaceId: readString(payload.account) ?? readString(context.configManager.get('surfaces.signal.account')) ?? 'signal',
-      externalId: readString(payload.threadId) ?? recipient,
-      channelId: recipient,
-      threadId: readString(payload.threadId),
-      title: recipient,
+      logLabel: 'handleSignalSurfaceWebhook',
+      control: 'notice',
+      ...(dedupKey ? { providerMessageId: dedupKey } : {}),
+      userId: sender,
+      displayName: sender,
+      title: conversationId,
       metadata: ingressMetadata(payload),
+      signal: req.signal,
+      committed,
     });
-    if (!message) {
-      const attachment = hasAttachments(payload.attachments) ? 'attachment' : undefined;
-      const notified = attachment ? await noticeUnsupportedAttachment(context, binding, attachment, !readString(payload.threadId) && !readString(payload.groupId)) : false;
+    if (outcome.kind === 'no-text') {
+      const attachment = hasAttachments(payload.attachments) || hasAttachments(readDataMessage(payload)?.attachments) ? 'attachment' : undefined;
+      const notified = attachment ? await noticeUnsupportedAttachment(context, outcome.binding, attachment, !threadId && !groupId) : false;
       return Response.json({
         acknowledged: true,
         queued: false,
         outcome: 'ignored',
         reason: attachment ? 'unsupported-attachment' : 'no-actionable-text',
         ...(attachment ? { attachment, notified } : {}),
-        bindingId: binding.id,
+        bindingId: outcome.binding.id,
       });
     }
-
-    const submission = await context.sessionBroker.submitMessage({
-      routeId: binding.id,
-      ...(dedupKey ? { providerMessageId: dedupKey } : {}),
-      surfaceKind: 'signal',
-      surfaceId: binding.surfaceId,
-      externalId: binding.externalId,
-      threadId: binding.threadId ?? binding.channelId,
-      userId: recipient,
-      displayName: recipient,
-      title: recipient,
-      body: message,
-      metadata: ingressMetadata(payload),
-    });
-    if (submission.mode === 'continued-live' || submission.mode === 'queued-follow-up') {
-      committed();
-      return Response.json({ acknowledged: true, continued: true, sessionId: submission.session.id, agentId: submission.activeAgentId ?? null });
-    }
-
-    const spawnResult = await context.trySpawnAgent(
-      { mode: 'spawn', task: submission.task! },
-      'handleSignalSurfaceWebhook',
-      submission.session.id,
-    );
-    if (spawnResult instanceof Response) return spawnResult;
-    committed();
-    await context.sessionBroker.bindAgent(submission.session.id, spawnResult.id, submission.input.id);
-    context.queueSurfaceReplyFromBinding(submission.routeBinding ?? binding, {
-      agentId: spawnResult.id,
-      task: message,
-      sessionId: submission.session.id,
-    });
-    return Response.json({ acknowledged: true, queued: true, bindingId: binding.id, sessionId: submission.session.id, agentId: spawnResult.id });
+    return surfaceOutcomeResponse(outcome);
   });
 }

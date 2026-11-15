@@ -1,21 +1,11 @@
 import { logger } from '../../utils/logger.js';
-import { GitHubIntegration } from '../../integrations/github.js';
+import { summarizeError } from '../../utils/error-display.js';
+import { GitHubIntegration, type GitHubReplyTarget } from '../../integrations/github.js';
 import type { ServiceRegistry } from '../../config/service-registry.js';
+import type { AgentRecord } from '../../tools/agent/index.js';
 import type { TrySpawnAgentFn } from '../types.js';
 import { parseJsonRecord, readRecord, readString, readTextBodyWithinLimit } from '../helpers.js';
 import { inboundDedupKey, runOncePerMessage } from '../inbound-dedup.js';
-
-/** Authors whose text may become an agent task; everyone else can open an issue or PR on a public repository. */
-const TRUSTED_AUTHOR_ASSOCIATIONS: ReadonlySet<string> = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
-
-/**
- * The association of whoever wrote the text of an issue or pull request event,
- * or undefined for an event with no human author text (a CI check run).
- */
-function authorAssociation(payload: Record<string, unknown>): string | undefined {
-  const subject = readRecord(payload.pull_request) ?? readRecord(payload.issue);
-  return readString(subject?.author_association)?.toUpperCase();
-}
 
 export async function handleGitHubAutomationWebhook(
   req: Request,
@@ -23,6 +13,12 @@ export async function handleGitHubAutomationWebhook(
     readonly serviceRegistry: ServiceRegistry;
     readonly githubWebhookSecret: string | null;
     readonly trySpawnAgent: TrySpawnAgentFn;
+    /**
+     * Resolves when an agent has finished, with its final record. When wired,
+     * the integration posts the agent's answer to the issue or pull request;
+     * without it the agent is asked to post the answer itself.
+     */
+    readonly awaitAgent?: ((agentId: string) => Promise<AgentRecord | null>) | undefined;
   },
 ): Promise<Response> {
   const rawBody = await readTextBodyWithinLimit(req);
@@ -48,43 +44,21 @@ export async function handleGitHubAutomationWebhook(
   if (body instanceof Response) return body;
 
   const event = GitHubIntegration.parseEvent(req.headers, body);
-  // Only a comment can be the agent's own reply, so the lookup is skipped for other events.
-  let ownLogin: string | null = null;
-  if (event.type === 'issue_comment') {
-    const token = (await context.serviceRegistry.resolveSecret('github', 'primary')) ?? process.env.GITHUB_TOKEN ?? null;
-    if (token) ownLogin = await GitHubIntegration.resolveAuthenticatedLogin(token);
-  }
-  const prompt = GitHubIntegration.eventToPrompt(event, { ownLogin });
-  if (prompt === null) {
-    logger.info('handleGitHubAutomationWebhook: event ignored (no prompt generated)', {
+  const resolveToken = async (): Promise<string | null> => (await context.serviceRegistry.resolveSecret('github', 'primary')) ?? process.env.GITHUB_TOKEN ?? null;
+  // Whether a comment mentions the bot is read before GitHub is asked for the token's login.
+  const decision = await GitHubIntegration.readEvent(event, { resolveToken, postsReply: context.awaitAgent !== undefined });
+  if (decision.kind === 'ignored') {
+    logger.info('handleGitHubAutomationWebhook: event ignored', {
       type: event.type,
       action: event.action,
+      reason: decision.reason,
     });
     return Response.json({
       acknowledged: true,
       queued: false,
       outcome: 'ignored',
-      reason: 'event-not-actionable',
-      message: 'Event not actionable',
-    });
-  }
-
-  // A valid signature proves only that GitHub sent the event. The title and body
-  // were written by whoever opened the issue or pull request, and become the
-  // agent's task, so text from an author outside the repository's team is not run.
-  const association = authorAssociation(body);
-  if (association !== undefined && !TRUSTED_AUTHOR_ASSOCIATIONS.has(association)) {
-    logger.info('handleGitHubAutomationWebhook: event ignored (author is not a repository member)', {
-      type: event.type,
-      action: event.action,
-      association,
-    });
-    return Response.json({
-      acknowledged: true,
-      queued: false,
-      outcome: 'ignored',
-      reason: 'untrusted-author',
-      message: `The author's association with the repository is ${association}; only OWNER, MEMBER and COLLABORATOR events start an agent.`,
+      reason: decision.reason,
+      message: decision.message,
     });
   }
 
@@ -100,8 +74,9 @@ export async function handleGitHubAutomationWebhook(
       message: 'This delivery was already handled.',
     }),
     async () => {
-      const spawnResult = await context.trySpawnAgent({ mode: 'spawn', task: prompt }, 'handleGitHubAutomationWebhook');
+      const spawnResult = await context.trySpawnAgent({ mode: 'spawn', task: decision.prompt }, 'handleGitHubAutomationWebhook');
       if (spawnResult instanceof Response) return spawnResult;
+      if (decision.reply && context.awaitAgent) void postAgentAnswer(context.awaitAgent, spawnResult.id, decision.reply, resolveToken);
       logger.info('handleGitHubAutomationWebhook: spawned agent', {
         type: event.type,
         action: event.action,
@@ -114,7 +89,40 @@ export async function handleGitHubAutomationWebhook(
         agentId: spawnResult.id,
         eventType: event.type,
         action: event.action,
+        replyPosted: decision.reply ? 'on-completion' : 'by-agent',
       });
     },
   );
+}
+
+/**
+ * Posts a finished agent's answer to the issue or pull request its event came
+ * from. Runs after GitHub was answered; a failure is logged, never thrown.
+ */
+async function postAgentAnswer(
+  awaitAgent: (agentId: string) => Promise<AgentRecord | null>,
+  agentId: string,
+  target: GitHubReplyTarget,
+  resolveToken: () => Promise<string | null>,
+): Promise<void> {
+  const where = `${target.owner}/${target.repo}#${target.number}`;
+  try {
+    const record = await awaitAgent(agentId);
+    const answer = record?.fullOutput?.trim();
+    if (record?.status !== 'completed' || !answer) {
+      logger.warn('handleGitHubAutomationWebhook: nothing was posted to GitHub', {
+        agentId, where, status: record?.status ?? 'unknown', reason: answer ? 'agent did not complete' : 'agent left no answer',
+      });
+      return;
+    }
+    const token = await resolveToken();
+    if (!token) {
+      logger.warn('handleGitHubAutomationWebhook: the answer was not posted; no GitHub token is configured', { agentId, where });
+      return;
+    }
+    await new GitHubIntegration().postReply(target, answer, token);
+    logger.info('handleGitHubAutomationWebhook: posted the agent answer', { agentId, where });
+  } catch (error) {
+    logger.warn('handleGitHubAutomationWebhook: the answer could not be posted to GitHub', { agentId, where, error: summarizeError(error) });
+  }
 }

@@ -704,7 +704,9 @@ describe('every remote adapter call site is covered by the shared hook', () => {
     const perAdapter: Record<string, number> = {};
     for (const dir of adapterDirs()) {
       perAdapter[dir] = adapterFiles(dir)
-        .reduce((sum, file) => sum + callsOf(file, readFileSync(file, 'utf8'), 'authorizeSurfaceIngress'), 0);
+        // The shared message runner (adapters/surface-message.ts) calls the hook first itself.
+        .reduce((sum, file) => sum + callsOf(file, readFileSync(file, 'utf8'), 'authorizeSurfaceIngress')
+          + callsOf(file, readFileSync(file, 'utf8'), 'runSurfaceMessage'), 0);
     }
     // A new adapter that never calls the hook fails here, whatever else it has.
     const ungated = Object.entries(perAdapter)
@@ -805,7 +807,8 @@ describe('every remote adapter call site is covered by the shared hook', () => {
       return gating;
     })();
 
-    const spawns = callsNamed('trySpawnAgent');
+    // submitSurfaceMessage spawns; runSurfaceMessage authorizes and then spawns.
+    const spawns = [...callsNamed('trySpawnAgent'), ...callsNamed('submitSurfaceMessage')];
     const gates = [
       ...callsNamed('authorizeSurfaceIngress'),
       ...[...gatingFunctionNames].flatMap((name) => callsNamed(name)),
@@ -877,7 +880,8 @@ describe('every remote adapter call site is covered by the shared hook', () => {
       if (DOCUMENTED_NON_CHANNEL_ADAPTERS.has(dir)) continue;
       for (const file of adapterFiles(dir)) {
         const source = readFileSync(file, 'utf8');
-        spawnSitesSeen += callsOf(file, source, 'trySpawnAgent');
+        spawnSitesSeen += callsOf(file, source, 'trySpawnAgent') + callsOf(file, source, 'submitSurfaceMessage')
+          + callsOf(file, source, 'runSurfaceMessage');
         bypassing.push(...ungatedSpawnSites(file.slice(ADAPTERS_DIR.length + 1), source));
       }
     }

@@ -221,6 +221,9 @@ export interface GenericWebhookAdapterContext {
     metadata?: Record<string, unknown> | undefined;
   }) => Promise<SurfaceIngressDecision>;
   readonly trySpawnAgent: TrySpawnAgentFn;
+  /** `status`, `cancel` and `retry <id>`, as on the chat surfaces; absent when the embedder wires none. */
+  readonly parseSurfaceControlCommand?: SurfaceAdapterContext['parseSurfaceControlCommand'] | undefined;
+  readonly performSurfaceControlCommand?: SurfaceAdapterContext['performSurfaceControlCommand'] | undefined;
   readonly surfaceDeliveryEnabled: (surface: Extract<AutomationSurfaceKind, 'webhook'>) => boolean;
   readonly signWebhookPayload: (body: string, secret: string) => string;
   readonly queueWebhookReply: (input: GenericWebhookReplyInput) => void;

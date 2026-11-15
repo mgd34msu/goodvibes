@@ -52,8 +52,9 @@ function makeBlockingContext(): SurfaceAdapterContext {
     } as unknown as SurfaceAdapterContext['routeBindings'],
     sessionBroker: {
       submitMessage: async () => ({
-        mode: 'new' as const,
+        mode: 'spawn' as const,
         session: { id: 'session-1' },
+        input: { id: 'input-1' },
         task: 'test-task',
         routeBinding: null,
       }),

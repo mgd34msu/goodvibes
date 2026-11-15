@@ -1,4 +1,4 @@
-import { createHmac, timingSafeEqual } from 'crypto';
+import { createHash, createHmac, timingSafeEqual } from 'crypto';
 import { logger } from '../utils/logger.js';
 import { fetchWithTimeout } from '../utils/fetch-with-timeout.js';
 import { summarizeError } from '../utils/error-display.js';
@@ -17,8 +17,62 @@ export interface GitHubWebhookEvent {
   payload: Record<string, unknown>;
 }
 
-/** Comment authors whose text may become an agent task on a public repository. */
-const TRUSTED_COMMENT_ASSOCIATIONS: ReadonlySet<string> = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
+/** Authors whose text may become an agent task; anyone can open an issue or pull request or comment on a public repository. */
+const TRUSTED_AUTHOR_ASSOCIATIONS: ReadonlySet<string> = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
+
+/** Handles a comment may address the bot by besides the token's own login, matched as whole handles. */
+export const GITHUB_BOT_HANDLE_ALIASES: readonly string[] = ['goodvibes', 'bot'];
+
+/** Where the integration posts the answer of an agent an event started. */
+export interface GitHubReplyTarget {
+  readonly owner: string;
+  readonly repo: string;
+  readonly number: number;
+  /** A pull request gets a review comment; an issue, or a comment thread, gets a comment. */
+  readonly kind: 'pr-review' | 'issue-comment';
+}
+
+/** What an event may do: start an agent with this prompt, or nothing, for a reason. */
+export type GitHubEventDecision =
+  | { readonly kind: 'prompt'; readonly prompt: string; readonly reply?: GitHubReplyTarget | undefined }
+  | { readonly kind: 'ignored'; readonly reason: 'event-not-actionable' | 'not-mentioned' | 'untrusted-author' | 'own-reply'; readonly message: string };
+
+export interface GitHubEventOptions {
+  /** The login the configured token authenticates as; comments by it are the agent's own. */
+  readonly ownLogin?: string | null | undefined;
+  /** The integration posts the agent's answer, so the prompt asks for the answer instead of a post. */
+  readonly postsReply?: boolean | undefined;
+}
+
+/** `@handle` mentions in comment text, lowercased; a handle inside a longer word or handle does not count. */
+function mentionedHandles(text: string): Set<string> {
+  const handles = new Set<string>();
+  for (const match of text.matchAll(/(?<![\w@/.-])@([a-z0-9](?:[a-z0-9-]{0,38}))(?![\w-])/gi)) {
+    handles.add(match[1]!.toLowerCase());
+  }
+  return handles;
+}
+
+function associationOf(record: Record<string, unknown> | undefined): string {
+  return typeof record?.author_association === 'string' ? record.author_association.toUpperCase() : '';
+}
+
+function untrustedAuthor(what: string, association: string): GitHubEventDecision {
+  return {
+    kind: 'ignored',
+    reason: 'untrusted-author',
+    message: `The ${what}'s association with the repository is ${association || 'NONE'}; only text by an OWNER, MEMBER or COLLABORATOR starts an agent.`,
+  };
+}
+
+function replyTarget(repoFullName: unknown, number: unknown, kind: GitHubReplyTarget['kind']): GitHubReplyTarget | undefined {
+  if (typeof repoFullName !== 'string' || typeof number !== 'number' || !Number.isSafeInteger(number)) return undefined;
+  const [owner, repo, ...rest] = repoFullName.split('/');
+  return owner && repo && rest.length === 0 ? { owner, repo, number, kind } : undefined;
+}
+
+/** Logins by token, so a token's login is asked of GitHub once. Keyed by a hash so no token is held as a key. */
+const authenticatedLogins = new Map<string, string>();
 
 function recordOf(value: unknown): Record<string, unknown> | undefined {
   return typeof value === 'object' && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
@@ -44,7 +98,7 @@ function isTrustedCommentAuthor(payload: Record<string, unknown>, comment: Recor
   const kinds = [recordOf(payload.sender)?.type, recordOf(comment.user)?.type];
   if (kinds.some((kind) => typeof kind === 'string' && kind.toLowerCase() === 'bot')) return false;
   const association = typeof comment.author_association === 'string' ? comment.author_association.toUpperCase() : '';
-  return TRUSTED_COMMENT_ASSOCIATIONS.has(association);
+  return TRUSTED_AUTHOR_ASSOCIATIONS.has(association);
 }
 
 /** Hidden marker on every comment this integration posts, so its own replies never start an agent. */
@@ -99,6 +153,9 @@ export class GitHubIntegration {
    * does not answer with one. Comments by this account are the agent's own.
    */
   static async resolveAuthenticatedLogin(token: string): Promise<string | null> {
+    const key = createHash('sha256').update(token).digest('hex');
+    const known = authenticatedLogins.get(key);
+    if (known) return known;
     try {
       const res = await fetchWithTimeout('https://api.github.com/user', {
         method: 'GET',
@@ -110,7 +167,9 @@ export class GitHubIntegration {
       });
       if (!res.ok) return null;
       const data = await res.json() as { login?: unknown };
-      return typeof data.login === 'string' && data.login ? data.login : null;
+      if (typeof data.login !== 'string' || !data.login) return null;
+      authenticatedLogins.set(key, data.login);
+      return data.login;
     } catch (error) {
       logger.warn('GitHubIntegration: could not resolve the authenticated login', { error: summarizeError(error) });
       return null;
@@ -118,18 +177,44 @@ export class GitHubIntegration {
   }
 
   /**
-   * Convert a GitHub webhook event into an agent prompt.
-   * Returns null if the event does not warrant agent action.
+   * Reads an event the way the webhook does: a comment that names no handle at
+   * all is ignored before any request to GitHub; otherwise the token's login is
+   * resolved (once per token) to recognise both a mention of it and the
+   * agent's own replies.
    */
-  static eventToPrompt(event: GitHubWebhookEvent, options: { readonly ownLogin?: string | null } = {}): string | null {
+  static async readEvent(
+    event: GitHubWebhookEvent,
+    options: { readonly resolveToken: () => Promise<string | null>; readonly postsReply?: boolean | undefined },
+  ): Promise<GitHubEventDecision> {
+    let ownLogin: string | null = null;
+    if (event.type === 'issue_comment') {
+      const comment = recordOf(event.payload.comment);
+      const body = typeof comment?.body === 'string' ? comment.body : '';
+      if (event.action === 'created' && mentionedHandles(body).size > 0) {
+        const token = await options.resolveToken();
+        if (token) ownLogin = await GitHubIntegration.resolveAuthenticatedLogin(token);
+      }
+    }
+    return GitHubIntegration.decideEvent(event, { ownLogin, postsReply: options.postsReply });
+  }
+
+  /**
+   * The one rule for whether an event's text may start an agent, per event
+   * type: the opener of an issue or pull request, the writer of a comment.
+   */
+  static decideEvent(event: GitHubWebhookEvent, options: GitHubEventOptions = {}): GitHubEventDecision {
+    const notActionable: GitHubEventDecision = { kind: 'ignored', reason: 'event-not-actionable', message: 'Event not actionable' };
     const { type, action, payload } = event;
+    const postsReply = options.postsReply === true;
 
     switch (type) {
       case 'pull_request': {
-        if (!['opened', 'synchronize', 'review_requested'].includes(action)) return null;
+        if (!['opened', 'synchronize', 'review_requested'].includes(action)) return notActionable;
         const pr = payload.pull_request as Record<string, unknown> | undefined;
         const repo = (payload.repository as Record<string, unknown> | undefined);
-        if (!pr || !repo) return null;
+        if (!pr || !repo) return notActionable;
+        // The title and body become the task, so they must be written by the repository's team.
+        if (!TRUSTED_AUTHOR_ASSOCIATIONS.has(associationOf(pr))) return untrustedAuthor('pull request author', associationOf(pr));
 
         const prNumber = pr.number as number;
         const prTitle = pr.title as string;
@@ -139,7 +224,8 @@ export class GitHubIntegration {
         const repoFullName = repo.full_name as string;
         const diffUrl = pr.diff_url as string;
 
-        return [
+        const reply = postsReply ? replyTarget(repoFullName, prNumber, 'pr-review') : undefined;
+        return { kind: 'prompt', ...(reply ? { reply } : {}), prompt: [
           `GitHub Pull Request ${action === 'review_requested' ? 'review requested' : action} on ${repoFullName}.`,
           untrustedBlock(`PR #${prNumber} title`, prTitle),
           `Base: ${baseBranch} ← Head: ${headBranch}`,
@@ -151,15 +237,18 @@ export class GitHubIntegration {
           '- Identify potential security issues',
           '- Suggest improvements to code quality and readability',
           '- Note any missing tests or documentation',
-          `After analysis, post a review comment on PR #${prNumber} of ${repoFullName}.`,
-        ].filter(Boolean).join('\n');
+          reply
+            ? `Write the review as your final answer; it will be posted to PR #${prNumber} of ${repoFullName} for you. Do not post it yourself.`
+            : `After analysis, post a review comment on PR #${prNumber} of ${repoFullName}.`,
+        ].filter(Boolean).join('\n') };
       }
 
       case 'issues': {
-        if (!['opened', 'assigned'].includes(action)) return null;
+        if (!['opened', 'assigned'].includes(action)) return notActionable;
         const issue = payload.issue as Record<string, unknown> | undefined;
         const repo = (payload.repository as Record<string, unknown> | undefined);
-        if (!issue || !repo) return null;
+        if (!issue || !repo) return notActionable;
+        if (!TRUSTED_AUTHOR_ASSOCIATIONS.has(associationOf(issue))) return untrustedAuthor('issue author', associationOf(issue));
 
         const issueNumber = issue.number as number;
         const issueTitle = issue.title as string;
@@ -169,7 +258,8 @@ export class GitHubIntegration {
           ? (issue.labels as Array<Record<string, unknown>>).map((l) => l.name as string).join(', ')
           : '';
 
-        return [
+        const reply = postsReply ? replyTarget(repoFullName, issueNumber, 'issue-comment') : undefined;
+        return { kind: 'prompt', ...(reply ? { reply } : {}), prompt: [
           `GitHub Issue ${action} on ${repoFullName}.`,
           untrustedBlock(`Issue #${issueNumber} title`, issueTitle),
           labels ? `Labels: ${labels}` : '',
@@ -179,16 +269,18 @@ export class GitHubIntegration {
           '- Identify relevant files and code areas',
           '- Outline a solution strategy',
           '- Note any potential complications or dependencies',
-          `Post a comment on issue #${issueNumber} of ${repoFullName} with your analysis.`,
-        ].filter(Boolean).join('\n');
+          reply
+            ? `Write your analysis as your final answer; it will be posted on issue #${issueNumber} of ${repoFullName} for you. Do not post it yourself.`
+            : `Post a comment on issue #${issueNumber} of ${repoFullName} with your analysis.`,
+        ].filter(Boolean).join('\n') };
       }
 
       case 'check_run': {
-        if (action !== 'completed') return null;
+        if (action !== 'completed') return notActionable;
         const checkRun = payload.check_run as Record<string, unknown> | undefined;
-        if (!checkRun || checkRun.conclusion !== 'failure') return null;
+        if (!checkRun || checkRun.conclusion !== 'failure') return notActionable;
         const repo = (payload.repository as Record<string, unknown> | undefined);
-        if (!repo) return null;
+        if (!repo) return notActionable;
 
         const checkName = checkRun.name as string;
         const detailsUrl = checkRun.details_url as string | undefined;
@@ -201,7 +293,7 @@ export class GitHubIntegration {
         const fromPullRequest = !Array.isArray(checkRun.pull_requests) || checkRun.pull_requests.length > 0;
         const summary = fromPullRequest ? '' : ((output?.summary as string | null) ?? '');
 
-        return [
+        return { kind: 'prompt', prompt: [
           `CI check "${checkName}" failed on ${repoFullName} at commit ${headSha}.`,
           summary ? untrustedBlock('Summary', summary) : '',
           detailsUrl ? `Details: ${detailsUrl}` : '',
@@ -210,32 +302,32 @@ export class GitHubIntegration {
           '- Identify the root cause of the failure',
           '- Suggest fixes',
           '- Check if related code changes could have introduced this failure',
-        ].filter(Boolean).join('\n');
+        ].filter(Boolean).join('\n') };
       }
 
       case 'check_suite': {
-        if (action !== 'completed') return null;
+        if (action !== 'completed') return notActionable;
         const suite = payload.check_suite as Record<string, unknown> | undefined;
-        if (!suite || suite.conclusion !== 'failure') return null;
+        if (!suite || suite.conclusion !== 'failure') return notActionable;
         const repo = (payload.repository as Record<string, unknown> | undefined);
-        if (!repo) return null;
+        if (!repo) return notActionable;
 
         const repoFullName = repo.full_name as string;
         const headSha = (suite.head_sha as string | undefined)?.slice(0, 8);
         const headBranch = suite.head_branch as string | undefined;
 
-        return [
+        return { kind: 'prompt', prompt: [
           `CI check suite failed on ${repoFullName}${headBranch ? ` (branch: ${headBranch})` : ''} at commit ${headSha}.`,
           '',
           'Please analyze the CI failure and identify what caused the check suite to fail.',
-        ].filter(Boolean).join('\n');
+        ].filter(Boolean).join('\n') };
       }
 
       case 'push': {
         const ref = payload.ref as string | undefined;
-        if (!ref || !['refs/heads/main', 'refs/heads/master'].includes(ref)) return null;
+        if (!ref || !['refs/heads/main', 'refs/heads/master'].includes(ref)) return notActionable;
         const repo = (payload.repository as Record<string, unknown> | undefined);
-        if (!repo) return null;
+        if (!repo) return notActionable;
 
         const repoFullName = repo.full_name as string;
         const commits = Array.isArray(payload.commits)
@@ -246,7 +338,7 @@ export class GitHubIntegration {
           .map((c) => `- ${c.id as string | undefined ? (c.id as string).slice(0, 8) : '?'}: ${c.message as string}`)
           .join('\n');
 
-        return [
+        return { kind: 'prompt', prompt: [
           `New commits pushed to ${ref} on ${repoFullName}.`,
           commits.length > 0 ? untrustedBlock('Commits', commitMessages) : '',
           '',
@@ -254,39 +346,69 @@ export class GitHubIntegration {
           '- Group changes by type (feat, fix, chore, docs, etc.)',
           '- Write user-facing descriptions',
           '- Highlight breaking changes if any',
-        ].filter(Boolean).join('\n');
+        ].filter(Boolean).join('\n') };
       }
 
       case 'issue_comment': {
-        if (action !== 'created') return null;
+        if (action !== 'created') return notActionable;
         const comment = payload.comment as Record<string, unknown> | undefined;
         const issue = payload.issue as Record<string, unknown> | undefined;
         const repo = (payload.repository as Record<string, unknown> | undefined);
-        if (!comment || !issue || !repo) return null;
+        if (!comment || !issue || !repo) return notActionable;
 
         const body = (comment.body as string | null) ?? '';
-        // Only respond to comments mentioning the bot
-        if (!body.includes('@bot') && !body.includes('@goodvibes')) return null;
-        if (!isTrustedCommentAuthor(payload, comment, options.ownLogin)) return null;
+        // Only a comment that addresses the bot by a whole handle: its login or an alias.
+        const handles = mentionedHandles(body);
+        const own = options.ownLogin?.toLowerCase();
+        if (!GITHUB_BOT_HANDLE_ALIASES.some((alias) => handles.has(alias)) && !(own && handles.has(own))) {
+          return { kind: 'ignored', reason: 'not-mentioned', message: 'The comment does not mention the bot.' };
+        }
+        // The commenter decides, not the issue's author: a maintainer may ask on an outsider's issue.
+        if (!isTrustedCommentAuthor(payload, comment, options.ownLogin)) {
+          const association = associationOf(comment);
+          return TRUSTED_AUTHOR_ASSOCIATIONS.has(association)
+            ? { kind: 'ignored', reason: 'own-reply', message: 'The comment is a reply by a bot or by GoodVibes itself.' }
+            : untrustedAuthor('comment author', association);
+        }
 
         const issueNumber = issue.number as number;
         const repoFullName = repo.full_name as string;
         const isPR = Boolean(issue.pull_request);
+        const reply = postsReply ? replyTarget(repoFullName, issueNumber, 'issue-comment') : undefined;
 
-        return [
+        return { kind: 'prompt', ...(reply ? { reply } : {}), prompt: [
           `Bot mention in ${isPR ? 'PR' : 'issue'} #${issueNumber} on ${repoFullName}.`,
           untrustedBlock('Comment', body),
           '',
           'Please respond to this comment. Address the specific request or question raised.',
-          `Post your response as a comment on ${isPR ? 'PR' : 'issue'} #${issueNumber} of ${repoFullName}.`,
-          // The agent posts with its own tools, so only the reply text can carry the marker that keeps it from re-triggering.
-          `End your comment with this exact line, on its own, so it is not treated as a new request:\n${OUTBOUND_MARKER}`,
-        ].filter(Boolean).join('\n');
+          ...(reply
+            ? [`Write your response as your final answer; it will be posted on ${isPR ? 'PR' : 'issue'} #${issueNumber} of ${repoFullName} for you. Do not post it yourself.`]
+            : [
+              `Post your response as a comment on ${isPR ? 'PR' : 'issue'} #${issueNumber} of ${repoFullName}.`,
+              // The agent posts with its own tools, so only the reply text can carry the marker that keeps it from re-triggering.
+              `End your comment with this exact line, on its own, so it is not treated as a new request:\n${OUTBOUND_MARKER}`,
+            ]),
+        ].filter(Boolean).join('\n') };
       }
 
       default:
-        return null;
+        return notActionable;
     }
+  }
+
+  /** The prompt an event starts an agent with, or null when it starts none. */
+  static eventToPrompt(event: GitHubWebhookEvent, options: GitHubEventOptions = {}): string | null {
+    const decision = GitHubIntegration.decideEvent(event, options);
+    return decision.kind === 'prompt' ? decision.prompt : null;
+  }
+
+  /** Posts an agent's answer where its event came from, with the marker that keeps it from starting another agent. */
+  async postReply(target: GitHubReplyTarget, body: string, token: string): Promise<void> {
+    if (target.kind === 'pr-review') {
+      await this.postPRReview(target.owner, target.repo, target.number, body, 'COMMENT', token);
+      return;
+    }
+    await this.postIssueComment(target.owner, target.repo, target.number, body, token);
   }
 
   // -------------------------------------------------------------------------

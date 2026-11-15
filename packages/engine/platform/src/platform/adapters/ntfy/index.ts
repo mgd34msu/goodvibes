@@ -3,6 +3,8 @@ import { constantTimeEquals, declaredMention, ingressMetadata, parseJsonRecord, 
 import { resolveSurfaceCredential, surfaceCredentialUnavailable } from '../surface-credential.js';
 import type { SurfaceAdapterContext } from '../types.js';
 import { inboundDedupKey, ntfyInboundDedup } from '../inbound-dedup.js';
+import { answerSurfaceControl, submitSurfaceMessage, surfaceOutcomeResponse } from '../surface-message.js';
+import type { UpsertRouteBindingInput } from '../../channels/route-manager.js';
 import {
   isGoodVibesNtfyDeliveryEcho,
   resolveGoodVibesNtfyTopics,
@@ -140,6 +142,39 @@ async function authorizeNtfyPayload(
   return null;
 }
 
+/** The route binding of an ntfy topic: the conversation a control command from it acts for. */
+function ntfyTopicBinding(body: Record<string, unknown>, topic: string): UpsertRouteBindingInput {
+  return {
+    kind: 'channel',
+    surfaceKind: 'ntfy',
+    surfaceId: 'ntfy',
+    externalId: topic,
+    channelId: topic,
+    title: typeof body.title === 'string' ? body.title : topic,
+    metadata: ingressMetadata(body),
+  };
+}
+
+/**
+ * `status`, `cancel` or `retry <id>` sent to a chat topic. The topic's binding
+ * is written only when the text is a command, so ordinary chat costs no write.
+ */
+async function answerNtfyControl(
+  body: Record<string, unknown>,
+  context: SurfaceAdapterContext,
+  topic: string,
+  message: string,
+): Promise<Response | null> {
+  const control = await answerSurfaceControl(context, {
+    surface: 'ntfy',
+    text: message,
+    binding: () => context.routeBindings.upsertBinding(ntfyTopicBinding(body, topic)),
+    channelId: topic,
+    answer: 'notice',
+  });
+  return control ? surfaceOutcomeResponse({ kind: 'control', ...control }, { topic }) : null;
+}
+
 async function handleNtfyChatPayload(
   body: Record<string, unknown>,
   context: SurfaceAdapterContext,
@@ -158,6 +193,8 @@ async function handleNtfyChatPayload(
       topic,
     });
   }
+  const control = await answerNtfyControl(body, context, topic, message);
+  if (control) return control;
   if (!context.publishConversationFollowup) {
     return Response.json({ error: 'ntfy chat routing is unavailable in this runtime' }, { status: 503 });
   }
@@ -215,6 +252,8 @@ async function handleNtfyRemoteChatPayload(
       topic,
     });
   }
+  const control = await answerNtfyControl(body, context, topic, message);
+  if (control) return control;
   if (!context.postNtfyRemoteChatMessage) {
     return Response.json({ error: 'ntfy remote chat is unavailable in this runtime' }, { status: 503 });
   }
@@ -243,15 +282,7 @@ async function handleNtfyAgentPayload(
   if (denied) return denied;
   const preferredTuiSession = await findPreferredTuiSession(context);
 
-  const binding = await context.routeBindings.upsertBinding({
-    kind: 'channel',
-    surfaceKind: 'ntfy',
-    surfaceId: 'ntfy',
-    externalId: topic,
-    channelId: topic,
-    title: typeof body.title === 'string' ? body.title : topic,
-    metadata: ingressMetadata(body),
-  });
+  const binding = await context.routeBindings.upsertBinding(ntfyTopicBinding(body, topic));
 
   if (!message) {
     return Response.json({
@@ -264,53 +295,22 @@ async function handleNtfyAgentPayload(
     });
   }
 
-  const submission = await context.sessionBroker.submitMessage({
+  const outcome = await submitSurfaceMessage(context, binding, {
+    surface: 'ntfy',
+    text: message,
+    logLabel: 'handleNtfySurfaceWebhook',
+    control: 'notice',
     ...(preferredTuiSession ? { sessionId: preferredTuiSession.id } : {}),
-    routeId: binding.id,
     ...(typeof body.id === 'string' && body.id ? { providerMessageId: body.id } : {}),
-    surfaceKind: 'ntfy',
-    surfaceId: binding.surfaceId,
     externalId: topic,
     threadId: topic,
+    channelId: topic,
     title: typeof body.title === 'string' ? body.title : topic,
-    body: message,
     metadata: ingressMetadata(body),
+    trackContract: true,
+    committed,
   });
-  if (submission.mode === 'continued-live' || submission.mode === 'queued-follow-up') {
-    committed();
-    return Response.json({
-      acknowledged: true,
-      queued: true,
-      continued: true,
-      bindingId: binding.id,
-      sessionId: submission.session.id,
-      agentId: submission.activeAgentId,
-    });
-  }
-
-  const spawnResult = await context.trySpawnAgent(
-    { mode: 'spawn', task: submission.task! },
-    'handleNtfySurfaceWebhook',
-    submission.session.id,
-  );
-  if (spawnResult instanceof Response) return spawnResult;
-  committed();
-  await context.sessionBroker.bindAgent(submission.session.id, spawnResult.id, submission.input.id);
-  context.queueSurfaceReplyFromBinding(submission.routeBinding ?? binding, {
-    agentId: spawnResult.id,
-    task: message,
-    ...(typeof submission.task === 'string' && submission.task.length > 0 ? { agentTask: submission.task } : {}),
-    ...(typeof spawnResult.contractId === 'string' && spawnResult.contractId.length > 0 ? { contractId: spawnResult.contractId } : {}),
-    sessionId: submission.session.id,
-  });
-  return Response.json({
-    acknowledged: true,
-    queued: true,
-    bindingId: binding.id,
-    topic,
-    sessionId: submission.session.id,
-    agentId: spawnResult.id,
-  });
+  return surfaceOutcomeResponse(outcome, { topic });
 }
 
 async function findPreferredTuiSession(context: SurfaceAdapterContext) {

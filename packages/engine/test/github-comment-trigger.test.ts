@@ -89,4 +89,36 @@ describe('GitHub comment trigger', () => {
     (other.payload.comment as { user: Record<string, unknown> }).user.login = 'someone-else';
     expect(GitHubIntegration.eventToPrompt(other, { ownLogin })).toContain('explain this');
   });
+
+  test('a comment that names no handle costs no GitHub request; the login is asked once per token', async () => {
+    const savedFetch = globalThis.fetch;
+    let requests = 0;
+    globalThis.fetch = (async () => { requests += 1; return new Response(JSON.stringify({ login: 'gv-bot' }), { status: 200 }); }) as unknown as typeof fetch;
+    try {
+      const resolveToken = async () => 'token-counted';
+      for (let i = 0; i < 10; i += 1) {
+        const decision = await GitHubIntegration.readEvent(comment({ association: 'OWNER', body: 'looks good to me' }), { resolveToken });
+        expect(decision.kind).toBe('ignored');
+      }
+      expect(requests).toBe(0);
+      for (let i = 0; i < 3; i += 1) {
+        const decision = await GitHubIntegration.readEvent(comment({ association: 'OWNER', body: '@gv-bot please look' }), { resolveToken });
+        expect(decision.kind).toBe('prompt');
+      }
+      expect(requests).toBe(1);
+      expect((await GitHubIntegration.readEvent(comment({ association: 'OWNER', body: '@goodvibes-fan and @bottle' }), { resolveToken })).kind).toBe('ignored');
+    } finally {
+      globalThis.fetch = savedFetch;
+    }
+  });
+
+  test('the commenter decides: a maintainer is answered on an outsider\'s issue, an outsider is not', () => {
+    const onOutsiderIssue = (association: string) => {
+      const event = comment({ association });
+      (event.payload.issue as Record<string, unknown>).author_association = 'NONE';
+      return GitHubIntegration.decideEvent(event);
+    };
+    expect(onOutsiderIssue('MEMBER').kind).toBe('prompt');
+    expect(onOutsiderIssue('NONE')).toMatchObject({ kind: 'ignored', reason: 'untrusted-author' });
+  });
 });

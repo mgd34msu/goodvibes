@@ -11,7 +11,7 @@ import type { AgentManager } from '../tools/agent/index.js';
 import type { ControlPlaneGateway, SharedSessionBroker } from '../control-plane/index.js';
 import type { ConversationMessageEnvelope } from '../control-plane/conversation-message.js';
 import type { RouteBindingManager, ChannelPolicyManager } from '../channels/index.js';
-import type { GenericWebhookAdapterContext, SurfaceAdapterContext } from '../adapters/index.js';
+import type { GenericWebhookAdapterContext, SurfaceAdapterContext, SurfaceControlCommand, SurfaceControlOrigin } from '../adapters/index.js';
 import type { AutomationManager } from '../automation/index.js';
 import type { ChannelPolicyDecision, ChannelIngressPolicyInput } from '../channels/index.js';
 import type { AutomationRouteBinding } from '../automation/routes.js';
@@ -187,7 +187,12 @@ export class DaemonSurfaceActionHelper {
     this.context.delegatedTelegram?.close();
   }
 
-  buildSurfaceAdapterContext(): SurfaceAdapterContext {
+  /**
+   * The per-message ingress scope: the policy check, the control commands it
+   * admits, and the gated spawn, sharing one authorization cell. Built once per
+   * inbound message.
+   */
+  private createIngressScope() {
     // One cell per inbound message (see SurfaceIngressOrigin). authorizeSurfaceIngress
     // fills it; the gated trySpawnAgent below reads it.
     const origin: { current: SurfaceIngressOrigin | null } = { current: null };
@@ -202,22 +207,7 @@ export class DaemonSurfaceActionHelper {
     // any run or agent id and carry no origin, so only the owner may act on them.
     const nonOperatorCommands = new WeakSet<SurfaceControlReading>();
     return {
-      delegatedTelegram: this.context.delegatedTelegram,
-      ...(this.context.deliverSurfaceNotice ? { deliverSurfaceNotice: this.context.deliverSurfaceNotice } : {}),
-      hasPaymentReplyWindow: () => this.paymentReplies.pending > 0,
-      serviceRegistry: this.context.serviceRegistry,
-      secretsManager: this.context.secretsManager,
-      configManager: this.context.configManager,
-      routeBindings: this.context.routeBindings,
-      sessionBroker: this.context.sessionBroker,
-      ...(this.context.ingressAlarm
-        ? {
-          reportIngressFailure: (surface: import('../channels/types.js').ChannelSurface, detail: string) => {
-            this.context.ingressAlarm?.recordFailure(surface, detail);
-          },
-        }
-        : {}),
-      authorizeSurfaceIngress: async (input) => {
+      authorizeSurfaceIngress: async (input: ChannelIngressPolicyInput): Promise<ChannelPolicyDecision> => {
         authorization = null;
         origin.current = {
           surface: input.surface,
@@ -244,7 +234,7 @@ export class DaemonSurfaceActionHelper {
         }
         return decision;
       },
-      parseSurfaceControlCommand: async (text, options = {}) => {
+      parseSurfaceControlCommand: async (text: string, options: CallOptions = {}): Promise<SurfaceControlReading | null> => {
         const accepted = authorization;
         const signal = options.signal ? AbortSignal.any([options.signal, lifecycle]) : lifecycle;
         const assertCurrent = () => {
@@ -268,7 +258,7 @@ export class DaemonSurfaceActionHelper {
         });
         return command;
       },
-      performSurfaceControlCommand: async (command, controlOrigin) => {
+      performSurfaceControlCommand: async (command: SurfaceControlCommand, controlOrigin?: SurfaceControlOrigin): Promise<string> => {
         const assertCurrent = commands.get(command);
         if (!assertCurrent) throw new Error('Surface control has no current source reading');
         commands.delete(command);
@@ -284,10 +274,9 @@ export class DaemonSurfaceActionHelper {
         }
         return this.performSurfaceControlCommand(command);
       },
-      performInteractiveSurfaceAction: (actionId, surface, request, userId) => this.performInteractiveSurfaceAction(actionId, surface, request, userId),
       // The shared spawn boundary: every channel surface adapter routes its
       // spawn through the conversation-first gate (surface-conversation-gate.ts).
-      trySpawnAgent: (input, logLabel, sessionId) => {
+      trySpawnAgent: (input: Parameters<AgentManager['spawn']>[0], logLabel?: string, sessionId?: string) => {
         const accepted = authorization;
         const capturedOrigin = origin.current;
         const assertCurrent = () => {
@@ -300,6 +289,29 @@ export class DaemonSurfaceActionHelper {
         };
         return gateSurfaceSpawn(this.conversationGateDeps({ signal: lifecycle, beforeAttempt: assertCurrent }), capturedOrigin, input, logLabel, sessionId);
       },
+    };
+  }
+
+  buildSurfaceAdapterContext(): SurfaceAdapterContext {
+    const scope = this.createIngressScope();
+    return {
+      delegatedTelegram: this.context.delegatedTelegram,
+      ...(this.context.deliverSurfaceNotice ? { deliverSurfaceNotice: this.context.deliverSurfaceNotice } : {}),
+      hasPaymentReplyWindow: () => this.paymentReplies.pending > 0,
+      serviceRegistry: this.context.serviceRegistry,
+      secretsManager: this.context.secretsManager,
+      configManager: this.context.configManager,
+      routeBindings: this.context.routeBindings,
+      sessionBroker: this.context.sessionBroker,
+      ...(this.context.ingressAlarm
+        ? {
+          reportIngressFailure: (surface: import('../channels/types.js').ChannelSurface, detail: string) => {
+            this.context.ingressAlarm?.recordFailure(surface, detail);
+          },
+        }
+        : {}),
+      ...scope,
+      performInteractiveSurfaceAction: (actionId, surface, request, userId) => this.performInteractiveSurfaceAction(actionId, surface, request, userId),
       queueSurfaceReplyFromBinding: (binding, input) => this.context.queueSurfaceReplyFromBinding(binding, input),
       publishConversationFollowup: (sessionId, envelope) => this.publishConversationFollowup(sessionId, envelope),
       queueNtfyChatReply: (input) => this.queueNtfyChatReply(input),
@@ -309,12 +321,18 @@ export class DaemonSurfaceActionHelper {
   }
 
   buildGenericWebhookAdapterContext(): GenericWebhookAdapterContext {
+    // The same scope as the chat surfaces, so `status`, `cancel` and `retry <id>`
+    // work over the webhook under the same rules. Its spawn stays ungated: a
+    // webhook is authorized when it is configured.
+    const scope = this.createIngressScope();
     return {
       secretsManager: this.context.secretsManager,
       configManager: this.context.configManager,
       routeBindings: this.context.routeBindings,
       sessionBroker: this.context.sessionBroker,
-      authorizeSurfaceIngress: (input) => this.authorizeSurfaceIngress(input),
+      authorizeSurfaceIngress: (input) => scope.authorizeSurfaceIngress(input),
+      parseSurfaceControlCommand: scope.parseSurfaceControlCommand,
+      performSurfaceControlCommand: scope.performSurfaceControlCommand,
       trySpawnAgent: (input, logLabel, sessionId) => this.context.trySpawnAgent(input, logLabel, sessionId),
       surfaceDeliveryEnabled: (surface) => this.context.surfaceDeliveryEnabled(surface),
       signWebhookPayload: (body, secret) => this.context.signWebhookPayload(body, secret),

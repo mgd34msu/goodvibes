@@ -1,6 +1,7 @@
 import { constantTimeEquals, parseJsonRecord, readBearerOrHeaderToken, readTextBodyWithinLimit, readRecord, readString, declaredMention, ingressMetadata, readIdentifier, noticeUnsupportedAttachment, hasAttachments } from '../helpers.js';
 import { duplicateDeliveryResponse, inboundDedupKey, runOncePerMessage } from '../inbound-dedup.js';
 import { resolveSurfaceCredential, surfaceCredentialUnavailable } from '../surface-credential.js';
+import { runSurfaceMessage, surfaceOutcomeResponse } from '../surface-message.js';
 import type { SurfaceAdapterContext } from '../types.js';
 
 export async function handleIMessageSurfaceWebhook(req: Request, context: SurfaceAdapterContext): Promise<Response> {
@@ -29,76 +30,53 @@ export async function handleIMessageSurfaceWebhook(req: Request, context: Surfac
   if (!chatId) return Response.json({ error: 'Missing chatId' }, { status: 400 });
 
   const dedupKey = inboundDedupKey('imessage', chatId, readIdentifier(payload.guid ?? payload.messageId ?? payload.id));
+  const threadId = readString(payload.threadId);
   return runOncePerMessage(dedupKey, duplicateDeliveryResponse, async (committed) => {
-    const policy = await context.authorizeSurfaceIngress({
-      surface: 'imessage',
-      userId: chatId,
-      channelId: chatId,
-      groupId: chatId,
-      threadId: readString(payload.threadId),
-      conversationKind: readString(payload.threadId) ? 'thread' : 'direct',
+    const outcome = await runSurfaceMessage(context, {
+      ingress: {
+        surface: 'imessage',
+        userId: chatId,
+        channelId: chatId,
+        groupId: chatId,
+        threadId,
+        conversationKind: threadId ? 'thread' : 'direct',
+        text: message,
+        mentioned: declaredMention(payload, !threadId),
+        metadata: payload,
+      },
+      binding: {
+        kind: threadId ? 'thread' : 'channel',
+        surfaceKind: 'imessage',
+        surfaceId: readString(payload.account) ?? readString(context.configManager.get('surfaces.imessage.account')) ?? 'imessage',
+        externalId: threadId ?? chatId,
+        channelId: chatId,
+        threadId,
+        title: chatId,
+        metadata: ingressMetadata(payload),
+      },
       text: message,
-      mentioned: declaredMention(payload, !readString(payload.threadId)),
-      metadata: payload,
-    });
-    if (!policy.allowed) {
-      return Response.json({ error: `Blocked by channel policy: ${policy.reason}` }, { status: 403 });
-    }
-
-    const binding = await context.routeBindings.upsertBinding({
-      kind: readString(payload.threadId) ? 'thread' : 'channel',
-      surfaceKind: 'imessage',
-      surfaceId: readString(payload.account) ?? readString(context.configManager.get('surfaces.imessage.account')) ?? 'imessage',
-      externalId: readString(payload.threadId) ?? chatId,
-      channelId: chatId,
-      threadId: readString(payload.threadId),
+      logLabel: 'handleIMessageSurfaceWebhook',
+      control: 'notice',
+      ...(dedupKey ? { providerMessageId: dedupKey } : {}),
+      userId: chatId,
+      displayName: chatId,
       title: chatId,
       metadata: ingressMetadata(payload),
+      signal: req.signal,
+      committed,
     });
-    if (!message) {
+    if (outcome.kind === 'no-text') {
       const attachment = hasAttachments(payload.attachments) ? 'attachment' : undefined;
-      const notified = attachment ? await noticeUnsupportedAttachment(context, binding, attachment, !readString(payload.threadId) && !readString(payload.groupId)) : false;
+      const notified = attachment ? await noticeUnsupportedAttachment(context, outcome.binding, attachment, !threadId && !readString(payload.groupId)) : false;
       return Response.json({
         acknowledged: true,
         queued: false,
         outcome: 'ignored',
         reason: attachment ? 'unsupported-attachment' : 'no-actionable-text',
         ...(attachment ? { attachment, notified } : {}),
-        bindingId: binding.id,
+        bindingId: outcome.binding.id,
       });
     }
-
-    const submission = await context.sessionBroker.submitMessage({
-      routeId: binding.id,
-      ...(dedupKey ? { providerMessageId: dedupKey } : {}),
-      surfaceKind: 'imessage',
-      surfaceId: binding.surfaceId,
-      externalId: binding.externalId,
-      threadId: binding.threadId ?? binding.channelId,
-      userId: chatId,
-      displayName: chatId,
-      title: chatId,
-      body: message,
-      metadata: ingressMetadata(payload),
-    });
-    if (submission.mode === 'continued-live' || submission.mode === 'queued-follow-up') {
-      committed();
-      return Response.json({ acknowledged: true, continued: true, sessionId: submission.session.id, agentId: submission.activeAgentId ?? null });
-    }
-
-    const spawnResult = await context.trySpawnAgent(
-      { mode: 'spawn', task: submission.task! },
-      'handleIMessageSurfaceWebhook',
-      submission.session.id,
-    );
-    if (spawnResult instanceof Response) return spawnResult;
-    committed();
-    await context.sessionBroker.bindAgent(submission.session.id, spawnResult.id, submission.input.id);
-    context.queueSurfaceReplyFromBinding(submission.routeBinding ?? binding, {
-      agentId: spawnResult.id,
-      task: message,
-      sessionId: submission.session.id,
-    });
-    return Response.json({ acknowledged: true, queued: true, bindingId: binding.id, sessionId: submission.session.id, agentId: spawnResult.id });
+    return surfaceOutcomeResponse(outcome);
   });
 }

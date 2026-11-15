@@ -22,7 +22,7 @@ import {
   type StepUpVerifyFailure,
   type StoredStepUpCredential,
 } from './step-up-webauthn.js';
-import type { StepUpAssertionVerifier, StepUpRequestContext } from './step-up-policy.js';
+import type { StepUpAssertionVerifier, StepUpRefusalReason, StepUpRequestContext, StepUpVerification } from './step-up-policy.js';
 
 /** User-verification requirement for the ceremony. Default `required`. */
 export type UserVerificationRequirement = 'required' | 'preferred' | 'discouraged';
@@ -95,16 +95,18 @@ export interface StepUpCredentialSummary {
 }
 
 /**
- * Input to mint a challenge. Every binding given (session, rendezvous, method,
- * path) must match the request the assertion is later presented for; a
- * challenge minted without any binding is accepted for any request.
+ * Input to mint a challenge. The assertion is accepted only for the request it
+ * was minted for: the method, the path and the minting principal must match,
+ * and so must the session or rendezvous when one is given. A challenge minted
+ * without a method and path can be signed (a device self-test) but never
+ * authorises a call.
  */
 export interface MintStepUpChallengeInput {
   readonly rendezvousId?: string;
   readonly sessionId?: string;
-  /** HTTP method the assertion may be used for. */
+  /** HTTP method of the call the assertion is for. */
   readonly method?: string;
-  /** Request path the assertion may be used for. */
+  /** Request path of the call the assertion is for. */
   readonly path?: string;
   /** Freshness window in ms (clamped 5s–300s). Default 120s. */
   readonly ttlMs?: number;
@@ -133,7 +135,7 @@ interface LiveChallenge {
 }
 
 /** Refusal reasons the verifier surfaces beyond the crypto failures. */
-export type StepUpChallengeFailure = 'no-credential' | 'unknown-challenge' | 'challenge-expired' | 'challenge-consumed' | 'challenge-unbound';
+export type StepUpChallengeFailure = Exclude<StepUpRefusalReason, StepUpVerifyFailure>;
 
 function normalizeOrigins(origin: string | readonly string[]): string[] {
   const list = Array.isArray(origin) ? origin : [origin];
@@ -158,6 +160,8 @@ export class StepUpService {
    * both pass.
    */
   private stateQueue: Promise<unknown> = Promise.resolve();
+  /** Registered credentials as of the last read or write of the stored state; undefined before the first. */
+  private knownCredentialCount: number | undefined;
 
   constructor(options: StepUpServiceOptions) {
     this.secrets = options.secrets;
@@ -167,24 +171,34 @@ export class StepUpService {
   }
 
   private async loadState(): Promise<StepUpState> {
-    const raw = await this.secrets.get(STEP_UP_STATE_KEY);
-    if (!raw) return { rpId: '', origins: [], userVerification: 'required', credentials: [] };
-    try {
-      const parsed = JSON.parse(raw) as Partial<StepUpState>;
-      return {
-        rpId: typeof parsed.rpId === 'string' ? parsed.rpId : '',
-        origins: Array.isArray(parsed.origins) ? parsed.origins.filter((o): o is string => typeof o === 'string') : [],
-        userVerification: parsed.userVerification ?? 'required',
-        credentials: Array.isArray(parsed.credentials) ? parsed.credentials : [],
-      };
-    } catch {
-      this.logger?.warn('step-up: stored state is unparseable; treating as empty');
-      return { rpId: '', origins: [], userVerification: 'required', credentials: [] };
-    }
+    const state = parseState(await this.secrets.get(STEP_UP_STATE_KEY), this.logger);
+    this.knownCredentialCount = state.credentials.length;
+    return state;
   }
 
   private async saveState(state: StepUpState): Promise<void> {
     await this.secrets.set(STEP_UP_STATE_KEY, JSON.stringify(state));
+    this.knownCredentialCount = state.credentials.length;
+  }
+
+  /**
+   * How many passkeys are registered. A positive count seen earlier is trusted
+   * (no read); zero or unknown is read again, so a passkey registered since is
+   * never reported missing. Another process removing every credential is seen
+   * at the next verification, which reads the stored state anyway.
+   */
+  credentialCount(): Promise<number> {
+    return this.serialized(() => this.credentialCountNow());
+  }
+
+  /** The count as of the last read or write of the stored state, without reading; undefined before the first. */
+  lastKnownCredentialCount(): number | undefined {
+    return this.knownCredentialCount;
+  }
+
+  private async credentialCountNow(): Promise<number> {
+    if (this.knownCredentialCount !== undefined && this.knownCredentialCount > 0) return this.knownCredentialCount;
+    return (await this.loadState()).credentials.length;
   }
 
   private serialized<T>(operation: () => Promise<T>): Promise<T> {
@@ -251,7 +265,7 @@ export class StepUpService {
     const others = state.credentials.filter((c) => c.credentialId !== input.credentialId);
     if (others.length > 0 && state.rpId !== rpId) {
       throw new StepUpValidationError(
-        `Credentials are already registered for relying party "${state.rpId}"; registering "${rpId}" would invalidate them. Remove the existing credentials first.`,
+        `Credentials are already registered for relying party "${state.rpId}"; registering "${rpId}" would invalidate them. Nothing was registered. Remove the existing credentials first with stepup.credentials.remove (see stepup.credentials.list).`,
       );
     }
     state.rpId = rpId;
@@ -275,7 +289,7 @@ export class StepUpService {
     };
   }
 
-  /** Mint a short-lived, single-use challenge bound to the session/rendezvous. */
+  /** Mint a short-lived, single-use challenge bound to the call, the minting principal and, when given, the session and rendezvous. */
   mintChallenge(input: MintStepUpChallengeInput = {}): MintedStepUpChallenge {
     this.pruneExpired();
     const principalId = input.principalId ?? '';
@@ -310,38 +324,45 @@ export class StepUpService {
 
   /**
    * The real {@link StepUpAssertionVerifier}. It parses the header envelope,
-   * confirms the signed challenge is one we minted and is still live+unconsumed,
-   * runs the full WebAuthn verification against the registered credential, and,
-   * only on complete success, consumes the challenge and advances the stored
-   * signature counter. Every other path returns false (fail closed).
+   * confirms the signed challenge is one we minted, is still live+unconsumed
+   * and was minted for this request, runs the full WebAuthn verification
+   * against the registered credential, and, only on complete success, consumes
+   * the challenge and advances the stored signature counter. Every other path
+   * is refused (fail closed) with the specific reason, which the gate hands to
+   * the caller.
    */
   createVerifier(): StepUpAssertionVerifier {
-    return async (assertion: string, context: StepUpRequestContext): Promise<boolean> => {
+    return async (assertion: string | null, context: StepUpRequestContext): Promise<StepUpVerification> => {
       const result = await this.verify(assertion, context);
-      if (!result.ok) {
+      if (!result.ok && result.reason !== 'assertion-missing') {
         this.logger?.warn('step-up: assertion refused', { reason: result.reason });
       }
-      return result.ok;
+      return result;
     };
   }
 
   /**
    * Verify an envelope, returning a specific outcome (used by the verifier and
-   * tests). A challenge minted for a particular session, rendezvous, method or
-   * path is accepted only when `context` is that request; without a `context`
-   * only an unbound challenge can pass.
+   * tests). The challenge is accepted only when `context` is the request it was
+   * minted for (method, path and principal, plus session or rendezvous when it
+   * names one); without a `context` nothing passes. A null `assertion` is
+   * refused as `no-credential` when no passkey is registered at all, otherwise
+   * as `assertion-missing`.
    */
   verify(
-    assertion: string,
+    assertion: string | null,
     context?: StepUpRequestContext,
-  ): Promise<{ ok: true } | { ok: false; reason: StepUpVerifyFailure | StepUpChallengeFailure | 'malformed-envelope' }> {
+  ): Promise<StepUpVerification> {
     return this.serialized(() => this.verifyNow(assertion, context));
   }
 
   private async verifyNow(
-    assertion: string,
+    assertion: string | null,
     context: StepUpRequestContext | undefined,
-  ): Promise<{ ok: true } | { ok: false; reason: StepUpVerifyFailure | StepUpChallengeFailure | 'malformed-envelope' }> {
+  ): Promise<StepUpVerification> {
+    if (assertion === null) {
+      return { ok: false, reason: (await this.credentialCountNow()) === 0 ? 'no-credential' : 'assertion-missing' };
+    }
     const envelope = parseAssertionHeader(assertion);
     if (!envelope) return { ok: false, reason: 'malformed-envelope' };
     const state = await this.loadState();
@@ -372,22 +393,48 @@ export class StepUpService {
     });
     if (!verifyResult.ok) return { ok: false, reason: verifyResult.reason };
 
-    // Consume the challenge (single-use) and persist the advanced counter.
+    // Consume the challenge (single-use). The counter is written back only when
+    // the authenticator advanced it: many passkeys always report 0, and for
+    // those an accepted call costs no secret-store write.
     live.consumed = true;
     this.challenges.delete(signedChallenge);
-    const updated: StoredStepUpCredential = { ...credential, signCount: verifyResult.signCount };
-    state.credentials = state.credentials.map((c) => (c.credentialId === credential.credentialId ? updated : c));
-    await this.saveState(state);
+    if (verifyResult.signCount !== credential.signCount) {
+      const updated: StoredStepUpCredential = { ...credential, signCount: verifyResult.signCount };
+      state.credentials = state.credentials.map((c) => (c.credentialId === credential.credentialId ? updated : c));
+      await this.saveState(state);
+    }
     return { ok: true };
   }
 }
 
-/** Whether the request is the one the challenge was minted for (every binding it carries must match). */
+function parseState(raw: string | null, logger: StepUpServiceOptions['logger']): StepUpState {
+  if (!raw) return { rpId: '', origins: [], userVerification: 'required', credentials: [] };
+  try {
+    const parsed = JSON.parse(raw) as Partial<StepUpState>;
+    return {
+      rpId: typeof parsed.rpId === 'string' ? parsed.rpId : '',
+      origins: Array.isArray(parsed.origins) ? parsed.origins.filter((o): o is string => typeof o === 'string') : [],
+      userVerification: parsed.userVerification ?? 'required',
+      credentials: Array.isArray(parsed.credentials) ? parsed.credentials : [],
+    };
+  } catch {
+    logger?.warn('step-up: stored state is unparseable; treating as empty');
+    return { rpId: '', origins: [], userVerification: 'required', credentials: [] };
+  }
+}
+
+/**
+ * Whether the request is the one the challenge was minted for. Method and path
+ * are always required, so a challenge minted without them authorises nothing;
+ * the principal is compared whenever the gate knows who is calling; session and
+ * rendezvous are compared when the challenge names them.
+ */
 function matchesBinding(live: LiveChallenge, context: StepUpRequestContext | undefined): boolean {
-  if (live.sessionId !== undefined && context?.sessionId !== live.sessionId) return false;
-  if (live.rendezvousId !== undefined && context?.rendezvousId !== live.rendezvousId) return false;
-  if (live.method !== undefined && context?.method.toUpperCase() !== live.method) return false;
-  if (live.path !== undefined && context?.path !== live.path) return false;
+  if (!context || live.method === undefined || live.path === undefined) return false;
+  if (context.method.toUpperCase() !== live.method || context.path !== live.path) return false;
+  if (context.principalId !== undefined && context.principalId !== live.principalId) return false;
+  if (live.sessionId !== undefined && context.sessionId !== live.sessionId) return false;
+  if (live.rendezvousId !== undefined && context.rendezvousId !== live.rendezvousId) return false;
   return true;
 }
 

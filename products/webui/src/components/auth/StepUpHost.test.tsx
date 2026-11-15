@@ -62,7 +62,7 @@ const challenge: StepUpMintChallengeResult = {
   challengeId: 'owned-synthetic-challenge', challenge: 'b3duZWQtY2hhbGxlbmdl', expiresAt: Date.now() + 60_000,
 };
 function required(): Response {
-  return Response.json({ error: 'step-up-required' }, { status: 401, headers: { 'www-authenticate': 'WebAuthn' } });
+  return Response.json({ code: 'step-up-required', reason: 'assertion-missing', action: 'sign' }, { status: 401, headers: { 'www-authenticate': 'WebAuthn' } });
 }
 function credential(id: string): PublicKeyCredential {
   const bytes = new TextEncoder().encode(id);

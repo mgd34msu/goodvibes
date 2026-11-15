@@ -103,11 +103,15 @@ credential**: whoever holds one can reach the daemon through the relay.
   higher-risk than a call on the trusted LAN, so an operator can require that
   *state-changing* operator calls arriving via relay carry a recent WebAuthn
   (passkey) step-up assertion (`relay.requireStepUpForMutations`). The gate
-  judges the HTTP verb of the tunneled request: every request other than GET,
-  HEAD and OPTIONS counts as mutating, whatever scope its method carries, so a
-  read-scope method that is bound to POST also needs the assertion over the
-  relay. The setting is read on every request, so turning it on or off applies
-  to the next relayed call without a restart. The ceremony is now **real and bundled** (no external
+  judges the operator method the tunneled request calls (its REST path, or the
+  id in `/api/control-plane/methods/<id>/invoke`): a method whose scopes are all
+  `read:*` is a read and passes, any other scope means it changes state and needs
+  the assertion, whatever HTTP verb carries it. Only a path that no operator
+  method covers is judged by its verb (anything but GET, HEAD and OPTIONS). The
+  setting is read on every request, so turning it on or off applies to the next
+  relayed call without a restart. Register a passkey (below) before turning the
+  requirement on: with none registered, every gated relay call is refused with
+  `action: "register-locally"`, and registering is itself gated over the relay. The ceremony is now **real and bundled** (no external
   WebAuthn library):
   - **Register** a passkey with the admin/local-only `stepup.credentials.register`
     verb: it stores the credential (`credentialId`, COSE public key, starting
@@ -120,13 +124,16 @@ credential**: whoever holds one can reach the daemon through the relay.
   - **Mint** a short-lived, single-use challenge with `stepup.challenge.mint`
     (`POST /api/stepup/challenge`; freshness window `ttlMs`, clamped 5s–300s,
     default 120s; at most 256 challenges wait at once, a further mint is
-    refused until one is used or expires). Pass `sessionId`, `rendezvousId`,
-    `method` and/or `path` to bind the challenge: it is then accepted only
-    for a relayed call to that session (`/api/sessions/<id>/...`), through
-    that rendezvous, with that HTTP method and on that path, and a challenge
-    minted without any of them is accepted for any call. This one verb is exempt from the gate. It is the prerequisite for
-    producing an assertion, so requiring one would deadlock. Credential
-    registration (`POST /api/stepup/credentials`) is **not** exempt.
+    refused until one is used or expires). Pass the `method` and `path` of the
+    call the assertion is for: a challenge is accepted only for that method and
+    path, and only from the principal (shared token, paired device or user)
+    that minted it. A challenge minted without `method` and `path` can be
+    signed, as a device self-test, but authorises no call. `sessionId` and
+    `rendezvousId` narrow it further to that session (`/api/sessions/<id>/...`)
+    and that rendezvous. Minting is a read-scope method, so it is never gated:
+    it is the prerequisite for producing an assertion, and requiring one would
+    deadlock. Credential registration (`POST /api/stepup/credentials`) is a
+    write and **is** gated.
     One relying-party id and origin policy covers every credential: a
     registration for a different relying-party id is refused while credentials
     exist for the first, and further origins for the same relying party are
@@ -135,9 +142,21 @@ credential**: whoever holds one can reach the daemon through the relay.
     `x-goodvibes-stepup-assertion` header: the base64url encoding of the JSON
     object `{credentialId, authenticatorData, clientDataJSON, signature}`
     (each field base64url, as `navigator.credentials.get` returns them). A
-    request without a verifiable assertion is answered `401` with
-    `{"error":"step-up-required"}` and a `www-authenticate: WebAuthn` header;
-    mint a new challenge and try again.
+    request without a verifiable assertion is answered `401` with a
+    `www-authenticate: WebAuthn` header and the daemon's usual refusal body
+    (`code: "step-up-required"`, `state`, `error` saying why, `next` saying
+    what to do) plus two fields to branch on: `reason` (for example
+    `assertion-missing`, `no-credential`, `challenge-expired`,
+    `challenge-consumed`, `unknown-challenge`, `challenge-unbound`,
+    `signature-invalid`) and `action`:
+    - `sign`: no assertion was sent; mint a challenge for this call, sign it
+      and send the call again with the header.
+    - `mint-again`: the challenge is expired, used, unknown or minted for
+      another call; mint a new one for this call.
+    - `re-sign`: the signature did not verify; sign again.
+    - `register-locally`: no passkey the daemon could accept is registered;
+      register one while connected directly (same network), then try again.
+      The web UI opens no passkey dialog for this one.
   - **Verify.** The daemon's `StepUpAssertionVerifier` (node/Web Crypto only)
     checks, in order:
     1. `clientDataJSON` type is `webauthn.get`, its challenge is a
@@ -151,7 +170,9 @@ credential**: whoever holds one can reach the daemon through the relay.
        signal).
 
     Only a complete pass consumes the challenge and advances the stored
-    counter. Every other path **fails closed**. It denies rather than
+    counter; the counter is written back only when the passkey advanced it
+    (many passkeys always report 0, and for those an accepted call writes
+    nothing). Every other path **fails closed**. It denies rather than
     allowing or faking a pass, and nothing ever reports an unverified
     assertion as verified.
 
@@ -195,7 +216,8 @@ The registration itself is opened when the daemon starts, so enabling relay
 access, or changing `relay.url` or `relay.rendezvousId`, takes effect at the next
 daemon start. Turning `relay.enabled` or the `relay-connect` feature off applies
 at once to traffic: a request that arrives over an already-open registration is
-answered `503` (`relay-disabled`) until the daemon is restarted.
+answered `503` with code `relay-disabled` (its `next` says to connect directly
+or turn relay access back on) until the daemon is restarted.
 
 Run your own relay with the bundled server:
 

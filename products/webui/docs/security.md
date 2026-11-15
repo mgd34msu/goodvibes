@@ -43,10 +43,13 @@ A stored relay pairing lets the app tunnel calls through a rendezvous relay
 when the daemon is unreachable directly. The tunnel is end to end encrypted
 against the daemon's public key from the pairing, and the pairing itself
 carries no identity, so storing it signs nobody in. The daemon gates
-state-changing relay calls behind a WebAuthn step-up assertion; a mutating
+state-changing relay calls behind a WebAuthn step-up assertion, judged by the
+operator method each call reaches rather than its HTTP verb; a state-changing
 call without a fresh assertion is refused, the passkey ceremony runs, and the
-call retries once. A cancelled or unavailable ceremony surfaces the refusal
-instead of skipping verification.
+call retries once. When the daemon has no passkey it could accept, no dialog
+opens: the refusal says to register one while connected directly to the
+daemon. A cancelled or unavailable ceremony surfaces the refusal instead of
+skipping verification.
 
 ## Web Push
 

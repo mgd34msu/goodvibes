@@ -24,7 +24,7 @@ const noVerifierState: StepUpEvaluationInput = {
   mutating: true,
   requireStepUp: true,
   // @ts-expect-error, there is no "no verifier" state to report
-  assertionVerified: null,
+  verification: null,
 };
 
 export { withoutVerifier, noVerifierState };

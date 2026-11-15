@@ -141,6 +141,9 @@ function makeService(now: () => number = () => 1_000): { service: StepUpService;
   return { service, store };
 }
 
+/** The call every challenge here is minted for and presented on. */
+const CALL = { method: 'POST', path: '/api/approvals/claim' } as const;
+
 async function register(service: StepUpService, credential: SyntheticCredential): Promise<void> {
   await service.registerCredential({
     rpId: RP_ID,
@@ -156,9 +159,9 @@ describe('relay step-up WebAuthn ceremony', () => {
     const { service } = makeService();
     const credential = await makeCredential();
     await register(service, credential);
-    const minted = service.mintChallenge();
+    const minted = service.mintChallenge(CALL);
     const envelope = await signAssertion({ credential, challenge: minted.challenge, signCount: 5 });
-    const result = await service.verify(encodeAssertionHeader(envelope));
+    const result = await service.verify(encodeAssertionHeader(envelope), CALL);
     expect(result.ok).toBe(true);
   });
 
@@ -175,7 +178,7 @@ describe('relay step-up WebAuthn ceremony', () => {
     await register(service, credential);
     // Sign a challenge the server never issued.
     const envelope = await signAssertion({ credential, challenge: toBase64Url(u8(9, 9, 9, 9, 9, 9, 9, 9)) });
-    const result = await service.verify(encodeAssertionHeader(envelope));
+    const result = await service.verify(encodeAssertionHeader(envelope), CALL);
     expect(result).toEqual({ ok: false, reason: 'unknown-challenge' });
   });
 
@@ -184,10 +187,10 @@ describe('relay step-up WebAuthn ceremony', () => {
     const { service } = makeService(() => clock);
     const credential = await makeCredential();
     await register(service, credential);
-    const minted = service.mintChallenge({ ttlMs: 5_000 });
+    const minted = service.mintChallenge({ ...CALL, ttlMs: 5_000 });
     const envelope = await signAssertion({ credential, challenge: minted.challenge });
     clock = 1_000 + 5_001; // advance past the freshness window
-    const result = await service.verify(encodeAssertionHeader(envelope));
+    const result = await service.verify(encodeAssertionHeader(envelope), CALL);
     expect(result).toEqual({ ok: false, reason: 'challenge-expired' });
   });
 
@@ -195,12 +198,12 @@ describe('relay step-up WebAuthn ceremony', () => {
     const { service } = makeService();
     const credential = await makeCredential();
     await register(service, credential);
-    const minted = service.mintChallenge();
+    const minted = service.mintChallenge(CALL);
     const envelope = await signAssertion({ credential, challenge: minted.challenge, signCount: 2 });
     const header = encodeAssertionHeader(envelope);
-    const first = await service.verify(header);
+    const first = await service.verify(header, CALL);
     expect(first.ok).toBe(true);
-    const second = await service.verify(header);
+    const second = await service.verify(header, CALL);
     expect(second).toEqual({ ok: false, reason: 'unknown-challenge' });
   });
 
@@ -208,9 +211,9 @@ describe('relay step-up WebAuthn ceremony', () => {
     const { service } = makeService();
     const credential = await makeCredential();
     await register(service, credential);
-    const minted = service.mintChallenge();
+    const minted = service.mintChallenge(CALL);
     const envelope = await signAssertion({ credential, challenge: minted.challenge, origin: 'https://evil.example' });
-    const result = await service.verify(encodeAssertionHeader(envelope));
+    const result = await service.verify(encodeAssertionHeader(envelope), CALL);
     expect(result).toEqual({ ok: false, reason: 'origin-not-allowed' });
   });
 
@@ -218,9 +221,9 @@ describe('relay step-up WebAuthn ceremony', () => {
     const { service } = makeService();
     const credential = await makeCredential();
     await register(service, credential);
-    const minted = service.mintChallenge();
+    const minted = service.mintChallenge(CALL);
     const envelope = await signAssertion({ credential, challenge: minted.challenge, flags: 0x04 }); // UV only, no UP
-    const result = await service.verify(encodeAssertionHeader(envelope));
+    const result = await service.verify(encodeAssertionHeader(envelope), CALL);
     expect(result).toEqual({ ok: false, reason: 'user-presence-missing' });
   });
 
@@ -230,35 +233,35 @@ describe('relay step-up WebAuthn ceremony', () => {
     await register(service, credential);
 
     // First assertion advances the stored counter to 10.
-    const first = service.mintChallenge();
+    const first = service.mintChallenge(CALL);
     const firstEnvelope = await signAssertion({ credential, challenge: first.challenge, signCount: 10 });
-    expect((await service.verify(encodeAssertionHeader(firstEnvelope))).ok).toBe(true);
+    expect((await service.verify(encodeAssertionHeader(firstEnvelope), CALL)).ok).toBe(true);
 
     // Second assertion reports a LOWER counter (a cloned authenticator).
-    const second = service.mintChallenge();
+    const second = service.mintChallenge(CALL);
     const secondEnvelope = await signAssertion({ credential, challenge: second.challenge, signCount: 4 });
-    const result = await service.verify(encodeAssertionHeader(secondEnvelope));
+    const result = await service.verify(encodeAssertionHeader(secondEnvelope), CALL);
     expect(result).toEqual({ ok: false, reason: 'sign-count-regression' });
   });
 
-  test('the createVerifier() function is a real StepUpAssertionVerifier (true only on a valid assertion)', async () => {
+  test('the createVerifier() function is a real StepUpAssertionVerifier (ok only on a valid assertion)', async () => {
     const { service } = makeService();
     const credential = await makeCredential();
     await register(service, credential);
     const verify = service.createVerifier();
-    const minted = service.mintChallenge();
+    const minted = service.mintChallenge(CALL);
     const envelope = await signAssertion({ credential, challenge: minted.challenge });
-    expect(await verify(encodeAssertionHeader(envelope), { method: 'POST', path: '/api/x' })).toBe(true);
-    expect(await verify('not-a-real-assertion', { method: 'POST', path: '/api/x' })).toBe(false);
+    expect(await verify(encodeAssertionHeader(envelope), CALL)).toEqual({ ok: true });
+    expect(await verify('not-a-real-assertion', CALL)).toEqual({ ok: false, reason: 'malformed-envelope' });
   });
 
   test('an assertion for an unregistered credential is refused', async () => {
     const { service } = makeService();
     const credential = await makeCredential();
     // NOTE: not registered.
-    const minted = service.mintChallenge();
+    const minted = service.mintChallenge(CALL);
     const envelope = await signAssertion({ credential, challenge: minted.challenge });
-    const result = await service.verify(encodeAssertionHeader(envelope));
+    const result = await service.verify(encodeAssertionHeader(envelope), CALL);
     expect(result).toEqual({ ok: false, reason: 'no-credential' });
   });
 });

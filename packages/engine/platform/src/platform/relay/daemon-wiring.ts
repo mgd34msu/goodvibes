@@ -8,13 +8,15 @@
 import type { ConfigManager } from '../config/manager.js';
 import type { SecretsManager } from '../config/secrets.js';
 import { isFeatureGateEnabled, type FeatureFlagReader } from '../runtime/feature-flags/index.js';
+import type { GatewayMethodCatalog } from '../control-plane/method-catalog.js';
 import type { SerializedRelayIdentity } from '@goodvibes-jev/engine/transport-core/relay';
 import { isRelayTunneledRequest } from '@goodvibes-jev/engine/daemon-api';
+import { refusal, refusalErrorBody } from '@goodvibes-jev/engine/errors';
 import { createRelayReachability, type RelayReachability } from './reachability.js';
 import {
   STEP_UP_ASSERTION_HEADER,
+  callNeedsStepUp,
   evaluateStepUp,
-  isMutatingMethod,
   type StepUpAssertionVerifier,
 } from './step-up-policy.js';
 
@@ -22,10 +24,52 @@ import {
 export interface StepUpGateState {
   /** Whether relay reachability is currently allowed at all. */
   relayEnabled(): boolean;
-  /** Whether mutating relay calls currently need a step-up assertion. */
+  /** Whether state-changing relay calls currently need a step-up assertion. */
   requireStepUp(): boolean;
   /** The rendezvous id of the live relay registration, when there is one. */
   rendezvousId(): string | null;
+}
+
+/**
+ * What the daemon already knows about a relayed request before it runs: the
+ * scopes of the catalog method it addresses and who it authenticates as.
+ */
+export interface RelayRequestFacts {
+  /** Scopes of the catalog method the request addresses, or null when it addresses none. */
+  methodScopes(req: Request): readonly string[] | null;
+  /** The principal the request authenticates as, or null when it carries no valid credential. */
+  principalId(req: Request): string | null;
+}
+
+const GENERIC_INVOKE_PATH = /^\/api\/(?:control-plane\/methods|control\/gateway-methods)\/([^/]+)\/invoke$/;
+
+/**
+ * Request facts from the daemon's method catalog and its request
+ * authentication. A generic invoke is one map read; a REST binding is the
+ * catalog's own binding match. Authentication binds its context to the
+ * request, so the router's check of the same request is an integer compare.
+ */
+export function relayRequestFactsFrom(
+  catalog: Pick<GatewayMethodCatalog, 'get' | 'findByHttpBinding'>,
+  authenticate: (req: Request) => { readonly principal: { readonly principalId: string } } | null,
+): RelayRequestFacts {
+  return {
+    methodScopes(req) {
+      const pathname = new URL(req.url).pathname;
+      const invoke = req.method.toUpperCase() === 'POST' ? GENERIC_INVOKE_PATH.exec(pathname) : null;
+      if (invoke) {
+        let id: string;
+        try {
+          id = decodeURIComponent(invoke[1]!);
+        } catch {
+          return null;
+        }
+        return catalog.get(id)?.scopes ?? null;
+      }
+      return catalog.findByHttpBinding(req.method, pathname)?.scopes ?? null;
+    },
+    principalId: (req) => authenticate(req)?.principal.principalId ?? null,
+  };
 }
 
 /** The session a request path addresses (`/api/sessions/<id>/...`), when it names one. */
@@ -39,59 +83,72 @@ function sessionIdOfPath(pathname: string): string | undefined {
   }
 }
 
+function jsonResponse(body: unknown, status: number, headers: Record<string, string> = {}): Response {
+  return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', ...headers } });
+}
+
 /**
  * Wrap a dispatch so relayed calls follow the current relay settings: a call
  * that arrives over the relay after relay access was turned off is refused, and
- * mutating relay calls are gated by the WebAuthn step-up policy while the
- * requirement is on. Both are read per request, so neither needs a restart. The
- * step-up gate fails closed unless the verifier genuinely confirms a fresh
- * assertion carried in the step-up header.
+ * state-changing relay calls are gated by the WebAuthn step-up policy while the
+ * requirement is on. Both settings are read per request (two in-memory reads),
+ * so turning relay access off or the requirement on applies to the next call
+ * without a restart. The step-up gate fails closed unless the verifier
+ * genuinely confirms a fresh assertion carried in the step-up header, and a
+ * refusal names the reason and the action that gets past it.
+ *
+ * With `facts`, whether a call changes state is read from its catalog method's
+ * scopes and the challenge must have been minted by the same principal; without
+ * them (a host that has no catalog) the HTTP verb decides.
  */
 export function wrapDispatchWithStepUp(
   dispatch: (req: Request) => Promise<Response | null>,
   gate: StepUpGateState,
   verifier: StepUpAssertionVerifier,
+  facts?: RelayRequestFacts,
 ): (req: Request) => Promise<Response | null> {
   return async (req) => {
     const viaRelay = isRelayTunneledRequest(req);
     if (!viaRelay) return dispatch(req);
     if (!gate.relayEnabled()) {
-      return new Response(JSON.stringify({
-        error: 'relay-disabled',
-        message: 'Relay access is turned off on this daemon (relay.enabled or the relay-connect flag).',
-      }), { status: 503, headers: { 'content-type': 'application/json' } });
+      return jsonResponse(refusalErrorBody(refusal({
+        code: 'relay-disabled',
+        state: 'relay access is turned off on this daemon',
+        reason: 'This call arrived over the relay, and relay access is turned off on this daemon (relay.enabled or the relay-connect flag).',
+        next: ['Connect to the daemon directly (same network), or turn relay access back on there with relay.enabled and the relay-connect flag.'],
+        status: 503,
+        retryable: false,
+      })), 503);
     }
     if (!gate.requireStepUp()) return dispatch(req);
-    const mutating = isMutatingMethod(req.method);
     const pathname = new URL(req.url).pathname;
-    // Bootstrap exemption: minting a step-up challenge is the prerequisite for
-    // producing an assertion, so it cannot itself require one, otherwise a relay
-    // client could never obtain a challenge (a deadlock). It creates only an
-    // ephemeral, single-use challenge and returns no privileged data. Credential
-    // registration is deliberately NOT exempt: it is an admin/local-only
-    // bootstrap that a mutating-relay caller must not be able to perform.
-    if (mutating && pathname === STEP_UP_CHALLENGE_MINT_PATH) {
-      return dispatch(req);
-    }
-    if (mutating) {
-      const assertion = req.headers.get(STEP_UP_ASSERTION_HEADER);
-      const rendezvousId = gate.rendezvousId() ?? undefined;
-      const sessionId = sessionIdOfPath(pathname);
-      const verified = assertion
-        ? await verifier(assertion, {
-          method: req.method,
-          path: pathname,
-          ...(sessionId !== undefined ? { sessionId } : {}),
-          ...(rendezvousId !== undefined ? { rendezvousId } : {}),
-        })
-        : false;
-      const decision = evaluateStepUp({ viaRelay, mutating, requireStepUp: true, assertionVerified: verified });
-      if (!decision.allow) {
-        return new Response(JSON.stringify({ error: decision.code, message: decision.message }), {
-          status: 401,
-          headers: { 'content-type': 'application/json', 'www-authenticate': 'WebAuthn' },
-        });
-      }
+    // Minting a challenge is the prerequisite for producing an assertion, so it
+    // cannot itself require one. Its catalog method is a read; this covers a
+    // host with no catalog.
+    if (!facts && pathname === STEP_UP_CHALLENGE_MINT_PATH) return dispatch(req);
+    const mutating = callNeedsStepUp(facts ? facts.methodScopes(req) : null, req.method);
+    if (!mutating) return dispatch(req);
+    const rendezvousId = gate.rendezvousId() ?? undefined;
+    const sessionId = sessionIdOfPath(pathname);
+    const principalId = facts ? (facts.principalId(req) ?? '') : undefined;
+    const verification = await verifier(req.headers.get(STEP_UP_ASSERTION_HEADER), {
+      method: req.method,
+      path: pathname,
+      ...(sessionId !== undefined ? { sessionId } : {}),
+      ...(rendezvousId !== undefined ? { rendezvousId } : {}),
+      ...(principalId !== undefined ? { principalId } : {}),
+    });
+    const decision = evaluateStepUp({ viaRelay, mutating, requireStepUp: true, verification });
+    if (!decision.allow) {
+      const body = refusalErrorBody(refusal({
+        code: decision.code,
+        state: 'the call was not run',
+        reason: decision.message,
+        next: decision.next,
+        status: 401,
+        retryable: decision.action !== 'register-locally',
+      }));
+      return jsonResponse({ ...body, reason: decision.reason, action: decision.action }, 401, { 'www-authenticate': 'WebAuthn' });
     }
     return dispatch(req);
   };
@@ -99,7 +156,7 @@ export function wrapDispatchWithStepUp(
 
 const IDENTITY_SECRET_KEY = 'relay.identity';
 
-/** The step-up challenge-mint REST path, exempt from the step-up gate (bootstrap). */
+/** The step-up challenge-mint REST path, exempt from the step-up gate (bootstrap) on a host with no catalog. */
 const STEP_UP_CHALLENGE_MINT_PATH = '/api/stepup/challenge';
 
 /**
@@ -116,6 +173,7 @@ export function buildDaemonRelayReachability(
   dispatch: (req: Request) => Promise<Response | null>,
   logger: { info(m: string, f?: Record<string, unknown>): void; warn(m: string, f?: Record<string, unknown>): void },
   verifyStepUp: StepUpAssertionVerifier,
+  requestFacts?: RelayRequestFacts,
 ): RelayReachability {
   const gate: StepUpGateState = {
     relayEnabled: () => reachability.isEnabled(),
@@ -141,7 +199,7 @@ export function buildDaemonRelayReachability(
         await secrets.set(IDENTITY_SECRET_KEY, JSON.stringify(identity));
       },
     },
-    dispatch: wrapDispatchWithStepUp(dispatch, gate, verifyStepUp),
+    dispatch: wrapDispatchWithStepUp(dispatch, gate, verifyStepUp, requestFacts),
     onRendezvousId: (rid) => configManager.set('relay.rendezvousId', rid),
     logger: {
       info: (m, f) => logger.info(`relay: ${m}`, f),

@@ -18,16 +18,22 @@ export {
   type RelayIdentityStore,
 } from './reachability.js';
 
-export { buildDaemonRelayReachability } from './daemon-wiring.js';
+export { buildDaemonRelayReachability, relayRequestFactsFrom, type RelayRequestFacts } from './daemon-wiring.js';
 
 export {
   STEP_UP_ASSERTION_HEADER,
+  callNeedsStepUp,
+  describeStepUpRefusal,
   evaluateStepUp,
   isMutatingMethod,
+  stepUpNextAction,
   type StepUpDecision,
   type StepUpEvaluationInput,
   type StepUpAssertionVerifier,
+  type StepUpNextAction,
+  type StepUpRefusalReason,
   type StepUpRequestContext,
+  type StepUpVerification,
 } from './step-up-policy.js';
 
 export {

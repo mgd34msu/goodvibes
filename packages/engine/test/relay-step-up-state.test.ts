@@ -13,16 +13,20 @@ import {
 import { ORIGIN, RP_ID, makeCredential, signAssertion, u8, type SyntheticCredential } from './_helpers/step-up-assertions.ts';
 import { toBase64Url } from '@goodvibes-jev/engine/transport-core/relay';
 
-function makeService(): { service: StepUpService; store: Map<string, string> } {
+/** The call every challenge in these tests is minted for and presented on. */
+const CALL = { method: 'POST', path: '/api/approvals/claim' } as const;
+
+function makeService(): { service: StepUpService; store: Map<string, string>; writes: () => number } {
   const store = new Map<string, string>();
+  let writes = 0;
   const service = new StepUpService({
     secrets: {
       get: async (key) => store.get(key) ?? null,
-      set: async (key, value) => { store.set(key, value); },
+      set: async (key, value) => { writes += 1; store.set(key, value); },
     },
     now: () => 1_000,
   });
-  return { service, store };
+  return { service, store, writes: () => writes };
 }
 
 async function registerCredential(service: StepUpService, credential: SyntheticCredential, extra: { rpId?: string; origin?: string } = {}): Promise<void> {
@@ -45,9 +49,9 @@ describe('one assertion is good once', () => {
     const { service } = makeService();
     const credential = await makeCredential();
     await registerCredential(service, credential);
-    const minted = service.mintChallenge();
+    const minted = service.mintChallenge(CALL);
     const header = encodeAssertionHeader(await signAssertion({ credential, challenge: minted.challenge, signCount: 3 }));
-    const results = await Promise.all([service.verify(header), service.verify(header), service.verify(header)]);
+    const results = await Promise.all([service.verify(header, CALL), service.verify(header, CALL), service.verify(header, CALL)]);
     expect(results.filter((r) => r.ok)).toHaveLength(1);
   });
 });
@@ -58,9 +62,9 @@ describe('registration and verification do not overwrite each other', () => {
     const first = await makeCredential();
     await registerCredential(service, first);
     const second = await otherCredential(9);
-    const minted = service.mintChallenge();
+    const minted = service.mintChallenge(CALL);
     const header = encodeAssertionHeader(await signAssertion({ credential: first, challenge: minted.challenge, signCount: 4 }));
-    const [verified] = await Promise.all([service.verify(header), registerCredential(service, second)]);
+    const [verified] = await Promise.all([service.verify(header, CALL), registerCredential(service, second)]);
     expect(verified.ok).toBe(true);
     const listed = await service.listCredentials();
     expect(listed.map((c) => c.credentialId).sort()).toEqual([first.credentialId, second.credentialId].sort());
@@ -74,9 +78,9 @@ describe('registration and verification do not overwrite each other', () => {
     const second = await otherCredential(9);
     await expect(registerCredential(service, second, { rpId: 'other.example', origin: 'https://other.example' })).rejects.toThrow(/relying party "daemon.example"/);
     // The first credential still verifies.
-    const minted = service.mintChallenge();
+    const minted = service.mintChallenge(CALL);
     const header = encodeAssertionHeader(await signAssertion({ credential: first, challenge: minted.challenge }));
-    expect((await service.verify(header)).ok).toBe(true);
+    expect((await service.verify(header, CALL)).ok).toBe(true);
   });
 
   test('a second origin for the same relying party is added, not substituted', async () => {
@@ -85,9 +89,9 @@ describe('registration and verification do not overwrite each other', () => {
     await registerCredential(service, first);
     const second = await otherCredential(9);
     await registerCredential(service, second, { origin: 'https://alt.daemon.example' });
-    const minted = service.mintChallenge();
+    const minted = service.mintChallenge(CALL);
     const header = encodeAssertionHeader(await signAssertion({ credential: first, challenge: minted.challenge, origin: ORIGIN }));
-    expect((await service.verify(header)).ok).toBe(true);
+    expect((await service.verify(header, CALL)).ok).toBe(true);
   });
 
   test('a removed credential can no longer verify', async () => {
@@ -98,9 +102,9 @@ describe('registration and verification do not overwrite each other', () => {
     await registerCredential(service, second);
     expect(await service.removeCredential(second.credentialId)).toBe(true);
     expect(await service.removeCredential(second.credentialId)).toBe(false);
-    const minted = service.mintChallenge();
+    const minted = service.mintChallenge(CALL);
     const header = encodeAssertionHeader(await signAssertion({ credential: second, challenge: minted.challenge }));
-    expect(await service.verify(header)).toEqual({ ok: false, reason: 'no-credential' });
+    expect(await service.verify(header, CALL)).toEqual({ ok: false, reason: 'no-credential' });
     expect((await service.listCredentials()).map((c) => c.credentialId)).toEqual([first.credentialId]);
   });
 });
@@ -115,7 +119,7 @@ describe('a challenge is good for the request it was minted for', () => {
   }
 
   test('a challenge minted for session a is refused for session b and accepted for a', async () => {
-    const { service, header } = await presented({ sessionId: 'a' });
+    const { service, header } = await presented({ method: 'POST', path: '/api/sessions/a/close', sessionId: 'a' });
     expect(await service.verify(header, { method: 'POST', path: '/api/sessions/b/close', sessionId: 'b' })).toEqual({ ok: false, reason: 'challenge-unbound' });
     // A refusal on binding does not burn the challenge.
     expect((await service.verify(header, { method: 'POST', path: '/api/sessions/a/close', sessionId: 'a' })).ok).toBe(true);
@@ -128,13 +132,43 @@ describe('a challenge is good for the request it was minted for', () => {
   });
 
   test('a bound challenge is refused when no request context is given', async () => {
-    const { service, header } = await presented({ rendezvousId: 'rid-1' });
+    const { service, header } = await presented({ ...CALL, rendezvousId: 'rid-1' });
     expect(await service.verify(header)).toEqual({ ok: false, reason: 'challenge-unbound' });
   });
 
-  test('a challenge minted without a binding is accepted for any request', async () => {
+  test('a challenge minted without a method and path authorises no call', async () => {
     const { service, header } = await presented({});
-    expect((await service.verify(header, { method: 'DELETE', path: '/api/anything' })).ok).toBe(true);
+    expect(await service.verify(header, { method: 'DELETE', path: '/api/anything' })).toEqual({ ok: false, reason: 'challenge-unbound' });
+  });
+
+  test('a challenge minted by one principal is refused for another and accepted for its own', async () => {
+    const { service, header } = await presented({ ...CALL, principalId: 'pairing:a' });
+    expect(await service.verify(header, { ...CALL, principalId: 'pairing:b' })).toEqual({ ok: false, reason: 'challenge-unbound' });
+    expect((await service.verify(header, { ...CALL, principalId: 'pairing:a' })).ok).toBe(true);
+  });
+});
+
+describe('a call without an assertion is told what would get it through', () => {
+  test('with no passkey registered the refusal is no-credential, with one it is assertion-missing', async () => {
+    const { service } = makeService();
+    expect(await service.verify(null, CALL)).toEqual({ ok: false, reason: 'no-credential' });
+    await registerCredential(service, await makeCredential());
+    expect(await service.verify(null, CALL)).toEqual({ ok: false, reason: 'assertion-missing' });
+  });
+});
+
+describe('an accepted assertion writes the counter only when it advanced', () => {
+  test('secret-store writes per accepted call: 0 for a passkey that reports 0, 1 when the counter advances', async () => {
+    const { service, writes } = makeService();
+    const credential = await makeCredential();
+    await registerCredential(service, credential);
+    const before = writes();
+    const still = service.mintChallenge(CALL);
+    expect((await service.verify(encodeAssertionHeader(await signAssertion({ credential, challenge: still.challenge, signCount: 0 })), CALL)).ok).toBe(true);
+    expect(writes() - before).toBe(0);
+    const advanced = service.mintChallenge(CALL);
+    expect((await service.verify(encodeAssertionHeader(await signAssertion({ credential, challenge: advanced.challenge, signCount: 2 })), CALL)).ok).toBe(true);
+    expect(writes() - before).toBe(1);
   });
 });
 

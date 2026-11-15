@@ -13,7 +13,7 @@
 //
 // The daemon relay identity is generated once and persisted through an injected
 // store (a thin adapter over the daemon SecretsManager), so pairing payloads
-// stay valid across restarts. All I/O is injected, so this is fully testable
+// stay valid across restarts; the controller loads it once and keeps it. All I/O is injected, so this is fully testable
 // without a daemon.
 
 import {
@@ -105,7 +105,6 @@ export function createRelayReachability(options: RelayReachabilityOptions): Rela
   const isEnabled = (): boolean => isRelayReachabilityEnabled(readConfig(), readFlag());
   let registration: RelayDaemonRegistration | null = null;
   let registeredWith: { readonly url: string; readonly rid: string } | null = null;
-  let identity: RelayKeyPair | null = null;
   // A rendezvous id generated here is kept for this controller's life, so a
   // stop and start does not mint a second one and strand the pairing payloads
   // already handed out for the first.
@@ -113,6 +112,11 @@ export function createRelayReachability(options: RelayReachabilityOptions): Rela
   // One start at a time, and a stop that arrives while one is in flight wins.
   let starting: Promise<void> | null = null;
   let generation = 0;
+  // The identity is loaded (or created and saved) once for the controller's
+  // life. A start that follows a stop while the first load is still running
+  // reuses that load, so two key pairs are never generated and saved at once.
+  // A failed load is forgotten so the next start tries again.
+  let identityPromise: Promise<RelayKeyPair> | null = null;
 
   async function loadOrCreateIdentity(): Promise<RelayKeyPair> {
     const existing = await options.identityStore.load();
@@ -122,10 +126,17 @@ export function createRelayReachability(options: RelayReachabilityOptions): Rela
     return created;
   }
 
+  function relayIdentity(): Promise<RelayKeyPair> {
+    identityPromise ??= loadOrCreateIdentity().catch((error: unknown) => {
+      identityPromise = null;
+      throw error;
+    });
+    return identityPromise;
+  }
+
   async function startRegistration(myGeneration: number): Promise<void> {
-    const loaded = await loadOrCreateIdentity();
+    const loaded = await relayIdentity();
     if (myGeneration !== generation) return;
-    identity = loaded;
     const config = readConfig();
     let rid = config.rendezvousId.trim() || generatedRid;
     if (!rid) {
@@ -136,7 +147,7 @@ export function createRelayReachability(options: RelayReachabilityOptions): Rela
     const next = createRelayDaemonRegistration({
       relayUrl: config.url,
       rid,
-      identity,
+      identity: loaded,
       localBaseUrl: options.localBaseUrl ?? 'http://daemon.local',
       dispatch: options.dispatch,
       ...(options.webSocketImpl ? { webSocketImpl: options.webSocketImpl } : {}),

@@ -12,29 +12,80 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { isRelayTunneledRequest, RELAY_VIA_HEADER } from '../daemon-api/src/relay-registration.js';
 import {
+  STEP_UP_ASSERTION_HEADER,
+  callNeedsStepUp,
   evaluateStepUp,
   isMutatingMethod,
+  type StepUpAssertionVerifier,
 } from '../platform/src/platform/relay/step-up-policy.js';
+import { wrapDispatchWithStepUp, type RelayRequestFacts } from '../platform/src/platform/relay/daemon-wiring.js';
 import * as relaySurface from '../platform/src/platform/relay/index.js';
 
 describe('step-up policy decision', () => {
+  const refused = { ok: false, reason: 'signature-invalid' } as const;
+
   test('only bites on mutating relay calls when required', () => {
     // Non-relay, or read-only, or requirement off → always allow.
-    expect(evaluateStepUp({ viaRelay: false, mutating: true, requireStepUp: true, assertionVerified: false }).allow).toBe(true);
-    expect(evaluateStepUp({ viaRelay: true, mutating: false, requireStepUp: true, assertionVerified: false }).allow).toBe(true);
-    expect(evaluateStepUp({ viaRelay: true, mutating: true, requireStepUp: false, assertionVerified: false }).allow).toBe(true);
+    expect(evaluateStepUp({ viaRelay: false, mutating: true, requireStepUp: true, verification: refused }).allow).toBe(true);
+    expect(evaluateStepUp({ viaRelay: true, mutating: false, requireStepUp: true, verification: refused }).allow).toBe(true);
+    expect(evaluateStepUp({ viaRelay: true, mutating: true, requireStepUp: false, verification: refused }).allow).toBe(true);
   });
 
   test('denies when the assertion is absent or invalid, allows when genuinely verified', () => {
-    const denied = evaluateStepUp({ viaRelay: true, mutating: true, requireStepUp: true, assertionVerified: false });
+    const denied = evaluateStepUp({ viaRelay: true, mutating: true, requireStepUp: true, verification: refused });
     expect(denied.allow).toBe(false);
     if (!denied.allow) expect(denied.code).toBe('step-up-required');
-    expect(evaluateStepUp({ viaRelay: true, mutating: true, requireStepUp: true, assertionVerified: true }).allow).toBe(true);
+    expect(evaluateStepUp({ viaRelay: true, mutating: true, requireStepUp: true, verification: { ok: true } }).allow).toBe(true);
   });
 
-  test('mutating-verb signal matches the catalog read/write split', () => {
-    for (const m of ['GET', 'HEAD', 'OPTIONS', 'get']) expect(isMutatingMethod(m)).toBe(false);
-    for (const m of ['POST', 'PUT', 'PATCH', 'DELETE']) expect(isMutatingMethod(m)).toBe(true);
+  test('a cataloged call is judged by its scopes, an uncataloged one by its verb', () => {
+    expect(callNeedsStepUp(['read:pairing'], 'POST')).toBe(false);
+    expect(callNeedsStepUp(['write:control'], 'GET')).toBe(true);
+    expect(callNeedsStepUp(['read:relay', 'write:relay'], 'POST')).toBe(true);
+    for (const m of ['GET', 'HEAD', 'OPTIONS', 'get']) expect(callNeedsStepUp(null, m)).toBe(false);
+    for (const m of ['POST', 'PUT', 'PATCH', 'DELETE']) expect(callNeedsStepUp(null, m)).toBe(true);
+    expect(isMutatingMethod('DELETE')).toBe(true);
+  });
+});
+
+describe('relay step-up gate with the daemon catalog', () => {
+  const relayed = (path: string, method: string, assertion?: string): Request =>
+    new Request(`http://daemon.local${path}`, { method, headers: { [RELAY_VIA_HEADER]: '1', ...(assertion ? { [STEP_UP_ASSERTION_HEADER]: assertion } : {}) } });
+  const scopes: Record<string, readonly string[]> = {
+    '/api/control-plane/methods/pairing.tokens.list/invoke': ['read:pairing'],
+    '/api/status': ['write:control'],
+  };
+  const facts: RelayRequestFacts = {
+    methodScopes: (req) => scopes[new URL(req.url).pathname] ?? null,
+    principalId: () => 'pairing:phone',
+  };
+  const gate = { relayEnabled: () => true, requireStepUp: () => true, rendezvousId: () => 'rid-1' };
+  const ran = async (): Promise<Response> => new Response('ran');
+
+  test('a read invoked by POST runs without an assertion; a write bound to GET is refused', async () => {
+    const seen: Array<string | null> = [];
+    const verifier: StepUpAssertionVerifier = async (assertion) => {
+      seen.push(assertion);
+      return { ok: false, reason: 'assertion-missing' };
+    };
+    const dispatch = wrapDispatchWithStepUp(ran, gate, verifier, facts);
+    expect((await dispatch(relayed('/api/control-plane/methods/pairing.tokens.list/invoke', 'POST')))!.status).toBe(200);
+    const refusedWrite = (await dispatch(relayed('/api/status', 'GET')))!;
+    expect(refusedWrite.status).toBe(401);
+    expect(await refusedWrite.json()).toMatchObject({ code: 'step-up-required', reason: 'assertion-missing', action: 'sign' });
+    expect(seen).toEqual([null]);
+  });
+
+  test('the verifier sees the calling principal, and a refusal names the reason and the action', async () => {
+    const contexts: unknown[] = [];
+    const verifier: StepUpAssertionVerifier = async (_assertion, context) => {
+      contexts.push(context);
+      return { ok: false, reason: 'no-credential' };
+    };
+    const response = (await wrapDispatchWithStepUp(ran, gate, verifier, facts)(relayed('/api/status', 'GET', 'signed')))!;
+    expect(contexts).toEqual([{ method: 'GET', path: '/api/status', rendezvousId: 'rid-1', principalId: 'pairing:phone' }]);
+    expect(response.headers.get('www-authenticate')).toBe('WebAuthn');
+    expect(await response.json()).toMatchObject({ code: 'step-up-required', reason: 'no-credential', action: 'register-locally', recoverable: false });
   });
 });
 

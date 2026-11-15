@@ -19,14 +19,17 @@
  * webui's stream consumers render the `relay-overflow` notice honestly (see
  * relay-stream-overflow.ts).
  *
- * STEP-UP ON MUTATING RELAY CALLS: the daemon gates state-changing relay calls behind a
- * WebAuthn step-up assertion. A mutating call over the relay with no fresh assertion is
- * answered `401` with `www-authenticate: WebAuthn` and body `{ error: 'step-up-required' }`.
- * `routedFetch` intercepts exactly that response, asks the registered UI prompter to run the
- * passkey ceremony (stepup-prompter.ts), and retries the original call ONCE with the
- * assertion header attached. If no prompter is registered, or the operator cancels, or the
- * server reports no verifier is available, the original 401 surfaces honestly, never a
- * silent skip of verification.
+ * STEP-UP ON STATE-CHANGING RELAY CALLS: the daemon gates state-changing relay calls behind
+ * a WebAuthn step-up assertion, deciding from the called method's catalog scopes (not the HTTP
+ * verb, so the browser does not guess). A gated call with no usable assertion is answered
+ * `401` with `www-authenticate: WebAuthn` and body `{ code: 'step-up-required', reason,
+ * action, error, next }`. `routedFetch` intercepts that response for any verb, asks the
+ * registered UI prompter to run the passkey ceremony (stepup-prompter.ts), and retries the
+ * original call ONCE with the assertion header attached. When the daemon's `action` is
+ * `register-locally` (no passkey it could accept is registered), no ceremony can help, so no
+ * dialog opens and the 401 surfaces with its reason and next step. If no prompter is
+ * registered or the operator cancels, the original 401 surfaces honestly too, never a silent
+ * skip of verification.
  *
  * `routedFetch` is the one `fetch` implementation the platform client is built with
  * (lib/goodvibes.ts). It always exists and behaves exactly like the plain global fetch
@@ -139,9 +142,7 @@ export async function probeRelayReachability(): Promise<boolean> {
 // routedFetch, the fetch the platform client is built with.
 // ---------------------------------------------------------------------------
 
-const READ_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
-
-/** The HTTP method a fetch call carries, uppercased. Mirrors the relay gate's own view. */
+/** The HTTP method a fetch call carries, uppercased; the challenge is minted for it. */
 function requestMethod(input: RequestInfo | URL, init: RequestInit | undefined): string {
   const method = init?.method ?? (input instanceof Request ? input.method : 'GET');
   return method.toUpperCase();
@@ -163,16 +164,18 @@ function requestPath(input: RequestInfo | URL): string {
   }
 }
 
-/** True when a fetch response is the daemon's "this call needs a fresh step-up assertion". */
-async function isStepUpRequired(response: Response): Promise<boolean> {
+/**
+ * True when a fetch response is the daemon's "this call needs a fresh step-up assertion"
+ * and a passkey ceremony could satisfy it. `register-locally` means no passkey the daemon
+ * could accept is registered, so the ceremony is skipped and the refusal surfaces. Peeks a
+ * clone so the caller's response body stays intact when we decide not to retry.
+ */
+async function isStepUpSatisfiable(response: Response): Promise<boolean> {
   if (response.status !== 401) return false;
   if (!/WebAuthn/i.test(response.headers.get('www-authenticate') ?? '')) return false;
-  // Distinguish 'step-up-required' (retry with an assertion helps) from
-  // 'step-up-verifier-unavailable' (retrying cannot help, surface it). Peek a clone so
-  // the caller's response body stays intact when we decide not to retry.
   try {
-    const body = (await response.clone().json()) as { error?: string };
-    return body?.error === 'step-up-required';
+    const body = (await response.clone().json()) as { code?: string; action?: string };
+    return body?.code === 'step-up-required' && body.action !== 'register-locally';
   } catch {
     return false;
   }
@@ -199,10 +202,11 @@ function withAssertion(
 }
 
 /**
- * Dispatch one relay fetch, transparently satisfying a step-up challenge on a mutating call.
- * On a `401 step-up-required`, runs the UI ceremony and retries ONCE with the assertion
- * header. Every non-step-up response (including a 401 with no verifier, or a cancelled
- * ceremony) is returned unchanged so the caller sees the honest outcome.
+ * Dispatch one relay fetch, transparently satisfying a step-up challenge. The daemon decides
+ * which calls are gated, so any verb may come back `401 step-up-required`; then the UI
+ * ceremony runs and the call is retried ONCE with the assertion header. Every other response
+ * (including a refusal no ceremony can fix, or a cancelled ceremony) is returned unchanged so
+ * the caller sees the honest outcome.
  */
 async function relayFetchWithStepUp(relayClient: RelayClient, input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   // Apply RequestInit once, before either dispatch consumes a native Request body.
@@ -213,16 +217,14 @@ async function relayFetchWithStepUp(relayClient: RelayClient, input: RequestInfo
   const requestInit = effectiveRequest ? undefined : init;
   const signal = requestSignal(requestInput, requestInit);
   signal?.throwIfAborted();
-  const mutating = !READ_METHODS.has(requestMethod(requestInput, requestInit));
   // The retry preserves the effective method/body/headers/signal, adding only its assertion.
-  const retryRequest = mutating && effectiveRequest ? effectiveRequest.clone() : null;
+  const retryRequest = effectiveRequest ? effectiveRequest.clone() : null;
 
   const first = await relayClient.fetch(requestInput, requestInit);
   signal?.throwIfAborted();
-  if (!mutating) return first;
-  const required = await isStepUpRequired(first);
+  const satisfiable = await isStepUpSatisfiable(first);
   signal?.throwIfAborted();
-  if (!required) return first;
+  if (!satisfiable) return first;
 
   const assertion = await resolveStepUp({ method: requestMethod(requestInput, requestInit), path: requestPath(requestInput),
     ...(signal === undefined ? {} : { signal }) });

@@ -65,6 +65,22 @@ describe('relay reachability start and stop', () => {
     expect(relay.rendezvousId).toBeNull();
   });
 
+  test('a start after a stop during the first identity load reuses that load: one identity saved', async () => {
+    let release: () => void = () => {};
+    const hold = new Promise<void>((resolve) => { release = resolve; });
+    const sockets = fakeSockets();
+    const store = identityStore({ hold });
+    const relay = createRelayReachability({ config: baseConfig, featureFlagEnabled: true, identityStore: store, dispatch, webSocketImpl: sockets.impl });
+    const abandoned = relay.start();
+    relay.stop();
+    const live = relay.start();
+    release();
+    await Promise.all([abandoned, live]);
+    expect(store.saves).toBe(1);
+    expect(sockets.opened).toHaveLength(1);
+    relay.stop();
+  });
+
   test('a restart keeps the rendezvous id it generated', async () => {
     const rids: string[] = [];
     const sockets = fakeSockets();
@@ -119,9 +135,9 @@ describe('the step-up gate reads its settings per request', () => {
   const relayed = (method: string, path: string, extra: Record<string, string> = {}): Request =>
     new Request(`http://daemon.local${path}`, { method, headers: { [RELAY_VIA_HEADER]: '1', ...extra } });
 
-  function gateWith(state: Partial<StepUpGateState>, verify: (a: string) => boolean = () => false) {
+  function gateWith(state: Partial<StepUpGateState>) {
     const gate: StepUpGateState = { relayEnabled: () => true, requireStepUp: () => false, rendezvousId: () => null, ...state };
-    return wrapDispatchWithStepUp(dispatch, gate, async (assertion) => verify(assertion));
+    return wrapDispatchWithStepUp(dispatch, gate, async () => ({ ok: false, reason: 'assertion-missing' }));
   }
 
   test('turning the requirement on takes effect on the next mutating relay call', async () => {
@@ -144,7 +160,7 @@ describe('the step-up gate reads its settings per request', () => {
   test('the assertion is verified for this request, with its session and rendezvous', async () => {
     const seen: unknown[] = [];
     const gate: StepUpGateState = { relayEnabled: () => true, requireStepUp: () => true, rendezvousId: () => 'rid-1' };
-    const gated = wrapDispatchWithStepUp(dispatch, gate, async (_assertion, context) => { seen.push(context); return true; });
+    const gated = wrapDispatchWithStepUp(dispatch, gate, async (_assertion, context) => { seen.push(context); return { ok: true }; });
     await gated(relayed('POST', '/api/sessions/s%201/close', { [STEP_UP_ASSERTION_HEADER]: 'x' }));
     expect(seen).toEqual([{ method: 'POST', path: '/api/sessions/s%201/close', sessionId: 's 1', rendezvousId: 'rid-1' }]);
   });

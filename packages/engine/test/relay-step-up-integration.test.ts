@@ -56,7 +56,9 @@ describe('relay step-up gate end-to-end', () => {
       flags,
       echo,
       silent,
-      async (assertion) => assertion === 'good-assertion',
+      async (assertion) => (assertion === 'good-assertion'
+        ? { ok: true }
+        : { ok: false, reason: assertion === null ? 'assertion-missing' : 'signature-invalid' }),
     );
     await reachability.start();
     await waitRegistered(() => reachability.status);
@@ -69,7 +71,7 @@ describe('relay step-up gate end-to-end', () => {
     // Mutating call, no step-up assertion → 401.
     const denied = await client.fetch('https://relay.invalid/api/approvals/claim', { method: 'POST', body: '{}' });
     expect(denied.status).toBe(401);
-    expect(await denied.json()).toMatchObject({ error: 'step-up-required' });
+    expect(await denied.json()).toMatchObject({ code: 'step-up-required', reason: 'assertion-missing', action: 'sign' });
 
     // Mutating call with a verified assertion → allowed through to the daemon.
     const allowed = await client.fetch('https://relay.invalid/api/approvals/claim', {
@@ -96,7 +98,7 @@ describe('relay step-up gate end-to-end', () => {
       echo,
       silent,
       // A verifier that refuses everything: proves the mint path bypasses it.
-      async () => false,
+      async () => ({ ok: false, reason: 'signature-invalid' }),
     );
     await reachability.start();
     await waitRegistered(() => reachability.status);

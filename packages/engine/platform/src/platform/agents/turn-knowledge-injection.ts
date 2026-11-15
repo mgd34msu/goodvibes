@@ -158,7 +158,8 @@ export interface TurnInjectionRecord {
   readonly codeInjectionSkipped?: string | undefined;
   /** Honest embeddings signal: 'available' when the registry's vector index is enabled and
    *  usable, 'fallback-lexical' when there is no vector index to build the shortlist from
-   *  (no vector index, or the registry does not expose vectorStats at all). */
+   *  (no vector index, the query embed failed this turn, or the registry does not expose
+   *  vectorStats at all). */
   readonly embeddingBackend: 'available' | 'fallback-lexical';
   /** Present exactly when block===null: why nothing was injected. */
   readonly reason?: string | undefined;
@@ -276,10 +277,15 @@ export function knowledgeQueryText(text: string): string {
   return query || trimmed.slice(0, KNOWLEDGE_QUERY_MAX_CHARS);
 }
 
+/**
+ * Read after the shortlist is built: a query embed that failed (the provider
+ * refused or was unreachable) is on `stats().error`, and that turn's shortlist
+ * was built lexically, so the record says so.
+ */
 function resolveEmbeddingBackend(registry: TurnKnowledgeRegistrySource): 'available' | 'fallback-lexical' {
   const stats = registry.vectorStats?.();
   if (!stats) return 'fallback-lexical';
-  return stats.enabled && stats.available ? 'available' : 'fallback-lexical';
+  return stats.enabled && stats.available && !stats.error ? 'available' : 'fallback-lexical';
 }
 
 /**
@@ -406,18 +412,18 @@ export async function buildPerTurnKnowledgeInjection(
 
   const query = deriveTurnKnowledgeQuery(task, conversationTail);
   const alreadyInjectedIdSet = new Set(alreadyInjectedIds);
-  const embeddingBackend = resolveEmbeddingBackend(memoryRegistry);
   if (isClassicOperation()) {
     codeAuthority?.signal?.throwIfAborted();
     return { block: null, record: {
       provenance: 'classic', turn, query, candidatesConsidered: 0, codeCandidatesConsidered: 0,
       injectedIds: [], injectedSources: [], droppedForBudget: [], tokenCost: 0, budgetTokens, relevanceFloor,
-      ingestModes: [], embeddingBackend, reason: 'Classic: passive semantic enrichment is disabled; explicit memory and code search remain available.',
+      ingestModes: [], embeddingBackend: resolveEmbeddingBackend(memoryRegistry), reason: 'Classic: passive semantic enrichment is disabled; explicit memory and code search remain available.',
     } };
   }
 
   // Already-injected records are left out before anything is asked about them.
   const scored = await selectKnowledgeForTaskScored(memoryRegistry, query, writeScope, limit, { excludeIds: alreadyInjectedIdSet });
+  const embeddingBackend = resolveEmbeddingBackend(memoryRegistry);
   const candidatesConsidered = scored.length;
   const memoryCleared: MergedCandidate[] = scored
     .filter((entry) => entry.score >= relevanceFloor)

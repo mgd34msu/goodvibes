@@ -1,6 +1,5 @@
-import { captureMemoryOperation, assertMemoryOperationCurrent, awaitMemoryOperation, type MemoryOperationOptions } from './memory-operation.js';
+import { assertMemoryOperationCurrent, awaitMemoryOperation, type MemoryOperationOptions } from './memory-operation.js';
 import { randomUUID } from 'node:crypto';
-import { isDeepStrictEqual } from 'node:util';
 import { dirname } from 'node:path';
 import { mkdirSync } from 'node:fs';
 import type { Database, SQLQueryBindings } from 'bun:sqlite';
@@ -8,6 +7,7 @@ import { createRequire } from 'node:module';
 import type { MemoryClass, MemoryRecord, MemoryReviewState, MemoryScope } from './memory-store.js';
 import {
   MemoryEmbeddingProviderRegistry,
+  type MemoryEmbeddingResult,
   embedMemoryText,
   normalizeMemoryEmbeddingVector,
 } from './memory-embeddings.js';
@@ -101,27 +101,18 @@ export function resolveMemoryVectorDbPath(dbPath?: string): string {
   return `${dbPath}.vec.sqlite`;
 }
 
-/** Native source-store revision, not a hash of private memory text. */
-export interface MemoryVectorSourceRevision {
-  readonly revision: string;
-  readonly assertCurrent: () => void;
-}
-
-type CapturedVectorSource = MemoryVectorSourceRevision & {
+/**
+ * A memory row as the store holds it, with the revision the store's trigger
+ * stamped on that row (`gv_revision`). The index records the revision with the
+ * vector, so an unchanged row is recognised by comparing two strings.
+ */
+export interface MemoryVectorEntry {
   readonly record: MemoryRecord;
-  readonly published: () => void;
-};
-
-/** Fields that affect embedding or vector filtering, with stored detail normalization. */
-export function memoryVectorInput(record: MemoryRecord) {
-  return {
-    id: record.id, scope: record.scope, cls: record.cls, summary: record.summary,
-    detail: record.detail?.trim() ?? '', tags: record.tags,
-    provenance: record.provenance.map(entry => ({ kind: entry.kind, ref: entry.ref, label: entry.label ?? '' })),
-    reviewState: record.reviewState, confidence: record.confidence,
-    createdAt: record.createdAt, updatedAt: record.updatedAt,
-  };
+  readonly revision: string;
 }
+
+/** A write's lifecycle, plus the revision of the row being indexed when the caller has it. */
+export type MemoryVectorWriteOptions = MemoryOperationOptions & { readonly revision?: string | undefined };
 
 export function buildMemoryEmbeddingText(record: MemoryRecord): string {
   return [
@@ -134,71 +125,43 @@ export function buildMemoryEmbeddingText(record: MemoryRecord): string {
   ].filter(Boolean).join('\n');
 }
 
+type StoredVectorRow = { record_id: string; source_revision: string; provider_id: string };
+
+/**
+ * The memory store's vector index. A synchronous write has no `await` between
+ * its entry and its last statement, so it checks the caller once at entry and
+ * nothing after. An asynchronous write (an embedding provider that only embeds
+ * over the network) checks once after the embed resolves, immediately before
+ * the transaction: the caller's lifecycle, that the index was not closed or
+ * reopened, and, through `currentRevision`, that the row still has the
+ * revision that was embedded. A row that moved on meanwhile is skipped; the
+ * write that moved it indexes it.
+ */
 export class SqliteVecMemoryIndex {
   private db: Database | null = null;
   private enabled = false;
   private available = false;
   private error: string | undefined;
+  /** Whether `error` is an embedding failure, which a later successful embed clears. */
+  private errorIsEmbedding = false;
   private platformLimitReason: string | undefined;
   /** The open in flight, so concurrent init calls share it. */
   private opening: Promise<void> | null = null;
   private static readonly rebuildBatchSize = 25;
-  // Only standalone indices need these snapshots. MemoryStore supplies durable
-  // native revisions, so its index never retains another copy of memory text.
-  private readonly standaloneSources = new Map<string, { record: MemoryRecord; revision: string }>();
-
-  private captureSource(record: MemoryRecord): CapturedVectorSource {
-    const snapshot = structuredClone(record);
-    const native = this.sourceRevision?.(snapshot);
-    const previous = native ? undefined : this.standaloneSources.get(snapshot.id);
-    const selected = previous && isDeepStrictEqual(previous.record, snapshot) ? previous
-      : { record: snapshot, revision: native?.revision ?? `memory-index-${randomUUID()}` };
-    return {
-      record: snapshot,
-      revision: selected.revision,
-      assertCurrent: () => {
-        native?.assertCurrent();
-        if (!isDeepStrictEqual(record, snapshot)) throw new Error('Memory vector record changed');
-        if (!native) {
-          const current = this.standaloneSources.get(snapshot.id);
-          if (current !== previous && current !== selected) throw new Error('Memory vector record source changed');
-        }
-      },
-      published: () => { if (!native) this.standaloneSources.set(snapshot.id, selected); },
-    };
-  }
-
-  private sourceOperation(source: CapturedVectorSource, operation: MemoryOperationOptions): MemoryOperationOptions {
-    return captureMemoryOperation({ signal: operation.signal, assertCurrent: () => {
-      assertMemoryOperationCurrent(operation);
-      source.assertCurrent();
-    } });
-  }
-
-  private captureOperation(options?: MemoryOperationOptions): MemoryOperationOptions {
-    const lifecycle = captureMemoryOperation(options), db = this.db;
-    const provider = this.embeddingRegistry.getDefaultProviderOrNull();
-    return captureMemoryOperation({ signal: lifecycle.signal, assertCurrent: () => {
-      assertMemoryOperationCurrent(lifecycle);
-      if (this.db !== db || this.embeddingRegistry.getDefaultProviderOrNull() !== provider) {
-        throw new Error('Memory vector operation source changed');
-      }
-    } });
-  }
 
   constructor(
     private readonly dbPath: string,
     private readonly dimensions = MEMORY_VECTOR_DIMS,
     private readonly embeddingRegistry: MemoryEmbeddingProviderRegistry,
-    private readonly sourceRevision?: (record: MemoryRecord) => MemoryVectorSourceRevision,
+    /** The row's current revision in the owning store, undefined when the row is gone. */
+    private readonly currentRevision?: (recordId: string) => string | undefined,
   ) {}
 
   /**
    * Opens the index. Never rejects: a failure leaves the index unavailable
-   * with platformLimitReason or error set. Loading the extension reads a
-   * load failure through Jev (sqlite-vec-loader.ts), hence async.
-   * Idempotent: a later call waits for an open still in flight, so a holder
-   * that did not start the open can await it.
+   * with platformLimitReason or error set (sqlite-vec-loader.ts decides which,
+   * in code). Idempotent: a later call waits for an open still in flight, so a
+   * holder that did not start the open can await it.
    */
   init(): Promise<void> {
     if (this.opening) return this.opening;
@@ -212,6 +175,7 @@ export class SqliteVecMemoryIndex {
   private async open(): Promise<void> {
     // A reason from an earlier failed open describes that attempt, not this one.
     this.error = undefined;
+    this.errorIsEmbedding = false;
     this.platformLimitReason = undefined;
     try {
       if (this.dbPath !== ':memory:') {
@@ -222,15 +186,11 @@ export class SqliteVecMemoryIndex {
       // Another process may hold a write on this file (a rebuild batch): wait
       // briefly rather than failing the write as soon as it is refused.
       opened.run('PRAGMA busy_timeout = 5000');
-      await loadSqliteVecExtension(opened);
-      // close() while the extension was loading already closed this handle and
-      // cleared it; carrying on would mark a closed store available and then
-      // fail in versioning with an error that has nothing to do with the cause.
-      if (this.db !== opened) return;
+      loadSqliteVecExtension(opened);
       this.available = true;
       this.enabled = true;
-      // Schema versioning: pre-migration snapshot, auto-restore on failure,
-      // and a downgrade guard (an older binary refuses a newer schema).
+      // Schema versioning: one consistent pre-migration copy, auto-restore on
+      // failure, and a downgrade guard (an older binary refuses a newer schema).
       openVersionedBunSqliteStore({
         storeName: 'memory vector index',
         dbPath: this.dbPath,
@@ -276,11 +236,8 @@ export class SqliteVecMemoryIndex {
 
   stats(): MemoryVectorStats {
     const provider = this.embeddingRegistry.getDefaultProviderOrNull();
-    // A search embeds its query synchronously; an async-only provider cannot,
-    // so say so up front rather than after the first search returns nothing.
-    const asyncOnlyError = provider && !provider.embedSync && this.enabled
-      ? `Active memory embedding provider '${provider.id}' only embeds asynchronously, so a semantic search cannot embed its query; searches use literal matching.`
-      : undefined;
+    const error = this.error
+      ?? (!provider && !this.platformLimitReason ? `Active memory embedding provider '${this.embeddingRegistry.getDefaultProviderId()}' is not registered.` : undefined);
     return {
       backend: 'sqlite-vec',
       enabled: this.enabled,
@@ -291,176 +248,176 @@ export class SqliteVecMemoryIndex {
       embeddingProviderId: provider?.id ?? this.embeddingRegistry.getDefaultProviderId(),
       embeddingProviderLabel: provider?.label ?? `Unregistered (${this.embeddingRegistry.getDefaultProviderId()})`,
       ...(this.platformLimitReason ? { platformLimitReason: this.platformLimitReason } : {}),
-      ...(this.error ?? asyncOnlyError ?? (!provider && !this.platformLimitReason)
-        ? { error: this.error ?? asyncOnlyError ?? `Active memory embedding provider '${this.embeddingRegistry.getDefaultProviderId()}' is not registered.` }
-        : {}),
+      ...(error ? { error } : {}),
     };
   }
 
-  upsert(record: MemoryRecord, options?: MemoryOperationOptions): void {
-    const owner = this.captureOperation(options);
-    assertMemoryOperationCurrent(owner);
+  /**
+   * Index one row. With a provider that embeds synchronously this runs to the
+   * end with no `await`, so the caller is checked once, here. A provider that
+   * only embeds over the network indexes the row in the background.
+   */
+  upsert(record: MemoryRecord, options: MemoryVectorWriteOptions = {}): void {
+    assertMemoryOperationCurrent(options);
     if (!this.db || !this.enabled) return;
     const provider = this.embeddingRegistry.getDefaultProviderOrNull();
     if (provider && !provider.embedSync && provider.embed) {
-      // An async-only provider cannot embed inside this synchronous write: index
-      // the record in the background instead of dropping it.
-      void this.upsertAsync(record).catch((err: unknown) => {
-        // The record changed again while this was in flight: the later write queues its own embed.
-        if (err instanceof Error && /source changed/.test(err.message)) return;
-        this.markEmbeddingUnavailable(err);
-      });
+      void this.upsertAsync(record, { revision: options.revision }).catch((err: unknown) => this.markEmbeddingUnavailable(err));
       return;
     }
-    this.upsertCaptured(this.captureSource(record), owner);
-  }
-
-  private upsertCaptured(source: CapturedVectorSource, owner: MemoryOperationOptions): void {
-    const operation = this.sourceOperation(source, owner);
     let embedding: Float32Array;
     try {
-      embedding = this.embedText(buildMemoryEmbeddingText(source.record), 'record', source.record.id, operation);
+      const result = this.embeddingRegistry.embedSync({
+        text: buildMemoryEmbeddingText(record), dimensions: this.dimensions, usage: 'record', recordId: record.id,
+      });
+      embedding = normalizeMemoryEmbeddingVector(result.vector, this.dimensions);
     } catch (err) {
-      assertMemoryOperationCurrent(operation);
       this.markEmbeddingUnavailable(err);
       return;
     }
     try {
-      this.writeRecord(source, embedding, operation);
+      this.writeEntries([{ record, revision: options.revision ?? this.revisionOf(record.id) ?? standaloneRevision(), embedding }]);
     } catch (err) {
-      assertMemoryOperationCurrent(operation);
       this.markStoreFailure(err);
     }
   }
 
-  async upsertAsync(record: MemoryRecord, options?: MemoryOperationOptions): Promise<void> {
-    const owner = this.captureOperation(options);
-    assertMemoryOperationCurrent(owner);
-    if (!this.db || !this.enabled) return;
-    const source = this.captureSource(record);
-    const operation = this.sourceOperation(source, owner);
+  /**
+   * Index one row through the asynchronous embed. The one check that protects
+   * the write runs after the embed resolves and before the transaction.
+   */
+  async upsertAsync(record: MemoryRecord, options: MemoryVectorWriteOptions = {}): Promise<void> {
+    assertMemoryOperationCurrent(options);
+    const db = this.db;
+    if (!db || !this.enabled) return;
+    const revision = options.revision ?? this.revisionOf(record.id);
+    if (this.currentRevision && revision === undefined) return;
+    const providerId = this.embeddingRegistry.getDefaultProviderId();
+    // A provider that ignores the signal cannot hold the caller past a cancellation.
     const result = await awaitMemoryOperation(() => this.embeddingRegistry.embedAsync({
-      text: buildMemoryEmbeddingText(source.record),
+      text: buildMemoryEmbeddingText(record),
       dimensions: this.dimensions,
       usage: 'record',
-      recordId: source.record.id,
-      signal: operation.signal, beforeAttempt: () => assertMemoryOperationCurrent(operation),
-    }), operation);
-    const embedding = normalizeMemoryEmbeddingVector(result.vector, this.dimensions);
+      recordId: record.id,
+      signal: options.signal, beforeAttempt: () => assertMemoryOperationCurrent(options),
+    }), options);
+    if (!this.stillCurrent(db, providerId, record.id, revision)) return;
+    this.clearEmbeddingError();
     try {
-      this.writeRecord(source, embedding, operation);
+      this.writeEntries([{ record, revision: revision ?? standaloneRevision(), embedding: normalizeMemoryEmbeddingVector(result.vector, this.dimensions) }]);
     } catch (err) {
-      // A changed source or cancelled operation is the caller's to handle; any other error is the vector file refusing the write.
-      assertMemoryOperationCurrent(operation);
-      if (err instanceof Error && /source changed/.test(err.message)) throw err;
       this.markStoreFailure(err);
     }
   }
 
-  delete(recordId: string, options?: MemoryOperationOptions): void {
-    const operation = this.captureOperation(options);
-    assertMemoryOperationCurrent(operation);
+  delete(recordId: string, options: MemoryOperationOptions = {}): void {
+    assertMemoryOperationCurrent(options);
     if (!this.db || !this.enabled) return;
-    const row = this.db.query<RecordIdRow, [string]>(
-      'SELECT rowid FROM memory_vector_ids WHERE record_id = ? LIMIT 1',
-    ).get(recordId);
-    if (!row) { this.standaloneSources.delete(recordId); return; }
-    this.runMutation('DELETE FROM memory_vectors WHERE rowid = ?', [row.rowid], operation);
-    this.runMutation('DELETE FROM memory_vector_ids WHERE rowid = ?', [row.rowid], operation);
-    this.standaloneSources.delete(recordId);
-  }
-
-  sync(records: readonly MemoryRecord[]): void {
-    if (!this.db || !this.enabled) return;
-    const operation = this.captureOperation();
-    assertMemoryOperationCurrent(operation);
-
-    const seen = new Set<string>();
-    const tx = this.db.transaction((entries: readonly MemoryRecord[]) => {
-      for (const record of entries) {
-        seen.add(record.id);
-        const row = this.db?.query<{ source_revision: string; provider_id: string }, [string]>(
-          'SELECT source_revision, provider_id FROM memory_vector_ids WHERE record_id = ? LIMIT 1',
-        ).get(record.id);
-        const source = this.captureSource(record);
-        source.assertCurrent();
-        // Unchanged text indexed by another provider is stale: its vector is in a different space.
-        if (row?.source_revision === source.revision && row.provider_id === this.embeddingRegistry.getDefaultProviderId()) continue;
-        this.upsertCaptured(source, operation);
-      }
-
-      const staleRows = this.db?.query<{ record_id: string }, []>(
-        'SELECT record_id FROM memory_vector_ids',
-      ).all() ?? [];
-      for (const stale of staleRows) {
-        if (!seen.has(stale.record_id)) this.delete(stale.record_id, operation);
-      }
-    });
     try {
-      tx(records);
+      this.deleteIds([recordId]);
     } catch (err) {
-      assertMemoryOperationCurrent(operation);
       this.markStoreFailure(err);
     }
   }
 
-  async syncAsync(records: readonly MemoryRecord[], options: MemoryOperationOptions & { force?: boolean } = {}): Promise<void> {
-    const operation = this.captureOperation(options);
-    assertMemoryOperationCurrent(operation);
+  /**
+   * Bring the index in step with the store's rows, synchronously. One query
+   * reads what the index holds; a row whose revision and provider match is
+   * left alone. A provider that only embeds over the network cannot embed
+   * here, so the pass runs in the background through `syncAsync`.
+   */
+  sync(entries: readonly MemoryVectorEntry[]): void {
     if (!this.db || !this.enabled) return;
-
-    const pending: Array<{ source: CapturedVectorSource; embedding: Float32Array }> = [];
-
-    for (const record of records) {
-      const row = this.db.query<{ source_revision: string; provider_id: string }, [string]>(
-        'SELECT source_revision, provider_id FROM memory_vector_ids WHERE record_id = ? LIMIT 1',
-      ).get(record.id);
-      const source = this.captureSource(record);
-      const sourceOperation = this.sourceOperation(source, operation);
-      assertMemoryOperationCurrent(sourceOperation);
-      if (!options.force && row?.source_revision === source.revision && row.provider_id === this.embeddingRegistry.getDefaultProviderId()) {
-        continue;
+    const provider = this.embeddingRegistry.getDefaultProviderOrNull();
+    if (provider && !provider.embedSync && provider.embed) {
+      void this.syncAsync(entries).catch((err: unknown) => this.markEmbeddingUnavailable(err));
+      return;
+    }
+    const providerId = this.embeddingRegistry.getDefaultProviderId();
+    const stored = this.storedRows();
+    const changed: Array<{ record: MemoryRecord; revision: string; embedding: Float32Array }> = [];
+    try {
+      for (const entry of entries) {
+        if (isIndexed(stored.get(entry.record.id), entry.revision, providerId)) continue;
+        const result = this.embeddingRegistry.embedSync({
+          text: buildMemoryEmbeddingText(entry.record), dimensions: this.dimensions, usage: 'record', recordId: entry.record.id,
+        });
+        changed.push({ ...entry, embedding: normalizeMemoryEmbeddingVector(result.vector, this.dimensions) });
       }
-
-      const result = await awaitMemoryOperation(() => this.embeddingRegistry.embedAsync({
-        text: buildMemoryEmbeddingText(source.record),
-        dimensions: this.dimensions,
-        usage: 'record',
-        recordId: source.record.id,
-        signal: sourceOperation.signal, beforeAttempt: () => assertMemoryOperationCurrent(sourceOperation),
-      }), sourceOperation);
-      pending.push({
-        source,
-        embedding: normalizeMemoryEmbeddingVector(result.vector, this.dimensions),
-      });
-
-      if (pending.length >= SqliteVecMemoryIndex.rebuildBatchSize) {
-        this.writePendingRebuildBatch(pending.splice(0, pending.length), operation);
-        await awaitMemoryOperation(() => yieldToEventLoop(), operation);
-      }
+    } catch (err) {
+      this.markEmbeddingUnavailable(err);
+      return;
     }
-
-    const staleRows = this.db.query<{ record_id: string }, []>(
-      'SELECT record_id FROM memory_vector_ids',
-    ).all();
-    const staleIds = new Set(staleRows.map((row) => row.record_id));
-    for (const record of records) {
-      staleIds.delete(record.id);
-    }
-
-    if (pending.length > 0) {
-      this.writePendingRebuildBatch(pending, operation);
-    }
-
-    for (const recordId of staleIds) {
-      this.delete(recordId, operation);
+    const live = new Set(entries.map((entry) => entry.record.id));
+    try {
+      this.writeEntries(changed, [...stored.keys()].filter((id) => !live.has(id)));
+    } catch (err) {
+      this.markStoreFailure(err);
     }
   }
 
-  search(query: string, filter: MemoryVectorSearchFilter = {}, options?: MemoryOperationOptions): MemoryVectorCandidate[] {
-    const operation = this.captureOperation(options);
-    assertMemoryOperationCurrent(operation);
-    if (!this.db || !this.enabled) return [];
+  /**
+   * The same pass through the asynchronous embed, in batches: one request per
+   * batch of rows where the provider takes a list. Rows the index already
+   * holds at their revision are skipped unless `force` is set. Each batch is
+   * checked once after its embed resolves; a row that changed meanwhile is
+   * left to the write that changed it. An embedding failure stops the pass and
+   * is reported through `stats().error`.
+   */
+  async syncAsync(entries: readonly MemoryVectorEntry[], options: MemoryOperationOptions & { force?: boolean } = {}): Promise<void> {
+    assertMemoryOperationCurrent(options);
+    const db = this.db;
+    if (!db || !this.enabled) return;
+    const providerId = this.embeddingRegistry.getDefaultProviderId();
+    const stored = this.storedRows();
+    const pending = entries.filter((entry) => options.force || !isIndexed(stored.get(entry.record.id), entry.revision, providerId));
+    const live = new Set(entries.map((entry) => entry.record.id));
+    const gone = [...stored.keys()].filter((id) => !live.has(id));
+    for (let start = 0; start < pending.length; start += SqliteVecMemoryIndex.rebuildBatchSize) {
+      const batch = pending.slice(start, start + SqliteVecMemoryIndex.rebuildBatchSize);
+      let results: MemoryEmbeddingResult[];
+      try {
+        results = await awaitMemoryOperation(() => this.embeddingRegistry.embedManyAsync({
+          texts: batch.map((entry) => buildMemoryEmbeddingText(entry.record)),
+          dimensions: this.dimensions,
+          usage: 'record',
+          signal: options.signal, beforeAttempt: () => assertMemoryOperationCurrent(options),
+        }), options);
+      } catch (err) {
+        assertMemoryOperationCurrent(options);
+        this.markEmbeddingUnavailable(err);
+        return;
+      }
+      if (this.db !== db || this.embeddingRegistry.getDefaultProviderId() !== providerId) return;
+      this.clearEmbeddingError();
+      const current = batch.flatMap((entry, index) => this.stillCurrent(db, providerId, entry.record.id, entry.revision)
+        ? [{ ...entry, embedding: normalizeMemoryEmbeddingVector(results[index]!.vector, this.dimensions) }] : []);
+      try {
+        this.writeEntries(current);
+      } catch (err) {
+        this.markStoreFailure(err);
+        return;
+      }
+    }
+    if (this.db !== db || gone.length === 0) return;
+    try {
+      this.deleteIds(gone);
+    } catch (err) {
+      this.markStoreFailure(err);
+    }
+  }
+
+  /**
+   * The rows nearest the query. The query is embedded through the
+   * asynchronous embed, which also serves a provider that embeds
+   * synchronously, so every shipped provider can answer. A failed embed is
+   * recorded on `stats().error` and the search returns nothing, so the caller
+   * falls back to its lexical path and can say so.
+   */
+  async search(query: string, filter: MemoryVectorSearchFilter = {}, options: MemoryOperationOptions = {}): Promise<MemoryVectorCandidate[]> {
+    assertMemoryOperationCurrent(options);
+    const db = this.db;
+    if (!db || !this.enabled) return [];
     const trimmed = query.trim();
     if (!trimmed) return [];
 
@@ -468,12 +425,18 @@ export class SqliteVecMemoryIndex {
     const vectorLimit = Math.max(requestedLimit, 1);
     let embedding: Float32Array;
     try {
-      embedding = this.embedText(trimmed, 'query', undefined, operation);
+      const result = await awaitMemoryOperation(() => this.embeddingRegistry.embedAsync({
+        text: trimmed, dimensions: this.dimensions, usage: 'query',
+        signal: options.signal, beforeAttempt: () => assertMemoryOperationCurrent(options),
+      }), options);
+      embedding = normalizeMemoryEmbeddingVector(result.vector, this.dimensions);
     } catch (err) {
-      assertMemoryOperationCurrent(operation);
+      assertMemoryOperationCurrent(options);
       this.markEmbeddingUnavailable(err);
       return [];
     }
+    if (this.db !== db) return [];
+    this.clearEmbeddingError();
     const where: string[] = ['embedding MATCH ?', 'k = ?'];
     const params: SQLQueryBindings[] = [embedding, vectorLimit];
 
@@ -501,7 +464,7 @@ export class SqliteVecMemoryIndex {
       where.push("review_state != 'contradicted'");
     }
 
-    const rows = this.db.query<VectorRow, SQLQueryBindings[]>(
+    const rows = db.query<VectorRow, SQLQueryBindings[]>(
       `SELECT rowid, record_id, distance
          FROM memory_vectors
         WHERE ${where.join(' AND ')}
@@ -516,7 +479,6 @@ export class SqliteVecMemoryIndex {
   }
 
   close(): void {
-    this.standaloneSources.clear();
     if (!this.db) return;
     this.db.close();
     this.db = null;
@@ -552,16 +514,6 @@ export class SqliteVecMemoryIndex {
     `);
   }
 
-  private ensureRowId(recordId: string, operation: MemoryOperationOptions): number {
-    if (!this.db) throw new Error('Memory vector index is not initialized');
-    this.runMutation('INSERT OR IGNORE INTO memory_vector_ids (record_id) VALUES (?)', [recordId], operation);
-    const row = this.db.query<RecordIdRow, [string]>(
-      'SELECT rowid FROM memory_vector_ids WHERE record_id = ? LIMIT 1',
-    ).get(recordId);
-    if (!row) throw new Error(`Memory vector row id not found for ${recordId}`);
-    return Number(row.rowid);
-  }
-
   private countIndexedRecords(): number {
     if (!this.db || !this.enabled) return 0;
     const row = this.db.query<CountRow, []>(
@@ -570,75 +522,114 @@ export class SqliteVecMemoryIndex {
     return Number(row?.count ?? 0);
   }
 
-  private embedText(text: string, usage: 'record' | 'query', recordId?: string, options?: MemoryOperationOptions): Float32Array {
-    const operation = this.captureOperation(options);
-    assertMemoryOperationCurrent(operation);
-    const result = this.embeddingRegistry.embedSync({
-      text,
-      dimensions: this.dimensions,
-      usage,
-      recordId, signal: operation.signal, beforeAttempt: () => assertMemoryOperationCurrent(operation),
-    });
-    assertMemoryOperationCurrent(operation);
-    return normalizeMemoryEmbeddingVector(result.vector, this.dimensions);
+  /** What the index holds, in one query: revision and provider per record. */
+  private storedRows(): Map<string, StoredVectorRow> {
+    const rows = this.db?.query<StoredVectorRow, []>('SELECT record_id, source_revision, provider_id FROM memory_vector_ids').all() ?? [];
+    return new Map(rows.map((row) => [row.record_id, row]));
+  }
+
+  private revisionOf(recordId: string): string | undefined {
+    return this.currentRevision?.(recordId);
+  }
+
+  /** After an awaited embed: same open index, same provider, and the row still at the embedded revision. */
+  private stillCurrent(db: Database, providerId: string, recordId: string, revision: string | undefined): boolean {
+    if (this.db !== db || !this.enabled || this.embeddingRegistry.getDefaultProviderId() !== providerId) return false;
+    return !this.currentRevision || this.currentRevision(recordId) === revision;
   }
 
   private markEmbeddingUnavailable(error: unknown): void {
     this.error = summarizeError(error);
+    this.errorIsEmbedding = true;
     logger.warn('Memory vector index could not embed text with the active embedding provider', {
       providerId: this.embeddingRegistry.getDefaultProviderId(),
       error: this.error,
     });
   }
 
+  private clearEmbeddingError(): void {
+    if (!this.errorIsEmbedding) return;
+    this.error = undefined;
+    this.errorIsEmbedding = false;
+  }
+
   /** The vector file refused a write (locked by another process, full disk): say that, not that the provider failed. */
   private markStoreFailure(error: unknown): void {
     this.error = `the vector index file could not be written: ${summarizeError(error)}`;
+    this.errorIsEmbedding = false;
     logger.warn('Memory vector index write failed', { path: this.dbPath, error: this.error });
   }
 
-  private writePendingRebuildBatch(entries: Array<{ source: CapturedVectorSource; embedding: Float32Array }>, operation: MemoryOperationOptions): void {
-    if (!this.db || !this.enabled || entries.length === 0) return;
-    const tx = this.db.transaction((batch: Array<{ source: CapturedVectorSource; embedding: Float32Array }>) => {
-      for (const entry of batch) {
-        this.writeRecord(entry.source, entry.embedding, this.sourceOperation(entry.source, operation));
+  /**
+   * One transaction: a refused write part-way (a lock held by another process)
+   * rolls back, so a previous vector stays instead of being deleted without a
+   * replacement.
+   */
+  private writeEntries(
+    entries: ReadonlyArray<{ readonly record: MemoryRecord; readonly revision: string; readonly embedding: Float32Array }>,
+    removed: readonly string[] = [],
+  ): void {
+    const db = this.db;
+    if (!db || (entries.length === 0 && removed.length === 0)) return;
+    const providerId = this.embeddingRegistry.getDefaultProviderId();
+    const ensureId = db.query('INSERT OR IGNORE INTO memory_vector_ids (record_id) VALUES (?)');
+    const selectId = db.query<RecordIdRow, [string]>('SELECT rowid FROM memory_vector_ids WHERE record_id = ? LIMIT 1');
+    const dropVector = db.query('DELETE FROM memory_vectors WHERE rowid = ?');
+    const insertVector = db.query(
+      `INSERT INTO memory_vectors
+         (rowid, embedding, scope, cls, review_state, confidence, record_id, updated_at, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    const stamp = db.query(
+      `UPDATE memory_vector_ids
+         SET source_revision = ?, provider_id = ?, updated_at = ?, indexed_at = ?
+       WHERE rowid = ?`,
+    );
+    db.transaction(() => {
+      for (const { record, revision, embedding } of entries) {
+        ensureId.run(record.id);
+        const row = selectId.get(record.id);
+        if (!row) throw new Error(`Memory vector row id not found for ${record.id}`);
+        const rowid = Number(row.rowid);
+        dropVector.run(rowid);
+        insertVector.run(rowid, embedding, record.scope, record.cls, record.reviewState,
+          record.confidence, record.id, record.updatedAt, record.createdAt);
+        stamp.run(revision, providerId, record.updatedAt, Date.now(), rowid);
       }
-    });
-    tx(entries);
-  }
-
-  private runMutation(sql: string, params: SQLQueryBindings[], operation: MemoryOperationOptions): void {
-    assertMemoryOperationCurrent(operation);
-    this.db?.query(sql).run(...params);
-    assertMemoryOperationCurrent(operation);
-  }
-
-  private writeRecord(source: CapturedVectorSource, embedding: Float32Array, operation: MemoryOperationOptions): void {
-    const record = source.record;
-    assertMemoryOperationCurrent(operation);
-    if (!this.db) return;
-    // One transaction: a refused write part-way (a lock held by another
-    // process) rolls back, so the previous vector stays instead of being deleted without a replacement.
-    this.db.transaction(() => {
-      const rowid = this.ensureRowId(record.id, operation);
-      this.runMutation('DELETE FROM memory_vectors WHERE rowid = ?', [rowid], operation);
-      this.runMutation(
-        `INSERT INTO memory_vectors
-           (rowid, embedding, scope, cls, review_state, confidence, record_id, updated_at, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [rowid, embedding, record.scope, record.cls, record.reviewState,
-          record.confidence, record.id, record.updatedAt, record.createdAt],
-        operation,
-      );
-      this.runMutation(
-        `UPDATE memory_vector_ids
-           SET source_revision = ?, provider_id = ?, updated_at = ?, indexed_at = ?
-         WHERE rowid = ?`,
-        [source.revision, this.embeddingRegistry.getDefaultProviderId(), record.updatedAt, Date.now(), rowid], operation);
+      this.deleteIdsIn(db, removed);
     })();
-    source.published();
-    this.error = undefined;
+    if (!this.errorIsEmbedding) this.error = undefined;
   }
+
+  private deleteIds(recordIds: readonly string[]): void {
+    const db = this.db;
+    if (!db || recordIds.length === 0) return;
+    db.transaction(() => this.deleteIdsIn(db, recordIds))();
+  }
+
+  private deleteIdsIn(db: Database, recordIds: readonly string[]): void {
+    if (recordIds.length === 0) return;
+    const selectId = db.query<RecordIdRow, [string]>('SELECT rowid FROM memory_vector_ids WHERE record_id = ? LIMIT 1');
+    const dropVector = db.query('DELETE FROM memory_vectors WHERE rowid = ?');
+    const dropId = db.query('DELETE FROM memory_vector_ids WHERE rowid = ?');
+    for (const recordId of recordIds) {
+      const row = selectId.get(recordId);
+      if (!row) continue;
+      dropVector.run(row.rowid);
+      dropId.run(row.rowid);
+    }
+  }
+}
+
+/** Whether the index already holds this row at this revision, embedded by this provider. */
+function isIndexed(row: StoredVectorRow | undefined, revision: string, providerId: string): boolean {
+  // Unchanged text indexed by another provider is stale: its vector is in a different space.
+  return row !== undefined && row.source_revision === revision && row.provider_id === providerId;
+}
+
+/** An index used without a store has no row revision; each write is its own. */
+function standaloneRevision(): string {
+  return `memory-index-${randomUUID()}`;
 }
 
 function normalizeLimit(value: number | undefined, fallback: number): number {
@@ -649,11 +640,4 @@ function normalizeLimit(value: number | undefined, fallback: number): number {
 function distanceToSimilarity(distance: number): number {
   if (!Number.isFinite(distance)) return 0;
   return Math.max(0, Math.min(1, 1 - (distance / 2)));
-}
-
-function yieldToEventLoop(): Promise<void> {
-  return new Promise((resolve) => {
-    const timer = setTimeout(resolve, 0);
-    timer.unref?.();
-  });
 }

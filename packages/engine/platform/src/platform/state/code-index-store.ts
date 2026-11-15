@@ -217,8 +217,8 @@ export class CodeIndexStore {
 
   /**
    * Opens the store. Never rejects: a failure leaves the store unavailable
-   * with platformLimitReason or error set. Loading the extension reads a
-   * load failure through Jev (sqlite-vec-loader.ts), hence async.
+   * with platformLimitReason or error set (sqlite-vec-loader.ts decides
+   * which, in code).
    * Idempotent: a later call waits for an open still in flight, so a holder
    * that did not start the open can await it.
    */
@@ -241,11 +241,7 @@ export class CodeIndexStore {
       }
       this.db = new (bunSqliteDatabase())(this.dbPath);
       const opened = this.db;
-      await loadSqliteVecExtension(opened);
-      // close() while the extension was loading already closed this handle and
-      // cleared it; carrying on would mark a closed store available and then
-      // fail in versioning with an error that has nothing to do with the cause.
-      if (this.db !== opened) return;
+      loadSqliteVecExtension(opened);
       this.available = true;
       // WAL so two windows on one workspace read while the other writes, a
       // busy wait for the other writer instead of failing mid-file, and the

@@ -4,11 +4,8 @@
  * degrade with platformLimitReason set and NO error field, while a genuine
  * packaging defect (missing extension file) must stay a loud error.
  */
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import type { JudgmentPort } from '@goodvibes-jev/judgment';
-import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { loadSqliteVecExtension, SqliteVecPlatformUnsupportedError } from '../platform/src/platform/state/sqlite-vec-loader.ts';
+import { afterEach, describe, expect, test } from 'bun:test';
+import { forgetSqliteVecPlatformRefusal, loadSqliteVecExtension, SqliteVecPlatformUnsupportedError } from '../platform/src/platform/state/sqlite-vec-loader.ts';
 
 describe('sqlite-vec platform-limit classification', () => {
   test('the typed platform error carries the honest literal-fallback wording', () => {
@@ -29,55 +26,38 @@ describe('sqlite-vec platform-limit classification', () => {
 });
 
 /**
- * Whether a load failure is the platform's refusal is read by Jev
- * (engine.state.sqlite-vec-refusal); this fake port answers it with the
- * probability the test sets, so each answer's handling is pinned.
+ * Whether a load failure is the platform's refusal is decided in code: the
+ * library's compile options or the platform, never a model request.
  */
-describe('a load failure is classified by the refusal reading', () => {
-  let probability = 0.97;
-  let requests: ReturnType<typeof fakePort>['requests'] = [];
-  let previous: JudgmentPort | undefined;
-  beforeEach(() => {
-    const fake = fakePort((name) => {
-      if (name !== 'platform_refuses') throw new Error(`unexpected question ${name}`);
-      return noulAnswer(probability);
-    });
-    requests = fake.requests;
-    previous = installJudgmentPort(fake.port);
-  });
-  afterEach(() => {
-    installJudgmentPort(previous);
+describe('a load failure is classified in code', () => {
+  afterEach(() => forgetSqliteVecPlatformRefusal());
+
+  const fakeDb = (msg: string, omitted = 0) => ({
+    loadExtension: () => { throw new Error(msg); },
+    query: () => ({ get: () => ({ omitted }) }),
   });
 
-  const fakeDb = (msg: string) => ({ loadExtension: () => { throw new Error(msg); } });
-
-  test('a yes throws the platform-limit error carrying the refusal', async () => {
-    probability = 0.97;
+  test('a build compiled without extension loading is the platform limit', () => {
     const refusal = 'This build of sqlite3 does not support dynamic extension loading';
-    const failure = await loadSqliteVecExtension(fakeDb(refusal) as never).catch((err: unknown) => err);
+    let failure: unknown;
+    try { loadSqliteVecExtension(fakeDb(refusal, 1) as never, { platform: 'linux' }); } catch (err) { failure = err; }
     expect(failure).toBeInstanceOf(SqliteVecPlatformUnsupportedError);
     expect((failure as Error).message).toContain(refusal);
-    expect(requests).toHaveLength(1);
-    expect(requests[0]!.state).toEqual({ message: refusal, platform: process.platform, bundled: false });
   });
 
-  test('a no rethrows the original error, a loud defect', async () => {
-    probability = 0.03;
+  test('on macOS a refused load is the platform limit, and the second index does not try again', () => {
+    let attempts = 0;
+    const db = { loadExtension: () => { attempts++; throw new Error('not authorized'); }, query: () => ({ get: () => ({ omitted: 0 }) }) };
+    expect(() => loadSqliteVecExtension(db as never, { platform: 'darwin' })).toThrow(SqliteVecPlatformUnsupportedError);
+    expect(() => loadSqliteVecExtension(db as never, { platform: 'darwin' })).toThrow(SqliteVecPlatformUnsupportedError);
+    expect(attempts).toBe(1);
+  });
+
+  test('elsewhere a refused load is rethrown as the original error, a loud defect', () => {
     const missing = 'dlopen failed: no such file or directory';
-    const failure = await loadSqliteVecExtension(fakeDb(missing) as never).catch((err: unknown) => err);
+    let failure: unknown;
+    try { loadSqliteVecExtension(fakeDb(missing) as never, { platform: 'linux' }); } catch (err) { failure = err; }
     expect(failure).not.toBeInstanceOf(SqliteVecPlatformUnsupportedError);
     expect((failure as Error).message).toBe(missing);
-  });
-
-  test('a yes too weak to act on rethrows the original error', async () => {
-    probability = 0.65;
-    const failure = await loadSqliteVecExtension(fakeDb('not authorized') as never).catch((err: unknown) => err);
-    expect(failure).not.toBeInstanceOf(SqliteVecPlatformUnsupportedError);
-    expect((failure as Error).message).toBe('not authorized');
-  });
-
-  test('a successful load asks nothing', async () => {
-    await loadSqliteVecExtension({ loadExtension: () => undefined } as never);
-    expect(requests).toHaveLength(0);
   });
 });

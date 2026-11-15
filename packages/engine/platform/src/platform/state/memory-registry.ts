@@ -76,7 +76,7 @@ export class MemoryRegistry {
   }
 
   /** The vector index's candidates in similarity order, retrieval only (see MemoryStore.semanticCandidates). */
-  semanticCandidates(filter: MemorySearchFilter = {}): MemorySemanticSearchResult[] {
+  semanticCandidates(filter: MemorySearchFilter = {}): Promise<MemorySemanticSearchResult[]> {
     return this.store.semanticCandidates(filter);
   }
 

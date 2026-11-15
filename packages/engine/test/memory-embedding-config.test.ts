@@ -66,12 +66,12 @@ describe('the vector index follows a provider change', () => {
     const index = new SqliteVecMemoryIndex(join(root, 'memory.vec.sqlite'), undefined, registry);
     await index.init();
     expect(index.stats().available).toBe(true);
-    const record = recordAt(1);
-    index.sync([record]);
-    index.sync([record]);
+    const entry = { record: recordAt(1), revision: 'r1' };
+    index.sync([entry]);
+    index.sync([entry]);
     expect(embeds).toEqual(['a']);
     configManager.set('provider.embeddingProvider', 'custom-b');
-    index.sync([record]);
+    index.sync([entry]);
     expect(embeds).toEqual(['a', 'b']);
     index.close();
   });
@@ -95,7 +95,7 @@ describe('a refused write to the vector file', () => {
     expect(stats.error).toContain('vector index file could not be written');
     expect(stats.error).not.toContain('custom-a');
     expect(stats.indexedRecords).toBe(1);
-    expect(index.search('deploy plan').map((candidate) => candidate.id)).toEqual(['mem_a']);
+    expect((await index.search('deploy plan')).map((candidate) => candidate.id)).toEqual(['mem_a']);
     index.close();
   });
 });

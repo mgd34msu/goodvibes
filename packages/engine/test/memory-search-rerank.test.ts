@@ -182,9 +182,9 @@ describe('SqliteVecMemoryIndex staleOnly', () => {
       id, scope: 'project', cls: 'fact', summary: `deploy note ${id}`, tags: [], provenance: [], reviewState, confidence, createdAt: 1, updatedAt: 1,
     });
     const records = [record('stale', 'stale', 90), record('contradicted', 'contradicted', 90), record('fresh-low', 'fresh', 20)];
-    await index.syncAsync(records, { force: true });
+    await index.syncAsync(records.map((entry) => ({ record: entry, revision: entry.id })), { force: true });
     expect(index.stats().available).toBe(true);
-    const ids = index.search('deploy note', { staleOnly: true }).map((candidate) => candidate.id).sort();
+    const ids = (await index.search('deploy note', { staleOnly: true })).map((candidate) => candidate.id).sort();
     expect(ids).toEqual(['contradicted', 'stale']);
     index.close();
   });

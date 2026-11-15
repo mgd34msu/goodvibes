@@ -46,10 +46,8 @@ registry.register(systemMessagePriority);
 import { codeSearchRerank } from '../state/batteries/code-search-rerank.js';
 registry.register(codeSearchRerank);
 
-// State: file watching, the sqlite-vec loader, VIBE.md import.
-import { sqliteVecRefusal } from '../state/batteries/sqlite-vec-refusal.js';
+// State: VIBE.md import.
 import { vibePersonaLine } from '../state/batteries/vibe-persona-line.js';
-registry.register(sqliteVecRefusal);
 registry.register(vibePersonaLine);
 
 // Runtime: ecosystem catalog search and review.

@@ -1,13 +1,9 @@
 import { isCompiledBunModuleUrl } from '../utils/bun-module.js';
 
 import { createRequire } from 'node:module';
+import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { Database } from 'bun:sqlite';
-import { judgmentPort } from '@goodvibes-jev/engine/errors';
-import { sqliteVecLoadFailureView, sqliteVecRefusal } from './batteries/sqlite-vec-refusal.js';
-import { decisionOrClassic } from '../runtime/decision-policy.js';
-
-const SQLITE_VEC_REFUSAL_SITE = 'state.sqlite-vec-loader';
 
 /**
  * `sqlite-vec` is an optionalDependency, resolved through `createRequire` at
@@ -41,13 +37,9 @@ function requireSqliteVecLoad(): (db: Database) => void {
  * Shared by memory-vector-store.ts (MemoryStore's vector index) and
  * code-index-store.ts (the repo source-tree code index; see CHANGELOG 0.38.0) so both
  * indexes load the exact same native extension the exact same way.
+ *
+ * The process facts the resolver reads are injectable so a test can stand in for a compiled binary.
  */
-/** Whether this is a Bun compiled binary: Bun's virtual bundle filesystem is marked `$bunfs` in module URLs. */
-function isBundledRun(): boolean {
-  return isCompiledBunModuleUrl(import.meta.url);
-}
-
-/** The process facts the resolver reads, injectable so a test can stand in for a compiled binary. */
 export interface SqliteVecPathContext {
   readonly moduleUrl?: string | undefined;
   readonly execPath?: string | undefined;
@@ -90,47 +82,58 @@ export class SqliteVecPlatformUnsupportedError extends Error {
 }
 
 /**
- * Whether a load failure is the platform refusing extension loading, read by
- * Jev (`engine.state.sqlite-vec-refusal`, batteries/sqlite-vec-refusal.ts):
- * true only on a yes the band allows acting on. The action is recorded.
+ * The platform's refusal, once seen: extension loading is a property of the
+ * SQLite library this process linked, so the second index does not try again.
  */
-async function readsAsPlatformRefusal(message: string): Promise<boolean> {
-  return decisionOrClassic(() => readDecisionPlatformRefusal(message), () => process.platform === 'darwin'
-    && ['not authorized', 'extension loading is disabled', 'extension loading is not supported'].some(text => message.toLowerCase().includes(text)));
+let platformRefusal: string | undefined;
+
+/** SQLite's own compile options: one query on the open handle. A handle that cannot answer says nothing. */
+function extensionLoadingCompiledOut(db: Database): boolean {
+  try {
+    const row = db.query<{ omitted: number }, []>("SELECT sqlite_compileoption_used('OMIT_LOAD_EXTENSION') AS omitted").get();
+    return Number(row?.omitted) === 1;
+  } catch {
+    return false;
+  }
 }
-async function readDecisionPlatformRefusal(message: string): Promise<boolean> {
-  const run = await sqliteVecRefusal.run(
-    judgmentPort(SQLITE_VEC_REFUSAL_SITE),
-    sqliteVecLoadFailureView(message, process.platform, isBundledRun()),
-    { site: SQLITE_VEC_REFUSAL_SITE },
-  );
-  const refuses = run.readings.platform_refuses;
-  const platformLimit = refuses.verdict === 'yes' && refuses.outcome === 'act';
-  run.recordAction(platformLimit ? 'platform-limit' : 'rethrown');
-  return platformLimit;
+
+/** Facts the classification reads, injectable so a test can stand in for another platform. */
+export interface SqliteVecLoadContext {
+  readonly platform?: NodeJS.Platform | undefined;
 }
 
 /**
  * Loads the sqlite-vec extension into a Bun SQLite database.
  * Handles both bundled-binary and development execution contexts.
  *
- * Throws SqliteVecPlatformUnsupportedError when the platform itself refuses
- * extension loading (see the class doc); rethrows everything else untouched.
- * The refusal is read by Jev only when loading fails.
+ * Decided in code, with no model request: an extension that cannot be found
+ * (no co-located file in a compiled binary, no `sqlite-vec` package in
+ * development) is a packaging defect and is thrown as it is. A found extension
+ * that the library refuses to load is the platform's limit when SQLite says it
+ * was compiled without extension loading, or on macOS, whose system SQLite
+ * (linked by a compiled binary) disables it; that throws
+ * SqliteVecPlatformUnsupportedError. Anything else is rethrown untouched.
  */
-export async function loadSqliteVecExtension(db: Database): Promise<void> {
+export function loadSqliteVecExtension(db: Database, context: SqliteVecLoadContext = {}): void {
+  if (platformRefusal !== undefined) throw new SqliteVecPlatformUnsupportedError(platformRefusal);
   const bundledPath = resolveSqliteVecPath();
+  if (bundledPath && !existsSync(bundledPath)) {
+    throw new Error(`the sqlite-vec extension is missing from this install (expected at ${bundledPath}); reinstall to restore semantic search.`);
+  }
+  const load = bundledPath ? (target: Database) => target.loadExtension(bundledPath) : requireSqliteVecLoad();
   try {
-    if (bundledPath) {
-      db.loadExtension(bundledPath);
-    } else {
-      requireSqliteVecLoad()(db);
-    }
+    load(db);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    if (await readsAsPlatformRefusal(message)) {
+    if (extensionLoadingCompiledOut(db) || (context.platform ?? process.platform) === 'darwin') {
+      platformRefusal = message;
       throw new SqliteVecPlatformUnsupportedError(message);
     }
     throw err;
   }
+}
+
+/** Tests forget a refusal recorded by an earlier case. */
+export function forgetSqliteVecPlatformRefusal(): void {
+  platformRefusal = undefined;
 }

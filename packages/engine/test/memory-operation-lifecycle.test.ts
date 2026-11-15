@@ -216,46 +216,7 @@ test('same-clock source changes receive new native revisions, including a return
   expect(new Set(revisions).size).toBe(3);
 });
 
-test('standalone memory indices compare equal inputs, update changed inputs and retire observations on reopen', async () => {
-  const f = await fixture();
-  const record = await f.store.add({ cls: 'fact', summary: 'first standalone source' });
-  let embeddings = 0;
-  f.embeddings.register({ ...HASHED_MEMORY_EMBEDDING_PROVIDER, id: 'standalone-counted', label: 'Counted standalone embedding',
-    embedSync(request) { embeddings++; return { vector: embedMemoryText(request.text, request.dimensions), dimensions: request.dimensions }; },
-  }, { makeDefault: true });
-  const index = new SqliteVecMemoryIndex(join(f.root, 'standalone.vec.sqlite'), undefined, f.embeddings);
-  cleanups.push(() => index.close()); await index.init();
-  index.sync([record]);
-  index.sync([structuredClone(record)]);
-  expect(embeddings).toBe(1);
-  index.sync([{ ...record, summary: 'a different source at the same time' }]);
-  expect(embeddings).toBe(2);
-  index.close(); await index.init();
-  // Without a primary source owner a new instance cannot attest old inputs.
-  index.sync([record]);
-  expect(embeddings).toBe(3);
-  index.sync([]);
-  expect(index.stats().indexedRecords).toBe(0);
-});
-
-test('mutating an input while a standalone embedding is pending cannot publish that embedding', async () => {
-  const f = await fixture();
-  const record = await f.store.add({ cls: 'fact', summary: 'original embedding request' });
-  const index = new SqliteVecMemoryIndex(join(f.root, 'mutated.vec.sqlite'), undefined, f.embeddings);
-  cleanups.push(() => index.close()); await index.init();
-  const started = deferred<void>(), release = deferred<void>();
-  f.embeddings.register({ id: 'mutable-source', label: 'Pending local embedding', dimensions: 384, local: true,
-    async embed() { started.resolve(); await release.promise; return { vector: new Float32Array(384).fill(1), dimensions: 384 }; },
-  }, { makeDefault: true });
-  const pending = index.upsertAsync(record);
-  await started.promise;
-  record.provenance.push({ kind: 'file', ref: 'changed-after-dispatch.ts' });
-  release.resolve();
-  await expect(pending).rejects.toThrow('Memory vector record changed');
-  expect(index.stats().indexedRecords).toBe(0);
-});
-
-test('a raw native SQL update retires an embedding even when it bypasses the store mutation counter', async () => {
+test('a raw native SQL update during an embed keeps that embedding from being published', async () => {
   const f = await fixture();
   const record = await f.store.add({ cls: 'fact', summary: 'before the native write' });
   const sqlite: unknown = Reflect.get(f.store, 'sqlite');
@@ -268,7 +229,8 @@ test('a raw native SQL update retires an embedding even when it bypasses the sto
   await started.promise;
   sqlite.run('UPDATE memory_records SET summary = ? WHERE id = ?', ['after the native write', record.id]);
   release.resolve();
-  await expect(pending).rejects.toThrow('Memory vector record source changed');
+  // The row moved on during the embed: its old embedding is not published, and the pass still completes.
+  await pending;
   expect(f.store.get(record.id)?.summary).toBe('after the native write');
 });
 

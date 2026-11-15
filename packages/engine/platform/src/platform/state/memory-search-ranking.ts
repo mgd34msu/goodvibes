@@ -103,7 +103,20 @@ async function rerankDecisionRetrieved(query: string, retrieved: readonly Memory
 /** The two retrieval paths a semantic search ranks over; MemoryStore provides both. */
 export interface SemanticRetrieval {
   retrieve(filter: MemorySearchFilter, options?: MemoryOperationOptions): MemoryRecord[];
-  semanticCandidates(filter: MemorySearchFilter, options?: MemoryOperationOptions): MemorySemanticSearchResult[];
+  semanticCandidates(filter: MemorySearchFilter, options?: MemoryOperationOptions): Promise<MemorySemanticSearchResult[]>;
+}
+
+/**
+ * The lexical path when the vector index returns nothing (no index, or the
+ * query embed failed): the filter's records that share a word with the query,
+ * most shared words first. A sentence is matched word by word, not as one
+ * substring.
+ */
+function lexicalCandidates(store: SemanticRetrieval, filter: MemorySearchFilter, query: string, operation: MemoryOperationOptions): Array<{ readonly record: MemoryRecord; readonly overlap: number }> {
+  return store.retrieve({ ...filter, query: undefined, semantic: false, limit: undefined }, operation)
+    .map((record) => ({ record, overlap: classicLexicalOverlap(query, JSON.stringify(rerankContent(record))) }))
+    .filter((entry) => entry.overlap > 0)
+    .sort((a, b) => b.overlap - a.overlap);
 }
 
 /**
@@ -114,18 +127,18 @@ export interface SemanticRetrieval {
  *
  * With no query there is nothing to rank against: records come back in
  * retrieval order with `score` = the record's confidence. When the index
- * returns nothing the literal search runs instead, reranked, with similarity
- * 0; records past its shortlist carry no reading and score 0.
+ * returns nothing the lexical path runs instead (records sharing a word with
+ * the query), reranked, with similarity 0; records past its shortlist carry no
+ * reading and score 0.
  */
 export async function rankSemanticSearch(store: SemanticRetrieval, filter: MemorySearchFilter, options?: MemoryOperationOptions): Promise<MemorySemanticSearchResult[]> {
-  return decisionOrClassic(() => rankDecisionSemanticSearch(store, filter, options), () => {
+  return decisionOrClassic(() => rankDecisionSemanticSearch(store, filter, options), async () => {
     const operation = captureMemoryOperation(options);
     assertMemoryOperationCurrent(operation);
-    const candidates = store.semanticCandidates(filter, operation);
+    const candidates = await store.semanticCandidates(filter, operation);
     const result = candidates.length ? candidates.map(entry => ({ ...entry, provenance: 'classic' as const, scoreSource: 'vector-similarity' as const, score: entry.similarity * 100 }))
-      : store.retrieve({ ...filter, semantic: false, limit: undefined }, operation).map(record => ({ record,
-        distance: Number.POSITIVE_INFINITY, similarity: 0,
-        score: classicLexicalOverlap(filter.query ?? '', JSON.stringify(rerankContent(record))) * 100,
+      : lexicalCandidates(store, filter, filter.query?.trim() ?? '', operation).map(({ record, overlap }) => ({ record,
+        distance: Number.POSITIVE_INFINITY, similarity: 0, score: overlap * 100,
         provenance: 'classic' as const, scoreSource: 'literal-overlap' as const }));
     assertMemoryOperationCurrent(operation);
     const sorted = result.sort((a, b) => b.score - a.score);
@@ -146,9 +159,10 @@ async function rankDecisionSemanticSearch(store: SemanticRetrieval, filter: Memo
     }));
   }
 
-  const candidates = store.semanticCandidates(filter, operation);
+  const candidates = await awaitMemoryOperation(() => store.semanticCandidates(filter, operation), operation);
   if (candidates.length === 0) {
-    const ranked = await awaitMemoryOperation(() => rerankDecisionRetrieved(query, store.retrieve({ ...filter, semantic: false, limit: undefined }, operation), filter.limit, operation), operation);
+    const lexical = lexicalCandidates(store, filter, query, operation).map((entry) => entry.record);
+    const ranked = await awaitMemoryOperation(() => rerankDecisionRetrieved(query, lexical, filter.limit, operation), operation);
     const results = ranked.map(({ record, probability }) => ({
       record,
       distance: Number.POSITIVE_INFINITY,

@@ -1,14 +1,6 @@
 /**
- * approvals.ts, unit coverage for the decision-trail helpers.
- *
- * The platform's approval record carries a required `audit` array
- * (SharedApprovalAuditRecord, packages/engine/platform/src/platform/control-plane/
- * approval-broker.ts) that this client's hand-typed ApprovalRecord previously
- * omitted entirely. `audit` is optional on this client's type because
- * invokeMethod reads the wire response as-is with no runtime schema
- * validation, a mixed-version or pre-audit daemon record may genuinely omit
- * it, and that must read as "no trail recorded", never as an error or a
- * fabricated one.
+ * approvals.ts, unit coverage for the decision-trail helpers. The approval record is
+ * the contract's, which carries a required `audit` array.
  */
 import { describe, expect, test } from 'bun:test';
 import type { ApprovalActionResult, ApprovalAuditRecord, ApprovalRecord } from './goodvibes';
@@ -40,6 +32,7 @@ function baseRecord(overrides: Partial<ApprovalRecord> = {}): ApprovalRecord {
     createdAt: 100,
     updatedAt: 100,
     metadata: {},
+    audit: [],
     ...overrides,
   };
 }
@@ -51,12 +44,6 @@ describe('auditTrail', () => {
       { id: 'a2', action: 'approved', actor: 'operator', createdAt: 110 },
     ];
     expect(auditTrail(baseRecord({ audit }))).toEqual(audit);
-  });
-
-  test('returns an empty array (never undefined/null) when audit is absent', () => {
-    const record = baseRecord();
-    expect('audit' in record).toBe(false);
-    expect(auditTrail(record)).toEqual([]);
   });
 
   test('returns an empty array when audit is present but empty', () => {

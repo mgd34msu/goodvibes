@@ -20,7 +20,7 @@ function node(partial: Partial<FleetProcessNode> & { id: string }): FleetProcess
 function approval(partial: Partial<ApprovalRecord> & { id: string }): ApprovalRecord {
   return {
     callId: 'c', status: 'pending', createdAt: 1_700_000_000_000, updatedAt: 1_700_000_000_000, metadata: {},
-    request: { callId: 'c', tool: 'bash', args: { command: 'bun test' }, category: 'shell', analysis: { riskLevel: 'medium', summary: 'run the tests', reasons: [] } },
+    request: { callId: 'c', tool: 'bash', args: { command: 'bun test' }, category: 'execute', analysis: { riskLevel: 'medium', summary: 'run the tests', reasons: [] } },
     ...partial,
   } as ApprovalRecord;
 }
@@ -72,7 +72,7 @@ describe('grouping', () => {
   });
 
   test('kinds: sessions, agents and processes filter separately', () => {
-    const task: RuntimeTaskSummary = { id: 't1', kind: 'exec', title: 'Build', status: 'running', owner: 'me', queuedAt: 1 };
+    const task: RuntimeTaskSummary = { id: 't1', kind: 'exec', title: 'Build', status: 'running', owner: 'me', cancellable: false, childTaskIds: [], queuedAt: 1 };
     const hosted = { id: 'h1', title: 'Hosted one', status: 'idle', workspaceRoot: '/w', turnCount: 1, messageCount: 1, updatedAt: 1, effectiveDetachPolicy: 'kill', attachedClients: [] } as unknown as HostedSessionRecord;
     const watch = { id: 'w1', repo: 'o/r', prNumber: 7, deliveryChannel: 'slack', triggerFixSession: false, createdAt: 1, lastOverall: 'failed' } as unknown as CiWatch;
     const items = buildWorkItems({

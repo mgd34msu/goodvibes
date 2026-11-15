@@ -17,6 +17,7 @@ function record(status: ApprovalRecord['status']): ApprovalRecord {
     createdAt: 100,
     updatedAt: 100,
     metadata: {},
+    audit: [],
   };
 }
 

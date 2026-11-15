@@ -376,12 +376,13 @@ describe('approvalsForNode (WEBUI-FLEET-DEPTH: "approve from the tree")', () => 
         callId: `call-${overrides.id}`,
         tool: 'bash',
         args: {},
-        category: 'shell',
+        category: 'execute',
         analysis: { classification: 'x', riskLevel: 'medium', summary: 'x', reasons: [] },
       },
       createdAt: 1,
       updatedAt: 1,
       metadata: {},
+      audit: [],
       ...overrides,
     };
   }

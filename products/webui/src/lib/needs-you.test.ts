@@ -20,7 +20,7 @@ function node(partial: Partial<FleetProcessNode> & { id: string }): FleetProcess
 function approval(partial: Partial<ApprovalRecord> & { id: string }): ApprovalRecord {
   return {
     callId: 'c', status: 'pending', createdAt: 1_700_000_000_000, updatedAt: 1_700_000_000_000, metadata: {},
-    request: { callId: 'c', tool: 'bash', args: {}, category: 'shell', analysis: { riskLevel: 'medium', summary: 'run', reasons: [] } },
+    request: { callId: 'c', tool: 'bash', args: {}, category: 'execute', analysis: { riskLevel: 'medium', summary: 'run', reasons: [] } },
     ...partial,
   } as ApprovalRecord;
 }

@@ -91,10 +91,9 @@ import type {
   SessionsHostedKillResult,
 } from './contract-bridge-types';
 
-// Re-exported so existing consumers (lib/fleet.ts, lib/checkpoints.ts, FleetView.tsx,
-// WorkstreamView.tsx, CheckpointsView.tsx, ...) keep importing these names from
-// './goodvibes' unchanged, the byte-compatible facade covers types, not just the `platform`
-// object. Definitions live in contract-bridge-types.ts (the pin-bump swap seam).
+// Re-exported so consumers (lib/fleet.ts, lib/checkpoints.ts, FleetView.tsx, ...) import
+// every wire type from './goodvibes'. Definitions live in contract-bridge-types.ts, as
+// aliases of the generated contract.
 export type {
   ContractsListInput,
   ContractsListResult,
@@ -159,17 +158,12 @@ export type {
 };
 
 /**
- * One undelivered daemon receipt, served by control.status only when called
- * with { receipts: 'consume' }. The daemon pre-renders the human line (a crash
- * restart, a self-update, a migration) in `text`; the webui renders it verbatim
- * as a one-line dismissible notice, no client-side kind logic. `at` is the
- * epoch-ms the event happened; `id` is the stable dedupe key.
+ * One undelivered daemon receipt, served by control.status only when called with a
+ * `receipts` mode. The daemon pre-renders the human line (a crash restart, a
+ * self-update, a migration) in `text`; the webui renders it verbatim as a one-line
+ * dismissible notice. `at` is the epoch-ms the event happened; `id` is the dedupe key.
  */
-export interface DaemonReceipt {
-  readonly id: string;
-  readonly text: string;
-  readonly at: number;
-}
+export type DaemonReceipt = NonNullable<OperatorMethodOutput<'control.status'>['receipts']>[number];
 
 /** Names an object type declares, leaving out an index signature such as the `[key: string]: unknown` the generated inputs carry. */
 type DeclaredKeys<T> = keyof { [K in keyof T as string extends K ? never : number extends K ? never : K]: T[K] };
@@ -215,19 +209,16 @@ interface RequestOptions {
  * reachable only through the generic gateway-method invoke endpoint, come from the
  * contract-emitted facade artifact (@goodvibes-jev/engine/contracts/generated/webui-facade):
  * WEBUI_METHOD_ROUTES (every REST-routed method id → route). The ergonomic layer below
- * (the platform.operator.* call shapes, typed I/O, error normalization, auth handling, and the
- * routedFetch relay integration) stays hand-written on top, that split is the design.
+ * (the platform.operator.* call shapes, error normalization, auth handling, and the
+ * routedFetch relay integration) stays hand-written on top; every request and reply type
+ * is the generated contract's.
  *
  * EXTRA_METHOD_ROUTES is DERIVED (buildExtraMethodRoutes): WEBUI_METHOD_ROUTES minus every
- * id the pinned browser platform route maps already cover (those resolve natively through
+ * id the browser platform route maps already cover (those resolve natively through
  * scopedPlatform.operator.invoke, the no-route fall-through in invokeOperator below). No route
  * path or http method is written by hand here, the drift test in goodvibes.test.ts pins
  * this table against the generated artifact so a hand-written row can never shadow or
- * diverge from a generated one. (Until the 2.0.0 re-pin this table also carried three
- * hand-written models.* rows, models.list/models.current/models.select were absent from
- * the operator contract entirely. The 2.0.0 contract now carries real models.list /
- * models.current.get / models.current.set entries with real REST bindings, so those rows
- * are gone and models.* flows through WEBUI_METHOD_ROUTES like everything else below.)
+ * diverge from a generated one.
  *
  * The retirement invariant the previous hand-table documented still holds structurally:
  * sessions.get / steer / followUp / messages.* / inputs.* are covered by the browser platform
@@ -241,8 +232,8 @@ interface RequestOptions {
 // REST row (the fall-through carries the scoped transport: relay, auth, observer, SSE).
 // KNOWLEDGE_BROWSER_ROUTES is a public runtime export; SHARED_BROWSER_ROUTES is not, so its
 // ids are listed here and pinned to the platform's own BrowserKnowledgeMethodId type by
-// SHARED_COVERAGE_IS_COMPLETE below, a pin bump that adds a browser-covered method this
-// list has not accounted for stops the build until the list is updated.
+// SHARED_COVERAGE_IS_COMPLETE below: a browser-covered method this list has not accounted
+// for stops the build until the list is updated.
 const SHARED_BROWSER_METHOD_IDS = [
   'accounts.snapshot',
   'control.auth.current',
@@ -638,46 +629,17 @@ void PROFILE_FORGET_BODY_IS_ACCEPTED;
 
 /**
  * invokeGatewayMethod, typed direct call to the generic invoke-by-id endpoint
- * (POST /api/control-plane/methods/{methodId}/invoke), mirroring the platform's
- * own `invokeVerb` test helper (test/w3-s2-fleet-checkpoints-search.test.ts).
+ * (POST /api/control-plane/methods/{methodId}/invoke).
  *
- * WHY THIS EXISTS: fleet.*, checkpoints.*, and sessions.search are
- * registered with `transport: ['ws']` and NO `http` route binding
- * (method-catalog-fleet.ts / session-search.ts), they are reachable ONLY through this
- * generic invoke mechanism, not through scopedPlatform.operator.invoke (which resolves
- * against the fixed SHARED_BROWSER_ROUTES/KNOWLEDGE_BROWSER_ROUTES tables baked into the
- * browser platform build and has no entries for these verbs) and not through
- * EXTRA_METHOD_ROUTES (built for REST-shaped path-param routes, which these verbs don't
- * have).
+ * WHY THIS EXISTS: fleet.*, checkpoints.*, push.*, pairing.* and the other ws-only verbs
+ * have NO `http` route binding, so they are reachable ONLY through this generic invoke
+ * mechanism, not through scopedPlatform.operator.invoke (fixed browser route tables) and
+ * not through EXTRA_METHOD_ROUTES (REST routes only).
  *
- * TYPED BY THE CONTRACT ID: `methodId: TMethodId extends OperatorMethodId`, these ids
- * ARE in the installed union (operator-method-ids.ts lists fleet.*, checkpoints.*,
- * sessions.search, sessions.detach). `body` is constrained to
- * `OperatorMethodInput<TMethodId>`.
- *
- * WHAT THAT CONSTRAINT MEANS CHANGED AT THE 1.19.1 RE-PIN, and this comment used to
- * say the opposite. It read: "`OperatorMethodInput<TMethodId>` today resolves to the
- * generic `{ [k: string]: unknown }` fallback for this family (no
- * `OperatorMethodInputMap` entry yet), every bridge input type is a plain object with
- * an optional-properties shape, which IS assignable to that index signature, so no cast
- * is needed at any call site." That fallback is gone. `OperatorMethodInput` is now a
- * plain indexed access, `OperatorMethodInputMap[TMethodId]`, every catalogued verb has
- * a rendered entry, and those entries carry their real `required` arrays.
- *
- * Measured against the installed 1.19.1 rather than estimated: this function is called
- * with 41 distinct method ids, and 25 of them now enforce at least one field that was
- * previously unenforced (checkpoints.create's `kind`, rewind.apply/plan's `sessionId`
- * and `scope`, push.subscriptions.reconcile's `deviceId`/`endpoint`/`keys`, and so on).
- * No call site needed a fix and no bridge type needed widening, because the bridge
- * types in contract-bridge-types.ts are already aliases OF `OperatorMethodInput<...>`
- * rather than hand-written optional-field copies, so the newly-required fields arrived
- * through them automatically, and every wrapper below already supplies them (mostly by
- * taking them as mandatory function parameters). That is a property worth stating
- * because it is not obvious from the diff: the re-pin was silent here on purpose, not
- * by luck, and the way to keep it silent is to keep those bridges as aliases.
- *
- * TOutput still has no useful default for the ids whose OutputMap entry is `unknown`,
- * so most call sites below supply the real result shape explicitly.
+ * `body` is the contract's input for the id and the reply defaults to its output, so a
+ * catalog change to any of these verbs fails this app's compile. Keep the wrappers'
+ * parameter types as aliases of the contract (contract-bridge-types.ts does), so a newly
+ * required field arrives through them instead of being hidden by a hand-written copy.
  */
 async function invokeGatewayMethod<TMethodId extends OperatorMethodId, TOutput = OperatorMethodOutput<TMethodId>>(
   methodId: TMethodId,
@@ -701,30 +663,22 @@ async function readContractMethod<M extends 'contracts.list' | 'contracts.get'>(
   return requestJson(path, { method: route.method, query: rest, signal });
 }
 
-// ─── Approvals (approvals.*, per-hunk selection) ─────────────────────
+// ─── Wire shapes ─────────────────────────────────────────────────────────────
 //
-// UNLIKE fleet.*/checkpoints.* (contract-bridge-types.ts), approvals.* HAS real,
-// generated OperatorMethodInputMap/OutputMap coverage today (foundation-client-
-// types.ts), every interface below was cross-checked field-by-field against
-// OperatorMethodOutputMap['approvals.list'/'approvals.approve'] and is a safe
-// SUPERSET or an intentional, permanent (not pin-bump-pending) divergence from it:
-//   - `status`/`request.category`/etc. are kept as open `string`s here rather than
-//     the contract's closed literal unions, the same defensive-parsing stance
-//     lib/fleet.ts documents for kind/state ("a daemon newer than this client may
-//     introduce a value we have never seen. Render it verbatim, never drop it").
-//   - `ApprovalRecord.audit` stays OPTIONAL here (the contract requires it), this
-//     client never runtime-validates the wire response (see `invokeOperator`), so
-//     a mixed-version/pre-audit record may genuinely omit it; approvals.test.ts
-//     pins a fixture that omits `audit` on purpose.
-// Because of these deliberate divergences, invokeOperator's approvals.* calls
-// below pass explicit TOutput overrides rather than the contract defaults. The
-// approve body is the contract's own input (approveInput below).
+// Every request and reply shape below is the generated contract's, named for the views
+// that import it. A local type exists only where it narrows the contract (a literal
+// `confirm: true`, a required field the contract leaves optional) or adds what the
+// published schema does not carry yet, and each one says which.
+
+/** `Omit` that keeps the declared names of an open generated object (one with an index signature). */
+type OmitDeclared<T, K extends PropertyKey> = Pick<T, Exclude<DeclaredKeys<T>, K>>;
+
+// ─── Approvals (approvals.*) ─────────────────────────────────────────────────
 
 /**
- * One edit hunk of an `edit`-tool approval's `request.args.edits` array.
- * Mirrors the platform's EditHunkLike (approval-hunk-apply.ts), path/find/replace
- * plus an optional stable id. Read defensively (see lib/approvals.ts): a
- * request whose args are not edit-shaped simply has no hunks to render.
+ * One edit hunk of an `edit`-tool approval's `request.args.edits` array, as the
+ * platform's approval-hunk-apply.ts reads it (lib/approvals.ts). A request whose args
+ * are not edit-shaped has no hunks to render.
  */
 export interface ApprovalEditHunk {
   readonly path: string;
@@ -733,71 +687,14 @@ export interface ApprovalEditHunk {
   readonly id?: string;
 }
 
-export interface ApprovalAnalysis {
-  readonly classification: string;
-  readonly riskLevel: string;
-  readonly summary: string;
-  readonly reasons: readonly string[];
-  readonly target?: string;
-  readonly targetKind?: string;
-  readonly surface?: string;
-  readonly blastRadius?: string;
-  readonly sideEffects?: readonly string[];
-  readonly host?: string;
-}
+type ContractApprovalRecord = OperatorMethodOutput<'approvals.list'>['approvals'][number];
+type ContractApprovalRequest = ContractApprovalRecord['request'];
 
 /**
- * Attribution for a permission ask that did not originate from the foreground
- * turn loop, the platform's `PermissionAttribution` discriminated union (platform/
- * permissions/prompt.ts). Populated when a background/subagent tool call, an
- * MCP server's elicitation request, or a sandboxed exec's host-access
- * escalation brokers an ask, so a surface can render "who/what is asking"
- * instead of an anonymous prompt. Absent on foreground asks (the common case).
- *
- * Not in the generated OperatorMethodOutputMap['approvals.list'/'approve']
- * shape (the operator contract's PERMISSION_PROMPT_REQUEST_SCHEMA is a stale,
- * closed `additionalProperties: false` doc that predates this field), but the
- * daemon's `/api/approvals*` routes serialize the ApprovalBroker's
- * SharedApprovalRecord directly (`Response.json({ approval })` /
- * `Response.json({ approvals })`, no schema-driven stripping), so a real
- * `request.attribution` genuinely reaches this client when the daemon
- * populates one. Same known-divergence pattern as `ApprovalDecision.
- * modifiedArgs` above.
- */
-export type ApprovalAttribution =
-  | BackgroundAgentAttribution
-  | McpServerAttribution
-  | SandboxEscalationAttribution
-  | ExecPromptAttribution;
-
-/** A background/subagent tool call brokered an ask on behalf of a spawned agent. */
-export interface BackgroundAgentAttribution {
-  readonly kind: 'background-agent';
-  readonly agentId: string;
-  readonly template?: string;
-}
-
-/** An MCP server's `elicitation/create` request, routed through the approval broker. */
-export interface McpServerAttribution {
-  readonly kind: 'mcp-server';
-  readonly serverName: string;
-}
-
-/** A sandboxed exec's ask for host access it would not otherwise have (e.g. network). */
-export interface SandboxEscalationAttribution {
-  readonly kind: 'sandbox-escalation';
-  readonly sandbox: string;
-  readonly escalations: readonly string[];
-}
-
-/**
- * A RUNNING command blocked on its own terminal (host-key confirm, credential
- * ask, an interactive installer). The platform's exec PTY prompt-answer path
- * (exec-prompt-wiring.ts) turns the detected prompt into an ordinary broker
- * ask with tool 'exec:prompt' and this attribution; an approval whose
- * decision carries `modifiedArgs.answer` (a string) feeds that text to the
- * waiting child, a deny (or an answer-less approve) stops the run honestly
- * with the prompt text on the result.
+ * A running command blocked on its own terminal (host-key confirm, credential ask). The
+ * daemon brokers it as an ordinary ask with tool 'exec:prompt'; an approval whose
+ * `modifiedArgs.answer` is a string feeds that text to the waiting child. The published
+ * attribution schema does not list this kind yet, so it is added here.
  */
 export interface ExecPromptAttribution {
   readonly kind: 'exec-prompt';
@@ -805,136 +702,33 @@ export interface ExecPromptAttribution {
   readonly prompt: string;
 }
 
-/**
- * One remember-tier choice offered on an ask, buildRememberOptions
- * (approval-rules.ts) generates label/detail from the concrete tool+args, so
- * a surface renders them verbatim rather than re-deriving policy language.
- * Tiers: 'session' (in-memory) | 'exact' | 'command-class' | 'path' | 'tool'
- * (the four durable ones persist as permissions.rules.* records).
- */
-export interface ApprovalRememberOption {
-  readonly tier: string;
-  readonly label: string;
-  readonly detail: string;
-}
-
-export interface ApprovalRequest {
-  readonly callId: string;
-  readonly tool: string;
-  readonly args: Record<string, unknown>;
-  readonly category: string;
-  readonly analysis: ApprovalAnalysis;
-  readonly workingDirectory?: string;
+export type ApprovalAttribution = NonNullable<ContractApprovalRequest['attribution']> | ExecPromptAttribution;
+export type ApprovalAnalysis = ContractApprovalRequest['analysis'];
+export type ApprovalRememberOption = NonNullable<ContractApprovalRequest['rememberOptions']>[number];
+export type ApprovalRequest = OmitDeclared<ContractApprovalRequest, 'attribution'> & {
   readonly attribution?: ApprovalAttribution;
-  /** Remember-tier choices for this ask (PERMISSION_PROMPT_REQUEST_SCHEMA's
-   * rememberOptions). Absent on records from a daemon predating the tiers. */
-  readonly rememberOptions?: readonly ApprovalRememberOption[];
-}
-
-export interface ApprovalDecision {
-  readonly approved: boolean;
-  readonly remember?: boolean;
-  /** How far the decision reached ('session'|'exact'|'command-class'|'path'|'tool').
-   * Stamped on the resolved record by the broker. The UI reports remembering
-   * from the response's `recorded` block (below), which the daemon now returns
-   * authoritatively, this decision snapshot is the back-compat fallback. */
-  readonly rememberTier?: string;
-  /** Free-text feedback; on a deny it rides the structured user-declined result. */
-  readonly reason?: string;
-  readonly modifiedArgs?: Record<string, unknown>;
-}
-
-/**
- * The `recorded` block a resolve response now carries: the daemon's own report
- * of what its broker actually did with the decision fields the route forwarded.
- * This is the authoritative signal the UI trusts, not what the client sent,
- * and not an inference off the returned record. Optional only for back-compat
- * with a daemon predating the block (then the UI falls back to the decision
- * snapshot). Mirrors approvals.approve/deny's contract output `recorded`:
- *   - `rememberTier`, the tier the broker recorded, or null if none.
- *   - `reasonStored`, a deny/approve reason was persisted with the decision.
- *   - `modifiedArgsDelivered`, modifiedArgs (e.g. an exec-prompt answer) reached the run.
- */
-export interface ApprovalRecordedOutcome {
-  readonly approved: boolean;
-  readonly rememberTier: string | null;
-  readonly reasonStored: boolean;
-  readonly modifiedArgsDelivered: boolean;
-}
-
-export type ApprovalStatus = 'pending' | 'claimed' | 'approved' | 'denied' | 'cancelled' | 'expired';
-
-/**
- * One entry in an approval's decision trail, the platform's SharedApprovalAuditRecord
- * (packages/engine/platform/src/platform/control-plane/approval-broker.ts). Appended on every
- * lifecycle transition (created/claimed/approved/denied/cancelled/expired/updated),
- * so a resolved approval's `audit` array is the honest provenance of who did what,
- * from where, and when, not just the final `decision`/`resolvedBy` snapshot.
- */
-export interface ApprovalAuditRecord {
-  readonly id: string;
-  readonly action: 'created' | 'claimed' | 'approved' | 'denied' | 'cancelled' | 'expired' | 'updated';
-  readonly actor: string;
-  readonly actorSurface?: string;
-  readonly createdAt: number;
-  readonly note?: string;
-}
-
-export interface ApprovalRecord {
-  readonly id: string;
-  readonly callId: string;
-  readonly sessionId?: string;
-  readonly routeId?: string;
-  readonly status: ApprovalStatus;
-  readonly request: ApprovalRequest;
-  readonly createdAt: number;
-  readonly updatedAt: number;
-  readonly claimedBy?: string;
-  readonly claimedAt?: number;
-  readonly resolvedAt?: number;
-  readonly resolvedBy?: string;
-  readonly decision?: ApprovalDecision;
-  readonly metadata: Record<string, unknown>;
-  /**
-   * The full decision trail. Optional in this client-side type (rather than
-   * mirroring the platform's required field) because this client reads the wire
-   * response as-is with no runtime schema validation (see `invokeOperator`
-   * below), a mixed-version or pre-audit daemon record may genuinely omit
-   * it. Treat absence as "no trail recorded", never as an error.
-   */
-  readonly audit?: readonly ApprovalAuditRecord[];
-}
-
-export interface ApprovalSnapshotResult {
-  readonly awaitingDecision: boolean;
-  readonly mode: string;
-  readonly approvalCount: number;
-  readonly denialCount: number;
-  readonly cachedChecks: number;
-  readonly totalChecks: number;
+};
+export type ApprovalDecision = NonNullable<ContractApprovalRecord['decision']>;
+export type ApprovalStatus = ContractApprovalRecord['status'];
+export type ApprovalAuditRecord = ContractApprovalRecord['audit'][number];
+export type ApprovalRecord = OmitDeclared<ContractApprovalRecord, 'request'> & { readonly request: ApprovalRequest };
+/** What the broker recorded for the decision: the tier, whether the reason was stored, whether modifiedArgs reached the run. */
+export type ApprovalRecordedOutcome = NonNullable<OperatorMethodOutput<'approvals.approve'>['recorded']>;
+export type ApprovalSnapshotResult = OmitDeclared<OperatorMethodOutput<'approvals.list'>, 'approvals'> & {
   readonly approvals: readonly ApprovalRecord[];
-}
-
-export interface ApprovalActionResult {
+};
+/** The reply of approvals.approve, deny, claim and cancel (one shape for all four). */
+export type ApprovalActionResult = OmitDeclared<OperatorMethodOutput<'approvals.approve'>, 'approval'> & {
   readonly approval: ApprovalRecord;
-  /** The daemon's authoritative report of what it recorded (see
-   * ApprovalRecordedOutcome). Absent only from a daemon predating the block. */
-  readonly recorded?: ApprovalRecordedOutcome;
-  /** False when the decision arrived after the record had already settled and nothing changed. */
-  readonly applied?: boolean;
-  /** Why an unapplied decision changed nothing, in the daemon's words. */
-  readonly refusal?: string;
-}
+};
 
 /**
- * Optional per-hunk selection for `approvals.approve`. Omitting
- * `selectedHunks` approves the whole request (back-compat); when present the
- * DAEMON filters the approval's own edit list to those indices server-side
- * (approval-hunk-apply.ts) so every surface (TUI, webui) produces identical
- * modified-edit args, the webui only ever sends indices, never a computed diff.
+ * Optional per-hunk selection and remember tier for `approvals.approve`. Omitting
+ * `selectedHunks` approves the whole request; when present the daemon filters the
+ * approval's own edit list to those indices, so the web UI only ever sends indices.
  */
 export type ApprovalApproveInput = Omit<OperatorMethodInput<'approvals.approve'>, 'approvalId' | 'rememberTier'> & {
-  /** A tier from the approval's own remember options (an open string on the record); checked against the contract's tiers before sending. */
+  /** A tier from the approval's own remember options; checked against the contract's tiers before sending. */
   readonly rememberTier?: string;
 };
 
@@ -950,215 +744,76 @@ function approveInput(approvalId: string, input: ApprovalApproveInput = {}): Ope
   return { ...rest, approvalId, rememberTier: tier };
 }
 
-/** Optional deny payload: `note` rides the audit trail; `reason` is the
- * broker's structured user-declined feedback field. The route now forwards
- * both and reports persistence via `recorded.reasonStored`. */
-export interface ApprovalDenyInput {
-  readonly note?: string;
-  readonly reason?: string;
-}
+/** Optional deny payload: `note` rides the audit trail; `reason` is the broker's structured user-declined feedback. */
+export type ApprovalDenyInput = Pick<OperatorMethodInput<'approvals.deny'>, 'note' | 'reason'>;
 
-/** One durable approval rule (permissions.rules.list), a remembered decision
- * at a generalizing tier, project-scoped, write-only from decisions (never
- * minted over the wire). Deleting a grant makes matching asks prompt again. */
-export interface PermissionRuleRecord {
-  readonly id: string;
-  readonly effect: 'allow' | 'deny';
-  readonly tier: string;
-  readonly tool: string;
-  readonly description?: string;
-  readonly createdAt: number;
-}
+/** One durable approval rule (permissions.rules.list): a remembered decision at a generalizing tier. Deleting it makes matching asks prompt again. */
+export type PermissionRuleRecord = OperatorMethodOutput<'permissions.rules.list'>['rules'][number];
 
-// ─── Tasks (tasks.*) ─────────────────────────────────────────────────────────
-//
-// tasks.create/cancel/retry have no known divergence from the generated contract
-// (ApprovalsTasksView.test.tsx exercises them without relying on any field the
-// contract omits), so their input/output alias OperatorMethodInput/Output directly.
-// tasks.list's item shape needs one addition the generated map does not carry,
-// `cancellable` (ApprovalsTasksView.tsx reads it to gate the Cancel button; the
-// contract's tasks.list item omits it even though tasks.cancel/get's richer task
-// shape does not carry it either), so RuntimeTaskSummary/TaskSnapshotResult stay
-// local, with the divergence named here rather than silently re-added.
+// ─── Tasks and watchers ──────────────────────────────────────────────────────
 
-export interface RuntimeTaskSummary {
-  readonly id: string;
-  readonly kind: string;
-  readonly title: string;
-  readonly status: string;
-  readonly owner: string;
-  /** Not in OperatorMethodOutputMap['tasks.list']'s item shape, a known, tested
-   * client-side addition (ApprovalsTasksView.test.tsx: "cancel is offered only for
-   * a cancellable task"). */
-  readonly cancellable?: boolean;
-  readonly parentTaskId?: string;
-  readonly queuedAt: number;
-  readonly startedAt?: number;
-  readonly endedAt?: number;
-  readonly error?: string;
-}
-
-export interface TaskSnapshotResult {
-  readonly queued: number;
-  readonly running: number;
-  readonly blocked: number;
-  readonly totals: {
-    readonly created: number;
-    readonly completed: number;
-    readonly failed: number;
-    readonly cancelled: number;
-  };
-  readonly tasks: readonly RuntimeTaskSummary[];
-}
-
+export type TaskSnapshotResult = OperatorMethodOutput<'tasks.list'>;
+export type RuntimeTaskSummary = TaskSnapshotResult['tasks'][number];
 export type TaskActionResult = OperatorMethodOutput<'tasks.cancel'>;
 export type TaskCreateInput = OperatorMethodInput<'tasks.create'>;
 export type TaskCreateResult = OperatorMethodOutput<'tasks.create'>;
+export type WatcherActionResult = OperatorMethodOutput<'watchers.stop'>;
 
-// ─── Watchers (watchers.stop only, WEBUI-FLEET-DEPTH) ────────────────────────
-// CORRECTED AT THE 1.19.1 RE-PIN: this comment used to say watchers.stop "has no
-// OperatorMethodInputMap/OutputMap entry in the installed contracts package". It has
-// one now, every catalogued verb does, and the entry confirms what was hand-authored
-// here: id/kind/label/state, all four required, `kind` and `state` as open strings.
-//
-// Kept as a hand-written SUBSET rather than aliased to OperatorMethodOutput<'watchers.stop'>
-// because the contract's shape carries much more (source, metadata, intervalMs,
-// heartbeat and lag fields) and FleetView reads exactly these four. Typing only what a
-// caller uses is this file's existing stance, and unlike the email/calendar shapes
-// below there is no field here whose absence hid information from a view. If FleetView
-// ever needs the rest, alias the contract type instead of extending this by hand.
-export interface WatcherActionResult {
-  readonly id: string;
-  readonly kind: string;
-  readonly label: string;
-  readonly state: string;
-}
+// ─── Calendar (calendar.*) ───────────────────────────────────────────────────
+// The two writes narrow `confirm` to literal `true`, so a caller cannot pass
+// `confirm: false` and meet the daemon's refusal at run time instead.
 
-/**
- * Calendar (calendar.*). Every shape is the contract's; the two writes narrow `confirm`
- * to literal `true` so a caller cannot pass `confirm: false` and meet the daemon's
- * refusal at runtime instead.
- */
 export type CalendarEventsListResult = OperatorMethodOutput<'calendar.events.list'>;
 export type CalendarEventSummary = CalendarEventsListResult['events'][number];
 export type CalendarEventsListInput = OperatorMethodInput<'calendar.events.list'>;
-
-export interface CalendarEventDetail extends CalendarEventSummary {
-  readonly uid: string;
-  readonly recurrence?: string;
-}
-
+export type CalendarEventDetail = OperatorMethodOutput<'calendar.events.get'>;
 export type CalendarEventCreateInput = OperatorMethodInput<'calendar.events.create'> & { readonly confirm: true };
-
 export type CalendarEventCreateResult = OperatorMethodOutput<'calendar.events.create'>;
-
 export type CalendarIcsImportInput = OperatorMethodInput<'calendar.ics.import'> & { readonly confirm: true };
-
 export type CalendarIcsImportResult = OperatorMethodOutput<'calendar.ics.import'>;
-
 export type CalendarIcsExportInput = OperatorMethodInput<'calendar.ics.export'>;
-
 export type CalendarIcsExportResult = OperatorMethodOutput<'calendar.ics.export'>;
 
-/**
- * Email (email.*), the daemon's IMAP/SMTP verbs.
- *
- * NO LONGER HAND-AUTHORED, as of the 1.19.1 re-pin. These shapes used to be transcribed
- * field-by-field from the platform's catalog because, as the comment here put it, the ids
- * "have no OperatorMethodInputMap/OutputMap entry, so OperatorMethodInput/Output<'email.*'>
- * would degrade to the generic fallback". They have entries now, so the types below are
- * derived from the contract and the transcription cannot drift from it.
- *
- * The transcription HAD already drifted, in a way that reached the UI: the hand-written
- * inbox-list result declared `messages` and `total` and stopped there, while the
- * contract also carries `unreadable`, the messages the account returned that the daemon
- * could not parse, each with its own reason. MailView could not render what it could not
- * see, so a window in which every message failed to parse displayed as a normal empty
- * inbox. MailView renders that list now (see UnreadableNote there).
- *
- * CAPABILITY REALITY (the reason every view over these renders a not-available state
- * as a first-class outcome rather than an error): all four ship `invokable: false`,
- * and the platform catalog's own comment states there is no /api/email surface on the
- * daemon router at any prefix yet. Cataloged, not served. Identical to how calendar.*
- * shipped, and the honest states are what makes that shippable rather than a dead end.
- */
+// ─── Email (email.*) ─────────────────────────────────────────────────────────
+// `unreadable` lists the messages the daemon could not parse, each with its reason;
+// MailView renders it, so a window where every message failed is not shown as an
+// empty inbox.
+
 export type EmailInboxListInput = OperatorMethodInput<'email.inbox.list'>;
 export type EmailInboxListResult = OperatorMethodOutput<'email.inbox.list'>;
 export type EmailInboxMessage = EmailInboxListResult['messages'][number];
-/**
- * Messages the daemon could not read, each with the reason. Optional on the
- * wire, and the hand-written EmailInboxListResult this replaced omitted it
- * entirely, so the Mail view had no way to tell an operator that part of the
- * inbox failed to load. MailView renders it now.
- */
 export type EmailUnreadableMessage = NonNullable<EmailInboxListResult['unreadable']>[number];
 export type EmailMessageDetail = OperatorMethodOutput<'email.inbox.read'>;
 export type EmailAttachment = NonNullable<EmailMessageDetail['attachments']>[number];
-
 /**
- * `confirm` is required and literal-true: the platform marks email.send `dangerous: true`
- * with the description "Irreversible external send; requires confirm: true and
- * explicit user review of recipients and body." Typing it as the literal rather than
- * `boolean` means a caller cannot forget it or pass false and discover the refusal at
- * runtime, and the view pairs it with a real confirmation sheet, so the flag is
- * never set on the operator's behalf without them having seen the recipients.
+ * email.send is an irreversible external send: `confirm` is literal `true`, and the view
+ * sets it only from a confirmation sheet that showed the recipients.
  */
 export type EmailSendInput = OperatorMethodInput<'email.send'> & { readonly confirm: true };
-
 export type EmailSendResult = OperatorMethodOutput<'email.send'>;
-
-/** Drafts append to the IMAP Drafts folder, distinct from the local channel draft
- * store, and notably NOT gated on a `confirm` flag (nothing leaves the account). */
+/** Drafts append to the account's Drafts folder and need no `confirm`: nothing leaves the account. */
 export type EmailDraftCreateInput = OperatorMethodInput<'email.draft.create'>;
-
 export type EmailDraftCreateResult = OperatorMethodOutput<'email.draft.create'>;
 
-/**
- * SessionDeleteResult, the honest hard-delete outcome shape shared by
- * `operator.sessions.delete` and `chat.sessions.delete`: `deleted: true` means the
- * record and its messages/inputs were actually removed, not merely closed. Neither
- * `sessions.delete` (union) nor a truly-deleting `companion.chat.sessions.delete` has a
- * generated OperatorMethodOutputMap entry in the installed 0.38 contracts yet, so this
- * is a hand-authored local shape, not a contract re-export.
- */
-export interface SessionDeleteResult {
-  readonly sessionId: string;
-  readonly deleted: boolean;
-}
+// ─── Sessions and companion chat ─────────────────────────────────────────────
+
+/** `deleted: true` means the record and its messages were removed, not merely closed. */
+export type SessionDeleteResult = OperatorMethodOutput<'sessions.delete'>;
 
 /**
- * The honest-lineage result of `chat.messages.retry` (regenerate). The prior assistant
- * response, and any turns after it, are SUPERSEDED, retained in the message list and on
- * disk, flagged with `supersededAt`/`supersededReason`, never deleted, and a fresh turn
- * re-runs from the preceding user message. `supersededMessageIds` is the retained-history
- * set the UI surfaces as viewable prior versions; `turnStarted` says whether a new turn
- * is now streaming back. Hand-authored: companion.chat.messages.retry has no generated
- * OperatorMethodOutputMap entry in the installed contracts (its id IS in the union, but
- * the I/O map is not), cross-checked against the platform's method-catalog-control-companion.
+ * Regenerate (companion.chat.messages.retry): the prior response and any turns after it
+ * are superseded, kept and flagged, never deleted; `supersededMessageIds` is that retained
+ * history and `turnStarted` says whether a new turn is streaming back.
  */
-export interface CompanionRegenerateResult {
-  readonly sessionId: string;
-  readonly regeneratedFrom: string;
-  readonly supersededMessageIds: readonly string[];
-  readonly turnStarted: boolean;
-}
+export type CompanionRegenerateResult = OperatorMethodOutput<'companion.chat.messages.retry'>;
 
 /**
- * The honest-lineage result of `chat.messages.edit` (edit-and-branch). The edited user
- * message, and everything after it, are SUPERSEDED (retained history), and a NEW user
- * message carrying `revisionOf` back to the original is appended before a fresh turn
- * answers it. `editedFrom` is the original id (now retained history); `messageId` is the
- * new active user message. Same generated-map gap as CompanionRegenerateResult.
+ * Edit-and-branch (companion.chat.messages.edit): the edited user message and everything
+ * after it are superseded; `messageId` is the new active user message, `editedFrom` the original.
  */
-export interface CompanionEditResult {
-  readonly sessionId: string;
-  readonly editedFrom: string;
-  readonly messageId: string;
-  readonly supersededMessageIds: readonly string[];
-  readonly turnStarted: boolean;
-}
+export type CompanionEditResult = OperatorMethodOutput<'companion.chat.messages.edit'>;
 
-/** Input for `chat.messages.edit`, the user message to edit plus its replacement text. */
+/** Input for `chat.messages.edit`: the replacement text is required here, where the contract also accepts `body` or attachments alone. */
 export interface CompanionEditInput {
   readonly content: string;
   readonly attachments?: readonly { artifactId: string; label?: string }[];
@@ -1179,522 +834,109 @@ export const DEFAULT_SSE_RECONNECT = {
   maxAttempts: 10,
 } as const;
 
-// ─── Memory (memory.records.*, memory.review-queue) ───────────────────────────
-//
-// The canonical, daemon-owned cross-surface memory store's wire shapes, hand-authored
-// because none of these six ids has a generated OperatorMethodInputMap/OutputMap entry
-// yet (see the EXTRA_METHOD_ROUTES comment above). Every field name and requiredness
-// below is cross-checked against the daemon's own schema definitions
-// (operator-contract-schemas-runtime.js: MEMORY_RECORD_SCHEMA,
-// MEMORY_RECORD_SEARCH_OUTPUT_SCHEMA, MEMORY_RECORD_DELETE_OUTPUT_SCHEMA), not guessed.
+// ─── Memory (memory.records.*, memory.review-queue, memory.consolidation.receipts) ──
 
-export type MemoryScope = 'session' | 'project' | 'team';
-export type MemoryClass =
-  | 'decision' | 'constraint' | 'incident' | 'pattern' | 'fact' | 'risk' | 'runbook' | 'architecture' | 'ownership';
-export type MemoryReviewState = 'fresh' | 'reviewed' | 'stale' | 'contradicted';
-export type MemoryProvenanceKind = 'session' | 'turn' | 'task' | 'event' | 'file';
-
-/** VIBE.md persona/preference lines are constraint records tagged with this, see the
- * platform's vibe-projection.ts (VIBE_PERSONA_TAG). There is no `memory.fold`/projection verb
- * on the wire ("fold is NOT on the wire", the brief this view was built from), so this
- * client replicates the same cls+tag test locally rather than deep-importing an
- * internal, non-exported platform module path. See memory-helpers.ts's isPersonaRecord. */
+/** VIBE.md persona/preference lines are constraint records tagged with this (the platform's
+ * vibe-projection.ts VIBE_PERSONA_TAG); memory-helpers.ts's isPersonaRecord applies the same
+ * cls+tag test, since no projection verb is on the wire. */
 export const VIBE_PERSONA_TAG = 'vibe';
 
-export interface MemoryProvenanceLink {
-  readonly kind: MemoryProvenanceKind;
-  readonly ref: string;
-  readonly label?: string;
-}
-
-export interface MemoryRecord {
-  readonly id: string;
-  readonly scope: MemoryScope;
-  readonly cls: MemoryClass;
-  readonly summary: string;
-  readonly detail?: string;
-  readonly tags: readonly string[];
-  readonly provenance: readonly MemoryProvenanceLink[];
-  readonly reviewState: MemoryReviewState;
-  readonly confidence: number;
-  readonly reviewedAt?: number;
-  readonly reviewedBy?: string;
-  readonly staleReason?: string;
-  readonly createdAt: number;
-  readonly updatedAt: number;
-}
-
-export interface MemoryRecordEntityResult {
-  readonly record: MemoryRecord;
-}
+export type MemoryRecordEntityResult = OperatorMethodOutput<'memory.records.get'>;
+export type MemoryRecord = MemoryRecordEntityResult['record'];
+export type MemoryScope = MemoryRecord['scope'];
+export type MemoryClass = MemoryRecord['cls'];
+export type MemoryReviewState = MemoryRecord['reviewState'];
+export type MemoryProvenanceLink = MemoryRecord['provenance'][number];
+export type MemoryProvenanceKind = MemoryProvenanceLink['kind'];
 
 /**
- * The honest search envelope (memory-recall-contract.ts's HonestMemorySearchResult,
- * promoted onto the wire verbatim by memory.records.search). `mode` is the path that
- * ACTUALLY ran ('literal' even when semantic was requested but the index could not be
- * consulted); `indexUnavailableReason` is non-null only in that fallback case and MUST
- * be shown verbatim, never swallowed into a silent empty result. `caveat` is the
- * softer "ran on the hashed-only fallback provider" note. `recallFiltered` /
- * `excludedFlaggedCount` / `excludedBelowFloorCount` / `totalBeforeRecallFilter` are the
- * honesty receipt for the recall-injection contract (only populated when the caller
- * opted into `recall: true`). `recallFloor` is the store's configured recall confidence
- * floor (MIN_PROMPT_MEMORY_CONFIDENCE) this result was judged against, carried on the
- * wire so a surface can state the floor in a label without hardcoding a number that
- * could silently go stale if the store's floor is retuned.
+ * The search reply. `mode` is the path that actually ran ('literal' even when semantic
+ * was asked for but the index could not be consulted), and `indexUnavailableReason` is
+ * then shown verbatim, never swallowed into a silent empty result. The recall fields are
+ * the receipt for `recall: true`; `recallFloor` is the store's confidence floor, so a
+ * label states it without hardcoding a number.
  */
-export interface MemorySearchResult {
-  readonly records: readonly MemoryRecord[];
-  readonly mode: 'literal' | 'semantic';
-  readonly requestedSemantic: boolean;
-  readonly indexUnavailableReason: string | null;
-  readonly caveat: string | null;
-  readonly recallFiltered: boolean;
-  readonly excludedFlaggedCount: number;
-  readonly excludedBelowFloorCount: number;
-  readonly totalBeforeRecallFilter: number;
-  readonly recallFloor: number;
-}
-
-/** Delete-means-delete: an honest boolean, never a 200 that pretends a phantom row was
- * removed (MEMORY_RECORD_DELETE_OUTPUT_SCHEMA, `deleted: false` when nothing existed). */
-export interface MemoryRecordDeleteResult {
-  readonly id: string;
-  readonly deleted: boolean;
-}
-
+export type MemorySearchResult = OperatorMethodOutput<'memory.records.search'>;
+/** `deleted: false` when nothing existed under that id. */
+export type MemoryRecordDeleteResult = OperatorMethodOutput<'memory.records.delete'>;
+/** The contract leaves the queue's items open; they are memory records, which the review views read field by field. */
 export interface MemoryReviewQueueResult {
   readonly records: readonly MemoryRecord[];
 }
 
-// ─── Memory consolidation receipts (memory.consolidation.receipts, platform 1.8.0's
-// consolidation-reaches-the-review-queue work) ──────────────────────────────────
-//
-// What each idle/scheduled consolidation pass scanned, merged, archived, decayed,
-// and, the judgment calls it never makes unilaterally, PROPOSED. A proposal names
-// the record ids it concerns; those records are already marked into the review
-// queue (reviewState set to 'fresh' or 'contradicted' by the pass itself, see
-// packages/engine/platform/src/platform/state/memory-consolidation.ts), so "route to review"
-// here means finding those same ids in the existing review queue, not a separate
-// resolution path. `route` is an internal agent-tool invocation string
-// (`memory action:"curator" ...`), not a browser route, never rendered as a link.
-// A runtime without the consolidation scheduler answers an honest 501
-// (isMethodUnavailableError), which the panel renders as an honest unavailable state.
-export interface MemoryConsolidationProposal {
-  readonly kind: 'contradiction' | 'cross-scope-duplicate' | 'stale-delete';
-  readonly ids: readonly string[];
-  readonly route: string;
-  readonly reason: string;
-}
-export interface MemoryConsolidationRunReceipt {
-  readonly runId: string;
-  readonly ranAt: string;
-  readonly trigger: string;
-  readonly idle: boolean;
-  readonly scanned: number;
-  readonly merged: readonly { readonly survivorId?: string; readonly duplicateIds?: readonly string[] }[];
-  readonly archived: readonly { readonly id?: string; readonly reason?: string }[];
-  readonly decayed: readonly { readonly id?: string; readonly fromConfidence?: number; readonly toConfidence?: number }[];
-  readonly proposed: readonly MemoryConsolidationProposal[];
-  readonly usageSignalAvailable: boolean;
-  readonly note: string;
-}
-export interface MemoryConsolidationReceiptsResult {
-  readonly receipts: readonly MemoryConsolidationRunReceipt[];
-  readonly pendingProposals: readonly MemoryConsolidationProposal[];
-}
+/**
+ * What each consolidation pass scanned, merged, archived, decayed and PROPOSED. A
+ * proposal's records are already in the review queue, so "route to review" means finding
+ * those ids there. `route` is an agent-tool invocation string, never rendered as a link.
+ */
+export type MemoryConsolidationReceiptsResult = OperatorMethodOutput<'memory.consolidation.receipts'>;
+export type MemoryConsolidationRunReceipt = MemoryConsolidationReceiptsResult['receipts'][number];
+export type MemoryConsolidationProposal = MemoryConsolidationReceiptsResult['pendingProposals'][number];
 
 /** `recall: true` applies the recall-injection contract server-side; a browse/review caller leaves it off to see flagged records too. */
 export type MemorySearchInput = OperatorMethodInput<'memory.records.search'>;
-
-
 export type MemoryAddInput = OperatorMethodInput<'memory.records.add'>;
-
-type MemoryRecordUpdateFields = OperatorMethodInput<'memory.records.update'>;
 /** The record's own words and scope, edited in place (memory.records.update); omitted fields stay as they are. */
-export type MemoryUpdateInput = {
-  readonly summary?: MemoryRecordUpdateFields['summary'];
-  readonly detail?: MemoryRecordUpdateFields['detail'];
-  readonly tags?: MemoryRecordUpdateFields['tags'];
-  readonly scope?: MemoryRecordUpdateFields['scope'];
-};
-
-export interface MemoryUpdateReviewInput {
-  readonly state?: MemoryReviewState;
-  readonly confidence?: number;
-  readonly reviewedBy?: string;
-  readonly staleReason?: string;
-}
-
+export type MemoryUpdateInput = Pick<OperatorMethodInput<'memory.records.update'>, 'summary' | 'detail' | 'tags' | 'scope'>;
+export type MemoryUpdateReviewInput = OmitDeclared<OperatorMethodInput<'memory.records.update-review'>, 'id'>;
 export type MemoryReviewQueueInput = OperatorMethodInput<'memory.review-queue'>;
 
-// ─── Web Push (push.*, platform 1.1.0) ────────────────────────────────────
-//
-// The push.* verbs are registered ws-only with NO REST http binding (platform
-// method-catalog-push.ts), exactly like fleet.*/checkpoints.*/sessions.search,
-// so they are reachable ONLY through the generic invoke-by-id endpoint
-// (invokeGatewayMethod), never through scopedPlatform.operator.invoke or an
-// EXTRA_METHOD_ROUTES row. push.* IS in the installed 1.1.0 OperatorMethodId
-// union (OPERATOR_METHOD_IDS), so the method-id strings below typecheck; the
-// generated I/O maps are the generic `unknown` fallback for this family (no
-// OperatorMethodInputMap entry yet), so every call supplies its explicit
-// TOutput shape, cross-checked field-by-field against the platform's own
-// method-catalog-push.ts outputSchema/inputSchema.
-//
-// CUSTODY: the daemon never returns a subscription's capability URL (endpoint)
-// or its key material over the wire, the read shape is the redacted
-// PublicPushSubscription (origin + short hash only). The VAPID private key
-// never leaves the daemon at all. These local types mirror that redaction; the
-// browser holds the full endpoint/keys only transiently, from its own
-// PushManager, to hand to push.subscriptions.create.
+// ─── Web Push (push.*) ───────────────────────────────────────────────────────
+// The daemon never returns a subscription's endpoint or keys: the read shape is the
+// redacted public view (origin and a hash). The browser holds the full endpoint and keys
+// only transiently, from its own PushManager, to hand to push.subscriptions.create.
 
-/** The endpoint's browser-supplied key material (base64url), sent to subscribe. */
-export interface PushSubscriptionKeys {
-  readonly p256dh: string;
-  readonly auth: string;
-}
+export type PushSubscriptionCreateInput = OperatorMethodInput<'push.subscriptions.create'>;
+export type PushSubscriptionKeys = PushSubscriptionCreateInput['keys'];
+/** Reconcile heals the daemon's record for a device it already knows, so `deviceId` is required here. */
+export type PushSubscriptionReconcileInput = OperatorMethodInput<'push.subscriptions.reconcile'>;
+export type PublicPushSubscription = OperatorMethodOutput<'push.subscriptions.list'>['subscriptions'][number];
+/** What reconcile changed: created, endpoint-updated, keys-updated or unchanged. */
+export type PushReconcileDrift = OperatorMethodOutput<'push.subscriptions.reconcile'>['drift'];
 
-/** The redacted, wire-safe view of a stored subscription (no capability URL, no keys). */
-export interface PublicPushSubscription {
-  readonly id: string;
-  readonly principalId: string;
-  /** The device identity this record is reconciled on, when known (platform 1.8.0). */
-  readonly deviceId?: string;
-  readonly endpointOrigin: string;
-  readonly createdAt: number;
-  readonly lastDeliveryAt?: number;
-  readonly lastOutcome?: string;
-  readonly consecutiveFailures?: number;
-}
+// ─── Pairing (pairing.tokens.*, pairing.handoff.*, pairing.posture.get) ──────
+// The literal token string comes back only once, at mint time; list, rename and delete
+// see the redacted view (id, name, timestamps).
 
-/** An honest per-subscription delivery receipt from a verify/test push. */
-export interface PushDeliveryReceipt {
-  readonly subscriptionId: string;
-  readonly endpointOrigin: string;
-  readonly outcome: 'delivered' | 'pruned' | 'failed' | 'skipped';
-  readonly httpStatus?: number;
-  readonly detail?: string;
-}
+export type PublicPairingToken = OperatorMethodOutput<'pairing.tokens.list'>['tokens'][number];
+/** An origin's TLS/capability posture: each browser-gated capability is available or carries the daemon's own reason. */
+export type OriginPosture = OperatorMethodOutput<'pairing.posture.get'>['posture'];
+export type PairingHandoffCompleteInput = OperatorMethodInput<'pairing.handoff.complete'>;
+type PairingHandoffAccept = NonNullable<PairingHandoffCompleteInput['accept']>;
+export type PairingHandoffCompleteNotificationsAccept = NonNullable<PairingHandoffAccept['notifications']>;
+export type PairingHandoffCompletePasskeyAccept = NonNullable<PairingHandoffAccept['passkey']>;
+/** One accepted offer's outcome, never silently half-applied. */
+export type PairingHandoffOutcome = OperatorMethodOutput<'pairing.handoff.complete'>['results'][number];
 
-export interface PushVapidKeyResult {
-  readonly publicKey: string;
-}
-// Plainly an interface again. It was a `type` alias, with an eslint-disable, because
-// invokeGatewayMethod's input constraint used to be the permissive
-// `{ readonly [k: string]: unknown }` fallback: an object-literal type alias carries an
-// implicit index signature and satisfies that, an interface does not. The 1.19.1 re-pin
-// removed the fallback, the parameter is now the contract's own concrete shape for
-// this id, which an interface satisfies, so both the alias and the suppression were
-// scaffolding for a constraint that no longer exists. Verified by compiling it as an
-// interface before changing it, not assumed from reading the type.
-export interface PushSubscriptionCreateInput {
-  /** Stable per-install device identity (platform 1.8.0); absent falls back to the legacy endpoint-keyed record. */
-  readonly deviceId?: string;
-  readonly endpoint: string;
-  readonly keys: PushSubscriptionKeys;
-}
-export interface PushSubscriptionCreateResult {
-  readonly subscription: PublicPushSubscription;
-}
-export interface PushSubscriptionListResult {
-  readonly subscriptions: readonly PublicPushSubscription[];
-}
-export interface PushSubscriptionDeleteResult {
-  readonly subscriptionId: string;
-  readonly deleted: boolean;
-}
-export interface PushVerifyResult {
-  readonly receipt: PushDeliveryReceipt;
-}
-
-// push.subscriptions.reconcile (platform 1.8.0): the reconcile-on-open self-heal verb.
-// Unlike subscribe/create (register-or-refresh), reconcile REQUIRES deviceId, it
-// is the verb a client calls when it already knows its own device identity and
-// wants the daemon's record healed to match its current live endpoint/keys,
-// reporting what (if anything) had drifted.
-// An interface for the same reason PushSubscriptionCreateInput is one again; see there.
-export interface PushSubscriptionReconcileInput {
-  readonly deviceId: string;
-  readonly endpoint: string;
-  readonly keys: PushSubscriptionKeys;
-}
-/** Whether reconcile changed the daemon's record for this device, and how. */
-export type PushReconcileDrift = 'created' | 'endpoint-updated' | 'keys-updated' | 'unchanged';
-export interface PushSubscriptionReconcileResult {
-  readonly subscription: PublicPushSubscription;
-  readonly drift: PushReconcileDrift;
-}
-
-// ─── Pairing (pairing.tokens.*, pairing.handoff.*, platform 1.8.0) ─────────
-//
-// See the platform.operator.pairing facade block below for the custody/transport
-// notes; these are the wire shapes it types against.
-
-/** The redacted, wire-safe view of a pairing token, never the secret itself. */
-export interface PublicPairingToken {
-  readonly id: string;
-  readonly name: string;
-  readonly createdAt: number;
-  readonly lastSeenAt?: number;
-}
-export interface PairingTokensListResult {
-  readonly tokens: readonly PublicPairingToken[];
-  /** Whether the legacy single shared token has been revoked (a one-way action). */
-  readonly legacySharedRevoked: boolean;
-}
-/** A freshly minted token. CUSTODY: `token` is the literal secret, shown exactly once. */
-export interface MintedPairingToken {
-  readonly id: string;
-  readonly name: string;
-  readonly token: string;
-  readonly createdAt: number;
-}
-export interface PairingTokensCreateResult {
-  readonly token: MintedPairingToken;
-}
-export interface PairingTokensRenameResult {
-  readonly id: string;
-  readonly renamed: boolean;
-}
-export interface PairingTokensDeleteResult {
-  readonly id: string;
-  readonly revoked: boolean;
-}
-export interface PairingTokensRevokeSharedResult {
-  readonly legacySharedRevoked: boolean;
-}
-
-// ─── Origin posture (pairing.posture.get, platform 1.8.0's LAN-http posture work) ──
-//
-// The honest TLS/capability posture of a web origin: plain http on a private-network
-// origin (LAN IP, .local, localhost) is a supported posture, reported with ONE honest
-// notice line (LAN_PLAIN_HTTP_NOTICE_TEXT below, stated once at pairing, never a nag);
-// each browser-gated capability (service worker/PWA install, push, microphone) is
-// labeled available or with the daemon's OWN "needs https, available via tailscale"
-// wording, never a client-fabricated guess. Mirrors
-// packages/engine/platform/src/platform/pairing/origin-posture.ts's ORIGIN_POSTURE_SCHEMA exactly.
-export type BrowserGatedCapability = 'service-worker' | 'push' | 'microphone';
-export interface OriginCapability {
-  readonly capability: string;
-  readonly available: boolean;
-  /** Present when unavailable: the label a surface renders instead of a dead button. */
-  readonly reason?: string;
-}
-export interface OriginPosture {
-  readonly origin: string;
-  readonly scheme: string;
-  readonly privateNetwork: boolean;
-  readonly secureContext: boolean;
-  /** Present only for the plain-http-on-LAN posture; absent when already a secure context. */
-  readonly notice?: string;
-  readonly capabilities: readonly OriginCapability[];
-}
-export interface PairingPostureGetInput {
-  /** This surface's own current origin. Omit to read the daemon's configured web origin. */
-  readonly origin?: string;
-}
-export interface PairingPostureGetResult {
-  readonly posture: OriginPosture;
-}
-
-/** The set-up steps a pairing hand-off can offer. Each is independently declinable. */
-export type PairingHandoffOfferKind = 'notifications' | 'relay' | 'passkey';
-export interface PairingHandoffOffer {
-  readonly kind: string;
-  readonly available: boolean;
-  /** Present only for the 'notifications' offer when it is available. */
-  readonly vapidPublicKey?: string;
-}
-export interface PairingHandoffCreateResult {
-  readonly token: MintedPairingToken;
-  readonly offers: readonly PairingHandoffOffer[];
-  /** The `#pair=<token>&offers=<kinds>` fragment content, see lib/pairing.ts. */
-  readonly fragment: string;
-  /** The fragment prefixed with a known web origin, when the daemon knows one. */
-  readonly deepLink?: string;
-  /** The origin's honest TLS/capability posture, present when the daemon knows a web origin. */
-  readonly posture?: OriginPosture;
-}
-export interface PairingHandoffCompleteNotificationsAccept {
-  readonly endpoint: string;
-  readonly keys: PushSubscriptionKeys;
-  readonly deviceId?: string;
-}
-export interface PairingHandoffCompletePasskeyAccept {
-  readonly rpId: string;
-  readonly origin: string;
-  readonly credentialId: string;
-  readonly publicKeyCose: string;
-}
-export interface PairingHandoffCompleteInput {
-  readonly accept?: {
-    readonly notifications?: PairingHandoffCompleteNotificationsAccept;
-    readonly relay?: boolean;
-    readonly passkey?: PairingHandoffCompletePasskeyAccept;
-  };
-}
-/** Honest per-offer outcome, never silently half-applied. */
-export interface PairingHandoffOutcome {
-  readonly kind: string;
-  readonly status: string;
-  readonly detail?: string;
-}
-export interface PairingHandoffCompleteResult {
-  readonly results: readonly PairingHandoffOutcome[];
-}
-
-// ─── Tailscale one-action https (tailscale.get / tailscale.serve.run, platform 1.8.0's
-// LAN-http posture work) ────────────────────────────────────────────────────────
-//
-// The one confirmed action behind a "needs https, available via tailscale" label,
-// reachable from the browser instead of only the TUI. tailscale.get is a READ-ONLY
-// probe (binary present, logged in, MagicDNS name, the https URL `tailscale serve`
-// would yield, and the most recent serve receipt if any), surfaces offer the
-// affordance ONLY when this reports a usable environment (available && loggedIn &&
-// httpsUrl); absence is quiet, never a nag or a dead button. tailscale.serve.run is
-// the ONE state-changing tailscale command the daemon ever runs, and only from this
-// explicit user-initiated verb; the attempt is recorded with an honest receipt
-// either way, and on success the daemon's web.publicBaseUrl updates to the same
-// https URL. Both ids carry no REST route binding (transport: ws-only), so they
-// resolve through invokeGatewayMethod exactly like fleet.*/permissions.rules.*.
-// Mirrors packages/engine/platform/src/platform/remote-access/tailscale.ts exactly.
-export interface TailscaleServeReceipt {
-  readonly at: number;
-  readonly command: string;
-  readonly ok: boolean;
-  /** The https MagicDNS URL now fronting the daemon, present only on success. */
-  readonly url?: string;
-  readonly detail: string;
-}
-export interface TailscaleGetResult {
-  readonly available: boolean;
-  readonly loggedIn: boolean;
-  readonly magicDnsName?: string;
-  readonly httpsUrl?: string;
-  readonly detail: string;
-  readonly lastServe?: TailscaleServeReceipt;
-}
-export interface TailscaleServeRunResult {
-  readonly receipt: TailscaleServeReceipt;
-  readonly publicBaseUrlUpdated: boolean;
-}
-
-// ─── WebAuthn step-up (stepup.*) ──────────────────────────────────────
-//
-// The step-up verbs are REST-routed in the generated webui facade
-// (WEBUI_METHOD_ROUTES: stepup.challenge.mint → POST /api/stepup/challenge,
-// stepup.credentials.register → POST /api/stepup/credentials), so they resolve
-// through invokeOperator/EXTRA_METHOD_ROUTES with no hand-written route. Both ids
-// ARE in the OperatorMethodId union and carry generated I/O maps, so these are
-// normal typed invokeOperator calls. The mint challenge is the bootstrap the relay
-// gate exempts from its own step-up requirement; register is a local/admin ceremony.
+// ─── WebAuthn step-up (stepup.*) ─────────────────────────────────────────────
 
 /** A minted, short-lived, single-use challenge for navigator.credentials.get. */
-export interface StepUpMintChallengeResult {
-  readonly challengeId: string;
-  /** base64url challenge bytes. */
-  readonly challenge: string;
-  readonly expiresAt: number;
-}
-
-/** Input to register a passkey the daemon will verify step-up assertions against. */
-export interface StepUpRegisterCredentialInput {
-  readonly rpId: string;
-  readonly origin: string | readonly string[];
-  readonly credentialId: string;
-  readonly publicKeyCose: string;
-  readonly signCount?: number;
-  readonly userVerification?: 'required' | 'preferred' | 'discouraged';
-  readonly label?: string;
-}
-
-/** A public (no key material) summary of the registered credential. */
-export interface StepUpRegisterCredentialResult {
-  readonly credential: {
-    readonly credentialId: string;
-    readonly label?: string;
-    readonly createdAt: number;
-    readonly signCount: number;
-  };
-}
-
+export type StepUpMintChallengeResult = OperatorMethodOutput<'stepup.challenge.mint'>;
+/** A passkey the daemon will verify step-up assertions against. */
+export type StepUpRegisterCredentialInput = OperatorMethodInput<'stepup.credentials.register'>;
 /** One registered step-up passkey as the daemon reports it (no key material). */
-export interface StepUpCredentialSummary {
-  readonly credentialId: string;
-  readonly label?: string;
-  readonly createdAt: number;
-  readonly signCount: number;
-}
+export type StepUpCredentialSummary = OperatorMethodOutput<'stepup.credentials.list'>['credentials'][number];
+
+// ─── Config and credentials ──────────────────────────────────────────────────
+
+/** config.set's and config.reset's outcome: where the value landed (`persistedTo`), its tier, and whether the daemon owns the key. */
+export type ConfigSetOutcome = OperatorMethodOutput<'config.set'>;
+/** Where credentials.set put the credential, never the value. */
+export type CredentialSetOutcome = OperatorMethodOutput<'credentials.set'>;
+
+// ─── Payment cards (payments.cards.*) ────────────────────────────────────────
 
 /**
- * config.set's write outcome. See the `config.set` comment below for why this
- * exists rather than relying on the pinned contracts package's generated
- * OperatorMethodOutput<'config.set'> as-is.
- */
-export interface ConfigSetOutcome {
-  readonly success: boolean;
-  readonly key: string;
-  readonly value?: unknown;
-  /** Absolute path (or daemon base URL, if landed remotely) the value actually landed in. */
-  readonly persistedTo?: string;
-  /** Mirrors the platform's ConfigKeyTier (platform/config/manager-key-source.ts). */
-  readonly tier?: 'daemon' | 'shared' | 'project' | 'global' | 'default';
-  /** Effective origin can be runtime-only while tier describes its persisted underlay. */
-  readonly effectiveOrigin?: 'daemon' | 'shared' | 'project' | 'global' | 'default' | 'runtime' | 'runtime-default';
-  /** True when the daemon, not this client, is the writer/reader-of-record for this key. */
-  readonly daemonOwned?: boolean;
-}
-
-/**
- * What credentials.set reports back: where the credential now lives, never the
- * value. Mirrors the daemon's createCredentialSetHandler response.
- */
-export interface CredentialSetOutcome {
-  readonly success: boolean;
-  readonly key: string;
-  readonly secretKey: string;
-  readonly scope: string;
-  readonly reference: string;
-  readonly configScope?: string;
-  readonly ownership?: string;
-  readonly credentialScope?: string;
-}
-
-/**
- * A stored card as every surface is allowed to see it: METADATA ONLY.
- *
- * There is no field here for the number, the expiry as typed, the CVV or the
- * cardholder name, and that is the point, the daemon has no method that
- * returns them. `last4` and `materialComplete` exist so a surface can render
- * "Visa ···4242, security code set" without the daemon ever emitting a value.
- *
- * Derived from the contract's own payments.cards.list output rather than
- * hand-written, so it cannot drift from what the daemon actually sends. The
- * hand-written version this replaced had already drifted in the direction that
- * matters least visibly: it was a faithful copy of the card object, but the
- * result type it sat inside omitted the sibling `defaultCardId` field, so no
- * caller could see which card the daemon would actually charge.
- *
- * Field notes worth keeping, since a derived type carries no comments of its
- * own: `issuerCapMinorUnits` is declared by the owner, unverifiable by us, and
- * never treated as an enforcement layer; `materialComplete` says whether every
- * required secret field is present, never which, and never the values.
+ * A stored card as every surface may see it: metadata only. There is no field for the
+ * number, the expiry as typed, the CVV or the cardholder name, because the daemon has no
+ * method that returns them. `issuerCapMinorUnits` is the owner's declaration, never an
+ * enforcement layer; `materialComplete` says whether every secret field is present, never
+ * which, and never the values.
  */
 export type PaymentCardMetadata = OperatorMethodOutput<'payments.cards.list'>['cards'][number];
 
-/**
- * What `payments.cards.create` accepts. Card material goes IN through here and
- * never comes back out; see the method comment on platform.operator.payments.
- */
-export interface PaymentCardCreateRequest {
-  readonly label: string;
-  readonly kind: 'virtual' | 'real';
-  readonly number: string;
-  readonly expiryMonth: number;
-  readonly expiryYear: number;
-  readonly cvv: string;
-  readonly cardholderName: string;
-  readonly issuerCapMinorUnits: number | null;
-}
+/** What `payments.cards.create` accepts. Card material goes in here and never comes back out. */
+export type PaymentCardCreateRequest = OperatorMethodInput<'payments.cards.create'>;
 
 const scopedPlatform = createBrowserKnowledgePlatform({
   baseUrl: GOODVIBES_BASE_URL,
@@ -1730,14 +972,10 @@ export const client = {
       // and is only for a daemon that predates peek.
       status: (input?: { receipts?: 'consume' | 'peek' | 'ack'; ids?: string }) => scopedPlatform.operator.invoke('control.status', input ?? {}),
       snapshot: () => scopedPlatform.operator.invoke('control.snapshot', {}),
-      // methodInfo: an honest, read-only capability probe. 'control.methods.get'
-      // IS in the installed 0.38 OperatorMethodId union with a real generated I/O map
-      // (foundation-client-types.ts), so this is a normal typed invokeOperator call, not
-      // a bridge, the METHOD BEING CHECKED (its `methodId` argument) can be any string,
-      // including one this daemon build has never heard of, which is the whole point:
-      // an unregistered id 404s with `{error: 'Unknown gateway method'}` rather than
-      // pretending. Callers use this to decide whether to offer a not-yet-available
-      // capability (e.g. sessions.delete) rather than rendering it and letting it fail.
+      // methodInfo: a read-only capability probe. The method being checked can be any
+      // string, including one this daemon build has never heard of: an unregistered id
+      // answers 404 rather than pretending. Callers use it to decide whether to offer a
+      // capability rather than rendering it and letting it fail.
       methodInfo: (methodId: string) => invokeOperator('control.methods.get', { methodId }),
     },
     accounts: {
@@ -1749,55 +987,47 @@ export const client = {
       usage: (providerId: string) => scopedPlatform.operator.invoke('providers.usage.get', { providerId }),
     },
     credentials: {
-      // Cross-surface secret-free credential status (see the 1.0.1 entry in
-      // CHANGELOG.md). The browser reaches the shared store only over the
-      // daemon. Status only, never bytes.
+      // Cross-surface secret-free credential status. The browser reaches the shared
+      // store only over the daemon. Status only, never bytes.
       get: () => invokeOperator('credentials.get'),
       // Writes a credential into the daemon's own secret store and leaves a
       // reference in config. ws-only (no REST binding), so it goes through the
       // generic invoke endpoint. The response never contains the value.
-      set: (input: { key: string; value: string }) =>
-        invokeGatewayMethod<'credentials.set', CredentialSetOutcome>('credentials.set', input),
+      set: (input: OperatorMethodInput<'credentials.set'>): Promise<CredentialSetOutcome> =>
+        invokeGatewayMethod('credentials.set', input),
     },
     // stepup.*, the WebAuthn step-up ceremony's two server verbs. mintChallenge is the
     // bootstrap call the relay gate exempts from step-up (it is the prerequisite for
     // producing an assertion); registerCredential persists this device's passkey public
-    // key so the daemon can verify later assertions. Both are REST-routed (see the
-    // StepUpMintChallengeResult comment above) and resolve through invokeOperator.
+    // key so the daemon can verify later assertions. All four are REST-routed and
+    // resolve through invokeOperator.
     stepup: {
-      mintChallenge: (input?: { rendezvousId?: string; sessionId?: string; method?: string; path?: string; ttlMs?: number }, signal?: AbortSignal) =>
-        invokeOperator<'stepup.challenge.mint', StepUpMintChallengeResult>('stepup.challenge.mint', input ?? {}, signal),
+      mintChallenge: (input?: OperatorMethodInput<'stepup.challenge.mint'>, signal?: AbortSignal): Promise<StepUpMintChallengeResult> =>
+        invokeOperator('stepup.challenge.mint', input ?? {}, signal),
       registerCredential: (input: StepUpRegisterCredentialInput) =>
-        invokeOperator<'stepup.credentials.register', StepUpRegisterCredentialResult>('stepup.credentials.register', input),
-      // The daemon's registered passkeys. Both verbs are admin-only and resolve through the
-      // generated REST routes (GET /api/stepup/credentials, DELETE .../{credentialId}).
+        invokeOperator('stepup.credentials.register', input),
+      // The daemon's registered passkeys (admin-only).
       listCredentials: (signal?: AbortSignal) =>
-        invokeOperator<'stepup.credentials.list', { credentials: readonly StepUpCredentialSummary[] }>('stepup.credentials.list', {}, signal),
+        invokeOperator('stepup.credentials.list', {}, signal),
       removeCredential: (credentialId: string) =>
-        invokeOperator<'stepup.credentials.remove', { credentialId: string; removed: boolean }>('stepup.credentials.remove', { credentialId }),
+        invokeOperator('stepup.credentials.remove', { credentialId }),
     },
-    // config.*, like models.*, no OperatorMethodId coverage in the pinned
-    // browser platform route maps, so both resolve through EXTRA_METHOD_ROUTES.
+    // config.*, REST-routed through EXTRA_METHOD_ROUTES.
     // get() returns the daemon's FULL config tree unredacted (configManager.
     // getAll(), verified against system-routes.ts). Two consumers: the voice
     // surface reads the SHARED tts.provider/tts.voice defaults so the browser
     // speaks in the same voice as the TUI and agent; the model/config
     // workspace browses the same snapshot, callers there MUST run it through
     // src/lib/config-redaction.ts before rendering, never display it raw.
-    // set() writes one key at a time (the daemon's real /config contract). The
-    // explicit ConfigSetOutcome override widens the pinned contracts package's
-    // generated OperatorMethodOutput<'config.set'> (just { success, key, value }
-    // plus an open index signature) to the persistedTo/tier/daemonOwned fields
-    // the daemon's postConfig route now reports (system-routes.ts), the
-    // generated type already permits them at runtime via its index signature,
-    // this just gives callers a typed shape instead of casting per call site.
+    // set() writes one key at a time and reports where it landed (persistedTo, tier,
+    // daemonOwned).
     config: {
       get: () => invokeOperator('config.get'),
-      set: (key: string, value: unknown) =>
-        invokeOperator<'config.set', ConfigSetOutcome>('config.set', { key, value }),
+      set: (key: string, value: unknown): Promise<ConfigSetOutcome> =>
+        invokeOperator('config.set', { key, value }),
       // Removes the key's explicit value so it reads as its default again; the
       // outcome reports the value the daemon now holds and the file it came from.
-      reset: (key: string) => invokeOperator<'config.reset', ConfigSetOutcome>('config.reset', { key }),
+      reset: (key: string): Promise<ConfigSetOutcome> => invokeOperator('config.reset', { key }),
     },
     // payments.cards.*, the ONLY path card material takes off this surface.
     //
@@ -1808,8 +1038,7 @@ export const client = {
     // owner's standing rule: anything configured on a surface stays available
     // to the daemon after that surface is gone.
     //
-    // Both methods are REST-routed by the pinned contracts facade
-    // (WEBUI_METHOD_ROUTES already carries payments.cards.*), so they resolve
+    // payments.cards.* are REST-routed by the generated facade, so they resolve
     // through EXTRA_METHOD_ROUTES with no hand-written row, and create()'s
     // route is POST, which is what puts the card in the request BODY.
     // invokeOperator sends a GET method's input as a query string; a route
@@ -1832,25 +1061,14 @@ export const client = {
         cancel: (input: Pick<PaymentWindowView, 'purchaseId' | 'windowId'>, signal?: AbortSignal) => answerPurchaseWindow('cancel', input, signal),
       },
       cards: {
-        // No hand-supplied TInput/TOutput on any of the three: invokeOperator no
-        // longer takes a TInput type argument at all (it types `input` as
-        // OperatorMethodInput<TMethodId> directly), and all three ids carry real
-        // generated OperatorMethodInputMap/OutputMap entries, so the defaults ARE
-        // the contract. The hand-written triples these replaced were written when
-        // the third type argument still existed; one of them had already drifted,
-        // it declared list's result as `{ cards: PaymentCardMetadata[] }` and so
-        // hid `defaultCardId`, which the daemon has been returning all along.
-        list: () => invokeOperator<'payments.cards.list'>('payments.cards.list', {}),
-        create: (input: PaymentCardCreateRequest) => invokeOperator<'payments.cards.create'>('payments.cards.create', input),
-        delete: (id: string) => invokeOperator<'payments.cards.delete'>('payments.cards.delete', { id }),
+        // list() also carries `defaultCardId`, the card the daemon would charge.
+        list: () => invokeOperator('payments.cards.list', {}),
+        create: (input: PaymentCardCreateRequest) => invokeOperator('payments.cards.create', input),
+        delete: (id: string) => invokeOperator('payments.cards.delete', { id }),
       },
     },
-    // Power (power.status.get / power.keepAwake.set, platform 1.8.0's host sleep-ownership
-    // work): both carry real generated OperatorMethodInputMap/OutputMap entries and a
-    // real `http` route binding (GET /api/power/status, POST /api/power/keep-awake,
-    // read:health / write:config), so both resolve through EXTRA_METHOD_ROUTES with no
-    // bridge override needed, like channels.profiles.* above. status/keepAwake.set
-    // return the SAME shape: `work` (the automatic inhibitor, held, grantedClasses,
+    // Power (power.status.get / power.keepAwake.set), REST-routed through
+    // EXTRA_METHOD_ROUTES. status/keepAwake.set return the SAME shape: `work` (the automatic inhibitor, held, grantedClasses,
     // deniedClasses, live "held because X" reasons, cap/expiry) and `keepAwake` (the
     // owner toggle, enabled, held, grantedClasses/deniedClasses, and an honest `note`
     // when part of the requested coverage was refused, e.g. lid-close suspend the OS
@@ -1861,13 +1079,10 @@ export const client = {
       status: () => invokeOperator('power.status.get', {}),
       setKeepAwake: (enabled: boolean) => invokeOperator('power.keepAwake.set', { enabled }),
     },
-    // Memory governance (ops.memory.get, platform 1.9.0-dev's memory-relay-voice-hardening
-    // work): the MemoryGovernor's own observability snapshot, current pressure tier,
-    // budget vs RSS/heap, per-cache footprints the governor can shrink, paused
-    // deferrable jobs, and the leak-tripwire state. Carries a real generated
-    // OperatorMethodInputMap/OutputMap entry and a real `http` route binding (GET
-    // /api/ops/memory, read:health), so it resolves through EXTRA_METHOD_ROUTES with no
-    // bridge override needed, same as power.* above. OPS_MEMORY_PRESSURE rides the 'ops'
+    // Memory governance (ops.memory.get): the MemoryGovernor's own observability
+    // snapshot, current pressure tier, budget vs RSS/heap, per-cache footprints the
+    // governor can shrink, paused deferrable jobs, and the leak-tripwire state.
+    // REST-routed through EXTRA_METHOD_ROUTES. OPS_MEMORY_PRESSURE rides the 'ops'
     // runtime domain (see useRealtimeInvalidation's DOMAIN_INVALIDATIONS map), the same
     // domain OPS_POWER_STATE_CHANGED already rides.
     ops: {
@@ -1875,10 +1090,10 @@ export const client = {
         get: () => invokeOperator('ops.memory.get', {}),
       },
     },
-    // Voice (platform 1.1.0). status/providers/voices are read:voice; stt/tts are write:voice.
+    // Voice. status/providers/voices are read:voice; stt/tts are write:voice.
     // ttsStream returns the RAW streamed-audio Response (not JSON), the Web Audio player
-    // reads its bytes. All resolve through EXTRA_METHOD_ROUTES (except ttsStream, which is
-    // a raw fetch) and carry the real generated I/O types.
+    // reads its bytes. All resolve through EXTRA_METHOD_ROUTES except ttsStream, which is
+    // a raw fetch.
     voice: {
       status: () => invokeOperator('voice.status', {}),
       providers: () => invokeOperator('voice.providers.list', {}),
@@ -1888,25 +1103,15 @@ export const client = {
       tts: (input: OperatorMethodInput<'voice.tts'>) => invokeOperator('voice.tts', input),
       ttsStream: (input: OperatorMethodInput<'voice.tts.stream'>, signal?: AbortSignal) =>
         requestStream('/api/voice/tts/stream', input, signal),
-      // Managed local-voice provisioning (voice.local.status / voice.local.install, platform
-      // 1.9.0-dev). Both carry real generated OperatorMethodInputMap/OutputMap entries
-      // and real `http` route bindings (GET /api/voice/local/status, read:health; POST
-      // /api/voice/local/install, write:config), so both resolve through
-      // EXTRA_METHOD_ROUTES with no bridge override needed. install() is a single
-      // request/response call, the wire contract has NO streamed per-component
-      // progress today (the provisioner's internal onProgress callback is never wired
-      // to a runtime event or a chunked response; see this round's adoption notes),
-      // callers only ever get the final receipt, never intermediate ticks.
+      // Managed local-voice provisioning (voice.local.status / voice.local.install).
+      // install() is a single request/response call: the contract has no streamed
+      // per-component progress, so callers get the final receipt, never intermediate ticks.
       local: {
         status: () => invokeOperator('voice.local.status', {}),
         install: () => invokeOperator('voice.local.install', {}),
       },
       // Wake-word detection in the browser tab (voice.wake.status /
-      // voice.wake.provision / voice.wake.model). All three carry real generated
-      // OperatorMethodInputMap/OutputMap entries and real `http` route bindings
-      // (GET /api/voice/wake/status, POST /api/voice/wake/provision, GET
-      // /api/voice/wake/model), so they resolve through EXTRA_METHOD_ROUTES the
-      // same way voice.local.* does, no bridge override needed.
+      // voice.wake.provision / voice.wake.model.get).
       //
       // `model.get` exists because a browser tab CANNOT fetch the pinned release
       // assets directly: they answer without an access-control-allow-origin
@@ -1941,24 +1146,18 @@ export const client = {
       },
     },
     tasks: {
-      // Local TaskSnapshotResult diverges from OperatorMethodOutput<'tasks.list'> only
-      // by adding `cancellable` (see the Tasks section comment), explicit override.
-      list: () => invokeOperator<'tasks.list', TaskSnapshotResult>('tasks.list'),
+      list: () => invokeOperator('tasks.list'),
       create: (input: TaskCreateInput) => invokeOperator('tasks.create', input),
       cancel: (taskId: string) => invokeOperator('tasks.cancel', { taskId }),
       retry: (taskId: string) => invokeOperator('tasks.retry', { taskId }),
     },
-    // Calendar (calendar.*, see the EXTRA_METHOD_ROUTES header comment above for the
-    // invokable-false/501/404 honesty caveat), typed by the contract.
+    // Calendar (calendar.*), REST-routed through EXTRA_METHOD_ROUTES.
     calendar: {
       events: {
         list: (input?: CalendarEventsListInput) =>
           invokeOperator('calendar.events.list', input ?? {}),
         get: (eventId: string, calendarId?: string) =>
-          invokeOperator<'calendar.events.get', CalendarEventDetail>(
-            'calendar.events.get',
-            { eventId, ...(calendarId ? { calendarId } : {}) },
-          ),
+          invokeOperator('calendar.events.get', { eventId, ...(calendarId ? { calendarId } : {}) }),
         create: (input: CalendarEventCreateInput) =>
           invokeOperator('calendar.events.create', input),
       },
@@ -1969,15 +1168,13 @@ export const client = {
           invokeOperator('calendar.ics.import', input),
       },
     },
-    // Email (email.*). Routed entirely by the generated WEBUI_METHOD_ROUTES rows that
-    // EXTRA_METHOD_ROUTES derives itself, this block adds no route and no transport,
-    // only the ergonomic layer over invokeOperator, typed by the contract.
+    // Email (email.*), REST-routed through EXTRA_METHOD_ROUTES.
     email: {
       inbox: {
         list: (input?: EmailInboxListInput) =>
           invokeOperator('email.inbox.list', input ?? {}),
         read: (uid: number) =>
-          invokeOperator<'email.inbox.read', EmailMessageDetail>('email.inbox.read', { uid }),
+          invokeOperator('email.inbox.read', { uid }),
       },
       send: (input: EmailSendInput) =>
         invokeOperator('email.send', input),
@@ -1986,9 +1183,7 @@ export const client = {
           invokeOperator('email.draft.create', input),
       },
     },
-    // Occasions and plans (occasions.*, docs/occasions.md). Real generated I/O maps
-    // throughout, no bridge overrides needed, same as checkin/principals above (unlike
-    // calendar.*/email.* just above, which predate a generated map for their family).
+    // Occasions and plans (occasions.*, docs/occasions.md).
     // Sixteen verbs, every one a real REST route (table-routed through
     // EXTRA_METHOD_ROUTES, same as checkin.*/ci.*/principals.*): occasions.confirm,
     // occasions.plans.confirm and occasions.remove write to the owner's profile and take
@@ -2028,8 +1223,7 @@ export const client = {
           invokeOperator('occasions.plans.confirm', input),
       },
     },
-    // Channel profiles (channels.profiles.*, platform 1.6.1). Real generated I/O maps
-    // throughout, no bridge overrides needed, unlike Approvals/Tasks above.
+    // Channel profiles (channels.profiles.*) and the Telegram cursor recovery actions.
     channels: {
       telegramCursor: {
         preview: async (signal?: AbortSignal) => readTelegramCursorPreview(await telegramCursorAction('cursor-migration-preview', {}, signal)),
@@ -2049,8 +1243,8 @@ export const client = {
           invokeOperator('channels.profiles.delete', channelId ? { surfaceKind, channelId } : { surfaceKind }),
       },
     },
-    // Check-in (checkin.*, platform 1.6.1): the proactive-contact configuration, its run
-    // receipts, and a manual run-now trigger. Real generated I/O maps throughout.
+    // Check-in (checkin.*): the proactive-contact configuration, its run receipts, and a
+    // manual run-now trigger.
     checkin: {
       config: {
         get: () => invokeOperator('checkin.config.get', {}),
@@ -2061,8 +1255,7 @@ export const client = {
       },
       run: () => invokeOperator('checkin.run', {}),
     },
-    // Principals (principals.*, platform 1.6.1): the named-identity registry. Real generated
-    // I/O maps throughout.
+    // Principals (principals.*): the named-identity registry.
     //
     // On the `{ id, ...input }` spread form used here and by sessions.steer / followUp /
     // messages.create: a property arriving THROUGH a spread is not excess-property
@@ -2087,10 +1280,8 @@ export const client = {
     // Markdown document at daemon scope holding what the platform knows about the owner
     //, identity, contact, location, commerce, preferences, people, places, work, notes.
     //
-    // ROUTING: all nine carry real REST bindings, so they resolve through
-    // EXTRA_METHOD_ROUTES with no wiring here, that table is DERIVED from the generated
-    // webui-facade artifact and pinned by the drift test, so a hand-written row is neither
-    // allowed nor needed. Real generated I/O maps throughout.
+    // ROUTING: all nine are REST-routed through EXTRA_METHOD_ROUTES, which is derived
+    // from the generated webui-facade artifact.
     //
     // AUTHORITY AND USER-REQUEST: the caller sends `authority` (WEBUI_PROFILE_AUTHORITY,
     // 'owner-direct', owner-profile.ts: the owner typing into their own settings page) on
@@ -2119,9 +1310,8 @@ export const client = {
       undo: (input: OperatorMethodInput<'profile.undo'>) => invokeOperator('profile.undo', input),
       status: () => invokeOperator('profile.status', {}),
     },
-    // CI (ci.*, platform 1.6.1): per-job CI status polling (never a rollup without the job
-    // list, see ci.status's own description) and standing watches. Real generated I/O
-    // maps throughout.
+    // CI (ci.*): per-job CI status polling (never a rollup without the job list, see
+    // ci.status's own description) and standing watches.
     ci: {
       status: (input: OperatorMethodInput<'ci.status'>) => invokeOperator('ci.status', input),
       watches: {
@@ -2131,10 +1321,9 @@ export const client = {
         run: (watchId: string) => invokeOperator('ci.watches.run', { watchId }),
       },
     },
+    // approvals.*: the TOutput below is the contract's reply with the exec-prompt
+    // attribution added (see ApprovalRecord).
     approvals: {
-      // Local ApprovalSnapshotResult/ApprovalRecord diverge from the generated contract
-      // (open strings, optional audit, see the Approvals section comment), explicit
-      // overrides throughout this group.
       list: () => invokeOperator<'approvals.list', ApprovalSnapshotResult>('approvals.list'),
       // selectedHunks: an index array into the pending approval's own
       // edit list. Omit it to approve the whole request. The daemon computes
@@ -2145,75 +1334,43 @@ export const client = {
         invokeOperator<'approvals.cancel', ApprovalActionResult>('approvals.cancel', { approvalId }),
       claim: (approvalId: string) =>
         invokeOperator<'approvals.claim', ApprovalActionResult>('approvals.claim', { approvalId }),
-      // deny carries the optional reason as BOTH `note` (lands in the audit
-      // trail via today's HTTP route) and `reason` (the broker's structured
-      // user-declined feedback field), one text, both fields, so whichever
-      // the daemon honors, nothing typed is silently dropped. Input override
-      // for the same reason approve has one (reason is not in the generated map).
+      // deny sends the optional text as `note` (the audit trail) and `reason` (the
+      // broker's structured user-declined feedback); `recorded.reasonStored` reports
+      // whether the reason was kept.
       deny: (approvalId: string, input?: ApprovalDenyInput) =>
         invokeOperator<'approvals.deny', ApprovalActionResult>(
           'approvals.deny',
           { approvalId, ...(input?.note ? { note: input.note } : {}), ...(input?.reason ? { reason: input.reason } : {}) },
         ),
     },
-    // Durable approval rules (permissions.rules.*, this snapshot's rounds): the
-    // remembered-decision store, listable and revocable. Both ids have real
-    // generated I/O maps (foundation-client-types.ts); the explicit output
-    // override swaps in PermissionRuleRecord, which keeps `tier` an open string
-    // per the same defensive-parsing stance as ApprovalRecord (a newer daemon
-    // may add tiers this client has never seen, render, never drop).
+    // Durable approval rules (permissions.rules.*): the remembered-decision store,
+    // listable and revocable. ws-only, so generic-invoke via invokeGatewayMethod.
     permissions: {
       rules: {
-        // transport: ws-only (no REST binding, and not in the scoped browser
-        // platform's entrypoint), generic-invoke-only via invokeGatewayMethod,
-        // exactly like fleet.*/checkpoints.*.
-        list: () =>
-          invokeGatewayMethod<'permissions.rules.list', { rules: readonly PermissionRuleRecord[] }>(
-            'permissions.rules.list',
-            {},
-          ),
-        delete: (ruleId: string) =>
-          invokeGatewayMethod<'permissions.rules.delete', { deleted: boolean }>(
-            'permissions.rules.delete',
-            { ruleId },
-          ),
+        list: () => invokeGatewayMethod('permissions.rules.list', {}),
+        delete: (ruleId: string) => invokeGatewayMethod('permissions.rules.delete', { ruleId }),
       },
     },
-    // memory.records.* / memory.review-queue, table-routed via EXTRA_METHOD_ROUTES
-    // (real REST bindings, see that table's comment); inputs are the contract's.
+    // memory.records.* / memory.review-queue / memory.consolidation.receipts,
+    // REST-routed through EXTRA_METHOD_ROUTES.
     memory: {
-      search: (input?: MemorySearchInput) =>
-        invokeOperator<'memory.records.search', MemorySearchResult>('memory.records.search', input ?? {}),
-      add: (input: MemoryAddInput) =>
-        invokeOperator<'memory.records.add', MemoryRecordEntityResult>('memory.records.add', input),
-      get: (id: string) =>
-        invokeOperator<'memory.records.get', MemoryRecordEntityResult>('memory.records.get', { id }),
-      update: (id: string, input: MemoryUpdateInput) =>
-        invokeOperator<'memory.records.update', MemoryRecordEntityResult>('memory.records.update', { id, ...input }),
+      search: (input?: MemorySearchInput) => invokeOperator('memory.records.search', input ?? {}),
+      add: (input: MemoryAddInput) => invokeOperator('memory.records.add', input),
+      get: (id: string) => invokeOperator('memory.records.get', { id }),
+      update: (id: string, input: MemoryUpdateInput) => invokeOperator('memory.records.update', { id, ...input }),
       updateReview: (id: string, input: MemoryUpdateReviewInput) =>
-        invokeOperator<'memory.records.update-review', MemoryRecordEntityResult>(
-          'memory.records.update-review',
-          { id, ...input },
-        ),
-      delete: (id: string) =>
-        invokeOperator<'memory.records.delete', MemoryRecordDeleteResult>('memory.records.delete', { id }),
+        invokeOperator('memory.records.update-review', { id, ...input }),
+      delete: (id: string) => invokeOperator('memory.records.delete', { id }),
+      // The contract leaves the queue's items open; MemoryReviewQueueResult reads them as records.
       reviewQueue: (input?: MemoryReviewQueueInput) =>
         invokeOperator<'memory.review-queue', MemoryReviewQueueResult>('memory.review-queue', input ?? {}),
-      // memory.consolidation.receipts (platform 1.8.0), HAS a real generated I/O map
-      // (unlike the six ids above), but the explicit TOutput override keeps the
-      // hand-authored, narrower `merged`/`archived`/`decayed` entry shapes above
-      // rather than the generated catch-all `{} & Record<string, unknown>`.
       consolidation: {
-        receipts: () =>
-          invokeOperator<'memory.consolidation.receipts', MemoryConsolidationReceiptsResult>(
-            'memory.consolidation.receipts',
-            {},
-          ),
+        receipts: () => invokeOperator('memory.consolidation.receipts', {}),
       },
     },
-    // fleet.*/checkpoints.*/sessions.search, generic-invoke-only (see
-    // invokeGatewayMethod above); I/O shapes are the contract-bridge-types.ts bridge
-    // (real ids, generic generated I/O today, see that module's header for the swap).
+    // Contract reads are REST-routed; fleet.*, checkpoints.*, rewind.* and
+    // sessions.search are ws-only and go through invokeGatewayMethod, typed by the
+    // contract-bridge-types.ts aliases.
     contracts: {
       list: (input: ContractsListInput = {}, signal?: AbortSignal): Promise<ContractsListResult> =>
         readContractMethod('contracts.list', input, signal),
@@ -2239,7 +1396,7 @@ export const client = {
       unarchive: (id: string) => invokeGatewayMethod<'fleet.unarchive', FleetUnarchiveResult>('fleet.unarchive', { id }),
       archiveFinished: () => invokeGatewayMethod<'fleet.archiveFinished', FleetArchiveFinishedResult>('fleet.archiveFinished', {}),
       archivedList: () => invokeGatewayMethod<'fleet.archived.list', FleetArchivedListResult>('fleet.archived.list', {}),
-      // Best-of-N attempt resolution (platform 1.6.1, confirm/apply grammar platform 1.8.0). list is
+      // Best-of-N attempt resolution. list is
       // read-only (held-merge candidate groups with per-candidate diffs + any prior judge
       // proposal); judge PROPOSES a winner with reasons, explicitly model judgment
       // (scoredBy:'model'), never an auto-pick; pick is the ONE-ACT verb: confirm defaults
@@ -2266,20 +1423,17 @@ export const client = {
         judge: (groupId: string) =>
           invokeGatewayMethod<'fleet.attempts.judge', FleetAttemptsJudgeResult>('fleet.attempts.judge', { groupId }),
       },
-      // graph.get (platform 1.8.0's fix-phase workstream rework): the dependency-graph view
+      // graph.get: the dependency-graph view
       // of one workstream, nodes (id, title, state, cluster, files, merge state,
       // blocked reason, orphaned flag, deepest-remaining-path depth, stalled tell,
       // agent), edges (from depends-on to), and the elastic-pool state (ready/running
       // counts, at-cap, cap key + size, any spawn refusal). Unlike its fleet.* siblings
-      // above (ws-only, generic-invoke), this carries a real generated I/O map AND a
-      // real `http` route (GET /api/fleet/workstreams/{workstreamId}/graph,
-      // read:fleet), resolves through EXTRA_METHOD_ROUTES like power.*/toolCalls.*/
-      // queuedMessages.* above, with workstreamId interpolated as a path param. 404s
-      // when the workstreamId is unknown to this daemon.
+      // above (ws-only), this is REST-routed through EXTRA_METHOD_ROUTES with
+      // workstreamId as a path param. 404s when the workstreamId is unknown to this daemon.
       graph: {
         get: (workstreamId: string) => invokeOperator('fleet.graph.get', { workstreamId }),
       },
-      // observed.steer (platform 1.8.0's read-only foreign-agent visibility): steer an
+      // observed.steer: steer an
       // externally-launched coding-agent session over its genuine channel (tmux
       // send-keys). `id` is the OBSERVED NODE's own id (observed:<pid>, not a
       // sessionId, these rows carry no sessionRef). ws-only, generic-invoke, same
@@ -2300,7 +1454,7 @@ export const client = {
         invokeGatewayMethod<'checkpoints.restore', CheckpointsRestoreResult>('checkpoints.restore', input),
       restorePreview: (input: CheckpointsRestorePreviewInput) =>
         invokeGatewayMethod<'checkpoints.restorePreview', CheckpointsRestorePreviewResult>('checkpoints.restorePreview', input),
-      // revertHunkPreview/revertHunk (platform 1.6.1): the review-cockpit's REJECT→REVERT flow.
+      // revertHunkPreview/revertHunk: the review-cockpit's REJECT→REVERT flow.
       // preview is read-only (validates the hunk still reverse-applies, mints a ~2min
       // single-use confirmToken, or answers applies:false with a human conflict string and
       // a null token); revertHunk consumes the token to snapshot-then-reverse-apply exactly
@@ -2311,7 +1465,7 @@ export const client = {
       revertHunk: (input: CheckpointsRevertHunkInput) =>
         invokeGatewayMethod<'checkpoints.revertHunk', CheckpointsRevertHunkResult>('checkpoints.revertHunk', input),
     },
-    // rewind.plan/apply (platform 1.6.1): the unified message-anchored rewind, a terraform-style
+    // rewind.plan/apply: the unified message-anchored rewind, a terraform-style
     // dry-run/apply pair over the platform's history stores. plan previews what restoring
     // files and/or conversation to a turn anchor would change and mints a single-use
     // confirmToken; apply consumes it, records an undo point (a pre-restore safety checkpoint
@@ -2325,14 +1479,9 @@ export const client = {
     },
     sessions: {
       list: (signal?: AbortSignal) => invokeOperator('sessions.list', {}, signal),
-      // get/steer/followUp/create/messages.*/inputs.* are native in the 0.38 browser platform
-      // (SHARED_BROWSER_ROUTES), they resolve WITHOUT an EXTRA_METHOD_ROUTES row,
-      // through invokeOperator's scopedPlatform.operator.invoke fall-through. Routing them
-      // through the same typed invokeOperator used everywhere else (rather than calling
-      // scopedPlatform.operator.invoke directly) means their input/output flow through the
-      // REAL generated OperatorMethodInput/Output types with no `as never` cast at any
-      // of these call sites, TypeScript rejects a wrong-shaped `input` here at compile
-      // time (see goodvibes.test.ts's "wrong-typed steer input is a compile error" case).
+      // get/steer/followUp/create/messages.*/inputs.* are native in the browser platform
+      // (SHARED_BROWSER_ROUTES): they resolve without an EXTRA_METHOD_ROUTES row, through
+      // invokeOperator's scopedPlatform.operator.invoke fall-through, typed by the contract.
       get: (sessionId: string, signal?: AbortSignal) => invokeOperator('sessions.get', { sessionId }, signal),
       steer: (sessionId: string, input: WithoutSessionId<OperatorMethodInput<'sessions.steer'>>, signal?: AbortSignal) =>
         invokeOperator('sessions.steer', { sessionId, ...input }, signal),
@@ -2343,11 +1492,9 @@ export const client = {
       reopen: (sessionId: string, signal?: AbortSignal) => invokeOperator('sessions.reopen', { sessionId }, signal),
       // delete: requires the session to already be closed (409 SESSION_ACTIVE otherwise),
       // callers close first. `deleted: true` means the record and its messages are gone.
-      delete: (sessionId: string, signal?: AbortSignal) => invokeOperator<'sessions.delete', SessionDeleteResult>('sessions.delete', { sessionId }, signal),
-      // sessions.search (typed-client scaffold, first consumer of the search facade):
-      // in the OperatorMethodId union but routeless (no browser/EXTRA_METHOD_ROUTES
-      // entry), generic-invoke-only, typed via the contract-bridge-types.ts bridge
-      // until real I/O shapes land upstream.
+      delete: (sessionId: string, signal?: AbortSignal): Promise<SessionDeleteResult> =>
+        invokeOperator('sessions.delete', { sessionId }, signal),
+      // sessions.search: ws-only, generic-invoke via invokeGatewayMethod.
       search: (input?: SessionsSearchInput) => invokeGatewayMethod<'sessions.search', SessionsSearchResult>('sessions.search', input ?? {}),
       messages: {
         create: (sessionId: string, input: WithoutSessionId<OperatorMethodInput<'sessions.messages.create'>>) =>
@@ -2358,22 +1505,18 @@ export const client = {
         list: (sessionId: string, signal?: AbortSignal) => invokeOperator('sessions.inputs.list', { sessionId }, signal),
         cancel: (sessionId: string, inputId: string) => invokeOperator('sessions.inputs.cancel', { sessionId, inputId }),
       },
-      // toolCalls.cancel (platform 1.8.0's interaction-wins round): stop ONE running tool
+      // toolCalls.cancel: stop ONE running tool
       // call mid-flight without ending the turn, the turn continues (e.g. the model
       // sees a cancelled tool result and can respond to it), unlike
-      // companion.chat.turns.cancel which stops the whole turn. Real generated I/O map
-      // (`{sessionId, callId} -> {sessionId, callId, cancelled}`), real `http` route
-      // (POST /api/sessions/{sessionId}/tool-calls/{callId}/cancel, write:sessions),
-      // resolves through EXTRA_METHOD_ROUTES with both ids interpolated as path params.
+      // companion.chat.turns.cancel which stops the whole turn. REST-routed with both
+      // ids as path params.
       toolCalls: {
         cancel: (sessionId: string, callId: string) => invokeOperator('sessions.toolCalls.cancel', { sessionId, callId }),
       },
-      // queuedMessages.list/edit/delete (platform 1.8.0's interaction-wins round): a message
+      // queuedMessages.list/edit/delete: a message
       // posted while another turn is still running sits queued (not yet delivered to the
       // model) until that turn ends. This lets a caller review, edit, or drop a queued
-      // message before it is ever sent, real generated I/O maps and real `http` routes
-      // throughout (GET/POST/DELETE /api/sessions/{sessionId}/queued-messages(/{messageId}),
-      // read:sessions / write:sessions), all resolving through EXTRA_METHOD_ROUTES.
+      // message before it is ever sent. REST-routed through EXTRA_METHOD_ROUTES.
       queuedMessages: {
         list: (sessionId: string) => invokeOperator('sessions.queuedMessages.list', { sessionId }),
         edit: (sessionId: string, messageId: string, text: string) =>
@@ -2381,7 +1524,7 @@ export const client = {
         delete: (sessionId: string, messageId: string) =>
           invokeOperator('sessions.queuedMessages.delete', { sessionId, messageId }),
       },
-      // detach (WEBUI-FLEET-DEPTH): remove ONE participant (surfaceId) from a shared
+      // detach: remove ONE participant (surfaceId) from a shared
       // session, WITHOUT closing or killing it, detach != close != kill. Idempotent:
       // detaching an already-detached surface, or detaching from a closed session, is a
       // no-op success (verified against the platform's own sessions.detach description). Used
@@ -2390,9 +1533,7 @@ export const client = {
       // process itself or any other surface attached to it (e.g. the TUI).
       detach: (sessionId: string, surfaceId: string) =>
         invokeOperator<'sessions.detach', SessionsDetachResult>('sessions.detach', { sessionId, surfaceId }),
-      // permissionMode.get/set + contextUsage.get (platform 1.6.1): session-scoped, real
-      // generated I/O maps, typed through the same invokeOperator overload as
-      // close/reopen above, no bridge override needed. Both answer honestly only for
+      // permissionMode.get/set + contextUsage.get: session-scoped. Both answer only for
       // the daemon's own live local session (404 SESSION_NOT_LOCAL otherwise); callers
       // must check isSessionNotLocalError (lib/errors.ts) rather than assume success.
       permissionMode: {
@@ -2403,10 +1544,8 @@ export const client = {
       contextUsage: {
         get: (sessionId: string) => invokeOperator('sessions.contextUsage.get', { sessionId }),
       },
-      // changes.get (platform 1.6.1): the session-scoped aggregate workspace diff, joined
-      // over checkpoints stamped with this session's id (`transport: ["ws"]` only, no
-      // `http` route, generic-invoke-only like checkpoints.*/sessions.search above, NOT
-      // routed through invokeOperator/EXTRA_METHOD_ROUTES). A session with no stamped
+      // changes.get: the session-scoped aggregate workspace diff, joined over checkpoints
+      // stamped with this session's id (ws-only, generic-invoke). A session with no stamped
       // checkpoints answers honestly with checkpointCount:0 and an empty diff
       // (from/to:"EMPTY") rather than an error, SessionChanges.tsx renders that as an
       // explicit "no captured changes for this session" state with a workspace-scoped
@@ -2419,11 +1558,7 @@ export const client = {
       },
       // hosted.* (daemon-hosted sessions): a conversation whose loop runs INSIDE the
       // daemon rather than inside this browser tab, create/attach/detach/kill/list the
-      // lifecycle; `transport: ["ws"]` only ("ws-invoke" in the generated facade), no
-      // `http` route, same generic-invoke-only shape as changes.get above. SWAP applied
-      // (2.0.0 pin): these five ids now carry real OperatorMethodInputMap/OutputMap
-      // entries (contract-bridge-types.ts), so they call invokeGatewayMethod directly
-      // like every other bridged family, no more invokeGatewayMethodUncheckedInput. A
+      // lifecycle; ws-only, generic-invoke like changes.get above. A
       // hosted session is steered with the ORDINARY sessions.steer/followUp/
       // toolCalls.cancel above, there is no sessions.hosted.steer (see the platform's
       // method-catalog-hosted-sessions.ts header comment), so none is wired here.
@@ -2440,58 +1575,35 @@ export const client = {
           invokeGatewayMethod<'sessions.hosted.kill', SessionsHostedKillResult>('sessions.hosted.kill', { sessionId }),
       },
     },
-    // watchers.stop (WEBUI-FLEET-DEPTH): the one fleet-node kill action genuinely
-    // backed by a real operator wire verb, see the EXTRA_METHOD_ROUTES comment above.
-    // Only `stop` is exposed here; watchers.create/delete/update/run/start are out of
-    // scope for the fleet depth this brief asks for (fleet is a live-process READER,
-    // not a watcher-authoring surface).
+    // watchers.stop: the fleet-node stop action for a watcher (fleet is a live-process
+    // reader, not a watcher-authoring surface), plus the trigger migration verbs.
     watchers: {
       triggers: {
         status: async () => readTriggerOperatorStatus(await requestJson('/api/control-plane/methods/watchers.triggers.status/invoke', { method: 'POST', body: { body: {} } })),
         migrate: async (input: { readonly olderInstancesClosed: true; readonly confirm: true }) =>
           readTriggerMigrationResult(await requestJson('/api/control-plane/methods/watchers.triggers.migrate/invoke', { method: 'POST', body: { body: input } })),
       },
-      stop: (watcherId: string) =>
-        invokeOperator<'watchers.stop', WatcherActionResult>('watchers.stop', { watcherId }),
+      stop: (watcherId: string): Promise<WatcherActionResult> => invokeOperator('watchers.stop', { watcherId }),
     },
-    // push.* (Web Push), generic-invoke-only (see the Web Push section comment
-    // above). The PWA reads the public VAPID key, registers/lists/removes its own
-    // browser subscription, and can send itself a live test push. Every capability
-    // URL / key stays off the wire; the daemon hands back the redacted view.
+    // push.* (Web Push), ws-only, generic-invoke. The PWA reads the public VAPID key,
+    // registers/lists/removes its own browser subscription, and can send itself a live
+    // test push. Every capability URL and key stays off the wire; the daemon hands back
+    // the redacted view.
     push: {
-      vapidKey: () => invokeGatewayMethod<'push.vapid.get', PushVapidKeyResult>('push.vapid.get', {}),
-      subscribe: (input: PushSubscriptionCreateInput) =>
-        invokeGatewayMethod<'push.subscriptions.create', PushSubscriptionCreateResult>('push.subscriptions.create', input),
-      list: () =>
-        invokeGatewayMethod<'push.subscriptions.list', PushSubscriptionListResult>('push.subscriptions.list', {}),
-      unsubscribe: (subscriptionId: string) =>
-        invokeGatewayMethod<'push.subscriptions.delete', PushSubscriptionDeleteResult>('push.subscriptions.delete', { subscriptionId }),
-      verify: (subscriptionId: string) =>
-        invokeGatewayMethod<'push.subscriptions.verify', PushVerifyResult>('push.subscriptions.verify', { subscriptionId }),
-      // reconcile (platform 1.8.0): the reconcile-on-open self-heal call, see
-      // reconcilePushSubscriptionOnOpen in lib/push/push-client.ts. Requires
-      // deviceId (unlike subscribe, where it is optional) because reconcile's
-      // whole point is healing the record already keyed on this device's identity.
-      reconcile: (input: PushSubscriptionReconcileInput) =>
-        invokeGatewayMethod<'push.subscriptions.reconcile', PushSubscriptionReconcileResult>(
-          'push.subscriptions.reconcile',
-          input,
-        ),
+      vapidKey: () => invokeGatewayMethod('push.vapid.get', {}),
+      subscribe: (input: PushSubscriptionCreateInput) => invokeGatewayMethod('push.subscriptions.create', input),
+      list: () => invokeGatewayMethod('push.subscriptions.list', {}),
+      unsubscribe: (subscriptionId: string) => invokeGatewayMethod('push.subscriptions.delete', { subscriptionId }),
+      verify: (subscriptionId: string) => invokeGatewayMethod('push.subscriptions.verify', { subscriptionId }),
+      // reconcile: the reconcile-on-open self-heal call, see
+      // reconcilePushSubscriptionOnOpen in lib/push/push-client.ts.
+      reconcile: (input: PushSubscriptionReconcileInput) => invokeGatewayMethod('push.subscriptions.reconcile', input),
     },
-    // ─── Pairing (pairing.tokens.*, pairing.handoff.*, platform 1.8.0) ───────────
+    // ─── Pairing (pairing.tokens.*, pairing.handoff.*, pairing.posture.get) ──────
     //
-    // Per-device revocable pairing tokens replace the old single shared token:
-    // each paired surface (a phone, a second laptop, …) gets its OWN named
-    // token, so revoking one device never signs out every other device.
-    // Generic-invoke-only (ws transport, no REST route), same family as push.*
-    // above, but unlike push.*, these DO carry real generated
-    // OperatorMethodInputMap/OutputMap entries (contracts 1.8.0), so the
-    // explicit TOutput below is a cross-check, not a required fallback.
-    //
-    // CUSTODY: the daemon hands back the literal token STRING only once, from
-    // tokens.create/tokens.migrate/handoff.create, at mint time, list/rename/
-    // delete never see it again (the redacted PublicPairingToken view carries
-    // id/name/timestamps only).
+    // Per-device revocable pairing tokens: each paired surface (a phone, a second
+    // laptop, …) gets its OWN named token, so revoking one device never signs out
+    // every other device. ws-only, generic-invoke.
     //
     // handoff.* is the QR/deep-link bundle: create mints a per-device token AND
     // an offer set (notifications/relay/passkey, each independently declinable)
@@ -2499,49 +1611,33 @@ export const client = {
     // (src/hooks/usePairingHandoff.ts) for the client flow.
     pairing: {
       tokens: {
-        list: () => invokeGatewayMethod<'pairing.tokens.list', PairingTokensListResult>('pairing.tokens.list', {}),
-        create: (name: string) =>
-          invokeGatewayMethod<'pairing.tokens.create', PairingTokensCreateResult>('pairing.tokens.create', { name }),
+        list: () => invokeGatewayMethod('pairing.tokens.list', {}),
+        create: (name: string) => invokeGatewayMethod('pairing.tokens.create', { name }),
         // migrate: mint a new per-device token for an operator still on the legacy
         // shared token, without yet revoking it, a bridge step before revokeShared.
-        migrate: (name: string) =>
-          invokeGatewayMethod<'pairing.tokens.migrate', PairingTokensCreateResult>('pairing.tokens.migrate', { name }),
-        rename: (id: string, name: string) =>
-          invokeGatewayMethod<'pairing.tokens.rename', PairingTokensRenameResult>('pairing.tokens.rename', { id, name }),
-        delete: (id: string) =>
-          invokeGatewayMethod<'pairing.tokens.delete', PairingTokensDeleteResult>('pairing.tokens.delete', { id }),
+        migrate: (name: string) => invokeGatewayMethod('pairing.tokens.migrate', { name }),
+        rename: (id: string, name: string) => invokeGatewayMethod('pairing.tokens.rename', { id, name }),
+        delete: (id: string) => invokeGatewayMethod('pairing.tokens.delete', { id }),
         // revokeShared: a one-way action, once every device has its own token,
         // this permanently disables the legacy shared token so it can never sign
         // in again. legacySharedRevoked also comes back on tokens.list, so a
         // caller can render whether this has already happened.
-        revokeShared: () =>
-          invokeGatewayMethod<'pairing.tokens.revokeShared', PairingTokensRevokeSharedResult>(
-            'pairing.tokens.revokeShared',
-            {},
-          ),
+        revokeShared: () => invokeGatewayMethod('pairing.tokens.revokeShared', {}),
       },
       handoff: {
         create: (name: string, offers?: readonly string[]) =>
-          invokeGatewayMethod<'pairing.handoff.create', PairingHandoffCreateResult>(
-            'pairing.handoff.create',
-            offers && offers.length > 0 ? { name, offers } : { name },
-          ),
-        complete: (input: PairingHandoffCompleteInput) =>
-          invokeGatewayMethod<'pairing.handoff.complete', PairingHandoffCompleteResult>('pairing.handoff.complete', input),
+          invokeGatewayMethod('pairing.handoff.create', offers && offers.length > 0 ? { name, offers } : { name }),
+        complete: (input: PairingHandoffCompleteInput) => invokeGatewayMethod('pairing.handoff.complete', input),
       },
       // posture.get: the same honest TLS/capability read outside a pairing exchange, a
       // surface passes ITS OWN current origin (usePairingHandoff, useOriginPosture pass
       // window.location.origin) so the labels describe wherever it is actually running,
       // not wherever the daemon's configured web origin happens to be.
       posture: {
-        get: (origin?: string) =>
-          invokeGatewayMethod<'pairing.posture.get', PairingPostureGetResult>(
-            'pairing.posture.get',
-            origin ? { origin } : {},
-          ),
+        get: (origin?: string) => invokeGatewayMethod('pairing.posture.get', origin ? { origin } : {}),
       },
     },
-    // cost.attribution.get (platform 1.6.1): windowed (24h/7d), cache-aware-priced cost
+    // cost.attribution.get: windowed (24h/7d), cache-aware-priced cost
     // attribution grouped by a dimension (agent/tool/hook/mcp/model/provider/session).
     // `transport: ["ws"]` only, generic-invoke-only like sessions.changes.get above.
     // Honest-unpriced: a row's costUsd is null when nothing in it could be priced,
@@ -2554,12 +1650,16 @@ export const client = {
           invokeGatewayMethod<'cost.attribution.get', CostAttributionGetResult>('cost.attribution.get', input),
       },
     },
-    // tailscale.get / tailscale.serve.run (platform 1.8.0), see the type block above for
-    // the full rationale. Neither id has a REST route binding, so both are
-    // generic-invoke-only via invokeGatewayMethod.
+    // tailscale.get / tailscale.serve.run: the one confirmed action behind a "needs
+    // https, available via tailscale" label. get is a read-only probe (binary present,
+    // logged in, MagicDNS name, the https URL serve would yield, the last serve
+    // receipt); a surface offers the action only when it reports a usable environment.
+    // serve.run is the one state-changing tailscale command the daemon runs, only from
+    // this explicit verb, with a receipt either way; on success web.publicBaseUrl
+    // becomes the same https URL. ws-only, generic-invoke.
     tailscale: {
-      get: () => invokeGatewayMethod<'tailscale.get', TailscaleGetResult>('tailscale.get', {}),
-      serveRun: () => invokeGatewayMethod<'tailscale.serve.run', TailscaleServeRunResult>('tailscale.serve.run', {}),
+      get: () => invokeGatewayMethod('tailscale.get', {}),
+      serveRun: () => invokeGatewayMethod('tailscale.serve.run', {}),
     },
   },
   chat: {
@@ -2569,17 +1669,8 @@ export const client = {
       list: (input?: OperatorMethodInput<'companion.chat.sessions.list'>) => invokeOperator('companion.chat.sessions.list', input),
       update: (sessionId: string, input: Parameters<typeof scopedPlatform.chat.sessions.update>[1]) =>
         invokeOperator('companion.chat.sessions.update', { sessionId, ...input }),
-      // delete-means-delete: this call site itself is UNCHANGED, the route
-      // (DELETE /api/companion/chat/sessions/{sessionId}) already resolves through
-      // EXTRA_METHOD_ROUTES either way. What changes is the daemon behind it: an older
-      // daemon soft-closes (`{sessionId, status:'closed'}`, file retained); an upgraded
-      // one hard-removes (`{sessionId, deleted:true}`, file gone). The static return type
-      // here still reflects the installed 0.38 OperatorMethodOutputMap entry
-      // (`{sessionId, status}`), the generated contract has not caught up to the
-      // hard-delete work's real wire shape yet, so callers must NOT trust this call's
-      // return value as proof the record is gone. App.tsx's delete flow never reads
-      // this response's fields for that; it reconciles against a real re-fetch
-      // (includeClosed:true) instead.
+      // delete: App.tsx's delete flow does not take this reply as proof the record is
+      // gone; it reconciles against a re-fetch (includeClosed:true).
       delete: (sessionId: string) => invokeOperator('companion.chat.sessions.delete', { sessionId }),
       // close: a genuinely NEW, distinct soft-close verb for companion chat
       // (companion.chat.sessions.close), separate from delete, see the
@@ -2600,10 +1691,9 @@ export const client = {
       // regenerate (companion.chat.messages.retry): re-run an assistant response
       // honestly. Omit messageId to regenerate the latest assistant reply. The prior
       // response is superseded (retained, flagged), never deleted, and a fresh turn
-      // streams back over the same SSE channel. Untyped route (no generated I/O map),
-      // CompanionRegenerateResult is this module's hand-authored shape.
-      retry: (sessionId: string, input?: { messageId?: string }) =>
-        invokeOperator<'companion.chat.messages.retry', CompanionRegenerateResult>('companion.chat.messages.retry', {
+      // streams back over the same SSE channel.
+      retry: (sessionId: string, input?: { messageId?: string }): Promise<CompanionRegenerateResult> =>
+        invokeOperator('companion.chat.messages.retry', {
           sessionId,
           ...(input?.messageId ? { messageId: input.messageId } : {}),
         }),
@@ -2611,8 +1701,8 @@ export const client = {
       // the conversation from it. The original (and everything after) is superseded
       // (retained, flagged); a new user message carrying `revisionOf` is appended and a
       // fresh turn answers it. The daemon route reads the edited text from `content`.
-      edit: (sessionId: string, messageId: string, input: CompanionEditInput) =>
-        invokeOperator<'companion.chat.messages.edit', CompanionEditResult>('companion.chat.messages.edit', {
+      edit: (sessionId: string, messageId: string, input: CompanionEditInput): Promise<CompanionEditResult> =>
+        invokeOperator('companion.chat.messages.edit', {
           sessionId,
           messageId,
           content: input.content,

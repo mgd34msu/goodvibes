@@ -18,7 +18,7 @@ import { join, resolve } from 'node:path';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { TuiConfigManager } from '../config/host-settings.ts';
 import { formatProviderModel, getModelIdFromProviderModel, getProviderIdFromModel } from '@goodvibes-jev/engine/platform/platform/providers';
-import { readOnboardingCheckMarkers } from '../runtime/onboarding/index.ts';
+import { readOnboardingCheckMarker } from '../runtime/onboarding/index.ts';
 import { GlobalNetworkTransportInstaller } from '@/runtime/index.ts';
 import { createShellPathService } from '@/runtime/index.ts';
 import { configureActivityLogger } from '@goodvibes-jev/engine/platform/platform/utils';
@@ -184,7 +184,7 @@ export async function prepareShellCliRuntime(
       workingDirectory: bootstrapWorkingDir,
       homeDirectory: bootstrapHomeDirectory,
     });
-    const onboardingMarkers = readOnboardingCheckMarkers(shellPaths);
+    const onboardingMarker = readOnboardingCheckMarker(shellPaths);
     const service = await buildCliServicePosture({
       configManager,
       workingDirectory: bootstrapWorkingDir,
@@ -232,7 +232,7 @@ export async function prepareShellCliRuntime(
       configManager,
       workingDirectory: bootstrapWorkingDir,
       homeDirectory: bootstrapHomeDirectory,
-      onboardingMarkers,
+      onboardingMarker,
       auth: readAuthPaths({ workingDirectory: bootstrapWorkingDir, homeDirectory: bootstrapHomeDirectory }),
       service,
       install: runInstallSelfCheck({

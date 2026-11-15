@@ -44,6 +44,90 @@ interface ChannelTransport {
   readonly send: (text: string) => Promise<void>;
 }
 
+/** Where notifications go, as resolved from the services, settings and environment at one moment. */
+export interface NotifierChannelSetup {
+  readonly slack?: SlackIntegration | undefined;
+  readonly discord?: DiscordIntegration | undefined;
+  /** Post Slack notifications with the bot into this channel instead of through the webhook. */
+  readonly slackChannel?: string | undefined;
+  /** Post Discord notifications with the bot into this channel instead of through the webhook. */
+  readonly discordChannelId?: string | undefined;
+  /** Connected services that have no notification target, reported by {@link Notifier.channelGaps}. */
+  readonly gaps?: readonly NotifierChannelGap[] | undefined;
+}
+
+function transportsFor(setup: NotifierChannelSetup): ChannelTransport[] {
+  const transports: ChannelTransport[] = [];
+  if (setup.slack) transports.push(transportFor('slack', setup.slack, setup.slackChannel));
+  if (setup.discord) transports.push(transportFor('discord', setup.discord, setup.discordChannelId));
+  return transports;
+}
+
+function setupSignature(transports: readonly ChannelTransport[], gaps: readonly NotifierChannelGap[]): string {
+  return `${transports.map((transport) => transport.channel).join(',')}|${gaps.map((gap) => gap.channel).join(',')}`;
+}
+
+type NotifierSettings = Pick<ConfigManager, 'get'> & Partial<Pick<ConfigManager, 'onDidChangeIncarnation'>>;
+
+/** Resolve the Slack and Discord notification channels from the services, settings and environment. */
+async function resolveNotifierChannels(
+  serviceRegistry: Pick<ServiceRegistry, 'resolveSecret'>,
+  configManager: NotifierSettings | null,
+  resolveConfigSecret: (value: unknown) => Promise<string | null>,
+): Promise<NotifierChannelSetup> {
+  const [
+    slackWebhookFromService,
+    slackTokenFromService,
+    discordWebhookFromService,
+    discordTokenFromService,
+    slackTokenFromConfig,
+    discordTokenFromConfig,
+  ] = await Promise.all([
+    serviceRegistry.resolveSecret('slack', 'webhookUrl'),
+    serviceRegistry.resolveSecret('slack', 'primary'),
+    serviceRegistry.resolveSecret('discord', 'webhookUrl'),
+    serviceRegistry.resolveSecret('discord', 'primary'),
+    configManager ? resolveConfigSecret(configManager.get('surfaces.slack.botToken')) : null,
+    configManager ? resolveConfigSecret(configManager.get('surfaces.discord.botToken')) : null,
+  ]);
+  const setting = (key: 'surfaces.slack.defaultChannel' | 'surfaces.discord.defaultChannelId'): string | undefined => {
+    const value = configManager?.get(key);
+    return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+  };
+
+  const slackWebhook = slackWebhookFromService ?? process.env.SLACK_WEBHOOK_URL;
+  const slackToken = slackTokenFromService ?? slackTokenFromConfig ?? process.env.SLACK_BOT_TOKEN;
+  const discordWebhook = discordWebhookFromService ?? process.env.DISCORD_WEBHOOK_URL;
+  const discordToken = discordTokenFromService ?? discordTokenFromConfig ?? process.env.DISCORD_BOT_TOKEN;
+  // The webhook wins when both exist: it is the address the owner gave for notifications.
+  const slackChannel = slackWebhook ? undefined : slackToken ? setting('surfaces.slack.defaultChannel') : undefined;
+  const discordChannelId = discordWebhook ? undefined : discordToken ? setting('surfaces.discord.defaultChannelId') : undefined;
+
+  const gaps: NotifierChannelGap[] = [];
+  if (!slackWebhook && slackToken && !slackChannel) {
+    gaps.push({
+      channel: 'slack',
+      reason: 'Slack is connected for chat but has nowhere to post notifications',
+      next: 'Add an incoming-webhook URL to the slack service, or set surfaces.slack.defaultChannel',
+    });
+  }
+  if (!discordWebhook && discordToken && !discordChannelId) {
+    gaps.push({
+      channel: 'discord',
+      reason: 'Discord is connected for chat but has nowhere to post notifications',
+      next: 'Add a webhook URL to the discord service, or set surfaces.discord.defaultChannelId',
+    });
+  }
+
+  return {
+    slack: slackWebhook || slackChannel ? new SlackIntegration(slackWebhook, slackToken) : undefined,
+    discord: discordWebhook || discordChannelId ? new DiscordIntegration(discordWebhook, discordToken) : undefined,
+    slackChannel,
+    discordChannelId,
+    gaps,
+  };
+}
+
 function transportFor(channel: NotifierChannel, integration: SlackIntegration | DiscordIntegration, target: string | undefined): ChannelTransport {
   // A default channel means the bot posts it; otherwise the incoming webhook.
   if (target) return { channel, send: (text) => integration.postMessage(target, text) };
@@ -63,13 +147,21 @@ function transportFor(channel: NotifierChannel, integration: SlackIntegration | 
  * `surfaces.discord.defaultChannelId`). A bot token alone is reported through
  * {@link Notifier.channelGaps} and gets no channel.
  *
+ * A notifier built by {@link Notifier.fromConfig} resolves its channels again
+ * before each delivery and on every settings change, so a token or webhook
+ * saved during a session reaches the next notification without a restart.
+ *
  * Which events are announced and how they are worded belongs to
  * `notification-dispatcher.ts`; failures are retried by the delivery queue and
  * end in a dead-letter list that {@link Notifier.persistDeadLetters} keeps on disk.
  */
 export class Notifier implements NotificationDeadLetterSource {
-  private readonly transports: readonly ChannelTransport[];
-  private readonly gaps: readonly NotifierChannelGap[];
+  private transports: readonly ChannelTransport[];
+  private gaps: readonly NotifierChannelGap[];
+  private readonly resolveChannels: (() => Promise<NotifierChannelSetup>) | undefined;
+  private _resolving: Promise<void> | undefined;
+  private readonly _channelListeners = new Set<() => void>();
+  private stopWatchingSettings: (() => void) | undefined;
   private unsubscribe: (() => void) | undefined;
   private readonly _queue: DeliveryQueue<NotificationEnvelope | string>;
   private readonly metadataOnly: NotificationPrivacyReader | undefined;
@@ -77,15 +169,9 @@ export class Notifier implements NotificationDeadLetterSource {
   private _closing: Promise<void> | undefined;
   private readonly _active = new Set<Promise<void>>();
 
-  constructor(options?: {
-    slack?: SlackIntegration | undefined;
-    discord?: DiscordIntegration | undefined;
-    /** Post Slack notifications with the bot into this channel instead of through the webhook. */
-    slackChannel?: string | undefined;
-    /** Post Discord notifications with the bot into this channel instead of through the webhook. */
-    discordChannelId?: string | undefined;
-    /** Connected services that have no notification target, reported by {@link Notifier.channelGaps}. */
-    gaps?: readonly NotifierChannelGap[] | undefined;
+  constructor(options?: NotifierChannelSetup & {
+    /** Resolves the channels again, before each delivery and on {@link Notifier.refresh}. */
+    resolveChannels?: (() => Promise<NotifierChannelSetup>) | undefined;
     delivery?: Partial<DeliveryQueueConfig> | undefined;
     featureFlags?: Pick<FeatureFlagManager, 'isEnabled'> | null | undefined;
     metadataOnly?: NotificationPrivacyReader | undefined;
@@ -93,11 +179,9 @@ export class Notifier implements NotificationDeadLetterSource {
     configManager?: Pick<ConfigManager, 'get'> | null | undefined;
   }) {
     this.metadataOnly = options?.metadataOnly;
-    const transports: ChannelTransport[] = [];
-    if (options?.slack) transports.push(transportFor('slack', options.slack, options.slackChannel));
-    if (options?.discord) transports.push(transportFor('discord', options.discord, options.discordChannelId));
-    this.transports = transports;
+    this.transports = transportsFor(options ?? {});
     this.gaps = options?.gaps ?? [];
+    this.resolveChannels = options?.resolveChannels;
     this._queue = new DeliveryQueue<NotificationEnvelope | string>({
       ...(options?.delivery ?? {}),
       featureFlags: options?.featureFlags,
@@ -118,9 +202,10 @@ export class Notifier implements NotificationDeadLetterSource {
        * Supplies `surfaces.slack.botToken`, `surfaces.discord.botToken` (the
        * tokens an account setup flow stores), the default channels and the
        * integrations.delivery.* settings. Without it only the service registry
-       * and the environment are read.
+       * and the environment are read. When it reports settings changes, the
+       * channels are resolved again on each one.
        */
-      configManager?: Pick<ConfigManager, 'get'> | null;
+      configManager?: NotifierSettings | null;
       /** Resolves a config value that is a secret reference; defaults to {@link resolveSecretInput}. */
       resolveConfigSecret?: (value: unknown) => Promise<string | null>;
       /**
@@ -134,57 +219,15 @@ export class Notifier implements NotificationDeadLetterSource {
     const resolveConfigSecret = options.resolveConfigSecret ?? ((value: unknown) => resolveSecretInput(value, options.secretsManager
       ? { resolveLocalSecret: (key) => options.secretsManager!.get(key), homeDirectory: options.secretsManager.getGlobalHome() }
       : undefined));
-    const [
-      slackWebhookFromService,
-      slackTokenFromService,
-      discordWebhookFromService,
-      discordTokenFromService,
-      slackTokenFromConfig,
-      discordTokenFromConfig,
-    ] = await Promise.all([
-      serviceRegistry.resolveSecret('slack', 'webhookUrl'),
-      serviceRegistry.resolveSecret('slack', 'primary'),
-      serviceRegistry.resolveSecret('discord', 'webhookUrl'),
-      serviceRegistry.resolveSecret('discord', 'primary'),
-      options.configManager ? resolveConfigSecret(options.configManager.get('surfaces.slack.botToken')) : null,
-      options.configManager ? resolveConfigSecret(options.configManager.get('surfaces.discord.botToken')) : null,
-    ]);
-    const setting = (key: 'surfaces.slack.defaultChannel' | 'surfaces.discord.defaultChannelId'): string | undefined => {
-      const value = options.configManager?.get(key);
-      return typeof value === 'string' && value.trim() ? value.trim() : undefined;
-    };
-
-    const slackWebhook = slackWebhookFromService ?? process.env.SLACK_WEBHOOK_URL;
-    const slackToken = slackTokenFromService ?? slackTokenFromConfig ?? process.env.SLACK_BOT_TOKEN;
-    const discordWebhook = discordWebhookFromService ?? process.env.DISCORD_WEBHOOK_URL;
-    const discordToken = discordTokenFromService ?? discordTokenFromConfig ?? process.env.DISCORD_BOT_TOKEN;
-    // The webhook wins when both exist: it is the address the owner gave for notifications.
-    const slackChannel = slackWebhook ? undefined : slackToken ? setting('surfaces.slack.defaultChannel') : undefined;
-    const discordChannelId = discordWebhook ? undefined : discordToken ? setting('surfaces.discord.defaultChannelId') : undefined;
-
-    const gaps: NotifierChannelGap[] = [];
-    if (!slackWebhook && slackToken && !slackChannel) {
-      gaps.push({
-        channel: 'slack',
-        reason: 'Slack is connected for chat but has nowhere to post notifications',
-        next: 'Add an incoming-webhook URL to the slack service, or set surfaces.slack.defaultChannel',
-      });
-    }
-    if (!discordWebhook && discordToken && !discordChannelId) {
-      gaps.push({
-        channel: 'discord',
-        reason: 'Discord is connected for chat but has nowhere to post notifications',
-        next: 'Add a webhook URL to the discord service, or set surfaces.discord.defaultChannelId',
-      });
-    }
-
-    const slack = slackWebhook || slackChannel ? new SlackIntegration(slackWebhook, slackToken) : undefined;
-    const discord = discordWebhook || discordChannelId ? new DiscordIntegration(discordWebhook, discordToken) : undefined;
-
-    return new Notifier({
-      slack, discord, slackChannel, discordChannelId, gaps,
-      featureFlags: options.featureFlags, metadataOnly: options.metadataOnly, configManager: options.configManager,
+    const configManager = options.configManager ?? null;
+    const resolveChannels = (): Promise<NotifierChannelSetup> => resolveNotifierChannels(serviceRegistry, configManager, resolveConfigSecret);
+    const notifier = new Notifier({
+      ...await resolveChannels(),
+      resolveChannels,
+      featureFlags: options.featureFlags, metadataOnly: options.metadataOnly, configManager,
     });
+    notifier.stopWatchingSettings = configManager?.onDidChangeIncarnation?.(() => { void notifier.refresh(); });
+    return notifier;
   }
 
   // -------------------------------------------------------------------------
@@ -199,6 +242,35 @@ export class Notifier implements NotificationDeadLetterSource {
   /** Connected chat services that receive no notifications, and what to add. */
   channelGaps(): readonly NotifierChannelGap[] {
     return this.gaps;
+  }
+
+  /**
+   * Resolve the channels again from the services, settings and environment. A
+   * resolution that fails keeps the channels already in use; concurrent calls
+   * share one resolution. Listeners of {@link onChannelsChanged} are told when
+   * a channel or a gap appeared or went away.
+   */
+  refresh(): Promise<void> {
+    const resolve = this.resolveChannels;
+    if (!resolve || this._closed) return Promise.resolve();
+    return this._resolving ??= resolve().then((setup) => {
+      if (this._closed) return;
+      const before = setupSignature(this.transports, this.gaps);
+      this.transports = transportsFor(setup);
+      this.gaps = setup.gaps ?? [];
+      if (setupSignature(this.transports, this.gaps) === before) return;
+      for (const listener of [...this._channelListeners]) {
+        try { listener(); } catch (error) { logger.warn('Notifier: channel listener failed', { error: error instanceof Error ? error.message : String(error) }); }
+      }
+    }, (error: unknown) => {
+      logger.warn('Notifier: notification channels could not be resolved; keeping the current ones', { error: error instanceof Error ? error.message : String(error) });
+    }).finally(() => { this._resolving = undefined; });
+  }
+
+  /** Told when the set of channels or channel gaps changes. Returns the unsubscribe function. */
+  onChannelsChanged(listener: () => void): () => void {
+    this._channelListeners.add(listener);
+    return () => { this._channelListeners.delete(listener); };
   }
 
   /**
@@ -233,6 +305,9 @@ export class Notifier implements NotificationDeadLetterSource {
     // A 'retrying' outcome is accepted: the queue still holds the message and
     // will resend it. 'dead_letter' means the queue gave up; the entry stays in
     // the dead-letter list until it is resent or cleared.
+    // Channels are resolved at send time: a webhook or token saved since the
+    // last notification is used now (a few secret lookups per notification).
+    await this.refresh();
     const failures: unknown[] = [];
     for (const transport of this.transports) {
       try {
@@ -307,6 +382,9 @@ export class Notifier implements NotificationDeadLetterSource {
   /** Stop subscriptions and admission immediately; use close() to drain deliveries. */
   dispose(): void {
     this._closed = true;
+    this.stopWatchingSettings?.();
+    this.stopWatchingSettings = undefined;
+    this._channelListeners.clear();
     this.detach();
     this._queue.dispose();
   }

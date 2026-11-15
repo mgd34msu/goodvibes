@@ -4,10 +4,10 @@
  * happen.
  *
  * Both units want one port, so the legacy unit has to be stopped before the new
- * one can bind. The order is therefore: new unit started, legacy stopped, new
- * unit answering on the endpoint from a live main process, legacy disabled and
- * removed. Any failure on the way leaves the machine with a working daemon and
- * says so.
+ * one can bind. The order is therefore: new unit installed, legacy stopped, new
+ * unit started and answering on the endpoint from a live main process, legacy
+ * disabled and removed. Any failure on the way leaves the machine with a working
+ * daemon and says so.
  */
 import { describe, expect, test } from 'bun:test';
 import { runLegacyDaemonMigration, type ManagedServiceActionRunner } from '../terminal-shell/src/legacy-daemon-migration.ts';
@@ -61,6 +61,7 @@ describe('retiring the install-script unit', () => {
 
     expect(result.ok).toBe(true);
     expect(h.removed).toEqual([LEGACY.path]);
+    expect(h.log.indexOf('systemctl:stop:goodvibes-daemon.service')).toBeLessThan(h.log.indexOf('manager:start'));
     expect(h.log.indexOf('systemctl:stop:goodvibes-daemon.service')).toBeLessThan(h.log.indexOf('systemctl:disable:goodvibes-daemon.service'));
     expect(h.log.indexOf('systemctl:disable:goodvibes-daemon.service')).toBeLessThan(h.log.indexOf('file:remove'));
     expect(result.lines.join('\n')).toContain('has been stopped, disabled, and removed');

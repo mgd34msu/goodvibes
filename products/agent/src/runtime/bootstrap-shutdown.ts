@@ -3,11 +3,12 @@ import { createOrderedShutdown, drainShutdownRegistry, clearIntervalSlot } from 
  * bootstrap-shutdown.ts, how a session lets go of everything it took.
  *
  * Teardown lives in one place rather than inline in bootstrapRuntime because
- * the order is load-bearing and easy to disturb by accident. It runs outermost
- * first: the session's registration on the spine, then the timers that would
- * fire into a half-torn-down runtime, then subscriptions, then the things that
- * own something outside this process, real Chromium processes, external
- * services, and only then the runtime's own shutdown.
+ * the order is load-bearing and easy to disturb by accident. The timers that
+ * would fire into a half-torn-down runtime stop first, then the session is
+ * saved (a local write, so no slow daemon can cost it), then the session's
+ * registration on the spine, subscriptions, the things that own something
+ * outside this process (real Chromium processes, external services), and
+ * last the runtime graph.
  *
  * Every step is best-effort in the sense that a failure must not strand the
  * ones after it: a session that cannot reach the daemon still has to release
@@ -38,8 +39,7 @@ export interface RuntimeShutdownDependencies {
   readonly executionLedger: { dispose(): void };
   /**
    * `RuntimeServices.dispose()`, stops every poller the composed graph started.
-   * Runs LAST, after shutdownRuntime: the final flushes below still need the
-   * schedulers, the orchestration registry and the provider registry alive.
+   * Runs LAST, after every other release.
    */
   readonly disposeRuntimeGraph: () => void | Promise<void>;
   readonly deferredStartup: { drain(ms: number): Promise<unknown> };
@@ -66,25 +66,15 @@ export function createRuntimeShutdown(
   // Collaborators must not await this owner's shutdown from inside their own
   // disposal: that is a dependency cycle, including indirectly wrapped waits.
   return createOrderedShutdown<Parameters<typeof shutdownRuntime>[1]>(async (sessionData, attempt) => {
-    await attempt(() => deps.sessionSpineClient.close(deps.sessionId));
-    await attempt(() => deps.sessionSpineClient.dispose());
+    // Local timers stop first so nothing fires into a half-torn-down runtime.
     await attempt(() => {
       const timer = deps.takeMemorySpineTimer();
       if (timer !== null) clearInterval(timer);
     });
-    // The agent-status tick renders and posts through the router; it must stop
-    // with the other timers, not after the awaits below.
+    // The agent-status tick renders and posts through the router.
     await attempt(() => clearIntervalSlot(deps.agentStatusIntervalRef));
-
-    // Take subscriptions out of the live arrays before invoking callbacks. One
-    // broken unsubscribe must neither retain itself nor strand its siblings.
-    await drainShutdownRegistry(deps.bootstrapUnsubs, attempt);
-    await drainShutdownRegistry(deps.runtimeUnsubs, attempt);
-    await attempt(() => deps.forensicsCollector.dispose());
-    await attempt(() => deps.executionLedger.dispose());
-    await attempt(() => shutdownAgentBrowserSessions());
-    await attempt(() => deps.deferredStartup.drain(100));
-    await attempt(() => deps.agentExternalServices.stop());
+    // Then the save: one local write that needs nothing the releases below free.
+    // Those include daemon round trips, and a slow daemon must not delay the save.
     let title = '';
     await attempt(() => {
       title = deps.conversationTitle();
@@ -103,7 +93,19 @@ export function createRuntimeShutdown(
         deps.shutdownOptions,
       ),
     );
-    // Always last: final persistence and platform shutdown still need the graph.
+    await attempt(() => deps.sessionSpineClient.close(deps.sessionId));
+    await attempt(() => deps.sessionSpineClient.dispose());
+
+    // Take subscriptions out of the live arrays before invoking callbacks. One
+    // broken unsubscribe must neither retain itself nor strand its siblings.
+    await drainShutdownRegistry(deps.bootstrapUnsubs, attempt);
+    await drainShutdownRegistry(deps.runtimeUnsubs, attempt);
+    await attempt(() => deps.forensicsCollector.dispose());
+    await attempt(() => deps.executionLedger.dispose());
+    await attempt(() => shutdownAgentBrowserSessions());
+    await attempt(() => deps.deferredStartup.drain(100));
+    await attempt(() => deps.agentExternalServices.stop());
+    // Always last: final flushes and platform shutdown still need the graph.
     await attempt(() => deps.disposeRuntimeGraph());
   }, 'Agent shutdown failed to release one or more owned resources');
 }

@@ -36,11 +36,7 @@ function makeOptions(overrides: ConfigValues = {}): CliStatusOptions {
     } as CliStatusOptions['configManager'],
     workingDirectory: '/project',
     homeDirectory: '/home/test',
-    onboardingMarkers: {
-      project: { scope: 'project', path: '/project/.goodvibes/tui/onboarding-checked.json', exists: false, payload: null },
-      user: { scope: 'user', path: '/home/test/.goodvibes/tui/onboarding-checked.json', exists: false, payload: null },
-      effective: null,
-    },
+    onboardingMarker: { scope: 'user', path: '/home/test/.goodvibes/tui/onboarding-checked.json', exists: false, payload: null },
     auth: {
       userStorePath: '/home/test/.goodvibes/tui/auth-users.json',
       userStorePresent: true,

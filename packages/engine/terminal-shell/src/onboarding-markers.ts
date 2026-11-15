@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs';
 import { atomicWriteFileSync, readVersioned, setAsideNewerVersionFile } from '@goodvibes-jev/engine/platform/platform/config';
 import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
-import type { OnboardingCheckMarkerPayload, OnboardingCheckMarkerState, OnboardingCheckMarkersState, OnboardingStateScope, WriteOnboardingCheckMarkerOptions, } from './onboarding-state-types.js';
+import type { OnboardingCheckMarkerPayload, OnboardingCheckMarkerState, OnboardingStateScope, WriteOnboardingCheckMarkerOptions, } from './onboarding-state-types.js';
 const ONBOARDING_CHECK_MARKER_FILE = 'onboarding-checked.json';
 const ONBOARDING_COMPLETION_MARKER_FILE = 'onboarding-complete.json';
 type OnboardingShellPaths = Pick<ShellPathService, 'workingDirectory' | 'resolveProjectPath' | 'resolveUserPath'>;
@@ -45,13 +45,6 @@ export function createOnboardingMarkerStorage(surfaceRoot: string) {
             parseError,
         };
     }
-    function pickEffectiveMarker(user: OnboardingCheckMarkerState): OnboardingCheckMarkerState | null {
-        if (user.payload)
-            return user;
-        if (user.exists)
-            return user;
-        return null;
-    }
     function getOnboardingCheckMarkerPath(shellPaths: OnboardingShellPaths, scope: OnboardingStateScope = 'user'): string {
         return resolveMarkerPath(shellPaths, scope);
     }
@@ -79,15 +72,6 @@ export function createOnboardingMarkerStorage(surfaceRoot: string) {
     function readOnboardingCompletionMarker(shellPaths: OnboardingShellPaths, scope: OnboardingStateScope = 'user'): OnboardingCheckMarkerState {
         return readOnboardingMarker(shellPaths, scope, ONBOARDING_COMPLETION_MARKER_FILE);
     }
-    function readOnboardingCheckMarkers(shellPaths: OnboardingShellPaths): OnboardingCheckMarkersState {
-        const user = readOnboardingCheckMarker(shellPaths, 'user');
-        const project = readOnboardingCheckMarker(shellPaths, 'project');
-        return {
-            user,
-            project,
-            effective: pickEffectiveMarker(user),
-        };
-    }
     function writeOnboardingMarker(shellPaths: OnboardingShellPaths, options: WriteOnboardingCheckMarkerOptions, fileName: string): OnboardingCheckMarkerState {
         const scope = options.scope ?? 'user';
         const path = resolveMarkerPath(shellPaths, scope, fileName);
@@ -111,5 +95,5 @@ export function createOnboardingMarkerStorage(surfaceRoot: string) {
     function writeOnboardingCompletionMarker(shellPaths: OnboardingShellPaths, options: WriteOnboardingCheckMarkerOptions = {}): OnboardingCheckMarkerState {
         return writeOnboardingMarker(shellPaths, options, ONBOARDING_COMPLETION_MARKER_FILE);
     }
-    return { getOnboardingCheckMarkerPath, readOnboardingCheckMarker, readOnboardingCheckMarkers, writeOnboardingCheckMarker, getOnboardingCompletionMarkerPath, readOnboardingCompletionMarker, writeOnboardingCompletionMarker };
+    return { getOnboardingCheckMarkerPath, readOnboardingCheckMarker, writeOnboardingCheckMarker, getOnboardingCompletionMarkerPath, readOnboardingCompletionMarker, writeOnboardingCompletionMarker };
 }

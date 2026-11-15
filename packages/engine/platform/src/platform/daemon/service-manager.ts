@@ -160,6 +160,22 @@ export function systemdSupportsRestartSteps(majorVersion: number | null): boolea
   return majorVersion !== null && majorVersion >= 254;
 }
 
+/**
+ * The restart policy a restartOnFailure unit is rendered with, stated once so
+ * anything that waits on the unit (the service migration) derives its deadline
+ * from the same numbers systemd was given.
+ */
+export const MANAGED_UNIT_RESTART_POLICY = { restartSec: 2, restartSteps: 8, restartMaxDelaySec: 300 } as const;
+
+/**
+ * How long to wait for a just-started unit to answer: the daemon's own boot
+ * allowance, plus one full restart delay so a first process that failed for a
+ * transient reason gets its restart inside the window.
+ */
+export function managedUnitStartDeadlineMs(bootAllowanceMs = 10_000): number {
+  return bootAllowanceMs + MANAGED_UNIT_RESTART_POLICY.restartSec * 1000;
+}
+
 /** First line of `systemctl --version` is "systemd NNN (...)"; returns NNN or null. */
 export function parseSystemdMajorVersion(versionOutput: string | undefined): number | null {
   const firstLine = (versionOutput ?? '').split('\n')[0] ?? '';
@@ -220,9 +236,9 @@ export function renderSystemdUnit(
   const restartLines = definition.restartOnFailure
     ? [
         'Restart=on-failure',
-        'RestartSec=2',
+        `RestartSec=${MANAGED_UNIT_RESTART_POLICY.restartSec}`,
         ...(systemdSupportsRestartSteps(systemdMajorVersion)
-          ? ['RestartSteps=8', 'RestartMaxDelaySec=300']
+          ? [`RestartSteps=${MANAGED_UNIT_RESTART_POLICY.restartSteps}`, `RestartMaxDelaySec=${MANAGED_UNIT_RESTART_POLICY.restartMaxDelaySec}`]
           : []),
       ]
     : ['Restart=no'];

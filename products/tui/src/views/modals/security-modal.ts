@@ -16,16 +16,20 @@ import type {
 // Security → config-modal surface (group-B port). Two tabs: 'Tokens' (the
 // token scope/rotation audit list under the governance summary) and
 // 'Governance' (policy preflight, MCP/plugin quarantine, latest incident, and
-// the MCP attack-path review). Read-model-backed, so refresh() is a no-op,
-// buildView reads getSnapshot() fresh every render. 'f' (preflight) routes to
-// its `/policy preflight` command path; 'i' jumps to the incident surface
-// (fleet) via the command path. Selection-blind port: the earlier view's
+// the MCP attack-path review). Read-model-backed: buildView reads the snapshot,
+// which shows the last token audit of record and never audits on a read. 'r'
+// runs an audit; 'f' (preflight) routes to `/policy preflight`; 'i' opens the
+// latest incident (its agent in /agents when it names one, else /forensics
+// latest). Selection-blind port: the earlier view's
 // selected-token scope/rotation detail is folded into each token row label.
 // Determinism: absolute ISO timestamps (never Date.now()).
 // ---------------------------------------------------------------------------
 
 export interface SecurityModalDeps {
-  readonly readModel: UiReadModel<UiSecuritySnapshot>;
+  readonly readModel: UiReadModel<UiSecuritySnapshot> & {
+    /** Run one token audit of record; absent on a surface that cannot audit. */
+    readonly runAudit?: () => { readonly totalTokens: number; readonly findings: number; readonly at: number };
+  };
 }
 
 const BAD: ModalSectionStyle = { fg: MODAL_TONES.bad };
@@ -81,7 +85,7 @@ class SecurityModalSurface implements ConfigModalSurface {
     { key: 'f', id: 'preflight', label: 'preflight' },
     { key: 'i', id: 'jumpToIncident', label: 'jump to incident', enabledFor: () => Boolean(this.deps.readModel.getSnapshot().latestIncident) },
     { key: 'd', id: 'manageDevices', label: 'manage devices' },
-    { key: 'r', id: 'refresh', label: 'refresh audit' },
+    { key: 'r', id: 'refresh', label: 'run audit', enabledFor: () => typeof this.deps.readModel.runAudit === 'function' },
   ];
 
   onOpen(requestRender: () => void): void {
@@ -108,10 +112,14 @@ class SecurityModalSurface implements ConfigModalSurface {
     const header = this.governanceHeader(snapshot);
     const rows: ConfigModalRow[] = [];
 
+    if (audit.results.length === 0 && audit.totalTokens > 0) {
+      rows.push(infoRow('unaudited', `${audit.totalTokens} token${audit.totalTokens === 1 ? ' is' : 's are'} registered and not audited yet: press r to audit now.`, WARN));
+      return { id: 'tokens', label: 'Tokens', header, rows, emptyText: '' };
+    }
     if (audit.results.length === 0) {
       const quarantinedMcp = snapshot.mcpServers.filter((s) => s.schemaFreshness === 'quarantined');
-      rows.push(infoRow('empty:0', 'No API tokens are registered with the security auditor yet.'));
-      rows.push(infoRow('empty:1', 'The security control room can already review policy, MCP, plugin, and incident posture, but token-specific scope and rotation audit data has not been registered.', { fg: MODAL_TONES.dim }));
+      rows.push(infoRow('empty:0', 'No tokens are registered with the security auditor: no device is paired here.'));
+      rows.push(infoRow('empty:1', 'Paired devices appear here with their age and rotation due date once paired (d manage devices).', { fg: MODAL_TONES.dim }));
       if (quarantinedMcp.length > 0) rows.push(infoRow('empty:mcp', 'MCP quarantine still active despite no registered tokens.', WARN));
       rows.push(headerRow('empty:title', 'Inspect further'));
       rows.push(infoRow('empty:storage', '/storage review — inspect secure secret storage and environment overrides', { fg: MODAL_TONES.dim }));
@@ -127,7 +135,7 @@ class SecurityModalSurface implements ConfigModalSurface {
         ...(resultColor(result) ? { style: resultColor(result)! } : {}),
       });
     }
-    rows.push(infoRow('audit:when', `Last audit ${fmtIso(audit.lastAuditAt)}: press r to refresh`, { fg: MODAL_TONES.dim }));
+    rows.push(infoRow('audit:when', `Last audit ${fmtIso(audit.lastAuditAt)}: press r to audit now`, { fg: MODAL_TONES.dim }));
     return { id: 'tokens', label: 'Tokens', header, rows, hints: ['f preflight'] };
   }
 
@@ -172,10 +180,26 @@ class SecurityModalSurface implements ConfigModalSurface {
   }
 
   onAction(id: string, ctx: ConfigModalActionContext): void {
-    if (id === 'refresh') { ctx.setStatus('Security posture is read live.'); ctx.requestRender(); return; }
+    if (id === 'refresh') {
+      const runAudit = this.deps.readModel.runAudit;
+      if (!runAudit) { ctx.setStatus('This surface cannot run a token audit.'); ctx.requestRender(); return; }
+      try {
+        const run = runAudit();
+        ctx.setStatus(`Audited ${run.totalTokens} token${run.totalTokens === 1 ? '' : 's'}: ${run.findings === 0 ? 'all in policy' : `${run.findings} with findings`} (${fmtIso(run.at)}).`);
+      } catch (error) {
+        ctx.setStatus(`The token audit failed: ${error instanceof Error ? error.message : String(error)}.`);
+      }
+      ctx.requestRender();
+      return;
+    }
     if (id === 'preflight') { runModalCommand(ctx, 'policy', ['preflight'], '/policy preflight'); return; }
-    if (id === 'jumpToIncident' && this.deps.readModel.getSnapshot().latestIncident) {
-      runModalCommand(ctx, 'agents', [], '/agents', { pending: 'Opening Agents on the running processes.', done: 'Opened Agents on the running processes.' });
+    const incident = id === 'jumpToIncident' ? this.deps.readModel.getSnapshot().latestIncident : null;
+    if (incident) {
+      if (incident.agentId) {
+        runModalCommand(ctx, 'agents', ['--target', incident.agentId], `/agents --target ${incident.agentId}`, { pending: `Opening Agents on ${incident.agentId}.`, done: `Opened Agents on ${incident.agentId}.` });
+      } else {
+        runModalCommand(ctx, 'forensics', ['latest'], '/forensics latest', { pending: 'Opening the latest incident report.', done: 'Opened the latest incident report.' });
+      }
       return;
     }
     if (id === 'manageDevices') {
@@ -187,42 +211,4 @@ class SecurityModalSurface implements ConfigModalSurface {
 
 export function createSecurityModalSurface(deps: SecurityModalDeps): ConfigModalSurface {
   return new SecurityModalSurface(deps);
-}
-
-/**
- * Deterministic golden fixture. A fixed `UiSecuritySnapshot` literal covering
- * the meaningful states in one shot: a clean token, a blocked/overdue/scope-
- * violating token, a quarantined allow-all MCP server, a quarantined plugin,
- * one recorded incident, and one critical attack-path finding. No Date.now().
- */
-export function securityModalGoldenSurface(): ConfigModalSurface {
-  const FIXED_INCIDENT = {
-    id: 'inc-0001', traceId: 'trace-0001', sessionId: 'sess-0001', generatedAt: 1700000000000,
-    classification: 'permission_denied' as const, summary: 'blocked write outside sandbox root',
-    phaseTimings: [], phaseLedger: [], slowPhases: [], causalChain: [], cascadeEvents: [], permissionEvidence: [], budgetBreaches: [], jumpLinks: [],
-  };
-  const snapshot: UiSecuritySnapshot = {
-    audit: {
-      managed: true, totalTokens: 2,
-      results: [
-        { tokenId: 'tok-openai', label: 'OPENAI_API_KEY', scope: { tokenId: 'tok-openai', outcome: 'ok', excessScopes: [], policyId: 'openai' }, rotation: { tokenId: 'tok-openai', outcome: 'ok', ageMs: 5 * 86400000, cadenceMs: 90 * 86400000, msUntilDue: 85 * 86400000, dueAt: 1707600000000 }, blocked: false },
-        { tokenId: 'tok-slack', label: 'SLACK_BOT_TOKEN', scope: { tokenId: 'tok-slack', outcome: 'violation', excessScopes: ['admin'], policyId: 'slack' }, rotation: { tokenId: 'tok-slack', outcome: 'overdue', ageMs: 120 * 86400000, cadenceMs: 90 * 86400000, msUntilDue: -30 * 86400000, dueAt: 1697328000000 }, blocked: true },
-      ],
-      blocked: ['tok-slack'], scopeViolations: ['tok-slack'], rotationWarnings: [], rotationOverdue: ['tok-slack'],
-      lastAuditAt: 1700000000000, capturedAt: '2023-11-14T22:13:20.000Z',
-    },
-    policy: { preflightStatus: 'warn', preflightIssueCount: 2, lintFindingCount: 1 },
-    deniedPermissions: 3, incidents: [FIXED_INCIDENT], latestIncident: FIXED_INCIDENT,
-    mcpServers: [{ name: 'fs-server', role: 'filesystem', trustMode: 'allow-all', connected: true, allowedPaths: [], allowedHosts: [], schemaFreshness: 'quarantined', quarantineReason: 'stale_threshold', quarantineDetail: 'ttl expired 2 days ago' }],
-    recentMcpDecisions: [],
-    attackPathReview: {
-      reviewedAt: 1700000000000, totalServers: 1, connectedServers: 1, allowAllServers: 1, askOnRiskServers: 0, constrainedServers: 0, blockedServers: 0, quarantinedServers: 1, incoherentFindings: 1, criticalFindings: 1,
-      findings: [{ kind: 'server-posture', serverName: 'fs-server', route: 'fs-server -> write_fs', verdict: 'ask', severity: 'critical', incoherent: true, reason: 'allow-all trust combined with a quarantined schema', evidence: ['schemaFreshness=quarantined', 'trustMode=allow-all'] }],
-      summary: '1 server in allow-all mode with a quarantined schema',
-    },
-    plugins: [],
-    quarantinedPlugins: [{ name: 'legacy-formatter', version: '0.1.0', description: 'old formatter plugin', enabled: false, active: false, trustTier: 'untrusted', quarantined: true }],
-    untrustedPlugins: [],
-  };
-  return createSecurityModalSurface({ readModel: { getSnapshot: () => snapshot, subscribe: () => () => {} } });
 }

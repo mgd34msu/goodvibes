@@ -98,8 +98,8 @@ test('a token finding reaches the security domain once however often the audit r
   const day = 24 * 60 * 60 * 1000;
   services.tokenAuditor.registerPolicy({ id: 'p', name: 'p', allowedScopes: ['read'], rotationCadenceMs: 10 * day, rotationWarningThresholdMs: 2 * day });
   services.tokenAuditor.registerToken({ id: 't', label: 'ci', issuedAt: 0, grantedScopes: ['read'], policyId: 'p' });
-  services.tokenAuditor.auditAll(11 * day);
-  services.tokenAuditor.auditAll(12 * day);
+  services.tokenAuditor.runAudit(11 * day);
+  services.tokenAuditor.runAudit(12 * day);
   for (let i = 0; i < 20; i += 1) await Promise.resolve();
   expect(seen.filter((type) => type === 'TOKEN_ROTATION_EXPIRED')).toHaveLength(1);
   await services.close();

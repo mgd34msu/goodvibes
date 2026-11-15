@@ -4,7 +4,6 @@ import { join } from 'node:path';
 import { makeProjectTempDir } from '../../helpers/project-temp.ts';
 import {
   readOnboardingCheckMarker,
-  readOnboardingCheckMarkers,
   writeOnboardingCheckMarker,
 } from '@/runtime/onboarding/markers.ts';
 
@@ -72,17 +71,6 @@ describe('onboarding markers', () => {
     const project = readOnboardingCheckMarker(shellPaths, 'project');
     expect(user.payload!.source).toBe('wizard');
     expect(project.payload!.source).toBe('command');
-  });
-
-  test('readOnboardingCheckMarkers returns both scopes and effective marker', () => {
-    writeOnboardingCheckMarker(shellPaths, { scope: 'user', source: 'wizard' });
-
-    const state = readOnboardingCheckMarkers(shellPaths);
-    expect(state.user.exists).toBe(true);
-    expect(state.project.exists).toBe(false);
-    // effective is user when user is the only one with a payload
-    expect(state.effective).not.toBeNull();
-    expect(state.effective!.payload!.source).toBe('wizard');
   });
 
   test('checkedAt and updatedAt are recorded', () => {

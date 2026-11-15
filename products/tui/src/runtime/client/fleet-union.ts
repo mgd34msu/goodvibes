@@ -73,6 +73,9 @@ export interface FleetUnionReadModel extends FleetReadModel {
 /** How this terminal names itself in a daemon-only-row act refusal. */
 const SURFACE_LABEL = 'this terminal';
 
+/** The elapsed column's resolution; a build older than this is redone so running times keep moving. */
+const ELAPSED_STEP_MS = 1_000;
+
 /**
  * Wrap a local fleet read model so its snapshot also carries the adopted
  * daemon's rows, over the platform's poll/merge/refusal policy.
@@ -87,51 +90,89 @@ export function createFleetUnionReadModel(options: FleetUnionOptions): FleetUnio
   const local = options.local;
   const poller = createFleetUnionRowsPoller(options);
 
+  // The merged view is built once per change. The poller and, while anything is
+  // subscribed, the local registry bump these counters; a read with both
+  // unchanged returns the last build. Elapsed times on that build age, so it is
+  // also rebuilt once the elapsed column (one-second steps) would show a new value.
+  let pollerRevision = 0;
+  let localRevision = 0;
+  let localWatchers = 0;
+  let unsubscribeLocalWatch: (() => void) | null = null;
+  let built: { readonly pollerRevision: number; readonly localRevision: number; readonly at: number; readonly snapshot: FleetSnapshot; readonly localIds: ReadonlySet<string> } | null = null;
+
   const listeners = new Set<() => void>();
   const unsubscribePoller = poller.subscribe(() => {
+    pollerRevision++;
     for (const listener of listeners) listener();
   });
 
-  /** Ids this surface owns right now, the set the daemon's copy defers to. */
-  const localNodeIds = (snapshot: FleetSnapshot): Set<string> => new Set(snapshot.rows.map((row) => row.node.id));
-  const isLocalId = (id: string): boolean => localNodeIds(local.getSnapshot()).has(id);
+  const build = (): NonNullable<typeof built> => {
+    const now = Date.now();
+    if (built && localWatchers > 0 && built.pollerRevision === pollerRevision && built.localRevision === localRevision && now - built.at < ELAPSED_STEP_MS) {
+      return built;
+    }
+    const localSnapshot = local.getSnapshot();
+    // Ids this surface owns right now, the set the daemon's copy defers to; computed once per build.
+    const localIds = new Set(localSnapshot.rows.map((row) => row.node.id));
+    const merged = poller.mergedRows(localSnapshot.rows.map((row) => row.node));
+    let snapshot = localSnapshot;
+    if (merged) {
+      const union = buildFleetSnapshot(merged.nodes, Math.max(localSnapshot.capturedAt, merged.capturedAt));
+      snapshot = merged.truncated && merged.totalCount !== undefined
+        ? { ...union, daemonPartial: { shown: merged.nodes.filter((node) => !localIds.has(node.id)).length, total: merged.totalCount } }
+        : union;
+    }
+    built = { pollerRevision, localRevision, at: now, snapshot, localIds };
+    return built;
+  };
+  const isLocalId = (id: string): boolean => build().localIds.has(id);
+  const acted = <T>(result: T): T => { built = null; return result; };
 
   return {
     getSnapshot(): FleetSnapshot {
-      const localSnapshot = local.getSnapshot();
-      const merged = poller.mergedRows(localSnapshot.rows.map((row) => row.node));
-      if (!merged) return localSnapshot;
-      const snapshot = buildFleetSnapshot(merged.nodes, Math.max(localSnapshot.capturedAt, merged.capturedAt));
-      return merged.truncated && merged.totalCount !== undefined
-        ? { ...snapshot, daemonPartial: { shown: merged.nodes.filter((node) => !isLocalId(node.id)).length, total: merged.totalCount } }
-        : snapshot;
+      return build().snapshot;
     },
 
     subscribe(listener: () => void): () => void {
       listeners.add(listener);
+      if (localWatchers++ === 0) unsubscribeLocalWatch = local.subscribe(() => { localRevision++; });
       const unsubscribeLocal = local.subscribe(listener);
+      let subscribed = true;
       return () => {
+        if (!subscribed) return;
+        subscribed = false;
         listeners.delete(listener);
         unsubscribeLocal();
+        if (--localWatchers === 0) {
+          unsubscribeLocalWatch?.();
+          unsubscribeLocalWatch = null;
+          built = null;
+        }
       };
     },
 
-    interrupt: (id) => local.interrupt(id),
-    resume: (id) => local.resume(id),
-    kill: (id, opts) => local.kill(id, opts),
-    steer: (id, text) => (isLocalId(id) ? local.steer(id, text) : { queued: false, reason: daemonOnlyFleetActRefusal(id, SURFACE_LABEL) }),
+    // An act on a local row changes the local fleet now; the next read rebuilds
+    // instead of waiting for the registry's next change notice.
+    interrupt: (id) => acted(local.interrupt(id)),
+    resume: (id) => acted(local.resume(id)),
+    kill: (id, opts) => acted(local.kill(id, opts)),
+    steer: (id, text) => (isLocalId(id) ? acted(local.steer(id, text)) : { queued: false, reason: daemonOnlyFleetActRefusal(id, SURFACE_LABEL) }),
     subscribeConsumed: (listener) => local.subscribeConsumed(listener),
     // The archive is this surface's own view state; the daemon keeps its own.
     getArchivedSnapshot: () => local.getArchivedSnapshot(),
     archive: (id) =>
-      isLocalId(id) ? local.archive(id) : { archived: false, count: 0, reason: daemonOnlyFleetActRefusal(id, SURFACE_LABEL) },
-    archiveFinished: () => local.archiveFinished(),
-    unarchive: (id) => local.unarchive(id),
+      isLocalId(id) ? acted(local.archive(id)) : { archived: false, count: 0, reason: daemonOnlyFleetActRefusal(id, SURFACE_LABEL) },
+    archiveFinished: () => acted(local.archiveFinished()),
+    unarchive: (id) => acted(local.unarchive(id)),
 
     refresh: () => poller.refresh(),
     stop(): void {
       poller.stop();
       unsubscribePoller();
+      unsubscribeLocalWatch?.();
+      unsubscribeLocalWatch = null;
+      localWatchers = 0;
+      built = null;
       listeners.clear();
     },
   };

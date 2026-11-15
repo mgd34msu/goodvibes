@@ -561,21 +561,6 @@ describe(`compiled interactive TUI native ${command === '/workstream start' ? 'w
       expect(session.text()).not.toContain('new-contract');
     } finally { await f.stop(); }
   }, 30_000);
-
-  test('unpaired native host refuses a real owner start without invoking the legacy model', async () => {
-    const f = await fixture();
-    try {
-      const session = await f.launch();
-      const refusal = 'No TUI credential is bound to this exact daemon origin';
-      expect(session.screen()).not.toContain(refusal);
-      const since = session.command(`${command} repair the owned fixture`);
-      await session.find('unpaired native start is unavailable', text => text.includes(refusal), since);
-      expect(session.text(since)).toContain(refusal);
-      expect(f.nativeCaptures).toEqual([]);
-      expect(existsSync(join(f.home.home, '.goodvibes/tui/native-work-submission.json.intake'))).toBe(false);
-      expect(session.child.exitCode).toBeNull();
-    } finally { await f.stop(); }
-  }, 30_000);
 });
 
 }

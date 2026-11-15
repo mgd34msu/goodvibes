@@ -2,7 +2,7 @@ import { captureCliStatusFacts, secretPolicyLabel } from '@goodvibes-jev/engine/
 import { yesNo } from '@goodvibes-jev/engine/terminal-shell/cli-output';
 import type { ConnectedHostReadiness } from '../runtime/connected-host-readiness.ts';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import type { OnboardingCheckMarkersState } from '../runtime/onboarding/index.ts';
+import type { OnboardingCheckMarkerState } from '../runtime/onboarding/index.ts';
 import { resolveRuntimeEndpointBinding } from './endpoints.ts';
 import type { GoodVibesCliOutputFormat } from './types.ts';
 import type { CliServicePosture } from './service-posture.ts';
@@ -14,11 +14,17 @@ import { formatAgentKnowledgeFailureKind } from './agent-knowledge-format.ts';
 import { readApprovalPostureFromConfig, type ApprovalPosture } from '../permissions/approval-posture.ts';
 import { appendTemporalLabel } from './temporal-label.ts';
 
+/** The marker that decides first-run state: the user's marker when its file exists. */
+function effectiveMarker(marker: OnboardingCheckMarkerState | undefined): OnboardingCheckMarkerState | null {
+  return marker?.exists ? marker : null;
+}
+
 export interface CliStatusOptions {
   readonly configManager: Pick<ConfigManager, 'get'>;
   readonly workingDirectory: string;
   readonly homeDirectory: string;
-  readonly onboardingMarkers?: OnboardingCheckMarkersState;
+  /** The first-run check marker (per user); absent or `exists: false` when first run was not marked. */
+  readonly onboardingMarker?: OnboardingCheckMarkerState;
   readonly nativeReadiness?: ConnectedHostReadiness;
   readonly pairingStatus?: string;
   readonly selectedHost?: string;
@@ -187,7 +193,7 @@ export function buildCliDoctorFindings(options: CliStatusOptions): readonly CliD
   const permissionMode = config.get('permissions.mode');
   const secretPolicy = config.get('storage.secretPolicy');
   const posture = readApprovalPosture(config);
-  const marker = options.onboardingMarkers?.effective;
+  const marker = effectiveMarker(options.onboardingMarker);
 
   const findings: CliDoctorFinding[] = [];
 
@@ -331,7 +337,7 @@ export function buildCliDoctorFindings(options: CliStatusOptions): readonly CliD
 
 export function buildCliStatusSnapshot(options: CliStatusOptions): CliStatusSnapshot {
   const config = options.configManager;
-  const common = captureCliStatusFacts(config, options.onboardingMarkers?.effective, options.service, getProviderIdFromModel);
+  const common = captureCliStatusFacts(config, effectiveMarker(options.onboardingMarker), options.service, getProviderIdFromModel);
 
   const findings = buildCliDoctorFindings(options);
   const posture = readApprovalPosture(config);
@@ -374,7 +380,7 @@ export function buildCliStatusSnapshot(options: CliStatusOptions): CliStatusSnap
 
 export function renderCliStatus(options: CliStatusOptions, snapshot: CliStatusSnapshot = buildCliStatusSnapshot(options)): string {
   const config = options.configManager;
-  const marker = options.onboardingMarkers?.effective;
+  const marker = effectiveMarker(options.onboardingMarker);
   const findings = snapshot.findings;
   const externalRuntime = snapshot.externalRuntime;
 
@@ -479,7 +485,7 @@ export function renderCliStatus(options: CliStatusOptions, snapshot: CliStatusSn
 }
 
 export function renderOnboardingCliStatus(options: CliStatusOptions): string {
-  const marker = options.onboardingMarkers?.effective;
+  const marker = effectiveMarker(options.onboardingMarker);
   if (options.outputFormat === 'json')
     return JSON.stringify(
       {

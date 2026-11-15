@@ -118,7 +118,7 @@ test('early close failure still reaches every later owned teardown', async () =>
     agentExternalServices: { stop: async () => { order.push('external-stop'); } },
   });
   await expect(createRuntimeShutdown(deps)(SESSION_DATA)).rejects.toBe(failure);
-  expect(order).toEqual(['close', 'spine-dispose', 'bootstrap-unsub', 'runtime-unsub', 'forensics', 'execution', 'drain', 'external-stop', 'schedule-manager', 'provider-registry', 'graph-dispose']);
+  expect(order).toEqual(['schedule-manager', 'provider-registry', 'close', 'spine-dispose', 'bootstrap-unsub', 'runtime-unsub', 'forensics', 'execution', 'drain', 'external-stop', 'graph-dispose']);
   expect(deps.bootstrapUnsubs).toHaveLength(0);
   expect(deps.runtimeUnsubs).toHaveLength(0);
 });

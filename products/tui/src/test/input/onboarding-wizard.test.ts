@@ -6,7 +6,7 @@ import { InfiniteBuffer } from '@goodvibes-jev/engine/terminal-shell';
 import { CommandRegistry, type CommandContext } from '../../input/command-registry.ts';
 import { InputHandler } from '../../input/handler.ts';
 import { OnboardingWizardController } from '../../input/onboarding/onboarding-wizard.ts';
-import { relayReadAccessors } from '../../runtime/relay-reachability-bridge.ts';
+import { createRelayReadAccessors } from '../../runtime/relay-reachability-bridge.ts';
 import { EXTERNAL_SURFACE_SPECS, getExternalSurfaceAutoStartFieldId } from '../../input/onboarding/onboarding-wizard-external-surfaces.ts';
 import { buildGoodVibesSecretKey, buildGoodVibesSecretRef } from '../../input/onboarding/onboarding-wizard-helpers.ts';
 import { handleOnboardingWizardToken } from '../../input/onboarding/handler-onboarding-routes.ts';
@@ -49,8 +49,8 @@ async function makeInput(uiServices?: UiRuntimeServices): Promise<InputHandler> 
  * Test callers only care about `inspect`/`restart` (and occasionally
  * `collectDaemonReceipts`); the relay accessors (`relayStatus`,
  * `mintRelayPairing`) are a separate concern (relay-reachability-bridge.ts)
- * that these onboarding tests don't exercise, so they get the shipped
- * accessors here instead of being repeated at every call site.
+ * that these onboarding tests don't exercise, so they get accessors over a
+ * daemon that cannot be asked instead of being repeated at every call site.
  */
 function installExternalServices(
   uiServices: UiRuntimeServices,
@@ -58,7 +58,10 @@ function installExternalServices(
     Pick<NonNullable<UiRuntimeServices['platform']['externalServices']>, 'inspect' | 'restart'>,
 ): void {
   const full: NonNullable<UiRuntimeServices['platform']['externalServices']> = {
-    ...relayReadAccessors,
+    ...createRelayReadAccessors({
+      probe: () => ({ available: false, reason: 'no daemon in this test' }),
+      invoke: async () => { throw new Error('no daemon in this test'); },
+    } as unknown as Parameters<typeof createRelayReadAccessors>[0]),
     ...controller,
   };
   (uiServices.platform as UiRuntimeServices['platform'] & {

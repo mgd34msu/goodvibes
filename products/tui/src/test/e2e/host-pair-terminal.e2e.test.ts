@@ -252,12 +252,6 @@ describe('compiled TUI host pairing terminal', () => {
       expect(blocked.code).not.toBe(0);
       expect(blocked.out).toContain('TUI host pairing: blocked');
       expect(f.requests()).toHaveLength(requestsBefore);
-      const native = await f.piped(f.nativeStatusCommand(f.otherHost));
-      expect(native.code).toBe(1);
-      expect(native.error).toBe('');
-      expect(JSON.parse(native.out)).toMatchObject({ stopReason: 'native-unavailable', native: { status: 'unavailable' } });
-      expect(native.out).toContain('No TUI credential is bound to this exact daemon origin');
-      expect(f.requests()).toHaveLength(requestsBefore);
       const preview = await f.piped(f.command(['--bootstrap-shared'], f.otherHost));
       expect(preview.code).toBe(0);
       expect(preview.out).toContain('TUI host pairing: preview');

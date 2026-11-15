@@ -29,7 +29,7 @@ import { readTuiNotificationsMetadataOnly } from '../config/host-settings.ts';
 import { ConversationManager } from '../core/conversation';
 import { createShellNoticeSink } from './notification-dispatch.ts';
 import { getSharedNotificationFeed } from '../views/notifications-feed.ts';
-import { registerSessionConversation } from './conversation-rewind-port.ts';
+import { registerSessionConversation, unregisterSessionConversation } from './conversation-rewind-port.ts';
 import { SelectionManager } from '@goodvibes-jev/engine/terminal-shell';
 import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { getConfiguredSystemPrompt } from '@goodvibes-jev/engine/platform/platform/config';
@@ -294,13 +294,7 @@ export async function initializeBootstrapCore(
   const providerRegistry = services.providerRegistry;
   let keybindingNotices: readonly string[] = [];
   initializeTerminalCatalog(providerRegistry, services.benchmarkStore, () => { keybindingNotices = services.keybindingsManager.loadFromDisk(); }, wireCostPricing);
-  seedTerminalControlPlane(domainDispatch, configManager, userSessionId, {
-    id: 'client:tui',
-    kind: 'tui',
-    label: 'Terminal UI',
-    capabilities: ['session', 'panels', 'commands', 'automation'],
-    metadata: {},
-  });
+  seedTerminalControlPlane(domainDispatch, configManager);
 
   const { approvalBroker, hookDispatcher, hookWorkbench, memoryStore, sessionBroker: sharedSessionBroker } = services;
   // Dormant for local-only, and for the platform's 'embedded' HostServiceMode, no product-facing
@@ -539,8 +533,17 @@ export async function initializeBootstrapCore(
       return runtimeSessionIdRef.value;
     },
     set sessionId(value: string) {
+      const previous = runtimeSessionIdRef.value;
       runtimeSessionIdRef.value = value;
       services.liveSessionIdRef.value = value;
+      if (value === previous) return;
+      domainDispatch.syncSessionState({ conversationSessionId: value }, 'runtime.session-id');
+      // The one live conversation moves with the session id (resume, fork,
+      // recovery), so a rewind asked from another surface finds the session
+      // this terminal is running and never the boot id.
+      unregisterSessionConversation(previous);
+      registerSessionConversation(value, conversation);
+      services.conversationRewindHost.follow(value);
     },
   };
   runtimeSessionIdRef.value = runtime.sessionId;

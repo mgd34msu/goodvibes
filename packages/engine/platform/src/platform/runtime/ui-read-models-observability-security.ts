@@ -1,10 +1,3 @@
-import { captureMcpSecurityDecisionReadSource } from '../mcp/registry.js';
-import { assertSecurityReadSource, captureSecurityReadBindings, retainSecurityReadData, retainSecurityReadMap } from '../security/read-source.js';
-import { captureTokenAuditReadSource } from '../security/token-audit.js';
-import { capturePolicyRuntimeReadSource } from './permissions/policy-runtime.js';
-import { capturePluginSecurityReadSource } from '../plugins/manager.js';
-import { captureRuntimeSecurityReadSource } from './store/index.js';
-import { captureForensicsReadSource } from './forensics/registry.js';
 import { buildMcpAttackPathReview } from './mcp/index.js';
 import type { McpDecisionRecord, McpSecuritySnapshot } from './mcp/types.js';
 import type { RuntimeServices } from './services.js';
@@ -58,45 +51,19 @@ export interface UiLocalAuthSnapshot {
   readonly sessionCount: number;
 }
 
+/**
+ * The security read model. Reading it never audits or emits: the token audit
+ * shown is the last audit of record, with its real time. `runAudit` runs one
+ * (re-reading the paired devices first) and the snapshot follows.
+ */
+export interface UiSecurityReadModel extends UiReadModel<UiSecuritySnapshot> {
+  runAudit(): { readonly totalTokens: number; readonly findings: number; readonly at: number };
+}
+
 export interface UiSecurityObservabilityReadModels {
-  readonly security: UiReadModel<UiSecuritySnapshot>;
+  readonly security: UiSecurityReadModel;
   readonly mcp: UiReadModel<UiMcpSnapshot>;
   readonly localAuth: UiReadModel<UiLocalAuthSnapshot>;
-}
-
-export interface UiSecurityReadSource {
-  readonly snapshot: UiSecuritySnapshot;
-  readonly assertCurrent: () => void;
-}
-
-const securityReadSources = new WeakMap<UiReadModel<UiSecuritySnapshot>, () => UiSecurityReadSource>();
-const getSecurityReadSources = securityReadSources.get.bind(securityReadSources);
-const setSecurityReadSources = securityReadSources.set.bind(securityReadSources);
-
-/** Only this native factory can supply the original source guard. No effect authority is granted. */
-export function captureUiSecurityReadSource(model: UiReadModel<UiSecuritySnapshot>): UiSecurityReadSource {
-  const capture = getSecurityReadSources(model);
-  assertSecurityReadSource(capture !== undefined);
-  return capture();
-}
-
-/** Native domain DTOs include owned Maps; retain every descriptor and entry without JSON conversion. */
-function captureSecurityDomain(owner: object, mapNames: readonly string[]): () => void {
-  captureSecurityReadBindings(owner, [])();
-  const keys = Reflect.ownKeys(owner);
-  assertSecurityReadSource(keys.every(key => typeof key === 'string'));
-  const names = keys.filter((key): key is string => typeof key === 'string');
-  const bindings = captureSecurityReadBindings(owner, names);
-  const values: unknown[] = [], maps: (() => void)[] = [];
-  for (const name of names) {
-    const value: unknown = Object.getOwnPropertyDescriptor(owner, name)?.value;
-    if (mapNames.includes(name)) {
-      assertSecurityReadSource(value instanceof Map);
-      maps.push(retainSecurityReadMap(value));
-    } else values.push(value);
-  }
-  const dataCurrent = retainSecurityReadData(values);
-  return () => { bindings(); dataCurrent(); for (const guard of maps) guard(); bindings(); };
 }
 
 export function createSecurityObservabilityReadModels(
@@ -105,9 +72,9 @@ export function createSecurityObservabilityReadModels(
 ): UiSecurityObservabilityReadModels {
   const { runtimeStore } = runtimeServices;
 
-  const security: UiReadModel<UiSecuritySnapshot> = {
+  const security: UiSecurityReadModel = {
       getSnapshot() {
-        const audit = runtimeServices.tokenAuditor.auditAll(Date.now());
+        const audit = runtimeServices.tokenAuditor.lastReport();
         const mcpServers = [...runtimeStore.getState().mcp.servers.values()].map((server): McpSecuritySnapshot => ({
           name: server.name,
           role: server.role,
@@ -129,12 +96,12 @@ export function createSecurityObservabilityReadModels(
         const snapshot: SecurityPanelSnapshot = {
           managed: runtimeServices.tokenAuditor.isManaged,
           totalTokens: runtimeServices.tokenAuditor.tokenCount,
-          results: audit.results,
-          blocked: audit.blocked,
-          scopeViolations: audit.scopeViolations,
-          rotationWarnings: audit.rotationWarnings,
-          rotationOverdue: audit.rotationOverdue,
-          lastAuditAt: audit.capturedAt,
+          results: audit?.results ?? [],
+          blocked: audit?.blocked ?? [],
+          scopeViolations: audit?.scopeViolations ?? [],
+          rotationWarnings: audit?.rotationWarnings ?? [],
+          rotationOverdue: audit?.rotationOverdue ?? [],
+          lastAuditAt: audit?.capturedAt ?? null,
           capturedAt: new Date().toISOString(),
         };
         return {
@@ -155,8 +122,14 @@ export function createSecurityObservabilityReadModels(
           untrustedPlugins: plugins.filter((plugin) => plugin.trustTier === 'untrusted'),
         };
       },
+      runAudit() {
+        const report = runtimeServices.tokenAuditor.runAudit(Date.now());
+        const findings = new Set([...report.scopeViolations, ...report.rotationOverdue, ...report.rotationWarnings, ...report.blocked]).size;
+        return { totalTokens: report.results.length, findings, at: report.capturedAt };
+      },
       subscribe(listener) {
         const unsubs: Array<() => void> = [
+          runtimeServices.tokenAuditor.onAudit(listener),
           runtimeStore.subscribe(listener),
           runtimeServices.pluginManager.subscribe(listener),
           runtimeServices.policyRuntimeState.subscribe(listener),
@@ -167,35 +140,6 @@ export function createSecurityObservabilityReadModels(
         return combineSubscriptions(...unsubs);
       },
   };
-  setSecurityReadSources(security, () => {
-    const modelCurrent = captureSecurityReadBindings(security, ['getSnapshot', 'subscribe']);
-    const runtimeCurrent = captureSecurityReadBindings(runtimeServices, ['runtimeStore', 'tokenAuditor', 'pluginManager', 'policyRuntimeState', 'mcpRegistry']);
-    const storeCurrent = captureRuntimeSecurityReadSource(runtimeStore);
-    const optionsCurrent = captureSecurityReadBindings(options, ['forensicsRegistry']);
-    const state = runtimeStore.getState();
-    const stateCurrent = captureSecurityReadBindings(state, ['mcp', 'permissions']);
-    const mcpCurrent = captureSecurityDomain(state.mcp, ['servers', 'tools']);
-    const permissionsCurrent = captureSecurityDomain(state.permissions, ['sessionApprovals']);
-    const tokenCurrent = captureTokenAuditReadSource(runtimeServices.tokenAuditor);
-    const policy = capturePolicyRuntimeReadSource(runtimeServices.policyRuntimeState);
-    const pluginsCurrent = capturePluginSecurityReadSource(runtimeServices.pluginManager);
-    const decisionsCurrent = captureMcpSecurityDecisionReadSource(runtimeServices.mcpRegistry);
-    const forensicsCurrent = options.forensicsRegistry ? captureForensicsReadSource(options.forensicsRegistry) : undefined;
-    const assertNative = () => {
-      modelCurrent(); runtimeCurrent(); storeCurrent(); optionsCurrent(); stateCurrent(); mcpCurrent(); permissionsCurrent();
-      tokenCurrent(); policy.assertCurrent(); pluginsCurrent(); decisionsCurrent(); forensicsCurrent?.();
-      const current = runtimeStore.getState();
-      captureSecurityReadBindings(current, ['mcp', 'permissions'])();
-      assertSecurityReadSource(current.mcp === state.mcp && current.permissions === state.permissions);
-      modelCurrent(); runtimeCurrent(); storeCurrent(); optionsCurrent();
-    };
-    assertNative();
-    const snapshot = security.getSnapshot();
-    const snapshotCurrent = retainSecurityReadData(snapshot);
-    assertNative();
-    return Object.freeze({ snapshot, assertCurrent() { assertNative(); snapshotCurrent(); assertNative(); } });
-  });
-
   return {
     security,
     mcp: {

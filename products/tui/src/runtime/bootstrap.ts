@@ -74,7 +74,7 @@ import {
 } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 import { createDaemonAttachHandshake } from './client/daemon-attach-handshake.ts';
 import { createPendingServiceStatus, hostServiceIsActive, hostServiceIsBlocked } from './client/host-service-status.ts';
-import { relayReadAccessors } from './relay-reachability-bridge.ts';
+import { createRelayReadAccessors } from './relay-reachability-bridge.ts';
 import { GOODVIBES_TUI_SURFACE_ROOT } from '../config/surface.ts';
 import { registerStartupProviders } from './startup-provider-registration.ts';
 import { createSerialSteps } from './serial-steps.ts';
@@ -119,6 +119,8 @@ export type BootstrapContext = RuntimeContext & {
   permissionPromptRef: { requestPermission: PermissionRequestHandler };
   /** Shell-owned trust-decision bridge that main.ts patches after UI setup (trust asks at consequence time). */
   trustPromptRef: { requestTrustDecision: () => Promise<WorkspaceTrustLevel> };
+  /** True once exit has durably saved the session, even while releases still run. */
+  sessionSaved?: () => boolean;
   /** Load the most recently saved conversation from disk. */
   loadLastConversation: () => { messages: Array<Record<string, unknown>> } | null;
   /** Write the last-session pointer file (used after session resume). */
@@ -288,15 +290,13 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
     runtimeBus,
     hookDispatcher: services.hookDispatcher,
   });
+  // The subagents' own spawn/complete/fail/cancel events keep their task rows current.
   const acpTaskAdapter = new AcpTaskAdapter(store);
   bootstrapUnsubs.push(acpTaskAdapter.attachRuntimeBus(runtimeBus));
-  const ACP_TASK_SYNC_INTERVAL_MS = 1_000;
-  const acpTaskSyncInterval = setInterval(() => {
-    acpTaskAdapter.sync(acpManager);
-  }, ACP_TASK_SYNC_INTERVAL_MS);
-  bootstrapUnsubs.push(() => clearInterval(acpTaskSyncInterval));
   orchestrator.registerDelegateTool(acpManager);
-  const opsTaskManager = createTaskManager(store, runtimeBus, userSessionId, services.featureFlags); // featureFlags required: without it runtime.unifiedTasks configured nothing (permissive fallback); platform default matches shipped behaviour, so this is a no-op for existing installs.
+  // An ACP task row's owner is its subagent id; the ACP manager can stop it and nothing else.
+  const opsTaskManager = createTaskManager(store, runtimeBus, userSessionId, services.featureFlags,
+    (task) => task.kind === 'acp' ? { cancel: () => acpManager.cancel(task.owner) } : undefined);
   // Operator interventions ride the control-plane gateway capability
   // (controlPlane.gateway, on by default; the old never-registered gate id shipped this dead).
   const opsControlPlane = services.featureFlags.isEnabled(CONTROL_PLANE_FEATURE_FLAG)
@@ -486,11 +486,9 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
     externalServices: NonNullable<typeof uiServices.platform.externalServices>;
   };
   platformExternalServices.externalServices = {
-    // The relay is a DAEMON feature and reading an adopted daemon's relay state
-    // is a verb this contract does not carry, so these two report 'unavailable'
-    // rather than a state this process is in no position to know, see
-    // relay-reachability-bridge.ts.
-    ...relayReadAccessors,
+    // The relay is a DAEMON feature: its state and pairing payload are asked of
+    // the adopted daemon through its relay verbs, see relay-reachability-bridge.ts.
+    ...createRelayReadAccessors(services.daemonVerbs),
     inspect: inspectExternalServices,
     restart: () => swapExternalServices(async () => {
       if (externalServicesPromise) {
@@ -639,6 +637,34 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
 
   // ── Compose RuntimeContext ────────────────────────────────────────────────
 
+  const shutdown = createBootstrapShutdown({
+    runtime,
+    conversationTitle: () => conversation.title || '',
+    bootstrapUnsubs,
+    runtimeUnsubs,
+    forensicsCollector,
+    sessionSpine,
+    sessionInboundInputs,
+    sessionUnionCache,
+    leaveHostedSession: () => leaveHostedSessionOnExit({ configManager, homeDirectory: services.homeDirectory }),
+    deferredStartup,
+    settleExternalServices: async () => {
+      if (externalServicesPromise) externalServices = await externalServicesPromise;
+    },
+    stopExternalServices: () => externalServices.stop(),
+    closeRuntimeGraph: () => services.close(),
+    agentStatusIntervalRef,
+    scheduleManager: services.workflow.scheduleManager,
+    hookDispatcher: services.hookDispatcher,
+    providerRegistry: services.providerRegistry,
+    sessionOrchestration: services.sessionOrchestration,
+    persistenceOptions: {
+      workingDirectory: services.workingDirectory,
+      homeDirectory: services.homeDirectory,
+      sessionManager: services.sessionManager,
+    },
+  });
+
   const ctx: BootstrapContext = {
     runtimeBus,
     store,
@@ -679,33 +705,8 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
     _getConfiguredProviderIds: () => services.providerRegistry.getConfiguredProviderIds(),
     commandRegistry,
     systemMessageRouter,
-    shutdown: createBootstrapShutdown({
-      runtime,
-      conversationTitle: () => conversation.title || '',
-      bootstrapUnsubs,
-      runtimeUnsubs,
-      forensicsCollector,
-      sessionSpine,
-      sessionInboundInputs,
-      sessionUnionCache,
-      leaveHostedSession: () => leaveHostedSessionOnExit({ configManager, homeDirectory: services.homeDirectory }),
-      deferredStartup,
-      settleExternalServices: async () => {
-        if (externalServicesPromise) externalServices = await externalServicesPromise;
-      },
-      stopExternalServices: () => externalServices.stop(),
-      closeRuntimeGraph: () => services.close(),
-      agentStatusIntervalRef,
-      scheduleManager: services.workflow.scheduleManager,
-      hookDispatcher: services.hookDispatcher,
-      providerRegistry: services.providerRegistry,
-      sessionOrchestration: services.sessionOrchestration,
-      persistenceOptions: {
-        workingDirectory: services.workingDirectory,
-        homeDirectory: services.homeDirectory,
-        sessionManager: services.sessionManager,
-      },
-    }),
+    shutdown,
+    sessionSaved: shutdown.sessionSaved,
   };
 
   // ── Phase 12b: Operator Control Plane wiring (capability-gated); store and

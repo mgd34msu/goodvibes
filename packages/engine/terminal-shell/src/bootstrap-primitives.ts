@@ -81,6 +81,7 @@ export function seedTerminalSession(dispatch: Pick<DomainDispatch, 'syncSessionS
   dispatch.syncSessionState(
     {
       id: sessionId,
+      conversationSessionId: sessionId,
       projectRoot,
       status: 'active',
       startedAt: Date.now(),
@@ -93,38 +94,58 @@ export function seedTerminalSession(dispatch: Pick<DomainDispatch, 'syncSessionS
     'bootstrap.session',
   );
 }
+/**
+ * Attach the Slack and Discord notifier to the runtime bus and mirror its
+ * delivery queues into the integrations domain. The notifier is attached even
+ * with no channel yet: it resolves its channels at send time, so a token saved
+ * during the session delivers the next notification. The rows are written now
+ * and again whenever the notifier's channels change.
+ */
 export function syncTerminalNotifierQueues(
-  notifier: Pick<Notifier, 'getQueueStatus'>,
+  notifier: Pick<Notifier, 'getQueueStatus' | 'onChannelsChanged'>,
   dispatch: Pick<DomainDispatch, 'syncIntegration'>,
   attach: () => () => void,
 ): () => void {
-  const queues = notifier.getQueueStatus();
-  if (!queues.length) return () => {};
   const unsubscribe = attach();
-  for (const queue of queues) {
-    dispatch.syncIntegration(
-      {
-        id: queue.channel,
-        displayName: queue.channel[0]!.toUpperCase() + queue.channel.slice(1),
-        category: 'communication',
-        status: queue.metrics.deadLettered > 0 ? 'degraded' : 'healthy',
-        enabled: true,
-        successCount: queue.metrics.delivered,
-        errorCount: queue.metrics.deadLettered,
-        ...(queue.dlqEntries[0]?.deadAt ? { lastErrorAt: queue.dlqEntries[0].deadAt } : {}),
-        ...(queue.dlqEntries[0]?.finalError ? { lastError: queue.dlqEntries[0].finalError } : {}),
-        meta: {
-          attempts: queue.metrics.totalAttempts,
-          retrying: queue.metrics.retrying,
-          deadLetters: queue.metrics.deadLettered,
-          dlqSize: queue.metrics.dlqSize,
-          sloEnforced: queue.sloEnforced,
+  let shown = new Set<string>();
+  const syncRows = (): void => {
+    const queues = notifier.getQueueStatus();
+    const now = new Set(queues.map((queue) => queue.channel));
+    for (const gone of shown) {
+      if (now.has(gone)) continue;
+      dispatch.syncIntegration(
+        { id: gone, displayName: gone[0]!.toUpperCase() + gone.slice(1), category: 'communication', status: 'unconfigured', enabled: false, successCount: 0, errorCount: 0 },
+        'bootstrap.notifier',
+      );
+    }
+    shown = now;
+    for (const queue of queues) {
+      dispatch.syncIntegration(
+        {
+          id: queue.channel,
+          displayName: queue.channel[0]!.toUpperCase() + queue.channel.slice(1),
+          category: 'communication',
+          status: queue.metrics.deadLettered > 0 ? 'degraded' : queue.metrics.delivered > 0 ? 'healthy' : 'configured',
+          enabled: true,
+          successCount: queue.metrics.delivered,
+          errorCount: queue.metrics.deadLettered,
+          ...(queue.dlqEntries[0]?.deadAt ? { lastErrorAt: queue.dlqEntries[0].deadAt } : {}),
+          ...(queue.dlqEntries[0]?.finalError ? { lastError: queue.dlqEntries[0].finalError } : {}),
+          meta: {
+            attempts: queue.metrics.totalAttempts,
+            retrying: queue.metrics.retrying,
+            deadLetters: queue.metrics.deadLettered,
+            dlqSize: queue.metrics.dlqSize,
+            sloEnforced: queue.sloEnforced,
+          },
         },
-      },
-      'bootstrap.notifier',
-    );
-  }
-  return unsubscribe;
+        'bootstrap.notifier',
+      );
+    }
+  };
+  syncRows();
+  const stopRows = notifier.onChannelsChanged(syncRows);
+  return () => { stopRows(); unsubscribe(); };
 }
 
 export function initialTerminalRuntimeFields(

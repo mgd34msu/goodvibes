@@ -1,8 +1,5 @@
-import { getOrCreateCompanionToken } from '@goodvibes-jev/engine/platform/platform/pairing';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { resolveDaemonEnabled } from '@goodvibes-jev/engine/platform/platform/config';
-import { resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/platform/platform/config';
-import { resolveControlPlaneBaseUrl } from './client/operator-endpoint.ts';
+import { resolveDaemonBaseUrl, resolveDaemonEndpoint } from './client/operator-endpoint.ts';
 
 export const CLOUDFLARE_COMPONENT_IDS = [
   'workers',
@@ -288,17 +285,11 @@ export interface CloudflareDaemonClientOptions {
  * token is never sent to a guessed scheme or port.
  */
 export function resolveCloudflareDaemonBaseUrl(configManager: Pick<ConfigManager, 'get'>): string | null {
-  if (!resolveDaemonEnabled(configManager)) return null;
-  return resolveControlPlaneBaseUrl(configManager);
+  return resolveDaemonBaseUrl(configManager);
 }
 
 export function buildDefaultCloudflareDaemonBaseUrl(configManager: Pick<ConfigManager, 'get'>): string | null {
   return resolveCloudflareDaemonBaseUrl(configManager);
-}
-
-function readDaemonToken(homeDirectory: string): string {
-  const daemonHomeDir = resolveGoodVibesDaemonHome(homeDirectory);
-  return getOrCreateCompanionToken('tui', { daemonHomeDir }).token;
 }
 
 async function readJsonResponse<T>(response: Response): Promise<T> {
@@ -326,21 +317,22 @@ async function readJsonResponse<T>(response: Response): Promise<T> {
 }
 
 export function createCloudflareDaemonClient(options: CloudflareDaemonClientOptions): CloudflareDaemonClient {
-  const baseUrl = resolveCloudflareDaemonBaseUrl(options.configManager);
-  const token = readDaemonToken(options.homeDirectory);
-
+  // Resolved per request through the one daemon resolver: nothing is minted for
+  // a disabled daemon, the token override applies, and an unwritable state
+  // directory is a refusal on the call that needed it, not a throw at construction.
   const requestJson = async <T>(path: string, init: RequestInit = {}): Promise<T> => {
-    if (!baseUrl) {
+    const endpoint = resolveDaemonEndpoint({ configManager: options.configManager, homeDirectory: options.homeDirectory });
+    if (!endpoint.available) {
       throw new CloudflareDaemonRouteError(
-        'The daemon is not reachable from here: it is disabled (daemon.enabled=false) or no control-plane address is configured (controlPlane.host and controlPlane.port, or controlPlane.publicBaseUrl). Enable the daemon or set the address in /settings, then retry.',
+        `The daemon is not reachable from here: ${endpoint.reason}`,
         503,
         'CLOUDFLARE_DAEMON_UNAVAILABLE',
       );
     }
     const headers = new Headers(init.headers);
-    headers.set('Authorization', `Bearer ${token}`);
+    headers.set('Authorization', `Bearer ${endpoint.token}`);
     if (init.body !== undefined) headers.set('Content-Type', 'application/json');
-    const response = await (options.fetch ?? fetch)(`${baseUrl}${path}`, { ...init, headers });
+    const response = await (options.fetch ?? fetch)(`${endpoint.baseUrl}${path}`, { ...init, headers });
     return await readJsonResponse<T>(response);
   };
 

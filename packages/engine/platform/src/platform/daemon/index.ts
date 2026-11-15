@@ -22,7 +22,7 @@ export type {
   DaemonHostedSessionsOptions,
   HostedSessionCompositionInput,
 } from './hosted-sessions-composition.js';
-export { PlatformServiceManager } from './service-manager.js';
+export { PlatformServiceManager, MANAGED_UNIT_RESTART_POLICY, managedUnitStartDeadlineMs } from './service-manager.js';
 export { resolveDaemonServiceDefault } from './daemon-service-default.js';
 
 export type { ManagedServiceActionResult, ManagedServiceStatus } from './service-manager.js';

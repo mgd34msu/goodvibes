@@ -130,6 +130,12 @@ export interface ConversationRewindHostClient {
   /** `offer`, plus the loop that keeps taking questions. Idempotent per session. */
   start(sessionId: string): void;
   /**
+   * Move this surface's offer to `sessionId` when the live session changes
+   * (resume, fork, recovery). Does nothing while this surface is not offering,
+   * so a surface that never adopted a daemon stays quiet.
+   */
+  follow(sessionId: string): void;
+  /**
    * Offer the conversation again after another surface took the session over and
    * this one stopped offering it. Meant for the moment the person acts on this
    * surface's session, so the claim moves back only on their say-so. Returns
@@ -469,6 +475,14 @@ export function createConversationRewindHost(options: ConversationRewindHostOpti
       const offered = offer(sessionId);
       if (!offered || offered.running) return;
       launch(offered);
+    },
+
+    follow(sessionId): void {
+      const previous = current;
+      if (!sessionId || !previous || !isCurrent(previous) || previous.sessionId === sessionId) return;
+      const wasLive = previous.running || previous.takenOver;
+      const offered = offer(sessionId);
+      if (offered && wasLive && !offered.running) launch(offered);
     },
 
     resumeIfTakenOver(): boolean {

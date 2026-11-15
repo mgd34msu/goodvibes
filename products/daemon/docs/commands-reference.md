@@ -147,12 +147,13 @@ goodvibes-daemon migrate-service [-y]
 
 Move from the older install script's `goodvibes-daemon.service` unit to the one this
 binary manages (`goodvibes.service`). Without `-y`/`--yes` (or `--non-interactive`) it
-prints the exact plan and changes nothing. This command does not migrate without its confirmation flag. The new service is installed
-and started, then the old one is stopped (not yet disabled or removed) to free the
-port, and the new service must answer on the configured address from its own running
-process. Only then is the old unit disabled and removed. If the new service does not
-answer, it is rolled back and the old unit is started again, so the working daemon is
-never retired. A process merely listening on the port with no unit behind it is
+prints the exact plan and changes nothing. This command does not migrate without its confirmation flag. The new service is installed,
+the old one is stopped (not yet disabled or removed) to free the port, and then the new
+service is started; it must answer on the configured address from its own running
+process within its start deadline (about 12 seconds: boot time plus one systemd restart
+delay). Only then is the old unit disabled and removed. If the new service does not
+start or answer, it is rolled back and the old unit is started again, so the working
+daemon is never retired. A process merely listening on the port with no unit behind it is
 reported, never killed.
 
 If retiring the old unit does not complete, the command exits non-zero, keeps the

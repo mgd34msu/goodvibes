@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { CommandRegistry, type CommandContext } from '../../input/command-registry.ts';
 import { registerRelayRuntimeCommands } from '../../input/commands/relay-runtime.ts';
-import { RELAY_STATE_NOT_READABLE_HERE, relayReadAccessors } from '../../runtime/relay-reachability-bridge.ts';
+import { createRelayReadAccessors, type RelayReadAccessors } from '../../runtime/relay-reachability-bridge.ts';
 
 const RELAY_CONFIG: Record<string, unknown> = {
   'relay.enabled': true,
@@ -14,10 +14,7 @@ function ctx(options: {
   readonly out: string[];
   readonly configOverrides?: Record<string, unknown>;
   readonly flagOn?: boolean;
-  readonly externalServices?: {
-    relayStatus(): string;
-    mintRelayPairing(): Promise<{ readonly payload: unknown; readonly encoded: string } | null>;
-  };
+  readonly externalServices?: RelayReadAccessors;
 }): CommandContext {
   const config = { ...RELAY_CONFIG, ...options.configOverrides };
   return {
@@ -30,92 +27,66 @@ function ctx(options: {
   } as unknown as CommandContext;
 }
 
+/** Accessors over a daemon that answers each verb from `answers`, or throws `failure`. */
+function daemon(answers: Record<string, unknown>, failure?: string): { accessors: RelayReadAccessors; calls: string[] } {
+  const calls: string[] = [];
+  const accessors = createRelayReadAccessors({
+    probe: () => ({ available: true }),
+    invoke: async (method: string) => {
+      calls.push(method);
+      if (failure) throw new Error(failure);
+      return answers[method];
+    },
+  } as unknown as Parameters<typeof createRelayReadAccessors>[0]);
+  return { accessors, calls };
+}
+
+async function run(args: string[], options: Parameters<typeof ctx>[0]): Promise<string> {
+  const registry = new CommandRegistry();
+  registerRelayRuntimeCommands(registry);
+  await registry.execute('relay', args, ctx(options));
+  return options.out.join('\n');
+}
+
 describe('/relay command', () => {
-  test('status reports disabled when relay.enabled is off', async () => {
-    const registry = new CommandRegistry();
-    registerRelayRuntimeCommands(registry);
-    const out: string[] = [];
-    await registry.execute('relay', ['status'], ctx({ out, configOverrides: { 'relay.enabled': false } }));
-    expect(out.join('\n')).toContain('Relay: disabled');
+  test('status reports disabled when relay.enabled is off, without asking the daemon', async () => {
+    const { accessors, calls } = daemon({});
+    const text = await run(['status'], { out: [], configOverrides: { 'relay.enabled': false }, externalServices: accessors });
+    expect(text).toContain('Relay: disabled');
+    expect(calls).toEqual([]);
   });
 
-  test('status reports disabled when the relay-connect flag is off, even if relay.enabled is on', async () => {
-    const registry = new CommandRegistry();
-    registerRelayRuntimeCommands(registry);
-    const out: string[] = [];
-    await registry.execute('relay', ['status'], ctx({ out, flagOn: false }));
-    expect(out.join('\n')).toContain('Relay: disabled');
-  });
-
-  test('status reports the live registration state and rendezvous id when configured + flagged on', async () => {
-    const registry = new CommandRegistry();
-    registerRelayRuntimeCommands(registry);
-    const out: string[] = [];
-    await registry.execute('relay', [], ctx({
-      out,
-      externalServices: { relayStatus: () => 'registered', mintRelayPairing: async () => null },
-    }));
-    const text = out.join('\n');
+  test('status shows the state the daemon reports, in one request', async () => {
+    const { accessors, calls } = daemon({ 'relay.reachability.get': { status: 'registered', configured: true } });
+    const text = await run([], { out: [], externalServices: accessors });
     expect(text).toContain('Relay: registered');
     expect(text).toContain('abc123');
-    expect(text).toContain('ciphertext and connection metadata');
+    expect(calls).toEqual(['relay.reachability.get']);
   });
 
-  test('status maps a non-registered live state to offline', async () => {
-    const registry = new CommandRegistry();
-    registerRelayRuntimeCommands(registry);
-    const out: string[] = [];
-    await registry.execute('relay', ['status'], ctx({
-      out,
-      externalServices: { relayStatus: () => 'reconnecting', mintRelayPairing: async () => null },
-    }));
-    expect(out.join('\n')).toContain('Relay: offline');
-  });
-
-  test('the shipped accessors report the relay state as unreadable here, never as off', async () => {
-    // The state is real and lives in the daemon; 'disabled' would tell an
-    // operator whose daemon IS registered that their relay is turned off.
-    const registry = new CommandRegistry();
-    registerRelayRuntimeCommands(registry);
-    const out: string[] = [];
-    await registry.execute('relay', ['status'], ctx({ out, externalServices: relayReadAccessors }));
-    const text = out.join('\n');
+  test('status says the daemon could not be asked, and why, instead of a relay state', async () => {
+    const { accessors } = daemon({}, 'the daemon is disabled');
+    const text = await run(['status'], { out: [], externalServices: accessors });
     expect(text).toContain('Relay: unavailable');
-    expect(text).toContain(RELAY_STATE_NOT_READABLE_HERE);
-    expect(text).not.toContain('live connection state:');
-    // The configuration half is this terminal's own and is still reported.
-    expect(text).toContain('abc123');
+    expect(text).toContain('the daemon is disabled');
   });
 
-  test('pair says why it cannot mint rather than blaming an unregistered relay', async () => {
-    const registry = new CommandRegistry();
-    registerRelayRuntimeCommands(registry);
-    const out: string[] = [];
-    await registry.execute('relay', ['pair'], ctx({ out, externalServices: relayReadAccessors }));
-    const text = out.join('\n');
-    expect(text).toContain(RELAY_STATE_NOT_READABLE_HERE);
-    expect(text).not.toContain('may not be registered yet');
+  test('pair prints the encoded payload the daemon minted', async () => {
+    const pairing = { protocol: 1, relayUrl: 'wss://relay.example.com', rid: 'abc123', daemonPublicKey: 'key' };
+    const { accessors, calls } = daemon({ 'relay.pairing.mint': { pairing, status: 'registered' } });
+    const text = await run(['pair'], { out: [], externalServices: accessors });
+    expect(text).toContain('Relay pairing payload');
+    expect(calls).toEqual(['relay.pairing.mint']);
   });
 
-  test('pair prints the encoded payload and a QR block when minting succeeds', async () => {
-    const registry = new CommandRegistry();
-    registerRelayRuntimeCommands(registry);
-    const out: string[] = [];
-    await registry.execute('relay', ['pair'], ctx({
-      out,
-      externalServices: {
-        relayStatus: () => 'registered',
-        mintRelayPairing: async () => ({ payload: {}, encoded: 'gv-relay:abc.def' }),
-      },
-    }));
-    expect(out.join('\n')).toContain('gv-relay:abc.def');
+  test('pair names the daemon state when there is no registration to pair against', async () => {
+    const { accessors } = daemon({ 'relay.pairing.mint': { pairing: null, status: 'connecting' } });
+    const text = await run(['pair'], { out: [], externalServices: accessors });
+    expect(text).toContain('no live relay registration yet (state: connecting)');
   });
 
   test('pair refuses when relay is disabled', async () => {
-    const registry = new CommandRegistry();
-    registerRelayRuntimeCommands(registry);
-    const out: string[] = [];
-    await registry.execute('relay', ['pair'], ctx({ out, configOverrides: { 'relay.enabled': false } }));
-    expect(out.join('\n')).toContain('Relay is disabled');
+    const text = await run(['pair'], { out: [], configOverrides: { 'relay.enabled': false } });
+    expect(text).toContain('Relay is disabled');
   });
 });

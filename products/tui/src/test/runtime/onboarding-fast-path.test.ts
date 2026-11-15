@@ -26,7 +26,14 @@ interface Harness {
 }
 
 /** A registry double whose getForModel reflects a genuinely keyless or key-requiring provider. */
-function makeModelProvider(readiness: 'keyless' | 'needs-key') {
+function makeModelProvider(readiness: 'keyless' | 'needs-key' | 'configured') {
+  if (readiness === 'configured') {
+    return {
+      name: 'anthropic',
+      isConfigured: () => true,
+      describeAuthState: () => ({ configured: true, allowAnonymous: false, anonymousReady: false, authEnvVars: ['ANTHROPIC_API_KEY'] }),
+    };
+  }
   return readiness === 'keyless'
     ? {
         name: 'openrouter',
@@ -45,7 +52,7 @@ function makeHarness(opts: {
   chooseFullSetup?: boolean;
   chooseNothing?: boolean;
   defaultModel?: string;
-  defaultModelReadiness?: 'keyless' | 'needs-key';
+  defaultModelReadiness?: 'keyless' | 'needs-key' | 'configured';
 }): Harness {
   const h: Harness = {
     wizardOpens: 0,
@@ -89,9 +96,9 @@ function makeHarness(opts: {
 }
 
 describe('onboarding fast path', () => {
-  test('a configured provider skips the wizard and writes the check marker (0 steps)', () => {
+  test('a ready session model skips the wizard and writes the check marker (0 steps)', () => {
     const shellPaths = makeShellPaths();
-    const h = makeHarness({ configuredProviders: ['anthropic'] });
+    const h = makeHarness({ configuredProviders: ['anthropic'], defaultModel: 'anthropic:claude', defaultModelReadiness: 'configured' });
     startOnboardingFastPath({ input: h.input, commandContext: h.ctx, shellPaths, render: () => {} });
     expect(h.wizardOpens).toBe(0);
     expect(h.selectionOpened).toBe(false);

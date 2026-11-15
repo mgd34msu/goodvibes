@@ -13,11 +13,7 @@ function options(service: CliStatusService): CliStatusOptions {
     configManager: { get: (key: string) => values[key] } as CliStatusOptions['configManager'],
     workingDirectory: '/project',
     homeDirectory: '/home/test',
-    onboardingMarkers: {
-      project: { scope: 'project', path: '/project/.goodvibes/agent/onboarding-checked.json', exists: false, payload: null },
-      user: { scope: 'user', path: '/home/test/.goodvibes/agent/onboarding-checked.json', exists: false, payload: null },
-      effective: null,
-    },
+    onboardingMarker: { scope: 'user', path: '/home/test/.goodvibes/agent/onboarding-checked.json', exists: false, payload: null },
     service,
   };
 }

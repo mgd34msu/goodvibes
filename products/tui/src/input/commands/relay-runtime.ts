@@ -1,7 +1,6 @@
 import type { CommandContext } from '../command-registry.ts';
 import type { CommandRegistry } from '../command-registry.ts';
 import { generateQrMatrix, renderQrToString } from '@goodvibes-jev/engine/platform/platform/pairing';
-import { RELAY_STATE_NOT_READABLE_HERE } from '../../runtime/relay-reachability-bridge.ts';
 
 /**
  * Register the /relay command, the relay's configuration, its reachability
@@ -10,11 +9,10 @@ import { RELAY_STATE_NOT_READABLE_HERE } from '../../runtime/relay-reachability-
  * flag).
  *
  * The CONFIGURATION half is read here, from this terminal's own config. The
- * LIVE half is not: registration state and pairing live in the running daemon's
- * memory (`DaemonServer.getRelayReachability()`), and no verb exposes either to
- * a client, so both read 'unavailable' with the reason said out loud rather
- * than a state this terminal is in no position to know. See
- * relay-reachability-bridge.ts.
+ * LIVE half (registration state and the pairing payload) lives in the running
+ * daemon and is asked for through its relay verbs, one request per command; see
+ * relay-reachability-bridge.ts. 'unavailable' means only that the daemon could
+ * not be asked, and the reason is printed.
  */
 
 function relayConfigured(ctx: CommandContext): { enabled: boolean; url: string; rendezvousId: string; label: string; flagOn: boolean } {
@@ -39,16 +37,19 @@ async function renderStatus(ctx: CommandContext): Promise<void> {
     ].join('\n'));
     return;
   }
-  const live = ctx.platform.externalServices?.relayStatus() ?? 'unavailable';
-  const state = live === 'registered' || live === 'disabled' || live === 'unavailable' ? live : 'offline';
+  const reading = ctx.platform.externalServices
+    ? await ctx.platform.externalServices.relayStatus()
+    : { status: 'unavailable' as const, reason: 'the background service controller is not running in this build' };
   ctx.print([
-    `Relay: ${state}`,
+    `Relay: ${reading.status}`,
     `  rendezvous id: ${cfg.rendezvousId || '(not yet minted; start the daemon to generate one)'}`,
     `  url: ${cfg.url || '(not set)'}`,
     `  label: ${cfg.label || '(not set)'}`,
-    state === 'unavailable'
-      ? `  ${RELAY_STATE_NOT_READABLE_HERE}`
-      : `  live connection state: ${live}`,
+    reading.status === 'unavailable'
+      ? `  The daemon holds the relay connection and could not be asked: ${reading.reason ?? 'no reason was given'}. Check the daemon with /status.`
+      : reading.status === 'disabled'
+        ? '  The daemon reports a relay gate off: relay.enabled, the relay-connect flag or relay.url on the daemon\'s machine.'
+        : `  live connection state (from the daemon): ${reading.status}`,
     '  The relay operator sees only ciphertext and connection metadata; self-host your own relay for full control.',
   ].join('\n'));
 }
@@ -64,16 +65,18 @@ async function renderPair(ctx: CommandContext): Promise<void> {
     ctx.print('Relay pairing is unavailable: background service controller is not running in this build.');
     return;
   }
-  const minted = await externalServices.mintRelayPairing();
-  if (!minted) {
-    ctx.print(`Relay pairing cannot be minted from here. ${RELAY_STATE_NOT_READABLE_HERE}`);
+  const reading = await externalServices.mintRelayPairing();
+  if (!reading.minted) {
+    ctx.print('reason' in reading
+      ? `Relay pairing could not be minted: the daemon could not be asked (${reading.reason}). Check the daemon with /status.`
+      : `Relay pairing could not be minted: the daemon has no live relay registration yet (state: ${reading.status}). Run /relay status, and try again once it reads registered.`);
     return;
   }
-  const qrMatrix = generateQrMatrix(minted.encoded);
+  const qrMatrix = generateQrMatrix(reading.minted.encoded);
   ctx.print([
     'Relay pairing payload (scan with a companion app, or copy the string below):',
     '',
-    minted.encoded,
+    reading.minted.encoded,
     '',
     renderQrToString(qrMatrix),
   ].join('\n'));

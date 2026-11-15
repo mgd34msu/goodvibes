@@ -120,7 +120,7 @@ export async function previewTuiHostPairing(options: TuiHostPairingOptions, name
         return { result: { status: 'already-paired', host, message: 'This TUI host credential is saved and its expected native principal is verified. No credential will be minted or replaced.' } };
       } catch { return { result: unverified(host) }; }
     }
-    if (!options.bootstrapShared) return { result: { status: 'blocked', host, message: 'No TUI credential is bound to this origin. Explicitly select --bootstrap-shared to use the existing daemon-global token for this one-shot migration. Native work never uses that token as a fallback.' } };
+    if (!options.bootstrapShared) return { result: { status: 'blocked', host, message: 'No device credential is bound to this origin. Native work on this machine already uses the daemon token this terminal holds; pairing gives the terminal its own revocable device token instead. Select --bootstrap-shared to mint one with that token.' } };
     const token = readTuiLegacyPairingBootstrap(home);
     if (!token) return { result: { status: 'blocked', host, message: 'The selected legacy bootstrap is missing or unsafe. It must be an owned, private regular daemon operator-tokens.json file; this command never creates or repairs it.' } };
     const current = () => sameSelection() && readTuiLegacyPairingBootstrap(home) === token;

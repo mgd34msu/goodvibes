@@ -169,7 +169,7 @@ export interface TokenAuditorConfig {
 }
 
 /**
- * Callback invoked after each token is audited in `auditAll()`.
+ * Callback invoked by an audit of record (`runAudit()`), never by a read.
  * Receives one SecurityEvent per relevant audit outcome.
  * No-op by default, pass via `ApiTokenAuditor` constructor options.
  */
@@ -217,6 +217,9 @@ export class ApiTokenAuditor {
   private readonly _tokens = new Map<string, ApiTokenMetadata>();
   private readonly _config: TokenAuditorConfig;
   private readonly _emitter: SecurityEventEmitter;
+  private _lastReport: TokenAuditReport | null = null;
+  private _tokenSource: (() => void) | undefined;
+  private readonly _auditListeners = new Set<() => void>();
 
   constructor(
     config: TokenAuditorConfig = { managed: false },
@@ -392,7 +395,8 @@ export class ApiTokenAuditor {
   // -------------------------------------------------------------------------
 
   /**
-   * Run scope and rotation audits for all registered tokens.
+   * Run scope and rotation audits for all registered tokens. A pure read:
+   * nothing is emitted or kept (see {@link runAudit} for the audit of record).
    *
    * In managed mode, tokens with scope violations or overdue rotation are
    * flagged as blocked. Callers must check `result.blocked` or
@@ -419,64 +423,11 @@ export class ApiTokenAuditor {
       // In managed mode: block tokens with scope violations or overdue rotation
       const isBlocked = this._config.managed && this._managedBlockingEnabled() && (hasViolation || isOverdue);
 
-      const result: TokenAuditResult = {
-        tokenId,
-        label: metadata.label,
-        scope,
-        rotation,
-        blocked: isBlocked,
-      };
-
-      results.push(result);
-
-      if (hasViolation) {
-        scopeViolations.push(tokenId);
-        this._emitter({
-          type: 'TOKEN_SCOPE_VIOLATION',
-          tokenId,
-          label: metadata.label,
-          policyId: scope.policyId,
-          excessScopes: scope.excessScopes,
-        });
-      }
-      if (isOverdue) {
-        rotationOverdue.push(tokenId);
-        this._emitter({
-          type: 'TOKEN_ROTATION_EXPIRED',
-          tokenId,
-          label: metadata.label,
-          ageMs: rotation.ageMs,
-          cadenceMs: rotation.cadenceMs,
-          dueAt: rotation.dueAt,
-        });
-      }
-      if (isWarning) {
-        rotationWarnings.push(tokenId);
-        this._emitter({
-          type: 'TOKEN_ROTATION_WARNING',
-          tokenId,
-          label: metadata.label,
-          msUntilDue: rotation.msUntilDue,
-          dueAt: rotation.dueAt,
-          ageMs: rotation.ageMs,
-        });
-      }
-      if (isBlocked) {
-        blocked.push(tokenId);
-        const reason =
-          hasViolation && isOverdue
-            ? 'scope_violation_and_rotation_overdue'
-            : hasViolation
-              ? 'scope_violation'
-              : 'rotation_overdue';
-        this._emitter({ type: 'TOKEN_BLOCKED', tokenId, label: metadata.label, reason });
-        logger.error('ApiTokenAuditor: token blocked (out-of-policy, managed mode)', {
-          tokenId,
-          label: metadata.label,
-          scopeViolation: hasViolation,
-          rotationOverdue: isOverdue,
-        });
-      }
+      results.push({ tokenId, label: metadata.label, scope, rotation, blocked: isBlocked });
+      if (hasViolation) scopeViolations.push(tokenId);
+      if (isOverdue) rotationOverdue.push(tokenId);
+      if (isWarning) rotationWarnings.push(tokenId);
+      if (isBlocked) blocked.push(tokenId);
     }
 
     return {
@@ -487,6 +438,68 @@ export class ApiTokenAuditor {
       rotationOverdue,
       capturedAt: now,
     };
+  }
+
+  /**
+   * Run an audit of record: refresh the token set from its source (see
+   * {@link setTokenSource}), compute the report, emit one security event per
+   * finding, keep the report as {@link lastReport} and tell subscribers.
+   * {@link auditAll} is the pure computation; this is the one place events
+   * are emitted, so reading a report never emits anything.
+   */
+  runAudit(now: number = Date.now()): TokenAuditReport {
+    if (this._tokenSource) {
+      try { this._tokenSource(); }
+      catch (error) { logger.warn('ApiTokenAuditor: the token source could not be read; auditing the tokens already known', { error: error instanceof Error ? error.message : String(error) }); }
+    }
+    const report = this.auditAll(now);
+    for (const result of report.results) {
+      const { tokenId, label, scope, rotation } = result;
+      if (scope.outcome === 'violation') {
+        this._emitter({ type: 'TOKEN_SCOPE_VIOLATION', tokenId, label, policyId: scope.policyId, excessScopes: scope.excessScopes });
+      }
+      if (rotation.outcome === 'overdue') {
+        this._emitter({ type: 'TOKEN_ROTATION_EXPIRED', tokenId, label, ageMs: rotation.ageMs, cadenceMs: rotation.cadenceMs, dueAt: rotation.dueAt });
+      }
+      if (rotation.outcome === 'warning') {
+        this._emitter({ type: 'TOKEN_ROTATION_WARNING', tokenId, label, msUntilDue: rotation.msUntilDue, dueAt: rotation.dueAt, ageMs: rotation.ageMs });
+      }
+      if (result.blocked) {
+        const hasViolation = scope.outcome === 'violation', isOverdue = rotation.outcome === 'overdue';
+        const reason = hasViolation && isOverdue ? 'scope_violation_and_rotation_overdue' : hasViolation ? 'scope_violation' : 'rotation_overdue';
+        this._emitter({ type: 'TOKEN_BLOCKED', tokenId, label, reason });
+        logger.error('ApiTokenAuditor: token blocked (out-of-policy, managed mode)', {
+          tokenId,
+          label,
+          scopeViolation: hasViolation,
+          rotationOverdue: isOverdue,
+        });
+      }
+    }
+    this._lastReport = report;
+    for (const listener of [...this._auditListeners]) {
+      try { listener(); } catch (error) { logger.warn('ApiTokenAuditor: audit listener failed', { error: error instanceof Error ? error.message : String(error) }); }
+    }
+    return report;
+  }
+
+  /** The last audit of record ({@link runAudit}), or null before the first one. */
+  lastReport(): TokenAuditReport | null {
+    return this._lastReport;
+  }
+
+  /** Told after each audit of record. Returns the unsubscribe function. */
+  onAudit(listener: () => void): () => void {
+    this._auditListeners.add(listener);
+    return () => { this._auditListeners.delete(listener); };
+  }
+
+  /**
+   * Where the token set comes from: called at the start of each
+   * {@link runAudit} to register and deregister tokens (the paired devices).
+   */
+  setTokenSource(source: (() => void) | undefined): void {
+    this._tokenSource = source;
   }
 
   /**

@@ -31,6 +31,7 @@ import {
   buildCrashRecord,
   buildPersistedSessionContextFromFacts,
   CRASH_LOG_FILENAME,
+  crashRecordLine,
   removeLivenessMarker,
 } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { writeFatalLine } from '@goodvibes-jev/engine/platform/platform/daemon';
@@ -171,7 +172,7 @@ export function installProcessLifecycle(deps: ProcessLifecycleDeps): ProcessLife
   // The durable trace of a fault: a record in the bounded crash log that support
   // tooling reads. Synchronous and best-effort, it must never cost the exit or
   // the notices that follow it.
-  const recordCrash = (kind: 'uncaughtException' | 'unhandledRejection', thrown: unknown): string | null => {
+  const recordCrash = (kind: 'uncaughtException' | 'unhandledRejection', thrown: unknown): { readonly path: string; readonly written: boolean } | null => {
     try {
       const record = buildCrashRecord(kind, thrown, {
         version: VERSION,
@@ -179,7 +180,7 @@ export function installProcessLifecycle(deps: ProcessLifecycleDeps): ProcessLife
         sessionId: ctx.runtime?.sessionId ?? null,
       });
       const path = resolveCrashLogPath();
-      return appendCrashRecord(path, record) ? path : null;
+      return { path, written: appendCrashRecord(path, record) };
     } catch (error) {
       reportCleanupError('crash record', error);
       return null;
@@ -329,7 +330,7 @@ export function installProcessLifecycle(deps: ProcessLifecycleDeps): ProcessLife
     bestEffort('crash stderr', () => {
       const writeStderr = deps.writeStderr ?? writeFatalLine;
       writeStderr(`goodvibes crashed: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}`);
-      if (crashLog) writeStderr(`crash record written to ${crashLog}`);
+      if (crashLog) writeStderr(crashRecordLine(crashLog.path, crashLog.written));
     });
     exitAfterRelease(1);
   };
@@ -372,6 +373,7 @@ export function installProcessLifecycle(deps: ProcessLifecycleDeps): ProcessLife
     let shutdownOk = false;
     let beforeDeadline = true;
     const saveNoticeTimer = setTimeout(() => {
+      if (ctx.sessionSaved?.()) return; // saved; only releases are still running
       bestEffort('save progress notice', () => { stdout.write('saving session…\n'); });
     }, saveNoticeAfterMs);
     let shutdownTimer: ReturnType<typeof setTimeout> | undefined;
@@ -408,6 +410,9 @@ export function installProcessLifecycle(deps: ProcessLifecycleDeps): ProcessLife
       clearTimeout(saveNoticeTimer);
       clearTimeout(shutdownTimer);
     }
+    // The save runs before every release, so a release still waiting on a slow
+    // daemon at the deadline does not mean the session was lost.
+    if (!shutdownOk && ctx.sessionSaved?.()) shutdownOk = true;
     // Recovery is removed only after the durable save confirms success.
     // Each finalizer is independent: a recovery or marker failure cannot skip
     // the log flush or process exit, and a logging failure cannot stop exit.

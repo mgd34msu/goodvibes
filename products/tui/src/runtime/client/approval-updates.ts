@@ -32,10 +32,8 @@
 import { watchApprovalUpdates } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 import type { ApprovalUpdateSubscriber } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { resolveDaemonEnabled } from '@goodvibes-jev/engine/platform/platform/config';
-import { getOrCreateCompanionToken } from '@goodvibes-jev/engine/platform/platform/pairing';
-import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-import { resolveControlPlaneBaseUrl, resolveDaemonStateDirectory } from './operator-endpoint.ts';
+import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
+import { resolveDaemonEndpoint } from './operator-endpoint.ts';
 
 export interface TerminalApprovalUpdateSubscriberOptions {
   readonly configManager: ConfigManager;
@@ -55,25 +53,14 @@ export function createTerminalApprovalUpdateSubscriber(
   options: TerminalApprovalUpdateSubscriberOptions,
 ): ApprovalUpdateSubscriber {
   return async (onUpdate, onTerminate) => {
-    if (!resolveDaemonEnabled(options.configManager)) return null;
-    const baseUrl = resolveControlPlaneBaseUrl(options.configManager);
-    if (!baseUrl) return null;
-    let token: string;
-    try {
-      const homeDirectory = typeof options.homeDirectory === 'function'
-        ? options.homeDirectory()
-        : options.homeDirectory;
-      token = getOrCreateCompanionToken('tui', {
-        daemonHomeDir: resolveDaemonStateDirectory(homeDirectory),
-      }).token;
-    } catch (error) {
-      logger.debug('[approvals] no bearer token could be read for the approval-update stream', {
-        error: summarizeError(error),
-      });
+    const endpoint = resolveDaemonEndpoint({ configManager: options.configManager, homeDirectory: options.homeDirectory });
+    if (!endpoint.available) {
+      logger.debug('[approvals] the approval-update stream is not opened', { reason: endpoint.reason });
       return null;
     }
+    const token = endpoint.token;
     return await watchApprovalUpdates({
-      baseUrl,
+      baseUrl: endpoint.baseUrl,
       getAuthToken: () => token,
       onUpdate,
       // The raiser reads the record instead once the stream has ended.

@@ -4,9 +4,10 @@
  * The full onboarding wizard is comprehensive but long (5+ steps for a brand
  * new user). The fast path gets a new user to a working session in the fewest
  * possible steps:
- *   - If a provider API key is already configured (env / secrets), skip
- *     onboarding entirely, write the check marker and drop straight into a
- *     working session. ZERO steps.
+ *   - If the model the session will use is ready (its provider has a key, or
+ *     is keyless), skip onboarding entirely, write the check marker and drop
+ *     straight into a working session. ZERO steps. A key for another provider
+ *     is not enough: that provider's model is offered as the first choice.
  *   - Otherwise ask exactly one question: start now on the default model, or
  *     run the full guided setup. Dismissing (Esc) starts now, so it is
  *     always skippable. The start-now copy is GENERATED from the default
@@ -22,8 +23,8 @@
 import {
   buildOnboardingModelCopy,
   resolveDefaultModelReadiness,
+  type DefaultModelReadiness,
   type ModelProviderSource,
-  type OnboardingModelCopy,
 } from '@goodvibes-jev/engine/platform/platform/providers';
 import type { CommandContext } from '../../input/command-registry.ts';
 import type { SelectionItem } from '../../input/selection-modal.ts';
@@ -52,15 +53,18 @@ function readConfiguredProviderIds(commandContext: CommandContext): string[] | n
 
 const MARKER_OPTIONS: WriteOnboardingCheckMarkerOptions = { source: 'command' };
 
+/** The model the session will use: the live setting, not the boot-time copy of the config. */
+function liveModelKey(commandContext: CommandContext): string {
+  const live = commandContext.platform?.configManager?.get('provider.model');
+  return String(live ?? commandContext.platform?.config?.provider?.model ?? '').trim();
+}
+
 /**
- * Copy for the "start now" choice, GENERATED from the default model's live
- * registration state (never hand-written): a "no API key needed" promise can
- * only appear when the provider's own auth state proves keyless readiness.
- * Surfaces that cannot answer (no registry / no getForModel) resolve to the
- * honest 'unresolvable' copy rather than a fabricated keyless claim.
+ * The readiness of the model the session will use, from its provider's live
+ * registration state. Surfaces that cannot answer (no registry / no
+ * getForModel) resolve to the honest 'unresolvable' answer.
  */
-function resolveStartCopy(commandContext: CommandContext): OnboardingModelCopy {
-  const modelKey = String(commandContext.platform?.config?.provider?.model ?? '').trim();
+function resolveLiveReadiness(commandContext: CommandContext): DefaultModelReadiness {
   const registry = commandContext.provider?.providerRegistry;
   const source: ModelProviderSource =
     registry && typeof (registry as Partial<ModelProviderSource>).getForModel === 'function'
@@ -70,12 +74,37 @@ function resolveStartCopy(commandContext: CommandContext): OnboardingModelCopy {
             throw new Error('provider registry unavailable on this surface');
           },
         };
-  return buildOnboardingModelCopy(resolveDefaultModelReadiness(source, modelKey));
+  return resolveDefaultModelReadiness(source, liveModelKey(commandContext));
 }
+
+/** A selectable model of the first configured provider that has one, for the "use it instead" offer. */
+type SelectableModel = { readonly id: string; readonly provider: string; readonly displayName: string; readonly registryKey: string };
+
+function configuredProviderModel(commandContext: CommandContext, configured: readonly string[]): SelectableModel | null {
+  const registry = commandContext.provider?.providerRegistry;
+  if (!registry || typeof registry.getSelectableModels !== 'function') return null;
+  let models: readonly SelectableModel[];
+  try {
+    models = registry.getSelectableModels();
+  } catch {
+    return null;
+  }
+  for (const provider of configured) {
+    const model = models.find((candidate) => candidate.provider === provider);
+    if (model) return model;
+  }
+  return null;
+}
+
+const isReady = (readiness: DefaultModelReadiness): boolean => readiness.kind === 'configured' || readiness.kind === 'keyless';
 
 /**
  * Run the fast-path first-run flow. Returns nothing; side effects (wizard open,
  * marker write, modal) happen through the injected deps.
+ *
+ * "Ready" is printed, and first run marked done, only when the model the
+ * session will use is ready. A key for some other provider is not enough: the
+ * person is offered that provider's model instead.
  */
 export function startOnboardingFastPath(deps: OnboardingFastPathDeps): void {
   const { input, commandContext, shellPaths, render } = deps;
@@ -88,18 +117,25 @@ export function startOnboardingFastPath(deps: OnboardingFastPathDeps): void {
     return;
   }
 
-  if (configured.length > 0) {
-    // A provider key already exists, nothing to ask. Straight to a working session.
+  const readiness = resolveLiveReadiness(commandContext);
+  if (configured.length > 0 && isReady(readiness)) {
+    // The session's model works now: nothing to ask. Straight to a working session.
     writeOnboardingCheckMarker(shellPaths, MARKER_OPTIONS);
     commandContext.print?.(
-      `Ready: provider configured (${configured.join(', ')}). Run /onboarding anytime for full setup.`,
+      `Ready: ${readiness.modelKey} (provider ${'provider' in readiness ? readiness.provider : configured[0]}). Run /onboarding anytime for full setup.`,
     );
     render();
     return;
   }
 
-  const startCopy = resolveStartCopy(commandContext);
+  const startCopy = buildOnboardingModelCopy(readiness);
+  const alternative = !isReady(readiness) && commandContext.completeModelSelection
+    ? configuredProviderModel(commandContext, configured)
+    : null;
   const items: SelectionItem[] = [
+    ...(alternative
+      ? [{ id: 'use-configured', label: `Use ${alternative.provider}`, detail: `Switch to ${alternative.registryKey}, from the provider whose key is set`, primaryAction: 'select' as const }]
+      : []),
     { id: 'start-now', label: startCopy.headline, detail: startCopy.detail, primaryAction: 'select' },
     { id: 'full-setup', label: 'Full guided setup', detail: 'Choose provider, model, channels, and more', primaryAction: 'select' },
   ];
@@ -112,10 +148,24 @@ export function startOnboardingFastPath(deps: OnboardingFastPathDeps): void {
         openWizard();
         return;
       }
+      if (result?.item.id === 'use-configured' && alternative) {
+        const effort = commandContext.platform?.configManager?.get('provider.reasoningEffort');
+        commandContext.completeModelSelection?.({
+          model: { id: alternative.id, provider: alternative.provider, displayName: alternative.displayName, registryKey: alternative.registryKey },
+          effort: typeof effort === 'string' ? effort : '',
+        });
+        if (isReady(resolveLiveReadiness(commandContext))) {
+          writeOnboardingCheckMarker(shellPaths, MARKER_OPTIONS);
+          commandContext.print?.(`Ready: ${alternative.registryKey}. Run /onboarding anytime for full setup.`);
+        } else {
+          commandContext.print?.(`${alternative.registryKey} is not ready yet. Pick a model with /model, or run /onboarding for full setup.`);
+        }
+        render();
+        return;
+      }
       // Start now (or dismissed): mark first-run done and drop into a working
-      // session on the default model. The status line reuses the generated
-      // copy so it can never promise keyless readiness the registration
-      // state does not prove.
+      // session on the configured model. The status line reuses the generated
+      // copy so it can never promise readiness the registration state does not prove.
       writeOnboardingCheckMarker(shellPaths, MARKER_OPTIONS);
       commandContext.print?.(
         `${startCopy.detail}. Add a provider key anytime with /provider, or run /onboarding for full setup.`,

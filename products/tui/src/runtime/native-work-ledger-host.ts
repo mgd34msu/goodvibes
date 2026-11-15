@@ -223,11 +223,9 @@ export function createNativeWorkLedgerHost(deps: {
       fetchImpl: createNativeHostFetch({ current: () => !controller.signal.aborted && captureSelection().identity === before.identity }),
     });
     discovery?.controller.abort();
+    // A selection change aborts this discovery from captureSelection, and the
+    // host fetch refuses a request whose selection moved; nothing polls.
     discovery = { controller, identity: before.identity };
-    const timer = setInterval(() => {
-      readSelection();
-    }, 100);
-    timer.unref?.();
     try {
       if (readSelection().identity !== before.identity || controller.signal.aborted) return false;
       const id = await getOperatorWorkLedgerProject(operator, { signal: AbortSignal.any([controller.signal, AbortSignal.timeout(5000)]) });
@@ -239,7 +237,6 @@ export function createNativeWorkLedgerHost(deps: {
       discoveryReason = 'Host project discovery unavailable or not permitted. Select an exact daemon project with /work <project-id>.';
       return ready();
     } finally {
-      clearInterval(timer);
       operator.dispose();
       if (discovery?.controller === controller) discovery = undefined;
     }

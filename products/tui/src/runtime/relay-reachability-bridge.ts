@@ -1,41 +1,36 @@
 /**
- * relay-reachability-bridge.ts, what this terminal can honestly say about the
- * outbound relay's live state.
+ * relay-reachability-bridge.ts, the relay's live state and pairing payload, as
+ * the adopted daemon reports them.
  *
- * The relay is a DAEMON capability. The reachability controller is composed
- * inside the platform's `DaemonServer` (platform/daemon/facade.ts,
- * `getRelayReachability()`), gated on `relay.enabled` plus the `relay-connect`
- * feature flag, and the process holding that controller is the one that
- * registers with the relay and can mint a pairing payload for it.
+ * The relay is a DAEMON capability: the reachability controller is composed
+ * inside the platform's `DaemonServer` and is the process that registers with
+ * the relay and can mint a pairing payload. This terminal is a client, so it
+ * asks the daemon through the two operator verbs that serve that controller,
+ * `relay.reachability.get` and `relay.pairing.mint` (one request per `/relay`).
  *
- * This terminal is a client. It never constructs a `DaemonServer`, so it holds
- * no controller of its own, and it has no handle to the adopted daemon's, the
- * control plane exposes no verb for one. The operator contract's `relay`
- * category carries the two step-up ceremony verbs (`stepup.challenge.mint`,
- * `stepup.credential.register`) and nothing that reports registration state or
- * mints a pairing payload, so there is no wire call to make.
- *
- * Hence `'unavailable'`, and deliberately NOT `'disabled'`. `'disabled'` is a
- * real relay state meaning the owner turned it off; reporting it for a relay
- * this terminal cannot see would tell an operator whose daemon IS registered
- * that their relay is off. What is true is narrower and worth saying plainly:
- * the state exists, it lives in the daemon, and this surface cannot read it.
- *
- * The accessors keep their shape rather than collapsing into the call sites,
- * because the shape is what a relay-state verb would fill in: the day the
- * daemon serves one, the call is made here and `/relay` renders a live state
- * with nothing else changing.
+ * `'unavailable'` is kept for exactly one case: the daemon could not be asked
+ * (disabled, unreachable, refused). It is deliberately NOT `'disabled'`, which is
+ * the daemon's own answer meaning a relay gate is off; the reason the daemon
+ * could not be asked travels with it so `/relay` can say it.
  */
 
 import type { RelayRegistrationStatus } from '@goodvibes-jev/engine/daemon-api';
-import type { RelayPairingPayload } from '@goodvibes-jev/engine/transport-core/relay';
+import { encodeRelayPairingString, type RelayPairingPayload } from '@goodvibes-jev/engine/transport-core/relay';
+import type { DaemonVerbCaller } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 
 /**
  * What `/relay` can be told: the daemon-side registration states, plus
- * `'disabled'` for a relay that is off, plus `'unavailable'` for one whose
- * state is real but not readable from here.
+ * `'disabled'` for a relay that is off, plus `'unavailable'` when the daemon
+ * could not be asked.
  */
 export type RelayReadableStatus = RelayRegistrationStatus | 'disabled' | 'unavailable';
+
+/** The relay state with, when it could not be read, why. */
+export interface RelayStatusReading {
+  readonly status: RelayReadableStatus;
+  /** Set only for `'unavailable'`: why the daemon could not be asked. */
+  readonly reason?: string;
+}
 
 /** A minted pairing payload, in both the structured and the scannable form. */
 export interface RelayPairingMint {
@@ -43,22 +38,57 @@ export interface RelayPairingMint {
   readonly encoded: string;
 }
 
+/** The outcome of asking the daemon for a pairing payload. */
+export type RelayPairingReading =
+  | { readonly minted: RelayPairingMint }
+  /** The daemon answered: there is no live registration to pair against yet. */
+  | { readonly minted: null; readonly status: RelayReadableStatus }
+  /** The daemon could not be asked. */
+  | { readonly minted: null; readonly status: 'unavailable'; readonly reason: string };
+
 export interface RelayReadAccessors {
-  relayStatus(): RelayReadableStatus;
-  mintRelayPairing(): Promise<RelayPairingMint | null>;
+  relayStatus(): Promise<RelayStatusReading>;
+  mintRelayPairing(): Promise<RelayPairingReading>;
 }
 
-/**
- * The one sentence explaining an `'unavailable'` relay state, and a pairing
- * payload this terminal cannot mint. Stated once so `/relay status` and
- * `/relay pair` cannot drift into two different explanations of one fact.
- */
-export const RELAY_STATE_NOT_READABLE_HERE =
-  'The daemon holds the relay connection and the control plane exposes no verb for its state, '
-  + 'so this terminal cannot read it; ask the machine running the daemon.';
+function failureReason(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+const KNOWN_STATUSES: ReadonlySet<string> = new Set(['disabled', 'idle', 'connecting', 'registered', 'reconnecting', 'stopped']);
+
+function statusOf(value: unknown): RelayReadableStatus {
+  return typeof value === 'string' && KNOWN_STATUSES.has(value) ? value as RelayReadableStatus : 'unavailable';
+}
+
+function isPairingPayload(value: unknown): value is RelayPairingPayload {
+  if (typeof value !== 'object' || value === null) return false;
+  const record = value as Record<string, unknown>;
+  return typeof record.protocol === 'number' && typeof record.relayUrl === 'string'
+    && typeof record.rid === 'string' && typeof record.daemonPublicKey === 'string';
+}
 
 /** The two relay accessors, spread into `externalServices` from bootstrap.ts. */
-export const relayReadAccessors: RelayReadAccessors = {
-  relayStatus: () => 'unavailable',
-  mintRelayPairing: async () => null,
-};
+export function createRelayReadAccessors(verbs: DaemonVerbCaller): RelayReadAccessors {
+  return {
+    async relayStatus() {
+      try {
+        const answer = await verbs.invoke<{ status?: unknown }>('relay.reachability.get', {});
+        return { status: statusOf(answer?.status) };
+      } catch (error) {
+        return { status: 'unavailable', reason: failureReason(error) };
+      }
+    },
+    async mintRelayPairing() {
+      try {
+        const answer = await verbs.invoke<{ pairing?: unknown; status?: unknown }>('relay.pairing.mint', {});
+        if (isPairingPayload(answer?.pairing)) {
+          return { minted: { payload: answer.pairing, encoded: encodeRelayPairingString(answer.pairing) } };
+        }
+        return { minted: null, status: statusOf(answer?.status) };
+      } catch (error) {
+        return { minted: null, status: 'unavailable', reason: failureReason(error) };
+      }
+    },
+  };
+}

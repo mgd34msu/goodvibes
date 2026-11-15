@@ -26,7 +26,10 @@
  * is read (or minted) from the daemon's own state directory. A daemon on
  * another machine is reached by the network-adopt path, which writes that
  * daemon's bearer into the same file, so this resolution covers both.
+ * `GOODVIBES_DAEMON_TOKEN`, when set, wins here, once, for every caller, as it
+ * does for the daemon itself (`resolveDaemonEndpoint`).
  */
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { createGoodVibesPlatform, isOperatorMethodId } from '@goodvibes-jev/engine/platform';
 import type { GoodVibesPlatform } from '@goodvibes-jev/engine/platform';
 import { GoodVibesError } from '@goodvibes-jev/engine/platform';
@@ -34,6 +37,7 @@ import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/conf
 import { resolveDaemonEnabled } from '@goodvibes-jev/engine/platform/platform/config';
 import { resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/platform/platform/config';
 import { getOrCreateCompanionToken } from '@goodvibes-jev/engine/platform/platform/pairing';
+import { operatorTokenPath } from '@goodvibes-jev/engine/platform/platform/workspace';
 import type { DaemonVerbCaller } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 
 /** Re-exported so this repo's importers keep one import site for the shape
@@ -77,28 +81,70 @@ export function resolveControlPlaneBaseUrl(configManager: Pick<ConfigManager, 'g
   return null;
 }
 
+/** Where an enabled daemon answers, or null when it is disabled or has no address. Reads settings only. */
+export function resolveDaemonBaseUrl(configManager: Pick<ConfigManager, 'get'>): string | null {
+  if (!resolveDaemonEnabled(configManager)) return null;
+  return resolveControlPlaneBaseUrl(configManager);
+}
+
 /** The daemon's own state directory, where the shared bearer token lives. */
 export function resolveDaemonStateDirectory(homeDirectory: string): string {
   return resolveGoodVibesDaemonHome(homeDirectory);
 }
 
+/** Where the daemon answers and the bearer this terminal presents to it, or why it cannot be reached. */
+export type DaemonEndpoint =
+  | { readonly available: true; readonly baseUrl: string; readonly token: string }
+  | OperatorRpcUnavailable;
+
 /**
- * Resolve (or honestly refuse to resolve) an operator platform client wired to this
- * workspace's control-plane daemon, from just the two things the resolution
- * actually needs, the config manager and the home directory.
+ * How a caller obtains the bearer. `mint` creates the shared token file when it
+ * is absent (a verb or a stream that is about to be used); `read-only` never
+ * creates or rewrites anything (a status question must not change a credential).
  */
-export function resolveOperatorRpc(deps: {
-  readonly configManager: ConfigManager;
+export type DaemonTokenMode = 'mint' | 'read-only';
+
+/** The `GOODVIBES_DAEMON_TOKEN` override, applied in one place for every caller. */
+function daemonTokenOverride(): string | null {
+  return process.env.GOODVIBES_DAEMON_TOKEN?.trim() || null;
+}
+
+/**
+ * The bearer this terminal presents to the daemon: the override when set,
+ * otherwise the shared operator-tokens.json record (minted when absent in
+ * `mint` mode). Read-only mode answers null for a missing or unreadable record.
+ * Throws only in `mint` mode, when the record cannot be created.
+ */
+export function resolveDaemonBearer(homeDirectory: string, mode: DaemonTokenMode): string | null {
+  const override = daemonTokenOverride();
+  if (override) return override;
+  const daemonHomeDir = resolveDaemonStateDirectory(homeDirectory);
+  if (mode === 'mint') return getOrCreateCompanionToken('tui', { daemonHomeDir }).token;
+  const path = operatorTokenPath(daemonHomeDir);
+  if (!existsSync(path)) return null;
+  try {
+    const parsed = JSON.parse(readFileSync(path, 'utf-8')) as { token?: unknown } | null;
+    return typeof parsed?.token === 'string' && parsed.token.trim() ? parsed.token : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The one resolver of "the daemon I talk to": enabled, base URL, bearer. Every
+ * daemon call from this terminal (verbs, the approval stream, the Cloudflare
+ * routes, the hosted-session stream) goes through it, so the override, the
+ * mint rule and the refusals are the same everywhere. A refusal is a VALUE,
+ * never a throw: callers print an honest line rather than crash a keystroke.
+ */
+export function resolveDaemonEndpoint(deps: {
+  readonly configManager: Pick<ConfigManager, 'get'>;
   readonly homeDirectory: string | (() => string);
-  /** Injectable fetch for tests; defaults to the global fetch. */
-  readonly fetch?: typeof fetch | undefined;
-}): OperatorRpc {
+  readonly mode?: DaemonTokenMode | undefined;
+}): DaemonEndpoint {
   const { configManager } = deps;
-  // A refusal is a VALUE here, never a throw, that is the whole contract of
-  // this function, and callers rely on it to print an honest line rather than
-  // crash a keystroke. A context whose config manager cannot answer (a narrow
-  // embed, a partially-wired test double) is one more case of "no daemon can be
-  // resolved", not an exception to raise from a probe.
+  // A context whose config manager cannot answer (a narrow embed, a partially
+  // wired test double) is one more case of "no daemon can be resolved".
   if (typeof (configManager as { get?: unknown } | null)?.get !== 'function') {
     return { available: false, reason: 'no config manager is wired here, so no control-plane daemon can be resolved.' };
   }
@@ -113,9 +159,9 @@ export function resolveOperatorRpc(deps: {
   // shell paths are not wired (a disabled-daemon path) must still get the honest
   // unavailable reason above, never a "shell paths not wired" throw.
   const homeDirectory = typeof deps.homeDirectory === 'function' ? deps.homeDirectory() : deps.homeDirectory;
-  let token: string;
+  let token: string | null;
   try {
-    token = getOrCreateCompanionToken('tui', { daemonHomeDir: resolveDaemonStateDirectory(homeDirectory) }).token;
+    token = resolveDaemonBearer(homeDirectory, deps.mode ?? 'mint');
   } catch (error) {
     // An unwritable state directory or a token file that cannot be replaced is a
     // refusal like the others: the caller prints a line, nothing crashes.
@@ -124,8 +170,31 @@ export function resolveOperatorRpc(deps: {
       reason: `the daemon's access token could not be read or created (${error instanceof Error ? error.message : String(error)}): check that ${resolveDaemonStateDirectory(homeDirectory)} is writable, then retry.`,
     };
   }
-  const platformClient = createGoodVibesPlatform({ baseUrl, authToken: token, ...(deps.fetch ? { fetch: deps.fetch } : {}) });
-  return { available: true, platformClient: withGatewayRouteForWsOnlyVerbs(platformClient, baseUrl, token, deps.fetch ?? fetch) };
+  if (!token) {
+    return { available: false, reason: `no daemon access token exists yet in ${resolveDaemonStateDirectory(homeDirectory)}: start the daemon or run any daemon command once, then retry.` };
+  }
+  return { available: true, baseUrl, token };
+}
+
+/**
+ * Resolve (or honestly refuse to resolve) an operator platform client wired to this
+ * workspace's control-plane daemon, from just the two things the resolution
+ * actually needs, the config manager and the home directory.
+ */
+export function resolveOperatorRpc(deps: {
+  readonly configManager: ConfigManager;
+  readonly homeDirectory: string | (() => string);
+  /** Injectable fetch for tests; defaults to the global fetch. */
+  readonly fetch?: typeof fetch | undefined;
+}): OperatorRpc {
+  const endpoint = resolveDaemonEndpoint(deps);
+  if (!endpoint.available) return endpoint;
+  return { available: true, platformClient: operatorClientFor(endpoint, deps.fetch) };
+}
+
+function operatorClientFor(endpoint: { readonly baseUrl: string; readonly token: string }, fetchImpl: typeof fetch | undefined): GoodVibesPlatform {
+  const platformClient = createGoodVibesPlatform({ baseUrl: endpoint.baseUrl, authToken: endpoint.token, ...(fetchImpl ? { fetch: fetchImpl } : {}) });
+  return withGatewayRouteForWsOnlyVerbs(platformClient, endpoint.baseUrl, endpoint.token, fetchImpl ?? fetch);
 }
 
 /**
@@ -234,14 +303,42 @@ function withGatewayRouteForWsOnlyVerbs(
   return { ...client, operator: { ...client.operator, invoke } };
 }
 
+/**
+ * The verb caller every client seam shares. The endpoint and its client are
+ * resolved on first use and kept while nothing they depend on moved: the
+ * settings revision, the token override and the token file (one `stat` per
+ * verb). Before this, every verb re-read the token file and built a new client.
+ */
 export function createDaemonVerbCaller(deps: {
   readonly configManager: ConfigManager;
   readonly homeDirectory: string | (() => string);
 }): DaemonVerbCaller {
+  let held: { readonly key: string; readonly rpc: OperatorRpc } | null = null;
+  const currentKey = (): string | null => {
+    const configManager = deps.configManager as Partial<Pick<ConfigManager, 'getConfigurationIncarnation'>>;
+    if (typeof configManager.getConfigurationIncarnation !== 'function') return null;
+    let tokenFile = 'none';
+    try {
+      const homeDirectory = typeof deps.homeDirectory === 'function' ? deps.homeDirectory() : deps.homeDirectory;
+      const stat = statSync(operatorTokenPath(resolveDaemonStateDirectory(homeDirectory)), { throwIfNoEntry: false });
+      if (stat) tokenFile = `${stat.mtimeMs}:${stat.size}:${stat.ino}`;
+    } catch {
+      return null; // shell paths not wired yet: resolve fresh and let the resolver say why
+    }
+    return `${configManager.getConfigurationIncarnation()}|${daemonTokenOverride() ?? ''}|${tokenFile}`;
+  };
+  const resolve = (): OperatorRpc => {
+    const key = currentKey();
+    if (key !== null && held?.key === key) return held.rpc;
+    const rpc = resolveOperatorRpc(deps);
+    // Only an available client is kept: a refusal is re-asked, so fixing the cause takes effect at once.
+    held = key !== null && rpc.available ? { key, rpc } : null;
+    return rpc;
+  };
   return {
-    probe: () => resolveOperatorRpc(deps),
+    probe: () => resolve(),
     invoke: async <T,>(methodId: string, input?: unknown): Promise<T> => {
-      const rpc = resolveOperatorRpc(deps);
+      const rpc = resolve();
       if (!rpc.available) throw new Error(`cannot invoke '${methodId}': ${rpc.reason}`);
       return await rpc.platformClient.operator.invoke(methodId as never, (input ?? {}) as never) as T;
     },

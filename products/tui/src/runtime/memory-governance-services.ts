@@ -1,28 +1,32 @@
 // ---------------------------------------------------------------------------
-// memory-governance-services.ts, the daemon-composition tail that constructs
-// and starts the platform's MemoryGovernor with the TUI fork's REAL cache adapters.
+// memory-governance-services.ts, the tail step that constructs and starts the
+// platform's MemoryGovernor for the terminal app.
 //
-// Mirrors the platform's own createRuntimeServices: the CacheRegistry, PauseController
-// and the admission-gate holder are built EARLY in services.ts (so the
-// scheduler gates and the knowledge background jobs can consult the pause
-// controller before the governor exists); this helper is the TAIL step that
-// hands them to wireDaemonMemoryGovernance with the fork's knowledge stores +
-// shared session broker as the real, reclaiming cache adapters, and starts the
-// governor. It is default ON, the governor is a safety feature the owner
-// confirmed starts by default (wireDaemonMemoryGovernance starts it unless a
-// caller opts out), so every daemon composition defends its own footprint.
+// The CacheRegistry, PauseController and the admission-gate holder are built
+// EARLY in services.ts (so the scheduler gates and the knowledge background
+// jobs can consult the pause controller before the governor exists); this
+// helper hands them to the platform's createMemoryGovernance and starts it.
 //
-// Kept as a one-function extraction (like wireIdlePowerAndLiveTurn) so the
-// composition-parity test can pin the wiring from a single file.
+// What the governor does here, and what it does not:
+//   - it refuses expensive work at the critical tier (`admitExpensiveWork`)
+//     and pauses the deferrable background jobs under pressure;
+//   - it registers no cache to trim: nothing this process could register
+//     reclaims resident memory (the knowledge job-run history is capped on
+//     every write and lives in SQLite; the session broker's trim only retires
+//     abandoned inputs), so trimming would delete history and free nothing;
+//   - it never exits the process. The daemon has a service manager to restart
+//     it; an interactive terminal has a person in front of it, so a tripwire
+//     snapshots the stores, reports the pressure and keeps running.
 // ---------------------------------------------------------------------------
 
 import {
-  wireDaemonMemoryGovernance,
+  createMemoryGovernance,
   type CacheRegistry,
   type PauseController,
   type MemoryGovernor,
 } from '@goodvibes-jev/engine/platform/platform/runtime/memory';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { RuntimeEventBus } from '@/runtime/index.ts';
 
 export interface MemoryGovernanceServicesDeps {
@@ -33,13 +37,16 @@ export interface MemoryGovernanceServicesDeps {
   readonly pauseController: PauseController;
   /** The deferrable background jobs the governor pauses under pressure. */
   readonly jobIds: readonly string[];
-  /** Where the tripwire receipt is written so a supervisor sees the exit reason. */
+  /** Where the tripwire receipt is written, so the pressure can be read after the fact. */
   readonly receiptPath: string;
-  /** The fork's three knowledge stores: real retained-entry counts + a real job-run trim. */
-  readonly knowledgeStores: ReadonlyArray<{ retainedEntryCount(): number; pruneJobRuns(keep: number): number }>;
-  /** The shared session broker: real retained-record count + a real GC/truncate trim. */
-  readonly sessionBroker: { retainedRecordCount(): number; trimRetained(level: 'floor' | 'flush'): void };
-  /** Graceful tripwire shutdown flush (async store snapshots), run before a tripwire exit. */
+  /**
+   * Not trimmed: the knowledge job-run history is already capped on write and
+   * trimming it frees no resident memory. Accepted until the caller stops passing it.
+   */
+  readonly knowledgeStores?: unknown;
+  /** Not trimmed: the broker's trim only retires abandoned inputs and frees nothing. */
+  readonly sessionBroker?: unknown;
+  /** Store snapshots taken when the tripwire fires, so a leak that ends in a kill loses nothing. */
   readonly onTripwireShutdown?: (() => Promise<void> | void) | undefined;
 }
 
@@ -48,13 +55,12 @@ export interface MemoryGovernanceServices {
 }
 
 /**
- * Construct + start the MemoryGovernor with the standard KNOWN cache adapters
- * (knowledge-store + session-union), reading the memory.* config domain. The
- * governor starts by default, it is a safety feature.
+ * Construct + start the MemoryGovernor, reading the memory.* config domain.
+ * The governor starts by default; it is a safety feature.
  */
 export function wireMemoryGovernance(deps: MemoryGovernanceServicesDeps): MemoryGovernanceServices {
   const { configManager } = deps;
-  const { memoryGovernor } = wireDaemonMemoryGovernance({
+  const { memoryGovernor } = createMemoryGovernance({
     config: {
       budgetMb: configManager.get('memory.budgetMb'),
       elevatedPct: configManager.get('memory.tier.elevatedPct'),
@@ -67,13 +73,20 @@ export function wireMemoryGovernance(deps: MemoryGovernanceServicesDeps): Memory
     runtimeBus: deps.runtimeBus,
     cacheRegistry: deps.cacheRegistry,
     pauseController: deps.pauseController,
+    caches: [],
     jobIds: deps.jobIds,
     receiptPath: deps.receiptPath,
-    // REAL cache adapters: genuine counts + trims that reclaim (knowledge
-    // job-run history pruning; session broker GC + bucket truncation).
-    knowledgeStores: deps.knowledgeStores,
-    sessionBroker: deps.sessionBroker,
     onTripwireShutdown: deps.onTripwireShutdown,
+    deps: {
+      exit: (receipt) => {
+        logger.warn('[memory] the terminal app keeps running past a memory tripwire; save your work and restart it when convenient', {
+          trigger: receipt.trigger,
+          rssMb: receipt.rssMb,
+          budgetMb: receipt.budgetMb,
+          receiptPath: deps.receiptPath,
+        });
+      },
+    },
   });
   return { memoryGovernor };
 }

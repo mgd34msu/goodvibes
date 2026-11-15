@@ -21,7 +21,7 @@ import { join } from 'node:path';
 import { AgentConfigManager, type ConfigManager } from '../config/index.ts';
 import { ensureDaemonConfigMigrated } from '../config/ensure-daemon-config-migrated.ts';
 import { formatProviderModel, getModelIdFromProviderModel, getProviderIdFromModel } from '../config/provider-model.ts';
-import { readOnboardingCheckMarkers } from '../runtime/onboarding/index.ts';
+import { readOnboardingCheckMarker } from '../runtime/onboarding/index.ts';
 import { GlobalNetworkTransportInstaller } from '@/runtime/index.ts';
 import { createShellPathService } from '@/runtime/index.ts';
 import { configureActivityLogger, logger } from '@goodvibes-jev/engine/platform/platform/utils';
@@ -192,7 +192,7 @@ export async function prepareShellCliRuntime(
         configManager,
         workingDirectory: bootstrapWorkingDir,
         homeDirectory: bootstrapHomeDirectory,
-        onboardingMarkers: readOnboardingCheckMarkers(shellPaths),
+        onboardingMarker: readOnboardingCheckMarker(shellPaths),
         nativeReadiness,
         pairingStatus,
         selectedHost,
@@ -210,7 +210,7 @@ export async function prepareShellCliRuntime(
     const userStorePath = shellPaths.resolveUserPath(GOODVIBES_AGENT_SURFACE_ROOT, 'auth-users.json');
     const bootstrapCredentialPath = shellPaths.resolveUserPath(GOODVIBES_AGENT_SURFACE_ROOT, 'auth-bootstrap.txt');
     const operatorTokenPath = connectedHostOperatorTokenPath(bootstrapHomeDirectory);
-    const onboardingMarkers = readOnboardingCheckMarkers(shellPaths);
+    const onboardingMarker = readOnboardingCheckMarker(shellPaths);
     const service = await buildCliServicePosture({
       configManager,
       workingDirectory: bootstrapWorkingDir,
@@ -248,7 +248,7 @@ export async function prepareShellCliRuntime(
       configManager,
       workingDirectory: bootstrapWorkingDir,
       homeDirectory: bootstrapHomeDirectory,
-      onboardingMarkers,
+      onboardingMarker,
       checkpoints,
       auth: {
         userStorePath,

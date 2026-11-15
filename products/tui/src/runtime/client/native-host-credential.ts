@@ -1,7 +1,7 @@
 import { OwnedSelectionObservation } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { resolveDaemonEnabled } from '@goodvibes-jev/engine/platform/platform/config';
-import { resolveControlPlaneBaseUrl } from './operator-endpoint.ts';
+import { resolveControlPlaneBaseUrl, resolveDaemonEndpoint } from './operator-endpoint.ts';
 import { canonicalizePairingHost, readTuiHostPairing } from '../tui-host-credential-store.ts';
 
 // Actual config owners retain only their latest selected frame. No host/token
@@ -26,9 +26,14 @@ export type NativeHostCredential =
   | { readonly available: true; readonly baseUrl: string; readonly token: string; readonly identity: string; readonly expectedPrincipalId?: string }
   | { readonly available: false; readonly identity: string; readonly reason: string };
 
-/** Passive snapshot only. Native operations never borrow another product's secret,
- * read the daemon-global token, honor unbound environment credentials, or mint.
- * Live scopes are enforced by each operation; a read does not require write/admin.
+/**
+ * The credential native work presents to the selected daemon. A per-device
+ * pairing bound to this exact origin wins (another machine's daemon, with its
+ * own attribution and revocation). Without one, the terminal uses the
+ * credential it already holds for every other daemon verb (the shared operator
+ * token in the daemon's state directory, or `GOODVIBES_DAEMON_TOKEN`), so on the
+ * owner's own machine `/work` needs no pairing step. Live scopes are enforced
+ * by each operation; a read does not require write/admin.
  */
 export function resolveNativeHostCredential(options: NativeHostCredentialOptions): NativeHostCredential {
   let owner: ConfigManager | undefined;
@@ -53,9 +58,12 @@ export function resolveNativeHostCredential(options: NativeHostCredentialOptions
     if (!enabled) return { available: false, identity, reason: 'Selected daemon is disabled.' };
     if (!baseUrl) return { available: false, identity, reason: 'Select an exact HTTP(S) daemon origin without a path, query, fragment or user information.' };
     if (pairing?.status === 'paired') return { available: true, baseUrl, token: pairing.token, identity, expectedPrincipalId: `pairing:${pairing.tokenId}` };
-    if (pairing?.status === 'unknown') return { available: false, identity, reason: 'A TUI host pairing outcome is unknown. Inspect this host before further action; no credential fallback or automatic remint is allowed.' };
-    if (pairing?.status === 'unavailable') return { available: false, identity, reason: 'The TUI host credential store could not be read safely. Native work is unavailable.' };
-    return { available: false, identity, reason: 'No TUI credential is bound to this exact daemon origin. Run goodvibes host pair --bootstrap-shared to review pairing, then use --apply in an owner terminal.' };
+    // A pairing whose outcome is unknown stays the owner's to inspect: its
+    // device token may be live on the daemon, so nothing is swapped in under it.
+    if (pairing?.status === 'unknown') return { available: false, identity, reason: 'A host pairing for this daemon has an unknown outcome. Check it with /host pair, then retry.' };
+    const shared = resolveDaemonEndpoint({ configManager: owner, homeDirectory: home });
+    if (shared.available) return { available: true, baseUrl, token: shared.token, identity };
+    return { available: false, identity, reason: `Native work cannot reach the daemon: ${shared.reason}` };
   } catch {
     if (retained) retained.retire();
     else if (owner) (applyObservation(getObservation, observations, [owner]) as OwnedSelectionObservation | undefined)?.retire();

@@ -4,7 +4,7 @@ import { effectivePermissionMode, presetForMode } from '@goodvibes-jev/engine/pl
 import { describeConfiguredPermissions } from '../permissions/configured-posture.ts';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { resolveDaemonEnabled } from '@goodvibes-jev/engine/platform/platform/config';
-import type { OnboardingCheckMarkersState } from '../runtime/onboarding/index.ts';
+import type { OnboardingCheckMarkerState } from '../runtime/onboarding/index.ts';
 import { formatRuntimeEndpointBinding, resolveRuntimeEndpointBinding } from '@goodvibes-jev/engine/terminal-shell';
 import type { RuntimeEndpointBinding, RuntimeEndpointId } from '@goodvibes-jev/engine/terminal-shell';
 import { classifyBindPosture, isNetworkFacing } from '@goodvibes-jev/engine/terminal-shell';
@@ -14,11 +14,17 @@ import type { InstallSelfCheckFinding } from '../runtime/install-self-check.ts';
 import { getProviderIdFromModel } from '@goodvibes-jev/engine/platform/platform/providers';
 import { describeConfiguredEffort } from '../providers/reasoning-effort-surface.ts';
 
+/** The marker that decides first-run state: the user's marker when its file exists. */
+function effectiveMarker(marker: OnboardingCheckMarkerState | undefined): OnboardingCheckMarkerState | null {
+  return marker?.exists ? marker : null;
+}
+
 export interface CliStatusOptions {
   readonly configManager: Pick<ConfigManager, 'get'>;
   readonly workingDirectory: string;
   readonly homeDirectory: string;
-  readonly onboardingMarkers?: OnboardingCheckMarkersState;
+  /** The first-run check marker (per user); absent or `exists: false` when first run was not marked. */
+  readonly onboardingMarker?: OnboardingCheckMarkerState;
   readonly auth?: CliAuthStatus;
   readonly service?: CliServicePosture;
   /** Findings from the install self-check (missing vendor binaries, broken daemon path), computed by the caller. */
@@ -345,7 +351,7 @@ export function buildCliDoctorFindings(options: CliStatusOptions): readonly CliD
   const webBinding = resolveRuntimeEndpointBinding(config, 'web');
   const permissionMode = config.get('permissions.mode');
   const secretPolicy = config.get('storage.secretPolicy');
-  const marker = options.onboardingMarkers?.effective;
+  const marker = effectiveMarker(options.onboardingMarker);
   const serverBackedEnabled = daemonEnabled || controlPlaneEnabled || listenerEnabled || webEnabled;
   const networkFacingSurfaces = [
     ['control plane', controlPlaneEnabled, controlPlaneBinding],
@@ -532,7 +538,7 @@ export function resolveDoctorExitCode(findings: readonly CliDoctorFinding[], str
 
 export function buildCliStatusSnapshot(options: CliStatusOptions): CliStatusSnapshot {
   const config = options.configManager;
-  const common = captureCliStatusFacts(config, options.onboardingMarkers?.effective, options.service, getProviderIdFromModel);
+  const common = captureCliStatusFacts(config, effectiveMarker(options.onboardingMarker), options.service, getProviderIdFromModel);
 
   const findings = buildCliDoctorFindings(options);
   const approvalPreset = presetForMode(
@@ -581,7 +587,7 @@ export function renderCliStatus(options: CliStatusOptions): string {
   const controlPlaneBinding = snapshot.surfaces.controlPlane;
   const httpListenerBinding = snapshot.surfaces.httpListener;
   const webBinding = snapshot.surfaces.web;
-  const marker = options.onboardingMarkers?.effective;
+  const marker = effectiveMarker(options.onboardingMarker);
   const findings = snapshot.findings;
 
   if (options.outputFormat === 'json') return JSON.stringify(snapshot, null, 2);
@@ -672,7 +678,7 @@ export function renderCliStatus(options: CliStatusOptions): string {
 }
 
 export function renderOnboardingCliStatus(options: CliStatusOptions): string {
-  const marker = options.onboardingMarkers?.effective;
+  const marker = effectiveMarker(options.onboardingMarker);
   return [
     'GoodVibes onboarding status',
     `  checked: ${marker?.exists ? 'yes' : 'no'}`,

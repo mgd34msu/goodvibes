@@ -29,7 +29,7 @@ import { createShellPathService } from '../runtime/shell-paths.js';
 import { createExecTool } from './exec/index.js';
 import { createExecValidatorRunner, type ExecToolOptions } from './exec/runtime.js';
 import type { CredentialEnvScrubConfig } from './exec/credential-env.js';
-import { detectSandboxAvailability, probeSandboxHost, type ExecSandboxRuntime } from './exec/sandbox.js';
+import { hostSandboxAvailability, type ExecSandboxRuntime } from './exec/sandbox.js';
 import { createSandboxRuntimeConfig } from './exec/sandbox-config-lists.js';
 import {
   detectPtyAvailability,
@@ -535,7 +535,7 @@ export function registerAllTools(
           // Read at each command: an allowlist or writable-path change applies to the next command. Only the
           // host probe and the decision to wire a sandbox at all are made at startup.
           config: createSandboxRuntimeConfig(sandboxConfigManager),
-          availability: detectSandboxAvailability(probeSandboxHost()),
+          availability: hostSandboxAvailability(),
           featureEnabled: true,
           homeDir: sandboxConfigManager.getHomeDirectory() ?? undefined,
           ...(deps.sandboxEscalationHandler ? { requestEscalation: deps.sandboxEscalationHandler } : {}),

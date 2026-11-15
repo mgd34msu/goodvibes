@@ -79,6 +79,9 @@ const MCP_TRUST_MODES = new Set(Object.keys({
   constrained: true, 'ask-on-risk': true, 'allow-all': true, blocked: true,
 } satisfies Record<NonNullable<McpServerConfig['trustMode']>, true>));
 
+/** The trust mode a server runs with when its configuration names none; every surface shows and edits this same value. */
+export const MCP_DEFAULT_TRUST_MODE = 'ask-on-risk' as const satisfies NonNullable<McpServerConfig['trustMode']>;
+
 /**
  * A configured role or trust mode, or undefined (the permission manager's
  * default) when absent. A value the manager does not implement is reported
@@ -165,21 +168,35 @@ function parseMcpServers(raw: unknown): McpServerConfig[] | null {
     return servers;
   }
 
-  if (isMcpConfig(raw)) {
-    return raw.servers.map((server) => {
-      const { role, trustMode, headers, ...rest } = server;
-      const knownHeaders = optionalStringRecord(headers);
-      const knownRole = knownValue<NonNullable<McpServerConfig['role']>>(server.name, 'role', role, MCP_SERVER_ROLES);
-      const knownTrust = knownValue<NonNullable<McpServerConfig['trustMode']>>(server.name, 'trustMode', trustMode, MCP_TRUST_MODES);
-      return {
-        ...rest,
-        ...(knownHeaders !== undefined ? { headers: knownHeaders } : {}),
-        ...(knownRole !== undefined ? { role: knownRole } : {}),
-        ...(knownTrust !== undefined ? { trustMode: knownTrust } : {}),
-      };
-    });
+  if (Array.isArray(raw.servers)) {
+    const servers: McpServerConfig[] = [];
+    for (const entry of raw.servers) {
+      const server = readServerEntry(entry);
+      if (server) servers.push(server);
+      else logger.warn('[MCP] Skipped a server entry that is missing a name, or a command or url; fix it in the file', { entry: describeEntry(entry) });
+    }
+    return servers;
   }
   return null;
+}
+
+function describeEntry(entry: unknown): string {
+  return isRecord(entry) && typeof entry.name === 'string' && entry.name ? entry.name : JSON.stringify(entry)?.slice(0, 120) ?? String(entry);
+}
+
+/** One goodvibes-format entry, or null when it lacks a name, or a command or url, or has a field of the wrong type. */
+function readServerEntry(entry: unknown): McpServerConfig | null {
+  if (!isServerEntry(entry)) return null;
+  const { role, trustMode, headers, ...rest } = entry;
+  const knownHeaders = optionalStringRecord(headers);
+  const knownRole = knownValue<NonNullable<McpServerConfig['role']>>(entry.name, 'role', role, MCP_SERVER_ROLES);
+  const knownTrust = knownValue<NonNullable<McpServerConfig['trustMode']>>(entry.name, 'trustMode', trustMode, MCP_TRUST_MODES);
+  return {
+    ...rest,
+    ...(knownHeaders !== undefined ? { headers: knownHeaders } : {}),
+    ...(knownRole !== undefined ? { role: knownRole } : {}),
+    ...(knownTrust !== undefined ? { trustMode: knownTrust } : {}),
+  };
 }
 
 /** Fields this module models; anything else in a file is the user's and is carried through a rewrite. */
@@ -201,6 +218,31 @@ function readUnmodelledFields(path: string): Map<string, Record<string, unknown>
   return found;
 }
 
+/**
+ * Entries this module could not read (a missing command, a wrong field type),
+ * kept verbatim so a rewrite of the file does not delete what the user wrote.
+ * An entry under a name in `replaced` is dropped: the write replaces or removes it.
+ */
+function readUnparsedEntries(path: string, replaced: ReadonlySet<string>): Record<string, unknown>[] {
+  let raw: unknown;
+  try { raw = JSON.parse(readFileSync(path, 'utf8')); } catch { return []; }
+  if (!isRecord(raw)) return [];
+  const kept: Record<string, unknown>[] = [];
+  if (isRecord(raw.mcpServers)) {
+    for (const [name, value] of Object.entries(raw.mcpServers)) {
+      if (replaced.has(name) || !isRecord(value) || normalizeServerConfig(name, value)) continue;
+      kept.push({ name, ...value });
+    }
+  } else if (Array.isArray(raw.servers)) {
+    for (const entry of raw.servers) {
+      if (!isRecord(entry) || readServerEntry(entry)) continue;
+      if (typeof entry.name === 'string' && replaced.has(entry.name)) continue;
+      kept.push(entry);
+    }
+  }
+  return kept;
+}
+
 /** A name the registry cannot address (it splits qualified tool names on ':' and '/'). */
 function serverNameProblem(name: string): string | null {
   if (!name.trim()) return 'MCP server name is required.';
@@ -208,11 +250,42 @@ function serverNameProblem(name: string): string | null {
   return null;
 }
 
+/** Paths already reported as unreadable, so a file another program owns is warned about once per process, not on every reload. */
+const reportedExternalFiles = new Set<string>();
+
+/**
+ * A settings file another program owns (Claude Desktop, a project's
+ * `.mcp/mcp.json`): read only. A file that cannot be read or holds no server
+ * list in a recognised shape is skipped with one warning; it is never moved,
+ * renamed or rewritten.
+ */
+function readExternalMcpConfig(path: string): McpConfig {
+  let raw: unknown;
+  try { raw = JSON.parse(readFileSync(path, 'utf8')); } catch (error) {
+    reportExternalFile(path, `it could not be read as JSON (${summarizeError(error)})`);
+    return { servers: [] };
+  }
+  const servers = parseMcpServers(raw);
+  // A settings file with no server list at all (Claude Desktop with none configured) simply contributes none.
+  if (!servers) {
+    if (isRecord(raw) && raw.servers !== undefined) reportExternalFile(path, 'its "servers" value is not a list of servers');
+    return { servers: [] };
+  }
+  return { servers };
+}
+
+function reportExternalFile(path: string, problem: string): void {
+  if (reportedExternalFiles.has(path)) return;
+  reportedExternalFiles.add(path);
+  logger.warn('[MCP] Skipped an MCP settings file owned by another program; it was left as it is', { path, problem });
+}
+
 function readMcpConfigAtPath(path: string): McpConfig {
   // This file is read-modify-written by every add/remove, so an unparseable
   // one would be destroyed by the next write. Quarantine it instead: the
   // operator keeps the file to recover server definitions from, and this
-  // reader reports the same empty config it reports for "no file yet".
+  // reader reports the same empty config it reports for "no file yet". One
+  // malformed entry is skipped (and carried through a rewrite), not the file.
   const servers = readJsonFileOrQuarantine<McpServerConfig[]>(path, {
     label: 'mcp/config',
     recovery: 'No MCP servers are configured from this file; each server must be added again, and the next add recreates the file.',
@@ -245,10 +318,14 @@ function assertServerConfig(server: McpServerConfig): void {
  * entry this module would refuse to add (an unaddressable name) must not make
  * every later add or remove fail, and must not be deleted by one.
  */
-function writeMcpConfigFile(path: string, config: McpConfig): void {
-  const unmodelled = existsSync(path) ? readUnmodelledFields(path) : new Map<string, Record<string, unknown>>();
+function writeMcpConfigFile(path: string, config: McpConfig, removedName?: string): void {
+  const exists = existsSync(path);
+  const unmodelled = exists ? readUnmodelledFields(path) : new Map<string, Record<string, unknown>>();
+  const replaced = new Set(config.servers.map((server) => server.name));
+  if (removedName !== undefined) replaced.add(removedName);
+  const unparsed = exists ? readUnparsedEntries(path, replaced) : [];
   const normalized = {
-    servers: config.servers.map((server) => {
+    servers: [...config.servers.map((server) => {
       return {
         ...(unmodelled.get(server.name) ?? {}),
         name: server.name,
@@ -262,7 +339,7 @@ function writeMcpConfigFile(path: string, config: McpConfig): void {
         ...(server.allowedPaths !== undefined ? { allowedPaths: [...server.allowedPaths] } : {}),
         ...(server.allowedHosts !== undefined ? { allowedHosts: [...server.allowedHosts] } : {}),
       };
-    }),
+    }), ...unparsed],
   };
   writeJsonFileAtomic(path, normalized);
 }
@@ -282,7 +359,7 @@ export function loadMcpEffectiveConfig(roots: McpConfigRoots): McpEffectiveConfi
   for (const location of locations) {
     try {
       if (!existsSync(location.path)) continue;
-      const config = readMcpConfigAtPath(location.path);
+      const config = location.writable ? readMcpConfigAtPath(location.path) : readExternalMcpConfig(location.path);
       const projectScope = location.kind === 'project-mcp' || location.kind === 'project-goodvibes';
       for (const parsed of config.servers) {
         const nameProblem = serverNameProblem(parsed.name);
@@ -373,33 +450,28 @@ export function removeMcpServerConfig(
   const current = readMcpConfigAtPath(location.path);
   const config = { servers: current.servers.filter((entry) => entry.name !== serverName) };
   const removed = config.servers.length !== current.servers.length;
-  if (removed || existsSync(location.path)) writeMcpConfigFile(location.path, config);
+  if (removed || existsSync(location.path)) writeMcpConfigFile(location.path, config, serverName);
   return { path: location.path, removed, config };
 }
 
-/** Type guard for McpConfig (goodvibes format) */
-function isMcpConfig(v: unknown): v is McpConfig {
-  if (typeof v !== 'object' || v === null) return false;
-  const obj = v as Record<string, unknown>;
-  if (!Array.isArray(obj['servers'])) return false;
-  for (const s of obj['servers']) {
-    if (typeof s !== 'object' || s === null) return false;
-    const srv = s as Record<string, unknown>;
-    if (typeof srv['name'] !== 'string' || !srv['name']) return false;
-    const hasCommand = typeof srv['command'] === 'string' && srv['command'].length > 0;
-    const hasUrl = typeof srv['url'] === 'string' && srv['url'].length > 0;
-    if (!hasCommand && !hasUrl) return false;
-    if (srv['command'] !== undefined && typeof srv['command'] !== 'string') return false;
-    if (srv['url'] !== undefined && typeof srv['url'] !== 'string') return false;
-    if (srv['args'] !== undefined) {
-      if (!Array.isArray(srv['args'])) return false;
-      if (!srv['args'].every((a: unknown) => typeof a === 'string')) return false;
-    }
-    if (srv['env'] !== undefined && (typeof srv['env'] !== 'object' || srv['env'] === null)) return false;
-    if (srv['role'] !== undefined && typeof srv['role'] !== 'string') return false;
-    if (srv['trustMode'] !== undefined && typeof srv['trustMode'] !== 'string') return false;
-    if (srv['allowedPaths'] !== undefined && (!Array.isArray(srv['allowedPaths']) || !srv['allowedPaths'].every((a: unknown) => typeof a === 'string'))) return false;
-    if (srv['allowedHosts'] !== undefined && (!Array.isArray(srv['allowedHosts']) || !srv['allowedHosts'].every((a: unknown) => typeof a === 'string'))) return false;
+/** Type guard for one goodvibes-format server entry. */
+function isServerEntry(s: unknown): s is McpServerConfig {
+  if (typeof s !== 'object' || s === null) return false;
+  const srv = s as Record<string, unknown>;
+  if (typeof srv['name'] !== 'string' || !srv['name']) return false;
+  const hasCommand = typeof srv['command'] === 'string' && srv['command'].length > 0;
+  const hasUrl = typeof srv['url'] === 'string' && srv['url'].length > 0;
+  if (!hasCommand && !hasUrl) return false;
+  if (srv['command'] !== undefined && typeof srv['command'] !== 'string') return false;
+  if (srv['url'] !== undefined && typeof srv['url'] !== 'string') return false;
+  if (srv['args'] !== undefined) {
+    if (!Array.isArray(srv['args'])) return false;
+    if (!srv['args'].every((a: unknown) => typeof a === 'string')) return false;
   }
+  if (srv['env'] !== undefined && (typeof srv['env'] !== 'object' || srv['env'] === null)) return false;
+  if (srv['role'] !== undefined && typeof srv['role'] !== 'string') return false;
+  if (srv['trustMode'] !== undefined && typeof srv['trustMode'] !== 'string') return false;
+  if (srv['allowedPaths'] !== undefined && (!Array.isArray(srv['allowedPaths']) || !srv['allowedPaths'].every((a: unknown) => typeof a === 'string'))) return false;
+  if (srv['allowedHosts'] !== undefined && (!Array.isArray(srv['allowedHosts']) || !srv['allowedHosts'].every((a: unknown) => typeof a === 'string'))) return false;
   return true;
 }

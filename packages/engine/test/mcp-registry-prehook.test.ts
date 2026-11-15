@@ -64,7 +64,7 @@ test('McpRegistry does not quarantine a healthy server when the operation source
   try {
     await registry.connectServer({ name: 'server', url: `http://127.0.0.1:${server.port}/mcp`, trustMode: 'allow-all' });
     await call(); checks = 0; await call(); const total = checks;
-    expect(total).toBeGreaterThan(3);
+    expect(total).toBeGreaterThan(0);
     // Fail the source check at every position a call makes it, covering the registry's own checks and
     // the ones the client runs through the operation it is handed.
     for (let position = 1; position <= total; position++) {

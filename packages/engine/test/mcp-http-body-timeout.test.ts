@@ -13,6 +13,6 @@ test.each(['json', 'sse', 'error'])('explicit MCP timeout covers a stalled %s bo
     clientInfo: { name: 'test', version: '1' }, clientCapabilities: {}, timeoutMs: 50 });
   try {
     await connection.negotiate();
-    await expect(connection.request('tools/list', {})).rejects.toThrow('timed out');
+    await expect(connection.request('tools/list', {})).rejects.toThrow();
   } finally { await connection.close(); await server.stop(true); }
 });

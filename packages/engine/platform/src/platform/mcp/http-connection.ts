@@ -1,9 +1,7 @@
 import { awaitPermission } from '../permissions/cancellation.js';
 import type { ExternalOperationSource } from '../permissions/external-request.js';
 import { commitMcpElicitation, discardMcpElicitation } from './elicitation-autonomous.js';
-import { retainOwnedJson, snapshotJudgmentInput } from '../gate/judgment-input.js';
-import { types as nodeTypes } from 'node:util';
-import { captureSecurityReadBindings } from '../security/read-source.js';
+import { snapshotJudgmentInput } from '../gate/judgment-input.js';
 /**
  * Streamable HTTP connection for the MCP client.
  *
@@ -55,13 +53,20 @@ export interface McpHttpConnectionOptions {
   readonly clientInfo: McpClientIdentity;
   readonly clientCapabilities: Record<string, unknown>;
   readonly timeoutMs: number;
+  /** Bound for each negotiation request (`server/discover`, `initialize`); 0 leaves them to `timeoutMs`. */
+  readonly handshakeTimeoutMs?: number | undefined;
   readonly fetchImpl?: typeof fetch | undefined;
   /** Headers sent on every request, typically `Authorization`; a protocol header of the same name wins. */
   readonly headers?: Readonly<Record<string, string>> | undefined;
   readonly handlers?: McpHttpServerMessageHandlers | undefined;
 }
 
-const nativeApply = Reflect.apply;
+/** Thrown inside one attempt when an expired legacy session was renewed and the request must be sent again. */
+const RESEND_ON_NEW_SESSION: unique symbol = Symbol('resend on the renewed MCP session');
+
+type PostOptions = { era: 'modern' | 'legacy'; version: string; initialize?: boolean; extraHeaders?: Record<string, string>; operation?: ExternalOperationSource;
+  beforeSend?: () => void; signal?: AbortSignal; timeoutMs?: number | undefined; resent?: boolean };
+
 const SESSION_CLOSE_TIMEOUT_MS = 5_000;
 /** A JSON-RPC answer larger than this is refused rather than buffered without limit. */
 const MAX_JSON_RESPONSE_BYTES = 64 * 1024 * 1024;
@@ -92,9 +97,6 @@ async function readJsonText(reader: ReadableStreamDefaultReader<Uint8Array>): Pr
     text += decoder.decode(value, { stream: true });
   }
   return JSON.parse(text + decoder.decode());
-}
-function applyNative<Args extends unknown[], Result>(method: (...args: Args) => Result, receiver: unknown, args: Args): Result {
-  return nativeApply(method, receiver, args);
 }
 
 interface JsonRpcErrorShape {
@@ -143,14 +145,6 @@ class SseEventParser {
 }
 
 export class McpHttpConnection {
-  // These exact native delegates remain owned across response and stream awaits.
-  static readonly #post = McpHttpConnection.prototype.post;
-  static readonly #captureSessionId = McpHttpConnection.prototype.captureSessionId;
-  static readonly #resolveJsonRpcResponse = McpHttpConnection.prototype.resolveJsonRpcResponse;
-  static readonly #readSseResponse = McpHttpConnection.prototype.readSseResponse;
-  static readonly #dispatchStreamMessage = McpHttpConnection.prototype.dispatchStreamMessage;
-  static readonly #answerServerRequest = McpHttpConnection.prototype.answerServerRequest;
-
   private negotiatedProtocol: McpNegotiatedProtocol | null = null;
   private sessionId: string | null = null;
   private closed = false;
@@ -160,41 +154,7 @@ export class McpHttpConnection {
   /** The in-flight replacement of an expired legacy session, shared by every request that finds it expired. */
   #renewing: Promise<void> | undefined;
 
-  readonly #catalogOptions: McpHttpConnectionOptions;
-  readonly #handlers: McpHttpServerMessageHandlers | undefined;
-  readonly #onNotification: McpHttpServerMessageHandlers['onNotification'];
-  readonly #onServerRequest: McpHttpServerMessageHandlers['onServerRequest'];
-  constructor(private readonly options: McpHttpConnectionOptions) {
-    this.#catalogOptions = options;
-    this.#handlers = options.handlers;
-    this.#onNotification = this.#handlers?.onNotification;
-    this.#onServerRequest = this.#handlers?.onServerRequest;
-  }
-
-  /** Retain transport bindings, without freezing its request counters or stream progress. */
-  captureToolCatalogSource(): () => void {
-    const originalOptions = this.#catalogOptions;
-    assertNativeHttpCatalogSlots(this);
-    const assertFields = captureSecurityReadBindings(this, ['options', 'lifetime', 'closed', 'negotiatedProtocol']);
-    if (this.options !== originalOptions) throw new Error('MCP HTTP catalog options changed');
-    const options = this.options, lifetime = this.lifetime;
-    const assertOptions = captureSecurityReadBindings(options, ['serverName', 'url', 'clientInfo', 'clientCapabilities', 'timeoutMs', 'fetchImpl', 'handlers']);
-    const clientInfo = retainOwnedJson(options.clientInfo, nodeTypes.isProxy);
-    const capabilities = retainOwnedJson(options.clientCapabilities, nodeTypes.isProxy);
-    const handlers = options.handlers;
-    const assertHandlers = handlers ? captureSecurityReadBindings(handlers, ['onNotification', 'onServerRequest']) : () => {};
-    const protocol = retainOwnedJson(this.negotiatedProtocol, nodeTypes.isProxy);
-    const fetchImpl = this.fetchImpl;
-    const assertCurrent = () => {
-      assertNativeHttpCatalogSlots(this); assertFields(); assertOptions(); assertHandlers();
-      clientInfo.assertCurrent(); capabilities.assertCurrent(); protocol.assertCurrent();
-      if (handlers !== this.#handlers || handlers?.onNotification !== this.#onNotification
-        || handlers?.onServerRequest !== this.#onServerRequest) throw new Error('MCP HTTP catalog notification owner changed');
-      lifetime.signal.throwIfAborted();
-      if (this.#catalogOptions !== originalOptions || this.fetchImpl !== fetchImpl) throw new Error('MCP HTTP catalog transport changed');
-    };
-    assertCurrent(); return assertCurrent;
-  }
+  constructor(private readonly options: McpHttpConnectionOptions) {}
 
   /** Monotonic session identity; a pending input response cannot cross a session replacement. */
   get sessionGeneration(): number { return this.sessionEpoch; }
@@ -223,6 +183,7 @@ export class McpHttpConnection {
       const result = await this.postAndParse('server/discover', withModernMeta({}, this.modernMeta(MCP_STATELESS_REVISION)), {
         era: 'modern',
         version: MCP_STATELESS_REVISION,
+        timeoutMs: this.options.handshakeTimeoutMs,
       });
       const supported = parseDiscoverSupportedVersions(result) ?? [MCP_STATELESS_REVISION];
       modernOutcome = { supported };
@@ -273,7 +234,7 @@ export class McpHttpConnection {
       protocolVersion: requested,
       capabilities: this.options.clientCapabilities,
       clientInfo: this.options.clientInfo,
-    }, { era: 'legacy', version: requested, initialize: true });
+    }, { era: 'legacy', version: requested, initialize: true, timeoutMs: this.options.handshakeTimeoutMs });
     const serverVersion = isRecord(result) && typeof result.protocolVersion === 'string'
       ? result.protocolVersion
       : requested;
@@ -286,7 +247,7 @@ export class McpHttpConnection {
   }
 
   /** Send a request and return its JSON-RPC result. */
-  async request(method: string, params: unknown, extraHeaders?: Record<string, string>, operation?: ExternalOperationSource, beforeSend?: () => void): Promise<unknown> {
+  async request(method: string, params: unknown, extraHeaders?: Record<string, string>, operation?: ExternalOperationSource, beforeSend?: () => void, signal?: AbortSignal, timeoutMs?: number): Promise<unknown> {
     if (this.#renewing) await this.#renewing.catch(() => {});
     const negotiated = this.negotiatedProtocol;
     if (!negotiated) throw new Error(`MCP server '${this.options.serverName}': not connected`);
@@ -298,6 +259,7 @@ export class McpHttpConnection {
       version: negotiated.version,
       ...(extraHeaders ? { extraHeaders } : {}),
       ...(operation ? { operation } : {}), ...(beforeSend ? { beforeSend } : {}),
+      ...(signal ? { signal } : {}), ...(timeoutMs !== undefined ? { timeoutMs } : {}),
     });
   }
 
@@ -382,21 +344,32 @@ export class McpHttpConnection {
     return headers;
   }
 
-  private async postAndParse(
+  private async postAndParse(method: string, params: unknown, options: PostOptions): Promise<unknown> {
+    try {
+      return await this.postAndParseOnce(method, params, options);
+    } catch (error) {
+      if (error !== RESEND_ON_NEW_SESSION) throw error;
+      // The 404 establishes the request was not run, so it is sent once more on the new session.
+      return this.postAndParseOnce(method, params, { ...options, resent: true });
+    }
+  }
+
+  private async postAndParseOnce(
     method: string,
     params: unknown,
-    options: { era: 'modern' | 'legacy'; version: string; initialize?: boolean; extraHeaders?: Record<string, string>; operation?: ExternalOperationSource; beforeSend?: () => void },
+    options: PostOptions,
   ): Promise<unknown> {
     const id = this.nextId++;
     const body = { jsonrpc: '2.0', id, method, params };
     const controller = new AbortController();
-    const signal = AbortSignal.any([controller.signal, this.lifetime.signal, ...(options.operation?.signal ? [options.operation.signal] : [])]);
-    const timer = this.options.timeoutMs > 0 ? setTimeout(() => controller.abort(new Error(`MCP request '${method}' timed out`)), this.options.timeoutMs) : undefined;
+    const signal = AbortSignal.any([controller.signal, this.lifetime.signal, ...(options.signal ? [options.signal] : []), ...(options.operation?.signal ? [options.operation.signal] : [])]);
+    const timeoutMs = options.timeoutMs || this.options.timeoutMs;
+    const timer = timeoutMs > 0 ? setTimeout(() => controller.abort(new Error(`MCP server '${this.options.serverName}': request '${method}' gave no answer within ${timeoutMs}ms`)), timeoutMs) : undefined;
     timer?.unref?.();
     let response: Response | undefined;
     const sessionAtSend = this.sessionId;
     try {
-      response = await applyNative(McpHttpConnection.#post, this, [body, { ...options, method, params, signal }]);
+      response = await this.post(body, { ...options, method, params, signal });
 
       if (response.status === 202) {
         throw new Error(`MCP server '${this.options.serverName}': request '${method}' was accepted as a notification (202) instead of answered`);
@@ -406,7 +379,8 @@ export class McpHttpConnection {
         // answer it with a JSON-RPC "Session not found" error, which must not mask the renewal.
         if (response.status === 404 && sessionAtSend && options.era === 'legacy' && !options.initialize) {
           await this.renewSession(sessionAtSend);
-          throw new Error(`MCP server '${this.options.serverName}': its session expired (HTTP 404 for '${method}'); a new session was established, so retry the request`);
+          if (!options.resent) throw RESEND_ON_NEW_SESSION;
+          throw new Error(`MCP server '${this.options.serverName}': its session expired again (HTTP 404 for '${method}') right after it was renewed; the request was not run. Check the server, then call again.`);
         }
         const errorBody = await awaitPermission(() => readBoundedJson(response!, signal), signal).catch(() => { signal.throwIfAborted(); return null; });
         const rpcError = parseJsonRpcError(errorBody);
@@ -415,13 +389,13 @@ export class McpHttpConnection {
       }
 
       this.lifetime.signal.throwIfAborted();
-      applyNative(McpHttpConnection.#captureSessionId, this, [response]);
+      this.captureSessionId(response);
       const contentType = response.headers.get('content-type') ?? '';
       if (contentType.includes('text/event-stream')) {
-        return await applyNative(McpHttpConnection.#readSseResponse, this, [response, id, method, options.operation, signal]);
+        return await this.readSseResponse(response, id, method, options.operation, signal);
       }
       const parsed: unknown = await awaitPermission(() => readBoundedJson(response!, signal), signal);
-      return applyNative(McpHttpConnection.#resolveJsonRpcResponse, this, [parsed, method]);
+      return this.resolveJsonRpcResponse(parsed, method);
     } catch (error) {
       if (signal.aborted && !this.lifetime.signal.aborted && options.era === 'legacy' && !options.initialize) {
         // Timed out or aborted while the server may still be working: say so, so a slow write is not left running.
@@ -497,9 +471,9 @@ export class McpHttpConnection {
           }
           if (!isRecord(message)) continue;
           if (message.id === requestId && !('method' in message)) {
-            return applyNative(McpHttpConnection.#resolveJsonRpcResponse, this, [message, method]);
+            return this.resolveJsonRpcResponse(message, method);
           }
-          applyNative(McpHttpConnection.#dispatchStreamMessage, this, [message, boundOperation]);
+          this.dispatchStreamMessage(message, boundOperation);
         }
       }
     } finally {
@@ -516,11 +490,11 @@ export class McpHttpConnection {
     const id = message.id;
     if (typeof id === 'number' || typeof id === 'string') {
       // Legacy servers may send JSON-RPC requests on SSE streams; answer via POST.
-      void applyNative(McpHttpConnection.#answerServerRequest, this, [id, method, message.params, operation]);
+      void this.answerServerRequest(id, method, message.params, operation);
       return;
     }
     try {
-      if (this.#onNotification) applyNative(this.#onNotification, this.#handlers, [method, message.params]);
+      this.options.handlers?.onNotification?.(method, message.params);
     } catch (err) {
       logger.warn('McpHttpConnection: notification observer threw', {
         server: this.options.serverName,
@@ -538,18 +512,22 @@ export class McpHttpConnection {
       if (this.closed || this.sessionEpoch !== epoch || this.options.url !== destination) throw new Error('MCP HTTP request owner changed'); };
     let outcome: unknown;
     let body: Record<string, unknown>;
+    let readable = false;
     try {
-      const handler = this.#onServerRequest;
+      const handler = this.options.handlers?.onServerRequest;
       const ownedParams = snapshotJudgmentInput(params);
+      readable = true;
       assertCurrent();
-      const result = handler ? await applyNative(handler, undefined, [id, method, ownedParams, operation]) : undefined;
+      const result = handler ? await handler(id, method, ownedParams, operation) : undefined;
       outcome = result;
       assertCurrent();
       body = result === undefined
         ? { jsonrpc: '2.0', id, error: { code: -32601, message: `Client method '${method}' is not supported` } }
         : { jsonrpc: '2.0', id, result };
     } catch (err) {
-      body = { jsonrpc: '2.0', id, error: { code: -32603, message: 'MCP input request could not be resolved' } };
+      body = readable
+        ? { jsonrpc: '2.0', id, error: { code: -32603, message: 'MCP input request could not be resolved' } }
+        : { jsonrpc: '2.0', id, error: { code: -32600, message: 'Invalid request: the client could not read its parameters' } };
     }
     try {
       assertCurrent();
@@ -564,30 +542,3 @@ export class McpHttpConnection {
   }
 }
 
-
-const nativeHttpCatalogSlots = Object.freeze([
-  'captureToolCatalogSource', 'request', 'modernMeta', 'buildHeaders', 'postAndParse', 'post',
-  'captureSessionId', 'resolveJsonRpcResponse', 'readSseResponse', 'dispatchStreamMessage', 'answerServerRequest',
-  'fetchImpl', 'sessionGeneration', 'isOpen',
-].map(key => {
-  const descriptor = Object.getOwnPropertyDescriptor(McpHttpConnection.prototype, key);
-  if (!descriptor) throw new Error('MCP native HTTP catalog method is unavailable');
-  return Object.freeze({ key, descriptor: Object.freeze(descriptor) });
-}));
-const nativeHttpCatalogSourceFactory = McpHttpConnection.prototype.captureToolCatalogSource;
-
-function assertNativeHttpCatalogSlots(connection: McpHttpConnection): void {
-  if (nodeTypes.isProxy(connection) || Object.getPrototypeOf(connection) !== McpHttpConnection.prototype)
-    throw new Error('MCP HTTP catalog transport is unavailable');
-  for (const { key, descriptor } of nativeHttpCatalogSlots) {
-    const current = Object.getOwnPropertyDescriptor(McpHttpConnection.prototype, key);
-    if (Object.hasOwn(connection, key) || !current || current.value !== descriptor.value || current.get !== descriptor.get
-      || current.set !== descriptor.set || current.writable !== descriptor.writable || current.enumerable !== descriptor.enumerable
-      || current.configurable !== descriptor.configurable) throw new Error('MCP HTTP catalog transport method changed');
-  }
-}
-
-/** Only the original native transport factory can issue this read restriction. */
-export function captureMcpHttpToolCatalogSource(connection: McpHttpConnection): () => void {
-  return applyNative(nativeHttpCatalogSourceFactory, connection, []);
-}

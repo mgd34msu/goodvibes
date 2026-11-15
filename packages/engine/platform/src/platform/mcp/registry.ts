@@ -1,31 +1,36 @@
 import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { assertSecurityReadSource, captureSecurityReadBindings } from '../security/read-source.js';
+import { getCorrelationContext } from '../runtime/correlation.js';
 import { prepareExternalExecution, prepareExternalWorkspaceRevision } from '../permissions/external-execution.js';
 import { captureExternalRequestEvidence } from '../permissions/external-request-evidence.js';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { admitExternalRequest, type ExternalPermissionHost } from '../permissions/external-request.js';
-import { retainAutonomousSource } from '../permissions/autonomous.js';
 import { awaitPermission } from '../permissions/cancellation.js';
-import { captureOwnedJson, retainOwnedJson, snapshotJudgmentInput } from '../gate/judgment-input.js';
-import { isDeepStrictEqual, types as nodeTypes } from 'node:util';
+import { snapshotJudgmentInput } from '../gate/judgment-input.js';
 import { currentExternalOperationSource } from '../permissions/external-operation-scope.js';
 /**
  * McpRegistry, manages all connected MCP servers.
  *
- * Progressive loading strategy:
- *   - On connect: load tool names and descriptions only.
- *   - On first callTool: fetch full JSON schema for that tool and cache it
+ * Tool catalog: connect loads no tool data; each client loads its one catalog
+ * (names, descriptions and schemas from one paged tools/list) on first use.
+ *
+ * One call is governed by one signal composed from the owners of the facts it
+ * depends on: the connection's life, the server's policy lifetime (ended by
+ * every trust, role, quarantine or host change), configuration invalidation,
+ * the caller and a default deadline. It is checked before admission and
+ * immediately before the request is sent; the abort reason says what changed.
  *
  * Tool namespace: mcp:<server-name>:<tool-name>
  */
 import { logger } from '../utils/logger.js';
 import {
+  MCP_DEFAULT_TRUST_MODE,
   loadMcpEffectiveConfig,
   removeMcpServerConfig,
   upsertMcpServerConfig,
   withMcpConfigLock,
 } from './config.js';
-import { McpClient, captureMcpClientToolCatalog } from './client.js';
+import { McpClient } from './client.js';
 import type {
   McpClientNotification,
   McpClientServerRequest,
@@ -33,8 +38,7 @@ import type {
   McpProcessSpec,
 } from './client.js';
 import type { McpToolInfo, McpToolSchema } from './client.js';
-import type { McpClientPhase, McpToolCallOptions } from './client-types.js';
-import { captureMcpBackendMethods, captureMcpCallRestrictions } from './call-currentness.js';
+import type { McpClientPhase, McpExcludedTool, McpToolCallOptions } from './client-types.js';
 import {
   parseElicitationParams,
   type McpElicitationHandler,
@@ -118,9 +122,23 @@ export function captureMcpSecurityDecisionReadSource(registry: McpRegistry): () 
 
 /** Servers connected at once while applying a configuration. */
 const MCP_CONNECT_CONCURRENCY = 4;
+/** How long a server may take to answer one tool call before the call is cancelled and the server told. */
+const DEFAULT_TOOL_CALL_DEADLINE_MS = 120_000;
+
+/** Health of one server: whether it answered a short probe, and how long it took. */
+export interface McpServerHealth {
+  readonly name: string;
+  readonly responsive: boolean;
+  readonly elapsedMs: number;
+}
+
+function isAbortLike(error: unknown): boolean {
+  return error instanceof Error && (error.name === 'AbortError' || error.name === 'TimeoutError');
+}
 
 export class McpRegistry {
-  readonly #catalogFactoryOwner = Object.freeze({});
+  /** Bumped on every change to what the catalog can list: servers configured, connected or dropped, a policy or quarantine change. */
+  #revision = 0;
   private clients = new Map<string, McpClient>();
   private readonly executionByClient = new WeakMap<McpClient, { assertCurrent: () => void; close: () => void }>();
   private serverConfigs = new Map<string, McpServerConfig>();
@@ -134,9 +152,11 @@ export class McpRegistry {
     if (!lifetime) { lifetime = new AbortController(); this.policyLifetimes.set(serverName, lifetime); }
     return lifetime;
   }
-  private invalidatePolicyLifetime(serverName: string): void {
+  /** Ends every call admitted under the server's current policy, with a reason the caller can act on. */
+  private invalidatePolicyLifetime(serverName: string, change: string): void {
+    this.#revision++;
     this.pendingConnections.get(serverName)?.lifetime.abort();
-    this.policyLifetimes.get(serverName)?.abort();
+    this.policyLifetimes.get(serverName)?.abort(new Error(`MCP server '${serverName}': ${change} while the call was in progress, so nothing more was sent. Call the tool again.`));
     this.policyLifetimes.set(serverName, new AbortController());
   }
   private freshness = new McpSchemaFreshnessTracker();
@@ -148,7 +168,7 @@ export class McpRegistry {
   private permissionHost: ExternalPermissionHost | undefined;
   setPermissionHost(host: ExternalPermissionHost): void {
     for (const pending of this.pendingConnections.values()) pending.lifetime.abort();
-    for (const [name, client] of this.clients) { this.executionByClient.get(client)?.close(); this.invalidatePolicyLifetime(name); }
+    for (const [name, client] of this.clients) { this.executionByClient.get(client)?.close(); this.invalidatePolicyLifetime(name, 'the permission owner was replaced'); }
     this.permissionHost = host;
   }
   private elicitationHandler: McpElicitationHandler | null = null;
@@ -178,7 +198,7 @@ export class McpRegistry {
    */
   setElicitationHandler(handler: McpElicitationHandler | null): void {
     for (const pending of this.pendingConnections.values()) pending.lifetime.abort();
-    for (const name of this.clients.keys()) this.invalidatePolicyLifetime(name);
+    for (const name of this.clients.keys()) this.invalidatePolicyLifetime(name, 'its input handler was replaced');
     this.elicitationHandler = handler;
   }
 
@@ -203,7 +223,7 @@ export class McpRegistry {
     this.permissionHost?.signal.throwIfAborted();
     serverConfig = structuredClone(serverConfig);
     const previous = this.serverConfigs.get(serverConfig.name);
-    this.serverConfigs.set(serverConfig.name, serverConfig);
+    this.serverConfigs.set(serverConfig.name, serverConfig); this.#revision++;
     if (previous && !sameServerConfig(previous, serverConfig)) await this.disconnectServer(serverConfig.name, 'config-changed');
     await this._connectServer(serverConfig);
   }
@@ -241,7 +261,7 @@ export class McpRegistry {
     const previousConfigs = this.serverConfigs;
     // Publish the complete new intent before any drain. An older reload may
     // never delete or reconnect a destination installed while it was awaiting.
-    this.serverConfigs = new Map(next);
+    this.serverConfigs = new Map(next); this.#revision++;
     const disconnecting: Promise<boolean>[] = [];
     for (const [name, previous] of previousConfigs) {
       if (!sameServerConfig(previous, next.get(name))) disconnecting.push(this.disconnectServer(name, next.has(name) ? 'config-changed' : 'config-removed'));
@@ -300,196 +320,203 @@ export class McpRegistry {
     return { added, changed, removed, unchanged, servers: results };
   }
 
-  /** Own the exact native catalog acquisition and retain it through read-only interpretation. */
-  captureToolCatalog(options?: McpToolCallOptions): { readonly listAllTools: () => Promise<readonly RegisteredTool[]>; readonly assertCurrent: () => void } {
-    const factoryOwner = this.#catalogFactoryOwner;
-    const clients = this.clients, configs = this.serverConfigs, permissions = this.permissions, freshness = this.freshness;
-    const originalClients = [...clients], originalConfigs = [...configs];
-    const configSources = originalConfigs.map(([, config]) => retainOwnedJson(config, nodeTypes.isProxy));
-    const assertMethods = captureMcpBackendMethods(this, ['captureToolCatalog', 'listAllTools', 'listServerSecurity']);
-    const originalSecurity = captureOwnedJson(this.listServerSecurity(), nodeTypes.isProxy);
-    const sources = originalClients.map(([name, client]) => {
-      const assertClient = captureMcpBackendMethods(client, ['captureToolCatalog', 'listTools']);
-      const native = captureMcpClientToolCatalog(client), connected = native.connected;
-      const policy = this.policyLifetime(name), execution = this.executionByClient.get(client);
-      return { name, client, connected, native, policy, execution, assertClient };
-    });
-    const assertCurrent = () => {
-      assertMethods(); for (const source of configSources) source.assertCurrent();
-      if (this.#catalogFactoryOwner !== factoryOwner || this.clients !== clients || this.serverConfigs !== configs || this.permissions !== permissions || this.freshness !== freshness
-        || clients.size !== originalClients.length || configs.size !== originalConfigs.length
-        || [...clients].some(([name, client], index) => name !== originalClients[index]?.[0] || client !== originalClients[index]?.[1])
-        || [...configs].some(([name, config], index) => name !== originalConfigs[index]?.[0] || config !== originalConfigs[index]?.[1])
-        || !isDeepStrictEqual(captureOwnedJson(this.listServerSecurity(), nodeTypes.isProxy), originalSecurity)) throw new Error('MCP catalog registry changed');
-      for (const source of sources) {
-        source.assertClient(); source.policy.signal.throwIfAborted();
-        if (this.policyLifetimes.get(source.name) !== source.policy
-          || this.executionByClient.get(source.client) !== source.execution) throw new Error('MCP catalog source changed');
-        source.execution?.assertCurrent(); source.native.assertCurrent();
+  /**
+   * Connect one configured server on first use and leave the others alone.
+   * A server already connected or connecting is not started again; a name with
+   * no configuration is left for the call to report.
+   */
+  async connectConfigured(roots: McpConfigRoots, serverName: string): Promise<void> {
+    if (this.clients.get(serverName)?.isConnected) return;
+    const pending = this.pendingConnections.get(serverName);
+    if (pending) { await pending.done; return; }
+    const entry = loadMcpEffectiveConfig(roots).servers.find((candidate) => candidate.server.name === serverName);
+    if (!entry) return;
+    await this.connectServer(entry.server);
+  }
+
+  /** Start every configured server that is not connected or connecting, without waiting; each reports `starting` meanwhile. */
+  startConfigured(roots: McpConfigRoots, onSettled?: (name: string, error?: unknown) => void): void {
+    for (const { server } of loadMcpEffectiveConfig(roots).servers) {
+      if (this.clients.get(server.name)?.isConnected || this.pendingConnections.has(server.name)) continue;
+      this.connectServer(server).then(
+        () => onSettled?.(server.name),
+        (error: unknown) => { logger.info('McpRegistry: background connect failed', { server: server.name, err: summarizeError(error) }); onSettled?.(server.name, error); },
+      );
+    }
+  }
+
+  /**
+   * Load one client's catalog and keep the server's schema freshness: a failed
+   * listing counts toward its quarantine, a successful one clears the count.
+   * A cancelled wait says nothing about the server and is not counted.
+   */
+  async #loadCatalog<T>(serverName: string, client: McpClient, load: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+    try {
+      const value = await load();
+      if (!this.freshness.isQuarantined(serverName) && this.freshness.getFreshness(serverName) !== 'fresh') this.freshness.markFresh(serverName);
+      return value;
+    } catch (error) {
+      if (!signal?.aborted && !isAbortLike(error) && client.isConnected) {
+        const wasQuarantined = this.freshness.isQuarantined(serverName);
+        this.freshness.markFailed(serverName, summarizeError(error));
+        if (!wasQuarantined && this.freshness.isQuarantined(serverName)) this.invalidatePolicyLifetime(serverName, 'it was quarantined after its tool list failed to load repeatedly');
       }
+      throw error;
+    }
+  }
+
+  /**
+   * The tool catalog as one read: `listAllTools` lists every connected server
+   * at once, and `assertCurrent` refuses once anything the listing depended on
+   * changed (a server connected, dropped or changed its tools, a policy or
+   * quarantine change), so a caller never acts on a mixed or partial view.
+   */
+  captureToolCatalog(options?: McpToolCallOptions): { readonly listAllTools: () => Promise<readonly RegisteredTool[]>; readonly assertCurrent: () => void } {
+    const revision = this.#revision;
+    const sources = [...this.clients].map(([name, client]) => ({ name, client, revision: client.catalogRevision, connected: client.isConnected }));
+    const assertCurrent = () => {
+      options?.signal?.throwIfAborted(); options?.assertCurrent?.();
+      if (this.#revision !== revision || this.clients.size !== sources.length || sources.some((source) => this.clients.get(source.name) !== source.client
+        || source.client.catalogRevision !== source.revision || source.client.isConnected !== source.connected))
+        throw new Error('The MCP tool catalog changed while it was being read (a server connected, disconnected, changed its tools or its policy). List the tools again.');
     };
-    let pending: Promise<readonly RegisteredTool[]> | undefined;
     assertCurrent();
-    const caller = captureMcpCallRestrictions(options);
-    const assertCollectionCurrent = () => { caller.assertCurrent(); assertCurrent(); };
+    let pending: Promise<readonly RegisteredTool[]> | undefined;
     const listAllTools = () => {
-      assertCollectionCurrent();
-      if (pending) return pending;
-      pending = (async () => {
-        const results: RegisteredTool[] = [];
-        for (const source of sources) {
-          assertCollectionCurrent(); if (!source.connected) continue;
-          const tools = await awaitPermission(() => source.native.listTools(options), caller.signal); assertCollectionCurrent();
-          for (const tool of tools) results.push({ qualifiedName: `mcp:${source.name}:${tool.name}`,
-            serverName: source.name, toolName: tool.name, description: tool.description });
-        }
-        assertCollectionCurrent(); return results;
+      assertCurrent();
+      pending ??= (async () => {
+        const listed = await Promise.all(sources.filter((source) => source.connected).map(async (source) => {
+          const tools = await this.#loadCatalog(source.name, source.client, () => source.client.listTools(options?.signal), options?.signal);
+          return tools.map((tool) => ({ qualifiedName: `mcp:${source.name}:${tool.name}`, serverName: source.name, toolName: tool.name, description: tool.description }));
+        }));
+        assertCurrent();
+        return listed.flat();
       })();
       return pending;
     };
-    assertCollectionCurrent(); return Object.freeze({ listAllTools, assertCurrent });
+    return Object.freeze({ listAllTools, assertCurrent });
   }
 
   /**
    * listAllTools, Return all registered tools (name + description) from all connected servers.
-   * Only loads tool names and descriptions, full schemas are NOT fetched here.
    * A server that fails to list is skipped and logged, so the list can be partial;
    * `captureToolCatalog` is the all-or-nothing variant for callers that must not act on a partial catalog.
    */
   async listAllTools(): Promise<RegisteredTool[]> {
-    const results: RegisteredTool[] = [];
-    for (const [serverName, client] of this.clients) {
-      if (!client.isConnected) continue;
+    const listed = await Promise.all([...this.clients].filter(([, client]) => client.isConnected).map(async ([serverName, client]) => {
       try {
-        const tools: McpToolInfo[] = await client.listTools();
-        for (const tool of tools) {
-          results.push({
-            qualifiedName: `mcp:${serverName}:${tool.name}`,
-            serverName,
-            toolName: tool.name,
-            description: tool.description,
-          });
-        }
+        const tools: McpToolInfo[] = await this.#loadCatalog(serverName, client, () => client.listTools());
+        return tools.map((tool) => ({ qualifiedName: `mcp:${serverName}:${tool.name}`, serverName, toolName: tool.name, description: tool.description }));
       } catch (err) {
         logger.info('McpRegistry: failed to list tools from server', { server: serverName, err: summarizeError(err) });
+        return [];
       }
-    }
-    return results;
+    }));
+    return listed.flat();
   }
 
   /**
    * getToolSchema, Fetch full JSON schema for a qualified tool name.
-   * Triggers lazy schema load and caches within McpClient.
+   * Reads the server's tool catalog, loading it on first use.
    */
   async getToolSchema(qualifiedName: string, options?: McpToolCallOptions): Promise<McpToolSchema | null> {
-    const caller = captureMcpCallRestrictions(options);
-    const assertCaller = caller.assertCurrent;
     const parsed = this._parseQualifiedName(qualifiedName);
     if (!parsed) return null;
     const client = this.clients.get(parsed.serverName);
     if (!client || !client.isConnected) return null;
-    const assertBackend = captureMcpBackendMethods(client, ['getToolSchema', 'captureToolScope']);
-    const transport = client.captureToolScope();
-    const assertCurrent = () => {
-      assertCaller(); assertBackend(); transport.assertCurrent();
-      this.executionByClient.get(client)?.assertCurrent();
-      if (this.clients.get(parsed.serverName) !== client) throw new Error('MCP schema owner changed');
-    };
-    const schema = await client.getToolSchema(parsed.toolName, { signal: caller.signal, assertCurrent });
-    if (caller.expectedSchema !== undefined && schema !== caller.expectedSchema) throw new Error('MCP selected schema changed');
-    assertCurrent(); return schema;
+    options?.signal?.throwIfAborted(); options?.assertCurrent?.();
+    const schema = await this.#loadCatalog(parsed.serverName, client, () => client.getToolSchema(parsed.toolName, options?.signal), options?.signal);
+    if (options?.expectedSchema !== undefined && schema !== options.expectedSchema) throw new Error(this.schemaChangedMessage(qualifiedName));
+    options?.assertCurrent?.();
+    return schema;
+  }
+
+  private schemaChangedMessage(qualifiedName: string): string {
+    return `The definition of MCP tool '${qualifiedName}' changed after it was read; nothing was sent. Read its schema again, then call it.`;
+  }
+
+  /** Why a server's tools cannot be used now, naming the state and what lifts it. */
+  private quarantineMessage(qualifiedName: string, serverName: string): string {
+    const record = this.freshness.getRecord(serverName);
+    const detail = record?.quarantine?.detail ? `: ${record.quarantine.detail}` : '';
+    return `MCP call '${qualifiedName}' refused: server '${serverName}' is quarantined (${record?.quarantine?.reason ?? 'unknown'})${detail}. `
+      + 'Approve it with the mcp tool (mode approve-quarantine) or reload the MCP configuration to reconnect it.';
+  }
+
+  /** Probe one connected server with a short ping; null when there is no such server. */
+  async checkServerHealth(serverName: string, signal?: AbortSignal): Promise<McpServerHealth | null> {
+    const client = this.clients.get(serverName);
+    if (!client) return null;
+    const started = performance.now();
+    const responsive = await client.ping(signal);
+    return { name: serverName, responsive, elapsedMs: Math.round(performance.now() - started) };
   }
 
   /**
    * callTool, Execute a tool by its qualified name.
-   * Fetches the full schema on first use.
+   * Loads the server's tool catalog on first use.
    */
   async callTool(qualifiedName: string, args: Record<string, unknown>, options?: McpToolCallOptions): Promise<unknown> {
-    const caller = captureMcpCallRestrictions(options);
-    const assertCaller = caller.assertCurrent;
     const source = currentExternalOperationSource();
     args = snapshotJudgmentInput(args, qualifiedName) as Record<string, unknown>;
     const parsed = this._parseQualifiedName(qualifiedName);
     if (!parsed) {
       throw new Error(`McpRegistry: invalid qualified tool name '${qualifiedName}'`);
     }
-    const client = this.clients.get(parsed.serverName);
+    const serverName = parsed.serverName;
+    const client = this.clients.get(serverName);
     if (!client) {
       // A configured server whose connect failed has no client; say why rather than that it does not exist.
-      if (this.serverConfigs.has(parsed.serverName)) throw new Error(this.notConnectedMessage(parsed.serverName));
-      throw new Error(`McpRegistry: no server named '${parsed.serverName}'`);
+      if (this.serverConfigs.has(serverName)) throw new Error(this.notConnectedMessage(serverName));
+      throw new Error(`McpRegistry: no server named '${serverName}'`);
     }
     if (!client.isConnected) {
-      throw new Error(this.notConnectedMessage(parsed.serverName));
+      throw new Error(this.notConnectedMessage(serverName));
     }
-    const assertBackend = captureMcpBackendMethods(client, ['getToolSchema', 'captureToolScope', 'captureToolSchemaScope', 'callTool']);
-    const sourceIsCurrent = source ? retainAutonomousSource(source.sourceOf()) : undefined;
-    const policyLife = this.policyLifetime(parsed.serverName);
+    if (this.freshness.isQuarantined(serverName)) throw new Error(this.quarantineMessage(qualifiedName, serverName));
+    const sessionId = options?.sessionId ?? getCorrelationContext().sessionId ?? '';
     const host = this.permissionHost;
     const transport = client.captureToolScope();
     const configLife = new AbortController();
-    const signal = AbortSignal.any([policyLife.signal, transport.signal, configLife.signal,
-      ...(host ? [host.signal] : []), ...(source?.signal ? [source.signal] : []), ...(caller.signal ? [caller.signal] : [])]);
-    const policySnapshot = () => {
-      const record = this.permissions.getServerPermissions(parsed.serverName);
-      return snapshotJudgmentInput(record ? {
-        trustLevel: record.trustLevel, profile: { role: record.profile.role, mode: record.profile.mode,
-          allowedPaths: record.profile.allowedPaths, allowedHosts: record.profile.allowedHosts,
-          allowedCapabilities: record.profile.allowedCapabilities }, toolOverrides: [...record.toolOverrides],
-      } : null) as Readonly<Record<string, unknown>>;
-    };
-    const serverPolicy = policySnapshot();
+    const signal = AbortSignal.any([this.policyLifetime(serverName).signal, transport.signal, configLife.signal,
+      ...(host ? [host.signal] : []), ...(source?.signal ? [source.signal] : []), ...(options?.signal ? [options.signal] : [])]);
+    const record = this.permissions.getServerPermissions(serverName);
+    const serverPolicy = snapshotJudgmentInput(record ? {
+      trustLevel: record.trustLevel, profile: { role: record.profile.role, mode: record.profile.mode,
+        allowedPaths: record.profile.allowedPaths, allowedHosts: record.profile.allowedHosts,
+        allowedCapabilities: record.profile.allowedCapabilities }, toolOverrides: [...record.toolOverrides],
+    } : null) as Readonly<Record<string, unknown>>;
     const externalRequestEvidence = captureExternalRequestEvidence({ destination: transport.destination, serverPolicy });
+    const execution = this.executionByClient.get(client);
     let assertWorkspaceCurrent: (() => void) | undefined;
-    let schemaScope: ReturnType<McpClient['captureToolSchemaScope']> | undefined;
-    // Errors raised by the authority checks (abort, policy or caller change) say nothing about the
-    // server's health, so they must not count toward its failure quarantine. Tagging happens here so
-    // every route to the check, including the operation handed to the client, is covered.
-    const authorityErrors = new WeakSet<object>();
+    // The caller's and the source's own checks run at admission and again just before sending;
+    // everything else this call depends on ends the composed signal when it changes.
     const assertCurrent = () => {
-      try { checkAuthority(); } catch (error) { if (typeof error === 'object' && error !== null) authorityErrors.add(error); throw error; }
+      signal.throwIfAborted(); options?.assertCurrent?.(); source?.assertCurrent();
     };
-    const checkAuthority = () => {
-      assertCaller(); assertBackend(); signal.throwIfAborted(); transport.assertCurrent(); source?.assertCurrent(); assertWorkspaceCurrent?.();
-      schemaScope?.assertCurrent();
-      this.executionByClient.get(client)?.assertCurrent();
-      if (source && !sourceIsCurrent?.(source.sourceOf())) throw new Error('MCP original operation source changed');
-      if (!isDeepStrictEqual(policySnapshot(), serverPolicy) || this.permissionHost !== host) throw new Error('MCP server policy changed');
-      if (this.clients.get(parsed.serverName) !== client || this.freshness.isQuarantined(parsed.serverName)) throw new Error('MCP operation authority changed');
-    };
-    const operation = source ? { ...source, inputFacts: [args, ...(source.inputFacts ?? [])], assertCurrent,
-      signal } : undefined;
+    const operation = source ? { ...source, inputFacts: [args, ...(source.inputFacts ?? [])], assertCurrent: () => signal.throwIfAborted(), signal } : undefined;
     let admission: Awaited<ReturnType<typeof admitExternalRequest>> | undefined;
-    const unsubscribe = host?.config.onDidInvalidate(() => configLife.abort());
+    const unsubscribe = host?.config.onDidInvalidate(() => configLife.abort(new Error(`MCP call '${qualifiedName}': the configuration changed during the call, so nothing more was sent. Call the tool again.`)));
+    let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
     try {
       assertCurrent();
       if (host && !operation) throw new Error(`MCP call '${qualifiedName}' has unresolved permission: original operation source is unavailable`);
-      const schema = await client.getToolSchema(parsed.toolName, { signal, assertCurrent });
-      assertCurrent();
-      if (!schema) throw new Error('MCP tool schema is unavailable');
-      if (caller.expectedSchema !== undefined && schema !== caller.expectedSchema) throw new Error('MCP selected schema changed');
-      schemaScope = client.captureToolSchemaScope(parsed.toolName);
-      assertCurrent();
+      const schema = await this.#loadCatalog(serverName, client, () => client.getToolSchema(parsed.toolName, signal), signal);
+      if (!schema) throw new Error(client.describeUnavailableTool(parsed.toolName));
+      if (options?.expectedSchema !== undefined && schema !== options.expectedSchema) throw new Error(this.schemaChangedMessage(qualifiedName));
       if (host) assertWorkspaceCurrent = await prepareExternalWorkspaceRevision(host, signal);
-      assertCurrent();
-      if (this.freshness.isQuarantined(parsed.serverName)) {
-        const record = this.freshness.getRecord(parsed.serverName);
-        throw new Error(
-          `MCP call '${qualifiedName}' blocked: schema quarantined (${record?.quarantine?.reason ?? 'unknown'})${record?.quarantine?.detail ? `, ${record.quarantine.detail}` : ''}`,
-        );
-      }
 
       const installed = host?.port;
       const port: JudgmentPort | undefined = installed ? {
         get model() { return installed.model; },
         ...(installed.recorder ? { recorder: installed.recorder } : {}),
         ask(request) {
-          assertCurrent(); const prior = request.beforeAttempt;
-          return awaitPermission(() => installed.ask({ ...request, signal, beforeAttempt() { assertCurrent(); assertSynchronousJudgmentGuard(() => prior?.()); } }), signal);
+          signal.throwIfAborted(); const prior = request.beforeAttempt;
+          return awaitPermission(() => installed.ask({ ...request, signal, beforeAttempt() { signal.throwIfAborted(); assertSynchronousJudgmentGuard(() => prior?.()); } }), signal);
         },
       } : undefined;
-      const permission = await this.permissions.evaluateToolCall(parsed.serverName, parsed.toolName, args, { port, signal, externalRequestEvidence });
-      assertCurrent();
+      const permission = await this.permissions.evaluateToolCall(serverName, parsed.toolName, args, { port, signal, externalRequestEvidence });
+      signal.throwIfAborted();
       if (permission.verdict === 'deny') {
         throw new Error(`MCP call '${qualifiedName}' denied: ${permission.reason}`);
       }
@@ -499,10 +526,10 @@ export class McpRegistry {
       // Deterministic server allows constrain policy; they never replace the
       // canonical recorded admission of an actual autonomous caller's source.
       if (host && operation) {
-        admission = await admitExternalRequest(host, { ...transport, signal, assertCurrent }, operation, {
+        admission = await admitExternalRequest(host, { ...transport, signal, assertCurrent: () => signal.throwIfAborted() }, operation, {
           tool: qualifiedName, args, serverPolicy, supportingDecisionIds: permission.judgmentDecisionIds ?? [],
         });
-        assertCurrent();
+        signal.throwIfAborted();
         if (!admission.result.approved) throw new Error(`MCP call '${qualifiedName}' autonomous admission did not act`);
       }
 
@@ -513,7 +540,7 @@ export class McpRegistry {
         phase: 'Pre',
         category: 'mcp',
         specific: 'call',
-        sessionId: '', timestamp: Date.now(),
+        sessionId, timestamp: Date.now(),
         payload: { tool: qualifiedName, args },
       };
       const preResult = await dispatcher.fire(preEvent).catch((error) => {
@@ -526,44 +553,66 @@ export class McpRegistry {
         throw new Error(`MCP call '${qualifiedName}' denied by hook: ${(preResult as { reason?: string }).reason ?? 'no reason'}`);
       }
 
+      const deadlineMs = options?.deadlineMs ?? DEFAULT_TOOL_CALL_DEADLINE_MS;
+      const deadline = new AbortController();
+      const sentAt = performance.now();
+      if (deadlineMs > 0) {
+        deadlineTimer = setTimeout(() => deadline.abort(new Error(
+          `MCP tool '${parsed.toolName}' on server '${serverName}' gave no answer within ${Math.round(deadlineMs / 1000)} s `
+          + `(waited ${Math.round(performance.now() - sentAt)} ms); the call was cancelled and the server was told.`)), deadlineMs);
+        deadlineTimer.unref?.();
+      }
+      const callSignal = AbortSignal.any([signal, deadline.signal]);
+      let claimed = false;
       try {
         assertCurrent();
-        const result = await client.callTool(parsed.toolName, args, operation, { assertCurrent, claim: () => {
-          assertCurrent();
-          // A refused claim (replayed or revoked source) is an admission failure, not a server failure.
-          try { admission?.claim(); } catch (error) { if (typeof error === 'object' && error !== null) authorityErrors.add(error); throw error; }
-        } });
+        const result = await client.callTool(parsed.toolName, args, {
+          signal: callSignal,
+          ...(operation ? { operation } : {}),
+          beforeSend: () => {
+            callSignal.throwIfAborted(); options?.assertCurrent?.(); source?.assertCurrent();
+            assertWorkspaceCurrent?.(); execution?.assertCurrent();
+            if (!claimed) { admission?.claim(); claimed = true; }
+          },
+        });
         // The tool has already run: a policy, configuration or caller change after
         // dispatch must not turn a completed call into a failure the caller would
         // retry. A quarantine that landed meanwhile is kept, not cleared as fresh.
-        if (!this.freshness.isQuarantined(parsed.serverName)) this.freshness.markFresh(parsed.serverName);
+        if (!this.freshness.isQuarantined(serverName) && this.freshness.getFreshness(serverName) !== 'fresh') this.freshness.markFresh(serverName);
         // Post:mcp:call hook (fire-and-forget)
         const postEvent: HookEvent = {
           path: 'Post:mcp:call',
           phase: 'Post',
           category: 'mcp',
           specific: 'call',
-          sessionId: '', timestamp: Date.now(),
+          sessionId, timestamp: Date.now(),
           payload: { tool: qualifiedName, args },
         };
         dispatcher.fire(postEvent).catch((err: unknown) => { logger.warn('Post:mcp:call hook error', { error: summarizeError(err) }); });
         return result;
       } catch (err) {
-        const authorityFailure = signal.aborted || (typeof err === 'object' && err !== null && authorityErrors.has(err));
-        if (!authorityFailure) this.freshness.markFailed(parsed.serverName, summarizeError(err));
+        // An error answer from the server is the caller's result, not evidence about the schema,
+        // so it never counts toward the server's quarantine.
+        let failure = err;
+        if (deadline.signal.aborted && err === deadline.signal.reason) {
+          const health = await this.checkServerHealth(serverName).catch(() => null);
+          failure = new Error(`${summarizeError(err)} ${health?.responsive
+            ? `The server still answers a health check (${health.elapsedMs} ms), so the tool itself is slow; call it again with less work, or raise the deadline.`
+            : 'The server did not answer a health check either; reload the MCP configuration to restart it.'}`);
+        }
         // Fail:mcp:call hook (fire-and-forget)
         const failEvent: HookEvent = {
           path: 'Fail:mcp:call',
           phase: 'Fail',
           category: 'mcp',
           specific: 'call',
-          sessionId: '', timestamp: Date.now(),
-          payload: { tool: qualifiedName, args, error: summarizeError(err) },
+          sessionId, timestamp: Date.now(),
+          payload: { tool: qualifiedName, args, error: summarizeError(failure) },
         };
         dispatcher.fire(failEvent).catch((hookErr: unknown) => { logger.warn('Fail:mcp:call hook error', { error: String(hookErr) }); });
-        throw err;
+        throw failure;
       }
-    } finally { admission?.close(); unsubscribe?.(); configLife.abort(); }
+    } finally { clearTimeout(deadlineTimer); admission?.close(); unsubscribe?.(); configLife.abort(); }
   }
 
   /**
@@ -581,7 +630,7 @@ export class McpRegistry {
   async disconnectServer(serverName: string, reason = 'manual'): Promise<boolean> {
     const pending = this.pendingConnections.get(serverName);
     const client = this.clients.get(serverName);
-    this.invalidatePolicyLifetime(serverName);
+    this.invalidatePolicyLifetime(serverName, 'it was disconnected');
     const outcomes = await Promise.allSettled([
       pending?.done.catch(() => {}),
       client ? this.disconnectClient(serverName, client, reason) : undefined,
@@ -604,7 +653,7 @@ export class McpRegistry {
     const sessionId = this.sandboxSessionByServer.get(serverName);
     this.executionByClient.get(client)?.close();
     await client.disconnect();
-    if (this.clients.get(serverName) === client) this.clients.delete(serverName);
+    if (this.clients.get(serverName) === client) { this.clients.delete(serverName); this.#revision++; }
     if (sessionId) {
       this.sandboxSessions.stop(sessionId);
       if (this.sandboxSessionByServer.get(serverName) === sessionId) this.sandboxSessionByServer.delete(serverName);
@@ -655,10 +704,12 @@ export class McpRegistry {
     protocolEra?: 'modern' | 'legacy' | undefined;
     phase: McpClientPhase;
     lastError?: string | undefined;
+    excludedTools?: readonly McpExcludedTool[] | undefined;
   }> {
     return this.serverNames.map((name) => {
       const client = this.clients.get(name);
       const negotiated = client?.protocolInfo ?? null;
+      const excludedTools = client?.excludedTools ?? [];
       return {
         name,
         connected: client?.isConnected ?? false,
@@ -667,6 +718,7 @@ export class McpRegistry {
         protocolEra: negotiated?.era,
         phase: this.serverPhase(name),
         lastError: client?.lastError ?? this.connectFailures.get(name),
+        ...(excludedTools.length > 0 ? { excludedTools } : {}),
       };
     });
   }
@@ -713,7 +765,7 @@ export class McpRegistry {
         protocolVersion: server.protocolVersion,
         protocolEra: server.protocolEra,
         role: permissions?.profile.role ?? 'general',
-        trustMode: permissions?.profile.mode ?? 'ask-on-risk',
+        trustMode: permissions?.profile.mode ?? this.serverConfigs.get(server.name)?.trustMode ?? MCP_DEFAULT_TRUST_MODE,
         allowedPaths: permissions?.profile.allowedPaths ?? [],
         allowedHosts: permissions?.profile.allowedHosts ?? [],
         schemaFreshness: this.freshness.getFreshness(server.name),
@@ -748,14 +800,24 @@ export class McpRegistry {
     });
   }
 
+  /** A policy change names a server that has a policy; refused before anything in flight is cancelled. */
+  private assertPolicyOwner(serverName: string, change: string): void {
+    if (this.permissions.getServerPermissions(serverName)) return;
+    const state = this.serverConfigs.has(serverName) ? `is configured but not connected (${this.serverPhase(serverName)})` : 'is not configured';
+    throw new Error(`MCP server '${serverName}' ${state}, so its ${change} cannot be changed; nothing was changed. `
+      + (this.serverConfigs.has(serverName) ? 'Connect it (reload the MCP configuration), then change it again.' : `Known servers: ${this.serverNames.join(', ') || '(none)'}.`));
+  }
+
   setServerTrustMode(serverName: string, mode: import('../runtime/mcp/types.js').McpTrustMode): void {
-    this.invalidatePolicyLifetime(serverName);
+    this.assertPolicyOwner(serverName, 'trust mode');
+    this.invalidatePolicyLifetime(serverName, 'its trust mode was changed');
     this.permissions.setTrustMode(serverName, mode);
     this._emitPolicyUpdate(serverName);
   }
 
   setServerRole(serverName: string, role: import('../runtime/mcp/types.js').McpServerRole): void {
-    this.invalidatePolicyLifetime(serverName);
+    this.assertPolicyOwner(serverName, 'role');
+    this.invalidatePolicyLifetime(serverName, 'its role was changed');
     this.permissions.setServerRole(serverName, role);
     this._emitPolicyUpdate(serverName);
   }
@@ -772,7 +834,7 @@ export class McpRegistry {
   }
 
   quarantineSchema(serverName: string, reason: QuarantineReason, detail?: string): void {
-    this.invalidatePolicyLifetime(serverName);
+    this.invalidatePolicyLifetime(serverName, 'it was quarantined');
     this.freshness.markQuarantined(serverName, reason, detail);
     if (this.runtimeBus) {
       emitMcpSchemaQuarantined(this.runtimeBus, {
@@ -784,7 +846,7 @@ export class McpRegistry {
   }
 
   approveSchemaQuarantine(serverName: string, operatorId: string): void {
-    this.invalidatePolicyLifetime(serverName);
+    this.invalidatePolicyLifetime(serverName, 'its quarantine was approved');
     this.freshness.approveQuarantine(serverName, operatorId);
     if (this.runtimeBus) {
       emitMcpSchemaQuarantineApproved(this.runtimeBus, {
@@ -917,11 +979,11 @@ export class McpRegistry {
       assertHostCurrent(); assertProcessCurrent();
       this.permissions.registerServer(name, 'standard', {
         role: serverConfig.role ?? 'general',
-        mode: serverConfig.trustMode ?? 'ask-on-risk',
+        mode: serverConfig.trustMode ?? MCP_DEFAULT_TRUST_MODE,
         allowedPaths: serverConfig.allowedPaths ?? [],
         allowedHosts: serverConfig.allowedHosts ?? [],
       });
-      this.clients.set(name, client);
+      this.clients.set(name, client); this.#revision++;
       this.connectFailures.delete(name);
       established = true;
       releaseConfiguration(); releaseConfiguration = () => {};
@@ -943,7 +1005,7 @@ export class McpRegistry {
           transport: client.protocolInfo?.transport ?? (serverConfig.url ? 'http' : 'stdio'),
           ...(serverConfig.url ? { url: serverConfig.url } : {}),
           role: serverConfig.role ?? 'general',
-          trustMode: serverConfig.trustMode ?? 'ask-on-risk',
+          trustMode: serverConfig.trustMode ?? MCP_DEFAULT_TRUST_MODE,
           allowedPaths: serverConfig.allowedPaths ?? [],
           allowedHosts: serverConfig.allowedHosts ?? [],
         });

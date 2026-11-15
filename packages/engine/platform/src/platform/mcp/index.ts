@@ -1,8 +1,8 @@
 export { McpRegistry, captureMcpSecurityDecisionReadSource } from './registry.js';
 export { createMcpAutonomousElicitationHandler } from './elicitation-autonomous.js';
-export type { McpReloadResult, McpReloadServerResult, RegisteredTool } from './registry.js';
+export type { McpReloadResult, McpReloadServerResult, McpServerHealth, RegisteredTool } from './registry.js';
 export { McpClient } from './client.js';
-export type { McpClientPhase, McpToolCallOptions, McpToolSchema } from './client-types.js';
+export type { McpClientPhase, McpExcludedTool, McpToolCallOptions, McpToolSchema, McpUnansweredQuestion } from './client-types.js';
 export { createMcpApi } from './mcp-api.js';
 export type {
   McpApi,
@@ -12,6 +12,7 @@ export type {
   McpServerSecurityRecord,
 } from './mcp-api.js';
 export {
+  MCP_DEFAULT_TRUST_MODE,
   getMcpConfigLocations,
   loadMcpConfig,
   loadMcpEffectiveConfig,

@@ -1,12 +1,3 @@
-import { captureMcpInputRequired, readProtocolRequest } from '../permissions/protocol-request.js';
-import { randomUUID } from 'node:crypto';
-import { captureOwnedJson, retainOwnedJson, snapshotJudgmentInput } from '../gate/judgment-input.js';
-import { isDeepStrictEqual, types as nodeTypes } from 'node:util';
-import { captureMcpBackendMethods, captureMcpCallRestrictions } from './call-currentness.js';
-import type { ExternalOperationSource, ExternalRequestScope } from '../permissions/external-request.js';
-import { awaitPermission } from '../permissions/cancellation.js';
-import { bindMcpElicitationResponse, commitMcpElicitation, discardMcpElicitation } from './elicitation-autonomous.js';
-import type { McpElicitationOutcome } from './elicitation.js';
 /**
  * McpClient, connects to a single MCP server over stdio (spawned process,
  * newline-delimited JSON-RPC 2.0) or Streamable HTTP (config `url`).
@@ -18,25 +9,38 @@ import type { McpElicitationOutcome } from './elicitation.js';
  * `initialize` on any error that is not a recognized modern error. The
  * negotiated version is exposed via `protocolInfo` for diagnostics.
  *
- * Progressive loading: connect() fetches no tool data at all; listTools()
- * returns names + descriptions only; getToolSchema() fetches full
- * inputSchema on demand and caches it.
+ * Tool catalog: connect() fetches no tool data. The first listing, schema
+ * read or call loads one catalog per connection from one paged `tools/list`
+ * (the protocol has no names-only listing), holding the full schemas. A tool
+ * is either in it and callable, or excluded with the reason in
+ * `excludedTools`. The catalog is dropped when the connection is replaced or
+ * the server sends `notifications/tools/list_changed`; `catalogRevision`
+ * counts those changes.
  */
+import { randomUUID } from 'node:crypto';
+import { captureMcpInputRequired, readProtocolRequest } from '../permissions/protocol-request.js';
+import { snapshotJudgmentInput } from '../gate/judgment-input.js';
+import type { ExternalOperationSource, ExternalRequestScope } from '../permissions/external-request.js';
+import { awaitPermission } from '../permissions/cancellation.js';
+import { bindMcpElicitationResponse, commitMcpElicitation, discardMcpElicitation, wasHandedBackToAgent } from './elicitation-autonomous.js';
+import type { McpElicitationOutcome } from './elicitation.js';
 import { logger } from '../utils/logger.js';
 import { VERSION } from '../version.js';
 import type { McpServerConfig } from './config.js';
 import { summarizeError } from '../utils/error-display.js';
 import { isRecord } from '../utils/record-coerce.js';
-import { McpHttpConnection, McpRpcError, captureMcpHttpToolCatalogSource } from './http-connection.js';
+import { McpHttpConnection, McpRpcError } from './http-connection.js';
 import type {
+  McpClientCallOptions,
   McpClientNotification,
   McpClientOptions,
   McpClientPhase,
   McpClientServerRequest,
   McpClientUnhandledResponse,
+  McpExcludedTool,
   McpToolInfo,
   McpToolSchema,
-  McpToolCallOptions,
+  McpUnansweredQuestion,
 } from './client-types.js';
 import {
   isJsonRpcNotification,
@@ -64,106 +68,128 @@ import {
   type McpNegotiatedProtocol,
 } from './protocol.js';
 
-const nativeApply = Reflect.apply;
-function applyNative<Args extends unknown[], Result>(method: (...args: Args) => Result, receiver: unknown, args: Args): Result {
-  return nativeApply(method, receiver, args);
-}
-
 interface PendingRequest {
   resolve: (value: unknown) => void;
   reject: (reason: unknown) => void;
   timer: ReturnType<typeof setTimeout> | undefined;
 }
 
+/** One loaded tool catalog: what the server listed, keyed by tool name, and what was left out and why. */
+interface McpToolCatalog {
+  readonly revision: number;
+  readonly tools: ReadonlyMap<string, McpToolSchema>;
+  readonly excluded: readonly McpExcludedTool[];
+}
+
+/** A tool call in flight on this connection; a question the server asks during it is recorded here. */
+interface InflightCall {
+  readonly operation: ExternalOperationSource | undefined;
+  readonly questions: McpUnansweredQuestion[];
+}
+
 const DEFAULT_TIMEOUT_MS = 0;
 const MAX_TOOL_LIST_PAGES = 100;
+/** Bound for one health probe; a server that cannot answer a ping this fast is reported unresponsive. */
 const PING_TIMEOUT_MS = 5_000;
 const RESTART_DELAY_MS = 2_000;
 const MAX_RESTART_ATTEMPTS = 3;
-/** Era-detection probe: a legacy server answers `server/discover` quickly with method-not-found; this bound covers servers that stay silent instead. */
+/** Era-detection probe: a legacy stdio server answers `server/discover` quickly with method-not-found; this bound covers servers that stay silent instead. */
 const DISCOVER_PROBE_TIMEOUT_MS = 3_000;
-/** The handshake is bounded separately from tool calls; OAuth-style servers can take a while to answer it. */
-const INITIALIZE_TIMEOUT_MS = 30_000;
+/** The handshake is bounded separately from tool calls, on both transports; OAuth-style servers can take a while to answer it. */
+const HANDSHAKE_TIMEOUT_MS = 30_000;
 
 export type { JsonRpcId } from './jsonrpc.js';
 export type {
+  McpClientCallOptions,
   McpClientNotification,
   McpClientOptions,
   McpClientPhase,
   McpClientServerRequest,
   McpClientUnhandledResponse,
   McpElicitationResolver,
+  McpExcludedTool,
   McpProcessSpec,
   McpToolInfo,
   McpToolSchema,
+  McpUnansweredQuestion,
 } from './client-types.js';
 
-export class McpClient {
-  // Native byte dispatch cannot be substituted while its reader is awaiting input. `this`, not the class name: the emitted
-  // JavaScript otherwise reads the class through a variable that is not assigned yet and fails to load under Node.
-  static readonly #processBuffer = this.prototype._processBuffer;
-  static readonly #dispatchLine = this.prototype._dispatchLine;
-  static readonly #handleResponse = this.prototype._handleResponse;
-  static readonly #handleNotification = this.prototype._handleNotification;
-  static readonly #handleServerRequest = this.prototype._handleServerRequest;
+function readAnnotations(value: unknown): McpToolSchema['annotations'] {
+  if (!isRecord(value)) return undefined;
+  return {
+    ...(typeof value.readOnlyHint === 'boolean' ? { readOnlyHint: value.readOnlyHint } : {}),
+    ...(typeof value.destructiveHint === 'boolean' ? { destructiveHint: value.destructiveHint } : {}),
+    ...(typeof value.idempotentHint === 'boolean' ? { idempotentHint: value.idempotentHint } : {}),
+    ...(typeof value.openWorldHint === 'boolean' ? { openWorldHint: value.openWorldHint } : {}),
+  };
+}
 
+/** The question an `elicitation/create` request asks, in the words and fields the server gave. */
+function describeQuestion(params: unknown): McpUnansweredQuestion {
+  const record = isRecord(params) ? params : {};
+  const message = typeof record.message === 'string' && record.message.trim() ? record.message : 'The server asked for input.';
+  const schema = isRecord(record.requestedSchema) ? record.requestedSchema : undefined;
+  const fields = schema && isRecord(schema.properties) ? Object.keys(schema.properties) : [];
+  return { message, fields };
+}
+
+/** The tool result with each declined question added as text the agent can act on. */
+function withUnansweredQuestions(serverName: string, result: unknown, questions: readonly McpUnansweredQuestion[]): unknown {
+  if (questions.length === 0 || !isRecord(result)) return result;
+  const lines = questions.map(question => `MCP server '${serverName}' asked: "${question.message}"${question.fields.length ? ` (fields: ${question.fields.join(', ')})` : ''}. `
+    + 'No one could answer it here, so it was declined. Ask the user for this, then call the tool again with the answer in its arguments.');
+  const content = Array.isArray(result.content) ? result.content : [];
+  return { ...result, content: [...content, ...lines.map(text => ({ type: 'text', text }))], unansweredQuestions: questions };
+}
+
+export class McpClient {
   private connectionId = randomUUID();
   private connectionLife = new AbortController();
   private readonly incoming = new Map<string, AbortController>();
-  private retireConnection(): void {
-    this.connectionLife.abort(); this.#invalidateToolCatalog();
+  readonly #inflight = new Set<InflightCall>();
+
+  private retireConnection(reason = 'the connection was closed'): void {
+    this.connectionLife.abort(new Error(`MCP server '${this.config.name}': ${reason}; call the tool again once it is connected`));
+    this.#invalidateToolCatalog();
     for (const request of this.incoming.values()) request.abort();
     this.incoming.clear();
   }
   private renewConnection(): void {
-    this.retireConnection(); this.connectionId = randomUUID(); this.connectionLife = new AbortController();
+    this.retireConnection('the connection was replaced');
+    this.connectionId = randomUUID(); this.connectionLife = new AbortController();
   }
 
-  /** Capture the actual destination and connection before asynchronous tool admission. */
+  /** The destination and connection a call is admitted against; the signal ends with this connection. */
   captureToolScope(): ExternalRequestScope {
-    const connectionId = this.connectionId, proc = this.proc, http = this.http;
-    const httpSession = http?.sessionGeneration;
-    const serverName = this.config.name;
+    const connectionId = this.connectionId;
     const destination = this.config.url ?? this.options?.processSpec?.command ?? this.config.command ?? '';
-    const signal = AbortSignal.any([this.connectionLife.signal, ...((this.options?.timeout ?? DEFAULT_TIMEOUT_MS) > 0 ? [AbortSignal.timeout(this.options!.timeout!)] : [])]);
-    const assertCurrent = () => {
-      signal.throwIfAborted();
-      if (this.connectionId !== connectionId || this.proc !== proc || this.http !== http || http?.sessionGeneration !== httpSession
-        || this.config.name !== serverName || !this.isConnected
-        || (this.config.url ?? this.options?.processSpec?.command ?? this.config.command ?? '') !== destination)
-        throw new Error('MCP tool destination changed');
-    };
-    assertCurrent();
-    return { connectionId, destination, signal, assertCurrent };
+    const signal = this.connectionLife.signal;
+    signal.throwIfAborted();
+    return { connectionId, destination, signal, assertCurrent: () => signal.throwIfAborted() };
   }
 
-  /** The selected cached schema remains the exact wire schema throughout admission. */
-  captureToolSchemaScope(toolName: string): { readonly assertCurrent: () => void } {
-    const schema = this.schemaCache.get(toolName);
-    if (!schema) throw new Error('MCP tool schema is unavailable');
-    const snapshot = captureOwnedJson(schema, nodeTypes.isProxy);
-    return { assertCurrent: () => {
-      if (this.schemaCache.get(toolName) !== schema || !isDeepStrictEqual(captureOwnedJson(schema, nodeTypes.isProxy), snapshot)) throw new Error('MCP tool schema changed');
-    } };
+  /** The call a server request belongs to: the one named by the operation, else the only call in flight. */
+  #callFor(operation: ExternalOperationSource | undefined): InflightCall | undefined {
+    if (operation?.operationId) for (const call of this.#inflight) if (call.operation?.operationId === operation.operationId) return call;
+    return this.#inflight.size === 1 ? this.#inflight.values().next().value : undefined;
   }
 
   private async resolveElicitation(id: JsonRpcId, params: unknown, operation?: ExternalOperationSource, nested = false): Promise<McpElicitationOutcome> {
     const resolver = this.options?.onElicitation;
     if (!resolver) return { action: 'cancel' };
-    const key = nested ? `${operation?.operationId ?? 'unowned'}:${jsonRpcIdKey(id)}` : jsonRpcIdKey(id);
+    const call = this.#callFor(operation);
+    const owner = operation ?? call?.operation;
+    const key = nested ? `${owner?.operationId ?? 'unowned'}:${jsonRpcIdKey(id)}` : jsonRpcIdKey(id);
     const prior = this.incoming.get(key);
     if (prior) { prior.abort(); throw new Error('Duplicate MCP request id'); }
     const controller = new AbortController(); this.incoming.set(key, controller);
-    const connectionId = this.connectionId, proc = this.proc, http = this.http;
-    const httpSession = http?.sessionGeneration;
+    const connectionId = this.connectionId;
     const serverName = this.config.name;
-    const signal = AbortSignal.any([this.connectionLife.signal, controller.signal, ...((this.options?.timeout ?? DEFAULT_TIMEOUT_MS) > 0 ? [AbortSignal.timeout(this.options!.timeout!)] : []), ...(operation?.signal ? [operation.signal] : [])]);
+    const signal = AbortSignal.any([this.connectionLife.signal, controller.signal, ...(owner?.signal ? [owner.signal] : [])]);
     const destination = this.config.url ?? this.options?.processSpec?.command ?? this.config.command ?? '';
     const assertCurrent = () => {
-      signal.throwIfAborted(); operation?.assertCurrent();
-      if (this.config.name !== serverName || this.connectionId !== connectionId || this.proc !== proc || this.http !== http || http?.sessionGeneration !== httpSession
-        || this.incoming.get(key) !== controller || (this.config.url ?? this.options?.processSpec?.command ?? this.config.command ?? '') !== destination
-        || !this.isConnected) throw new Error('MCP request connection changed');
+      signal.throwIfAborted(); owner?.assertCurrent();
+      if (this.incoming.get(key) !== controller) throw new Error('MCP request was replaced');
     };
     const close = () => { if (this.incoming.get(key) === controller) this.incoming.delete(key); controller.abort(); };
     let held: McpElicitationOutcome | undefined;
@@ -171,9 +197,10 @@ export class McpClient {
       const owned = snapshotJudgmentInput(params);
       assertCurrent();
       const outcome = await awaitPermission(() => resolver({ serverName, id, params: owned,
-        context: { scope: { connectionId, destination, signal, assertCurrent }, ...(operation ? { operation } : {}) } }), signal);
+        context: { scope: { connectionId, destination, signal, assertCurrent }, ...(owner ? { operation: owner } : {}) } }), signal);
       held = outcome;
       assertCurrent();
+      if (wasHandedBackToAgent(outcome)) call?.questions.push(describeQuestion(owned));
       const bound = bindMcpElicitationResponse(outcome, assertCurrent, close);
       held = undefined;
       return bound;
@@ -209,105 +236,12 @@ export class McpClient {
   /** Outcome of protocol version negotiation, for diagnostics. */
   private negotiated: McpNegotiatedProtocol | null = null;
 
-  /** Cache: tool name → full schema (populated lazily on first callTool) */
-  private schemaCache = new Map<string, McpToolSchema>();
-
-  // Only native connection retirement and tools/list_changed replace this owner.
-  #toolCatalogOwner: object = Object.freeze({});
-  #pendingToolInfo: { readonly owner: object; readonly promise: Promise<{ readonly owner: object; readonly tools: McpToolInfo[] }> } | undefined;
+  #catalogRevision = 0;
+  #catalog: McpToolCatalog | null = null;
+  #pendingCatalog: Promise<McpToolCatalog> | undefined;
   #invalidateToolCatalog(): void {
-    this.#toolCatalogOwner = Object.freeze({}); this.toolInfoCache = null;
-    this.schemaCache.clear(); this.#pendingToolInfo = undefined;
+    this.#catalogRevision++; this.#catalog = null; this.#pendingCatalog = undefined;
   }
-
-  #captureToolCatalogCurrent(): () => void {
-    const owner = this.#toolCatalogOwner, lifetime = this.connectionLife, proc = this.proc, http = this.http;
-    const assertHttp = http ? captureMcpHttpToolCatalogSource(http) : undefined;
-    const session = http?.sessionGeneration, config = this.config, configSource = retainOwnedJson(config, nodeTypes.isProxy);
-    const assertMethods = captureMcpBackendMethods(this, nativeClientCatalogSlots.map(slot => slot.key));
-    const assertNativeMethods = () => {
-      assertMethods();
-      for (const slot of nativeClientCatalogSlots) if (Reflect.get(this, slot.key) !== slot.method) throw new Error('MCP native catalog factory changed');
-    };
-    assertNativeMethods();
-    const connected = this.#isConnected();
-    const assertCurrent = () => {
-      assertNativeMethods(); assertHttp?.(); lifetime.signal.throwIfAborted(); configSource.assertCurrent();
-      if (this.#toolCatalogOwner !== owner || this.connectionLife !== lifetime || this.proc !== proc || this.http !== http
-        || http?.sessionGeneration !== session || this.#isConnected() !== connected || this.config !== config) throw new Error('MCP tool catalog owner changed');
-    };
-    assertCurrent(); return assertCurrent;
-  }
-
-  /** Every page of tools/list: a server that pages is never silently cut to its first page. */
-  async #requestAllTools<T>(assertCurrent: () => void): Promise<T[]> {
-    const tools: T[] = [];
-    const seen = new Set<string>();
-    let cursor: string | undefined;
-    for (let page = 0; page < MAX_TOOL_LIST_PAGES; page++) {
-      const result = await this._request<{ tools?: T[]; nextCursor?: unknown }>('tools/list', cursor === undefined ? undefined : { cursor }, undefined, undefined, assertCurrent);
-      assertCurrent();
-      tools.push(...(result.tools ?? []));
-      const next = typeof result.nextCursor === 'string' && result.nextCursor !== '' ? result.nextCursor : undefined;
-      if (next === undefined) return tools;
-      if (seen.has(next)) throw new Error(`McpClient(${this.config.name}): tools/list repeated a page cursor`);
-      seen.add(next); cursor = next;
-    }
-    throw new Error(`McpClient(${this.config.name}): tools/list returned more than ${MAX_TOOL_LIST_PAGES} pages; the catalog would be incomplete`);
-  }
-
-  #collectToolInfo(assertCurrent: () => void): Promise<{ readonly owner: object; readonly tools: McpToolInfo[] }> {
-    assertCurrent(); const owner = this.#toolCatalogOwner;
-    if (this.toolInfoCache) return Promise.resolve({ owner, tools: this.toolInfoCache });
-    if (this.#pendingToolInfo?.owner === owner) return this.#pendingToolInfo.promise;
-    const pending = { owner, promise: Promise.resolve().then(async () => {
-      assertCurrent();
-      const listed = await this.#requestAllTools<{ name: string; description?: string }>(assertCurrent);
-      const tools = listed.map(tool => ({ name: tool.name, description: tool.description ?? '' }));
-      this.toolInfoCache = tools;
-      return { owner, tools };
-    }) };
-    this.#pendingToolInfo = pending;
-    const finished = () => { if (this.#pendingToolInfo === pending) this.#pendingToolInfo = undefined; };
-    void pending.promise.then(finished, finished); return pending.promise;
-  }
-
-  /** Native collector owns cold-cache adoption; its retained guard adds no tool-call grant or deadline. */
-  captureToolCatalog(options?: McpToolCallOptions): { readonly connected: boolean; readonly listTools: (restrictions?: McpToolCallOptions) => Promise<McpToolInfo[]>; readonly assertCurrent: () => void } {
-    const assertOwnerCurrent = this.#captureToolCatalogCurrent(), owner = this.#toolCatalogOwner;
-    const connected = this.#isConnected();
-    let cache = this.toolInfoCache, cacheSource = cache ? retainOwnedJson(cache, nodeTypes.isProxy) : undefined;
-    let pending: Promise<McpToolInfo[]> | undefined;
-    const assertCurrent = () => {
-      assertOwnerCurrent(); cacheSource?.assertCurrent();
-      if (this.toolInfoCache !== cache)
-        throw new Error('MCP tool catalog changed');
-    };
-    const caller = captureMcpCallRestrictions(options);
-    const listTools = (restrictions?: McpToolCallOptions) => {
-      assertCurrent();
-      const operation = restrictions === undefined ? caller : captureMcpCallRestrictions(restrictions);
-      const assertCollectionCurrent = () => { caller.assertCurrent(); if (operation !== caller) operation.assertCurrent(); assertCurrent(); };
-      assertCollectionCurrent();
-      if (!connected) throw new Error(`McpClient(${this.config.name}): not connected`);
-      if (pending) return pending;
-      pending = (async () => {
-        const collectCurrent = () => { caller.assertCurrent(); if (operation !== caller) operation.assertCurrent(); assertOwnerCurrent(); };
-        const signals = [caller.signal, operation.signal].filter((signal): signal is AbortSignal => signal !== undefined);
-        const signal = signals.length ? AbortSignal.any(signals) : undefined;
-        const collected = await awaitPermission(() => this.#collectToolInfo(collectCurrent), signal);
-        collectCurrent();
-        if (collected.owner !== owner || this.toolInfoCache !== collected.tools) throw new Error('MCP tool catalog acquisition changed');
-        cache = collected.tools; cacheSource = retainOwnedJson(cache, nodeTypes.isProxy);
-        assertCollectionCurrent(); return cache;
-      })();
-      return pending;
-    };
-    caller.assertCurrent(); assertCurrent(); return Object.freeze({ connected, listTools, assertCurrent });
-  }
-
-  /** Minimal tool info loaded at connect time (name + description only) */
-  private toolInfoCache: McpToolInfo[] | null = null;
 
   constructor(
     private config: McpServerConfig,
@@ -349,6 +283,16 @@ export class McpClient {
     return this.#lastError;
   }
 
+  /** Bumped whenever the tool catalog is dropped (connection replaced, server said its list changed). */
+  get catalogRevision(): number {
+    return this.#catalogRevision;
+  }
+
+  /** Tools the loaded catalog left out, each with the reason; empty before the first listing. */
+  get excludedTools(): readonly McpExcludedTool[] {
+    return this.#catalog?.excluded ?? [];
+  }
+
   #fail(phase: McpClientPhase, error: unknown): void {
     this.#phase = phase;
     this.#lastError = summarizeError(error);
@@ -370,6 +314,10 @@ export class McpClient {
     this.#lastError = null;
   }
 
+  #handshakeTimeoutMs(): number {
+    return this.options?.initializeTimeoutMs ?? (this.options?.timeout || HANDSHAKE_TIMEOUT_MS);
+  }
+
   async #connect(): Promise<void> {
     if (this.config.url) {
       if (this.http?.isOpen) return;
@@ -381,11 +329,12 @@ export class McpClient {
         clientInfo: { name: 'goodvibes-platform', version: VERSION },
         clientCapabilities: this._clientCapabilities(),
         timeoutMs: this.options?.timeout ?? DEFAULT_TIMEOUT_MS,
+        handshakeTimeoutMs: this.#handshakeTimeoutMs(),
         fetchImpl: this.options?.fetchImpl,
         ...(this.config.headers ? { headers: this.config.headers } : {}),
         handlers: {
           onNotification: (method, params) => {
-            applyNative(McpClient.#handleNotification, this, [{ jsonrpc: '2.0', method, ...(params !== undefined ? { params } : {}) }]);
+            this._handleNotification({ jsonrpc: '2.0', method, ...(params !== undefined ? { params } : {}) });
           },
           onServerRequest: (id, method, params, operation) => this._answerServerRequestOverHttp(id, method, params, operation),
         },
@@ -400,118 +349,147 @@ export class McpClient {
     this.restartCount = 0;
   }
 
-  /**
-   * listTools, Return tool names and descriptions (progressive loading).
-   * Full schemas are NOT fetched here; call getToolSchema() to get them.
-   */
-  async listTools(): Promise<McpToolInfo[]> {
-    return this.captureToolCatalog().listTools();
+  /** Every page of tools/list: a server that pages is never silently cut to its first page. */
+  async #requestAllTools(signal: AbortSignal): Promise<unknown[]> {
+    const tools: unknown[] = [];
+    const seen = new Set<string>();
+    let cursor: string | undefined;
+    for (let page = 0; page < MAX_TOOL_LIST_PAGES; page++) {
+      const result = await this._request<{ tools?: unknown[]; nextCursor?: unknown }>('tools/list', cursor === undefined ? undefined : { cursor }, undefined, undefined, undefined, signal);
+      tools.push(...(Array.isArray(result?.tools) ? result.tools : []));
+      const next = typeof result?.nextCursor === 'string' && result.nextCursor !== '' ? result.nextCursor : undefined;
+      if (next === undefined) return tools;
+      if (seen.has(next)) throw new Error(`McpClient(${this.config.name}): tools/list repeated a page cursor`);
+      seen.add(next); cursor = next;
+    }
+    throw new Error(`McpClient(${this.config.name}): tools/list returned more than ${MAX_TOOL_LIST_PAGES} pages; the catalog would be incomplete`);
   }
 
-  /**
-   * getToolSchema, Fetch full JSON schema for a tool (lazy, cached).
-   * MCP protocol provides full schemas in tools/list; we cache them on first access.
-   */
-  async getToolSchema(toolName: string, options?: McpToolCallOptions): Promise<McpToolSchema | null> {
-    const assertCatalogCurrent = this.#captureToolCatalogCurrent(), caller = captureMcpCallRestrictions(options);
-    const assertCurrent = () => { caller.assertCurrent(); assertCatalogCurrent(); };
-    assertCurrent();
-    if (this.schemaCache.has(toolName)) {
-      return this.schemaCache.get(toolName)!;
-    }
-
-    if (!this.isConnected) {
-      throw new Error(`McpClient(${this.config.name}): not connected`);
-    }
-
-    // Fetch all tools with full schemas and cache them all at once
-    const listed = await this.#requestAllTools<{ name: string; description?: string; inputSchema?: Record<string, unknown>; annotations?: unknown }>(assertCurrent);
-
-    for (const t of listed) {
-      const inputSchema = t.inputSchema ?? { type: 'object', properties: {} };
+  #buildCatalog(revision: number, listed: readonly unknown[]): McpToolCatalog {
+    const tools = new Map<string, McpToolSchema>();
+    const excluded: McpExcludedTool[] = [];
+    for (const entry of listed) {
+      if (!isRecord(entry) || typeof entry.name !== 'string' || !entry.name) continue;
+      const inputSchema = isRecord(entry.inputSchema) ? entry.inputSchema : { type: 'object', properties: {} };
       // On the HTTP transport the specification requires excluding tool
       // definitions whose x-mcp-header annotations are invalid.
       if (this.http && !hasValidHeaderAnnotations(inputSchema)) {
-        logger.warn('McpClient: excluding tool with invalid x-mcp-header annotations', {
-          server: this.config.name,
-          tool: t.name,
-        });
+        excluded.push({ name: entry.name, reason: 'its x-mcp-header annotations are invalid, so the HTTP transport cannot carry its arguments' });
+        logger.warn('McpClient: excluding tool with invalid x-mcp-header annotations', { server: this.config.name, tool: entry.name });
         continue;
       }
-      this.schemaCache.set(t.name, {
-        name: t.name,
-        description: t.description ?? '',
+      const annotations = readAnnotations(entry.annotations);
+      tools.set(entry.name, {
+        name: entry.name,
+        description: typeof entry.description === 'string' ? entry.description : '',
         inputSchema,
-        ...(isRecord(t.annotations) ? { annotations: {
-          ...(typeof t.annotations.readOnlyHint === 'boolean' ? { readOnlyHint: t.annotations.readOnlyHint } : {}),
-          ...(typeof t.annotations.destructiveHint === 'boolean' ? { destructiveHint: t.annotations.destructiveHint } : {}),
-          ...(typeof t.annotations.idempotentHint === 'boolean' ? { idempotentHint: t.annotations.idempotentHint } : {}),
-          ...(typeof t.annotations.openWorldHint === 'boolean' ? { openWorldHint: t.annotations.openWorldHint } : {}),
-        } } : {}),
+        ...(annotations ? { annotations } : {}),
       });
     }
+    return Object.freeze({ revision, tools, excluded: Object.freeze(excluded) });
+  }
 
-    return this.schemaCache.get(toolName) ?? null;
+  /**
+   * The connection's one tool catalog. A listing in progress is shared, and it
+   * runs under the connection's own lifetime: cancelling one waiting caller
+   * never fails another's listing.
+   */
+  #loadCatalog(): Promise<McpToolCatalog> {
+    if (this.#catalog) return Promise.resolve(this.#catalog);
+    if (this.#pendingCatalog) return this.#pendingCatalog;
+    if (!this.isConnected) return Promise.reject(new Error(`McpClient(${this.config.name}): not connected`));
+    const revision = this.#catalogRevision;
+    const pending = this.#requestAllTools(this.connectionLife.signal).then(listed => {
+      const catalog = this.#buildCatalog(revision, listed);
+      if (this.#catalogRevision === revision) this.#catalog = catalog;
+      return catalog;
+    });
+    this.#pendingCatalog = pending;
+    const finished = () => { if (this.#pendingCatalog === pending) this.#pendingCatalog = undefined; };
+    pending.then(finished, finished);
+    return pending;
+  }
+
+  async #catalogFor(signal?: AbortSignal): Promise<McpToolCatalog> {
+    return signal ? awaitPermission(() => this.#loadCatalog(), signal) : this.#loadCatalog();
+  }
+
+  /** Tool names and descriptions from the connection's catalog. */
+  async listTools(signal?: AbortSignal): Promise<McpToolInfo[]> {
+    const catalog = await this.#catalogFor(signal);
+    return [...catalog.tools.values()].map(tool => ({ name: tool.name, description: tool.description }));
+  }
+
+  /** The full schema of one listed tool, or null when the server does not list it (or it was excluded). */
+  async getToolSchema(toolName: string, signal?: AbortSignal): Promise<McpToolSchema | null> {
+    return (await this.#catalogFor(signal)).tools.get(toolName) ?? null;
+  }
+
+  /** The schema from the loaded catalog without any request; undefined before the first listing. */
+  getCachedToolSchema(toolName: string): McpToolSchema | undefined {
+    return this.#catalog?.tools.get(toolName);
+  }
+
+  /** Why a tool name cannot be called on this server: not listed, or listed but excluded and why. */
+  describeUnavailableTool(toolName: string): string {
+    const excluded = this.excludedTools.find(tool => tool.name === toolName);
+    return excluded
+      ? `MCP server '${this.config.name}' lists tool '${toolName}' but it cannot be called: ${excluded.reason}. Fix the tool definition on the server.`
+      : `MCP server '${this.config.name}' does not list a tool named '${toolName}'. List its tools again to see the current names.`;
   }
 
   /**
    * callTool, Execute a tool on the MCP server.
-   * Fetches full schema on first use (if not already cached).
    * Modern-era servers may answer with an input_required interim result
    * (Multi Round-Trip Requests); elicitation input requests are resolved
    * through the wired resolver and the call is retried with inputResponses.
+   * A question the server asked that was declined is added to the result.
    */
-  async callTool(toolName: string, args: Record<string, unknown>, operation?: ExternalOperationSource, effect?: { readonly assertCurrent: () => void; readonly claim: () => void }): Promise<unknown> {
+  async callTool(toolName: string, args: Record<string, unknown>, options: McpClientCallOptions = {}): Promise<unknown> {
     if (!this.isConnected) throw new Error(`McpClient(${this.config.name}): not connected`);
-    const ownedArgs = snapshotJudgmentInput(args, toolName) as Record<string, unknown>;
-    const connectionId = this.connectionId, proc = this.proc, http = this.http;
-    const httpSession = http?.sessionGeneration;
-    const serverName = this.config.name;
-    const lifetime = new AbortController();
-    const signal = AbortSignal.any([this.connectionLife.signal, lifetime.signal, ...(operation?.signal ? [operation.signal] : [])]);
-    let schema: McpToolSchema | undefined, schemaSnapshot: unknown;
-    const assertCurrent = () => {
-      signal.throwIfAborted(); operation?.assertCurrent(); effect?.assertCurrent();
-      if (this.config.name !== serverName || this.connectionId !== connectionId || this.proc !== proc || this.http !== http || http?.sessionGeneration !== httpSession || !this.isConnected) throw new Error('MCP tool operation changed');
-      if (schema && (this.schemaCache.get(toolName) !== schema || !isDeepStrictEqual(captureOwnedJson(schema, nodeTypes.isProxy), schemaSnapshot))) throw new Error('MCP tool schema changed');
-    };
-    const boundOperation = operation ? { ...operation, operationId: randomUUID(), signal, assertCurrent } : undefined;
+    const signal = options.signal ? AbortSignal.any([this.connectionLife.signal, options.signal]) : this.connectionLife.signal;
+    const operation = options.operation;
+    const boundOperation: ExternalOperationSource | undefined = operation
+      ? { ...operation, operationId: randomUUID(), signal, assertCurrent: () => { signal.throwIfAborted(); operation.assertCurrent(); } }
+      : undefined;
+    const call: InflightCall = { operation: boundOperation, questions: [] };
     let responses: Record<string, unknown> | null = null;
-    let claimed = false;
+    this.#inflight.add(call);
     try {
-      assertCurrent();
-      if (!this.schemaCache.has(toolName)) await this.getToolSchema(toolName, { signal, assertCurrent });
-      assertCurrent();
-      schema = this.schemaCache.get(toolName);
-      if (!schema) throw new Error('MCP tool schema is unavailable');
-      schemaSnapshot = captureOwnedJson(schema, nodeTypes.isProxy);
-      let params: Record<string, unknown> = { name: toolName, arguments: ownedArgs };
+      const schema = await this.getToolSchema(toolName, signal);
+      if (!schema) throw new Error(this.describeUnavailableTool(toolName));
+      let params: Record<string, unknown> = { name: toolName, arguments: args };
       while (true) {
-        assertCurrent();
+        signal.throwIfAborted();
         const pendingResponses = responses;
-        const beforeSend = () => { assertCurrent(); if (this.schemaCache.get(toolName) !== schema) throw new Error('MCP tool schema changed'); if (!claimed) { effect?.claim(); claimed = true; } if (pendingResponses) for (const response of Object.values(pendingResponses)) commitMcpElicitation(response); };
-        const result = await this._request('tools/call', params, this._toolCallHeaders(toolName, ownedArgs), boundOperation, beforeSend);
+        const beforeSend = () => {
+          signal.throwIfAborted();
+          if (this.getCachedToolSchema(toolName) !== schema) throw new Error(`MCP server '${this.config.name}' changed its tool list during the call; nothing was sent. Call the tool again.`);
+          options.beforeSend?.();
+          if (pendingResponses) for (const response of Object.values(pendingResponses)) commitMcpElicitation(response);
+        };
+        const result = await this._request('tools/call', params, this._toolCallHeaders(schema, args), boundOperation, beforeSend, signal);
         // The tool has run once its result is back: a change after that point must
         // not discard the result. Only an interim result that asks for another
         // request still needs the call to be current.
         const interim = this.negotiated?.era === 'modern' && isInputRequiredResult(result);
-        if (interim) assertCurrent();
         responses = null;
-        if (!interim) return result;
+        if (!interim) return withUnansweredQuestions(this.config.name, result, call.questions);
+        signal.throwIfAborted();
         const ownedResult = readProtocolRequest(captureMcpInputRequired(result)).wire as typeof result;
         responses = await this._resolveInputRequests(toolName, ownedResult.inputRequests, boundOperation);
-        assertCurrent();
-        params = { name: toolName, arguments: ownedArgs, ...(responses ? { inputResponses: responses } : {}),
+        params = { name: toolName, arguments: args, ...(responses ? { inputResponses: responses } : {}),
           ...(typeof ownedResult.requestState === 'string' ? { requestState: ownedResult.requestState } : {}) };
       }
-    } finally { if (responses) for (const response of Object.values(responses)) discardMcpElicitation(response); lifetime.abort(); }
+    } finally {
+      this.#inflight.delete(call);
+      if (responses) for (const response of Object.values(responses)) discardMcpElicitation(response);
+    }
   }
 
   /** Mcp-Param-* headers for a tools/call on the modern HTTP transport. */
-  private _toolCallHeaders(toolName: string, args: Record<string, unknown>): Record<string, string> | undefined {
+  private _toolCallHeaders(schema: McpToolSchema, args: Record<string, unknown>): Record<string, string> | undefined {
     if (!this.http || this.negotiated?.era !== 'modern') return undefined;
-    const schema = this.schemaCache.get(toolName);
-    if (!schema) return undefined;
     const headers = buildParamHeaders(schema.inputSchema, args);
     return Object.keys(headers).length > 0 ? headers : undefined;
   }
@@ -526,17 +504,17 @@ export class McpClient {
     const resolver = this.options?.onElicitation;
     const responses = Object.create(null) as Record<string, unknown>;
     try {
-    for (const [key, request] of Object.entries(inputRequests)) {
-      const method = isRecord(request) && typeof request.method === 'string' ? request.method : 'unknown';
-      if (method !== 'elicitation/create' || !resolver) {
-        throw new Error(
-          `McpClient(${this.config.name}): tool '${toolName}' requested '${method}' input this client cannot provide`,
-        );
+      for (const [key, request] of Object.entries(inputRequests)) {
+        const method = isRecord(request) && typeof request.method === 'string' ? request.method : 'unknown';
+        if (method !== 'elicitation/create' || !resolver) {
+          throw new Error(
+            `McpClient(${this.config.name}): tool '${toolName}' requested '${method}' input this client cannot provide`,
+          );
+        }
+        const params = isRecord(request) ? request.params : undefined;
+        responses[key] = await this.resolveElicitation(key, params, operation, true);
       }
-      const params = isRecord(request) ? request.params : undefined;
-      responses[key] = await this.resolveElicitation(key, params, operation, true);
-    }
-    return responses;
+      return responses;
     } catch (error) { for (const response of Object.values(responses)) discardMcpElicitation(response); throw error; }
   }
 
@@ -549,7 +527,7 @@ export class McpClient {
     // any await so it is already true when the detached read loop runs.
     this.intentionalClose = true;
     this._cancelRestart();
-    this.retireConnection();
+    this.retireConnection('the server was disconnected');
     if (this.http) {
       const http = this.http;
       await http.close();
@@ -574,12 +552,13 @@ export class McpClient {
       logger.warn('[McpClient] error during process shutdown', { error: String(err) });
     } finally {
       this.#phase = 'closed';
-      if (this.proc !== proc) return;
-      this.proc = null;
-      this.buffer = '';
-      if (this.readLoopProc === proc) this.readLoopProc = null;
-      this.initialized = false;
-      this.negotiated = null;
+      if (this.proc === proc) {
+        this.proc = null;
+        this.buffer = '';
+        if (this.readLoopProc === proc) this.readLoopProc = null;
+        this.initialized = false;
+        this.negotiated = null;
+      }
     }
   }
 
@@ -677,7 +656,7 @@ export class McpClient {
         protocolVersion: requested,
         capabilities: this._clientCapabilities(),
         clientInfo: { name: 'goodvibes-platform', version: VERSION },
-      }, this.options?.initializeTimeoutMs ?? (this.options?.timeout || INITIALIZE_TIMEOUT_MS));
+      }, this.#handshakeTimeoutMs());
       const serverVersion = isRecord(result) && typeof result.protocolVersion === 'string'
         ? result.protocolVersion
         : requested;
@@ -697,16 +676,17 @@ export class McpClient {
    * Send a JSON-RPC request; returns the result. In the modern era the
    * request params carry the per-request `_meta` the revision requires.
    */
-  private _request<T = unknown>(method: string, params?: unknown, extraHeaders?: Record<string, string>, operation?: ExternalOperationSource, beforeSend?: () => void): Promise<T> {
+  private _request<T = unknown>(method: string, params?: unknown, extraHeaders?: Record<string, string>, operation?: ExternalOperationSource, beforeSend?: () => void, signal?: AbortSignal, timeoutOverrideMs?: number): Promise<T> {
     let finalParams = params;
     if (this.negotiated?.era === 'modern') {
       const meta = buildModernMeta(this.negotiated.version, { name: 'goodvibes-platform', version: VERSION }, this._clientCapabilities());
       finalParams = withModernMeta(params, meta);
     }
+    const requestSignal = signal ?? operation?.signal;
     if (this.http) {
-      return this.http.request(method, finalParams, extraHeaders, operation, beforeSend) as Promise<T>;
+      return this.http.request(method, finalParams, extraHeaders, operation, beforeSend, requestSignal, timeoutOverrideMs) as Promise<T>;
     }
-    return this._rawRequest<T>(method, finalParams, undefined, beforeSend, operation?.signal);
+    return this._rawRequest<T>(method, finalParams, timeoutOverrideMs, beforeSend, requestSignal);
   }
 
   /** Send a JSON-RPC request over stdio without protocol decoration. */
@@ -799,45 +779,51 @@ export class McpClient {
           const { done, value } = await reader.read();
           if (done) break;
           this.buffer += decoder.decode(value, { stream: true });
-          applyNative(McpClient.#processBuffer, this, []);
+          this._processBuffer();
         }
       } catch (err) {
         logger.warn('McpClient: stdout read loop ended', { server: this.config.name, err: summarizeError(err) });
       } finally {
         if (this.readLoopProc === proc) this.readLoopProc = null;
-        if (this.proc !== proc) return;
-        // Reject remaining pending requests before retiring the connection, so
-        // callers learn the process exited rather than a bare abort.
-        for (const [, pending] of this.pendingRequests) {
-          clearTimeout(pending.timer);
-          pending.reject(new Error(`McpClient(${this.config.name}): process exited unexpectedly`));
-        }
-        this.pendingRequests.clear();
-        this.retireConnection();
-        // The process is gone; any restart must re-negotiate the protocol.
-        this.initialized = false;
-        this.negotiated = null;
-
-        // Auto-restart only on an unexpected crash, never after a deliberate disconnect.
-        if (this.intentionalClose) {
-          this.#phase = 'closed';
-        } else {
-          // stdout can close while the process lives on; nothing would read its
-          // replies again, so it must not keep reporting itself connected.
-          if (this.#isConnected()) {
-            try { proc.kill(); } catch { /* already gone */ }
-          }
-          // Keep a more specific failure (a timed-out restart handshake) when there is one.
-          this.#lastError ??= 'the server process exited unexpectedly';
-          if (this.restartCount < MAX_RESTART_ATTEMPTS) {
-            this._scheduleRestart();
-          } else {
-            this.#phase = 'gave-up';
-            logger.info('McpClient: exceeded max restart attempts', { server: this.config.name });
-          }
-        }
+        if (this.proc === proc) this.#onProcessExit(proc);
       }
     })();
+  }
+
+  #onProcessExit(proc: ReturnType<typeof Bun.spawn>): void {
+    // Reject remaining pending requests before retiring the connection, so
+    // callers learn the process exited rather than a bare abort.
+    for (const [, pending] of this.pendingRequests) {
+      clearTimeout(pending.timer);
+      pending.reject(new Error(`McpClient(${this.config.name}): process exited unexpectedly`));
+    }
+    this.pendingRequests.clear();
+    this.retireConnection('the server process exited');
+    // The process is gone; any restart must re-negotiate the protocol.
+    this.initialized = false;
+    this.negotiated = null;
+
+    // Auto-restart only on an unexpected crash, never after a deliberate disconnect.
+    if (this.intentionalClose) {
+      this.#phase = 'closed';
+      return;
+    }
+    // stdout can close while the process lives on; nothing would read its
+    // replies again, so it must not keep reporting itself connected.
+    if (this.#isConnected()) {
+      try { proc.kill(); } catch { /* already gone */ }
+    }
+    // Keep a more specific failure (a timed-out restart handshake) when there is one.
+    this.#lastError ??= 'the server process exited unexpectedly';
+    if (this.restartCount < MAX_RESTART_ATTEMPTS) {
+      this._scheduleRestart();
+    } else {
+      this.#phase = 'gave-up';
+      // The exit status can land after stdout closes; a client that gave up holds no process.
+      this.proc = null;
+      this.buffer = '';
+      logger.info('McpClient: exceeded max restart attempts', { server: this.config.name });
+    }
   }
 
   private _processBuffer(): void {
@@ -846,7 +832,7 @@ export class McpClient {
       const line = this.buffer.slice(0, newlineIdx).trim();
       this.buffer = this.buffer.slice(newlineIdx + 1);
       if (!line) continue;
-      applyNative(McpClient.#dispatchLine, this, [line]);
+      this._dispatchLine(line);
     }
   }
 
@@ -865,17 +851,17 @@ export class McpClient {
     }
 
     if (isJsonRpcResponse(msg)) {
-      applyNative(McpClient.#handleResponse, this, [msg]);
+      this._handleResponse(msg);
       return;
     }
 
     if (isJsonRpcRequest(msg)) {
-      applyNative(McpClient.#handleServerRequest, this, [msg]);
+      this._handleServerRequest(msg);
       return;
     }
 
     if (isJsonRpcNotification(msg)) {
-      applyNative(McpClient.#handleNotification, this, [msg]);
+      this._handleNotification(msg);
       return;
     }
 
@@ -926,7 +912,12 @@ export class McpClient {
   }
 
   private _handleServerRequest(request: JsonRpcRequest): void {
-    try { request = snapshotJudgmentInput(request) as JsonRpcRequest; } catch { return; }
+    try { request = snapshotJudgmentInput(request) as JsonRpcRequest; } catch (err) {
+      // An answer the server can act on, rather than leaving it waiting for one that never comes.
+      logger.warn('McpClient: refused an unreadable server request', { server: this.config.name, id: request.id, err: summarizeError(err) });
+      this._sendJsonRpcError(request.id, -32600, 'Invalid request: the client could not read its parameters');
+      return;
+    }
     const observed: McpClientServerRequest = {
       serverName: this.config.name,
       id: request.id,
@@ -938,8 +929,8 @@ export class McpClient {
     this._callObserver('server request', () => this.options?.onServerRequest?.(observed));
 
     // Elicitation is the one server→client request we can genuinely answer: route
-    // it to the wired resolver (the approval broker) and write its outcome back as
-    // the JSON-RPC result instead of rejecting with -32601.
+    // it to the wired resolver and write its outcome back as the JSON-RPC result
+    // instead of rejecting with -32601.
     const elicit = this.options?.onElicitation;
     if (request.method === 'elicitation/create' && elicit) {
       logger.info('McpClient: brokering elicitation/create request', {
@@ -1068,8 +1059,7 @@ export class McpClient {
         // A restart only counts once the server has negotiated; a process that
         // spawns and then crashes must still run out of attempts.
         this.restartCount = 0;
-        // Invalidate tool caches so they're re-fetched after restart (the
-        // restarted server may advertise changed tool lists or schemas).
+        // The restarted server may advertise a changed tool list.
         this.#invalidateToolCatalog();
         this.#phase = 'ready';
         this.#lastError = null;
@@ -1107,15 +1097,15 @@ export class McpClient {
   }
 
   /**
-   * ping, Check whether the server is healthy.
+   * ping, Check whether the server answers at all, within a short bound.
    * The 2026-07-28 revision removed `ping`; modern-era servers are probed
    * with `server/discover` instead. Legacy servers keep the classic ping.
    */
-  async ping(): Promise<boolean> {
+  async ping(signal?: AbortSignal): Promise<boolean> {
     if (!this.isConnected) return false;
     const method = this.negotiated?.era === 'modern' ? 'server/discover' : 'ping';
     try {
-      await this._request(method, {});
+      await this._request(method, {}, undefined, undefined, undefined, signal, PING_TIMEOUT_MS);
       return true;
     } catch {
       return false;
@@ -1140,15 +1130,4 @@ export class McpClient {
     }
     return undefined;
   }
-}
-
-const nativeClientToolCatalogFactory = McpClient.prototype.captureToolCatalog;
-const nativeClientCatalogSlots = Object.freeze(['captureToolCatalog', 'listTools', '_request', '_rawRequest',
-  '_processBuffer', '_dispatchLine', '_handleResponse', '_handleNotification', '_clientCapabilities'].map(key => Object.freeze({
-    key, method: Object.getOwnPropertyDescriptor(McpClient.prototype, key)?.value as unknown,
-  })));
-
-/** Registry acquisition invokes the original class factory, never a substituted instance factory. */
-export function captureMcpClientToolCatalog(client: McpClient, options?: McpToolCallOptions): ReturnType<McpClient['captureToolCatalog']> {
-  return applyNative(nativeClientToolCatalogFactory, client, [options]);
 }

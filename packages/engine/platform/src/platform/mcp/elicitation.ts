@@ -1,10 +1,12 @@
 import { snapshotJudgmentInput } from '../gate/judgment-input.js';
-import type { McpElicitationContext } from './elicitation-autonomous.js';
-// MCP protocol shapes and the explicitly selected legacy human adapter.
-// Runtime compositions install createMcpAutonomousElicitationHandler instead:
-// their decisions use the existing recorded autonomous admission owner.
+import { effectivePermissionMode } from '../gate/presets.js';
+import type { McpElicitationContext, McpPersonElicitation } from './elicitation-autonomous.js';
+// MCP protocol shapes and the person-facing adapter. Compositions install
+// createMcpAutonomousElicitationHandler, which answers from the call's own facts
+// first and reaches a person through this adapter only when one is attached.
 import { randomUUID } from 'node:crypto';
 import type { PermissionPromptDecision, PermissionPromptRequest } from '../permissions/prompt.js';
+import type { ConfigManager } from '../config/manager.js';
 
 /**
  * The MCP `elicitation/create` request, already parsed out of the raw JSON-RPC
@@ -59,7 +61,6 @@ export function parseElicitationParams(serverName: string, params: unknown, requ
 }
 
 /**
- * @deprecated Explicit legacy human-mode adapter; never installed by runtime compositions.
  * Build the broker-backed elicitation handler. Every incoming elicitation
  * becomes a `PermissionPromptRequest` in the `delegate` category (an MCP server
  * asking the operator to act is a delegation, not a filesystem/exec/network
@@ -109,5 +110,25 @@ export function createMcpElicitationApprovalHandler(
       ? (decision.modifiedArgs as Record<string, unknown>)
       : undefined;
     return { action: 'accept', ...(content ? { content } : {}) };
+  };
+}
+
+/**
+ * The person path for a product whose surface has someone at it (the terminal
+ * apps): questions go to the product's own approval prompt, except in `yolo`
+ * mode, where the person chose not to be interrupted, and in `plan` mode, where
+ * nothing runs; there the question goes back to the agent instead. Reading the
+ * mode is two settings lookups.
+ */
+export function createMcpPersonElicitation(
+  requestApproval: Parameters<typeof createMcpElicitationApprovalHandler>[0],
+  config: Pick<ConfigManager, 'get'>,
+): McpPersonElicitation {
+  return {
+    available: () => {
+      const mode = effectivePermissionMode(config.get('permissions.mode'), config.get('behavior.autoApprove') === true);
+      return mode !== 'yolo' && mode !== 'plan';
+    },
+    ask: createMcpElicitationApprovalHandler(requestApproval),
   };
 }

@@ -82,7 +82,12 @@ export function createMcpTool(mcpRegistry: McpRegistry): Tool {
         toolName: tool.toolName,
         description: tool.description,
       }));
-      return { success: true, output: JSON.stringify({ view, count: summarized.length, tools: summarized }) };
+      // A server still starting has no tools listed yet; say so rather than let the list read as complete.
+      const starting = mcpRegistry.listServers()
+        .filter((server) => (server.phase === 'starting' || server.phase === 'negotiating') && (!input.serverName || server.name === input.serverName))
+        .map((server) => server.name);
+      return { success: true, output: JSON.stringify({ view, count: summarized.length, tools: summarized,
+        ...(starting.length > 0 ? { starting, partial: true, next: 'These servers are still starting; list the tools again in a few seconds.' } : {}) }) };
     }
 
     if (input.mode === 'schema') {

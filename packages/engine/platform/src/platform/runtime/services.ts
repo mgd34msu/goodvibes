@@ -1130,6 +1130,8 @@ function buildRuntimeGraph(product: ProductComposition, disposalScope: AsyncDisp
   // ACP/MCP protocol decisions use the same recorded autonomous owner as native tools.
 
   mcpRegistry.setPermissionHost(externalPermissionHost);
+  // No person sits at this graph's surface (embedded hosts, the daemon): a server question the call's
+  // own facts cannot answer is declined and handed back to the agent in the tool result.
   mcpRegistry.setElicitationHandler(createMcpAutonomousElicitationHandler(externalPermissionHost));
   const acpHost = new AcpHostService({
     permissionHost: externalPermissionHost,

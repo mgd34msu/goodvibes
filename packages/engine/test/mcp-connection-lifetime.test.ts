@@ -97,7 +97,7 @@ test('configured headers reach every request, and a protocol header is never rep
   }
 });
 
-test('an expired legacy HTTP session is replaced, and the next request works', async () => {
+test('an expired legacy HTTP session is replaced and the request is sent again on it', async () => {
   let session = 0;
   const issued: string[] = [];
   const server = Bun.serve({ port: 0, hostname: '127.0.0.1', async fetch(request) {
@@ -118,7 +118,8 @@ test('an expired legacy HTTP session is replaced, and the next request works', a
   const registry = newRegistry();
   await registry.connectServer({ name: 'synthetic', url: `http://127.0.0.1:${server.port}/mcp`, trustMode: 'allow-all' });
   issued.push('server-side-rotation'); // the session the client holds is no longer the valid one
-  await expect(registry.getToolSchema('mcp:synthetic:synthetic')).rejects.toThrow('session expired');
+  // The 404 means the request was not run, so it is sent once more on the renewed session.
+  expect(await registry.getToolSchema('mcp:synthetic:synthetic')).toMatchObject({ name: 'synthetic' });
   expect(issued).toHaveLength(3);
   expect((await registry.listAllTools()).map(entry => entry.toolName)).toEqual(['synthetic']);
 });
@@ -145,7 +146,8 @@ test('an expired legacy HTTP session answered with a JSON-RPC 404 body is replac
   const registry = newRegistry();
   await registry.connectServer({ name: 'synthetic', url: `http://127.0.0.1:${server.port}/mcp`, trustMode: 'allow-all' });
   issued.push('server-side-rotation');
-  await expect(registry.getToolSchema('mcp:synthetic:synthetic')).rejects.toThrow('session expired');
+  // The 404 means the request was not run, so it is sent once more on the renewed session.
+  expect(await registry.getToolSchema('mcp:synthetic:synthetic')).toMatchObject({ name: 'synthetic' });
   expect(issued).toHaveLength(3);
   expect((await registry.listAllTools()).map(entry => entry.toolName)).toEqual(['synthetic']);
 });
@@ -232,4 +234,23 @@ test('a request that times out or is aborted tells the stdio server to cancel it
   const ping = await raw._rawRequest('ping') as { cancelled: { requestId: number; reason: string }[] };
   expect(ping.cancelled).toHaveLength(1);
   expect(ping.cancelled[0]).toMatchObject({ reason: 'request aborted' });
+});
+
+test('one tools/list fills the catalog, and error answers from a tool never quarantine its server', async () => {
+  let lists = 0;
+  const server = Bun.serve({ port: 0, hostname: '127.0.0.1', async fetch(request) {
+    const body = await request.json() as { id: number; method: string };
+    if (body.method === 'server/discover') return Response.json({ jsonrpc: '2.0', id: body.id, result: { supportedProtocolVersions: [MCP_STATELESS_REVISION], capabilities: { tools: {} } } });
+    if (body.method === 'tools/list') { lists += 1; return Response.json({ jsonrpc: '2.0', id: body.id, result: { tools: [tool('synthetic')] } }); }
+    return Response.json({ jsonrpc: '2.0', id: body.id, error: { code: -32602, message: 'Invalid params' } });
+  } });
+  cleanup.push(async () => { server.stop(true); });
+  const registry = newRegistry();
+  await registry.connectServer({ name: 'synthetic', url: `http://127.0.0.1:${server.port}/mcp`, trustMode: 'allow-all' });
+  expect((await registry.listAllTools()).map(entry => entry.toolName)).toEqual(['synthetic']);
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await expect(registry.callTool('mcp:synthetic:synthetic', {})).rejects.toThrow('Invalid params');
+  }
+  expect(lists).toBe(1);
+  expect(registry.listServerSecurity()[0]).toMatchObject({ name: 'synthetic', schemaFreshness: 'fresh' });
 });

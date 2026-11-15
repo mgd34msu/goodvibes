@@ -2,6 +2,7 @@
  * Public option and observation types for McpClient.
  */
 import type { McpElicitationContext } from './elicitation-autonomous.js';
+import type { ExternalOperationSource } from '../permissions/external-request.js';
 import type { JsonRpcId } from './jsonrpc.js';
 
 export interface McpProcessSpec {
@@ -29,12 +30,38 @@ export interface McpToolSchema extends McpToolInfo {
   } | undefined;
 }
 
+/** A listed tool the client left out of its catalog, and why it cannot be called. */
+export interface McpExcludedTool {
+  readonly name: string;
+  readonly reason: string;
+}
+
+/** A question an MCP server asked during a tool call that no one answered; it is added to the tool result. */
+export interface McpUnansweredQuestion {
+  readonly message: string;
+  readonly fields: readonly string[];
+}
+
 /** Additive restrictions from the actual caller, never execution authority. */
 export interface McpToolCallOptions {
   readonly signal?: AbortSignal | undefined;
+  /** The caller's own check, run before admission and again just before the request is sent. */
   readonly assertCurrent?: (() => void) | undefined;
-  /** Require the exact schema returned by this native owner; never a grant. */
+  /** Require the schema object this registry handed the caller (compared by identity); never a grant. */
   readonly expectedSchema?: McpToolSchema | undefined;
+  /** The session making the call, carried on the MCP hook events. */
+  readonly sessionId?: string | undefined;
+  /** How long the server may take to answer the call; defaults to the registry's tool-call deadline. 0 means no deadline. */
+  readonly deadlineMs?: number | undefined;
+}
+
+/** What the registry hands one client call: when to stop, what to check just before sending, and the calling operation. */
+export interface McpClientCallOptions {
+  readonly signal?: AbortSignal | undefined;
+  /** Runs synchronously immediately before each request of the call is written; a throw sends nothing. */
+  readonly beforeSend?: (() => void) | undefined;
+  /** The autonomous operation the call belongs to; server questions during the call are resolved against it. */
+  readonly operation?: ExternalOperationSource | undefined;
 }
 
 export interface McpClientNotification {
@@ -82,11 +109,12 @@ export type McpClientPhase = 'idle' | 'starting' | 'negotiating' | 'ready' | 're
 export interface McpClientOptions {
   /** Live owner check immediately before every initial or restarted process spawn. */
   beforeProcessStart?: (() => void) | undefined;
-  /** Bound for one tool call or other request; 0 (the default) means unbounded. */
+  /** Bound for every request on this connection; 0 (the default) leaves tool calls to the registry's deadline. */
   timeout?: number | undefined;
   /**
-   * Bound for the stdio `initialize` handshake, so a spawned server that never
-   * answers cannot hold a connect open forever even when `timeout` is 0.
+   * Bound for the handshake (stdio `initialize`, HTTP `server/discover` and
+   * `initialize`), so a server that never answers cannot hold a connect open
+   * forever even when `timeout` is 0.
    * Defaults to `timeout` when that is set, otherwise 30 s; 0 disables it.
    */
   initializeTimeoutMs?: number | undefined;

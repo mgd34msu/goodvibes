@@ -1,9 +1,10 @@
-import type {
-  McpConfigScope,
-  McpEffectiveConfig,
-  McpServerConfig,
-  McpServerConfigEntry,
-  McpServerSecurityRecord,
+import {
+  MCP_DEFAULT_TRUST_MODE,
+  type McpConfigScope,
+  type McpEffectiveConfig,
+  type McpServerConfig,
+  type McpServerConfigEntry,
+  type McpServerSecurityRecord,
 } from '@goodvibes-jev/engine/platform/platform/mcp';
 export const MCP_WORKSPACE_MODAL_NAME = 'mcpWorkspace';
 export const MCP_ROLES = ['general', 'docs', 'filesystem', 'git', 'database', 'browser', 'automation', 'ops', 'remote'] as const;
@@ -50,7 +51,7 @@ export interface McpWorkspaceFormBase {
    * the user has not changed keeps the saved value instead of its re-parsed text.
    */
   origin?: McpServerConfig | undefined;
-  /** Set once the user moves the trust mode, so a deliberate choice replaces a saved allow-all. */
+  /** Set once the user moves the trust mode; until then saving keeps the saved mode (allow-all, or none for the default). */
   trustTouched?: boolean | undefined;
 }
 export interface McpWorkspaceSnapshot {
@@ -135,7 +136,9 @@ export function serverConfigToForm(server?: McpServerConfig | undefined): McpWor
     command: server?.command ?? '',
     args: server?.args ? formatArgs(server.args) : '',
     role: server?.role ?? 'general',
-    trustMode: server?.trustMode === 'blocked' || server?.trustMode === 'ask-on-risk' ? server.trustMode : 'constrained',
+    // The form cannot show allow-all; an unset mode shows the default the server actually runs with.
+    trustMode: server?.trustMode === 'blocked' || server?.trustMode === 'ask-on-risk' || server?.trustMode === 'constrained'
+      ? server.trustMode : MCP_DEFAULT_TRUST_MODE,
     env: envText(server?.env),
     allowedPaths: server?.allowedPaths?.join(', ') ?? '',
     allowedHosts: server?.allowedHosts?.join(', ') ?? '',
@@ -157,14 +160,15 @@ export function formToServerConfig(form: McpWorkspaceFormBase): McpServerConfig 
   const env = origin?.env && unedited(form.env, envText(origin.env)) ? { ...origin.env } : parseEnv(form.env);
   const allowedPaths = origin?.allowedPaths && unedited(form.allowedPaths, origin.allowedPaths.join(', ')) ? [...origin.allowedPaths] : splitList(form.allowedPaths);
   const allowedHosts = origin?.allowedHosts && unedited(form.allowedHosts, origin.allowedHosts.join(', ')) ? [...origin.allowedHosts] : splitList(form.allowedHosts);
-  // The form cannot show allow-all, so an untouched trust field must not downgrade it.
-  const trustMode = origin?.trustMode === 'allow-all' && !form.trustTouched ? 'allow-all' : form.trustMode;
+  // Saving another field never changes the trust mode: an untouched trust field keeps what was saved
+  // (allow-all, which the form cannot show, or nothing, which runs as the default).
+  const trustMode = form.trustTouched ? form.trustMode : origin ? origin.trustMode : form.trustMode === MCP_DEFAULT_TRUST_MODE ? undefined : form.trustMode;
   return {
     name,
     command,
     ...(args.length > 0 ? { args } : {}),
     role: form.role,
-    trustMode,
+    ...(trustMode !== undefined ? { trustMode } : {}),
     ...(env ? { env } : {}),
     ...(allowedPaths.length > 0 ? { allowedPaths } : {}),
     ...(allowedHosts.length > 0 ? { allowedHosts } : {}),
@@ -198,7 +202,7 @@ export function mergeServers(
         name,
         connected: runtime?.connected ?? false,
         role: runtime?.role ?? config?.role ?? 'general',
-        trustMode: runtime?.trustMode ?? config?.trustMode ?? 'constrained',
+        trustMode: runtime?.trustMode ?? config?.trustMode ?? MCP_DEFAULT_TRUST_MODE,
         freshness: runtime?.schemaFreshness ?? 'unknown',
         source:
           entry?.source.scope === 'project' ? 'project' : entry?.source.scope === 'global' ? 'global' : config ? 'external' : 'runtime',

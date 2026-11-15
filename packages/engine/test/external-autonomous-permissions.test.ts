@@ -104,11 +104,15 @@ function mcp(inputId = 'form') {
   const client = new McpClient({ name: 'synthetic', command: '/synthetic/server' }, {
     onElicitation: input => handler(parseElicitationParams(input.serverName, input.params, input.id), input.context),
   });
-  const access = client as unknown as { proc: unknown; negotiated: unknown; schemaCache: Map<string, unknown>; _dispatchLine(line: string): void };
+  const access = client as unknown as { proc: unknown; negotiated: unknown; _dispatchLine(line: string): void };
   access.negotiated = { era: 'modern', version: '2026-07-28', transport: 'stdio' };
-  access.schemaCache.set('register', { name: 'register', description: 'synthetic', inputSchema: { type: 'object' } });
   access.proc = { exitCode: null, stdin: { write(line: string) {
-    const message = JSON.parse(line) as Record<string, unknown>; wire.push(message);
+    const message = JSON.parse(line) as Record<string, unknown>;
+    if (message.method === 'tools/list') {
+      queueMicrotask(() => access._dispatchLine(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { tools: [{ name: 'register', description: 'synthetic', inputSchema: { type: 'object' } }] } })));
+      return;
+    }
+    wire.push(message);
     if (message.method === 'tools/call') {
       const params = message.params as Record<string, unknown>;
       const result = params.inputResponses ? { content: [], received: params.inputResponses } : {
@@ -121,20 +125,20 @@ function mcp(inputId = 'form') {
 }
 test('MCP stdio MRTR resolves exact current facts through canonical Jev and commits to original wire', async () => {
   const { client, wire } = mcp();
-  const result = await client.callTool('register', { name: 'Alice' }, operation()) as { received: unknown };
+  const result = await client.callTool('register', { name: 'Alice' }, { operation: operation() }) as { received: unknown };
   expect(result.received).toEqual({ form: { action: 'accept', content: { name: 'Alice' } } });
   expect(wire).toHaveLength(2); expect(humans).toBe(0); expect(invalidations.size).toBe(0);
 });
 test('MCP configured plan mode returns decline; no human or fabricated data', async () => {
   mode = 'plan'; const { client } = mcp();
-  const result = await client.callTool('register', { name: 'Alice' }, operation()) as { received: unknown };
+  const result = await client.callTool('register', { name: 'Alice' }, { operation: operation() }) as { received: unknown };
   expect(result.received).toEqual({ form: { action: 'decline' } }); expect(humans).toBe(0);
 });
 test('MCP missing originating authority or missing fact cancels rather than prompting', async () => {
   const { client } = mcp();
-  expect((await client.callTool('register', {}) as { received: unknown }).received).toEqual({ form: { action: 'cancel' } });
+  expect((await client.callTool('register', {}) as { received: unknown }).received).toEqual({ form: { action: 'decline' } });
   const second = mcp(); const source = operation(); source.inputFacts = [];
-  expect((await second.client.callTool('register', {}, source) as { received: unknown }).received).toEqual({ form: { action: 'cancel' } });
+  expect((await second.client.callTool('register', {}, { operation: source }) as { received: unknown }).received).toEqual({ form: { action: 'decline' } });
   expect(humans).toBe(0); expect(invalidations.size).toBe(0);
 });
 test('MCP response cannot commit after source cancellation', async () => {
@@ -188,7 +192,7 @@ function httpMcp(requestId?: string) {
 }
 test('MCP HTTP SSE carries originating POST authority and commits exact facts in original session', async () => {
   const { client, responses } = httpMcp(); await client.connect();
-  const result = await client.callTool('register', { name: 'Alice' }, operation()) as { accepted: unknown };
+  const result = await client.callTool('register', { name: 'Alice' }, { operation: operation() }) as { accepted: unknown };
   expect(result.accepted).toEqual({ action: 'accept', content: { name: 'Alice' } });
   expect(responses).toHaveLength(1); expect(responses[0]?.session).toBe('session-one'); expect(humans).toBe(0);
   await client.disconnect(); expect(invalidations.size).toBe(0);
@@ -197,7 +201,7 @@ test('MCP concurrent HTTP POST scopes never borrow each other\'s facts', async (
   const { client, responses } = httpMcp(); await client.connect();
   const alice = operation();
   const bob = { sourceOf: () => ({ goal: 'Use the supplied display name Bob', criteria: [] }), inputFacts: [{ name: 'Bob' }], assertCurrent() {} };
-  const results = await Promise.all([client.callTool('register', { name: 'Alice' }, alice), client.callTool('register', { name: 'Bob' }, bob)]);
+  const results = await Promise.all([client.callTool('register', { name: 'Alice' }, { operation: alice }), client.callTool('register', { name: 'Bob' }, { operation: bob })]);
   expect(results).toEqual([{ accepted: { action: 'accept', content: { name: 'Alice' } } }, { accepted: { action: 'accept', content: { name: 'Bob' } } }]);
   expect(responses).toHaveLength(2); expect(humans).toBe(0); await client.disconnect();
 });
@@ -215,7 +219,7 @@ test('MCP late admission cannot resume MRTR on a replaced process', async () => 
   let entered!: () => void; const started = new Promise<void>(resolve => { entered = resolve; });
   beforeAdmission = async () => { entered(); await wait; };
   const { client, access, wire } = mcp();
-  const pending = client.callTool('register', { name: 'Alice' }, operation()); const caught = pending.catch(error => error);
+  const pending = client.callTool('register', { name: 'Alice' }, { operation: operation() }); const caught = pending.catch(error => error);
   await started; access.proc = { exitCode: null, stdin: { write() { throw new Error('Never write replacement'); } } }; release();
   expect(await caught).toBeInstanceOf(Error); expect(wire).toHaveLength(1); expect(humans).toBe(0); expect(invalidations.size).toBe(0);
 });
@@ -224,7 +228,7 @@ test('MCP HTTP late admission cannot POST after session replacement', async () =
   let entered!: () => void; const started = new Promise<void>(resolve => { entered = resolve; });
   beforeAdmission = async () => { entered(); await wait; };
   const { client, responses, streams } = httpMcp(); await client.connect();
-  const pending = client.callTool('register', { name: 'Alice' }, operation()).catch(error => error);
+  const pending = client.callTool('register', { name: 'Alice' }, { operation: operation() }).catch(error => error);
   await started;
   const http = (client as unknown as { http: { captureSessionId(response: Response): void } }).http;
   http.captureSessionId(new Response(null, { headers: { 'mcp-session-id': 'session-two' } })); release();
@@ -290,28 +294,12 @@ test('ACP rejects overlapping prompts instead of assigning old permission reques
   expect(service.prompt('host', 'Completely unrelated new goal')).toEqual({ queued: false, reason: 'hosted agent already has an active prompt' });
   expect(record.operation.source.goal).toBe('Write the requested project file');
 });
-test('MCP HTTP MRTR cancellation binds session epoch even when the HTTP object is unchanged', async () => {
-  let release!: () => void; const wait = new Promise<void>(resolve => { release = resolve; });
-  let entered!: () => void; const started = new Promise<void>(resolve => { entered = resolve; });
-  beforeAdmission = async () => { entered(); await wait; };
-  const { client, access } = mcp();
-  let writes = 0; let sessionGeneration = 1;
-  const http = { get isOpen() { return true; }, get sessionGeneration() { return sessionGeneration; },
-    async request(_method: string, params: Record<string, unknown>, _headers: unknown, _operation: unknown, beforeSend?: () => void) {
-      beforeSend?.(); writes++;
-      return params.inputResponses ? { accepted: true } : { resultType: 'input_required', inputRequests: { form: { method: 'elicitation/create', params: form } }, requestState: 'state' };
-    } };
-  (client as unknown as { http: unknown }).http = http;
-  const pending = client.callTool('register', { name: 'Alice' }, operation()).catch(error => error);
-  await started; sessionGeneration = 2; release();
-  expect(await pending).toBeInstanceOf(Error); expect(writes).toBe(1); expect(invalidations.size).toBe(0);
-});
 test('MCP typed shared resolver selects an exact offered fact, never its own generated value', async () => {
   factSelection = 'revise_1';
   const source = { sourceOf: () => ({ goal: 'Use Bob, not Alice, for this registration', criteria: [] }),
     inputFacts: [{ name: 'Alice' }, { name: 'Bob' }], assertCurrent() {} };
   const { client } = mcp();
-  const result = await client.callTool('register', { name: 'Bob' }, source) as { received: unknown };
+  const result = await client.callTool('register', { name: 'Bob' }, { operation: source }) as { received: unknown };
   expect(result.received).toEqual({ form: { action: 'accept', content: { name: 'Bob' } } }); expect(humans).toBe(0);
 });
 test('MCP string length uses Unicode code points and unsupported time format fails closed', () => {
@@ -350,7 +338,7 @@ test('MCP URL-mode cannot masquerade as a form acceptance or fabricated complete
   const outcome = await handler(parseElicitationParams('synthetic', { ...form, mode: 'url', url: 'https://synthetic.invalid/login' }, 'url-1'), {
     scope: { connectionId: 'connection', destination: 'synthetic', signal: new AbortController().signal, assertCurrent() {} }, operation: operation(),
   });
-  expect(outcome).toEqual({ action: 'cancel' }); expect(reads).toBe(0); expect(humans).toBe(0);
+  expect(outcome).toEqual({ action: 'decline' }); expect(reads).toBe(0); expect(humans).toBe(0);
 });
 test('unrecorded external judgment owner is refused before any model request', async () => {
   let reads = 0;
@@ -359,7 +347,7 @@ test('unrecorded external judgment owner is refused before any model request', a
   const outcome = await handler(parseElicitationParams('synthetic', form, 'request'), {
     scope: { connectionId: 'connection', destination: 'synthetic', signal: new AbortController().signal, assertCurrent() {} }, operation: operation(),
   });
-  expect(outcome).toEqual({ action: 'cancel' }); expect(reads).toBe(0);
+  expect(outcome).toEqual({ action: 'decline' }); expect(reads).toBe(0);
 });
 test('ACP ambiguous same-kind options and MCP unbound request identifiers cannot become acceptance', async () => {
   const { client } = acp(); const input = request(); input.options.push({ optionId: 'other-allow', kind: 'allow_once' });
@@ -368,7 +356,7 @@ test('ACP ambiguous same-kind options and MCP unbound request identifiers cannot
   const outcome = await handler(parseElicitationParams('synthetic', form), {
     scope: { connectionId: 'connection', destination: 'synthetic', signal: new AbortController().signal, assertCurrent() {} }, operation: operation(),
   });
-  expect(outcome).toEqual({ action: 'cancel' });
+  expect(outcome).toEqual({ action: 'decline' });
 });
 test('MCP arbitrary server regex constraints are unsupported, never executed against host facts', () => {
   expect(elicitationContent({ type: 'object', properties: { value: { type: 'string', pattern: '(a+)+$' } } }, { value: 'aaaaaaaaaaaaaaaa!' })).toBeNull();
@@ -466,14 +454,14 @@ test('ACP captured native diff provenance stays bound without raw re-screening',
 });
 test('MCP connection UUID is validated metadata through actual MRTR wire', async () => {
   const f = mcp(); (f.client as unknown as { connectionId: string }).connectionId = PAN_SHAPED_PROTOCOL_UUID;
-  expect((await f.client.callTool('register', { name: 'Alice' }, operation()) as { received: unknown }).received)
+  expect((await f.client.callTool('register', { name: 'Alice' }, { operation: operation() }) as { received: unknown }).received)
     .toEqual({ form: { action: 'accept', content: { name: 'Alice' } } });
 });
 test('MCP multiple fact candidates use private native provenance only in binding, never semantic state', async () => {
   factSelection = 'revise_1'; const f = mcp();
   const observed: string[] = []; beforeRead = async input => { observed.push(JSON.stringify((input as unknown as { state: unknown }).state)); };
   const source = { ...operation(), sourceOf: selectedDiffSource, inputFacts: [{ name: 'Alice' }, { name: 'Bob' }] };
-  expect((await f.client.callTool('register', { name: 'Bob' }, source) as { received: unknown }).received)
+  expect((await f.client.callTool('register', { name: 'Bob' }, { operation: source }) as { received: unknown }).received)
     .toEqual({ form: { action: 'accept', content: { name: 'Bob' } } });
   expect(observed.length).toBeGreaterThan(0); expect(observed.some(state => state.includes(PAN_SHAPED_PROTOCOL_UUID))).toBe(false);
 });
@@ -527,12 +515,12 @@ for (const field of ['session', 'toolCall', 'option']) test(`ACP ${field} UUID s
 });
 test('MCP UUID request map key survives stdio MRTR and exact original response routing', async () => {
   const f = mcp(PAN_SHAPED_PROTOCOL_UUID);
-  const result = await f.client.callTool('register', { name: 'Alice' }, operation()) as { received: unknown };
+  const result = await f.client.callTool('register', { name: 'Alice' }, { operation: operation() }) as { received: unknown };
   expect(result.received).toEqual({ [PAN_SHAPED_PROTOCOL_UUID]: { action: 'accept', content: { name: 'Alice' } } }); expect(f.wire).toHaveLength(2);
 });
 test('MCP UUID requestId survives correlated HTTP SSE and final response write', async () => {
   const f = httpMcp(PAN_SHAPED_PROTOCOL_UUID); await f.client.connect();
-  try { await f.client.callTool('register', { name: 'Alice' }, operation());
+  try { await f.client.callTool('register', { name: 'Alice' }, { operation: operation() });
     expect(f.responses).toHaveLength(1); expect(f.responses[0]).toMatchObject({ id: PAN_SHAPED_PROTOCOL_UUID, result: { action: 'accept', content: { name: 'Alice' } } });
   } finally { await f.client.disconnect(); }
 });
@@ -558,7 +546,7 @@ for (const field of ['message', 'schema', 'rawParams', 'unknown']) test(`MCP UUI
     ...(field === 'unknown' ? { unknown: PAN_SHAPED_PROTOCOL_UUID } : {}),
   };
   const outcome = await createMcpAutonomousElicitationHandler(host)(input, { scope: { connectionId: 'connection', destination: '/synthetic', signal: new AbortController().signal, assertCurrent() {} }, operation: operation() });
-  expect(outcome).toEqual({ action: 'cancel' }); expect(reads).toBe(0);
+  expect(outcome).toEqual({ action: 'decline' }); expect(reads).toBe(0);
 });
 for (const secret of ['4111111111111111', 'password=synthetic-private']) test('credential/card-shaped protocol IDs are not broadly exempted', () => {
   const input = request(); input.toolCall.toolCallId = secret;

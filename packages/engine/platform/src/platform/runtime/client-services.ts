@@ -95,6 +95,7 @@ import { SessionManager } from '../sessions/manager.js';
 import { CrossSessionTaskRegistry } from '../sessions/orchestration/index.js';
 import { McpRegistry } from '../mcp/registry.js';
 import { createMcpAutonomousElicitationHandler } from '../mcp/elicitation-autonomous.js';
+import { createMcpPersonElicitation } from '../mcp/elicitation.js';
 import { WebSearchProviderRegistry, WebSearchService } from '../web-search/index.js';
 import { createConfiguredFetchDeps } from '../tools/fetch/index.js';
 import { PermissionManager } from '../permissions/manager.js';
@@ -572,7 +573,8 @@ function composeClientRuntimeServices(
   // MCP input requests use the canonical autonomous owner and current operation facts.
 
   mcpRegistry.setPermissionHost(externalPermissionHost);
-  mcpRegistry.setElicitationHandler(createMcpAutonomousElicitationHandler(externalPermissionHost));
+  // The person at this surface is asked a server question the call's own facts cannot answer.
+  mcpRegistry.setElicitationHandler(createMcpAutonomousElicitationHandler(externalPermissionHost, createMcpPersonElicitation(options.requestApproval, configManager)));
 
   const pluginManager = new PluginManager({
     pathOptions: { cwd: shellPaths.workingDirectory, homeDir: shellPaths.homeDirectory },

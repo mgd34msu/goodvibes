@@ -14,9 +14,11 @@ The response object is bound privately to its original request incarnation. The 
 
 An MCP request is untrusted evidence, not the authority to disclose facts. An admitted tool operation carries its original goal and already supplied structured facts through a process-local scope. The registry binds that scope to the exact server client and its current trust/role/quarantine lifetime.
 
-The handler considers only complete, exact fact objects matching the original supported form schema. It never fills defaults, invents values, or fabricates consent. When several exact candidates fit structurally, the existing typed autonomous resolver selects an offered candidate; a fresh canonical permission admission then judges sending that exact content to that exact server. Selection decision IDs are included in the final admission. Missing source/facts or unsupported schemas cancel; a typed rejection declines.
+The handler considers only complete, exact fact objects matching the original supported form schema. It never fills defaults, invents values, or fabricates consent. When several exact candidates fit structurally, the existing typed autonomous resolver selects an offered candidate; a fresh canonical permission admission then judges sending that exact content to that exact server. Selection decision IDs are included in the final admission. A typed rejection declines.
 
-Acceptance is not committed when the response object is constructed. Its private single-use claim is checked at the final stdio write, HTTP POST, or MRTR continuation. Connection replacement, HTTP session replacement, operation completion/cancellation, server-policy changes (including A→B→A), and runtime disposal prevent late acceptance.
+When the call's own facts cannot answer the question (no fact fits the form, the question arrived outside an attributable tool call, URL mode), the question goes to the person when one is at the surface: the terminal apps show it through their approval prompt, except in `yolo` and `plan` modes. Otherwise, and in the daemon and embedded hosts, the question is declined and added to the tool result with the server's message and requested field names, so the agent can ask the user and call the tool again with the answer in its arguments. Every resolution is logged with its reason.
+
+Acceptance is not committed when the response object is constructed. Its private single-use claim is checked at the final stdio write, HTTP POST, or MRTR continuation. Connection replacement, operation completion/cancellation, server-policy changes (including A→B→A), and runtime disposal prevent late acceptance.
 
 Supported forms are objects of primitive or array fields, with explicitly validated type/enum/const/choice, numeric, string, and array constraints. Unknown schema keywords, arbitrary regular-expression patterns, references, defaults, coercion, protected credential/card data, and unsupported formats fail closed. Validation returns the original owned content, never transformed parser output.
 
@@ -24,9 +26,9 @@ Supported forms are objects of primitive or array fields, with explicitly valida
 
 - Modern MCP MRTR, including stdio, has direct operation association through `inputRequests` in the originating tool result.
 - Legacy HTTP SSE uses the originating POST stream's operation scope, preserving concurrent request separation.
-- Legacy unsolicited stdio requests do not carry a supported parent-operation association. They cancel rather than borrow the latest turn or another tool's source. This is an explicit compatibility limit, not complete legacy-stdio autonomy.
+- Legacy unsolicited stdio requests do not carry a parent-operation association. While exactly one tool call is in flight on the connection they are attributed to it; otherwise no fact is borrowed from another call and the question goes to the person or back to the agent as above.
 - This implementation selects supplied structured facts. It does not extract arbitrary new form values from prose, execute URL-mode login flows, or invent a missing answer.
-- The separately exported deprecated human elicitation helper remains an explicitly selected compatibility adapter. Neither runtime composition installs it.
+- A server request the client cannot read is answered with JSON-RPC error `-32600` rather than left waiting.
 
 The [official transport specification](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports) associates HTTP server requests with stream membership. `relatedRequestId` in the [official SDK example](https://github.com/modelcontextprotocol/typescript-sdk/blob/main/examples/elicitation/server.ts) is a server-side routing option, not a serialized field that clients may assume exists.
 

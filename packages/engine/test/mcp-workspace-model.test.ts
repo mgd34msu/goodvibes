@@ -29,7 +29,13 @@ test('an edited field is re-parsed while untouched fields keep their saved value
 test('a hand-typed new server still parses quotes and splits lists', () => {
   const form = serverConfigToForm();
   Object.assign(form, { name: 'n', command: 'c', args: `-y "two words" 'single q'`, env: 'A=1, B=2', allowedHosts: 'x, y' });
-  expect(formToServerConfig(form)).toMatchObject({ args: ['-y', 'two words', 'single q'], env: { A: '1', B: '2' }, allowedHosts: ['x', 'y'], trustMode: 'constrained' });
+  expect(formToServerConfig(form)).toMatchObject({ args: ['-y', 'two words', 'single q'], env: { A: '1', B: '2' }, allowedHosts: ['x', 'y'] });
+});
+
+test('editing another field of a server with no trust mode leaves it running with the default', () => {
+  const form = serverConfigToForm({ name: 'docs', command: 'npx' });
+  form.args = '-y docs-server';
+  expect(formToServerConfig(form).trustMode).toBeUndefined();
 });
 
 test('a repeated confirm while a removal is pending starts only one removal', async () => {

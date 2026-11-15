@@ -96,7 +96,9 @@ export class McpSchemaFreshnessTracker {
   }
 
   /**
-   * Mark a schema fetch as failed.
+   * Mark a schema fetch as failed: a tool listing or a connect that did not
+   * succeed. An error answer to a tool call is the caller's result, not
+   * evidence about the schema, and is never recorded here.
    * Increments consecutive failure counter.
    *
    * @param serverName - Server identifier

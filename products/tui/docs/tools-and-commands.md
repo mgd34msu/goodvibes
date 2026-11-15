@@ -617,7 +617,7 @@ Project planning and the persistent `/work-plan` checklist are a related but sep
 
 Connect to any MCP-compatible server from inside the running TUI. Project-scoped servers live in `.goodvibes/mcp.json`; global servers live in `~/.config/mcp/mcp.json`. You can also edit either file directly:
 
-GoodVibes also reads MCP servers already configured for other tools, read-only: a project's `.mcp/mcp.json`, a user's `~/.mcp/mcp.json`, and Claude Desktop's `~/.config/claude/claude_desktop_config.json`. Servers found there show up alongside your GoodVibes-configured servers, but `/mcp add` and `/mcp remove` only write to the two GoodVibes-owned files above.
+GoodVibes also reads MCP servers already configured for other tools, read-only: a project's `.mcp/mcp.json`, a user's `~/.mcp/mcp.json`, and Claude Desktop's `~/.config/claude/claude_desktop_config.json`. Servers found there show up alongside your GoodVibes-configured servers, but `/mcp add` and `/mcp remove` only write to the two GoodVibes-owned files above. Those other files are never moved or rewritten: one that cannot be read, or holds no server list GoodVibes recognises, is skipped with one warning. In the GoodVibes-owned files an entry missing its name, or a command or url, is skipped with a warning and kept as written when the file is next saved. A server whose entry names no `trustMode` runs as `ask-on-risk`, and the `/mcp` workspace shows and keeps that default until you change the trust field.
 
 ```json
 {

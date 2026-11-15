@@ -8,8 +8,20 @@ import { captureOwnedJson, snapshotJudgmentInput } from '../gate/judgment-input.
 import { autonomousSourceEvidence, captureAutonomousSource, retainAutonomousSource } from '../permissions/autonomous.js';
 import { admitExternalRequest, type ExternalPermissionHost, type ExternalOperationSource, type ExternalRequestScope } from '../permissions/external-request.js';
 import { awaitPermission } from '../permissions/cancellation.js';
+import { logger } from '../utils/logger.js';
+import { summarizeError } from '../utils/error-display.js';
 import { elicitationContent } from './elicitation-schema.js';
-import type { McpElicitationHandler, McpElicitationOutcome } from './elicitation.js';
+import type { McpElicitationHandler, McpElicitationOutcome, McpElicitationRequest } from './elicitation.js';
+
+/**
+ * How a question the call's own facts cannot answer reaches a person. `ask`
+ * shows it on the attached surface; `available` says whether one is attached
+ * and the permission mode allows interrupting the person right now.
+ */
+export interface McpPersonElicitation {
+  readonly available: () => boolean;
+  readonly ask: McpElicitationHandler;
+}
 
 export interface McpElicitationContext {
   readonly scope: ExternalRequestScope;
@@ -37,10 +49,58 @@ export function discardMcpElicitation(outcome: unknown): void {
   if (commits.has(outcome)) { commits.get(outcome)!.close(); commits.delete(outcome); retired.add(outcome); }
 }
 
-export function createMcpAutonomousElicitationHandler(host: ExternalPermissionHost): McpElicitationHandler {
+const handedBack = new WeakSet<object>();
+/** A decline that hands the question back to the agent: no person could be asked. */
+function handBack(): McpElicitationOutcome {
+  const outcome: McpElicitationOutcome = Object.freeze({ action: 'decline' as const });
+  handedBack.add(outcome);
+  return outcome;
+}
+/** Whether this outcome declined because no one could be asked, so the question belongs in the tool result. */
+export function wasHandedBackToAgent(outcome: unknown): boolean {
+  return !!outcome && typeof outcome === 'object' && handedBack.has(outcome);
+}
+
+/**
+ * Resolve a server's question: from the call's own facts when they answer the
+ * form exactly; otherwise shown to the person when one is attached; otherwise
+ * declined, and the client adds the question to the tool result so the agent
+ * can ask. Every resolution is logged with its reason.
+ */
+export function createMcpAutonomousElicitationHandler(host: ExternalPermissionHost, person?: McpPersonElicitation): McpElicitationHandler {
+  const fromFacts = createFactElicitationHandler(host);
   return async (request, context) => {
-    const cancel: McpElicitationOutcome = { action: 'cancel' };
-    if (!context?.operation || !host.port.recorder) return cancel;
+    const resolved = await fromFacts(request, context);
+    if (resolved.outcome) {
+      logResolution(request, resolved.outcome.action, resolved.reason);
+      return resolved.outcome;
+    }
+    if (person?.available()) {
+      try {
+        const outcome = await person.ask(request, context);
+        logResolution(request, outcome.action, `${resolved.reason}; shown to the person, who ${outcome.action === 'accept' ? 'answered it' : 'declined it'}`);
+        return outcome;
+      } catch (error) {
+        logResolution(request, 'decline', `${resolved.reason}; asking the person failed (${summarizeError(error)}), so the question goes back to the agent in the tool result`);
+        return handBack();
+      }
+    }
+    logResolution(request, 'decline', `${resolved.reason}; no person can be asked here, so the question goes back to the agent in the tool result`);
+    return handBack();
+  };
+}
+
+function logResolution(request: McpElicitationRequest, action: McpElicitationOutcome['action'], reason: string): void {
+  logger.info('MCP server question resolved', { server: request.serverName, action, reason });
+}
+
+type FactResolution = { readonly outcome?: McpElicitationOutcome; readonly reason: string };
+
+function createFactElicitationHandler(host: ExternalPermissionHost): (request: McpElicitationRequest, context?: McpElicitationContext) => Promise<FactResolution> {
+  return async (request, context) => {
+    const unanswered = (reason: string): FactResolution => ({ reason });
+    if (!context?.operation) return unanswered('the question arrived outside a tool call the program can attribute');
+    if (!host.port.recorder) return unanswered('no decision recorder is installed to admit an answer from facts');
     const { scope, operation } = context;
     let transferred = false;
     let admission: Awaited<ReturnType<typeof admitExternalRequest>> | undefined;
@@ -54,9 +114,9 @@ export function createMcpAutonomousElicitationHandler(host: ExternalPermissionHo
       const captured = readProtocolRequest(protocolSubject);
       const owned = captured.wire as typeof request;
       const meaning = captured.meaning as typeof request;
-      if (typeof owned.requestId !== 'string' && (typeof owned.requestId !== 'number' || !Number.isFinite(owned.requestId))) return cancel;
+      if (typeof owned.requestId !== 'string' && (typeof owned.requestId !== 'number' || !Number.isFinite(owned.requestId))) return unanswered('the request has no usable id');
       const mode = owned.rawParams && typeof owned.rawParams === 'object' ? (owned.rawParams as Record<string, unknown>)['mode'] : undefined;
-      if (mode !== undefined && mode !== 'form') return cancel;
+      if (mode !== undefined && mode !== 'form') return unanswered(`the server asked in '${String(mode)}' mode, which facts cannot answer`);
       const source = captureAutonomousSource(operation.sourceOf());
       const sourceIsCurrent = retainAutonomousSource(source);
       const sourceRevision = 'captured-source';
@@ -67,9 +127,9 @@ export function createMcpAutonomousElicitationHandler(host: ExternalPermissionHo
       const unique: Record<string, unknown>[] = [];
       for (const value of candidates) {
         if (!unique.some(prior => isDeepStrictEqual(prior, value))) unique.push(value);
-        if (unique.length > 32) return cancel;
+        if (unique.length > 32) return unanswered('too many of the call\'s facts fit the form to choose between');
       }
-      if (unique.length === 0 || unique.length > 32) return cancel;
+      if (unique.length === 0) return unanswered('none of the call\'s own arguments answers the server\'s form');
       let content = unique[0]!;
       let supportingDecisionIds: readonly string[] = [];
       if (unique.length > 1) {
@@ -85,22 +145,25 @@ export function createMcpAutonomousElicitationHandler(host: ExternalPermissionHo
           conditions: [], allowAct: false, assertCurrent: current, signal }), signal);
         current();
         supportingDecisionIds = selected.decision.judgmentDecisionIds;
-        if (selected.decision.outcome !== 'revise') return { action: 'decline' };
+        if (selected.decision.outcome !== 'revise') return unanswered('the decision model found no authorized fact that answers the form');
         const index = refs.findIndex(ref => selected.decision.outcome === 'revise' && ref.id === selected.decision.next.id && ref.revision === selected.decision.next.revision);
-        if (index < 0) return cancel; content = unique[index]!;
+        if (index < 0) return unanswered('the decision model chose no offered fact'); content = unique[index]!;
       }
       current();
       admission = await admitExternalRequest(host, { ...scope, signal, assertCurrent: current }, operation, {
         tool: `mcp:${owned.serverName}:elicitation`, args: { content, destination: scope.destination }, protocolSubject, supportingDecisionIds,
       });
       current();
-      if (!admission.result.approved) return { action: 'decline' };
+      if (!admission.result.approved) return { outcome: { action: 'decline' }, reason: 'admission refused returning the matching fact to this server' };
       const outcome: McpElicitationOutcome = Object.freeze({ action: 'accept', content });
       const committed = admission;
       commits.set(outcome, { assertCurrent: current, claim() { current(); committed.claim(); unsubscribe(); }, close() { committed.close(); unsubscribe(); } });
       admission = undefined; transferred = true;
-      return outcome;
-    } catch { return cancel; }
+      return { outcome, reason: 'answered from the call\'s own arguments' };
+    } catch (error) {
+      if (signal.aborted) return { outcome: { action: 'cancel' }, reason: 'the call ended before the question was answered' };
+      return unanswered(`answering from facts failed (${summarizeError(error)})`);
+    }
     finally { admission?.close(); if (!transferred) unsubscribe(); }
   };
 }

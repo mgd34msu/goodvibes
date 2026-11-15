@@ -29,6 +29,20 @@ export interface ChannelProfileBinding {
   readonly permissionMode?: ChannelPermissionMode | undefined;
   readonly updatedAt: number;
   readonly metadata?: Readonly<Record<string, unknown>> | undefined;
+  /**
+   * Set when the stored row holds a value this build cannot use. The value is
+   * left out of every resolution (the host default applies in its place) and
+   * written back unchanged, so a newer build's row survives; `set` or `delete`
+   * on the binding clears it.
+   */
+  readonly invalid?: ChannelProfileBindingProblem | undefined;
+}
+
+/** What is wrong with one stored binding. */
+export interface ChannelProfileBindingProblem {
+  readonly field: 'permissionMode';
+  readonly value: unknown;
+  readonly reason: string;
 }
 
 /** The subset of a binding that actually enriches an originated session/spawn. */
@@ -36,6 +50,14 @@ export interface ChannelProfileDefaults {
   readonly model?: string | undefined;
   readonly provider?: string | undefined;
   readonly permissionMode?: ChannelPermissionMode | undefined;
+}
+
+export type ChannelProfileField = keyof ChannelProfileDefaults;
+
+/** The effective profile for one channel and the binding id that supplied each field. */
+export interface ChannelProfileResolution {
+  readonly profile: ChannelProfileDefaults;
+  readonly sources: Readonly<Partial<Record<ChannelProfileField, string>>>;
 }
 
 export type ChannelProfileErrorCode = 'INVALID_ARGUMENT' | 'NOT_FOUND';

@@ -114,6 +114,34 @@ describe('channels.profiles.* registry + verbs', () => {
     expect(await registry.resolve('telegram')).toBeNull();
   });
 
+  test('a channel binding that sets only a model keeps the surface-wide permission mode', async () => {
+    const registry = makeRegistry();
+    await registry.set({ surfaceKind: 'slack', permissionMode: 'plan' });
+    await registry.set({ surfaceKind: 'slack', channelId: 'C1', model: 'x' });
+    expect(await registry.resolve('slack', 'C1')).toEqual({ model: 'x', permissionMode: 'plan' });
+    expect((await registry.explain('slack', 'C1'))?.sources).toEqual({ model: 'slack:C1', permissionMode: 'slack' });
+  });
+
+  test('one stored row with an unknown mode leaves every other row usable and is listed flagged', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'channel-profiles-invalid-'));
+    try {
+      const path = join(directory, 'profiles.json');
+      await writeFile(path, JSON.stringify({ version: 1, bindings: [
+        { id: 'slack', surfaceKind: 'slack', permissionMode: 'bogus', model: 'm', updatedAt: 1 },
+        { id: 'email', surfaceKind: 'email', permissionMode: 'safe-jev', updatedAt: 1 },
+      ] }));
+      const registry = new ChannelProfileRegistry(new ChannelProfileStore(path));
+      expect(await registry.resolve('email')).toEqual({ permissionMode: 'safe-jev' });
+      expect(await registry.resolve('slack')).toEqual({ model: 'm' });
+      const flagged = (await registry.list()).find(binding => binding.id === 'slack');
+      expect(flagged?.invalid).toMatchObject({ field: 'permissionMode', value: 'bogus' });
+      // Another change writes the unknown value back as found.
+      await registry.set({ surfaceKind: 'email', permissionMode: 'plan' });
+      const reloaded = new ChannelProfileRegistry(new ChannelProfileStore(path));
+      expect((await reloaded.list()).find(binding => binding.id === 'slack')?.invalid?.value).toBe('bogus');
+    } finally { await rm(directory, { recursive: true, force: true }); }
+  });
+
   test('set upserts on the same key rather than accumulating rows', async () => {
     const registry = makeRegistry();
     await registry.set({ surfaceKind: 'slack', model: 'a' });

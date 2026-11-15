@@ -2,10 +2,11 @@
  * channel-profiles/registry.ts
  *
  * The channel→profile binding registry: CRUD over the bindings plus the one
- * operation intake depends on, resolve(surfaceKind, channelId?), which returns
- * the MOST SPECIFIC binding for an inbound message (a channel-scoped binding
- * wins over the surface-wide default), so a session originated from that channel
- * inherits the right model/permission defaults.
+ * operation intake depends on, resolve(surfaceKind, channelId?), which merges
+ * the two bindings that can apply to a channel FIELD BY FIELD: a field the
+ * channel-scoped binding sets wins, and every field it leaves unset comes from
+ * the surface-wide default. Binding one Slack channel to a model therefore
+ * keeps the permission mode the owner set for all of Slack.
  *
  * `set` is an upsert keyed on (surfaceKind, channelId?): binding the same
  * channel again replaces the previous binding rather than accumulating rows.
@@ -20,7 +21,11 @@ import {
   type ChannelPermissionMode,
   type ChannelProfileBinding,
   type ChannelProfileDefaults,
+  type ChannelProfileField,
+  type ChannelProfileResolution,
 } from './types.js';
+
+const PROFILE_FIELDS: readonly ChannelProfileField[] = ['model', 'provider', 'permissionMode'];
 
 export interface SetChannelProfileInput {
   readonly surfaceKind: string;
@@ -151,25 +156,45 @@ export class ChannelProfileRegistry {
     });
   }
 
-  /**
-   * Resolve the effective profile defaults for a channel-originated session: a
-   * channel-scoped binding (surfaceKind + channelId) wins over the surface-wide
-   * default (surfaceKind only). Returns null when no binding applies, intake
-   * then falls back to the host defaults, unchanged.
-   */
+  /** The effective profile for a channel-originated session, or null when no binding applies (host defaults stay). */
   async resolve(surfaceKind: string, channelId?: string): Promise<ChannelProfileDefaults | null> {
-    const surface = requireSurfaceKind(surfaceKind);
-    const bindings = await this.all();
-    const channel = (channelId ?? '').trim();
-    const specific = channel
-      ? bindings.find((b) => b.id === channelProfileBindingId(surface, channel))
-      : undefined;
-    const chosen = specific ?? bindings.find((b) => b.id === channelProfileBindingId(surface));
-    if (!chosen) return null;
-    return {
-      ...(chosen.model ? { model: chosen.model } : {}),
-      ...(chosen.provider ? { provider: chosen.provider } : {}),
-      ...(chosen.permissionMode ? { permissionMode: chosen.permissionMode } : {}),
-    };
+    return (await this.explain(surfaceKind, channelId))?.profile ?? null;
   }
+
+  /** The effective profile plus the binding id that supplied each field, for showing an operator why. */
+  async explain(surfaceKind: string, channelId?: string): Promise<ChannelProfileResolution | null> {
+    return resolveFrom(await this.all(), requireSurfaceKind(surfaceKind), channelId);
+  }
+
+  /**
+   * The same answer as `resolve`, synchronously, from the bindings already in
+   * memory; `undefined` when they have not been read yet. For the spawn path,
+   * which runs after intake has read them for the message that created the session.
+   */
+  resolveLoaded(surfaceKind: string, channelId?: string): ChannelProfileDefaults | null | undefined {
+    if (this.bindings === null) return undefined;
+    return resolveFrom(this.bindings, requireSurfaceKind(surfaceKind), channelId)?.profile ?? null;
+  }
+
+  /** Read the bindings now, so the first channel message after start does not wait on the file. */
+  async preload(): Promise<void> {
+    await this.all();
+  }
+}
+
+function resolveFrom(bindings: readonly ChannelProfileBinding[], surface: string, channelId?: string): ChannelProfileResolution | null {
+  const channel = (channelId ?? '').trim();
+  const specific = channel ? bindings.find((b) => b.id === channelProfileBindingId(surface, channel)) : undefined;
+  const wide = bindings.find((b) => b.id === channelProfileBindingId(surface));
+  if (!specific && !wide) return null;
+  const profile: { model?: string; provider?: string; permissionMode?: ChannelPermissionMode } = {};
+  const sources: Partial<Record<ChannelProfileField, string>> = {};
+  for (const field of PROFILE_FIELDS) {
+    const from = specific?.[field] !== undefined ? specific : wide?.[field] !== undefined ? wide : undefined;
+    if (!from) continue;
+    sources[field] = from.id;
+    if (field === 'permissionMode') profile.permissionMode = from.permissionMode!;
+    else profile[field] = from[field]!;
+  }
+  return { profile, sources };
 }

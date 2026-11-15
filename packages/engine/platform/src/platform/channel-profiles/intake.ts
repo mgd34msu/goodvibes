@@ -5,8 +5,10 @@
  * session: it resolves WHO the sender is (a named principal, via the principal
  * registry) and WHICH profile the originating channel binds (model/permission
  * defaults, via the channel-profile registry), and packages both into the two
- * things the origination path needs, session metadata (attribution) and spawn
- * overrides (model/provider) plus the permission posture.
+ * things the origination path needs: session metadata (attribution) and the
+ * permission posture. The model/provider are read from the registry again at
+ * spawn time (see `channelProfileForSession`), so a profile change reaches the
+ * next turn without a copy on every message.
  *
  * These are pure functions over the two registries so intake adopts them with a
  * single call before submitMessage/trySpawnAgent, without the SharedSessionBroker
@@ -22,17 +24,6 @@ import type { ChannelSurface } from '../channels/types.js';
 export const ATTRIBUTED_PRINCIPAL_ID_KEY = 'attributedPrincipalId';
 export const ATTRIBUTED_PRINCIPAL_NAME_KEY = 'attributedPrincipalName';
 export const ATTRIBUTED_PRINCIPAL_KNOWN_KEY = 'attributedPrincipalKnown';
-
-/**
- * Stable session-metadata keys recording the channel profile applied at intake:
- * the model/provider the originating channel binds and the permission posture.
- * Recorded on the originated session so the profile it inherited is observable
- * and the spawn path can pick the model/provider up from the session it belongs
- * to (never overriding a value the caller set explicitly).
- */
-export const CHANNEL_PROFILE_MODEL_KEY = 'channelProfileModel';
-export const CHANNEL_PROFILE_PROVIDER_KEY = 'channelProfileProvider';
-export const CHANNEL_PROFILE_PERMISSION_MODE_KEY = 'channelProfilePermissionMode';
 
 export interface InboundSender {
   /** The surface the message arrived on (e.g. 'slack'), used as the identity channel. */
@@ -107,17 +98,20 @@ export async function resolveOriginationProfile(
 
 /**
  * Merge a channel profile's model/provider into a spawn input WITHOUT overriding
- * values the caller already set explicitly, a channel default fills a gap, it
- * never overrules an intent the intake path expressed. Returns a new object.
+ * a model the caller already chose: a channel default fills a gap, it never
+ * overrules an intent the intake path expressed. Model and provider travel
+ * together: the profile's provider is applied only with the profile's model,
+ * because a provider without a model is refused by agent routing and a profile
+ * provider beside a caller's model could contradict it. Returns a new object.
  */
-export function applyChannelProfileToSpawn<T extends { model?: string; provider?: string }>(
+export function applyChannelProfileToSpawn<T extends { model?: string | undefined; provider?: string | undefined }>(
   spawnInput: T,
   defaults: ChannelProfileDefaults | null | undefined,
 ): T {
-  if (!defaults) return spawnInput;
+  if (!defaults || defaults.model === undefined || spawnInput.model !== undefined) return spawnInput;
   return {
     ...spawnInput,
-    ...(spawnInput.model === undefined && defaults.model !== undefined ? { model: defaults.model } : {}),
+    model: defaults.model,
     ...(spawnInput.provider === undefined && defaults.provider !== undefined ? { provider: defaults.provider } : {}),
   };
 }

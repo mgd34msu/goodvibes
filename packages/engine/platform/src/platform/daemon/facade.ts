@@ -1,6 +1,7 @@
 import { requestedEffortOverride } from '../providers/reasoning-effort-surface.js';
 import { completeGatewayScopePolicyBootstrap } from '../control-plane/scope-policy-bootstrap.js';
-import { withChannelExecutionMode } from '../channel-profiles/install-inbound-intake.js';
+import { channelProfileForSession, withChannelExecutionMode } from '../channel-profiles/install-inbound-intake.js';
+import { applyChannelProfileToSpawn } from '../channel-profiles/intake.js';
 import { isChannelSurfaceKind } from '../../events/surfaces.js';
 import { withTurnSurfaceId } from '../security/turn-boundary.js';
 import { runDaemonBootGuarantees } from './facade-boot-guarantees.js';
@@ -1336,14 +1337,19 @@ export class DaemonServer {
   }
   private trySpawnAgent(input: Parameters<AgentManager['spawn']>[0], logLabel = 'DaemonServer', sessionId?: string): AgentRecord | Response {
     try {
-      const spawnInput = Array.isArray((input as { tools?: readonly string[] }).tools)
+      const copied = Array.isArray((input as { tools?: readonly string[] }).tools)
         ? {
             ...input,
             tools: [...((input as { tools?: readonly string[] }).tools ?? [])],
           }
         : input;
       // Work started for a third-party channel message runs under that channel's surface authority; local sessions keep the owner's.
-      const triggerSurface = sessionId === undefined ? undefined : this.sessionBroker.getSession(sessionId)?.surfaceKinds.find(isChannelSurfaceKind);
+      const session = sessionId === undefined ? null : this.sessionBroker.getSession(sessionId);
+      const triggerSurface = session?.surfaceKinds.find(isChannelSurfaceKind);
+      // The channel's bound model fills the gap when the caller chose none.
+      const spawnInput = triggerSurface && session
+        ? applyChannelProfileToSpawn(copied, channelProfileForSession(this.sessionBroker, session))
+        : copied;
       const record = withTurnSurfaceId(triggerSurface, () => withChannelExecutionMode(this.sessionBroker, sessionId, () => this.agentManager.spawn(spawnInput)));
       this.syncSpawnedAgentTask(record, sessionId);
       // Register the agent with AgentTaskAdapter so bus events can transition its task.

@@ -4,8 +4,9 @@
  * Proves the inbound-intake enrichment is actually WIRED at the transport intake
  * chokepoint (SharedSessionBroker.submitMessage), not just that the substrate
  * exists: an inbound message from a mapped identity originates a session
- * attributed to the right principal with the channel profile applied, and an
- * unmapped sender gets the honest unknown principal (known:false), never a guess.
+ * attributed to the right principal under the channel profile's mode, an
+ * unmapped sender gets the honest unknown principal (known:false), never a
+ * guess, and a message that is not from a channel is left as it was sent.
  */
 import { describe, expect, spyOn, test } from 'bun:test';
 import { SharedSessionBroker } from '../platform/src/platform/control-plane/session-broker.ts';
@@ -19,13 +20,10 @@ import {
   ATTRIBUTED_PRINCIPAL_ID_KEY,
   ATTRIBUTED_PRINCIPAL_NAME_KEY,
   ATTRIBUTED_PRINCIPAL_KNOWN_KEY,
-  CHANNEL_PROFILE_MODEL_KEY,
-  CHANNEL_PROFILE_PROVIDER_KEY,
-  CHANNEL_PROFILE_PERMISSION_MODE_KEY,
 } from '../platform/src/platform/channel-profiles/index.ts';
 import { PrincipalRegistry, PrincipalStore, UNKNOWN_PRINCIPAL_ID } from '../platform/src/platform/principals/index.ts';
 import { trackDisposables } from './_helpers/disposables.ts';
-import { channelExecutionModeOwner, withChannelExecutionMode } from '../platform/src/platform/channel-profiles/install-inbound-intake.ts';
+import { channelExecutionModeOwner, channelProfileForSession, withChannelExecutionMode } from '../platform/src/platform/channel-profiles/install-inbound-intake.ts';
 import { currentExecutionModeOwner } from '../platform/src/platform/gate/execution-context.ts';
 import { createSessionPermissionModeGetHandler, createSessionPermissionModeSetHandler, createSessionRuntimeControls, SessionLiveTurnControlsHolder } from '../platform/src/platform/control-plane/routes/session-runtime.ts';
 
@@ -70,7 +68,7 @@ async function makeRegistries() {
 }
 
 describe('inbound-intake enrichment: pure metadata mapping', () => {
-  test('a mapped identity produces principal attribution + the applied channel profile', async () => {
+  test('a mapped identity produces principal attribution', async () => {
     const { principals, channelProfiles, averyId } = await makeRegistries();
     const metadata = await enrichInboundSubmitMetadata(
       { principals, channelProfiles },
@@ -79,9 +77,6 @@ describe('inbound-intake enrichment: pure metadata mapping', () => {
     expect(metadata[ATTRIBUTED_PRINCIPAL_ID_KEY]).toBe(averyId);
     expect(metadata[ATTRIBUTED_PRINCIPAL_NAME_KEY]).toBe('Avery');
     expect(metadata[ATTRIBUTED_PRINCIPAL_KNOWN_KEY]).toBe(true);
-    expect(metadata[CHANNEL_PROFILE_MODEL_KEY]).toBe('claude-profile-model');
-    expect(metadata[CHANNEL_PROFILE_PROVIDER_KEY]).toBe('anthropic');
-    expect(metadata[CHANNEL_PROFILE_PERMISSION_MODE_KEY]).toBe('safe-jev');
   });
 
   test('an unmapped sender is attributed to the honest unknown principal (known:false)', async () => {
@@ -92,8 +87,6 @@ describe('inbound-intake enrichment: pure metadata mapping', () => {
     );
     expect(metadata[ATTRIBUTED_PRINCIPAL_KNOWN_KEY]).toBe(false);
     expect(metadata[ATTRIBUTED_PRINCIPAL_ID_KEY]).toBe(UNKNOWN_PRINCIPAL_ID);
-    // The profile still applies, it binds to the channel, not the sender.
-    expect(metadata[CHANNEL_PROFILE_MODEL_KEY]).toBe('claude-profile-model');
   });
 
   test('caller-set metadata is preserved (enrichment augments, never rewrites)', async () => {
@@ -180,7 +173,7 @@ describe('inbound-intake enrichment: wired at the broker submitMessage seam', ()
     await broker.start();
     installInboundIntakeEnrichment(broker, { principals, channelProfiles });
     const submission = await broker.submitMessage({ surfaceKind: 'slack', surfaceId: 'T1', body: 'first' });
-    const spoofed = await broker.createSession({ metadata: { channelPermissionMode: 'yolo', [CHANNEL_PROFILE_PERMISSION_MODE_KEY]: 'yolo' } });
+    const spoofed = await broker.createSession({ metadata: { channelPermissionMode: 'yolo' } });
     await broker.stop();
     const restored = makeBroker(store);
     await restored.start();
@@ -194,7 +187,7 @@ describe('inbound-intake enrichment: wired at the broker submitMessage seam', ()
     await broker.start();
     installInboundIntakeEnrichment(broker, { principals, channelProfiles });
     const submission = await broker.submitMessage({ surfaceKind: 'slack', surfaceId: 'T1', body: 'inspect',
-      metadata: { [CHANNEL_PROFILE_PERMISSION_MODE_KEY]: 'yolo', channelPermissionMode: 'yolo' } });
+      metadata: { channelPermissionMode: 'yolo' } });
     expect(broker.getSession(submission.session.id)?.channelPermissionMode).toBe('safe-jev');
     expect(withChannelExecutionMode(broker, submission.session.id, () => currentExecutionModeOwner()?.getMode())).toBe('safe-jev');
     expect(currentExecutionModeOwner()).toBeUndefined();
@@ -213,13 +206,12 @@ describe('inbound-intake enrichment: wired at the broker submitMessage seam', ()
     await broker.start();
     installInboundIntakeEnrichment(broker, { principals, channelProfiles });
     const submission = await broker.submitMessage({ surfaceKind: 'slack', surfaceId: 'T1', body: 'inspect',
-      metadata: { [CHANNEL_PROFILE_PERMISSION_MODE_KEY]: 'yolo', channelPermissionMode: 'yolo' } });
+      metadata: { channelPermissionMode: 'yolo' } });
     expect(broker.getSession(submission.session.id)?.channelPermissionMode).toBeUndefined();
-    expect(submission.session.metadata[CHANNEL_PROFILE_PERMISSION_MODE_KEY]).toBeUndefined();
     expect(channelExecutionModeOwner(broker, submission.session.id)).toBeUndefined();
   });
 
-  test('installInboundIntakeEnrichment attributes an originated session and applies the profile', async () => {
+  test('installInboundIntakeEnrichment attributes an originated session and the spawn path reads its profile', async () => {
     const { principals, channelProfiles, averyId } = await makeRegistries();
     const broker = makeBroker();
     await broker.start();
@@ -238,9 +230,21 @@ describe('inbound-intake enrichment: wired at the broker submitMessage seam', ()
     expect(meta[ATTRIBUTED_PRINCIPAL_ID_KEY]).toBe(averyId);
     expect(meta[ATTRIBUTED_PRINCIPAL_NAME_KEY]).toBe('Avery');
     expect(meta[ATTRIBUTED_PRINCIPAL_KNOWN_KEY]).toBe(true);
-    expect(meta[CHANNEL_PROFILE_MODEL_KEY]).toBe('claude-profile-model');
-    expect(meta[CHANNEL_PROFILE_PROVIDER_KEY]).toBe('anthropic');
-    expect(meta[CHANNEL_PROFILE_PERMISSION_MODE_KEY]).toBe('safe-jev');
+    expect(channelProfileForSession(broker, submission.session)).toEqual({
+      model: 'claude-profile-model', provider: 'anthropic', permissionMode: 'safe-jev',
+    });
+  });
+
+  test('a message that is not from a channel surface is not attributed and binds no mode', async () => {
+    const { principals, channelProfiles } = await makeRegistries();
+    await channelProfiles.set({ surfaceKind: 'web', permissionMode: 'yolo' });
+    const broker = makeBroker();
+    await broker.start();
+    installInboundIntakeEnrichment(broker, { principals, channelProfiles });
+    const submission = await broker.submitMessage({ surfaceKind: 'web', surfaceId: 'surface:web', body: 'mine' });
+    expect(submission.session.metadata[ATTRIBUTED_PRINCIPAL_KNOWN_KEY]).toBeUndefined();
+    expect(broker.getSession(submission.session.id)?.channelPermissionMode).toBeUndefined();
+    expect(channelProfileForSession(broker, submission.session)).toBeNull();
   });
 
   test('an unmapped sender originates a session with the honest unknown principal', async () => {

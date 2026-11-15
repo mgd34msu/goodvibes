@@ -50,6 +50,8 @@ const UPDATE_STATUS_PROPERTIES = {
   failedCheckCount: NUMBER_SCHEMA,
   lastCheckFailure: { anyOf: [STRING_SCHEMA, { type: 'null' }] },
   pendingVersion: { anyOf: [STRING_SCHEMA, { type: 'null' }] },
+  pendingSince: { anyOf: [NUMBER_SCHEMA, { type: 'null' }] },
+  pendingBlockedBy: arraySchema(STRING_SCHEMA),
   rejectedVersion: { anyOf: [STRING_SCHEMA, { type: 'null' }] },
   // Present only while an interrupted update or rollback fences the loop.
   recoveryRequired: { type: 'boolean', enum: [true] },
@@ -57,7 +59,7 @@ const UPDATE_STATUS_PROPERTIES = {
 };
 const UPDATE_STATUS_REQUIRED = [
   'armed', 'offReason', 'currentVersion', 'releasesUrl', 'checkIntervalMs',
-  'firstCheckDelayMs', 'failedCheckCount', 'lastCheckFailure', 'pendingVersion', 'rejectedVersion',
+  'firstCheckDelayMs', 'failedCheckCount', 'lastCheckFailure', 'pendingVersion', 'pendingSince', 'pendingBlockedBy', 'rejectedVersion',
 ];
 const UPDATE_STATUS_SCHEMA = objectSchema(UPDATE_STATUS_PROPERTIES, UPDATE_STATUS_REQUIRED);
 const UPDATE_CHECK_SCHEMA = objectSchema({
@@ -69,7 +71,7 @@ export const builtinGatewayUpdateMethodDescriptors: readonly GatewayMethodDescri
   methodDescriptor({
     id: 'update.status',
     title: 'Self-Update Status',
-    description: 'Whether this daemon is keeping itself current, and, when it is not, the reason in one line. `armed` is false whenever no loop is running and `offReason` says which gate stopped it: update.auto not set, no artifact identity (a host that manages its own updates), or no release URL to resolve tags from. `failedCheckCount` with `lastCheckFailure` is the case that used to be invisible: checks running on schedule and failing every time, which looks exactly like having nothing to update to. `pendingVersion` is a release already downloaded and verified, waiting for a moment when no work is in flight. `rejectedVersion` is a release that was installed here, failed to start, and was rolled back, it is deliberately not reinstalled. `recoveryRequired` (true) and `transactionRecovery` appear only while an interrupted update or rollback fences the loop: `transactionRecovery.recoveryPaths` lists the retained files to inspect, `recoveryErrors` what went wrong, and the loop stays off until they are dealt with.',
+    description: 'Whether this daemon is keeping itself current, and, when it is not, the reason in one line. `armed` is false whenever no loop is running and `offReason` says which gate stopped it: update.auto not set, no artifact identity (a host that manages its own updates), or no release URL to resolve tags from. `failedCheckCount` with `lastCheckFailure` is the case that used to be invisible: checks running on schedule and failing every time, which looks exactly like having nothing to update to. `pendingVersion` is a release already downloaded and verified, waiting for a moment when no work is in flight; `pendingSince` says since when a release has waited and `pendingBlockedBy` names the fleet ids of the work it waits behind (the owner is told once after 24 hours). `rejectedVersion` is a release that was installed here, failed to start, and was rolled back, it is deliberately not reinstalled. `recoveryRequired` (true) and `transactionRecovery` appear only while an interrupted update or rollback fences the loop: `transactionRecovery.recoveryPaths` lists the retained files to inspect, `recoveryErrors` what went wrong, and the loop stays off until they are dealt with.',
     category: 'control-plane',
     scopes: ['read:control-plane'],
     transport: ['ws'],

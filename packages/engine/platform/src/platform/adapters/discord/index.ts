@@ -4,7 +4,7 @@ import { DiscordIntegration, DiscordInteractionResponseType, DiscordInteractionT
 import type { SurfaceAdapterContext } from '../types.js';
 import { summarizeError } from '../../utils/error-display.js';
 import { resolveSurfaceSecret } from '../../channels/builtin/surface-secrets.js';
-import { policyReplyText, readTextBodyWithinLimit } from '../helpers.js';
+import { ingressAnswer, readTextBodyWithinLimit } from '../helpers.js';
 import { answerSurfaceControl, gateAnswerText, runSurfaceMessage, submitSurfaceMessage, surfaceOutcomeResponse } from '../surface-message.js';
 
 /** Discord message flag: only the user who ran the command sees the reply. */
@@ -101,12 +101,14 @@ async function dispatchDiscordInteraction(
       },
     });
     if (!policy.allowed) {
-      // Discord shows an interaction reply only when it arrives with 200; no work
-      // was started, so the claim on this interaction is given back.
+      // Discord shows an interaction reply only when it arrives with 200. A refusal
+      // started no work, so the claim on this interaction is given back; a consumed
+      // answer keeps it, so a repeat is never read as a second answer.
+      if (policy.consumed) committed();
       finished();
       return Response.json({
         type: DiscordInteractionResponseType.ChannelMessageWithSource,
-        data: { content: policyReplyText(policy.reason), flags: EPHEMERAL_MESSAGE_FLAG },
+        data: { content: ingressAnswer(policy).text, flags: EPHEMERAL_MESSAGE_FLAG },
       });
     }
 
@@ -229,7 +231,7 @@ async function dispatchDiscordInteraction(
       if (!policy.allowed) {
         return Response.json({
           type: DiscordInteractionResponseType.ChannelMessageWithSource,
-          data: { content: `Blocked by channel policy: ${policy.reason}`, flags: EPHEMERAL_MESSAGE_FLAG },
+          data: { content: ingressAnswer(policy).text, flags: EPHEMERAL_MESSAGE_FLAG },
         });
       }
       const message = await context.performInteractiveSurfaceAction(customId, 'discord', req, interaction.userId);

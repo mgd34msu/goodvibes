@@ -7,6 +7,16 @@ import { sendWebSocketMessage, WEBSOCKET_CHUNK_CHARS } from '@goodvibes-jev/engi
 /** A client that stops reading must not grow the spill file without bound. */
 const DEFAULT_MAX_PENDING_BYTES = 64 * 1024 * 1024;
 
+/**
+ * Bytes written to one spill file before new records go to a fresh one. A
+ * file is removed once its last record is sent, so a client that keeps up
+ * slowly for a whole session holds at most the undelivered bytes plus one
+ * file's worth on disk, not the size of the stream.
+ */
+const SPILL_FILE_BYTES = 8 * 1024 * 1024;
+
+interface SpillFile { readonly fd: number; readonly path: string; written: number; pending: number }
+
 /** One queued event that a connected client does not take within this long means it has stopped reading. */
 const DEFAULT_STALL_TIMEOUT_MS = 2 * 60 * 1000;
 
@@ -62,9 +72,10 @@ export function sweepStaleWebSocketOutboxes(
 export class WebSocketOutbox {
   private readonly lifetime = new AbortController();
   private directory: string | undefined;
-  private fd: number | undefined;
-  private offset = 0;
-  private readonly records: { offset: number; length: number }[] = [];
+  /** In write order; the last one takes new records. */
+  private readonly files: SpillFile[] = [];
+  private fileCount = 0;
+  private readonly records: { file: SpillFile; offset: number; length: number }[] = [];
   private running = false;
   private pendingBytes = 0;
   constructor(
@@ -100,16 +111,29 @@ export class WebSocketOutbox {
     this.socket.close?.(code, reason);
   }
   private enqueue(bytes: Buffer): void {
-    if (this.fd === undefined) {
-      this.directory = mkdtempSync(join(tmpdir(), `${OUTBOX_DIRECTORY_PREFIX}${process.pid}-`));
-      this.fd = openSync(join(this.directory, 'outbox'), constants.O_CREAT | constants.O_EXCL | constants.O_RDWR | constants.O_NOFOLLOW, 0o600);
+    this.directory ??= mkdtempSync(join(tmpdir(), `${OUTBOX_DIRECTORY_PREFIX}${process.pid}-`));
+    let file = this.files.at(-1);
+    if (file === undefined || file.written >= SPILL_FILE_BYTES) {
+      const path = join(this.directory, `outbox-${this.fileCount++}`);
+      file = { fd: openSync(path, constants.O_CREAT | constants.O_EXCL | constants.O_RDWR | constants.O_NOFOLLOW, 0o600), path, written: 0, pending: 0 };
+      this.files.push(file);
     }
-    const offset = this.offset;
+    const offset = file.written;
     let written = 0;
-    while (written < bytes.length) written += writeSync(this.fd, bytes, written, bytes.length - written, offset + written);
-    this.offset += bytes.length;
-    this.records.push({ offset, length: bytes.length });
+    while (written < bytes.length) written += writeSync(file.fd, bytes, written, bytes.length - written, offset + written);
+    file.written += bytes.length;
+    file.pending += 1;
+    this.records.push({ file, offset, length: bytes.length });
     this.pendingBytes += bytes.length;
+  }
+
+  /** A spill file whose records have all been taken, and that takes no new ones, is closed and removed. */
+  private release(file: SpillFile): void {
+    file.pending -= 1;
+    if (file.pending > 0 || file === this.files.at(-1)) return;
+    this.files.splice(this.files.indexOf(file), 1);
+    closeSync(file.fd);
+    rmSync(file.path, { force: true });
   }
   private async drain(): Promise<void> {
     this.running = true;
@@ -121,10 +145,11 @@ export class WebSocketOutbox {
         const bytes = Buffer.alloc(record.length);
         let read = 0;
         while (read < bytes.length) {
-          const n = readSync(this.fd!, bytes, read, bytes.length - read, record.offset + read);
+          const n = readSync(record.file.fd, bytes, read, bytes.length - read, record.offset + read);
           if (!n) throw new Error('Incomplete WebSocket outbox');
           read += n;
         }
+        this.release(record.file);
         stall = AbortSignal.timeout(this.stallTimeoutMs);
         await sendWebSocketMessage(this.socket, bytes.toString('utf8'), AbortSignal.any([this.lifetime.signal, stall]));
       }
@@ -148,8 +173,7 @@ export class WebSocketOutbox {
     this.lifetime.abort(); this.records.length = 0; this.pendingBytes = 0; this.cleanup();
   }
   private cleanup(): void {
-    if (this.fd !== undefined) { closeSync(this.fd); this.fd = undefined; }
+    for (const file of this.files.splice(0)) closeSync(file.fd);
     if (this.directory !== undefined) { rmSync(this.directory, { recursive: true, force: true }); this.directory = undefined; }
-    this.offset = 0;
   }
 }

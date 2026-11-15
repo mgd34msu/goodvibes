@@ -1,13 +1,8 @@
+import { randomUUID } from 'node:crypto';
 import type { RuntimeEventBus } from '../runtime/events/index.js';
-import {
-  emitTransportConnected,
-  emitTransportDisconnected,
-  emitTransportInitializing,
-  emitTransportTerminalFailure,
-  type EmitterContext,
-} from '../runtime/emitters/index.js';
+import type { EmitterContext } from '../runtime/emitters/index.js';
+import { announceTransport, type TransportAnnouncement } from '../runtime/emitters/transport-announce.js';
 import type { HookDispatcher } from '../hooks/index.js';
-import type { HookCategory, HookEventPath, HookPhase } from '../hooks/types.js';
 import type { ResolvedInboundTlsContext } from '../runtime/network/index.js';
 import { summarizeError } from '../utils/error-display.js';
 import { logger } from '../utils/logger.js';
@@ -20,11 +15,22 @@ interface DaemonTransportEventsContext {
   readonly tlsState: () => ResolvedInboundTlsContext | null;
 }
 
+/**
+ * The daemon listener's transport lifecycle. Its id is fixed for the life of
+ * the daemon server, so a rebind to another host or port continues the same
+ * transport (the endpoint it reached is in the `connected` payload), and a
+ * connection after a failure or stop opens a new lifecycle with
+ * `initializing` first, so every `connected` has a start and an end.
+ */
 export class DaemonTransportEventsHelper {
+  private readonly id = `daemon:http:${randomUUID().slice(0, 8)}`;
+  /** Between `initializing` and the next `disconnected` or `failed`. */
+  private open = false;
+
   constructor(private readonly context: DaemonTransportEventsContext) {}
 
   transportId(): string {
-    return `daemon:http:${this.context.host}:${this.context.port}`;
+    return this.id;
   }
 
   transportScheme(): 'http' | 'https' {
@@ -38,78 +44,37 @@ export class DaemonTransportEventsHelper {
   emitterContext(): EmitterContext {
     return {
       sessionId: 'daemon-server',
-      traceId: `daemon-server:${this.context.host}:${this.context.port}`,
+      traceId: `daemon-server:${this.id}`,
       source: 'daemon-server',
     };
   }
 
   emitTransportInitializing(): void {
-    if (!this.context.runtimeBus) return;
-    emitTransportInitializing(this.context.runtimeBus, this.emitterContext(), {
-      transportId: this.transportId(),
-      protocol: 'http-daemon',
-    });
-    void this.fireTransportHook('initializing', {
-      transportId: this.transportId(),
-      protocol: 'http-daemon',
-    });
+    this.open = true;
+    this.announce({ step: 'initializing', payload: { transportId: this.id, protocol: 'http-daemon' } });
   }
 
   emitTransportConnected(): void {
-    if (!this.context.runtimeBus) return;
-    emitTransportConnected(this.context.runtimeBus, this.emitterContext(), {
-      transportId: this.transportId(),
-      endpoint: this.transportEndpoint(),
-    });
-    void this.fireTransportHook('connected', {
-      transportId: this.transportId(),
-      endpoint: this.transportEndpoint(),
-    });
+    if (!this.open) this.emitTransportInitializing();
+    this.announce({ step: 'connected', payload: { transportId: this.id, endpoint: this.transportEndpoint() } });
   }
 
   emitTransportDisconnected(reason: string, willRetry: boolean): void {
-    if (!this.context.runtimeBus) return;
-    emitTransportDisconnected(this.context.runtimeBus, this.emitterContext(), {
-      transportId: this.transportId(),
-      reason,
-      willRetry,
-    });
-    void this.fireTransportHook('disconnected', {
-      transportId: this.transportId(),
-      reason,
-      willRetry,
-    });
+    if (!this.open) return;
+    this.open = false;
+    this.announce({ step: 'disconnected', payload: { transportId: this.id, reason, willRetry } });
   }
 
   emitTransportTerminalFailure(error: string): void {
-    if (!this.context.runtimeBus) return;
-    emitTransportTerminalFailure(this.context.runtimeBus, this.emitterContext(), {
-      transportId: this.transportId(),
-      error,
-    });
-    void this.fireTransportHook('failed', {
-      transportId: this.transportId(),
-      error,
-    });
+    // A failed bind after a failure or stop is a lifecycle of its own: started, then failed.
+    if (!this.open) this.emitTransportInitializing();
+    this.open = false;
+    this.announce({ step: 'failed', payload: { transportId: this.id, error } });
   }
 
-  async fireTransportHook(specific: string, payload: Record<string, unknown>): Promise<void> {
-    if (!this.context.hookDispatcher) return;
-    try {
-      await this.context.hookDispatcher.fire({
-        path: `Lifecycle:transport:${specific}` as HookEventPath,
-        phase: 'Lifecycle' as HookPhase,
-        category: 'transport' as HookCategory,
-        specific,
-        sessionId: 'daemon-server',
-        timestamp: Date.now(),
-        payload,
-      });
-    } catch (error) {
-      logger.warn('[daemon-transport] lifecycle hook failed', {
-        specific,
-        error: summarizeError(error),
-      });
-    }
+  private announce(announcement: TransportAnnouncement): void {
+    announceTransport(this.context.runtimeBus, this.context.hookDispatcher, this.emitterContext(), announcement, (step, error) => {
+      logger.warn('[daemon-transport] lifecycle hook failed', { specific: step, error: summarizeError(error) });
+    });
   }
 }

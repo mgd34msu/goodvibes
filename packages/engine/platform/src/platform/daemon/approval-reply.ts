@@ -2,18 +2,21 @@
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
 import { LIMITS, toJson, type Selection } from '@goodvibes-jev/judgment';
 import type { ChannelIngressPolicyInput, ChannelPolicyDecision, RouteBindingManager } from '../channels/index.js';
+import { isChannelOwner } from '../channels/policy-manager.js';
 import type { ApprovalBroker, SharedApprovalRecord } from '../control-plane/approval-broker.js';
 import type { SharedSessionBroker } from '../control-plane/session-broker.js';
 import { logger } from '../utils/logger.js';
 import { assertJudgmentInput, snapshotJudgmentInput } from '../gate/judgment-input.js';
-import { channelApprovalReply, channelApprovalTarget } from './batteries/approval-reply.js';
+import { channelApprovalTarget } from './batteries/approval-reply.js';
 import { isClassicOperation } from '../runtime/decision-policy.js';
+import { readInboundMessage, type InboundReading } from './inbound-reading.js';
 
 export type ApprovalReplyBroker = Pick<ApprovalBroker, 'listApprovals' | 'resolveApproval'>;
 
 const SITE = 'daemon.approval-reply';
 const isPending = (record: SharedApprovalRecord): boolean => record.status === 'pending' || record.status === 'claimed';
-function proposalFor(record: SharedApprovalRecord) {
+/** What the owner's reply is read against: the ask's id, tool, summary and arguments. */
+export function approvalProposal(record: SharedApprovalRecord) {
   const proposal = {
     approvalId: record.id,
     tool: record.request.tool,
@@ -46,40 +49,60 @@ export function approvalDeliveryRouteId(
   return record.routeId ?? (record.sessionId ? sessions?.getSession(record.sessionId)?.routeIds[0] : undefined);
 }
 
+interface ApprovalReplyDeps {
+  readonly approvalBroker?: ApprovalReplyBroker | undefined;
+  readonly routeBindings: Pick<RouteBindingManager, 'getBinding'>;
+  readonly sessions?: Pick<SharedSessionBroker, 'getSession'> | undefined;
+}
+
 /**
- * Only an authorized owner can answer, and only an ask that was delivered to
- * the conversation the reply arrived in (same surface, channel and thread).
- * An ask raised elsewhere is answered where it was shown, and a message in a
- * conversation that holds no ask costs no decision request. With several
- * asks in one conversation the selector must identify exactly one before the
- * reply is read against it. Unclear or unsettled readings consume nothing;
- * unavailable judgment throws and leaves every ask waiting.
+ * The asks a reply may answer, decided in code before anything is read: the
+ * sender is the channel's owner (`isChannelOwner`; an allowlisted guest cannot
+ * approve tool use), and the ask was delivered to the conversation the reply
+ * arrived in (same surface, channel and thread). Empty when there is none.
  */
-export async function tryResolveApprovalReplyFromChannel(
+export function approvalReplyCandidates(
   input: ChannelIngressPolicyInput,
   decision: ChannelPolicyDecision,
-  deps: {
-    readonly approvalBroker?: ApprovalReplyBroker | undefined;
-    readonly routeBindings: Pick<RouteBindingManager, 'getBinding'>;
-    readonly sessions?: Pick<SharedSessionBroker, 'getSession'> | undefined;
-  },
-): Promise<boolean> {
+  deps: ApprovalReplyDeps,
+): readonly SharedApprovalRecord[] {
   const broker = deps.approvalBroker;
   const { userId, surface, text } = input;
-  if (!broker || !decision.allowed || !userId || !text?.trim()) return false;
-  const owners = decision.matchedGroupPolicy?.allowlistUserIds ?? decision.policy.allowlistUserIds;
-  if (owners.length === 0 || !owners.includes(userId)) return false;
-
+  if (!broker || !decision.allowed || !userId || !text?.trim()) return [];
+  if (!isChannelOwner(decision, userId)) return [];
   // Inspect all pending records: truncating newest-first can hide ambiguity.
-  const candidates = broker.listApprovals(Number.MAX_SAFE_INTEGER).filter((record) => {
+  return broker.listApprovals(Number.MAX_SAFE_INTEGER).filter((record) => {
     if (!isPending(record)) return false;
     const routeId = approvalDeliveryRouteId(record, deps.sessions);
     const binding = routeId ? deps.routeBindings.getBinding(routeId) : undefined;
     return binding !== undefined && binding.surfaceKind === surface
       && (binding.channelId ?? binding.externalId) === input.channelId && binding.threadId === input.threadId;
   });
+}
+
+/**
+ * Only the channel's owner can answer, and only an ask that was delivered to
+ * the conversation the reply arrived in. An ask raised elsewhere is answered
+ * where it was shown, and a message in a conversation that holds no ask costs
+ * no decision request. With one ask the reply is read with the message's
+ * other questions (or alone, when no reading is handed in); with several the
+ * selector must identify exactly one first. Unclear, unsure or missing
+ * readings consume nothing: the message goes on as conversation and every ask
+ * keeps waiting.
+ */
+export async function tryResolveApprovalReplyFromChannel(
+  input: ChannelIngressPolicyInput,
+  decision: ChannelPolicyDecision,
+  deps: ApprovalReplyDeps & {
+    /** The single candidate's answer from the message's one inbound reading, when ingress asked it. */
+    readonly reading?: { readonly approvalId: string; readonly answer: InboundReading['approval'] } | undefined;
+  },
+): Promise<boolean> {
+  const broker = deps.approvalBroker;
+  const { userId, surface, text } = input;
+  const candidates = approvalReplyCandidates(input, decision, deps);
   // A selector has one additional option for none. Never truncate candidates.
-  if (candidates.length === 0 || candidates.length >= LIMITS.maxChoiceOptions) return false;
+  if (!broker || !userId || !text || candidates.length === 0 || candidates.length >= LIMITS.maxChoiceOptions) return false;
   if (isClassicOperation()) {
     const command = /^\/(approve|deny)\s+(\S+)$/u.exec(text.trim());
     const action = command?.[1], id = command?.[2];
@@ -94,13 +117,13 @@ export async function tryResolveApprovalReplyFromChannel(
   // Keep this safe snapshot across the asynchronous selection/reply steps.
   assertJudgmentInput(text);
   const offers = candidates.map((record) => ({
-    id: record.id, content: proposalFor(record), source: sourceKey(record, deps.routeBindings),
+    id: record.id, content: approvalProposal(record), source: sourceKey(record, deps.routeBindings),
   }));
-  const port = judgmentPort(SITE);
   let target = offers[0]!;
   let selection: Selection | undefined;
   if (candidates.length > 1) {
-    selection = await channelApprovalTarget.select(port, { reply: text }, offers, { site: SITE });
+    // Several asks in one conversation: which one is answered is its own request, before the reply is read.
+    selection = await channelApprovalTarget.select(judgmentPort(SITE), { reply: text }, offers, { site: SITE });
     const chosen = offers.find((offer) => offer.id === selection?.chosen);
     // All fits must be settled and exactly one must fit. Conflicting fits are
     // ambiguity even when the relative pick itself looks confident.
@@ -114,22 +137,19 @@ export async function tryResolveApprovalReplyFromChannel(
     selection.recordAction(`selected approval ${target.id}; awaiting reply reading`);
   }
 
-  const reply = await channelApprovalReply.read(port, target.content, text, { site: SITE });
-  if (reply.reading.outcome !== 'act' || reply.reading.choice === 'unclear') {
-    const action = `no resolution: reply ${reply.reading.choice} (${reply.reading.outcome})`;
-    reply.recordAction(action);
-    selection?.recordAction(action);
+  const answer = deps.reading?.approvalId === target.id
+    ? deps.reading.answer
+    : (await readInboundMessage({ message: text, approval: target.content })).approval;
+  if (answer === undefined || answer === 'unsure' || answer === 'unclear') {
+    selection?.recordAction(`no resolution: reply ${answer ?? 'unread'}`);
     return false;
   }
-  const approved = reply.reading.choice === 'approve';
-  // Record the decision before its side effect. A recording failure cannot
-  // authorize an action without the underlying reading in the decision log.
-  const action = `resolve approval ${target.id}: ${reply.reading.choice}`;
-  reply.recordAction(action);
+  const approved = answer === 'approve';
+  const action = `resolve approval ${target.id}: ${answer}`;
   selection?.recordAction(action);
   const settled = await broker.resolveApproval(target.id, {
     approved,
-    disposition: approved ? 'approved' : reply.reading.choice === 'amend' ? 'amended' : 'denied',
+    disposition: approved ? 'approved' : answer === 'amend' ? 'amended' : 'denied',
     actor: userId,
     actorSurface: surface,
     // Preserve ALL owner guidance without guessing where a verb ends. Amend
@@ -143,9 +163,7 @@ export async function tryResolveApprovalReplyFromChannel(
   // returns that record, which this reply did not decide, and the message
   // goes on as ordinary chat.
   if (!settled || settled.status !== (approved ? 'approved' : 'denied')) {
-    const outcome = `no resolution: approval ${target.id} was already ${settled?.status ?? 'unavailable'}`;
-    reply.recordAction(outcome);
-    selection?.recordAction(outcome);
+    selection?.recordAction(`no resolution: approval ${target.id} was already ${settled?.status ?? 'unavailable'}`);
     logger.info('Channel reply did not resolve the approval', { surface, userId, approvalId: target.id, status: settled?.status ?? null });
     return false;
   }
@@ -154,8 +172,7 @@ export async function tryResolveApprovalReplyFromChannel(
     userId,
     approvalId: target.id,
     approved,
-    reading: reply.reading.choice,
-    replyDecisionId: reply.decisionId,
+    reading: answer,
     targetDecisionId: selection?.decisionId,
   });
   return true;

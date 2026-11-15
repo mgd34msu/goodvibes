@@ -17,7 +17,7 @@ import { flushActivityLogSync, logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 import type { ConfigManager } from '../config/manager.js';
 import { DEFAULT_CONFIG } from '../config/schema.js';
-import type { PlatformServiceManager } from './service-manager.js';
+import { detectPlatform, type PlatformServiceManager } from './service-manager.js';
 import { DaemonAutoUpdater, type AutoUpdateServiceActions } from './auto-updater.js';
 import { prepareHandoverBeforeStop, prepareServiceHandover, ServiceHandoverPreflightError, type PreparedServiceHandover } from './service-handover-preflight.js';
 import { reserveLaunchdHandover } from './launchd-handover.js';
@@ -738,7 +738,6 @@ export class DaemonLifecycleRuntime {
     const abort = inheritedAbort ?? new AbortController();
     this.rollbackAbort = abort;
     try {
-      prepared?.assertCurrent();
       // A manager-owned reservation reports through its own admission owner,
       // whose failure fails startup; only the unreserved handover exits here.
       const exitWhenIncomplete = () => { if (!inheritedAbort && !abort.signal.aborted) this.exitAfterIncompleteHandover('rollback'); };
@@ -1034,6 +1033,8 @@ export class DaemonLifecycleRuntime {
         failedCheckCount: this.rollbackRecovery ? 1 : 0,
         lastCheckFailure: this.rollbackRecovery ? this.updateLoopOffReason : null,
         pendingVersion: null,
+        pendingSince: null,
+        pendingBlockedBy: [],
         rejectedVersion,
         ...(this.rollbackRecovery ? { recoveryRequired: true, transactionRecovery: {
           ...this.rollbackRecovery,
@@ -1056,6 +1057,8 @@ export class DaemonLifecycleRuntime {
       failedCheckCount: snapshot.failedCheckCount,
       lastCheckFailure: snapshot.lastCheckFailure,
       pendingVersion: snapshot.pendingVersion,
+      pendingSince: snapshot.pendingSince ?? null,
+      pendingBlockedBy: [...(snapshot.pendingBlockedBy ?? [])],
       rejectedVersion,
       ...(snapshot.recoveryRequired ? { recoveryRequired: true, transactionRecovery: snapshot.transactionRecovery ?? null } : {}),
     };
@@ -1088,6 +1091,17 @@ export class DaemonLifecycleRuntime {
     const platform = this.options.servicePlatform ?? process.platform;
     const configuredTimeout = this.options.serviceCommandTimeoutMs ?? 10_000;
     const timeoutMs = Number.isFinite(configuredTimeout) ? Math.max(1, Math.min(60_000, configuredTimeout)) : 10_000;
+    // One service-manager reading serves every check made in the same
+    // synchronous step (supervision and support at creation, the comparison
+    // before the stop, the one before the request), so a step costs one query.
+    let stepStatus: ReturnType<PlatformServiceManager['status']> | undefined;
+    const readStatus = (): ReturnType<PlatformServiceManager['status']> => {
+      if (stepStatus) return stepStatus;
+      const status = this.options.platformServiceManager.status();
+      stepStatus = status;
+      queueMicrotask(() => { stepStatus = undefined; });
+      return status;
+    };
     const command = async (argv: readonly string[], actionSignal?: AbortSignal): Promise<ServiceHandoverOutcome> => {
       assertCurrent?.();
       const outcome: ServiceHandoverOutcome = this.hasTransactionRecovery()
@@ -1104,16 +1118,11 @@ export class DaemonLifecycleRuntime {
       // No supported enqueue path means no unit should be installed either.
       if (platform !== 'linux') return { status: 'unsupported', detail: 'service adoption is only supported on systemd' };
       if (actionSignal?.aborted || this.hasTransactionRecovery()) return { status: 'unknown', detail: 'handover cancelled or filesystem recovery required' };
+      // The manager is systemd: the preflight that admitted this handover established it.
       try {
-        assertCurrent?.();
-        const status = this.options.platformServiceManager.status();
-        assertCurrent?.();
-        if (status.platform && status.platform !== 'systemd') return { status: 'unsupported', detail: `service adoption is unsupported for ${status.platform}` };
-      } catch (error) {
-        return { status: 'failed', detail: `service unit install failed: ${summarizeError(error)}` };
-      }
-      try {
-        const installed = this.options.platformServiceManager.install();
+        // Asynchronous, so the install's manager commands never hold the runtime that still serves.
+        const manager = this.options.platformServiceManager;
+        const installed = typeof manager.requestFromDaemon === 'function' ? await manager.requestFromDaemon('install') : manager.install();
         assertCurrent?.();
         if (installed.installed === false) return { status: 'failed', detail: 'service unit installation was not confirmed' };
         if (installed.actionError) return { status: 'failed', detail: installed.actionError };
@@ -1136,7 +1145,7 @@ export class DaemonLifecycleRuntime {
           detail: 'Unattended service handover is unavailable on this platform.' };
         try {
           assertCurrent?.();
-          const status = this.options.platformServiceManager.status();
+          const status = readStatus();
           assertCurrent?.();
           if (status.platform !== (platform === 'darwin' ? 'launchd' : 'systemd')) return { supported: false,
             detail: platform === 'darwin' ? 'Unattended service handover requires the launchd service manager.' : 'Unattended service handover requires the systemd service manager.' };
@@ -1153,7 +1162,7 @@ export class DaemonLifecycleRuntime {
             detail: 'Unattended launchd handover requires this process to own its selected loaded service.' };
           selectedService ??= { name, path: status.path, pid: status.pid, contents: status.contents };
           serviceName = selectedService.name;
-          return { supported: true };
+          return { supported: true, supervised: status.installed && status.running };
         } catch { return { supported: false, detail: 'The selected service manager could not be confirmed for unattended handover.' }; }
       },
       ...(platform === 'darwin' ? { reserve: async (supervised: boolean, actionSignal: AbortSignal) => {
@@ -1180,7 +1189,7 @@ export class DaemonLifecycleRuntime {
       } } : {}),
       isSupervised: () => {
         try {
-          const status = this.options.platformServiceManager.status();
+          const status = readStatus();
           return status.installed && status.running;
         } catch {
           return false;
@@ -1197,23 +1206,15 @@ export class DaemonLifecycleRuntime {
       },
       restartService: async (actionSignal = signal) => {
         if (actionSignal?.aborted || this.hasTransactionRecovery()) return { status: 'unknown', detail: 'handover cancelled or filesystem recovery required' };
+        // The manager on this platform is settled by detectPlatform; a manager
+        // that is not there refuses the command, and its own words are the detail.
         if (platform === 'linux') {
-          try {
-            const manager = this.options.platformServiceManager.status().platform;
-            if (manager && manager !== 'systemd') return { status: 'unsupported', detail: `service restart is unsupported for ${manager}` };
-          } catch (error) {
-            return { status: 'unknown', detail: `could not verify systemd supervision: ${summarizeError(error)}` };
+          if (detectPlatform(String(this.options.configManager.get('service.platform')), platform) !== 'systemd') {
+            return { status: 'unsupported', detail: 'service restart needs the systemd service manager (service.platform)' };
           }
           return command(['systemctl', '--user', '--no-block', 'restart', `${serviceName}.service`], actionSignal);
         }
         if (platform !== 'darwin') return { status: 'unsupported', detail: 'no supported service restart handover' };
-        try {
-          if (this.options.platformServiceManager.status().platform !== 'launchd') {
-            return { status: 'unsupported', detail: 'restart-by-exit requires launchd supervision' };
-          }
-        } catch (error) {
-          return { status: 'unknown', detail: `could not verify launchd supervision: ${summarizeError(error)}` };
-        }
         // Being listed by launchd does not acknowledge a replacement job.
         // Desired restartOnFailure and the plist on disk do not establish the
         // policy loaded by launchd; KeepAlive may be disabled or stale. Until
@@ -1265,16 +1266,12 @@ export class DaemonLifecycleRuntime {
       logger.info('DaemonServer: source/dev run, skipping boot promotion (only a compiled binary self-promotes)');
       return;
     }
-    let status: { installed: boolean; running: boolean };
-    try {
-      status = this.options.platformServiceManager.status();
-    } catch {
-      return; // no service manager on this platform, nothing to promote into
-    }
-    if (status.installed && status.running) return; // already supervised
     if (this.promotionAttempted || this.promotionTask || this.promotionTimer || this.stopping) return;
+    const actions = this.buildServiceActions(undefined, this.assertArtifactCurrent);
+    // The same reading the handover below is created from (one query for both).
+    if (actions.isSupervised()) return; // already supervised
     let prepared: PreparedServiceHandover | undefined;
-    try { prepared = prepareServiceHandover(this.buildServiceActions(undefined, this.assertArtifactCurrent)); }
+    try { prepared = prepareServiceHandover(actions); }
     catch {
       logger.warn('DaemonServer: boot promotion requires a confirmed systemd handover; the current runtime was left running');
       return;
@@ -1292,9 +1289,9 @@ export class DaemonLifecycleRuntime {
         try {
           if (abort.signal.aborted) return;
           this.assertArtifactCurrent?.();
-          prepared?.assertCurrent();
           // The unit install and manager reload happen while the runtime still
           // serves; a refusal here leaves a working daemon, not a stopped one.
+          // `prepare` ends with the one service reading before the stop.
           const ready = await prepareHandoverBeforeStop(prepared, abort.signal);
           if (abort.signal.aborted) return;
           if (ready.status !== 'accepted') {

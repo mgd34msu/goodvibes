@@ -6,7 +6,7 @@ import type { SurfaceAdapterContext } from '../types.js';
 import { summarizeError } from '../../utils/error-display.js';
 import { fetchWithTimeout } from '../../utils/fetch-with-timeout.js';
 import { resolveSecretInput, type SecretRefResolutionOptions } from '../../config/secret-refs.js';
-import { hasAttachments, noticeUnsupportedAttachment, policyReplyText, readRecord, readTextBodyWithinLimit } from '../helpers.js';
+import { hasAttachments, ingressAnswer, ingressAnswerResponse, noticeUnsupportedAttachment, readRecord, readTextBodyWithinLimit } from '../helpers.js';
 import { duplicateDeliveryResponse, inboundDedupKey, runOncePerMessage } from '../inbound-dedup.js';
 import { answerSurfaceControl, runSurfaceMessage, submitSurfaceMessage, surfaceOutcomeResponse } from '../surface-message.js';
 
@@ -90,7 +90,7 @@ export async function handleSlackSurfacePayload(
       // Slack shows a slash-command reply only when it arrives with 200.
       return Response.json({
         response_type: 'ephemeral',
-        text: policyReplyText(policy.reason),
+        text: ingressAnswer(policy).text,
       });
     }
 
@@ -273,9 +273,8 @@ export async function handleSlackSurfacePayload(
         committed,
       });
       if (outcome.kind === 'refused') {
-        // An attachment-only message is not worth a redelivery: acknowledge it.
-        if (!task) return Response.json({ ok: true, acknowledged: true, queued: false, outcome: 'ignored', policyReason: outcome.reason });
-        return Response.json({ ok: false, error: `Blocked by channel policy: ${outcome.reason}` }, { status: 403 });
+        // Slack retries a failed event three times and stops delivering to an app whose deliveries mostly fail.
+        return ingressAnswerResponse(outcome.decision);
       }
       if (outcome.kind === 'no-text') {
         // A message that is only a file: say so in a one-to-one conversation; in a channel it is chatter.
@@ -323,7 +322,7 @@ export async function handleSlackSurfacePayload(
     if (!policy.allowed) {
       return Response.json({
         response_type: 'ephemeral',
-        text: `Blocked by channel policy: ${policy.reason}`,
+        text: ingressAnswer(policy).text,
       });
     }
     const message = await context.performInteractiveSurfaceAction(actionId, 'slack', req, typeof (actionPayload.user as Record<string, unknown> | undefined)?.id === 'string'

@@ -28,6 +28,8 @@ import {
   titleFromBody,
 } from './shared.js';
 import { HttpStatusError } from '@goodvibes-jev/engine/errors';
+import { logger } from '../../utils/logger.js';
+import { summarizeError } from '../../utils/error-display.js';
 
 /**
  * Posts to an explicit chat webhook address taken from a target or binding.
@@ -222,15 +224,22 @@ export function createDiscordDeliveryStrategy(
       const interactionToken = typeof request.binding?.metadata.interactionToken === 'string'
         ? request.binding.metadata.interactionToken
         : undefined;
+      const replyChannel = firstNonEmpty(request.binding?.channelId, request.binding?.externalId);
       if (applicationId && interactionToken) {
-        await discord.editOriginalResponse(
+        // An interaction token lasts fifteen minutes. A reply that takes longer is
+        // refused as an edit, so it is posted to the channel the command came from.
+        const edited = await discord.editOriginalResponse(
           applicationId,
           interactionToken,
           '',
           [discord.formatAgentResult(request.agentId ?? request.runId, request.title, bodyWithAttachments)],
           request,
-        );
-        return success();
+        ).then(() => true, (error: unknown) => {
+          if (!replyChannel) throw error;
+          logger.warn('Discord interaction edit refused; posting the reply to its channel', { channelId: replyChannel, error: summarizeError(error) });
+          return false;
+        });
+        if (edited) return success();
       }
       if (request.target.address?.startsWith('https://')) {
         await requireChatWebhookOk('Discord', await postToExplicitChatWebhook(

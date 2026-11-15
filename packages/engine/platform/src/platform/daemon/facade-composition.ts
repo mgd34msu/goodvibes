@@ -612,6 +612,12 @@ export function createDaemonFacadeCollaborators(
     surfaceDeliveryEnabled: options.surfaceDeliveryEnabled,
     recordDeliveryAttempt: (entry) => recordSurfaceDeliveryAttempt(runtime, entry, surfaceDeliveryStartedAt),
     channelPolicy: runtime.channelPolicy,
+    recordApprovalPromptUndelivered: (approvalId, detail) => runtime.approvalBroker.recordRemoteUpdate(approvalId, {
+      actor: 'daemon',
+      actorSurface: 'daemon',
+      note: `The approval prompt could not be shown in its conversation (${detail.reason}).`,
+      metadata: { promptDelivery: { ...detail } },
+    }),
   });
   // Every reply the pipeline could not put on a channel becomes a visible
   // failed delivery rather than an absence.

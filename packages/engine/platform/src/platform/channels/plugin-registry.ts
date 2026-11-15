@@ -48,7 +48,8 @@ export interface ChannelPlugin {
   readonly renderEvent?: ((request: ChannelRenderRequest) => Promise<ChannelRenderResult | void>) | undefined;
   readonly deliverReply?: ((pending: unknown, message: string) => Promise<void>) | undefined;
   readonly deliverProgress?: ((pending: unknown, progress: string) => Promise<void>) | undefined;
-  readonly notifyApproval?: ((approval: SharedApprovalRecord, binding: AutomationRouteBinding) => Promise<void>) | undefined;
+  /** Show an approval update; resolving `{ delivered: false }` (or rejecting) says the prompt did not get there. */
+  readonly notifyApproval?: ((approval: SharedApprovalRecord, binding: AutomationRouteBinding) => Promise<void | { readonly delivered: boolean; readonly error?: string | undefined }>) | undefined;
   readonly getSetupSchema?: ((accountId?: string) => Promise<ChannelSetupSchema> | ChannelSetupSchema) | undefined;
   readonly doctor?: ((accountId?: string) => Promise<ChannelDoctorReport> | ChannelDoctorReport) | undefined;
   readonly listRepairActions?: ((accountId?: string) => Promise<readonly ChannelRepairAction[]> | readonly ChannelRepairAction[]) | undefined;
@@ -240,11 +241,24 @@ export class ChannelPluginRegistry {
     return true;
   }
 
-  async notifyApproval(surface: ChannelSurface, approval: SharedApprovalRecord, binding: AutomationRouteBinding): Promise<boolean> {
+  /**
+   * Hand an approval update to the surface's plugin. `handled: false` when the
+   * plugin has no approval rendering; otherwise whether it got there, so a
+   * prompt that did not can be taken to the owner's other conversations.
+   */
+  async notifyApproval(surface: ChannelSurface, approval: SharedApprovalRecord, binding: AutomationRouteBinding): Promise<
+    { readonly handled: false } | { readonly handled: true; readonly delivered: boolean; readonly error?: string | undefined }
+  > {
     const plugin = this.getBySurface(surface);
-    if (!plugin?.notifyApproval) return false;
-    await plugin.notifyApproval(approval, binding);
-    return true;
+    if (!plugin?.notifyApproval) return { handled: false };
+    try {
+      const result = await plugin.notifyApproval(approval, binding);
+      return typeof result === 'object' && result !== null && result.delivered === false
+        ? { handled: true, delivered: false, ...(result.error ? { error: result.error } : {}) }
+        : { handled: true, delivered: true };
+    } catch (error) {
+      return { handled: true, delivered: false, error: summarizeError(error) };
+    }
   }
 
   async getRenderPolicy(surface: ChannelSurface): Promise<ChannelRenderPolicy | null> {

@@ -46,6 +46,10 @@ export interface DaemonUpdateStatus {
   readonly lastCheckFailure: string | null;
   /** A discovered release descriptor waiting for an idle moment, or null. */
   readonly pendingVersion: string | null;
+  /** Since when a release has waited for in-flight work to finish (epoch ms), or null when none waits. */
+  readonly pendingSince: number | null;
+  /** The fleet ids of the work the waiting release is held behind, empty when none waits. */
+  readonly pendingBlockedBy: readonly string[];
   /** A release a crash-loop rollback rejected and no boot has cleared, or null. */
   readonly rejectedVersion: string | null;
   /** A terminal filesystem recovery fence, preserved across in-process restarts. */

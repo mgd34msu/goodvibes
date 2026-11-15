@@ -1,8 +1,8 @@
-import { inboundIntent } from './batteries/conversation-gate.js';
-import { decisionOrClassic, isClassicOperation, requireDecisionFeature, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
-import { assertSynchronousCurrent, daemonReadingPort } from './reading-lifetime.js';
-import { captureOwnedJson, snapshotJudgmentInput } from '../gate/judgment-input.js';
+import { isClassicOperation, requireDecisionFeature, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
+import { assertSynchronousCurrent } from './reading-lifetime.js';
+import { snapshotJudgmentInput } from '../gate/judgment-input.js';
 import type { CallOptions } from '@goodvibes-jev/judgment/decisions';
+import { readInboundMessage, type InboundReading } from './inbound-reading.js';
 /**
  * The conversation-first spawn gate, at the shared surface spawn boundary.
  *
@@ -63,6 +63,8 @@ export interface SurfaceIngressOrigin {
   readonly userId?: string | undefined;
   readonly channelId?: string | undefined;
   readonly threadId?: string | undefined;
+  /** The intent the message's one inbound reading gave, when ingress already asked it. */
+  readonly intent?: InboundReading['intent'];
 }
 
 export type SpawnInput = Parameters<AgentManager['spawn']>[0];
@@ -135,66 +137,40 @@ async function gateOwnedSurfaceSpawn(
   // Classify the message the OWNER sent, not the enriched prompt the broker
   // built from it, the enrichment adds framing that would read as work.
   const options = deps.readingOptions ?? {};
-  const source = JSON.stringify(captureOwnedJson(origin));
   const sourceCurrent = deps.captureReadingSource?.(origin);
-  const inputSource = JSON.stringify(captureOwnedJson(input));
-  const configSource = JSON.stringify(config);
-  const assertCurrent = () => {
-    options.signal?.throwIfAborted();
-    assertSynchronousCurrent(options.beforeAttempt);
-    assertSynchronousCurrent(sourceCurrent);
-    if (JSON.stringify(origin) !== source || JSON.stringify(input) !== inputSource
-      || JSON.stringify(readConversationGateConfig(deps.configManager)) !== configSource) {
-      throw new Error('Conversation gate source is no longer current');
-    }
-  };
-  assertCurrent();
-  const spawnClassic = async () => {
-    assertCurrent();
-    // No semantic statement about the message. Keep the same native first-turn
-    // channel capabilities as conversation, with no autonomous contract launch.
-    const spawnInput = { ...input, ...conversationalFirstTurnOptions(deps, origin, input.tools, sessionId),
-      outsideContract: true, replyStyle: 'conversational' as const };
-    assertCurrent(); return spawn(spawnInput);
-  };
-  if (classic) return spawnClassic();
-  let inboundText = '';
-  const result = await decisionOrClassic<Awaited<ReturnType<typeof inboundIntent.run>> | null>(async () => {
-    inboundText = snapshotJudgmentInput(origin?.text ?? input.task ?? '') as string;
-    // Also screen the actual task before retaining it in a pending proposal.
-    snapshotJudgmentInput(input.task);
-    return inboundIntent.run(daemonReadingPort('daemon.inbound-intent', assertCurrent, options.signal), { message: inboundText }, { ...options, beforeAttempt: assertCurrent });
-  }, () => { assertCurrent(); return null; }, () => { assertCurrent(); return true; });
-  assertCurrent();
-  if (result === null) return spawnClassic();
-  if (result.readings.reading.outcome !== 'act') {
-    result.recordAction('held: inbound intent unsettled');
-    // Nothing was started; tell the sender, once, so the message does not vanish.
-    await deliverProposalNotice(deps, resolveOriginBinding(deps, origin, sessionId), 'I could not read that message just now. Please send it again.');
-    await failHeldInput(deps, origin, sessionId, 'The message was not acted on because it could not be read. Send it again.');
-    return Response.json({ acknowledged: true, queued: false, outcome: 'work-intent-unsettled' }, { status: 202 });
-  }
-  const needsAgreement = config.mode === 'confirm-all' || result.readings.reading.choice === 'work';
-  result.recordAction(needsAgreement ? 'propose-work' : 'conversational-response');
-  assertCurrent();
+  options.signal?.throwIfAborted();
+  const spawnConversational = () => spawn({ ...input, ...conversationalFirstTurnOptions(deps, origin, input.tools, sessionId),
+    outsideContract: true, replyStyle: 'conversational' as const });
+  // No semantic statement about the message: the same native first-turn channel
+  // capabilities as conversation, with no autonomous contract launch.
+  if (classic) return spawnConversational();
+  const inboundText = origin?.text ?? input.task ?? '';
+  // Screen the actual task before it can be retained in a pending proposal.
+  snapshotJudgmentInput(input.task);
+  // Ingress asks the intent in the message's one reading; a spawn that did not
+  // come through ingress (a continuation) asks it here, alone.
+  const intent = origin?.intent
+    ?? (await readInboundMessage({ message: inboundText, intent: true }, { signal: options.signal })).intent;
+  // The policy that admitted the message is compared once, at the point the reading is acted on.
+  options.signal?.throwIfAborted();
+  assertSynchronousCurrent(options.beforeAttempt);
+  assertSynchronousCurrent(sourceCurrent);
+  // Only a confident work reading proposes work. An unsure or missing reading
+  // gets a conversational reply, which starts nothing and can ask what was meant.
+  const needsAgreement = config.mode === 'confirm-all' || intent === 'work';
+  logger.debug('Conversation gate read the message', { surface: origin?.surface ?? 'unknown', intent: intent ?? 'unsure',
+    action: needsAgreement ? 'propose-work' : intent === 'conversation' ? 'conversational-response' : 'conversation: intent unsettled' });
 
   if (!needsAgreement) {
     // Conversation still gets a real reply, it just must not become a
     // contract. Keeping the spawn outside every contract is the difference
     // between answering "Testing" and planning and checking work against it.
     //
-    // `replyStyle` carries the SAME decision through to the system prompt. The
-    // gate had already classified this as conversation and then spawned an
-    // agent still under instructions to file a completion report, so "Hey, are
-    // you there?" was answered with a Summary/Changes/Decisions form. What the
+    // `replyStyle` carries the SAME decision through to the system prompt, so
+    // "Hey, are you there?" is not answered with a completion report. What the
     // message IS and what the reply should LOOK like are one decision, made
     // here, once.
-    return spawn({
-      ...input,
-      ...conversationalFirstTurnOptions(deps, origin, input.tools, sessionId),
-      outsideContract: true,
-      replyStyle: 'conversational',
-    });
+    return spawnConversational();
   }
 
   if (!store) throw new Error('Conversation gate proposal store is unavailable');
@@ -222,7 +198,7 @@ async function gateOwnedSurfaceSpawn(
   // the owner was never shown. Fails closed: any refusal drops the proposal.
   // The store may have folded an earlier pending request from this conversation into this proposal; the notice names both.
   const delivery = await deliverProposalNotice(deps, binding, renderWorkProposalMessage({ summary: proposal.summary, expiresInMs: config.proposalTtlMs, requestCount: proposal.requestCount }));
-  try { assertCurrent(); }
+  try { options.signal?.throwIfAborted(); assertSynchronousCurrent(sourceCurrent); }
   catch (error) { store.markUndeliverable(proposal.id, 'source-invalidated'); throw error; }
   if (!delivery.delivered) {
     store.markUndeliverable(proposal.id, delivery.reason);

@@ -12,7 +12,8 @@
 import type { AutomationRouteBinding } from '../automation/routes.js';
 import type { UpsertRouteBindingInput } from '../channels/route-manager.js';
 import type { SharedSessionSubmission } from '../control-plane/session-types.js';
-import type { SurfaceAdapterContext, TrySpawnAgentResult } from './types.js';
+import type { SurfaceAdapterContext, SurfaceIngressDecision, TrySpawnAgentResult } from './types.js';
+import { ingressAnswerResponse } from './helpers.js';
 
 type IngressInput = Parameters<SurfaceAdapterContext['authorizeSurfaceIngress']>[0];
 
@@ -190,7 +191,8 @@ export interface SurfaceIngressMessage extends Omit<SurfaceMessageInput, 'surfac
 }
 
 export type SurfaceIngressOutcome =
-  | { readonly kind: 'refused'; readonly reason: string }
+  /** Not admitted: refused by the channel policy, or consumed as an answer to something pending. */
+  | { readonly kind: 'refused'; readonly reason: string; readonly decision: SurfaceIngressDecision }
   /** Admitted and bound, but there is no text to act on (an attachment, an empty message). */
   | { readonly kind: 'no-text'; readonly binding: AutomationRouteBinding }
   | SurfaceMessageOutcome;
@@ -201,7 +203,7 @@ export async function runSurfaceMessage(
   input: SurfaceIngressMessage,
 ): Promise<SurfaceIngressOutcome> {
   const policy = await context.authorizeSurfaceIngress(input.ingress);
-  if (!policy.allowed) return { kind: 'refused', reason: policy.reason };
+  if (!policy.allowed) return { kind: 'refused', reason: policy.reason, decision: policy };
   const binding = await context.routeBindings.upsertBinding(input.binding);
   if (!input.text) return { kind: 'no-text', binding };
   return submitSurfaceMessage(context, binding, {
@@ -223,7 +225,7 @@ export function surfaceOutcomeResponse(
 ): Response {
   switch (outcome.kind) {
     case 'refused':
-      return Response.json({ error: `Blocked by channel policy: ${outcome.reason}` }, { status: 403 });
+      return ingressAnswerResponse(outcome.decision);
     case 'control':
       return Response.json({
         ok: true, acknowledged: true, control: true, message: outcome.message, bindingId: outcome.bindingId,
@@ -243,7 +245,6 @@ export function surfaceOutcomeResponse(
 export function gateAnswerText(outcome: string): string {
   switch (outcome) {
     case 'work-proposed': return 'This reads as work, so I proposed it instead of starting it. Answer the proposal to start it.';
-    case 'work-intent-unsettled': return 'I could not read that message just now, so nothing was started. Send it again.';
     case 'work-proposal-undelivered': return 'The work proposal could not be shown here, so nothing was started. Send the request again.';
     case 'work-proposal-expired': return 'The work proposal expired before it could be answered. Send the request again.';
     default: return 'Received; nothing was started.';

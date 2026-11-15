@@ -22,21 +22,29 @@ import type { ServiceRegistry } from '../config/service-registry.js';
  * The production implementation still returns the full decision; it remains
  * assignable.
  */
-export type SurfaceIngressDecision = Pick<ChannelPolicyDecision, 'allowed' | 'reason'>;
+export interface SurfaceIngressDecision extends Pick<ChannelPolicyDecision, 'allowed' | 'reason'> {
+  /**
+   * Set when the message was an answer that has been acted on: a permission
+   * ask, a purchase window or a work proposal took it. Nothing else is to be
+   * done with it, and the provider is told it was received.
+   */
+  readonly consumed?: { readonly by: 'approval' | 'payment' | 'work-proposal'; readonly answer: string } | undefined;
+  /**
+   * For a refusal: true only when the same message delivered again could be
+   * admitted, so a provider that redelivers on a failure status should be
+   * given one. Policy refusals (an unaddressed group message, a sender not on
+   * the allowlist, a message carrying card details) do not change on
+   * redelivery and are acknowledged.
+   */
+  readonly retryWillChange?: boolean | undefined;
+}
 
-/**
- * Refusals the channel policy produces for ordinary traffic: a group message that did not address the
- * bot, a sender not on the allowlist. They will not change when the provider delivers the same message
- * again, so a surface whose provider redelivers on failure acknowledges them instead of failing the delivery.
- * Any other refusal (for example a failed source-account check) is still answered with a failure status.
- */
-const ORDINARY_INGRESS_REFUSALS: ReadonlySet<string> = new Set([
-  'surface-disabled', 'direct-messages-disabled', 'group-messages-disabled', 'thread-messages-disabled',
-  'group-not-allowlisted', 'missing-group-identity', 'user-not-allowlisted', 'missing-user-identity',
-  'channel-not-allowlisted', 'missing-channel-identity', 'mention-required', 'command-not-allowed',
-]);
-export function isOrdinaryIngressRefusal(reason: string): boolean {
-  return ORDINARY_INGRESS_REFUSALS.has(reason);
+/** What ingress did with a message: admitted to the conversation, consumed as an answer, or refused. */
+export type IngressDisposition = 'admitted' | 'consumed' | 'refused';
+
+export function ingressDisposition(decision: SurfaceIngressDecision): IngressDisposition {
+  if (decision.allowed) return 'admitted';
+  return decision.consumed ? 'consumed' : 'refused';
 }
 
 export interface SurfaceControlCommand {

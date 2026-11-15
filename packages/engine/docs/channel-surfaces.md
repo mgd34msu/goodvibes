@@ -267,6 +267,40 @@ is admitted while the lists are empty and no claim is raised. A host without an
 owner inbox makes the first identified sender the owner and records the same
 two fields.
 
+The surface's owner (`ownerId`) is the one sender who can answer a permission
+ask, a purchase approval or veto, and send `status`, `cancel` or `retry`. Anyone
+else the allowlists admit can talk to the assistant, but cannot approve tool use
+or spending, or act on the owner's runs. A policy saved before owners were
+recorded takes its first allowlisted user as its owner when it loads; when the
+owner is no longer on a non-empty user list, its first entry becomes the owner.
+
+An approval prompt that cannot be shown in the conversation it belongs to (no
+route, a refused or failed send) is taken to the owner's other conversations,
+and the approval record carries `metadata.promptDelivery` (`delivered: false`,
+the reason, and the surface that took it), so every attached surface and the
+waiting agent can see that the prompt was not seen where it was raised. A
+Discord reply that comes after the fifteen-minute interaction window is posted
+to the command's channel instead of being dropped.
+
+What a provider is told about a message ingress did not start: an answer that
+was acted on (a permission ask, a purchase window or a work proposal took it) is
+acknowledged with `outcome: "consumed"`, and a message the policy refuses is
+acknowledged with `outcome: "ignored"` and the `policyReason`. Neither is
+answered with a failure status, so a provider that redelivers failures (Slack,
+Telegram webhooks, WhatsApp, the bridges) never delivers the same answer again
+as a new message. Slash commands and buttons show the same outcome as a line.
+
+Each inbound message costs at most one decision-model request. Code decides
+which questions it needs: whether it gives card details (only when it holds a
+short number or a month/year pair), its answer to a work proposal or permission
+ask (only when one is pending on that conversation for that sender), and
+whether it asks for work (only on a gated surface). They are asked together,
+with the decision deadline. A card number is refused by its checksum without
+any reading; an unsure reading refuses nothing, so a message with an ordinary
+number is answered. A message whose work intent is unsure gets a conversational
+reply rather than a request to send it again; only a confident work reading
+proposes work.
+
 An allowlist edit names its `kind` (`user`, `channel` or `group`) unless every
 entry is a typed id (`user:U0123`, `channel:C0123`). Names and handles are
 looked up in the provider directory and stored as provider ids; an entry that
@@ -305,7 +339,11 @@ or Home Assistant service target before dispatching work.
   the server refuses, reports `degraded` or `dead` with the reason.
 - Home Assistant uses signed ingress, isolated remote sessions, Assist
   submit-and-wait conversation routes, event-bus delivery, setup manifest
-  discovery, REST-backed tools, and an inactivity TTL for remote sessions.
+  discovery, REST-backed tools, and an inactivity TTL for remote sessions. A
+  message whose turn runs past two minutes is answered "Still working on that."
+  (event status `running`), and the final reply follows as a second event when
+  the turn ends. A stopped or failed turn is spoken as a short sentence; the
+  internal reason stays in the event's `metadata.error`.
 - Slack uses bot and app-level tokens, Socket Mode runtime, final delivery with
   bot-token resolution, and service-backed secret refs. A Slack or Discord start
   is reported as running only once the socket has actually opened; a socket that

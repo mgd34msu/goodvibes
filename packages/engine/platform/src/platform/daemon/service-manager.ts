@@ -36,6 +36,13 @@ export interface ManagedServiceStatus {
   readonly lastAction?: 'install' | 'uninstall' | 'start' | 'stop' | 'restart' | 'status' | undefined;
   readonly actionError?: string | undefined;
   /**
+   * The manager accepted an action that ends the daemon giving this answer
+   * (a stop, restart or uninstall of its own service) and carries it out after
+   * the answer: what happens next, in one sentence. The rest of the record is
+   * the state the action was asked from.
+   */
+  readonly accepted?: string | undefined;
+  /**
    * One honest line about login lingering after an install on systemd:
    * verified-on means the daemon starts at boot; anything else names the
    * exact command the user can run once themselves.
@@ -66,8 +73,26 @@ export interface ManagedServiceProcessControl {
 /** How long a manual restart waits for the previous process to exit before refusing to start a second one. */
 const MANUAL_STOP_WAIT_MS = 10_000;
 const MANUAL_STOP_POLL_MS = 100;
-/** A service-manager query that hangs (broken user bus) must not freeze the daemon's event loop. */
+/** How long a service-manager command may take before it is reported as not answering (a broken user bus). */
 const SERVICE_QUERY_TIMEOUT_MS = 10_000;
+
+/** One step a service flow hands its driver: a command to run and read, a command to issue and leave, or a wait. */
+type ServiceStep =
+  | { readonly run: readonly string[] }
+  | { readonly detach: readonly string[] }
+  | { readonly pause: number };
+type ServiceFlow<T> = Generator<ServiceStep, T, ManagedServiceActionResult>;
+const DONE: ManagedServiceActionResult = Object.freeze({ status: 0 });
+
+/** What a failed command said, for the person reading the action's result. */
+function commandFailureText(result: ManagedServiceActionResult): string {
+  return ((result.stderr ?? '') || (result.stdout ?? '') || `command exited with ${result.status}`).trim();
+}
+
+/** The launchd domain of this user's agents (`gui/<uid>`). */
+function launchdUid(): string {
+  return String(process.getuid?.() ?? '');
+}
 
 export interface ManagedServiceManagerOptions extends ManagedServicePaths {
   readonly processControl?: ManagedServiceProcessControl | undefined;
@@ -471,7 +496,59 @@ export class PlatformServiceManager {
     } catch { return false; }
   }
 
+  /**
+   * Every public method below is written once, as a flow of service-manager
+   * commands, and run by one of two drivers: the synchronous one for the
+   * terminal apps and the daemon CLI (a separate process, which may wait), and
+   * the asynchronous one for the daemon's own routes, where a waiting command
+   * would freeze every session the daemon serves.
+   */
   status(): ManagedServiceStatus {
+    return this.drive(this.statusFlow());
+  }
+
+  install(): ManagedServiceStatus {
+    return this.drive(this.installFlow());
+  }
+
+  uninstall(): ManagedServiceStatus {
+    return this.drive(this.uninstallFlow(false));
+  }
+
+  start(): ManagedServiceStatus {
+    return this.drive(this.actionFlow('start', false));
+  }
+
+  stop(): ManagedServiceStatus {
+    return this.drive(this.actionFlow('stop', false));
+  }
+
+  restart(): ManagedServiceStatus {
+    return this.drive(this.actionFlow('restart', false));
+  }
+
+  /** `status()` without blocking the caller's thread: the daemon's service read. */
+  statusAsync(): Promise<ManagedServiceStatus> {
+    return this.driveAsync(this.statusFlow());
+  }
+
+  /**
+   * A service action asked of the daemon the service may be running. Nothing
+   * waits: every command runs asynchronously. A stop, restart or uninstall
+   * that ends this daemon is issued without waiting for the stop (systemd
+   * `--no-block`; launchd through launchd itself, `kickstart -k` or
+   * `bootout`, so no second step depends on this process surviving the
+   * first) and answered with `accepted`, which says what happens next.
+   */
+  requestFromDaemon(action: 'install' | 'start' | 'stop' | 'restart' | 'uninstall'): Promise<ManagedServiceStatus> {
+    switch (action) {
+      case 'install': return this.driveAsync(this.installFlow());
+      case 'uninstall': return this.driveAsync(this.uninstallFlow(true));
+      default: return this.driveAsync(this.actionFlow(action, true));
+    }
+  }
+
+  private *statusFlow(): ServiceFlow<ManagedServiceStatus> {
     this.assertCurrent();
     const platform = detectPlatform(String(this.configManager.get('service.platform')));
     const serviceName = resolveServiceName(this.configManager, this.defaultServiceName);
@@ -493,7 +570,7 @@ export class PlatformServiceManager {
       };
     }
     const installed = existsSync(path);
-    const { running, pid, unreachable } = this.queryRunning(platform, serviceName);
+    const { running, pid, unreachable } = yield* this.runningFlow(platform, serviceName);
     const definition = this.resolveDefinition();
     return {
       platform,
@@ -512,7 +589,7 @@ export class PlatformServiceManager {
     };
   }
 
-  install(): ManagedServiceStatus {
+  private *installFlow(): ServiceFlow<ManagedServiceStatus> {
     this.assertCurrent();
     this.requireEnabled('install service');
     const platform = detectPlatform(String(this.configManager.get('service.platform')));
@@ -520,7 +597,7 @@ export class PlatformServiceManager {
     const definition = this.resolveDefinition();
     const path = definitionPath(platform, serviceName, this.getPaths(), this.surfaceRoot);
     const contents = platform === 'systemd'
-      ? renderSystemdUnit(definition, this.detectSystemdMajorVersion())
+      ? renderSystemdUnit(definition, yield* this.systemdMajorVersionFlow())
       : platform === 'launchd'
         ? renderLaunchdPlist(definition)
         : platform === 'windows'
@@ -534,10 +611,10 @@ export class PlatformServiceManager {
     writeFileSync(path, `${contents}\n`, { encoding: 'utf-8', mode: 0o600 });
     try { chmodSync(path, 0o600); } catch { /* a platform without POSIX modes */ }
     // Without the reload, systemd keeps acting on the previously loaded unit.
-    const registrationError = this.registerInstalledDefinition(platform, definition);
-    const lingerNote = platform === 'systemd' ? this.ensureLinger() : undefined;
+    const registrationError = yield* this.registerInstalledDefinitionFlow(platform, definition);
+    const lingerNote = platform === 'systemd' ? yield* this.ensureLingerFlow() : undefined;
     return {
-      ...this.status(),
+      ...(yield* this.statusFlow()),
       lastAction: 'install',
       ...(registrationError === undefined ? {} : { actionError: registrationError }),
       ...(lingerNote ? { lingerNote } : {}),
@@ -545,19 +622,19 @@ export class PlatformServiceManager {
   }
 
   /** Makes the platform pick up a freshly written definition; returns the failure text, or undefined. */
-  private registerInstalledDefinition(platform: ManagedServicePlatform, definition: ManagedServiceDefinition): string | undefined {
+  private *registerInstalledDefinitionFlow(platform: ManagedServicePlatform, definition: ManagedServiceDefinition): ServiceFlow<string | undefined> {
     const argv = platform === 'systemd' ? ['systemctl', '--user', 'daemon-reload']
       : platform === 'windows' ? ['schtasks', ...windowsCreateArgs(definition)]
         : undefined;
     if (argv === undefined) return undefined;
-    const result = this.runQuery(argv[0]!, argv.slice(1));
+    const result = yield { run: argv };
     if ((result.status ?? 1) === 0) return undefined;
-    return `${argv.slice(0, 2).join(' ')} failed: ${((result.stderr ?? '') || (result.stdout ?? '') || `command exited with ${result.status}`).trim()}`;
+    return `${argv.slice(0, 2).join(' ')} failed: ${commandFailureText(result)}`;
   }
 
-  /** systemd major version via the injected runner, or null when unreadable. */
-  private detectSystemdMajorVersion(): number | null {
-    const result = this.runQuery('systemctl', ['--version']);
+  /** systemd major version, or null when unreadable. */
+  private *systemdMajorVersionFlow(): ServiceFlow<number | null> {
+    const result = yield { run: ['systemctl', '--version'] };
     if (result.status !== 0) return null;
     return parseSystemdMajorVersion(result.stdout);
   }
@@ -570,92 +647,105 @@ export class PlatformServiceManager {
    * show-user property readback is the source of truth, checked before and
    * after enabling. Returns exactly one honest line either way.
    */
-  private ensureLinger(): string {
+  private *ensureLingerFlow(): ServiceFlow<string> {
     const user = process.env.USER ?? process.env.LOGNAME ?? '';
     if (!user) {
       return 'lingering: could not determine the current user, the daemon starts at login rather than at boot. Enable it once yourself with: loginctl enable-linger <user>';
     }
-    const lingerEnabled = (): boolean => {
-      const readback = this.runQuery('loginctl', ['show-user', user, '--property=Linger']);
-      return readback.status === 0 && (readback.stdout ?? '').trim() === 'Linger=yes';
-    };
-    if (lingerEnabled()) {
+    const lingerEnabled = (readback: ManagedServiceActionResult): boolean => readback.status === 0 && (readback.stdout ?? '').trim() === 'Linger=yes';
+    const readback: readonly string[] = ['loginctl', 'show-user', user, '--property=Linger'];
+    if (lingerEnabled(yield { run: readback })) {
       return `lingering: already enabled for ${user}, the daemon starts at boot.`;
     }
-    this.runQuery('loginctl', ['enable-linger', user]);
-    if (lingerEnabled()) {
+    yield { run: ['loginctl', 'enable-linger', user] };
+    if (lingerEnabled(yield { run: readback })) {
       return `lingering: enabled for ${user}, the daemon starts at boot.`;
     }
     return `lingering: could not be enabled (polkit may require an interactive session), the daemon starts at login rather than at boot. Enable it once yourself with: loginctl enable-linger ${user}`;
   }
 
-  uninstall(): ManagedServiceStatus {
+  private *uninstallFlow(fromDaemon: boolean): ServiceFlow<ManagedServiceStatus> {
     this.assertCurrent();
     this.requireEnabled('uninstall service');
-    const status = this.status();
+    const status = yield* this.statusFlow();
     let actionError: string | undefined;
+    let accepted: string | undefined;
     if (existsSync(status.path)) {
-      // Stop and unregister while the definition still names the service, so
-      // removing the file does not leave a running, autostarting daemon behind.
-      // Ending a task that is not running, or unloading a job that is not loaded,
-      // exits non-zero without anything being left behind, so those are best effort.
-      const teardown: ReadonlyArray<{ readonly argv: readonly string[]; readonly bestEffort?: boolean }> = status.platform === 'systemd'
-        ? [{ argv: ['systemctl', '--user', 'disable', '--now', `${status.serviceName}.service`] }]
-        : status.platform === 'launchd'
-          ? [{ argv: ['launchctl', 'unload', status.path], bestEffort: true }]
-          : status.platform === 'windows'
-            ? [{ argv: ['schtasks', '/End', '/TN', status.serviceName], bestEffort: true }, { argv: ['schtasks', '/Delete', '/TN', status.serviceName, '/F'] }]
-            : [];
-      for (const { argv, bestEffort } of teardown) {
-        const result = this.runQuery(argv[0]!, argv.slice(1));
-        if ((result.status ?? 1) !== 0 && !bestEffort && actionError === undefined) {
-          actionError = `${argv.slice(0, 2).join(' ')} failed, so the service may still be running: ${((result.stderr ?? '') || (result.stdout ?? '') || `command exited with ${result.status}`).trim()}`;
+      const self = fromDaemon && this.runsThisDaemon(status);
+      if (self && status.platform === 'systemd') {
+        // Unregister and remove while this process still runs; the stop that ends
+        // it is queued last and not waited for.
+        const disable = yield { run: ['systemctl', '--user', 'disable', `${status.serviceName}.service`] };
+        if ((disable.status ?? 1) !== 0) {
+          actionError = `systemctl --user disable failed, so the service was left installed and running: ${commandFailureText(disable)}`;
+        } else {
+          this.assertCurrent();
+          rmSync(status.path, { force: true });
+          yield { run: ['systemctl', '--user', 'daemon-reload'] };
+          const stop = yield { run: ['systemctl', '--user', '--no-block', 'stop', `${status.serviceName}.service`] };
+          if ((stop.status ?? 1) !== 0) actionError = `the service was removed, but systemctl --user stop failed, so this daemon is still running: ${commandFailureText(stop)}`;
+          else accepted = 'The service was removed and its stop is queued: this daemon stops after this answer and will not start at login again.';
         }
+      } else if (self && status.platform === 'launchd') {
+        // launchd ends this process the moment the job is booted out, so the file goes first.
+        this.assertCurrent();
+        rmSync(status.path, { force: true });
+        yield { detach: ['launchctl', 'bootout', `gui/${launchdUid()}/${status.serviceName}`] };
+        accepted = 'The service was removed and launchd is unloading it: this daemon stops after this answer and will not start at login again.';
+      } else {
+        // Stop and unregister while the definition still names the service, so
+        // removing the file does not leave a running, autostarting daemon behind.
+        // Ending a task that is not running, or unloading a job that is not loaded,
+        // exits non-zero without anything being left behind, so those are best effort.
+        const teardown: ReadonlyArray<{ readonly argv: readonly string[]; readonly bestEffort?: boolean }> = status.platform === 'systemd'
+          ? [{ argv: ['systemctl', '--user', 'disable', '--now', `${status.serviceName}.service`] }]
+          : status.platform === 'launchd'
+            ? [{ argv: ['launchctl', 'unload', status.path], bestEffort: true }]
+            : status.platform === 'windows'
+              ? [{ argv: ['schtasks', '/End', '/TN', status.serviceName], bestEffort: true }, { argv: ['schtasks', '/Delete', '/TN', status.serviceName, '/F'] }]
+              : [];
+        for (const { argv, bestEffort } of teardown) {
+          const result = yield { run: argv };
+          if ((result.status ?? 1) !== 0 && !bestEffort && actionError === undefined) {
+            actionError = `${argv.slice(0, 2).join(' ')} failed, so the service may still be running: ${commandFailureText(result)}`;
+          }
+        }
+        this.assertCurrent();
+        rmSync(status.path, { force: true });
+        if (status.platform === 'systemd') yield { run: ['systemctl', '--user', 'daemon-reload'] };
       }
-      this.assertCurrent();
-      rmSync(status.path, { force: true });
-      if (status.platform === 'systemd') this.runQuery('systemctl', ['--user', 'daemon-reload']);
     }
     const pidPath = pidFilePath(status.platform, this.workingDirectory, this.surfaceRoot);
-    if (existsSync(pidPath)) {
+    if (existsSync(pidPath) && accepted === undefined) {
       this.assertCurrent();
       rmSync(pidPath, { force: true });
     }
+    // After a queued stop of this daemon the manager is not asked again: the answer is the state it was asked from.
+    const after = accepted === undefined ? yield* this.statusFlow() : { ...status, installed: false, contents: undefined };
     return {
-      ...this.status(),
+      ...after,
       lastAction: 'uninstall',
       ...(actionError === undefined ? {} : { actionError }),
+      ...(accepted === undefined ? {} : { accepted }),
     };
   }
 
-  start(): ManagedServiceStatus {
+  private *actionFlow(action: 'start' | 'stop' | 'restart', fromDaemon: boolean): ServiceFlow<ManagedServiceStatus> {
     this.assertCurrent();
-    this.requireEnabled('start service');
+    this.requireEnabled(`${action} service`);
     const platform = detectPlatform(String(this.configManager.get('service.platform')));
     if (platform === 'manual') {
-      return this.startManual(platform);
+      if (action === 'start') return yield* this.startManualFlow(platform);
+      if (action === 'stop') return yield* this.stopManualFlow(platform);
+      return yield* this.restartManualFlow(platform);
     }
-    return this.runPlatformAction(platform, 'start');
+    return yield* this.platformActionFlow(platform, action, fromDaemon);
   }
 
-  stop(): ManagedServiceStatus {
-    this.assertCurrent();
-    this.requireEnabled('stop service');
-    const platform = detectPlatform(String(this.configManager.get('service.platform')));
-    if (platform === 'manual') {
-      return this.stopManual(platform);
-    }
-    return this.runPlatformAction(platform, 'stop');
-  }
-
-  restart(): ManagedServiceStatus {
-    this.assertCurrent();
-    this.requireEnabled('restart service');
-    const platform = detectPlatform(String(this.configManager.get('service.platform')));
-    if (platform === 'manual') {
-      return this.restartManual(platform);
-    }
-    return this.runPlatformAction(platform, 'restart');
+  /** Whether the service is this daemon: launchd names its pid; a running systemd unit asked from inside the daemon is taken to be it. */
+  private runsThisDaemon(status: ManagedServiceStatus): boolean {
+    if (!status.installed || !status.running) return false;
+    return status.platform === 'launchd' ? status.pid === process.pid : status.platform === 'systemd';
   }
 
   private resolveDefinition(): ManagedServiceDefinition {
@@ -666,8 +756,8 @@ export class PlatformServiceManager {
     });
   }
 
-  private startManual(platform: ManagedServicePlatform, action: ManagedServiceStatus['lastAction'] = 'start'): ManagedServiceStatus {
-    const current = this.status();
+  private *startManualFlow(platform: ManagedServicePlatform, action: ManagedServiceStatus['lastAction'] = 'start'): ServiceFlow<ManagedServiceStatus> {
+    const current = yield* this.statusFlow();
     if (current.running) {
       return {
         ...current,
@@ -684,7 +774,8 @@ export class PlatformServiceManager {
     this.assertCurrent();
     const stdoutFd = openSync(logPath, 'a');
     let stderrFd: number | undefined;
-    let child: ReturnType<typeof spawn>;
+    let child: ReturnType<typeof spawn> | undefined;
+    let launchError: unknown;
     try {
       this.assertCurrent();
       stderrFd = openSync(logPath, 'a');
@@ -703,14 +794,17 @@ export class PlatformServiceManager {
       const launch = this.processControl.spawn ?? ((command: string, args: readonly string[], options: SpawnOptions) => spawn(command, [...args], options));
       child = launch(definition.command, definition.args, spawnOptions);
     } catch (error) {
-      return {
-        ...this.status(),
-        lastAction: action,
-        actionError: `could not start ${definition.command}: ${error instanceof Error ? error.message : String(error)}`,
-      };
+      launchError = error;
     } finally {
       closeSync(stdoutFd);
       if (stderrFd !== undefined) closeSync(stderrFd);
+    }
+    if (child === undefined) {
+      return {
+        ...(yield* this.statusFlow()),
+        lastAction: action,
+        actionError: `could not start ${definition.command}: ${launchError instanceof Error ? launchError.message : String(launchError)}`,
+      };
     }
     // A failed spawn reports asynchronously; without a listener it would be an
     // uncaught exception in the daemon.
@@ -718,7 +812,7 @@ export class PlatformServiceManager {
     child.unref();
     if (child.pid === undefined) {
       return {
-        ...this.status(),
+        ...(yield* this.statusFlow()),
         lastAction: action,
         actionError: `could not start ${definition.command}: the process did not launch (check that the command exists and is executable)`,
       };
@@ -733,12 +827,12 @@ export class PlatformServiceManager {
       throw error;
     }
     return {
-      ...this.status(),
+      ...(yield* this.statusFlow()),
       lastAction: action,
     };
   }
 
-  private stopManual(platform: ManagedServicePlatform): ManagedServiceStatus {
+  private stopManualProcess(platform: ManagedServicePlatform): void {
     const pidPath = pidFilePath(platform, this.workingDirectory, this.surfaceRoot);
     const record = existsSync(pidPath) ? this.readPidRecord(pidPath) : undefined;
     if (record !== undefined && this.isServiceProcess(record)) {
@@ -754,48 +848,73 @@ export class PlatformServiceManager {
       this.assertCurrent();
       rmSync(pidPath, { force: true });
     }
+  }
+
+  private *stopManualFlow(platform: ManagedServicePlatform): ServiceFlow<ManagedServiceStatus> {
+    this.stopManualProcess(platform);
     return {
-      ...this.status(),
+      ...(yield* this.statusFlow()),
       lastAction: 'stop',
     };
   }
 
   /** Stops the recorded process, waits for it to exit, and only then starts a new one. */
-  private restartManual(platform: ManagedServicePlatform): ManagedServiceStatus {
+  private *restartManualFlow(platform: ManagedServicePlatform): ServiceFlow<ManagedServiceStatus> {
     const pidPath = pidFilePath(platform, this.workingDirectory, this.surfaceRoot);
     const record = existsSync(pidPath) ? this.readPidRecord(pidPath) : undefined;
     if (record !== undefined && record.pid === process.pid && this.isServiceProcess(record)) {
       // This daemon is the recorded process: its own SIGTERM cannot be handled
       // while this call waits for it, so it would only time out and start nothing.
       return {
-        ...this.status(),
+        ...(yield* this.statusFlow()),
         lastAction: 'restart',
         actionError: `the service process (pid ${record.pid}) is the daemon answering this request and cannot restart itself; run the restart from a terminal (service restart) instead`,
       };
     }
-    this.stopManual(platform);
+    this.stopManualProcess(platform);
     if (record !== undefined && this.isServiceProcess(record)) {
-      const pause = this.processControl.pause ?? sleepSynchronously;
       for (let waited = 0; this.isServiceProcess(record) && waited < MANUAL_STOP_WAIT_MS; waited += MANUAL_STOP_POLL_MS) {
-        pause(MANUAL_STOP_POLL_MS);
+        yield { pause: MANUAL_STOP_POLL_MS };
       }
       if (this.isServiceProcess(record)) {
         // Keep tracking it so stop/status can still find the process that did not exit.
         this.assertCurrent();
         writeFileSync(pidPath, `${record.pid}\n${record.startTime ?? ''}\n`, 'utf-8');
         return {
-          ...this.status(),
+          ...(yield* this.statusFlow()),
           lastAction: 'restart',
           actionError: `the previous service process (pid ${record.pid}) did not exit within ${MANUAL_STOP_WAIT_MS / 1000} seconds, so no second one was started`,
         };
       }
     }
-    return this.startManual(platform, 'restart');
+    return yield* this.startManualFlow(platform, 'restart');
   }
 
-  private runPlatformAction(platform: ManagedServicePlatform, action: 'start' | 'stop' | 'restart'): ManagedServiceStatus {
+  private *platformActionFlow(platform: ManagedServicePlatform, action: 'start' | 'stop' | 'restart', fromDaemon: boolean): ServiceFlow<ManagedServiceStatus> {
     const serviceName = resolveServiceName(this.configManager, this.defaultServiceName);
     const path = definitionPath(platform, serviceName, this.getPaths(), this.surfaceRoot);
+    if (fromDaemon && action !== 'start' && (platform === 'systemd' || platform === 'launchd')) {
+      const before = yield* this.statusFlow();
+      if (this.runsThisDaemon(before)) {
+        if (platform === 'systemd') {
+          // The stop reaches this process after the answer: the manager is asked to queue the job, not to wait for it.
+          const queued = yield { run: ['systemctl', '--user', '--no-block', action, `${serviceName}.service`] };
+          if ((queued.status ?? 1) !== 0) return { ...before, lastAction: action, actionError: commandFailureText(queued) };
+        } else {
+          // launchd stops and starts the job itself, so nothing depends on this process outliving the stop.
+          yield { detach: action === 'restart'
+            ? ['launchctl', 'kickstart', '-k', `gui/${launchdUid()}/${serviceName}`]
+            : ['launchctl', 'bootout', `gui/${launchdUid()}/${serviceName}`] };
+        }
+        return {
+          ...before,
+          lastAction: action,
+          accepted: action === 'restart'
+            ? 'The service manager accepted the restart: this daemon stops after this answer and comes back in a few seconds.'
+            : 'The service manager accepted the stop: this daemon stops after this answer.',
+        };
+      }
+    }
     // Each step is an argv plus a bestEffort flag. launchd has no native restart
     // verb, so restart is an honest unload-then-load; the unload is best-effort
     // (the agent may simply not be loaded yet), mirroring suggestedCommands()'
@@ -819,55 +938,39 @@ export class PlatformServiceManager {
           : [];
     if (steps.length === 0) {
       return {
-        ...this.status(),
+        ...(yield* this.statusFlow()),
         lastAction: action,
         actionError: `Unsupported platform action: ${platform}`,
       };
     }
     let actionError: string | undefined;
     for (const step of steps) {
-      const argv = step.argv;
-      const result = this.runQuery(argv[0]!, argv.slice(1));
+      const result = yield { run: step.argv };
       if ((result.status ?? 1) !== 0 && !step.bestEffort) {
-        actionError = ((result.stderr ?? '') || (result.stdout ?? '') || `command exited with ${result.status}`).trim();
+        actionError = commandFailureText(result);
         break;
       }
     }
     return {
-      ...this.status(),
+      ...(yield* this.statusFlow()),
       lastAction: action,
       ...(actionError === undefined ? {} : { actionError }),
     };
   }
 
   /**
-   * Resolves `running` (+ `pid` when known) for `status()`. Only the manual
+   * Resolves `running` (+ `pid` when known) for the status. Only the manual
    * platform's `startManual` ever writes the pid file (`start()` branches on
-   * `platform === 'manual'` before ever calling `runPlatformAction`), so for
+   * `platform === 'manual'` before ever reaching `platformActionFlow`), so for
    * systemd/launchd the pid file is permanently absent and a pid-file-only
    * check would report `running: false` for a genuinely active unit. systemd
    * and launchd are queried live instead, through the same injected
    * `actionRunner` used by start/stop/restart (never a raw exec bypassing it,
    * so tests can fake the query deterministically).
    */
-  private queryRunning(platform: ManagedServicePlatform, serviceName: string): { running: boolean; pid?: number | undefined; unreachable?: string | undefined } {
-    if (platform === 'systemd' || platform === 'launchd') {
-      return this.queryPlatformRunning(platform, serviceName);
-    }
-    const pidPath = pidFilePath(platform, this.workingDirectory, this.surfaceRoot);
-    const record = existsSync(pidPath) ? this.readPidRecord(pidPath) : undefined;
-    const running = record !== undefined ? this.isServiceProcess(record) : false;
-    // Status is observational; explicit stop/uninstall own stale PID cleanup.
-
-    return running && record !== undefined ? { running, pid: record.pid } : { running };
-  }
-
-  private queryPlatformRunning(
-    platform: 'systemd' | 'launchd',
-    serviceName: string,
-  ): { running: boolean; pid?: number | undefined; unreachable?: string | undefined } {
+  private *runningFlow(platform: ManagedServicePlatform, serviceName: string): ServiceFlow<{ running: boolean; pid?: number | undefined; unreachable?: string | undefined }> {
     if (platform === 'systemd') {
-      const result = this.runQuery('systemctl', ['--user', 'is-active', `${serviceName}.service`]);
+      const result = yield { run: ['systemctl', '--user', 'is-active', `${serviceName}.service`] };
       const state = (result.stdout ?? '').trim();
       // A reachable manager always names a state ("inactive", "failed", ...),
       // even for a unit it has never heard of. No exit status or an empty
@@ -879,28 +982,70 @@ export class PlatformServiceManager {
       }
       return { running: result.status === 0 && state === 'active' };
     }
-    // launchd: no single-job query is used here, `launchctl list <label>` prints
-    // a plist dump on modern macOS, not a stable parseable field. Instead run the
-    // plain `launchctl list` (same command this module's suggestedCommands()
-    // already tells operators to run: `launchctl list | grep <name>`) and find the
-    // job's own tabular line: `<pid-or-dash>\t<last-exit-status>\t<label>`. No
-    // matching line = not loaded = not running; a `-` PID column = loaded but
-    // stopped; a numeric PID = running.
-    const result = this.runQuery('launchctl', ['list']);
-    if (result.status === null) {
-      return { running: false, unreachable: 'launchctl could not be reached or did not answer in time' };
+    if (platform === 'launchd') {
+      // launchd: no single-job query is used here, `launchctl list <label>` prints
+      // a plist dump on modern macOS, not a stable parseable field. Instead run the
+      // plain `launchctl list` (same command this module's suggestedCommands()
+      // already tells operators to run: `launchctl list | grep <name>`) and find the
+      // job's own tabular line: `<pid-or-dash>\t<last-exit-status>\t<label>`. No
+      // matching line = not loaded = not running; a `-` PID column = loaded but
+      // stopped; a numeric PID = running.
+      const result = yield { run: ['launchctl', 'list'] };
+      if (result.status === null) {
+        return { running: false, unreachable: 'launchctl could not be reached or did not answer in time' };
+      }
+      const match = (result.stdout ?? '')
+        .split('\n')
+        .map((line) => line.trim().split(/\s+/))
+        .find((fields) => fields[fields.length - 1] === serviceName);
+      if (!match) return { running: false };
+      const pidToken = match[0];
+      const pid = pidToken && /^\d+$/.test(pidToken) ? Number(pidToken) : undefined;
+      return pid !== undefined ? { running: true, pid } : { running: false };
     }
-    const match = (result.stdout ?? '')
-      .split('\n')
-      .map((line) => line.trim().split(/\s+/))
-      .find((fields) => fields[fields.length - 1] === serviceName);
-    if (!match) return { running: false };
-    const pidToken = match[0];
-    const pid = pidToken && /^\d+$/.test(pidToken) ? Number(pidToken) : undefined;
-    return pid !== undefined ? { running: true, pid } : { running: false };
+    const pidPath = pidFilePath(platform, this.workingDirectory, this.surfaceRoot);
+    const record = existsSync(pidPath) ? this.readPidRecord(pidPath) : undefined;
+    const running = record !== undefined ? this.isServiceProcess(record) : false;
+    // Status is observational; explicit stop/uninstall own stale PID cleanup.
+    return running && record !== undefined ? { running, pid: record.pid } : { running };
   }
 
-  /** Runs a service-management query/action through the injected actionRunner when present, else a real spawnSync, the single choke point start/stop/restart/status share. */
+  /** The synchronous driver: each command through the injected actionRunner, else a real spawnSync. */
+  private drive<T>(flow: ServiceFlow<T>): T {
+    let next = flow.next();
+    while (!next.done) {
+      const step = next.value;
+      if ('pause' in step) {
+        (this.processControl.pause ?? sleepSynchronously)(step.pause);
+        next = flow.next(DONE);
+      } else if ('detach' in step) {
+        next = flow.next(this.runDetached(step.detach));
+      } else {
+        next = flow.next(this.runQuery(step.run[0]!, step.run.slice(1)));
+      }
+    }
+    return next.value;
+  }
+
+  /** The asynchronous driver: no command and no wait blocks the caller's thread. */
+  private async driveAsync<T>(flow: ServiceFlow<T>): Promise<T> {
+    let next = flow.next();
+    while (!next.done) {
+      const step = next.value;
+      if ('pause' in step) {
+        if (this.processControl.pause) this.processControl.pause(step.pause);
+        else await new Promise<void>((resolveWait) => { setTimeout(resolveWait, step.pause); });
+        next = flow.next(DONE);
+      } else if ('detach' in step) {
+        next = flow.next(this.runDetached(step.detach));
+      } else {
+        next = flow.next(await this.runQueryAsync(step.run[0]!, step.run.slice(1)));
+      }
+    }
+    return next.value;
+  }
+
+  /** Runs a service-management query/action through the injected actionRunner when present, else a real spawnSync. */
   private runQuery(command: string, args: readonly string[]): ManagedServiceActionResult {
     this.assertCurrent();
     try {
@@ -908,6 +1053,59 @@ export class PlatformServiceManager {
         ? this.actionRunner(command, args)
         : spawnSync(command, args, { stdio: 'pipe', encoding: 'utf-8', timeout: SERVICE_QUERY_TIMEOUT_MS });
     } finally { this.assertCurrent(); }
+  }
+
+  /** `runQuery` without blocking: the same timeout, the output collected as it arrives. */
+  private async runQueryAsync(command: string, args: readonly string[]): Promise<ManagedServiceActionResult> {
+    this.assertCurrent();
+    try {
+      if (this.actionRunner) return this.actionRunner(command, args);
+      return await new Promise<ManagedServiceActionResult>((resolveResult) => {
+        let stdout = '', stderr = '', settled = false;
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const finish = (result: ManagedServiceActionResult): void => {
+          if (settled) return;
+          settled = true;
+          if (timer !== undefined) clearTimeout(timer);
+          resolveResult(result);
+        };
+        let child: ChildProcess;
+        try {
+          child = spawn(command, [...args], { stdio: ['ignore', 'pipe', 'pipe'] });
+        } catch (error) {
+          finish({ status: null, stderr: error instanceof Error ? error.message : String(error) });
+          return;
+        }
+        timer = setTimeout(() => {
+          try { child.kill('SIGKILL'); } catch { /* already gone */ }
+          finish({ status: null, stdout, stderr: `${stderr}${stderr ? '\n' : ''}${command} did not answer within ${SERVICE_QUERY_TIMEOUT_MS / 1000} seconds` });
+        }, SERVICE_QUERY_TIMEOUT_MS);
+        child.stdout?.setEncoding('utf8');
+        child.stderr?.setEncoding('utf8');
+        child.stdout?.on('data', (chunk: string) => { stdout += chunk; });
+        child.stderr?.on('data', (chunk: string) => { stderr += chunk; });
+        child.once('error', (error) => finish({ status: null, stdout, stderr: error.message }));
+        child.once('close', (code) => finish({ status: code, stdout, stderr }));
+      });
+    } finally { this.assertCurrent(); }
+  }
+
+  /**
+   * Issues a command that ends this process and is carried out by the service
+   * manager itself. It runs in its own process group, so the stop it causes
+   * does not take it down, and nothing waits for it.
+   */
+  private runDetached(argv: readonly string[]): ManagedServiceActionResult {
+    this.assertCurrent();
+    if (this.actionRunner) return this.actionRunner(argv[0]!, argv.slice(1));
+    try {
+      const child = spawn(argv[0]!, [...argv.slice(1)], { stdio: 'ignore', detached: true });
+      child.once('error', () => {});
+      child.unref();
+      return DONE;
+    } catch (error) {
+      return { status: null, stderr: error instanceof Error ? error.message : String(error) };
+    }
   }
 
   /** The pid file is `pid` then, optionally, the process start time that proves a reused pid is not ours. */

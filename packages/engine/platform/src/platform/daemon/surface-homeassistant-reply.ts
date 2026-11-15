@@ -12,8 +12,10 @@
  * well under the cap, which is why the card gate could be installed on
  * `authorizeSurfaceIngress` without grandfathering a file over the limit.
  *
- * Behaviour is unchanged from the methods it replaces: the helper keeps thin
- * delegating methods so the adapter-context surface is identical.
+ * A turn that outlasts the wait is not reported as a failure: Home Assistant
+ * hears "Still working on that." (status `running`) and the final reply is
+ * published as a second event when the turn ends. Failures and stops are
+ * spoken as short sentences, never as internal error text.
  */
 import {
   HOME_ASSISTANT_DEFAULT_EVENT_TYPE,
@@ -29,9 +31,23 @@ import { HomeAssistantIntegration } from '../integrations/homeassistant.js';
 import { summarizeError } from '../utils/error-display.js';
 import { logger } from '../utils/logger.js';
 import {
+  homeAssistantReplyOutcome,
   postHomeAssistantChatMessage as postHomeAssistantChatTurn,
   readHomeAssistantRemoteSessionTtlMs,
+  type HomeAssistantChatPostResult,
 } from './homeassistant-chat.js';
+import type { CompanionChatTurnEvent } from '../companion/companion-chat-types.js';
+
+/** How long a Home Assistant message waits for its reply before Home Assistant is told the turn is still running. */
+const HOME_ASSISTANT_REPLY_WAIT_MS = 120_000;
+
+/** The final result of a turn, read from its terminal event. */
+function finishedTurn(event: CompanionChatTurnEvent): Pick<HomeAssistantChatPostResult, 'response' | 'error' | 'cancelled' | 'assistantMessageId'> | undefined {
+  if (event.type === 'turn.completed') return { response: event.envelope.body, assistantMessageId: event.assistantMessageId };
+  if (event.type === 'turn.error') return { error: event.error, ...(event.assistantMessageId ? { assistantMessageId: event.assistantMessageId } : {}) };
+  if (event.type === 'turn.cancelled') return { cancelled: true, error: 'cancelled', ...(event.assistantMessageId ? { assistantMessageId: event.assistantMessageId } : {}) };
+  return undefined;
+}
 
 /** The slice of the daemon surface-action context this module consults. */
 export interface HomeAssistantReplyDeps {
@@ -86,6 +102,31 @@ export async function postHomeAssistantSurfaceChatMessage(
     };
   }
 
+  // The turn's terminal event, kept for a reply that arrives after the wait has ended.
+  type Finished = NonNullable<ReturnType<typeof finishedTurn>>;
+  const turn: { finished?: Finished; late?: (result: Finished) => void } = {};
+  const publish = async (result: Pick<HomeAssistantChatPostResult, 'response' | 'error' | 'cancelled' | 'timedOut' | 'assistantMessageId'>,
+    session: { readonly sessionId: string; readonly routeId?: string | undefined }): Promise<string | undefined> => {
+    if (input.publishEvent === false) return undefined;
+    const outcome = homeAssistantReplyOutcome(result);
+    try {
+      await publishHomeAssistantChatReply(deps, input, {
+        ...session,
+        ...(result.assistantMessageId ? { assistantMessageId: result.assistantMessageId } : {}),
+        response: outcome.speech,
+        status: outcome.status === 'timeout' ? 'running' : outcome.status,
+        ...(result.error && outcome.status !== 'completed' ? { error: result.error } : {}),
+      });
+      return undefined;
+    } catch (caught) {
+      logger.warn('DaemonSurfaceActionHelper: failed to publish Home Assistant chat reply', {
+        conversationId: input.conversationId,
+        sessionId: session.sessionId,
+        error: summarizeError(caught),
+      });
+      return `The reply was produced but could not be published to Home Assistant: ${summarizeError(caught)}`;
+    }
+  };
   try {
     const result = await postHomeAssistantChatTurn(
       {
@@ -112,37 +153,40 @@ export async function postHomeAssistantSurfaceChatMessage(
       },
       {
         wait: true,
-        timeoutMs: 120_000,
+        timeoutMs: HOME_ASSISTANT_REPLY_WAIT_MS,
         clientId: `homeassistant:${input.surfaceId}:${input.conversationId}`,
+        // The listener rides the turn for its whole life, past the wait, so a late reply still reaches Home Assistant.
+        onTurnEvent: (event) => {
+          const done = finishedTurn(event);
+          if (!done || turn.finished) return;
+          turn.finished = done;
+          turn.late?.(done);
+        },
       },
     );
+    const session = { sessionId: result.session.id, routeId: result.binding.id };
     const response = result.response?.trim();
+    if (result.timedOut) {
+      const finished = turn.finished;
+      if (finished) {
+        // The turn ended between the deadline and this line: its reply is the answer.
+        const publishError = await publish(finished, session);
+        const failure = finished.error ?? publishError;
+        return { ...session, messageId: input.messageId, ...(finished.response ? { response: finished.response } : {}),
+          delivered: !failure, ...(failure ? { error: failure } : {}) };
+      }
+      turn.late = (done) => { void publish(done, session); };
+      const publishError = await publish({ timedOut: true }, session);
+      // Still running, not failed: the final reply follows as its own event when the turn ends.
+      return { ...session, messageId: input.messageId, delivered: !publishError, ...(publishError ? { error: publishError } : {}) };
+    }
     const error = result.error ?? (response ? undefined : 'No response from Home Assistant remote chat');
     // The turn ran. A failure to publish its reply must not be reported as a failed turn
-    // (a second "Error:" event, an empty session id): the session and answer are kept.
-    let publishError: string | undefined;
-    if (input.publishEvent !== false) {
-      try {
-        await publishHomeAssistantChatReply(deps, input, {
-          sessionId: result.session.id,
-          routeId: result.binding.id,
-          assistantMessageId: result.assistantMessageId,
-          response: response || `Error: ${error}`,
-          status: error ? 'failed' : 'completed',
-        });
-      } catch (caught) {
-        publishError = `The reply was produced but could not be published to Home Assistant: ${summarizeError(caught)}`;
-        logger.warn('DaemonSurfaceActionHelper: failed to publish Home Assistant chat reply', {
-          conversationId: input.conversationId,
-          sessionId: result.session.id,
-          error: summarizeError(caught),
-        });
-      }
-    }
+    // (a second event, an empty session id): the session and answer are kept.
+    const publishError = await publish({ ...result, ...(error ? { error } : {}) }, session);
     const reportedError = error ?? publishError;
     return {
-      sessionId: result.session.id,
-      routeId: result.binding.id,
+      ...session,
       messageId: input.messageId,
       ...(result.assistantMessageId ? { assistantMessageId: result.assistantMessageId } : {}),
       ...(response ? { response } : {}),
@@ -151,20 +195,7 @@ export async function postHomeAssistantSurfaceChatMessage(
     };
   } catch (error) {
     const errorMessage = summarizeError(error);
-    if (input.publishEvent !== false) {
-      try {
-        await publishHomeAssistantChatReply(deps, input, {
-          sessionId: '',
-          response: `Error: ${errorMessage}`,
-          status: 'failed',
-        });
-      } catch (publishError) {
-        logger.warn('DaemonSurfaceActionHelper: failed to publish Home Assistant chat error', {
-          conversationId: input.conversationId,
-          error: summarizeError(publishError),
-        });
-      }
-    }
+    await publish({ error: errorMessage }, { sessionId: '' });
     return {
       sessionId: '',
       messageId: input.messageId,
@@ -185,8 +216,11 @@ export async function publishHomeAssistantChatReply(
     readonly sessionId: string;
     readonly routeId?: string | undefined;
     readonly assistantMessageId?: string | undefined;
+    /** What Home Assistant shows and speaks: the reply, or a short sentence for a turn still running, stopped or failed. */
     readonly response: string;
     readonly status: string;
+    /** The internal reason a turn failed, kept in the event's metadata and never spoken. */
+    readonly error?: string | undefined;
   },
 ): Promise<void> {
   const baseUrl = resolveHomeAssistantBaseUrl(deps.configManager, deps.serviceRegistry);
@@ -216,6 +250,7 @@ export async function publishHomeAssistantChatReply(
       displayName: input.displayName ?? null,
       inboundMessageId: input.messageId,
       conversationId: input.conversationId,
+      ...(result.error ? { error: result.error } : {}),
       ...(input.context ? { homeAssistantContext: input.context } : {}),
     },
   });

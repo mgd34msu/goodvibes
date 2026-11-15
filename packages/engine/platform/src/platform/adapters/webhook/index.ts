@@ -1,6 +1,6 @@
 import type { GenericWebhookAdapterContext } from '../types.js';
 import { validatePublicWebhookUrl } from '../../utils/url-safety.js';
-import { constantTimeEquals, readTextBodyWithinLimit } from '../helpers.js';
+import { constantTimeEquals, readTextBodyWithinLimit, ingressAnswerResponse } from '../helpers.js';
 import { resolveSurfaceCredential, surfaceCredentialUnavailable } from '../surface-credential.js';
 import { submitSurfaceMessage, surfaceOutcomeResponse } from '../surface-message.js';
 
@@ -106,9 +106,7 @@ export async function handleGenericWebhookSurface(req: Request, context: Generic
     controlCommand: typeof body.controlCommand === 'string' ? body.controlCommand : undefined,
     metadata: body,
   });
-  if (!policy.allowed) {
-    return Response.json({ error: `Blocked by channel policy: ${policy.reason}` }, { status: 403 });
-  }
+  if (!policy.allowed) return ingressAnswerResponse(policy);
   // A caller may continue a conversation that came through this webhook, not step into one from another surface.
   const requestedSessionId = typeof body.sessionId === 'string' ? body.sessionId : undefined;
   if (requestedSessionId) {

@@ -25,6 +25,7 @@ import type { ServiceRegistry } from '../config/service-registry.js';
 import type { AgentManager } from '../tools/agent/index.js';
 import { SlackIntegration, DiscordIntegration, NtfyIntegration, resolveNtfyDefaultPriority } from '../integrations/index.js';
 import { logger } from '../utils/logger.js';
+import { summarizeError } from '../utils/error-display.js';
 import { resolveSurfaceSecret } from '../channels/builtin/surface-secrets.js';
 import { postToPublicWebhook, validatePublicWebhookUrl } from '../utils/url-safety.js';
 import type { HostResolver } from '../tools/fetch/pinned-request.js';
@@ -161,13 +162,19 @@ export async function deliverDiscordAgentReply(
     await discordBotToken(deps),
   );
   if (pending.applicationId && pending.interactionToken) {
-    await discord.editOriginalResponse(
+    // An interaction token lasts fifteen minutes. A late reply is refused as an
+    // edit, so it is posted to the channel the command came from instead.
+    const edited = await discord.editOriginalResponse(
       pending.applicationId,
       pending.interactionToken,
       '',
       [discord.formatAgentResult(pending.agentId, pending.task, message)],
-    );
-    return;
+    ).then(() => true, (error: unknown) => {
+      if (!pending.channelId) throw error;
+      logger.warn('Discord interaction edit refused; posting the reply to its channel', { channelId: pending.channelId, error: summarizeError(error) });
+      return false;
+    });
+    if (edited) return;
   }
   if (pending.channelId) {
     await discord.postMessage(pending.channelId, message, [discord.formatAgentResult(pending.agentId, pending.task, message)]);

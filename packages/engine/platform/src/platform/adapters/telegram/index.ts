@@ -1,6 +1,6 @@
 import type { TelegramSourceAccountHandle, TelegramWebhookAccountLease } from '../../channels/telegram/source-account.js';
-import { isOrdinaryIngressRefusal, type SurfaceAdapterContext } from '../types.js';
-import { constantTimeEquals, parseJsonRecord, readTextBodyWithinLimit } from '../helpers.js';
+import type { SurfaceAdapterContext } from '../types.js';
+import { constantTimeEquals, ingressAnswerResponse, parseJsonRecord, readTextBodyWithinLimit } from '../helpers.js';
 import { resolveSurfaceCredential, surfaceCredentialUnavailable } from '../surface-credential.js';
 import { logger } from '../../utils/logger.js';
 import { submitSurfaceMessage, surfaceOutcomeResponse } from '../surface-message.js';
@@ -232,16 +232,9 @@ export async function processTelegramUpdate(
     },
   });
   if (!policy.allowed) {
-    if (policy.reason === 'payment-reply-recorded') return Response.json({ ok: true, acknowledged: true, consumed: true, queued: false, outcome: 'payment-reply', recorded: true });
-    const paymentAnswer = /^payment-reply-(approve|deny|acknowledge|object)$/.exec(policy.reason)?.[1];
-    if (paymentAnswer) return Response.json({ ok: true, acknowledged: true, consumed: true, queued: false, outcome: 'payment-reply', answer: paymentAnswer });
-    // Telegram redelivers an update it was answered with a failure status, and an ordinary refusal
-    // (an unaddressed group message, a user not on the allowlist) will not change on redelivery.
-    if (isOrdinaryIngressRefusal(policy.reason)) {
-      logger.info('processTelegramUpdate: update ignored by channel policy', { reason: policy.reason, chatId });
-      return Response.json({ ok: true, acknowledged: true, queued: false, outcome: 'ignored', reason: 'blocked-by-channel-policy', policyReason: policy.reason });
-    }
-    return Response.json({ ok: false, error: `Blocked by channel policy: ${policy.reason}` }, { status: 403 });
+    // Telegram redelivers an update answered with a failure status; a consumed answer or a final refusal is acknowledged.
+    if (!policy.consumed) logger.info('processTelegramUpdate: update not admitted by channel policy', { reason: policy.reason, chatId });
+    return ingressAnswerResponse(policy);
   }
 
   // An edit is requested only so a purchase answer can be corrected, and the policy above has already

@@ -11,7 +11,8 @@ import type { AgentManager } from '../tools/agent/index.js';
 import type { ControlPlaneGateway, SharedSessionBroker } from '../control-plane/index.js';
 import type { ConversationMessageEnvelope } from '../control-plane/conversation-message.js';
 import type { RouteBindingManager, ChannelPolicyManager } from '../channels/index.js';
-import type { GenericWebhookAdapterContext, SurfaceAdapterContext, SurfaceControlCommand, SurfaceControlOrigin } from '../adapters/index.js';
+import { isChannelOwner } from '../channels/policy-manager.js';
+import type { GenericWebhookAdapterContext, SurfaceAdapterContext, SurfaceControlCommand, SurfaceControlOrigin, SurfaceIngressDecision } from '../adapters/index.js';
 import type { AutomationManager } from '../automation/index.js';
 import type { ChannelPolicyDecision, ChannelIngressPolicyInput } from '../channels/index.js';
 import type { AutomationRouteBinding } from '../automation/routes.js';
@@ -27,11 +28,13 @@ import type { CompanionChatManager } from '../companion/companion-chat-manager.j
 import { resolveSecretInput } from '../config/secret-refs.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
-import { tryResolveApprovalReplyFromChannel, type ApprovalReplyBroker } from './approval-reply.js';
-import { tryResolveWorkProposalReplyFromChannel } from './work-proposal-reply.js';
+import { approvalProposal, approvalReplyCandidates, tryResolveApprovalReplyFromChannel, type ApprovalReplyBroker } from './approval-reply.js';
+import { proposalReplyTarget, tryResolveWorkProposalReplyFromChannel } from './work-proposal-reply.js';
 import { tryResolvePaymentReplyFromChannel } from './payment-reply.js';
 import { PaymentReplyInbox, type PaymentReplyOffer } from '../payments/reply-inbox.js';
-import { refuseCardShapedIngress, CARD_SHAPES_REFUSED_REASON, JUDGMENT_INPUT_REFUSED_REASON } from './surface-card-gate.js';
+import { refuseCardShapedIngress, refuseCardTalk, CARD_SHAPES_REFUSED_REASON, JUDGMENT_INPUT_REFUSED_REASON } from './surface-card-gate.js';
+import { readInboundMessage, type InboundReading } from './inbound-reading.js';
+import { isGatedSurface, readConversationGateConfig } from '../agents/conversation-gate.js';
 import {
   deliverProposalNotice,
   settleUnstartedWork,
@@ -152,6 +155,15 @@ interface DaemonSurfaceActionContext {
   readonly ingressAlarm?: import('../channels/ingress-alarm.js').ChannelIngressAlarm | undefined;
 }
 
+/**
+ * What ingress decided about one message: the policy decision, whether the
+ * message was consumed as an answer (and by what), and the intent its one
+ * reading gave, which the gated spawn uses instead of asking again.
+ */
+export type AuthorizedIngress = ChannelPolicyDecision & SurfaceIngressDecision & {
+  readonly intent?: InboundReading['intent'];
+};
+
 export class DaemonSurfaceActionHelper {
   private controlAbort = new AbortController();
   private readonly controlTargets = new WeakMap<SurfaceControlReading, () => void>();
@@ -197,17 +209,22 @@ export class DaemonSurfaceActionHelper {
     // fills it; the gated trySpawnAgent below reads it.
     const origin: { current: SurfaceIngressOrigin | null } = { current: null };
     const lifecycle = this.controlAbort.signal;
+    // The registered policy record the message was admitted under. A record is
+    // replaced on every change, so one identity compare says whether it moved.
     const registeredPolicy = (surface: ChannelIngressPolicyInput['surface']) => this.context.channelPolicy.listPolicies().find(policy => policy.surface === surface);
-    // Unconfigured surfaces synthesize a fresh default timestamp on each read.
-    // Compare semantic policy fields plus registered-record identity instead.
-    const policyState = (policy: ChannelPolicyDecision['policy']) => JSON.stringify({ ...policy, updatedAt: undefined });
-    let authorization: { text: string; surface: ChannelIngressPolicyInput['surface']; policy: string; record: ChannelPolicyDecision['policy'] | undefined; operator: boolean } | null = null;
+    let authorization: { text: string; surface: ChannelIngressPolicyInput['surface']; record: ChannelPolicyDecision['policy'] | undefined; operator: boolean } | null = null;
     const commands = new WeakMap<SurfaceControlReading, () => void>();
-    // Commands read from an admitted sender who is not the surface owner. They address
+    // Commands read from an admitted sender who is not the channel's owner. They address
     // any run or agent id and carry no origin, so only the owner may act on them.
     const nonOperatorCommands = new WeakSet<SurfaceControlReading>();
+    const authorizationCurrent = (accepted: typeof authorization) => {
+      lifecycle.throwIfAborted();
+      if (!accepted || accepted !== authorization || registeredPolicy(accepted.surface) !== accepted.record) {
+        throw new Error('Surface ingress authorization is no longer current');
+      }
+    };
     return {
-      authorizeSurfaceIngress: async (input: ChannelIngressPolicyInput): Promise<ChannelPolicyDecision> => {
+      authorizeSurfaceIngress: async (input: ChannelIngressPolicyInput): Promise<AuthorizedIngress> => {
         authorization = null;
         origin.current = {
           surface: input.surface,
@@ -218,16 +235,14 @@ export class DaemonSurfaceActionHelper {
         };
         const decision = await this.authorizeSurfaceIngress(input);
         if (decision.allowed) {
-          const allowlist = decision.matchedGroupPolicy?.allowlistUserIds ?? decision.policy.allowlistUserIds;
-          // An identity-less surface is admitted by its webhook secret and only exists
-          // with an empty allowlist; an identified sender is the operator only as the owner.
-          const operator = input.userId === undefined || allowlist.length === 0 || allowlist[0] === input.userId;
-          authorization = { text: input.text ?? '', surface: input.surface, policy: policyState(decision.policy), record: decision.policy, operator };
+          // A sender with no identity is admitted by its surface secret, which only an
+          // empty allowlist allows; an identified sender is the operator only as the owner.
+          const operator = input.userId === undefined || isChannelOwner(decision, input.userId);
+          authorization = { text: input.text ?? '', surface: input.surface, record: registeredPolicy(input.surface), operator };
+          if (decision.intent !== undefined && origin.current) origin.current = { ...origin.current, intent: decision.intent };
         }
         // A protected-input refusal must not stay readable from the cell the gated
-        // spawn path reads. Every adapter does return early on a not-allowed
-        // decision, so this changes no behaviour today, it stops the guarantee
-        // from depending on all nineteen of them continuing to.
+        // spawn path reads.
         if (!decision.allowed && (decision.reason.startsWith(CARD_SHAPES_REFUSED_REASON)
           || decision.reason.startsWith(JUDGMENT_INPUT_REFUSED_REASON))) {
           origin.current = null;
@@ -240,15 +255,11 @@ export class DaemonSurfaceActionHelper {
         const assertCurrent = () => {
           signal.throwIfAborted();
           assertSynchronousCurrent(options.beforeAttempt);
-          if (!accepted || accepted !== authorization || accepted.text !== text
-            || (registeredPolicy(accepted.surface) !== undefined && registeredPolicy(accepted.surface) !== accepted.record)
-            || policyState(this.context.channelPolicy.getPolicy(accepted.surface)) !== accepted.policy) {
-            throw new Error('Surface control source is no longer authorized');
-          }
+          authorizationCurrent(accepted);
+          if (accepted?.text !== text) throw new Error('Surface control source is no longer authorized');
         };
         assertCurrent();
         const command = await this.parseSurfaceControlCommand(text, { ...options, signal, beforeAttempt: assertCurrent });
-        assertCurrent();
         if (command && accepted?.operator === false) nonOperatorCommands.add(command);
         if (command) commands.set(command, () => {
           assertCurrent();
@@ -265,7 +276,7 @@ export class DaemonSurfaceActionHelper {
         assertCurrent();
         this.controlTargets.delete(command);
         if (nonOperatorCommands.has(command)) {
-          return `Not done: ${command.action} ${command.id} was refused. Status, cancel and retry act on any run or agent, so only the surface owner (the first user on its allowlist) may send them. Ask the owner, or have them change the allowlist.`;
+          return `Not done: ${command.action} ${command.id} was refused. Status, cancel and retry act on any run or agent, so only the owner of this channel may send them. Ask the owner, or have them change the channel's owner.`;
         }
         // A command that names its conversation acts only on what that conversation started.
         // The reply is the same for a target that exists elsewhere and one that does not.
@@ -280,12 +291,8 @@ export class DaemonSurfaceActionHelper {
         const accepted = authorization;
         const capturedOrigin = origin.current;
         const assertCurrent = () => {
-          lifecycle.throwIfAborted();
-          if (!accepted || accepted !== authorization || capturedOrigin !== origin.current
-            || (registeredPolicy(accepted.surface) !== undefined && registeredPolicy(accepted.surface) !== accepted.record)
-            || policyState(this.context.channelPolicy.getPolicy(accepted.surface)) !== accepted.policy) {
-            throw new Error('Conversation gate source is no longer authorized');
-          }
+          authorizationCurrent(accepted);
+          if (capturedOrigin !== origin.current) throw new Error('Conversation gate source is no longer authorized');
         };
         return gateSurfaceSpawn(this.conversationGateDeps({ signal: lifecycle, beforeAttempt: assertCurrent }), capturedOrigin, input, logLabel, sessionId);
       },
@@ -352,122 +359,144 @@ export class DaemonSurfaceActionHelper {
       queueSurfaceReplyFromBinding: this.context.queueSurfaceReplyFromBinding,
       workProposals: this.context.workProposals,
       readingOptions: { ...readingOptions, signal },
+      // The policy record a gated message was admitted under: one identity compare where the reading is acted on.
       captureReadingSource: (origin: SurfaceIngressOrigin | null) => {
         const surface = origin?.surface as ChannelIngressPolicyInput['surface'] | undefined;
-        const policy = surface ? this.context.channelPolicy.getPolicy(surface) : undefined;
-        const source = JSON.stringify(policy ? { ...policy, updatedAt: undefined } : null);
         const record = surface ? this.context.channelPolicy.listPolicies().find(entry => entry.surface === surface) : undefined;
         return () => {
           signal.throwIfAborted();
-          if (!surface) return;
-          const current = this.context.channelPolicy.getPolicy(surface);
-          if (this.context.channelPolicy.listPolicies().find(entry => entry.surface === surface) !== record
-            || JSON.stringify({ ...current, updatedAt: undefined }) !== source) throw new Error('Conversation source policy changed');
+          if (surface && this.context.channelPolicy.listPolicies().find(entry => entry.surface === surface) !== record) {
+            throw new Error('Conversation source policy changed');
+          }
         };
       },
       deliverSurfaceNotice: this.context.deliverSurfaceNotice,
     };
   }
 
-  async authorizeSurfaceIngress(input: ChannelIngressPolicyInput): Promise<ChannelPolicyDecision> {
-    // Source admission must precede every semantic reader, including card-talk.
+  /**
+   * The shared ingress hook every surface adapter calls. Code decides first
+   * (source admission, a card number by its checksum, protected input), then
+   * one inbound reading answers every question that applies to the message
+   * (inbound-reading.ts), and the answers are acted on in order: card details
+   * refused, a work proposal, a purchase window or a permission ask answered.
+   * A message that answered something is reported `consumed`; anything else
+   * goes on to the conversation carrying the intent its reading gave.
+   */
+  async authorizeSurfaceIngress(input: ChannelIngressPolicyInput): Promise<AuthorizedIngress> {
+    // Source admission must precede every semantic reader.
     // This shares the policy owner's rules but cannot seed, audit or retain text.
     const preflight = await this.context.channelPolicy.preflightIngress(input);
     if (!preflight.allowed) {
       const denial = await this.context.channelPolicy.recordDeniedIngress(input);
       if (!denial.allowed) return denial;
     }
-    // Before anything below can store, log or transcribe the message
-    // (docs/decisions/2026-07-27-inbound-email-design.md §11.0). evaluateIngress writes input.text into the
-    // channel policy audit trail and schedules it to disk, and an approval
-    // reply's full text becomes a stored steering note, so a card number
-    // typed here reaches disk by two routes unless this runs ahead of both.
+    // A card number or protected credential input is refused before anything
+    // below can store, log or transcribe the message (docs/decisions/2026-07-27-inbound-email-design.md §11.0).
     // Approvals and vetoes themselves keep working over remote channels: a
     // remote surface has authority to say yes or no about a purchase, and no
-    // path for entering the instrument. Authority over a decision is not a
-    // channel for a secret.
-    const cardRefusal = await refuseCardShapedIngress(
-      { ...this.conversationGateDeps(), channelPolicy: this.context.channelPolicy },
-      input,
-    );
+    // path for entering the instrument.
+    const cardDeps = { ...this.conversationGateDeps(), channelPolicy: this.context.channelPolicy };
+    const cardRefusal = await refuseCardShapedIngress(cardDeps, input);
     if (cardRefusal) return cardRefusal;
+    // The audit record this writes masks every digit, so it holds no card value whatever the reading says.
     const decision = await this.context.channelPolicy.evaluateIngress(input, { recordDenied: false });
     if (!decision.allowed) { await this.context.channelPolicy.recordDeniedIngress(input); return decision; }
-    // An answer to a pending work proposal is consumed here, on the shared
-    // ingress hook every surface adapter already calls, which is what makes
-    // agreement answerable over whatever channel the proposal went out on,
-    // with no per-adapter wiring and no walk to a terminal.
-    const policySource = JSON.stringify({ ...decision.policy, updatedAt: undefined });
-    const replySurface = input.surface;
     const lifecycle = this.controlAbort.signal;
+    const admittedUnder = this.context.channelPolicy.listPolicies().find(policy => policy.surface === input.surface);
+    // The policy that admitted the message is compared once, where an answer is about to be acted on.
     const assertReplyCurrent = () => {
       lifecycle.throwIfAborted();
-      const registered = this.context.channelPolicy.listPolicies().find(policy => policy.surface === replySurface);
-      if ((registered && registered !== decision.policy)
-        || JSON.stringify({ ...this.context.channelPolicy.getPolicy(replySurface), updatedAt: undefined }) !== policySource) {
+      if (this.context.channelPolicy.listPolicies().find(policy => policy.surface === input.surface) !== admittedUnder) {
         throw new Error('The original reply owner policy is no longer current');
       }
     };
     // The conversation the owner wrote from: a route already bound for it, or one made from the message itself.
     const replyToOwner = async (text: string): Promise<unknown> => deliverProposalNotice(
       this.context, ownerReplyBinding(this.context.routeBindings.listBindings(), input), text);
+    const paymentConsumed = (offer: PaymentReplyOffer): AuthorizedIngress | undefined => {
+      if (offer.consumed) return { ...decision, allowed: false, reason: `payment-reply-${offer.answer}`, consumed: { by: 'payment', answer: offer.answer } };
+      if (offer.reason === 'recorded') return { ...decision, allowed: false, reason: 'payment-reply-recorded', consumed: { by: 'payment', answer: 'recorded' } };
+      return undefined;
+    };
     let addressedPayment: PaymentReplyOffer | undefined;
     if (typeof input.metadata?.['replyToMessageId'] === 'string') {
       // An explicit provider reply names its notice before another pending
       // dialogue can interpret the same short answer against different text.
       addressedPayment = await tryResolvePaymentReplyFromChannel(input, decision, this.paymentReplies, this.context.telegramSourceAccounts,
         { assertCurrent: assertReplyCurrent, signal: lifecycle, replyToOwner });
-      if (addressedPayment.consumed) return { ...decision, allowed: false, reason: `payment-reply-${addressedPayment.answer}` };
-      if (addressedPayment.reason === 'recorded') return { ...decision, allowed: false, reason: 'payment-reply-recorded' };
+      const consumed = paymentConsumed(addressedPayment);
+      if (consumed) return consumed;
     }
-    const proposalReply = await tryResolveWorkProposalReplyFromChannel(input, {
-      readingOptions: { signal: lifecycle, beforeAttempt: assertReplyCurrent },
-      proposals: this.context.workProposals,
-      captureProposalSource: (proposal) => {
-        const routeState = () => {
-          const route = proposal.routeId ? this.context.routeBindings.getBinding(proposal.routeId) : undefined;
-          if (proposal.routeId && (!route || route.surfaceKind !== proposal.surfaceKind
-            || (route.channelId ?? route.externalId) !== proposal.channelId || route.threadId !== proposal.threadId)) {
-            throw new Error('Work proposal route is no longer current');
-          }
-          return JSON.stringify(route ? [route.id, route.surfaceKind, route.surfaceId, route.externalId, route.channelId, route.threadId, route.sessionId] : null);
-        };
-        const source = routeState();
-        return () => { if (routeState() !== source) throw new Error('Work proposal route changed'); };
-      },
-      startAgreedWork: (proposal, note) => startAgreedWork(this.conversationGateDeps(), proposal, note),
-      settleUnstartedWork: (proposal, reason) => settleUnstartedWork(this.conversationGateDeps(), proposal, reason),
-      replyOnChannel: async (proposal, text) => {
-        const binding = proposal.routeId ? this.context.routeBindings.getBinding(proposal.routeId) : undefined;
-        await deliverProposalNotice(this.context, binding, text);
-      },
-    });
-    if (proposalReply.consumed) {
-      // Report not-allowed so the adapter neither creates a session nor sends
-      // a chat turn: the answer has already been acted on.
-      return { ...decision, allowed: false, reason: `work-proposal-${proposalReply.action}` };
+
+    // Code decides which questions apply; one request asks them all.
+    const text = input.text ?? '';
+    const interactive = input.metadata?.['interactive'] === true;
+    const proposal = interactive ? undefined : proposalReplyTarget(input, this.context.workProposals);
+    const approvalDeps = { approvalBroker: this.context.approvalBroker, routeBindings: this.context.routeBindings, sessions: this.context.sessionBroker };
+    const asks = interactive ? [] : approvalReplyCandidates(input, decision, approvalDeps);
+    const ask = asks.length === 1 ? asks[0] : undefined;
+    const gated = this.context.workProposals !== undefined && !interactive
+      && isGatedSurface(readConversationGateConfig(this.context.configManager), input.surface);
+    const reading = text.trim().length === 0 || interactive
+      ? undefined
+      : await readInboundMessage({
+        message: text,
+        intent: gated,
+        ...(proposal ? { proposal: { task: proposal.task, summary: proposal.summary } } : {}),
+        ...(ask ? { approval: approvalProposal(ask) } : {}),
+      }, { signal: lifecycle });
+
+    const cardTalk = reading ? await refuseCardTalk(cardDeps, input, reading.card) : null;
+    if (cardTalk) return cardTalk;
+
+    // An answer to a pending work proposal is consumed here, on the shared
+    // ingress hook every surface adapter already calls, which is what makes
+    // agreement answerable over whatever channel the proposal went out on.
+    if (proposal) {
+      const proposalReply = await tryResolveWorkProposalReplyFromChannel(input, {
+        readingOptions: { signal: lifecycle, beforeAttempt: assertReplyCurrent },
+        proposals: this.context.workProposals,
+        reading: { target: proposal, answer: reading?.proposal },
+        captureProposalSource: (target) => {
+          const route = target.routeId ? this.context.routeBindings.getBinding(target.routeId) : undefined;
+          return () => {
+            const current = target.routeId ? this.context.routeBindings.getBinding(target.routeId) : undefined;
+            if (current !== route || (target.routeId && (!current || current.surfaceKind !== target.surfaceKind
+              || (current.channelId ?? current.externalId) !== target.channelId || current.threadId !== target.threadId))) {
+              throw new Error('Work proposal route is no longer current');
+            }
+          };
+        },
+        startAgreedWork: (agreed, note) => startAgreedWork(this.conversationGateDeps(), agreed, note),
+        settleUnstartedWork: (unstarted, reason) => settleUnstartedWork(this.conversationGateDeps(), unstarted, reason),
+        replyOnChannel: async (target, notice) => {
+          const binding = target.routeId ? this.context.routeBindings.getBinding(target.routeId) : undefined;
+          await deliverProposalNotice(this.context, binding, notice);
+        },
+      });
+      // The answer has already been acted on: the adapter neither creates a session nor sends a chat turn.
+      if (proposalReply.consumed) {
+        return { ...decision, allowed: false, reason: `work-proposal-${proposalReply.action}`, consumed: { by: 'work-proposal', answer: proposalReply.action } };
+      }
     }
     // An answer to a purchase approval or veto notice, read against the notice
-    // it follows. Consumed the same way: the window already has its answer.
-    const paymentReply = addressedPayment ?? await tryResolvePaymentReplyFromChannel(input, decision, this.paymentReplies, this.context.telegramSourceAccounts,
-      { assertCurrent: assertReplyCurrent, signal: lifecycle, replyToOwner });
-    if (paymentReply.consumed) {
-      return { ...decision, allowed: false, reason: `payment-reply-${paymentReply.answer}` };
+    // it follows (the purchase window's own reading, only while one is open).
+    if (!addressedPayment) {
+      const consumed = paymentConsumed(await tryResolvePaymentReplyFromChannel(input, decision, this.paymentReplies, this.context.telegramSourceAccounts,
+        { assertCurrent: assertReplyCurrent, signal: lifecycle, replyToOwner }));
+      if (consumed) return consumed;
     }
-    if (paymentReply.reason === 'recorded') return { ...decision, allowed: false, reason: 'payment-reply-recorded' };
-    const consumed = await tryResolveApprovalReplyFromChannel(input, decision, {
-      approvalBroker: this.context.approvalBroker,
-      routeBindings: this.context.routeBindings,
-      sessions: this.context.sessionBroker,
-    });
-    if (consumed) {
-      // The reply was a settled answer from the paired owner and resolved a
-      // pending ask through the shared broker. Report it as not-allowed so
-      // the adapter neither creates a session nor sends a chat turn, the
-      // approval machinery publishes its own resolution events.
-      return { ...decision, allowed: false, reason: 'approval-reply-consumed' };
+    if (asks.length > 0) {
+      assertReplyCurrent();
+      const answered = await tryResolveApprovalReplyFromChannel(input, decision, {
+        ...approvalDeps,
+        ...(ask ? { reading: { approvalId: ask.id, answer: reading?.approval } } : {}),
+      });
+      // The approval machinery publishes its own resolution events; the message is not a chat turn.
+      if (answered) return { ...decision, allowed: false, reason: 'approval-reply-consumed', consumed: { by: 'approval', answer: 'answered' } };
     }
-    return decision;
+    return { ...decision, ...(reading?.intent !== undefined ? { intent: reading.intent } : {}) };
   }
 
   async parseSurfaceControlCommand(text: string, options: CallOptions = {}): Promise<SurfaceControlReading | null> {

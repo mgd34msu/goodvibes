@@ -1,6 +1,6 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import type { AutomationRouteBinding } from '../automation/routes.js';
-import type { SurfaceAdapterContext } from './types.js';
+import type { SurfaceAdapterContext, SurfaceIngressDecision } from './types.js';
 import { readTextBodyWithinLimit, DEFAULT_MAX_REQUEST_BODY_BYTES } from '../utils/request-body.js';
 import { WORK_AUTHORIZED_METADATA_KEY } from '../agents/conversation-continuation.js';
 import { SHARED_SESSION_DELEGATED_INPUT_METADATA_KEY } from '../control-plane/session-intents.js';
@@ -35,15 +35,42 @@ export function readString(value: unknown): string | undefined {
 }
 
 /**
- * What an interaction surface (a slash command, a button) shows when the channel
- * policy answered instead of starting work. The policy also answers a reply that
- * it consumed (an approval, a payment answer, a work proposal reply), which is
- * not a refusal.
+ * What a provider is told about a message ingress did not admit, decided in
+ * one place for every adapter:
+ * - consumed (an answer that was acted on): 2xx, so the provider never
+ *   redelivers it as a new chat message;
+ * - refused and redelivery cannot change that: 2xx with `outcome: 'ignored'`;
+ * - refused and redelivery could help: a failure status.
+ * `text` is the line an interaction surface (a slash command, a button, a
+ * chat app that posts the body) shows the person.
  */
-export function policyReplyText(reason: string): string {
-  return /^(approval-reply-consumed|payment-reply-|work-proposal-)/.test(reason)
-    ? `Your reply was received (${reason}).`
-    : `Blocked by channel policy: ${reason}`;
+export function ingressAnswer(decision: SurfaceIngressDecision): { readonly status: number; readonly body: Record<string, unknown>; readonly text: string } {
+  if (decision.consumed) {
+    const { by, answer } = decision.consumed;
+    return {
+      status: 200,
+      body: { ok: true, acknowledged: true, consumed: true, queued: false, outcome: 'consumed', by, answer },
+      text: `Your reply was received (${by}: ${answer}).`,
+    };
+  }
+  if (decision.retryWillChange === true) {
+    return {
+      status: 403,
+      body: { ok: false, error: `Blocked by channel policy: ${decision.reason}`, policyReason: decision.reason },
+      text: `Not done: blocked by channel policy (${decision.reason}).`,
+    };
+  }
+  return {
+    status: 200,
+    body: { ok: true, acknowledged: true, queued: false, outcome: 'ignored', reason: 'blocked-by-channel-policy', policyReason: decision.reason },
+    text: `Not done: blocked by channel policy (${decision.reason}).`,
+  };
+}
+
+/** {@link ingressAnswer} as the JSON response a webhook provider or bridge receives. */
+export function ingressAnswerResponse(decision: SurfaceIngressDecision): Response {
+  const answer = ingressAnswer(decision);
+  return Response.json(answer.body, { status: answer.status });
 }
 
 /** A provider message id that may arrive as a string or a number, as a string. */

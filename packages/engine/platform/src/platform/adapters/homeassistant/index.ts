@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { SurfaceAdapterContext } from '../types.js';
 import { answerSurfaceControl } from '../surface-message.js';
 import type { UpsertRouteBindingInput } from '../../channels/route-manager.js';
-import { constantTimeEquals, declaredMention, parseJsonRecord, readString, readTextBodyWithinLimit } from '../helpers.js';
+import { constantTimeEquals, declaredMention, parseJsonRecord, readString, readTextBodyWithinLimit, ingressAnswerResponse } from '../helpers.js';
 import {
   HOME_ASSISTANT_SURFACE,
   resolveHomeAssistantWebhookSecret,
@@ -68,9 +68,7 @@ export async function handleHomeAssistantSurfaceWebhook(
     mentioned: declaredMention(body, true),
     metadata: body,
   });
-  if (!policy.allowed) {
-    return Response.json({ error: `Blocked by channel policy: ${policy.reason}` }, { status: 403 });
-  }
+  if (!policy.allowed) return ingressAnswerResponse(policy);
 
   // The conversation this request belongs to; the remote chat binds the same one.
   const conversationBinding = (): UpsertRouteBindingInput => ({

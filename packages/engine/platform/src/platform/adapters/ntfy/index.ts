@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { constantTimeEquals, declaredMention, ingressMetadata, parseJsonRecord, readBearerOrHeaderToken, readTextBodyWithinLimit } from '../helpers.js';
+import { constantTimeEquals, declaredMention, ingressMetadata, parseJsonRecord, readBearerOrHeaderToken, readTextBodyWithinLimit, ingressAnswerResponse } from '../helpers.js';
 import { resolveSurfaceCredential, surfaceCredentialUnavailable } from '../surface-credential.js';
 import type { SurfaceAdapterContext } from '../types.js';
 import { inboundDedupKey, ntfyInboundDedup } from '../inbound-dedup.js';
@@ -136,9 +136,7 @@ async function authorizeNtfyPayload(
     mentioned: declaredMention(body, true),
     metadata: body,
   });
-  if (!policy.allowed) {
-    return Response.json({ error: `Blocked by channel policy: ${policy.reason}` }, { status: 403 });
-  }
+  if (!policy.allowed) return ingressAnswerResponse(policy);
   return null;
 }
 

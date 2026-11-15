@@ -7,6 +7,7 @@ import type { SharedSessionBroker } from '../control-plane/index.js';
 import type { ChannelPluginRegistry, ChannelReplyPipeline, RouteBindingManager } from '../channels/index.js';
 import type { ChannelPolicyManager, ChannelSurface } from '../channels/index.js';
 import { daemonReceiptStoreAt, daemonReceiptsPath } from './receipts.js';
+import { deliverOwnerAlert } from './owner-alert.js';
 import type { DeliveredChannelReply, UndeliveredChannelReply } from '../channels/reply-pipeline.js';
 import type { SharedSessionSurfaceReplyBinding } from '../control-plane/session-intents.js';
 import { logger } from '../utils/logger.js';
@@ -111,6 +112,22 @@ interface DaemonSurfaceDeliveryContext {
   readonly recordDeliveryAttempt?: SurfaceDeliveryLedgerRecorder | undefined;
   /** Names each surface's owner, so an owner alert goes only to the owner's own conversations. */
   readonly channelPolicy?: Pick<ChannelPolicyManager, 'getPolicy'> | undefined;
+  /**
+   * Marks an approval whose prompt could not be shown where it was raised, so
+   * every attached surface and the waiting agent can see it. The approval
+   * broker's remote update when wired.
+   */
+  readonly recordApprovalPromptUndelivered?: ((approvalId: string, detail: ApprovalPromptUndelivered) => Promise<unknown>) | undefined;
+}
+
+/** What `metadata.promptDelivery` holds on an approval whose prompt did not reach its conversation. */
+export interface ApprovalPromptUndelivered {
+  readonly delivered: false;
+  /** Why the prompt's own conversation did not get it. */
+  readonly reason: string;
+  /** The owner conversation the prompt was taken to instead, or null when none took it. */
+  readonly reachedSurface: string | null;
+  readonly at: number;
 }
 
 /** One entry the delivery ledger should show for a surface reply. */
@@ -746,35 +763,56 @@ export class DaemonSurfaceDeliveryHelper {
     await deliverWebhookAgentReply(this.directDeliveryDeps(), pending, message);
   }
 
+  /**
+   * Show an approval update on the conversation it belongs to (its route, else
+   * its session's first route). When a prompt that still waits for an answer
+   * did not get there (no route, a refused or failed send), it is taken to the
+   * owner's other conversations through the owner-alert path, and the approval
+   * record says the prompt was not delivered, once.
+   */
   async notifyApprovalUpdate(approval: SharedApprovalRecord): Promise<void> {
     await this.context.sessionBroker.start();
     await this.context.routeBindings.start();
+    const outcome = await this.deliverApprovalToItsRoute(approval);
+    if (outcome.delivered || (approval.status !== 'pending' && approval.status !== 'claimed')) return;
+    // Marked already: the record update that said so is itself published here.
+    const marked = approval.metadata['promptDelivery'];
+    if (typeof marked === 'object' && marked !== null && (marked as { delivered?: unknown }).delivered === false) return;
+    const reason = outcome.reason === 'delivery-failed' && outcome.error ? `delivery-failed: ${outcome.error}` : outcome.reason;
+    const webUrl = this.controlPlaneWebUrl({ approvalId: approval.id, sessionId: approval.sessionId });
+    const text = `Approval required for ${approval.request.tool}: ${approval.request.analysis.summary}. `
+      + 'It could not be shown in the conversation it came from. '
+      + `Answer it in the terminal app or the web UI${webUrl ? `: ${webUrl}` : ''}.`;
+    const reached = await deliverOwnerAlert(this.context.routeBindings, this, null, text);
+    logger.warn('An approval prompt did not reach its conversation', {
+      approvalId: approval.id, reason, reachedSurface: reached?.surfaceKind ?? null,
+    });
+    await this.context.recordApprovalPromptUndelivered?.(approval.id, {
+      delivered: false, reason, reachedSurface: reached?.surfaceKind ?? null, at: Date.now(),
+    })?.catch((error: unknown) => {
+      logger.warn('An undelivered approval prompt could not be marked on its record', { approvalId: approval.id, error: summarizeError(error) });
+    });
+  }
+
+  private async deliverApprovalToItsRoute(approval: SharedApprovalRecord): Promise<SurfaceNoticeDelivery> {
     const routeId = approval.routeId
       ?? this.context.sessionBroker.getSession(approval.sessionId ?? '')?.routeIds[0];
-    if (!routeId) return;
+    if (!routeId) return { delivered: false, reason: 'no-route-binding' };
     const binding = this.context.routeBindings.getBinding(routeId);
-    if (!binding) return;
-    if (binding.surfaceKind !== 'service') {
-      const pluginDelivered = await this.context.channelPlugins.notifyApproval(binding.surfaceKind, approval, binding);
-      if (pluginDelivered) {
-        return;
+    if (!binding) return { delivered: false, reason: 'no-route-binding' };
+    // The four surfaces rendered here say whether the prompt got there.
+    const deps = this.approvalDeliveryDeps();
+    switch (binding.surfaceKind) {
+      case 'slack': return deliverSlackApprovalUpdate(deps, approval, binding);
+      case 'discord': return deliverDiscordApprovalUpdate(deps, approval, binding);
+      case 'ntfy': return deliverNtfyApprovalUpdate(deps, approval, binding);
+      case 'webhook': return deliverWebhookApprovalUpdate(deps, approval, binding);
+      case 'service': return { delivered: false, reason: 'unsupported-delivery-surface' };
+      default: {
+        const plugin = await this.context.channelPlugins.notifyApproval(binding.surfaceKind, approval, binding);
+        if (!plugin.handled) return { delivered: false, reason: 'unsupported-delivery-surface' };
+        return plugin.delivered ? { delivered: true } : { delivered: false, reason: 'delivery-failed', ...(plugin.error ? { error: plugin.error } : {}) };
       }
-    }
-
-    if (binding.surfaceKind === 'slack') {
-      await this.deliverSlackApprovalUpdate(approval, binding);
-      return;
-    }
-    if (binding.surfaceKind === 'discord') {
-      await this.deliverDiscordApprovalUpdate(approval, binding);
-      return;
-    }
-    if (binding.surfaceKind === 'ntfy') {
-      await this.deliverNtfyApprovalUpdate(approval, binding);
-      return;
-    }
-    if (binding.surfaceKind === 'webhook') {
-      await this.deliverWebhookApprovalUpdate(approval, binding);
     }
   }
 

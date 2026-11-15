@@ -5,7 +5,9 @@
  * four are a cohesive block: each takes the same approval + route binding and
  * differs only in how that surface expresses "approve / deny / here is the
  * console link". Nothing here decides WHICH surface to use, that stays in
- * DaemonSurfaceDeliveryHelper.notifyApprovalUpdate, the one router.
+ * DaemonSurfaceDeliveryHelper.notifyApprovalUpdate, the one router. Each one
+ * says whether the update got there, so the router can try the owner's other
+ * conversations when an approval prompt did not.
  *
  * Every function takes its collaborators as an object rather than a bound
  * method. Passing `configManager.get` on its own would lose the receiver and
@@ -21,6 +23,7 @@ import { postToPublicWebhook, validatePublicWebhookUrl } from '../utils/url-safe
 import type { HostResolver } from '../tools/fetch/pinned-request.js';
 import { summarizeError } from '../utils/error-display.js';
 import { resolveSurfaceSecret } from '../channels/builtin/surface-secrets.js';
+import type { SurfaceNoticeDelivery } from './types.js';
 
 type RouteBinding = import('../automation/routes.js').AutomationRouteBinding;
 
@@ -41,6 +44,10 @@ export interface SurfaceApprovalDeliveryDeps {
   readonly resolveHost?: HostResolver | undefined;
 }
 
+function failed(error: unknown): SurfaceNoticeDelivery {
+  return { delivered: false, reason: 'delivery-failed', error: summarizeError(error) };
+}
+
 /** 'pending' and 'claimed' both still want the approve/deny affordance. */
 function isPendingApproval(approval: SharedApprovalRecord): boolean {
   return approval.status === 'pending' || approval.status === 'claimed';
@@ -50,7 +57,7 @@ export async function deliverSlackApprovalUpdate(
   deps: SurfaceApprovalDeliveryDeps,
   approval: SharedApprovalRecord,
   binding: RouteBinding,
-): Promise<void> {
+): Promise<SurfaceNoticeDelivery> {
   const webUrl = deps.controlPlaneWebUrl({ approvalId: approval.id, sessionId: approval.sessionId });
   const isPending = isPendingApproval(approval);
   const summary = approval.request.analysis.summary;
@@ -82,19 +89,22 @@ export async function deliverSlackApprovalUpdate(
         ...(blocks ? { blocks } : {}),
       }),
     }, { resolveHost: deps.resolveHost }).then(() => true, (error: unknown) => {
-      // The approval prompt is the one message a person must see. Without a
-      // channel to fall back to, surface the refusal so the caller records it.
-      if (!binding.channelId) throw error;
-      logger.warn('Slack approval response delivery failed; posting to the bound channel instead', {
+      logger.warn('Slack approval response delivery failed', {
         approvalId: approval.id,
+        fallback: binding.channelId ? 'the bound channel' : 'none',
         error: summarizeError(error),
       });
-      return false;
+      return error;
     });
-    if (delivered) return;
+    if (delivered === true) return { delivered: true };
+    if (!binding.channelId) return failed(delivered);
   }
-  if (binding.channelId) {
+  if (!binding.channelId) return { delivered: false, reason: 'no-deliverable-target' };
+  try {
     await slack.postMessage(binding.channelId, text, blocks);
+    return { delivered: true };
+  } catch (error) {
+    return failed(error);
   }
 }
 
@@ -102,7 +112,7 @@ export async function deliverDiscordApprovalUpdate(
   deps: SurfaceApprovalDeliveryDeps,
   approval: SharedApprovalRecord,
   binding: RouteBinding,
-): Promise<void> {
+): Promise<SurfaceNoticeDelivery> {
   const webUrl = deps.controlPlaneWebUrl({ approvalId: approval.id, sessionId: approval.sessionId });
   const isPending = isPendingApproval(approval);
   const summary = approval.request.analysis.summary;
@@ -117,22 +127,29 @@ export async function deliverDiscordApprovalUpdate(
   const applicationId = typeof binding.metadata.applicationId === 'string' ? binding.metadata.applicationId : undefined;
   const interactionToken = typeof binding.metadata.interactionToken === 'string' ? binding.metadata.interactionToken : undefined;
   if (applicationId && interactionToken) {
-    await discord.editOriginalResponse(applicationId, interactionToken, content).catch((error) => {
+    // An interaction token lasts fifteen minutes; when the edit is refused, the channel it came from still takes a post.
+    const edited = await discord.editOriginalResponse(applicationId, interactionToken, content).then(() => true, (error: unknown) => {
       logger.warn('Discord approval interaction update failed', {
         approvalId: approval.id,
+        fallback: binding.channelId ? 'the channel' : 'none',
         error: summarizeError(error),
       });
+      return error;
     });
-    return;
+    if (edited === true) return { delivered: true };
+    if (!binding.channelId) return failed(edited);
   }
-  if (binding.channelId) {
-    await discord.postMessage(binding.channelId, content).catch((error) => {
-      logger.warn('Discord approval channel update failed', {
-        approvalId: approval.id,
-        channelId: binding.channelId,
-        error: summarizeError(error),
-      });
+  if (!binding.channelId) return { delivered: false, reason: 'no-deliverable-target' };
+  try {
+    await discord.postMessage(binding.channelId, content);
+    return { delivered: true };
+  } catch (error) {
+    logger.warn('Discord approval channel update failed', {
+      approvalId: approval.id,
+      channelId: binding.channelId,
+      error: summarizeError(error),
     });
+    return failed(error);
   }
 }
 
@@ -140,9 +157,9 @@ export async function deliverNtfyApprovalUpdate(
   deps: SurfaceApprovalDeliveryDeps,
   approval: SharedApprovalRecord,
   binding: RouteBinding,
-): Promise<void> {
+): Promise<SurfaceNoticeDelivery> {
   const topic = binding.channelId ?? binding.externalId;
-  if (!topic) return;
+  if (!topic) return { delivered: false, reason: 'no-deliverable-target' };
   const webUrl = deps.controlPlaneWebUrl({ approvalId: approval.id, sessionId: approval.sessionId });
   const isPending = isPendingApproval(approval);
   const summary = approval.request.analysis.summary;
@@ -153,31 +170,33 @@ export async function deliverNtfyApprovalUpdate(
       : await resolveSurfaceSecret(deps, 'ntfy', 'primary') ?? undefined,
   );
   const priority = resolveNtfyDefaultPriority(deps.configManager.get('surfaces.ntfy.defaultPriority'));
-  await ntfy.publish(topic, `${isPending ? 'Approval required' : `Approval ${approval.status}`}: ${summary}`, {
-    title: approval.request.tool,
-    ...(priority === undefined ? {} : { priority }),
-    ...(webUrl ? { click: webUrl } : {}),
-    markGoodVibesOrigin: true,
-  }).catch((error) => logger.warn('ntfy approval update failed', {
-    approvalId: approval.id,
-    topic,
-    error: summarizeError(error),
-  }));
+  try {
+    await ntfy.publish(topic, `${isPending ? 'Approval required' : `Approval ${approval.status}`}: ${summary}`, {
+      title: approval.request.tool,
+      ...(priority === undefined ? {} : { priority }),
+      ...(webUrl ? { click: webUrl } : {}),
+      markGoodVibesOrigin: true,
+    });
+    return { delivered: true };
+  } catch (error) {
+    logger.warn('ntfy approval update failed', { approvalId: approval.id, topic, error: summarizeError(error) });
+    return failed(error);
+  }
 }
 
 export async function deliverWebhookApprovalUpdate(
   deps: SurfaceApprovalDeliveryDeps,
   approval: SharedApprovalRecord,
   binding: RouteBinding,
-): Promise<void> {
-  if (typeof binding.metadata.callbackUrl !== 'string') return;
+): Promise<SurfaceNoticeDelivery> {
+  if (typeof binding.metadata.callbackUrl !== 'string') return { delivered: false, reason: 'no-deliverable-target' };
   const validation = validatePublicWebhookUrl(binding.metadata.callbackUrl);
   if (!validation.ok) {
     logger.warn('DaemonServer: refusing unsafe webhook approval callback URL', {
       approvalId: approval.id,
       reason: validation.error,
     });
-    return;
+    return { delivered: false, reason: 'no-deliverable-target', error: validation.error };
   }
   const payload = JSON.stringify({
     type: 'approval',
@@ -190,12 +209,15 @@ export async function deliverWebhookApprovalUpdate(
     headers.set('X-Goodvibes-Signature', deps.signWebhookPayload(payload, secret));
   }
   // Resolved, every answer checked, pinned to a checked address (utils/url-safety.ts).
-  await postToPublicWebhook(validation.url, {
-    method: 'POST',
-    headers,
-    body: payload,
-  }, { resolveHost: deps.resolveHost }).catch((error) => logger.warn('Webhook approval update failed', {
-    approvalId: approval.id,
-    error: summarizeError(error),
-  }));
+  try {
+    await postToPublicWebhook(validation.url, {
+      method: 'POST',
+      headers,
+      body: payload,
+    }, { resolveHost: deps.resolveHost });
+    return { delivered: true };
+  } catch (error) {
+    logger.warn('Webhook approval update failed', { approvalId: approval.id, error: summarizeError(error) });
+    return failed(error);
+  }
 }

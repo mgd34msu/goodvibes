@@ -1,7 +1,7 @@
 import { createHash, createHmac } from 'node:crypto';
 import { constantTimeEquals, parseJsonRecord, readBearerOrHeaderToken, readTextBodyWithinLimit } from '../helpers.js';
 import { resolveSurfaceCredential, surfaceCredentialUnavailable } from '../surface-credential.js';
-import { isOrdinaryIngressRefusal, type SurfaceAdapterContext } from '../types.js';
+import type { SurfaceAdapterContext } from '../types.js';
 import { logger } from '../../utils/logger.js';
 import { runSurfaceMessage, surfaceOutcomeResponse } from '../surface-message.js';
 
@@ -167,11 +167,7 @@ export async function handleTelephonySurfaceWebhook(req: Request, context: Surfa
     signal: req.signal,
   });
   if (outcome.kind === 'refused') {
-    // An ordinary refusal will not change on redelivery, so it is acknowledged rather than failed.
-    if (isOrdinaryIngressRefusal(outcome.reason)) {
-      logger.info('handleTelephonySurfaceWebhook: message ignored by channel policy', { reason: outcome.reason });
-      return Response.json({ acknowledged: true, queued: false, outcome: 'ignored', reason: 'blocked-by-channel-policy', policyReason: outcome.reason });
-    }
+    if (!outcome.decision.consumed) logger.info('handleTelephonySurfaceWebhook: message not admitted by channel policy', { reason: outcome.reason });
     return surfaceOutcomeResponse(outcome);
   }
   if (outcome.kind === 'no-text') {

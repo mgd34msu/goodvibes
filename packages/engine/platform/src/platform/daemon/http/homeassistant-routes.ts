@@ -9,6 +9,7 @@ import type { CompanionChatTurnEvent } from '../../companion/companion-chat-type
 import type { ConfigManager } from '../../config/manager.js';
 import { serviceFailureStatus } from './error-response.js';
 import {
+  homeAssistantReplyOutcome,
   isHomeAssistantChatSession,
   postHomeAssistantChatMessage,
   readHomeAssistantRemoteSessionTtlMs,
@@ -364,12 +365,12 @@ export class HomeAssistantConversationRoutes {
       return { ...base, status: 'running' };
     }
     if (posted.error) {
-      const timedOut = posted.timedOut === true;
+      const status = homeAssistantReplyOutcome(posted).status;
       return {
         ...base,
         ok: false,
-        status: timedOut ? 'timeout' : posted.cancelled ? 'cancelled' : 'failed',
-        ...(timedOut ? { timeoutMs: input.waitTimeoutMs } : {}),
+        status: status === 'completed' ? 'failed' : status,
+        ...(status === 'timeout' ? { timeoutMs: input.waitTimeoutMs } : {}),
         error: posted.error,
       };
     }

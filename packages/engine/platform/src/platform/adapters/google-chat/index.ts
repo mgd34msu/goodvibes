@@ -1,6 +1,6 @@
 import type { SurfaceAdapterContext } from '../types.js';
 import { runSurfaceMessage } from '../surface-message.js';
-import { constantTimeEquals, parseJsonRecord, readTextBodyWithinLimit, readRecord, readString, policyReplyText, noticeUnsupportedAttachment, hasAttachments } from '../helpers.js';
+import { constantTimeEquals, parseJsonRecord, readTextBodyWithinLimit, readRecord, readString, ingressAnswer, noticeUnsupportedAttachment, hasAttachments } from '../helpers.js';
 import { duplicateDeliveryResponse, inboundDedupKey, runOncePerMessage, surfaceInboundDedup } from '../inbound-dedup.js';
 import { resolveSurfaceCredential, surfaceCredentialUnavailable } from '../surface-credential.js';
 import { logger } from '../../utils/logger.js';
@@ -116,9 +116,10 @@ export async function handleGoogleChatSurfaceWebhook(req: Request, context: Surf
     switch (outcome.kind) {
       case 'refused':
         // Google posts the 200 body as the reply; a 403 would only show "app not responding".
-        // A 200 would count as delivered, so release the claim: a retry after the policy changes must run.
-        surfaceInboundDedup.release(dedupKey);
-        return Response.json({ text: policyReplyText(outcome.reason) });
+        // A refusal would count as delivered, so its claim is released: a retry after the policy changes must
+        // run. A consumed answer keeps its claim, so a redelivery is never read as a second answer.
+        if (!outcome.decision.consumed) surfaceInboundDedup.release(dedupKey);
+        return Response.json({ text: ingressAnswer(outcome.decision).text });
       case 'no-text': {
         const attachment = hasAttachments(message?.attachment) ? 'attachment' : undefined;
         const notified = attachment ? await noticeUnsupportedAttachment(context, outcome.binding, attachment, space?.type === 'DM' || space?.spaceType === 'DIRECT_MESSAGE') : false;

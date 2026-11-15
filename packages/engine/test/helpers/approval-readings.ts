@@ -6,7 +6,8 @@ import { choiceAnswer, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { decisionPort } from './decision-port.ts';
 import { securityPort } from './security-readings.ts';
 
-export const REPLY_BATTERY = 'engine.daemon.approval-reply';
+/** The message's one inbound reading; its `approval_reply` question is the reply to a pending ask. */
+export const REPLY_BATTERY = 'engine.daemon.inbound-message';
 export const TARGET_BATTERY = 'engine.daemon.approval-target';
 
 interface Answers {
@@ -25,7 +26,11 @@ export function useApprovalReadings() {
   let previous: JudgmentPort | undefined;
   const security = securityPort();
   const own = decisionPort([REPLY_BATTERY, TARGET_BATTERY], (name, question, state) => {
-    if (name === 'reading') return choiceAnswer(question, answers.reply ?? 'unclear', answers.confidence ?? 0.97);
+    if (name === 'approval_reply') return choiceAnswer(question, answers.reply ?? 'unclear', answers.confidence ?? 0.97);
+    // The inbound reading's other questions, when the same request asks them: an ordinary message.
+    if (name === 'intent') return choiceAnswer(question, 'conversation', 0.99);
+    if (name === 'proposal_reply') return choiceAnswer(question, 'message', 0.99);
+    if (name === 'security_code' || name === 'expiry') return noulAnswer(0.01);
     if (name === 'pick') return choiceAnswer(question, answers.target ?? 'none', answers.targetConfidence ?? 0.97);
     const { candidates } = state as { candidates: { id: string }[] };
     const id = candidates[Number(name.slice('fits_'.length))]!.id;

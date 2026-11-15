@@ -29,19 +29,21 @@
  * consumption live there. The payments round learned the alternative firsthand:
  * a fix applied per-adapter leaves the other seventeen open.
  *
- * ## Why it runs FIRST
+ * ## Why the code checks run first and the reading before any answer
  *
- * Before `evaluateIngress`, before proposal-reply resolution, before
- * approval-reply resolution. This is not stylistic. `evaluateIngress` writes
- * `input.text.slice(0, 200)` into the channel policy audit trail and schedules
- * that trail to disk; running the gate second would persist the digits it
- * exists to keep off disk. Everything downstream may store, log or transcribe,
- * so the check must precede all of it.
+ * The checksum and protected-input refusals run before `evaluateIngress` and
+ * before anything else reads the message. The audit trail `evaluateIngress`
+ * writes masks every digit whatever the message says, so it holds no card
+ * value. The card questions are part of the message's one inbound reading
+ * (inbound-reading.ts), and their refusal is applied before a proposal,
+ * purchase or permission answer is acted on, since an approval reply's text
+ * becomes a stored steering note.
  */
 import type { ChannelIngressPolicyInput, ChannelPolicyDecision, ChannelPolicyManager } from '../channels/index.js';
 import { logger } from '../utils/logger.js';
 import { JudgmentInputError, judgmentInputProblem, type JudgmentInputProblem } from '../gate/judgment-input.js';
-import { cardShapeKinds, detectCardShapes, findCardNumberShapes, renderCardShapeRefusal } from '../security/card-shapes.js';
+import { cardShapeKinds, findCardNumberShapes, renderCardShapeRefusal, type CardShapeFinding } from '../security/card-shapes.js';
+import type { InboundReading } from './inbound-reading.js';
 import { isSecurityCodeAwaited } from '../payments/security-code-requests.js';
 import { readsAsSecurityCode } from '../payments/entry-surface.js';
 import {
@@ -66,13 +68,7 @@ async function refuseProtectedInput(
   input: ChannelIngressPolicyInput,
   problem: JudgmentInputProblem,
 ): Promise<ChannelPolicyDecision> {
-  const binding = resolveOriginBinding(deps, {
-    surface: input.surface,
-    ...(input.userId !== undefined ? { userId: input.userId } : {}),
-    ...(input.channelId !== undefined ? { channelId: input.channelId } : {}),
-    ...(input.threadId !== undefined ? { threadId: input.threadId } : {}),
-  });
-  const outcome = await deliverProposalNotice(deps, binding,
+  const outcome = await deliverProposalNotice(deps, originBinding(deps, input),
     `${new JudgmentInputError(problem).message} Approving or vetoing an action still works here; resend your answer without protected values.`);
   logger.warn('Refused protected input on a remote channel before judgment', {
     surface: input.surface, problem, refusalDelivered: outcome.delivered,
@@ -84,13 +80,23 @@ async function refuseProtectedInput(
   };
 }
 
+/** The conversation a refusal is said in: where the message came from, never carrying its text. */
+function originBinding(deps: SurfaceCardGateDeps, input: ChannelIngressPolicyInput) {
+  return resolveOriginBinding(deps, {
+    surface: input.surface,
+    ...(input.userId !== undefined ? { userId: input.userId } : {}),
+    ...(input.channelId !== undefined ? { channelId: input.channelId } : {}),
+    ...(input.threadId !== undefined ? { threadId: input.threadId } : {}),
+  });
+}
+
 /**
- * Inspect one inbound message for card shapes and protected judgment input.
+ * The refusals code decides alone, before anything stores, logs or reads the
+ * message: a card number (by its checksum) and protected credential input.
  *
  * Returns `null` when there is nothing to refuse, which is the overwhelming
- * majority of messages and the only path that continues to policy evaluation.
- * Returns a not-allowed `ChannelPolicyDecision` when card shapes are present,
- * having first put a refusal on the same channel the message arrived on.
+ * majority of messages. Returns a not-allowed `ChannelPolicyDecision` after
+ * putting a refusal on the channel the message came from.
  *
  * No raw values from `input.text` reach logs, reasons, notices or stores:
  * outward strings name only fixed card-shape or judgment-input problem kinds.
@@ -101,54 +107,57 @@ export async function refuseCardShapedIngress(
 ): Promise<ChannelPolicyDecision | null> {
   const text = input.text;
   if (typeof text !== 'string' || text.length === 0) return null;
-
-  // A definite PAN already refuses the message. Do not send accompanying
-  // prose (which may contain other credentials) to the optional card-talk
-  // reading just to decide whether more card shapes should be named.
   const pans = findCardNumberShapes(text);
-  const problem = pans.length === 0 ? judgmentInputProblem(text) : undefined;
-  if (problem !== undefined) return refuseProtectedInput(deps, input, problem);
-  const findings = pans.length > 0 ? pans : await detectCardShapes(text);
-  if (findings.length === 0) {
-    // While a purchase waits for its security code, a short number typed here
-    // is most likely that code: it is refused and the owner told to delete it.
-    if (!isSecurityCodeAwaited() || !await readsAsSecurityCode(text)) return null;
-    const binding = resolveOriginBinding(deps, {
-      surface: input.surface,
-      ...(input.userId !== undefined ? { userId: input.userId } : {}),
-      ...(input.channelId !== undefined ? { channelId: input.channelId } : {}),
-      ...(input.threadId !== undefined ? { threadId: input.threadId } : {}),
-    });
-    const outcome = await deliverProposalNotice(deps, binding,
-      'That looks like your card security code. Do not send it here: delete that message from this chat. '
-      + 'Type the code in the terminal app with /payments pending, or in the local web UI.');
-    logger.warn('Refused a likely card security code on a remote channel', { surface: input.surface, refusalDelivered: outcome.delivered });
-    return { allowed: false, reason: `${CARD_SHAPES_REFUSED_REASON}:security-code`, policy: deps.channelPolicy.getPolicy(input.surface) };
+  if (pans.length > 0) return refuseCardShapes(deps, input, pans);
+  const problem = judgmentInputProblem(text);
+  return problem === undefined ? null : refuseProtectedInput(deps, input, problem);
+}
+
+/**
+ * The refusal a reading decides: the message's one inbound reading says it
+ * gives a card's security code or expiry (a confident reading; an unsure one
+ * refuses nothing), or a purchase is waiting for its security code and the
+ * short number typed here reads as that code.
+ */
+export async function refuseCardTalk(
+  deps: SurfaceCardGateDeps,
+  input: ChannelIngressPolicyInput,
+  card: InboundReading['card'],
+): Promise<ChannelPolicyDecision | null> {
+  const text = input.text;
+  if (typeof text !== 'string' || text.length === 0) return null;
+  if (card.securityCode || card.expiry) {
+    return refuseCardShapes(deps, input, [
+      ...(card.securityCode ? [{ kind: 'security-code' as const, startIndex: 0, length: 0 }] : []),
+      ...(card.expiry ? [{ kind: 'expiry' as const, startIndex: 0, length: 0 }] : []),
+    ]);
   }
+  // While a purchase waits for its security code, a short number typed here
+  // is most likely that code: it is refused and the owner told to delete it.
+  if (!isSecurityCodeAwaited() || !await readsAsSecurityCode(text)) return null;
+  const outcome = await deliverProposalNotice(deps, originBinding(deps, input),
+    'That looks like your card security code. Do not send it here: delete that message from this chat. '
+    + 'Type the code in the terminal app with /payments pending, or in the local web UI.');
+  logger.warn('Refused a likely card security code on a remote channel', { surface: input.surface, refusalDelivered: outcome.delivered });
+  return { allowed: false, reason: `${CARD_SHAPES_REFUSED_REASON}:security-code`, policy: deps.channelPolicy.getPolicy(input.surface) };
+}
 
+async function refuseCardShapes(
+  deps: SurfaceCardGateDeps,
+  input: ChannelIngressPolicyInput,
+  findings: readonly CardShapeFinding[],
+): Promise<ChannelPolicyDecision> {
   const kinds = cardShapeKinds(findings);
-
-  // The policy record comes from a plain read, deliberately: evaluateIngress
-  // would have produced one too, and would have written the message text to the
-  // audit trail on the way. getPolicy touches nothing.
+  // The policy record comes from a plain read, deliberately: getPolicy touches nothing.
   const decision: ChannelPolicyDecision = {
     allowed: false,
     reason: `${CARD_SHAPES_REFUSED_REASON}:${kinds.join(',')}`,
     policy: deps.channelPolicy.getPolicy(input.surface),
   };
-
   // Tell the owner, on the channel they sent from, through the same delivery path
-  // the conversation gate uses for its proposals. They can resend without the digits
-  //, including resending a veto, which is the case that makes silence costly.
-  const binding = resolveOriginBinding(deps, {
-    surface: input.surface,
-    ...(input.userId !== undefined ? { userId: input.userId } : {}),
-    ...(input.channelId !== undefined ? { channelId: input.channelId } : {}),
-    ...(input.threadId !== undefined ? { threadId: input.threadId } : {}),
-    // No `text`, the origin this gate builds must not carry the refused message.
-  });
-  const outcome = await deliverProposalNotice(deps, binding, renderCardShapeRefusal(findings));
-
+  // the conversation gate uses for its proposals. They can resend without the digits,
+  // including resending a veto, which is the case that makes silence costly.
+  const outcome = await deliverProposalNotice(deps, originBinding(deps, input), renderCardShapeRefusal(findings));
   logger.warn('Refused a message carrying card-shaped content on a remote channel', {
     surface: input.surface,
     kinds,
@@ -156,6 +165,5 @@ export async function refuseCardShapedIngress(
     refusalDelivered: outcome.delivered,
     ...(outcome.delivered ? {} : { refusalUndeliverableReason: outcome.reason }),
   });
-
   return decision;
 }

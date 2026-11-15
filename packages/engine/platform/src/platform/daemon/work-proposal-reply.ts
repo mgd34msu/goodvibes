@@ -1,8 +1,7 @@
-import { workProposalReply } from './batteries/conversation-gate.js';
-import { decisionOrClassic, isClassicOperation, requireDecisionFeature, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
-import { assertSynchronousCurrent, daemonReadingPort } from './reading-lifetime.js';
-import { captureOwnedJson, snapshotJudgmentInput } from '../gate/judgment-input.js';
+import { isClassicOperation, requireDecisionFeature, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
+import { assertSynchronousCurrent } from './reading-lifetime.js';
 import type { CallOptions } from '@goodvibes-jev/judgment/decisions';
+import { readInboundMessage, type InboundReading } from './inbound-reading.js';
 /**
  * Channel-reply resolution of pending work proposals.
  *
@@ -22,15 +21,19 @@ import type { WorkProposalRecord, WorkProposalStore } from '../agents/work-propo
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 
-const UNSETTLED_REPLY_NOTICE = 'I could not read that reply just now. Please send it again.';
-
 export type WorkProposalReplyOutcome =
   | { readonly consumed: false; readonly reason?: 'decision-model-required' }
-  | { readonly consumed: true; readonly action: 'accepted' | 'declined' | 'expired' | 'unsettled' | 'already-accepted' | 'start-failed' };
+  | { readonly consumed: true; readonly action: 'accepted' | 'declined' | 'expired' | 'already-accepted' | 'start-failed' };
 
 export interface WorkProposalReplyDeps {
   readonly readingOptions?: CallOptions | undefined;
+  /** Checked once, before the answer is acted on: the proposal's route is still the one it was delivered on. */
   readonly captureProposalSource?: ((proposal: WorkProposalRecord) => () => void) | undefined;
+  /**
+   * The answer the message's one inbound reading already gave for `target`,
+   * when ingress asked it with the message's other questions.
+   */
+  readonly reading?: { readonly target: WorkProposalRecord; readonly answer: InboundReading['proposal'] } | undefined;
   readonly proposals?: (Pick<WorkProposalStore, 'listPending' | 'resolve'> & Partial<Pick<WorkProposalStore, 'get'>>) | undefined;
   /**
    * Start the agreed work. Called only after an affirmative reply resolved a
@@ -82,53 +85,44 @@ export async function tryResolveWorkProposalReplyFromChannel(
   return withConfiguredDecisionModelPolicy(() => resolveOwnedProposalReply(input, deps));
 }
 
+/**
+ * The pending proposal a message may answer, decided in code before anything
+ * is read: a delivered proposal pending on the exact conversation for the same
+ * sender. Undefined when there is none or decision models are off.
+ */
+export function proposalReplyTarget(
+  input: ChannelIngressPolicyInput,
+  proposals: WorkProposalReplyDeps['proposals'],
+): WorkProposalRecord | undefined {
+  if (isClassicOperation() || !proposals) return undefined;
+  // Explicit authenticated button wire tokens are not conversational replies.
+  if ((input.surface === 'slack' || input.surface === 'discord') && input.metadata?.interactive === true
+    && /^gv:(?:approval:(?:approve|deny|claim)|run:(?:cancel|retry)):.+$/.test(input.text ?? '')) return undefined;
+  return findProposalForReply(input, proposals.listPending({ surfaceKind: input.surface })) ?? undefined;
+}
+
 async function resolveOwnedProposalReply(input: ChannelIngressPolicyInput, deps: WorkProposalReplyDeps): Promise<WorkProposalReplyOutcome> {
   deps.readingOptions?.signal?.throwIfAborted();
   assertSynchronousCurrent(deps.readingOptions?.beforeAttempt);
   if (isClassicOperation()) return { consumed: false, reason: 'decision-model-required' };
   const store = deps.proposals;
   if (!store) return { consumed: false };
-  // Explicit authenticated button wire tokens are not conversational replies.
-  if ((input.surface === 'slack' || input.surface === 'discord') && input.metadata?.interactive === true
-    && /^gv:(?:approval:(?:approve|deny|claim)|run:(?:cancel|retry)):.+$/.test(input.text ?? '')) return { consumed: false };
-
   // Bind an actual delivered pending proposal BEFORE interpreting the reply.
-  const target = findProposalForReply(input, store.listPending({ surfaceKind: input.surface }));
+  const target = deps.reading?.target ?? proposalReplyTarget(input, store);
   if (!target) return { consumed: false };
-  const options = deps.readingOptions ?? {};
   const proposalCurrent = deps.captureProposalSource?.(target);
-  const inputSource = JSON.stringify(captureOwnedJson(input));
-  const targetSource = JSON.stringify(captureOwnedJson(target));
-  const assertCurrent = () => {
-    options.signal?.throwIfAborted();
-    assertSynchronousCurrent(options.beforeAttempt);
-    assertSynchronousCurrent(proposalCurrent);
-    const current = findProposalForReply(input, store.listPending({ surfaceKind: input.surface }));
-    if (JSON.stringify(input) !== inputSource || !current || current !== target || current.id !== target.id
-      || JSON.stringify(current) !== targetSource) throw new Error('Work proposal source is no longer current');
-  };
-  assertCurrent();
-  const proposal = snapshotJudgmentInput({ task: target.task, summary: target.summary }) as { task: string; summary: string };
-  const text = snapshotJudgmentInput(input.text ?? '') as string;
-  const result = await decisionOrClassic<Awaited<ReturnType<typeof workProposalReply.read>> | null>(
-    () => workProposalReply.read(daemonReadingPort('daemon.work-proposal-reply', assertCurrent, options.signal), proposal, text, { ...options, beforeAttempt: assertCurrent }),
-    () => { assertCurrent(); return null; }, () => { assertCurrent(); return true; });
-  assertCurrent();
-  if (result === null) return { consumed: false, reason: 'decision-model-required' };
-  if (result.reading.outcome !== 'act') {
-    result.recordAction('held: work proposal reply unsettled');
-    // The answer is consumed, so say it was not understood rather than leave the owner waiting.
-    await deps.replyOnChannel(target, UNSETTLED_REPLY_NOTICE).catch((error: unknown) => {
-      logger.warn('Work proposal unsettled-reply notice failed', { error: summarizeError(error) });
-    });
-    return { consumed: true, action: 'unsettled' };
-  }
-  const answer = result.reading.choice;
-  if (answer === 'message') { result.recordAction('ordinary-message'); return { consumed: false }; }
+  const text = input.text ?? '';
+  const answer = deps.reading?.target === target
+    ? deps.reading.answer
+    : (await readInboundMessage({ message: text, proposal: { task: target.task, summary: target.summary } }, { signal: deps.readingOptions?.signal })).proposal;
+  // An unsure reading answers nothing: the message goes on as conversation and the proposal stays pending.
+  if (answer === undefined || answer === 'unsure' || answer === 'message') return { consumed: false };
+  // Checked once, where the answer is acted on.
+  deps.readingOptions?.signal?.throwIfAborted();
+  assertSynchronousCurrent(deps.readingOptions?.beforeAttempt);
+  assertSynchronousCurrent(proposalCurrent);
   const reply = { decision: answer === 'reject' ? 'negative' : 'affirmative',
     ...(answer === 'steer' ? { note: text } : {}) };
-  result.recordAction(answer);
-  assertCurrent();
   if (reply.decision === 'affirmative') requireDecisionFeature('accepting an autonomous work proposal; continue through an ordinary Classic conversation instead');
 
   const resolved = store.resolve(target.id, reply.decision === 'affirmative' ? 'accepted' : 'declined');

@@ -1,6 +1,6 @@
 import { constantTimeEquals, noticeUnsupportedAttachment, parseJsonRecord, readBearerOrHeaderToken, readTextBodyWithinLimit, verifySha256HmacSignature } from '../helpers.js';
 import { resolveSurfaceCredential, surfaceCredentialUnavailable } from '../surface-credential.js';
-import { isOrdinaryIngressRefusal, type SurfaceAdapterContext } from '../types.js';
+import type { SurfaceAdapterContext } from '../types.js';
 import { logger } from '../../utils/logger.js';
 import { runSurfaceMessage, surfaceOutcomeResponse } from '../surface-message.js';
 
@@ -187,12 +187,9 @@ async function processWhatsAppMessage(value: Record<string, unknown>, message: R
     metadata: { messageId },
   });
   if (outcome.kind === 'refused') {
-    // Meta redelivers a payload it was answered with a failure status, and a refusal will not change on
-    // redelivery. Acknowledge it so a blocked sender cannot cause the allowed messages beside it to repeat.
-    if (isOrdinaryIngressRefusal(outcome.reason)) {
-      logger.info('handleWhatsAppSurfaceWebhook: message ignored by channel policy', { reason: outcome.reason, messageId });
-      return Response.json({ acknowledged: true, queued: false, outcome: 'ignored', reason: 'blocked-by-channel-policy', policyReason: outcome.reason });
-    }
+    // Meta redelivers a payload answered with a failure status; the shared answer acknowledges a consumed
+    // answer and a final refusal, so a blocked sender cannot make the allowed messages beside it repeat.
+    if (!outcome.decision.consumed) logger.info('handleWhatsAppSurfaceWebhook: message not admitted by channel policy', { reason: outcome.reason, messageId });
     return surfaceOutcomeResponse(outcome);
   }
   if (outcome.kind === 'no-text') {

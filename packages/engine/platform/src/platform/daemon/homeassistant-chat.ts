@@ -146,6 +146,24 @@ export async function postHomeAssistantChatMessage(
   };
 }
 
+/** What one Home Assistant turn came to, for every caller that reports it. */
+export type HomeAssistantReplyStatus = 'completed' | 'timeout' | 'cancelled' | 'failed';
+
+/**
+ * The one reading of a turn's result: the status the HTTP route answers with
+ * and the short line a Home Assistant event speaks. Internal error text is
+ * never spoken; it stays with the caller's own record.
+ */
+export function homeAssistantReplyOutcome(
+  result: Pick<HomeAssistantChatPostResult, 'response' | 'error' | 'timedOut' | 'cancelled'>,
+): { readonly status: HomeAssistantReplyStatus; readonly speech: string } {
+  const response = result.response?.trim();
+  if (result.timedOut) return { status: 'timeout', speech: 'Still working on that.' };
+  if (result.cancelled) return { status: 'cancelled', speech: 'That request was stopped before it finished.' };
+  if (result.error || !response) return { status: 'failed', speech: 'Sorry, I could not finish that.' };
+  return { status: 'completed', speech: response };
+}
+
 const resolutionTails = new Map<string, Promise<unknown>>();
 
 /**

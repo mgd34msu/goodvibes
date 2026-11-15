@@ -24,6 +24,29 @@ import { APPROVAL_REMEMBER_TIERS } from './system-route-types.js';
 import type { WatcherRecord, WatcherRegistryLike } from './system-route-types.js';
 import { RefusalError } from '@goodvibes-jev/engine/errors';
 
+type ServiceAction = 'install' | 'start' | 'stop' | 'restart' | 'uninstall';
+
+/**
+ * The service manager as the daemon may hold it: when it offers the
+ * asynchronous forms, the routes use them, so no service command blocks the
+ * daemon and an action that ends this daemon is answered before the stop.
+ */
+type DaemonServiceManager = DaemonSystemRouteContext['platformServiceManager'] & {
+  readonly statusAsync?: () => Promise<Record<string, unknown>>;
+  readonly requestFromDaemon?: (action: ServiceAction) => Promise<unknown>;
+};
+
+function daemonServiceManager(context: DaemonSystemRouteContext): DaemonServiceManager {
+  return context.platformServiceManager;
+}
+
+async function serviceAction(context: DaemonSystemRouteContext, req: Request, action: ServiceAction): Promise<Response> {
+  const admin = context.requireAdmin(req);
+  if (admin) return admin;
+  const manager = daemonServiceManager(context);
+  return Response.json(manager.requestFromDaemon ? await manager.requestFromDaemon(action) : manager[action]());
+}
+
 const WATCHER_KIND_VALUES: readonly WatcherKind[] = ['filesystem', 'webhook', 'socket', 'integration', 'polling'];
 const WATCHER_SOURCE_KIND_MAP: Readonly<Record<string, WatcherKind>> = {
   webhook: 'webhook',
@@ -96,12 +119,13 @@ export function createDaemonSystemRouteHandlers(
     },
     // Admin only: the status carries the installed unit file, which can hold the
     // operator token, and install/start/stop beside it are admin only too.
-    getServiceStatus: (req?: Request) => {
+    getServiceStatus: async (req?: Request) => {
       // A caller that cannot pass the request cannot be checked, so it never
       // receives the unit file.
       const admin = req ? context.requireAdmin(req) : null;
       if (admin) return admin;
-      const full = context.platformServiceManager.status();
+      const manager = daemonServiceManager(context);
+      const full = manager.statusAsync ? await manager.statusAsync() : manager.status();
       const { contents: _unitFile, ...withoutUnitFile } = full;
       return Response.json({
         ...(req ? full : withoutUnitFile),
@@ -112,31 +136,11 @@ export function createDaemonSystemRouteHandlers(
         },
       });
     },
-    installService: (req) => {
-      const admin = context.requireAdmin(req);
-      if (admin) return admin;
-      return Response.json(context.platformServiceManager.install());
-    },
-    startService: (req) => {
-      const admin = context.requireAdmin(req);
-      if (admin) return admin;
-      return Response.json(context.platformServiceManager.start());
-    },
-    stopService: (req) => {
-      const admin = context.requireAdmin(req);
-      if (admin) return admin;
-      return Response.json(context.platformServiceManager.stop());
-    },
-    restartService: (req) => {
-      const admin = context.requireAdmin(req);
-      if (admin) return admin;
-      return Response.json(context.platformServiceManager.restart());
-    },
-    uninstallService: (req) => {
-      const admin = context.requireAdmin(req);
-      if (admin) return admin;
-      return Response.json(context.platformServiceManager.uninstall());
-    },
+    installService: (req) => serviceAction(context, req, 'install'),
+    startService: (req) => serviceAction(context, req, 'start'),
+    stopService: (req) => serviceAction(context, req, 'stop'),
+    restartService: (req) => serviceAction(context, req, 'restart'),
+    uninstallService: (req) => serviceAction(context, req, 'uninstall'),
     getRouteBindings: (req) => {
       const admin = context.requireAdmin(req);
       if (admin) return admin;
@@ -530,7 +534,11 @@ async function handleWorkingDirectoryConfig(
   value: unknown,
 ): Promise<Response> {
   if (!context.swapManager) {
-    return jsonErrorResponse({ error: 'Workspace swapping is not available in this daemon configuration.' }, { status: 400 });
+    return jsonErrorResponse({
+      error: 'This daemon cannot save a working-directory change', code: 'WORKSPACE_CHANGE_UNAVAILABLE',
+      state: 'the program embedding this daemon did not give it a place to save runtime.workingDir',
+      next: ['Restart the daemon with --working-dir <path> (or GOODVIBES_WORKING_DIR) to work in another directory'],
+    }, { status: 409 });
   }
   if (typeof value !== 'string' || !value.trim()) {
     return jsonErrorResponse({ error: 'runtime.workingDir value must be a non-empty string path.', code: 'INVALID_PATH' }, { status: 400 });
@@ -539,7 +547,10 @@ async function handleWorkingDirectoryConfig(
   if (result.ok) {
     return Response.json({
       success: true, key, value: result.current, previous: result.previous,
-      // The new root works now but did not save (it is lost at restart), or some subsystems still use the old root until restart.
+      // The change is saved for the next start; the running daemon keeps `previous` until it restarts.
+      workingDir: result.previous,
+      ...('restartRequired' in result && typeof result.restartRequired === 'boolean' ? { restartRequired: result.restartRequired } : {}),
+      ...('note' in result && typeof result.note === 'string' ? { note: result.note } : {}),
       ...(result.persisted !== undefined ? { persisted: result.persisted } : {}),
       ...(result.requiresRestart?.length ? { requiresRestart: result.requiresRestart } : {}),
     });

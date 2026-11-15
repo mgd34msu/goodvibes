@@ -41,15 +41,9 @@ import {
   emitAgentCompleted,
   emitAgentFailed,
   emitAgentStreamDelta,
-  emitTransportAuthenticating,
-  emitTransportConnected,
-  emitTransportDisconnected,
-  emitTransportInitializing,
-  emitTransportSyncing,
-  emitTransportTerminalFailure,
 } from '../runtime/emitters/index.js';
+import { announceTransport, type TransportAnnouncement } from '../runtime/emitters/transport-announce.js';
 import type { HookDispatcher } from '../hooks/index.js';
-import type { HookCategory, HookEventPath, HookPhase } from '../hooks/types.js';
 import { summarizeError } from '../utils/error-display.js';
 import type { AgentUsage } from '../../events/agents.js';
 
@@ -368,96 +362,38 @@ export class AcpConnection {
   }
 
   private emitTransportInitializing(): void {
-    if (!this.runtimeBus) return;
-    emitTransportInitializing(this.runtimeBus, this.emitterContext(), {
-      transportId: this.transportId(),
-      protocol: 'acp-stdio',
-    });
-    void this.fireTransportHook('initializing', {
-      transportId: this.transportId(),
-      protocol: 'acp-stdio',
-    });
+    this.announceTransport({ step: 'initializing', payload: { transportId: this.transportId(), protocol: 'acp-stdio' } });
   }
 
   private emitTransportAuthenticating(): void {
-    if (!this.runtimeBus) return;
-    emitTransportAuthenticating(this.runtimeBus, this.emitterContext(), {
-      transportId: this.transportId(),
-    });
-    void this.fireTransportHook('authenticating', {
-      transportId: this.transportId(),
-    });
+    this.announceTransport({ step: 'authenticating', payload: { transportId: this.transportId() } });
   }
 
   private emitTransportConnected(): void {
-    if (!this.runtimeBus) return;
-    emitTransportConnected(this.runtimeBus, this.emitterContext(), {
-      transportId: this.transportId(),
-      endpoint: this.transportEndpoint(),
-    });
-    void this.fireTransportHook('connected', {
-      transportId: this.transportId(),
-      endpoint: this.transportEndpoint(),
-    });
+    this.announceTransport({ step: 'connected', payload: { transportId: this.transportId(), endpoint: this.transportEndpoint() } });
   }
 
   private emitTransportSyncing(): void {
-    if (!this.runtimeBus) return;
-    emitTransportSyncing(this.runtimeBus, this.emitterContext(), {
-      transportId: this.transportId(),
-    });
-    void this.fireTransportHook('syncing', {
-      transportId: this.transportId(),
-    });
+    this.announceTransport({ step: 'syncing', payload: { transportId: this.transportId() } });
   }
 
+  /** A terminal step is announced once. */
   private emitTransportDisconnected(reason: string, willRetry: boolean): void {
-    if (!this.runtimeBus || this.transportClosed) return;
+    if (this.transportClosed) return;
     this.transportClosed = true;
-    emitTransportDisconnected(this.runtimeBus, this.emitterContext(), {
-      transportId: this.transportId(),
-      reason,
-      willRetry,
-    });
-    void this.fireTransportHook('disconnected', {
-      transportId: this.transportId(),
-      reason,
-      willRetry,
-    });
+    this.announceTransport({ step: 'disconnected', payload: { transportId: this.transportId(), reason, willRetry } });
   }
 
   private emitTransportTerminalFailure(error: string): void {
-    if (!this.runtimeBus || this.transportClosed) return;
+    if (this.transportClosed) return;
     this.transportClosed = true;
-    emitTransportTerminalFailure(this.runtimeBus, this.emitterContext(), {
-      transportId: this.transportId(),
-      error,
-    });
-    void this.fireTransportHook('failed', {
-      transportId: this.transportId(),
-      error,
-    });
+    this.announceTransport({ step: 'failed', payload: { transportId: this.transportId(), error } });
   }
 
-  private async fireTransportHook(specific: string, payload: Record<string, unknown>): Promise<void> {
-    if (!this.hookDispatcher) return;
-    try {
-      await this.hookDispatcher.fire({
-        path: `Lifecycle:transport:${specific}` as HookEventPath,
-        phase: 'Lifecycle' as HookPhase,
-        category: 'transport' as HookCategory,
-        specific,
-        sessionId: this.task.sessionId ?? 'acp-connection',
-        timestamp: Date.now(),
-        payload,
-      });
-    } catch (error) {
-      logger.warn('AcpConnection transport hook failed', {
-        id: this.id,
-        specific,
-        error: summarizeError(error),
-      });
-    }
+  private announceTransport(announcement: TransportAnnouncement): void {
+    announceTransport(this.runtimeBus, this.hookDispatcher, this.emitterContext(), announcement, (specific, error) => {
+      logger.warn('AcpConnection transport hook failed', { id: this.id, specific, error: summarizeError(error) });
+    });
   }
 
   /** Revoke the run's authority and stop the child; every caller shares one stop. */

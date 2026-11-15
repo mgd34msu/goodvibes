@@ -8,11 +8,13 @@
  * it without per-adapter wiring.
  *
  * Who may answer is decided in code, before anything is read: the sender must
- * be on the channel policy's owner allowlist, as for permission asks, and the
+ * be the channel's owner (`isChannelOwner`, the same test permission answers and
+ * control commands use; an allowlisted guest cannot approve spending), and the
  * surface must be a command-authority channel (types.ts). What the reply
  * says is the payment reply inbox's Jev reading (payments/reply-inbox.ts).
  */
 import type { ChannelIngressPolicyInput, ChannelPolicyDecision } from '../channels/index.js';
+import { isChannelOwner } from '../channels/policy-manager.js';
 import { PaymentReplyWindowError, type PaymentReplyInbox, type PaymentReplyOffer } from '../payments/reply-inbox.js';
 import { parseCommandAuthorityChannel } from '../payments/types.js';
 import { logger } from '../utils/logger.js';
@@ -81,8 +83,7 @@ export async function tryResolvePaymentReplyFromChannel(
   } = {},
 ): Promise<PaymentReplyOffer> {
   if (inbox === undefined || inbox.pending === 0 || !input.userId || !input.text) return { consumed: false, reason: 'no-window' };
-  const owners = decision.matchedGroupPolicy?.allowlistUserIds ?? decision.policy.allowlistUserIds;
-  if (owners.length === 0 || !owners.includes(input.userId)) return { consumed: false, reason: 'no-window' };
+  if (!isChannelOwner(decision, input.userId)) return { consumed: false, reason: 'no-window' };
   const channel = parseCommandAuthorityChannel(input.surface);
   if (channel === null) return { consumed: false, reason: 'no-window' };
   const check = options.assertCurrent?.bind(options), signal = options.signal;

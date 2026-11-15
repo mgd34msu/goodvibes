@@ -6,6 +6,12 @@ import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 export interface ServiceHandoverSupport {
   readonly supported: boolean;
   readonly detail?: string;
+  /**
+   * The supervision the preflight saw on the same service-manager reading.
+   * When given, the handover compares it with the one captured at creation and
+   * does not ask `isSupervised()` again for that step.
+   */
+  readonly supervised?: boolean;
 }
 
 /** A manager-admitted helper remains inert until runtime cleanup completes. */
@@ -51,15 +57,19 @@ export function prepareServiceHandover(actions: AutoUpdateServiceActions): Prepa
   let reservation: ServiceHandoverReservation | undefined;
   let reservationWork: Promise<void> | undefined;
   let cancelled = false;
+  // One service-manager reading per step: at creation, before the runtime stops
+  // (the end of `prepare`) and before the request. Each reading is compared
+  // with the supervision captured here.
   const assertCurrent = () => {
     if (cancelled) throw new ServiceHandoverPreflightError('Service handover reservation was cancelled.');
-    if (actions.isSupervised() !== supervised) throw new ServiceHandoverPreflightError('Service supervision changed before unattended handover.');
     const support = preflight.call(actions, supervised);
     if (support && (typeof support === 'object' || typeof support === 'function') && 'then' in support) {
       drainOwned(support);
       throw new ServiceHandoverPreflightError('Service handover preflight must complete synchronously.');
     }
-    if (actions.isSupervised() !== supervised) throw new ServiceHandoverPreflightError('Service supervision changed during unattended handover preflight.');
+    if ((support?.supervised ?? actions.isSupervised()) !== supervised) {
+      throw new ServiceHandoverPreflightError('Service supervision changed during unattended handover preflight.');
+    }
     if (support?.supported !== true) throw new ServiceHandoverPreflightError(support?.detail
       ?? 'No supported unattended service handover is available.');
     try { reservation?.assertCurrent(); }
@@ -84,14 +94,16 @@ export function prepareServiceHandover(actions: AutoUpdateServiceActions): Prepa
       await reservation?.cancel();
     },
     async prepare(signal?: AbortSignal) {
-      assertCurrent();
       // Restarting a supervised daemon and a manager-owned reservation have nothing to settle early.
-      if (supervised || reservation || !actions.prepareAdoption) return { status: 'accepted' } as const;
-      let outcome: ServiceHandoverOutcome;
-      try { outcome = await actions.prepareAdoption(signal); }
-      catch (error) { return { status: 'failed', detail: error instanceof Error ? error.message : String(error) } as const; }
+      if (!supervised && !reservation && actions.prepareAdoption) {
+        let outcome: ServiceHandoverOutcome;
+        try { outcome = await actions.prepareAdoption(signal); }
+        catch (error) { return { status: 'failed', detail: error instanceof Error ? error.message : String(error) } as const; }
+        if (outcome.status !== 'accepted') return outcome;
+      }
+      // The reading before the runtime stops: the step after this cannot be undone.
       assertCurrent();
-      return outcome;
+      return { status: 'accepted' } as const;
     },
     request(signal?: AbortSignal) {
       assertCurrent();

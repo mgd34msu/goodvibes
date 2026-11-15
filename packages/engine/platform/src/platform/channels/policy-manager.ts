@@ -14,6 +14,7 @@ import { isRecord } from '../utils/record-coerce.js';
 import { logger } from '../utils/logger.js';
 import { judgmentInputProblem } from '../gate/judgment-input.js';
 import type { OwnerInbox, OwnerItem } from '../control-plane/owner-inbox.js';
+import { maskDigits } from '../security/batteries/card-talk.js';
 
 /** The part of the owner inbox an owner claim uses. */
 export type ChannelOwnerClaimInbox = Pick<OwnerInbox, 'postNow' | 'listNow' | 'subscribe' | 'withdraw'>;
@@ -74,6 +75,29 @@ function normalizeConversationKind(input: ChannelIngressPolicyInput): ChannelCon
   if (input.groupId) return 'group';
   if (input.channelId) return 'channel';
   return 'service';
+}
+
+/**
+ * The one owner test on a channel, read by control commands, purchase answers
+ * and permission answers alike: the sender is the policy's explicit owner.
+ * Being on an allowlist admits a person to talk to the assistant; it does not
+ * let them approve spending or tool use, or cancel the owner's runs. A sender
+ * with no identity is never the owner.
+ */
+export function isChannelOwner(decision: { readonly policy: Pick<ChannelPolicyRecord, 'ownerId'> }, userId: string | undefined): boolean {
+  return userId !== undefined && decision.policy.ownerId !== undefined && decision.policy.ownerId === userId;
+}
+
+/**
+ * The owner a policy record carries. A policy saved before owners were
+ * recorded, or an allowlist edited by hand, names its first allowlisted user,
+ * which is how the surface was seeded; an owner who is no longer on a
+ * non-empty allowlist hands over to its first entry, as before.
+ */
+function settledOwner(policy: Pick<ChannelPolicyRecord, 'ownerId' | 'allowlistUserIds' | 'groupPolicies'>): string | undefined {
+  const first = policy.allowlistUserIds[0];
+  if (policy.ownerId === undefined) return first ?? policy.groupPolicies.find(group => (group.allowlistUserIds?.length ?? 0) > 0)?.allowlistUserIds?.[0];
+  return first === undefined || policy.allowlistUserIds.includes(policy.ownerId) ? policy.ownerId : first;
 }
 
 /** The three allowlists that apply to one message: the surface's, or a matching group policy's. */
@@ -345,6 +369,7 @@ export class ChannelPolicyManager {
         allowlistGroupIds: policy.allowlistGroupIds ?? [],
         groupPolicies: (policy.groupPolicies ?? []).map(normalizeGroupPolicy),
         metadata: policy.metadata ?? {},
+        ownerId: settledOwner({ ownerId: policy.ownerId, allowlistUserIds: policy.allowlistUserIds ?? [], groupPolicies: policy.groupPolicies ?? [] }),
       });
     }
     this.audit.push(...(snapshot?.audit ?? []));
@@ -412,9 +437,10 @@ export class ChannelPolicyManager {
     const group = typeof groupPolicyId === 'string' ? policy.groupPolicies.find((entry) => entry.id === groupPolicyId) : undefined;
     const owners = group ? group.allowlistUserIds ?? [] : policy.allowlistUserIds;
     if (!owners.includes(userId)) {
+      const owner = policy.ownerId ? {} : { ownerId: userId, ownerSince: Date.now() };
       this.updatePolicy(policy.surface, group
-        ? { groupPolicies: policy.groupPolicies.map((entry) => entry === group ? { ...entry, allowlistUserIds: [...owners, userId] } : entry) }
-        : { allowlistUserIds: [...owners, userId], ...(policy.ownerId ? {} : { ownerId: userId, ownerSince: Date.now() }) });
+        ? { groupPolicies: policy.groupPolicies.map((entry) => entry === group ? { ...entry, allowlistUserIds: [...owners, userId] } : entry), ...owner }
+        : { allowlistUserIds: [...owners, userId], ...owner });
       await this.persist();
     }
     logger.info('Channel owner claim accepted', { surface: policy.surface, userId });
@@ -492,8 +518,11 @@ export class ChannelPolicyManager {
       groupPolicies: (patch.groupPolicies ?? existing.groupPolicies).map(normalizeGroupPolicy),
       metadata: patch.metadata ?? existing.metadata,
     };
-    this.policies.set(surface, next);
-    return next;
+    const ownerId = settledOwner(next);
+    const owned: ChannelPolicyRecord = ownerId === next.ownerId ? next
+      : { ...next, ownerId, ownerSince: ownerId === undefined ? undefined : Date.now() };
+    this.policies.set(surface, owned);
+    return owned;
   }
 
   /** Same deterministic rules as ingress evaluation, without audit, logging or owner seeding. */
@@ -593,7 +622,8 @@ export class ChannelPolicyManager {
       // seed the empty scope. An explicit group override owns its own seed.
       const before = this.policies.get(input.surface);
       effectivePolicy = this.updatePolicy(input.surface, matchedGroupPolicy?.allowlistUserIds !== undefined
-        ? { groupPolicies: policy.groupPolicies.map(entry => entry === matchedGroupPolicy ? { ...entry, allowlistUserIds: [input.userId!] } : entry) }
+        ? { groupPolicies: policy.groupPolicies.map(entry => entry === matchedGroupPolicy ? { ...entry, allowlistUserIds: [input.userId!] } : entry),
+          ...(policy.ownerId ? {} : { ownerId: input.userId, ownerSince: Date.now() }) }
         : { allowlistUserIds: [input.userId], ownerId: input.userId, ownerSince: Date.now() });
       try {
         await this.persist();
@@ -660,7 +690,9 @@ export class ChannelPolicyManager {
       ...(identity.threadId ? { threadId: identity.threadId } : {}),
       conversationKind,
       ...(matchedGroupPolicyId ? { matchedGroupPolicyId } : {}),
-      ...(retainText && input.text ? { text: input.text.slice(0, 200) } : {}),
+      // Digits are masked whatever the message says, so the audit trail never
+      // holds a card number or code and does not wait on any reading of the text.
+      ...(retainText && input.text ? { text: maskDigits(input.text.slice(0, 200)) } : {}),
       metadata: retainText ? input.metadata ?? {} : {},
     });
     if (this.audit.length > MAX_AUDIT_RECORDS) {

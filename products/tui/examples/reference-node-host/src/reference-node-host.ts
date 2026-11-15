@@ -1,7 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { hostname } from 'node:os';
+import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { mkdir, readFile, writeFile, rename } from 'node:fs/promises';
+import { resolveGoodVibesTreeDirectory } from '@goodvibes-jev/engine/platform/platform/config';
+import { resolveVerificationHostUrl } from '@goodvibes-jev/engine/terminal-shell/verification-primitives';
 import {
   type DistributedNodeHostContract,
   type DistributedPeerKind,
@@ -26,7 +29,6 @@ export interface ReferenceNodeHostConfig {
   readonly heartbeatIntervalMs: number;
   readonly workPullIntervalMs: number;
   readonly pairingRetryMs: number;
-  readonly verifyRetryMs: number;
   readonly verifyTimeoutMs: number;
   readonly maxWorkItemsPerPull: number;
   readonly statePath: string;
@@ -65,6 +67,18 @@ export interface WorkExecutionResult {
   readonly result?: unknown;
   readonly error?: string;
   readonly metadata?: Record<string, unknown>;
+}
+
+/** Executes one claimed work item whose command is allowlisted. */
+export type ReferenceNodeHostWorkHandler = (work: DistributedPendingWork, command: string) => Promise<WorkExecutionResult>;
+
+/**
+ * Real execution for the work types the reference host cannot answer from what it already knows. Without a handler,
+ * such an item is reported failed with the reason, never completed.
+ */
+export interface ReferenceNodeHostHandlers {
+  readonly 'automation.run'?: ReferenceNodeHostWorkHandler;
+  readonly invoke?: ReferenceNodeHostWorkHandler;
 }
 
 export interface PairRequestResponse {
@@ -152,7 +166,10 @@ export class ReferenceNodeHostClient {
   private stopped = false;
   private ready = false;
 
-  constructor(private readonly config: ReferenceNodeHostConfig) {
+  constructor(
+    private readonly config: ReferenceNodeHostConfig,
+    private readonly handlers: ReferenceNodeHostHandlers = {},
+  ) {
     this.stateFile = expandHome(config.statePath);
     this.backoff = new ExponentialBackoff(config.pairingRetryMs, config.verifyTimeoutMs);
   }
@@ -489,30 +506,29 @@ export class ReferenceNodeHostClient {
           },
         };
       case 'automation.run':
-        return {
-          status: 'completed',
-          result: {
-            type: 'automation.run',
-            automationRunId: work.automationRunId ?? null,
-            automationJobId: work.automationJobId ?? null,
-            routeId: work.routeId ?? null,
-            command: work.command,
-            payload: work.payload ?? null,
-            note: 'reference node-host recorded the automation request',
-          },
-        };
+        return this.runHandler('automation.run', work, command);
       case 'invoke':
       default:
-        return {
-          status: 'completed',
-          result: {
-            type: 'invoke',
-            command,
-            payload: work.payload ?? null,
-            allowlist: normalizeList(this.config.allowedCommands, this.config.commands),
-            note: 'generic invoke handled by reference node-host',
-          },
-        };
+        return this.runHandler('invoke', work, command);
+    }
+  }
+
+  private async runHandler(kind: keyof ReferenceNodeHostHandlers, work: DistributedPendingWork, command: string): Promise<WorkExecutionResult> {
+    const handler = this.handlers[kind];
+    if (!handler) {
+      return {
+        status: 'failed',
+        error: `The reference node host does not execute ${kind} work (command: ${command}). Pass a '${kind}' handler to ReferenceNodeHostClient to run it.`,
+        metadata: { executed: false, workType: work.type },
+      };
+    }
+    try {
+      return await handler(work, command);
+    } catch (error) {
+      return {
+        status: 'failed',
+        error: `The ${kind} handler failed for ${command}: ${error instanceof Error ? error.message : String(error)}`,
+      };
     }
   }
 
@@ -605,9 +621,22 @@ export class ReferenceNodeHostClient {
   }
 }
 
+/**
+ * The local daemon's control plane: GOODVIBES_DAEMON_URL, else the `controlPlane.port` saved in the terminal settings,
+ * else the default port, resolved the same way the live verifier does.
+ */
+export function resolveDefaultReferenceNodeHostBaseUrl(): string {
+  return resolveVerificationHostUrl(
+    resolveGoodVibesTreeDirectory(),
+    undefined,
+    ['GOODVIBES_DAEMON_URL'],
+    (path) => JSON.parse(readFileSync(path, 'utf-8')) as unknown,
+  );
+}
+
 export function createDefaultReferenceNodeHostConfig(overrides: Partial<ReferenceNodeHostConfig> = {}): ReferenceNodeHostConfig {
   return {
-    baseUrl: 'http://127.0.0.1:1455',
+    baseUrl: overrides.baseUrl ?? resolveDefaultReferenceNodeHostBaseUrl(),
     label: 'goodvibes-reference-node-host',
     requestedId: `goodvibes-reference-node-host-${hostname()}`,
     peerKind: 'node',
@@ -621,7 +650,6 @@ export function createDefaultReferenceNodeHostConfig(overrides: Partial<Referenc
     heartbeatIntervalMs: 30_000,
     workPullIntervalMs: 2_000,
     pairingRetryMs: 5_000,
-    verifyRetryMs: 2_500,
     verifyTimeoutMs: 10 * 60_000,
     maxWorkItemsPerPull: 4,
     confirmReplace: true,

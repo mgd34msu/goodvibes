@@ -1,5 +1,4 @@
 {
-  "baseUrl": "http://127.0.0.1:1455",
   "label": "goodvibes-reference-node-host",
   "requestedId": "goodvibes-reference-node-host",
   "peerKind": "node",
@@ -31,7 +30,6 @@
   "heartbeatIntervalMs": 30000,
   "workPullIntervalMs": 2000,
   "pairingRetryMs": 5000,
-  "verifyRetryMs": 2500,
   "verifyTimeoutMs": 600000,
   "maxWorkItemsPerPull": 4,
   "statePath": "~/.goodvibes/reference-node-host/state.json"

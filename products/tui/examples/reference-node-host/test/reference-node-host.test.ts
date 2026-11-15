@@ -220,7 +220,6 @@ describe('ReferenceNodeHostClient', () => {
       statePath: join(tempDir, 'state.json'),
       operatorToken: 'operator-token',
       verifyTimeoutMs: 60_000,
-      verifyRetryMs: 10,
       pairingRetryMs: 10,
       heartbeatIntervalMs: 10,
       workPullIntervalMs: 10,
@@ -236,11 +235,13 @@ describe('ReferenceNodeHostClient', () => {
     expect(summary.paired).toBe(true);
     expect(client.getState().lastHeartbeatAt).toBeDefined();
     expect(summary.claimed).toBe(4);
-    expect(summary.completed).toBe(4);
-    expect(summary.failed).toBe(0);
+    expect(summary.completed).toBe(3);
+    expect(summary.failed).toBe(1);
     expect(recordedCompletions).toHaveLength(4);
     expect(recordedCompletions[0]?.body.status).toBe('completed');
     expect(recordedCompletions[0]?.body.result).toBeDefined();
+    // Without a handler the automation run was not executed, so it is not reported completed.
+    expect(recordedCompletions.find((entry) => entry.workId === 'work-automation')?.body.status).toBe('failed');
   });
 
   test('re-pairing the same requested id retries the approval with confirmReplace after the daemon refuses', async () => {

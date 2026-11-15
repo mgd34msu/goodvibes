@@ -12,15 +12,26 @@ It demonstrates the full node-host lifecycle against the existing `/api/remote` 
 - work completion, `POST /api/remote/work/<id>/complete`, reports each claimed item's outcome back to the daemon
 - reconnect and backoff, an exponential backoff with jitter that resets after every successful pass and lengthens after every failed one, so a client that loses its peer token or its network connection recovers on its own
 
-It also includes built-in handlers for five work types, each returning a
-small JSON result rather than executing anything on the host. `status.request`
-reports the client's uptime and configured heartbeat/work-pull intervals.
-`location.request` reports the host's hostname, platform, architecture, and
-working directory. `session.message` echoes the received message back as
-acknowledged. `automation.run` records that an automation request arrived,
-along with its run and job ids. `invoke` is the generic command path used
-when no other type matches, subject to the same allowlist as every other
-type.
+It answers three work types itself, from facts it already has:
+`status.request` reports the client's uptime and configured heartbeat/work-pull
+intervals, `location.request` reports the host's hostname, platform,
+architecture, and working directory, and `session.message` echoes the received
+message back as acknowledged.
+
+`automation.run` and `invoke` (the generic command path used when no other
+type matches) need real execution. The reference host reports them `failed`,
+with an error naming the work type and the handler to supply, unless you pass
+one to the client:
+
+```ts
+const client = new ReferenceNodeHostClient(config, {
+  'automation.run': async (work) => ({ status: 'completed', result: await runAutomation(work) }),
+  invoke: async (work, command) => ({ status: 'completed', result: await runCommand(command, work.payload) }),
+});
+```
+
+A handler that throws reports the item `failed` with its message. Every type
+is subject to the same allowlist.
 
 ## Usage
 
@@ -35,6 +46,11 @@ a time. `contract` fetches and prints the node-host contract, `pair` sends
 only the pair request, `verify` attempts pairing verification against
 whatever state was already saved, and `once` runs a single
 heartbeat-and-work-pull pass and prints its summary.
+
+The client dials the local daemon's control plane: `baseUrl` in the config
+when set, else `GOODVIBES_DAEMON_URL`, else `http://127.0.0.1:<controlPlane.port>`
+from `~/.goodvibes/tui/settings.json` (under `GOODVIBES_HOME` when that is
+set), else port 3421.
 
 For a first pairing run, the daemon must approve the pair request before verification succeeds. If you supply an `operatorToken` in your config, the reference client can approve its own request through the operator endpoint for local testing.
 
@@ -51,6 +67,6 @@ The client persists token and pairing state to the configured `statePath`. The s
 - Command allowlisting is enforced before any work item is handled, not
   just `invoke` items. Every work type resolves to a command string first,
   and an unlisted command fails the item instead of reaching a handler.
-- The client does not execute arbitrary shell commands. Every handler above
-  returns a descriptive JSON result; none of them shells out.
-- The work handlers are reference implementations. Replace them with your real node-host logic when you are ready.
+- The client does not execute arbitrary shell commands. The built-in handlers
+  answer from facts the host has; work that needs execution fails until you
+  supply a handler for it.

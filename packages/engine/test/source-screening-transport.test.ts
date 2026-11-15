@@ -193,20 +193,12 @@ describe('source-screening exact loopback transport', () => {
     },
   );
 
-  test('rechecks proxy environment at dispatch after the last authority callback', async () => {
-    await isolatedProxyScenario('after-authority');
-  });
-
   test('assertUsable checks proxy, authority and admission without creating a network request', async () => {
     await isolatedProxyScenario('assert-usable');
   });
 
-  test('refuses a new attempt when proxy configuration appears after a successful dispatch', async () => {
-    await isolatedProxyScenario('next-dispatch');
-  });
-
-  test('an explicit protected judgment retry refuses a proxy introduced after the first attempt', async () => {
-    await isolatedProxyScenario('judgment-retry');
+  test('an owner created with a proxy variable set holds every source as proxy-configured with no request', async () => {
+    await isolatedProxyScenario('owner-proxy-configured');
   });
 
   test('stale native proxy state before owner creation cannot redirect protected dispatch', async () => {

@@ -1,6 +1,4 @@
 export { SecurityReadSourceRetiredError } from './read-source.js';
-export { SpawnTokenManager } from './spawn-tokens.js';
-export type { SpawnToken, OrchestrationPolicyConfig } from './spawn-tokens.js';
 export { UserAuthManager } from './user-auth.js';
 export type { AuthUser, AuthSession, LocalAuthSnapshot } from './user-auth.js';
 export {
@@ -27,6 +25,7 @@ export {
   UNTRUSTED_CONTENT_RULE,
   UntrustedContentLedger,
   createUntrustedContentPort,
+  currentUntrustedContentScope,
   evaluateOutwardEffect,
   getProcessUntrustedContentLedger,
   grantOwnerApproval,

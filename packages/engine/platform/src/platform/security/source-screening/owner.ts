@@ -2,11 +2,11 @@ import { assertScreeningOperation, captureScreeningOperation as captureOperation
 import { createClassicProtectedSourceOwner, classicScreeningParts } from './classic-owner.js';
 import { activateClassicFallback, isClassicOperation, withConfiguredDecisionModelPolicy } from '../../runtime/decision-policy.js';
 import { DecisionModelsDisabledError, decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
-import { createSystemOnePort, DEFAULT_MODEL, hashState, JudgmentError, type JudgmentRetryProgress } from '@goodvibes-jev/judgment';
+import { createSystemOnePort, DEFAULT_MODEL, JudgmentError, type JudgmentRetryProgress } from '@goodvibes-jev/judgment';
 import { types as nodeTypes } from 'node:util';
 import { JudgmentInputError } from '../../gate/judgment-input.js';
 import { captureScreeningSource, isMalformedScreeningProposal, proposeScreeningSpans, type ScreeningSource, type ScreeningSpan } from './proposal.js';
-import { captureHostedScreeningCredentials, captureLoopbackEndpoint, createScreeningTransport } from './transport.js';
+import { captureHostedScreeningCredentials, captureLoopbackEndpoint, createScreeningTransport, proxyConfigured } from './transport.js';
 import { verifyScreeningSpans } from './verification.js';
 import { captureResearchReference, createResearchReferenceReader, WITHHELD_RESEARCH_REFERENCE, type CapturedResearchReference } from './reference.js';
 import { SOURCE_SCREENING_LIMITS as LIMITS, type ProtectedSource, type ProtectedSourceOwner, type ProtectedSourceOwnerOptions,
@@ -23,10 +23,11 @@ interface OwnedSource {
   readonly reference?: CapturedResearchReference;
   readonly lifetime: AbortController;
   released: boolean;
+  /** The text could not be taken for screening at all (it holds protected input). */
+  refused?: 'protected-input';
   pending?: Promise<Result>;
   pendingOperation?: ResearchReferenceOperation | undefined;
   result?: Result;
-  releasedRefusalComparison?: string;
 }
 interface OwnedProjection { readonly source: OwnedSource; readonly parts: readonly string[]; }
 /** Cheap pending-work bucket, retaining no source text beyond its live owner. */
@@ -105,33 +106,29 @@ export function createProtectedSourceOwner(options: ProtectedSourceOwnerOptions)
   const sources = new Map<Handle, OwnedSource>();
   const projections = new Map<Receipt, OwnedProjection>();
   const referenceReader = createResearchReferenceReader(credentialLiterals);
-  // Live uncertainty compares exact owned parts. Release must forget private
-  // source bodies while preserving the earlier refusal for that source only.
-  // There is no persisted native source revision here: source-N labels a new
-  // capture, not its bytes. A compact expected commitment is therefore retained
-  // only for an actual released uncertain original, never successful screening.
-  // They are original-byte comparisons, not anonymization or authority.
-  // These pins stay inside this exact authority/retention/route/model owner;
-  // changing policy cannot grant a lucky retry or a Classic downgrade.
+  // A live handle whose text could not be settled answers the same for any
+  // live capture of the same text, so a retry cannot buy a lucky reading.
+  // Callers set an unsettled message aside instead of offering it again, so
+  // nothing is pinned after release.
   const unsettled = new Set<OwnedSource>();
-  const releasedUnsettled = new Map<string, Set<string>>();
-  let releasedUnsettledCount = 0;
-  const refusalComparison = (source: OwnedSource): string => source.releasedRefusalComparison ??= hashState({
-    reference: source.reference !== undefined, parts: [...source.source.parts],
-  });
   // Only already-owned pending sources, removed when their original work ends.
   // Kind/part lengths avoid full-text comparisons across unrelated requests.
   const screening = new Map<string, Set<OwnedSource>>();
-  let screeningCount = 0;
   const wasUnsettled = (source: OwnedSource): boolean => {
     for (const original of unsettled) if (samePendingSource(original, source)) return true;
-    const originals = releasedUnsettled.get(pendingSourceBucket(source));
-    // Unrelated geometry needs no commitment. A matching candidate is compared
-    // once against the independent released original, then reuses its tiny pin.
-    return originals !== undefined && originals.has(refusalComparison(source));
+    return false;
+  };
+  // New uncertainty about a text also retires every live capture of the same
+  // text, so an earlier positive receipt cannot outlive it.
+  const markUnsettled = (source: OwnedSource): void => {
+    unsettled.add(source);
+    for (const other of sources.values()) if (other !== source && !other.released && samePendingSource(other, source)) unsettled.add(other);
   };
   const work = new Set<Promise<unknown>>();
   let closing: Promise<void> | undefined;
+  // The process environment is one fact: a proxy variable set when the owner
+  // is created withholds private screening for its whole life, with no request.
+  const proxied = proxyConfigured();
   const active = () => {
     if (signal.aborted) return invalid();
     let result: unknown;
@@ -145,6 +142,11 @@ export function createProtectedSourceOwner(options: ProtectedSourceOwnerOptions)
     if (signal.aborted) return invalid();
   };
   active();
+  // One connection pool for the owner's life: one client per fixed origin, not
+  // one per source. Each run gets its own fences and failure flags.
+  const transport = proxied ? undefined : createScreeningTransport({ ...(credentials ? { kind: 'hosted', credentials } : {
+    endpoints: [`${proposal.endpoint}/v1/chat/completions`, `${judgment.endpoint}/v1/systemone`] }),
+    signal, assertCurrent: active, timeoutMs });
   const retry = options.onRetry;
   const onRetry = retry ? (progress: JudgmentRetryProgress) => {
     active();
@@ -182,30 +184,28 @@ export function createProtectedSourceOwner(options: ProtectedSourceOwnerOptions)
       projections.set(receipt, { source, parts });
       return source.result = Object.freeze({ status: 'settled', receipt });
     };
-    let transport: ReturnType<typeof createScreeningTransport> | undefined;
+    let route: ReturnType<NonNullable<typeof transport>['run']> | undefined;
     try {
       assertCurrent();
       if (isClassicOperation()) return classicResult();
-      transport = createScreeningTransport({ ...(credentials ? { kind: 'hosted', credentials } : {
-        endpoints: [`${proposal.endpoint}/v1/chat/completions`, `${judgment.endpoint}/v1/systemone`] }),
-        signal: requestSignal, assertCurrent, timeoutMs });
-      const ownedTransport = transport;
-      const assertRoute = () => { assertCurrent(); ownedTransport.assertUsable(); };
+      if (!transport) return held('proxy-configured');
+      const ownedRoute = route = transport.run({ signal: requestSignal, assertCurrent });
+      const assertRoute = () => { assertCurrent(); ownedRoute.assertUsable(); };
       const port = createSystemOnePort({ endpoint: { kind: isHosted ? 'hosted' : 'local', baseURL: judgment.endpoint,
         apiKey: credentials?.typesafeApiKey ?? 'source-screening-local' },
-        model: judgment.model, timeoutMs, retry: {}, fetch: ownedTransport.fetch });
+        model: judgment.model, timeoutMs, retry: {}, fetch: ownedRoute.fetch });
       let parts: readonly string[];
       if (source.reference) {
         const result = await referenceReader.read(source.reference, { port, signal: requestSignal, assertCurrent: assertRoute, onRetry });
         if (result.status === 'held') {
-          if (result.reason === 'unsettled') unsettled.add(source);
+          if (result.reason === 'unsettled') markUnsettled(source);
           return result.reason === 'unsettled' ? source.result = held(result.reason) : held(result.reason);
         }
         parts = Object.freeze([result.value]);
       } else {
-        const spans = await proposeScreeningSpans(source.source, { ...proposal, fetch: transport.fetch, signal: requestSignal, assertCurrent });
+        const spans = await proposeScreeningSpans(source.source, { ...proposal, fetch: ownedRoute.fetch, signal: requestSignal, assertCurrent });
         const settled = await verifyScreeningSpans(source.source, spans, { port, signal: requestSignal, assertCurrent: assertRoute, onRetry });
-        if (!settled) { unsettled.add(source); return source.result = held('unsettled'); }
+        if (!settled) { markUnsettled(source); return source.result = held('unsettled'); }
         parts = project(source.source, spans);
       }
       assertCurrent();
@@ -223,15 +223,17 @@ export function createProtectedSourceOwner(options: ProtectedSourceOwnerOptions)
       if (error instanceof JudgmentError && error.kind === 'invalid-response') return held('malformed');
       const unavailable = error instanceof JudgmentError && error.kind === 'unavailable'
         && (error.status !== undefined && (error.status === 408 || error.status === 429 || error.status >= 500)
-          || transport?.availabilityFailed() === true);
+          || route?.availabilityFailed() === true);
       if (!wasUnsettled(source) && (policySelectedClassic && isClassicOperation() || unavailable && activateClassicFallback(error))) {
         try { return classicResult(); } catch (failure) { return held(failure instanceof JudgmentInputError ? 'protected-input' : 'stale'); }
       }
       return held('route-unavailable');
-    } finally { await transport?.close(); }
+    }
   };
   const screen = (source: OwnedSource, operation?: ResearchReferenceOperation): Promise<Result> => {
     try { operationCurrent(source, operation); } catch { return Promise.resolve(held(signal.aborted || (operation?.signal && apply(signalAborted, operation.signal, [])) ? 'cancelled' : 'stale')); }
+    if (source.refused) return Promise.resolve(held(source.refused));
+    if (proxied && !isClassicOperation()) return Promise.resolve(held('proxy-configured'));
     if (source.pending) return operation || source.pendingOperation ? Promise.resolve(held('busy')) : source.pending;
     if (wasUnsettled(source)) return Promise.resolve(held('unsettled'));
     if (source.result) return Promise.resolve(source.result);
@@ -239,16 +241,13 @@ export function createProtectedSourceOwner(options: ProtectedSourceOwnerOptions)
     if (bucket) for (const pending of bucket) {
       if (samePendingSource(pending, source)) return Promise.resolve(held('busy'));
     }
-    // The existing bound covers live/released refusals and pending work before
-    // asynchronous admission. No old refusal is evicted to admit another sample.
-    if (unsettled.size + releasedUnsettledCount + screeningCount >= LIMITS.unsettledRevisions) return Promise.resolve(held('capacity'));
     const pendingSources = bucket ?? new Set<OwnedSource>();
-    pendingSources.add(source); screening.set(bucketKey, pendingSources); screeningCount++;
+    pendingSources.add(source); screening.set(bucketKey, pendingSources);
     const pending = own(Promise.resolve().then(() => withConfiguredDecisionModelPolicy(() => run(source, operation))));
     source.pending = pending;
     source.pendingOperation = operation;
     const finished = () => {
-      if (pendingSources.delete(source)) screeningCount--;
+      pendingSources.delete(source);
       if (pendingSources.size === 0 && screening.get(bucketKey) === pendingSources) screening.delete(bucketKey);
       if (source.pending === pending) { delete source.pending; delete source.pendingOperation; }
     };
@@ -257,10 +256,19 @@ export function createProtectedSourceOwner(options: ProtectedSourceOwnerOptions)
   };
   return {
     capture(parts) {
-      active(); const source = captureScreeningSource(parts, credentialLiterals); active();
+      active();
+      // Text holding protected input is still a handle: screening it answers
+      // held('protected-input') with no request, so callers have one path.
+      let source: ScreeningSource, refused: 'protected-input' | undefined;
+      try { source = captureScreeningSource(parts, credentialLiterals); }
+      catch (error) {
+        if (!(error instanceof JudgmentInputError)) throw error;
+        source = Object.freeze({ revision: 'protected-input', parts: Object.freeze([]) }); refused = 'protected-input';
+      }
+      active();
       if (sources.size >= LIMITS.sources) return invalid();
       const handle = Object.freeze({}) as ProtectedSource;
-      sources.set(handle, { source, lifetime: new AbortController(), released: false }); return handle;
+      sources.set(handle, { source, lifetime: new AbortController(), released: false, ...(refused ? { refused } : {}) }); return handle;
     },
     captureResearchReference(value) {
       active();
@@ -305,14 +313,8 @@ export function createProtectedSourceOwner(options: ProtectedSourceOwnerOptions)
       source.released = true; source.lifetime.abort();
       return own(Promise.resolve(source.pending).then(() => {
         // Retirement synchronously removes every future consumer, even when
-        // this release was queued first. Always forget the raw original below,
-        // but do not generate a compact expectation for a dead owner lifetime.
-        if (unsettled.delete(source) && !closing && !signal.aborted) {
-          const bucket = pendingSourceBucket(source), pin = refusalComparison(source);
-          const originals = releasedUnsettled.get(bucket) ?? new Set<string>();
-          if (!originals.has(pin)) { originals.add(pin); releasedUnsettledCount++; }
-          releasedUnsettled.set(bucket, originals);
-        }
+        // this release was queued first. The raw original is forgotten here.
+        unsettled.delete(source);
         sources.delete(handle);
         for (const [receipt, entry] of projections) if (entry.source === source) projections.delete(receipt);
       }));
@@ -321,7 +323,10 @@ export function createProtectedSourceOwner(options: ProtectedSourceOwnerOptions)
       if (closing) return closing;
       const finish = Promise.withResolvers<void>(); closing = finish.promise;
       lifetime.abort();
-      void Promise.allSettled([...work]).then(() => { sources.clear(); projections.clear(); unsettled.clear(); releasedUnsettled.clear(); releasedUnsettledCount = 0; screening.clear(); referenceReader.clear(); finish.resolve(); });
+      void Promise.allSettled([...work]).then(async () => {
+        await transport?.close();
+        sources.clear(); projections.clear(); unsettled.clear(); screening.clear(); referenceReader.clear(); finish.resolve();
+      });
       return closing;
     },
   };

@@ -6,6 +6,13 @@ import type { ProtectedSourceOwnerOptions, ResearchReferenceScreeningReceipt, Pr
 import type { ResearchReferenceOperation } from '../platform/src/platform/security/source-screening/types.js';
 
 const cleanups: Array<() => Promise<void>> = [];
+/** The parameter names one request asked about, in order. */
+function namesOf(call: { body: Record<string, unknown> }): string[] {
+  // A single name is asked in the battery's own shape: the name is the state.
+  if ('credential' in (call.body['questions'] as object)) return [(call.body['state'] as { parameter: string }).parameter];
+  return Object.values(call.body['questions'] as Record<string, { instructions: { subject: { parameter: string } } }>)
+    .map((question) => question.instructions.subject.parameter);
+}
 afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await close(); });
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>((done) => { resolve = done; }); return { promise, resolve }; }
 function answer(value = 0, model = 'jev-1.13.0') {
@@ -23,7 +30,22 @@ function fixture(options: {
     const path = new URL(request.url).pathname;
     calls.push({ path, body });
     if (path !== '/v1/systemone') return new Response('Unexpected proposal route', { status: 400 });
-    return options.judge ? options.judge(body, calls.length) : answer();
+    // One request carries every unread name of a reference, one question per
+    // name; each is answered as its own one-name reading would be.
+    const questions = body['questions'] as Record<string, { instructions: { subject: Record<string, unknown> } }>;
+    const count = calls.length;
+    if ('credential' in questions) return options.judge ? options.judge(body, count) : answer();
+    const answers: Record<string, unknown> = {};
+    let last: Response | undefined;
+    for (const [key, question] of Object.entries(questions)) {
+      const single = { ...body, state: question.instructions.subject, questions: { credential: question } };
+      last = await (options.judge ? options.judge(single, count) : answer());
+      if (!last.ok) return last;
+      const parsed = await last.clone().json() as { answers: { credential: unknown } };
+      answers[key] = parsed.answers.credential;
+    }
+    const sample = await last!.json() as Record<string, unknown>;
+    return Response.json({ ...sample, answers });
   },
   });
   const lifetime = new AbortController();
@@ -81,8 +103,9 @@ test('name-only Jev preserves the exact benign reference, duplicate fields, quer
   const f = fixture();
   const url = 'HTTPS://EXAMPLE.TEST:443/document%2fid?id=sentinel-one&id=sentinel-two&q=ordinary+words#section-2';
   expect(await f.project(url)).toEqual([url]);
-  expect(f.calls.map((call) => call.path)).toEqual(['/v1/systemone', '/v1/systemone']);
-  expect(f.calls.map((call) => call.body.state)).toEqual([{ parameter: 'id' }, { parameter: 'q' }]);
+  // Both names of the reference in one request.
+  expect(f.calls.map((call) => call.path)).toEqual(['/v1/systemone']);
+  expect(f.calls.map(namesOf)).toEqual([['id', 'q']]);
   const transmitted = JSON.stringify(f.calls);
   for (const withheld of ['EXAMPLE.TEST', 'document%2fid', 'sentinel-one', 'sentinel-two', 'ordinary+words', 'section-2']) {
     expect(transmitted).not.toContain(withheld);
@@ -92,7 +115,7 @@ test('name-only Jev preserves the exact benign reference, duplicate fields, quer
 test('a credential role withholds the whole reference rather than changing its identity', async () => {
   const f = fixture({ judge: () => answer(1) });
   expect(await f.project('https://example.test/document?pat=synthetic-sentinel#section')).toEqual(['[source URL withheld]']);
-  expect(f.calls[0]?.body.state).toEqual({ parameter: 'pat' });
+  expect(f.calls.map(namesOf)).toEqual([['pat']]);
   expect(JSON.stringify(f.calls)).not.toContain('synthetic-sentinel');
   expect(f.calls).toHaveLength(1);
 });
@@ -102,7 +125,7 @@ test('names are decoded once by URLSearchParams while original resource bytes st
   expect(await f.project('https://example.test/document?%61uth=synthetic-sentinel')).toEqual(['[source URL withheld]']);
   const benign = 'https://example.test/search?q=ordinary words&%71=more%20words&max_tokens=42#anchor';
   expect(await f.project(benign)).toEqual([benign]);
-  expect(f.calls.map((call) => call.body.state)).toEqual([{ parameter: 'auth' }, { parameter: 'q' }, { parameter: 'max_tokens' }]);
+  expect(f.calls.map(namesOf)).toEqual([['auth'], ['q', 'max_tokens']]);
   expect(JSON.stringify(f.calls)).not.toContain('synthetic-sentinel');
 });
 
@@ -206,7 +229,7 @@ test('an explicit retry after a protected decision outage sends identical name-o
   const handle = f.owner.captureResearchReference('https://example.test/path?auth=synthetic-sentinel#anchor');
   expect(await f.owner.screenResearchReference(handle)).toEqual({ status: 'held', reason: 'route-unavailable' });
   expect(await f.project('https://example.test/path?auth=synthetic-sentinel#anchor')).toEqual(['[source URL withheld]']);
-  expect(f.calls.map((call) => call.body.state)).toEqual([{ parameter: 'auth' }, { parameter: 'auth' }]);
+  expect(f.calls.map(namesOf)).toEqual([['auth'], ['auth']]);
   expect(progress).toHaveLength(0);
   expect(JSON.stringify([f.calls, progress])).not.toContain('synthetic-sentinel');
 }, 10_000);
@@ -257,7 +280,7 @@ test('query-role projection makes no claim about fragments or server-specific qu
   const serverSpecific = 'https://example.test/?id=123;auth=synthetic-server-field';
   expect(await f.project(fragment)).toEqual([fragment]);
   expect(await f.project(serverSpecific)).toEqual([serverSpecific]);
-  expect(f.calls.map((call) => call.body.state)).toEqual([{ parameter: 'id' }]);
+  expect(f.calls.map(namesOf)).toEqual([['id']]);
   expect(JSON.stringify(f.calls)).not.toContain('synthetic-');
 });
 
@@ -282,20 +305,24 @@ test('non-string inputs are refused without invoking coercion or proxy traps', (
   expect(f.calls).toHaveLength(0);
 });
 
-test('name-role capacity never evicts an earlier outcome or sends overflowing names', async () => {
+test('name-role capacity forgets the least recently used role instead of refusing new names', async () => {
   const f = fixture();
+  const asked = () => f.calls.flatMap(namesOf).length;
   for (let offset = 0; offset < 1_024; offset += 100) {
     const names = Array.from({ length: Math.min(100, 1_024 - offset) }, (_, index) => `field${offset + index}=ordinary`);
     await f.project(`https://example.test/?${names.join('&')}`);
   }
-  expect(f.calls).toHaveLength(1_024);
-  const overflow = f.owner.captureResearchReference('https://example.test/?new_field=synthetic-sentinel');
-  expect(await f.owner.screenResearchReference(overflow)).toEqual({ status: 'held', reason: 'capacity' });
-  expect(await f.owner.screenResearchReference(overflow)).toEqual({ status: 'held', reason: 'capacity' });
-  await f.owner.release(overflow);
-  expect(await f.project('https://other.example.test/?field0=changed#anchor')).toEqual(['https://other.example.test/?field0=changed#anchor',
-  ]);
-  expect(f.calls).toHaveLength(1_024);
+  expect(asked()).toBe(1_024);
+  // A remembered name costs nothing and becomes the most recently used.
+  expect(await f.project('https://other.example.test/?field0=changed#anchor')).toEqual(['https://other.example.test/?field0=changed#anchor']);
+  expect(asked()).toBe(1_024);
+  // A new name is read, and the least recently used role (field1) is forgotten.
+  expect(await f.project('https://example.test/?new_field=ordinary')).toEqual(['https://example.test/?new_field=ordinary']);
+  expect(asked()).toBe(1_025);
+  await f.project('https://example.test/?field0=again');
+  expect(asked()).toBe(1_025);
+  await f.project('https://example.test/?field1=again');
+  expect(asked()).toBe(1_026);
 }, 30_000);
 
 test('reference cancellation retires the request before release completes and permits no late projection', async () => {

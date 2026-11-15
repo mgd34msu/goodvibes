@@ -34,10 +34,12 @@
  *
  *  2. **Wrong merchant ⇒ refuse.** The purchase was decided against one
  *     registrable domain. The page must still be on it. This uses
- *     `validateLinkTarget`, the same check the rest of the platform uses,
+ *     `checkLinkTarget`, the same code check the rest of the platform uses,
  *     rather than a fresh host comparison, a second implementation of "is this
  *     the right site" is a second chance to get punycode, userinfo, ports or
- *     the public-suffix boundary wrong.
+ *     the public-suffix boundary wrong. The lookalike and shortener reading
+ *     was made once, when the checkout url admitted the merchant domain; this
+ *     compares the page reached against that domain in code.
  *
  *  3. **No redactor ⇒ refuse.** Filling a card into a page whose content can
  *     still be reported to the model is the leak this whole design exists to
@@ -57,7 +59,7 @@
  * read path exactly like a response field is. Every throw from the driver is
  * caught here and replaced with a sentence this module wrote.
  */
-import { validateLinkTarget } from '../security/link-validation.js';
+import { checkLinkTarget } from '../security/link-validation.js';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { cardFieldValue, type CardFieldName, type CardMaterialStore } from './card-material.js';
 import type { CardFieldKind, CardMaterialRedactor } from './card-redaction.js';
@@ -187,7 +189,7 @@ export async function fillCard(
   // ── 2. The page must still be the merchant the purchase was decided for ──
   const pageUrl = await driver.url({ signal, assertCurrent: assertCheckout });
   assertCheckout();
-  const validation = await validateLinkTarget(pageUrl, checkout.merchantDomain, signal);
+  const validation = checkLinkTarget(pageUrl, checkout.merchantDomain);
   assertCheckout();
   if (!validation.ok) {
     throw new FillCardRefusal(

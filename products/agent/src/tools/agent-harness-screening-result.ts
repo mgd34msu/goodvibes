@@ -5,8 +5,8 @@ import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platfor
 import type { SourceScreeningHold, SourceScreeningReceipt } from '@goodvibes-jev/engine/platform/platform/security';
 
 const holds = Object.freeze({
-  'route-unavailable': true, 'protected-input': true, malformed: true, unsettled: true,
-  cancelled: true, stale: true, capacity: true, busy: true,
+  'route-unavailable': true, 'proxy-configured': true, 'protected-input': true, malformed: true, unsettled: true,
+  cancelled: true, stale: true, busy: true,
 } satisfies Record<SourceScreeningHold, true>);
 
 function resultFields(value: unknown): PropertyDescriptorMap | undefined {

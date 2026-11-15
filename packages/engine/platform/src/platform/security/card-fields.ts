@@ -17,10 +17,12 @@ import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decision
  * There is no registry of merchants here and there must never be one. A
  * control whose `autocomplete` attribute carries one of the payment tokens the
  * HTML standard defines has declared itself a payment field, and that
- * declaration is taken as given. Every other form control is read by Jev
- * (`engine.security.card-field`) from its name, id, placeholder and labels in
- * whatever language the page uses; that reading replaced a list of
- * multilingual name and label regexes.
+ * declaration is taken as given. An input whose type cannot hold card material
+ * (checkbox, email, search, date, ...) is settled in code. Every other form
+ * control is read by Jev (`engine.security.card-field`) from its name, id,
+ * placeholder and labels in whatever language the page uses, all the controls
+ * of one snapshot in one request, and a page remembers each reading; that
+ * reading replaced a list of multilingual name and label regexes.
  *
  * ── Erring toward yes ─────────────────────────────────────────────────────
  *
@@ -30,8 +32,9 @@ import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decision
  * is a confident no.
  */
 import { judgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
-import { checkAnswers, drainOwned, type JudgmentPort } from '@goodvibes-jev/judgment';
-import { cardField } from './batteries/card-field.js';
+import { checkAnswers, drainOwned, recordAction, type EntryType, type JudgmentPort } from '@goodvibes-jev/judgment';
+import { cardField, type CardFieldView } from './batteries/card-field.js';
+import { askEach } from './batteries/ask-each.js';
 import { runDecisionOrClassic as decisionOrClassic } from '@goodvibes-jev/engine/errors';
 
 /**
@@ -75,14 +78,56 @@ const CARD_AUTOCOMPLETE_TOKENS: ReadonlySet<string> = new Set([
 /** The decision site the card-field reading is logged under. */
 export const CARD_FIELD_SITE = 'security.card-field';
 
-/** Whether this control is a payment field whose value must never be reported. */
-export async function isCardFieldDescriptor(control: FormControlDescriptor, reading?: {
+/**
+ * Input types whose value cannot hold card material: settled in code, no request.
+ * `month` is not here: an expiry can be a month input.
+ */
+const NON_CARD_INPUT_TYPES: ReadonlySet<string> = new Set([
+  'checkbox', 'radio', 'file', 'range', 'color', 'date', 'datetime-local', 'week', 'time',
+  'email', 'url', 'search', 'submit', 'button', 'reset', 'image', 'hidden',
+]);
+
+/**
+ * Controls a person types digits into. With no decision model only these keep
+ * their value back; every other control reports its value as usual.
+ */
+const DIGIT_ENTRY_INPUT_TYPES: ReadonlySet<string> = new Set(['', 'text', 'tel', 'number', 'password', 'month']);
+
+/**
+ * What a snapshot does with one control's value:
+ * - `reported`: the value is shown.
+ * - `card-field`: a payment field; the value is never reported.
+ * - `no-decision-model`: a digit-entry control nobody could read for card
+ *   meaning because no decision model is available; the value is withheld and
+ *   the element says so.
+ */
+export type CardFieldDecision = 'reported' | 'card-field' | 'no-decision-model';
+
+/** Readings remembered for one page: descriptor key to "is a card field". */
+export type CardFieldMemory = Map<string, boolean>;
+
+/** Most readings one page remembers; the oldest is dropped first. */
+const MEMORY_LIMIT = 1_024;
+
+interface CardFieldReading {
   /** Explicit absence retains the caller's original missing reader. */
   readonly port: JudgmentPort | undefined;
   readonly signal?: AbortSignal | undefined;
   readonly assertCurrent: () => void;
-}): Promise<boolean> {
-  const source = reading?.port, signal = reading?.signal, assertion = reading?.assertCurrent;
+  /** Readings already made on this page; an unchanged control is asked about once per page. */
+  readonly memory?: CardFieldMemory | undefined;
+}
+
+/**
+ * Decide, for every control of one snapshot, whether its value may be
+ * reported. Code settles what it can (elements that carry no value, declared
+ * `cc-*` tokens, input types that cannot hold card material, and controls this
+ * page already had read); the rest are asked about in ONE request, one yes/no
+ * per control. Erring toward yes: a control is a payment field unless the
+ * reading is a confident no.
+ */
+export async function classifyCardFields(controls: readonly FormControlDescriptor[], reading?: CardFieldReading): Promise<CardFieldDecision[]> {
+  const source = reading?.port, signal = reading?.signal, assertion = reading?.assertCurrent, memory = reading?.memory;
   const current = (): void => {
     signal?.throwIfAborted();
     const value: unknown = assertion?.();
@@ -95,47 +140,70 @@ export async function isCardFieldDescriptor(control: FormControlDescriptor, read
   // ordinary occurrence, and a throw here would fail the whole snapshot, which
   // is a far worse outcome than misclassifying one control.
   const text = (value: unknown): string => (typeof value === 'string' ? value : '');
-  const tag = text(control.tag).toLowerCase();
-  // Only these elements carry a value a snapshot could report.
-  if (tag !== 'input' && tag !== 'textarea' && tag !== 'select') return false;
+  const decisions: CardFieldDecision[] = new Array<CardFieldDecision>(controls.length).fill('reported');
+  const pending = new Map<string, { readonly view: CardFieldView; readonly digitEntry: boolean; readonly indexes: number[] }>();
+  controls.forEach((control, index) => {
+    const tag = text(control?.tag).toLowerCase();
+    // Only these elements carry a value a snapshot could report.
+    if (tag !== 'input' && tag !== 'textarea' && tag !== 'select') return;
+    // `autocomplete="shipping cc-number"` and `section-pay cc-csc` are both legal
+    // spellings, so each token is checked rather than the whole attribute.
+    const tokens = text(control.autocomplete).toLowerCase().split(/\s+/).filter((token) => token.length > 0);
+    if (tokens.some((token) => CARD_AUTOCOMPLETE_TOKENS.has(token))) { decisions[index] = 'card-field'; return; }
+    const type = text(control.type).toLowerCase();
+    if (tag === 'input' && NON_CARD_INPUT_TYPES.has(type)) return;
+    const view: CardFieldView = { tag, type: text(control.type), name: text(control.name), id: text(control.id),
+      placeholder: text(control.placeholder), ariaLabel: text(control.ariaLabel), label: text(control.label) };
+    const key = JSON.stringify([view.tag, view.type, view.name, view.id, view.placeholder, view.ariaLabel, view.label]);
+    const remembered = memory?.get(key);
+    if (remembered !== undefined) { if (remembered) decisions[index] = 'card-field'; return; }
+    const entry = pending.get(key);
+    if (entry) { entry.indexes.push(index); return; }
+    pending.set(key, { view, digitEntry: tag === 'textarea' || (tag === 'input' && DIGIT_ENTRY_INPUT_TYPES.has(type)), indexes: [index] });
+  });
+  if (pending.size === 0) return decisions;
 
-  // `autocomplete="shipping cc-number"` and `section-pay cc-csc` are both legal
-  // spellings, so each token is checked rather than the whole attribute.
-  const tokens = text(control.autocomplete).toLowerCase().split(/\s+/).filter((token) => token.length > 0);
-  if (tokens.some((token) => CARD_AUTOCOMPLETE_TOKENS.has(token))) return true;
-
+  const entries = [...pending.entries()];
   return decisionOrClassic(async () => {
     current();
     const base = reading === undefined ? judgmentPort(CARD_FIELD_SITE) : source;
     if (!base) throw new JudgmentPortMissingError(CARD_FIELD_SITE);
     const port: JudgmentPort = { ...base, async ask(request) {
-      current();
       const result = await base.ask({ ...request,
         beforeAttempt: () => { current(); assertSynchronousJudgmentGuard(() => request.beforeAttempt?.()); current(); },
         assertLogCurrent: () => { current(); assertSynchronousJudgmentGuard(() => request.assertLogCurrent?.(), 'retention'); current(); },
       });
-      current(); checkAnswers(request.questions, result.answers); return result;
+      checkAnswers(request.questions, result.answers); return result;
     } };
-    const run = await cardField.run(port, {
-      tag,
-      type: text(control.type),
-      name: text(control.name),
-      id: text(control.id),
-      placeholder: text(control.placeholder),
-      ariaLabel: text(control.ariaLabel),
-      label: text(control.label),
-    }, { site: CARD_FIELD_SITE, ...(signal === undefined ? {} : { signal }), beforeAttempt: current });
+    const { readings, decisionIds } = await askEach(port, cardField, ['card_field'],
+      { controls: 'Each question carries one form control of the same page as its subject.' },
+      entries.map(([, entry]) => entry.view as unknown as EntryType),
+      { site: CARD_FIELD_SITE, ...(signal === undefined ? {} : { signal }), beforeAttempt: current });
     current();
-    const resultReading = run.readings.card_field;
-    const ordinary = resultReading.verdict === 'no' && resultReading.outcome === 'act';
-    run.recordAction(ordinary ? 'value reported' : 'value suppressed');
-    current();
-    return !ordinary;
+    let suppressed = 0;
+    entries.forEach(([key, entry], position) => {
+      const resultReading = readings[position]!.card_field;
+      const ordinary = resultReading.verdict === 'no' && resultReading.outcome === 'act';
+      if (!ordinary) { suppressed += 1; for (const index of entry.indexes) decisions[index] = 'card-field'; }
+      if (memory) {
+        if (memory.size >= MEMORY_LIMIT) memory.delete(memory.keys().next().value!);
+        memory.set(key, !ordinary);
+      }
+    });
+    for (const id of decisionIds) recordAction(port, id, `value suppressed for ${String(suppressed)} of ${String(entries.length)} control(s)`);
+    return decisions;
   }, () => {
     current();
-    // This boolean governs value retention, not a claim that the control is a
-    // payment field. With no semantic assessment, omit every form value;
-    // selectors, labels, checked state and owner-authorized actions remain usable.
-    return true;
+    // No semantic assessment: only controls a person types digits into keep
+    // their value back, and each says why. Selectors, labels, checked state and
+    // owner-authorized actions remain usable.
+    for (const [, entry] of entries) if (entry.digitEntry) for (const index of entry.indexes) decisions[index] = 'no-decision-model';
+    return decisions;
   });
+}
+
+/** Whether this control's value must not be reported (a payment field, or unread with no decision model). */
+export async function isCardFieldDescriptor(control: FormControlDescriptor, reading?: CardFieldReading): Promise<boolean> {
+  const [decision] = await classifyCardFields([control], reading);
+  return decision !== 'reported';
 }

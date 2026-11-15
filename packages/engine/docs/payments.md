@@ -1697,14 +1697,16 @@ the eBay seller bar.
 
 Any checkout URL that arrived from untrusted content passes
 `validateLinkTarget(rawUrl, authorizedDomain)` before anything is typed, `platform/security/link-validation.ts`, with its generated public-suffix data
-(`public-suffix.ts`). Redirect chains go through `followValidatedRedirects`, so a
-link that lands correctly and then 302s away refuses the chain.
+(`public-suffix.ts`). The page actually reached is validated again in code
+(`checkLinkTarget`) before the card is filled, so a link that lands correctly and
+then redirects away is refused at the fill.
 
 A registrable-domain mismatch refuses locally before any decision-model call.
 Matching the domain does not establish that it is neither a lookalike nor a
 shortening service, especially when the merchant was discovered in page content;
-decision mode still checks those meanings. Classic link validation provides the
-deterministic URL/domain/redirect checks with Classic provenance, without semantic
+decision mode reads those meanings once, when the checkout url admits the
+merchant domain; the card fill compares domains in code and asks nothing. Classic
+link validation provides the deterministic URL and domain checks with Classic provenance, without semantic
 lookalike or shortener assurance. Merchant and checkout interpretation separately
 require decision models, as described in the [decision-model policy](../../../docs/decision-model-policy.md).
 

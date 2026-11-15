@@ -32,7 +32,11 @@
  * passes `inputOriginIsOwnerDirect`. Each one runs in its own scope instead
  * (`session:<id>`, hosted-sessions/session-runtime.ts), which opens empty when
  * its loop is built and starts a new turn on input an authenticated operator
- * sent; channel and automation input leaves it open.
+ * sent; channel and automation input leaves it open. A gateway call outside
+ * any session keeps the window of its principal (or of its connection), so a
+ * fresh request there cannot clear what a session's running turn just read.
+ * Mail read by background work lands in a window of its own (the daemon's mail
+ * composition), so it does not count against sessions that never read it.
  */
 
 import { AsyncLocalStorage } from 'node:async_hooks';

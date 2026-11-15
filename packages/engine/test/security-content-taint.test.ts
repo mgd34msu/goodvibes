@@ -141,17 +141,30 @@ describe('recipients: exact containment first', () => {
 });
 
 describe('end to end: the wiring the check depends on', () => {
-  test.each(['missing', 'whitespace', 'truncated', 'evicted'])('incomplete %s exposure cannot be cleared by benign retained text', async kind => {
+  test.each(['missing', 'whitespace', 'evicted'])('incomplete %s exposure cannot be cleared by benign retained text, and the refusal names it', async kind => {
     const ledger = new UntrustedContentLedger();
     ledger.record({ surface: 'email', origin: 'incomplete', at: new Date().toISOString(),
-      content: kind === 'missing' ? undefined : kind === 'whitespace' ? '   ' : kind === 'truncated' ? 'x'.repeat(20_001) : INJECTION });
+      content: kind === 'missing' ? undefined : kind === 'whitespace' ? '   ' : INJECTION });
     for (let i = 0; i < (kind === 'evicted' ? 1000 : 1); i++) {
       ledger.record({ surface: 'email', origin: 'benign', at: new Date().toISOString(), content: 'unrelated weather report' });
     }
     const result = await evaluateOutwardEffect({ ledger, request: { toolName: 'email', action: 'email.send', description: 'sending mail' }, content: { body: 'Weekly summary: 142 orders.' } });
     expect(result.allowed).toBe(false);
-    expect(result.reason).toContain('missing, empty, truncated, or no longer retained');
+    expect(result.reason).toContain('incomplete');
     expect(readings.requests).toHaveLength(0);
+  });
+
+  test('a source longer than one reading is compared in pieces in one request, not refused as truncated', async () => {
+    const ledger = new UntrustedContentLedger();
+    ledger.record({ surface: 'web-page', origin: 'https://long.example', at: new Date().toISOString(), content: 'weather '.repeat(5_000) });
+    const send = () => evaluateOutwardEffect({ ledger, request: { toolName: 'email', action: 'email.send', description: 'sending mail' },
+      content: { to: 'owner@example.com', subject: 'Note', body: 'Weekly summary: 142 orders.' } });
+    expect((await send()).allowed).toBe(true);
+    // One request per field, each carrying every piece of the page.
+    expect(readings.requests).toHaveLength(3);
+    // A second send of the same content in the turn asks nothing new.
+    expect((await send()).allowed).toBe(true);
+    expect(readings.requests).toHaveLength(3);
   });
   test('a real port records text, so the ledger has something to compare', async () => {
     // The regression that made all of this inert: content was dropped between

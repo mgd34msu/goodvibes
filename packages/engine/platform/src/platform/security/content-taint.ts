@@ -24,7 +24,8 @@
  * ── How derivation is decided ─────────────────────────────────────────────
  *
  * By Jev, reading each outgoing field against each piece of untrusted text
- * actually read (`engine.security.content-derivation`), not by provenance
+ * actually read (`engine.security.content-derivation`), one request per field
+ * carrying every source it has not been cleared against, not by provenance
  * bookkeeping the caller could forget to thread. The reading asks whether the
  * field carries an instruction, claim or specific value from the source, and
  * whether all they share is boilerplate that unrelated senders all carry. It
@@ -48,12 +49,13 @@
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
 import { JudgmentError, mapLimit, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { executePolicyCheck } from '../gate/execute-policy-check.js';
-import { contentDerivation, derivationView } from './batteries/content-derivation.js';
+import { contentDerivation, derivationField, derivationPieces, derivationSource } from './batteries/content-derivation.js';
+import { askEach } from './batteries/ask-each.js';
 
 /** The decision site the derivation reading is logged under. */
 export const CONTENT_DERIVATION_SITE = 'security.content-taint';
 
-/** How many (field, source) readings run at once. */
+/** How many fields are read at once; each field's sources go in one request. */
 const DERIVATION_CONCURRENCY = 4;
 
 /** Untrusted text retained for comparison, with where it came from. */
@@ -158,31 +160,42 @@ export function findExactContainment(
 }
 
 /**
- * Whether one field reads as derived from one source. Clean only on a
- * confident no to the derivation question or a confident yes to the
- * boilerplate question; the reading's outcome is recorded with what was done.
+ * Cleared (field, source piece) readings, per source object, for as long as
+ * the source is retained: a later decision in the turn asks only about new
+ * sources or changed fields. A cleared pair is a fact about two fixed texts.
+ * The ledger hands out one source object per retained ingest, so this keys on
+ * that object; any other source (retained evidence, a caller's own list) is
+ * simply read again.
  */
-async function readsAsDerived(view: ReturnType<typeof derivationView>, reply: boolean, signal?: AbortSignal, port?: JudgmentPort): Promise<boolean> {
-  assertTaintActive(signal);
-  const derivationItem = reply ? 'reply_derives' : 'derives';
-  const run = await contentDerivation.run(taintPort(signal, port), view, {
-    site: CONTENT_DERIVATION_SITE,
-    only: [derivationItem, 'boilerplate_only'],
-    ...(signal === undefined ? {} : { signal }),
-  });
-  assertTaintActive(signal);
-  const derives = run.readings[derivationItem];
-  const boilerplate = run.readings.boilerplate_only;
-  const clean = (derives.verdict === 'no' && derives.outcome === 'act')
-    || (boilerplate.verdict === 'yes' && boilerplate.outcome === 'act');
-  run.recordAction(clean ? 'clean' : 'finding');
-  return !clean;
+const clearedPairs = new WeakMap<TaintSource, Map<string, Set<number>>>();
+/** Sources the ledger handed out; only their readings are remembered. */
+const ledgerSources = new WeakSet<TaintSource>();
+
+/** Called by the untrusted-content ledger for each source object it hands out. */
+export function markLedgerTaintSource(source: TaintSource): void { ledgerSources.add(source); }
+/** Field texts remembered per source; the oldest is forgotten first. */
+const CLEARED_FIELDS_PER_SOURCE = 64;
+
+function clearedFor(source: TaintSource, fieldKey: string): Set<number> | undefined {
+  return clearedPairs.get(source)?.get(fieldKey);
+}
+function rememberCleared(source: TaintSource, fieldKey: string, piece: number): void {
+  if (!ledgerSources.has(source)) return;
+  let fields = clearedPairs.get(source);
+  if (!fields) { fields = new Map(); clearedPairs.set(source, fields); }
+  let pieces = fields.get(fieldKey);
+  if (!pieces) {
+    pieces = new Set();
+    fields.set(fieldKey, pieces);
+    if (fields.size > CLEARED_FIELDS_PER_SOURCE) fields.delete(fields.keys().next().value!);
+  }
+  pieces.add(piece);
 }
 
 /** Retain first-source order and exact original text, without serializing it into keys. */
-function uniqueTaintSources(sources: readonly TaintSource[]): readonly TaintSource[] {
+function uniqueTaintSources(sources: readonly TaintSource[]): readonly { readonly owned: TaintSource; readonly borrowed: TaintSource }[] {
   const surfaces = new Map<string, Map<string, Set<string>>>();
-  const unique: TaintSource[] = [];
+  const unique: { owned: TaintSource; borrowed: TaintSource }[] = [];
   for (const borrowed of sources) {
     const source = Object.freeze({ surface: borrowed.surface, origin: borrowed.origin, text: borrowed.text });
     let origins = surfaces.get(source.surface);
@@ -190,10 +203,13 @@ function uniqueTaintSources(sources: readonly TaintSource[]): readonly TaintSour
     let texts = origins.get(source.origin);
     if (!texts) { texts = new Set(); origins.set(source.origin, texts); }
     if (texts.has(source.text)) continue;
-    texts.add(source.text); unique.push(source);
+    texts.add(source.text); unique.push({ owned: source, borrowed });
   }
   return unique;
 }
+
+/** Most characters of source pieces carried in one derivation request, beside the field itself. */
+const DERIVATION_REQUEST_CHARS = 100_000;
 
 /**
  * Find every field of an outward action whose content derives from untrusted
@@ -204,6 +220,12 @@ function uniqueTaintSources(sources: readonly TaintSource[]): readonly TaintSour
  * rather than an index. At most one finding per field: the exact match when
  * there is one, else the first source (in the order given) the field reads as
  * derived from.
+ *
+ * Exact containment runs in code over the whole of every source. The
+ * derivation reading asks, per field, ONE request carrying every source not
+ * already cleared for that field (a long source as consecutive pieces), each
+ * with its own pair of questions; fields are read side by side. Pairs cleared
+ * earlier are remembered, so a second send in the same turn asks nothing new.
  */
 export async function findContentTaint(
   fields: Readonly<Record<string, string | undefined>>,
@@ -213,41 +235,58 @@ export async function findContentTaint(
   assertTaintActive(options.signal);
   if (sources.length === 0) return [];
   const ownedFields = Object.freeze({ ...fields });
-  const ownedSources = uniqueTaintSources(sources);
+  const uniqueSources = uniqueTaintSources(sources);
+  const ownedSources = uniqueSources.map(entry => entry.owned);
   const exact = findExactContainment(ownedFields, ownedSources, options);
   const settled = new Set(exact.map((finding) => finding.field));
   const allowedReplies = new Set((options.replyToEnvelopeSenders ?? []).map(normalizeAddress));
   const exactFields = new Set(options.exactMatchFields ?? []);
   const replyFields = new Set(options.stripQuotedFields ?? []);
 
-  const activeSources = ownedSources.filter(source => source.text.trim().length > 0);
-  let pending = Object.entries(ownedFields).flatMap(([field, text]) =>
+  const activeSources = uniqueSources.filter(entry => entry.owned.text.trim().length > 0);
+  const pending = Object.entries(ownedFields).flatMap(([field, text]) =>
     text === undefined || text.trim().length === 0 || settled.has(field)
       || (exactFields.has(field) && allowedReplies.has(normalizeAddress(text))) ? [] : [{ field, text }]);
-
-  // Preflight the whole pass before any reading: a late oversized source must
-  // not leave earlier pairs classified against incomplete evidence.
-  for (const pair of pending) for (const source of activeSources) derivationView(pair.field, pair.text, source);
   const findings: TaintFinding[] = [...exact];
-  for (const source of activeSources) {
-    if (pending.length === 0) break;
-    const clean: typeof pending = [];
-    for (let offset = 0; offset < pending.length; offset += DERIVATION_CONCURRENCY) {
-      // Each batch contains distinct fields. A field's next source is never
-      // dispatched before its preceding source has actually cleared it.
-      const batch = pending.slice(offset, offset + DERIVATION_CONCURRENCY);
-      const derived = await mapLimit(batch, DERIVATION_CONCURRENCY, pair =>
-        readsAsDerived(derivationView(pair.field, pair.text, source), replyFields.has(pair.field), options.signal, options.port));
-      assertTaintActive(options.signal);
-      for (const [index, pair] of batch.entries()) {
-        if (derived[index] === false) clean.push(pair);
-        else if (derived[index] === true) findings.push({ field: pair.field, surface: source.surface, origin: source.origin,
-          excerpt: truncate(pair.text.trim()), kind: 'derived' });
-        else throw new JudgmentError('invalid-response', 'A content derivation reading was not returned');
-      }
-    }
-    pending = clean;
-  }
+  if (pending.length === 0 || activeSources.length === 0) return findings;
+
+  // Every piece of every source, in source order; preflight the whole pass
+  // before any reading, so a late refused input cannot leave earlier pairs
+  // classified against incomplete evidence.
+  const pieces = activeSources.flatMap(({ owned, borrowed }) => derivationPieces(owned.text).map((text, piece) => ({
+    owned, borrowed, piece, view: derivationSource({ surface: owned.surface, origin: owned.origin, text }),
+  })));
+  for (const pair of pending) derivationField(pair.field, pair.text);
+
+  const port = taintPort(options.signal, options.port);
+  const perField = await mapLimit(pending, DERIVATION_CONCURRENCY, async (pair): Promise<TaintFinding | undefined> => {
+    const reply = replyFields.has(pair.field);
+    const fieldKey = `${reply ? 'reply' : 'plain'}\0${pair.field}\0${pair.text}`;
+    const unread = pieces.filter(entry => !clearedFor(entry.borrowed, fieldKey)?.has(entry.piece));
+    if (unread.length === 0) return undefined;
+    const derivationItem = reply ? 'reply_derives' : 'derives';
+    const { readings, decisionIds } = await askEach(port, contentDerivation, [derivationItem, 'boilerplate_only'],
+      derivationField(pair.field, pair.text), unread.map(entry => entry.view), {
+        subjectKey: 'source', charBudget: DERIVATION_REQUEST_CHARS, site: CONTENT_DERIVATION_SITE,
+        ...(options.signal === undefined ? {} : { signal: options.signal }),
+      });
+    assertTaintActive(options.signal);
+    let finding: TaintFinding | undefined;
+    unread.forEach((entry, index) => {
+      const reading = readings[index];
+      if (!reading) throw new JudgmentError('invalid-response', 'A content derivation reading was not returned');
+      const derives = reading[derivationItem], boilerplate = reading.boilerplate_only;
+      const clean = (derives.verdict === 'no' && derives.outcome === 'act')
+        || (boilerplate.verdict === 'yes' && boilerplate.outcome === 'act');
+      if (clean) rememberCleared(entry.borrowed, fieldKey, entry.piece);
+      else finding ??= { field: pair.field, surface: entry.owned.surface, origin: entry.owned.origin,
+        excerpt: truncate(pair.text.trim()), kind: 'derived' };
+    });
+    for (const id of decisionIds) if (id !== undefined) port.recorder?.recordAction(id, finding ? 'finding' : 'clean');
+    return finding;
+  });
+  assertTaintActive(options.signal);
+  for (const finding of perField) if (finding) findings.push(finding);
   // Report in the caller's field order.
   const order = Object.keys(ownedFields);
   return findings.sort((a, b) => order.indexOf(a.field) - order.indexOf(b.field));

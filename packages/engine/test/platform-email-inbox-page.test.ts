@@ -100,7 +100,9 @@ describe('oldest pending pages preserve durable UID progress', () => {
     const retried = complete(await f.service.readInboxPage({ checkpoint: saved, limit: 2 }));
     expect(retried.checkpoint).toEqual(saved); expect(retried.coveredUids).toEqual([70, 80]);
     expect(retried.pending).toBe(4); expect(retried.hasMore).toBe(true);
-    expect(retried.checkpoint.history.skippedOlderMessages).toBe(2); expect(f.ingests).toHaveLength(2);
+    expect(retried.checkpoint.history.skippedOlderMessages).toBe(2);
+    // A page goes to privacy screening, never to a model, so it is not an ingest.
+    expect(f.ingests).toHaveLength(0);
   });
 
   test.each(['gone', 'incomplete'] as const)('a %s message ends the page there, keeping only what was read before it', async mode => {
@@ -108,7 +110,7 @@ describe('oldest pending pages preserve durable UID progress', () => {
     const f = snapshotFixture({ sockets: [socket] });
     const result = complete(await f.service.readInboxPage({ checkpoint: checkpoint() }));
     expect(result.coveredUids).toEqual([42]); expect(result.hasMore).toBe(true); expect('unsupported' in result).toBe(false);
-    expect(f.ingests).toHaveLength(1);
+    expect(f.ingests).toHaveLength(0);
     expect(fetched(socket)).toEqual([42, 43]); expect(socket.closed).toBe(true);
   });
 
@@ -124,7 +126,7 @@ describe('oldest pending pages preserve durable UID progress', () => {
     expect(f.service.getInboxMailboxObservation(result)?.uidValidity).toBe(7);
     expect(f.service.getInboxMailboxObservation({ ...result })).toBeUndefined();
     expect(f.service.getReplySubjectSource(source.detail)).toBeUndefined();
-    expect(JSON.stringify(f.ingests)).toContain('Second'); expect(f.connections()).toBe(1);
+    expect(f.ingests).toHaveLength(0); expect(f.connections()).toBe(1);
   });
 
   test('aggregate source cap ends the page before the message that would exceed it, never truncating one', async () => {
@@ -214,12 +216,4 @@ describe('UID pages keep owned cancellation and argument snapshots', () => {
     expect(f.ingests).toHaveLength(0); expect(socket.closed).toBe(true);
   });
 
-  test('reentrant ingest cancellation honors original signal despite caller replacing input', async () => {
-    const gate = deferred<string | null>(); const original = new AbortController(); const replacement = new AbortController();
-    let count = 0; const f = snapshotFixture({ deps: { secretsManager: { get: () => gate.promise },
-      recordUntrustedIngest() { expect(f.sockets[0]!.closed).toBe(true); count++; original.abort(); } } });
-    const input = { signal: original.signal, checkpoint: checkpoint() };
-    const pending = f.service.readInboxPage(input); input.signal = replacement.signal; gate.resolve('synthetic');
-    await expect(pending).rejects.toThrow('cancelled'); expect(count).toBe(1);
-  });
 });

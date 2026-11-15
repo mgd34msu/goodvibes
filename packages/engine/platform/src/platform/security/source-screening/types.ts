@@ -51,7 +51,14 @@ export interface SourceScreeningReceipt {
 export interface ProtectedResearchReference { readonly [referenceBrand]: true; }
 /** Query-name role authority only, never a complete content-privacy receipt. */
 export interface ResearchReferenceScreeningReceipt { readonly [referenceReceiptBrand]: true; readonly provenance?: 'classic'; }
-export type SourceScreeningHold = 'route-unavailable' | 'protected-input' | 'malformed' | 'unsettled' | 'cancelled' | 'stale' | 'capacity' | 'busy';
+/**
+ * Why a source was not settled. About the source itself: `unsettled`,
+ * `malformed`, `protected-input`. About the route: `route-unavailable`,
+ * `proxy-configured` (a proxy variable is set for this process, so private
+ * text is not sent; decided once when the owner is created), `cancelled`,
+ * `stale`, `busy`.
+ */
+export type SourceScreeningHold = 'route-unavailable' | 'proxy-configured' | 'protected-input' | 'malformed' | 'unsettled' | 'cancelled' | 'stale' | 'busy';
 export type SourceScreeningResult =
   | { readonly status: 'settled'; readonly receipt: SourceScreeningReceipt }
   | { readonly status: 'held'; readonly reason: SourceScreeningHold };
@@ -80,4 +87,4 @@ export interface ProtectedSourceOwner {
   close(): Promise<void>;
 }
 export const SOURCE_SCREENING_LIMITS = Object.freeze({ parts: 8, characters: 40_000, spans: 100, proposalBytes: 32_768,
-  sources: 128, unsettledRevisions: 1_024, referenceParameters: 100, referenceRoles: 1_024 });
+  sources: 128, referenceParameters: 100, referenceRoles: 1_024 });

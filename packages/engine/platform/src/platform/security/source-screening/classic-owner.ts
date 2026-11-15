@@ -41,7 +41,7 @@ export function createClassicProtectedSourceOwner(authority: Pick<LocalSourceScr
   let closed = false;
   type Handle = ProtectedSource | ProtectedResearchReference;
   type Receipt = SourceScreeningReceipt | ResearchReferenceScreeningReceipt;
-  interface Entry { readonly source: ScreeningSource; readonly reference?: CapturedResearchReference; released: boolean; receipt?: Receipt; }
+  interface Entry { readonly source: ScreeningSource; readonly reference?: CapturedResearchReference; released: boolean; receipt?: Receipt; readonly refused?: boolean; }
   const sources = new Map<Handle, Entry>();
   const receipts = new Map<Receipt, { readonly entry: Entry; readonly parts: readonly string[] }>();
   const current = (entry?: Entry, operation?: ResearchReferenceOperation) => {
@@ -53,15 +53,25 @@ export function createClassicProtectedSourceOwner(authority: Pick<LocalSourceScr
   };
   const capture = (parts: readonly string[], reference?: CapturedResearchReference): Handle => {
     current();
+    let refused = false;
     if (sources.size >= SOURCE_SCREENING_LIMITS.sources) throw new Error('Classic source capacity reached');
-    const source = captureScreeningSource(parts); current();
+    // Text holding protected input is still a handle whose screening answers
+    // held('protected-input'), the same one path the semantic owner gives callers.
+    let source: ScreeningSource;
+    try { source = captureScreeningSource(parts); }
+    catch (error) {
+      if (!(error instanceof JudgmentInputError)) throw error;
+      source = Object.freeze({ revision: 'protected-input', parts: Object.freeze([]) }); refused = true;
+    }
+    current();
     const handle = Object.freeze({}) as Handle;
-    sources.set(handle, { source, ...(reference ? { reference } : {}), released: false });
+    sources.set(handle, { source, ...(reference ? { reference } : {}), released: false, ...(refused ? { refused } : {}) });
     return handle;
   };
   const screen = async (handle: Handle, reference: boolean, raw?: ResearchReferenceOperation): Promise<SourceScreeningResult> => {
     const entry = sources.get(handle);
     if (!entry || Boolean(entry.reference) !== reference) return { status: 'held', reason: 'stale' };
+    if (entry.refused) return { status: 'held', reason: 'protected-input' };
     let operation: ResearchReferenceOperation | undefined;
     try {
       operation = captureScreeningOperation(raw);

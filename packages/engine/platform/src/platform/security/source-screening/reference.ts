@@ -1,5 +1,6 @@
 import { matchesJudgmentModel, defineBattery, type JudgmentPort, type JudgmentRetryProgress } from '@goodvibes-jev/judgment';
 import { captureScreeningSource } from './proposal.js';
+import { askEach } from '../batteries/ask-each.js';
 import { SOURCE_SCREENING_LIMITS as LIMITS } from './types.js';
 
 const band = { yes: { actAt: 0.98, confirmAt: 0.9 }, no: { actAt: 0.98, confirmAt: 0.9 } };
@@ -58,46 +59,59 @@ export function captureResearchReference(original: string, credentialLiterals: r
 }
 
 type Role = 'ordinary' | 'credential' | 'unsettled';
-type Hold = 'unsettled' | 'capacity' | 'busy';
+type Hold = 'unsettled' | 'busy';
 type Projection = { readonly status: 'projected'; readonly value: string } | { readonly status: 'held'; readonly reason: Hold };
 interface ReadOptions {
   readonly port: JudgmentPort; readonly signal: AbortSignal; readonly assertCurrent: () => void;
   readonly onRetry?: ((progress: JudgmentRetryProgress) => void) | undefined;
 }
 
-/** Owner-local role cache of already screened parameter names; no URLs or values. */
+/**
+ * Owner-local role cache of already screened parameter names; no URLs or
+ * values. All names of one reference the cache does not hold are read in one
+ * request, and at capacity the least recently used role is forgotten.
+ */
 export function createResearchReferenceReader(credentialLiterals: readonly string[] = []): {
   read: (reference: CapturedResearchReference, options: ReadOptions) => Promise<Projection>;
   clear: () => void;
 } {
   // A reserved undefined slot means an in-flight reading, not a default answer.
+  // Map order is recency: a hit moves the name to the end.
   const roles = new Map<string, Role | undefined>();
   const current = (options: ReadOptions) => { options.assertCurrent(); options.signal.throwIfAborted(); };
-  const role = async (parameter: string, options: ReadOptions): Promise<Role | Hold> => {
-    current(options);
-    captureScreeningSource([parameter], credentialLiterals);
-    const key = parameter;
-    if (roles.has(key)) return roles.get(key) ?? 'busy';
-    if (roles.size >= LIMITS.referenceRoles) return 'capacity';
-    roles.set(key, undefined);
+  const remember = (parameter: string, role: Role | undefined): void => {
+    roles.delete(parameter); roles.set(parameter, role);
+    while (roles.size > LIMITS.referenceRoles) {
+      // Forget the least recently used settled role; an in-flight slot stays.
+      const oldest = [...roles].find(([, value]) => value !== undefined);
+      if (!oldest) break;
+      roles.delete(oldest[0]);
+    }
+  };
+  const readRoles = async (parameters: readonly string[], options: ReadOptions): Promise<void> => {
+    for (const parameter of parameters) remember(parameter, undefined);
     try {
-      const run = await researchReferenceParameterRole.run(options.port, { parameter }, {
-        signal: options.signal, beforeAttempt: options.assertCurrent,
-        ...(options.onRetry ? { onRetry: options.onRetry } : {}), site: 'source-screening.research-reference-parameter',
-      });
+      const { readings } = await askEach(options.port, researchReferenceParameterRole, ['credential'],
+        { reference: 'Each question carries one query parameter name of the same research URL as its subject.' },
+        parameters.map(parameter => ({ parameter })), {
+          signal: options.signal, beforeAttempt: options.assertCurrent,
+          ...(options.onRetry ? { onRetry: options.onRetry } : {}), site: 'source-screening.research-reference-parameter',
+          answeredBy: (result) => {
+            if (result.requestedModel !== options.port.model || !matchesJudgmentModel(options.port.model, result.model)) {
+              throw new Error('Reference judgment did not use the requested model');
+            }
+          },
+        });
       current(options);
-      if (run.result.requestedModel !== options.port.model || !matchesJudgmentModel(options.port.model, run.result.model)) {
-        throw new Error('Reference judgment did not use the requested model');
-      }
-      const reading = run.readings.credential;
-      const result: Role = reading.outcome !== 'act' ? 'unsettled'
-        : reading.verdict === 'no' ? 'ordinary' : reading.verdict === 'yes' ? 'credential' : 'unsettled';
-      roles.set(key, result);
-      return result;
+      parameters.forEach((parameter, index) => {
+        const reading = readings[index]!.credential;
+        remember(parameter, reading.outcome !== 'act' ? 'unsettled'
+          : reading.verdict === 'no' ? 'ordinary' : reading.verdict === 'yes' ? 'credential' : 'unsettled');
+      });
     } catch (error) {
       // Operational unavailability is retried only by the canonical owner. A
       // later explicit attempt may recover; semantic uncertainty stays held.
-      roles.delete(key);
+      for (const parameter of parameters) if (roles.get(parameter) === undefined) roles.delete(parameter);
       throw error;
     }
   };
@@ -105,11 +119,16 @@ export function createResearchReferenceReader(credentialLiterals: readonly strin
     async read(reference, options) {
       current(options);
       if (reference.malformed) return { status: 'projected', value: WITHHELD_RESEARCH_REFERENCE };
+      for (const parameter of reference.parameters) captureScreeningSource([parameter], credentialLiterals);
+      const unread = reference.parameters.filter(parameter => !roles.has(parameter));
+      if (reference.parameters.some(parameter => roles.has(parameter) && roles.get(parameter) === undefined)) return { status: 'held', reason: 'busy' };
+      if (unread.length > 0) await readRoles(unread, options);
+      current(options);
       for (const parameter of reference.parameters) {
-        const result = await role(parameter, options);
-        current(options);
+        const result = roles.get(parameter);
+        if (result !== undefined) remember(parameter, result);
         if (result === 'credential') return { status: 'projected', value: WITHHELD_RESEARCH_REFERENCE };
-        if (result !== 'ordinary') return { status: 'held', reason: result };
+        if (result !== 'ordinary') return { status: 'held', reason: result === undefined ? 'busy' : 'unsettled' };
       }
       // Never reconstruct or strip the query. This exact original retains the
       // resource identity, duplicate parameters, spelling and section anchor.

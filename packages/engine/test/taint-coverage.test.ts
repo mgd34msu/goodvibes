@@ -47,7 +47,7 @@ describe('outward taint evidence coverage', () => {
     expect(readings.requests).toHaveLength(0);
   });
 
-  test('a truncated source cannot be cleared by comparing only its retained prefix', async () => {
+  test('a long source cannot be cleared by comparing only its first piece', async () => {
     const ledger = new UntrustedContentLedger();
     ingest(ledger, `${'a'.repeat(20_000)}${marker}`);
     expect((await boundary(ledger)).passed).toBe(false);
@@ -124,39 +124,13 @@ describe('outward taint evidence coverage', () => {
     expect(readings.requests).toHaveLength(0);
   });
 
-  test('a late oversized source fails the whole pass before any earlier comparison starts', async () => {
-    await expect(findContentTaint({ body: marker }, [
+  test('a source longer than one reading is read whole in pieces: text past the first budget is still found', async () => {
+    const findings = await findContentTaint({ body: marker }, [
       { surface: 'email', origin: 'earlier.example', text: 'A valid earlier source' },
       { surface: 'email', origin: 'mail.example', text: `${'a'.repeat(20_000)}${marker}` },
-    ])).rejects.toMatchObject({ kind: 'invalid-request' });
-    expect(readings.requests).toHaveLength(0);
-  });
-
-  test('one field compares detached source text serially until its first finding', async () => {
-    const sources = Array.from({ length: 9 }, (_, i) => ({ surface: 'email', origin: `mail-${i}.example`, text: i === 8 ? marker : `Unrelated source ${i}` }));
-    const fake = securityPort({ derives: state => state.text.includes(marker) && state.source.text.includes(marker) });
-    let release!: () => void;
-    const pending = new Promise<void>(resolve => { release = resolve; });
-    let enter!: () => void;
-    const started = new Promise<void>(resolve => { enter = resolve; });
-    let active = 0;
-    let maximum = 0;
-    const work = findContentTaint({ body: marker }, sources, { port: {
-      ...fake.port,
-      async ask(input) {
-        active++;
-        maximum = Math.max(maximum, active);
-        enter();
-        await pending;
-        try { return await fake.port.ask(input); } finally { active--; }
-      },
-    } });
-    await started;
-    sources[8]!.text = 'Later caller replacement';
-    release();
-    expect(await work).toHaveLength(1);
-    expect(maximum).toBe(1);
-    expect(fake.requests).toHaveLength(9);
+    ]);
+    expect(findings).toMatchObject([{ field: 'body', origin: 'mail.example', kind: 'derived' }]);
+    expect(readings.requests).toHaveLength(1);
   });
 
   test('distinct fields retain the four-request bound without duplicate same-field work', async () => {

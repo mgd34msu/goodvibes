@@ -45,7 +45,7 @@
  */
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { JudgmentError } from '@goodvibes-jev/judgment';
-import { findContentTaint, describeContentTaint, type TaintFinding, type TaintOptions, type TaintSource } from './content-taint.js';
+import { findContentTaint, describeContentTaint, markLedgerTaintSource, type TaintFinding, type TaintOptions, type TaintSource } from './content-taint.js';
 import { captureOwnedJson, judgmentInputProblem } from '../gate/judgment-input.js';
 import { isYoloExecution } from '../gate/execution-context.js';
 import { exceedsDerivationBudget } from './batteries/content-derivation.js';
@@ -259,8 +259,16 @@ export function currentUntrustedContentScope(): string | undefined {
 /** Scopes whose own turn watermark is remembered; the oldest is forgotten first, which only widens what that scope sees. */
 const MAX_SCOPE_WATERMARKS = 1_024;
 
-/** Longest excerpt retained per ingest, so a daemon's ledger stays bounded. */
-const MAX_RETAINED_CONTENT_CHARS = 20_000;
+/**
+ * Characters of source text one ledger keeps across all its ingests.
+ *
+ * A source is kept whole, so a long page is compared in full (in consecutive
+ * pieces, see content-taint.ts) rather than reported as truncated. The budget
+ * bounds a long-lived daemon: past it the oldest ingests are dropped first.
+ * Only a single ingest larger than the whole budget is kept cut, and the
+ * refusal that follows names it.
+ */
+const RETAINED_CONTENT_BUDGET = 8_000_000;
 
 /**
  * How many ingests one ledger keeps.
@@ -270,6 +278,13 @@ const MAX_RETAINED_CONTENT_CHARS = 20_000;
  * require approval instead of evaluating only the surviving text.
  */
 const MAX_RETAINED_INGESTS = 1_000;
+
+/** One source of the current window that cannot be compared, and why. */
+export interface IncompleteTaintSource {
+  readonly surface: UntrustedSurface;
+  readonly origin: string;
+  readonly why: 'no-text' | 'too-long' | 'dropped';
+}
 
 export type TaintEvidenceWindow = 'turn' | 'since-last-boundary' | 'retained';
 
@@ -310,6 +325,10 @@ export class UntrustedContentLedger {
   private readonly ingests: UntrustedIngest[] = [];
   private readonly incompleteIngests = new WeakMap<UntrustedIngest, 'missing' | 'truncated'>();
   private ingestSequence = 0;
+  /** Characters of source text currently retained, for the budget. */
+  private retainedChars = 0;
+  /** The newest dropped ingest of each scope ('' for unscoped), for naming it in a refusal. */
+  private readonly lastDropped = new Map<string, { readonly surface: UntrustedSurface; readonly origin: string }>();
   private turnStartSequence = 0;
   /**
    * Where the CURRENT turn's predecessor began.
@@ -343,14 +362,19 @@ export class UntrustedContentLedger {
     const scope = ingest.scope ?? currentUntrustedContentScope();
     const retained: UntrustedIngest = Object.freeze({ surface: ingest.surface, origin: ingest.origin, at: ingest.at,
       ...(scope === undefined ? {} : { scope }),
-      ...(content === undefined ? {} : { content: content.slice(0, MAX_RETAINED_CONTENT_CHARS) }) });
+      ...(content === undefined ? {} : { content: content.length > RETAINED_CONTENT_BUDGET ? content.slice(0, RETAINED_CONTENT_BUDGET) : content }) });
     if (content === undefined || !content.trim()) this.incompleteIngests.set(retained, 'missing');
-    else if (content.length > MAX_RETAINED_CONTENT_CHARS) this.incompleteIngests.set(retained, 'truncated');
+    else if (content.length > RETAINED_CONTENT_BUDGET) this.incompleteIngests.set(retained, 'truncated');
     this.ingests.push(retained);
-    if (this.ingests.length > MAX_RETAINED_INGESTS) {
-      const discarded = this.ingests.length - MAX_RETAINED_INGESTS;
-      const firstSequence = this.ingestSequence - this.ingests.length + 1;
-      for (const [index, dropped] of this.ingests.splice(0, discarded).entries()) this.noteEvicted(dropped.scope ?? '', firstSequence + index);
+    this.retainedChars += retained.content?.length ?? 0;
+    let firstSequence = this.ingestSequence - this.ingests.length + 1;
+    while (this.ingests.length > MAX_RETAINED_INGESTS || (this.ingests.length > 1 && this.retainedChars > RETAINED_CONTENT_BUDGET)) {
+      const dropped = this.ingests.shift()!;
+      this.retainedChars -= dropped.content?.length ?? 0;
+      this.noteEvicted(dropped.scope ?? '', firstSequence);
+      this.lastDropped.delete(dropped.scope ?? ''); this.lastDropped.set(dropped.scope ?? '', { surface: dropped.surface, origin: dropped.origin });
+      if (this.lastDropped.size > MAX_SCOPE_WATERMARKS) this.lastDropped.delete(this.lastDropped.keys().next().value!);
+      firstSequence += 1;
     }
   }
 
@@ -471,6 +495,27 @@ export class UntrustedContentLedger {
     return evidence.complete && evidence.sources.length > 0;
   }
 
+  /**
+   * The sources of the current turn that cannot be compared, named, so a
+   * refusal says which read it is about instead of four possible causes.
+   */
+  incompleteSourcesThisTurn(): readonly IncompleteTaintSource[] {
+    const scope = currentUntrustedContentScope();
+    const start = this.turnStartOf(scope);
+    const result: IncompleteTaintSource[] = [];
+    for (const ingest of this.ingestedSince(start, scope)) {
+      const state = this.incompleteIngests.get(ingest);
+      if (state !== undefined) result.push({ surface: ingest.surface, origin: ingest.origin, why: state === 'missing' ? 'no-text' : 'too-long' });
+    }
+    if (this.evictedSince(start, scope)) {
+      const principalScope = scope?.includes(':connection:') ? scope.slice(0, scope.indexOf(':connection:')) : undefined;
+      const dropped = (scope === undefined ? undefined : this.lastDropped.get(scope))
+        ?? (principalScope === undefined ? undefined : this.lastDropped.get(principalScope)) ?? this.lastDropped.get('');
+      if (dropped) result.push({ ...dropped, why: 'dropped' });
+    }
+    return result;
+  }
+
   /** One immutable coverage model for semantic turn windows and retained exact comparisons. */
   captureTaintEvidence(window: TaintEvidenceWindow = 'turn'): TaintEvidence {
     const revision = this.#publicationRevision;
@@ -528,11 +573,25 @@ export class UntrustedContentLedger {
   }
 }
 
+/**
+ * One taint source per retained ingest, the same object every time, so the
+ * derivation readings content-taint.ts remembers for a source carry across the
+ * decisions of a turn.
+ */
+const taintSourceOf = new WeakMap<UntrustedIngest, TaintSource>();
+
 /** Ingests that carried their text, as taint sources. */
 function toTaintSources(ingests: readonly UntrustedIngest[]): readonly TaintSource[] {
   return Object.freeze(ingests
     .filter((entry): entry is UntrustedIngest & { content: string } => typeof entry.content === 'string')
-    .map((entry) => Object.freeze({ surface: entry.surface, origin: entry.origin, text: entry.content })));
+    .map((entry) => {
+      let source = taintSourceOf.get(entry);
+      if (!source) {
+        source = Object.freeze({ surface: entry.surface, origin: entry.origin, text: entry.content });
+        taintSourceOf.set(entry, source); markLedgerTaintSource(source);
+      }
+      return source;
+    }));
 }
 
 export type OutwardContentAssessment =
@@ -577,7 +636,7 @@ export function captureRetainedTaintEvidence(value: unknown): RetainedTaintEvide
     || !['complete', 'missing', 'truncated', 'evicted'].every(key => typeof (captured as unknown as Record<string, unknown>)[key] === 'boolean')
     || captured.complete !== !(captured.missing || captured.truncated || captured.evicted)
     || captured.sources.some(source => !source || typeof source !== 'object' || typeof source.surface !== 'string'
-      || typeof source.origin !== 'string' || typeof source.text !== 'string' || source.text.length > MAX_RETAINED_CONTENT_CHARS
+      || typeof source.origin !== 'string' || typeof source.text !== 'string' || source.text.length > RETAINED_CONTENT_BUDGET
       || Object.keys(source).some(key => !['surface', 'origin', 'text'].includes(key)))) {
     throw new JudgmentError('invalid-request', 'the retained untrusted-source evidence is invalid');
   }
@@ -597,8 +656,8 @@ async function assessEvidence(
   if (judgmentInputProblem(fields) || evidence.sources.some(source => judgmentInputProblem(source))) {
     return { kind: 'incomplete', findings: [], reason: 'protected-input' };
   }
-  // An over-long field or source cannot be read whole, so it is an unanswerable assessment, not a thrown refusal.
-  if (exceedsDerivationBudget(fields, evidence.sources)) return { kind: 'incomplete', findings: [], reason: 'over-limit' };
+  // An over-long outgoing field cannot be read whole, so it is an unanswerable assessment, not a thrown refusal.
+  if (exceedsDerivationBudget(fields)) return { kind: 'incomplete', findings: [], reason: 'over-limit' };
   return decisionOrClassic<OutwardContentAssessment>(async () => {
     const findings = await findContentTaint(fields, evidence.sources, options);
     if (options.signal?.aborted) throw new JudgmentError('aborted', 'the judgment call was cancelled');
@@ -609,6 +668,17 @@ async function assessEvidence(
     assertCurrent?.();
     return { kind: 'incomplete' as const, findings: [], reason: 'decision-model-disabled' as const };
   });
+}
+
+/** Which source could not be compared and why, in the owner's terms. */
+function describeIncompleteSources(sources: readonly IncompleteTaintSource[]): string {
+  const named = sources.slice(0, 3).map((source) => source.why === 'no-text'
+    ? `the text read from ${source.origin} was not kept`
+    : source.why === 'too-long'
+      ? `the text read from ${source.origin} is larger than this machine keeps for comparison`
+      : `the text read from ${source.origin} and earlier reads were dropped to keep memory bounded`);
+  if (named.length === 0) return 'the text of a source read this turn is no longer kept';
+  return `${named.join('; ')}${sources.length > 3 ? ` (and ${String(sources.length - 3)} more)` : ''}`;
 }
 
 /** An outward effect: something that reaches the world outside this machine. */
@@ -793,10 +863,10 @@ export async function evaluateOutwardEffect(input: {
     : assessment.reason === 'protected-input'
       ? 'protected material cannot be sent for a derivation reading'
       : assessment.reason === 'over-limit'
-        ? 'a field or a source it would be compared with is too long to be read whole; shorten it and send it in parts'
+        ? 'one of its fields is too long to be read whole; shorten it and send it in parts'
       : assessment.reason === 'decision-model-disabled'
         ? 'Classic does not assess semantic derivation from untrusted input'
-        : 'some source text is missing, empty, truncated, or no longer retained';
+        : describeIncompleteSources(input.ledger.incompleteSourcesThisTurn());
   return {
     allowed: false,
     untrustedOrigins: origins,

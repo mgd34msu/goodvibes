@@ -25,9 +25,11 @@ test('Classic browser value protection and card entry need no decision model met
     async ask() { requests++; throw new Error('Unexpected decision request'); } });
   await withDecisionModelPolicy(() => 'Classic - Off', async () => {
     // The boolean means suppress this value; it does not certify what the field means.
+    // With no decision model only controls a person types digits into keep their value back.
     expect(await isCardFieldDescriptor(control())).toBe(true);
     expect(await isCardFieldDescriptor(control('textarea'))).toBe(true);
-    expect(await isCardFieldDescriptor(control('select'))).toBe(true);
+    expect(await isCardFieldDescriptor(control('select'))).toBe(false);
+    expect(await isCardFieldDescriptor({ ...control(), type: 'email' })).toBe(false);
     expect(await isCardFieldDescriptor(control('button'))).toBe(false);
     expect(await scanForCardDetails('482', { expectingCvv: true })).toEqual({ looksLikeCardDetails: true, matched: ['cvv'] });
     expect(await scanForCardDetails('482')).toEqual({ looksLikeCardDetails: false, matched: [] });

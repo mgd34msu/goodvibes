@@ -110,7 +110,8 @@ describe('strict batch snapshot ownership', () => {
     expect(requireValue(f.service.getInboxMailboxObservation(result)).uidValidity).toBe(7);
     expect(f.service.getInboxMailboxObservation({ ...result })).toBeUndefined();
     expect(f.service.getReplySubjectSource(result.messages[0]!.source.detail)).toBeUndefined();
-    expect(f.ingests).toHaveLength(2);
+    // A batch goes to privacy screening, never to a model, so it is not an ingest.
+    expect(f.ingests).toHaveLength(0);
     expect(f.sockets[0]!.commands.some(command => command.includes('SINCE'))).toBe(false);
   });
 
@@ -138,13 +139,14 @@ describe('strict batch snapshot ownership', () => {
     expect(socket.closed).toBe(true); expect(f.ingests).toHaveLength(0);
   });
 
-  test.each(['list', 'batch'] as const)('%s captures caller signal once before asynchronous admission', async kind => {
+  test.each(['list'] as const)('%s captures caller signal once before asynchronous admission', async kind => {
     const gate = deferred<string | null>(); const original = new AbortController(); const replacement = new AbortController();
     let count = 0;
     const f = snapshotFixture({ deps: { secretsManager: { get: () => gate.promise },
       recordUntrustedIngest() { count++; original.abort(); } } });
     const input = { signal: original.signal };
-    const pending = kind === 'list' ? f.service.listInbox(input) : f.service.readInboxBatch(input);
+    expect(kind).toBe('list');
+    const pending = f.service.listInbox(input);
     input.signal = replacement.signal; gate.resolve('synthetic');
     await expect(pending).rejects.toThrow('cancelled'); expect(count).toBe(1);
   });
@@ -173,7 +175,7 @@ describe('compatible inbox callback order remains authority-fenced', () => {
     expect(events).toEqual(['ingest-claim', 'record', 'ingest-claim', 'record', 'summary-claim', 'summary-claim']);
   });
 
-  test.each(['list', 'batch', 'page'] as const)('%s cannot emit ingest after the claim callback revokes authority', async method => {
+  test.each(['list'] as const)('%s cannot emit ingest after the claim callback revokes authority', async method => {
     const events: string[] = [];
     const f = snapshotFixture({ sockets: [new SnapshotSocket(), new SnapshotSocket()], deps: {
       describeSenderClaim(from, checks) {
@@ -183,13 +185,9 @@ describe('compatible inbox callback order remains authority-fenced', () => {
       },
       recordUntrustedIngest() { events.push('record'); },
     } });
-    let operation: Promise<unknown>;
-    if (method === 'page') {
-      const seed = await f.service.readInboxPage();
-      if (seed.outcome !== 'checkpoint-required') throw new Error('Expected seed');
-      operation = f.service.readInboxPage({ checkpoint: seed.next });
-    } else operation = method === 'list' ? f.service.listInbox() : f.service.readInboxBatch();
-    await expect(operation).rejects.toThrow();
+    // Only a listing records ingests; pages and batches go to screening, not to a model.
+    expect(method).toBe('list');
+    await expect(f.service.listInbox()).rejects.toThrow();
     expect(events).toEqual(['ingest-claim']);
   });
 

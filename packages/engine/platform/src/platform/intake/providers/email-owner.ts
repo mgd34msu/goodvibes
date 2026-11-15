@@ -5,7 +5,6 @@ import { EmailCredentialUnavailableError } from '../../email/email-config.js';
 import type { EmailService } from '../../email/email-service.js';
 import type { EmailMailboxObservation } from '../../email/reply-subject-source.js';
 import { createProtectedSourceOwner } from '../../security/source-screening/owner.js';
-import { JudgmentInputError } from '../../gate/judgment-input.js';
 import type { ProtectedSourceOwnerOptions, ProtectedSource } from '../../security/source-screening/types.js';
 import type { OwnedInboxReadLease } from '../registration.js';
 import { digestSender, normalizeWhitespace, stripMarkup } from '../text-normalization.js';
@@ -107,10 +106,14 @@ function sync(assert: () => void): void {
     throw new Error('Email inbox requires synchronous currentness');
   }
 }
-function unavailable(configured?: boolean): ProviderPollResult {
-  return { items: [], state: 'unavailable', error: 'Email inbox account or complete source is unavailable',
-    ...(configured === undefined ? {} : { configured }) };
+function unavailable(configured?: boolean, error = 'Email inbox account or complete source is unavailable'): ProviderPollResult {
+  return { items: [], state: 'unavailable', error, ...(configured === undefined ? {} : { configured }) };
 }
+
+/** The inbox status while a proxy variable keeps private screening from running; it does not pass by waiting. */
+const PROXY_CONFIGURED_TEXT = 'Mail previews are withheld: a proxy variable (HTTP_PROXY, HTTPS_PROXY or ALL_PROXY) '
+  + 'is set for the process reading this inbox, and private screening never sends mail text around it. '
+  + 'Unset it for the daemon and restart the daemon to read new mail here.';
 
 /**
  * Polls on which one message may fail to read or to be screened before it is
@@ -129,6 +132,8 @@ const UNREADABLE_REASON_TEXT: Readonly<Record<string, string>> = {
   'complete-source-too-large': 'its text is larger than this reader takes',
   'repeated-read-failure': `the server did not return it readably on ${String(MAX_POLLS_PER_MESSAGE)} polls in a row`,
   'screening-unsettled': 'privacy screening could not settle what it holds, so it is withheld here',
+  'screening-malformed': 'privacy screening did not return a usable answer about it, so it is withheld here',
+  'screening-protected-input': 'it holds what looks like a credential or card number, so it is withheld here',
 };
 
 /** No credentials or provider calls happen during construction. */
@@ -272,17 +277,11 @@ export function createEmailInboxOwner(options: EmailInboxOwnerOptions): Verified
           const abort = (): void => { void retire().catch(() => {}); };
           const sentAt = messageTime(source.detail.date, Date.now());
           try {
-            try {
-              captured = screening.capture([source.rawHeaders, source.rawBodyStructure,
-                source.textSections.map(section => section.text).join('\n'),
-                normalizeWhitespace(stripMarkup(source.detail.subject)), normalizeWhitespace(stripMarkup(body))]);
-            } catch (error) {
-              // Text the screening owner refuses to take is about this message: withhold it and move on.
-              if (!(error instanceof JudgmentInputError)) throw error;
-              const item = unreadableItem(observation.uidValidity, uid, 'screening-unsettled', senderDomainOf(source.detail.from), sentAt);
-              items.push(item); terminal.push({ uid, disposition: 'published', itemId: item.id });
-              continue;
-            }
+            // Text holding protected input is still captured: its screening
+            // answers held('protected-input') below, on the one path every hold takes.
+            captured = screening.capture([source.rawHeaders, source.rawBodyStructure,
+              source.textSections.map(section => section.text).join('\n'),
+              normalizeWhitespace(stripMarkup(source.detail.subject)), normalizeWhitespace(stripMarkup(body))]);
             operationSignal.addEventListener('abort', abort, { once: true });
             observation.signal.addEventListener('abort', abort, { once: true });
             if (operationSignal.aborted || observation.signal.aborted) abort();
@@ -295,11 +294,14 @@ export function createEmailInboxOwner(options: EmailInboxOwnerOptions): Verified
               // (down, busy, cancelled) keeps the messages screened before it and
               // the next poll starts here; a route outage never steps a message over.
               if (judged.reason === 'unsettled' || judged.reason === 'malformed' || judged.reason === 'protected-input') {
-                const item = unreadableItem(observation.uidValidity, uid, 'screening-unsettled', senderDomainOf(source.detail.from), sentAt);
+                const item = unreadableItem(observation.uidValidity, uid, `screening-${judged.reason}`, senderDomainOf(source.detail.from), sentAt);
                 items.push(item); terminal.push({ uid, disposition: 'published', itemId: item.id });
                 failures.delete(key);
                 continue;
               }
+              // A proxy variable is a fact about this process, not an outage:
+              // nothing is screened until it changes, and the status says so.
+              if (judged.reason === 'proxy-configured') return unavailable(true, PROXY_CONFIGURED_TEXT);
               stopAt = uid; break;
             }
             const projected = screening.project(judged.receipt);

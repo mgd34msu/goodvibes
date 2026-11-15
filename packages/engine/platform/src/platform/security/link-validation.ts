@@ -4,9 +4,19 @@
  *
  * Owner's framing: headers can be spoofed, so any domain we are about to click
  * has to be validated first. This is that validation, and it is written as a
- * gate rather than a helper: the only way a link out of a page or a mailbox
- * should reach a navigation is through `validateLinkTarget`, and the only way
- * a redirect chain should be walked is through `followValidatedRedirects`.
+ * gate rather than a helper. What runs:
+ *
+ *  - `checkLinkTarget`, code only, no model: the link is validated before it
+ *    is opened, and the page actually reached is validated again by the same
+ *    rules before anything is filled (fill-card.ts compares the page address
+ *    against the merchant domain admitted to the purchase). There is no
+ *    redirect walker: whatever a browser followed, the address it ended on is
+ *    what the second check reads.
+ *  - `validateLinkTarget`, used once where a domain is ADMITTED (the checkout
+ *    url at the start of a purchase): the same code checks, then one reading
+ *    of whether the admitted domain is a lookalike or a link shortener. Later
+ *    checks of the same purchase compare domains in code against what was
+ *    admitted; they never ask again.
  *
  * Every rule below exists because a naive check fails to a specific real
  * attack, and each refusal names which:
@@ -16,25 +26,17 @@
  *    a warning, because the whole attack is that it looks fine.
  *  - **scheme**. `javascript:` and `data:` execute; `http:` is
  *    interceptable and a downgrade. Only `https:` is opened.
- *  - **homograph**. `аccounts.google.com` with a Cyrillic `а` is a different
- *    host that renders identically. Whether a label is built from lookalike
- *    characters is read by Jev (`engine.security.link-host`, `lookalike`)
- *    from the encoded and rendered host, in place of the old "more than one
- *    Unicode script in a label" rule, which refused honest mixed labels and
- *    passed single-script lookalikes.
  *  - **registrable domain**. `google.com.evil.example`, `google-verify.example`
  *    and `accounts-google.example` all pass at least one substring or
- *    `endsWith` check. Comparison is on eTLD+1 (see public-suffix.ts).
- *  - **redirects**. A link that lands on the right host and then 302s away is
- *    the same attack one hop later, so EVERY hop is validated by these same
- *    rules and any hop leaving the authorized domain refuses the chain.
- *  - **shorteners**. A different registrable domain refuses locally. A matching
- *    domain can still be a shortening service, so decision mode reads that
- *    meaning rather than treating domain equality as a non-shortener proof.
- *    A matching domain's shortener refusal names that reason for the person
- *    finishing the job by hand, without a fixed list of services.
+ *    `endsWith` check. Comparison is on eTLD+1 (see public-suffix.ts). A
+ *    different registrable domain refuses in code, which is what stops every
+ *    lookalike or shortener that is not the admitted domain itself.
+ *  - **homograph and shortener, at admission**. The admitted domain itself can
+ *    be a lookalike (`xn--pypal-4ve.com` chosen from page content) or a
+ *    shortening service; whether it is, is read by Jev
+ *    (`engine.security.link-host`) once, when it is admitted.
  *
- * Classic applies the deterministic rules and marks accepted results as Classic.
+ * Classic applies the code rules and marks accepted results as Classic.
  * It does not claim semantic homograph/shortener assurance or ban all IDNs.
  *
  * Refusal is loud and carries both domains, because a refused verification link
@@ -49,9 +51,6 @@ import { runDecisionOrClassic as decisionOrClassic } from '@goodvibes-jev/engine
 /** The decision site the link-host reading is logged under. */
 export const LINK_HOST_SITE = 'security.link-validation';
 
-/** Hop ceiling for a redirect chain. Beyond this the chain is refused. */
-export const MAX_REDIRECT_HOPS = 5;
-
 export type LinkRefusalReason =
   | 'not-https'
   | 'contains-userinfo'
@@ -60,9 +59,7 @@ export type LinkRefusalReason =
   | 'malformed-url'
   | 'lookalike-host'
   | 'known-redirector'
-  | 'domain-mismatch'
-  | 'redirect-left-domain'
-  | 'too-many-redirects';
+  | 'domain-mismatch';
 
 export interface LinkAccepted {
   readonly provenance?: 'classic';
@@ -103,16 +100,13 @@ function refuse(
 }
 
 /**
- * Validate one link against the domain a caller authorized.
+ * Check one link against a domain already admitted, in code: no model request.
  *
  * `authorizedDomain` is the domain the agent is actually transacting with,
  * the service it signed up at, or the service it is logging in to. Comparison
- * is on the registrable domain of both. A mismatch refuses before any model
- * request; a matching domain still needs the semantic checks in decision mode.
- * Classic accepts the deterministic match with explicit Classic provenance.
+ * is on the registrable domain of both.
  */
-export async function validateLinkTarget(rawUrl: string, authorizedDomain: string, signal?: AbortSignal): Promise<LinkValidation> {
-  signal?.throwIfAborted();
+export function checkLinkTarget(rawUrl: string, authorizedDomain: string): LinkValidation {
   const expected = registrableDomain(normalizeHost(authorizedDomain));
   if (expected === null) {
     return refuse(
@@ -179,8 +173,24 @@ export async function validateLinkTarget(rawUrl: string, authorizedDomain: strin
     );
   }
 
-  const accepted: LinkAccepted = { ok: true, url: parsed.toString(), host, registrableDomain: actual };
-  // Even an exact host match may be an owner/discovery-selected shortener or
+  return { ok: true, url: parsed.toString(), host, registrableDomain: actual };
+}
+
+/**
+ * Admit a domain: the code checks of `checkLinkTarget`, then one reading of
+ * whether the admitted domain is a lookalike or a link shortener. Call it once
+ * where the domain enters (a purchase's checkout url); later checks of the
+ * same action use `checkLinkTarget` against the admitted registrable domain.
+ * Classic accepts the code match with explicit Classic provenance.
+ */
+export async function validateLinkTarget(rawUrl: string, authorizedDomain: string, signal?: AbortSignal): Promise<LinkValidation> {
+  signal?.throwIfAborted();
+  const checked = checkLinkTarget(rawUrl, authorizedDomain);
+  if (!checked.ok) return checked;
+  const accepted = checked;
+  const { host, registrableDomain: actual } = accepted;
+  const expected = actual;
+  // The admitted domain itself may be an owner/discovery-selected shortener or
   // lookalike. Domain equality does not settle those separate semantic checks.
   return decisionOrClassic<LinkValidation>(async () => {
     const run = await linkHost.run(judgmentPort(LINK_HOST_SITE), linkHostView(host, actual, expected), { site: LINK_HOST_SITE, ...(signal === undefined ? {} : { signal }) });
@@ -212,93 +222,4 @@ export async function validateLinkTarget(rawUrl: string, authorizedDomain: strin
     run.recordAction('accepted');
     return accepted;
   }, () => { signal?.throwIfAborted(); return { ...accepted, provenance: 'classic' }; });
-}
-
-/** A single HEAD/GET that reports only what redirect following needs. */
-export interface RedirectProbe {
-  (url: string): Promise<{ readonly status: number; readonly location: string | null }>;
-}
-
-export interface RedirectChainResult {
-  readonly ok: boolean;
-  /** Every url visited, in order, all of them validated. */
-  readonly chain: readonly string[];
-  /** The final validated url, when the whole chain stayed in-domain. */
-  readonly finalUrl: string | null;
-  readonly refusal: LinkRefused | null;
-}
-
-/**
- * Walk a redirect chain, validating EVERY hop by the same rules.
- *
- * The starting url is validated first, so a caller cannot skip the gate by
- * entering here. A hop that leaves the authorized registrable domain refuses
- * the whole chain rather than the hop, because the caller's question is "may I
- * open this link", and the honest answer for a link that ends up elsewhere is
- * no.
- */
-export async function followValidatedRedirects(
-  rawUrl: string,
-  authorizedDomain: string,
-  probe: RedirectProbe,
-  maxHops: number = MAX_REDIRECT_HOPS,
-): Promise<RedirectChainResult> {
-  const first = await validateLinkTarget(rawUrl, authorizedDomain);
-  if (!first.ok) return { ok: false, chain: [], finalUrl: null, refusal: first };
-
-  const chain: string[] = [first.url];
-  let current = first.url;
-
-  for (let hop = 0; hop < maxHops; hop += 1) {
-    const response = await probe(current);
-    const isRedirect = response.status >= 300 && response.status < 400 && response.location !== null;
-    if (!isRedirect) {
-      return { ok: true, chain, finalUrl: current, refusal: null };
-    }
-
-    // Resolve relative Location headers against the current url, then put the
-    // result through the SAME gate, a redirect target is not more trustworthy
-    // for having been reached by one.
-    let next: string;
-    try {
-      next = new URL(response.location as string, current).toString();
-    } catch {
-      return {
-        ok: false,
-        chain,
-        finalUrl: null,
-        refusal: refuse('malformed-url', 'Refused: a redirect pointed at an unparseable URL.', authorizedDomain),
-      };
-    }
-
-    const validated = await validateLinkTarget(next, authorizedDomain);
-    if (!validated.ok) {
-      return {
-        ok: false,
-        chain,
-        finalUrl: null,
-        refusal: {
-          ...validated,
-          reason: validated.reason === 'domain-mismatch' ? 'redirect-left-domain' : validated.reason,
-          message:
-            `Refused after ${String(chain.length)} hop(s): ${validated.message} `
-            + 'A link that starts on the right site and then redirects away is the same attack one step later.',
-        },
-      };
-    }
-    chain.push(validated.url);
-    current = validated.url;
-  }
-
-  return {
-    ok: false,
-    chain,
-    finalUrl: null,
-    refusal: refuse(
-      'too-many-redirects',
-      `Refused: the link redirected more than ${String(maxHops)} times without settling.`,
-      authorizedDomain,
-      null,
-    ),
-  };
 }

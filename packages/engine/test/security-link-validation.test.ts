@@ -16,8 +16,7 @@ import { decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
 import { withDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.js';
 import { useSecurityReadings, withSecurityReadings } from './helpers/security-readings.ts';
 import {
-  MAX_REDIRECT_HOPS,
-  followValidatedRedirects,
+  checkLinkTarget,
   validateLinkTarget,
 } from '../platform/src/platform/security/link-validation.ts';
 import {
@@ -47,6 +46,15 @@ describe('registrable domain: the comparison every naive check gets wrong', () =
   test('a public suffix has no registrable domain of its own', () => {
     expect(registrableDomain('co.uk')).toBeNull();
     expect(registrableDomain('com')).toBeNull();
+  });
+
+  test('wildcard and exception rules: one label under a wildcard parent has no registrant', () => {
+    expect(registrableDomain('www.city.kobe.jp')).toBe('city.kobe.jp');
+    expect(registrableDomain('evil.kobe.jp')).toBeNull();
+    expect(registrableDomain('x.nom.br')).toBeNull();
+    expect(registrableDomain('co.ck')).toBeNull();
+    expect(sameRegistrableDomain('www.city.kobe.jp', 'evil.kobe.jp')).toBe(false);
+    expect(sameRegistrableDomain('a.x.nom.br', 'b.y.nom.br')).toBe(false);
   });
 
   test('two sites under the same hosting suffix are NOT the same domain', () => {
@@ -149,73 +157,6 @@ describe('the positive case: a genuine link is opened', () => {
   });
 });
 
-describe('redirect chains: the same attack one hop later', () => {
-  function probeFrom(map: Readonly<Record<string, { status: number; location: string | null }>>) {
-    return async (url: string) => map[url] ?? { status: 200, location: null };
-  }
-
-  test('a valid host that redirects cross-domain on hop 2 is refused', async () => {
-    const result = await followValidatedRedirects(
-      'https://accounts.google.com/verify',
-      TARGET,
-      probeFrom({
-        'https://accounts.google.com/verify': { status: 302, location: 'https://evil.example/steal' },
-      }),
-    );
-    expect(result.ok).toBe(false);
-    expect(result.finalUrl).toBeNull();
-    expect(result.refusal?.reason).toBe('redirect-left-domain');
-    expect(result.refusal?.message).toContain('redirects away');
-  });
-
-  test('an in-domain redirect chain is followed and settles', async () => {
-    const result = await followValidatedRedirects(
-      'https://accounts.google.com/verify',
-      TARGET,
-      probeFrom({
-        'https://accounts.google.com/verify': { status: 302, location: 'https://myaccount.google.com/done' },
-      }),
-    );
-    expect(result.ok).toBe(true);
-    expect(result.finalUrl).toBe('https://myaccount.google.com/done');
-    expect(result.chain).toHaveLength(2);
-  });
-
-  test('a redirect to a userinfo URL is refused even though the chain started well', async () => {
-    const result = await followValidatedRedirects(
-      'https://accounts.google.com/verify',
-      TARGET,
-      probeFrom({
-        'https://accounts.google.com/verify': { status: 302, location: 'https://accounts.google.com@evil.example/' },
-      }),
-    );
-    expect(result.ok).toBe(false);
-    expect(result.refusal?.reason).toBe('contains-userinfo');
-  });
-
-  test('an endless redirect loop is refused rather than followed forever', async () => {
-    const result = await followValidatedRedirects(
-      'https://accounts.google.com/a',
-      TARGET,
-      async (url: string) => ({ status: 302, location: `${url}a` }),
-    );
-    expect(result.ok).toBe(false);
-    expect(result.refusal?.reason).toBe('too-many-redirects');
-    expect(result.chain.length).toBeLessThanOrEqual(MAX_REDIRECT_HOPS + 1);
-  });
-
-  test('the entry point is gated too: a caller cannot skip validation by starting here', async () => {
-    const result = await followValidatedRedirects(
-      'https://evil.example/verify',
-      TARGET,
-      probeFrom({}),
-    );
-    expect(result.ok).toBe(false);
-    expect(result.chain).toHaveLength(0);
-    expect(result.refusal?.reason).toBe('domain-mismatch');
-  });
-});
-
 describe('what the code does with the link-host reading', () => {
   test('code refusals come first and ask nothing', async () => {
     await validateLinkTarget('http://accounts.google.com/verify', TARGET);
@@ -225,6 +166,12 @@ describe('what the code does with the link-host reading', () => {
     await validateLinkTarget('https://google-verify.example/verify', TARGET);
     await validateLinkTarget('https://bit.ly/verify', TARGET);
     await validateLinkTarget('https://bob.github.io/verify', 'alice.github.io');
+    expect(readings.requests).toHaveLength(0);
+  });
+
+  test('the page reached is compared with the admitted domain in code, asking nothing', () => {
+    expect(checkLinkTarget('https://accounts.google.com/pay', TARGET)).toMatchObject({ ok: true, registrableDomain: 'google.com' });
+    expect(checkLinkTarget('https://bit.ly/pay', TARGET)).toMatchObject({ ok: false, reason: 'domain-mismatch' });
     expect(readings.requests).toHaveLength(0);
   });
 
@@ -277,17 +224,6 @@ describe('Classic link guarantees', () => {
       expect(await validateLinkTarget('https://bit.ly/abc', TARGET)).toMatchObject({ ok: false, reason: 'domain-mismatch' });
       expect(await validateLinkTarget('https://bob.github.io/verify', 'alice.github.io')).toMatchObject({ ok: false, reason: 'domain-mismatch' });
     });
-    expect(readings.requests).toHaveLength(0);
-  });
-
-  test('Classic redirect following checks every target and never probes a mismatched target', async () => {
-    const probes: string[] = [];
-    const result = await withDecisionModelPolicy(() => 'Classic - Off', () => followValidatedRedirects(
-      'https://accounts.google.com/verify', TARGET,
-      async url => { probes.push(url); return { status: 302, location: 'https://evil.example/steal' }; },
-    ));
-    expect(result).toMatchObject({ ok: false, finalUrl: null, refusal: { reason: 'redirect-left-domain' } });
-    expect(probes).toEqual(['https://accounts.google.com/verify']);
     expect(readings.requests).toHaveLength(0);
   });
 });

@@ -57,11 +57,13 @@ const MULTI_LABEL_SUFFIXES: ReadonlySet<string> = new Set(PUBLIC_SUFFIX_MULTI_LA
  * suffix, so two instances under it are different registrants.
  */
 const WILDCARD_SUFFIX_PARENTS: readonly string[] = PUBLIC_SUFFIX_WILDCARD_PARENTS;
+const WILDCARD_PARENT_SET: ReadonlySet<string> = new Set(WILDCARD_SUFFIX_PARENTS);
 
 /**
- * `!exception` rules: registrable despite matching a wildcard above.
+ * `!exception` rules: the exception itself is registrable despite matching a
+ * wildcard above (its suffix is the exception minus its first label).
  *
- * Checked before the wildcard rules, which is the order the PSL algorithm
+ * Checked before every other rule, which is the order the PSL algorithm
  * requires, an exception that lost to its own wildcard would do nothing.
  */
 const SUFFIX_EXCEPTIONS: ReadonlySet<string> = new Set(PUBLIC_SUFFIX_EXCEPTIONS);
@@ -82,15 +84,9 @@ export function bundledWildcardSuffixParents(): readonly string[] {
   return WILDCARD_SUFFIX_PARENTS;
 }
 
-/** True when `host` is itself exactly a public suffix (so it has no registrant). */
+/** True when `host` has no registrant: it is itself a public suffix, a single label or malformed. */
 export function isPublicSuffix(host: string): boolean {
-  const labels = host.split('.');
-  if (labels.length <= 1) return true;
-  if (MULTI_LABEL_SUFFIXES.has(host)) return true;
-  return WILDCARD_SUFFIX_PARENTS.some((parent) => {
-    const rest = labels.slice(1).join('.');
-    return rest === parent;
-  });
+  return registrableDomain(host) === null;
 }
 
 /**
@@ -108,27 +104,20 @@ export function registrableDomain(host: string): string | null {
   const labels = normalized.split('.');
   if (labels.length < 2 || labels.some((label) => label.length === 0)) return null;
 
-  // PSL order: an exception rule wins over the wildcard it contradicts.
-  for (const exception of SUFFIX_EXCEPTIONS) {
-    if (normalized === exception || normalized.endsWith(`.${exception}`)) {
-      const exceptionLabels = exception.split('.');
-      return exceptionLabels.slice(exceptionLabels.length - 2).join('.');
-    }
-  }
-
-  for (const parent of WILDCARD_SUFFIX_PARENTS) {
-    const parentLabels = parent.split('.');
-    // `*.compute.amazonaws.com`: the suffix is one label plus the parent.
-    if (labels.length >= parentLabels.length + 2
-      && labels.slice(labels.length - parentLabels.length).join('.') === parent) {
-      return labels.slice(labels.length - parentLabels.length - 2).join('.');
-    }
-  }
-
-  // Longest known multi-label suffix wins, so `co.uk` beats `uk`.
-  for (let start = 0; start < labels.length - 1; start += 1) {
+  // PSL order: an exception rule wins over every other rule. `!city.kobe.jp`
+  // makes `city.kobe.jp` the registrable domain of itself and every host below it.
+  for (let start = 0; start < labels.length; start += 1) {
     const candidate = labels.slice(start).join('.');
-    if (MULTI_LABEL_SUFFIXES.has(candidate)) {
+    if (SUFFIX_EXCEPTIONS.has(candidate)) return candidate;
+  }
+
+  // Otherwise the longest matching rule is the suffix, so `co.uk` beats `uk`.
+  // A wildcard `*.p` makes every `<label>.p` a suffix: a host exactly one label
+  // below `p` is itself a suffix (no registrant).
+  for (let start = 0; start < labels.length; start += 1) {
+    const candidate = labels.slice(start).join('.');
+    const wildcard = start + 1 < labels.length && WILDCARD_PARENT_SET.has(labels.slice(start + 1).join('.'));
+    if (wildcard || (start < labels.length - 1 && MULTI_LABEL_SUFFIXES.has(candidate))) {
       if (start === 0) return null; // the host IS the suffix
       return labels.slice(start - 1).join('.');
     }

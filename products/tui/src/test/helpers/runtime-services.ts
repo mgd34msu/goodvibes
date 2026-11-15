@@ -27,7 +27,6 @@ import { RemoteSupervisor } from '@/runtime/index.ts';
 import { createRuntimeServices, type RuntimeServices } from '../../runtime/services.ts';
 import { createShellPathService } from '@/runtime/index.ts';
 import { createRuntimeStore } from '../../runtime/store/index.ts';
-import { SpawnTokenManager } from '@goodvibes-jev/engine/platform/platform/security';
 import { FileUndoManager } from '@goodvibes-jev/engine/platform/platform/state';
 import { MemoryEmbeddingProviderRegistry } from '@goodvibes-jev/engine/platform/platform/state';
 import { ModeManager } from '@goodvibes-jev/engine/platform/platform/state';
@@ -66,7 +65,6 @@ let lspService: LspService | null = null;
 let treeSitterService: TreeSitterService | null = null;
 let codeIntelligence: CodeIntelligence | null = null;
 let featureFlags: FeatureFlagManager | null = null;
-const spawnTokenManagers = new Map<string, SpawnTokenManager>();
 const projectIndexes = new Map<string, ProjectIndex>();
 const gitServices = new Map<string, GitService>();
 let agentExecutorForTests: AgentExecutor | null = null;
@@ -438,18 +436,6 @@ export function resetTestProcessManager(): void {
   resetTestRuntimeServices();
 }
 
-export function getTestSpawnTokenManager(sessionId: string): SpawnTokenManager {
-  const existing = spawnTokenManagers.get(sessionId);
-  if (existing) return existing;
-  const created = new SpawnTokenManager(sessionId);
-  spawnTokenManagers.set(sessionId, created);
-  return created;
-}
-
-export function resetTestSpawnTokenManagers(): void {
-  spawnTokenManagers.clear();
-}
-
 export function getTestFeatureFlagManager(): FeatureFlagManager {
   featureFlags ??= createFeatureFlagManager();
   return featureFlags;
@@ -495,7 +481,6 @@ export function resetAllTestServiceState(): void {
   resetTestRuntimeServices();
   resetTestToolLLM();
   resetTestCodeIntelligence();
-  resetTestSpawnTokenManagers();
   resetTestFeatureFlagManager();
   resetTestProjectIndexes();
   resetTestGitServices();

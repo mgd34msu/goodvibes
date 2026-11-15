@@ -25,8 +25,11 @@ import {
   type EmailServiceDeps,
   type SurfaceEmailConfigProblem,
 } from '@goodvibes-jev/engine/platform/platform/email';
-import { getProcessUntrustedContentLedger } from '@goodvibes-jev/engine/platform/platform/security';
+import { currentUntrustedContentScope, getProcessUntrustedContentLedger } from '@goodvibes-jev/engine/platform/platform/security';
 import { nodeEmailTransport } from '@goodvibes-jev/engine/platform/platform/email/node';
+
+/** The untrusted-content window of mail read by background work, which no session's turn sees. */
+const BACKGROUND_MAIL_SCOPE = 'mail:background';
 
 /** The narrow slices this composition needs; the real managers satisfy them. */
 interface MailCompositionInput {
@@ -96,8 +99,13 @@ export function composeMailDeps(input: MailCompositionInput): {
     describeSenderClaim: describeSenderClaimNeutrally,
     // Without a recorder the service reads strangers' mail into nothing and the
     // outward-effect guard never sees the exposure. The process-wide ledger is
-    // the one the gateway composition and the browser engine already use.
-    recordUntrustedIngest: (ingest) => { getProcessUntrustedContentLedger().record(ingest); },
+    // the one the gateway composition and the browser engine already use. A
+    // read made for a session or a caller lands in that session's or caller's
+    // window; a read made by background work, outside any of them, lands in a
+    // window of its own, so it does not count against sessions that never read it.
+    recordUntrustedIngest: (ingest) => {
+      getProcessUntrustedContentLedger().record({ ...ingest, scope: currentUntrustedContentScope() ?? BACKGROUND_MAIL_SCOPE });
+    },
   });
   return {
     emailServiceDeps,

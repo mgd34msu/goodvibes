@@ -6,7 +6,9 @@
  * "seen in 2 distinct origins" boilerplate exemption, and the regexes that
  * decided where quoted reply text starts.
  *
- * One request per (field, source) pair, asking two questions:
+ * Asked per (field, source) pair; content-taint.ts carries one field and
+ * several sources (or consecutive pieces of one long source) in one request,
+ * each source its own pair of questions. Two questions per pair:
  *
  * - `derives` (or `reply_derives` for a field the caller marks as a reply,
  *   where the quoted copy of the message being answered is context, not
@@ -26,8 +28,27 @@
 import { defineBattery, JudgmentError, STAKES_BANDS, yesNo } from '@goodvibes-jev/judgment';
 import { assertJudgmentInput } from '../../gate/judgment-input.js';
 
-/** Maximum complete field/source per reading. A prefix cannot clear the whole action. */
+/**
+ * Maximum outgoing field, and maximum piece of a source, per reading. A field
+ * is read whole (a prefix cannot clear the whole action); a longer source is
+ * read in consecutive overlapping pieces of this size.
+ */
 export const MAX_DERIVATION_CHARS = 20_000;
+
+/** Characters two consecutive pieces of a long source share, so text across a cut is read whole once. */
+export const DERIVATION_PIECE_OVERLAP = 1_000;
+
+/** The consecutive pieces a source is read in; one piece when it fits. */
+export function derivationPieces(text: string): readonly string[] {
+  if (text.length <= MAX_DERIVATION_CHARS) return [text];
+  const pieces: string[] = [];
+  const step = MAX_DERIVATION_CHARS - DERIVATION_PIECE_OVERLAP;
+  for (let start = 0; start < text.length; start += step) {
+    pieces.push(text.slice(start, start + MAX_DERIVATION_CHARS));
+    if (start + MAX_DERIVATION_CHARS >= text.length) break;
+  }
+  return pieces;
+}
 
 /** What one reading sees: the outgoing field and the untrusted source it is compared with. */
 export function derivationView(
@@ -46,13 +67,31 @@ export function derivationView(
   return view;
 }
 
-/** True when any outgoing field or untrusted source is too long for a derivation reading, so a caller can report that up front instead of catching the refusal. */
-export function exceedsDerivationBudget(
-  fields: Readonly<Record<string, string | undefined>>,
-  sources: readonly { readonly text: string }[],
-): boolean {
-  return Object.values(fields).some((text) => text !== undefined && text.length > MAX_DERIVATION_CHARS)
-    || sources.some((source) => source.text.length > MAX_DERIVATION_CHARS);
+/** The shared state of one field's reading: the outgoing field, read whole. */
+export function derivationField(field: string, text: string): { field: string; text: string } {
+  const state = { field, text };
+  assertJudgmentInput(state);
+  if (text.length > MAX_DERIVATION_CHARS) {
+    throw new JudgmentError('invalid-request', `The complete content derivation input exceeds the judgment budget: the outgoing ${field} field is ${text.length} characters, over the ${MAX_DERIVATION_CHARS} character limit. A prefix cannot clear the whole action, so shorten the field and send it in parts.`);
+  }
+  return state;
+}
+
+/** One source (or one piece of a long source) a field is compared with. */
+export function derivationSource(source: { readonly surface: string; readonly origin: string; readonly text: string }): { surface: string; origin: string; text: string } {
+  const view = { surface: source.surface, origin: source.origin, text: source.text };
+  assertJudgmentInput(view);
+  if (view.text.length > MAX_DERIVATION_CHARS) throw new JudgmentError('invalid-request', 'A content derivation source piece exceeds the judgment budget.');
+  return view;
+}
+
+/**
+ * True when an outgoing field is too long to be read whole, so a caller can
+ * report that up front instead of catching the refusal. Sources are never too
+ * long: they are read in pieces.
+ */
+export function exceedsDerivationBudget(fields: Readonly<Record<string, string | undefined>>): boolean {
+  return Object.values(fields).some((text) => text !== undefined && text.length > MAX_DERIVATION_CHARS);
 }
 
 const FIELD_AND_SOURCE =

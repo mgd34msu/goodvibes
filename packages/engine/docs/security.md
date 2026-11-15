@@ -85,34 +85,11 @@ The session cookie is set on login and cleared on logout by the daemon's interna
 
 ## Token management
 
-**Public subpath:** `@goodvibes-jev/engine/platform/platform/security`: exports `SpawnTokenManager`, `ApiTokenAuditor`, the `TokenScopePolicy` type, `UserAuthManager`, `isOperatorAdmin`, and `authenticateOperatorToken`. (The operator session cookie builders referenced above are internal daemon wiring and are not part of this barrel.)
+**Public subpath:** `@goodvibes-jev/engine/platform/platform/security`: exports `ApiTokenAuditor`, the `TokenScopePolicy` type, `UserAuthManager`, `isOperatorAdmin`, and `authenticateOperatorToken`. (The operator session cookie builders referenced above are internal daemon wiring and are not part of this barrel.)
 
-### Spawn tokens
+### Sub-agent spawning limits
 
-`SpawnTokenManager` is a local grant registry for callers implementing bounded sub-agent spawning. Each issued token names an immutable record retained by that manager:
-
-```ts
-interface SpawnToken {
-  id: string;          // opaque registry lookup ID
-  type: 'orchestrator' | 'agent';
-  sessionId: string;
-  issuedTo: string;     // agent ID
-  issuedBy: string;     // issuing agent or orchestrator ID
-  depth: number;        // current nesting depth
-  maxDepth: number;     // configured depth limit
-  canGenerate: boolean; // whether this token may generate child tokens
-  expiresAt: number;    // epoch ms expiry
-}
-```
-
-Before spawning, `canSpawn()` checks:
-1. Recursion is enabled in the `OrchestrationPolicyConfig`
-2. Total active agent count is within `maxActiveAgents`
-3. The ID belongs to this manager and has not been revoked
-4. Every supplied field matches the immutable issued grant, and it has not expired (default TTL: 1 hour)
-5. The issued nesting depth is within the configured `maxDepth`
-
-Revoke a grant with `revoke(token.id)`. A token copied to another manager is unavailable there; editing the recipient’s copy cannot change the issuer’s grant. Callers still enforce their actual execution permissions.
+There are no spawn tokens. Every agent spawn (a manual batch, a plan step, a recursive child) is admitted by `evaluateOrchestrationSpawn` in `runtime/orchestration/spawn-policy.ts`, the one place that bounds recursion, nesting depth and fleet size. It reads `orchestration.recursionEnabled`, `orchestration.maxDepth` and `fleet.maxSize`, and a refusal names the setting that bound it and its value.
 
 ### API token auditing
 
@@ -157,7 +134,6 @@ On rotation: call `deregisterToken(oldId)` then `registerToken(newMetadata)` to 
 - **Per-device pairing tokens** are stored, hashed, under `<surfaceRoot>/control-plane/pairing-tokens.json` (a daemon's `surfaceRoot` is `tui` for historical reasons; see [Companion app pairing](./pairing.md)). Only a SHA-256 hash is persisted; the plaintext is returned once, at mint time.
 - **The legacy shared/operator token** is stored at `<daemonHomeDir>/operator-tokens.json` (default: `~/.goodvibes/daemon/operator-tokens.json`). The file is written at mode `0600`. Consumers should keep the daemon-home directory outside any project tree.
 - **Session tokens** are in-memory only; they are not persisted to disk.
-- **Spawn tokens** are in-memory per session; they expire automatically.
 - **API keys and provider credentials** should be stored via `SecretsManager` in secure (encrypted) mode, not plaintext. See [Secret Management](#secret-management) below.
 
 ---
@@ -345,7 +321,7 @@ For a call left to judgment, the boundary runs on Jev's reading of the call (ste
 | Catastrophic command | Whether a shell command would destroy the machine or the user's data wholesale. | **Jev** (`engine.gate.boundary`, `catastrophic`). It is a judgment about what a command does; the old frozen list only knew the spellings someone wrote down (`find / -delete` and `rm -rf ~/*` walked past it). A yes refuses outright; an uncertain reading makes the call critical stakes, so every preset asks. The gate reads it before the call runs; the exec tool does not read it a second time, so a run path with no gate in front of it is not covered by this check. | `boundary_catastrophic` |
 | Surface authority | Whether the surface the turn's instruction came from can direct work. | **Code** (the owner's per-surface declarations, `gate/surface-authority.ts`). What it depends on is who can write to the surface in this deployment (who holds the bot token, who can mail the address), which no text in the call shows; the owner declared it, and an undeclared surface is input-only. Whether the call is consequential is Jev's reading (`mutates`, `outward`). | `boundary_surface_authority` |
 | Card details | Whether an outward call carries a person's payment card details. | **Jev** (`engine.gate.boundary`, `cardDetails`). A checksum cannot tell a card from an order number and misses a card written in words or split across fields. A yes refuses; an uncertain reading is refused unless the owner approves the exact call. | `boundary_card_details` |
-| Outward-effect taint | Whether what an outward call sends derives from untrusted text read this turn. | **Jev over a recorded fact.** That the turn read untrusted text is the untrusted-content ledger's record (what happened). Whether the call's content derives from it is `engine.security.content-derivation`, read for each string field of the call against each recent source (security/content-taint.ts findContentTaint, the same reading the email, calendar and channel send paths use: reply-aware, with a boilerplate question), replacing the shared-word and shared-character overlap counts. One battery asks this question for the whole engine. When the ledger kept no text there is nothing to read, and the owner is asked. | `boundary_outward_effect` |
+| Outward-effect taint | Whether what an outward call sends derives from untrusted text read this turn. | **Jev over a recorded fact.** That the turn read untrusted text is the untrusted-content ledger's record (what happened). Whether the call's content derives from it is `engine.security.content-derivation`, read for each string field of the call against the recent sources in one request per field, a long source as consecutive pieces, with pairs already cleared in the turn not asked again (security/content-taint.ts findContentTaint, the same reading the email, calendar and channel send paths use: reply-aware, with a boilerplate question), replacing the shared-word and shared-character overlap counts. One battery asks this question for the whole engine. When the ledger kept no text there is nothing to read, and the owner is asked. | `boundary_outward_effect` |
 | Trust-gated approval | Whether an owner approval clears a card-uncertain or taint refusal. | **Code.** The approval is minted only from the prompt the owner answered for this call; the check is that it names this action, that its fingerprint equals the fingerprint of the exact content being sent, and that its five minutes have not passed. Hash equality and a clock comparison decide nothing; the owner's answer is the decision. | `owner_approved_outward` |
 
 Which calls are outward is Jev's `outward` reading alone; there is no fixed tool list.

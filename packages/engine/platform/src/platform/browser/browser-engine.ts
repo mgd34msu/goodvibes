@@ -1096,6 +1096,7 @@ export class BrowserEngine {
       // each frame's origin is recorded separately because a frame is a
       // different author with the same access to this page.
       const frameTexts: string[] = [];
+      const frameUrls: string[] = [];
       const withheld: string[] = [];
       for (const frame of page.frames()) {
         // The main frame is already read above. Identity comparison is not enough
@@ -1109,9 +1110,7 @@ export class BrowserEngine {
         current();
         const frameText = await read(() => frame.evaluate(() => document.body?.innerText ?? '')).catch(() => { signal.throwIfAborted(); return ''; }); current();
         if (!frameText.trim()) continue;
-        // With its text, so the ledger can check content instead of treating
-        // the turn as holding text it could not see.
-        this.recordPageIngest(frame.url(), this.scrub(sessionId, pageId, frameText.trim()));
+        frameUrls.push(frame.url());
         frameTexts.push(`\n\n[embedded frame ${this.untrusted.originOf(frame.url())}]\n${frameText.trim()}`);
       }
       // Scrubbed before it is labelled, recorded, or returned. A page is free to
@@ -1123,7 +1122,20 @@ export class BrowserEngine {
         `${text}${frameTexts.join('')}`.replace(/\n{3,}/g, '\n\n').trim(),
       );
       const title = await page.title().catch(() => ''); current();
-      const origin = this.recordPageIngest(page.url(), normalized); current();
+      // The ledger is told what the model is given (the returned slice), each
+      // part under its own author: the page's text, then each frame's block.
+      const given = normalized.slice(0, limit);
+      const marks = frameUrls.map((url) => ({ url, at: given.indexOf(`[embedded frame ${this.untrusted.originOf(url)}]\n`) }))
+        .filter((mark) => mark.at >= 0).sort((a, b) => a.at - b.at);
+      const own = (marks.length > 0 ? given.slice(0, marks[0]!.at) : given).trim();
+      // A page whose words are all in its frames is recorded through them.
+      const origin = own || marks.length === 0 ? this.recordPageIngest(page.url(), own) : this.untrusted.originOf(page.url()); current();
+      marks.forEach((mark, index) => {
+        const start = mark.at + `[embedded frame ${this.untrusted.originOf(mark.url)}]\n`.length;
+        const block = given.slice(start, marks[index + 1]?.at ?? given.length).trim();
+        if (block) this.recordPageIngest(mark.url, block);
+      });
+      current();
       return {
         sessionId,
         pageId,

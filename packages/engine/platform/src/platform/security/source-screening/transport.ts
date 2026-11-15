@@ -1,5 +1,5 @@
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
-import { Client, interceptors } from 'undici/index.js';
+import { Pool, interceptors } from 'undici/index.js';
 import * as directClient from './direct-client.js';
 import { types as nodeTypes } from 'node:util';
 import type { HostedProtectedSourceOwnerOptions } from './types.js';
@@ -12,6 +12,8 @@ export const HOSTED_SOURCE_SCREENING_ROUTES = Object.freeze({
 const RESPONSE_LIMIT = 256 * 1024;
 const DEFAULT_TIMEOUT_MS = 30_000;
 const MAX_TIMEOUT_MS = 2_147_483_647;
+/** Connections one origin may hold open at once; idle ones are reused, not reopened. */
+const MAX_CONNECTIONS_PER_ORIGIN = 8;
 
 const diagnostics = new WeakSet<object>();
 function diagnostic(message: string): Error {
@@ -28,24 +30,26 @@ const unauthorized = () => diagnostic('source-screening transport authority is n
 const timedOut = () => diagnostic('source-screening transport timed out');
 const failed = () => diagnostic('source-screening transport did not return a usable response');
 const oversized = () => diagnostic('source-screening response exceeds the byte limit');
-const routeUnavailable = () => diagnostic('source-screening local route is unavailable');
+const proxyRefused = () => diagnostic('source-screening is off because a proxy is configured for this process');
 
 /**
- * Visible proxy configuration withholds admission even though dispatch uses
- * an explicitly owned socket client. Bun's native fetch can retain a proxy
- * after its environment entry is deleted, so absence alone is NOT the direct
- * routing proof: the fixed-origin Client below never uses native fetch or an
- * ambient/global dispatcher.
+ * Visible proxy configuration withholds private screening even though dispatch
+ * uses an explicitly owned socket client: the operator routed this process's
+ * traffic through a proxy, and private text is never sent around it. Bun's
+ * native fetch can retain a proxy after its environment entry is deleted, so
+ * absence alone is NOT the direct routing proof: the fixed-origin pool below
+ * never uses native fetch or an ambient/global dispatcher.
  * NO_PROXY is not an owner grant. Read only a presence bit, never retain or
- * print proxy values (which can themselves contain credentials).
+ * print proxy values (which can themselves contain credentials). The
+ * environment of a running process is one fact: the owner and the transport
+ * read it once, when they are created.
  */
-function requireDirectRoute(kind: 'local' | 'hosted' = 'local'): void {
+export function proxyConfigured(): boolean {
   // Bun's lazily materialized standard proxy keys can be non-enumerable after
   // assignment. Test the known spellings explicitly, then discover variants.
   const names = new Set(['HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'all_proxy',
     ...Object.getOwnPropertyNames(process.env).filter((name) => ['http_proxy', 'https_proxy', 'all_proxy'].includes(name.toLowerCase()))]);
-  if ([...names].some((name) => process.env[name] !== undefined && process.env[name] !== ''))
-    throw kind === 'hosted' ? diagnostic('source-screening hosted direct route is unavailable') : routeUnavailable();
+  return [...names].some((name) => process.env[name] !== undefined && process.env[name] !== '');
 }
 
 /** Capture syntax before URL parsing can repair a non-literal or ambiguous address. */
@@ -107,12 +111,21 @@ type ScreeningTransportOptions = ScreeningTransportOperation & (
   | { readonly kind: 'hosted'; readonly credentials: HostedProtectedSourceOwnerOptions['credentials'] }
 );
 
-interface ScreeningTransport {
-  /** True only for a physical availability failure, never routing, source or body-boundary violations. */
+/** One screening run's view of the shared connections: its own fences and failure flags. */
+export interface ScreeningTransportRun {
+  /** True only for a physical availability failure of this run, never routing, source or body-boundary violations. */
   availabilityFailed(): boolean;
   /** Check current admission/authority and direct routing before a logical retry. */
   assertUsable(): void;
   fetch(input: string | URL | Request, init?: RequestInit): Promise<Response>;
+}
+interface ScreeningTransport extends ScreeningTransportRun {
+  /**
+   * A run over the same connections, fenced by its own signal and currentness
+   * check. The connection pool belongs to the transport: one client per fixed
+   * origin for the transport's life, never one per source.
+   */
+  run(operation: { readonly signal: AbortSignal; readonly assertCurrent: () => void }): ScreeningTransportRun;
   /** Wait for the current underlying-operation snapshot without fencing admission. */
   drain(): Promise<void>;
   close(): Promise<void>;
@@ -129,155 +142,169 @@ export function createScreeningTransport(options: ScreeningTransportOptions): Sc
   const targets = options.kind === 'hosted' ? new Set<string>(Object.values(HOSTED_SOURCE_SCREENING_ROUTES)) : captureTargets(options.endpoints);
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   if (!Number.isInteger(timeoutMs) || timeoutMs < 0 || timeoutMs > MAX_TIMEOUT_MS) throw invalidRequest();
-  const assertCurrent = options.assertCurrent;
   const sourceSignal = options.signal;
   const lifetime = new AbortController();
   const actualFetch = directClient.fetchDirect;
-  const clients = new Map<string, Client>();
+  const clients = new Map<string, Pool>();
   const active = new Set<Promise<Response>>();
   let closed = false;
   let closing: Promise<void> | undefined;
-  let unavailable = false;
-  let boundaryFailed = false;
   const stop = () => lifetime.abort(cancelled());
   sourceSignal.addEventListener('abort', stop, { once: true });
   if (sourceSignal.aborted) stop();
+  const proxied = proxyConfigured();
 
-  function check(signal?: AbortSignal): void {
-    if (closed || sourceSignal.aborted || lifetime.signal.aborted) throw cancelled();
-    if (signal?.aborted) throw signal.reason;
-    try {
-      const result: unknown = assertCurrent();
-      // An async hook must not silently authorize transmission before it fails.
-      if (result !== null && (typeof result === 'object' || typeof result === 'function') && 'then' in result) {
-        drainOwned(result);
-        throw unauthorized();
-      }
-    } catch { throw unauthorized(); }
-    if (closed || sourceSignal.aborted || lifetime.signal.aborted) throw cancelled();
-    if (signal?.aborted) throw signal.reason;
-  }
-
-  return {
-    availabilityFailed() { return unavailable && !boundaryFailed; },
-    assertUsable() { check(); requireDirectRoute(hosted ? 'hosted' : 'local'); },
-    async fetch(input, init) {
-      check();
-      let request: Request;
+  const makeRun = (runSignal: AbortSignal, assertCurrent: () => void): ScreeningTransportRun => {
+    let unavailable = false;
+    let boundaryFailed = false;
+    function check(signal?: AbortSignal): void {
+      if (closed || runSignal.aborted || lifetime.signal.aborted) throw cancelled();
+      if (signal?.aborted) throw signal.reason;
       try {
-        const address = typeof input === 'string' ? input : input instanceof URL ? input.href : input instanceof Request ? input.url : undefined;
-        if (address === undefined || !targets.has(address)) throw invalidRequest();
-        // Request admits standard fetch options only. In particular, do not
-        // forward Bun proxy/unix/TLS/dispatcher extensions from a caller's init.
-        request = new Request(input, { ...init, redirect: 'error', credentials: 'omit' });
-        if (request.method !== 'POST' || !targets.has(request.url)) throw invalidRequest();
-        if (hosted) {
-          // No caller header, cookie, alternate credential or routing hint crosses
-          // this boundary. Each private key belongs to exactly one fixed target.
-          const apiKey = request.url === HOSTED_SOURCE_SCREENING_ROUTES.proposal ? hosted.abacusApiKey : hosted.typesafeApiKey;
-          request = new Request(request, { headers: { 'content-type': 'application/json', authorization: `Bearer ${apiKey}` } });
+        const result: unknown = assertCurrent();
+        // An async hook must not silently authorize transmission before it fails.
+        if (result !== null && (typeof result === 'object' || typeof result === 'function') && 'then' in result) {
+          drainOwned(result);
+          throw unauthorized();
         }
-      } catch { boundaryFailed = true; throw invalidRequest(); }
-      check();
-      const controller = new AbortController();
-      const abort = () => {
-        // A canonical target deadline can abort its private request while the
-        // source/caller remains live. Source cancellation never enables fallback.
-        if (!sourceSignal.aborted && !lifetime.signal.aborted) unavailable = true;
-        controller.abort(cancelled());
-      };
-      lifetime.signal.addEventListener('abort', abort, { once: true });
-      request.signal.addEventListener('abort', abort, { once: true });
-      if (lifetime.signal.aborted || request.signal.aborted) abort();
-      const timer = timeoutMs > 0 ? setTimeout(() => { unavailable = true; controller.abort(timedOut()); }, timeoutMs) : undefined;
-      let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
-      let cancellation: Promise<void> | undefined;
-      let bodyFinished = false;
-      const cancelBody = () => {
-        if (reader && !bodyFinished && !cancellation) {
-          try { cancellation = reader.cancel().then(() => {}, () => {}); }
-          catch { cancellation = Promise.resolve(); }
-        }
-      };
-      controller.signal.addEventListener('abort', cancelBody, { once: true });
-      // Register before invoking any asynchronous work or caller hook again.
-      const work = Promise.resolve().then(async () => {
+      } catch { throw unauthorized(); }
+      if (closed || runSignal.aborted || lifetime.signal.aborted) throw cancelled();
+      if (signal?.aborted) throw signal.reason;
+    }
+    function route(): void { if (proxied) throw proxyRefused(); }
+
+    return {
+      availabilityFailed() { return unavailable && !boundaryFailed; },
+      assertUsable() { check(); route(); },
+      async fetch(input, init) {
+        check();
+        let request: Request;
         try {
-          check(controller.signal);
-          // No await or owner/caller hook may run between this check and
-          // dispatch. Recheck each attempt, including canonical platform retries.
-          requireDirectRoute(hosted ? 'hosted' : 'local');
-          const origin = new URL(request.url).origin;
-          let client = clients.get(origin);
-          if (!client) {
-            // Undici's own HTTP/1.1 implementation connects through net/TLS to
-            // this captured literal origin. Never use EnvHttpProxyAgent,
-            // getGlobalDispatcher, Bun fetch, or caller-supplied connectors.
-            client = new Client(origin, { pipelining: 0, allowH2: false,
-              connect: { rejectUnauthorized: true },
-              maxHeaderSize: 16 * 1024, connectTimeout: timeoutMs,
-              headersTimeout: timeoutMs, bodyTimeout: timeoutMs });
-            clients.set(origin, client);
+          const address = typeof input === 'string' ? input : input instanceof URL ? input.href : input instanceof Request ? input.url : undefined;
+          if (address === undefined || !targets.has(address)) throw invalidRequest();
+          // Request admits standard fetch options only. In particular, do not
+          // forward Bun proxy/unix/TLS/dispatcher extensions from a caller's init.
+          request = new Request(input, { ...init, redirect: 'error', credentials: 'omit' });
+          if (request.method !== 'POST' || !targets.has(request.url)) throw invalidRequest();
+          if (hosted) {
+            // No caller header, cookie, alternate credential or routing hint crosses
+            // this boundary. Each private key belongs to exactly one fixed target.
+            const apiKey = request.url === HOSTED_SOURCE_SCREENING_ROUTES.proposal ? hosted.abacusApiKey : hosted.typesafeApiKey;
+            request = new Request(request, { headers: { 'content-type': 'application/json', authorization: `Bearer ${apiKey}` } });
           }
-          const response = await actualFetch(client.compose(interceptors.decompress({ maxSize: RESPONSE_LIMIT })), request, controller.signal);
-          reader = response.body?.getReader();
-          check(controller.signal);
-          const chunks: Uint8Array[] = [];
-          let size = 0;
-          if (reader) {
-            for (;;) {
-              check(controller.signal);
-              const next = await reader.read();
-              check(controller.signal);
-              if (next.done) { bodyFinished = true; break; }
-              if (!(next.value instanceof Uint8Array) || next.value.byteLength > RESPONSE_LIMIT - size) throw oversized();
-              size += next.value.byteLength;
-              chunks.push(next.value);
+        } catch { boundaryFailed = true; throw invalidRequest(); }
+        check();
+        const controller = new AbortController();
+        const abort = () => {
+          // A canonical target deadline can abort its private request while the
+          // source/caller remains live. Source cancellation never enables fallback.
+          if (!runSignal.aborted && !lifetime.signal.aborted) unavailable = true;
+          controller.abort(cancelled());
+        };
+        lifetime.signal.addEventListener('abort', abort, { once: true });
+        runSignal.addEventListener('abort', abort, { once: true });
+        request.signal.addEventListener('abort', abort, { once: true });
+        if (lifetime.signal.aborted || runSignal.aborted || request.signal.aborted) abort();
+        const timer = timeoutMs > 0 ? setTimeout(() => { unavailable = true; controller.abort(timedOut()); }, timeoutMs) : undefined;
+        let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+        let cancellation: Promise<void> | undefined;
+        let bodyFinished = false;
+        const cancelBody = () => {
+          if (reader && !bodyFinished && !cancellation) {
+            try { cancellation = reader.cancel().then(() => {}, () => {}); }
+            catch { cancellation = Promise.resolve(); }
+          }
+        };
+        controller.signal.addEventListener('abort', cancelBody, { once: true });
+        // Register before invoking any asynchronous work or caller hook again.
+        const work = Promise.resolve().then(async () => {
+          try {
+            check(controller.signal);
+            // No await or owner/caller hook may run between this check and dispatch.
+            route();
+            const origin = new URL(request.url).origin;
+            let client = clients.get(origin);
+            if (!client) {
+              // Undici's own HTTP/1.1 implementation connects through net/TLS to
+              // this captured literal origin. Never use EnvHttpProxyAgent,
+              // getGlobalDispatcher, Bun fetch, or caller-supplied connectors.
+              // A pool keeps its connections alive for the owner's life, so sources
+              // screened side by side each get one without a new handshake.
+              client = new Pool(origin, { connections: MAX_CONNECTIONS_PER_ORIGIN, pipelining: 1, allowH2: false,
+                connect: { rejectUnauthorized: true },
+                maxHeaderSize: 16 * 1024, connectTimeout: timeoutMs,
+                headersTimeout: timeoutMs, bodyTimeout: timeoutMs });
+              clients.set(origin, client);
             }
+            const response = await actualFetch(client.compose(interceptors.decompress({ maxSize: RESPONSE_LIMIT })), request, controller.signal);
+            reader = response.body?.getReader();
+            check(controller.signal);
+            const chunks: Uint8Array[] = [];
+            let size = 0;
+            if (reader) {
+              for (;;) {
+                check(controller.signal);
+                const next = await reader.read();
+                check(controller.signal);
+                if (next.done) { bodyFinished = true; break; }
+                if (!(next.value instanceof Uint8Array) || next.value.byteLength > RESPONSE_LIMIT - size) throw oversized();
+                size += next.value.byteLength;
+                chunks.push(next.value);
+              }
+            }
+            const bytes = new Uint8Array(size);
+            let offset = 0;
+            for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+            check(controller.signal);
+            // No URL, status text, request ID, arbitrary headers, or upstream
+            // errors accompany the bounded bytes handed to the canonical client.
+            return new Response([204, 205, 304].includes(response.status) ? null : bytes, {
+              status: response.status, headers: safeHeaders(response),
+            });
+          } catch (error) {
+            if (controller.signal.aborted) throw controller.signal.reason;
+            // Preserve only diagnostics constructed in this boundary, never an
+            // upstream Error (whose message/cause can contain source material).
+            if (error !== null && (typeof error === 'object' || typeof error === 'function') && diagnostics.has(error)) {
+              boundaryFailed = true; throw error;
+            }
+            if (directClient.isDirectScreeningUnavailable(error)) unavailable = true;
+            else boundaryFailed = true;
+            throw failed();
+          } finally {
+            cancelBody();
+            // Do not race this cleanup: it remains owned even after cancellation
+            // has already released the caller or the canonical platform's await.
+            await cancellation;
+            reader?.releaseLock();
+            clearTimeout(timer);
+            controller.signal.removeEventListener('abort', cancelBody);
+            lifetime.signal.removeEventListener('abort', abort);
+            runSignal.removeEventListener('abort', abort);
+            request.signal.removeEventListener('abort', abort);
           }
-          const bytes = new Uint8Array(size);
-          let offset = 0;
-          for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
-          check(controller.signal);
-          // No URL, status text, request ID, arbitrary headers, or upstream
-          // errors accompany the bounded bytes handed to the canonical client.
-          return new Response([204, 205, 304].includes(response.status) ? null : bytes, {
-            status: response.status, headers: safeHeaders(response),
-          });
-        } catch (error) {
-          if (controller.signal.aborted) throw controller.signal.reason;
-          // Preserve only diagnostics constructed in this boundary, never an
-          // upstream Error (whose message/cause can contain source material).
-          if (error !== null && (typeof error === 'object' || typeof error === 'function') && diagnostics.has(error)) {
-            boundaryFailed = true; throw error;
-          }
-          if (directClient.isDirectScreeningUnavailable(error)) unavailable = true;
-          else boundaryFailed = true;
-          throw failed();
-        } finally {
-          cancelBody();
-          // Do not race this cleanup: it remains owned even after cancellation
-          // has already released the caller or the canonical platform's await.
-          await cancellation;
-          reader?.releaseLock();
-          clearTimeout(timer);
-          controller.signal.removeEventListener('abort', cancelBody);
-          lifetime.signal.removeEventListener('abort', abort);
-          request.signal.removeEventListener('abort', abort);
-        }
-      });
-      active.add(work);
-      const release = () => { active.delete(work); };
-      void work.then(release, release);
-      let interrupt = () => {};
-      const interrupted = new Promise<never>((_resolve, reject) => {
-        interrupt = () => reject(controller.signal.reason);
-        controller.signal.addEventListener('abort', interrupt, { once: true });
-        if (controller.signal.aborted) interrupt();
-      });
-      try { return await Promise.race([work, interrupted]); }
-      finally { controller.signal.removeEventListener('abort', interrupt); }
-    },
+        });
+        active.add(work);
+        const release = () => { active.delete(work); };
+        void work.then(release, release);
+        let interrupt = () => {};
+        const interrupted = new Promise<never>((_resolve, reject) => {
+          interrupt = () => reject(controller.signal.reason);
+          controller.signal.addEventListener('abort', interrupt, { once: true });
+          if (controller.signal.aborted) interrupt();
+        });
+        try { return await Promise.race([work, interrupted]); }
+        finally { controller.signal.removeEventListener('abort', interrupt); }
+      },
+    };
+  };
+
+  const base = makeRun(sourceSignal, options.assertCurrent);
+  return {
+    availabilityFailed: () => base.availabilityFailed(),
+    assertUsable: () => base.assertUsable(),
+    fetch: (input, init) => base.fetch(input, init),
+    run: (operation) => makeRun(AbortSignal.any([sourceSignal, operation.signal]), operation.assertCurrent),
     drain() { return Promise.allSettled([...active]).then(() => {}); },
     close() {
       if (!closing) {

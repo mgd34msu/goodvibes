@@ -143,10 +143,12 @@ test('private keys require strict data descriptors and malformed credentials nev
   expect(reads).toBe(0); expect(f.calls).toHaveLength(0);
 });
 
-test('hosted known credential and card floors run before proposal or judgment transmission', () => {
+test('hosted known credential and card floors run before proposal or judgment transmission', async () => {
   const f = fixture();
   for (const text of [abacusApiKey, typesafeApiKey, 'apiKey=synthetic-value', 'password=synthetic-value',
-    'ghp_' + 'X'.repeat(40), '4111 1111 1111 1111']) expect(() => f.owner.capture([text])).toThrow();
+    'ghp_' + 'X'.repeat(40), '4111 1111 1111 1111']) {
+    expect(await f.owner.screen(f.owner.capture([text]))).toEqual({ status: 'held', reason: 'protected-input' });
+  }
   expect(f.calls).toHaveLength(0);
 });
 

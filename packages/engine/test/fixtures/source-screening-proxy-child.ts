@@ -56,42 +56,38 @@ const proxyUrl = `http://127.0.0.1:${proxy.port}`;
 const base = `http://127.0.0.1:${local.port}`;
 const url = `${base}/v1/systemone`;
 let current = true;
-let checks = 0;
 const transportOptions = { endpoints: [url], signal: new AbortController().signal, timeoutMs: 1_000,
   assertCurrent() {
     if (!current) throw new Error('synthetic-private-authority');
-    if (mode === 'after-authority' && ++checks === 3) process.env.HTTP_PROXY = proxyUrl;
   },
 };
+const PROXY_REFUSED = 'source-screening is off because a proxy is configured for this process';
 let transport = createScreeningTransport(transportOptions);
 const post = { method: 'POST', body: '{"synthetic":"local-source"}' };
 let controlProxyCalls = 0;
 try {
   if (mode === 'configured') {
+    // The process environment is read once, when the transport is created.
     process.env[name] = proxyUrl;
     process.env.NO_PROXY = '*';
     process.env.no_proxy = '127.0.0.1';
-    await assert.rejects(transport.fetch(url, post), { message: 'source-screening local route is unavailable' });
-    assert.equal(localCalls, 0);
-  } else if (mode === 'after-authority') {
-    await assert.rejects(transport.fetch(url, post), { message: 'source-screening local route is unavailable' });
+    await transport.close();
+    transport = createScreeningTransport(transportOptions);
+    await assert.rejects(transport.fetch(url, post), { message: PROXY_REFUSED });
     assert.equal(localCalls, 0);
   } else if (mode === 'assert-usable') {
-    transport.assertUsable();
     process.env.HTTP_PROXY = proxyUrl;
-    assert.throws(() => transport.assertUsable(), { message: 'source-screening local route is unavailable' });
+    const proxied = createScreeningTransport(transportOptions);
+    assert.throws(() => proxied.assertUsable(), { message: PROXY_REFUSED });
+    await proxied.close();
     delete process.env.HTTP_PROXY;
+    transport.assertUsable();
     current = false;
     assert.throws(() => transport.assertUsable(), { message: 'source-screening transport authority is no longer current' });
     current = true;
     await transport.close();
     assert.throws(() => transport.assertUsable(), { message: 'source-screening transport was cancelled' });
     assert.equal(localCalls, 0);
-  } else if (mode === 'next-dispatch') {
-    assert.equal((await transport.fetch(url, post)).status, 503);
-    process.env.HTTPS_PROXY = proxyUrl;
-    await assert.rejects(transport.fetch(url, post), { message: 'source-screening local route is unavailable' });
-    assert.equal(localCalls, 1);
   } else if (mode === 'stale-before-owner' || mode === 'stale-between-dispatches') {
     if (mode === 'stale-between-dispatches') assert.equal((await transport.fetch(url, post)).status, 503);
     else await transport.close();
@@ -109,20 +105,19 @@ try {
     if (mode === 'stale-before-owner') transport = createScreeningTransport(transportOptions);
     assert.equal((await transport.fetch(url, post)).status, 503);
     assert.equal(localCalls, mode === 'stale-before-owner' ? 1 : 2);
-  } else if (mode === 'judgment-retry') {
-    let retries = 0;
+  } else if (mode === 'owner-proxy-configured') {
+    // An owner created while a proxy variable is set holds every source as
+    // `proxy-configured`, with no request, for its whole life.
+    process.env.HTTP_PROXY = proxyUrl;
     const owner = createProtectedSourceOwner({
-      authority: { ownerId: 'synthetic-proxy-retry', revision: '1', retention: 'ephemeral-no-log', signal: new AbortController().signal, assertCurrent() {} },
+      authority: { ownerId: 'synthetic-proxy-owner', revision: '1', retention: 'ephemeral-no-log', signal: new AbortController().signal, assertCurrent() {} },
       proposal: { endpoint: base, model: 'local-fixture' }, judgment: { endpoint: base, model: 'jev-1.13.0' },
-      onRetry() { retries++; process.env.HTTP_PROXY = proxyUrl; },
     });
     try {
       const source = owner.capture(['Ordinary synthetic source.']);
-      assert.deepEqual(await owner.screen(source), { status: 'held', reason: 'route-unavailable' });
-      process.env.HTTP_PROXY = proxyUrl;
-      assert.deepEqual(await owner.screen(source), { status: 'held', reason: 'route-unavailable' });
-      assert.equal(retries, 0);
-      assert.equal(localCalls, 2);
+      assert.deepEqual(await owner.screen(source), { status: 'held', reason: 'proxy-configured' });
+      assert.deepEqual(await owner.screen(source), { status: 'held', reason: 'proxy-configured' });
+      assert.equal(localCalls, 0);
     } finally { await owner.close(); }
   } else {
     throw new Error('Unknown isolated proxy fixture mode');

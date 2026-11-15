@@ -48,7 +48,8 @@ describe('shared taint coverage consumers', () => {
   test('payment cannot clear a truncated source or one evicted during the current turn', async () => {
     for (const loss of ['truncated', 'evicted'] as const) {
       const ledger = new UntrustedContentLedger();
-      ingest(ledger, loss === 'truncated' ? 'a'.repeat(20_001) : 'The original source');
+      // Only a source larger than the ledger's whole text budget is kept cut.
+      ingest(ledger, loss === 'truncated' ? 'a'.repeat(8_000_001) : 'The original source');
       if (loss === 'evicted') for (let i = 0; i < 1_000; i++) ingest(ledger, `Complete later source ${i}`);
       expect((await evaluatePaymentTaint({ intent: ownerIntent, ledger })).allowed).toBe(false);
     }
@@ -74,7 +75,7 @@ describe('shared taint coverage consumers', () => {
 
   test('profile cannot report clean exact evidence when retained source text was truncated', async () => {
     const ledger = new UntrustedContentLedger();
-    ingest(ledger, 'a'.repeat(20_001));
+    ingest(ledger, 'a'.repeat(8_000_001));
     ledger.startTurn();
     ledger.startTurn();
     expect((await write(ledger)).allowed).toBe(false);

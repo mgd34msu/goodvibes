@@ -553,11 +553,11 @@ export class EmailService {
     if (result.outcome !== 'complete') return result;
     const observation = sourceRead.completeMailboxObservation();
     if (!observation) return Object.freeze({ outcome: 'incomplete', reason: 'Mailbox identity is unavailable.' });
-    for (const message of result.messages) {
-      current();
-      this.recordIngest([{ from: message.source.detail.from,
-        text: [message.source.rawHeaders, message.source.rawBodyStructure, ...message.source.textSections.map(section => section.text)].join('\n') }], current);      this.#noteDetail(message.source.detail);
-    }
+    // A complete-source snapshot goes to privacy screening, never to a model:
+    // only its screened previews reach one, through a tool whose result is
+    // recorded then. Recording the raw text here would charge every session's
+    // next send with mail none of them read.
+    for (const message of result.messages) { current(); this.#noteDetail(message.source.detail); }
     current();
     this.#inboxObservations.set(result, this.bindObservation(observation, input.signal));
     return result;
@@ -585,11 +585,8 @@ export class EmailService {
     if (result.outcome === 'incomplete') return result;
     const observation = sourceRead.completeMailboxObservation();
     if (!observation) return Object.freeze({ outcome: 'incomplete', reason: 'Mailbox identity is unavailable.' });
-    if (result.outcome === 'complete') for (const message of result.messages) {
-      current();
-      this.recordIngest([{ from: message.source.detail.from,
-        text: [message.source.rawHeaders, message.source.rawBodyStructure, ...message.source.textSections.map(section => section.text)].join('\n') }], current);      this.#noteDetail(message.source.detail);
-    }
+    // Screening input, not model input: see readInboxBatch.
+    if (result.outcome === 'complete') for (const message of result.messages) { current(); this.#noteDetail(message.source.detail); }
     current();
     this.#inboxObservations.set(result, this.bindObservation(observation, signal));
     return result;

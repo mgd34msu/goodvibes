@@ -237,9 +237,17 @@ function panCandidates(groups: readonly DigitGroup[]): PanCandidate[] {
  */
 export function findCardNumberShapes(text: string, maxFindings = Number.POSITIVE_INFINITY): CardShapeFinding[] {
   const accepted: CardShapeFinding[] = [];
+  let identifiers: readonly Span[] | undefined;
   PAN_RUN.lastIndex = 0;
   for (let match = PAN_RUN.exec(text); match !== null; match = PAN_RUN.exec(text)) {
     const runStart = match.index;
+    // Identifiers are not prose: a run glued to identifier characters
+    // (`job-1731667200000`, `bg_...`, `...abc`) or inside a UUID-shaped token
+    // is an id, never a pasted card. Settled before any Luhn work, and the UUID
+    // scan runs only once a run long enough to be a card number exists.
+    if (match[0].replace(/[ -]/g, '').length < MIN_PAN_DIGITS || gluedToIdentifier(text, runStart, runStart + match[0].length)) continue;
+    identifiers ??= uuidSpans(text);
+    if (overlaps({ startIndex: runStart, length: match[0].length }, identifiers)) continue;
     const groups: DigitGroup[] = [];
     const groupPattern = /\d+/g;
     for (let group = groupPattern.exec(match[0]); group !== null; group = groupPattern.exec(match[0])) {
@@ -257,6 +265,30 @@ export function findCardNumberShapes(text: string, maxFindings = Number.POSITIVE
     }
   }
   return accepted.sort((a, b) => a.startIndex - b.startIndex);
+}
+
+/** A UUID (8-4-4-4-12 hex) anywhere in the text. */
+const UUID_TOKEN = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
+
+function uuidSpans(text: string): readonly Span[] {
+  const spans: Span[] = [];
+  UUID_TOKEN.lastIndex = 0;
+  for (let match = UUID_TOKEN.exec(text); match !== null; match = UUID_TOKEN.exec(text)) spans.push({ startIndex: match.index, length: match[0].length });
+  return spans;
+}
+
+const IDENTIFIER_CHAR = /[A-Za-z_]/;
+const IDENTIFIER_JOIN = /[-_./]/;
+
+/**
+ * Whether a digit run is part of an identifier token: a letter or underscore
+ * touches it on either side, or it hangs off a word by `-`, `_`, `.` or `/`.
+ * A card number in prose stands apart, after a space, a colon or a quote.
+ */
+function gluedToIdentifier(text: string, start: number, end: number): boolean {
+  const before = text[start - 1] ?? '', after = text[end] ?? '';
+  if (IDENTIFIER_CHAR.test(before) || IDENTIFIER_CHAR.test(after)) return true;
+  return IDENTIFIER_JOIN.test(before) && /[A-Za-z0-9_]/.test(text[start - 2] ?? '');
 }
 
 function findMatches(pattern: RegExp, text: string, kind: CardShapeKind, exclude: readonly Span[]): CardShapeFinding[] {

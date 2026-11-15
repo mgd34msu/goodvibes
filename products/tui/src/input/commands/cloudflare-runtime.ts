@@ -50,18 +50,26 @@ export function registerCloudflareRuntimeCommands(registry: CommandRegistry): vo
       try {
         if (subcommand === 'status' || subcommand === 'show') {
           const status = await client.status();
+          // A resource name has a default; it is shown only once a provision created or confirmed it.
+          const provisioned = (key: string, value: unknown): string => status.configured[key] && value ? String(value) : '(not provisioned)';
+          const connector = status.tunnelConnector;
           ctx.print([
             'Cloudflare Status',
             `  enabled: ${status.enabled ? 'yes' : 'no'}`,
             `  ready: ${status.ready ? 'yes' : 'no'}`,
             `  account: ${status.config.accountId || '(not set)'}`,
             `  token ref: ${status.config.apiTokenRef || '(CLOUDFLARE_API_TOKEN fallback)'}`,
-            `  worker: ${status.config.workerName || '(not set)'}`,
+            `  worker: ${provisioned('workerName', status.config.workerName)}`,
             `  worker URL: ${status.config.workerBaseUrl || '(not set)'}`,
-            `  queue: ${status.config.queueName || '(not set)'}`,
-            `  DLQ: ${status.config.deadLetterQueueName || '(not set)'}`,
-            `  tunnel: ${status.config.tunnelName || '(not set)'} ${status.config.tunnelId ? `(${status.config.tunnelId})` : ''}`.trimEnd(),
-            `  access app: ${status.config.accessAppId || '(not set)'}`,
+            `  queue: ${provisioned('queueName', status.config.queueName)}`,
+            `  DLQ: ${provisioned('deadLetterQueueName', status.config.deadLetterQueueName)}`,
+            `  tunnel: ${provisioned('tunnel', status.config.tunnelName)} ${status.configured.tunnel && status.config.tunnelId ? `(${status.config.tunnelId})` : ''}`.trimEnd(),
+            ...(connector ? [`  tunnel connector: ${connector.state} - ${connector.detail}`] : []),
+            `  access app: ${provisioned('access', status.config.accessAppId)}`,
+            `  kv: ${provisioned('kv', status.config.kvNamespaceName)}`,
+            `  durable objects: ${provisioned('durableObjects', status.config.durableObjectNamespaceName)}`,
+            `  r2: ${provisioned('r2', status.config.r2BucketName)}`,
+            `  secrets store: ${provisioned('secretsStore', status.config.secretsStoreName)}`,
             `  batch mode: ${String(ctx.platform.configManager.get('batch.mode') ?? 'off')}`,
             `  queue backend: ${String(ctx.platform.configManager.get('batch.queueBackend') ?? 'local')}`,
             ...status.warnings.map((warning) => `  warning: ${warning}`),
@@ -172,7 +180,6 @@ export function registerCloudflareRuntimeCommands(registry: CommandRegistry): vo
             ...optionalString('kvNamespaceName', getFlag(parsed, 'kv-namespace-name')),
             ...optionalString('kvNamespaceId', getFlag(parsed, 'kv-namespace-id')),
             ...optionalString('durableObjectNamespaceName', getFlag(parsed, 'do-namespace-name') || getFlag(parsed, 'durable-object-namespace-name')),
-            ...optionalString('durableObjectNamespaceId', getFlag(parsed, 'do-namespace-id') || getFlag(parsed, 'durable-object-namespace-id')),
             ...optionalString('r2BucketName', getFlag(parsed, 'r2-bucket-name')),
             ...optionalString('secretsStoreName', getFlag(parsed, 'secrets-store-name')),
             ...optionalString('secretsStoreId', getFlag(parsed, 'secrets-store-id')),
@@ -223,7 +230,8 @@ export function registerCloudflareRuntimeCommands(registry: CommandRegistry): vo
           if (!hasFlag(parsed, 'yes')) {
             ctx.print([
               'Cloudflare disable turns the integration off and persists that in config.',
-              `  by default it also disables the Worker cron${hasFlag(parsed, 'keep-cron') ? ' (not with --keep-cron, which you gave)' : ' (add --keep-cron to leave it running)'}${hasFlag(parsed, 'disable-worker-subdomain') ? ' and the workers.dev subdomain (--disable-worker-subdomain)' : ''}.`,
+              '  It also removes the Worker\'s daemon credential and stops this daemon\'s tunnel connector.',
+              `  By default it disables the Worker cron${hasFlag(parsed, 'keep-cron') ? ' (not with --keep-cron, which you gave)' : ' (add --keep-cron to leave it running)'} and the workers.dev route${hasFlag(parsed, 'keep-worker-subdomain') ? ' (not with --keep-worker-subdomain, which you gave)' : ' (add --keep-worker-subdomain to keep it)'}.`,
               'Nothing was changed. Re-run with --yes to confirm.',
             ].join('\n'));
             return;
@@ -231,13 +239,14 @@ export function registerCloudflareRuntimeCommands(registry: CommandRegistry): vo
           const result = await client.disable({
             ...cloudflareAuthInput(parsed),
             ...optionalString('workerName', getFlag(parsed, 'worker-name')),
-            disableWorkerSubdomain: hasFlag(parsed, 'disable-worker-subdomain'),
+            disableWorkerSubdomain: !hasFlag(parsed, 'keep-worker-subdomain'),
             disableCron: !hasFlag(parsed, 'keep-cron'),
             persistConfig: true,
           });
           ctx.print([
             'Cloudflare Disabled',
             `  ok: ${result.ok ? 'yes' : 'no'}`,
+            `  remote: ${result.remote === 'disabled' ? 'disabled at Cloudflare' : 'not fully disabled at Cloudflare; see the steps below'}`,
             ...formatProvisionSteps(result.steps),
           ].join('\n'));
           return;
@@ -269,9 +278,7 @@ const VALUE_FLAGS: ReadonlySet<string> = new Set([
   'daemon-url',
   'dead-letter-queue',
   'dlq',
-  'do-namespace-id',
   'do-namespace-name',
-  'durable-object-namespace-id',
   'durable-object-namespace-name',
   'kv-namespace-id',
   'kv-namespace-name',

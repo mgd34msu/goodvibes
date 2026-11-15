@@ -64,7 +64,7 @@ describe('mail subject issuance through real daemon fresh-auth dispatch', () => 
     state.mail.owner!.dispose();
   });
 
-  test('role/scope revocation during a canonical read suppresses issuance; newer read still succeeds', async () => {
+  test('role/scope revocation during a canonical read suppresses issuance; a non-owner is refused; the owner reads again', async () => {
     const gate = deferred<void>();
     const state = host([{ headerGate: gate.promise }, {}, {}]);
     const pending = state.read(42);
@@ -72,7 +72,7 @@ describe('mail subject issuance through real daemon fresh-auth dispatch', () => 
     state.setRoles([]); gate.resolve();
     expect(message(await pending).replySubjectRef).toBeUndefined();
     expect(state.issued).toHaveLength(0);
-    expect(message(await state.read(43)).replySubjectRef).toBeUndefined();
+    expect((await state.read(43)).status).toBe(403);
     state.setRoles(['admin']);
     expect(message(await state.read(44)).replySubjectRef).toBe('synthetic-source-1');
     state.mail.owner!.dispose();

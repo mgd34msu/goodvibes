@@ -426,7 +426,7 @@ export const builtinGatewayOccasionsMethodDescriptors: readonly GatewayMethodDes
   }),
   methodDescriptor({
     id: 'occasions.confirm',
-    metadata: { requiresFreshOperatorAuth: true },
+    access: 'admin',
     title: 'Record A Confirmed Important Date',
     description: 'Write the confirmed occasion as one line in the owner profile, under Important dates, carrying its provenance. self:true marks the owner\'s own date (written as for me), so a remember-only one is never pushed at them. This is the ONE confirmation: nothing re-confirms at nudge time, because for an annual date a silent write means the mistake surfaces up to eleven months later. Refused without a kind rather than defaulting one. Goes through the owner-profile write gate, so authority, surface and a verbatim quote of what the owner said are all required.',
     category: 'occasions',
@@ -437,7 +437,7 @@ export const builtinGatewayOccasionsMethodDescriptors: readonly GatewayMethodDes
   }),
   methodDescriptor({
     id: 'occasions.remove',
-    metadata: { requiresFreshOperatorAuth: true },
+    access: 'admin',
     title: 'Remove An Important Date',
     description: 'Remove one occasion and every record the machine kept against it, answers, gift history, open items, interviews and calendar mirrors. Takes exactly one confirmation: not unquestioned, and not an argument. People divorce and people die. A confirmed:false call returns the sentence to put to the owner and removes nothing.',
     category: 'occasions',
@@ -449,7 +449,7 @@ export const builtinGatewayOccasionsMethodDescriptors: readonly GatewayMethodDes
   }),
   methodDescriptor({
     id: 'occasions.answer',
-    metadata: { requiresFreshOperatorAuth: true },
+    access: 'admin',
     title: 'Answer An Occasion Nudge',
     description: 'Record yes, no, later or acknowledged for one occurrence. A no goes silent for the rest of this cycle and expires with the date, so next year asks fresh carrying no memory of the refusal. A later is NOT a decline, it comes back roughly halfway to the date. A yes on a gift-giving occasion opens the short interview and returns its first question. A yes or a no RESOLVES the open item and removes it. A later keeps the item open and moves it to its return date with its pushes available again. An answer of acknowledged leaves the item standing and quiet (the same as occasions.acknowledge); on an occurrence already answered yes or no it changes nothing and ok is false with the reason.',
     category: 'occasions',
@@ -460,7 +460,7 @@ export const builtinGatewayOccasionsMethodDescriptors: readonly GatewayMethodDes
   }),
   methodDescriptor({
     id: 'occasions.acknowledge',
-    metadata: { requiresFreshOperatorAuth: true },
+    access: 'admin',
     title: 'Acknowledge An Occasion',
     description: 'Record that the owner has one occurrence in hand, so nothing is pushed at them about it again. This is not a yes and not a no: the open item STAYS OPEN and stays enumerable, so occasions.pending still lists it, under acknowledged[] rather than in the nudge, and asking what is coming up still answers with it. Only the push stops. The record expires with its occurrence, so next year asks fresh. An occurrence already answered yes or no is left as it is: changed is false and reply says so. source names how it was recorded: conversation when the owner said so in a reply, explicit when a surface offered the action, gift-flow when the owner is already answering gift questions about it.',
     category: 'occasions',
@@ -481,7 +481,7 @@ export const builtinGatewayOccasionsMethodDescriptors: readonly GatewayMethodDes
   }),
   methodDescriptor({
     id: 'occasions.interview.answer',
-    metadata: { requiresFreshOperatorAuth: true },
+    access: 'admin',
     title: 'Answer A Gift Interview Question',
     description: 'Record one answer and return the next question, if there is one. The interview guides the owner to their own idea and never recommends a gift, that judgement is the owner\'s, which is also why the outcome recorded is what the owner landed on rather than what was suggested.',
     category: 'occasions',
@@ -492,7 +492,7 @@ export const builtinGatewayOccasionsMethodDescriptors: readonly GatewayMethodDes
   }),
   methodDescriptor({
     id: 'occasions.interview.record',
-    metadata: { requiresFreshOperatorAuth: true },
+    access: 'admin',
     title: 'Record What The Owner Landed On',
     description: 'Close the interview with what the owner settled on and write it to the gift history. Recording the outcome rather than merely that the owner said yes is the point: "said yes in 2026" cannot stop year three steering where year one did.',
     category: 'occasions',
@@ -523,7 +523,7 @@ export const builtinGatewayOccasionsMethodDescriptors: readonly GatewayMethodDes
   }),
   methodDescriptor({
     id: 'occasions.sweep',
-    metadata: { requiresFreshOperatorAuth: true },
+    access: 'admin',
     title: 'Run The Approach Sweep Now',
     description: 'Run one pass immediately: reap expired and orphaned state, find the occasions entering their lead window, batch them into a single message, mirror to the calendar if that is on, and deliver. Delivery goes to every destination in occasions.nudgeChannel, a comma-separated list, so Telegram and the agent both get it, and each is attempted independently, with deliveries[] naming per destination what landed and what did not. Housekeeping runs first and unconditionally, so a machine with nudging turned off still reaps. Returns hold:"quiet-hours" or hold:"disabled" when it deliberately said nothing, nothing is dropped, it waits. It runs the same with or without a decision model; with decision models off, provenance:"classic" says who each date is about was taken from the line\'s own for-me marker only. A push a destination accepted is recorded as sent even if settings or the profile changed during the send, so it is not pushed again next pass.',
     category: 'occasions',
@@ -534,7 +534,7 @@ export const builtinGatewayOccasionsMethodDescriptors: readonly GatewayMethodDes
   }),
   methodDescriptor({
     id: 'occasions.conflict.resolve',
-    metadata: { requiresFreshOperatorAuth: true },
+    access: 'admin',
     title: 'Resolve A Date Conflict',
     description: 'Apply the owner\'s answer to "which date is right?": keep names the date to keep, the other lines for that title are removed from the owner profile through the profile write gate (so authority is required with keep), answers and gift history stay, and the conflict is not raised again. Without keep nothing changes and dates lists what is recorded, to put to the owner. A conflict is never resolved automatically: only the owner knows which date was right. When the file already holds one date (the owner fixed it by hand) the reminder is closed and resolved is true.',
     category: 'occasions',
@@ -565,7 +565,7 @@ export const builtinGatewayOccasionsMethodDescriptors: readonly GatewayMethodDes
   }),
   methodDescriptor({
     id: 'occasions.plans.confirm',
-    metadata: { requiresFreshOperatorAuth: true },
+    access: 'admin',
     title: 'Record A Confirmed Plan',
     description: 'Write the confirmed plan as one line in the owner profile, under Plans, carrying its provenance and every entry of details (a confirmation number, flights and times, who is travelling), which occasions.plans.list returns in extras. Same one-confirmation rule and the same owner-profile write gate as an occasion.',
     category: 'occasions',

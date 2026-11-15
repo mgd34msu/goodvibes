@@ -680,7 +680,6 @@ export const builtinGatewayChannelMethodDescriptors: readonly GatewayMethodDescr
     category: 'channels',
     scopes: ['write:channels'],
     access: 'admin',
-    metadata: { requiresFreshOperatorAuth: true },
     http: { method: 'POST', path: '/api/channels/routing' },
     inputSchema: bodyEnvelopeSchema({
       admission: { type: 'string', enum: ['autonomous'] },
@@ -709,7 +708,6 @@ export const builtinGatewayChannelMethodDescriptors: readonly GatewayMethodDescr
     category: 'channels',
     scopes: ['write:channels'],
     access: 'admin',
-    metadata: { requiresFreshOperatorAuth: true },
     http: { method: 'DELETE', path: '/api/channels/routing/{assignmentId}' },
     inputSchema: objectSchema({ assignmentId: STRING_SCHEMA, admission: { type: 'string', enum: ['autonomous'] } }, ['assignmentId']),
     outputSchema: objectSchema({
@@ -751,7 +749,6 @@ export const builtinGatewayChannelMethodDescriptors: readonly GatewayMethodDescr
     category: 'channels',
     scopes: ['write:channels'],
     access: 'admin',
-    metadata: { requiresFreshOperatorAuth: true },
     http: { method: 'POST', path: '/api/channels/drafts' },
     inputSchema: bodyEnvelopeSchema({ ...CHANNEL_DRAFT_PROPERTIES, admission: { type: 'string', enum: ['autonomous'] } }, [...CHANNEL_DRAFT_REQUIRED]),
     outputSchema: objectSchema({
@@ -767,7 +764,6 @@ export const builtinGatewayChannelMethodDescriptors: readonly GatewayMethodDescr
     category: 'channels',
     scopes: ['write:channels'],
     access: 'admin',
-    metadata: { requiresFreshOperatorAuth: true },
     http: { method: 'DELETE', path: '/api/channels/drafts/{draftId}' },
     inputSchema: objectSchema({ draftId: STRING_SCHEMA, admission: { type: 'string', enum: ['autonomous'] } }, ['draftId']),
     outputSchema: objectSchema({

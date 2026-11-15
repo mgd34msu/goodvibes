@@ -333,14 +333,6 @@ export function buildCloudflareStep(controller: OnboardingWizardControllerLike):
           placeholder: DEFAULTS.durableObjectNamespaceName,
           defaultValue: config?.durableObjectNamespaceName || DEFAULTS.durableObjectNamespaceName,
         },
-        {
-          kind: 'text',
-          id: 'cloudflare.do-namespace-id',
-          label: 'Durable Object namespace id',
-          hint: 'Optional existing Durable Object namespace id.',
-          placeholder: 'optional Durable Object id',
-          defaultValue: config?.durableObjectNamespaceId ?? '',
-        },
       );
     }
 

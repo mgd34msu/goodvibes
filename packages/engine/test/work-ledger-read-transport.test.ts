@@ -438,11 +438,11 @@ describe('fresh authorization on every ledger entry point', () => {
     expect((await ws.call(method, { body: { actorId: 'forged', authority: {}, context: { admin: true, scopes: ['*'] } } }))?.status).toBe(400);
     expect(host.snapshotCalls).toBe(0); expect(host.historyCalls).toBe(0);
   });
-  test('every work ledger operator method requires fresh operator authorization', () => {
+  test('every work ledger operator method is held to the owner by its access level', () => {
     const host = fixture();
     const ledgerMethods = host.catalog.list().filter(method => method.id.startsWith('workLedger.'));
     expect(ledgerMethods.length).toBeGreaterThan(0);
-    expect(ledgerMethods.filter(method => method.metadata?.requiresFreshOperatorAuth !== true).map(method => method.id)).toEqual([]);
+    expect(ledgerMethods.filter(method => method.access !== 'admin').map(method => method.id)).toEqual([]);
   });
 });
 

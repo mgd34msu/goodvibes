@@ -43,7 +43,7 @@ test('an owner maximum cannot create an approval escape from exhausted mandatory
   expect(decidePurchase({ ...original, limits, pools: new BudgetLedger().snapshot(limits, Date.now(), 'UTC') }))
     .toMatchObject({ kind: 'refuse', code: 'overage-pool-exhausted' });
   expect(decidePurchase({ ...original, limits: { ...original.limits, dailyItemMinorUnits: 0 } }))
-    .toMatchObject({ kind: 'refuse', code: 'zero-budget' });
+    .toMatchObject({ kind: 'needs-approval', exceeded: { limit: 'daily-item-budget', unset: true } });
 });
 
 test.each([

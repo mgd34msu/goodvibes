@@ -1,4 +1,5 @@
 import { normalizePermissionMode } from '@goodvibes-jev/engine/platform/platform/gate';
+import { DEFAULT_CONFIG } from '@goodvibes-jev/engine/platform/platform/config';
 import type { OnboardingAcknowledgementTarget, OnboardingApplyOperation, OnboardingApplyRequest } from '../../runtime/onboarding/index.ts';
 import { formatProviderModel } from '@goodvibes-jev/engine/platform/platform/providers';
 import { getServerSurfaceFeatureFlags } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
@@ -245,6 +246,17 @@ function addCloudflareOperations(
     };
 
     const config = controller.runtimeSnapshot?.config.cloudflare;
+    const defaults = DEFAULT_CONFIG.cloudflare;
+    // A name or limit with a default is written only when it differs from the
+    // default (or replaces a non-default value), so a later change of the
+    // default reaches everyone who kept it.
+    type DefaultedKey = 'workerName' | 'workerCron' | 'queueName' | 'deadLetterQueueName' | 'tunnelName'
+      | 'kvNamespaceName' | 'durableObjectNamespaceName' | 'r2BucketName' | 'secretsStoreName';
+    const setDefaulted = (key: DefaultedKey, fieldId: string): void => {
+      const current = config?.[key];
+      const value = controller.getStringFieldValue(fieldId, current ?? defaults[key]);
+      if (value !== defaults[key] || (current !== undefined && current !== defaults[key])) setConfig(`cloudflare.${key}`, value);
+    };
     const enabledDefault = controller.isCapabilitySelected('cloudflare-batch') || config?.enabled === true;
     const enabled = controller.getBooleanFieldValue('cloudflare.enabled', enabledDefault);
     const components = getCloudflareComponentSelection(controller);
@@ -278,31 +290,35 @@ function addCloudflareOperations(
     setConfig('cloudflare.apiTokenRef', apiTokenRef);
     setConfig('cloudflare.zoneId', controller.getStringFieldValue('cloudflare.zone-id', config?.zoneId ?? ''));
     setConfig('cloudflare.zoneName', controller.getStringFieldValue('cloudflare.zone-name', config?.zoneName ?? ''));
-    setConfig('cloudflare.workerName', controller.getStringFieldValue('cloudflare.worker-name', config?.workerName ?? 'goodvibes-batch-worker'));
+    setDefaulted('workerName', 'cloudflare.worker-name');
     setConfig('cloudflare.workerSubdomain', controller.getStringFieldValue('cloudflare.worker-subdomain', config?.workerSubdomain ?? ''));
     setConfig('cloudflare.workerHostname', controller.getStringFieldValue('cloudflare.worker-hostname', config?.workerHostname ?? ''));
     setConfig('cloudflare.workerBaseUrl', controller.getStringFieldValue('cloudflare.worker-base-url', config?.workerBaseUrl ?? ''));
     setConfig('cloudflare.daemonBaseUrl', controller.getStringFieldValue('cloudflare.daemon-base-url', config?.daemonBaseUrl ?? ''));
     setConfig('cloudflare.daemonHostname', controller.getStringFieldValue('cloudflare.daemon-hostname', config?.daemonHostname ?? ''));
-    setConfig('cloudflare.workerCron', controller.getStringFieldValue('cloudflare.worker-cron', config?.workerCron ?? '*/5 * * * *'));
-    setConfig('cloudflare.queueName', controller.getStringFieldValue('cloudflare.queue-name', config?.queueName ?? 'goodvibes-batch'));
-    setConfig('cloudflare.deadLetterQueueName', controller.getStringFieldValue('cloudflare.dead-letter-queue-name', config?.deadLetterQueueName ?? 'goodvibes-batch-dlq'));
-    setConfig('cloudflare.tunnelName', controller.getStringFieldValue('cloudflare.tunnel-name', config?.tunnelName ?? 'goodvibes-daemon'));
+    setDefaulted('workerCron', 'cloudflare.worker-cron');
+    setDefaulted('queueName', 'cloudflare.queue-name');
+    setDefaulted('deadLetterQueueName', 'cloudflare.dead-letter-queue-name');
+    setDefaulted('tunnelName', 'cloudflare.tunnel-name');
     setConfig('cloudflare.tunnelId', controller.getStringFieldValue('cloudflare.tunnel-id', config?.tunnelId ?? ''));
     setConfig('cloudflare.tunnelTokenRef', controller.getStringFieldValue('cloudflare.tunnel-token-ref', config?.tunnelTokenRef ?? ''));
     setConfig('cloudflare.accessAppId', controller.getStringFieldValue('cloudflare.access-app-id', config?.accessAppId ?? ''));
     setConfig('cloudflare.accessServiceTokenId', controller.getStringFieldValue('cloudflare.access-service-token-id', config?.accessServiceTokenId ?? ''));
     setConfig('cloudflare.accessServiceTokenRef', controller.getStringFieldValue('cloudflare.access-service-token-ref', config?.accessServiceTokenRef ?? ''));
-    setConfig('cloudflare.kvNamespaceName', controller.getStringFieldValue('cloudflare.kv-namespace-name', config?.kvNamespaceName ?? 'goodvibes-runtime'));
+    setDefaulted('kvNamespaceName', 'cloudflare.kv-namespace-name');
     setConfig('cloudflare.kvNamespaceId', controller.getStringFieldValue('cloudflare.kv-namespace-id', config?.kvNamespaceId ?? ''));
-    setConfig('cloudflare.durableObjectNamespaceName', controller.getStringFieldValue('cloudflare.do-namespace-name', config?.durableObjectNamespaceName ?? 'GoodVibesCoordinator'));
-    setConfig('cloudflare.durableObjectNamespaceId', controller.getStringFieldValue('cloudflare.do-namespace-id', config?.durableObjectNamespaceId ?? ''));
-    setConfig('cloudflare.r2BucketName', controller.getStringFieldValue('cloudflare.r2-bucket-name', config?.r2BucketName ?? 'goodvibes-artifacts'));
-    setConfig('cloudflare.secretsStoreName', controller.getStringFieldValue('cloudflare.secrets-store-name', config?.secretsStoreName ?? 'goodvibes'));
+    setDefaulted('durableObjectNamespaceName', 'cloudflare.do-namespace-name');
+    setDefaulted('r2BucketName', 'cloudflare.r2-bucket-name');
+    setDefaulted('secretsStoreName', 'cloudflare.secrets-store-name');
     setConfig('cloudflare.secretsStoreId', controller.getStringFieldValue('cloudflare.secrets-store-id', config?.secretsStoreId ?? ''));
-    setConfig('cloudflare.maxQueueOpsPerDay', controller.getNumberFieldValue('cloudflare.max-queue-ops-per-day', config?.maxQueueOpsPerDay ?? 10000, 1));
+    const maxQueueOps = controller.getNumberFieldValue('cloudflare.max-queue-ops-per-day', config?.maxQueueOpsPerDay ?? defaults.maxQueueOpsPerDay, 1);
+    if (maxQueueOps !== defaults.maxQueueOpsPerDay || (config?.maxQueueOpsPerDay !== undefined && config.maxQueueOpsPerDay !== defaults.maxQueueOpsPerDay)) {
+      setConfig('cloudflare.maxQueueOpsPerDay', maxQueueOps);
+    }
     setConfig('batch.mode', batchMode);
-    setConfig('batch.queueBackend', batchMode !== 'off' && components.queues ? 'cloudflare' : 'local');
+    // The Cloudflare queue is switched on by provisioning, and only after the
+    // Worker has been seen reaching this daemon; until then jobs stay local.
+    if (batchMode === 'off' || !components.queues) setConfig('batch.queueBackend', 'local');
     // Zero Trust Tunnel auto-enables trustProxy on both services so the
     // login-rate-limiter keys on the client address the tunnel forwards rather
     // than the tunnel's own egress address. On its own, that address is read

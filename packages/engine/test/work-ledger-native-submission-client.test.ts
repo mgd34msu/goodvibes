@@ -60,7 +60,6 @@ describe('native submission transport contract', () => {
       const descriptor = catalog.get(method)!;
       expect(descriptor.access).toBe('admin');
       expect(descriptor.scopes).toEqual(['read:work-ledger', 'write:work-ledger']);
-      expect(descriptor.metadata?.['requiresFreshOperatorAuth']).toBe(true);
       expect(descriptor.http).toEqual({ method: 'POST', path });
       expect(firstJsonSchemaFailure(descriptor.inputSchema!, request)).toBeUndefined();
       expect(firstJsonSchemaFailure(descriptor.outputSchema!, result)).toBeUndefined();

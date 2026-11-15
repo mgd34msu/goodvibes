@@ -51,6 +51,12 @@ const CREDENTIAL_PROPERTIES = {
   apiTokenRef: STRING_SCHEMA,
 };
 
+const TUNNEL_CONNECTOR_SCHEMA = objectSchema({
+  state: stringEnumSchema(['not-configured', 'not-installed', 'starting', 'connected', 'failed', 'stopped']),
+  detail: STRING_SCHEMA,
+  next: arraySchema(STRING_SCHEMA),
+}, ['state', 'detail'], { additionalProperties: true });
+
 const VERIFY_RESULT_SCHEMA = objectSchema({
   ok: BOOLEAN_SCHEMA,
   workerHealth: objectSchema({ ok: BOOLEAN_SCHEMA, status: { type: 'number' }, error: STRING_SCHEMA }, ['ok', 'status']),
@@ -65,7 +71,7 @@ const PROVISION_INPUT_PROPERTIES: Record<string, Record<string, unknown>> = {
     'workerName', 'workerSubdomain', 'workerHostname', 'workerBaseUrl', 'daemonBaseUrl', 'daemonHostname',
     'zoneId', 'zoneName', 'queueName', 'deadLetterQueueName', 'tunnelName', 'tunnelId', 'tunnelServiceUrl',
     'tunnelTokenRef', 'accessAppId', 'accessServiceTokenId', 'accessServiceTokenRef', 'kvNamespaceName',
-    'kvNamespaceId', 'durableObjectNamespaceName', 'durableObjectNamespaceId', 'r2BucketName',
+    'kvNamespaceId', 'durableObjectNamespaceName', 'r2BucketName',
     'secretsStoreName', 'secretsStoreId', 'workerCron', 'operatorToken', 'operatorTokenRef',
     'workerClientToken', 'workerClientTokenRef',
   ].map((key) => [key, STRING_SCHEMA])),
@@ -79,7 +85,7 @@ export const builtinGatewayCloudflareMethodDescriptors: readonly GatewayMethodDe
   methodDescriptor({
     id: 'cloudflare.status',
     title: 'Cloudflare Status',
-    description: 'Whether the Cloudflare control plane is enabled and ready, which of its settings and credentials are configured (booleans only, never values), the stored non-secret configuration, and the warnings that explain anything missing. `GET /api/cloudflare` returns the same document.',
+    description: 'Whether the Cloudflare control plane is enabled and ready, which of its settings and credentials are configured (booleans only, never values), the stored non-secret configuration, and the warnings that explain anything missing. A resource (worker, queues, tunnel, Access, KV, Durable Objects, R2, Secrets Store) reads as configured only when a provision created or confirmed it at Cloudflare. Where this daemon runs the Cloudflare Tunnel connector, `tunnelConnector` says whether it is connected and what to do when it is not; `ready` requires it. `GET /api/cloudflare` returns the same document.',
     category: 'cloudflare',
     scopes: ['read:cloudflare'],
     access: 'admin',
@@ -91,6 +97,7 @@ export const builtinGatewayCloudflareMethodDescriptors: readonly GatewayMethodDe
       configured: objectSchema({}, [], { additionalProperties: true }),
       config: OPEN_OBJECT_SCHEMA,
       warnings: arraySchema(STRING_SCHEMA),
+      tunnelConnector: TUNNEL_CONNECTOR_SCHEMA,
     }, ['enabled', 'ready', 'configured', 'config', 'warnings']),
   }),
   methodDescriptor({
@@ -198,7 +205,7 @@ export const builtinGatewayCloudflareMethodDescriptors: readonly GatewayMethodDe
   methodDescriptor({
     id: 'cloudflare.provision',
     title: 'Provision Cloudflare Platform',
-    description: 'Create or update the selected Cloudflare resources (worker, queues and dead-letter queue, tunnel, Access application and service token, DNS records, KV, Durable Objects, R2, Secrets Store), answered 202 with one step per resource: `ok`, `skipped` or `warning`. Generated secrets are stored as `goodvibes://` secrets when asked and returned only when `returnGeneratedSecrets` is true. With Workers selected and a worker URL known it then runs the `cloudflare.worker.verify` check unless `verify` is false. Creates and changes billable resources in the Cloudflare account.',
+    description: 'Create or update the selected Cloudflare resources (worker, queues and dead-letter queue, tunnel and its connector on this daemon, Access application and service token, DNS records, KV for queued-job state, Durable Objects for the daily queue budget, R2 for job bodies, Secrets Store for the worker\'s credentials), answered 202 with one step per resource: `ok`, `skipped` or `warning`; `warnings` repeats the message of every warning step. Generated secrets are stored as `goodvibes://` secrets when asked and returned only when `returnGeneratedSecrets` is true. With Workers selected and a worker URL known it then runs the `cloudflare.worker.verify` check unless `verify` is false. `ok` is true, and `cloudflare.enabled` and the Cloudflare batch queue are switched on, only when that check passed (or was turned off) and Access, when asked for, protects the daemon hostname; otherwise a `switch-on` warning step says why nothing was switched. Creates and changes billable resources in the Cloudflare account.',
     category: 'cloudflare',
     scopes: ['write:cloudflare'],
     access: 'admin',
@@ -221,6 +228,7 @@ export const builtinGatewayCloudflareMethodDescriptors: readonly GatewayMethodDe
       secretsStore: OPEN_OBJECT_SCHEMA,
       verification: VERIFY_RESULT_SCHEMA,
       generatedSecrets: OPEN_OBJECT_SCHEMA,
+      warnings: arraySchema(STRING_SCHEMA),
     }, ['ok', 'dryRun', 'steps']),
   }),
   methodDescriptor({
@@ -241,7 +249,7 @@ export const builtinGatewayCloudflareMethodDescriptors: readonly GatewayMethodDe
   methodDescriptor({
     id: 'cloudflare.disable',
     title: 'Disable Cloudflare Worker',
-    description: 'Switch the Cloudflare integration off. Always disables it locally (`cloudflare.enabled` false and the batch queue back to `local`; `persistConfig` defaults to true) so the daemon stops using the worker, and, when an API token and account are available, removes the worker\'s cron trigger (`disableCron`, default true) and optionally its workers.dev subdomain (`disableWorkerSubdomain`, default false). `remote` is `not-disabled` when any Cloudflare step failed or was skipped: the deployed worker may then keep calling the daemon until it is disabled in the Cloudflare dashboard, and `steps` says which. The worker and the account\'s other resources are left in place.',
+    description: 'Switch the Cloudflare integration off. Always disables it locally (`cloudflare.enabled` false and the batch queue back to `local`; `persistConfig` defaults to true) and stops this daemon\'s tunnel connector, so the daemon stops using the worker. When an API token and account are available it also removes the worker\'s daemon credential (the script secret and its Secrets Store copy), its cron trigger (`disableCron`, default true) and its workers.dev route (`disableWorkerSubdomain`, default true; pass false to keep the route). `remote` is `disabled` only when every Cloudflare step succeeded; otherwise it is `not-disabled`, the deployed worker may keep calling the daemon until it is disabled in the Cloudflare dashboard, and `steps` says which. The worker and the account\'s other resources stay in place; each one still deployed is listed as a `still-deployed` step.',
     category: 'cloudflare',
     scopes: ['write:cloudflare'],
     access: 'admin',

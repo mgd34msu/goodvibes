@@ -139,7 +139,7 @@ test('HTTP request cancellation and token revocation while the import is in flig
   expect(await (await waiting).json()).toMatchObject({ kind: 'rejected', code: 'cancelled' });
   const release2 = await acquireCrossProcessLock(`${host.file}.knowledge-lock`, { strictOwnership: true });
   // Start at the authenticated catalog handler, so a revoked token is refused by the live check, not by the REST edge.
-  const entered = host.catalog.get('workLedger.importLegacy')!; expect(entered.metadata?.requiresFreshOperatorAuth).toBe(true);
+  expect(host.catalog.get('workLedger.importLegacy')!.access).toBe('admin');
   const pending = host.helper.invokeGatewayMethodCall({ authToken: host.paired.token, methodId: 'workLedger.importLegacy', body: request,
     context: host.helper.describeAuthenticatedPrincipal(host.paired.token)! });
   host.revoke(); await release2();

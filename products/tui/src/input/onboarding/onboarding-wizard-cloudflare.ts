@@ -193,7 +193,6 @@ export function buildCloudflareProvisionRequest(controller: OnboardingWizardCont
     kvNamespaceName: controller.getStringFieldValue('cloudflare.kv-namespace-name', controller.runtimeSnapshot?.config.cloudflare.kvNamespaceName ?? 'goodvibes-runtime'),
     kvNamespaceId: controller.getStringFieldValue('cloudflare.kv-namespace-id', controller.runtimeSnapshot?.config.cloudflare.kvNamespaceId ?? ''),
     durableObjectNamespaceName: controller.getStringFieldValue('cloudflare.do-namespace-name', controller.runtimeSnapshot?.config.cloudflare.durableObjectNamespaceName ?? 'GoodVibesCoordinator'),
-    durableObjectNamespaceId: controller.getStringFieldValue('cloudflare.do-namespace-id', controller.runtimeSnapshot?.config.cloudflare.durableObjectNamespaceId ?? ''),
     r2BucketName: controller.getStringFieldValue('cloudflare.r2-bucket-name', controller.runtimeSnapshot?.config.cloudflare.r2BucketName ?? 'goodvibes-artifacts'),
     secretsStoreName: controller.getStringFieldValue('cloudflare.secrets-store-name', controller.runtimeSnapshot?.config.cloudflare.secretsStoreName ?? 'goodvibes'),
     secretsStoreId: controller.getStringFieldValue('cloudflare.secrets-store-id', controller.runtimeSnapshot?.config.cloudflare.secretsStoreId ?? ''),

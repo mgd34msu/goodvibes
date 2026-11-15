@@ -17,7 +17,7 @@ const descriptions = {
 } as const;
 export const builtinGatewayNativeConversationIntakeMethodDescriptors: readonly GatewayMethodDescriptor[] = (['capture', 'get', 'admit', 'resume', 'cancel'] as const).map(operation => methodDescriptor({
   id: `workLedger.intake.${operation}`, title: `${operation[0]!.toUpperCase()}${operation.slice(1)} Native Conversation Intake`, category: 'work-ledger',
-  description: descriptions[operation], access: 'admin', scopes: ['read:work-ledger', WORK_LEDGER_WRITE_SCOPE], metadata: { requiresFreshOperatorAuth: true },
+  description: descriptions[operation], access: 'admin', scopes: ['read:work-ledger', WORK_LEDGER_WRITE_SCOPE],
   http: { method: 'POST', path: `/api/work-ledger/intake/${operation}` },
   inputSchema: json(operation === 'capture' ? nativeConversationIntakeCaptureRequestSchema : operation === 'get' ? nativeConversationIntakeLookupRequestSchema : nativeConversationIntakeTransitionRequestSchema),
   outputSchema: json(operation === 'get' ? nativeConversationIntakeLookupResultSchema : nativeConversationIntakeResultSchema),

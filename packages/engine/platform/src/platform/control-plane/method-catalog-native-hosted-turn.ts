@@ -12,13 +12,13 @@ export const builtinGatewayNativeHostedTurnMethodDescriptors: readonly GatewayMe
   description: operation === 'start' || operation === 'startAgent' ? `Deliver an already admitted native conversation input at most once through a host-owned broker identity and durable dispatch claim bound to the ${operation === 'startAgent' ? 'Agent' : 'WebUI'} settings owner. An optional execution mode initializes only a new session; continuation and replay retain the current session mode. Cross-surface replay is refused. Ambiguous dispatch requires inspection and is never replayed.`
     : operation === 'status' ? 'Read native hosted dispatch status. Does not admit, claim, retry or execute.'
     : 'Persist cancellation of the exact native hosted dispatch and drain its owned turn. Cancellation does not undo effects already performed.',
-  access: 'admin', scopes: [...NATIVE_HOSTED_TURN_SCOPES], metadata: { requiresFreshOperatorAuth: true },
+  access: 'admin', scopes: [...NATIVE_HOSTED_TURN_SCOPES],
   http: { method: 'POST', path: `/api/work-ledger/turn/${operation}` },
   inputSchema: json(operation === 'start' || operation === 'startAgent' ? nativeHostedTurnStartRequestSchema : nativeHostedTurnRequestSchema), outputSchema: json(nativeHostedTurnLookupSchema),
 })), methodDescriptor({
   id: 'workLedger.turn.session', title: 'Inspect Native Hosted Session', category: 'work-ledger',
   description: 'Read authoritative native session ownership. Only an explicit legacy result permits ordinary session ingress. Native sessions additionally require their current paired owner and native delivery scopes.',
-  access: 'authenticated', scopes: ['read:sessions'], metadata: { requiresFreshOperatorAuth: true },
+  access: 'admin', scopes: ['read:sessions'],
   http: { method: 'POST', path: '/api/work-ledger/turn/session' },
   inputSchema: json(nativeHostedSessionRequestSchema), outputSchema: json(nativeHostedSessionLookupSchema),
 })];

@@ -21,7 +21,7 @@ export const builtinGatewayNativeWorkExecutionMethodDescriptors: readonly Gatewa
   methodDescriptor({
     id: 'workLedger.project', title: 'Read Native Work Project', category: 'work-ledger',
     description: 'Read only the selected host project identity. Does not confer execution eligibility or authority.',
-    access: 'admin', scopes: ['read:work-ledger'], metadata: { requiresFreshOperatorAuth: true },
+    access: 'admin', scopes: ['read:work-ledger'],
     http: { method: 'GET', path: '/api/work-ledger/project' },
     inputSchema: json(strictObject({})), outputSchema: json(nativeWorkLedgerProjectSchema),
   }),
@@ -30,7 +30,6 @@ export const builtinGatewayNativeWorkExecutionMethodDescriptors: readonly Gatewa
       id: `workLedger.execution.${operation}`,
       title, description, category: 'work-ledger',
       access: 'admin', scopes: ['read:work-ledger', 'write:fleet'],
-      metadata: { requiresFreshOperatorAuth: true },
       http: { method: 'POST', path: `/api/work-ledger/execution/${operation}` },
       inputSchema: json(nativeWorkExecutionRequestSchema),
       outputSchema: json(nativeWorkExecutionSnapshotSchema),

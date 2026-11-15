@@ -381,14 +381,14 @@ export function createWebuiBrowserJudgment(options: WebuiBrowserJudgmentOptions)
     let id: string | undefined;
     try {
       const method = options.methods.get('email.inbox.read');
-      if (!method || method.metadata?.requiresFreshOperatorAuth !== true || method.access === 'remote-peer'
+      if (!method || method.access === 'remote-peer'
         || (method.access === 'admin' && !principal.admin) || !canRead(principal, [...method.scopes, 'read:email', 'write:judgment'])
         || !source.revision || source.signal.aborted) return undefined;
       const scopes = [...method.scopes];
       const access = method.access;
       const assertCurrent = () => {
         if (source.signal.aborted || options.methods.get('email.inbox.read') !== method || method.access !== access
-          || method.metadata?.requiresFreshOperatorAuth !== true || method.scopes.length !== scopes.length
+          || method.scopes.length !== scopes.length
           || method.scopes.some((scope, index) => scope !== scopes[index])) return held();
         requireSynchronousAssertion(source.assertCurrent, 'JUDGMENT_REFERENCE_HELD');
       };

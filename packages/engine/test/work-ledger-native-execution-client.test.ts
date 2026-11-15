@@ -51,7 +51,6 @@ describe('native execution transport-only contract', () => {
       const descriptor = catalog.get(`workLedger.execution.${operation}`)!;
       expect(descriptor.access).toBe('admin');
       expect(descriptor.scopes).toEqual(['read:work-ledger', 'write:fleet']);
-      expect(descriptor.metadata?.['requiresFreshOperatorAuth']).toBe(true);
       expect(descriptor.http).toEqual({ method: 'POST', path: `/api/work-ledger/execution/${operation}` });
       expect(firstJsonSchemaFailure(descriptor.inputSchema!, { projectId, ...identity() })).toBeUndefined();
       expect(firstJsonSchemaFailure(descriptor.outputSchema!, snapshot())).toBeUndefined();
@@ -235,7 +234,6 @@ describe('native work host project discovery', () => {
     const descriptor = new GatewayMethodCatalog().get('workLedger.project')!;
     expect(descriptor.http).toEqual({ method: 'GET', path: '/api/work-ledger/project' });
     expect(descriptor.access).toBe('admin'); expect(descriptor.scopes).toEqual(['read:work-ledger']);
-    expect(descriptor.metadata?.['requiresFreshOperatorAuth']).toBe(true);
     expect(firstJsonSchemaFailure(descriptor.inputSchema!, {})).toBeUndefined();
     expect(firstJsonSchemaFailure(descriptor.inputSchema!, { projectId })).toBeDefined();
     expect(firstJsonSchemaFailure(descriptor.outputSchema!, { projectId })).toBeUndefined();

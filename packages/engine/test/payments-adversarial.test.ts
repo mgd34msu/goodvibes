@@ -912,7 +912,7 @@ describe('the decision order', () => {
     expect(outcome.draw.toleranceMinorUnits).toBeGreaterThan(0);
   });
 
-  test('a zero budget refuses with a message that says what to set', () => {
+  test('an unset (zero) daily item budget asks the owner and offers to set it', () => {
     const outcome = decidePurchase({
       quoted: {
         itemMinorUnits: 100, taxMinorUnits: 0, mandatoryFeesMinorUnits: 0,
@@ -921,10 +921,10 @@ describe('the decision order', () => {
       limits: { ...limits, dailyItemMinorUnits: 0 },
       pools: poolsFor(new BudgetLedger()), budgetCurrency: USD, preferredTier: 'normal',
     });
-    expect(outcome.kind).toBe('refuse');
-    if (outcome.kind !== 'refuse') return;
-    expect(outcome.code).toBe('zero-budget');
-    expect(outcome.reason).toContain('dailyItem');
+    expect(outcome.kind).toBe('needs-approval');
+    if (outcome.kind !== 'needs-approval') return;
+    expect(outcome.approvalReasons).toContain('daily-item-budget');
+    expect(outcome.exceeded).toMatchObject({ limit: 'daily-item-budget', setting: 'payments.budget.dailyItem', unset: true, excessMinorUnits: 100 });
   });
 
   test('a checkout in another currency is refused rather than converted', () => {

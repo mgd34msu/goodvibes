@@ -18,7 +18,7 @@ export const builtinGatewayNativeWorkSubmissionMethodDescriptors: readonly Gatew
   methodDescriptor({
     id: 'workLedger.submit', title: 'Submit Native Work', category: 'work-ledger',
     description: 'Persist one bounded explicit-source goal and ordered criteria on the selected authoritative host. Exact request replay returns the immutable submission receipt. Does not start execution or grant verification authority. Complete encoded input is limited to 262144 bytes without truncation.',
-    access: 'admin', scopes: ['read:work-ledger', WORK_LEDGER_WRITE_SCOPE], metadata: { requiresFreshOperatorAuth: true },
+    access: 'admin', scopes: ['read:work-ledger', WORK_LEDGER_WRITE_SCOPE],
     http: { method: 'POST', path: '/api/work-ledger/submissions' },
     replay: { in: 'body', name: 'requestId', behavior: 'Sending the same requestId with the same content again returns the original immutable receipt (replayed: true). After a lost response, use workLedger.submission.get with the same requestId.' },
     inputSchema: json(nativeWorkSubmissionRequestSchema), outputSchema: json(nativeWorkSubmissionResultSchema),
@@ -26,7 +26,7 @@ export const builtinGatewayNativeWorkSubmissionMethodDescriptors: readonly Gatew
   methodDescriptor({
     id: 'workLedger.submission.get', title: 'Read Native Work Submission', category: 'work-ledger',
     description: 'Look up an immutable native submission receipt by the original request ID on the selected authoritative host. Use after a lost submit response. Does not submit, retry, resume, or start execution.',
-    access: 'admin', scopes: ['read:work-ledger', WORK_LEDGER_WRITE_SCOPE], metadata: { requiresFreshOperatorAuth: true },
+    access: 'admin', scopes: ['read:work-ledger', WORK_LEDGER_WRITE_SCOPE],
     http: { method: 'POST', path: '/api/work-ledger/submissions/get' },
     inputSchema: json(nativeWorkSubmissionLookupRequestSchema), outputSchema: json(nativeWorkSubmissionLookupResultSchema),
   }),

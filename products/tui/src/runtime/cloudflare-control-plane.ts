@@ -57,6 +57,8 @@ export interface CloudflareControlPlaneStatus {
   readonly configured: Record<string, boolean>;
   readonly config: Record<string, unknown>;
   readonly warnings: readonly string[];
+  /** The daemon's Cloudflare Tunnel connector; present only where the daemon runs it. */
+  readonly tunnelConnector?: { readonly state: string; readonly detail: string; readonly next?: readonly string[] };
 }
 
 export interface CloudflareTokenRequirement {
@@ -164,6 +166,8 @@ export interface CloudflareVerifyResult {
 export interface CloudflareDisableResult {
   readonly ok: boolean;
   readonly steps: readonly CloudflareProvisionStep[];
+  /** `disabled` only when every step at Cloudflare succeeded. */
+  readonly remote: 'disabled' | 'not-disabled';
 }
 
 export interface CloudflareTokenRequirementsRequest {
@@ -215,7 +219,6 @@ export interface CloudflareProvisionRequest extends CloudflareDiscoverRequest {
   readonly kvNamespaceName?: string;
   readonly kvNamespaceId?: string;
   readonly durableObjectNamespaceName?: string;
-  readonly durableObjectNamespaceId?: string;
   readonly r2BucketName?: string;
   readonly secretsStoreName?: string;
   readonly secretsStoreId?: string;

@@ -44,6 +44,7 @@ import { registerCompatRuntimeCommands } from './commands/compat-runtime.ts';
 import { registerOwnerProfileRuntimeCommands } from './commands/owner-profile-runtime.ts';
 import { registerOperatorActionRuntimeCommands } from './commands/operator-actions-runtime.ts';
 import { registerConnectedHostAdminCommands } from './commands/connected-host-admin-runtime.ts';
+import { registerOwnerInboxCommands } from './commands/owner-inbox-runtime.ts';
 import { registerEmailRuntimeCommands } from './commands/email-runtime.ts';
 import { registerCalendarRuntimeCommands } from './commands/calendar-runtime.ts';
 import { registerGoogleRuntimeCommands } from './commands/google-runtime.ts';
@@ -79,6 +80,7 @@ export function registerBuiltinCommands(registry: CommandRegistry): void {
   registerOwnerProfileRuntimeCommands(registry);
   registerOperatorActionRuntimeCommands(registry);
   registerConnectedHostAdminCommands(registry);
+  registerOwnerInboxCommands(registry);
   registerCalendarRuntimeCommands(registry);
   registerAgentRuntimeProfileRuntimeCommands(registry);
   registerVibeRuntimeCommands(registry);

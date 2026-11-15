@@ -48,6 +48,7 @@ import type {
   BudgetApprovalReason,
 } from './types.js';
 import { SHIPPING_TIERS } from './types.js';
+import { formatMinorUnits } from './message.js';
 
 /** What the checkout quoted, once parsed into integers we trust. */
 export interface QuotedTotals {
@@ -71,11 +72,26 @@ export interface DecisionInput {
   readonly requestedMaximumMinorUnits?: MinorUnits | undefined;
 }
 
+/** The owner's limit a purchase did not fit, with the amounts, in the budget currency's minor units. */
+export interface ExceededLimit {
+  readonly limit: 'daily-item-budget' | 'per-purchase-ceiling' | 'requested-maximum' | 'daily-overage-budget';
+  /** The setting that holds it, so a surface can offer to change it. */
+  readonly setting?: string | undefined;
+  /** What the limit allows right now (for a daily budget, what is left of it today). */
+  readonly availableMinorUnits: MinorUnits;
+  readonly neededMinorUnits: MinorUnits;
+  readonly excessMinorUnits: MinorUnits;
+  readonly currency: CurrencyCode;
+  /** True when the limit is 0 because it was never set; the owner is offered to set it. */
+  readonly unset: boolean;
+}
+
 export type DecisionOutcome =
   | {
       readonly kind: 'refuse';
       readonly code: RefusalCode;
       readonly reason: string;
+      readonly exceeded?: ExceededLimit | undefined;
     }
   | {
       readonly kind: 'needs-approval';
@@ -83,6 +99,8 @@ export type DecisionOutcome =
       readonly shipping: ShippingLadderResult;
       readonly reason: string;
       readonly approvalReasons: readonly BudgetApprovalReason[];
+      /** The first limit the purchase did not fit, with its amounts. */
+      readonly exceeded: ExceededLimit;
     }
   | {
       readonly kind: 'within-budget';
@@ -118,15 +136,12 @@ export function decidePurchase(input: DecisionInput): DecisionOutcome {
     };
   }
 
-  if (limits.dailyItemMinorUnits <= 0) {
-    return {
-      kind: 'refuse',
-      code: 'zero-budget',
-      reason:
-        'Refused: the daily item budget is 0, so nothing can be bought yet. '
-        + 'Set payments.budget.dailyItem to the most you want spent on items in a day.',
-    };
-  }
+  // Wording only: an amount the formatter will not render (never expected from the pools) is shown as its integer.
+  const money = (amount: MinorUnits): string => Number.isSafeInteger(amount) && amount >= 0 ? formatMinorUnits(amount, quoted.currency) : String(amount);
+  // A daily item budget of 0 is the shipped default: nothing is spent without
+  // the owner, so every purchase goes to him for a yes (below, as over the
+  // daily item budget), and that ask offers to set the limit.
+  const itemBudgetUnset = limits.dailyItemMinorUnits <= 0;
 
   const requestedMaximum = input.requestedMaximumMinorUnits;
   if (requestedMaximum !== undefined && (!Number.isSafeInteger(requestedMaximum) || requestedMaximum < 0)) {
@@ -137,7 +152,7 @@ export function decidePurchase(input: DecisionInput): DecisionOutcome {
   const overCeiling =
     limits.perPurchaseCeiling.enabled
     && quoted.itemMinorUnits > limits.perPurchaseCeiling.minorUnits;
-  const overDaily = quoted.itemMinorUnits > pools.item.remaining;
+  const overDaily = quoted.itemMinorUnits > (itemBudgetUnset ? 0 : pools.item.remaining);
   const aboveBudget = overCeiling || overDaily;
 
   // ── Step 2: the unavoidable charges, with the ladder ───────────────────
@@ -192,13 +207,22 @@ export function decidePurchase(input: DecisionInput): DecisionOutcome {
     const lowestDraw = fixedUnavoidable + ladderAtAnyPrice.costMinorUnits;
     const shortfall = lowestDraw - overageAvailable;
     if (!limits.overageTolerance.enabled || shortfall > pools.tolerance.remaining) {
+      const overageUnset = limits.dailyOverageMinorUnits <= 0;
       return {
         kind: 'refuse',
         code: 'overage-pool-exhausted',
         reason:
-          `Refused: tax, fees and even the lowest delivery option I could choose come to ${lowestDraw} and only `
-          + `${overageAvailable} is left in today's overage budget. I stepped delivery all the way `
-          + 'down and it still does not fit, so this does not go through.',
+          `Refused: tax, fees and even the lowest delivery option I could choose come to ${money(lowestDraw)} and only `
+          + `${money(overageAvailable)} is left in today's overage budget, ${money(shortfall)} short. I stepped delivery all the way `
+          + 'down and it still does not fit, so this does not go through.'
+          + (overageUnset
+            ? ' The daily overage budget is not set (0). Set payments.budget.dailyOverage to what tax, fees and delivery may add in a day, and purchases like this one can go ahead.'
+            : ''),
+        exceeded: {
+          limit: 'daily-overage-budget', setting: 'payments.budget.dailyOverage',
+          availableMinorUnits: overageAvailable, neededMinorUnits: lowestDraw, excessMinorUnits: shortfall,
+          currency: quoted.currency, unset: overageUnset,
+        },
       };
     }
     toleranceDraw = shortfall;
@@ -218,16 +242,32 @@ export function decidePurchase(input: DecisionInput): DecisionOutcome {
   if (overCeiling) approvalReasons.push('per-purchase-ceiling');
   if (requestedMaximum !== undefined && draw.totalMinorUnits > requestedMaximum) approvalReasons.push('requested-maximum');
   if (approvalReasons.length > 0) {
-    const why = overCeiling
-      ? `it is over the per-purchase ceiling of ${limits.perPurchaseCeiling.minorUnits}`
-      : `only ${pools.item.remaining} is left in today's item budget`;
+    const item = quoted.itemMinorUnits;
+    const exceeded: ExceededLimit = itemBudgetUnset
+      ? { limit: 'daily-item-budget', setting: 'payments.budget.dailyItem', availableMinorUnits: 0, neededMinorUnits: item, excessMinorUnits: item, currency: quoted.currency, unset: true }
+      : overCeiling
+        ? { limit: 'per-purchase-ceiling', setting: 'payments.budget.perPurchaseCeiling', availableMinorUnits: limits.perPurchaseCeiling.minorUnits,
+            neededMinorUnits: item, excessMinorUnits: item - limits.perPurchaseCeiling.minorUnits, currency: quoted.currency, unset: limits.perPurchaseCeiling.minorUnits <= 0 }
+        : overDaily
+          ? { limit: 'daily-item-budget', setting: 'payments.budget.dailyItem', availableMinorUnits: pools.item.remaining,
+              neededMinorUnits: item, excessMinorUnits: item - pools.item.remaining, currency: quoted.currency, unset: false }
+          : { limit: 'requested-maximum', availableMinorUnits: requestedMaximum!, neededMinorUnits: draw.totalMinorUnits,
+              excessMinorUnits: draw.totalMinorUnits - requestedMaximum!, currency: quoted.currency, unset: false };
+    const reason = exceeded.unset
+      ? `This item costs ${money(item)} and ${exceeded.limit === 'per-purchase-ceiling' ? 'the per-purchase ceiling' : 'the daily item budget'} is not set (0), so every purchase asks you first. `
+        + `Set ${exceeded.setting} to the most you want ${exceeded.limit === 'per-purchase-ceiling' ? 'one purchase to cost' : 'spent on items in a day'}, and purchases within it will go ahead without asking.`
+      : aboveBudget
+        ? `This item costs ${money(item)} and ${overCeiling
+          ? `it is over the per-purchase ceiling of ${money(limits.perPurchaseCeiling.minorUnits)} by ${money(exceeded.excessMinorUnits)}`
+          : `only ${money(pools.item.remaining)} is left in today's item budget, ${money(exceeded.excessMinorUnits)} short`}.`
+        : `The full purchase total ${money(draw.totalMinorUnits)} exceeds the owner's requested maximum ${money(requestedMaximum!)} by ${money(exceeded.excessMinorUnits)}.`;
     return {
       kind: 'needs-approval',
       draw,
       shipping,
-      reason: aboveBudget ? `This item costs ${quoted.itemMinorUnits} and ${why}.`
-        : `The full purchase total ${draw.totalMinorUnits} exceeds the owner's requested maximum ${requestedMaximum}.`,
+      reason,
       approvalReasons: Object.freeze(approvalReasons),
+      exceeded,
     };
   }
 

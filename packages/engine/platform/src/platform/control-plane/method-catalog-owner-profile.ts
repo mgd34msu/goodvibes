@@ -340,7 +340,7 @@ export const builtinGatewayOwnerProfileMethodDescriptors: readonly GatewayMethod
   }),
   methodDescriptor({
     id: 'profile.set',
-    metadata: { requiresFreshOperatorAuth: true },
+    access: 'admin',
     title: 'Set Profile Field',
     description: 'Record or correct one mechanical field, moving any previous value into a retained history comment. Refused unless the caller carries owner-direct authority AND the proposed value does not overlap untrusted content read this turn AND a verbatim quote of what the owner said is supplied. A caller declaring the call was not an explicit user request is refused before any of that.',
     category: 'profile',
@@ -351,7 +351,7 @@ export const builtinGatewayOwnerProfileMethodDescriptors: readonly GatewayMethod
   }),
   methodDescriptor({
     id: 'profile.append',
-    metadata: { requiresFreshOperatorAuth: true },
+    access: 'admin',
     title: 'Append Profile Note',
     description: 'Add one prose bullet to a section, carrying its provenance suffix. Same three-layer gate as profile.set. A section that does not exist is created at the end of the document; a section the owner renamed is matched case-insensitively rather than duplicated.',
     category: 'profile',
@@ -362,7 +362,7 @@ export const builtinGatewayOwnerProfileMethodDescriptors: readonly GatewayMethod
   }),
   methodDescriptor({
     id: 'profile.forget',
-    metadata: { requiresFreshOperatorAuth: true },
+    access: 'admin',
     title: 'Forget Profile Line',
     description: 'Delete a mechanical field and every retained history comment for it, or one prose line addressed by its section plus its exact text. Never by line position: the owner edits this file himself, so an index taken from an earlier read may name a different line by the time the delete arrives. Text that no longer matches removes nothing and says so, rather than deleting the nearest thing. No tombstone, no deleted flag, no retention window, delete means delete. Forgetting something that was not there reports that honestly instead of returning success. Authority-gated exactly like a write: an injection that cannot add a fact must not be able to remove one.',
     category: 'profile',
@@ -374,7 +374,7 @@ export const builtinGatewayOwnerProfileMethodDescriptors: readonly GatewayMethod
   }),
   methodDescriptor({
     id: 'profile.undo',
-    metadata: { requiresFreshOperatorAuth: true },
+    access: 'admin',
     title: 'Undo Profile Correction',
     description: 'Promote a field\'s most recent superseded value back to the active line, so a wrong correction is recoverable. Authority-gated like every other mutation.',
     category: 'profile',

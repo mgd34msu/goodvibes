@@ -8,7 +8,7 @@ export const builtinDelegatedInboundMethodDescriptors = Object.entries(operation
   description: operation === 'release'
     ? 'Stop routing this chat through delegated intake and return it to normal handling. Pass the configurationId, or the chatId (and threadId) when no configuration exists.'
     : 'Explicit paired-owner command for bounded in-memory original-source intake. Configure chooses the pending source lifetime; decide approves one exact external message and metadata-only review receipt. No execution, standing processing grant, or owner-text capture.',
-  access: 'admin', scopes: ['read:work-ledger', WORK_LEDGER_WRITE_SCOPE], metadata: { requiresFreshOperatorAuth: true },
+  access: 'admin', scopes: ['read:work-ledger', WORK_LEDGER_WRITE_SCOPE],
   http: { method: 'POST', path: `/api/inbound/telegram/${operation}` },
   inputSchema: toJSONSchema(schema), outputSchema: toJSONSchema(delegatedTelegramResultSchema),
 }));

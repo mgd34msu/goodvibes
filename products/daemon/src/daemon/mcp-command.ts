@@ -98,9 +98,17 @@ export async function runMcpCommand(input: RunMcpCommandInput): Promise<number> 
     fetchImpl,
   });
   const client = createOperatorRemoteClient(transport, contract);
+  const restBound = new Set(contract.operator.methods.filter((method) => method.http).map((method) => method.id));
   const server = createOperatorMcpServer({
     contract,
-    invoke: (methodId, params) => client.invoke(methodId, params),
+    // A method with no REST path (published for the WebSocket only) is reached
+    // through the daemon's invoke-by-id endpoint, which runs the same handler
+    // behind the same access gate.
+    invoke: (methodId, params) => restBound.has(methodId)
+      ? client.invoke(methodId, params)
+      : transport.requestJson(`/api/control-plane/methods/${encodeURIComponent(methodId)}/invoke`, {
+        method: 'POST', body: { body: params }, methodId,
+      }),
     serverInfo: { name: 'goodvibes-operator', version: VERSION },
   });
   await serveOperatorMcp(server, createStreamTransport(input.input, input.output));

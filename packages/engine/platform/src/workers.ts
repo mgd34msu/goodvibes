@@ -23,6 +23,9 @@ export interface GoodVibesCloudflareWorkerEnv {
   GOODVIBES_OPERATOR_TOKEN?: string | undefined;
   GOODVIBES_WORKER_TOKEN?: string | undefined;
   GOODVIBES_QUEUE_JOB_PAYLOADS?: string | undefined;
+  /** Cloudflare Access service token, sent to the daemon when its hostname is behind Access. */
+  GOODVIBES_ACCESS_CLIENT_ID?: string | undefined;
+  GOODVIBES_ACCESS_CLIENT_SECRET?: string | undefined;
   GOODVIBES_BATCH_QUEUE?: GoodVibesCloudflareQueue<GoodVibesCloudflareQueuePayload> | undefined;
 }
 
@@ -224,6 +227,10 @@ async function proxyDaemonJson(
   if (init.body !== undefined) headers.set('Content-Type', 'application/json');
   const token = options.authToken ?? env.GOODVIBES_OPERATOR_TOKEN ?? '';
   if (token) headers.set('Authorization', `Bearer ${token}`);
+  if (env.GOODVIBES_ACCESS_CLIENT_ID && env.GOODVIBES_ACCESS_CLIENT_SECRET) {
+    headers.set('CF-Access-Client-Id', env.GOODVIBES_ACCESS_CLIENT_ID);
+    headers.set('CF-Access-Client-Secret', env.GOODVIBES_ACCESS_CLIENT_SECRET);
+  }
   return fetch(`${baseUrl}${path}${init.search ?? ''}`, {
     method: init.method,
     headers,

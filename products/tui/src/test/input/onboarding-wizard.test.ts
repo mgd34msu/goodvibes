@@ -290,7 +290,7 @@ describe('OnboardingWizardController', () => {
     expect(configValues.get('cloudflare.queueName')).toBe('gv-queue');
     expect(configValues.get('cloudflare.deadLetterQueueName')).toBe('gv-dlq');
     expect(configValues.get('batch.mode')).toBe('explicit');
-    expect(configValues.get('batch.queueBackend')).toBe('cloudflare');
+    expect(configValues.has('batch.queueBackend')).toBe(false);
   });
 
   test('stores a pasted Cloudflare operational token as a GoodVibes secret ref', () => {

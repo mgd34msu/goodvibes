@@ -88,6 +88,26 @@ describe('goodvibes-daemon mcp serve', () => {
     expect(call?.authorization).toBe('Bearer operator-token-fixture');
   });
 
+  test('a method published for the WebSocket only is invoked through the invoke-by-id endpoint', async () => {
+    const posted: { url: string; body: unknown }[] = [];
+    const { input, written } = setup({
+      input: inputOf(initialize, { jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'checkpoints_list', arguments: {} } }),
+      fetchImpl: async (request, init) => {
+        const url = String(request);
+        if (url.includes('/invoke')) {
+          posted.push({ url, body: JSON.parse(String(init?.body)) });
+          return Response.json({ checkpoints: [] });
+        }
+        return Response.json({ version: '0.0.0-test' });
+      },
+    });
+    expect(await runMcpCommand(input)).toBe(0);
+    const result = frames(written).find((frame) => frame['id'] === 4)!['result'] as { isError?: boolean; content: { text: string }[] };
+    expect(result.isError).toBeUndefined();
+    expect(JSON.parse(result.content[0]!.text)).toEqual({ checkpoints: [] });
+    expect(posted).toEqual([{ url: 'http://127.0.0.1:3421/api/control-plane/methods/checkpoints.list/invoke', body: { body: {} } }]);
+  });
+
   test('without an operator token it names the missing pairing on one stderr line and writes nothing to stdout', async () => {
     const { input, written, stderr, requests } = setup({ readToken: () => undefined });
     expect(await runMcpCommand(input)).toBe(1);

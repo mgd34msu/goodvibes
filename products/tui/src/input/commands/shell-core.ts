@@ -3,7 +3,7 @@ import { createBasicShellCommands, createShellNavigationCommands } from '@goodvi
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import type { SelectionItem } from '../selection-modal.ts';
 import { publishActiveEffortOptions } from '../../providers/reasoning-effort-surface.ts';
-import { executeWriteQuit } from './quit-shared.ts';
+import { executeCommitAll } from './quit-shared.ts';
 import { startFreshConversation } from './fresh-conversation.ts';
 import { CompactBusyError, compactConversation, requireKeybindingsManager, requireProviderApi, requireSessionMemoryStore } from './runtime-services.ts';
 import {
@@ -45,7 +45,7 @@ export function registerShellCoreCommands(registry: CommandRegistry): void {
   const navigation = createShellNavigationCommands<CommandContext>({
     shortcutsHidden: false,
     shortcutsFallback: 'Use /commands for shortcuts',
-    quitAliases: [':q', 'exit'],
+    quitAliases: [':q', ':wq', 'exit'],
   });
 
   registry.register(coreActions.model);
@@ -233,11 +233,13 @@ export function registerShellCoreCommands(registry: CommandRegistry): void {
   registry.register(navigation.quit);
 
   registry.register({
-    name: 'wq',
-    aliases: [':wq'],
-    description: 'Commit all git changes and then exit',
-    async handler(_args, ctx) {
-      await executeWriteQuit(ctx);
+    name: 'commit-all',
+    aliases: [],
+    description: 'Show what committing the whole working tree would include; --yes commits it',
+    usage: '[--yes]: bare shows the repository root and file counts; --yes commits (a hand-staged set is committed as it is)',
+    argsHint: '[--yes]',
+    async handler(args, ctx) {
+      await executeCommitAll(ctx, args);
     },
   });
 

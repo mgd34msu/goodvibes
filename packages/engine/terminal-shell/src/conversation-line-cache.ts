@@ -1,5 +1,5 @@
 /**
- * conversation-line-cache.ts, per-unit Line[] production cache.
+ * conversation-line-cache.ts, per-unit rendered-row production cache.
  *
  * The measured defect (perf baseline 2026-07-03, transcript.build_1k): appending
  * ONE message to an N-message conversation re-rendered all N messages, because
@@ -36,6 +36,7 @@
 
 import { BeadContentCache } from './bead-content-cache.js';
 import { createEmptyLine, type Line } from '@goodvibes-jev/engine/platform/platform/types';
+import { compactLine, expandLine, type CompactLine } from './conversation-history.js';
 import type { BlockMeta } from './work-tree-types.js';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { TurnModel } from './work-tree-model.js';
@@ -66,8 +67,8 @@ interface CacheEntry {
   readonly focusIds: ReadonlySet<string>;
   /** The focus id this entry was drawn with, when it is one of its own rows. */
   readonly focusDrawn: string | null;
-  /** Rendered lines, including paragraph spacing when the unit ends with prose. */
-  readonly lines: Line[];
+  /** Rendered lines, kept compact, including paragraph spacing when the unit ends with prose. */
+  readonly lines: readonly CompactLine[];
   /** Block metas with startLine relative to the unit. */
   readonly blocks: BlockMeta[];
   /** Error-navigation line offsets relative to the unit. */
@@ -132,7 +133,13 @@ export interface LineCacheContext {
   readonly treeGlyphSet?: TreeGlyphSetName | undefined;
   readonly focusId?: string | null | undefined;
   readonly frame?: number | undefined;
-  readonly history: { addLine(line: Line): void; addLines(lines: Line[]): void; getLineCount(): number };
+  readonly history: {
+    addLine(line: Line): void;
+    addLines(lines: Line[]): void;
+    getLineCount(): number;
+    /** Present on the transcript buffer: cached rows are kept by reference instead of rebuilt as cells. */
+    addCompactLines?: ((lines: readonly CompactLine[]) => void) | undefined;
+  };
   readonly collapseState: Map<string, boolean>;
   readonly blockRegistry: BlockMeta[];
   readonly errorLineRegistry: number[];
@@ -329,7 +336,7 @@ export class MessageLineCache<Context extends LineCacheContext> {
       collapseDeps,
       focusIds,
       focusDrawn: focus !== null && focusIds.has(focus) ? focus : null,
-      lines,
+      lines: lines.map(compactLine),
       blocks,
       errorRelLines: errors,
       messageLines,
@@ -338,11 +345,13 @@ export class MessageLineCache<Context extends LineCacheContext> {
   }
 
   /**
-   * Replay an entry into the live context at buffer offset `base`. Line objects
-   * are shared (never mutated after production).
+   * Replay an entry into the live context at buffer offset `base`. The
+   * transcript buffer takes the compact rows by reference; any other target
+   * (a test's plain array) gets cells built from them.
    */
   private apply(context: Context, entry: CacheEntry, base: number, messageLineRegistry: number[]): void {
-    context.history.addLines(entry.lines);
+    if (context.history.addCompactLines) context.history.addCompactLines(entry.lines);
+    else context.history.addLines(entry.lines.map(expandLine));
     const registry = context.blockRegistry;
     for (const block of entry.blocks) registry.push({ ...block, blockIndex: registry.length, startLine: block.startLine + base });
     for (const line of entry.errorRelLines) context.errorLineRegistry.push(line + base);

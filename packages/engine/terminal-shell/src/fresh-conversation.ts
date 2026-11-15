@@ -20,6 +20,7 @@ import type { SessionMeta, SessionManager } from '@goodvibes-jev/engine/platform
 import { clearTurnAnchors, getTurnAnchors, persistTurnAnchors, recordTurnAnchor } from '@goodvibes-jev/engine/platform/platform/rewind';
 import type { TerminalConversationManager } from './terminal-conversation.js';
 import type { SessionSurface } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { RefusalError, refusal } from '@goodvibes-jev/engine/errors';
 export interface FreshConversationContext {
   readonly session: {
     readonly conversationManager: TerminalConversationManager;
@@ -59,7 +60,13 @@ export function startFreshConversation(ctx: FreshConversationContext, surface?: 
   const conversation = ctx.session.conversationManager;
   const keep = hasConversation(ctx);
   if (keep && !ctx.session.sessionManager) {
-    throw new Error('This session has no session store, so the conversation cannot be saved first. Nothing was cleared; /export it or start a new session instead.');
+    // One property read: clearing without a store would drop the only copy of the conversation.
+    throw new RefusalError(refusal({
+      code: 'NO_SESSION_STORE',
+      state: 'nothing was cleared',
+      reason: 'This session has no session store, so the conversation on screen cannot be saved before it is cleared',
+      next: ['Keep a copy with /export markdown <path> --yes, then clear'],
+    }));
   }
   let savedAs: string | null = null;
   const sessionManager = ctx.session.sessionManager;

@@ -7,17 +7,16 @@
  * listing from outside, while a hosted one can be running on a headless box
  * with nothing attached to it at all.
  *
- * The verbs are `sessions.hosted.list` and `sessions.hosted.kill`, and both are
- * declared ws-only in the method catalog, they have no REST binding, so they
- * go through `callDaemonWsVerb` rather than `callDaemonVerb`. Same target, same
- * operator token, same --host/--port/--token convention; only the transport is
- * different. A daemon built without hosted sessions answers "does not know the
- * verb", which is reported as exactly that.
+ * The verbs are `sessions.hosted.list` and `sessions.hosted.kill`. They have
+ * no REST path of their own, so they go through the generic gateway route
+ * (`callDaemonMethod`), the same route and operator token the terminal apps use
+ * for them. A daemon built without hosted sessions answers "does not know this
+ * command", which is reported as exactly that.
  *
  * This module decides nothing about what a session IS. It parses, calls, and
  * renders.
  */
-import { callDaemonWsVerb } from '@goodvibes-jev/engine/terminal-shell';
+import { callDaemonMethod } from '@goodvibes-jev/engine/terminal-shell';
 import {
   resolveTargetOrFailure,
   type DaemonCommandResult,
@@ -142,19 +141,16 @@ export async function runSessionsCommand(input: RunSessionsCommandInput): Promis
   const resolved = resolveTargetOrFailure(flags, input);
   if (!resolved.ok) return resolved.result;
   const target = resolved.target;
-  const socketOption = input.socketFactory ? { socketFactory: input.socketFactory } : {};
+  const fetchImpl = input.fetchImpl ?? fetch;
   const now = input.now?.() ?? Date.now();
 
   if (subcommand === 'kill') {
-    const outcome = await callDaemonWsVerb<HostedKillPayload>(target, 'sessions.hosted.kill', {
-      body: { sessionId },
-      ...socketOption,
-    });
+    const outcome = await callDaemonMethod<HostedKillPayload>(target, 'sessions.hosted.kill', { input: { sessionId } }, fetchImpl);
     if (!outcome.ok) {
       return {
         exitCode: 1,
         lines: flags.json
-          ? [JSON.stringify({ ok: false, error: outcome.error, fix: outcome.fix }, null, 2)]
+          ? [JSON.stringify({ ok: false, code: outcome.code, error: outcome.error, fix: outcome.fix }, null, 2)]
           : [outcome.error, `  ${outcome.fix}`],
       };
     }
@@ -172,15 +168,14 @@ export async function runSessionsCommand(input: RunSessionsCommandInput): Promis
     };
   }
 
-  const outcome = await callDaemonWsVerb<HostedListPayload>(target, 'sessions.hosted.list', {
-    body: { includeTerminated: flags.all },
-    ...socketOption,
-  });
+  const outcome = await callDaemonMethod<HostedListPayload>(
+    target, 'sessions.hosted.list', { input: { includeTerminated: flags.all }, readOnly: true }, fetchImpl,
+  );
   if (!outcome.ok) {
     return {
       exitCode: 1,
       lines: flags.json
-        ? [JSON.stringify({ ok: false, error: outcome.error, fix: outcome.fix }, null, 2)]
+        ? [JSON.stringify({ ok: false, code: outcome.code, error: outcome.error, fix: outcome.fix }, null, 2)]
         : [outcome.error, `  ${outcome.fix}`],
     };
   }

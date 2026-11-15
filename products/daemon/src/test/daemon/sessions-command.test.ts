@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { DaemonWebSocket, DaemonWebSocketFactory } from '@goodvibes-jev/engine/terminal-shell';
+import type { DaemonFetch } from '@goodvibes-jev/engine/terminal-shell';
 import { isSessionsSubcommand, runSessionsCommand } from '../../daemon/sessions-command.js';
 
 function config() {
@@ -11,61 +11,30 @@ function config() {
   return { get: (key: string): never => values[key] as never };
 }
 
-interface SocketRecorder {
-  factory: DaemonWebSocketFactory;
+/**
+ * The daemon's side of the generic gateway route,
+ * `POST /api/control-plane/methods/{methodId}/invoke`: record the call and
+ * answer with a canned body and status.
+ */
+function fakeGatewayFetch(answer: { ok: boolean; body?: unknown; status?: number } | { authFails: true }): {
+  factory: DaemonFetch;
   methodIds: string[];
   bodies: unknown[];
   urls: string[];
   headers: Record<string, string>[];
-}
-
-function fakeSocketFactory(
-  answer: { ok: boolean; body?: unknown; status?: number } | { authFails: true },
-): SocketRecorder {
+} {
   const methodIds: string[] = [];
   const bodies: unknown[] = [];
   const urls: string[] = [];
   const headers: Record<string, string>[] = [];
-  const factory: DaemonWebSocketFactory = (url, init) => {
+  const factory: DaemonFetch = async (url, init) => {
     urls.push(url);
-    headers.push({ ...init.headers });
-    const socket: DaemonWebSocket = {
-      onopen: null,
-      onmessage: null,
-      onerror: null,
-      onclose: null,
-      send(data: string): void {
-        const frame = JSON.parse(data) as { type: string; id?: string; methodId?: string; body?: unknown };
-        if (frame.type === 'auth') {
-          if ('authFails' in answer) {
-            queueMicrotask(() => socket.onmessage?.({
-              data: JSON.stringify({ type: 'auth', ok: false, error: 'Unauthorized' }),
-            }));
-            return;
-          }
-          queueMicrotask(() => socket.onmessage?.({ data: JSON.stringify({ type: 'auth', ok: true }) }));
-          return;
-        }
-        if (frame.type === 'call' && !('authFails' in answer)) {
-          methodIds.push(frame.methodId ?? '');
-          bodies.push(frame.body);
-          queueMicrotask(() => socket.onmessage?.({
-            data: JSON.stringify({
-              type: 'response',
-              id: frame.id,
-              ok: answer.ok,
-              status: answer.status ?? (answer.ok ? 200 : 400),
-              body: answer.body,
-            }),
-          }));
-        }
-      },
-      close(): void {
-        // Nothing to release.
-      },
-    };
-    queueMicrotask(() => socket.onopen?.({}));
-    return socket;
+    headers.push({ ...(init?.headers as Record<string, string>) });
+    if ('authFails' in answer) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 });
+    const match = /\/api\/control-plane\/methods\/([^/]+)\/invoke$/.exec(new URL(url).pathname);
+    methodIds.push(match ? decodeURIComponent(match[1] as string) : '');
+    bodies.push((JSON.parse(String(init?.body ?? '{}')) as { body?: unknown }).body);
+    return new Response(JSON.stringify(answer.body ?? {}), { status: answer.status ?? (answer.ok ? 200 : 400) });
   };
   return { factory, methodIds, bodies, urls, headers };
 }
@@ -92,38 +61,38 @@ describe('sessions arguments', () => {
   });
 
   test('no subcommand is a usage refusal, exit 2', async () => {
-    const { factory } = fakeSocketFactory({ ok: true, body: { sessions: [] } });
-    const result = await runSessionsCommand({ ...baseInput({ args: [] }), socketFactory: factory });
+    const { factory } = fakeGatewayFetch({ ok: true, body: { sessions: [] } });
+    const result = await runSessionsCommand({ ...baseInput({ args: [] }), fetchImpl: factory });
     expect(result.exitCode).toBe(2);
     expect(result.lines.join('\n')).toContain('sessions list');
   });
 
   test('an unrecognized subcommand names the two that exist', async () => {
-    const { factory } = fakeSocketFactory({ ok: true, body: { sessions: [] } });
-    const result = await runSessionsCommand({ ...baseInput({ args: ['stop'] }), socketFactory: factory });
+    const { factory } = fakeGatewayFetch({ ok: true, body: { sessions: [] } });
+    const result = await runSessionsCommand({ ...baseInput({ args: ['stop'] }), fetchImpl: factory });
     expect(result.exitCode).toBe(2);
     expect(result.lines.join('\n')).toContain('try list or kill');
   });
 
   test('kill with no id is refused rather than treated as "kill everything"', async () => {
-    const { factory, methodIds } = fakeSocketFactory({ ok: true, body: {} });
-    const result = await runSessionsCommand({ ...baseInput({ args: ['kill'] }), socketFactory: factory });
+    const { factory, methodIds } = fakeGatewayFetch({ ok: true, body: {} });
+    const result = await runSessionsCommand({ ...baseInput({ args: ['kill'] }), fetchImpl: factory });
     expect(result.exitCode).toBe(2);
     expect(result.lines.join('\n')).toContain('kill needs the session to end');
     expect(methodIds).toEqual([]);
   });
 
   test('a stray extra argument is refused', async () => {
-    const { factory } = fakeSocketFactory({ ok: true, body: { sessions: [] } });
-    expect((await runSessionsCommand({ ...baseInput({ args: ['list', 'x'] }), socketFactory: factory })).exitCode).toBe(2);
-    expect((await runSessionsCommand({ ...baseInput({ args: ['kill', 'a', 'b'] }), socketFactory: factory })).exitCode).toBe(2);
+    const { factory } = fakeGatewayFetch({ ok: true, body: { sessions: [] } });
+    expect((await runSessionsCommand({ ...baseInput({ args: ['list', 'x'] }), fetchImpl: factory })).exitCode).toBe(2);
+    expect((await runSessionsCommand({ ...baseInput({ args: ['kill', 'a', 'b'] }), fetchImpl: factory })).exitCode).toBe(2);
   });
 
   test('a usage refusal in --json mode is still one JSON document', async () => {
-    const { factory } = fakeSocketFactory({ ok: true, body: {} });
+    const { factory } = fakeGatewayFetch({ ok: true, body: {} });
     const result = await runSessionsCommand({
       ...baseInput({ args: ['kill'], flags: { host: undefined, port: undefined, token: undefined, json: true, all: false } }),
-      socketFactory: factory,
+      fetchImpl: factory,
     });
     expect(result.exitCode).toBe(2);
     expect(JSON.parse(result.lines[0] as string)).toMatchObject({ ok: false });
@@ -142,20 +111,20 @@ describe('sessions list', () => {
     updatedAt: 940_000,
   };
 
-  test('calls the ws-only list verb with the operator token', async () => {
-    const { factory, methodIds, bodies, urls, headers } = fakeSocketFactory({ ok: true, body: { sessions: [RECORD] } });
-    const result = await runSessionsCommand({ ...baseInput(), socketFactory: factory });
+  test('calls the list verb on the gateway route with the operator token', async () => {
+    const { factory, methodIds, bodies, urls, headers } = fakeGatewayFetch({ ok: true, body: { sessions: [RECORD] } });
+    const result = await runSessionsCommand({ ...baseInput(), fetchImpl: factory });
 
     expect(result.exitCode).toBe(0);
     expect(methodIds).toEqual(['sessions.hosted.list']);
     expect(bodies).toEqual([{ includeTerminated: false }]);
-    expect(urls[0]).toBe('ws://127.0.0.1:3421/api/control-plane/ws');
+    expect(urls[0]).toBe('http://127.0.0.1:3421/api/control-plane/methods/sessions.hosted.list/invoke');
     expect(headers[0]?.['Authorization']).toBe('Bearer op-token');
   });
 
   test('renders id, status, title, workspace and the facts that matter', async () => {
-    const { factory } = fakeSocketFactory({ ok: true, body: { sessions: [RECORD] } });
-    const result = await runSessionsCommand({ ...baseInput(), socketFactory: factory });
+    const { factory } = fakeGatewayFetch({ ok: true, body: { sessions: [RECORD] } });
+    const result = await runSessionsCommand({ ...baseInput(), fetchImpl: factory });
     const text = result.lines.join('\n');
     expect(text).toContain('hs-1');
     expect(text).toContain('idle');
@@ -168,41 +137,41 @@ describe('sessions list', () => {
   });
 
   test('--all asks for terminated sessions too', async () => {
-    const { factory, bodies } = fakeSocketFactory({ ok: true, body: { sessions: [] } });
+    const { factory, bodies } = fakeGatewayFetch({ ok: true, body: { sessions: [] } });
     await runSessionsCommand({
       ...baseInput({ flags: { host: undefined, port: undefined, token: undefined, json: false, all: true } }),
-      socketFactory: factory,
+      fetchImpl: factory,
     });
     expect(bodies).toEqual([{ includeTerminated: true }]);
   });
 
   test('an empty list says so, and points at --all', async () => {
-    const { factory } = fakeSocketFactory({ ok: true, body: { sessions: [] } });
-    const result = await runSessionsCommand({ ...baseInput(), socketFactory: factory });
+    const { factory } = fakeGatewayFetch({ ok: true, body: { sessions: [] } });
+    const result = await runSessionsCommand({ ...baseInput(), fetchImpl: factory });
     expect(result.exitCode).toBe(0);
     expect(result.lines.join('\n')).toContain('hosting no sessions');
     expect(result.lines.join('\n')).toContain('--all');
   });
 
   test('a daemon that does not know the verb says exactly that', async () => {
-    const { factory } = fakeSocketFactory({ ok: false, status: 404, body: { error: 'Unknown gateway method: sessions.hosted.list', code: 'METHOD_NOT_FOUND' } });
-    const result = await runSessionsCommand({ ...baseInput(), socketFactory: factory });
+    const { factory } = fakeGatewayFetch({ ok: false, status: 404, body: { error: 'Unknown gateway method: sessions.hosted.list', code: 'METHOD_NOT_FOUND' } });
+    const result = await runSessionsCommand({ ...baseInput(), fetchImpl: factory });
     expect(result.exitCode).toBe(1);
-    expect(result.lines.join('\n')).toContain('does not know the verb sessions.hosted.list');
+    expect(result.lines.join('\n')).toContain('does not know this command');
   });
 
   test('a refused token is reported as a token problem, not a missing daemon', async () => {
-    const { factory } = fakeSocketFactory({ authFails: true });
-    const result = await runSessionsCommand({ ...baseInput(), socketFactory: factory });
+    const { factory } = fakeGatewayFetch({ authFails: true });
+    const result = await runSessionsCommand({ ...baseInput(), fetchImpl: factory });
     expect(result.exitCode).toBe(1);
     expect(result.lines.join('\n')).toContain('refused the operator token');
   });
 
   test('--json returns the daemon\'s own record', async () => {
-    const { factory } = fakeSocketFactory({ ok: true, body: { sessions: [RECORD] } });
+    const { factory } = fakeGatewayFetch({ ok: true, body: { sessions: [RECORD] } });
     const result = await runSessionsCommand({
       ...baseInput({ flags: { host: undefined, port: undefined, token: undefined, json: true, all: false } }),
-      socketFactory: factory,
+      fetchImpl: factory,
     });
     const parsed = JSON.parse(result.lines[0] as string) as { ok: boolean; data: { sessions: unknown[] } };
     expect(parsed.ok).toBe(true);
@@ -212,11 +181,11 @@ describe('sessions list', () => {
 
 describe('sessions kill', () => {
   test('calls the ws-only kill verb with the named id', async () => {
-    const { factory, methodIds, bodies } = fakeSocketFactory({
+    const { factory, methodIds, bodies } = fakeGatewayFetch({
       ok: true,
       body: { session: { id: 'hs-1', status: 'terminated', terminatedReason: 'killed' } },
     });
-    const result = await runSessionsCommand({ ...baseInput({ args: ['kill', 'hs-1'] }), socketFactory: factory });
+    const result = await runSessionsCommand({ ...baseInput({ args: ['kill', 'hs-1'] }), fetchImpl: factory });
 
     expect(result.exitCode).toBe(0);
     expect(methodIds).toEqual(['sessions.hosted.kill']);
@@ -227,12 +196,12 @@ describe('sessions kill', () => {
   });
 
   test('a refusal from the daemon is reported with its own fix line', async () => {
-    const { factory } = fakeSocketFactory({
+    const { factory } = fakeGatewayFetch({
       ok: false,
       status: 400,
       body: { error: 'no session hs-9', fix: 'run sessions list' },
     });
-    const result = await runSessionsCommand({ ...baseInput({ args: ['kill', 'hs-9'] }), socketFactory: factory });
+    const result = await runSessionsCommand({ ...baseInput({ args: ['kill', 'hs-9'] }), fetchImpl: factory });
     expect(result.exitCode).toBe(1);
     expect(result.lines.join('\n')).toContain('no session hs-9');
     expect(result.lines.join('\n')).toContain('run sessions list');
@@ -240,13 +209,13 @@ describe('sessions kill', () => {
 });
 
 describe('sessions against another machine', () => {
-  test('--host/--port build the ws URL for that machine', async () => {
-    const { factory, urls, headers } = fakeSocketFactory({ ok: true, body: { sessions: [] } });
+  test('--host/--port build the URL for that machine', async () => {
+    const { factory, urls, headers } = fakeGatewayFetch({ ok: true, body: { sessions: [] } });
     await runSessionsCommand({
       ...baseInput({ flags: { host: 'http://10.0.0.7', port: 4321, token: 'other-token', json: false, all: false } }),
-      socketFactory: factory,
+      fetchImpl: factory,
     });
-    expect(urls[0]).toBe('ws://10.0.0.7:4321/api/control-plane/ws');
+    expect(urls[0]).toBe('http://10.0.0.7:4321/api/control-plane/methods/sessions.hosted.list/invoke');
     expect(headers[0]?.['Authorization']).toBe('Bearer other-token');
   });
 });

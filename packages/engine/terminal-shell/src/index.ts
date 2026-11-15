@@ -115,6 +115,10 @@ export {
   extractOperatorToken,
   resolveRemoteDaemonTarget,
   callDaemonVerb,
+  DAEMON_FAILURE_CODES,
+  type DaemonCallInit,
+  type DaemonFailure,
+  type DaemonFailureCode,
   type RemoteDaemonTarget,
   type RemoteTargetFlags,
   type RemoteTargetResolution,
@@ -122,15 +126,7 @@ export {
   type DaemonFetch,
   type DaemonVerbOutcome,
 } from './cluster-remote-daemon-target.js';
-
-export {
-  callDaemonWsVerb,
-  DAEMON_WS_TIMEOUT_MS,
-  type CallDaemonWsVerbOptions,
-  type DaemonWebSocket,
-  type DaemonWebSocketFactory,
-} from './daemon-ws-call.js';
-export { callDaemonRoute, rawReplyReader, type DaemonReplyEnvelope } from './raw-reply-route.js';
+export { callDaemonMethod, callDaemonRoute, rawReplyReader, type DaemonReplyEnvelope } from './raw-reply-route.js';
 
 export type {
   GoodVibesCliCommand,

@@ -26,7 +26,7 @@
  * confirmation before acting, `-y`/`--yes` satisfies that non-interactively,
  * the same convention `migrate-service` uses. An unreachable daemon, a
  * rejected token, and a daemon too old to serve the verb are each refused by
- * name (see `callDaemonWsVerb`), never a stack trace.
+ * name (see `callDaemonVerb`), never a stack trace.
  *
  * The remote form's mint call carries no `--name` flag of its own: the token
  * is named with the platform's `defaultPairingTokenName()`, the same date-stamped
@@ -43,14 +43,15 @@ import {
 } from '@goodvibes-jev/engine/platform/platform/pairing';
 import { renderPairingBanner } from '../core/pairing-banner.js';
 import {
+  callDaemonMethod,
   callDaemonRoute,
   extractOperatorToken,
   resolveRemoteDaemonTarget,
+  type DaemonFailureCode,
   type DaemonFetch,
   resolveRuntimeEndpointBinding,
   type RemoteDaemonTarget,
 } from '@goodvibes-jev/engine/terminal-shell';
-import { callDaemonWsVerb, type DaemonWebSocketFactory } from '@goodvibes-jev/engine/terminal-shell';
 import type { DaemonCommandResult, RemoteCommandFlags } from './status-command.js';
 
 export interface PairCommandDeps {
@@ -61,9 +62,7 @@ export interface PairCommandDeps {
   readonly readToken: (daemonHomeDir: string) => string | undefined;
   /** Process-local override, never adopted into the stored companion identity. */
   readonly operatorToken?: string | undefined;
-  /** Opens the remote mint connection with the configured outbound TLS trust (`createDaemonCommandRemote`). */
-  readonly socketFactory: DaemonWebSocketFactory;
-  /** Asks the running daemon on this machine, with the same outbound trust. */
+  /** Asks the daemon, here or remote, with the configured outbound TLS trust (`createDaemonCommandRemote`). */
   readonly fetchImpl?: DaemonFetch | undefined;
 }
 
@@ -126,10 +125,10 @@ function namesThisMachine(host: string): boolean {
     || normalized === '0.0.0.0';
 }
 
-function failure(error: string, fix: string, json: boolean): DaemonCommandResult {
+function failure(error: string, fix: string, json: boolean, code?: DaemonFailureCode): DaemonCommandResult {
   return {
     exitCode: 1,
-    lines: json ? [JSON.stringify({ ok: false, error, fix }, null, 2)] : [error, `  ${fix}`],
+    lines: json ? [JSON.stringify({ ok: false, ...(code ? { code } : {}), error, fix }, null, 2)] : [error, `  ${fix}`],
   };
 }
 
@@ -267,11 +266,10 @@ function mintPlanResult(target: RemoteDaemonTarget, json: boolean): DaemonComman
 async function runRemoteMint(input: RunPairCommandInput, target: RemoteDaemonTarget): Promise<DaemonCommandResult> {
   const { flags } = input;
 
-  const outcome = await callDaemonWsVerb<PairingHandoffCreateResult>(target, 'pairing.handoff.create', {
-    body: { name: defaultPairingTokenName() },
-    socketFactory: input.socketFactory,
-  });
-  if (!outcome.ok) return failure(outcome.error, outcome.fix, flags.json);
+  const outcome = await callDaemonMethod<PairingHandoffCreateResult>(
+    target, 'pairing.handoff.create', { input: { name: defaultPairingTokenName() } }, input.fetchImpl ?? fetch,
+  );
+  if (!outcome.ok) return failure(outcome.error, outcome.fix, flags.json, outcome.code);
 
   const data = outcome.data;
   const offerKinds = data.offers.map((offer) => offer.kind).filter(isPairingOfferKind);
@@ -362,7 +360,7 @@ export async function runPairCommand(input: RunPairCommandInput): Promise<Daemon
       daemonHomeDir: input.daemonHomeDir,
       readToken: input.readToken,
     });
-    if (!resolved.ok) return failure(resolved.error, resolved.fix, flags.json);
+    if (!resolved.ok) return failure(resolved.error, resolved.fix, flags.json, resolved.code);
     if (!flags.yes) return mintPlanResult(resolved.target, flags.json);
     return runRemoteMint(input, resolved.target);
   }

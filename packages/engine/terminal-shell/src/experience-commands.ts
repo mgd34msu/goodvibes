@@ -76,9 +76,6 @@ export function createVoiceExperienceCommand<Context extends ExperienceContext>(
   readonly review: (enabled: boolean) => string[];
   readonly toggled: (enabled: boolean) => string;
   readonly notes: readonly string[];
-  /** Not consulted: a missing or unreadable bundle is always reported, never thrown. Products may drop these. */
-  readonly inspectMissingFile?: boolean | undefined;
-  readonly reportReadFailure?: boolean | undefined;
 }): TerminalSlashCommand<Context> {
   return {
     name: 'voice',

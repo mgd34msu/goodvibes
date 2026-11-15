@@ -51,8 +51,9 @@ const safeErrorCodes = new Set(['ERR_ASSERTION', 'ENOENT', 'ENOTDIR', 'EISDIR', 
 const safeError = error => ({ name: safeErrorNames.has(error?.name) ? error.name : 'Error',
   ...(safeErrorCodes.has(error?.code) ? { code: error.code } : {}) });
 const safeExitSignal = signal => typeof signal === 'string' && Object.hasOwn(osConstants.signals, signal) ? signal : undefined;
-const nativeDaemonFailureKinds = new Set(['token-missing', 'invalid-port', 'unreachable', 'auth-refused', 'route-missing',
-  'unreadable-reply', 'cli-command-caught', 'native-startup-repair', 'unknown']);
+const nativeDaemonFailureCodes = new Set(['token-missing', 'invalid-port', 'invalid-host', 'unreachable', 'auth-refused',
+  'route-missing', 'unreadable-reply', 'refused']);
+const nativeDaemonFailureKinds = new Set([...nativeDaemonFailureCodes, 'cli-command-caught', 'native-startup-repair', 'unknown']);
 const nativeStartupFailureCodes = new Set(['SQLITE_ARCH_UNSUPPORTED', 'SQLITE_ARCH_MISMATCH', 'SQLITE_PARENT_TYPE', 'SQLITE_FILE_MODE',
   'SQLITE_SIZE_BOUND', 'SQLITE_READ_CHANGED', 'SQLITE_LIFETIME_ASYNC', 'SQLITE_RUNTIME_UNDECLARED', 'SQLITE_COMPILED_OWNER',
   'SQLITE_BYTES_MISMATCH', 'SQLITE_PROVENANCE_MISMATCH', 'SQLITE_ADMISSION_CHANGED', 'SQLITE_LOADER_REFUSED', 'SQLITE_SOURCE_CHANGED',
@@ -77,15 +78,9 @@ function nativeDaemonFailure(stdout, stderr) {
     const start = output.indexOf('{\n  "ok": false,');
     let failure;
     try { failure = JSON.parse(start < 0 ? output.trim() : output.slice(start)); } catch { continue; }
-    if (failure?.ok !== false || typeof failure.error !== 'string') continue;
-    const error = failure.error;
-    if (error === 'no operator token was found for this machine') return 'token-missing';
-    if (error.startsWith("'") && error.endsWith("' is not a usable port")) return 'invalid-port';
-    if (error === 'could not reach the daemon on this machine' || error.startsWith('could not reach the daemon at ')) return 'unreachable';
-    const where = suffix => error === `the daemon on this machine${suffix}` || error.startsWith('the daemon at ') && error.endsWith(suffix);
-    if (where(' refused the operator token')) return 'auth-refused';
-    if (where(' does not know this command')) return 'route-missing';
-    if (where(' sent a reply this build could not read')) return 'unreadable-reply';
+    if (failure?.ok !== false) continue;
+    // The daemon CLI states why in `code`, from its closed list (DAEMON_FAILURE_CODES); the sentences are for people.
+    if (typeof failure.code === 'string' && nativeDaemonFailureCodes.has(failure.code)) return failure.code;
   }
   return 'unknown';
 }

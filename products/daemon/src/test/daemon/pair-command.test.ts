@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { DaemonWebSocket, DaemonWebSocketFactory } from '@goodvibes-jev/engine/terminal-shell';
+import type { DaemonFetch } from '@goodvibes-jev/engine/terminal-shell';
 import { renderPairingBanner } from '../../core/pairing-banner.js';
 import { runPairCommand } from '../../daemon/pair-command.js';
 
@@ -25,7 +25,6 @@ function baseInput(overrides: Record<string, unknown> = {}) {
     version: '9.9.9-test',
     readToken: () => JSON.stringify({ token: 'companion-token' }),
     flags: { host: undefined, port: undefined, token: undefined, json: false, yes: false },
-    socketFactory: neverCalledFactory(),
     fetchImpl: noDaemon,
     ...overrides,
   };
@@ -35,58 +34,31 @@ function baseInput(overrides: Record<string, unknown> = {}) {
 const noDaemon = async (): Promise<Response> => { throw new Error('connect ECONNREFUSED'); };
 
 /**
- * A WebSocket stand-in that plays the daemon's side of the frame exchange:
- * accept the auth frame, then answer the `call` frame with a canned body,
- * the same double status-command.test.ts uses for its ws-only verbs.
+ * The daemon's side of the generic gateway route,
+ * `POST /api/control-plane/methods/{methodId}/invoke`: record the call and
+ * answer with a canned body and status.
  */
-function fakeSocketFactory(answer: { ok: boolean; body?: unknown; status?: number }): {
-  factory: DaemonWebSocketFactory;
+function fakeGatewayFetch(answer: { ok: boolean; body?: unknown; status?: number } | { authFails: true }): {
+  factory: DaemonFetch;
   methodIds: string[];
   bodies: unknown[];
+  urls: string[];
+  headers: Record<string, string>[];
 } {
   const methodIds: string[] = [];
   const bodies: unknown[] = [];
-  const factory: DaemonWebSocketFactory = (_url, _init) => {
-    const socket: DaemonWebSocket = {
-      onopen: null,
-      onmessage: null,
-      onerror: null,
-      onclose: null,
-      send(data: string): void {
-        const frame = JSON.parse(data) as { type: string; id?: string; methodId?: string; body?: unknown };
-        if (frame.type === 'auth') {
-          queueMicrotask(() => socket.onmessage?.({ data: JSON.stringify({ type: 'auth', ok: true }) }));
-          return;
-        }
-        if (frame.type === 'call') {
-          methodIds.push(frame.methodId ?? '');
-          bodies.push(frame.body);
-          queueMicrotask(() => socket.onmessage?.({
-            data: JSON.stringify({
-              type: 'response',
-              id: frame.id,
-              ok: answer.ok,
-              status: answer.status ?? (answer.ok ? 200 : 400),
-              body: answer.body,
-            }),
-          }));
-        }
-      },
-      close(): void {
-        // Nothing to release: this double never opened anything.
-      },
-    };
-    queueMicrotask(() => socket.onopen?.({}));
-    return socket;
+  const urls: string[] = [];
+  const headers: Record<string, string>[] = [];
+  const factory: DaemonFetch = async (url, init) => {
+    urls.push(url);
+    headers.push({ ...(init?.headers as Record<string, string>) });
+    if ('authFails' in answer) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 });
+    const match = /\/api\/control-plane\/methods\/([^/]+)\/invoke$/.exec(new URL(url).pathname);
+    methodIds.push(match ? decodeURIComponent(match[1] as string) : '');
+    bodies.push((JSON.parse(String(init?.body ?? '{}')) as { body?: unknown }).body);
+    return new Response(JSON.stringify(answer.body ?? {}), { status: answer.status ?? (answer.ok ? 200 : 400) });
   };
-  return { factory, methodIds, bodies };
-}
-
-/** A socket factory that fails the test if it is ever invoked. */
-function neverCalledFactory(): DaemonWebSocketFactory {
-  return () => {
-    throw new Error('socketFactory was called, but nothing should have been reached yet');
-  };
+  return { factory, methodIds, bodies, urls, headers };
 }
 
 const MINTED_WITH_ORIGIN = {
@@ -180,7 +152,6 @@ describe('pair reprints the block the daemon prints at startup (local form)', ()
     const result = await runPairCommand(baseInput({
       configManager: config({ 'web.publicBaseUrl': '', 'web.hostMode': 'custom', 'web.host': host }),
       flags: { host: undefined, port: undefined, token: undefined, json: true, yes: false },
-      socketFactory: neverCalledFactory(),
     }));
     const parsed = JSON.parse(result.lines[0]!) as { data: { origin: string; deepLink: string } };
     expect(parsed.data.origin).toBe(`http://[${host}]:3423`);
@@ -224,7 +195,6 @@ describe('pair reprints the block the daemon prints at startup (local form)', ()
     async (host) => {
       const result = await runPairCommand(baseInput({
         flags: { host, port: undefined, token: undefined, json: false, yes: false },
-        socketFactory: neverCalledFactory(),
       }));
       expect(result.exitCode).toBe(0);
     },
@@ -270,7 +240,6 @@ describe('pair --host <other machine> (remote form): confirmation gate', () => {
   test('without -y nothing is called, and the plan states the mint-vs-reprint distinction', async () => {
     const result = await runPairCommand(baseInput({
       flags: { host: 'http://10.0.0.7', port: undefined, token: undefined, json: false, yes: false },
-      socketFactory: neverCalledFactory(),
     }));
     expect(result.exitCode).toBe(0);
     const text = result.lines.join('\n');
@@ -283,7 +252,6 @@ describe('pair --host <other machine> (remote form): confirmation gate', () => {
   test('the --json dry run is one JSON document with confirmed: false', async () => {
     const result = await runPairCommand(baseInput({
       flags: { host: 'http://10.0.0.7', port: undefined, token: undefined, json: true, yes: false },
-      socketFactory: neverCalledFactory(),
     }));
     expect(result.exitCode).toBe(0);
     const parsed = JSON.parse(result.lines[0] as string) as { ok: boolean; data: { confirmed: boolean; target: string } };
@@ -293,10 +261,10 @@ describe('pair --host <other machine> (remote form): confirmation gate', () => {
   });
 
   test('-y proceeds to call pairing.handoff.create', async () => {
-    const { factory, methodIds, bodies } = fakeSocketFactory({ ok: true, body: MINTED_WITH_ORIGIN });
+    const { factory, methodIds, bodies } = fakeGatewayFetch({ ok: true, body: MINTED_WITH_ORIGIN });
     const result = await runPairCommand(baseInput({
       flags: { host: 'http://10.0.0.7', port: undefined, token: undefined, json: false, yes: true },
-      socketFactory: factory,
+      fetchImpl: factory,
     }));
     expect(result.exitCode).toBe(0);
     expect(methodIds).toEqual(['pairing.handoff.create']);
@@ -309,10 +277,10 @@ describe('pair --host <other machine> (remote form): confirmation gate', () => {
 
 describe('pair --host <other machine> -y (remote form): mint and render', () => {
   test('a deep-link-bearing mint renders through the SAME banner the local form uses', async () => {
-    const { factory } = fakeSocketFactory({ ok: true, body: MINTED_WITH_ORIGIN });
+    const { factory } = fakeGatewayFetch({ ok: true, body: MINTED_WITH_ORIGIN });
     const result = await runPairCommand(baseInput({
       flags: { host: 'http://10.0.0.7', port: undefined, token: undefined, json: false, yes: true },
-      socketFactory: factory,
+      fetchImpl: factory,
     }));
     expect(result.exitCode).toBe(0);
 
@@ -335,10 +303,10 @@ describe('pair --host <other machine> -y (remote form): mint and render', () => 
   });
 
   test('--json carries the minted secret and the rebuilt deep link', async () => {
-    const { factory } = fakeSocketFactory({ ok: true, body: MINTED_WITH_ORIGIN });
+    const { factory } = fakeGatewayFetch({ ok: true, body: MINTED_WITH_ORIGIN });
     const result = await runPairCommand(baseInput({
       flags: { host: 'http://10.0.0.7', port: undefined, token: undefined, json: true, yes: true },
-      socketFactory: factory,
+      fetchImpl: factory,
     }));
     const parsed = JSON.parse(result.lines[0] as string) as {
       ok: boolean;
@@ -352,10 +320,10 @@ describe('pair --host <other machine> -y (remote form): mint and render', () => 
   });
 
   test('a mint with no configured web origin degrades honestly: token and fragment, no QR', async () => {
-    const { factory } = fakeSocketFactory({ ok: true, body: MINTED_NO_ORIGIN });
+    const { factory } = fakeGatewayFetch({ ok: true, body: MINTED_NO_ORIGIN });
     const result = await runPairCommand(baseInput({
       flags: { host: 'http://10.0.0.7', port: undefined, token: undefined, json: false, yes: true },
-      socketFactory: factory,
+      fetchImpl: factory,
     }));
     expect(result.exitCode).toBe(0);
     const text = result.lines.join('\n');
@@ -367,10 +335,10 @@ describe('pair --host <other machine> -y (remote form): mint and render', () => 
   });
 
   test('the fragment-only --json shape carries the token but no deepLink', async () => {
-    const { factory } = fakeSocketFactory({ ok: true, body: MINTED_NO_ORIGIN });
+    const { factory } = fakeGatewayFetch({ ok: true, body: MINTED_NO_ORIGIN });
     const result = await runPairCommand(baseInput({
       flags: { host: 'http://10.0.0.7', port: undefined, token: undefined, json: true, yes: true },
-      socketFactory: factory,
+      fetchImpl: factory,
     }));
     const parsed = JSON.parse(result.lines[0] as string) as {
       data: { token: string; fragment: string; deepLink?: string };
@@ -383,54 +351,36 @@ describe('pair --host <other machine> -y (remote form): mint and render', () => 
 
 describe('pair --host <other machine> -y: each refusal is named, never a stack trace', () => {
   test('an unreachable daemon is refused by name', async () => {
-    const factory: DaemonWebSocketFactory = () => {
+    const factory: DaemonFetch = async () => {
       throw new Error('ECONNREFUSED');
     };
     const result = await runPairCommand(baseInput({
       flags: { host: 'http://10.0.0.7', port: undefined, token: undefined, json: false, yes: true },
-      socketFactory: factory,
+      fetchImpl: factory,
     }));
     expect(result.exitCode).toBe(1);
     expect(result.lines.join('\n')).toContain('could not reach');
   });
 
   test('an auth failure is refused by name', async () => {
-    const factory: DaemonWebSocketFactory = (_url, _init) => {
-      const socket: DaemonWebSocket = {
-        onopen: null,
-        onmessage: null,
-        onerror: null,
-        onclose: null,
-        send(data: string): void {
-          const frame = JSON.parse(data) as { type: string };
-          if (frame.type === 'auth') {
-            queueMicrotask(() => socket.onmessage?.({ data: JSON.stringify({ type: 'auth', ok: false }) }));
-          }
-        },
-        close(): void {
-          // Nothing to release.
-        },
-      };
-      queueMicrotask(() => socket.onopen?.({}));
-      return socket;
-    };
+    const { factory } = fakeGatewayFetch({ authFails: true });
     const result = await runPairCommand(baseInput({
       flags: { host: 'http://10.0.0.7', port: undefined, token: undefined, json: false, yes: true },
-      socketFactory: factory,
+      fetchImpl: factory,
     }));
     expect(result.exitCode).toBe(1);
     expect(result.lines.join('\n')).toContain('refused the operator token');
   });
 
   test('a daemon too old to serve the verb is refused by name, not a stack trace', async () => {
-    const { factory } = fakeSocketFactory({ ok: false, status: 404, body: { error: 'Unknown gateway method: pairing.handoff.create', code: 'METHOD_NOT_FOUND' } });
+    const { factory } = fakeGatewayFetch({ ok: false, status: 404, body: { error: 'Unknown gateway method: pairing.handoff.create', code: 'METHOD_NOT_FOUND' } });
     const result = await runPairCommand(baseInput({
       flags: { host: 'http://10.0.0.7', port: undefined, token: undefined, json: false, yes: true },
-      socketFactory: factory,
+      fetchImpl: factory,
     }));
     expect(result.exitCode).toBe(1);
     const text = result.lines.join('\n');
-    expect(text).toContain('does not know the verb pairing.handoff.create');
+    expect(text).toContain('does not know this command');
     expect(text).toContain('update it');
   });
 
@@ -438,7 +388,6 @@ describe('pair --host <other machine> -y: each refusal is named, never a stack t
     const result = await runPairCommand(baseInput({
       readToken: () => undefined,
       flags: { host: 'http://10.0.0.7', port: undefined, token: undefined, json: false, yes: true },
-      socketFactory: neverCalledFactory(),
     }));
     expect(result.exitCode).toBe(1);
     expect(result.lines.join('\n')).toContain('no operator token');

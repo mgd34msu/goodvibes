@@ -60,6 +60,14 @@ is down. Recheck the selected daemon home and any server token override before
 re-pairing. Connection refusal means no listener answered at that address; check
 its actual bound endpoint and platform service separately.
 
+With `--json`, a `status`, `update`, `sessions`, `pair` or `cluster` call that fails prints
+`{ "ok": false, "code", "error", "fix" }`. Scripts read `code`, one of
+`token-missing`, `invalid-port`, `invalid-host`, `unreachable`, `auth-refused`,
+`route-missing`, `unreadable-reply` or `refused` (the daemon answered and said
+no); `error` and `fix` are for people and may be reworded. `--host` takes a host
+name, an address, or a base URL such as `https://10.0.0.7:3421`; another machine
+must be named with its scheme.
+
 A configured endpoint is not evidence of a live listener. `status` can report a
 successful primary response while naming failed health/channel/session subqueries.
 Read those individual diagnostics rather than interpreting exit 0 as all-green.

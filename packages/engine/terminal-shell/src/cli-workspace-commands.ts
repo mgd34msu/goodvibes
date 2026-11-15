@@ -4,6 +4,7 @@ import { findSessionCandidates, type SessionManager } from '@goodvibes-jev/engin
 import type { RuntimeStore } from '@goodvibes-jev/engine/platform/platform/runtime/state';
 import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 import { redactSensitiveDataAsync } from '@goodvibes-jev/engine/platform/platform/utils';
+import { createTasksClient, type DaemonVerbCaller } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 import { formatJsonOrText } from './cli-output.js';
 interface WorkspaceCommandRuntime {
   readonly cli: { readonly commandArgs: readonly string[]; readonly flags: { readonly outputFormat?: string | undefined } };
@@ -21,7 +22,8 @@ export function createCliWorkspaceCommands<Runtime extends WorkspaceCommandRunti
     readonly inline: boolean;
     readonly submit: (runtime: Runtime, args: string[]) => Promise<string>;
     readonly allowSubmit: boolean;
-    readonly emptyTasks: string;
+    /** The daemon whose tasks `tasks list|show` read; its `probe()` says why when none can be asked. */
+    readonly verbs: (runtime: Runtime, services: Services) => DaemonVerbCaller;
   },
 ) {
   async function handleSessions(runtime: Runtime): Promise<string | null> {
@@ -95,19 +97,37 @@ export function createCliWorkspaceCommands<Runtime extends WorkspaceCommandRunti
   async function handleTasks(runtime: Runtime): Promise<string> {
     const [sub = 'list', ...rest] = runtime.cli.commandArgs;
     if (sub === 'submit') return policy.submit(runtime, rest);
-    return await withRuntimeServices(runtime, (services) => {
-      const tasks = [...services.runtimeStore.getState().tasks.tasks.values()];
+    const usage = `Usage: ${policy.binary(runtime)} tasks list|show <taskId>${policy.allowSubmit ? '|submit <prompt>' : ''}`;
+    if (sub !== 'list' && sub !== 'show') return usage;
+    if (sub === 'show' && !rest[0]) return `Usage: ${policy.binary(runtime)} tasks show <taskId>`;
+    return await withRuntimeServices(runtime, async (services) => {
+      // This process started a moment ago, so its own store is near empty; the tasks a user means run in the daemon.
+      const store = services.runtimeStore;
+      const tasks = createTasksClient({
+        local: {
+          list: (limit) => [...store.getState().tasks.tasks.values()].slice(0, limit),
+          get: (taskId) => store.getState().tasks.tasks.get(taskId) ?? null,
+        },
+        verbs: policy.verbs(runtime, services),
+      });
+      const noDaemon = (reason: string): string => `no daemon could be asked (${reason}); tasks exist only in the daemon or inside a running session`;
       if (sub === 'list') {
-        return tasks.length === 0
-          ? policy.emptyTasks
-          : ['GoodVibes tasks', ...tasks.map((task) => `  ${task.id} ${task.status} ${task.kind} ${task.title}`)].join('\n');
+        const { tasks: listed, daemonUnavailable } = await tasks.list(500);
+        const rows = listed.map(({ task }) => task);
+        return formatJsonOrText(runtime.cli)(
+          { tasks: rows, returned: rows.length, complete: daemonUnavailable === null, ...(daemonUnavailable ? { daemonUnavailable } : {}) },
+          [
+            'GoodVibes tasks',
+            ...(rows.length === 0 && daemonUnavailable === null ? ['  The daemon has no tasks.'] : []),
+            ...rows.map((task) => `  ${task.id} ${task.status} ${task.kind} ${task.title}`),
+            ...(daemonUnavailable ? [`  ${rows.length === 0 ? 'None listed' : 'Partial list'}: ${noDaemon(daemonUnavailable)}.`] : []),
+          ].join('\n'),
+        );
       }
-      if (sub === 'show') {
-        if (!rest[0]) return `Usage: ${policy.binary(runtime)} tasks show <taskId>`;
-        const task = tasks.find((candidate) => candidate.id === rest[0]);
-        return task ? JSON.stringify(task, null, 2) : `Unknown task${policy.inline ? ': ' : ' '}${rest[0] ?? ''}`;
-      }
-      return `Usage: ${policy.binary(runtime)} tasks list|show <taskId>${policy.allowSubmit ? '|submit <prompt>' : ''}`;
+      const taskId = rest[0] as string;
+      const { found, daemonUnavailable } = await tasks.lookup(taskId);
+      if (found) return JSON.stringify(found.task, null, 2);
+      return `Unknown task${policy.inline ? ': ' : ' '}${taskId}${daemonUnavailable ? ` (${noDaemon(daemonUnavailable)})` : ''}`;
     });
   }
   return { handleSessions, handleTasks };

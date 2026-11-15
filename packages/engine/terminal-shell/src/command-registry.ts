@@ -8,7 +8,71 @@ export interface TerminalSlashCommand<Context> {
   usage?: string | undefined;
   argsHint?: string | undefined;
   hidden?: boolean | undefined;
+  /** Typed arguments that carry a secret; the input history stores `<redacted>` in their place. */
+  secretArgs?: CommandSecretArgs | undefined;
   handler: (args: string[], context: Context) => void | Promise<void>;
+}
+/**
+ * Which typed arguments of a command are secrets. Positions count from the
+ * first argument after the command name. `subcommands` keys on the first
+ * argument, or the first two joined by a space (`set` in `/secrets set KEY
+ * value`, `local add-user` in `/auth local add-user NAME PASSWORD`), and
+ * counts positions the same way, so `{ subcommands: { set: [2] } }` is the
+ * value. `flags` names options whose value is a secret, in either
+ * `--flag value` or `--flag=value` form.
+ */
+export interface CommandSecretArgs {
+  readonly positions?: readonly number[] | undefined;
+  /** Positions, or `{ from }` for every non-flag argument from that position on (a value that may contain spaces). */
+  readonly subcommands?: Readonly<Record<string, readonly number[] | { readonly from: number }>> | undefined;
+  readonly flags?: readonly string[] | undefined;
+}
+const REDACTED_ARGUMENT = '<redacted>';
+function quoteHistoryArgument(value: string): string {
+  return /\s/.test(value) || value === '' ? JSON.stringify(value) : value;
+}
+/**
+ * The line the input history keeps for an executed command: the typed line as
+ * it was, or, when the command declares secret arguments and the line has
+ * them, the command rebuilt with `<redacted>` in each secret's place.
+ */
+export function commandHistoryLine(
+  rawLine: string,
+  name: string,
+  args: readonly string[],
+  secretArgs: CommandSecretArgs | undefined,
+): string {
+  if (!secretArgs) return rawLine.trim();
+  const secret = new Set<number>(secretArgs.positions ?? []);
+  const first = args[0]?.toLowerCase();
+  const second = args[1]?.toLowerCase();
+  for (const key of [first, first !== undefined && second !== undefined ? `${first} ${second}` : undefined]) {
+    if (key === undefined) continue;
+    const declared = secretArgs.subcommands?.[key];
+    if (declared === undefined) continue;
+    if ('from' in declared) {
+      for (let index = declared.from; index < args.length; index++) if (!args[index]!.startsWith('--')) secret.add(index);
+    } else for (const position of declared) secret.add(position);
+  }
+  const flags = new Set(secretArgs.flags ?? []);
+  let redacted = false;
+  const kept = args.map((value, index) => {
+    if (secret.has(index)) {
+      redacted = true;
+      return REDACTED_ARGUMENT;
+    }
+    const equals = value.indexOf('=');
+    if (equals > 0 && flags.has(value.slice(0, equals))) {
+      redacted = true;
+      return `${value.slice(0, equals)}=${REDACTED_ARGUMENT}`;
+    }
+    if (index > 0 && flags.has(args[index - 1]!)) {
+      redacted = true;
+      return REDACTED_ARGUMENT;
+    }
+    return quoteHistoryArgument(value);
+  });
+  return redacted ? [`/${name}`, ...kept].join(' ') : rawLine.trim();
 }
 export interface TerminalCommandRegistry<Context> {
   register(command: TerminalSlashCommand<Context>): void;
@@ -180,7 +244,10 @@ export function createTerminalCommandRegistry<
       return results;
     }
     /**
-     * execute - Look up and run a command. Returns true if found, false otherwise.
+     * execute - Look up and run a command. Resolves true when it ran and false
+     * when no command has that name. A command that refuses throws its refusal
+     * (`RefusalError`, with the state, reason and next step), so the promise
+     * rejects with it: a caller reports "Failed: <reason>", never "Done".
      */
     async execute(rawName: string, args: string[], context: Context): Promise<boolean> {
       const cmd = this.get(rawName);

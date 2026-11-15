@@ -16,6 +16,7 @@ import {
   type SettingsSyncBundle,
 } from '@/runtime/index.ts';
 import { getProviderIdFromModel } from '@goodvibes-jev/engine/platform/platform/providers';
+import { RefusalError, refusal, toRefusal } from '@goodvibes-jev/engine/errors';
 import { type ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
 import { CONFIG_KEYS } from '@goodvibes-jev/engine/platform/platform/config';
 import type { CommandRegistry } from '../command-registry.ts';
@@ -98,14 +99,16 @@ export function registerSettingsSyncRuntimeCommands(registry: CommandRegistry): 
       if (sub === 'resolve') {
         const key = args[1] as ConfigKey | undefined;
         const resolution = (args[2] ?? '').toLowerCase();
+        // A refusal is thrown so a modal action reports Failed with the reason, not Done.
         if (!key || !CONFIG_KEYS.has(key) || (resolution !== 'local' && resolution !== 'synced')) {
-          ctx.print('Usage: /settings-sync resolve <config-key> <local|synced>');
-          return;
+          throw new RefusalError(refusal({ code: 'USAGE', state: 'nothing was changed', reason: 'Usage: /settings-sync resolve <config-key> <local|synced>' }));
         }
         const changed = resolveSettingsSyncConflict(ctx.platform.configManager, key, resolution);
         if (!changed) {
-          ctx.print(`No synced conflict found for ${key}.`);
-          return;
+          throw new RefusalError(refusal({
+            code: 'NO_CONFLICT', state: 'nothing was changed', reason: `No synced conflict found for ${key}`,
+            next: ['/settings-sync conflicts lists the conflicts that are open'],
+          }));
         }
         // The live selection follows config only for the key that was resolved: a model
         // chosen this session and not saved must not change because an unrelated key resolved.
@@ -188,7 +191,7 @@ export function registerSettingsSyncRuntimeCommands(registry: CommandRegistry): 
           ctx.print(`Settings sync bundle pulled from ${sourcePath} (${result.appliedCount} applied, ${result.conflictCount} conflicts${result.skippedLockedKeys ? `, ${result.skippedLockedKeys.length} skipped because managed locks own them: ${result.skippedLockedKeys.join(', ')}` : ''}).`);
         } catch (error) {
           recordSettingsSyncFailure('settings-sync', summarizeError(error), controlPlaneConfigDir);
-          ctx.print(summarizeError(error));
+          throw new RefusalError(toRefusal(error, { code: 'PULL_FAILED', state: 'the bundle was not applied', next: ['/settings-sync inspect <path> shows what the bundle holds'] }));
         }
         return;
       }

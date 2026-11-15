@@ -1,6 +1,8 @@
 import { loadSkillByTrigger } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
+import { formatRefusal, readRefusal } from '@goodvibes-jev/engine/errors';
 import { activeTokens } from './renderer/theme.js';
+import { commandHistoryLine, type CommandSecretArgs } from './command-registry.js';
 export interface CommandRouteContext {
   readonly workspace: {
     readonly shellPaths?:
@@ -31,8 +33,10 @@ export interface CommandRouteState<Context extends CommandRouteContext> {
       | null
       | undefined;
   } | null;
+  /** Executed command lines are recalled with Up and Ctrl+R like sent messages. */
+  inputHistory?: { add(text: string): void } | null | undefined;
   commandRegistry: {
-    get(name: string): unknown;
+    get(name: string): { readonly secretArgs?: CommandSecretArgs | undefined } | undefined;
     executeFromOwner(name: string, args: string[], context: Context, rawInput?: string | undefined): Promise<boolean>;
   } | null;
   commandContext?: Context | undefined;
@@ -48,6 +52,7 @@ export interface CommandRouteState<Context extends CommandRouteContext> {
   readonly requestRender: () => void;
   readonly handleEscape: () => void;
 }
+const COMMAND_LINE_CURSOR_KEYS: readonly string[] = ['left', 'right', 'home', 'end'];
 export function createCommandModeTokenHandler<Context extends CommandRouteContext, State extends CommandRouteState<Context>>(presentation: {
   readonly prepare: (
     context: Context,
@@ -62,9 +67,6 @@ export function createCommandModeTokenHandler<Context extends CommandRouteContex
     | undefined;
   readonly unknownCommand: (name: string) => string;
   readonly commandError: (error: unknown, name: string) => string;
-  readonly dismissSplash: boolean;
-  readonly passOriginalInput: boolean;
-  readonly passthroughKeys: readonly string[];
 }) {
   function handleCommandModeToken(state: State, token: InputToken): boolean {
     if (!state.commandMode) return false;
@@ -120,12 +122,14 @@ export function createCommandModeTokenHandler<Context extends CommandRouteContex
       const raw = originalCommand.trim();
       if (raw.startsWith('/') && state.commandRegistry && state.commandContext) {
         closeCommandMode();
-        if (presentation.dismissSplash) state.conversationManager?.dismissSplash();
+        state.conversationManager?.dismissSplash(); // command input retires the splash, same as text input
         const prepared = presentation.prepare(state.commandContext, state, raw);
         if (!prepared) return true;
         const { name, args, context: ctx } = prepared;
-        const commandPromise = state.commandRegistry.get(name)
-          ? state.commandRegistry.executeFromOwner(name, args, ctx, presentation.passOriginalInput ? originalCommand : undefined)
+        const registered = state.commandRegistry.get(name);
+        state.inputHistory?.add(commandHistoryLine(raw, name, args, registered?.secretArgs));
+        const commandPromise = registered
+          ? state.commandRegistry.executeFromOwner(name, args, ctx, originalCommand)
           : (ctx.executeCommand?.(name, args) ?? Promise.resolve(false));
         commandPromise
           .then((handled) => {
@@ -148,7 +152,9 @@ export function createCommandModeTokenHandler<Context extends CommandRouteContex
             }
           })
           .catch((error: unknown) => {
-            const message = presentation.commandError(error, name);
+            // A command that refused threw its refusal; it reads as the reason and the next step, not as a crash.
+            const refused = readRefusal(error);
+            const message = refused ? formatRefusal(refused) : presentation.commandError(error, name);
             state.conversationManager?.log(message, { fg: activeTokens().error });
             state.requestRender();
           });
@@ -157,7 +163,8 @@ export function createCommandModeTokenHandler<Context extends CommandRouteContex
       }
       return true;
     }
-    return !presentation.passthroughKeys.includes(token.logicalName);
+    // Cursor keys fall through to the composer's key route, so a command line is edited like any other text.
+    return !COMMAND_LINE_CURSOR_KEYS.includes(token.logicalName);
   }
   return handleCommandModeToken;
 }

@@ -159,7 +159,7 @@ export function registerShellCoreCommands(registry: CommandRegistry): void {
   const navigation = createShellNavigationCommands<CommandContext>({
     shortcutsHidden: true,
     shortcutsFallback: 'Use ? key or /help for shortcuts',
-    quitAliases: [':q'],
+    quitAliases: [':q', ':wq'],
     beforeCommands: (ctx) => {
       if (!ctx.openSelection) return false;
       openRegisteredCommandSelection(registry, ctx, { includeHidden: true });

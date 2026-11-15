@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { clearTurnAnchors, recordTurnAnchor } from '@goodvibes-jev/engine/platform/platform/rewind';
 import { readConversationMessageSnapshots } from '../terminal-shell/src/conversation-message-snapshot.ts';
 import { createConversationRewindPort, type RewindConversation } from '../terminal-shell/src/conversation-rewind-port.ts';
-import { callDaemonWsVerb, type DaemonWebSocket, type DaemonWebSocketFactory } from '../terminal-shell/src/daemon-ws-call.ts';
+import { callDaemonMethod } from '../terminal-shell/src/raw-reply-route.ts';
 import type { RemoteDaemonTarget } from '../terminal-shell/src/cluster-remote-daemon-target.ts';
 import { FilePickerModal } from '../terminal-shell/src/file-picker.ts';
 import { startFreshConversation, type FreshConversationContext } from '../terminal-shell/src/fresh-conversation.ts';
@@ -138,52 +138,21 @@ describe('host pairing attempts can be cleared exactly', () => {
   });
 });
 
-describe('the daemon ws call tells a lost answer from a refusal', () => {
+describe('a daemon call keeps a verb\'s own refusal', () => {
   const LOCAL: RemoteDaemonTarget = { baseUrl: 'http://127.0.0.1:3421', token: 't', isLocal: true };
-  function socketFixture() {
-    let made: DaemonWebSocket | null = null;
-    const sent: string[] = [];
-    const factory: DaemonWebSocketFactory = () => {
-      made = { onopen: null, onmessage: null, onerror: null, onclose: null, send: (data: string) => { sent.push(data); }, close: () => {} };
-      return made;
-    };
-    return { factory, socket: () => made as unknown as DaemonWebSocket, sent };
-  }
-  function callSent(f: ReturnType<typeof socketFixture>): string {
-    f.socket().onopen?.({});
-    f.socket().onmessage?.({ data: JSON.stringify({ type: 'auth', ok: true }) });
-    return (JSON.parse(f.sent[1] as string) as { id: string }).id;
-  }
 
   test("a handler's own 404 keeps its message instead of blaming the daemon build", async () => {
-    const f = socketFixture();
-    const pending = callDaemonWsVerb(LOCAL, 'sessions.hosted.kill', { socketFactory: f.factory });
-    const id = callSent(f);
-    f.socket().onmessage?.({ data: JSON.stringify({ type: 'response', id, ok: false, status: 404, body: { error: 'No session x', code: 'SESSION_NOT_FOUND' } }) });
-    const outcome = await pending;
+    const fetchImpl = async () => Response.json({ error: 'No session x', code: 'SESSION_NOT_FOUND' }, { status: 404 });
+    const outcome = await callDaemonMethod(LOCAL, 'sessions.hosted.kill', { input: { sessionId: 'x' } }, fetchImpl);
     if (outcome.ok) throw new Error('expected a refusal');
+    expect(outcome.code).toBe('refused');
     expect(outcome.error).toContain('No session x');
-    expect(outcome.error).not.toContain('does not know the verb');
   });
 
-  test('a close after the call was sent says the outcome is unknown', async () => {
-    const f = socketFixture();
-    const pending = callDaemonWsVerb(LOCAL, 'sessions.hosted.kill', { socketFactory: f.factory });
-    callSent(f);
-    f.socket().onclose?.({});
-    const outcome = await pending;
-    if (outcome.ok) throw new Error('expected a failure');
-    expect(outcome.error).toContain('may or may not have taken effect');
-    expect(outcome.fix).toContain('before retrying');
-  });
-
-  test('a close before the call was sent is still a plain connection failure', async () => {
-    const f = socketFixture();
-    const pending = callDaemonWsVerb(LOCAL, 'sessions.hosted.kill', { socketFactory: f.factory });
-    f.socket().onclose?.({});
-    const outcome = await pending;
-    if (outcome.ok) throw new Error('expected a failure');
-    expect(outcome.error).not.toContain('may or may not');
+  test('an unknown verb is a missing route', async () => {
+    const fetchImpl = async () => Response.json({ error: 'Unknown gateway method', code: 'METHOD_NOT_FOUND' }, { status: 404 });
+    const outcome = await callDaemonMethod(LOCAL, 'sessions.hosted.kill', { input: { sessionId: 'x' } }, fetchImpl);
+    expect(outcome.ok === false && outcome.code).toBe('route-missing');
   });
 });
 

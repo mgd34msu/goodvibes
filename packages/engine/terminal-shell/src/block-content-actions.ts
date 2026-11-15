@@ -7,9 +7,11 @@ import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { activeTokens } from './renderer/theme.js';
 import { describeBlockForReceipt } from './block-description.js';
 export function createBlockContentActions(policy: {
-  readonly copyReceipt: boolean;
+  /**
+   * Product choice: whether Ctrl+S writes the block to a file. The Agent keeps
+   * block files off and points at copy and `/export`; `saveDisabled` is what it says.
+   */
   readonly allowSave: boolean;
-  readonly requireNearestForToggle: boolean;
   readonly saveDisabled: string;
   readonly noteTouch: (conversation: TerminalConversationManager, key: string) => void;
   readonly bookmarkTarget: (block: BlockMeta) => string;
@@ -32,18 +34,6 @@ export function createBlockContentActions(policy: {
     onCopied: () => void,
   ): void {
     if (!conversationManager) return;
-    if (!policy.copyReceipt) {
-      const lineIndex = getAnchorLine();
-      const content = conversationManager.getBlockContentAtLine(lineIndex);
-      if (!content) return;
-      if (copyToClipboard(content)) onCopied();
-      else conversationManager.log('[Copy failed: nothing was sent to the terminal clipboard]', { fg: activeTokens().error });
-      const nearest = conversationManager.findNearestBlock(lineIndex);
-      if (nearest) policy.noteTouch(conversationManager, nearest.collapseKey);
-      requestRender();
-      setTimeout(() => requestRender(), 2005);
-      return;
-    }
     const lineIndex = getAnchorLine();
     const nearest = conversationManager.findNearestBlock(lineIndex);
     if (!nearest) {
@@ -132,8 +122,7 @@ export function createBlockContentActions(policy: {
   ): void {
     if (!conversationManager) return;
     const lineIndex = getAnchorLine();
-    const nearest = policy.requireNearestForToggle ? conversationManager.findNearestBlock(lineIndex) : null;
-    if (policy.requireNearestForToggle && !nearest) return;
+    if (!conversationManager.findNearestBlock(lineIndex)) return;
     const blockIdx = conversationManager.toggleCollapseAtLine(lineIndex);
     if (blockIdx >= 0) {
       requestRender();

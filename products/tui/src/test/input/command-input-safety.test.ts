@@ -452,7 +452,7 @@ describe('/settings-sync resolve', () => {
     expect(runtime).toEqual({ model: 'session-only-model', provider: 'session-provider', reasoningEffort: 'high' });
   });
 
-  test('inspect and pull refuse a file that is not a bundle in one line and nothing throws', async () => {
+  test('inspect and pull refuse a file that is not a bundle in one line', async () => {
     const configManager = new ConfigManager({ surfaceRoot: 'tui', configDir: join(root, '.goodvibes', 'tui') });
     const { ctx, out } = makeCtx({ platform: { configManager } });
     const sync = command(registerSettingsSyncRuntimeCommands, 'settings-sync');
@@ -462,9 +462,15 @@ describe('/settings-sync resolve', () => {
     for (const sub of ['inspect', 'pull']) {
       for (const file of ['not-json.json', 'settings-is-a-number.json', 'no-export-time.json', 'missing.json']) {
         out.length = 0;
+        const reason = /not valid JSON|not a settings sync bundle|Cannot read/;
+        if (sub === 'pull') {
+          // A pull that fails throws its refusal, so a modal action reports Failed instead of Done.
+          await expect(Promise.resolve().then(() => sync.handler([sub, file], ctx))).rejects.toThrow(reason);
+          continue;
+        }
         await sync.handler([sub, file], ctx);
         expect(out.join('\n').split('\n')).toHaveLength(1);
-        expect(out.join('\n')).toMatch(/not valid JSON|not a settings sync bundle|Cannot read/);
+        expect(out.join('\n')).toMatch(reason);
       }
     }
   });

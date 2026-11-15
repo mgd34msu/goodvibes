@@ -272,7 +272,7 @@ export const { handleSessions, handleTasks } = createCliWorkspaceCommands<CliCom
   inline: true,
   time: (timestamp) => new Date(timestamp).toISOString(),
   allowSubmit: true,
-  emptyTasks: 'GoodVibes tasks\n  No in-process runtime tasks are currently recorded.',
+  verbs: (_runtime, services) => services.daemonVerbs,
   async submit(runtime, rest) {
     const prompt = rest.join(' ').trim();
     if (!prompt) return 'Usage: goodvibes tasks submit <prompt>';

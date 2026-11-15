@@ -1,6 +1,5 @@
 import { describe, expect, test } from 'bun:test';
 import type { DaemonFetch } from '@goodvibes-jev/engine/terminal-shell';
-import type { DaemonWebSocket, DaemonWebSocketFactory } from '@goodvibes-jev/engine/terminal-shell';
 import type { LocalStateIo } from '../../daemon/local-daemon-state.js';
 import { localDaemonStatePaths } from '../../daemon/local-daemon-state.js';
 import { runStatusCommand, runUpdateCommand } from '../../daemon/status-command.js';
@@ -32,9 +31,10 @@ function fakeFetch(routes: Record<string, unknown>, options: { readonly missing?
   calls: string[];
 } {
   const calls: string[] = [];
-  const fetchImpl: DaemonFetch = async (url) => {
+  const fetchImpl: DaemonFetch = async (url, init) => {
     const path = new URL(url).pathname;
     calls.push(path);
+    if (path.startsWith('/api/control-plane/methods/')) return gateway(path, init);
     if (options.missing?.includes(path)) {
       return new Response(JSON.stringify({ ok: false, error: 'not here' }), { status: 404 });
     }
@@ -49,11 +49,13 @@ function fakeFetch(routes: Record<string, unknown>, options: { readonly missing?
 }
 
 /**
- * A WebSocket stand-in that plays the daemon's side of the frame exchange:
- * accept the auth frame, then answer the call frame with a canned body.
+ * The daemon's side of the generic gateway route the hosted-session and update
+ * verbs go through. `fakeGateway` sets the answer for the next command; the
+ * fetch above hands every `/api/control-plane/methods/{id}/invoke` call to it.
  */
-function fakeSocketFactory(answer: { ok: boolean; body?: unknown; status?: number }): {
-  factory: DaemonWebSocketFactory;
+let gateway: (path: string, init: RequestInit | undefined) => Response = () => new Response('{}', { status: 500 });
+
+function fakeGateway(answer: { ok: boolean; body?: unknown; status?: number }): {
   headers: Record<string, string>[];
   methodIds: string[];
   bodies: unknown[];
@@ -61,41 +63,13 @@ function fakeSocketFactory(answer: { ok: boolean; body?: unknown; status?: numbe
   const headers: Record<string, string>[] = [];
   const methodIds: string[] = [];
   const bodies: unknown[] = [];
-  const factory: DaemonWebSocketFactory = (_url, init) => {
-    headers.push({ ...init.headers });
-    const socket: DaemonWebSocket = {
-      onopen: null,
-      onmessage: null,
-      onerror: null,
-      onclose: null,
-      send(data: string): void {
-        const frame = JSON.parse(data) as { type: string; id?: string; methodId?: string; body?: unknown };
-        if (frame.type === 'auth') {
-          queueMicrotask(() => socket.onmessage?.({ data: JSON.stringify({ type: 'auth', ok: true }) }));
-          return;
-        }
-        if (frame.type === 'call') {
-          methodIds.push(frame.methodId ?? '');
-          bodies.push(frame.body);
-          queueMicrotask(() => socket.onmessage?.({
-            data: JSON.stringify({
-              type: 'response',
-              id: frame.id,
-              ok: answer.ok,
-              status: answer.status ?? (answer.ok ? 200 : 400),
-              body: answer.body,
-            }),
-          }));
-        }
-      },
-      close(): void {
-        // Nothing to release: this double never opened anything.
-      },
-    };
-    queueMicrotask(() => socket.onopen?.({}));
-    return socket;
+  gateway = (path, init) => {
+    headers.push({ ...(init?.headers as Record<string, string>) });
+    methodIds.push(decodeURIComponent(/\/methods\/([^/]+)\/invoke$/.exec(path)?.[1] ?? ''));
+    bodies.push((JSON.parse(String(init?.body ?? '{}')) as { body?: unknown }).body);
+    return new Response(JSON.stringify(answer.body ?? {}), { status: answer.status ?? (answer.ok ? 200 : 400) });
   };
-  return { factory, headers, methodIds, bodies };
+  return { headers, methodIds, bodies };
 }
 
 function io(files: Record<string, string>): LocalStateIo {
@@ -135,12 +109,11 @@ function baseDeps(overrides: Record<string, unknown> = {}) {
 describe('status talks to a running daemon over the remote-target convention', () => {
   test('defaults to this machine and authenticates with the operator token', async () => {
     const { fetchImpl, calls } = fakeFetch(HEALTHY_ROUTES);
-    const { factory, headers } = fakeSocketFactory({ ok: true, body: { sessions: [] } });
+    const { headers } = fakeGateway({ ok: true, body: { sessions: [] } });
 
     const result = await runStatusCommand({
       ...baseDeps(),
       fetchImpl,
-      socketFactory: factory,
       flags: { host: undefined, port: undefined, token: undefined, json: false },
     });
 
@@ -163,12 +136,11 @@ describe('status talks to a running daemon over the remote-target convention', (
       const wrapped = path.startsWith('/api/cluster/');
       return new Response(JSON.stringify(wrapped ? { ok: true, data: body } : body), { status: 200 });
     };
-    const { factory } = fakeSocketFactory({ ok: true, body: { sessions: [] } });
+    fakeGateway({ ok: true, body: { sessions: [] } });
 
     const result = await runStatusCommand({
       ...baseDeps(),
       fetchImpl,
-      socketFactory: factory,
       flags: { host: 'http://10.0.0.7', port: 4321, token: 'other-token', json: false },
     });
 
@@ -179,12 +151,11 @@ describe('status talks to a running daemon over the remote-target convention', (
 
   test('reports version, health, binding, channels, cluster role and hosted sessions', async () => {
     const { fetchImpl } = fakeFetch(HEALTHY_ROUTES);
-    const { factory } = fakeSocketFactory({ ok: true, body: { sessions: [{ id: 'a' }, { id: 'b' }] } });
+    fakeGateway({ ok: true, body: { sessions: [{ id: 'a' }, { id: 'b' }] } });
 
     const result = await runStatusCommand({
       ...baseDeps(),
       fetchImpl,
-      socketFactory: factory,
       flags: { host: undefined, port: undefined, token: undefined, json: false },
     });
 
@@ -209,12 +180,11 @@ describe('status talks to a running daemon over the remote-target convention', (
         },
       },
     });
-    const { factory } = fakeSocketFactory({ ok: true, body: { sessions: [] } });
+    fakeGateway({ ok: true, body: { sessions: [] } });
 
     const result = await runStatusCommand({
       ...baseDeps(),
       fetchImpl,
-      socketFactory: factory,
       flags: { host: undefined, port: undefined, token: undefined, json: false },
     });
 
@@ -228,7 +198,7 @@ describe('status talks to a running daemon over the remote-target convention', (
 
   test('reports uptime, receipts, the rejected version and a rollback for a local daemon', async () => {
     const { fetchImpl } = fakeFetch(HEALTHY_ROUTES);
-    const { factory } = fakeSocketFactory({ ok: true, body: { sessions: [] } });
+    fakeGateway({ ok: true, body: { sessions: [] } });
 
     const result = await runStatusCommand({
       ...baseDeps({
@@ -244,7 +214,6 @@ describe('status talks to a running daemon over the remote-target convention', (
         }),
       }),
       fetchImpl,
-      socketFactory: factory,
       flags: { host: undefined, port: undefined, token: undefined, json: false },
     });
 
@@ -258,12 +227,11 @@ describe('status talks to a running daemon over the remote-target convention', (
 
   test('for a remote daemon those lines say they cannot be read from here', async () => {
     const { fetchImpl } = fakeFetch(HEALTHY_ROUTES);
-    const { factory } = fakeSocketFactory({ ok: true, body: { sessions: [] } });
+    fakeGateway({ ok: true, body: { sessions: [] } });
 
     const result = await runStatusCommand({
       ...baseDeps(),
       fetchImpl,
-      socketFactory: factory,
       flags: { host: 'http://10.0.0.7', port: undefined, token: 'other', json: false },
     });
 
@@ -274,12 +242,11 @@ describe('status talks to a running daemon over the remote-target convention', (
     const fetchImpl: DaemonFetch = async () => {
       throw new Error('ECONNREFUSED');
     };
-    const { factory } = fakeSocketFactory({ ok: true, body: { sessions: [] } });
+    fakeGateway({ ok: true, body: { sessions: [] } });
 
     const result = await runStatusCommand({
       ...baseDeps(),
       fetchImpl,
-      socketFactory: factory,
       flags: { host: undefined, port: undefined, token: undefined, json: false },
     });
 
@@ -290,12 +257,11 @@ describe('status talks to a running daemon over the remote-target convention', (
 
   test('one broken sub-question is a line, not a failed command', async () => {
     const { fetchImpl } = fakeFetch(HEALTHY_ROUTES, { missing: ['/api/channels/status'] });
-    const { factory } = fakeSocketFactory({ ok: false, status: 404, body: { error: 'Unknown gateway method: sessions.hosted.list', code: 'METHOD_NOT_FOUND' } });
+    fakeGateway({ ok: false, status: 404, body: { error: 'Unknown gateway method: sessions.hosted.list', code: 'METHOD_NOT_FOUND' } });
 
     const result = await runStatusCommand({
       ...baseDeps(),
       fetchImpl,
-      socketFactory: factory,
       flags: { host: undefined, port: undefined, token: undefined, json: false },
     });
 
@@ -303,17 +269,16 @@ describe('status talks to a running daemon over the remote-target convention', (
     const text = result.lines.join('\n');
     expect(text).toContain('channels: could not read');
     expect(text).toContain('sessions: could not read');
-    expect(text).toContain('does not know the verb sessions.hosted.list');
+    expect(text).toContain('does not know this command');
   });
 
   test('a missing operator token is refused with the fix, not attempted anonymously', async () => {
     const { fetchImpl, calls } = fakeFetch(HEALTHY_ROUTES);
-    const { factory } = fakeSocketFactory({ ok: true, body: { sessions: [] } });
+    fakeGateway({ ok: true, body: { sessions: [] } });
 
     const result = await runStatusCommand({
       ...baseDeps({ readToken: () => undefined }),
       fetchImpl,
-      socketFactory: factory,
       flags: { host: undefined, port: undefined, token: undefined, json: false },
     });
 
@@ -324,12 +289,11 @@ describe('status talks to a running daemon over the remote-target convention', (
 
   test('--json is one document carrying every part', async () => {
     const { fetchImpl } = fakeFetch(HEALTHY_ROUTES);
-    const { factory } = fakeSocketFactory({ ok: true, body: { sessions: [{ id: 'a' }] } });
+    fakeGateway({ ok: true, body: { sessions: [{ id: 'a' }] } });
 
     const result = await runStatusCommand({
       ...baseDeps(),
       fetchImpl,
-      socketFactory: factory,
       flags: { host: undefined, port: undefined, token: undefined, json: true },
     });
 
@@ -345,14 +309,13 @@ describe('status talks to a running daemon over the remote-target convention', (
     expect(parsed.data['cluster']).toBeDefined();
   });
 
-  test('the hosted-session count comes from the ws-only verb, by name', async () => {
+  test('the hosted-session count comes from the list verb, by name', async () => {
     const { fetchImpl } = fakeFetch(HEALTHY_ROUTES);
-    const { factory, methodIds } = fakeSocketFactory({ ok: true, body: { sessions: [] } });
+    const { methodIds } = fakeGateway({ ok: true, body: { sessions: [] } });
 
     await runStatusCommand({
       ...baseDeps(),
       fetchImpl,
-      socketFactory: factory,
       flags: { host: undefined, port: undefined, token: undefined, json: false },
     });
 
@@ -369,7 +332,7 @@ describe('update asks the daemon about its own updates', () => {
 
   test('reads update.status from the daemon and the receipts from this machine', async () => {
     const { fetchImpl } = fakeFetch({ '/status': { status: 'running', version: '1.28.0' } });
-    const { factory, methodIds } = fakeSocketFactory({ ok: true, body: UPDATE_STATUS });
+    const { methodIds } = fakeGateway({ ok: true, body: UPDATE_STATUS });
 
     const result = await runUpdateCommand({
       ...baseDeps({
@@ -379,7 +342,6 @@ describe('update asks the daemon about its own updates', () => {
         }),
       }),
       fetchImpl,
-      socketFactory: factory,
       flags: { host: undefined, port: undefined, token: undefined, json: false, check: false },
     });
 
@@ -395,12 +357,11 @@ describe('update asks the daemon about its own updates', () => {
 
   test('--check runs update.check and reports what the check did', async () => {
     const { fetchImpl } = fakeFetch({ '/status': { status: 'running', version: '1.28.0' } });
-    const { factory, methodIds } = fakeSocketFactory({ ok: true, body: { ...UPDATE_STATUS, check: 'ran' } });
+    const { methodIds } = fakeGateway({ ok: true, body: { ...UPDATE_STATUS, check: 'ran' } });
 
     const result = await runUpdateCommand({
       ...baseDeps(),
       fetchImpl,
-      socketFactory: factory,
       flags: { host: undefined, port: undefined, token: undefined, json: true, check: true },
     });
 
@@ -414,7 +375,7 @@ describe('update asks the daemon about its own updates', () => {
     const fetchImpl: DaemonFetch = async () => {
       throw new Error('ECONNREFUSED');
     };
-    const { factory } = fakeSocketFactory({ ok: false, status: 503 });
+    fakeGateway({ ok: false, status: 503 });
     const result = await runUpdateCommand({
       ...baseDeps({
         localStateIo: io({
@@ -423,7 +384,6 @@ describe('update asks the daemon about its own updates', () => {
         }),
       }),
       fetchImpl,
-      socketFactory: factory,
       flags: { host: undefined, port: undefined, token: undefined, json: false, check: false },
     });
     expect(result.exitCode).toBe(1);
@@ -439,7 +399,6 @@ describe('update asks the daemon about its own updates', () => {
     const result = await runUpdateCommand({
       ...baseDeps(),
       fetchImpl,
-      socketFactory: fakeSocketFactory({ ok: false, status: 503 }).factory,
       flags: { host: undefined, port: undefined, token: undefined, json: false, check: false },
     });
     expect(result.exitCode).toBe(1);

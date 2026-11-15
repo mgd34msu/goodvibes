@@ -1,13 +1,13 @@
 import type { CommandRegistry } from '../command-registry.ts';
 import type { WorkPlanItemStatus, WorkPlanStore } from '@goodvibes-jev/engine/platform/platform/workflow';
-import { WORK_PLAN_STATUSES } from '@goodvibes-jev/engine/platform/platform/workflow';
 import { openModalCommand } from './runtime-services.ts';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { RefusalError, readRefusal, refusal, toRefusal } from '@goodvibes-jev/engine/errors';
 
 const STATUS_COMMANDS: Record<string, WorkPlanItemStatus> = {
   pending: 'pending',
   todo: 'pending',
   start: 'in_progress',
+  in_progress: 'in_progress',
   active: 'in_progress',
   progress: 'in_progress',
   block: 'blocked',
@@ -41,6 +41,16 @@ function formatList(store: WorkPlanStore): string {
   ].join('\n');
 }
 
+/**
+ * Hands an incomplete command back to the person who typed it (or pressed the
+ * Work Plan modal's add/edit key) so they finish it in the composer instead of
+ * retyping it. Never for a model's call, and never over text already there.
+ */
+function offerDraft(ctx: import('../command-registry.ts').CommandContext, text: string): void {
+  if (ctx.invokedByModel === true) return;
+  ctx.restoreDraft?.(text);
+}
+
 function parseAddArgs(args: string[]): { title: string; owner?: string; source?: string; notes?: string } {
   const titleParts: string[] = [];
   let owner: string | undefined;
@@ -70,18 +80,21 @@ function parseAddArgs(args: string[]): { title: string; owner?: string; source?:
   };
 }
 
+function usage(reason: string): RefusalError {
+  return new RefusalError(refusal({ code: 'USAGE', state: 'nothing was changed', reason, next: ['/work-plan list shows the current items'] }));
+}
+
 export function registerWorkPlanRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
     name: 'work-plan',
     aliases: ['wp', 'todo', 'workplan'],
     description: 'Track a persistent workspace-scoped work plan',
-    usage: '[panel|list|show|export|add <title> [--owner name] [--source label] [--notes text]|edit <id> [<new title>] [--owner name] [--source label] [--notes text]|cycle <id>|done <id>|start <id>|block <id>|fail <id>|cancel <id>|pending <id>|remove <id>|clear-done]',
+    usage: '[panel|list|show|export|add <title> [--owner name] [--source label] [--notes text]|edit <id> [<new title>] [--owner name] [--source label] [--notes text]|cycle <id>|done <id>|start <id>|in_progress <id>|block <id>|fail <id>|cancel <id>|pending <id>|remove <id>|clear-done]',
     argsHint: '[panel|add|list|done]',
     handler(args, ctx) {
       const store = getStore(ctx);
       if (!store) {
-        ctx.print('Work plan store is not available in this runtime.');
-        return;
+        throw new RefusalError(refusal({ code: 'WORK_PLAN_UNAVAILABLE', state: 'nothing was changed', reason: 'The work plan store is not available in this runtime' }));
       }
       const subcommand = (args[0] ?? 'panel').toLowerCase();
       try {
@@ -99,9 +112,8 @@ export function registerWorkPlanRuntimeCommands(registry: CommandRegistry): void
           return;
         }
         if (subcommand === 'export') {
-          // Thin wrapper over WorkPlanStore.exportMarkdown(), writes the plan's
-          // markdown alongside the JSON and reports the path. (W6 command-path
-          // parity: the work-plan modal's export action routes here.)
+          // Writes the plan's markdown beside the JSON store and reports the
+          // path; the Work Plan modal's `x` closes the modal and runs this.
           const { path } = store.exportMarkdown();
           ctx.print(`Exported work plan markdown to ${path}`);
           return;
@@ -109,7 +121,11 @@ export function registerWorkPlanRuntimeCommands(registry: CommandRegistry): void
         if (subcommand === 'add') {
           const parsed = parseAddArgs(args.slice(1));
           if (!parsed.title) {
-            ctx.print('Usage: /work-plan add <title> [--owner name] [--source label] [--notes text]');
+            const line = 'Usage: /work-plan add <title> [--owner name] [--source label] [--notes text]';
+            if (args.length !== 1) throw usage(line);
+            // Bare `add` hands the line back in the composer to finish.
+            ctx.print(line);
+            offerDraft(ctx, '/work-plan add ');
             return;
           }
           const addOptions = {
@@ -123,13 +139,12 @@ export function registerWorkPlanRuntimeCommands(registry: CommandRegistry): void
           return;
         }
         if (subcommand === 'edit' || subcommand === 'update') {
-          // Thin wrapper over WorkPlanStore.updateItem(idOrPrefix, patch).
-          // (W6 command-path parity: the work-plan modal's edit action routes
-          // here.) Only the flags the caller supplies are patched.
+          // Only the flags the caller supplies are patched. With an id and
+          // nothing else (the Work Plan modal's `e`), the item's current title
+          // is handed back in the composer to change.
           const id = args[1];
           if (!id) {
-            ctx.print(`Usage: /work-plan ${subcommand} <id> [<new title>] [--owner name] [--source label] [--notes text]`);
-            return;
+            throw usage(`Usage: /work-plan ${subcommand} <id> [<new title>] [--owner name] [--source label] [--notes text]`);
           }
           const parsed = parseAddArgs(args.slice(2));
           const patch = {
@@ -139,7 +154,13 @@ export function registerWorkPlanRuntimeCommands(registry: CommandRegistry): void
             ...(parsed.notes !== undefined ? { notes: parsed.notes } : {}),
           };
           if (Object.keys(patch).length === 0) {
-            ctx.print(`Usage: /work-plan ${subcommand} <id> [<new title>] [--owner name] [--source label] [--notes text]`);
+            const line = `Usage: /work-plan ${subcommand} <id> [<new title>] [--owner name] [--source label] [--notes text]`;
+            const items = args.length === 2 ? store.listItems() : [];
+            const matches = items.filter((item) => item.id.startsWith(id));
+            const target = items.find((item) => item.id === id) ?? (matches.length === 1 ? matches[0]! : null);
+            if (!target) throw usage(args.length === 2 ? `No work plan item matches ${id}` : line);
+            ctx.print(line);
+            offerDraft(ctx, `/work-plan edit ${target.id} ${target.title}`);
             return;
           }
           const item = store.updateItem(id, patch);
@@ -149,8 +170,7 @@ export function registerWorkPlanRuntimeCommands(registry: CommandRegistry): void
         if (subcommand === 'remove' || subcommand === 'delete' || subcommand === 'rm') {
           const id = args[1];
           if (!id) {
-            ctx.print(`Usage: /work-plan ${subcommand} <id>`);
-            return;
+            throw usage(`Usage: /work-plan ${subcommand} <id>`);
           }
           const item = store.removeItem(id);
           ctx.print(`Removed work plan item ${item.id}: ${item.title}`);
@@ -164,8 +184,7 @@ export function registerWorkPlanRuntimeCommands(registry: CommandRegistry): void
         if (subcommand === 'cycle' || subcommand === 'toggle') {
           const id = args[1];
           if (!id) {
-            ctx.print(`Usage: /work-plan ${subcommand} <id>`);
-            return;
+            throw usage(`Usage: /work-plan ${subcommand} <id>`);
           }
           const item = store.cycleItemStatus(id);
           ctx.print(`Updated ${item.id}: ${item.status}.`);
@@ -175,20 +194,18 @@ export function registerWorkPlanRuntimeCommands(registry: CommandRegistry): void
         if (status) {
           const id = args[1];
           if (!id) {
-            ctx.print(`Usage: /work-plan ${subcommand} <id>`);
-            return;
+            throw usage(`Usage: /work-plan ${subcommand} <id>`);
           }
           const item = store.setItemStatus(id, status);
           ctx.print(`Updated ${item.id}: ${item.status}.`);
           return;
         }
-        if (WORK_PLAN_STATUSES.includes(subcommand as WorkPlanItemStatus)) {
-          ctx.print(`Usage: /work-plan ${subcommand} <id>`);
-          return;
-        }
-        ctx.print(`Unknown workplan subcommand: ${subcommand}`);
+        throw usage(`Unknown work-plan subcommand: ${subcommand}`);
       } catch (error) {
-        ctx.print(summarizeError(error));
+        // A refusal is thrown, not printed and returned: a typed line shows it, and a modal action reports Failed.
+        throw new RefusalError(readRefusal(error) ?? toRefusal(error, {
+          code: 'WORK_PLAN_REFUSED', state: 'the work plan was not changed', next: ['/work-plan list shows the current items'],
+        }));
       }
     },
   });

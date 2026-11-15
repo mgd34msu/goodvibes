@@ -10,8 +10,7 @@
  * wrapped reader called a perfectly healthy 200 "the daemon refused the
  * request".
  *
- * So this is the second half of the SAME convention, next to daemon-ws-call.ts:
- * the target is resolved by `resolveRemoteDaemonTarget`, the credential is the
+ * So this is the second half of the SAME convention: the target is resolved by `resolveRemoteDaemonTarget`, the credential is the
  * same operator token, the reachability / stale-credential / unreadable-reply
  * refusals are the shared reader's, only the shape of a successful body
  * differs. `rawReplyReader` restates a raw reply in the wrapped convention
@@ -109,5 +108,30 @@ export function callDaemonRoute<T>(
     path,
     request,
     (init.envelope ?? 'wrapped') === 'raw' ? rawReplyReader(target, fetchImpl) : fetchImpl,
+  );
+}
+
+/**
+ * Call a catalogued daemon verb by its id over the generic gateway route,
+ * `POST /api/control-plane/methods/{methodId}/invoke`, with the operator token.
+ *
+ * The route serves every catalogued verb whatever transport it declares, and
+ * it is the one the terminal apps use for the same verbs, so a ws-only verb
+ * (`sessions.hosted.*`, `pairing.handoff.create`, `update.*`) needs no socket:
+ * one request, the same refusals in the same words, the same time budget as
+ * every other daemon call. The verb answers with its payload itself.
+ */
+export function callDaemonMethod<T>(
+  target: RemoteDaemonTarget,
+  methodId: string,
+  options: { readonly input?: unknown; readonly readOnly?: boolean } = {},
+  fetchImpl: DaemonFetch = fetch,
+): Promise<DaemonVerbOutcome<T>> {
+  return callDaemonVerb<T>(
+    target,
+    `/api/control-plane/methods/${encodeURIComponent(methodId)}/invoke`,
+    // The route requires the `body` envelope to be present even when empty.
+    { method: 'POST', body: { body: options.input ?? {} }, ...(options.readOnly ? { readOnly: true } : {}) },
+    rawReplyReader(target, fetchImpl),
   );
 }

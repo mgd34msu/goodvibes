@@ -100,7 +100,7 @@ describe('vim-style quit shortcuts', () => {
     expect(result.handled).toBe(true);
     expect(result.prompt).toBe('');
     expect(result.cursorPos).toBe(0);
-    expect(executed).toEqual(['wq']);
+    expect(executed).toEqual(['quit']);
     expect(exited).toBe(false);
     expect(renderCount).toBe(1);
   });

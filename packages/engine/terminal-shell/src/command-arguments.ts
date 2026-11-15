@@ -1,28 +1,20 @@
-/** Shared command argument syntax; callers own allowed flags and mutation authority. */
+/**
+ * Slash-command argument readers. They speak the one flag grammar of
+ * cli-arguments.ts (`--name value` or `--name=value`; a following `--flag` is
+ * never taken as the value), so a flag spelt one way works in every command.
+ * Callers own which flags they allow and what a value may change.
+ */
 import { shellSplit } from '@goodvibes-jev/engine/platform/platform/utils';
-export function readFlag(args: string[], name: string): string | undefined {
-  const index = args.indexOf(name);
-  return index >= 0 ? args[index + 1] : undefined;
+import { readOptionValue, readOptionValues, readPositiveInt, readStringList } from './cli-arguments.js';
+
+export { readOptionValue as readFlag, readPositiveInt as readPositiveIntFlag, readOptionValues as readRepeatedFlagValues };
+
+export function readStringListFlag(args: readonly string[], name: string): string[] {
+  return [...readStringList(args, name)];
 }
 
-export function readStringListFlag(args: string[], name: string): string[] {
-  const value = readFlag(args, name);
-  if (!value) return [];
-  return value
-    .split(',')
-    .map((entry) => entry.trim())
-    .filter(Boolean);
-}
-
-export function readPositiveIntFlag(args: string[], name: string, fallback: number): number {
-  const raw = readFlag(args, name);
-  if (!raw) return fallback;
-  const parsed = Number.parseInt(raw, 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
-}
-
-export function readJsonObjectFlag(args: string[], name: string): Record<string, unknown> | null | undefined {
-  const value = readFlag(args, name);
+export function readJsonObjectFlag(args: readonly string[], name: string): Record<string, unknown> | null | undefined {
+  const value = readOptionValue(args, name);
   if (!value) return undefined;
   try {
     const parsed = JSON.parse(value) as unknown;
@@ -35,7 +27,8 @@ export function readJsonObjectFlag(args: string[], name: string): Record<string,
   }
 }
 
-export function positionalArgs(args: string[], valuedFlags: readonly string[] = []): string[] {
+/** The words that are not flags or the value of a bare valued flag; `--name=value` is one flag token. */
+export function positionalArgs(args: readonly string[], valuedFlags: readonly string[] = []): string[] {
   return args.filter((token, index) => {
     if (token.startsWith('--')) return false;
     if (index > 0 && valuedFlags.includes(args[index - 1]!)) return false;
@@ -43,34 +36,23 @@ export function positionalArgs(args: string[], valuedFlags: readonly string[] = 
   });
 }
 
-export function readRepeatedFlagValues(args: readonly string[], name: string): string[] {
-  const values: string[] = [];
-  for (let index = 0; index < args.length; index++) {
-    const value = args[index + 1];
-    if (args[index] === name && value) {
-      values.push(value);
-      index++;
-    }
-  }
-  return values;
+export function readKnowledgeTaskArguments(args: readonly string[]) {
+  return { scopeValues: readOptionValues(args, '--scope'), query: positionalArgs(args, ['--scope']).join(' ').trim() };
 }
-export function readKnowledgeTaskArguments(args: string[]) {
-  return { scopeValues: readRepeatedFlagValues(args, '--scope'), query: positionalArgs(args, ['--scope']).join(' ').trim() };
-}
-export function readKnowledgeAskArguments(args: string[], allowKnowledgeSpace: boolean) {
+export function readKnowledgeAskArguments(args: readonly string[], allowKnowledgeSpace: boolean) {
   const query = positionalArgs(args, allowKnowledgeSpace ? ['--space', '--knowledge-space', '--limit', '--mode'] : ['--limit', '--mode'])
     .join(' ')
     .trim();
-  const requested = readFlag(args, '--mode');
+  const requested = readOptionValue(args, '--mode');
   const mode = requested === 'concise' || requested === 'standard' || requested === 'detailed' ? requested : 'standard';
   return {
     query,
-    limit: readPositiveIntFlag(args, '--limit', 10),
+    limit: readPositiveInt(args, '--limit', 10),
     mode,
     includeSources: true,
     includeConfidence: true,
     includeLinkedObjects: true,
-    ...(allowKnowledgeSpace ? { knowledgeSpaceId: readFlag(args, '--space') ?? readFlag(args, '--knowledge-space') } : {}),
+    ...(allowKnowledgeSpace ? { knowledgeSpaceId: readOptionValue(args, '--space') ?? readOptionValue(args, '--knowledge-space') } : {}),
   } as const;
 }
 

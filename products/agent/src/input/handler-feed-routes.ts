@@ -27,11 +27,6 @@ export const { handleIndicatorFocusToken, handlePromptTextToken, handlePromptKey
     state.modalOpened('process');
     state.processModal.open();
   },
-  armCommandWithoutRegistry: false,
-  recoverDesyncedCommands: false,
-  scheduleCommandArguments: () => undefined,
   // InputTokenizer already reports zero-based rows.
   mouseRowOffset: 0,
-  clipMouseToTranscript: false,
-  requireBlockForCollapse: false,
 });

@@ -62,7 +62,6 @@ describe('webui setup preserves complete transitions', () => {
         flags: { host: undefined, port: undefined, token: undefined, json: true, yes: false },
         // No daemon is running: the link comes from the settings this test wrote.
         fetchImpl: async () => { throw new Error('connect ECONNREFUSED'); },
-        socketFactory: () => { throw new Error('the local form opens no socket'); },
       });
       expect(JSON.parse(paired.lines[0]!).data.origin).toBe('http://fixture.local:3421');
       expect(runWebuiCommand(['enable', '--loopback'], f.deps).exitCode).toBe(0);

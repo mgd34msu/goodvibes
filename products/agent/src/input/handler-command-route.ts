@@ -61,9 +61,6 @@ function withComposerBindings(context: CommandContext, state: CommandModeRouteSt
 }
 
 export const handleCommandModeToken = createCommandModeTokenHandler<CommandContext, CommandModeRouteState>({
-  dismissSplash: false,
-  passOriginalInput: false,
-  passthroughKeys: ['left', 'right'],
   unknownCommand: (name) => `Unknown command /${name}. Type /help for available commands.`,
   commandError: (error) => summarizeCommandError(error),
   prepare(context, state, raw) {

@@ -25,7 +25,7 @@ export interface TerminalComposerHost {
   pathCompletionPrefix: string;
   pathCompletionStart: number;
   readonly filePicker: {
-    readonly allFiles: string[];
+    completionCandidates(prefix: string): string[];
   };
   saveUndoState(): void;
   ensureInputCursorVisible(contentWidth?: number | undefined): void;
@@ -94,7 +94,7 @@ export abstract class TerminalComposerController {
       pathCompletionIndex: this.pathCompletionIndex,
       pathCompletionPrefix: this.pathCompletionPrefix,
       pathCompletionStart: this.pathCompletionStart,
-      allFiles: this.filePicker.allFiles,
+      allFiles: this.filePicker.completionCandidates(findPathToken(this.prompt, this.cursorPos)?.prefix ?? ''),
       saveUndoState: () => this.saveUndoState(),
     });
     if (!result.handled) return false;

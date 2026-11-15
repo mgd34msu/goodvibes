@@ -3,14 +3,12 @@ import { execSync } from 'child_process';
 import { rmSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import type { CommandContext } from '../../input/command-registry.ts';
-import { buildWriteQuitCommitMessage, collectGitChanges, executeWriteQuit } from '../../input/commands/quit-shared.ts';
+import { buildWriteQuitCommitMessage, collectGitChanges, executeCommitAll } from '../../input/commands/quit-shared.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
-import { withPublicErrorText } from '../helpers/user-error-reading.ts';
 
-function makeCommandContext(overrides: Partial<CommandContext> = {}): Pick<CommandContext, 'print' | 'exit'> {
+function makeCommandContext(overrides: Partial<CommandContext> = {}): Pick<CommandContext, 'print'> {
   return {
     print: () => {},
-    exit: () => {},
     ...overrides,
   };
 }
@@ -25,7 +23,7 @@ afterEach(() => {
   }
 });
 
-describe('write quit helpers', () => {
+describe('commit-all', () => {
   test('builds a readable commit subject from collected changes', () => {
     const changes = collectGitChanges({
       staged: ['src/main.ts', 'src/ui.ts'],
@@ -40,80 +38,42 @@ describe('write quit helpers', () => {
     expect(buildWriteQuitCommitMessage(changes)).toBe('Update src files');
   });
 
-  test('exits immediately when the current directory is not a git repo', async () => {
-    let exitCount = 0;
-    const printed: string[] = [];
-
-    await executeWriteQuit(makeCommandContext({
-      print: (text) => { printed.push(text); },
-      exit: () => { exitCount++; },
-    }), {
-      cwd: '/tmp/non-git-dir',
-      isGitRepo: () => false,
-    });
-
-    expect(exitCount).toBe(1);
-    expect(printed).toEqual([]);
-  });
-
-  test('stages all changes, commits them, and then exits', async () => {
-    const repoDir = makeProjectTempDir('goodvibes-wq');
+  function repoWithThreeKinds(): string {
+    const repoDir = makeProjectTempDir('goodvibes-commit-all');
     tempDirs.push(repoDir);
+    const git = (command: string) => execSync(command, { cwd: repoDir, stdio: 'ignore' });
+    git('git init');
+    git('git config user.email "test@example.com"');
+    git('git config user.name "Test User"');
+    writeFileSync(join(repoDir, 'a.txt'), 'one\n', 'utf-8');
+    writeFileSync(join(repoDir, 'b.txt'), 'one\n', 'utf-8');
+    git('git add a.txt b.txt');
+    git('git commit -m base');
+    writeFileSync(join(repoDir, 'a.txt'), 'staged\n', 'utf-8');
+    git('git add a.txt');
+    writeFileSync(join(repoDir, 'b.txt'), 'unstaged\n', 'utf-8');
+    writeFileSync(join(repoDir, 'new.txt'), 'untracked\n', 'utf-8');
+    return repoDir;
+  }
 
-    execSync('git init', { cwd: repoDir, stdio: 'ignore' });
-    execSync('git config user.email "test@example.com"', { cwd: repoDir, stdio: 'ignore' });
-    execSync('git config user.name "Test User"', { cwd: repoDir, stdio: 'ignore' });
-    writeFileSync(join(repoDir, 'README.md'), '# hello\n', 'utf-8');
-
-    let exited = 0;
-    const printed: string[] = [];
-
-    await executeWriteQuit(makeCommandContext({
-      print: (text) => { printed.push(text); },
-      exit: () => { exited++; },
-    }), { cwd: repoDir });
-
-    const subject = execSync('git log -1 --pretty=%s', { cwd: repoDir }).toString('utf-8').trim();
-    const porcelain = execSync('git status --porcelain', { cwd: repoDir }).toString('utf-8').trim();
-
-    expect(subject).toBe('Add README.md');
-    expect(porcelain).toBe('');
-    expect(exited).toBe(1);
-    expect(printed.some((line) => line.includes('[wq] Commit complete:'))).toBe(true);
+  test('bare /commit-all changes nothing', async () => {
+    const repoDir = repoWithThreeKinds();
+    const before = execSync('git status --porcelain', { cwd: repoDir }).toString('utf-8');
+    await executeCommitAll(makeCommandContext(), [], { cwd: repoDir });
+    expect(execSync('git status --porcelain', { cwd: repoDir }).toString('utf-8')).toBe(before);
+    expect(execSync('git log -1 --pretty=%s', { cwd: repoDir }).toString('utf-8').trim()).toBe('base');
   });
 
-  test('does not exit when the commit step fails', async () => {
-    let exited = 0;
-    let commits = 0;
-    const printed: string[] = [];
+  test('--yes commits a hand-staged set alone and leaves the rest as it was', async () => {
+    const repoDir = repoWithThreeKinds();
+    await executeCommitAll(makeCommandContext(), ['--yes'], { cwd: repoDir });
+    expect(execSync('git show --name-only --pretty=format: HEAD', { cwd: repoDir }).toString('utf-8').trim()).toBe('a.txt');
+    expect(execSync('git status --porcelain', { cwd: repoDir }).toString('utf-8').trim().split('\n').sort()).toEqual([' M b.txt', '?? new.txt']);
+  });
 
-    await withPublicErrorText(['commit rejected'], () => executeWriteQuit(makeCommandContext({
-      print: (text) => { printed.push(text); },
-      exit: () => { exited++; },
-    }), {
-      cwd: '/repo',
-      isGitRepo: () => true,
-      getRepoRoot: () => '/repo',
-      gitFactory: () => ({
-        addAll: async () => {},
-        status: async () => ({
-          staged: ['src/app.ts'],
-          modified: [],
-          not_added: [],
-          deleted: [],
-          created: [],
-          renamed: [],
-          isClean: () => false,
-        } as never),
-        commit: async () => {
-          commits++;
-          throw new Error('commit rejected');
-        },
-      }),
-    }));
-
-    expect(exited).toBe(0);
-    expect(commits).toBe(1);
-    expect(printed[printed.length - 1]).toContain('commit rejected');
+  test('--yes from a model commits nothing', async () => {
+    const repoDir = repoWithThreeKinds();
+    await expect(executeCommitAll({ ...makeCommandContext(), invokedByModel: true }, ['--yes'], { cwd: repoDir })).rejects.toThrow();
+    expect(execSync('git log -1 --pretty=%s', { cwd: repoDir }).toString('utf-8').trim()).toBe('base');
   });
 });

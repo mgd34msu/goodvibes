@@ -267,15 +267,17 @@ test('a successful command followed by a failed assertion reports the proof and 
 test('owned status commands classify only fixed failure kinds from private stdout or stderr without exposing values', async () => {
   const root = mkdtempSync(join(tmpdir(), 'published-acceptance-status-')); roots.push(root);
   const invoke = nativeDaemonChild(root), secret = 'acceptance-private-status-value-40a9';
-  const failure = (error: string) => JSON.stringify({ ok: false, error, fix: secret, target: `https://${secret}.invalid`,
+  const failure = (code: string) => JSON.stringify({ ok: false, code, error: secret, fix: secret, target: `https://${secret}.invalid`,
     cause: { message: secret, code: secret }, headers: { Authorization: `Bearer ${secret}` } }, null, 2);
   const cases = [
-    [failure('no operator token was found for this machine'), 'token-missing'],
-    [failure(`'${secret}' is not a usable port`), 'invalid-port'],
-    [failure(`could not reach the daemon at https://${secret}.invalid`), 'unreachable'],
-    [failure(`the daemon at https://${secret}.invalid refused the operator token`), 'auth-refused'],
-    [failure('the daemon on this machine does not know this command'), 'route-missing'],
-    [failure('the daemon on this machine sent a reply this build could not read'), 'unreadable-reply'],
+    [failure('token-missing'), 'token-missing'],
+    [failure('invalid-port'), 'invalid-port'],
+    [failure('invalid-host'), 'invalid-host'],
+    [failure('unreachable'), 'unreachable'],
+    [failure('auth-refused'), 'auth-refused'],
+    [failure('route-missing'), 'route-missing'],
+    [failure('unreadable-reply'), 'unreadable-reply'],
+    [failure('refused'), 'refused'],
     [`private warning ${secret}\nDaemon command failed\n`, 'cli-command-caught'],
     [`error: Native daemon startup could not verify its installation. Repair using the released suite installer: curl -fsSL https://goodvibes.sh/install.sh | sh . The installer preserves existing application data.\nprivate stack ${secret}`, 'native-startup-repair'],
     [failure(secret), 'unknown'],
@@ -294,7 +296,7 @@ test('owned status commands classify only fixed failure kinds from private stdou
 
 test('status diagnostics preserve nonzero exits, ignore unrelated fields and do not carry a failure into later probes', async () => {
   const root = mkdtempSync(join(tmpdir(), 'published-acceptance-status-probes-')); roots.push(root);
-  const invoke = nativeDaemonChild(root), payload = JSON.stringify({ ok: false, error: 'no operator token was found for this machine' }, null, 2);
+  const invoke = nativeDaemonChild(root), payload = JSON.stringify({ ok: false, code: 'token-missing', error: 'no operator token was found for this machine' }, null, 2);
   const first = await invoke(`warning before machine reply\n${payload}`);
   expect(first.nativeDaemonFailure).toBe('token-missing');
   const success = await invoke('', '{"ok":true,"data":{}}', 0);

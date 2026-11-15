@@ -3,6 +3,7 @@ import { basename } from 'path';
 import type { CommandContext } from '../command-registry.ts';
 import { GitService } from '@goodvibes-jev/engine/platform/platform/git';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { RefusalError, refusal } from '@goodvibes-jev/engine/errors';
 
 type GitLike = Pick<GitService, 'addAll' | 'status' | 'commit'>;
 
@@ -113,50 +114,107 @@ export function buildWriteQuitCommitMessage(changes: GitChange[]): string {
   return `Update ${changes.length} files`;
 }
 
-export type ExecuteWriteQuitOptions = {
+export type ExecuteCommitAllOptions = {
   cwd?: string;
   isGitRepo?: (cwd: string) => boolean;
   getRepoRoot?: (cwd: string) => string | null;
   gitFactory?: (cwd: string) => GitLike;
 };
 
-export async function executeWriteQuit(
-  ctx: Pick<CommandContext, 'print' | 'exit'> & {
+/** What a working tree holds, counted from one `git status`: what is staged, what is not, what git does not track. */
+export interface WorkingTreeCounts {
+  readonly staged: readonly string[];
+  readonly unstaged: readonly string[];
+  readonly untracked: readonly string[];
+}
+
+export function countWorkingTree(status: Pick<StatusResult, 'files'>): WorkingTreeCounts {
+  const staged: string[] = [];
+  const unstaged: string[] = [];
+  const untracked: string[] = [];
+  for (const file of status.files ?? []) {
+    if (file.index === '?' || file.working_dir === '?') { untracked.push(file.path); continue; }
+    if (file.index && file.index !== ' ') staged.push(file.path);
+    if (file.working_dir && file.working_dir !== ' ') unstaged.push(file.path);
+  }
+  return { staged, unstaged, untracked };
+}
+
+const UNTRACKED_SHOWN = 10;
+
+/**
+ * `/commit-all`: commit the working tree of the repository this session runs in.
+ *
+ * Bare, it changes nothing: it prints the repository root (which may be above
+ * the working directory), the counts of staged, unstaged and untracked files,
+ * the untracked ones by name, and the commit it would make. `--yes` makes it.
+ * A set staged by hand is never added to: `--yes` then commits exactly that set
+ * and leaves everything else as it is. Without a hand-staged set, `--yes`
+ * stages every change, untracked files included, and commits it.
+ */
+export async function executeCommitAll(
+  ctx: Pick<CommandContext, 'print'> & {
     workspace?: CommandContext['workspace'];
+    invokedByModel?: boolean | undefined;
   },
-  options: ExecuteWriteQuitOptions = {},
+  args: readonly string[],
+  options: ExecuteCommitAllOptions = {},
 ): Promise<void> {
   const cwd = options.cwd ?? ctx.workspace?.shellPaths?.workingDirectory;
   if (!cwd) {
-    throw new Error('commandContext.workspace.shellPaths is required when executeWriteQuit() is called without an explicit cwd');
+    throw new RefusalError(refusal({ code: 'NO_WORKSPACE', state: 'nothing was committed', reason: 'This session has no working directory' }));
   }
   const isGitRepo = options.isGitRepo ?? ((dir: string) => GitService.isGitRepo(dir));
   if (!isGitRepo(cwd)) {
-    ctx.exit();
-    return;
+    throw new RefusalError(refusal({ code: 'NOT_A_REPOSITORY', state: 'nothing was committed', reason: `${cwd} is not inside a git repository` }));
+  }
+  const confirmed = args.includes('--yes') || args.includes('-y');
+  if (confirmed && ctx.invokedByModel === true) {
+    throw new RefusalError(refusal({
+      code: 'OWNER_ONLY', state: 'nothing was committed',
+      reason: '/commit-all --yes commits the owner\'s whole working tree and runs only when the owner types it',
+      next: ['Use the git tools to stage and commit the files this task changed'],
+    }));
   }
 
   const repoRoot = options.getRepoRoot?.(cwd) ?? GitService.getRepoRoot(cwd) ?? cwd;
   const git = options.gitFactory?.(repoRoot) ?? new GitService(repoRoot);
+  const before = await git.status();
+  const counts = countWorkingTree(before);
+  const total = counts.staged.length + counts.unstaged.length + counts.untracked.length;
+  if (total === 0) {
+    ctx.print(`[commit-all] ${repoRoot}: nothing to commit, the working tree is clean.`);
+    return;
+  }
+  const handStaged = counts.staged.length > 0;
+  if (!confirmed) {
+    const shown = counts.untracked.slice(0, UNTRACKED_SHOWN);
+    ctx.print([
+      `[commit-all] Repository: ${repoRoot}`,
+      `  staged ${counts.staged.length}, unstaged ${counts.unstaged.length}, untracked ${counts.untracked.length}`,
+      ...(shown.length > 0 ? [`  untracked: ${shown.join(', ')}${counts.untracked.length > shown.length ? `, and ${counts.untracked.length - shown.length} more` : ''}`] : []),
+      handStaged
+        ? `  Nothing changed yet. /commit-all --yes commits only the ${counts.staged.length} staged file${counts.staged.length === 1 ? '' : 's'}; the rest stays as it is.`
+        : `  Nothing changed yet. /commit-all --yes stages all ${total} file${total === 1 ? '' : 's'}, untracked included, and commits them.`,
+    ].join('\n'));
+    return;
+  }
 
   try {
-    ctx.print(`[wq] Staging changes in ${repoRoot}...`);
-    await git.addAll();
-    const status = await git.status();
-    if (status.isClean()) {
-      ctx.print('[wq] Working tree clean. Exiting without creating a commit.');
-      ctx.exit();
-      return;
-    }
-
-    const changes = collectGitChanges(status);
+    if (!handStaged) await git.addAll();
+    const status = handStaged ? before : await git.status();
+    const changes = collectGitChanges(handStaged
+      ? { staged: [...counts.staged], modified: [], not_added: [], deleted: [], created: [], renamed: [] }
+      : status);
     const message = buildWriteQuitCommitMessage(changes);
-    ctx.print(`[wq] Committing ${changes.length} change${changes.length === 1 ? '' : 's'}: ${message}`);
     const result = await git.commit(message);
     const shortHash = result.hash ? result.hash.slice(0, 7) : 'unknown';
-    ctx.print(`[wq] Commit complete: ${shortHash} ${message}`);
-    ctx.exit();
+    ctx.print(`[commit-all] Committed ${changes.length} file${changes.length === 1 ? '' : 's'} in ${repoRoot}: ${shortHash} ${message}`
+      + (handStaged && (counts.unstaged.length + counts.untracked.length) > 0 ? ' (only the staged set; the rest is unchanged)' : ''));
   } catch (error) {
-    ctx.print(`[wq] Commit failed: ${summarizeError(error)}`);
+    throw new RefusalError(refusal({
+      code: 'COMMIT_FAILED', state: handStaged ? 'nothing was committed; the staged set is as it was' : 'the changes are staged but not committed',
+      reason: `git commit failed: ${summarizeError(error)}`, next: ['Run git status to see the repository'],
+    }));
   }
 }

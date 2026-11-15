@@ -310,15 +310,6 @@ describe('findPathToken', () => {
 // ── handlePathCompletion (via public state) ─────────────────────────────────
 
 describe('handlePathCompletion', () => {
-  test('returns false when allFiles is empty', async () => {
-    const ih = (await makeInput());
-    ih.prompt = '@src/in';
-    ih.cursorPos = 7;
-    // filePicker.allFiles is [] by default
-    const result = asTestAccess(ih).handlePathCompletion();
-    expect(result).toBe(false);
-  });
-
   test('completes a path token when allFiles has matches', async () => {
     const ih = (await makeInput());
     ih.prompt = '@src/in';

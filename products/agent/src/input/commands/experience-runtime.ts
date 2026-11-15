@@ -246,6 +246,4 @@ const voiceExperienceCommand = createVoiceExperienceCommand<CommandContext>({
     ? 'Always-speak mode enabled. Every submitted turn will be played through live TTS.'
     : 'Always-speak mode disabled. Use /tts <prompt> to speak individual turns.',
   notes: ['Voice is optional and local-first.', 'Operator review remains the primary review path for risky actions.'],
-  inspectMissingFile: true,
-  reportReadFailure: true,
 });

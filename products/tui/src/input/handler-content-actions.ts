@@ -97,11 +97,8 @@ export function handleDiffApply(
 }
 
 export const { handleCopy, handleBlockCopy, handleBookmark, handleBlockSave, handleBlockToggle } = createBlockContentActions({
-  copyReceipt: true,
   allowSave: true,
-  requireNearestForToggle: true,
-  saveDisabled:
-    '[Block file save is disabled in GoodVibes Agent: copy the block explicitly or use /export markdown <path> --yes for the conversation.]',
+  saveDisabled: '',
   noteTouch: (conversation, key) => conversation.searchExpansion.noteUserTouch(key),
   bookmarkTarget: describeBlockForReceipt,
 });

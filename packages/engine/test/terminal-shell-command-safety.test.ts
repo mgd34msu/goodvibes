@@ -239,7 +239,7 @@ describe('sessions export over an older, wider file', () => {
         runtimeStore: {},
       };
       const commands = createCliWorkspaceCommands<Rt, never>(direct(services) as never, {
-        binary: () => 'goodvibes', time: String, inline: true, submit: async () => '', allowSubmit: false, emptyTasks: '',
+        binary: () => 'goodvibes', time: String, inline: true, submit: async () => '', allowSubmit: false, verbs: () => ({ probe: () => ({ available: false, reason: 'none' }), invoke: async () => undefined as never }),
       });
       await commands.handleSessions(runtimeOf('export', 'abc', 'session.json'));
       expect(statSync(target).mode & 0o777).toBe(0o600);
@@ -262,7 +262,7 @@ describe('sessions export', () => {
         runtimeStore: {},
       };
       const commands = createCliWorkspaceCommands<Rt, never>(direct(services) as never, {
-        binary: () => 'goodvibes', time: String, inline: true, submit: async () => '', allowSubmit: false, emptyTasks: '',
+        binary: () => 'goodvibes', time: String, inline: true, submit: async () => '', allowSubmit: false, verbs: () => ({ probe: () => ({ available: false, reason: 'none' }), invoke: async () => undefined as never }),
       });
       await commands.handleSessions(runtimeOf('export', 'abc', 'out/session.json'));
       const target = join(dir, 'out/session.json');
@@ -340,6 +340,24 @@ describe('cluster output from other machines', () => {
     expect(text).not.toContain('\x07');
     expect(Math.max(...lines.map((l) => l.length))).toBeLessThan(200);
     expect(printableName('a\x1b]52;c;QQ==\x07b')).not.toContain('\x1b');
+  });
+
+  test('every string of a daemon answer is made printable where it enters, in text and in --json', async () => {
+    const hostile = 'x\x1b]52;c;QQ==\x07y';
+    const config = { get: (key: string): unknown => ({ 'controlPlane.host': '127.0.0.1', 'controlPlane.port': 4319, 'controlPlane.hostMode': 'local', 'controlPlane.tlsMode': 'off' })[key] };
+    const answer = { groupId: 'g', groupName: hostile, memberCount: 2 };
+    for (const json of [false, true]) {
+      const result = await runClusterCommand({
+        argv: ['join', '--group', 'g', '--key', 'k', ...(json ? ['--json'] : [])],
+        configManager: config as never, daemonHomeDir: '/nowhere', readToken: () => 'tok', isTerminal: false,
+        fetchImpl: async () => new Response(JSON.stringify({ ok: true, data: answer })),
+      });
+      expect(result.exitCode).toBe(0);
+      const text = result.lines.join('\n');
+      expect(text).not.toContain('\x1b');
+      expect(text).not.toContain('\\u001b');
+      expect(text).not.toContain('\x07');
+    }
   });
 });
 
@@ -531,7 +549,7 @@ describe('control plane seed', () => {
     const states: Array<Record<string, unknown>> = [];
     const dispatch = { syncControlPlaneState: (s: Record<string, unknown>) => { states.push(s); }, syncControlPlaneClient: () => {} };
     const values: Record<string, unknown> = { 'controlPlane.enabled': true, 'controlPlane.hostMode': 'network', 'controlPlane.host': '127.0.0.1', 'controlPlane.port': 0 };
-    seedTerminalControlPlane(dispatch as never, { get: (k: string) => values[k] } as never, 's', { id: 'c', kind: 'service', label: 'l', capabilities: [], metadata: {} } as never);
+    seedTerminalControlPlane(dispatch as never, { get: (k: string) => values[k] } as never);
     expect(states[0]).toMatchObject({ enabled: true, host: '0.0.0.0', port: 3421, isRunning: false });
     expect(states[0]?.connectionState).not.toBe('connected');
   });
@@ -618,7 +636,7 @@ describe('--model inference', () => {
 
 describe('copy receipts', () => {
   const actions = createBlockContentActions({
-    copyReceipt: true, allowSave: false, requireNearestForToggle: true, saveDisabled: '',
+    allowSave: false, saveDisabled: '',
     noteTouch: () => {}, bookmarkTarget: () => '',
   });
   const selection = { hasSelection: () => true, getSelectedText: () => 'hello' } as never;

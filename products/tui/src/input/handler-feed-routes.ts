@@ -6,7 +6,6 @@ import {
   type MouseRouteState as SharedMouseState,
 } from '@goodvibes-jev/engine/terminal-shell/feed-token-routes';
 import type { CommandContext } from './command-registry.ts';
-import { scheduleCommandArguments } from './commands/schedule-arguments.ts';
 import type { FooterTarget } from '../renderer/footer-targets.ts';
 import type { KillRing } from './kill-ring.ts';
 export type IndicatorFocusRouteState = SharedIndicatorState & { openAgentsView: () => void };
@@ -32,10 +31,5 @@ export const { handleIndicatorFocusToken, handlePromptTextToken, handlePromptKey
   openKeyIndicator(state) {
     state.openAgentsView();
   },
-  armCommandWithoutRegistry: true,
-  recoverDesyncedCommands: true,
-  scheduleCommandArguments: scheduleCommandArguments,
   mouseRowOffset: 0,
-  clipMouseToTranscript: true,
-  requireBlockForCollapse: true,
 });

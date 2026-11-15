@@ -13,6 +13,9 @@ import {
   moveCursorVertical as computeCursorVerticalMove,
 } from './prompt-buffer.js';
 import { captureNativeConversationInput } from './native/native-conversation-input.js';
+import { commandHistoryLine } from './command-registry.js';
+import { formatRefusal, readRefusal } from '@goodvibes-jev/engine/errors';
+import { scheduleCommandArguments } from './command-arguments.js';
 import type { NativeConversationInput } from './native/native-conversation-input.js';
 export interface FeedCommandContext {
   readonly print: (message: string) => void;
@@ -90,6 +93,8 @@ export type KeyRouteState<Context extends FeedCommandContext> = {
   contentWidth: number;
   maxInputRows: number;
   inputHistory: InputHistory | null;
+  /** Collapsed pastes by id; Enter sends the pasted text, not its marker. */
+  pasteRegistry?: ReadonlyMap<string, string> | undefined;
   indicatorFocused: boolean;
   conversationManager: TerminalConversationManager | null;
   commandContext: Context | undefined;
@@ -103,11 +108,9 @@ export type KeyRouteState<Context extends FeedCommandContext> = {
   /** True while the composer is collecting a concealed value; history recall must not write into the masked field. */
   isConcealedInput?: (() => boolean) | undefined;
   /**
-   * Optional: only used by the enter-key desync safety net below (a stray
-   * slash-prefixed submission with commandMode somehow still false). When
-   * absent, that fallback simply doesn't trigger, the primary fix (arming
-   * commandMode on the '/' keystroke regardless of registry attachment, in
-   * handlePromptTextToken above) is what actually prevents the desync.
+   * Used by Enter for a line that starts with '/' while command mode is off: a
+   * pasted command line, or a '/' typed while the registry was detached. When
+   * absent the line is sent as chat.
    */
   commandRegistry?: (TerminalCommandRegistry<Context> | null) | undefined;
   autocomplete: AutocompleteEngine<TerminalSlashCommand<Context>> | null;
@@ -173,12 +176,7 @@ export function createFeedTokenRoutes<
 >(policy: {
   readonly openIndicator: (state: IndicatorState) => void;
   readonly openKeyIndicator: (state: KeyState) => void;
-  readonly armCommandWithoutRegistry: boolean;
-  readonly recoverDesyncedCommands: boolean;
-  readonly scheduleCommandArguments: (raw: string) => string[] | undefined;
   readonly mouseRowOffset: number;
-  readonly clipMouseToTranscript: boolean;
-  readonly requireBlockForCollapse: boolean;
 }) {
   function handleIndicatorFocusToken(
     state: IndicatorState,
@@ -258,7 +256,7 @@ export function createFeedTokenRoutes<
     }
     if (concealed) {
       // Nothing else to arm: the buffer is a secret, not a command.
-    } else if (prompt === '/' && (policy.armCommandWithoutRegistry || state.commandRegistry)) {
+    } else if (prompt === '/') {
       // Arm commandMode as soon as the prompt becomes a bare '/', regardless of
       // whether commandRegistry has been (re)attached yet, this is a one-shot
       // transition (the only place commandMode ever becomes true), and gating
@@ -310,10 +308,11 @@ export function createFeedTokenRoutes<
     const ensureLocalInputCursorVisible = () => {
       inputScrollTop = computeInputScrollTop(prompt, cursorPos, inputScrollTop, state.contentWidth, state.maxInputRows);
     };
-    const runQuitShortcut = (commandName: 'quit' | 'wq') => {
+    // `:q` and `:wq` are the editor habit for leaving; the conversation is already saved, so both only quit.
+    const runQuitShortcut = () => {
       if (state.commandContext?.executeCommand) {
-        void state.commandContext.executeCommand(commandName, []).catch((error) => {
-          state.commandContext?.print(`[${commandName}] ${summarizeError(error)}`);
+        void state.commandContext.executeCommand('quit', []).catch((error) => {
+          state.commandContext?.print(`[quit] ${summarizeError(error)}`);
         });
         return;
       }
@@ -341,7 +340,7 @@ export function createFeedTokenRoutes<
         state.requestRender();
         return { handled: true, prompt, cursorPos, inputScrollTop, commandMode, indicatorFocused };
       }
-      const originalInput = captureNativeConversationInput(prompt);
+      const originalInput = captureNativeConversationInput(prompt, undefined, undefined, state.pasteRegistry);
       const text = prompt.trim();
       if (!text && !commandMode) {
         // Target the block the user is actually reading, not the conversation's
@@ -358,20 +357,16 @@ export function createFeedTokenRoutes<
       if (text === ':q' || text === ':wq') {
         prompt = '';
         cursorPos = 0;
-        runQuitShortcut(text === ':wq' ? 'wq' : 'quit');
+        runQuitShortcut();
         state.requestRender();
         return { handled: true, prompt, cursorPos, inputScrollTop, commandMode, indicatorFocused };
       }
       if (text) {
-        // Safety net for a desynced commandMode: text is command-shaped (starts
-        // with '/') but commandMode never armed, e.g. the '/' keystroke landed
-        // during a modal/overlay handoff window. handleCommandModeToken (the
-        // normal dispatch path for '/name ...') never runs in this state since
-        // it early-returns when commandMode is false, so without this the text
-        // would fall straight through to submitInput as ordinary chat. Re-derive
-        // intent from the literal text instead of trusting commandMode alone.
+        // A command-shaped line with command mode off: pasted whole (the prompt
+        // never equalled a bare '/'), or typed while the registry was detached.
+        // handleCommandModeToken never runs in this state, so without this the
+        // line would be sent as chat. Intent comes from the literal text.
         if (
-          policy.recoverDesyncedCommands &&
           !commandMode &&
           text.startsWith('/') &&
           state.commandRegistry &&
@@ -379,7 +374,7 @@ export function createFeedTokenRoutes<
         ) {
           const parts = text.slice(1).trim().split(/\s+/);
           const name = parts[0];
-          const args = name === 'schedule' || name === 'sched' ? policy.scheduleCommandArguments(text.slice(1)) : parts.slice(1);
+          const args = name === 'schedule' || name === 'sched' ? scheduleCommandArguments(text.slice(1)) : parts.slice(1);
           prompt = '';
           cursorPos = 0;
           if (!args) {
@@ -391,6 +386,7 @@ export function createFeedTokenRoutes<
           }
           if (name) {
             state.conversationManager?.dismissSplash(); // command input retires the splash, same as text input
+            state.inputHistory?.add(commandHistoryLine(text, name, args, state.commandRegistry.get(name)?.secretArgs));
             const executeCommand = state.commandContext.executeCommand;
             // Only the actual terminal fallback may carry the exact owner source.
             // Keep other fallback commands on their existing generic route.
@@ -407,7 +403,17 @@ export function createFeedTokenRoutes<
           }
           return { handled: true, prompt, cursorPos, inputScrollTop, commandMode, indicatorFocused };
         }
-        const expanded = state.expandPrompt(text);
+        let expanded: ReturnType<typeof state.expandPrompt>;
+        try {
+          expanded = state.expandPrompt(text);
+        } catch (error) {
+          // A typed reference that cannot be read refuses the send; the draft stays as typed.
+          const refused = readRefusal(error);
+          if (!refused) throw error;
+          state.commandContext?.print(formatRefusal(refused));
+          state.requestRender();
+          return { handled: true, prompt, cursorPos, inputScrollTop, commandMode, indicatorFocused };
+        }
         const historyRecallText =
           typeof expanded === 'string'
             ? expanded
@@ -621,7 +627,8 @@ export function createFeedTokenRoutes<
       state.openFooterTarget?.(footerTarget);
       return { handled: true, mouseDownRow: -1, mouseDownCol: -1 };
     }
-    if (policy.clipMouseToTranscript && (viewportRow < 0 || viewportRow >= state.viewportHeight)) {
+    // A selection starts and extends only inside the transcript.
+    if (viewportRow < 0 || viewportRow >= state.viewportHeight) {
       state.selection.endSelection();
       return { handled: true, mouseDownRow: -1, mouseDownCol: -1 };
     }
@@ -655,7 +662,7 @@ export function createFeedTokenRoutes<
             state.requestRender();
             return { handled: true, mouseDownRow: -1, mouseDownCol: -1 };
           }
-          const blockIdx = block || !policy.requireBlockForCollapse ? state.conversationManager.toggleCollapseAtLine(absoluteLine) : -1;
+          const blockIdx = block ? state.conversationManager.toggleCollapseAtLine(absoluteLine) : -1;
           if (blockIdx >= 0) {
             state.selection.clearSelection();
             state.requestRender();

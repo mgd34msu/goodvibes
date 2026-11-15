@@ -545,6 +545,7 @@ GoodVibes ships **163** built-in slash commands across **75** categories. Every 
 | --- | --- | --- | --- |
 | `/clear` | `/cls`, `/reset` | None | Start a fresh conversation (the current one is saved as its own session) |
 | `/commands` | `/cmds` | None | Browse all commands in a scrollable list |
+| `/commit-all` | None | `[--yes]` | Show what committing the whole working tree would include; --yes commits it |
 | `/compact` | None | None | Summarize conversation to free context window |
 | `/compact-history` | `/compaction-history` | None | Show compaction history for this session |
 | `/debug` | None | None | Toggle debug mode |
@@ -559,9 +560,8 @@ GoodVibes ships **163** built-in slash commands across **75** categories. Every 
 | `/pastes` | `/pending-pastes` | `[pN]` | Preview the actual content behind each [TEXT: pN, M lines] fold in the composer, before you submit |
 | `/power` | None | `[status \| on \| off \| toggle]` | Host sleep ownership: show status and toggle keep-awake |
 | `/queue` | `/q` | `[list \| edit <n> <text> \| delete <n>]` | Mid-turn message queue: list, edit, or delete still-undelivered messages |
-| `/quit` | `/:q`, `/exit` | None | Exit the application |
+| `/quit` | `/:q`, `/:wq`, `/exit` | None | Exit the application |
 | `/shortcuts` | `/keys`, `/keybinds` | None | Show keyboard shortcuts reference |
-| `/wq` | `/:wq` | None | Commit all git changes and then exit |
 
 ## Skills
 

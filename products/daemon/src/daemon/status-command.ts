@@ -13,8 +13,8 @@
  * established: `/status` for identity, `/api/health` for the health roll-up and
  * the address it actually bound, `/api/channels/status` for the channels, and
  * `/api/cluster/status` for this machine's place in its group. Hosted sessions
- * are a ws-only verb family, so they go through `callDaemonWsVerb`, same
- * target, same token, different transport.
+ * and the update verbs have no REST path of their own, so they go through the
+ * generic gateway route (`callDaemonMethod`), same target, same token.
  *
  * Whether the daemon is keeping itself current comes from the daemon's own
  * `update.status` verb, and `update --check` runs its `update.check` verb, so
@@ -32,12 +32,12 @@
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import {
   resolveRemoteDaemonTarget,
+  type DaemonFailureCode,
   type DaemonFetch,
   type DaemonVerbOutcome,
   type RemoteDaemonTarget,
 } from '@goodvibes-jev/engine/terminal-shell';
-import { callDaemonRoute } from '@goodvibes-jev/engine/terminal-shell';
-import { callDaemonWsVerb, type DaemonWebSocketFactory } from '@goodvibes-jev/engine/terminal-shell';
+import { callDaemonMethod, callDaemonRoute } from '@goodvibes-jev/engine/terminal-shell';
 import {
   describeLocalDaemonState,
   formatDuration,
@@ -64,7 +64,6 @@ export interface RemoteCommandDeps {
   /** Where the daemon writes its own lifecycle/receipt files, for the local-only lines. */
   readonly controlPlaneConfigDir: string;
   readonly fetchImpl?: DaemonFetch | undefined;
-  readonly socketFactory?: DaemonWebSocketFactory | undefined;
   readonly readToken?: ((daemonHomeDir: string) => string | undefined) | undefined;
   readonly now?: (() => number) | undefined;
   readonly localStateIo?: LocalStateIo | undefined;
@@ -163,10 +162,10 @@ interface HostedSessionsPayload {
 
 // ---------------------------------------------------------------------------
 
-function failure(error: string, fix: string, json: boolean): DaemonCommandResult {
+function failure(code: DaemonFailureCode, error: string, fix: string, json: boolean): DaemonCommandResult {
   return {
     lines: json
-      ? [JSON.stringify({ ok: false, error, fix }, null, 2)]
+      ? [JSON.stringify({ ok: false, code, error, fix }, null, 2)]
       : [error, `  ${fix}`],
     exitCode: 1,
   };
@@ -193,7 +192,7 @@ export function resolveTargetOrFailure(
     ...(deps.readToken ? { readToken: deps.readToken } : {}),
   });
   if (!resolved.ok) {
-    return { ok: false, result: failure(resolved.error, resolved.fix, flags.json) };
+    return { ok: false, result: failure(resolved.code, resolved.error, resolved.fix, flags.json) };
   }
   return { ok: true, target: resolved.target };
 }
@@ -383,15 +382,13 @@ export async function runStatusCommand(input: RunStatusCommandInput): Promise<Da
   const identity = await callDaemonRoute<ControlStatusPayload>(
     target, '/status', { method: 'GET', envelope: 'raw' }, fetchImpl,
   );
-  if (!identity.ok) return failure(identity.error, identity.fix, flags.json);
+  if (!identity.ok) return failure(identity.code, identity.error, identity.fix, flags.json);
 
   const [health, channels, cluster, hosted] = await Promise.all([
     callDaemonRoute<HealthPayload>(target, '/api/health', { method: 'GET', envelope: 'raw' }, fetchImpl),
     callDaemonRoute<ChannelsPayload>(target, '/api/channels/status', { method: 'GET', envelope: 'raw' }, fetchImpl),
     callDaemonRoute<ClusterStatusPayload>(target, '/api/cluster/status', { method: 'GET', envelope: 'wrapped' }, fetchImpl),
-    callDaemonWsVerb<HostedSessionsPayload>(target, 'sessions.hosted.list', {
-      ...(input.socketFactory ? { socketFactory: input.socketFactory } : {}),
-    }),
+    callDaemonMethod<HostedSessionsPayload>(target, 'sessions.hosted.list', { readOnly: true }, fetchImpl),
   ]);
 
   const local = describeLocalDaemonState({
@@ -519,9 +516,7 @@ export async function runUpdateCommand(input: RunUpdateCommandInput): Promise<Da
 
   const [identity, update] = await Promise.all([
     callDaemonRoute<ControlStatusPayload>(target, '/status', { method: 'GET', envelope: 'raw' }, fetchImpl),
-    callDaemonWsVerb<UpdateStatusPayload>(target, method, {
-      ...(input.socketFactory ? { socketFactory: input.socketFactory } : {}),
-    }),
+    callDaemonMethod<UpdateStatusPayload>(target, method, { readOnly: method === 'update.status' }, fetchImpl),
   ]);
   const local = describeLocalDaemonState({
     isLocal: target.isLocal,
@@ -530,18 +525,18 @@ export async function runUpdateCommand(input: RunUpdateCommandInput): Promise<Da
     ...(input.localStateIo ? { io: input.localStateIo } : {}),
   });
 
-  const fail = (error: string, fix: string, daemonDown: boolean): DaemonCommandResult => ({
+  const fail = (code: DaemonFailureCode, error: string, fix: string, daemonDown: boolean): DaemonCommandResult => ({
     exitCode: 1,
     lines: flags.json
-      ? [JSON.stringify({ ok: false, error, fix, ...(target.isLocal ? { local: localJson(local) } : {}) }, null, 2)]
+      ? [JSON.stringify({ ok: false, code, error, fix, ...(target.isLocal ? { local: localJson(local) } : {}) }, null, 2)]
       : [
         error,
         `  ${fix}`,
         ...(target.isLocal && daemonDown ? ['', 'what this machine\'s files say about the daemon:', ...localStateLines(local)] : []),
       ],
   });
-  if (!identity.ok) return fail(identity.error, identity.fix, true);
-  if (!update.ok) return fail(`the daemon answered, but ${method} failed: ${update.error}`, update.fix, false);
+  if (!identity.ok) return fail(identity.code, identity.error, identity.fix, true);
+  if (!update.ok) return fail(update.code, `the daemon answered, but ${method} failed: ${update.error}`, update.fix, false);
 
   if (flags.json) {
     return {

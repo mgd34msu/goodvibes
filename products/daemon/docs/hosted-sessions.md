@@ -30,7 +30,9 @@ session returns its retained record. A missing identifier is a usage error.
 
 The [remote-target convention](commands-reference.md#the-remote-target-convention)
 applies to `--host`, `--port`, and `--token`. Defaults use the configured control
-plane and the local operator token. The CLI calls authenticated WebSocket verbs.
+plane and the local operator token. The CLI calls the verbs with one authenticated
+request each to `POST /api/control-plane/methods/{methodId}/invoke`, the route the
+terminal apps use for the same verbs.
 It has no session-create, attach, or stream subcommand.
 See the [CLI implementation](../src/daemon/sessions-command.ts).
 

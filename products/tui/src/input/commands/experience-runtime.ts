@@ -263,6 +263,4 @@ const voiceExperienceCommand = createVoiceExperienceCommand<CommandContext>({
   toggled: (next) =>
     `Always-speak mode ${next ? 'enabled' : 'disabled'}. ${next ? 'Every submitted turn will be played through live TTS.' : 'Use /tts <prompt> to speak individual turns.'}`,
   notes: ['Voice is optional and local-first.', 'Secure sandbox mode and operator review remain the primary control surfaces.'],
-  inspectMissingFile: false,
-  reportReadFailure: false,
 });

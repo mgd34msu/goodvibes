@@ -22,12 +22,18 @@ import type {
 } from '@goodvibes-jev/engine/platform/platform/cluster';
 
 /**
- * A name another machine chose, made safe to print: escape sequences and control characters
- * are removed and the length is bounded, so a hostile advertisement cannot write to the
- * operator's terminal or clipboard or blow up the table width.
+ * Text another machine chose, made safe to print: escape sequences and control characters are
+ * removed, so a hostile advertisement cannot write to the operator's terminal or clipboard.
+ * The cluster commands apply it to every string of a daemon's answer where the answer enters
+ * (cluster-commands.ts), so the renderers below receive printable text.
  */
+export function printableText(value: string): string {
+  return stripDangerousAnsi(value).replace(/[\u0000-\u001f\u007f-\u009f]/g, '');
+}
+
+/** A name made printable and bounded, so a long name cannot blow up the table width. */
 export function printableName(value: string, max = 64): string {
-  const plain = stripDangerousAnsi(value).replace(/[\u0000-\u001f\u007f-\u009f]/g, '');
+  const plain = printableText(value);
   return plain.length > max ? `${plain.slice(0, max - 1)}…` : plain;
 }
 

@@ -30,6 +30,7 @@ import type {
 import {
   callDaemonVerb,
   resolveRemoteDaemonTarget,
+  type DaemonFailureCode,
   type DaemonFetch,
   type DaemonVerbOutcome,
 } from './cluster-remote-daemon-target.js';
@@ -39,6 +40,7 @@ import { decisionOrClassic } from '@goodvibes-jev/engine/platform/platform/runti
 import {
   describeAge,
   printableName,
+  printableText,
   renderCreated,
   renderDiscovered,
   renderFailure,
@@ -197,13 +199,40 @@ export interface RunClusterCommandInput {
   readonly promptSecret?: ((question: string) => Promise<string>) | undefined;
 }
 
-function failure(error: string, fix: string, json: boolean): ClusterCommandResult {
+/**
+ * Why a cluster command failed, for a script or an agent: the daemon call's
+ * codes, plus the refusals this command makes before calling anything.
+ */
+export type ClusterFailureCode = DaemonFailureCode | 'usage' | 'not-confirmed' | 'not-interactive' | 'no-group-found';
+
+function failure(code: ClusterFailureCode, error: string, fix: string, json: boolean): ClusterCommandResult {
   return {
     lines: json
-      ? [JSON.stringify({ ok: false, error, fix }, null, 2)]
+      ? [JSON.stringify({ ok: false, code, error, fix }, null, 2)]
       : renderFailure(error, fix),
     exitCode: 1,
   };
+}
+
+function refused(outcome: { readonly code: DaemonFailureCode; readonly error: string; readonly fix: string }, json: boolean): ClusterCommandResult {
+  return failure(outcome.code, outcome.error, outcome.fix, json);
+}
+
+/**
+ * Every string in a daemon's answer made printable, in one walk. Group and
+ * machine names, reasons and the daemon's own refusal text are chosen by
+ * other machines on the network; stripping them here, where the answer
+ * enters, means no renderer and no `--json` line can print them raw.
+ */
+function printableAnswer<T>(value: T): T {
+  if (typeof value === 'string') return printableText(value) as T;
+  if (Array.isArray(value)) return value.map((item: unknown) => printableAnswer(item)) as T;
+  if (value !== null && typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [key, item] of Object.entries(value)) out[key] = printableAnswer(item);
+    return out as T;
+  }
+  return value;
 }
 
 function success(data: unknown, lines: readonly string[], json: boolean, rawOutput?: string): ClusterCommandResult {
@@ -251,10 +280,11 @@ function describeIrreversible(parsed: ParsedClusterCommand): string | null {
 export async function runClusterCommand(input: RunClusterCommandInput): Promise<ClusterCommandResult> {
   const parsed = parseClusterCommand(input.argv);
   if (parsed.errors.length > 0) {
-    return failure(parsed.errors[0] as string, `usage: goodvibes-daemon cluster <${CLUSTER_SUBCOMMANDS.join('|')}>`, parsed.json);
+    return failure('usage', parsed.errors[0] as string, `usage: goodvibes-daemon cluster <${CLUSTER_SUBCOMMANDS.join('|')}>`, parsed.json);
   }
   if (!parsed.subcommand) {
     return failure(
+      'usage',
       'no cluster command was given',
       `usage: goodvibes-daemon cluster <${CLUSTER_SUBCOMMANDS.join('|')}>`,
       parsed.json,
@@ -271,12 +301,12 @@ export async function runClusterCommand(input: RunClusterCommandInput): Promise<
     daemonHomeDir: input.daemonHomeDir,
     ...(input.readToken ? { readToken: input.readToken } : {}),
   });
-  if (!resolved.ok) return failure(resolved.error, resolved.fix, parsed.json);
+  if (!resolved.ok) return refused(resolved, parsed.json);
 
   const now = input.now?.() ?? Date.now();
   const isTerminal = input.isTerminal ?? Boolean(process.stdout.isTTY);
-  const call = <T>(path: string, method: 'GET' | 'POST' = 'GET', body?: unknown): Promise<DaemonVerbOutcome<T>> =>
-    callDaemonVerb<T>(resolved.target, path, { method, ...(body === undefined ? {} : { body }) }, input.fetchImpl ?? fetch);
+  const call = async <T>(path: string, method: 'GET' | 'POST' = 'GET', body?: unknown): Promise<DaemonVerbOutcome<T>> =>
+    printableAnswer(await callDaemonVerb<T>(resolved.target, path, { method, ...(body === undefined ? {} : { body }) }, input.fetchImpl ?? fetch));
 
   const irreversible = describeIrreversible(parsed);
   if (irreversible !== null && !parsed.yes) {
@@ -286,6 +316,7 @@ export async function runClusterCommand(input: RunClusterCommandInput): Promise<
       : '';
     if (answer !== 'yes') {
       return failure(
+        'not-confirmed',
         `cluster ${parsed.subcommand} was not run: ${irreversible}, and it was not confirmed`,
         `nothing was changed. Run it again with --yes to confirm: cluster ${parsed.subcommand}${parsed.positional ? ` ${parsed.positional}` : ''}${parsed.now ? ' --now' : ''} --yes`,
         parsed.json,
@@ -298,23 +329,23 @@ export async function runClusterCommand(input: RunClusterCommandInput): Promise<
       const result = await call<GroupStatusReport>('/api/cluster/status');
       return result.ok
         ? success(result.data, renderStatus(result.data, now), parsed.json)
-        : failure(result.error, result.fix, parsed.json);
+        : refused(result, parsed.json);
     }
     case 'nodes': {
       const result = await call<NodesResult>('/api/cluster/nodes');
       return result.ok
         ? success(result.data, renderNodes(result.data, now), parsed.json)
-        : failure(result.error, result.fix, parsed.json);
+        : refused(result, parsed.json);
     }
     case 'groups': {
       const result = await call<readonly DiscoveredGroup[]>('/api/cluster/groups');
       return result.ok
         ? success(result.data, renderDiscovered(result.data, now), parsed.json)
-        : failure(result.error, result.fix, parsed.json);
+        : refused(result, parsed.json);
     }
     case 'key': {
       const result = await call<JoinKeyResult>('/api/cluster/key');
-      if (!result.ok) return failure(result.error, result.fix, parsed.json);
+      if (!result.ok) return refused(result, parsed.json);
       const rendered = renderJoinKey(result.data, isTerminal && !parsed.json);
       const lines = parsed.qr
         ? [...rendered.lines, '', ...renderJoinKeyQr(result.data.joinKey)]
@@ -328,13 +359,13 @@ export async function runClusterCommand(input: RunClusterCommandInput): Promise<
       });
       return result.ok
         ? success(result.data, renderCreated(result.data), parsed.json)
-        : failure(result.error, result.fix, parsed.json);
+        : refused(result, parsed.json);
     }
     case 'rotate': {
       const result = await call<RotateKeyResult>('/api/cluster/rotate', 'POST', { immediate: parsed.now });
       return result.ok
         ? success(result.data, renderRotated(result.data), parsed.json)
-        : failure(result.error, result.fix, parsed.json);
+        : refused(result, parsed.json);
     }
     case 'leave': {
       const result = await call<{ groupId: string; groupName: string }>('/api/cluster/leave', 'POST');
@@ -342,7 +373,7 @@ export async function runClusterCommand(input: RunClusterCommandInput): Promise<
         ? success(result.data, [`left "${result.data.groupName}" [${result.data.groupId}]`,
           'this machine no longer coordinates with it. The other machines still list it,',
           'run `cluster forget` on one of them to tidy up.'], parsed.json)
-        : failure(result.error, result.fix, parsed.json);
+        : refused(result, parsed.json);
     }
     case 'rename': {
       const name = parsed.name ?? parsed.positional ?? '';
@@ -351,13 +382,13 @@ export async function runClusterCommand(input: RunClusterCommandInput): Promise<
         ? success(result.data, [`the group is now called "${result.data.groupName}"`,
           'this name is visible to anything on this network, and every machine in the',
           'group will pick it up shortly.'], parsed.json)
-        : failure(result.error, result.fix, parsed.json);
+        : refused(result, parsed.json);
     }
     case 'forget': {
       const result = await call<ForgetNodeResult>('/api/cluster/forget', 'POST', { nodeId: parsed.positional });
       return result.ok
         ? success(result.data, renderForgotten(result.data), parsed.json)
-        : failure(result.error, result.fix, parsed.json);
+        : refused(result, parsed.json);
     }
     case 'join':
       return runJoin(parsed, call, now, input, isTerminal);
@@ -387,6 +418,7 @@ async function runJoin(
     const interactive = input.prompt !== undefined || (isTerminal && Boolean(process.stdin.isTTY));
     if (!interactive) {
       return failure(
+        'not-interactive',
         'a group and a join key are both needed, and this is not an interactive terminal',
         'pass them directly: cluster join --group <id> --key <join key>',
         parsed.json,
@@ -397,9 +429,10 @@ async function runJoin(
 
     if (groupId === null) {
       const found = await call<readonly DiscoveredGroup[]>('/api/cluster/groups');
-      if (!found.ok) return failure(found.error, found.fix, parsed.json);
+      if (!found.ok) return refused(found, parsed.json);
       if (found.data.length === 0) {
         return failure(
+          'no-group-found',
           'no goodvibes groups are advertising themselves on this network',
           'check the other machine is switched on with clustering enabled, or join by id: '
             + 'cluster join --group <id> --key <join key>',
@@ -414,7 +447,7 @@ async function runJoin(
         ?? uniqueIdPrefix(found.data, answer)
         ?? await readJoinGroup(answer, found.data, now);
       if (!chosen) {
-        return failure(`no group on this network matches '${answer}'`, 'run `cluster groups` to see them again', parsed.json);
+        return failure('no-group-found', `no group on this network matches '${answer}'`, 'run `cluster groups` to see them again', parsed.json);
       }
       groupId = chosen.groupId;
     }
@@ -428,7 +461,7 @@ async function runJoin(
   const result = await call<JoinGroupResult>('/api/cluster/join', 'POST', { groupId, joinKey });
   return result.ok
     ? success(result.data, renderJoined(result.data), parsed.json)
-    : failure(result.error, result.fix, parsed.json);
+    : refused(result, parsed.json);
 }
 
 /** The decision site the join group reading is logged under. */
@@ -446,7 +479,7 @@ function uniqueIdPrefix(groups: readonly DiscoveredGroup[], answer: string): Dis
  */
 async function readJoinGroup(answer: string, groups: readonly DiscoveredGroup[], now: number): Promise<DiscoveredGroup | undefined> {
   return decisionOrClassic(() => readDecisionJoinGroup(answer, groups, now), () => {
-    const matches = groups.filter(group => group.groupId === answer || group.displayName === answer || printableName(group.displayName) === answer);
+    const matches = groups.filter(group => group.groupId === answer || group.displayName === answer);
     return matches.length === 1 ? matches[0] : undefined;
   });
 }

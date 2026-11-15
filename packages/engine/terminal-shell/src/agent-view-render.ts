@@ -20,6 +20,7 @@
  * every line.
  */
 import type { MessageLineCache } from './conversation-line-cache.js';
+import { InfiniteBuffer } from './conversation-history.js';
 import type { BlockMeta } from './work-tree-types.js';
 import { createEmptyLine, type Line } from '@goodvibes-jev/engine/platform/platform/types';
 import type { ConversationMessageSnapshot } from '@goodvibes-jev/engine/platform/platform/core';
@@ -124,11 +125,13 @@ function headRow(input: AgentViewInput): Line {
 export function createAgentViewRenderer(renderer: Pick<ReturnType<typeof createConversationRenderer>, 'drawConversationTurn' | 'appendConversationMessages'>, presentation?: WorkTreePresentation | undefined) {
     return function renderAgentView(input: AgentViewInput): Line[] {
         const t = activeTokens();
-        const lines: Line[] = [headRow(input), createEmptyLine(input.width)];
+        // Rows are kept compact; the view builds cells only for the rows it shows (`slice` of the returned array).
+        const buffer = new InfiniteBuffer();
+        const lines = { push: (...more: Line[]): void => buffer.addLines(more), get length(): number { return buffer.getLineCount(); } };
+        lines.push(headRow(input), createEmptyLine(input.width));
         const running = input.agent.contract ? contractIsActive(input.agent.contract) : input.agent.status === 'running' || input.agent.status === 'pending';
         const context: ConversationRenderContext = {
-            history: { addLine: (l) => { lines.push(l); }, addLines: (ls) => { for (const line of ls)
-                    lines.push(line); }, getLineCount: () => lines.length },
+            history: buffer,
             blockRegistry: input.blocks ?? [],
             collapseState: input.collapse,
             errorLineRegistry: [],
@@ -178,6 +181,6 @@ export function createAgentViewRenderer(renderer: Pick<ReturnType<typeof createC
             put(note, TEXT_X + 2, input.width - 3, '⧗ queued · it arrives at the agent\'s next turn', { fg: t.textFaint });
             lines.push(note);
         }
-        return lines;
+        return buffer.getAllLines();
     };
 }

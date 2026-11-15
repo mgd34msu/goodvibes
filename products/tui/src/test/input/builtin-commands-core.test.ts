@@ -20,7 +20,8 @@ describe('input/registerBuiltinCommands shell core extraction', () => {
     let exited = false;
     registry.get('exit')!.handler([], { exit: () => { exited = true; } } as unknown as CommandContext);
     expect(exited).toBe(true);
-    expect(registry.get('wq')?.name).toBe('wq');
+    expect(registry.get(':wq')?.name).toBe('quit');
+    expect(registry.get('commit-all')?.name).toBe('commit-all');
     expect(registry.get('effort')?.name).toBe('effort');
     expect(registry.get('lines')).toBeUndefined();
   });

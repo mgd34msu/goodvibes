@@ -221,6 +221,7 @@ export const feedInputTokens = createFeedInputTokens<InputFeedContext>({
   key: (context, token) => handlePromptKeyToken(
     {
       ...capturePromptKeyState(context),
+      commandRegistry: context.commandRegistry,
       processModal: context.processModal,
     },
     token,

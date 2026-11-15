@@ -211,7 +211,7 @@ describe('wireFleetNeedsInputPush', () => {
     };
     const fakeSessionBroker = { getSession: () => null };
 
-    wireFleetNeedsInputPush({
+    const { detach } = wireFleetNeedsInputPush({
       registry: fakeRegistry as never,
       runtimeBus: bus,
       sessionBroker: fakeSessionBroker as never,
@@ -234,6 +234,8 @@ describe('wireFleetNeedsInputPush', () => {
 
     expect(received).toHaveLength(1);
     expect(received[0]).toMatchObject({ type: 'FLEET_NODE_BLOCKED_ON_USER', nodeId: 'n1', sessionId: 's1' });
+    detach();
+    expect(snapshotListener).toBeNull();
   });
 
   test('sessionPresence.isAttached mirrors the platform daemon composition: true for a freshly-seen participant, false otherwise', () => {
@@ -243,7 +245,7 @@ describe('wireFleetNeedsInputPush', () => {
     const fakeSessionBroker = {
       getSession: (id: string) => (id === 'attached' ? attachedSession : id === 'stale' ? staleSession : null),
     };
-    const deps = wireFleetNeedsInputPush({
+    const { deps } = wireFleetNeedsInputPush({
       registry: { subscribe: () => () => {} } as never,
       runtimeBus: new RuntimeEventBus(),
       sessionBroker: fakeSessionBroker as never,

@@ -38,25 +38,29 @@ export interface FleetNeedsInputPushDeps {
 
 /**
  * Attach the fleet emit-bridge (registry snapshot deltas -> runtime bus `fleet`
- * domain) and build the presence lookup, returning both as the deps
+ * domain) and build the presence lookup. `deps` is what
  * `attachWsOnlyGatewayVerbHandlers` spreads into its call so the needs-input
- * push source registers for real instead of gracefully degrading to absent.
+ * push source registers for real; `detach` ends the bridge and belongs on the
+ * graph's disposal registry, so no fleet event reaches the bus after shutdown.
  */
 export function wireFleetNeedsInputPush(input: {
   /** The unfiltered registry (`archivable.unfiltered`): archiving a node must not look like it ending to the bridge. */
   readonly registry: ProcessRegistry;
   readonly runtimeBus: RuntimeEventBus;
   readonly sessionBroker: Pick<SharedSessionBroker, 'getSession'>;
-}): FleetNeedsInputPushDeps {
-  attachFleetEmitBridge({ registry: input.registry, bus: input.runtimeBus });
+}): { readonly deps: FleetNeedsInputPushDeps; readonly detach: () => void } {
+  const detach = attachFleetEmitBridge({ registry: input.registry, bus: input.runtimeBus });
   const sessionBroker = input.sessionBroker;
   return {
-    runtimeBus: input.runtimeBus,
-    sessionPresence: {
-      isAttached: (sessionId: string) => {
-        const session = sessionBroker.getSession(sessionId);
-        return session !== null && hasFreshSurfaceParticipant(session, Date.now(), SURFACE_ROUTE_FRESHNESS_MS);
+    deps: {
+      runtimeBus: input.runtimeBus,
+      sessionPresence: {
+        isAttached: (sessionId: string) => {
+          const session = sessionBroker.getSession(sessionId);
+          return session !== null && hasFreshSurfaceParticipant(session, Date.now(), SURFACE_ROUTE_FRESHNESS_MS);
+        },
       },
     },
+    detach,
   };
 }

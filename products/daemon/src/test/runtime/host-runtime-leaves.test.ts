@@ -78,7 +78,7 @@ test('fleet notice wiring attaches the shared snapshot bridge and reads fresh su
   let subscriptions = 0;
   let present: SharedSessionRecord | null = null;
   const runtimeBus = new RuntimeEventBus();
-  const deps = wireFleetNeedsInputPush({
+  const { deps } = wireFleetNeedsInputPush({
     registry: { subscribe() { subscriptions++; return () => {}; } } as unknown as ArchivableProcessRegistry,
     runtimeBus, sessionBroker: { getSession: () => present },
   });

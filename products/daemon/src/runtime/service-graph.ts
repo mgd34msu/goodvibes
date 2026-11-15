@@ -583,6 +583,8 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
       acpHost, // Folds live hosted-agent sessions into the fleet as 'acp' rows
     });
     disposalScope.ownUntilRegistered('fleet process registry', () => processRegistry.dispose());
+    const fleetNeedsInputPush = wireFleetNeedsInputPush({ registry: processRegistry.unfiltered, runtimeBus: options.runtimeBus, sessionBroker });
+    disposalScope.registry.add('fleet event bridge', fleetNeedsInputPush.detach); // newer than the registry, so detaches first
     const modeManager = new ModeManager({ featureFlags }); const fileUndoManager = new FileUndoManager({ onFileChanged: (path) => fileCache.invalidate(path) });
     // Checkpoints, gated on live workspace registration, see workspace-checkpointing.ts.
     const checkpointing = createWorkspaceCheckpointing({
@@ -683,7 +685,7 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
       relayAvailable: () => configManager.get('relay.enabled') === true,
       pairingWebOrigin: () => resolvePairingWebOrigin(configManager).origin,
       disposal: disposalScope.registry,
-      ...wireFleetNeedsInputPush({ registry: processRegistry.unfiltered, runtimeBus: options.runtimeBus, sessionBroker }),
+      ...fleetNeedsInputPush.deps,
     });
     disposalScope.registry.add('browser checkout seam holder', () => browserCheckoutSeam.clear()); // newer than 'browser sessions' above, so runs first
     disposalScope.registry.add('native automation updates', registerNativeAutomationGatewayMethods(gatewayMethods, { manager: automationManager, host: autonomousHost }));

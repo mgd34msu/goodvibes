@@ -114,10 +114,9 @@ export function composeAgentToolRegistry(deps: AgentToolRegistryDeps): AgentTool
     readAdmissionPolicy: 'agent-main-conversation',
     settingsAdmissionPolicy: 'agent-main-conversation',
     // ONE file cache and ONE project index for the process. registerAllTools
-    // built its own pair when none was passed, so the tools read one index while
-    // `services.rerootStores` re-rooted a different one on a workspace swap,
-    // the swap took effect nowhere the file tools could see. Passing the graph's
-    // pair makes the instance the tools read the instance the graph owns.
+    // builds its own pair when none is passed, and then the file tools would read
+    // an index the graph neither owns nor closes. Passing the graph's pair makes
+    // the instance the tools read the instance the graph owns.
     fileCache: services.fileCache,
     projectIndex: services.projectIndex,
     // Daemon-owned settings (surfaces.*, the control-plane binding, watchers,

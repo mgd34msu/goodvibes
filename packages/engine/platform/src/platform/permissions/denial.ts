@@ -1,11 +1,11 @@
 /**
- * Shared construction of the structured, call-scoped {@link ToolDenial} that
- * rides on a refused tool call, plus the self-explaining error string the
- * asking agent reads. Centralised so the phased-executor permission phase and
- * the main orchestrator tool-runtime path produce identical denial data.
+ * Shared construction of what rides on a gated tool call: the decision object
+ * (state, who decided, reason, next step), the older {@link ToolDenial}, and
+ * the self-explaining error string the asking agent reads. Centralised so every
+ * tool path produces identical data.
  */
 
-import type { ToolDenial } from '../types/tools.js';
+import type { ToolDecision, ToolDecisionMaker, ToolDenial } from '../types/tools.js';
 
 /**
  * Structured-denial reason surfaced for a plan-mode refusal.
@@ -49,6 +49,60 @@ export function buildToolDenial(source: DenialSource): ToolDenial {
     scope: source.sourceLayer,
     ...(source.userReason ? { detail: source.userReason } : source.detail ? { detail: source.detail } : {}),
   };
+}
+
+/** A gate result, as {@link toolDecisionOf} reads it. */
+export interface DecisionSource extends DenialSource {
+  readonly approved: boolean;
+  /** Present when the gate built the decision itself (gate/classify.ts); used as is. */
+  readonly decision?: ToolDecision | undefined;
+  /** Jev's receipt, when Jev decided. */
+  readonly autonomousDecision?: { readonly decisionId: string; readonly summary: string } | undefined;
+}
+
+const DECIDED_BY: Readonly<Record<string, ToolDecisionMaker>> = {
+  boundary: 'code', safety_check: 'code', invocation_admission: 'code',
+  runtime_mode: 'mode', stakes_preset: 'mode',
+  config_policy: 'rule', managed_policy: 'rule', session_override: 'rule', user_rule: 'rule',
+  user_prompt: 'owner', jev_decision: 'jev',
+};
+
+const REASONS: Readonly<Record<string, string>> = {
+  boundary_judgment_input: 'the call carries protected material that cannot be sent for a safety reading',
+  boundary_catastrophic: 'the command reads as destroying the machine or the user\'s data wholesale',
+  boundary_surface_authority: 'the instruction came from a surface that cannot direct changes',
+  boundary_card_details: 'the call would send payment card details',
+  boundary_outward_effect: 'what the call sends may repeat untrusted text read this turn',
+  config_deny: 'the owner\'s permission settings deny this tool',
+  managed_policy_deny: 'managed policy denies this call',
+  user_rule_deny: 'a rule the owner saved denies this call',
+  session_cached_deny: 'the owner denied this earlier in the session',
+  user_denied: 'the owner declined this call',
+  plan_mode: 'plan mode is on and this call would change something',
+  jev_reject: 'Jev refused this call',
+  jev_revise: 'Jev asked for a revised action',
+  jev_defer: 'Jev deferred this call',
+};
+
+/**
+ * The decision object for a gate result. A decision the gate built from facts
+ * is returned unchanged; anything else is read from the result's layer and
+ * reason code, so every result carries one shape.
+ */
+export function toolDecisionOf(source: DecisionSource): ToolDecision {
+  if (source.decision) return source.decision;
+  const decidedBy = DECIDED_BY[source.sourceLayer] ?? 'code';
+  const decisionId = source.autonomousDecision?.decisionId;
+  const id = decisionId ? { decisionId } : {};
+  if (source.approved) {
+    return { state: decidedBy === 'jev' ? 'allowed-by-jev' : 'allowed', decidedBy,
+      reason: source.autonomousDecision?.summary ?? source.detail ?? source.reasonCode, ...id };
+  }
+  const reason = source.userReason ? `the owner declined: ${source.userReason}` : source.detail ?? REASONS[source.reasonCode] ?? source.reasonCode;
+  const next = isPlanModeDenial(source)
+    ? ['present the plan of changes and wait for the owner to approve it', 'the owner leaves plan mode to run it']
+    : ['carry on without this call and report that it was not run'];
+  return { state: 'refused', decidedBy, reason, next, ...id };
 }
 
 /**

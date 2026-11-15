@@ -18,6 +18,7 @@ import type { JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
 
 import { dirname } from 'node:path';
 import type { PolicyRule } from '../runtime/permissions/types.js';
+import type { OwnerOnlyKind } from '../gate/classify.js';
 import {
   evaluateArgShapeRule,
   evaluateArgShapeRuleAsync,
@@ -150,7 +151,14 @@ export function buildDurableRuleForDecision(input: {
   readonly tier: RememberTier;
   readonly effect: 'allow' | 'deny';
   readonly now?: number | undefined;
+  /** The owner-only kind the owner answered; the rule then settles that kind too. */
+  readonly ownerOnly?: OwnerOnlyKind | undefined;
 }): PolicyRule | null {
+  const rule = durableRuleFor(input);
+  return rule && input.ownerOnly !== undefined ? { ...rule, ownerOnly: input.ownerOnly } : rule;
+}
+
+function durableRuleFor(input: Parameters<typeof buildDurableRuleForDecision>[0]): PolicyRule | null {
   const { toolName, args, tier, effect } = input;
   const at = input.now ?? Date.now();
   const id = `user-${tier}-${toolName}-${at.toString(36)}-${Math.random().toString(36).slice(2, 8)}`;

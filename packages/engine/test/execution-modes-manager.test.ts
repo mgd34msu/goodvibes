@@ -63,8 +63,6 @@ test.each([true, false])('safe-owner binds the exact risky call to owner reply a
   const [result] = await f.run(args);
   expect(result?.success).toBe(approved); expect(f.bodies).toHaveLength(approved ? 1 : 0);
   expect(f.prompts).toHaveLength(1); expect(f.prompts[0]?.args).toEqual(args);
-  // The mode always asks the owner about this kind of call, so a remembered allow must not be promised to skip it.
-  expect(f.prompts[0]?.rememberEffect).toBe('owner-asked-again');
   expect(requests.some(request => Object.hasOwn(request.questions, 'disposition'))).toBe(false);
 });
 

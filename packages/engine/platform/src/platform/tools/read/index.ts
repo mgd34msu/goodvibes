@@ -39,6 +39,7 @@ export class ReadTool implements Tool {
       + ' for token-efficient reading, per-file caching, pagination via token_budget, and batch processing.',
     parameters: toRecord(READ_TOOL_SCHEMA),
     sideEffects: ['read_fs'],
+    subjects: { paths: ['files[].path'] },
     concurrency: 'parallel',
     supportsProgress: true,
   };

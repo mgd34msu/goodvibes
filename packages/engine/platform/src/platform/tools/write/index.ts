@@ -461,6 +461,9 @@ export function createWriteTool(options?: {
       'Use content_base64 for content containing special characters.',
     parameters: WRITE_SCHEMA as Record<string, unknown>,
     sideEffects: ['write_fs'],
+    subjects: { paths: ['files[].path'] },
+    // Undo restores UTF-8 text only; raw bytes and other encodings get no undo entry.
+    ...(options.fileUndoManager ? { recoverable: { unless: ['files[].content_base64', 'files[].encoding'] } } : {}),
     concurrency: 'serial',
     supportsProgress: true,
   };

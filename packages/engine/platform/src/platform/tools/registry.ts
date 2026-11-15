@@ -893,6 +893,12 @@ export class ToolRegistry {
     return this.prepared.get(call)!.tool.definition.dangerous === true;
   }
 
+  /** The captured registration's definition: the facts the gate classifies a call by. */
+  readPreparedDefinition(call: PreparedToolCall): ToolDefinition {
+    this.assertPrepared(call);
+    return this.prepared.get(call)!.tool.definition;
+  }
+
   /** Whether the registered tool of this name declares itself dangerous. */
   isDangerous(name: string): boolean {
     return this.tools.get(name)?.definition.dangerous === true;

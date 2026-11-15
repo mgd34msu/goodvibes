@@ -320,11 +320,25 @@ Slack setup uses this same URI mechanism. Direct setup writes Slack token values
 
 **Public subpaths:** `@goodvibes-jev/engine/platform/platform/gate` (the boundary, the presets, the stakes reading and surface authority) and `@goodvibes-jev/engine/platform/platform/gate/policy` (the policy and posture runtimes the TUI and agent call). `@goodvibes-jev/engine/platform/platform/runtime` keeps the `security.*` namespace for policy simulation and signed policy bundles.
 
-The gate replaces the old permission layer. It is the one path every tool call takes before it runs, and `PermissionManager` (`platform/permissions/manager.ts`) runs it. A call passes the boundary first, then graduated autonomy: Jev reads what the call does, code composes the reading into the call's stakes, and the active preset maps the stakes to allow, ask or deny.
+The gate replaces the old permission layer. It is the one path every tool call takes before it runs, and `PermissionManager` (`platform/permissions/manager.ts`) runs it. Code first settles who decides the call; only a call left to judgment passes the boundary and graduated autonomy: Jev reads what the call does, code composes the reading into the call's stakes, and the active preset maps the stakes to allow, ask or deny.
+
+### 0. Who decides
+
+Before any reading, one function in code classifies the call (`platform/gate/classify.ts`) from facts the gate already holds: the effects and the argument paths the tool declared, the paths classed against the working directory, the rule or answer that matched, the surface the instruction came from, and whether the turn read untrusted text. No model is asked and nothing is read from disk. The first step that applies decides:
+
+1. **Surface authority**, then **plan**: a change asked for from an input-only surface is refused, and so is a change in plan mode.
+2. **yolo** runs everything that passed step 1.
+3. A **deny** (a saved rule, a session answer, managed policy, `permissions.tools.<tool>: deny`) refuses the call.
+4. An item **only the owner decides** goes to the owner, in every mode but yolo, and Jev is never asked: changing what an MCP server may do (`set-trust`, `set-role`, `approve-quarantine`) and any tool that declares itself dangerous. When the owner answers with a remember choice, that answer settles the same item next time; an allow given for something else never does.
+5. An **allow** settles the call. After the turn read untrusted text, an allow still settles a call that stays on this machine, but a call that can reach outside goes to judgment, where the outward-effect check below reads where its content came from.
+6. **Declared effects**: a read inside the working directory, and a change inside it that the tool records for undo (`write` of text, `edit`), run at once. The tools themselves still refuse a path whose link leads outside their root.
+7. Anything else is a judgment: sections 1 to 4 below apply to it.
+
+Every result carries a `decision` (state, who decided, the reason, the rule or limit that decided, what the agent can do next), so a refused call tells the asking agent why and what to do instead.
 
 ### 1. The boundary
 
-The boundary runs on Jev's reading of the call (step 3 below asks every question in one round) and before any explicit rule or preset; no preset, remembered approval or phrase in the conversation relaxes it (`platform/gate/boundary.ts`). Each check was read for what it actually decides, and its disposition follows from that, not from being a security check:
+For a call left to judgment, the boundary runs on Jev's reading of the call (step 3 below asks every question in one round) and before any preset; no preset or phrase in the conversation relaxes it (`platform/gate/boundary.ts`). Each check was read for what it actually decides, and its disposition follows from that, not from being a security check:
 
 | Check | What it decides | Disposition and why | Reason code |
 |---|---|---|---|
@@ -346,7 +360,7 @@ After the boundary, decisions the owner made explicitly stand as given:
 4. **Remembered approvals**: the session cache (`session_override`) and durable rules (`user_rule`). A remembered allow does not carry a change into the plan preset, and never lifts an administrator's deny (a managed deny rule outranks every user or remembered allow). A durable rule remembered from a prompt is saved with the project it was made in and applies only there; rules saved before this, or written by hand, have no project and keep applying everywhere. A session answer belongs to the session that gave it: another hosted session is asked again. A remembered command-class or prefix allow covers only a simple command: one with `;`, `&&`, `||`, `|`, `&`, a newline, a substitution, a redirection or a subshell is covered only when every part matches on its own and none of it is a substitution or redirection. An exact allow also needs the same environment, working directory, detachment and file operations it was approved with. If a choice to remember cannot be saved, the answer still applies to that call and the result says it was not saved and why.
 5. **Hook changes**: adding, enabling, disabling or removing a hook through `state mode=hooks` is never decided by a category, a preset or a remembered rule. The owner is asked every time (a surface must not offer to remember it), and the prompt states the hook type, the events it fires on, the command, script or URL, that an http hook sends tool arguments and results to its URL, the header names (not values) and whether `allowInternal` is on. Plan mode refuses it; only the mode that skips every prompt allows it unasked.
 
-A call to a built-in read-only tool (read, find, analyze, inspect, state, registry and the other `read`-category tools except `fetch`) is asked one question, whether it touches secret or credential material (`secrets`); a no runs it with no further reading, a yes gives it the full reading, where it is at least high stakes. There is no shipped list of credential paths: a list decided every unlisted path by omission. Search, list and map tools do not ask that question per file: through `PermissionManager.readAccess` they withhold the content of a file only when the owner denied reads (`permissions.tools.read` deny, a policy rule or a remembered deny), and show its path flagged as access-restricted. A secret in a file nobody denied is not withheld from a search or map result.
+A call to a built-in read-only tool (read, find, analyze, inspect, state, registry and the other `read`-category tools except `fetch`) that section 0 did not settle is asked one question, whether it touches secret or credential material (`secrets`); a no runs it with no further reading, a yes gives it the full reading, where it is at least high stakes. There is no shipped list of credential paths: a list decided every unlisted path by omission. Search, list and map tools do not ask that question per file: through `PermissionManager.readAccess` they withhold the content of a file only when the owner denied reads (`permissions.tools.read` deny, a policy rule or a remembered deny), and show its path flagged as access-restricted. A secret in a file nobody denied is not withheld from a search or map result.
 
 ### 3. The stakes reading
 

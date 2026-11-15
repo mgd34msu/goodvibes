@@ -47,7 +47,10 @@ test.each(['active', 'pending', 'handoff', 'asking'] as const)('actual Agent per
     };
   }
   const path = 'synthetic-permission-write.txt';
-  const args = { files: [{ path, content: 'synthetic content' }] };
+  // Raw bytes get no undo entry, so the asking write is read by the gate instead of allowed as a recoverable change.
+  const args = mode === 'asking'
+    ? { files: [{ path, content_base64: Buffer.from('synthetic content').toString('base64') }] }
+    : { files: [{ path, content: 'synthetic content' }] };
   let calls = 0;
   const providerEntered = Promise.withResolvers<void>();
   const providerRelease = Promise.withResolvers<void>();

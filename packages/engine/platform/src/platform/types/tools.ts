@@ -14,12 +14,53 @@ export type ToolSideEffect =
 
 export type ToolConcurrencyMode = 'serial' | 'parallel' | 'singleton';
 
+/** What a call does, as the gate classes it. */
+export type PermissionCategory = 'read' | 'write' | 'execute' | 'delegate';
+
+/**
+ * Where a value sits in a call's arguments: keys joined by dots, `[]` for
+ * every entry of a list. `files[].path` is the `path` of each entry of `files`.
+ */
+export type ToolArgumentPath = string;
+
+/**
+ * Where one call's subjects sit in its arguments, declared by the tool that
+ * knows them. A declared list is complete: the gate reads the call's paths,
+ * commands, hosts and recipients from it without guessing argument names.
+ * Data, not code, so a registered definition stays plain JSON.
+ */
+export interface ToolSubjectDeclaration {
+  readonly paths?: readonly ToolArgumentPath[] | undefined;
+  readonly commands?: readonly ToolArgumentPath[] | undefined;
+  readonly hosts?: readonly ToolArgumentPath[] | undefined;
+  readonly recipients?: readonly ToolArgumentPath[] | undefined;
+}
+
+/** A tool whose changes are recorded where the owner can undo them, except when a listed argument is present. */
+export interface ToolRecoverability {
+  readonly unless?: readonly ToolArgumentPath[] | undefined;
+}
+
 export interface ToolDefinition {
   name: string;
   description: string;
   parameters: Record<string, unknown>;
-  /** Side effects the tool may perform when executed successfully. */
+  /**
+   * Side effects the tool may perform when executed successfully. Absent means
+   * undeclared (an MCP or plugin tool): the gate never decides such a call from
+   * its effects alone.
+   */
   sideEffects?: readonly ToolSideEffect[] | undefined;
+  /** The tool's permission category; absent means the gate's built-in table decides. */
+  category?: PermissionCategory | undefined;
+  /** Where the paths, commands, hosts and recipients of a call sit in its arguments. Absent: undeclared. */
+  subjects?: ToolSubjectDeclaration | undefined;
+  /**
+   * Present when every change a call makes is recorded where the owner can undo
+   * it (the file-undo history), except a call carrying one of `unless`. Absent:
+   * the change is not known to be recoverable.
+   */
+  recoverable?: ToolRecoverability | undefined;
   /** Whether multiple calls can safely run in parallel. */
   concurrency?: ToolConcurrencyMode | undefined;
   /** Whether the tool can emit meaningful progress before final completion. */
@@ -27,10 +68,35 @@ export interface ToolDefinition {
   /** Whether results may be streamed or delivered incrementally. */
   supportsStreamingOutput?: boolean | undefined;
   /**
-   * The tool changes who can reach the agent or acts on an outside system. The permission gate
-   * asks the owner before it runs in every mode except allow-all, whatever its category.
+   * The tool changes who can reach the agent or acts on an outside system. Its calls are the
+   * owner's to decide (gate/classify.ts, `grant-access`): the owner is asked once, and the answer
+   * is remembered when he chooses; only yolo runs it unasked.
    */
   dangerous?: boolean | undefined;
+}
+
+/** What happened to a call at the gate. */
+export type ToolDecisionState = 'allowed' | 'allowed-by-jev' | 'refused' | 'queued-for-owner' | 'skipped';
+
+/** Who settled it: a fact in code, a standing rule, a limit, Jev, the owner, or the mode. */
+export type ToolDecisionMaker = 'code' | 'rule' | 'limit' | 'jev' | 'owner' | 'mode';
+
+/**
+ * The gate's decision on one call, carried on its result so the asking agent
+ * learns what happened, why, and what it can do next without another call.
+ * The tool-side spelling of the refusal shape every surface uses.
+ */
+export interface ToolDecision {
+  readonly state: ToolDecisionState;
+  readonly decidedBy: ToolDecisionMaker;
+  /** Why, in words the agent can act on. */
+  readonly reason: string;
+  /** The standing limit or rule that decided, when one did. */
+  readonly limit?: string | undefined;
+  /** What the agent can do instead, most useful first. */
+  readonly next?: readonly string[] | undefined;
+  /** The decision log row, when Jev decided. */
+  readonly decisionId?: string | undefined;
 }
 
 /** A tool invocation requested by the LLM. */
@@ -94,8 +160,13 @@ export interface ToolResult {
   /** Non-failing issues the caller should surface with the result. */
   warnings?: readonly string[] | undefined;
   /**
-   * Present only when the call was refused by the permission layer. Structured,
-   * call-scoped denial data the asking agent can act on. See {@link ToolDenial}.
+   * The gate's decision: on every refused call, and on an allowed one when Jev
+   * or the owner decided it. See {@link ToolDecision}.
+   */
+  decision?: ToolDecision | undefined;
+  /**
+   * Present only when the call was refused by the permission layer.
+   * @deprecated Read {@link ToolResult.decision}; this older shape lacks who decided and what to do next.
    */
   denial?: ToolDenial | undefined;
   /**

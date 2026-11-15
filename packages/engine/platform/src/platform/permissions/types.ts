@@ -9,8 +9,9 @@ import type { BoundaryCheck, BoundaryCheckName } from '../gate/boundary.js';
 import type { GateRiskFamily } from '../gate/batteries/risk-family.js';
 import type { GateFactName } from '../gate/reading.js';
 import type { GatePresetName, GateAction } from '../gate/presets.js';
+import type { PermissionCategory, ToolDecision } from '../types/tools.js';
 
-export type PermissionCategory = 'read' | 'write' | 'execute' | 'delegate';
+export type { PermissionCategory } from '../types/tools.js';
 
 export type PermissionRiskLevel = 'low' | 'medium' | 'high' | 'critical';
 
@@ -137,4 +138,6 @@ export interface PermissionCheckResult {
    * any other tool, the one Jev read from what the call does.
    */
   readonly category?: PermissionCategory | undefined;
+  /** The decision as the asking agent receives it on the tool result. */
+  readonly decision?: ToolDecision | undefined;
 }

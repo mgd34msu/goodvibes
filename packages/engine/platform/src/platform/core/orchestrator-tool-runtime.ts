@@ -17,7 +17,7 @@ import type { ToolCall, ToolResult } from '../types/tools.js';
 import type { ToolRegistry } from '../tools/registry.js';
 import type { ConfigManager } from '../config/manager.js';
 import type { PermissionManager } from '../permissions/manager.js';
-import { buildToolDenial, buildDenialErrorMessage } from '../permissions/denial.js';
+import { buildToolDenial, buildDenialErrorMessage, toolDecisionOf } from '../permissions/denial.js';
 import type { RuntimeEventBus } from '../runtime/events/index.js';
 import {
   emitToolCancelled,
@@ -254,6 +254,7 @@ function toCancelledResult(callId: string, settled: ToolResult | null): ToolResu
     cancelled: true,
     ...(settled?.output !== undefined ? { output: settled.output } : {}),
     ...(settled?.autonomousDecision ? { autonomousDecision: settled.autonomousDecision } : {}),
+    ...(settled?.decision ? { decision: settled.decision } : {}),
   };
 }
 
@@ -414,6 +415,7 @@ async function executeToolCallsInMode(
           callId: call.id,
           success: false,
           error: err.message,
+          decision: checkResult.decision ?? toolDecisionOf({ ...denialSource, approved: false }),
           denial: buildToolDenial(denialSource),
           ...(checkResult.autonomousDecision ? { autonomousDecision: checkResult.autonomousDecision } : {}),
         };
@@ -583,6 +585,9 @@ async function executeToolCallsInMode(
       }
 
       if (checkResult.autonomousDecision) result = { ...result, autonomousDecision: checkResult.autonomousDecision };
+      // A plain allow by code or rule is not reported; one Jev or the owner made is.
+      const decided = checkResult.decision;
+      if (decided && (decided.state !== 'allowed' || decided.decidedBy === 'owner')) result = { ...result, decision: decided };
       // Do not race the tool promise: abort-ignoring work must actually return
       // before this throw allows the turn's terminal cancellation event.
       assertTurnActive();

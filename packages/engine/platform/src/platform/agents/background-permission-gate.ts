@@ -6,8 +6,8 @@
 // loop.
 import type { PermissionManager } from '../permissions/manager.js';
 import type { PermissionAttribution } from '../permissions/prompt.js';
-import { buildToolDenial, buildDenialErrorMessage } from '../permissions/denial.js';
-import type { ToolDenial } from '../types/tools.js';
+import { buildToolDenial, buildDenialErrorMessage, toolDecisionOf } from '../permissions/denial.js';
+import type { ToolDecision, ToolDenial } from '../types/tools.js';
 import type { AgentRecord } from '../tools/agent/index.js';
 import { assertPermissionActive, awaitPermission } from '../permissions/cancellation.js';
 
@@ -19,7 +19,7 @@ export type BackgroundPermissionManager = Pick<
 
 export type BackgroundPermissionOutcome =
   | { readonly approved: true; readonly modifiedArgs?: Record<string, unknown> | undefined }
-  | { readonly approved: false; readonly error: string; readonly denial: ToolDenial };
+  | { readonly approved: false; readonly error: string; readonly decision: ToolDecision; readonly denial: ToolDenial };
 
 /**
  * Background calls use the same owner/Jev/YOLO mode as foreground calls.
@@ -60,6 +60,7 @@ export async function gateBackgroundToolCall(
   return {
     approved: false,
     error: buildDenialErrorMessage(toolName, source),
+    decision: result.decision ?? toolDecisionOf({ ...source, approved: false }),
     denial: buildToolDenial(source),
   };
 }

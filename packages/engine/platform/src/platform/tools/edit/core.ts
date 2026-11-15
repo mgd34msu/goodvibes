@@ -797,6 +797,8 @@ export function createEditTool(fileCache: FileStateCache, options?: EditToolOpti
       'Also supports Jupyter notebook (.ipynb) cell operations via notebook_operations field.',
     parameters: toRecord(editSchema),
     sideEffects: ['write_fs'],
+    subjects: { paths: ['edits[].path', 'notebook_operations.path'] },
+    ...(options?.fileUndoManager ? { recoverable: {} } : {}),
     concurrency: 'serial',
     supportsProgress: true,
   };

@@ -4,6 +4,7 @@
  * These types represent the full evaluation model: modes, decisions, reason
  * codes, classification, policy rules, and per-step evaluation trace.
  */
+import type { OwnerOnlyKind } from '../../gate/classify.js';
 
 // ── Permission Mode ────────────────────────────────────────────────────────────
 
@@ -326,6 +327,12 @@ interface BaseRule {
   origin: RuleOrigin;
   /** Whether the rule grants (allow) or blocks (deny) matching calls. */
   effect: 'allow' | 'deny';
+  /**
+   * Set when the rule records the owner's answer to an item only he decides
+   * (gate/classify.ts OwnerOnlyKind). Only such an allow settles that item
+   * again; an allow without it never does.
+   */
+  ownerOnly?: OwnerOnlyKind | undefined;
 }
 
 /**

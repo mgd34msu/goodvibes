@@ -340,7 +340,7 @@ async function executeToolCalls(
       assertCallCurrent();
       if (!permissionOutcome.approved) {
         recordResult(
-          { callId: call.id, success: false, error: permissionOutcome.error, denial: permissionOutcome.denial },
+          { callId: call.id, success: false, error: permissionOutcome.error, decision: permissionOutcome.decision, denial: permissionOutcome.denial },
           JSON.stringify(call.arguments),
         );
       } else {

@@ -325,7 +325,8 @@ test.each(['arguments', 'source'] as const)('protected %s remain local without s
   const result = await f.run('read', args).catch(() => ({ success: false }));
   if (location === 'arguments') expect(result.success).toBe(false);
   else expect(readBodies).toBe(1);
-  expectNoReadAdmission('synthetic-private'); expect(f.prompts()).toBe(location === 'arguments' ? 1 : 0);
+  // A read inside the workspace is decided in code: nothing is sent and the owner is not asked.
+  expectNoReadAdmission('synthetic-private'); expect(f.prompts()).toBe(0);
 });
 
 test('changed original source during the final admission hook cannot execute', async () => {

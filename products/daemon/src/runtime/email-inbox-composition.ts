@@ -3,6 +3,7 @@ import { createMultiOwnerDaemonInboxFactory } from './multiowner-inbox-compositi
 import { createInboxRouteResolver } from '@goodvibes-jev/engine/platform/platform/channels';
 import type { ClusterClock } from '@goodvibes-jev/engine/platform/platform/cluster';
 import { ownAccountInboxStore } from './account-inbox-store.js';
+import { atInboxBuildStage, type InboxBuildStage } from './inbox-admission-refusal.js';
 /** Explicit single-account mail inbox; does not enable all-provider default serve. */
 import { realpath } from 'node:fs/promises';
 import { configReaderWithOrigins, createSurfaceEmailInboxConfigReader } from '@goodvibes-jev/engine/platform/platform/email';
@@ -88,10 +89,12 @@ function createEmailAccountFactory<T extends InboxSurfaceRegistration>(options: 
     let owner: EmailInboxOwner;
     let identity: Awaited<ReturnType<typeof acquireAccountInboxIdentity>>;
     let surface: T | undefined;
+    let stage: InboxBuildStage = 'identity';
     try {
       identity = await acquireAccountInboxIdentity({ workingDirectory, assertCurrent: current,
         beforeWrite: controls.beforeAccountIdentityWrite }, { provider: 'email', account: options.account });
       current();
+      stage = 'owner';
       owner = (factories.createOwner ?? createEmailInboxOwner)({ identity, account: options.account, service: mail.service,
         screening: options.screening, assertCurrent: current, resolveRouteId,
         ...(controls.onOwnerMail ? { onMail: controls.onOwnerMail } : {}),
@@ -101,7 +104,7 @@ function createEmailAccountFactory<T extends InboxSurfaceRegistration>(options: 
         } });
     } catch (error) {
       try { mail.close(); } catch { /* The acquisition failure is the error reported. */ }
-      throw new Error('The email inbox could not acquire its owned account and storage', { cause: error });
+      throw atInboxBuildStage('email', stage, error);
     }
     const selectedOwner = owner, electionIdentity = identity;
     const result = await ownAccountInboxStore({

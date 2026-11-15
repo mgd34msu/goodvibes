@@ -20,6 +20,7 @@ import { createFeatureFlagManager, deriveFeatureStates, RuntimeEventBus } from '
 import { createRuntimeServices } from '../../runtime/services.js';
 import { createSlackDaemonInboxFactory } from '../../runtime/slack-inbox-composition.js';
 import { makeOwnedTempDir } from '../helpers/owned-temp.js';
+import { inboxAdmissionReason, inboxBuildStage } from '../../runtime/inbox-admission-refusal.js';
 
 let hosts: DaemonHost[];
 let cleanups: Array<() => void | Promise<void>>;
@@ -328,7 +329,8 @@ test('live workspace configuration invalidation fences mirror reads and polling 
 test('a second owner cannot open the same store; a different explicit account has an isolated store', async () => {
   const remote = endpoints(); const first = fixture(remote); await first.host.start(); const before = stored(first.storePath);
   const calls = remote.slackCalls.length;
-  await expect(first.composition(first.handlerContext, first.routing, { gatePolling() {} })).rejects.toThrow('could not acquire its owned account and storage');
+  const refused = await first.composition(first.handlerContext, first.routing, { gatePolling() {} }).then(() => undefined, (error: unknown) => error);
+  expect(inboxAdmissionReason(refused)).toBe('storage-busy'); expect(inboxBuildStage(refused)).toBe('lock');
   expect(first.owners).toHaveLength(2); expect(remote.slackCalls).toHaveLength(calls);
   await expect(first.owners[1]!.assertReadCurrent()).rejects.toThrow('unavailable');
   expect(stored(first.storePath)).toEqual(before); expect((await first.inbox()).total).toBe(1);

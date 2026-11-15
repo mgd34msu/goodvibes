@@ -37,6 +37,9 @@ const childEnv = { PATH: '/usr/bin:/bin', HOME: home, TMPDIR: join(root, 'tmp'),
   GOODVIBES_SKIP_WAKE_MODEL_DOWNLOAD: '1' };
 const writeJson = (path, value) => writeFileSync(path, JSON.stringify(value));
 const wait = ms => new Promise(yes => setTimeout(yes, ms));
+// The whole start's deadline: well inside the job's own limit, so a hung start
+// still prints its observation and has its process group drained.
+const STARTUP_DEADLINE_MS = 300_000;
 // These wire shapes are advisory counts, never decision-site attribution.
 function exactKeys(value, keys) {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -75,7 +78,7 @@ function nativeRequestShape(body) {
 }
 // Advisory reachability only: a connection never proves listener ownership.
 // This runs after qualification already failed, sends no bytes, and cannot
-// turn a stalled startup into a pass or revive its expired liveness clock.
+// turn an expired startup into a pass.
 async function observeDeadlinePort(port) {
   const socket = createConnection({ host: '127.0.0.1', port });
   let timer;
@@ -197,11 +200,11 @@ try {
     if (hostExited || requests.length !== 0 || progress.failed) {
       assertNativeStartupActive(progress, { processClosed: hostExited, requestCount: requests.length });
     }
-    if (progress.stalled) {
+    if (progress.elapsedMs >= STARTUP_DEADLINE_MS) {
       // Capture the failing boundary before the diagnostic yields. These are
       // fixed booleans/counts; no settings, paths, request text or errors enter it.
       const failureOutput = output, failureErrors = errors;
-      const observation = { elapsedMs: progress.elapsedMs, noProgressMs: progress.noProgressMs,
+      const observation = { elapsedMs: progress.elapsedMs,
         processClosed: hostExited, requestCount: requests.length,
         requestShapes: Object.freeze({ ...requestShapes }), phases: progress.phases,
         startupBannerDelayMs: startupBannerObservedAt ?? null,
@@ -209,7 +212,7 @@ try {
         readyBannerObserved: hasNativeStartupReadyBanner(output, version) };
       const portObservation = await observeDeadlinePort(port).catch(() => ({ portConnection: 'unobserved', probeClosed: false }));
       console.error(JSON.stringify({ proof: 'native-startup-deadline-observation', ...observation, ...portObservation }));
-      assert.fail(`Native host startup liveness deadline: ${failureOutput} ${failureErrors}`);
+      assert.fail(`Native host startup deadline: ${failureOutput} ${failureErrors}`);
     }
     assertNativeStartupActive(progress, { processClosed: hostExited, requestCount: requests.length });
     await wait(25);

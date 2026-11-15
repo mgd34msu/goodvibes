@@ -2,21 +2,10 @@ import { expect, test } from 'bun:test';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { boundedNativeProcessClose, drainNativeProcessGroup } from '../../../scripts/native-execution-process.mjs';
-import { nativeStartupPhases } from '../../../scripts/native-startup-liveness.mjs';
-import type { NativeStartupPhase } from '../../runtime/startup-observation.js';
+import { NATIVE_STARTUP_PHASES as phases } from '../../runtime/startup-observation.js';
 import { makeOwnedTempDir } from '../helpers/owned-temp.js';
 
-const phases: readonly NativeStartupPhase[] = [
-  'runtime-base', 'base-project-context', 'base-credentials', 'base-providers', 'base-knowledge',
-  'base-native-intake-storage', 'base-native-intake-ready', 'runtime-base-failed',
-  'handler-surfaces', 'contract-recovery', 'provider-preload', 'listener-construction',
-  'secondary-listener-construction', 'cluster-startup', 'device-recovery', 'device-grant-sweep',
-  'device-capture-sweep', 'device-disclosure-read', 'device-disclosure-persist', 'listener-startup',
-  'secondary-listener-startup', 'boot-tasks', 'foreground-ready',
-];
-
 test.skipIf(process.platform === 'win32').each([false, true])('fixed native startup phases retain the last stage and stay opt-in (enabled=%s)', async enabled => {
-  expect(nativeStartupPhases).toEqual(phases);
   const modulePath = fileURLToPath(new URL('../../runtime/startup-observation.ts', import.meta.url));
   const script = `import {observeNativeStartupPhase} from ${JSON.stringify(modulePath)};
 for (const phase of ${JSON.stringify(phases)}) { observeNativeStartupPhase(phase); observeNativeStartupPhase(phase); }`;

@@ -1,16 +1,12 @@
-import type { NativeStartupPhase } from '../src/runtime/startup-observation.js';
-
-export const nativeStartupPhases: readonly NativeStartupPhase[];
 export interface NativeStartupPhaseObservation {
-  readonly phase: NativeStartupPhase;
+  /** A phase token as the daemon printed it; the daemon's list is NATIVE_STARTUP_PHASES. */
+  readonly phase: string;
   readonly delayMs: number;
   readonly requestCount: number;
 }
 export interface NativeStartupProgressSnapshot {
   readonly elapsedMs: number;
-  readonly noProgressMs: number;
   readonly failed: boolean;
-  readonly stalled: boolean;
   readonly phases: readonly NativeStartupPhaseObservation[];
 }
 export interface NativeStartupProgress {

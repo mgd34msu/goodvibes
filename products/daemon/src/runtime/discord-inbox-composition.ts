@@ -8,6 +8,7 @@ import { acquireDiscordInboxIdentity, resolveDiscordInboxElectionScope, acquireD
 import { createMultiOwnerDaemonInboxFactory, type DaemonInboxSourceFactory } from './multiowner-inbox-composition.js';
 import { attachDaemonInboxTagging, type DaemonTriageTaggingActivation } from './tagged-inbox-composition.js';
 import { ownAccountInboxStore } from './account-inbox-store.js';
+import { atInboxBuildStage, type InboxBuildStage } from './inbox-admission-refusal.js';
 
 export interface DiscordDaemonInboxOptions extends Pick<DiscordInboxOwnerOptions, 'account' | 'channels' | 'screening' | 'timeoutMs'> {
   /** Separately established semantic destination/account grant, never inferred from screening. */
@@ -164,6 +165,7 @@ export function createDiscordDaemonInboxSourceFactory(options: DiscordDaemonInbo
     const startupCurrent = () => { current(); if (generation !== startupGeneration) throw new Error('Discord inbox startup was revoked'); };
     let workingDirectory: string;
     let identity: Awaited<ReturnType<typeof acquireDiscordInboxIdentity>>;
+    let stage: InboxBuildStage = 'identity';
     try {
       startupCurrent();
       workingDirectory = await realpath(context.workingDirectory); startupCurrent();
@@ -171,6 +173,7 @@ export function createDiscordDaemonInboxSourceFactory(options: DiscordDaemonInbo
       const resolveRouteId = createInboxRouteResolver({ getProfileForChannel: resolveProfileId, resolveProfile: resolveProfileId });
       identity = await acquireDiscordInboxIdentity({ workingDirectory, assertCurrent: startupCurrent, beforeWrite: controls.beforeDiscordIdentityWrite }, options, { configuredRegistry });
       startupCurrent();
+      stage = 'owner';
       owner = await createOwner({ ...context, resolveRouteId }, {
         identity, account: options.account, channels: options.channels, screening: options.screening, assertCurrent: current,
         ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
@@ -179,7 +182,7 @@ export function createDiscordDaemonInboxSourceFactory(options: DiscordDaemonInbo
       closed = true;
       try { unsubscribe(); } catch { /* The acquisition failure is the error reported. */ }
       await Promise.allSettled([owner?.close()]);
-      throw new Error('The discord inbox could not acquire its owned account and storage', { cause: error });
+      throw atInboxBuildStage('discord', stage, error);
     }
     const owned = owner, ownedIdentity = identity, ownedDirectory = workingDirectory;
     let result: OwnedInboxSource;

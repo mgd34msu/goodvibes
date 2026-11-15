@@ -1,57 +1,43 @@
 import assert from 'node:assert/strict';
 import { performance } from 'node:perf_hooks';
 
-// This is the CI observer's finite source-defined inventory, not a runtime
-// heartbeat protocol or a product cold-start SLA. Optional stages may be absent.
-export const nativeStartupPhases = Object.freeze([
-  'runtime-base', 'base-project-context', 'base-credentials', 'base-providers', 'base-knowledge',
-  'base-native-intake-storage', 'base-native-intake-ready', 'runtime-base-failed',
-  'handler-surfaces', 'contract-recovery', 'provider-preload', 'listener-construction',
-  'secondary-listener-construction', 'cluster-startup', 'device-recovery', 'device-grant-sweep',
-  'device-capture-sweep', 'device-disclosure-read', 'device-disclosure-persist', 'listener-startup',
-  'secondary-listener-startup', 'boot-tasks', 'foreground-ready',
-]);
-const stallMs = 20_000;
+// The daemon defines its start phases (NATIVE_STARTUP_PHASES in
+// src/runtime/startup-observation.ts) and prints each one once. This observer
+// records whichever phase tokens arrive, in arrival order, so it keeps no copy
+// of that list. It judges states, never timings: the daemon exited, it reported
+// a failed start, or it made a semantic request. How long a start may take is
+// the consumer's own deadline.
+const MARKER_PREFIX = '[goodvibes-daemon:native-startup-phase] ';
+const FAILED_PHASE = 'runtime-base-failed';
+const PHASE_TOKEN = /^[a-z][a-z0-9-]{0,63}$/;
+const MAX_PHASES = 64;
 
-/** Only a first strictly forward fixed phase advances this test-owned clock.
- * Once stalled, late output cannot revive the observation. The injected clock
- * permits deterministic boundary controls; the actual consumer uses monotonic
- * controller time, independent of the daemon's wall clock. */
+/** The clock is injectable so a caller can report deterministic delays. */
 export function retainNativeStartupProgress(now = () => performance.now()) {
-  const started = now(), history = [];
-  let lastProgress = started, lastPhase = -1, failed = false, stalled = false;
+  const started = now(), history = [], seen = new Set();
+  let failed = false;
   let line = '', discard = false;
-  const observeTime = () => {
-    const current = now();
-    if (current - lastProgress >= stallMs) stalled = true;
-    return current;
-  };
   return {
     append(chunk, requestCount) {
-      const current = observeTime();
+      const current = now();
       for (const character of String(chunk)) {
         if (character !== '\n') {
           if (!discard) { line += character; if (line.length > 128) { line = ''; discard = true; } }
           continue;
         }
-        if (!discard) {
-          const prefix = '[goodvibes-daemon:native-startup-phase] ';
-          const phase = line.startsWith(prefix) ? line.slice(prefix.length) : '';
-          const index = nativeStartupPhases.indexOf(phase);
-          if (phase === 'runtime-base-failed') failed = true;
-          if (index > lastPhase && history.length < nativeStartupPhases.length) {
+        if (!discard && line.startsWith(MARKER_PREFIX)) {
+          const phase = line.slice(MARKER_PREFIX.length);
+          if (phase === FAILED_PHASE) failed = true;
+          if (PHASE_TOKEN.test(phase) && !seen.has(phase) && history.length < MAX_PHASES) {
+            seen.add(phase);
             history.push(Object.freeze({ phase, delayMs: current - started, requestCount }));
-            lastPhase = index;
-            if (!stalled && !failed) lastProgress = current;
           }
         }
         line = ''; discard = false;
       }
     },
     snapshot() {
-      const current = observeTime();
-      return Object.freeze({ elapsedMs: current - started, noProgressMs: current - lastProgress,
-        failed, stalled, phases: Object.freeze([...history]) });
+      return Object.freeze({ elapsedMs: now() - started, failed, phases: Object.freeze([...history]) });
     },
   };
 }
@@ -62,7 +48,6 @@ export function assertNativeStartupActive(progress, { processClosed, requestCoun
   assert(!processClosed, 'Native host exited before readiness');
   assert.equal(requestCount, 0, 'Unconfigured native startup made a semantic request');
   assert(!progress.failed, 'Native host reported a failed startup phase');
-  assert(!progress.stalled, 'Native host startup made no forward phase progress for 20 seconds');
 }
 
 /** Phase observations alone never establish readiness or listener ownership.

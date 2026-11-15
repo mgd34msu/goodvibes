@@ -5,7 +5,7 @@ import { createOwnedInboxSource, type OwnedInboxSource } from '@goodvibes-jev/en
 import type { HandlerContext } from '../../daemon/handlers/context.js';
 import type { DaemonInboxControls, DaemonInboxFactory } from '../../runtime/daemon-handler-composition.js';
 import { createReacquiringDaemonInboxSourceFactory, selectConfiguredSlackInboxAccount } from '../../runtime/configured-inbox-accounts.js';
-import { InboxAdmissionRefusal } from '../../runtime/inbox-admission-refusal.js';
+import { InboxAdmissionRefusal, atInboxBuildStage } from '../../runtime/inbox-admission-refusal.js';
 import type { DaemonInboxSourceFactory } from '../../runtime/multiowner-inbox-composition.js';
 import { makeOwnedTempDir } from '../helpers/owned-temp.js';
 
@@ -128,6 +128,36 @@ test('retries are bounded and closing the source cancels a pending retry', async
   expect(second.live()).toHaveLength(1);
   await again.close();
   expect(second.live()).toEqual([]);
+});
+
+test('a store held by another owner degrades the provider, names the lock step, and keeps retrying until admitted', async () => {
+  const f = fixture();
+  const clock = manualClock();
+  let constructions = 0;
+  const factory: DaemonInboxSourceFactory = context => {
+    constructions++;
+    if (constructions <= 5) throw atInboxBuildStage('email', 'lock', Object.assign(new Error('Synthetic held lease'), { code: 'PROCESS_LOCK_BUSY' }));
+    return realSource(context);
+  };
+  const owned = await createReacquiringDaemonInboxSourceFactory('email', factory, { retryDelaysMs: [1, 2], schedule: clock.schedule })(f.context, routing, f.controls);
+  try {
+    await owned.ready;
+    const degraded = await owned.acquireRead(true);
+    expect(degraded.sources.poller.snapshotStatuses()[0]).toMatchObject({ state: 'unavailable', error: 'storage-busy' });
+    degraded.release();
+    expect(f.warnings[0]?.meta).toMatchObject({ provider: 'email', reason: 'storage-busy', stage: 'lock', name: 'Error' });
+    const delays: number[] = [];
+    while (constructions < 6) {
+      const next = clock.live()[0];
+      if (!next) break;
+      delays.push(next.delayMs);
+      next.callback(); clock.pending.splice(clock.pending.indexOf(next), 1);
+      await nextTurn(); await nextTurn();
+    }
+    expect(delays).toEqual([1, 2, 2, 2, 2]);
+    const read = await owned.acquireRead(true);
+    try { expect(read.sources.poller.snapshotStatuses()[0]?.state).not.toBe('unavailable'); } finally { read.release(); }
+  } finally { await owned.close(); }
 });
 
 test('the production inbox starts with a half-configured Slack account and reports it unavailable with the reason', async () => {

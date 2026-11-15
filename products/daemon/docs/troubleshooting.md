@@ -173,3 +173,22 @@ one channel qualifies as default. A disabled channel never silently falls back t
 another. Use `--` for message text beginning with a dash. Acceptance is not recipient
 arrival. An unconfirmed network send may already have reached the provider: inspect
 available delivery evidence before intentionally retrying, to avoid duplicates.
+
+## An inbox provider shows as unavailable
+
+`channels.inbox.list` reports a Slack, email or Discord inbox that could not
+start with state `error` and a reason. The daemon log has one line per attempt,
+`Native inbox source admission is unavailable`, with the provider, the reason,
+the step that failed (`identity`, `owner`, `lock` or `store`) and the error name;
+it never contains the error message or account values.
+
+- `storage-busy`: another daemon process still holds that inbox's store, usually
+  the previous process during a restart. Stop it or let it exit.
+- `settings-changing`: a settings or credential edit is in progress.
+- `unavailable`: any other failure, such as the provider being unreachable. The
+  step and error name in the log say where it failed.
+
+For these three a running daemon retries the inbox on its own, after 2 s, 10 s
+and then every minute until it starts; no restart or settings edit is needed. The other reasons
+(`account-incomplete`, `consent-missing`, `credential-unavailable`) wait for the
+settings or credential write that fixes them.

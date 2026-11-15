@@ -3,6 +3,7 @@ import { createMultiOwnerDaemonInboxFactory } from './multiowner-inbox-compositi
 import { createInboxRouteResolver } from '@goodvibes-jev/engine/platform/platform/channels';
 import type { ClusterClock } from '@goodvibes-jev/engine/platform/platform/cluster';
 import { ownAccountInboxStore } from './account-inbox-store.js';
+import { atInboxBuildStage } from './inbox-admission-refusal.js';
 import { realpath } from 'node:fs/promises';
 import {
   createSlackInboxOwner, acquireAccountInboxIdentity, resolveAccountInboxElectionScope, registerInboxSurface, createOwnedInboxSource, createOwnedTriagedInboxSource,
@@ -102,12 +103,16 @@ function createSlackAccountFactory<T extends InboxSurfaceRegistration>(
     const workingDirectory = await realpath(context.workingDirectory);
     current();
     const identity = await acquireAccountInboxIdentity({ workingDirectory, assertCurrent: current,
-      beforeWrite: controls.beforeAccountIdentityWrite }, { provider: 'slack', account });
+      beforeWrite: controls.beforeAccountIdentityWrite }, { provider: 'slack', account })
+      .catch((error: unknown) => { throw atInboxBuildStage('slack', 'identity', error); });
     current();
-    const owner = await (factories.createOwner ?? createSlackInboxOwner)({ ...context, resolveRouteId }, {
-      identity, account, screening: options.screening, assertCurrent: current,
-      ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
-    });
+    let owner: SlackInboxOwner;
+    try {
+      owner = await (factories.createOwner ?? createSlackInboxOwner)({ ...context, resolveRouteId }, {
+        identity, account, screening: options.screening, assertCurrent: current,
+        ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
+      });
+    } catch (error) { throw atInboxBuildStage('slack', 'owner', error); }
     let unsubscribe: (() => void) | undefined;
     const result = await ownAccountInboxStore({
       provider: 'slack', controls, workingDirectory, clustered, owner, assertCurrent: current,

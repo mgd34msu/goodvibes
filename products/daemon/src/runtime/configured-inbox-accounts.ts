@@ -9,7 +9,8 @@ import { createSlackDaemonInboxSourceFactory, type SlackDaemonInboxSourceFactori
 import { createEmailDaemonInboxSourceFactory, type EmailDaemonInboxSourceFactories } from './email-inbox-composition.js';
 import { createConfiguredDiscordDaemonInboxSourceFactory, parseConfiguredDiscordInboxAccount, type ConfiguredDiscordInboxAccount, type DiscordDaemonInboxSourceFactories } from './discord-inbox-composition.js';
 import type { HostedInboxScreeningOperation } from './hosted-source-screening-composition.js';
-import { INBOX_ADMISSION_ACTIONS, InboxAdmissionRefusal, inboxAdmissionReason, type InboxAdmissionReason } from './inbox-admission-refusal.js';
+import { INBOX_ADMISSION_ACTIONS, InboxAdmissionRefusal, inboxAdmissionClearsOnItsOwn, inboxAdmissionReason, inboxAdmissionRefusalOf, inboxBuildStage,
+  type InboxAdmissionReason } from './inbox-admission-refusal.js';
 
 // Every setting a selected account depends on, plus the cluster switch that
 // decides how its poller is elected: a write to any of them ends the account's
@@ -158,15 +159,18 @@ export function createConfiguredHostedInboxSourceFactory(provider: 'slack' | 'em
 }
 
 /**
- * After a failed admission the source retries on its own, a bounded number of
- * times, because the event that would normally trigger a replacement (a settings
- * or credential write settling) may already have fired while admission was
- * being refused. Past the last delay it waits for the next native notification.
+ * After a failed admission the source retries on its own, because the event
+ * that would normally trigger a replacement (a settings or credential write
+ * settling) may already have fired while admission was being refused. A
+ * failure that clears without anyone acting (a busy store, an edit in
+ * progress, an untyped failure such as a provider outage) keeps retrying at
+ * the last delay until it is admitted; the others stop after the last delay
+ * and wait for the settings or credential write that fixes them.
  */
 const ADMISSION_RETRY_DELAYS_MS: readonly number[] = Object.freeze([2_000, 10_000, 60_000]);
 
 export interface ReacquiringInboxOptions {
-  /** Backoff between admission retries; an empty list disables retrying. */
+  /** Backoff between admission retries, the last one repeated for failures that clear on their own; an empty list disables retrying. */
   readonly retryDelaysMs?: readonly number[] | undefined;
   /** Schedules a callback and returns its canceller. Injected so tests own time. */
   readonly schedule?: ((callback: () => void, delayMs: number) => () => void) | undefined;
@@ -258,8 +262,10 @@ export function createReacquiringDaemonInboxSourceFactory(provider: 'slack' | 'e
       try { cancel?.(); } catch { /* A timer that cannot be cancelled still finds the source closed. */ }
     };
     const retryAdmission = (): void => {
-      if (closed || retirementFailed || cancelRetry || retryAttempts >= retryDelays.length) return;
-      const delay = retryDelays[retryAttempts++]!;
+      if (closed || retirementFailed || cancelRetry || retryDelays.length === 0) return;
+      const persistent = admissionFailure !== undefined && inboxAdmissionClearsOnItsOwn(admissionFailure.reason);
+      if (retryAttempts >= retryDelays.length && !persistent) return;
+      const delay = retryDelays[Math.min(retryAttempts++, retryDelays.length - 1)]!;
       cancelRetry = schedule(() => {
         cancelRetry = undefined;
         if (closed || retirementFailed || current) return;
@@ -295,13 +301,15 @@ export function createReacquiringDaemonInboxSourceFactory(provider: 'slack' | 'e
           if (retirementFailed) throw error;
           // Mutation onset can legitimately refuse new admission, and the
           // notification that would replace this source may already have
-          // fired, so retry a bounded number of times as well. A retired owner
-          // is never reused. The fixed reason is reported with the innermost
-          // cause's error name and errno-style code; the message can sit next
-          // to account or credential material and stays out.
+          // fired, so retry on its own as well (see ADMISSION_RETRY_DELAYS_MS). A retired owner
+          // is never reused. The fixed reason is reported with the build step
+          // that failed and the innermost cause's error name and errno-style
+          // code; the message can sit next to account or credential material
+          // and stays out.
+          const stage = inboxBuildStage(error);
           try {
             context.logger.warn('Native inbox source admission is unavailable', {
-              provider, reason, action: INBOX_ADMISSION_ACTIONS[reason], ...failureKind(error),
+              provider, reason, ...(stage ? { stage } : {}), action: INBOX_ADMISSION_ACTIONS[reason], ...failureKind(error),
             });
           } catch { /* Reporting cannot grant admission. */ }
           retryAdmission();
@@ -335,9 +343,12 @@ export function createReacquiringDaemonInboxSourceFactory(provider: 'slack' | 'e
       if (closed || retirementFailed) throw unavailable();
       if (!current) {
         // An account that cannot be admitted yet degrades this provider alone:
-        // reads report it unavailable with the reason. Any other failure still
+        // reads report it unavailable with the reason. So does a provider
+        // account owner that could not be built (the provider unreachable at
+        // boot): no store was leased or opened yet. Any other failure still
         // stops the start, because it may mean unproven storage.
-        if (admissionFailure && admissionFailure.error instanceof InboxAdmissionRefusal) return;
+        if (admissionFailure && (inboxAdmissionRefusalOf(admissionFailure.error)
+          || inboxBuildStage(admissionFailure.error) === 'owner')) return;
         if (admissionFailure) throw admissionFailure.error;
         throw unavailable();
       }

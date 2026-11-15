@@ -13,6 +13,7 @@ import type { InboxPollingControl, InboxSurfaceRegistration, RegisterInboxSurfac
 import { GOODVIBES_DAEMON_SURFACE_ROOT } from '../config/surface.js';
 import type { DaemonInboxFactory } from './daemon-handler-composition.js';
 import { ownInboxEligibility } from './inbox-eligibility.js';
+import { atInboxBuildStage, type InboxBuildStage } from './inbox-admission-refusal.js';
 
 type Controls = Parameters<DaemonInboxFactory>[2];
 export type AccountInboxProvider = 'slack' | 'email' | 'discord';
@@ -75,15 +76,18 @@ export async function ownAccountInboxStore<T extends InboxSurfaceRegistration, O
   const constructed = Promise.withResolvers<T>();
   // A registrar may yield before returning its actual storage owner.
   void constructed.promise.catch(() => {});
+  let stage: InboxBuildStage = 'owner';
   try {
     input.prepare?.();
     if (clustered && typeof owner.verifyEligibility !== 'function') throw new Error(`Clustered ${provider} inbox requires an eligible owner`);
     const electionScope = input.electionScope();
     const storeFileName = `inbox-${provider}-${owner.scopeId}.sqlite`;
+    stage = 'lock';
     release = await acquireCrossProcessLock(accountInboxLockPath(input.workingDirectory, storeFileName), {
       strictOwnership: true, totalTimeoutMs: STORE_LEASE_WAIT_MS,
     });
     input.assertCurrent();
+    stage = 'store';
     surface = await input.register({
       storeFileName,
       ...(clustered ? { awaitInitialPoll: false as const } : {}),
@@ -116,7 +120,7 @@ export async function ownAccountInboxStore<T extends InboxSurfaceRegistration, O
     ]);
     try { input.releaseExtras?.(); } catch { /* The construction failure is the error reported. */ }
     if (cleanup[0]?.status === 'fulfilled') release?.();
-    throw new Error(`The ${provider} inbox could not acquire its owned account and storage`, { cause: error });
+    throw atInboxBuildStage(provider, stage, error);
   }
   const registration = surface;
   const unlock = release;

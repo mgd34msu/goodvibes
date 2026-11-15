@@ -18,6 +18,12 @@ export interface OrchestratorUsageTotals {
   output: number;
   cacheRead: number;
   cacheWrite: number;
+  /**
+   * What the session's priced responses cost, in USD, each at the price of the
+   * model that spent it when it was spent. Undefined until a priced response
+   * lands; a response with no known price adds nothing.
+   */
+  costUsd?: number | undefined;
 }
 
 function assertTokenUsage(value: unknown): asserts value is TokenUsage {
@@ -54,6 +60,8 @@ function addTokens(total: number, count: number): number {
  */
 export function sumConversationUsage(
   messages: readonly ConversationMessageSnapshot[],
+  /** The USD cost of one response at its own model's price, or null when that price is unknown. */
+  priceOf?: (usage: TokenUsage, model: string | undefined, provider: string | undefined) => number | null,
 ): { usage: OrchestratorUsageTotals; lastInputTokens: number } {
   const usage: OrchestratorUsageTotals = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
   let lastInputTokens = 0;
@@ -64,6 +72,8 @@ export function sumConversationUsage(
     usage.output = addTokens(usage.output, message.usage.outputTokens);
     usage.cacheRead = addTokens(usage.cacheRead, message.usage.cacheReadTokens ?? 0);
     usage.cacheWrite = addTokens(usage.cacheWrite, message.usage.cacheWriteTokens ?? 0);
+    const cost = priceOf?.(message.usage, message.model, message.provider);
+    if (typeof cost === 'number' && Number.isFinite(cost)) usage.costUsd = (usage.costUsd ?? 0) + cost;
     if (message.followUp) continue;
     lastInputTokens = addTokens(addTokens(message.usage.inputTokens, message.usage.cacheReadTokens ?? 0), message.usage.cacheWriteTokens ?? 0);
   }

@@ -2,7 +2,7 @@
 import { JudgmentAuthorityRetiredError } from '@goodvibes-jev/engine/errors';
 import { TranscriptSourceChangedError, TranscriptReadingLifetime } from '@goodvibes-jev/engine/platform/platform/core';
 import type { ConversationManager } from '@goodvibes-jev/engine/platform/platform/core';
-export type TranscriptConversation = Pick<ConversationManager, 'getMessageSnapshot' | 'getTranscriptEventIndex'>;
+export type TranscriptConversation = Pick<ConversationManager, 'getMessageSnapshot' | 'getTranscriptEventIndex'> & Partial<Pick<ConversationManager, 'revisionSource'>>;
 export interface TranscriptCommandContext<Conversation extends TranscriptConversation = TranscriptConversation> {
     readonly session: {
         readonly sessionManager?: unknown;
@@ -19,10 +19,11 @@ export function captureTranscriptSource<Conversation extends TranscriptConversat
     const conversation = ctx.session.conversationManager;
     const runtime = ctx.session.runtime;
     const sessionId = runtime?.sessionId;
-    const messages = JSON.stringify(conversation.getMessageSnapshot());
+    // The conversation's revision is the one owner of "the history changed"; the session identity is compared by reference.
+    const revision = conversation.revisionSource?.revision();
     const assertCurrent = () => {
         signal?.throwIfAborted();
-        if (ctx.session.sessionManager !== manager || ctx.session.conversationManager !== conversation || ctx.session.runtime !== runtime || runtime?.sessionId !== sessionId || JSON.stringify(conversation.getMessageSnapshot()) !== messages)
+        if (ctx.session.sessionManager !== manager || ctx.session.conversationManager !== conversation || ctx.session.runtime !== runtime || runtime?.sessionId !== sessionId || conversation.revisionSource?.revision() !== revision)
             throw new TranscriptSourceChangedError();
     };
     lifetime.retain(assertCurrent);

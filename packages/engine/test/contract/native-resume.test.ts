@@ -154,7 +154,7 @@ test('a native-configured owner holds source-less historical records without act
   expect(h.runner.get(contract.id)?.status).toBe('awaiting-owner'); expect(h.manager.list()).toHaveLength(0);
   expect(() => startContract(h)).toThrow('complete original source');
   await expect(h.runner.reply(contract.id, 'legacy.e1', 'Yes, approved')).rejects.toThrow();
-  await expect(createContractIntake({ runner: h.runner, projectRoot: directory }).intake({ sessionId: contract.sessionId, text: 'Yes, approved' })).rejects.toThrow('source-bearing host admission');
+  await expect(createContractIntake({ runner: h.runner, projectRoot: directory }).intake({ sessionId: contract.sessionId, text: 'Yes, approved', answersEscalationId: 'legacy.e1' })).rejects.toThrow('source-bearing host admission');
   expect(h.runner.get(contract.id)?.escalations[0]!.reply).toBeUndefined(); expect(h.events.some(event => event.type === 'CONTRACT_OWNER_REPLIED')).toBe(false);
 });
 

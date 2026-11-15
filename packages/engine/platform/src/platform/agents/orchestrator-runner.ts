@@ -1158,23 +1158,13 @@ async function runAgentTaskWithPolicy(context: AgentOrchestratorRunContext, reco
       }
 
       if (response.toolCalls.length > 0) {
-        let assertProgressPublicationCurrent: (() => void) | undefined;
+        // Interim text never holds its tools: it is read beside them, on the
+        // text and the last few messages, and a finding corrects the next request.
         if (response.content.trim()) {
-          const checkedText = response.content;
-          const publication = await completionGuard.checkProgress({ request: record.task, response: checkedText,
-            conversation, tools: toolDefinitions.map(tool => tool.name), requirements: acceptanceDetails },
-          { signal: context.getCancellationSignal?.(record.id), assertCurrent: terminal.assertCurrent });
-          if (publication.correction === null) {
-            response = { ...response, content: checkedText };
-            assertProgressPublicationCurrent = () => {
-              publication.assertCurrent();
-              if (response?.content !== checkedText) throw new Error('Checked progress text changed before publication');
-            };
-          }
-          else {
-            correctNextRequest(publication.correction + '\nUnpublished progress text (quoted data):\n' + JSON.stringify(response.content));
-            response = { ...response, content: '' };
-          }
+          const progressSignal = context.getCancellationSignal?.(record.id);
+          void completionGuard.checkProgress({ request: record.task, response: response.content, recent: conversation.getRecentMessageSnapshot(6) }, progressSignal)
+            .then(correction => { if (correction !== null && !progressSignal?.aborted) correctNextRequest(correction); })
+            .catch(() => { /* An unsure or failed reading finds nothing. */ });
         }
         // Apply the existing delegated exec defaults before the immutable
         // projection, history publication, progress and permission readers.
@@ -1204,8 +1194,6 @@ async function runAgentTaskWithPolicy(context: AgentOrchestratorRunContext, reco
         try {
           try {
             batch?.assertCurrent();
-            try { assertProgressPublicationCurrent?.(); }
-            catch { terminal.assertCurrent(); response = { ...response, content: '' }; }
             conversation.addAssistantMessage(response.content, { toolCalls: response.toolCalls, usage: response.usage });
             assistantPublished = true;
             // Bound here: the closure below runs later, after `response` and `session` could have been reassigned.

@@ -1,4 +1,3 @@
-import { readErrorFailure } from '../../types/errors.js';
 /**
  * routes/attribution-ingest.ts, the runtime-bus → cost-attribution ingest.
  *
@@ -72,13 +71,11 @@ export function bindCostAttributionIngest(
           ...(event.rateLimit.retryAfterMs !== undefined ? { retryAfterMs: event.rateLimit.retryAfterMs } : {}),
         });
       }
-    } else if (event.type === 'STREAM_RETRY') {
+    } else if (event.type === 'STREAM_RETRY' && event.rateLimited === true) {
       // A rate-limit retry carries the provider's requested backoff, the real
-      // cooldown window the fan-out assessment reasons over.
-      const at = Date.now();
-      void readErrorFailure(new Error(event.reason), 'cost-attribution.retry').then(reading => {
-        if (reading.rateLimited) quotaWindow.record({ provider: event.provider, at, retryAfterMs: event.delayMs });
-      }).catch(() => { /* Unsettled diagnostics do not establish a quota cooldown. */ });
+      // cooldown window the fan-out assessment reasons over. The retry site
+      // states the facts; nothing reads the sentence.
+      quotaWindow.record({ provider: event.provider, at: Date.now(), retryAfterMs: event.retryAfterMs ?? event.delayMs });
     }
   });
   const unbind = (): void => {

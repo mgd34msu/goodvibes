@@ -1,14 +1,7 @@
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
-import { prepareJudgmentResult } from '../../gate/judgment-result.js';
 import { declaredNoticePresentation } from '../../runtime/runtime-event-notices.js';
-import { systemMessagePresentation } from '../../runtime/system-message-presentation.js';
-import { captureJudgmentPort, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
-import { assertJudgmentInput } from '../../gate/judgment-input.js';
-import { captureTranscriptSnapshot } from './snapshot.js';
 import type { ToolCall } from '../../types/tools.js';
-import type { TranscriptEvent } from './types.js';
+import type { TranscriptEvent, TranscriptEventKind } from './types.js';
 import type { ConversationMessageSnapshot } from '../conversation.js';
-import { decisionOrClassic, isClassicOperation } from '../../runtime/decision-policy.js';
 
 function summarizeText(text: string, max = 96): string {
   const normalized = text.replace(/\s+/g, ' ').trim();
@@ -27,47 +20,49 @@ function toolCallEvents(messageIndex: number, toolCalls: readonly ToolCall[]): T
   }));
 }
 
-/** A replaced/cancelled source must not publish an index or stale UI update. */
+/** The history changed (or the session was replaced) between reading the index and showing it. */
 export class TranscriptSourceChangedError extends Error {
   constructor() { super('Transcript source changed.'); this.name = 'TranscriptSourceChangedError'; }
 }
-/** Unsettled meaning is not a resolved approval and does not publish an index. */
+/** Kept for callers that still name it; the index no longer has an unsettled state. */
 export class TranscriptReadingUnsettledError extends Error {
   constructor() { super('Transcript presentation reading is unsettled.'); this.name = 'TranscriptReadingUnsettledError'; }
 }
-/** Carries the original reading authority across every asynchronous publication boundary. */
+/**
+ * The caller's own "is this still the transcript I asked about" checks (its
+ * session and conversation identity), carried to where the result is shown.
+ * The index adds nothing to it: the conversation's revision is the one owner
+ * of "the history changed".
+ */
 export class TranscriptReadingLifetime {
   private readonly checks = new Set<() => void>();
   public retain(check: () => void): void { this.checks.add(check); }
   public assertCurrent(): void { for (const check of this.checks) check(); }
 }
-export interface TranscriptReadingOptions extends JudgmentReadingOptions {
-  readonly lifetime?: TranscriptReadingLifetime;
+export interface TranscriptReadingOptions {
+  readonly signal?: AbortSignal | undefined;
+  /** The caller's synchronous check, run once before the index is returned. */
+  readonly assertCurrent?: (() => void) | undefined;
+  readonly lifetime?: TranscriptReadingLifetime | undefined;
 }
 
-export async function classifyTranscriptMessages(messages: readonly ConversationMessageSnapshot[], options: TranscriptReadingOptions = {}): Promise<TranscriptEvent[]> {
-  return decisionOrClassic(() => classifyCurrentPolicyTranscript(messages, options), () => classifyCurrentPolicyTranscript(messages, options));
+/**
+ * The category of a system line, from what its writer stored: a declared
+ * runtime event, the presentation saved with the line, or the notice kind.
+ * Anything else is a plain system notice. No model reads a line for this.
+ */
+function systemEventKind(message: Extract<ConversationMessageSnapshot, { role: 'system' }>): TranscriptEventKind {
+  const declared = declaredNoticePresentation(message.content, message.runtimeEvent)?.event
+    ?? message.presentation?.event;
+  if (declared) return declared;
+  if (message.notice?.kind === 'contract') return 'contract_state';
+  return 'system_notice';
 }
 
-async function classifyCurrentPolicyTranscript(messages: readonly ConversationMessageSnapshot[], options: TranscriptReadingOptions): Promise<TranscriptEvent[]> {
-  const classic = isClassicOperation();
-  const lifetime = options.lifetime ?? new TranscriptReadingLifetime();
-  const captured = captureTranscriptSnapshot(messages) as readonly ConversationMessageSnapshot[];
-  const source = JSON.stringify(captured);
-  const assertCurrent = () => {
-    options.signal?.throwIfAborted();
-    const checked: unknown = options.assertCurrent?.();
-    if (checked !== undefined) { drainOwned(checked); throw new Error('Transcript source checks must be synchronous'); }
-    if (JSON.stringify(captureTranscriptSnapshot(messages)) !== source) throw new TranscriptSourceChangedError();
-  };
-  assertCurrent();
-  // Preflight every complete system notice before transmitting any of them.
-  // User, assistant and tool contents remain outside this presentation reading.
-  const notices = classic ? [] : captured.filter(message => message.role === 'system' && !declaredNoticePresentation(message.content, message.runtimeEvent));
-  for (const message of notices) assertJudgmentInput({ content: message.content });
-  const authority = notices.length ? captureJudgmentPort(systemMessagePresentation.name, { ...options, assertCurrent, prepareResultCapture: prepareJudgmentResult }) : undefined;
+/** One record per message, built in one pass over the messages; nothing is copied or asked. */
+export function transcriptEventsOf(messages: readonly ConversationMessageSnapshot[]): TranscriptEvent[] {
   const events: TranscriptEvent[] = [];
-  for (const [messageIndex, message] of captured.entries()) {
+  for (const [messageIndex, message] of messages.entries()) {
     switch (message.role) {
       case 'user': {
         const content = typeof message.content === 'string'
@@ -111,23 +106,9 @@ async function classifyCurrentPolicyTranscript(messages: readonly ConversationMe
         });
         break;
       case 'system': {
-        let kind = declaredNoticePresentation(message.content, message.runtimeEvent)?.event;
-        if (!kind && classic) kind = 'system_notice';
-        if (!kind) {
-          if (!authority) throw new TranscriptReadingUnsettledError();
-          const result = await systemMessagePresentation.run(authority.port, { content: message.content }, {
-            site: 'core.transcript-events.presentation', signal: authority.signal, beforeAttempt: authority.assertCurrent,
-          });
-          authority.assertCurrent();
-          const reading = result.readings.event;
-          if (reading.outcome !== 'act') throw new TranscriptReadingUnsettledError();
-          kind = reading.choice;
-          result.recordAction(`transcript presentation:${kind}`);
-          authority.assertCurrent();
-        }
+        const kind = systemEventKind(message);
         events.push({
           id: `msg-${messageIndex}-system`,
-          ...(classic ? { provenance: 'classic' as const } : {}),
           kind,
           messageIndex,
           groupKey: `${kind}:${messageIndex}`,
@@ -138,9 +119,12 @@ async function classifyCurrentPolicyTranscript(messages: readonly ConversationMe
       }
     }
   }
-  assertCurrent();
-  lifetime.retain(assertCurrent);
-  if (authority) lifetime.retain(authority.assertCurrent);
-  lifetime.assertCurrent();
+  return events;
+}
+
+export async function classifyTranscriptMessages(messages: readonly ConversationMessageSnapshot[], options: TranscriptReadingOptions = {}): Promise<TranscriptEvent[]> {
+  options.signal?.throwIfAborted();
+  const events = transcriptEventsOf(messages);
+  options.assertCurrent?.();
   return events;
 }

@@ -18,11 +18,16 @@ export interface SyntheticToolResult extends ToolResult {
   readonly synthetic: true;
   /** The reason the reconciliation pass created this result. */
   readonly reason: ReconciliationReason;
-  /**
-   * LLM-directed guidance for the model, separate from the operational `error`
-   * field so telemetry and rendering can treat them independently.
-   */
-  readonly instruction?: string | undefined;
+}
+
+/**
+ * The one statement about calls that returned no result before the turn
+ * ended, for the person and the model alike: the host does not know whether
+ * they ran, so they may have.
+ */
+export function describeReconciledCalls(calls: readonly Pick<ToolCall, 'name'>[]): string {
+  return `[Tool Reconciliation] ${calls.length} tool call(s) (${calls.map((call) => `'${call.name}'`).join(', ')}) did not return a result before the turn ended; they may have run. `
+    + 'Check the actual state (files, processes, messages) before repeating any of them, and keep work that already completed.';
 }
 
 /**
@@ -81,8 +86,8 @@ export function buildSyntheticResult(
   return {
     callId: call.id,
     success: false,
-    error: `[RECONCILED] Tool call '${call.name}' (id: ${call.id}) has no retained result. Its execution status is unknown; inspect the actual target state before retrying. Reason: ${reason}.`,
-    instruction: 'Preserve completed work. Inspect retained receipts and the actual target state before retrying a call whose result is missing.',
+    // The model reads this text: the guidance lives in it, since a result carries nothing else to the model.
+    error: `[RECONCILED] Tool call '${call.name}' (id: ${call.id}) did not return a result; it may have run. Check the actual target state before retrying it, and keep work that already completed. Reason: ${reason}.`,
     synthetic: true,
     reason,
   };

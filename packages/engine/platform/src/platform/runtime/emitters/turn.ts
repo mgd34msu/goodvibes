@@ -59,7 +59,7 @@ export function emitStreamStart(
 export function emitStreamDelta(
   bus: RuntimeEventBus,
   ctx: EmitterContext,
-  data: { turnId: string; content: string; accumulated: string; reasoning?: string; toolCalls?: PartialToolCall[] }
+  data: { turnId: string; content: string; accumulated: string; provisional?: boolean; reasoning?: string; toolCalls?: PartialToolCall[] }
 ): void {
   bus.emit('turn', createEventEnvelope('STREAM_DELTA', { type: 'STREAM_DELTA', ...data }, ctx));
 }
@@ -77,7 +77,7 @@ export function emitStreamEnd(
 export function emitStreamRetry(
   bus: RuntimeEventBus,
   ctx: EmitterContext,
-  data: { turnId: string; provider: string; attempt: number; maxAttempts: number; delayMs: number; reason: string }
+  data: { turnId: string; provider: string; attempt: number; maxAttempts: number; delayMs: number; reason: string; status?: number; rateLimited?: boolean; retryAfterMs?: number }
 ): void {
   bus.emit('turn', createEventEnvelope('STREAM_RETRY', { type: 'STREAM_RETRY', ...data }, ctx));
 }

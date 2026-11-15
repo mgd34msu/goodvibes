@@ -1,4 +1,5 @@
 import { resolveSystemPrompt } from './orchestrator-system-prompt.js';
+import { mentionsAgent } from './event-replay.js';
 import type { ConversationManager } from './conversation.js';
 import type { ConfigManager } from '../config/manager.js';
 import type { ModelDefinition, ProviderRegistry } from '../providers/registry.js';
@@ -141,6 +142,23 @@ function snapshotAgents(agents: ReturnType<AgentManager['list']>): ReturnType<Ag
   return JSON.parse(JSON.stringify(agents)) as ReturnType<AgentManager['list']>;
 }
 
+/**
+ * The agents this conversation started: the ids its own `agent` tool results
+ * name, and the agents of this session's contracts. The agent manager is
+ * shared by every session of a process, so a summary built from its whole
+ * list would tell this session's model about another session's work.
+ */
+export function agentsOfConversation(
+  agents: ReturnType<AgentManager['list']>,
+  messages: readonly unknown[],
+  contractIds: ReadonlySet<string>,
+): ReturnType<AgentManager['list']> {
+  return agents.filter(agent => (agent.contractId !== undefined && contractIds.has(agent.contractId)) || mentionsAgent(messages, agent.id));
+}
+
+/** The conversation's work revision at which a pre-request compaction failed; it is not tried again until the work changes. */
+const failedPreflightCompaction = new WeakMap<object, number>();
+
 async function buildAutoCompactionContext(
   deps: AutoCompactionDeps,
   params: {
@@ -156,14 +174,15 @@ async function buildAutoCompactionContext(
     : undefined;
   deps.signal?.throwIfAborted();
   const activeSkillFrontmatter = deps.getActiveSkillFrontmatter?.()?.trim() || undefined;
+  const contracts = deps.contractRunner.list({ sessionId: deps.sessionId, includeTerminal: true });
   return {
     signal: deps.signal,
     sessionId: deps.sessionId,
     messages: params.messages,
     sessionMemories: deps.sessionMemoryStore?.list() ?? [],
     lineageEntries: deps.sessionLineageTracker.getEntries(),
-    agents: snapshotAgents(deps.agentManager.list()),
-    contracts: deps.contractRunner.list({ sessionId: deps.sessionId, includeTerminal: true }),
+    agents: snapshotAgents(agentsOfConversation(deps.agentManager.list(), params.messages, new Set(contracts.map(contract => contract.id)))),
+    contracts,
     activePlan: deps.planManager?.getActive(deps.sessionId) ?? null,
     compactionCount: deps.sessionLineageTracker.getCompactionCount(),
     originalTask: deps.sessionLineageTracker.getOriginalTask() ?? undefined,
@@ -234,8 +253,12 @@ export async function checkContextWindowPreflight(
   // never a reason to refuse a request that still fits the window.
   const compactionWanted = autoCompactEnabled && preflightDecision.shouldCompact;
   if (!forcedByModelWarning && !compactionWanted && estimatedTokens <= contextWindow) return 'ok';
+  const fits = knownWindow === null || estimatedTokens <= contextWindow;
+  // The same compaction of the same conversation fails the same way; it is paid for again only after the work changes.
+  if (failedPreflightCompaction.get(deps.conversation) === deps.conversation.workRevision && fits) return 'ok';
 
-  if (forcedByModelWarning || (autoCompactEnabled && !deps.isCompacting && preflightDecision.shouldCompact)) {
+  if (failedPreflightCompaction.get(deps.conversation) !== deps.conversation.workRevision
+    && (forcedByModelWarning || (autoCompactEnabled && !deps.isCompacting && preflightDecision.shouldCompact))) {
     deps.setIsCompacting(true);
 
     if (deps.hookDispatcher) {
@@ -351,7 +374,12 @@ export async function checkContextWindowPreflight(
       const msg = compactErr instanceof Error ? compactErr.message : String(compactErr);
       logger.error('Orchestrator: pre-flight compact failed', { error: msg });
       emitCompactionFailureReceipt(deps, turnId, compactErr, 'auto', 'structured');
-      deps.conversation.addNotice(`Auto-compact failed: ${msg}.`, { level: 'error' });
+      failedPreflightCompaction.set(deps.conversation, deps.conversation.workRevision);
+      // A failed compaction ends the turn only when the request cannot be sent as it is.
+      deps.conversation.addNotice(fits
+        ? `Auto-compact failed: ${msg}. The request is sent as it is, since it still fits the model's context window; compaction is not tried again until the conversation changes. To free room, run /compact, start a fresh conversation with /clear, or set behavior.autoCompactThreshold to 0 to turn auto-compact off.`
+        : `Auto-compact failed: ${msg}. The request does not fit the model's context window, so it was not sent. Run /compact, start a fresh conversation with /clear, or switch to a model with a larger window with /model.`,
+      { level: fits ? 'warning' : 'error' });
       if (deps.hookDispatcher) {
         deps.hookDispatcher.fire({
           path: 'Fail:compact:preflight',
@@ -374,7 +402,7 @@ export async function checkContextWindowPreflight(
           },
         }).catch((err: unknown) => { logger.warn('Fail:compact:preflight hook error', { error: summarizeError(err) }); });
       }
-      return 'error';
+      return fits ? 'ok' : 'error';
     } finally {
       deps.setIsCompacting(false);
     }

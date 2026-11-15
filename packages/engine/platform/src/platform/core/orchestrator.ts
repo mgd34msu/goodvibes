@@ -10,7 +10,7 @@ import { TurnHookOwner, bindTurnHookDispatcher } from '../hooks/turn-ownership.j
 import { TurnCancellationFence, type TurnCancellationResult } from './turn-cancellation.js';
 import { resolveSystemPrompt } from './orchestrator-system-prompt.js';
 import { JudgmentError } from '@goodvibes-jev/judgment';
-import { JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
+import { classifyFailure, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
 import { inheritClassicDecisionFallback, isClassicOperation, withDecisionModelPolicy } from '../runtime/decision-policy.js';
 import { JudgmentInputError } from '../gate/judgment-input.js';
 import { PlannerJudgmentError } from './adaptive-planner.js';
@@ -20,9 +20,9 @@ import type { ConversationManager } from './conversation.js';
 import { resolveCompactionStrategy } from './conversation-compaction.js';
 import type { ToolRegistry } from '../tools/registry.js';
 import type { ToolCall, ToolResult } from '../types/tools.js';
-import { ProviderError, isNonTransientProviderFailure } from '../types/errors.js';
+import { AppError, ProviderError, isNonTransientProviderFailure } from '../types/errors.js';
 import type { HookEvent, HookResult } from '../hooks/types.js';
-import { readFormattedError, summarizeError } from '../utils/error-display.js';
+import { formatError, readFormattedError, summarizeError } from '../utils/error-display.js';
 import type { ModelDefinition } from '../providers/registry.js';
 import type { ContentPart } from '../providers/interface.js';
 import { notifyCompletion } from '../utils/notify.js';
@@ -41,12 +41,13 @@ import type { AcpManager } from '../acp/manager.js';
 import type { SubagentTask } from '../acp/protocol.js';
 import { estimateConversationTokens } from './context-compaction.js';
 import { SessionLineageTracker } from './session-lineage.js';
-import { EventReplayQueue } from './event-replay.js';
+import { EventReplayQueue, sessionReplayFilter } from './event-replay.js';
 import type { ConversationFollowUpItem } from './conversation-follow-ups.js';
 import { OrchestratorFollowUpRuntime } from './orchestrator-follow-up-runtime.js';
 import { ToolCallAbortRegistry, listQueuedMessages, editQueuedMessage, deleteQueuedMessage } from './orchestrator-live-turn.js';
 import { AgentManager } from '../tools/agent/index.js';
 import type { ContractIntake, ContractRunner } from '../contract/index.js';
+import { openEscalation } from '../contract/intake-route.js';
 import { randomUUID } from 'node:crypto';
 import { TurnSubmissionOwner } from './turn-submission.js';
 import { CacheHitTracker } from '../providers/cache-strategy.js';
@@ -130,6 +131,12 @@ export interface OrchestratorUserInputOptions {
    * orchestrator is disposed before the queued input runs.
    */
   readonly awaitQueuedTurn?: boolean | undefined;
+  /**
+   * The open contract question (its escalation id, from `pendingContractQuestion`)
+   * this message answers: the composer showed it and the person did not dismiss
+   * it. The message goes to the contract as the answer, with no model request.
+   */
+  readonly answersContractQuestion?: string | undefined;
 }
 
 /** A queued input that never ran because its orchestrator was disposed first. */
@@ -195,9 +202,9 @@ export interface OrchestratorOptions {
   passiveKnowledgeInjectionRelevanceFloor?: number | undefined;
   /** Required runtime service dependencies. */
   services: {
-    readonly agentManager: Pick<AgentManager, 'list' | 'spawn'>;
+    readonly agentManager: Pick<AgentManager, 'list' | 'spawn'> & Partial<Pick<AgentManager, 'join'>>;
     readonly contractRunner: Pick<ContractRunner, 'list'>;
-    /** Reads each user turn before the model is called; built with createContractIntake. */
+    /** Takes the person's answer to an open contract question; built with createContractIntake. */
     readonly contractIntake: ContractIntake;
   };
 }
@@ -218,6 +225,8 @@ export class Orchestrator {
   public completionActivity: { readonly phase: 'checking' | 'waiting'; readonly startedAtMs: number } | null = null;
   public thinkingFrame = 0;
   public usage: OrchestratorUsageTotals = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+  /** The contract question the turn being run answers, set from its input options. */
+  private contractAnswer: string | undefined;
   /**
    * Input tokens from the most recent LLM response (incl. cache read/write),
    * current context-window usage; 0 before the first response.
@@ -283,7 +292,7 @@ export class Orchestrator {
   /** Cleanup function returned by the active replay queue attachment. */
   private detachReplay: (() => void) | null = null;
   private readonly runtimeBus: RuntimeEventBus | null;
-  private readonly agentManager: Pick<AgentManager, 'list' | 'spawn'>;
+  private readonly agentManager: Pick<AgentManager, 'list' | 'spawn'> & Partial<Pick<AgentManager, 'join'>>;
   private readonly contractRunner: Pick<ContractRunner, 'list'>;
   private readonly contractIntake: ContractIntake;
   private coreServices: OrchestratorCoreServices = {};
@@ -369,7 +378,8 @@ export class Orchestrator {
       return mode === undefined ? prompt : `${prompt.trimEnd()}\n\n${permissionModeLine(mode)}`;
     };
     this.hookDispatcher = hookDispatcher;
-    this.replayQueue = new EventReplayQueue();
+    this.replayQueue = new EventReplayQueue(3, 1, sessionReplayFilter({ agents: () => this.agentManager.list(), messages: () => this.conversation.getMessagesForLLM(),
+      contractIds: () => new Set(this.contractRunner.list({ sessionId: this.currentSessionId }).map(contract => contract.id)) }));
     this.detachReplay = runtimeBus
       ? EventReplayQueue.attachToRuntimeBus(runtimeBus, this.replayQueue)
       : null;
@@ -528,6 +538,12 @@ export class Orchestrator {
 
   public setSystemMessageRouter(router: LowPrioritySystemMessageSink | null): void {
     this.systemMessageRouter = router;
+  }
+
+  /** This session's newest open contract question, for the composer to offer as the next message's subject; one lookup, no model. */
+  public pendingContractQuestion(): { readonly contractId: string; readonly escalationId: string; readonly question: string } | null {
+    const open = openEscalation(this.contractRunner.list({ sessionId: this.currentSessionId }));
+    return open ? { contractId: open.contract.id, escalationId: open.escalation.id, question: open.escalation.question } : null;
   }
 
   public enqueueConversationFollowUp(item: ConversationFollowUpItem): void {
@@ -932,12 +948,13 @@ export class Orchestrator {
       if (nativeTurn && this.hookDispatcher) markNativeConversationTurnEffectsPossible();
       const preTurnPlan = resume ? this.coreServices.planManager?.getActive(this.currentSessionId) ?? null : await prepareConversationForTurn(
         this.conversation, providerRegistry, text, content, this.currentSessionId, this.coreServices.planManager ?? null,
-        { ...(signal ? { signal } : {}), directUserInput: true, onMessageAdded: () => { this.turnStartMessageCount = this.conversation.getMessageCount(); } },
+        { ...(signal ? { signal } : {}), onMessageAdded: () => { this.turnStartMessageCount = this.conversation.getMessageCount(); } },
       );
       signal?.throwIfAborted();
       this.turnStartMessageCount = this.conversation.getMessageCount();
       this.scrollToEnd(this.getViewportHeight());
       this.streamingInputTokens = estimateFreshTurnInputTokens(this.lastInputTokens, estimateConversationTokens(this.conversation.getMessagesForLLM()), text, content);
+      this.contractAnswer = options?.answersContractQuestion;
       await this.runTurnStream(text, content, turnId, preTurnPlan, configManager, providerRegistry,
         (publish) => { terminal.publish = publish; }, () => { terminal.answered = true; }, resume);
 
@@ -1059,7 +1076,6 @@ export class Orchestrator {
     const planOwner = this.postTurnPlanOwner;
     const sessionId = this.currentSessionId;
     const signal = this.abortController?.signal;
-    let blockedContracts = new Set<string>(), blockedContractsReadAt = 0;
     await executeOrchestratorTurnLoop({
       assertPostTurnCurrent: () => {
         signal?.throwIfAborted();
@@ -1122,16 +1138,12 @@ export class Orchestrator {
       recordTurnKnowledgeInjection: (record) => { this.recordTurnKnowledgeInjection(record); },
       nextTurnKnowledgeSequence: () => this.nextTurnKnowledgeSequence(), contractHooks: this.coreServices.contractHooks,
       contractIntake: this.contractIntake,
-      directUserInput: true,
+      answersContractQuestion: this.contractAnswer,
       continuationEvidence,
+      // Asked when a delegate ends or a contract stops for its owner, not on a timer.
       canWaitForDelegate: (id) => {
         const record = this.agentManager.list().find(agent => agent.id === id);
-        if (!record?.contractId) return true;
-        if (Date.now() - blockedContractsReadAt >= 250) {
-          blockedContracts = new Set(this.contractRunner.list({ sessionId }).filter(contract => contract.status === 'awaiting-owner').map(contract => contract.id));
-          blockedContractsReadAt = Date.now();
-        }
-        return !blockedContracts.has(record.contractId);
+        return !record?.contractId || !this.contractRunner.list({ sessionId }).some(contract => contract.id === record.contractId && contract.status === 'awaiting-owner');
       },
       getCompletedWork: () => completedContractEvidence(this.contractRunner, this.currentSessionId, configManager.getWorkingDirectory() ?? undefined),
       getCompletionRequirements: () => {
@@ -1243,12 +1255,11 @@ export class Orchestrator {
 
     const error = err instanceof Error ? err : new Error(summarizeError(err));
     const judgmentFailed = error instanceof JudgmentError || error instanceof JudgmentPortMissingError || error instanceof JudgmentInputError || error instanceof PlannerJudgmentError || error instanceof ResponseCompletionError;
-    const msg = judgmentFailed ? `[Judgment] ${error.message}` : await readFormattedError(error, {
-      site: 'core.orchestrator.turn-error',
-      ...(error instanceof ProviderError
-        ? { provider: providerRegistry.getCurrentModel().provider, source: 'provider' as const }
-        : {}),
-    });
+    const display = error instanceof ProviderError ? { provider: providerRegistry.getCurrentModel().provider, source: 'provider' as const } : {};
+    // A failure with a status, errno or code is worded from it; only one with none is read, and a failed reading never replaces it.
+    const structured = (error instanceof AppError && (error.statusCode !== undefined || error.category !== 'unknown')) || classifyFailure(error) !== undefined;
+    const msg = judgmentFailed ? `[Judgment] ${error.message}` : structured ? formatError(error, display)
+      : await readFormattedError(error, { site: 'core.orchestrator.turn-error', ...display }).catch(() => formatError(error, display));
     this.conversation.addNotice(msg, { level: 'error' });
     this.requestRender();
     // Graceful degradation, suggest alternative when provider fails non-transiently

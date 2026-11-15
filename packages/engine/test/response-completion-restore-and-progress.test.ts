@@ -13,22 +13,6 @@ let previous: ReturnType<typeof installJudgmentPort>;
 beforeEach(() => { previous = installJudgmentPort(fakePort(() => noulAnswer(.01)).port); });
 afterEach(() => { installJudgmentPort(previous); });
 
-describe('a progress check that cannot run', () => {
-  test('is recorded as a checker failure and does not tell the model its prose was unsupported', async () => {
-    const conversation = new ConversationManager();
-    // The person's own messages are never clipped, so an oversized one exceeds the evidence budget.
-    conversation.addUserMessage('Review everything. ' + 'x'.repeat(450_000));
-    const store = new VerificationStore();
-    const guard = new ResponseCompletionGuard({ request: 'Review everything.', conversation, verificationStore: store });
-    const outcome = await guard.checkProgress({ request: 'Review everything.', response: 'Reading the files now.', conversation, tools: ['read'] });
-    expect(outcome.correction).toContain('progress check could not run');
-    expect(outcome.correction).toContain('not a finding about the text');
-    expect(outcome.correction).not.toContain('unsupported');
-    expect([...store.proposals.keys()].some(key => key.includes('completion-verification-failure'))).toBe(true);
-    expect(() => outcome.assertCurrent()).toThrow();
-  });
-});
-
 /** A journal whose stored originals cannot be read back, as a failing disk read would behave. */
 class UnreadableOriginals extends VerificationStore {
   override original(): never { throw new VerificationHeldError('unreadable journal original'); }

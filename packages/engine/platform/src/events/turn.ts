@@ -53,8 +53,14 @@ export type TurnEvent =
   | { type: 'PREFLIGHT_FAIL'; turnId: string; reason: string; stopReason: Extract<TurnStopReason, 'preflight_failed' | 'context_overflow'> }
   /** A provider stream iteration has begun inside the logical turn. */
   | { type: 'STREAM_START'; turnId: string; scope?: 'provider'; terminal?: false }
-  /** An incremental content chunk arrived from the provider. */
-  | { type: 'STREAM_DELTA'; turnId: string; content: string; accumulated: string; reasoning?: string; toolCalls?: PartialToolCall[] }
+  /**
+   * An incremental content chunk arrived from the provider. `content` is the
+   * chunk and `accumulated` the response's text so far. With `provisional`,
+   * the text is a draft: an answer the completion check sends back is replaced
+   * by the next request's stream (which starts again from empty), so a reader
+   * shows it as in progress until TURN_COMPLETED.
+   */
+  | { type: 'STREAM_DELTA'; turnId: string; content: string; accumulated: string; provisional?: boolean; reasoning?: string; toolCalls?: PartialToolCall[] }
   /**
    * A provider stream iteration has ended.
    *
@@ -71,7 +77,15 @@ export type TurnEvent =
    * terminal TURN_ERROR): STREAM_RETRY fires from inside a single in-flight
    * `provider.chat()` call, before any TURN_ERROR is ever raised.
    */
-  | { type: 'STREAM_RETRY'; turnId: string; provider: string; attempt: number; maxAttempts: number; delayMs: number; reason: string }
+  | {
+    type: 'STREAM_RETRY'; turnId: string; provider: string; attempt: number; maxAttempts: number; delayMs: number; reason: string;
+    /** The provider's HTTP status, when the failure had one. */
+    status?: number;
+    /** The provider refused for rate or quota (a 429, or a failure the provider categorised as a rate limit). */
+    rateLimited?: boolean;
+    /** The wait the provider asked for (Retry-After or a structured field). */
+    retryAfterMs?: number;
+  }
   /** An LLM request is about to be dispatched to the provider. */
   | {
     type: 'LLM_REQUEST_STARTED';

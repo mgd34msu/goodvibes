@@ -54,7 +54,8 @@ export interface SystemMessagePresentation {
   readonly severity?: SystemMessageSeverity;
   readonly event?: keyof typeof systemMessagePresentation.items.event.question.criteria;
 }
-interface Cache { readonly settled: Map<string, SystemMessagePresentation>; readonly pending: Map<string, Promise<SystemMessagePresentation>>; }
+interface PendingReading { readonly promise: Promise<SystemMessagePresentation>; readonly stop: AbortController; waiters: number }
+interface Cache { readonly settled: Map<string, SystemMessagePresentation>; readonly pending: Map<string, PendingReading>; }
 const caches = new WeakMap<object, Cache>();
 function configured(signal?: AbortSignal) {
   const owner = captureJudgmentPort(systemMessagePresentation.name, { signal, prepareResultCapture: prepareJudgmentResult });
@@ -80,32 +81,55 @@ async function prepareDecisionSystemMessagePresentation(content: string, signal?
   assertJudgmentInput({ content });
   if (content.length > 160_000) throw new JudgmentInputError('unsupported-input');
   signal?.throwIfAborted();
-  const { port, cache, owner } = configured(signal), model = port.model;
+  const { port, cache } = configured(), model = port.model;
   const key = JSON.stringify([model, content]);
   const old = cache.settled.get(key);
   if (old?.severity && old.event && old.activity) return old;
-  const current = owner.assertCurrent;
-  const run = async () => {
-    current();
-    const result = await systemMessagePresentation.run(port, { content }, { site: systemMessagePresentation.name,
-      beforeAttempt: current, signal: owner.signal });
-    current();
-    const presentation: SystemMessagePresentation = Object.freeze({
-      ...(result.readings.activity.outcome === 'act' ? { activity: result.readings.activity.choice } : {}),
-      ...(result.readings.severity.outcome === 'act' ? { severity: result.readings.severity.choice } : {}),
-      ...(result.readings.event.outcome === 'act' ? { event: result.readings.event.choice } : {}),
-    });
-    // Store only actual settled fields; an absent field remains unclassified.
-    if (presentation.severity || presentation.event || presentation.activity) {
-      if (cache.settled.size >= 512) cache.settled.delete(cache.settled.keys().next().value!);
-      cache.settled.set(key, presentation);
-    }
-    result.recordAction('Prepare presentation fields only; no routing or authorization authority.');
-    return presentation;
+  // One reading per text, shared by every caller asking for it at once. Each
+  // caller's signal releases only that caller; the reading stops when the last
+  // caller has left.
+  let pending = cache.pending.get(key);
+  if (!pending) {
+    const stop = new AbortController();
+    const shared = configured(stop.signal).owner;
+    const read = async (): Promise<SystemMessagePresentation> => {
+      shared.assertCurrent();
+      const result = await systemMessagePresentation.run(shared.port, { content }, { site: systemMessagePresentation.name,
+        beforeAttempt: shared.assertCurrent, signal: shared.signal });
+      shared.assertCurrent();
+      const presentation: SystemMessagePresentation = Object.freeze({
+        ...(result.readings.activity.outcome === 'act' ? { activity: result.readings.activity.choice } : {}),
+        ...(result.readings.severity.outcome === 'act' ? { severity: result.readings.severity.choice } : {}),
+        ...(result.readings.event.outcome === 'act' ? { event: result.readings.event.choice } : {}),
+      });
+      // Store only actual settled fields; an absent field remains unclassified.
+      if (presentation.severity || presentation.event || presentation.activity) {
+        if (cache.settled.size >= 512) cache.settled.delete(cache.settled.keys().next().value!);
+        cache.settled.set(key, presentation);
+      }
+      result.recordAction('Prepare presentation fields only; no routing or authorization authority.');
+      return presentation;
+    };
+    const entry: PendingReading = { promise: read().finally(() => { if (cache.pending.get(key) === entry) cache.pending.delete(key); }), stop, waiters: 0 };
+    entry.promise.catch(() => undefined);
+    cache.pending.set(key, entry);
+    pending = entry;
+  }
+  const entry = pending;
+  entry.waiters++;
+  const leave = () => {
+    if (--entry.waiters > 0) return;
+    if (cache.pending.get(key) === entry) cache.pending.delete(key);
+    entry.stop.abort(signal?.reason);
   };
-  if (signal) return run(); // Cancellation belongs to this caller, never a shared promise.
-  const pending = cache.pending.get(key);
-  if (pending) return pending;
-  const promise = run(); cache.pending.set(key, promise);
-  try { return await promise; } finally { if (cache.pending.get(key) === promise) cache.pending.delete(key); }
+  if (!signal) {
+    try { return await entry.promise; } finally { entry.waiters--; }
+  }
+  const caller: AbortSignal = signal;
+  return new Promise<SystemMessagePresentation>((resolve, reject) => {
+    const onAbort = () => { leave(); reject(caller.reason); };
+    caller.addEventListener('abort', onAbort, { once: true });
+    entry.promise.then(value => { caller.removeEventListener('abort', onAbort); entry.waiters--; resolve(value); },
+      (error: unknown) => { caller.removeEventListener('abort', onAbort); entry.waiters--; reject(error); });
+  });
 }

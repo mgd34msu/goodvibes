@@ -42,6 +42,8 @@ export interface BudgetBreachUsageSnapshot {
   readonly output: number;
   readonly cacheRead: number;
   readonly cacheWrite: number;
+  /** The session cost as spent, each response at its own model's price; preferred over pricing the totals. */
+  readonly costUsd?: number | undefined;
 }
 
 export interface BudgetBreachNotifierDeps {
@@ -85,9 +87,10 @@ export function createBudgetBreachNotifier(deps: BudgetBreachNotifierDeps): Budg
       // Unknown usage is not zero and cannot prove a crossing or re-arm a latch.
       if (![usage.input, usage.output, usage.cacheRead, usage.cacheWrite]
         .every((value) => typeof value === 'number' && Number.isFinite(value) && value >= 0)) return false;
-      if (!isModelPriced(sessionModel)) return false; // cost would be a placeholder, not real
+      const spent = typeof usage.costUsd === 'number' && Number.isFinite(usage.costUsd) ? usage.costUsd : undefined;
+      if (spent === undefined && !isModelPriced(sessionModel)) return false; // cost would be a placeholder, not real
 
-      const sessionCost = calcSessionCost(usage.input, usage.output, usage.cacheRead, usage.cacheWrite, sessionModel);
+      const sessionCost = spent ?? calcSessionCost(usage.input, usage.output, usage.cacheRead, usage.cacheWrite, sessionModel);
       const breached = computeBudgetBreach(sessionCost, budgetThresholdUsd);
 
       if (!breached) {

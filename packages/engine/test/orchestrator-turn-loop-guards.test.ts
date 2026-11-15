@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, rmSync, symlinkSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readdirSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
@@ -50,7 +50,7 @@ function harness(chat: (request: ChatRequest, call: number) => ChatResponse | Pr
     usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     isPassiveKnowledgeInjectionEnabled: () => false, isPassiveCodeInjectionEnabled: () => false, getAlreadyInjectedKnowledgeIds: () => [],
     addInjectedKnowledgeIds() {}, recordTurnKnowledgeInjection() {}, nextTurnKnowledgeSequence: () => 1,
-    contractIntake: { intake: async () => ({ kind: 'turn' }) }, directUserInput: true,
+    contractIntake: { intake: async () => ({ kind: 'turn' }) },
     ...extra,
   };
   return { context, conversation, errors, calls: () => calls, failed: () => failed };
@@ -87,7 +87,7 @@ describe('a turn whose tool rounds keep failing', () => {
 });
 
 describe('a verification journal that cannot be opened', () => {
-  test('the turn stops before any provider call, names the cause and the way out, and leaves the conversation unchanged', async () => {
+  test('the turn runs, nothing is written through the journal location, and the person is told why the evidence is not saved', async () => {
     const root = mkdtempSync(join(tmpdir(), 'gv-loop-journal-'));
     try {
       const elsewhere = join(root, 'shared-state');
@@ -95,16 +95,17 @@ describe('a verification journal that cannot be opened', () => {
       symlinkSync(elsewhere, join(root, '.goodvibes'));
       const h = harness((_request, call) => ({ content: 'done', toolCalls: [], usage, stopReason: 'completed' as const, ...(call < 0 ? {} : {}) }),
         { configManager: { get: () => undefined, getWorkingDirectory: () => root } as never });
-      const before = h.conversation.getMessageSnapshot();
-      await expect(executeOrchestratorTurnLoop(h.context)).rejects.toThrow(/verification journal for this workspace could not be opened/);
-      expect(h.calls()).toBe(0);
-      expect(h.conversation.getMessageSnapshot()).toEqual(before);
+      await executeOrchestratorTurnLoop(h.context);
+      expect(h.calls()).toBeGreaterThan(0);
+      expect(h.conversation.getMessageSnapshot().some(message => message.role === 'system'
+        && message.content.includes('verification journal for this workspace could not be opened'))).toBe(true);
+      expect(readdirSync(elsewhere)).toEqual([]);
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 });
 
 describe('completion checking', () => {
-  test('a transcript that changes while the applicability reading runs is rebuilt and read again', async () => {
+  test('a notice that arrives while the applicability reading runs does not restart the check', async () => {
     const conversation = new ConversationManager();
     conversation.addUserMessage('Say hello.');
     let changed = false, reads = 0;
@@ -116,7 +117,7 @@ describe('completion checking', () => {
     const guard = new ResponseCompletionGuard();
     const correction = await guard.checkUntilAvailable(() => ({ request: 'Say hello.', response: 'Hello.', conversation, tools: [] }));
     expect(correction).toBeNull();
-    expect(reads).toBeGreaterThan(1);
+    expect(reads).toBe(1);
   });
 
   test('a delegate that stays pending releases the wait when the turn is cancelled', async () => {

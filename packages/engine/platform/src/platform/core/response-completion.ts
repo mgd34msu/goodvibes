@@ -1,6 +1,6 @@
 import { assertDecisionAvailable } from '../routing/decision-availability.js';
 import { isDeepStrictEqual } from 'node:util';
-import { activateClassicFallback, decisionOrClassic, isClassicOperation } from '../runtime/decision-policy.js';
+import { decisionOrClassic, isClassicOperation } from '../runtime/decision-policy.js';
 import { captureJudgmentPort, JudgmentAuthorityRetiredError, JudgmentPortMissingError, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
 import { JudgmentError, mapLimit, type JudgmentResult, type Questions } from '@goodvibes-jev/judgment';
 import { logger } from '../utils/logger.js';
@@ -18,6 +18,8 @@ import { executionAssurance } from './batteries/execution-assurance.js';
 import type { AgentManager } from '../tools/agent/manager.js';
 import { completionFindings, completionFinding, type CompletionFinding } from './response-completion-findings.js';
 import { responseProgress } from './batteries/response-progress.js';
+import { judge } from '../runtime/judge.js';
+import { appendVerificationObservation } from './verification/archive.js';
 import { CompletionVerification } from './verification/coordinator.js';
 import { VerificationHeldError, VerificationUnsettledError, VerificationSubdivisionError, type VerificationWriter } from './verification/types.js';
 import { VerificationStore, type VerificationRepairCheckpoint } from './verification/store.js';
@@ -32,14 +34,6 @@ import { retainedDelegationSources } from './verification/delegated-history.js';
 
 /** Evidence rebuilds one completion check may take before it reports that the transcript will not hold still. */
 const MAX_EVIDENCE_REBUILDS = 8;
-
-/** A short, fixed description of why a check could not run, safe to show the model. */
-function progressCheckFailure(error: unknown): string {
-  if (error instanceof CompletionEvidenceBudgetError) return 'the conversation is larger than the check can read';
-  if (error instanceof JudgmentInputError) return 'part of the evidence cannot be admitted to the check';
-  if (error instanceof ResponseCompletionError && error.problem === 'rejected') return 'the conversation changed while it was being checked';
-  return 'the checking service is unavailable or returned an unusable result';
-}
 
 export class ResponseCompletionError extends Error {
   constructor(readonly problem: 'rejected' | 'unavailable' | 'stale-evidence' | 'invalid-evidence' | 'rejected-request' | 'invalid-response' | 'internal' | 'capacity' | 'access-blocked' = 'rejected', options?: ErrorOptions) {
@@ -93,11 +87,12 @@ function completionTranscript(messages: readonly ConversationMessageSnapshot[]) 
   // Old releases saved rejected final drafts followed by their host-generated
   // feedback. Preserve history on disk, but do not treat those rejected drafts
   // and evaluator warnings as fresh observations of performed work.
+  // Notices for the person are not observations of work: they are left out, so
+  // one arriving while a draft is checked does not change the evidence.
   return messages.filter((message, index) => {
     const isFeedback = (entry: ConversationMessageSnapshot | undefined) => entry?.role === 'system' && entry.content.startsWith('[Response completion check]');
     if (message.role === 'assistant' && !message.toolCalls?.length && isFeedback(messages[index + 1])) return false;
-    if (isFeedback(message)) return false;
-    return true;
+    return message.role !== 'system';
   }).map(message => {
     if (message.role === 'user') return { role: message.role, content: typeof message.content === 'string' ? message.content
       : message.content.map(part => part.type === 'text' ? { type: 'text', text: part.text } : { type: 'image', evidence: 'Image content is unavailable to this text check.' }) };
@@ -408,48 +403,33 @@ export class ResponseCompletionGuard {
       review: this.previousReview, instruction: 'Continue the existing work. Preserve completed inspections, findings and artifacts. Establish the specific remaining work from primary receipts before assigning it; do not restart the entire task, create replacement reports unnecessarily, or add exhaustive per-file/runtime requirements absent from the original request. Reopen completed work only for a specific observed defect, changed input or unresolved dependency.' });
   }
 
-  /** A progress observation permits only this prose, never a final response. */
-  async checkProgress(input: ResponseCompletionInput, options: JudgmentReadingOptions = {}): Promise<{ readonly correction: string | null; readonly assertCurrent: () => void }> {
-    this.accepted = undefined;
-    if (isClassicOperation()) return { correction: null, assertCurrent: this.classicPublication(input, options) };
-    const held = { correction: '[Progress publication check] This interim text could not be accepted. Continue the authorized work with tools; publish only useful progress supported by observations. Do not repeat the withheld prose as a final answer.', assertCurrent: () => { throw new ResponseCompletionError('rejected'); } };
-    try {
-      const source = retainStrictJudgmentJson({ request: input.request, response: input.response,
-        transcript: completionTranscript(verificationMessages(input.conversation, input.conversation.getMessageSnapshot()) as ConversationMessageSnapshot[]), tools: input.tools, delegated: [], requirements: null, initial: null });
-      const state = this.evidenceProjection.prepare(source.snapshot);
-      const transcript = JSON.stringify(source.snapshot.transcript);
-      const current = () => {
-        options.signal?.throwIfAborted(); options.assertCurrent?.(); source.assertCurrent();
-        if (input.response !== source.snapshot.response || input.request !== source.snapshot.request
-          || JSON.stringify(completionTranscript(verificationMessages(input.conversation, input.conversation.getMessageSnapshot()) as ConversationMessageSnapshot[])) !== transcript) throw new ResponseCompletionError('rejected');
-      };
-      current();
-      const owner = captureJudgmentPort(responseProgress.name, { ...options, assertCurrent: current, prepareResultCapture: prepareJudgmentResult });
-      const run = await responseProgress.run(owner.port, state as never, { signal: owner.signal, beforeAttempt: owner.assertCurrent, site: responseProgress.name });
-      owner.assertCurrent(); current();
-      if (Object.values(run.readings).some(reading => reading.verdict !== 'no' || reading.outcome !== 'act')) {
-        run.recordAction('Withhold the unsupported or repetitive progress prose; continue the authorized tool work.');
-        return { ...held, correction: '[Progress publication check] Interim prose is held: '
-          + Object.entries(run.readings).filter(([, reading]) => reading.verdict !== 'no' || reading.outcome !== 'act').map(([check]) => check).join(', ')
-          + '. Continue the tool work and correct these specific prose issues before the next publication.' };
-      }
-      run.recordAction('Publish only this checked interim prose; do not authorize terminal completion.');
-      const restriction = owner.consumeObservation();
-      return { correction: null, assertCurrent: () => { restriction.assertCurrent(); current(); } };
-    } catch (error) {
-      options.signal?.throwIfAborted(); options.assertCurrent?.();
-      if (activateClassicFallback(error)) return { correction: null, assertCurrent: this.classicPublication(input, options) };
-      assertDecisionAvailable(error);
-      const blocked = accessFailure(error);
-      if (blocked) throw blocked;
-      // The checker did not reach a verdict. Record that, so the failure is
-      // visible to the operator, and tell the model so rather than implying
-      // the prose was judged unsupported. The error text is never echoed.
-      try { this.rememberFailure(error); } catch { /* Diagnostics cannot replace the held outcome. */ }
-      logger.warn('Response completion: the interim progress check could not run; the progress text stays unpublished', { error: error instanceof Error ? error.name : typeof error });
-      return { ...held, correction: '[Progress publication check] This interim text was not published because the progress check could not run (' + progressCheckFailure(error)
-        + '). That is not a finding about the text. Continue the authorized work with tools; publish progress only when the check can run. Do not repeat the withheld prose as a final answer.' };
-    }
+  /**
+   * Reads interim text shown before its tools: does it claim results the
+   * observations do not support, or repeat an earlier status. It never holds
+   * the tools: it reads the text and the last few messages only, with the
+   * decision deadline, and an unsure or unavailable reading finds nothing.
+   * Resolves with a correction for the model's next request, or null.
+   */
+  async checkProgress(input: { readonly request: string; readonly response: string; readonly recent: readonly ConversationMessageSnapshot[] }, signal?: AbortSignal): Promise<string | null> {
+    if (isClassicOperation()) return null;
+    const state = { request: input.request, response: input.response, transcript: completionTranscript(input.recent) };
+    const { value } = await judge({
+      site: responseProgress.name,
+      battery: responseProgress,
+      state: state as never,
+      settle: (readings): string | null | undefined => {
+        const entries = Object.entries(readings as unknown as Record<string, { readonly verdict: string; readonly outcome: string }>);
+        if (entries.some(([, reading]) => reading.outcome !== 'act')) return undefined;
+        const found = entries.filter(([, reading]) => reading.verdict === 'yes').map(([check]) => check);
+        return found.length === 0 ? null : '[Progress check] Your interim text before the last tool calls was read as '
+          + found.map(check => check === 'unsupported' ? 'claiming results the observations do not support' : 'repeating an earlier status').join(' and ')
+          + '. Do not repeat it; state results only from tool observations. Interim text (quoted data): ' + JSON.stringify(input.response);
+      },
+      fallback: () => null,
+      describe: value => value === null ? 'nothing to correct in the interim text' : 'correct the interim text on the next request',
+      ...(signal === undefined ? {} : { signal }),
+    });
+    return value;
   }
 
   /**
@@ -471,6 +451,20 @@ export class ResponseCompletionGuard {
       return current;
     }
     catch (error) { throw new ResponseCompletionError('unavailable', { cause: error }); }
+  }
+
+  /**
+   * The draft stands without a settled check: the repair rounds of the turn ran
+   * out, or the check did not finish in time. Publication keeps its ordinary
+   * fences (the turn, the transcript, the exact text); the caller tells the
+   * person the answer is not verified.
+   */
+  acceptUnverified(input: ResponseCompletionInput, options: JudgmentReadingOptions = {}): void {
+    const current = this.classicPublication(input, options);
+    this.accepted = response => {
+      if (response.content !== input.response) throw new ResponseCompletionError('stale-evidence');
+      current(); return current;
+    };
   }
 
   async check(input: ResponseCompletionInput, options: JudgmentReadingOptions = {}, onWaiting?: () => void): Promise<string | null> {
@@ -523,9 +517,11 @@ export class ResponseCompletionGuard {
     const current = () => {
       options.signal?.throwIfAborted(); options.assertCurrent?.();
       const now = conversation.getMessageSnapshot();
+      // Notices may arrive meanwhile; besides them, only this exact answer may follow.
+      const after = now.slice(messages.length).filter(message => message.role !== 'system');
       if (input.conversation !== conversation || input.response !== response
-        || JSON.stringify(now.slice(0, messages.length)) !== prefix || now.length > messages.length + 1) throw new ResponseCompletionError('stale-evidence');
-      const added = now[messages.length];
+        || JSON.stringify(now.slice(0, messages.length)) !== prefix || after.length > 1) throw new ResponseCompletionError('stale-evidence');
+      const added = after[0];
       if (added && (added.role !== 'assistant' || added.content !== response || added.toolCalls?.length)) throw new ResponseCompletionError('stale-evidence');
     };
     current(); return current;
@@ -568,7 +564,14 @@ export class ResponseCompletionGuard {
     }
   }
 
-  private async read(input: ResponseCompletionInput, options: JudgmentReadingOptions, onWaiting?: () => void, withoutCheckpoint = false, requireVerification = false): Promise<string | null> {
+  /**
+   * One check of one draft. The evidence is captured, screened and projected
+   * once, and applicability is asked once; a pass that must settle uncertain
+   * readings against primary evidence, or drop a checkpoint, continues with
+   * the same evidence instead of starting the check again.
+   */
+  private async read(input: ResponseCompletionInput, options: JudgmentReadingOptions, onWaiting?: () => void): Promise<string | null> {
+    let withoutCheckpoint = false, requireVerification = false;
     this.assertEvidenceCurrent = undefined;
     options.signal?.throwIfAborted(); options.assertCurrent?.();
     const conversation = input.conversation, snapshot = conversation.getMessageSnapshot;
@@ -624,12 +627,15 @@ export class ResponseCompletionGuard {
         this.reviewStore.retainSource(value);
       }
     }
-    const batch = new AbortController();
-    const owner = captureJudgmentPort(responseCompletion.name, { ...options,
-      signal: options.signal ? AbortSignal.any([options.signal, batch.signal]) : batch.signal,
-      assertCurrent: current, prepareResultCapture: questions => this.resultCapture(questions) });
-    const port = bindVerificationTargets(owner.port);
-    const readingOptions = { signal: owner.signal, beforeAttempt: owner.assertCurrent, onRetry: () => onWaiting?.() };
+    // One reading authority per pass; a pass that is abandoned aborts its own siblings only.
+    const openPass = () => {
+      const batch = new AbortController();
+      const owner = captureJudgmentPort(responseCompletion.name, { ...options,
+        signal: options.signal ? AbortSignal.any([options.signal, batch.signal]) : batch.signal,
+        assertCurrent: current, prepareResultCapture: questions => this.resultCapture(questions) });
+      return { batch, owner, port: bindVerificationTargets(owner.port), readingOptions: { signal: owner.signal, beforeAttempt: owner.assertCurrent, onRetry: () => onWaiting?.() } };
+    };
+    let { batch, owner, port, readingOptions } = openPass();
     const acceptCheckedResponse = () => {
       owner.assertCurrent(); current();
       this.hasSemanticRefusal = false;
@@ -668,6 +674,7 @@ export class ResponseCompletionGuard {
     }
     this.onCompletionRequired?.();
     routing.recordAction('The request requires task fulfillment, or applicability is unsettled. Retain the original completion checks.');
+    for (;;) {
     let state: unknown = fullState;
     let checkpoint = !withoutCheckpoint && JSON.stringify(fullState).length > 100_000
       ? nativeWorkCheckpoint(input.completedWork ?? [], source.snapshot.completedWork, fullState, this.ownSource) : undefined;
@@ -791,13 +798,17 @@ export class ResponseCompletionGuard {
         .some(reading => reading.outcome !== 'act')) {
       run.recordAction('Settle uncertain direct readings against the original requirements and primary evidence before requesting any working-model repair.');
       batch.abort();
-      return this.read(input, options, onWaiting, withoutCheckpoint, true);
+      requireVerification = true;
+      ({ batch, owner, port, readingOptions } = openPass());
+      continue;
     }
     if (checkpoint && (needsFinalSource || !executionAccepted
       || needsDelegatedSource)) {
       run.recordAction('This native work checkpoint does not settle every current final check; retrieve retained originals before requesting any working-model repair.');
       batch.abort();
-      return this.read(input, options, onWaiting, true, requireVerification);
+      withoutCheckpoint = true;
+      ({ batch, owner, port, readingOptions } = openPass());
+      continue;
     }
     if (state !== fullState && this.verification && (needsFinalSource || needsDelegatedSource || (!executionAccepted && !verificationFindings.length))) {
       const opened = await this.verification.openFinal(state, { completion: run.readings, consolidation: consolidation?.readings ?? null, execution: execution?.readings ?? null },
@@ -807,7 +818,8 @@ export class ResponseCompletionGuard {
         consolidation?.recordAction('Retrieve primary evidence before declaring a synthesis defect.');
         execution?.recordAction('Retrieve primary evidence before declaring an execution defect.');
         batch.abort();
-        return this.read(input, options, onWaiting, withoutCheckpoint, requireVerification);
+        ({ batch, owner, port, readingOptions } = openPass());
+        continue;
       }
     }
     if (Object.keys(run.readings).every(aspect => qualifications.completion.has(aspect))
@@ -881,6 +893,7 @@ export class ResponseCompletionGuard {
     this.heldCycle = { evidenceKey, draft: input.response, correction,
       wordingCannotRepair: heldChecks.length > 0 && heldChecks.every(check => WORDING_CANNOT_REPAIR.includes(check)), shortCircuits: 0 };
     return correction;
+    }
   }
 
   private async checkCheckpointHistory(full: Record<string, unknown>, checkpoint: Record<string, unknown>, access: VerificationAccess): Promise<boolean> {
@@ -929,22 +942,44 @@ export function waitForTaskRecovery(milliseconds: number, signal?: AbortSignal):
   });
 }
 
-/** Delegation is a step inside a turn. Failed children return to its coordinator for repair. */
+/**
+ * Delegation is a step inside a turn. The turn waits for its delegates to end
+ * (or to stop on a question for the owner), woken by the agents' own completion
+ * and by `wake`, never by polling. Then the person gets a short notice and the
+ * model the full results once, as an observation in the conversation, so later
+ * requests read them from the cached history. Failed children return to the
+ * coordinator for repair.
+ */
 export async function waitForResponseDelegates(conversation: ConversationManager,
-  manager: Parameters<typeof collectResponseDelegates>[1], options: JudgmentReadingOptions = {}, knownAgentIds: readonly string[] = [],
-  canWait: (agentId: string) => boolean = () => true): Promise<string | null> {
+  manager: Parameters<typeof collectResponseDelegates>[1] & Partial<Pick<AgentManager, 'join'>>, options: JudgmentReadingOptions = {}, knownAgentIds: readonly string[] = [],
+  canWait: (agentId: string) => boolean = () => true, wake?: (notify: () => void) => (() => void) | undefined): Promise<boolean> {
   let delegates = collectResponseDelegates(conversation, { list: () => manager.list() }, knownAgentIds);
-  if (!delegates.length) return null;
+  if (!delegates.length) return false;
   const ids = new Set(delegates.map(agent => agent.id));
-  while (manager.list().some(agent => ids.has(agent.id) && (agent.status === 'pending' || agent.status === 'running') && canWait(agent.id))) {
+  const waiting = () => manager.list().filter(agent => ids.has(agent.id) && (agent.status === 'pending' || agent.status === 'running') && canWait(agent.id));
+  let previous = '';
+  for (let pending = waiting(); pending.length > 0; pending = waiting()) {
     options.signal?.throwIfAborted(); options.assertCurrent?.();
-    await waitForTaskRecovery(50, options.signal);
+    // Joining an agent that has not started returns at once; when nothing moved
+    // since the last wake, the list is looked at once a second instead.
+    const state = pending.map(agent => `${agent.id}:${agent.status}`).join(',');
+    const join = state === previous ? undefined : manager.join;
+    previous = state;
+    await new Promise<void>((resolve, reject) => {
+      let stop: (() => void) | undefined;
+      const done = () => { stop?.(); options.signal?.removeEventListener('abort', aborted); clearTimeout(fallback); resolve(); };
+      const aborted = () => { stop?.(); clearTimeout(fallback); reject(options.signal?.reason); };
+      stop = wake?.(done);
+      options.signal?.addEventListener('abort', aborted, { once: true });
+      const fallback = join ? undefined : setTimeout(done, 1_000);
+      if (join) void Promise.race(pending.map(agent => join.call(manager, agent.id))).then(done, done);
+    });
   }
   options.signal?.throwIfAborted(); options.assertCurrent?.();
   delegates = collectResponseDelegates(conversation, { list: () => manager.list() }, knownAgentIds);
   const evidence = '[Delegated work state] ' + JSON.stringify(delegates.map(({ evidence: _evidence, ...agent }) => agent))
     + '\nReview these results against the original request. Recover failed or incomplete work, consolidate findings, and produce every requested deliverable. Delegation itself does not complete the task.';
-  // Shown here; the caller carries the same evidence to the model on its next request.
-  conversation.addNotice(evidence, { level: 'info', kind: 'operational' });
-  return evidence;
+  conversation.addNotice(`[Delegated work] ${delegates.map(agent => `${agent.id} ${agent.status}`).join(', ')}. The results were given to the model.`, { level: 'info', kind: 'operational' });
+  appendVerificationObservation(conversation, evidence);
+  return true;
 }

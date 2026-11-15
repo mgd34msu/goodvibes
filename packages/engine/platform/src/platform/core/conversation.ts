@@ -1,4 +1,3 @@
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { providerConversation, withHostMessage } from './conversation-provider-projection.js';
 import { HostInstructionChannel, type HostInstructions } from './host-instructions.js';
 import { declaredNoticePresentation } from '../runtime/runtime-event-notices.js';
@@ -12,7 +11,7 @@ import type { CompactionContext } from './context-compaction.js';
 import type { CompactionReceipt } from './compaction-types.js';
 import type { SessionMemoryStore } from './session-memory.js';
 import type { SessionLineageTracker } from './session-lineage.js';
-import { buildTranscriptEventIndex, TranscriptReadingLifetime, TranscriptSourceChangedError, type TranscriptReadingOptions } from './transcript-events/index.js';
+import { buildTranscriptEventIndex, TranscriptSourceChangedError, type TranscriptReadingOptions } from './transcript-events/index.js';
 import { compactConversation } from './conversation-compaction.js';
 import {
   cloneBranchMap,
@@ -27,6 +26,8 @@ import { revisionSource, type RevisionSource } from '../utils/revision.js';
 import { archiveVerificationCompaction, detachVerificationMessages, forkVerificationArchive, isVerificationRuntimeMessage, mergeVerificationArchive, resetVerificationArchives,
   restoreVerificationBranch, restoreVerificationMessages, retainVerificationMessagePositions, switchVerificationArchive, updateVerificationMessage } from './verification/archive.js';
 import { retainStrictJudgmentJson } from '../gate/judgment-result.js';
+
+export type TranscriptEventIndex = Awaited<ReturnType<typeof buildTranscriptEventIndex>>;
 
 export type TokenUsage = {
   inputTokens: number;
@@ -63,6 +64,15 @@ export const INFO_NOTICE: NoticeMeta = Object.freeze({ level: 'info' });
 /** The transcript colour of a declared notice. */
 export function noticePresentation(notice: NoticeMeta): SystemMessagePresentation {
   return Object.freeze({ severity: notice.level === 'error' ? 'error' : notice.level === 'warning' ? 'warning' : 'info' });
+}
+
+const SEVERITIES: ReadonlySet<string> = new Set(['error', 'warning', 'info']);
+
+/** A presentation saved in a session file, kept when it names a severity this build shows. */
+function storedPresentation(value: unknown): SystemMessagePresentation | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const severity = (value as { severity?: unknown }).severity;
+  return typeof severity === 'string' && SEVERITIES.has(severity) ? Object.freeze({ ...(value as SystemMessagePresentation) }) : undefined;
 }
 
 export type ConversationMessageSnapshot =
@@ -179,9 +189,12 @@ export class ConversationManager {
   private streamingMessageIndex = -1;
   private undoStack: Message[][] = [];
   private _messagesRevision = 0;
+  /** Revisions that only added a notice; see `workRevision`. */
+  private _noticeRevisions = 0;
   readonly #revisionSource = revisionSource('conversation', () => this._messagesRevision);
   private _cachedLLMMessages: ProviderMessage[] | null = null;
   private _cachedLLMRevision = -1;
+  private transcriptIndex: { readonly revision: number; readonly index: TranscriptEventIndex } | undefined;
   /**
    * What the host tells the model for the next request(s), sent after the
    * history as one trailing message (host-instructions.ts). Not history: not
@@ -193,6 +206,14 @@ export class ConversationManager {
 
   /** Every change to the message history (append, stream update, undo, branch switch, compaction, reset) as a revision source. */
   get revisionSource(): RevisionSource { return this.#revisionSource; }
+
+  /**
+   * The revision of what was said and done: every change except a notice
+   * appended for the person. A notice is not an observation of work, so a
+   * check of the work (completion evidence, a compaction that failed) does
+   * not have to start again when one arrives.
+   */
+  get workRevision(): number { return this._messagesRevision - this._noticeRevisions; }
 
   private findToolName(callId: string): string | undefined {
     for (let i = this.messages.length - 1; i >= 0; i--) {
@@ -368,6 +389,7 @@ export class ConversationManager {
       ...(runtimeEvent ? { runtimeEvent: { type: runtimeEvent.type, occurrenceId: runtimeEvent.occurrenceId } } : {}),
     });
     this._messagesRevision++;
+    this._noticeRevisions++;
   }
 
   /**
@@ -382,6 +404,7 @@ export class ConversationManager {
       ...(meta.kind ? { kind: meta.kind } : {}), ...(meta.priority ? { priority: meta.priority } : {}) });
     this.messages.push({ role: 'system', content, notice, presentation: noticePresentation(notice) });
     this._messagesRevision++;
+    this._noticeRevisions++;
   }
 
   public getLastUserMessage(): string | null {
@@ -470,6 +493,11 @@ export class ConversationManager {
     return cloneMessages(this.messages);
   }
 
+  /** A copy of the last `count` messages only, for a reading that needs the recent exchange and not the history. */
+  public getRecentMessageSnapshot(count: number): ConversationMessageSnapshot[] {
+    return cloneMessages(this.messages.slice(-Math.max(0, count)));
+  }
+
   /** True when a system message satisfies the test; scans in place so a per-check liveness probe does not deep-copy the history. */
   public hasSystemMessage(test: (message: Readonly<Extract<ConversationMessageSnapshot, { role: 'system' }>>) => boolean): boolean {
     return this.messages.some((message) => message.role === 'system' && test(message));
@@ -479,7 +507,7 @@ export class ConversationManager {
    * shared nested arguments. Compare identities/slots, never reserialize large
    * source strings on every verifier question. Presentation can update freely. */
   public captureMessageEvidence(): { snapshot: ConversationMessageSnapshot[]; native: boolean; assertCurrent: () => void; assertFinalized: (response: string) => void } {
-    const messages = this.messages, revision = this._messagesRevision, snapshot = this.getMessageSnapshot;
+    const messages = this.messages, revision = this.workRevision, snapshot = this.getMessageSnapshot;
     const fields = ['role', 'content', 'toolCalls', 'callId', 'outcome', 'hostEvidence'] as const;
     const captured = messages.map(message => ({ message, slots: fields.map(key => ({ key, descriptor: Object.getOwnPropertyDescriptor(message, key) })) }));
     const nested = captured.flatMap(entry => entry.slots.flatMap(slot => {
@@ -500,15 +528,18 @@ export class ConversationManager {
       }
       for (const source of nested) source.assertCurrent();
     };
+    // A notice for the person is not evidence: one appended after the capture changes nothing checked.
+    const addedWork = () => messages.slice(captured.length).filter(message => message.role !== 'system');
     const assertCurrent = () => {
       assertPrefix();
-      if (this._messagesRevision !== revision || messages.length !== captured.length) throw new TranscriptSourceChangedError();
+      if (this.workRevision !== revision || addedWork().length !== 0) throw new TranscriptSourceChangedError();
     };
     const assertFinalized = (response: string) => {
       assertPrefix();
-      if (messages.length === captured.length && this._messagesRevision === revision) return;
-      const final = messages[captured.length];
-      if (messages.length !== captured.length + 1 || this._messagesRevision !== revision + 1 || final?.role !== 'assistant'
+      const added = addedWork();
+      if (added.length === 0 && this.workRevision === revision) return;
+      const final = added[0];
+      if (added.length !== 1 || this.workRevision !== revision + 1 || final?.role !== 'assistant'
         || final.content !== response || final.toolCalls?.length) throw new TranscriptSourceChangedError();
     };
     assertCurrent();
@@ -516,19 +547,21 @@ export class ConversationManager {
     return { snapshot: result, native: snapshot === nativeMessageSnapshot, assertCurrent, assertFinalized };
   }
 
-  public async getTranscriptEventIndex(options: TranscriptReadingOptions = {}) {
-    const lifetime = options.lifetime ?? new TranscriptReadingLifetime();
+  /**
+   * The transcript event index: one record per message, built in one pass with
+   * no copy and no model request, and reused until the history's revision moves.
+   */
+  public async getTranscriptEventIndex(options: TranscriptReadingOptions = {}): Promise<TranscriptEventIndex> {
+    options.signal?.throwIfAborted();
     const revision = this._messagesRevision;
-    const assertCurrent = () => {
-      options.signal?.throwIfAborted();
-      const checked: unknown = options.assertCurrent?.();
-      if (checked !== undefined) { drainOwned(checked); throw new Error('Transcript source checks must be synchronous'); }
-      if (revision !== this._messagesRevision) throw new TranscriptSourceChangedError();
-    };
-    lifetime.retain(assertCurrent);
-    const index = await buildTranscriptEventIndex(this.getMessageSnapshot(), { ...options, assertCurrent, lifetime });
-    lifetime.assertCurrent();
-    return index;
+    let cached = this.transcriptIndex;
+    if (cached?.revision !== revision) {
+      cached = { revision, index: Object.freeze(await buildTranscriptEventIndex(this.messages)) };
+      if (this._messagesRevision !== revision) throw new TranscriptSourceChangedError();
+      this.transcriptIndex = cached;
+    }
+    options.assertCurrent?.();
+    return cached.index;
   }
 
   public replaceMessagesForLLM(newMessages: ProviderMessage[]): void {
@@ -676,13 +709,14 @@ export class ConversationManager {
   }
 
   /**
-   * A restored line keeps its declared level, or the level of its declared
-   * runtime event; a line saved before levels were stored shows as information.
-   * Restoring or branching asks no model about any line.
+   * A restored line keeps its declared level, the level of its declared
+   * runtime event, or the presentation saved with it; a line saved with none
+   * of these shows as information. Restoring or branching asks no model about
+   * any line.
    */
   private presentStoredSystemMessage(message: Extract<Message, { role: 'system' }>): void {
     message.presentation = message.notice ? noticePresentation(message.notice)
-      : declaredNoticePresentation(message.content, message.runtimeEvent) ?? noticePresentation(INFO_NOTICE);
+      : declaredNoticePresentation(message.content, message.runtimeEvent) ?? storedPresentation(message.presentation) ?? noticePresentation(INFO_NOTICE);
   }
 
   public getCurrentBranch(): string {

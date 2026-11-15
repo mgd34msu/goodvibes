@@ -6,14 +6,12 @@ import type { ConversationManager } from './conversation.js';
 import type { ConfigManager } from '../config/manager.js';
 import type { ContentPart, LLMProvider } from '../providers/interface.js';
 import type { ProviderRegistry } from '../providers/registry.js';
-import { classifyIntent, type ClassificationResult } from './intent-classifier.js';
 import { logger } from '../utils/logger.js';
 import { appendVerificationRuntimeMessage } from './verification/archive.js';
-import { PlannerJudgmentError, type AdaptivePlanner } from './adaptive-planner.js';
 import type { ExecutionPlan, PlanItem } from './execution-plan.js';
 import type { ExecutionPlanManager } from './execution-plan.js';
 import type { RuntimeEventBus } from '../runtime/events/index.js';
-import { emitCommunicationConsumed, emitPlanStrategySelected, emitToolReconciled, emitTurnCompleted } from '../runtime/emitters/index.js';
+import { emitCommunicationConsumed, emitToolReconciled, emitTurnCompleted } from '../runtime/emitters/index.js';
 import { buildSyntheticResult } from './tool-reconciliation.js';
 import type { ToolCall, ToolResult } from '../types/tools.js';
 import type { ToolRegistry } from '../tools/registry.js';
@@ -22,7 +20,6 @@ import { captureToolInputCalls, projectToolInputBatch } from './tool-input-ingre
 import type { AgentManager, AgentRecord } from '../tools/agent/index.js';
 import type { ContractSessionHooks } from '../contract/agent-hooks.js';
 import { toolResultStartedContract } from '../contract/intake-route.js';
-import { decisionOrClassic, isClassicOperation } from '../runtime/decision-policy.js';
 
 type EmitterContextFactory = (turnId: string) => import('../runtime/emitters/index.js').EmitterContext;
 export type ChatResponseWithReasoning = Awaited<ReturnType<LLMProvider['chat']>> & {
@@ -30,58 +27,10 @@ export type ChatResponseWithReasoning = Awaited<ReturnType<LLMProvider['chat']>>
   reasoningSummary?: string | undefined;
 };
 
-export async function maybeEmitAdaptivePlannerDecision(
-  text: string,
-  flagEnabled: boolean,
-  adaptivePlanner: Pick<AdaptivePlanner, 'select'> | null,
-  runtimeBus: RuntimeEventBus | null,
-  emitterContext: EmitterContextFactory,
-  turnId: string,
-  classification?: ClassificationResult,
-  signal?: AbortSignal,
-): Promise<void> {
-  return decisionOrClassic(() => emitDecisionAdaptivePlannerDecision(text, flagEnabled, adaptivePlanner, runtimeBus, emitterContext, turnId, classification, signal), () => { signal?.throwIfAborted(); });
-}
-async function emitDecisionAdaptivePlannerDecision(text: string, flagEnabled: boolean,
-  adaptivePlanner: Pick<AdaptivePlanner, 'select'> | null, runtimeBus: RuntimeEventBus | null,
-  emitterContext: EmitterContextFactory, turnId: string, classification?: ClassificationResult, signal?: AbortSignal): Promise<void> {
-  if (!flagEnabled) return;
-  if (!adaptivePlanner) return;
-  const reading = classification ?? await classifyIntent(text, signal ? { signal } : {});
-  signal?.throwIfAborted();
-  if (reading.risk.outcome !== 'act') {
-    reading.recordAction(`planner held: risk reading ${reading.risk.outcome}`);
-    throw new PlannerJudgmentError('unsettled');
-  }
-  const plannerInputs = {
-    riskScore: reading.risk.normalized,
-    latencyBudgetMs: Infinity,
-    isMultiStep: reading.intent === 'project' && reading.outcome === 'act',
-    remoteAvailable: false,
-    backgroundEligible: false,
-    taskDescription: text,
-  };
-  const decision = await adaptivePlanner.select(plannerInputs, signal ? { signal } : {});
-  reading.recordAction(`planner selected ${decision.selected}`);
-  if (runtimeBus) {
-    emitPlanStrategySelected(runtimeBus, emitterContext(turnId), decision);
-  }
-  logger.debug('[Orchestrator] adaptive-planner decision', {
-    strategy: decision.selected,
-    reasonCode: decision.reasonCode,
-  });
-}
-
 export interface TurnPreparationOptions {
-  /** User messages go to the conversation model without semantic admission. */
-  readonly directUserInput?: boolean;
   readonly signal?: AbortSignal;
   /** Capture the transcript boundary before awaiting a reading or cancellation. */
   readonly onMessageAdded?: () => void;
-  /** Contract intake must decide who plans before a conversational plan instruction is injected. */
-  readonly deferPlanPriming?: boolean;
-  /** Reuses the turn's reading for planner telemetry without another request. */
-  readonly onClassification?: (reading: ClassificationResult) => Promise<void>;
 }
 
 export async function prepareConversationForTurn(
@@ -123,36 +72,8 @@ export async function prepareConversationForTurn(
   }
 
   options.onMessageAdded?.();
-  // Direct user input needs no semantic admission. Explicit native turns also
-  // retain their existing routing without a second classifier interpreting it.
-  if (nativeTurn || options.directUserInput) return preTurnPlan;
-  // The submitted message is retained even if judgment fails or is cancelled.
-  const classification = await decisionOrClassic(() => classifyIntent(text, options.signal ? { signal: options.signal } : {}), () => undefined);
-  options.signal?.throwIfAborted();
-  if (classification === undefined) return preTurnPlan;
-  await options.onClassification?.(classification);
-  options.signal?.throwIfAborted();
-  if (options.deferPlanPriming) classification.recordAction('plan priming deferred until contract intake');
-  else primeConversationForTurn(conversation, classification, planManager?.getActive(sessionId) ?? null);
-
+  // The person's message goes to the conversation model as it is; nothing reads it first.
   return preTurnPlan;
-}
-
-/** Apply only after contract intake leaves this as an ordinary conversational turn. */
-export function primeConversationForTurn(conversation: ConversationManager, classification: ClassificationResult, activePlan: ExecutionPlan | null): void {
-  if (isNativeConversationTurn() || isClassicOperation()) return;
-  if (!activePlan && classification.needsPlan.verdict === 'yes' && classification.needsPlan.outcome === 'act') {
-    classification.recordAction('inject specification and execution-plan instruction');
-    const instruction = '[Project mode] This request warrants a specification and execution plan. ' +
-      'Before executing, write a brief spec (goals, constraints, non-goals) ' +
-      'and an execution plan (phases and tasks). ' +
-      'Use the execution plan format: ## Phase [STATUS] / - [x] Task - STATUS.';
-    conversation.hostInstructions.set('mode', instruction, { once: true });
-    conversation.addNotice(instruction, { level: 'info', kind: 'system' });
-  } else {
-    classification.recordAction(activePlan ? 'use the existing execution plan' : `no automatic plan priming: ${classification.needsPlan.verdict} (${classification.needsPlan.outcome})`);
-  }
-
 }
 
 export type { ContractSessionHooks };
@@ -282,7 +203,6 @@ type ToolResponseOutcomeArgs = {
   /** Production ingress supplies the real registry before publishing tool input. */
   toolRegistry?: ToolRegistry | undefined;
   inputProjection?: ToolInputProjectionOptions | undefined;
-  assertProgressPublicationCurrent?: (() => void) | undefined;
   onTurnTerminal?: ((publish: () => void) => void) | undefined;
   conversation: ConversationManager;
   agentManager: Pick<AgentManager, 'list' | 'spawn'>;
@@ -320,14 +240,7 @@ export async function handleToolResponseOutcome(args: ToolResponseOutcomeArgs): 
 
 async function handleOwnedToolResponseOutcome(args: ToolResponseOutcomeArgs): Promise<{ continueLoop: boolean; results: ToolResult[] }> {
   const toolCalls = args.response.toolCalls;
-  let content = args.response.content;
-  try { args.assertProgressPublicationCurrent?.(); }
-  catch {
-    args.inputProjection?.signal?.throwIfAborted(); args.inputProjection?.assertCurrent?.();
-    // A stale prose review withholds only prose. Tool admission independently
-    // owns these calls and useful work must not fail because a notice arrived.
-    content = '';
-  }
+  const content = args.response.content;
   args.conversation.addAssistantMessage(content, {
     toolCalls,
     reasoningContent: args.response.reasoning || undefined,

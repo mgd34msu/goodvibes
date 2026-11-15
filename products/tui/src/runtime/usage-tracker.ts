@@ -72,7 +72,7 @@ export interface UsageTrackerDeps {
   readonly turnEvents: UiEventFeed<TurnEvent>;
   readonly agentEvents: UiEventFeed<AgentEvent>;
   /** Cumulative main-session usage (the orchestrator's counters). */
-  readonly getUsage: () => UsageTotals & { readonly model?: string };
+  readonly getUsage: () => UsageTotals & { readonly model?: string; readonly costUsd?: number | undefined };
   /** Tokens in the context window right now. */
   readonly getContextTokens: () => number;
   /** The current model's context window (0 when unknown). */
@@ -314,6 +314,12 @@ export class UsageTracker {
   }
 
   sessionCost(): UsageCost {
+    // The cost as spent (each response at its own model's price) when the session has it,
+    // the same figure the status line and the budget alert read.
+    const spent = this.deps.getUsage().costUsd;
+    if (typeof spent === 'number' && Number.isFinite(spent)) {
+      return { usd: spent, priced: this.available(), source: this.available() ? 'priced per response at the model that ran it' : null };
+    }
     const u = this.totals();
     const model = this.modelId();
     const priced = this.available() && isModelPriced(model);

@@ -17,7 +17,7 @@ export interface SharedShellFooterOptions {
   readonly promptLineCount: number;
   readonly promptCursorPos?: number | undefined;
   readonly promptFocused?: boolean | undefined;
-  readonly usage: { available?: boolean; up: number; down: number; cacheRead?: number; cacheWrite?: number; fleetCostUsd?: number | null };
+  readonly usage: { available?: boolean; up: number; down: number; cacheRead?: number; cacheWrite?: number; fleetCostUsd?: number | null; /** The session cost as spent (each response at its own model's price), when the caller has it. */ costUsd?: number | undefined };
   readonly showExitNotice: boolean;
   readonly lastCopyTime: number;
   /** The model the session cost is priced against; not drawn (the header names the model). */
@@ -89,8 +89,10 @@ export function statusCostText(usage: SharedShellFooterOptions['usage'], model: 
   if (usage.available === false) return 'usage unavailable';
   const inp = usage.up;
   const out = usage.down;
-  const main =
-    model && isModelPriced(model) ? `~$${fmtCost(calcSessionCost(inp, out, usage.cacheRead ?? 0, usage.cacheWrite ?? 0, model))}` : null;
+  // The session's cost as spent, each response at its own model's price; pricing
+  // the totals at the current model is only for a caller that has no such figure.
+  const main = typeof usage.costUsd === 'number' ? `~$${fmtCost(usage.costUsd)}`
+    : model && isModelPriced(model) ? `~$${fmtCost(calcSessionCost(inp, out, usage.cacheRead ?? 0, usage.cacheWrite ?? 0, model))}` : null;
   const fleet = usage.fleetCostUsd;
   if (includeFleet && typeof fleet === 'number' && fleet > 0) return `you ${main ?? '~n/a'} · fleet ~$${fmtCost(fleet)}`;
   return main;

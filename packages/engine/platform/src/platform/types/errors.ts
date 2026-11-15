@@ -4,6 +4,7 @@ export type { AppErrorOptions, PlatformErrorCategory, PlatformErrorSource } from
 import { assertJudgmentInput } from '../gate/judgment-input.js';
 import {
   categoryForStatus,
+  classifyFailure,
   HttpStatusError,
   readFailure,
   RETRYABLE_STATUS_CODES,
@@ -208,10 +209,39 @@ export async function isRateLimitOrQuotaError(err: unknown, site = 'types.errors
   return (await readErrorFailure(err, site)).rateLimited;
 }
 
-/** Whether the error says the model's context window was exceeded. */
+/** Statuses a context-window refusal comes back with; any other status answers no without a reading. */
+const CONTEXT_REFUSAL_STATUS: ReadonlySet<number> = new Set([400, 413, 422]);
+/** Provider codes that name a context-window refusal outright. */
+const CONTEXT_REFUSAL_CODES: ReadonlySet<string> = new Set(['context_length_exceeded', 'request_too_large', 'string_above_max_length']);
+
+/**
+ * Whether the error says the model's context window was exceeded. Structure
+ * decides first: a code that names it, or a status or errno that cannot mean
+ * it. Only a 400-class refusal with no telling code, or an error with no
+ * structure at all, is read by Jev. A failed reading answers no, so the
+ * caller reports the original error.
+ */
 export async function isContextSizeExceededError(err: unknown, site = 'types.errors.context-exceeded'): Promise<boolean> {
   if (!(err instanceof Error)) return false;
-  return (await readErrorFailure(err, site)).contextExceeded;
+  const evidence = failureEvidence(err);
+  if (evidence.code !== undefined && CONTEXT_REFUSAL_CODES.has(evidence.code)) return true;
+  if (evidence.status !== undefined && !CONTEXT_REFUSAL_STATUS.has(evidence.status)) return false;
+  if (evidence.status === undefined && classifyFailure(err) !== undefined) return false;
+  try { return (await readErrorFailure(err, site)).contextExceeded; }
+  catch { return false; }
+}
+
+/**
+ * The facts a stream retry carries for its readers, from the error's own
+ * fields: its status, whether it was a rate or quota refusal, and the wait the
+ * provider asked for. No model reads the message.
+ */
+export function streamRetryFacts(err: unknown): { status?: number; rateLimited: boolean; retryAfterMs?: number } {
+  const status = err instanceof AppError ? err.statusCode : undefined;
+  const classified = classifyFailure(err);
+  const retryAfterMs = (err instanceof AppError ? err.retryAfterMs : undefined) ?? classified?.retryAfterMs;
+  const rateLimited = status === 429 || (err instanceof AppError && err.category === 'rate_limit') || classified?.category === 'rate_limit';
+  return { ...(status === undefined ? {} : { status }), rateLimited, ...(retryAfterMs === undefined ? {} : { retryAfterMs }) };
 }
 
 /**
@@ -242,8 +272,15 @@ export async function isNetworkTransportError(err: unknown, site = 'types.errors
  */
 export async function isNonTransientProviderFailure(err: unknown, site = 'types.errors.non-transient'): Promise<boolean> {
   if (!(err instanceof Error)) return false;
-  if (err instanceof ProviderError && err.statusCode !== undefined && NON_TRANSIENT_STATUS.has(err.statusCode)) return true;
-  return (await readErrorFailure(err, site)).providerUnusable;
+  // A status or a category answers it: only a failure with neither is read, and a failed reading answers no.
+  const status = err instanceof AppError ? err.statusCode : undefined;
+  if (status !== undefined) return NON_TRANSIENT_STATUS.has(status);
+  const category = err instanceof AppError && err.category !== 'unknown' ? err.category : classifyFailure(err)?.category;
+  if (category !== undefined) return NON_TRANSIENT_CATEGORIES.has(category);
+  try { return (await readErrorFailure(err, site)).providerUnusable; }
+  catch { return false; }
 }
+
+const NON_TRANSIENT_CATEGORIES: ReadonlySet<string> = new Set(['authentication', 'authorization', 'billing']);
 
 const NON_TRANSIENT_STATUS: ReadonlySet<number> = new Set([401, 402, 403]);

@@ -180,13 +180,11 @@ test('historical rejected drafts and checker warnings cannot become evidence aga
   expect(JSON.stringify(input.conversation.toJSON())).toContain('REJECTED-DRAFT');
 });
 
-test('checked progress cannot authorize completion and its publication is bound to its exact source', async () => {
+test('an interim reading finds nothing to correct and cannot authorize completion', async () => {
   installJudgmentPort(answered().port);
   const input = source('I will inspect the parser next.'), guard = new ResponseCompletionGuard();
-  const publication = await guard.checkProgress(input);
-  expect(publication.correction).toBeNull(); expect(publication.assertCurrent).not.toThrow();
+  expect(await guard.checkProgress({ request: input.request, response: input.response, recent: input.conversation.getRecentMessageSnapshot(6) })).toBeNull();
   expect(() => guard.beginFinalization({ content: input.response })).toThrow(new ResponseCompletionError('unavailable'));
-  input.conversation.addUserMessage('Stop.'); expect(publication.assertCurrent).toThrow();
 });
 
 test('truthful admissions of unfinished work hold completion and retain the original request', async () => {
@@ -405,7 +403,7 @@ function loop(replies: string[]) {
     setLastRequestInputTokens() {}, setLastInputTokens() {}, markTurnFailed() {}, noteModelContextWindowWarning() {}, usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     isPassiveKnowledgeInjectionEnabled: () => false, isPassiveCodeInjectionEnabled: () => false, getAlreadyInjectedKnowledgeIds: () => [],
     addInjectedKnowledgeIds() {}, recordTurnKnowledgeInjection() {}, nextTurnKnowledgeSequence: () => 1,
-    contractIntake: { intake: async () => ({ kind: 'turn' }) }, directUserInput: true,
+    contractIntake: { intake: async () => ({ kind: 'turn' }) },
   };
   return { context, events, requests, bus, unsubscribe };
 }
@@ -595,14 +593,14 @@ test('account refusals hold the actual turn without publishing, retrying Jev, or
   }
 });
 
-test('progress account refusals surface the account action and cannot silently trigger more work', async () => {
+test('an interim reading the decision model refuses finds nothing and never authorizes completion', async () => {
   let calls = 0;
   installJudgmentPort({ model: 'jev-latest', ask: async () => {
     calls++; throw new JudgmentError('rejected', 'Upstream refusal', { status: 402 });
   } });
   const input = source('Inspecting the parser.'), guard = new ResponseCompletionGuard();
-  await expect(guard.checkProgress(input)).rejects.toMatchObject({ problem: 'access-blocked', status: 402 });
-  expect(calls).toBe(1);
+  expect(await guard.checkProgress({ request: input.request, response: input.response, recent: input.conversation.getRecentMessageSnapshot(6) })).toBeNull();
+  expect(calls).toBeLessThanOrEqual(2);
   expect(() => guard.beginFinalization({ content: input.response })).toThrow(new ResponseCompletionError('unavailable'));
 });
 
@@ -817,8 +815,9 @@ test('a contract waiting for a necessary user decision returns control to its co
   input.conversation.addAssistantMessage('', { toolCalls: [{ id: 'agent', name: 'agent', arguments: { mode: 'spawn' } }] });
   input.conversation.addToolResults([{ callId: 'agent', success: true, output: '{"agentId":"owner"}' }]);
   const manager = { list: () => [{ id: 'owner', task: 'Review the repository', status: 'running', fullOutput: '' }] } as never;
-  const evidence = await waitForResponseDelegates(input.conversation, manager, {}, [], () => false);
-  expect(evidence).toContain('"status":"running"');
+  expect(await waitForResponseDelegates(input.conversation, manager, {}, [], () => false)).toBe(true);
+  const evidence = JSON.stringify(input.conversation.getMessagesForLLM().at(-1));
+  expect(evidence).toContain('\\"status\\":\\"running\\"');
   expect(evidence).toContain('original request');
 });
 

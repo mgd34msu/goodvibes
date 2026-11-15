@@ -9,10 +9,7 @@
  * route below act, leaves the turn to the conversation. The agent tool's
  * `contractStarted` field is read as a fixed format.
  */
-import { afterEach, describe, expect, test } from 'bun:test';
-import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import type { JudgmentPort } from '@goodvibes-jev/judgment';
+import { describe, expect, test } from 'bun:test';
 import {
   createContractIntake,
   describeIntake,
@@ -25,28 +22,6 @@ import {
 } from '../../platform/src/platform/contract/index.js';
 import { makeContract } from './fixtures.js';
 
-let restore: JudgmentPort | undefined;
-afterEach(() => {
-  if (restore !== undefined) installJudgmentPort(restore);
-  restore = undefined;
-});
-
-/**
- * The route read as `route` with `confidence`, and whether a turn responds to
- * an open escalation read at probability `responds` (yes); records every
- * question asked and the state it was asked about.
- */
-function routePort(route: string, confidence: number, asked: string[], responds = 0.97, states: unknown[] = []): void {
-  const fake = fakePort((name, question, state) => {
-    asked.push(name);
-    states.push(state);
-    if (name === 'responds') return noulAnswer(responds);
-    return name === 'route' ? choiceAnswer(question, route, confidence) : undefined;
-  });
-  restore = installJudgmentPort(fake.port);
-}
-
-/** A session s1 contract with one open escalation, and a contract in session s2. */
 function waitingContracts(): ContractView[] {
   const waiting: ContractView = {
     ...makeContract(),
@@ -78,100 +53,40 @@ function fakeRunner(contracts: ContractView[] = []) {
 }
 
 describe('turn intake', () => {
-  test('work at act starts a contract with origin turn and the text as the ask', async () => {
-    const asked: string[] = [];
-    routePort('contract', 0.97, asked);
-    const { runner, started } = fakeRunner();
-    const outcome = await createContractIntake({ runner, projectRoot: '/repo' }).intake({ text: 'Add a --json flag to export.', sessionId: 's1' });
-    expect(outcome).toEqual({ kind: 'started', contractId: 'ctr-0000abcd', ownerAgentId: 'agent-owner' });
-    expect(started).toEqual([{ ask: 'Add a --json flag to export.', sessionId: 's1', origin: 'turn', projectRoot: '/repo' }]);
-    expect(asked).toEqual(['route']);
-  });
-
-  test('conversation and answers stay with the conversation model', async () => {
-    for (const route of ['converse', 'answer']) {
-      routePort(route, 0.99, []);
-      const { runner, started } = fakeRunner();
-      expect(await createContractIntake({ runner, projectRoot: '/repo' }).intake({ text: 'hello', sessionId: 's1' })).toEqual({ kind: 'turn' });
-      expect(started).toEqual([]);
-    }
-  });
-
-  test('a contract route below act leaves the turn to the conversation', async () => {
-    routePort('contract', 0.8, []);
-    const { runner, started } = fakeRunner();
-    expect(await createContractIntake({ runner, projectRoot: '/repo' }).intake({ text: 'maybe tidy this up?', sessionId: 's1' })).toEqual({ kind: 'turn' });
+  test('a message that does not answer a question is an ordinary turn: nothing is read, started or answered', async () => {
+    const { runner, started, replies } = fakeRunner(waitingContracts());
+    expect(await createContractIntake({ runner, projectRoot: '/repo' }).intake({ text: 'yes, accept it', sessionId: 's1' })).toEqual({ kind: 'turn' });
     expect(started).toEqual([]);
+    expect(replies).toEqual([]);
   });
 
-  test('with an open escalation, a turn read as responding to it is the reply, and no route is read', async () => {
-    const asked: string[] = [];
-    const states: unknown[] = [];
-    routePort('contract', 0.99, asked, 0.97, states);
+  test('a message answering the open question is the reply', async () => {
     const { runner, replies, started } = fakeRunner(waitingContracts());
-    const outcome = await createContractIntake({ runner, projectRoot: '/repo' }).intake({ text: 'yes, accept it', sessionId: 's1' });
+    const outcome = await createContractIntake({ runner, projectRoot: '/repo' }).intake({ text: 'yes, accept it', sessionId: 's1', answersEscalationId: 'ctr-00001111.e2' });
     expect(outcome.kind).toBe('replied');
     expect(replies).toEqual([{ contractId: 'ctr-00001111', escalationId: 'ctr-00001111.e2', text: 'yes, accept it' }]);
     expect(started).toEqual([]);
-    expect(asked).toEqual(['responds']);
-    expect(states).toEqual([{ question: 'q2', turn: 'yes, accept it' }]);
     if (outcome.kind === 'replied') expect(describeIntake(outcome)).toContain('read as approve: approved');
   });
 
+  test('an answer to a question that is no longer the open one is an ordinary turn', async () => {
+    const { runner, replies } = fakeRunner(waitingContracts());
+    expect(await createContractIntake({ runner, projectRoot: '/repo' }).intake({ text: 'yes', sessionId: 's1', answersEscalationId: 'ctr-00001111.e1' })).toEqual({ kind: 'turn' });
+    expect(replies).toEqual([]);
+  });
+
   test('a reply to a failed-turn question is described as retrying or cancelled, never as an amendment', async () => {
-    routePort('contract', 0.99, []);
     const contracts = waitingContracts();
     const open = contracts[0]!.escalations.find((entry) => entry.resolvedAt === undefined)!;
     Object.assign(open, { failurePause: true });
     for (const [action, expected] of [['amended', 'retry: the turn is retrying'], ['stopped', 'cancel: the contract is cancelled']] as const) {
       const { runner } = fakeRunner(contracts);
       const outcome = await createContractIntake({ runner: { ...runner, reply: async (_contractId, escalationId) => ({ escalationId, reading: 'amend', outcome: 'act', action }) }, projectRoot: '/repo' })
-        .intake({ text: 'retry', sessionId: 's1' });
+        .intake({ text: 'retry', sessionId: 's1', answersEscalationId: open.id });
       if (outcome.kind !== 'replied') throw new Error('the turn should have been the reply');
       expect(describeIntake(outcome)).toContain(expected);
       expect(describeIntake(outcome)).not.toContain('read as');
     }
-  });
-
-  test('a turn read at act as unrelated to the open escalation goes to the request route and can start work', async () => {
-    const asked: string[] = [];
-    routePort('contract', 0.97, asked, 0.03);
-    const { runner, replies, started } = fakeRunner(waitingContracts());
-    const outcome = await createContractIntake({ runner, projectRoot: '/repo' }).intake({ text: 'Rename the user service everywhere.', sessionId: 's1' });
-    expect(outcome).toEqual({ kind: 'started', contractId: 'ctr-0000abcd', ownerAgentId: 'agent-owner' });
-    expect(asked).toEqual(['responds', 'route']);
-    expect(replies).toEqual([]);
-    expect(started).toEqual([{ ask: 'Rename the user service everywhere.', sessionId: 's1', origin: 'turn', projectRoot: '/repo' }]);
-  });
-
-  test('an unrelated turn the route leaves to the conversation stays a normal turn; the escalation is not answered', async () => {
-    routePort('answer', 0.97, [], 0.05);
-    const { runner, replies, started } = fakeRunner(waitingContracts());
-    expect(await createContractIntake({ runner, projectRoot: '/repo' }).intake({ text: 'What is a mutex?', sessionId: 's1' })).toEqual({ kind: 'turn' });
-    expect(replies).toEqual([]);
-    expect(started).toEqual([]);
-  });
-
-  test('a turn read below act on either side goes to the escalation, whose reply reading asks again when it is unclear', async () => {
-    // 0.2: no at confirm (below the high act threshold); 0.5: a tie that settles on neither side; 0.65: yes at confirm.
-    for (const responds of [0.2, 0.5, 0.65]) {
-      const asked: string[] = [];
-      routePort('contract', 0.99, asked, responds);
-      const { runner, replies, started } = fakeRunner(waitingContracts());
-      const outcome = await createContractIntake({ runner, projectRoot: '/repo' }).intake({ text: 'hmm, maybe', sessionId: 's1' });
-      expect(outcome.kind).toBe('replied');
-      expect(replies).toEqual([{ contractId: 'ctr-00001111', escalationId: 'ctr-00001111.e2', text: 'hmm, maybe' }]);
-      expect(started).toEqual([]);
-      expect(asked).toEqual(['responds']);
-    }
-  });
-
-  test('no escalation-turn question is asked when the session has no open escalation', async () => {
-    const asked: string[] = [];
-    routePort('converse', 0.99, asked);
-    const { runner } = fakeRunner(waitingContracts());
-    expect(await createContractIntake({ runner, projectRoot: '/repo' }).intake({ text: 'hello', sessionId: 's3' })).toEqual({ kind: 'turn' });
-    expect(asked).toEqual(['route']);
   });
 
   test('the newest open escalation across the session\'s contracts is the one answered', () => {

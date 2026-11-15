@@ -1,33 +1,18 @@
 /**
- * Intake of a person's turn (docs/design/contract-runner.md 10.3). Once per
- * user turn, before the conversation model is called:
- *
- * 1. A session with an open escalation (the newest open escalation of the
- *    session's contracts): `contract.escalation-turn` reads whether the turn
- *    responds to that escalation's question. Unless it reads no at act, the
- *    turn is the owner's reply and goes to `runner.reply`, whose
- *    `contract.owner-reply` reading asks again when the reply is unclear; the
- *    turn ends there. A no at act leaves the escalation open and the turn goes
- *    on to step 2 like any other turn.
- * 2. `contract.request-route` reads the text. Route `contract` at act
- *    starts a contract with origin `turn` and the text as the ask, and the turn
- *    ends; the contract's answer arrives through its owner record's
- *    completion. Every other route, and any reading below act, leaves the turn
- *    to the conversation model, which may still start a contract through the
- *    agent tool.
- *
- * Nothing is injected into the model's prompt. The intake subsystem imports
- * this same dispatch rather than defining another.
+ * Intake of a person's turn (docs/design/contract-runner.md 10.3). The
+ * composer shows the session's open contract question (`openEscalation`)
+ * above the input; when the person answers it there, the message carries the
+ * question's escalation id and goes to `runner.reply` as the answer, and the
+ * turn ends there. Code decides this from the message and the open question:
+ * no model reads the turn first. A message sent without the id, or after the
+ * person dismissed the question, is an ordinary turn. The conversation model
+ * may still start a contract through the agent tool.
  *
  * `toolResultStartedContract` reads the agent tool's fixed result field
  * `contractStarted: true` (a format the tool itself writes, read as code).
  */
-import { judgmentPort } from '@goodvibes-jev/engine/errors';
-import { decisionOrClassic, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
 import type { ToolResult } from '../types/tools.js';
 import { isRecord } from '../utils/record-coerce.js';
-import { ESCALATION_TURN_SITE, escalationTurn, turnIsUnrelated } from './batteries/escalation-turn.js';
-import { REQUEST_ROUTE_SITE, requestRoute } from './batteries/request-route.js';
 import { OwnerReplyRefusedError, type OwnerReplyOutcome } from './escalation.js';
 import type { ContractRunner } from './runner.js';
 import type { ContractView, Escalation } from './types.js';
@@ -41,8 +26,8 @@ export type TurnIntakeOutcome =
   | { readonly kind: 'replied'; readonly contractId: string; readonly outcome: OwnerReplyOutcome; readonly failurePause?: true };
 
 export interface ContractIntake {
-  /** Reads one user turn; see the module comment. */
-  intake(turn: { readonly text: string; readonly sessionId: string; readonly signal?: AbortSignal | undefined }): Promise<TurnIntakeOutcome>;
+  /** Answers the named open question with the turn's text; see the module comment. */
+  intake(turn: { readonly text: string; readonly sessionId: string; readonly signal?: AbortSignal | undefined; readonly answersEscalationId?: string | undefined }): Promise<TurnIntakeOutcome>;
 }
 
 export interface ContractIntakeDeps {
@@ -68,55 +53,21 @@ export function openEscalation(contracts: readonly ContractView[]): { readonly c
 export function createContractIntake(deps: ContractIntakeDeps): ContractIntake {
   return {
     async intake(turn) {
-      return withConfiguredDecisionModelPolicy(async () => {
-        turn.signal?.throwIfAborted();
-        if (deps.runner.nativeMode === true) throw new Error('Native intake requires source-bearing host admission; legacy owner replies are unavailable');
-        const signal = turn.signal === undefined ? {} : { signal: turn.signal };
-        // Only classification may fall back. Never repeat reply/start effects.
-        const route = await decisionOrClassic(async () => {
-          const waiting = openEscalation(deps.runner.list({ sessionId: turn.sessionId }));
-          if (waiting !== null) {
-            const read = await escalationTurn.run(
-              judgmentPort(ESCALATION_TURN_SITE),
-              { question: waiting.escalation.question, turn: turn.text },
-              { site: ESCALATION_TURN_SITE, ...signal },
-            );
-            turn.signal?.throwIfAborted();
-            const reading = read.readings.responds;
-            if (!turnIsUnrelated(reading)) {
-              read.recordAction(`the owner's reply to ${waiting.escalation.id} (${reading.verdict}, ${reading.outcome})`);
-              return { kind: 'reply' as const, waiting };
-            }
-            read.recordAction(`not a reply to ${waiting.escalation.id}: read as a request`);
-          }
-          const routed = await requestRoute.route(judgmentPort(REQUEST_ROUTE_SITE), { request: turn.text }, { site: REQUEST_ROUTE_SITE, ...signal });
-          turn.signal?.throwIfAborted();
-          if (routed.route !== 'contract' || routed.reading.outcome !== 'act') {
-            routed.recordAction(`left to the conversation (${routed.route}, ${routed.reading.outcome})`);
-            return { kind: 'turn' as const };
-          }
-          return { kind: 'contract' as const, routed };
-        }, () => ({ kind: 'turn' as const }));
-        turn.signal?.throwIfAborted();
-        if (route.kind === 'turn') return route;
-        if (route.kind === 'reply') {
-          let outcome: OwnerReplyOutcome;
-          try {
-            outcome = await deps.runner.reply(route.waiting.contract.id, route.waiting.escalation.id, turn.text);
-          } catch (error) {
-            // The question was read as the turn's answer while it was being read elsewhere: the contract ended, or another
-            // surface answered first. Each refusal says nothing was applied, so the turn goes on as a normal message.
-            if (error instanceof OwnerReplyRefusedError && (error.refusal === 'ended' || error.refusal === 'not-open' || error.refusal === 'already-reading')) return { kind: 'turn' as const };
-            throw error;
-          }
-          return { kind: 'replied', contractId: route.waiting.contract.id, outcome, ...(route.waiting.escalation.failurePause === true ? { failurePause: true as const } : {}) };
-        }
-        const started = await deps.runner.start({ ask: turn.text, sessionId: turn.sessionId, origin: 'turn', projectRoot: deps.projectRoot,
-          ...(deps.getSelectedModel === undefined ? {} : { selectedModel: deps.getSelectedModel() }),
-        }, { signal: turn.signal });
-        route.routed.recordAction(`started contract ${started.contract.id}`);
-        return { kind: 'started', contractId: started.contract.id, ownerAgentId: started.owner.id };
-      });
+      turn.signal?.throwIfAborted();
+      if (turn.answersEscalationId === undefined) return { kind: 'turn' };
+      if (deps.runner.nativeMode === true) throw new Error('Native intake requires source-bearing host admission; legacy owner replies are unavailable');
+      const waiting = openEscalation(deps.runner.list({ sessionId: turn.sessionId }));
+      // The question was answered elsewhere or its contract ended: the message is an ordinary turn.
+      if (waiting === null || waiting.escalation.id !== turn.answersEscalationId) return { kind: 'turn' };
+      let outcome: OwnerReplyOutcome;
+      try {
+        outcome = await deps.runner.reply(waiting.contract.id, waiting.escalation.id, turn.text);
+      } catch (error) {
+        // Each refusal says nothing was applied, so the turn goes on as a normal message.
+        if (error instanceof OwnerReplyRefusedError && (error.refusal === 'ended' || error.refusal === 'not-open' || error.refusal === 'already-reading')) return { kind: 'turn' };
+        throw error;
+      }
+      return { kind: 'replied', contractId: waiting.contract.id, outcome, ...(waiting.escalation.failurePause === true ? { failurePause: true as const } : {}) };
     },
   };
 }

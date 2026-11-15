@@ -46,6 +46,49 @@ function generateId(): string {
  * model exactly once. maxReplays remains as a backstop for callers that
  * defer acknowledgment; events exceeding it are dropped with a log line.
  */
+/** Whether an event is about work of the session that owns the queue. */
+export type ReplayEventFilter = (eventName: ReplayTrackedEventName, payload: unknown) => boolean;
+
+/** Events kept while the session is idle; the oldest go first. */
+const MAX_QUEUED_EVENTS = 64;
+/** Characters of an agent's output a replay line can quote; the line shows 60. */
+const MAX_REPLAY_OUTPUT = 200;
+
+/**
+ * Keep only events about this session's own agents (named by its own `agent`
+ * tool results, or belonging to its contracts) and its own contracts. The bus
+ * and the agent manager are shared by every session of a process.
+ */
+export function sessionReplayFilter(owner: {
+  readonly agents: () => readonly { readonly id: string; readonly contractId?: string | undefined }[];
+  readonly contractIds: () => ReadonlySet<string>;
+  readonly messages: () => readonly unknown[];
+}): ReplayEventFilter {
+  return (eventName, payload) => {
+    const record = payload as { id?: unknown; contractId?: unknown } | null;
+    if (eventName === 'AGENT_COMPLETED' || eventName === 'AGENT_FAILED') {
+      const id = typeof record?.id === 'string' ? record.id : undefined;
+      if (id === undefined) return false;
+      const agent = owner.agents().find(entry => entry.id === id);
+      if (agent?.contractId !== undefined && owner.contractIds().has(agent.contractId)) return true;
+      return mentionsAgent(owner.messages(), id);
+    }
+    return typeof record?.contractId === 'string' && owner.contractIds().has(record.contractId);
+  };
+}
+
+/** Whether one of the conversation's own `agent` tool results names this agent id. */
+export function mentionsAgent(messages: readonly unknown[], agentId: string): boolean {
+  const agentCalls = new Set<string>();
+  for (const message of messages) {
+    const entry = message as { role?: unknown; toolCalls?: readonly { id: string; name: string }[]; callId?: unknown; content?: unknown };
+    if (entry.role === 'assistant') for (const call of entry.toolCalls ?? []) if (call.name === 'agent') agentCalls.add(call.id);
+    if (entry.role === 'tool' && typeof entry.callId === 'string' && agentCalls.has(entry.callId)
+      && typeof entry.content === 'string' && entry.content.includes(agentId)) return true;
+  }
+  return false;
+}
+
 export class EventReplayQueue {
   private queue: QueuedEvent[] = [];
   private currentTurn = 0;
@@ -58,6 +101,7 @@ export class EventReplayQueue {
   constructor(
     maxReplays: number = 3,
     graceTurns: number = 1,
+    private readonly belongs: ReplayEventFilter = () => true,
   ) {
     this.maxReplays = maxReplays;
     this.graceTurns = graceTurns;
@@ -66,9 +110,12 @@ export class EventReplayQueue {
   /**
    * Enqueue an event for tracking.
    * Called when significant events fire (agent complete, contract status change, etc.)
-   * Returns the assigned event ID.
+   * Returns the assigned event ID, or undefined for an event about another
+   * session's work, which is not queued.
    */
-  enqueue(eventName: ReplayTrackedEventName, payload: unknown): string {
+  enqueue(eventName: ReplayTrackedEventName, payload: unknown): string | undefined {
+    if (!this.belongs(eventName, payload)) return undefined;
+    if (this.queue.length >= MAX_QUEUED_EVENTS) { this.queue.shift(); this.droppedCount++; }
     const id = generateId();
     this.queue.push({
       id,
@@ -86,7 +133,8 @@ export class EventReplayQueue {
    * Mark an event as acknowledged by ID.
    * Called when the model demonstrates awareness of the event.
    */
-  acknowledge(eventId: string): void {
+  acknowledge(eventId: string | undefined): void {
+    if (eventId === undefined) return;
     const event = this.queue.find((e) => e.id === eventId);
     if (event) {
       event.acknowledged = true;
@@ -257,7 +305,7 @@ export class EventReplayQueue {
           result: {
             id: payload.agentId,
             success: true,
-            output: payload.output ?? '',
+            output: (payload.output ?? '').slice(0, MAX_REPLAY_OUTPUT),
             toolCallsMade: payload.toolCallsMade ?? 0,
             duration: payload.durationMs,
           },

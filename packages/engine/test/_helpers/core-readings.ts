@@ -2,7 +2,7 @@
 import { afterEach, beforeEach } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { choiceAnswer, fakePort, noulAnswer, scoreAnswer } from '@goodvibes-jev/judgment/testing';
-import type { Intent } from '../../platform/src/platform/core/intent-classifier.ts';
+type Intent = 'chat' | 'task' | 'project';
 import type { ExecutionStrategy } from '../../platform/src/platform/core/adaptive-planner.ts';
 
 export interface CoreReadings {

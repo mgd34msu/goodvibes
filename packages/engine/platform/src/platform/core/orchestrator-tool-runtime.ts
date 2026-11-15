@@ -30,7 +30,7 @@ import {
   emitToolSucceeded,
   toToolResultSummary,
 } from '../runtime/emitters/index.js';
-import { buildSyntheticResult, detectUnresolvedToolCalls, type ReconciliationReason } from './tool-reconciliation.js';
+import { buildSyntheticResult, describeReconciledCalls, detectUnresolvedToolCalls, type ReconciliationReason } from './tool-reconciliation.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 import { DEFAULT_CEILING_TOKENS, capToolText } from '../runtime/tools/output-policy.js';
@@ -816,9 +816,7 @@ export function reconcileUnresolvedToolCalls(
     }
   }
 
-  const reconciliation = `[Tool Reconciliation] ${unresolved.length} tool call(s) (${unresolved.map((c) => `'${c.name}'`).join(', ')}) were not executed before ` +
-    `the turn ended. Synthetic error results have been injected. ` +
-    `Review the situation and avoid repeating the same tool calls if the root cause has not changed.`;
+  const reconciliation = describeReconciledCalls(unresolved);
   deps.conversation.addNotice(reconciliation, { level: 'warning' });
   // Reconciliation can close a turn, so this rides the next request whichever turn makes it.
   deps.conversation.hostInstructions.set('replay', reconciliation, { once: true, append: true });

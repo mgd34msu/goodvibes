@@ -9,7 +9,7 @@ import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/conf
 import type { NoticeMeta, TranscriptEventKind, TranscriptReadingOptions } from '@goodvibes-jev/engine/platform/platform/core';
 // SystemMessageKind imported from runtime directly to avoid cycle: conversation.ts → system-message-router.ts → conversation.ts
 import type { SystemMessageKind } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
-import { ConversationManager as PlatformConversationManager, TranscriptReadingLifetime, type BlockMeta as PlatformBlockMeta, } from '@goodvibes-jev/engine/platform/platform/core';
+import { ConversationManager as PlatformConversationManager, type BlockMeta as PlatformBlockMeta, } from '@goodvibes-jev/engine/platform/platform/core';
 import type { BlockMeta } from './work-tree-types.js';
 import type { ConversationRenderContext } from './conversation-render-context.js';
 import type { createConversationRenderer } from './conversation-rendering.js';
@@ -774,17 +774,15 @@ export class TerminalConversationManager extends PlatformConversationManager {
     public prevErrorLine(currentLine: number): number { return wrapToLine(this.getErrorLines(), currentLine, 'prev'); }
     public async nextTranscriptEventLine(currentLine: number, kind: TranscriptEventKind | 'all' = 'all', options: TranscriptReadingOptions = {}): Promise<number> {
         this.flushHistory();
-        const lifetime = options.lifetime ?? new TranscriptReadingLifetime();
-        const index = await this.getTranscriptEventIndex({ ...options, lifetime });
-        lifetime.assertCurrent();
+        const index = await this.getTranscriptEventIndex(options);
+        options.lifetime?.assertCurrent();
         this.flushHistory();
         return resolveTranscriptEventLine(index.events, kind, this.messageLineRegistry, currentLine, 'next');
     }
     public async prevTranscriptEventLine(currentLine: number, kind: TranscriptEventKind | 'all' = 'all', options: TranscriptReadingOptions = {}): Promise<number> {
         this.flushHistory();
-        const lifetime = options.lifetime ?? new TranscriptReadingLifetime();
-        const index = await this.getTranscriptEventIndex({ ...options, lifetime });
-        lifetime.assertCurrent();
+        const index = await this.getTranscriptEventIndex(options);
+        options.lifetime?.assertCurrent();
         this.flushHistory();
         return resolveTranscriptEventLine(index.events, kind, this.messageLineRegistry, currentLine, 'prev');
     }

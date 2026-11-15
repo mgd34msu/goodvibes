@@ -109,3 +109,28 @@ test('awaitApprovalDecision resolves null when the stream ends without a decisio
   });
   expect(result).toBeNull();
 });
+
+test('the daemon decides when another surface answered first, and an expired ask says so', async () => {
+  for (const [record, expected] of [
+    [{ id: 'approval-1', status: 'denied', decision: { approved: false, reason: 'denied on the phone' } }, { approved: false, reason: 'denied on the phone' }],
+    [{ id: 'approval-1', status: 'expired' }, { approved: false }],
+  ] as const) {
+    const raised = Promise.withResolvers<void>();
+    const raise = createClientApprovalRaiser({
+      actor: 'tui',
+      verbs: {
+        probe: () => ({ available: true as const }),
+        async invoke<T>(method: string): Promise<T> {
+          if (method === 'approvals.raise') { raised.resolve(); return { approval: { id: 'approval-1' }, coalesced: false } as T; }
+          if (method === 'approvals.approve') return { approval: record } as T;
+          return [] as T;
+        },
+      },
+      // The person answers after the raise landed, but after another surface did.
+      localPrompt: () => async () => { await raised.promise; await turn(); return { approved: true, remember: false }; },
+    });
+    const decision = await raise({ request: REQUEST });
+    expect(decision).toMatchObject(expected);
+    if (record.status === 'expired') expect(decision.reason).toContain('expired');
+  }
+});

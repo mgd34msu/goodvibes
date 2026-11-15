@@ -5,31 +5,27 @@
  * transcript journal (agents/session.ts) and the local execution ledger
  * (runtime/telemetry/exporters/local-ledger.ts). Issuer-reserved credential
  * formats are masked by code; a span in a candidate shape (`sk-`, `key-`, the
- * word after `Bearer`) is kept in the clear only when
- * `engine.runtime.at-rest-credential` reads it as not a credential, and is
- * masked while unread, on an uncertain or yes reading, and when no reading can
- * be made. Also pins retention caps, config keys with honest defaults, and the
- * replay path reading redacted records.
+ * word after `Bearer`) is kept in the clear only when its characters prove it
+ * harmless, and no span is ever sent to a decision model. Also pins retention
+ * caps, config keys with honest defaults, and the replay path reading
+ * redacted records.
  */
-import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
-import * as crypto from 'node:crypto';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, utimesSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import type { EntryType, Question } from '@goodvibes-jev/judgment';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import {
   redactAtRestLine,
-  readAtRestCredentialSpans,
-  clearAtRestCredentialReadings,
+  isReadableCredentialCandidate,
   resolveAtRestPolicy,
   enforceFileRetention,
   DEFAULT_AT_REST_POLICY,
   AT_REST_CONFIG_KEYS,
-  AtRestLineWriter,
 } from '../platform/src/platform/runtime/at-rest-persistence.ts';
 import { AgentSession } from '../platform/src/platform/agents/session.ts';
+import { registerProfileRedactionValues } from '../platform/src/platform/utils/redaction.ts';
 import { LocalLedgerExporter } from '../platform/src/platform/runtime/telemetry/exporters/local-ledger.ts';
 
 const tmpDirs: string[] = [];
@@ -43,30 +39,22 @@ const API_KEY = 'sk-ABCDEFGHIJKLMNOPQRSTUVWX';
 const DOC_NAME = 'key-rotation-policy-for-tenants';
 const GITHUB_TOKEN = 'ghp_0123456789012345678901234567890123456789';
 
-/** A port reading each span through `probability` (of being a credential), recording every request. */
-function spanPort(probability: (span: string) => number) {
-  return fakePort((name: string, _question: Question, state: EntryType) => {
-    if (name !== 'credential') throw new Error(`at-rest port: unexpected question ${name}`);
-    return noulAnswer(probability((state as { span: string }).span));
-  });
+/** A port that answers anything and records every request, to prove none is made. */
+function recordingPort() {
+  return fakePort(() => noulAnswer(0.01));
 }
-
-/** The API key reads as a credential, the document name as not one, anything else as uncertain. */
-const KEY_YES_DOC_NO = (span: string): number => (span === API_KEY ? 0.97 : span === DOC_NAME ? 0.02 : 0.5);
 
 let previousPort: ReturnType<typeof installJudgmentPort>;
 beforeEach(() => {
   previousPort = installJudgmentPort(undefined);
-  clearAtRestCredentialReadings();
 });
 afterEach(() => {
   installJudgmentPort(previousPort);
-  clearAtRestCredentialReadings();
   for (const dir of tmpDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
 describe('redactAtRestLine: masks credentials, preserves content, stays valid JSON', () => {
-  test('issuer formats and unread candidate spans are masked; the line stays parseable', () => {
+  test('issuer formats and credential-shaped spans are masked, harmless names kept; the line stays parseable', () => {
     const line = JSON.stringify({
       role: 'user',
       body: `run with token ${API_KEY} and Authorization: Bearer abcdef.ghijkl, see ${DOC_NAME}`,
@@ -75,7 +63,7 @@ describe('redactAtRestLine: masks credentials, preserves content, stays valid JS
     const out = redactAtRestLine(line);
     expect(out).not.toContain(API_KEY);
     expect(out).not.toContain('abcdef.ghijkl');
-    expect(out).not.toContain(DOC_NAME);
+    expect(out).toContain(DOC_NAME);
     expect(out).toContain('[REDACTED_API_KEY]');
     expect(out).toContain('Bearer [REDACTED_TOKEN]');
     expect(out).toContain('[REDACTED_GITHUB_TOKEN]');
@@ -84,65 +72,40 @@ describe('redactAtRestLine: masks credentials, preserves content, stays valid JS
     expect(parsed.body).toContain('run with token');
   });
 
-  test('a span read as not a credential stays in the clear; a yes or an uncertain reading masks', async () => {
-    const { port, requests } = spanPort(KEY_YES_DOC_NO);
+  test('candidate spans are decided in code; no span reaches a decision model', () => {
+    const { port, requests } = recordingPort();
     installJudgmentPort(port);
-    const line = JSON.stringify({ body: `see ${DOC_NAME}; key ${API_KEY}; the bearer of bad news` });
-    const projected = await readAtRestCredentialSpans([line, line], 'test.at-rest');
-    // One request per candidate in this complete source, deduplicating identical lines.
-    expect(requests).toHaveLength(3);
-    expect(projected).toHaveLength(2);
-    expect(projected[0]).toBe(projected[1]);
-    const out = projected[0]!;
+    const line = JSON.stringify({ body: `see ${DOC_NAME}; key ${API_KEY}; the bearer of bad news; Bearer 7f3c9a1e5b2d48f0a6c4e8b1d3f5a7c9` });
+    const out = redactAtRestLine(line);
+    expect(requests).toHaveLength(0);
     expect(out).toContain(DOC_NAME);
     expect(out).not.toContain(API_KEY);
-    expect(out).toContain('the bearer [REDACTED_TOKEN] bad news');
-
-    expect(redactAtRestLine(line)).not.toContain(DOC_NAME);
-    const later = await readAtRestCredentialSpans([line], 'test.at-rest');
-    expect(later[0]).toContain(DOC_NAME);
-    expect(requests).toHaveLength(6);
+    expect(out).toContain('the bearer of bad news');
+    expect(out).not.toContain('7f3c9a1e5b2d48f0a6c4e8b1d3f5a7c9');
   });
 
-  test('a no that falls short of the critical band still masks', async () => {
-    installJudgmentPort(spanPort(() => 0.2).port);
-    const line = JSON.stringify({ body: `see ${DOC_NAME}` });
-    const projected = await readAtRestCredentialSpans([line], 'test.at-rest');
-    expect(projected[0]).not.toContain(DOC_NAME);
+  test('random tokens stay masked; words, placeholders and filler stay readable', () => {
+    for (const secret of ['sk-proj-4fQ9xT2mLk8vRw7ZbN3cYp1JhG6sDe0A', 'key-3ax6xnjp29jd6fds4gc373sgvjxteol0',
+      'sk-or-v1-7c1e2b9a04d38f6e5a1b0c9d8e7f6a5b4c3d2e1f0a9b8c7d', 'key-abcdefghijklmnopqrst',
+      'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1c2VyLTQyIn0.dBjftJeZ4CVP', 'deadbeefcafebabe']) {
+      expect(isReadableCredentialCandidate(secret)).toBe(false);
+    }
+    for (const harmless of [DOC_NAME, 'key-value-store-migration-2024', 'sk-spinner-double-bounce-animation',
+      'key-management-service-endpoint', 'sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx', 'YOUR_TOKEN_HERE', 'of', 'and']) {
+      expect(isReadableCredentialCandidate(harmless)).toBe(true);
+    }
   });
+});
 
-  test('issuer formats are never asked about', async () => {
-    const { port, requests } = spanPort(() => 0.01);
-    installJudgmentPort(port);
-    const line = JSON.stringify({ body: GITHUB_TOKEN });
-    await readAtRestCredentialSpans([line], 'test.at-rest');
-    expect(requests).toHaveLength(0);
-    expect(redactAtRestLine(line)).toContain('[REDACTED_GITHUB_TOKEN]');
-  });
-
-  test('with no port installed the read rejects and the span stays masked', async () => {
-    const line = JSON.stringify({ body: `see ${DOC_NAME}` });
-    await expect(readAtRestCredentialSpans([line], 'test.at-rest')).rejects.toThrow();
-    expect(redactAtRestLine(line)).not.toContain(DOC_NAME);
-  });
-
-  test('separate actual writes reread their original source without retaining a content fingerprint', async () => {
-    const fake = spanPort(KEY_YES_DOC_NO);
-    installJudgmentPort(fake.port);
-    const hashes = spyOn(crypto, 'createHash');
-    const line = JSON.stringify({ body: `read ${DOC_NAME}` });
-    const output: string[] = [];
-    const writer = new AtRestLineWriter('test.at-rest-owned-write');
+describe('a failing owner-profile source', () => {
+  test('refuses the line with a fixed error and never inspects or writes the rejection', () => {
+    let inspected = false;
+    const rejection = Object.defineProperty({}, 'message', { get() { inspected = true; return 'synthetic-private-sentinel'; } });
+    const dispose = registerProfileRedactionValues(() => { throw rejection; });
     try {
-      writer.write(line, value => output.push(value));
-      await writer.flush();
-      writer.write(line, value => output.push(value));
-      await writer.flush();
-      expect(output).toEqual([line, line]);
-      expect(fake.requests).toHaveLength(2);
-      expect(redactAtRestLine(line)).not.toContain(DOC_NAME);
-      expect(hashes).not.toHaveBeenCalled();
-    } finally { await writer.flush(); hashes.mockRestore(); }
+      expect(() => redactAtRestLine(JSON.stringify({ body: DOC_NAME }))).toThrow('unavailable');
+      expect(inspected).toBe(false);
+    } finally { dispose(); }
   });
 });
 
@@ -233,7 +196,6 @@ describe('AgentSession transcript journal: redaction at write', () => {
   });
 
   test('shutdown saves full conversation once, retaining tool contents while redacting credentials', async () => {
-    installJudgmentPort(spanPort(KEY_YES_DOC_NO).port);
     const dir = mkTemp();
     const session = new AgentSession('agent-history', 'm', 'p', { sessionsDir: dir, stateDir: dir });
     session.conversation.addUserMessage('Read the report.');
@@ -252,30 +214,17 @@ describe('AgentSession transcript journal: redaction at write', () => {
     expect(saved[0].messages[2].content).toContain('[REDACTED_API_KEY]');
   });
 
-  test('a line waits for its span readings; the key is masked and the document name kept', async () => {
-    installJudgmentPort(spanPort(KEY_YES_DOC_NO).port);
+  test('each line is written at once and in order; the key is masked and the document name kept', () => {
     const dir = mkTemp();
     const session = new AgentSession('agent-1', 'm', 'p', { sessionsDir: dir, stateDir: dir });
     session.appendMessage({ role: 'user', body: `key is ${API_KEY}, policy in ${DOC_NAME}` });
     session.appendMessage({ role: 'assistant', body: 'noted' });
-    await session.flush();
     const lines = readFileSync(join(dir, 'agent-1.jsonl'), 'utf8').trim().split('\n');
-    // Order kept: the meta line, the line that waited on its readings, then the plain line.
     expect(lines).toHaveLength(3);
     expect(lines[1]).not.toContain(API_KEY);
     expect(lines[1]).toContain('[REDACTED_API_KEY]');
     expect(lines[1]).toContain(DOC_NAME);
     expect(lines[2]).toContain('noted');
-  });
-
-  test('when no reading can be made the line is still written, with the span masked', async () => {
-    const dir = mkTemp();
-    const session = new AgentSession('agent-4', 'm', 'p', { sessionsDir: dir, stateDir: dir });
-    session.appendMessage({ body: `policy in ${DOC_NAME}` });
-    await session.flush();
-    const contents = readFileSync(join(dir, 'agent-4.jsonl'), 'utf8');
-    expect(contents).not.toContain(DOC_NAME);
-    expect(contents).toContain('[REDACTED_API_KEY]');
   });
 
   test('redaction can be disabled by policy (opt-out)', () => {
@@ -306,7 +255,6 @@ describe('AgentSession transcript journal: redaction at write', () => {
 
 describe('LocalLedgerExporter execution ledger: redaction + replay', () => {
   test('recordEvent masks a credential span, and readRunEntries returns the redacted record after flush', async () => {
-    installJudgmentPort(spanPort(KEY_YES_DOC_NO).port);
     const dir = mkTemp();
     const exporter = new LocalLedgerExporter({
       filePath: join(dir, 'spans.jsonl'),
@@ -328,8 +276,7 @@ describe('LocalLedgerExporter execution ledger: redaction + replay', () => {
     expect(JSON.stringify(entries[0]!.payload)).toContain('[REDACTED_API_KEY]');
   });
 
-  test('export waits for the readings of the spans in the batch', async () => {
-    installJudgmentPort(spanPort(KEY_YES_DOC_NO).port);
+  test('export masks the key and keeps the document name in the span file', async () => {
     const dir = mkTemp();
     const filePath = join(dir, 'spans.jsonl');
     const exporter = new LocalLedgerExporter({ filePath });

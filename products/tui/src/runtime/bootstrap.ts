@@ -79,7 +79,7 @@ import { GOODVIBES_TUI_SURFACE_ROOT } from '../config/surface.ts';
 import { registerStartupProviders } from './startup-provider-registration.ts';
 import { createSerialSteps } from './serial-steps.ts';
 
-type ExternalServiceFactories = NonNullable<Parameters<typeof startExternalServices>[4]>;
+type ExternalServiceFactories = NonNullable<Parameters<typeof startExternalServices>[3]>;
 
 // ── Bootstrap context type ──────────────────────────────────────────────────
 
@@ -169,11 +169,9 @@ export type BootstrapContext = RuntimeContext & {
 export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: BootstrapOptions): Promise<BootstrapContext> {
   const workingDir = options.workingDir;
   const configManager = options.configManager;
-  const controlPlaneRecentEventsRef: {
-    value: (limit: number) => readonly import('@goodvibes-jev/engine/platform/platform/control-plane').ControlPlaneRecentEvent[];
-  } = {
-    value: (_limit) => [],
-  };
+  // Recent control-plane events live in the daemon and are served by its
+  // operator verb; this process holds no copy to list.
+  const noLocalControlPlaneEvents = (_limit: number): readonly import('@goodvibes-jev/engine/platform/platform/control-plane').ControlPlaneRecentEvent[] => [];
   const {
     userSessionId,
     runtimeBus,
@@ -204,7 +202,7 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
     sessionSpine,
     sessionInboundInputs,
     sessionUnionCache,
-  } = await initializeBootstrapCore(stdout, options, (limit) => controlPlaneRecentEventsRef.value(limit));
+  } = await initializeBootstrapCore(stdout, options, noLocalControlPlaneEvents);
   const providerRegistry = services.providerRegistry;
   const { automationManager, hookDispatcher, pluginManager } = services;
   options.onHookDispatcherReady?.({ runtime, surface: services.surface, hookDispatcher });
@@ -327,7 +325,7 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
       runtimeSessionIdRef.value = sessionId;
     },
     writeLastSessionPointer: writeSessionPointer,
-    getControlPlaneRecentEvents: (limit) => controlPlaneRecentEventsRef.value(limit),
+    getControlPlaneRecentEvents: noLocalControlPlaneEvents,
     toolRegistry,
     forensicsRegistry,
     policyRuntimeState: services.policyRuntimeState,
@@ -424,20 +422,11 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
   };
 
   // ADOPT ONLY. This app never constructs a DaemonServer or an HttpListener: the
-  // daemon is a separate product with its own binary and its own service unit.
-  // The factories carry the shared bearer and the daemon's state directory so an
-  // adopted daemon is authenticated the same way it always was, no factory that
-  // BUILDS anything is passed, and `adoptOnly` makes the platform refuse to start one
-  // even if a future caller did.
-  //
-  // `daemonRuntimeDir` names the daemon's own STATE directory
-  // (`<home>/.goodvibes/daemon`), which is where operator-tokens.json,
-  // auth-users.json and daemon-settings.json live, not the home above it. Every
-  // reader in this repository resolves it that way.
+  // daemon is a separate product with its own binary and its own service unit,
+  // and the platform's host services only adopt one. The factories carry the
+  // shared bearer so an adopted daemon is authenticated the same way it always was.
   const createExternalServiceFactories = (token: string): ExternalServiceFactories => ({
     sharedDaemonToken: token,
-    daemonRuntimeDir: resolveGoodVibesDaemonHome(services.homeDirectory),
-    adoptOnly: true,
   });
 
   // Replacing the external-services handle is one step at a time and always
@@ -472,7 +461,6 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
           }
           externalServicesPromise = startExternalServices(
             configManager,
-            runtimeBus,
             hookDispatcher,
             services,
             createExternalServiceFactories(companionTokenRecord.token),
@@ -517,13 +505,11 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
       const companionTokenRecord = resolveDaemonCompanionToken(daemonHomeDir, GOODVIBES_TUI_SURFACE_ROOT);
       externalServicesPromise = startExternalServices(
         configManager,
-        runtimeBus,
         hookDispatcher,
         services,
         createExternalServiceFactories(companionTokenRecord.token),
       );
       externalServices = await externalServicesPromise;
-      controlPlaneRecentEventsRef.value = (limit) => externalServices.listRecentControlPlaneEvents(limit);
       await daemonHandshake.attach(companionTokenRecord.token);
       requestRender();
       return inspectExternalServices();
@@ -585,7 +571,6 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
       }
       externalServicesPromise = startExternalServices(
         configManager,
-        runtimeBus,
         hookDispatcher,
         services,
         createExternalServiceFactories(companionTokenRecord.token),
@@ -593,7 +578,6 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
       externalServices = await externalServicesPromise;
       // Installed-but-stopped recovery, before anything reads the status.
       await maybeStartInstalledDaemon();
-      controlPlaneRecentEventsRef.value = (limit) => externalServices.listRecentControlPlaneEvents(limit);
       await daemonHandshake.attach(companionTokenRecord.token);
       requestRender();
     },

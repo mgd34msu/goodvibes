@@ -80,8 +80,27 @@ function spawnNotification(command: string[]): void {
   }
 }
 
+/** A turn longer than this rings the terminal bell when it completes. */
+const BELL_AFTER_MS = 5000;
+/** A turn longer than this also shows a desktop notification when it completes. */
+const DESKTOP_AFTER_MS = 30000;
+
 export function notifyCompletion(title: string, message: string, durationMs: number, options?: NotifyOptions): void {
-  // Terminal bell for responses > 5s.
+  emitNotification(title, message, durationMs > BELL_AFTER_MS, durationMs > DESKTOP_AFTER_MS, options);
+}
+
+/**
+ * Ring the bell and show a desktop notification now. For point-in-time alerts
+ * (an approval waiting, a budget breach) that have no duration to measure;
+ * whether such an alert fires at all is decided by the caller's gate
+ * (runtime/alert-gating.ts shouldFireAlert).
+ */
+export function notifyNow(title: string, message: string, options?: NotifyOptions): void {
+  emitNotification(title, message, true, true, options);
+}
+
+function emitNotification(title: string, message: string, bell: boolean, desktop: boolean, options?: NotifyOptions): void {
+  // Terminal bell.
   // Surface-specific: this writes directly to stdout and is only meaningful
   // in a terminal context. Host surfaces that manage their own output stream
   // should inject this behaviour via a callback rather than calling it here.
@@ -89,17 +108,17 @@ export function notifyCompletion(title: string, message: string, durationMs: num
   // A piped headless response is a machine-readable stream. A bell byte there
   // corrupts JSON even though the model and completion check both succeeded.
   // Test suppression still governs only external notifications; real TTYs ring.
-  if (durationMs > 5000 && process.stdout.isTTY) {
+  if (bell && process.stdout.isTTY) {
     process.stdout.write('\x07');
   }
 
-  // Desktop notification for responses > 30s. Real notify-send/osascript
-  // spawns must never fire from an automated test run, suppressed under
-  // NODE_ENV=test / GOODVIBES_SUPPRESS_NOTIFY, with `force` as the opt-back-in
-  // for tests that exercise this shell-out layer itself.
-  if (durationMs > 30000) {
+  // Desktop notification. Real notify-send/osascript spawns must never fire
+  // from an automated test run, suppressed under NODE_ENV=test /
+  // GOODVIBES_SUPPRESS_NOTIFY, with `force` as the opt-back-in for tests that
+  // exercise this shell-out layer itself.
+  if (desktop) {
     if (isNotifySuppressed(options?.force)) {
-      logger.debug('Completion desktop notification suppressed under test', { title, durationMs });
+      logger.debug('Desktop notification suppressed under test', { title });
       return;
     }
     if (process.platform === 'linux') {

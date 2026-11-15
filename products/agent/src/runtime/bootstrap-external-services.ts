@@ -11,9 +11,8 @@ import {
  * keep this concern, and the Agent's daemon-lifecycle boundary, in one
  * small, readable place.
  *
- * Discovery routes through the platform-shared adopt-or-spawn policy
- * (decideDaemonAdoption/classifyDaemonProbe) with `adoptOnly: true`, so a
- * reachable, version-compatible daemon is adopted and anything else (absent,
+ * Discovery routes through the platform's host services, which only adopt:
+ * a reachable, version-compatible daemon is adopted and anything else (absent,
  * blocked, or on an incompatible wire version) is reported honestly. The
  * Agent never spawns or embeds a daemon of its own and never restarts a
  * running one. One bounded exception at boot: when discovery finds nothing
@@ -91,7 +90,8 @@ export interface ConnectedHostAutostartSeams {
 
 export function wireAgentExternalServices(options: {
   readonly configManager: HostServicesConfig;
-  readonly runtimeBus: RuntimeEventBus;
+  /** Not read: host discovery publishes nothing on the bus. Accepted from existing callers. */
+  readonly runtimeBus?: RuntimeEventBus;
   readonly hookDispatcher: HookDispatcher;
   readonly services: RuntimeServices;
   readonly uiServices: UiRuntimeServices;
@@ -102,7 +102,7 @@ export function wireAgentExternalServices(options: {
   readonly startServices?: typeof startExternalServices;
   readonly connectedHostAutostart?: ConnectedHostAutostartSeams;
 }): AgentExternalServicesController {
-  const { configManager, runtimeBus, hookDispatcher, services, uiServices, deferredStartup, systemMessageRouter, requestRender } = options;
+  const { configManager, hookDispatcher, services, uiServices, deferredStartup, systemMessageRouter, requestRender } = options;
   const startServices = options.startServices ?? startExternalServices;
 
   // Connected-host honesty receipts ("updated from X to Y", "restarted after
@@ -141,18 +141,18 @@ export function wireAgentExternalServices(options: {
   let externalServicesPromise: Promise<ExternalServicesHandle> | null = null;
 
   // Deliberately NOT passing the daemon facade's `updateArtifact` identity
-  // ({version, execPath}): with adoptOnly the agent never constructs or embeds
+  // ({version, execPath}): the agent never constructs or embeds
   // a DaemonServer, so there is no daemon-side hourly update loop here to feed
   //, absent means host-managed, which is exactly the agent's stance toward
   // whichever host it adopts. The agent's OWN binary updates at launch through
   // its launch auto-update path instead (src/cli/launch-auto-update.ts).
   const startAgentExternalServices = (): Promise<ExternalServicesHandle> =>
     // The daemon-grade view, because this platform entry point still takes that
-    // whole shape. Under `adoptOnly: true` it reads `localUserAuthManager` and
-    // `configManager` and never constructs a DaemonServer, see the view's own
-    // doc comment in runtime/services.ts for exactly which two members it
-    // substitutes and why neither is dereferenced here.
-    startServices(configManager, runtimeBus, hookDispatcher, services.asDaemonGradeView(), { adoptOnly: true });
+    // whole shape. It reads `localUserAuthManager` and `configManager` and never
+    // constructs a DaemonServer, see the view's own doc comment in
+    // runtime/services.ts for exactly which two members it substitutes and why
+    // neither is dereferenced here.
+    startServices(configManager, hookDispatcher, services.asDaemonGradeView());
 
   // The boot discovery, the boot-time autostart and `restart()` each replace the
   // adopted handle. Every replacement goes through here: the latest START wins (a
@@ -257,8 +257,8 @@ export function wireAgentExternalServices(options: {
   };
 
   // Connected-host discovery OFF the interactive path: probe the configured
-  // host/port through the shared adopt-or-spawn policy (adoptOnly, Agent
-  // never spawns or embeds) and replace the pending status with an honest
+  // host/port through the platform's adopt-only host services (the Agent
+  // never spawns or embeds a daemon) and replace the pending status with an honest
   // one (adopted, incompatible, blocked, or unavailable). An unavailable
   // daemon then gets the one bounded installed-but-stopped start check.
   const discoveryComplete = deferredStartup.schedule({

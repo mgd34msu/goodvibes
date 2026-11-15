@@ -81,16 +81,16 @@ The platform does not replace your server framework. You still own:
 - **runtime bootstrapping**: starting your process and wiring these pieces together.
 - **concrete host policies** like CORS, TLS termination, and deployment-specific auth envelopes.
 
-## Adopt-or-spawn daemon startup
+## Daemon adoption at startup
 
-Full-surface hosts such as the TUI call `startHostServices` to start the
-services a client surface owns. The daemon itself is never one of them:
-`startHostServices` never constructs a `DaemonServer` in the calling process.
-The daemon is a separate product (`goodvibes-daemon`) with its own
-composition root; a host either adopts an already-running compatible daemon
-or spawns the standalone `goodvibes-daemon` binary as a detached child
-process and then adopts that. `daemonServer` on the returned handle is always
-`null`, there is no in-process daemon instance to hold or stop.
+Full-surface hosts such as the TUI call `startHostServices` to find the daemon
+they work with and to start the HTTP listener when one is configured and the
+caller can compose it. The daemon itself is never one of them:
+`startHostServices` never constructs a `DaemonServer` in the calling process
+and never starts one. The daemon is a separate product (`goodvibes-daemon`)
+with its own composition root and its own service unit; a host adopts an
+already-running compatible daemon. Starting an installed but stopped daemon is
+the service manager's job (`platform/runtime/client/daemon-autostart.ts`).
 
 When `daemon.enabled` is true (the default; resolved via
 `resolveDaemonEnabled`), the shared pure decision in
@@ -98,30 +98,21 @@ When `daemon.enabled` is true (the default; resolved via
 a port probe and an identity probe onto one of these outcomes, reported as
 `daemonStatus.mode`:
 
-- **`external`** (adopt): a compatible GoodVibes daemon already answers on the
-  configured host/port, or a freshly spawned detached daemon became reachable.
-  The host runs without owning the daemon process itself.
+- **`external`** (adopt): a compatible GoodVibes daemon answers on the
+  configured host/port. The host runs without owning the daemon process.
 - **`incompatible`**: a GoodVibes daemon answers, but on a version band this
-  host cannot adopt. The host never starts a second, competing daemon; it
-  reports the mismatch and runs without one.
+  host cannot adopt. The host reports the mismatch and runs without one.
 - **`blocked`**: the configured port is occupied by a process that does not
   verify as a GoodVibes daemon. The host runs without a daemon rather than
   guessing.
-- **`unavailable`**: the port is free but no daemon exists to adopt and this
-  call is not allowed to spawn one (`adoptOnly: true`, what both `goodvibes-tui`
-  and `goodvibes-agent` pass), or a spawn attempt did not become reachable in
-  time.
+- **`unavailable`**: the port is free and no daemon is running; the reason
+  names `goodvibes-daemon install-service`.
 - **`disabled`**: `daemon.enabled` (or the caller's own gate) is false.
 
-A caller that does not pass `adoptOnly: true` and finds the port free spawns
-the detached `goodvibes-daemon` binary (the daemon is a
-system service, so a surface starting must not couple the daemon's lifetime to
-that surface's process) and then adopts it the same way as an already-running
-one, still reported as `external`.
+The identity probe sends the shared token only to a process that has proved,
+by answering a challenge, that it already holds the same token.
 
-Hosts should read `daemonStatus` rather than treat every `daemonServer: null`
-as the same outcome, since `daemonServer` is unconditionally `null` regardless
-of which of the outcomes above occurred.
+Hosts read `daemonStatus`; the returned handle holds no daemon object.
 
 `httpListenerStatus` reports on a different, separate service: the optional
 HTTP listener gated by `danger.httpListener` (default off). Unlike the daemon,

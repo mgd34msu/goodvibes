@@ -3,8 +3,12 @@
  * such as email, CMS, file storage, analytics, and custom webhooks.
  */
 
-/** Integration health status. */
-export type IntegrationStatus = 'unconfigured' | 'connecting' | 'healthy' | 'degraded' | 'error' | 'disabled';
+/**
+ * Integration health status. `configured` means a credential is stored and
+ * nothing has contacted the service yet; `healthy` and `degraded` come from a
+ * real call.
+ */
+export type IntegrationStatus = 'unconfigured' | 'configured' | 'connecting' | 'healthy' | 'degraded' | 'error' | 'disabled';
 
 /** Integration category for grouping in UI. */
 export type IntegrationCategory =

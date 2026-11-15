@@ -7,9 +7,10 @@
  * cancellation source) cannot be constructor deps, they are set afterwards, on
  * the orchestrator, pointing back at the manager. Miss either and a spawned
  * agent's transcript never reaches a panel, or a cancel never reaches the run.
- * Both compositions that own a loop (the daemon-grade `createRuntimeServices`
- * and the pure-client `createClientRuntimeServices`) call this, so the order
- * exists in exactly one place.
+ * Every graph that runs agents calls this: the daemon-grade
+ * `createRuntimeServices`, the pure-client `createClientRuntimeServices`, and
+ * the execution graph with a contract runner (agent-graph-composition.ts), so
+ * the order exists in exactly one place.
  *
  * Nothing here is daemon-grade: a surface running its own loop owns this graph
  * outright, which is why it sits below the daemon furniture in the dependency
@@ -34,13 +35,11 @@ export interface AgentGraphOptions {
   readonly providerRegistry: ProviderRegistry;
   /** Project root; the per-project archetype directory hangs off it. */
   readonly workingDirectory: string;
+  /** Runs owned outside this manager (a daemon's other fleets) that count against the same capacity. */
+  readonly additionalFleetOwnership?: (() => ReturnType<AgentManager['fleetOwnership']>) | undefined;
 }
 
-/**
- * The agent graph a conversation loop runs on. The daemon-grade graph with a contract runner is
- * agent-graph-composition.ts; both must wire the same links (message bus, conversation sink,
- * cancellation source), so a change to one belongs in the other.
- */
+/** The agent graph a conversation loop runs on. */
 export interface AgentGraph {
   readonly archetypeLoader: ArchetypeLoader;
   readonly agentMessageBus: AgentMessageBus;
@@ -59,7 +58,10 @@ export function createAgentGraph(options: AgentGraphOptions): AgentGraph {
     messageBus: agentMessageBus,
     executor: agentOrchestrator,
     configManager: options.configManager,
+    // The live registry lets a bare model id in a spawn() override resolve
+    // through the shared resolver instead of being rejected as unqualified.
     providerRegistry: options.providerRegistry,
+    additionalFleetOwnership: options.additionalFleetOwnership,
   });
   // Conversation-snapshot sink bridge: AgentOrchestrator predates AgentManager, so it's
   // wired via setConversationSink, not a constructor dep (same ordering constraint as setRuntimeBus above).

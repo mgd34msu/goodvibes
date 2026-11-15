@@ -1,10 +1,12 @@
 /**
- * The installed-member to published-asset mapping is declared twice: in the
- * release scripts (publication) and here (producer and reader). They must name
- * the same members for every program and platform, or a cohort change that the
- * producer accepts fails only on release day.
+ * The installed-member to published-asset table (runtime/native-cohort-table.ts)
+ * is read by the producer and reader here and by the release script. The
+ * installer and the CI workflow still type the Linux companion members out,
+ * so they are checked against the same table: a cohort change that misses one
+ * fails here, not on release day.
  */
 import { expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   clientReaderAsset, clientReaderMemberAsset, clientReaderPayloadPaths, parseClientReaderArtifact,
@@ -12,8 +14,10 @@ import {
 } from '../platform/src/platform/runtime/client-reader-artifact.ts';
 import { resolveDaemonNativePayloads } from '../platform/src/platform/runtime/daemon-native-cohort.ts';
 import { nativeReaderCapabilities } from '../platform/src/platform/runtime/native-reader-compatibility.ts';
+import { nativeCohortMembers } from '../platform/src/platform/runtime/native-cohort-table.ts';
 
-const scripts = join(import.meta.dir, '..', '..', '..', '.github', 'scripts');
+const root = join(import.meta.dir, '..', '..', '..');
+const scripts = join(root, '.github', 'scripts');
 const packages: readonly ClientReaderPackage[] = ['@goodvibes-jev/tui', '@goodvibes-jev/agent', '@goodvibes-jev/daemon'];
 const targets: readonly ClientReaderTarget[] = ['linux-x64', 'linux-arm64', 'darwin-x64', 'darwin-arm64'];
 
@@ -46,6 +50,29 @@ test('the release script and the producer name the same cohort members for every
   for (const { packageName, target, evidence } of cases) {
     expect({ evidence, members: published[evidence] }).toEqual({ evidence, members: producerMembers(packageName, target) });
   }
+});
+
+test('the installer and the CI archives name every Linux member of the table', () => {
+  const installer = readFileSync(join(root, 'scripts', 'install.sh'), 'utf8');
+  const workflow = readFileSync(join(root, '.github', 'workflows', 'ci.yml'), 'utf8');
+  const evidenceLine = /then _evidence_members='([^']+)'/.exec(installer)?.[1]?.split(' ') ?? [];
+  for (const product of ['goodvibes', 'goodvibes-agent', 'goodvibes-daemon'] as const) {
+    const members = nativeCohortMembers(product, 'linux-x64');
+    const launcher = members[0]!.path;
+    const companions = members.filter((member) => member.reader && member.path !== launcher).map((member) => member.path.slice(launcher.length));
+    expect({ product, companions: [...evidenceLine].sort() }).toEqual({ product, companions: [...companions].sort() });
+  }
+  const daemonPaths = nativeCohortMembers('goodvibes-daemon', 'linux-x64').map((member) => member.path.replace('goodvibes-daemon-linux-x64', '${binary}').replace('linux-x64', '${target}'));
+  const installerDaemonPaths = /const paths = \[([^\]]*)\];/.exec(installer)?.[1]?.split(',').map((entry) => entry.trim()
+    .replace(/^binary$/, '${binary}').replace(/^binary\+"([^"]*)"$/, '${binary}$1').replace(/^`(.*)`$/, '$1')) ?? [];
+  expect(installerDaemonPaths).toEqual(daemonPaths);
+  const archived = (directory: string, product: 'goodvibes' | 'goodvibes-agent' | 'goodvibes-daemon', target: 'linux-x64' | 'linux-arm64') =>
+    nativeCohortMembers(product, target).filter((member) => product === 'goodvibes-daemon' || member.reader)
+      .map((member) => `${directory}/${member.path}`).filter((path) => !workflow.includes(path));
+  expect(archived('products/tui/dist', 'goodvibes', 'linux-x64')).toEqual([]);
+  expect(archived('products/agent/dist', 'goodvibes-agent', 'linux-x64')).toEqual([]);
+  expect(archived('products/daemon/native', 'goodvibes-daemon', 'linux-x64')).toEqual([]);
+  expect(archived('products/daemon/native', 'goodvibes-daemon', 'linux-arm64')).toEqual([]);
 });
 
 test('reader evidence that names fewer members than its cohort is refused', () => {

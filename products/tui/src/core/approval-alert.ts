@@ -21,14 +21,13 @@
  * (OSC 9, desktop, webhook) sends the tool name and permission category only,
  * never a command, a path or the turn's name.
  */
-import { notifyCompletion } from '@goodvibes-jev/engine/platform/platform/utils';
+import { notifyNow } from '@goodvibes-jev/engine/platform/platform/utils';
 import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { WebhookNotifier } from '@goodvibes-jev/engine/platform/platform/integrations';
 import type { PermissionRequestHandler, PermissionPromptRequest } from '@goodvibes-jev/engine/platform/platform/permissions';
 import type { FocusTracker } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import {
   shouldFireAlert,
-  FORCE_NOTIFY_DURATION_MS,
   NOTIFICATION_TEXT_LIMITS,
   buildApprovalNotification,
   describeToolTarget,
@@ -57,8 +56,8 @@ export interface ApprovalAlertDeps {
    * user message while a turn runs). Absent means the notice names no turn.
    */
   readonly conversation?: ApprovalTurnSource | null;
-  /** Desktop delivery; defaults to the platform notifyCompletion. Tests pass a spy to read the text. */
-  readonly notifyDesktop?: typeof notifyCompletion;
+  /** Desktop delivery; defaults to the platform notifyNow. Tests pass a spy to read the text. */
+  readonly notifyDesktop?: (title: string, body: string) => void;
 }
 
 /** The conversation surface the approval notice names the turn from. */
@@ -114,7 +113,7 @@ function fireApprovalAlert(request: PermissionPromptRequest, deps: ApprovalAlert
   if (!shouldFireAlert(deps.focusTracker, deps.configGet, 'behavior.notifyOnApprovalPending')) return;
 
   try {
-    (deps.notifyDesktop ?? notifyCompletion)(notice.title, notice.body, FORCE_NOTIFY_DURATION_MS);
+    (deps.notifyDesktop ?? notifyNow)(notice.title, notice.body);
   } catch (err) {
     logger.debug('approval-alert: desktop notify error', { error: String(err) });
   }

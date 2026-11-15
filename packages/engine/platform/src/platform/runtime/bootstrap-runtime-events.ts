@@ -1,11 +1,14 @@
 import type { RuntimeEventProvenance } from '../../events/occurrence.js';
 export type { RuntimeEventProvenance } from '../../events/occurrence.js';
 import type { ConversationFollowUpItem } from '../core/conversation-follow-ups.js';
-import type { AgentEvent, ProviderEvent, RuntimeEventBus } from './events/index.js';
+import type { AgentEvent, CompactionEvent, ProviderEvent, RuntimeEventBus } from './events/index.js';
+import type { GateEvent } from '../../events/gate.js';
 import type { ContractEvent } from '../../events/contract.js';
 import type { createDomainDispatch } from './store/index.js';
 import type { ContractRunner } from '../contract/runner.js';
 import type { AgentManager } from '../tools/agent/index.js';
+import type { ToolRegistry } from '../tools/registry.js';
+import { logger } from '../utils/logger.js';
 import { finishWorkstreamLabel, rememberWorkstreamLabel, workstreamLabel } from '../channels/workstream-labels.js';
 
 const AGENT_STATUS_INTERVAL_MS = 30_000;
@@ -25,6 +28,30 @@ export interface HostRuntimeEventBridgeOptions {
   readonly requestRender: () => void;
   readonly agentManager: AgentManager;
   readonly contractRunner: Pick<ContractRunner, 'get' | 'list'>;
+  /**
+   * How agent lifecycle lines are worded: the terminal app's `[Agents]` lines
+   * (default) or the Agent app's `[Delegated task]` lines. Only the words differ.
+   */
+  readonly agentLineVoice?: HostAgentLineVoice | undefined;
+  /**
+   * Post a high-priority line for each compaction receipt. A host that renders
+   * the receipt as its own transcript block leaves this off.
+   */
+  readonly compactionReceiptLines?: boolean | undefined;
+  /**
+   * When given, a failed agent's line carries the structured failure the
+   * `agent` tool reports for it (reason code, phase, turns completed).
+   */
+  readonly toolRegistry?: Pick<ToolRegistry, 'execute'> | undefined;
+}
+
+export type HostAgentLineVoice = 'agents' | 'delegated-task';
+
+/** The bridge's subscriptions and its status timer; `dispose` ends both. */
+export interface HostRuntimeEventBridge {
+  dispose(): void;
+  readonly unsubs: Array<() => void>;
+  readonly agentStatusIntervalRef: { value: ReturnType<typeof setInterval> | null };
 }
 
 export { runtimeEventOfNotice, runtimeEventKey, type RuntimeEventNotice } from './runtime-event-notices.js';
@@ -234,9 +261,7 @@ export function registerContractRuntimeEvents(options: ContractRuntimeEventBridg
   return unsubs;
 }
 
-export function registerHostRuntimeEvents(
-  options: HostRuntimeEventBridgeOptions,
-): { unsubs: Array<() => void>; agentStatusIntervalRef: { value: ReturnType<typeof setInterval> | null } } {
+export function registerHostRuntimeEvents(options: HostRuntimeEventBridgeOptions): HostRuntimeEventBridge {
   const {
     runtimeBus,
     domainDispatch,
@@ -299,57 +324,223 @@ export function registerHostRuntimeEvents(
     requestRender();
   }));
 
+  const voice = agentLineWording(options.agentLineVoice ?? 'agents');
+  const checkCohort = (record: ReturnType<AgentManager['getStatus']>): void => {
+    checkCohortCompletion(agentManager, contractRunner, record ?? null, getSystemMessageRouter, queueConversationFollowUp);
+  };
+
   unsubs.push(runtimeBus.on<Extract<AgentEvent, { type: 'AGENT_COMPLETED' }>>('AGENT_COMPLETED', ({ payload }) => {
     const record = agentManager.getStatus(payload.agentId);
     if (record) {
-      const durationSeconds = record.completedAt !== undefined ? Math.round((record.completedAt - record.startedAt) / 1000) : 0;
-      const taskSnippet = record.task.length > 50 ? `${record.task.slice(0, 50)}\u2026` : record.task;
+      const facts = agentLineFacts(record, payload.agentId, voice);
       withRouter(getSystemMessageRouter, (router) => {
-        router.low(`[Agents] \u2713 ${record.template} ${payload.agentId.slice(-8)}: "${taskSnippet}" \u2014 completed in ${durationSeconds}s (${record.toolCallCount} tool calls)`, payload);
+        router.low(voice.completedLine(facts), payload);
       });
       // A contract delivers its checked answer when the owner finishes.
       // Planner/unit milestones are not separate replies to the user.
       if (!record.contractId) queueConversationFollowUp?.({
         key: `agent:${payload.agentId}:completed`,
-        summary: `${record.template} agent ${payload.agentId.slice(-8)} completed "${taskSnippet}" in ${durationSeconds}s after ${record.toolCallCount} tool calls.`,
+        summary: voice.completedSummary(facts),
         ...(record.fullOutput?.trim() ? { result: record.fullOutput.trim() } : {}),
       });
     }
-    checkCohortCompletion(agentManager, contractRunner, record ?? null, getSystemMessageRouter, queueConversationFollowUp);
+    checkCohort(record);
     requestRender();
   }));
 
   unsubs.push(runtimeBus.on<Extract<AgentEvent, { type: 'AGENT_FAILED' }>>('AGENT_FAILED', ({ payload }) => {
     const record = agentManager.getStatus(payload.agentId);
     if (record && record.status !== 'cancelled') {
-      const durationSeconds = record.completedAt !== undefined ? Math.round((record.completedAt - record.startedAt) / 1000) : 0;
-      const taskSnippet = record.task.length > 50 ? `${record.task.slice(0, 50)}\u2026` : record.task;
-      withRouter(getSystemMessageRouter, (router) => {
-        router.low(`[Agents] \u2717 ${record.template} ${payload.agentId.slice(-8)}: "${taskSnippet}" \u2014 failed in ${durationSeconds}s: ${payload.error}`, payload);
-      });
-      if (!record.contractId) queueConversationFollowUp?.({
-        key: `agent:${payload.agentId}:failed`,
-        summary: `${record.template} agent ${payload.agentId.slice(-8)} failed after ${durationSeconds}s while working on "${taskSnippet}": ${payload.error.slice(0, 120)}`,
-      });
+      const facts = agentLineFacts(record, payload.agentId, voice);
+      // A spent turn budget is stamped on the record at the source
+      // (failureReason 'max_turns' plus the applied limit and what set it): an
+      // expected, nameable outcome, worded as a budget line, not as a failure.
+      if (record.failureReason === 'max_turns' && record.turnBudget) {
+        const budget = { limit: record.turnBudget.limit, source: turnBudgetSourceLabel(record.turnBudget.source) };
+        withRouter(getSystemMessageRouter, (router) => {
+          router.low(voice.budgetLine(facts, budget), payload);
+        });
+        if (!record.contractId) queueConversationFollowUp?.({
+          key: `agent:${payload.agentId}:failed`,
+          summary: voice.budgetSummary(facts, budget),
+        });
+      } else {
+        const postLine = (envelope: string | null): void => {
+          withRouter(getSystemMessageRouter, (router) => {
+            router.low(voice.failedLine(facts, payload.error, envelope), payload);
+          });
+        };
+        const toolRegistry = options.toolRegistry;
+        if (toolRegistry) {
+          void fetchChildFailureSummary(toolRegistry, payload.agentId).then((envelope) => {
+            postLine(envelope);
+            requestRender();
+          });
+        } else {
+          postLine(null);
+        }
+        if (!record.contractId) queueConversationFollowUp?.({
+          key: `agent:${payload.agentId}:failed`,
+          summary: voice.failedSummary(facts, payload.error),
+        });
+      }
     }
-    checkCohortCompletion(agentManager, contractRunner, record ?? null, getSystemMessageRouter, queueConversationFollowUp);
+    checkCohort(record);
     requestRender();
   }));
+
+  // A cancelled run emits AGENT_CANCELLED, never AGENT_FAILED; when it is the
+  // last of its cohort to end, the cohort is reported from here.
+  unsubs.push(runtimeBus.on<Extract<AgentEvent, { type: 'AGENT_CANCELLED' }>>('AGENT_CANCELLED', ({ payload }) => {
+    checkCohort(agentManager.getStatus(payload.agentId));
+    requestRender();
+  }));
+
+  unsubs.push(runtimeBus.on<Extract<GateEvent, { type: 'PRESET_CHANGED' }>>('PRESET_CHANGED', ({ payload }) => {
+    withRouter(getSystemMessageRouter, (router) => {
+      router.high(`[Permissions] Permission preset changed: ${payload.previousPreset} -> ${payload.preset}.`);
+    });
+    requestRender();
+  }));
+
+  if (options.compactionReceiptLines) {
+    // When the compaction did not apply, `detail` carries the reason, so a
+    // silent revert is never silent.
+    unsubs.push(runtimeBus.on<Extract<CompactionEvent, { type: 'COMPACTION_RECEIPT' }>>('COMPACTION_RECEIPT', ({ payload }) => {
+      withRouter(getSystemMessageRouter, (router) => {
+        router.high(`[Compaction] ${formatCompactionReceipt(payload)}`);
+      });
+      requestRender();
+    }));
+  }
 
   const agentStatusIntervalRef: { value: ReturnType<typeof setInterval> | null } = { value: null };
   agentStatusIntervalRef.value = setInterval(() => {
     const running = agentManager.list().filter((agent) => agent.status === 'running');
     if (running.length === 0) return;
-    const lines = running.map((agent) => `  ${agent.id.slice(-8)}: ${agent.progress ?? agent.status}`);
     withRouter(getSystemMessageRouter, (router) => {
-      router.low(`[Agents] ${running.length} running:\n${lines.join('\n')}`);
+      router.low(voice.runningLine(running.map((agent) => ({ id: agent.id.slice(-8), progress: agent.progress ?? agent.status }))));
     });
     requestRender();
   }, AGENT_STATUS_INTERVAL_MS);
   // Don't block clean process exit.
   (agentStatusIntervalRef.value as unknown as { unref?: () => void }).unref?.();
 
-  return { unsubs, agentStatusIntervalRef };
+  return {
+    unsubs,
+    agentStatusIntervalRef,
+    dispose: () => {
+      if (agentStatusIntervalRef.value) clearInterval(agentStatusIntervalRef.value);
+      agentStatusIntervalRef.value = null;
+      for (const unsub of unsubs.splice(0)) unsub();
+    },
+  };
+}
+
+interface AgentLineFacts {
+  readonly template: string;
+  readonly id: string;
+  readonly task: string;
+  readonly seconds: number;
+  readonly toolCalls: number;
+}
+
+interface AgentLineWording {
+  readonly ellipsis: string;
+  completedLine(facts: AgentLineFacts): string;
+  completedSummary(facts: AgentLineFacts): string;
+  failedLine(facts: AgentLineFacts, error: string, envelope: string | null): string;
+  failedSummary(facts: AgentLineFacts, error: string): string;
+  budgetLine(facts: AgentLineFacts, budget: { limit: number; source: string }): string;
+  budgetSummary(facts: AgentLineFacts, budget: { limit: number; source: string }): string;
+  runningLine(running: ReadonlyArray<{ id: string; progress: string }>): string;
+}
+
+const AGENT_LINE_WORDING: Record<HostAgentLineVoice, AgentLineWording> = {
+  agents: {
+    ellipsis: '\u2026',
+    completedLine: (f) => `[Agents] \u2713 ${f.template} ${f.id}: "${f.task}" \u2014 completed in ${f.seconds}s (${f.toolCalls} tool calls)`,
+    completedSummary: (f) => `${f.template} agent ${f.id} completed "${f.task}" in ${f.seconds}s after ${f.toolCalls} tool calls.`,
+    failedLine: (f, error, envelope) => `[Agents] \u2717 ${f.template} ${f.id}: "${f.task}" \u2014 failed in ${f.seconds}s: ${error}${envelope ? ` (${envelope})` : ''}`,
+    failedSummary: (f, error) => `${f.template} agent ${f.id} failed after ${f.seconds}s while working on "${f.task}": ${error.slice(0, 120)}`,
+    // Kept in the failed-line shape the operator feed reads (runtime-event-notices.ts); the detail names the budget.
+    budgetLine: (f, b) => `[Agents] \u2717 ${f.template} ${f.id}: "${f.task}" \u2014 failed in ${f.seconds}s: spent its ${b.limit}-turn budget (${b.source})`,
+    budgetSummary: (f, b) => `${f.template} agent ${f.id} spent its ${b.limit}-turn budget (${b.source}) while working on "${f.task}".`,
+    runningLine: (running) => `[Agents] ${running.length} running:\n${running.map((agent) => `  ${agent.id}: ${agent.progress}`).join('\n')}`,
+  },
+  'delegated-task': {
+    ellipsis: '...',
+    completedLine: (f) => `[Delegated task] ${f.template} ${f.id} completed in ${f.seconds}s "${f.task}"`,
+    completedSummary: (f) => `${f.template} delegated task ${f.id} completed "${f.task}" in ${f.seconds}s after ${f.toolCalls} tool calls.`,
+    failedLine: (f, error, envelope) => `[Delegated task] ${f.template} ${f.id} failed in ${f.seconds}s ${error}${envelope ? ` (${envelope})` : ''}`,
+    failedSummary: (f, error) => `${f.template} delegated task ${f.id} failed while working on "${f.task}" ${error.slice(0, 120)}`,
+    budgetLine: (f, b) => `[Delegated task] ${f.template} ${f.id} spent its turn budget in ${f.seconds}s, ${b.limit} turns (${b.source}) while working on "${f.task}"`,
+    budgetSummary: (f, b) => `${f.template} delegated task ${f.id} spent its ${b.limit}-turn budget (${b.source}) while working on "${f.task}".`,
+    runningLine: (running) => `[Delegated task] ${running.length} running\n${running.map((agent) => `  ${agent.id} ${agent.progress}`).join('\n')}`,
+  },
+};
+
+function agentLineWording(voice: HostAgentLineVoice): AgentLineWording {
+  return AGENT_LINE_WORDING[voice];
+}
+
+function agentLineFacts(record: NonNullable<ReturnType<AgentManager['getStatus']>>, agentId: string, voice: AgentLineWording): AgentLineFacts {
+  return {
+    template: record.template,
+    id: agentId.slice(-8),
+    task: record.task.length > 50 ? `${record.task.slice(0, 50)}${voice.ellipsis}` : record.task,
+    seconds: record.completedAt !== undefined ? Math.round((record.completedAt - record.startedAt) / 1000) : 0,
+    toolCalls: record.toolCallCount,
+  };
+}
+
+function turnBudgetSourceLabel(source: string): string {
+  return source === 'default'
+    ? 'the default agents.maxTurns'
+    : source === 'spawn-override'
+      ? 'a per-spawn override'
+      : 'the agents.maxTurnsCap policy ceiling';
+}
+
+/** One line per compaction receipt: strategy, trigger and outcome, with the reason when it did not apply. */
+function formatCompactionReceipt(payload: Extract<CompactionEvent, { type: 'COMPACTION_RECEIPT' }>): string {
+  const { strategy, trigger, outcome, tokensBefore, tokensAfter, detail } = payload;
+  if (outcome === 'applied') {
+    const saved = Math.max(0, tokensBefore - tokensAfter);
+    return `${strategy} (${trigger}) applied, ${saved.toLocaleString()} tokens reclaimed`;
+  }
+  const reason = detail ? `: ${detail}` : '';
+  return `${strategy} (${trigger}) ${outcome}${reason}`;
+}
+
+interface ChildFailureEnvelopeLike {
+  readonly phase?: string;
+  readonly reason?: { readonly code?: string };
+  readonly partialOutputs?: { readonly note?: string; readonly turnsCompleted?: number };
+}
+
+/**
+ * The structured failure the `agent` tool attaches to its `status` result,
+ * read through the same tool the model calls, as
+ * `reason: <code>, phase: <phase>[, N turns completed][, note]`. Read-only;
+ * null when the record or result cannot be read, so the base line still lands.
+ */
+async function fetchChildFailureSummary(toolRegistry: Pick<ToolRegistry, 'execute'>, agentId: string): Promise<string | null> {
+  try {
+    const result = await toolRegistry.execute('agent-runtime-events:child-failure-envelope', 'agent', { mode: 'status', agentId });
+    if (!result.success || !result.output) return null;
+    const parsed = JSON.parse(result.output) as { failure?: ChildFailureEnvelopeLike };
+    const failure = parsed.failure;
+    if (!failure) return null;
+    const parts = [`reason: ${failure.reason?.code ?? 'error'}`];
+    if (failure.phase) parts.push(`phase: ${failure.phase}`);
+    if (failure.partialOutputs?.turnsCompleted !== undefined) parts.push(`${failure.partialOutputs.turnsCompleted} turns completed`);
+    if (failure.partialOutputs?.note) parts.push(failure.partialOutputs.note);
+    return parts.join(', ');
+  } catch (err) {
+    logger.debug('runtime events: child-failure envelope could not be read', { agentId, error: String(err) });
+    return null;
+  }
 }
 
 export type BootstrapRuntimeEventBridgeOptions = HostRuntimeEventBridgeOptions;

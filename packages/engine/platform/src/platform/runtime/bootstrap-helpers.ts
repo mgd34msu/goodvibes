@@ -69,7 +69,9 @@ export async function synchronizeConfiguredServices(
         id,
         displayName: config.name || id,
         category: 'custom',
-        status: inspection.hasPrimaryCredential ? 'healthy' : 'unconfigured',
+        // Nothing was contacted here: a stored credential is 'configured', and
+        // only a real call may report the service healthy or degraded.
+        status: inspection.hasPrimaryCredential ? 'configured' : 'unconfigured',
         enabled: true,
         successCount: 0,
         errorCount: 0,

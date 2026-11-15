@@ -19,7 +19,8 @@
  * 1. Raise the ask on the daemon. The verb returns the pending record
  *    immediately, it deliberately does not park an HTTP request across a
  *    person's attention span.
- * 2. Prompt locally at the same time.
+ * 2. Prompt locally at the same time: the prompt is drawn at once and never
+ *    waits for the raise, so a slow or stalled daemon cannot hold it back.
  * 3. Watch the raised id for a decision made elsewhere. The channel for that is
  *    `control.approval_update`, which carries every transition of the record the
  *    moment the broker records it, so a decision made on a phone reaches this
@@ -32,9 +33,16 @@
  *    after subscribing, because a decision can land between the raise and the
  *    subscription and a push channel cannot deliver what happened before it
  *    opened.
- * 4. Whichever answers first is the decision. If the local prompt answered, the
- *    daemon is TOLD (`approvals.approve`/`approvals.deny`) so its record, the
- *    one every other surface reads, matches what happened here.
+ * 4. The daemon is the arbiter once its record exists. A remote answer that
+ *    arrives first is the decision. A local answer is sent to the daemon
+ *    (`approvals.approve`/`approvals.deny`) and the record's final state is
+ *    what runs: when another surface answered first, its answer stands. When
+ *    the daemon does not answer within a short bound, the local answer runs
+ *    and the write-back finishes on its own. A local answer given before the
+ *    raise landed is written back once the record's id is known.
+ *
+ * An ask the daemon expired or cancelled is a deny whose reason names that
+ * state and says to ask again, never a bare deny.
  *
  * ── When the daemon is not reachable ───────────────────────────────────────
  *
@@ -90,6 +98,13 @@ export type ApprovalUpdateSubscriber = (
 /** The local ask: draw a prompt on this surface and resolve with what the user chose. */
 export type LocalPermissionPrompt = (request: PermissionPromptRequest, options?: PermissionExecutionOptions) => Promise<PermissionPromptDecision>;
 
+/**
+ * How long a local answer waits for the daemon to record it and return the
+ * record's final state. Loopback round trips take milliseconds; past this the
+ * local answer runs and the write-back completes in the background.
+ */
+const DEFAULT_ARBITER_WAIT_MS = 2_000;
+
 /** How often the raised id is re-read while the local prompt is open. */
 const DEFAULT_POLL_INTERVAL_MS = 750;
 
@@ -135,6 +150,8 @@ export interface ClientApprovalRaiserOptions {
   readonly sleep?: (ms: number) => Promise<void>;
   /** How long the daemon keeps a raised record open before expiring it. */
   readonly raiseTimeoutMs?: number;
+  /** How long a local answer waits for the daemon's final record (tests). */
+  readonly arbiterWaitMs?: number;
 }
 
 /**
@@ -181,6 +198,17 @@ function readRemoteDecision(record: RaisedRecord | null | undefined): Permission
   // itself, so it is declined rather than typing the placeholder into the program.
   if (approved && isPlainRecord(decision?.modifiedArgs) && decision.modifiedArgs['answer'] === WITHHELD_PROMPT_ANSWER) {
     return { approved: false, remember: false, reason: 'The answer was typed on another surface and cannot be forwarded here; answer at this prompt instead.' };
+  }
+  if (status === 'expired' || status === 'cancelled') {
+    return {
+      approved: false,
+      remember: false,
+      reason: typeof decision?.reason === 'string' && decision.reason.length > 0
+        ? decision.reason
+        : status === 'expired'
+          ? 'The ask expired before anyone answered it; ask again if the action is still wanted.'
+          : 'The ask was cancelled before anyone answered it; ask again if the action is still wanted.',
+    };
   }
   const rememberTier = typeof decision?.rememberTier === 'string' && REMEMBER_TIERS.has(decision.rememberTier)
     ? decision.rememberTier as RememberTier
@@ -382,7 +410,7 @@ export function createClientApprovalRaiser(options: ClientApprovalRaiserOptions)
    * Deliberately not tied to the consumer's signal: the decision was taken, and
    * a turn aborted a moment later must not leave the record pending everywhere else.
    */
-  const reportLocalDecision = async (approvalId: string, decision: PermissionPromptDecision): Promise<void> => {
+  const reportLocalDecision = async (approvalId: string, decision: PermissionPromptDecision): Promise<RaisedRecord | null> => {
     try {
       const method = decision.approved ? 'approvals.approve' : 'approvals.deny';
       // Who decided is taken from the authenticated session on the daemon, not
@@ -397,14 +425,41 @@ export function createClientApprovalRaiser(options: ClientApprovalRaiserOptions)
         // Argument changes only ever apply to an approval; a deny runs nothing.
         ...(decision.approved && decision.modifiedArgs !== undefined ? { modifiedArgs: decision.modifiedArgs } : {}),
       };
-      await options.verbs.invoke(method, input);
+      const answered = await options.verbs.invoke<{ approval?: RaisedRecord } | null>(method, input);
+      return answered?.approval?.id === approvalId ? answered.approval : null;
     } catch (error) {
-      // The user has already been served; a failed write-back is a
-      // record-consistency problem, not a reason to re-ask them.
+      // The local answer stands; a failed write-back is a record-consistency
+      // problem, not a reason to re-ask the user.
       logger.warn('[approvals] recording this surface\'s decision on the daemon failed', {
         approvalId,
         error: summarizeError(error),
       });
+      return null;
+    }
+  };
+
+  /**
+   * Send a local answer to the daemon and return what the record's owner
+   * decided: the local answer when the record agrees or the daemon did not
+   * answer in time, the record's own decision when another surface answered first.
+   */
+  const arbitrateLocalDecision = async (approvalId: string, local: PermissionPromptDecision): Promise<PermissionPromptDecision> => {
+    const reporting = reportLocalDecision(approvalId, local);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const deadline = new Promise<'deadline'>((resolve) => {
+      timer = setTimeout(() => resolve('deadline'), options.arbiterWaitMs ?? DEFAULT_ARBITER_WAIT_MS);
+      timer.unref?.();
+    });
+    try {
+      const record = await Promise.race([reporting, deadline]);
+      if (record === 'deadline' || record === null) return local;
+      const final = readRemoteDecision(record);
+      // The record agrees with this surface: run the local answer, which keeps
+      // the fields only this surface holds (a typed answer, the remember tier).
+      if (!final || final.approved === local.approved) return local;
+      return final;
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
     }
   };
 
@@ -442,45 +497,42 @@ export function createClientApprovalRaiser(options: ClientApprovalRaiserOptions)
     const promptSignal = signal ? AbortSignal.any([signal, promptLifetime.signal]) : promptLifetime.signal;
     let settled = false;
     let decided = false;
-    let raisedOnDaemon: RaisedOnDaemon | null = null;
+    // Set by the raise when it lands, which may be after the local answer.
+    let raisedOnDaemon = null as RaisedOnDaemon | null;
     let left = false;
     try {
       const raising = raiseOnDaemon(input);
       // A raise that lands after this caller already left still created a record.
       void raising.then((raised) => { if (raised && left && !decided) cancelAbandoned(raised); }, () => {});
-      raisedOnDaemon = await awaitPermission(() => raising, signal);
-      assertPermissionActive(signal);
       const prompt = options.localPrompt();
-      const askLocal = (): Promise<PermissionPromptDecision> => awaitPermission(async () => {
+      // The prompt is drawn now, not after the raise: the daemon's answer
+      // time never decides when the person in front of this surface is asked.
+      const local = awaitPermission(async () => {
         const decision = await prompt(input.request, { signal: promptSignal });
         assertPermissionActive(signal);
-        return localDecisionSnapshot(decision);
-      }, signal);
-      if (raisedOnDaemon === null) {
-        const decision = await askLocal();
-        decided = true;
-        return decision;
-      }
-      const approvalId = raisedOnDaemon.id;
-
-      const local = askLocal().then((decision) => {
         settled = true;
-        return { source: 'local' as const, decision };
-      });
-      const remote = watchRemote(approvalId, () => settled, observations.signal).then((decision) => {
-        if (decision) settled = true;
-        return decision ? { source: 'remote' as const, decision } : null;
-      }, () => null);
+        return { source: 'local' as const, decision: localDecisionSnapshot(decision) };
+      }, signal);
       // A cancellation can land before the race below subscribes; own the
       // losing branch here so it never surfaces as an unhandled rejection.
       local.catch(() => {});
+      const remote = raising.then(async (raised) => {
+        raisedOnDaemon = raised;
+        if (!raised || settled) return null;
+        const decision = await watchRemote(raised.id, () => settled, observations.signal);
+        if (decision) settled = true;
+        return decision ? { source: 'remote' as const, decision } : null;
+      }).catch(() => null);
       const winner = await awaitPermission(() => Promise.race([
         local,
         remote.then(async (result) => result ?? await local),
       ]), signal);
       assertPermissionActive(signal);
       decided = true;
-      if (winner.source === 'local') void reportLocalDecision(approvalId, winner.decision);
+      if (winner.source === 'remote') return winner.decision;
+      if (raisedOnDaemon) return await arbitrateLocalDecision(raisedOnDaemon.id, winner.decision);
+      // Answered before the raise landed: the record is told once its id is known.
+      void raising.then((raised) => { if (raised) void reportLocalDecision(raised.id, winner.decision); }, () => {});
       return winner.decision;
     } finally {
       settled = true;

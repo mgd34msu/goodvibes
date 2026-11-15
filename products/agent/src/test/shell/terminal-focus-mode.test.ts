@@ -106,11 +106,11 @@ describe('wrapRequestPermissionWithApprovalAlert', () => {
 
   test('fires the notify callback when the terminal is unfocused-or-unknown (honest fallback: never observed = alert)', async () => {
     const focusTracker = new FocusTracker(); // isFocused() starts null, "unknown"
-    const notified: Array<{ title: string; message: string; durationMs: number }> = [];
+    const notified: Array<{ title: string; message: string }> = [];
     const original = async (request: PermissionPromptRequest) => ({ approved: true, remember: false, request });
     const wrapped = wrapRequestPermissionWithApprovalAlert(original as never, {
       focusTracker,
-      notify: (title, message, durationMs) => { notified.push({ title, message, durationMs }); },
+      notify: (title, message) => { notified.push({ title, message }); },
     });
 
     const request = makeRequest();
@@ -190,5 +190,17 @@ describe('wrapRequestPermissionWithApprovalAlert', () => {
     });
     const result = await wrapped(makeRequest());
     expect((result as { approved: boolean }).approved).toBe(true);
+  });
+  test('the approval-alert settings mean what they mean in the TUI', async () => {
+    const original = async () => ({ approved: true, remember: false });
+    const unfocused = new FocusTracker(); unfocused.setFocused(false);
+    const focused = new FocusTracker(); focused.setFocused(true);
+    const count = async (focusTracker: FocusTracker, config: Record<string, unknown>) => {
+      let calls = 0;
+      await wrapRequestPermissionWithApprovalAlert(original as never, { focusTracker, configGet: (key) => config[key], notify: () => { calls += 1; } })(makeRequest());
+      return calls;
+    };
+    expect(await count(unfocused, { 'behavior.notifyOnApprovalPending': false })).toBe(0);
+    expect(await count(focused, { 'behavior.notifyOnlyWhenUnfocused': false })).toBe(1);
   });
 });

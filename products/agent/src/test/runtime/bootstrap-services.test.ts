@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
-import { RuntimeEventBus, startExternalServices } from '@/runtime/index.ts';
+import { startExternalServices } from '@/runtime/index.ts';
 import { HookDispatcher } from '@goodvibes-jev/engine/platform/platform/hooks';
 import { getTestRuntimeServices } from '../helpers/runtime-services.ts';
 
@@ -32,47 +32,36 @@ function createConfig(overrides: {
 }
 
 describe('startExternalServices (Agent: adopt-only)', () => {
-  let runtimeBus: RuntimeEventBus;
   let hookDispatcher: HookDispatcher;
   let runtimeServices: Awaited<ReturnType<typeof getTestRuntimeServices>>;
 
   beforeEach(async () => {
-    runtimeBus = new RuntimeEventBus();
     hookDispatcher = new HookDispatcher();
     runtimeServices = (await getTestRuntimeServices());
   });
 
   test('never spawns or embeds a daemon even when legacy flags are enabled', async () => {
-    const spawnDetachedDaemon = mock(() => ({ pid: 1, unref: () => {} }));
     const probeDaemonPortInUse = mock(async () => false);
 
     // httpListener stays at its default (disabled) here so this test never
     // reaches the (unrelated) real HTTP-listener embed path.
     const services = await startExternalServices(
       createConfig({ daemon: true }),
-      runtimeBus,
       hookDispatcher,
       runtimeServices.asDaemonGradeView(),
       {
-        adoptOnly: true,
-        spawnDetachedDaemon,
         probeDaemonPortInUse,
       },
     );
 
-    // adoptOnly never spawns/embeds the daemon regardless of daemon.enabled:
-    // with the port free, adoptOnly steers the decision to 'adopt-only-idle'
-    // rather than 'spawn', so the detached-spawn seam is never invoked.
-    expect(spawnDetachedDaemon).not.toHaveBeenCalled();
+    // The host only adopts: with the port free it reports the daemon unavailable.
     expect(probeDaemonPortInUse).toHaveBeenCalledTimes(1);
-    expect(services.daemonServer).toBeNull();
     expect(services.httpListener).toBeNull();
     expect(services.daemonStatus.mode).toBe('unavailable');
-    expect(services.daemonStatus.reason).toContain('adopt-only');
+    expect(services.daemonStatus.reason).toContain('goodvibes-daemon install-service');
     expect(services.httpListenerStatus.mode).toBe('disabled');
 
     await services.stop();
-    expect(services.listRecentControlPlaneEvents(100)).toEqual([]);
   });
 
   test('adopts a reachable, version-compatible daemon on the configured endpoint', async () => {
@@ -88,11 +77,9 @@ describe('startExternalServices (Agent: adopt-only)', () => {
         controlPlaneHost: '0.0.0.0',
         controlPlanePort: 4444,
       }),
-      runtimeBus,
       hookDispatcher,
       runtimeServices.asDaemonGradeView(),
       {
-        adoptOnly: true,
         probeDaemonPortInUse: async () => true,
         probeDaemonIdentity,
         localDaemonVersion: '1.0.0',
@@ -124,11 +111,9 @@ describe('startExternalServices (Agent: adopt-only)', () => {
 
     const services = await startExternalServices(
       createConfig({ daemon: true }),
-      runtimeBus,
       hookDispatcher,
       runtimeServices.asDaemonGradeView(),
       {
-        adoptOnly: true,
         probeDaemonPortInUse: async () => true,
         probeDaemonIdentity,
         localDaemonVersion: 'local-fixture-version',
@@ -136,7 +121,6 @@ describe('startExternalServices (Agent: adopt-only)', () => {
       },
     );
 
-    expect(services.daemonServer).toBeNull();
     expect(services.daemonStatus.mode).toBe('incompatible');
     expect(services.daemonStatus.version).toBe('incompatible-fixture-version');
   });
@@ -144,17 +128,14 @@ describe('startExternalServices (Agent: adopt-only)', () => {
   test('reports a blocked port when the occupant does not verify as a GoodVibes daemon', async () => {
     const services = await startExternalServices(
       createConfig({ daemon: true }),
-      runtimeBus,
       hookDispatcher,
       runtimeServices.asDaemonGradeView(),
       {
-        adoptOnly: true,
         probeDaemonPortInUse: async () => true,
         probeDaemonIdentity: async () => ({ kind: 'unknown', reason: 'connection reset' }),
       },
     );
 
-    expect(services.daemonServer).toBeNull();
     expect(services.daemonStatus.mode).toBe('blocked');
   });
 

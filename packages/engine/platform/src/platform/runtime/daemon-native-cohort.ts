@@ -6,6 +6,7 @@ import type { UpdateTarget } from './self-update.js';
 import { hasNativeUpdateObservations, type UpdateFileIo } from './update-file-io.js';
 import { captureIdentity, sameIdentity, retainNativeUpdateSources } from './native-file-sources.js';
 import { NATIVE_PREVIOUS_READER_RECEIPT_FORMAT, parseNativeReaderCapabilities, type NativeReaderCapabilities } from './native-reader-compatibility.js';
+import { nativeCohortMembers } from './native-cohort-table.js';
 
 export const DAEMON_NATIVE_TARGETS = ['linux-x64', 'linux-arm64'] as const;
 export type DaemonNativeTarget = typeof DAEMON_NATIVE_TARGETS[number];
@@ -35,16 +36,12 @@ export interface DaemonPreviousReader {
 function record(value: unknown): value is Record<string, unknown> { return value !== null && typeof value === 'object' && !Array.isArray(value); }
 function exact(value: Record<string, unknown>, keys: readonly string[]): boolean { return Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key)); }
 function digest(bytes: Uint8Array): string { return createHash('sha256').update(bytes).digest('hex'); }
+/** The Linux daemon's installed members, from the one cohort table (native-cohort-table.ts). */
 export function resolveDaemonNativePayloads(platform: string, arch: string): readonly DaemonNativePayload[] | null {
   if (platform !== 'linux' || (arch !== 'x64' && arch !== 'arm64')) return null;
-  const binary = `goodvibes-daemon-linux-${arch}`;
-  return Object.freeze([
-    { relativePath: binary, assetName: binary, executable: true },
-    { relativePath: `${binary}.bun`, assetName: `${binary}.bun`, executable: true },
-    { relativePath: `${binary}.bun.LICENSE.md`, assetName: `${binary}.bun.LICENSE.md`, executable: false },
-    { relativePath: `${binary}.bun.json`, assetName: `${binary}.bun.json`, executable: false },
-    { relativePath: `lib/sqlite-vec-linux-${arch}/vec0.so`, assetName: `sqlite-vec-linux-${arch}.so`, executable: false },
-  ].map(value => Object.freeze(value)));
+  return Object.freeze(nativeCohortMembers('goodvibes-daemon', `linux-${arch}`).map((member) => Object.freeze({
+    relativePath: member.path, assetName: member.asset, executable: member.mode === 0o755,
+  })));
 }
 export function resolveDaemonNativeTargets(execPath: string, platform: string, arch: string): readonly UpdateTarget[] | null {
   const payloads = resolveDaemonNativePayloads(platform, arch);

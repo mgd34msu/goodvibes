@@ -32,15 +32,10 @@
  * would, e.g., corrupt `status --json` for a machine consumer.
  *
  * wrapRequestPermissionWithApprovalAlert(): fires an unfocused-user alert the
- * moment a tool call becomes a real, user-blocking permission prompt. Ported
- * concept from goodvibes-tui's core/approval-alert.ts, scoped down: that
- * module's config-gated alert-class system (alert-gating.ts's
- * behavior.notifyOnApprovalPending / notifyOnlyWhenUnfocused settings, shared
- * with budget-breach/long-task/chain-failure notifiers) is TUI-specific
- * infrastructure the port's parity matrix does not list as a PORT item, only
- * core/focus-tracker.ts is. This is the minimal, self-contained wiring the
- * matrix's own text calls for ("route focus in/out events ... to drive
- * awaiting-approval alerts").
+ * moment a tool call becomes a real, user-blocking permission prompt. Whether
+ * it fires is the platform gate (runtime/alert-gating.ts shouldFireAlert) the
+ * TUI uses too, so behavior.notifyOnApprovalPending and
+ * behavior.notifyOnlyWhenUnfocused mean the same thing in both apps.
  *
  * Text (owner ruling 2026-09-29, platform runtime/turn-notification.ts, the same
  * words the TUI uses): the alert names what is waiting, the command for exec,
@@ -48,30 +43,20 @@
  * it. Unless behavior.notificationsMetadataOnly is explicitly false it carries
  * the tool name and permission category only.
  */
-import { logger, notifyCompletion, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { logger, notifyNow, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { PermissionRequestHandler, PermissionPromptRequest } from '@goodvibes-jev/engine/platform/platform/permissions';
 import {
   buildApprovalNotification,
   describeToolTarget,
   readNotificationsMetadataOnly,
   resolveTurnName,
+  shouldFireAlert,
   type ConfigGet,
 } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import type { FocusTracker } from '@/runtime/index.ts';
 
 import { FOCUS_DISABLE } from '../renderer/terminal-escapes.ts';
 export { FOCUS_ENABLE, FOCUS_DISABLE } from '../renderer/terminal-escapes.ts';
-
-/**
- * notifyCompletion (platform platform/utils) only rings the bell above 5s of
- * "duration" and only pops a desktop notification above 30s, a heuristic
- * tuned for long-running-turn notifications (ported alongside
- * goodvibes-tui's alert-gating.ts FORCE_NOTIFY_DURATION_MS). The
- * approval-alert wire is a point-in-time event with no natural duration, so
- * it passes this constant as durationMs to force both the bell and the
- * desktop popup unconditionally.
- */
-export const FORCE_APPROVAL_NOTIFY_DURATION_MS = 30_001;
 
 /**
  * Whether the TUI actually enabled OS focus reporting (DECSET ?1004h) this run.
@@ -104,8 +89,13 @@ export function installFocusModeExitGuard(
 
 export interface ApprovalAlertDeps {
   readonly focusTracker: Pick<FocusTracker, 'shouldAlertWhenUnfocused'>;
-  readonly notify?: typeof notifyCompletion;
-  /** Config reader for behavior.notificationsMetadataOnly; absent or invalid reads remain metadata-only. */
+  /** Bell and desktop delivery; defaults to the platform notifyNow. */
+  readonly notify?: (title: string, body: string) => void;
+  /**
+   * Config reader for the alert gate (behavior.notifyOnApprovalPending,
+   * behavior.notifyOnlyWhenUnfocused) and behavior.notificationsMetadataOnly.
+   * Absent: the gate uses its defaults and text stays metadata-only.
+   */
   readonly configGet?: ConfigGet;
   /**
    * The live conversation, read for the name of the turn that is asking: a
@@ -150,12 +140,13 @@ export function wrapRequestPermissionWithApprovalAlert(
   original: PermissionRequestHandler,
   deps: ApprovalAlertDeps,
 ): PermissionRequestHandler {
-  const notify = deps.notify ?? notifyCompletion;
+  const notify = deps.notify ?? notifyNow;
+  const configGet: ConfigGet = deps.configGet ?? (() => undefined);
   return (request: PermissionPromptRequest, options) => {
-    if (deps.focusTracker.shouldAlertWhenUnfocused()) {
+    if (shouldFireAlert(deps.focusTracker, configGet, 'behavior.notifyOnApprovalPending')) {
       try {
         const notice = describeApprovalAlert(request, deps);
-        notify(notice.title, notice.body, FORCE_APPROVAL_NOTIFY_DURATION_MS);
+        notify(notice.title, notice.body);
       } catch (err) {
         logger.debug('approval-alert: desktop notify error', { error: summarizeError(err) });
       }

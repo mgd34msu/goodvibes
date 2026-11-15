@@ -10,18 +10,17 @@
  * manager. Assembled anywhere but in one place, a half-wired graph looks
  * correct and silently drops either the snapshot bridge or the contracts.
  *
- * The platform's own loop graph (agent-graph.ts) wires the same links without a contract runner;
- * a link added to one belongs in the other.
+ * The bus, loader, orchestrator and manager and their links come from
+ * createAgentGraph (agent-graph.ts), the one place that wiring is written.
  *
  * It is also the graph whose runs `cancelHostedAgentRuns` cancels at disposal:
  * the manager returned here is the one the runtime hands to the platform's
  * `cancelAllAgentRuns`. `dispose` releases the runner and its store.
  */
-import { join } from 'node:path';
-import { resolveProcessCapturedBunRuntimeExecutable } from './captured-bun-runtime.js';
-import { AgentMessageBus, AgentOrchestrator, ArchetypeLoader } from '../agents/index.js';
+import type { AgentMessageBus, AgentOrchestrator, ArchetypeLoader } from '../agents/index.js';
 import type { ContractRunner } from '../contract/runner.js';
-import { AgentManager, ContextAccountingHolder } from '../tools/index.js';
+import { ContextAccountingHolder, type AgentManager } from '../tools/index.js';
+import { createAgentGraph } from './agent-graph.js';
 import type { ConfigManager } from '../config/index.js';
 import type { ProviderRegistry } from '../providers/index.js';
 import { composeContractRunner, nativeAgentFleetCapacity, resumeContracts } from './contract-composition.js';
@@ -68,36 +67,8 @@ export interface ContractedAgentGraphOptions extends AgentExecutionGraphOptions 
  * use createContractedAgentGraph when its native-only fleet and resume policy apply.
  */
 export function createAgentExecutionGraph(options: AgentExecutionGraphOptions): AgentExecutionGraph {
-  const agentMessageBus = new AgentMessageBus();
-  agentMessageBus.setRuntimeBus(options.runtimeBus);
-  const archetypeLoader = new ArchetypeLoader(join(options.workingDirectory, '.goodvibes', 'agents'));
-  const agentOrchestrator = new AgentOrchestrator({
-    messageBus: agentMessageBus,
-    capturedBunRuntimeExecutable: options.capturedBunRuntimeExecutable ?? resolveProcessCapturedBunRuntimeExecutable(),
-  });
-  agentOrchestrator.setRuntimeBus(options.runtimeBus);
-  const agentManager = new AgentManager({
-    archetypeLoader,
-    messageBus: agentMessageBus,
-    executor: agentOrchestrator,
-    configManager: options.configManager,
-    // The live registry lets a bare model id in a spawn() override resolve
-    // through the shared resolver instead of being rejected as unqualified.
-    providerRegistry: options.providerRegistry,
-    additionalFleetOwnership: options.additionalFleetOwnership,
-  });
-  const contextAccountingHolder = new ContextAccountingHolder();
-  // Conversation-snapshot bridge (mirrors the platform's own createRuntimeServices).
-  agentOrchestrator.setConversationSink({
-    register: (agentId, source) => agentManager.registerConversationSource(agentId, source),
-    release: (agentId) => agentManager.releaseConversationSource(agentId),
-  });
-  // Without this bridge a cancel never reaches an in-flight exec, fetch or judgment call.
-  agentOrchestrator.setCancellationSource({
-    get: (agentId) => agentManager.getCancellationSignal(agentId),
-  });
-  agentManager.setRuntimeBus(options.runtimeBus);
-  return { agentMessageBus, archetypeLoader, agentOrchestrator, agentManager, contextAccountingHolder };
+  const graph = createAgentGraph(options);
+  return { ...graph, contextAccountingHolder: new ContextAccountingHolder() };
 }
 
 /** Build the complete default graph and resume its contracts once per project root. */

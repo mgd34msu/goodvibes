@@ -7,12 +7,9 @@ import { openRecordLog, type RecordLog } from '../state/record-log.js';
 import {
   type AtRestPolicy,
   DEFAULT_AT_REST_POLICY,
-  AtRestLineWriter,
   enforceJournalDirectoryRetention,
+  redactAtRestLine,
 } from '../runtime/at-rest-persistence.js';
-
-/** The decision site the journal's credential span readings are logged under. */
-const AGENT_JOURNAL_CREDENTIAL_SITE = 'agents.session.journal-credential-span';
 
 export interface AgentSessionPaths {
   readonly sessionsDir: string;
@@ -53,8 +50,6 @@ export class AgentSession {
   /** The at-rest redaction + retention policy for this journal. */
   private readonly atRestPolicy: AtRestPolicy;
 
-  /** Keeps journal lines in order while their credential spans are read. */
-  private readonly lineWriter = new AtRestLineWriter(AGENT_JOURNAL_CREDENTIAL_SITE);
   private disposal: Promise<void> | undefined;
   /**
    * Journal lines that could not be written (a full disk, a permission error).
@@ -107,28 +102,22 @@ export class AgentSession {
 
   /**
    * Append a message record to the agent's JSONL log.
-   * Each record is written as a single JSON line. With redaction on, a line
-   * carrying a credential-shaped span that has not been read yet is written
-   * once the span is read (engine.runtime.at-rest-credential), after every
-   * line ahead of it; {@link flush} waits for those.
+   * Each record is written at once as a single JSON line, with credentials
+   * masked when the policy says so.
    */
   appendMessage(msg: Record<string, unknown>): void {
     try {
       const serialized = JSON.stringify(msg);
-      if (this.atRestPolicy.redact) {
-        this.lineWriter.write(serialized, (line) => this._appendLine(line));
-      } else {
-        this._appendLine(serialized);
-      }
+      this._appendLine(this.atRestPolicy.redact ? redactAtRestLine(serialized) : serialized);
     } catch (err) {
       this.lostWrites += 1;
       logger.error('AgentSession.appendMessage failed', { agentId: this.agentId, error: summarizeError(err) });
     }
   }
 
-  /** Resolves once every appended message is on disk. */
-  flush(): Promise<void> {
-    return this.lineWriter.flush();
+  /** Resolves once every appended message is synced to disk. */
+  async flush(): Promise<void> {
+    await this.journal?.flush();
   }
 
   /**
@@ -145,7 +134,6 @@ export class AgentSession {
       messages: verificationMessages(this.conversation, this.conversation.getMessageSnapshot()),
       archive: verificationHistory(this.conversation), timestamp: Date.now() });
     this.disposal = (async () => {
-      await this.flush();
       const journal = this.journal;
       this.journal = null;
       this.journalClosed = true;

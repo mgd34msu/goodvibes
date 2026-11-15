@@ -2,9 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   classifyDaemonProbe,
   decideDaemonAdoption,
-  startHostServices,
   type DaemonIdentityProbeResult,
-  type HostServicesConfig,
 } from '../platform/src/platform/runtime/bootstrap.ts';
 import { isDaemonVersionCompatible } from '../platform/src/platform/runtime/daemon-version-compat.ts';
 
@@ -82,50 +80,5 @@ describe('decideDaemonAdoption', () => {
       // This is the agent-stub gap the hoist closes, it would have adopted blindly.
       expect(decideDaemonAdoption({ ...base, enabled: true, portInUse: true, identity: goodvibes('9.9.9'), adoptOnly: true }).action).toBe('incompatible');
     });
-  });
-});
-
-// ── Integration: adopt-only flows through startHostServices ────────────────────
-
-function baseConfig(values: Record<string, boolean | number | string> = {}): HostServicesConfig {
-  const merged: Record<string, boolean | number | string> = {
-    'daemon.enabled': true,
-    'danger.httpListener': false,
-    'controlPlane.host': '127.0.0.1',
-    'controlPlane.port': 3421,
-    'httpListener.host': '127.0.0.1',
-    'httpListener.port': 3422,
-    ...values,
-  };
-  return { get: (key) => merged[key] ?? false };
-}
-
-const runtimeBus = {} as never;
-const hookDispatcher = {} as never;
-const runtimeServices = { localUserAuthManager: {}, configManager: {} } as never;
-
-describe('startHostServices: adopt-only policy', () => {
-  test('port free + adoptOnly: never spawns, reports unavailable', async () => {
-    let spawnCalled = false;
-    const handle = await startHostServices(baseConfig(), runtimeBus, hookDispatcher, runtimeServices, {
-      adoptOnly: true,
-      probeDaemonPortInUse: async () => false,
-      spawnDetachedDaemon: () => { spawnCalled = true; return { pid: 1, unref() {} }; },
-    });
-    expect(spawnCalled).toBe(false);
-    expect(handle.daemonServer).toBeNull();
-    expect(handle.daemonStatus.mode).toBe('unavailable');
-    expect(handle.daemonStatus.reason).toContain('adopt-only');
-  });
-
-  test('compatible daemon present + adoptOnly: adopts as external', async () => {
-    const handle = await startHostServices(baseConfig(), runtimeBus, hookDispatcher, runtimeServices, {
-      adoptOnly: true,
-      isDaemonVersionCompatible: () => true,
-      probeDaemonPortInUse: async () => true,
-      probeDaemonIdentity: async () => ({ kind: 'goodvibes' as const, status: 'running', version: '1.2.3' }),
-    });
-    expect(handle.daemonStatus.mode).toBe('external');
-    expect(handle.daemonStatus.version).toBe('1.2.3');
   });
 });

@@ -1,8 +1,4 @@
 import { describe, expect, test } from 'bun:test';
-import { mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { ConfigurationError } from '@goodvibes-jev/engine/errors';
 import { createDaemonIdentityProof, DAEMON_CHALLENGE_HEADER, DAEMON_PROOF_HEADER } from '../platform/src/platform/daemon/identity-proof.ts';
 import { startHostServices, type HostServicesConfig } from '../platform/src/platform/runtime/bootstrap-services.ts';
 
@@ -17,10 +13,8 @@ function baseConfig(values: Record<string, boolean | number | string> = {}): Hos
     ...values,
   });
 }
-const runtimeBus = {} as never;
 const hookDispatcher = {} as never;
 const runtimeServices = { localUserAuthManager: {}, configManager: {} } as never;
-const yieldOnce = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
 
 describe('the identity probe and the daemon token', () => {
   async function withStatusServer(respond: (authorization: string | null, request: Request) => Response, run: (port: number, seen: Array<string | null>) => Promise<void>): Promise<void> {
@@ -32,11 +26,10 @@ describe('the identity probe and the daemon token', () => {
 
   test('the first request carries no token, and a daemon that answers without one never receives it', async () => {
     await withStatusServer(() => running(), async (port, seen) => {
-      const handle = await startHostServices(baseConfig({ 'controlPlane.port': port }), runtimeBus, hookDispatcher, runtimeServices, {
+      const handle = await startHostServices(baseConfig({ 'controlPlane.port': port }), hookDispatcher, runtimeServices, {
         sharedDaemonToken: 'secret-token',
         isDaemonVersionCompatible: () => true,
         probeDaemonPortInUse: async () => true,
-        spawnDetachedDaemon: () => { throw new Error('must not spawn'); },
       });
       expect(handle.daemonStatus.mode).toBe('external');
       expect(seen).toEqual([null]);
@@ -51,11 +44,10 @@ describe('the identity probe and the daemon token', () => {
     if (challenge) refusal.headers.set(DAEMON_PROOF_HEADER, createDaemonIdentityProof(token, challenge));
     return refusal;
   };
-  const adopt = (port: number) => startHostServices(baseConfig({ 'controlPlane.port': port }), runtimeBus, hookDispatcher, runtimeServices, {
+  const adopt = (port: number) => startHostServices(baseConfig({ 'controlPlane.port': port }), hookDispatcher, runtimeServices, {
     sharedDaemonToken: 'secret-token',
     isDaemonVersionCompatible: () => true,
     probeDaemonPortInUse: async () => true,
-    spawnDetachedDaemon: () => { throw new Error('must not spawn'); },
   });
 
   test('a daemon that proves it holds the token is retried once with the token', async () => {
@@ -88,36 +80,5 @@ describe('the identity probe and the daemon token', () => {
       await adopt(port);
       expect(seen).toEqual([null]);
     });
-  });
-});
-
-describe('starting the daemon', () => {
-  test('two hosts started together spawn one daemon and both adopt it', async () => {
-    let spawned = 0;
-    const factories = {
-      daemonRuntimeDir: mkdtempSync(join(tmpdir(), 'gv-spawn-lock-')),
-      sleep: yieldOnce,
-      isDaemonVersionCompatible: () => true,
-      probeDaemonPortInUse: async () => spawned > 0,
-      probeDaemonIdentity: async () => ({ kind: 'goodvibes' as const, status: 'running', version: '1.0.0' }),
-      spawnDetachedDaemon: () => { spawned += 1; return { pid: 4242, unref() {} }; },
-    };
-    const [first, second] = await Promise.all([
-      startHostServices(baseConfig(), runtimeBus, hookDispatcher, runtimeServices, factories),
-      startHostServices(baseConfig(), runtimeBus, hookDispatcher, runtimeServices, factories),
-    ]);
-    expect(spawned).toBe(1);
-    expect(first.daemonStatus.mode).toBe('external');
-    expect(second.daemonStatus.mode).toBe('external');
-  });
-
-  test('an invalid setting is refused before any daemon is spawned', async () => {
-    let spawned = 0;
-    await expect(startHostServices(baseConfig({ 'danger.httpListener': 'yes' }), runtimeBus, hookDispatcher, runtimeServices, {
-      daemonRuntimeDir: mkdtempSync(join(tmpdir(), 'gv-spawn-lock-')),
-      probeDaemonPortInUse: async () => false,
-      spawnDetachedDaemon: () => { spawned += 1; return { pid: 1, unref() {} }; },
-    })).rejects.toBeInstanceOf(ConfigurationError);
-    expect(spawned).toBe(0);
   });
 });

@@ -1,23 +1,20 @@
 /**
- * `engine.runtime.at-rest-credential`: is a string found in a line about to be
- * written to the owner's own disk (the per-agent transcript journal, the local
- * execution ledger and span file, the crash log) a credential value? Read by
- * at-rest-persistence.ts in place of the rule that masked, as a credential,
- * any `sk-` token of 20 or more characters, any `key-` token of 16 or more,
- * and the word after a case-insensitive `Bearer` (utils/redaction.ts). That
- * rule masked `key-rotation-policy-for-tenants` and the `of` in "the bearer of
- * bad news" in the owner's journal and ledger.
+ * `engine.runtime.at-rest-credential`: is a string in a credential candidate
+ * shape (an `sk-` token of 20 or more characters, a `key-` token of 16 or
+ * more, the word after `Bearer`; utils/redaction.ts finds them) a credential
+ * value?
  *
- * The three shapes still FIND the candidate spans in code; they no longer
- * decide. One yes/no per distinct span, each its own request, with the text
- * around the span as context. The issuer-reserved formats (`ghp_`, `gho_`,
- * `github_pat_`, `glpat-`, `xoxb-`, `xoxp-`, `AKIA`) are credentials by the
- * issuer's own definition and stay code.
+ * Its one caller is the Agent's external-memory metadata projection
+ * (products/agent readMemoryPublicText), which sees every candidate with no
+ * local admission in front, so the fixtures below are the population it
+ * sends. The at-rest writers (journal, ledger, crash log) do not ask: they
+ * decide in code (runtime/at-rest-persistence.ts isReadableCredentialCandidate)
+ * and never send a span off the machine.
  *
- * Band: critical stakes. A credential read as ordinary text is written in the
- * clear to disk; ordinary text read as a credential only costs a readable
- * word. The span is kept in the clear only on a no verdict, which the critical
- * band gives at 0.9 confidence or more; yes, uncertain, or no reading at all
+ * Band: critical stakes. A credential read as ordinary text is shown in the
+ * clear; ordinary text read as a credential only costs a readable word. The
+ * span is kept in the clear only on a no verdict, which the critical band
+ * gives at 0.9 confidence or more; yes, uncertain, or no reading at all
  * leaves the span masked.
  */
 import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes-jev/judgment';

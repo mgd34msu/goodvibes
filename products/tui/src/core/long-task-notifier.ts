@@ -45,7 +45,7 @@ import {
   FORCE_NOTIFY_DURATION_MS,
   buildTurnNotification,
   readNotificationsMetadataOnly,
-  readNotifyOnlyWhenUnfocused,
+  shouldFireAlert,
   type ConfigGet,
   type TurnOutcome,
   type TurnNotificationFacts,
@@ -182,7 +182,7 @@ export function maybeNotifyLongTask(opts: MaybeNotifyLongTaskOptions): boolean {
   // Focus gate: only applied when both a tracker and a config reader
   // are supplied. Absent either one, behavior is unchanged from before focus
   // gating existed (always fire once the threshold is met).
-  if (focusTracker && configGet && readNotifyOnlyWhenUnfocused(configGet) && !focusTracker.shouldAlertWhenUnfocused()) {
+  if (focusTracker && configGet && !shouldFireAlert(focusTracker, configGet)) {
     logger.debug('long-task-notifier: suppressed; terminal focused');
     return false;
   }

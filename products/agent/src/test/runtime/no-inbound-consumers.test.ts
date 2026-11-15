@@ -3,9 +3,8 @@
  * composes NO inbound channel consumer of its own.
  *
  * This process never runs a daemon of its own. `src/runtime/bootstrap-external-services.ts`
- * only ever ADOPTS a connected host through the platform's adopt-or-spawn policy
- * with `adoptOnly: true`, it never constructs, embeds, or restarts a
- * DaemonServer, and there is no getUpdates/ntfy/inbox poll loop anywhere
+ * only ever ADOPTS a connected host through the platform's host services,
+ * which have no path that constructs, embeds, or restarts a DaemonServer, and there is no getUpdates/ntfy/inbox poll loop anywhere
  * under src/ outside tests.
  *
  * That property is true today by construction, but nothing enforced it.
@@ -23,11 +22,10 @@ import { createDeferredStartupCoordinator, startExternalServices, type ExternalS
 
 
 describe('external-services bootstrap stays adopt-only (no daemon construction)', () => {
-  test('wireAgentExternalServices calls the platform adopt-or-spawn policy with adoptOnly: true, never with a construction/embed factory', async () => {
+  test('wireAgentExternalServices calls the adopt-only platform host services once during boot discovery', async () => {
     // Drive the real seam with injected fakes instead of grepping text: this
     // proves the *behavior*, not just the source shape, so a future refactor
-    // that keeps the words "adoptOnly: true" somewhere but stops passing them
-    // to the platform policy call still fails this test.
+    // that routes boot discovery around the platform call still fails this test.
     const daemonReceiptFeed = new AgentDaemonReceiptFeed();
     const memoryConsolidationReceiptFeed = new AgentDaemonReceiptFeed();
 
@@ -64,10 +62,9 @@ describe('external-services bootstrap stays adopt-only (no daemon construction)'
       configManager,
       runtimeBus: {} as never,
       hookDispatcher: {} as never,
-      // `asDaemonGradeView` is what the wiring hands the adopt-or-spawn policy:
-      // the graph with its two client narrowings substituted back. Under
-      // adoptOnly the policy reads only localUserAuthManager and configManager
-      // off it and never constructs a DaemonServer, which is this test's point.
+      // `asDaemonGradeView` is what the wiring hands the platform: the graph
+      // with its two client narrowings substituted back. The platform reads only
+      // localUserAuthManager and configManager off it.
       services: { daemonReceiptFeed, memoryConsolidationReceiptFeed, asDaemonGradeView: () => ({}) } as never,
       uiServices: { platform: {} } as never,
       deferredStartup,
@@ -88,26 +85,9 @@ describe('external-services bootstrap stays adopt-only (no daemon construction)'
     const calls = (startServicesSpy as unknown as { mock: { calls: unknown[][] } }).mock.calls;
     expect(
       calls.length,
-      'wireAgentExternalServices must call the platform adopt-or-spawn policy exactly once during boot discovery. ' +
+      'wireAgentExternalServices must call the platform host services exactly once during boot discovery. ' +
       'This process is adopt-only: it connects to an existing daemon rather than running one. If this count ' +
       'changed, check what boot-time path now bypasses the shared policy call.',
     ).toBe(1);
-
-    const [, , , , factories] = calls[0] as [unknown, unknown, unknown, unknown, Record<string, unknown> | undefined];
-    expect(
-      factories,
-      'The Agent must pass { adoptOnly: true } (and no daemon-construction factory) to the platform\'s startHostServices ' +
-      'policy. adoptOnly is what stops this process from ever spawning or embedding its own DaemonServer, per the ' +
-      'contract in src/runtime/bootstrap-external-services.ts. Losing this flag would let the Agent construct a ' +
-      'daemon of its own; that is an architectural change to how this process relates to the daemon it connects ' +
-      'to, and it must be raised and agreed on deliberately, not land as a side effect of this call site changing.',
-    ).toEqual({ adoptOnly: true });
-    expect(
-      factories && 'createDaemonServer' in factories,
-      'No daemon-construction factory may be passed at this call site. The platform deleted the createDaemonServer ' +
-      'slot when in-process daemon composition was removed; this runtime check stays as insurance against the ' +
-      'slot being reintroduced or smuggled through as an untyped extra. This process adopts connected hosts; ' +
-      'it does not build them.',
-    ).toBe(false);
   });
 });

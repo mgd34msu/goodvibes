@@ -95,15 +95,21 @@ test('one cancelled remote participant does not close or decide its active peer'
   for (const prompt of prompts) prompt.resolve({ approved: true, rememberTier: 'tool' }); await turn(); noRemoteMutation(wire.calls);
 });
 
-test('a late daemon raise does not start a local prompt after cancellation', async () => {
-  const opening = deferred<unknown>(); let invoked = false; const prompt = mock(async () => ({ approved: true }));
+test('the local prompt starts before a slow raise lands; cancelling clears it and retires the late record', async () => {
+  const opening = deferred<unknown>(); const methods: string[] = []; let promptSignal: AbortSignal | undefined;
+  const prompt = mock(async (_request: unknown, options?: { signal?: AbortSignal | undefined }) => { promptSignal = options?.signal; return await new Promise<never>(() => {}); });
   const controller = new AbortController();
   const raise = createClientApprovalRaiser({ actor: 'synthetic', localPrompt: () => prompt, verbs: {
-    probe: () => ({ available: true }), async invoke<T>() { invoked = true; return await opening.promise as T; },
+    probe: () => ({ available: true }),
+    async invoke<T>(method: string) { methods.push(method); return (method === 'approvals.raise' ? await opening.promise : {}) as T; },
   } });
-  const result = caught(raise({ request, signal: controller.signal })); await until(() => invoked);
+  const result = caught(raise({ request, signal: controller.signal }));
+  await until(() => prompt.mock.calls.length === 1);
+  expect(methods).toEqual(['approvals.raise']);
   controller.abort(new Error(PRIVATE_REASON)); cancelled(await result);
-  opening.resolve({ approval: { id: 'wire-owner-remains' } }); await turn(); expect(prompt).not.toHaveBeenCalled();
+  expect(promptSignal?.aborted).toBe(true);
+  opening.resolve({ approval: { id: 'late-record' }, coalesced: false }); await turn(); await turn();
+  expect(methods).toContain('approvals.cancel');
 });
 
 test('workspace trust coalesces its choice while preserving independent consumer signals', async () => {

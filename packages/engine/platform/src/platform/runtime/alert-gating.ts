@@ -35,11 +35,14 @@ export function readNotifyOnlyWhenUnfocused(configGet: ConfigGet): boolean {
 }
 
 /**
- * Decide whether a given alert class should fire right now.
+ * Decide whether a given alert class should fire right now. Every terminal
+ * product calls this for every alert class, so a setting means the same thing
+ * in each.
  *
  * `classConfigKey` is the per-class on/off switch (e.g.
  * 'behavior.notifyOnBudgetBreach'); default true when absent. When that key
- * is off, the class never fires regardless of focus. When it's on, the
+ * is off, the class never fires regardless of focus. A class with no switch of
+ * its own (the long-task notice, switched by its threshold) passes none. When it's on, the
  * result additionally depends on the master `notifyOnlyWhenUnfocused` gate:
  * if that master gate is off, the class fires unconditionally (today's
  * pre-focus-tracking behavior); if on (the default), it only fires when the
@@ -49,19 +52,16 @@ export function readNotifyOnlyWhenUnfocused(configGet: ConfigGet): boolean {
 export function shouldFireAlert(
   focusTracker: Pick<FocusTracker, 'shouldAlertWhenUnfocused'>,
   configGet: ConfigGet,
-  classConfigKey: string,
+  classConfigKey?: string,
 ): boolean {
-  if (!readBooleanConfig(configGet, classConfigKey, true)) return false;
+  if (classConfigKey !== undefined && !readBooleanConfig(configGet, classConfigKey, true)) return false;
   if (!readNotifyOnlyWhenUnfocused(configGet)) return true;
   return focusTracker.shouldAlertWhenUnfocused();
 }
 
 /**
- * notifyCompletion (platform/utils) only rings the bell above 5s of
- * "duration" and only pops a desktop notification above 30s, a heuristic
- * tuned for long-running-turn notifications. The alert classes gated here are
- * point-in-time events with no natural duration, so they pass this constant as
- * the `durationMs` argument to force both the bell and the desktop popup
- * unconditionally.
+ * A duration above both notifyCompletion thresholds, for callers that still
+ * pass a duration for a point-in-time alert. New code calls notifyNow
+ * (platform/utils), which needs no duration.
  */
 export const FORCE_NOTIFY_DURATION_MS = 30_001;

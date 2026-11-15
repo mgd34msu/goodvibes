@@ -24,30 +24,28 @@ def needs_metadata(name):
     return bool(match and (match[4] == 'reader-ci-artifact' or match[1] == 'goodvibes-daemon' and match[2] == 'linux')) or bool(SQLITE.fullmatch(name))
 
 
+# The one table of installed members and their release assets, read from the
+# tagged source, so publication does not trust the descriptor the build produced.
+# The table is strict JSON between two markers in the TypeScript module that owns it.
+COHORT_TABLE = Path(__file__).resolve().parents[2] / 'packages/engine/platform/src/platform/runtime/native-cohort-table.ts'
+COHORT_MARKERS = re.compile(r'/\* cohort-table:begin \*/(.*?)/\* cohort-table:end \*/', re.S)
+
+
+def cohort_members():
+    match = COHORT_MARKERS.search(COHORT_TABLE.read_text(encoding='utf-8'))
+    assert match, f'The cohort table markers are missing from {COHORT_TABLE}'
+    return json.loads(match[1])['members']
+
+
 def reader_member_assets(name):
-    """Fixed installed-member to published-asset mapping, independent of JSON."""
+    """Installed-member to published-asset mapping for an evidence file, from the cohort table."""
     match = PROFILE.fullmatch(name)
     if not match or not needs_metadata(name):
         return {}
     product, platform, arch, _ = match.groups()
-    asset = f'{product}-{platform}-{arch}'
     target = f'{"darwin" if platform == "macos" else platform}-{arch}'
-    members = [asset]
-    if platform == 'linux':
-        members += [asset + suffix for suffix in ['.bun', '.bun.LICENSE.md', '.bun.json']]
-        if product == 'goodvibes-daemon':
-            members.append(f'lib/sqlite-vec-{target}/vec0.so')
-    elif product == 'goodvibes-daemon':
-        members += [f'lib/sqlite-vec-{target}/vec0.dylib', f'lib/sqlite-{target}/libsqlite3.dylib', f'lib/sqlite-{target}/libsqlite3.dylib.json']
-    result = {}
-    for path in members:
-        if path.startswith('lib/sqlite-vec-'):
-            result[path] = f'sqlite-vec-{target}.{ "so" if platform == "linux" else "dylib" }'
-        elif path.startswith('lib/sqlite-'):
-            result[path] = f'sqlite-{target}.dylib' + ('.json' if path.endswith('.json') else '')
-        else:
-            result[path] = path
-    return result
+    return {member['path']: member['asset'] for member in cohort_members()
+            if member['product'] == product and member['target'] == target}
 
 
 def validate_reader_assets(pins, metadata, tag, source=None):

@@ -1,10 +1,6 @@
-import { decisionOrClassic } from '../runtime/decision-policy.js';
+import { judge } from '../runtime/judge.js';
 import { rankClassicCatalog } from '../runtime/classic-catalog.js';
-import { captureJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { retainOwnedJson, snapshotJudgmentInput } from '../gate/judgment-input.js';
-import { prepareJudgmentResult } from '../gate/judgment-result.js';
-import { requireActingReading } from '../types/judgment-held.js';
-import { hookContractCandidate, hookContractSearch } from './batteries/contract-search.js';
+import { hookContractSearch } from './batteries/contract-search.js';
 import type { HookPointContract } from './contracts.js';
 import type { HookChain, HookDefinition, HookType } from './types.js';
 import type {
@@ -14,8 +10,11 @@ import type {
 } from './workbench.js';
 
 export interface HookContractRecord extends HookPointContract {
+  /** Set when code chose the entry from the filter's words, without a decision model. */
   readonly provenance?: 'classic';
   readonly scoreSource?: 'literal-overlap';
+  /** Set when the decision model could not say whether the entry fits the filter; it is listed anyway. */
+  readonly unsure?: true;
 }
 
 export interface HookWorkbenchApi {
@@ -82,9 +81,11 @@ export interface HookContractSource {
 
 export interface HookApi {
   /**
-   * The hook point contracts, all of them for a blank filter; otherwise the
-   * ones selected under the active decision policy for the filter
-   * (`engine.hooks.contract-search`), in catalog order.
+   * The hook point contracts, all of them for a blank filter. Otherwise the
+   * ones whose phase, category, specific or description match every word of
+   * the filter, in catalog order; only when none does, one decision-model
+   * request (`engine.hooks.contract-search`) picks them, and with no model
+   * the literal-overlap ranking does.
    */
   contracts(filter?: string): Promise<readonly HookContractRecord[]>;
   dispatcher: {
@@ -103,6 +104,35 @@ export interface CreateHookApiOptions {
 /** Decision site for the contract search. */
 export const HOOK_CONTRACT_SEARCH_SITE = 'hooks.contract-search';
 
+const FILTER_FILLER = new Set(['a', 'an', 'the', 'to', 'of', 'for', 'on', 'in', 'at', 'and', 'or', 'is', 'it', 'when', 'hook', 'hooks', 'point', 'points', 'event', 'events']);
+const FILTER_SYNONYMS: Readonly<Record<string, string>> = {
+  before: 'pre', after: 'post', failed: 'fail', failure: 'fail', failures: 'fail', error: 'fail', errors: 'fail',
+  changed: 'change', changes: 'change', model: 'llm', setting: 'config', settings: 'config',
+};
+
+function filterWords(text: string): string[] {
+  return text.toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length > 0);
+}
+
+/** A filter word fits a field word when they are equal or one is a prefix of the other (three letters or more). */
+function wordFits(query: string, field: string): boolean {
+  if (query === field) return true;
+  if (query.length >= 3 && field.startsWith(query)) return true;
+  return field.length >= 4 && query.startsWith(field);
+}
+
+/** Hook points whose pattern segments or description words fit every word of the filter, in catalog order. */
+function localContractMatches(contracts: readonly HookPointContract[], query: string): HookContractRecord[] {
+  const words = filterWords(query).filter((word) => !FILTER_FILLER.has(word)).map((word) => FILTER_SYNONYMS[word] ?? word);
+  if (words.length === 0) return [...contracts];
+  return contracts
+    .filter((contract) => {
+      const fields = [...filterWords(contract.pattern.replaceAll('*', ' ')), ...filterWords(contract.description), contract.authority, contract.executionMode.replace('_', '')];
+      return words.every((word) => fields.some((field) => wordFits(word, field)));
+    })
+    .map((contract) => ({ ...contract, provenance: 'classic' as const, scoreSource: 'literal-overlap' as const }));
+}
+
 export function createHookApi(options: CreateHookApiOptions): HookApi {
   // Each authoring verb reads the file, changes it and writes it back, so two
   // overlapping verbs would each start from the same file and the later write
@@ -118,33 +148,27 @@ export function createHookApi(options: CreateHookApiOptions): HookApi {
       const contracts = options.listContracts();
       const query = filter?.trim() ?? '';
       if (query.length === 0) return contracts;
-      const original = retainOwnedJson(contracts);
-      snapshotJudgmentInput({ query, contracts: original.snapshot });
-      const identity = JSON.stringify(original.snapshot);
-      const current = () => {
-        original.assertCurrent();
-        if (JSON.stringify(snapshotJudgmentInput(options.listContracts())) !== identity) throw new Error('Hook contract catalog changed during search.');
-      };
-      return decisionOrClassic(async () => {
-        const owner = captureJudgmentPort(HOOK_CONTRACT_SEARCH_SITE, { assertCurrent: current, prepareResultCapture: prepareJudgmentResult });
-        const { ranked } = await hookContractSearch.rerank(
-          owner.port,
-          query,
-          contracts.map(hookContractCandidate),
-          { site: HOOK_CONTRACT_SEARCH_SITE, signal: owner.signal, beforeAttempt: owner.assertCurrent },
-        );
-        owner.assertCurrent();
-        for (const entry of ranked) requireActingReading(entry.reading);
-        const matched = new Set(ranked.filter((entry) => entry.reading.verdict === 'yes').map((entry) => entry.id));
-        return contracts.filter((contract) => matched.has(contract.pattern));
-      }, () => {
-        current();
-        const matches = rankClassicCatalog(contracts, query, contract => ({ id: contract.pattern,
+      const local = localContractMatches(contracts, query);
+      if (local.length > 0) return local;
+      const asked = contracts.map((contract) => contract.pattern).filter((pattern) => pattern in hookContractSearch.items);
+      if (asked.length === 0) return [];
+      const { value } = await judge({
+        site: HOOK_CONTRACT_SEARCH_SITE,
+        battery: hookContractSearch,
+        state: { query },
+        only: asked,
+        cache: { key: query, scope: 'process' },
+        settle: (readings): readonly HookContractRecord[] => contracts.flatMap((contract) => {
+          const verdict = readings[contract.pattern]?.verdict;
+          if (verdict === 'yes') return [contract];
+          return verdict === 'uncertain' ? [{ ...contract, unsure: true as const }] : [];
+        }),
+        fallback: (): readonly HookContractRecord[] => rankClassicCatalog(contracts, query, (contract) => ({ id: contract.pattern,
           description: `${contract.description} ${contract.authority} ${contract.executionMode}` }))
-          .map(match => ({ ...match.entry, provenance: 'classic' as const, scoreSource: 'literal-overlap' as const }));
-        current();
-        return matches;
+          .map((match) => ({ ...match.entry, provenance: 'classic' as const, scoreSource: 'literal-overlap' as const })),
+        describe: (matches) => `listed ${matches.map((contract) => contract.pattern).join(', ') || 'none'}`,
       });
+      return value;
     },
     dispatcher: {
       listHooks(): Array<{ pattern: string; hook: HookDefinition }> {

@@ -1,11 +1,11 @@
-import { matchesEventPath } from './matcher.js';
-import type { HookCategory, HookEventPath, HookPhase } from './types.js';
+import { matchesEventPath, patternsOverlap } from './matcher.js';
+import type { HookCategory, HookEventPath, HookPattern, HookPhase } from './types.js';
 
 export type HookExecutionMode = 'blocking' | 'non_blocking' | 'background';
 export type HookAuthority = 'intercept' | 'observe' | 'defer' | 'chain';
 
 export interface HookPointContract {
-  pattern: HookEventPath;
+  pattern: HookPattern;
   description: string;
   authority: HookAuthority;
   executionMode: HookExecutionMode;
@@ -70,6 +70,39 @@ const CONTRACTS: HookPointContract[] = [
     canDeny: false,
     canMutateInput: false,
     canInjectContext: true,
+    timeoutMs: 0,
+    failurePolicy: 'log_only',
+  },
+  {
+    pattern: 'Pre:git:*',
+    description: 'Intercept a git commit, push, pull, merge, checkout, stash or worktree change before it runs.',
+    authority: 'intercept',
+    executionMode: 'blocking',
+    canDeny: true,
+    canMutateInput: false,
+    canInjectContext: false,
+    timeoutMs: 0,
+    failurePolicy: 'fail_open',
+  },
+  {
+    pattern: 'Post:git:*',
+    description: 'Observe a successful git commit, push, pull, merge, checkout, stash or worktree change.',
+    authority: 'observe',
+    executionMode: 'non_blocking',
+    canDeny: false,
+    canMutateInput: false,
+    canInjectContext: false,
+    timeoutMs: 0,
+    failurePolicy: 'log_only',
+  },
+  {
+    pattern: 'Fail:git:*',
+    description: 'Observe a failed git operation.',
+    authority: 'observe',
+    executionMode: 'non_blocking',
+    canDeny: false,
+    canMutateInput: false,
+    canInjectContext: false,
     timeoutMs: 0,
     failurePolicy: 'log_only',
   },
@@ -326,6 +359,17 @@ const CONTRACTS: HookPointContract[] = [
     timeoutMs: 0,
     failurePolicy: 'log_only',
   },
+  {
+    pattern: '*:webhook:*',
+    description: 'Answer a webhook delivered to the daemon; the phase and event name come from the sender, and the decision, reason and error go back in the reply.',
+    authority: 'intercept',
+    executionMode: 'blocking',
+    canDeny: true,
+    canMutateInput: false,
+    canInjectContext: false,
+    timeoutMs: 0,
+    failurePolicy: 'fail_open',
+  },
 ];
 
 function specificityScore(pattern: string): number {
@@ -348,6 +392,20 @@ export function getHookPointContract(path: HookEventPath): HookPointContract | n
     }
   }
   return best;
+}
+
+/**
+ * Why a hooks-file key can never fire, or null when it can: it must be
+ * Phase:Category:Specific and overlap at least one registered hook point.
+ * Segments compare exactly, so `pre:tool:exec` is refused rather than kept
+ * as a hook that never runs.
+ */
+export function hookPatternProblem(pattern: string): string | null {
+  if (pattern.split(':').length !== 3) {
+    return `"${pattern}" is not a recognized hook event point: a key has exactly three parts, Phase:Category:Specific`;
+  }
+  if (CONTRACTS.some((contract) => patternsOverlap(pattern, contract.pattern))) return null;
+  return `"${pattern}" is not a recognized hook event point: no registered hook point matches it (phases are Pre, Post, Fail, Change and Lifecycle, and case matters); /hooks contracts lists them`;
 }
 
 export function parseHookPath(path: HookEventPath): {

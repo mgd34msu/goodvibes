@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from 'bun:test';
-import { decisionModelPolicyState, installJudgmentPort, type DecisionModelPolicy } from '@goodvibes-jev/engine/errors';
+import { installJudgmentPort, type DecisionModelPolicy } from '@goodvibes-jev/engine/errors';
 import { JudgmentError, type JudgmentPort } from '@goodvibes-jev/judgment';
-import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
+import { fakePort } from '@goodvibes-jev/judgment/testing';
 import { withDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.js';
 import { readNaturalLanguageSchedule } from '../platform/src/platform/automation/schedule-reading.js';
 import { createHookApi } from '../platform/src/platform/hooks/hook-api.js';
@@ -71,20 +71,12 @@ test.each(['Classic - Off', 'Preferred'] as const)('%s hook and playbook searche
     const contracts = await hooks().contracts('intercept tool');
     expect(contracts.some(contract => contract.pattern === 'Pre:tool:*')).toBe(true);
     expect(contracts.every(contract => contract.provenance === 'classic' && contract.scoreSource === 'literal-overlap')).toBe(true);
-    const attempted = requests.length;
-    expect(policy === 'Classic - Off' ? attempted === 0 : attempted > 0).toBe(true);
+    expect(requests).toHaveLength(0);
     const playbooks = await findPlaybooksBySymptom('stuck-turn');
     expect(playbooks.some(playbook => playbook.id === 'stuck-turn')).toBe(true);
     expect(playbooks.every(playbook => playbook.provenance === 'classic')).toBe(true);
     expect(await hooks().contracts('zzzz_no_literal_match_zzzz')).toEqual([]);
-    expect(requests).toHaveLength(attempted);
+    if (policy === 'Classic - Off') expect(requests).toHaveLength(0);
   });
 });
 
-test('uncertain catalog readings do not become Classic suggestions', async () => {
-  const fake = fakePort(() => noulAnswer(0.5)); previous = installJudgmentPort(fake.port); installed = true;
-  await under('Preferred', async () => {
-    await expect(hooks().contracts('intercept tool')).rejects.toBeInstanceOf(Error);
-    expect(decisionModelPolicyState().operation).toBe('decision');
-  });
-});

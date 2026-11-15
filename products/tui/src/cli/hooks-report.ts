@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from 'node:fs';
-import { createHookDispatcher, createHookWorkbench, getHookPointContract } from '@goodvibes-jev/engine/platform/platform/hooks';
+import { createHookDispatcher, createHookWorkbench, getHookPointContract, hookDefinitionProblem, hooksFileRefusal } from '@goodvibes-jev/engine/platform/platform/hooks';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { HookDefinition, HookEventPath, HookPointContract, HookType } from '@goodvibes-jev/engine/platform/platform/hooks';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
@@ -9,9 +9,9 @@ import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 // `goodvibes hooks validate` (src/cli/hooks-command.ts) and `goodvibes doctor
 // hooks` (src/cli/doctor.ts). There is NO second validator: field-level
 // acceptance comes from running the platform's own HookDispatcher.loadFromFile (the
-// same loader the app uses at startup), and the "is this a real hook event
-// point" verdict comes from the platform's getHookPointContract. This module only
-// reads and reports, it changes no config and fires no hooks.
+// same loader the app uses at startup), and the reason an entry was left out
+// comes from the loader's own hookDefinitionProblem. This module only reads and
+// reports, it changes no config and fires no hooks.
 // ---------------------------------------------------------------------------
 
 /** Per-hook acceptance verdict, keyed to the on-disk position it was declared at. */
@@ -42,7 +42,7 @@ export interface HooksValidation {
 }
 
 export const LOADER_FIELD_REASON =
-  "the hooks loader skipped this entry; a hook needs a string \"match\" and a \"type\" of command, prompt, agent, http, or ts";
+  'the hooks loader did not load this entry; see the warning in the log for the reason';
 
 /** Build a consumable multiset of the loader-accepted definitions, keyed by pattern. */
 function acceptedMultiset(accepted: Map<string, HookDefinition[]>): Map<string, Map<string, number>> {
@@ -109,6 +109,8 @@ export function buildHooksValidation(configManager: Pick<ConfigManager, 'get' | 
 
   const record = parsed as { hooks?: unknown; chains?: unknown };
   const topLevelIssues: string[] = [];
+  const fileRefusal = hooksFileRefusal(path);
+  if (fileRefusal !== null) topLevelIssues.push(`the hooks file is not loaded because ${fileRefusal}.`);
 
   // Run the real loader once so field-level acceptance mirrors runtime behavior.
   dispatcher.loadFromFile(path);
@@ -128,15 +130,8 @@ export function buildHooksValidation(configManager: Pick<ConfigManager, 'get' | 
         const counts = accepted.get(pattern);
         defs.forEach((def, index) => {
           const loaderAccepted = consumeAccepted(counts, def);
-          let ok = true;
-          let reason: string | undefined;
-          if (!loaderAccepted) {
-            ok = false;
-            reason = LOADER_FIELD_REASON;
-          } else if (contract === null) {
-            ok = false;
-            reason = `"${pattern}" is not a recognized hook event point (no matching hook contract).`;
-          }
+          const ok = loaderAccepted;
+          const reason = loaderAccepted ? undefined : hookDefinitionProblem(def, pattern) ?? fileRefusal ?? LOADER_FIELD_REASON;
           checks.push({ pattern, index, name: readHookName(def), type: readHookType(def), ok, contract, ...(reason ? { reason } : {}) });
         });
       }

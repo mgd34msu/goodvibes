@@ -1,7 +1,8 @@
 export { TurnHookOwner, bindTurnHookDispatcher } from './turn-ownership.js';
 export type { HookDispatchOptions, HookWorkAdmission, TurnHookDispatcher } from './turn-ownership.js';
 export type { HookExecutionOptions } from './execution.js';
-export { HookDispatcher } from './dispatcher.js';
+export { HookDispatcher, hookDefinitionProblem, hooksFileRefusal } from './dispatcher.js';
+export type { HookRunnerDeps } from './dispatcher.js';
 export { ChainEngine } from './chain-engine.js';
 export { HookActivityTracker } from './activity.js';
 export { HookWorkbench, createHookWorkbench } from './workbench.js';
@@ -19,6 +20,7 @@ export type {
   HookPhase,
   HookCategory,
   HookEventPath,
+  HookPattern,
   HookEvent,
   HookResult,
   HookType,
@@ -30,25 +32,26 @@ export type {
 export type { HookActivityRecord } from './activity.js';
 export type { HookAuthoringAction, HookConfigInspection, HookSimulationResult } from './workbench.js';
 export type { HookExecutionMode, HookAuthority, HookPointContract } from './contracts.js';
-import type { AgentManager } from '../tools/agent/index.js';
 export {
   listHookPointContracts,
   getHookPointContract,
+  hookPatternProblem,
   parseHookPath,
 } from './contracts.js';
-export { matchesEventPath, matchesMatcher } from './matcher.js';
+export { matchesEventPath, matchesMatcher, patternsOverlap } from './matcher.js';
 export { safeEvaluate } from './chain-engine.js';
-export { run } from './runner.js';
 
-import { HookActivityTracker } from './activity.js';
-import { HookDispatcher } from './dispatcher.js';
+import type { HookActivityTracker } from './activity.js';
+import { HookDispatcher, type HookRunnerDeps } from './dispatcher.js';
 
-export function createHookDispatcher(config: {
-  readonly agentManager?: (Pick<AgentManager, 'spawn' | 'getStatus' | 'cancel'> & Partial<Pick<AgentManager, 'spawnOwned'>>) | undefined;
+/**
+ * A dispatcher with the same runners the runtime builds: pass the agent
+ * manager, tool LLM and project root to run `agent`, `prompt` and `ts` hooks.
+ * A runner left out answers that it is not configured in this runtime.
+ */
+export function createHookDispatcher(config: HookRunnerDeps & {
   readonly activityTracker?: HookActivityTracker | undefined;
 } = {}): HookDispatcher {
-  return new HookDispatcher(
-    { agentManager: config.agentManager },
-    config.activityTracker,
-  );
+  const { activityTracker, ...runnerDeps } = config;
+  return new HookDispatcher(runnerDeps, activityTracker);
 }

@@ -2,9 +2,9 @@ import type { HookDispatchOptions, HookWorkAdmission, TurnHookOwner } from './tu
 import type { HookExecutionOptions } from './execution.js';
 import { existsSync, readFileSync, statSync } from 'fs';
 import { dirname } from 'path';
-import type { HookDefinition, HookChain, HookEvent, HookResult } from './types.js';
+import type { HookDefinition, HookChain, HookEvent, HookEventPath, HookResult, HookType } from './types.js';
 import { matchesEventPath, matchesMatcher } from './matcher.js';
-import { getHookPointContract } from './contracts.js';
+import { getHookPointContract, hookPatternProblem } from './contracts.js';
 import { withHookWorkObserver } from './live-work.js';
 import { HookActivityTracker } from './activity.js';
 import { logger } from '../utils/logger.js';
@@ -24,7 +24,7 @@ import type { FeatureFlagManager } from '../runtime/feature-flags/index.js';
 import type { TriggerManagerLike } from '../workflow/trigger-executor.js';
 import { summarizeError } from '../utils/error-display.js';
 
-type HookRunnerDeps = {
+export type HookRunnerDeps = {
   readonly agentManager?: (Pick<AgentManager, 'spawn' | 'getStatus' | 'cancel'> & Partial<Pick<AgentManager, 'spawnOwned' | 'join'>>) | undefined;
   readonly toolLLM?: Pick<ToolLLM, 'chat'> | undefined;
   readonly projectRoot?: string | undefined;
@@ -83,12 +83,24 @@ export function hooksFileRefusal(filePath: string): string | null {
 
 const VALID_HOOK_TYPES = new Set(['command', 'prompt', 'agent', 'http', 'ts']);
 
-/** What is wrong with a hook definition read from a file, or null when it is accepted. */
-export function hookDefinitionProblem(def: unknown): string | null {
+/**
+ * What is wrong with a hook definition read from a file, or null when it is
+ * accepted. With `pattern`, the key it is listed under, the key must be able
+ * to fire (see hookPatternProblem) and an optional `match` must equal it: the
+ * key is the only thing that decides which events the hook runs on.
+ */
+export function hookDefinitionProblem(def: unknown, pattern?: string): string | null {
+  if (pattern !== undefined) {
+    const keyProblem = hookPatternProblem(pattern);
+    if (keyProblem !== null) return keyProblem;
+  }
   if (typeof def !== 'object' || def === null) return 'hook definition must be an object';
   const d = def as Record<string, unknown>;
   if (typeof d.type !== 'string' || !VALID_HOOK_TYPES.has(d.type)) return 'hook is missing a valid "type" field';
-  if (typeof d.match !== 'string') return 'hook is missing its "match" field';
+  if (d.match !== undefined && typeof d.match !== 'string') return 'hook "match" must be a string when present';
+  if (pattern !== undefined && typeof d.match === 'string' && d.match !== pattern) {
+    return `hook "match" is "${d.match}" but it is listed under "${pattern}", which decides when it fires; move it under "${d.match}" or remove "match"`;
+  }
   return null;
 }
 
@@ -198,13 +210,13 @@ export class HookDispatcher {
         } else {
           for (const [pattern, defs] of Object.entries(parsed.hooks as Record<string, unknown>)) {
             if (!Array.isArray(defs)) {
-              logger.info('HookDispatcher: hook pattern value must be an array, skipping', { filePath, pattern });
+              this.refuseLoadedHook(filePath, pattern, undefined, 'the value must be an array of hook definitions');
               continue;
             }
             for (const def of defs as unknown[]) {
-              const problem = hookDefinitionProblem(def);
+              const problem = hookDefinitionProblem(def, pattern);
               if (problem !== null) {
-                logger.info(`HookDispatcher: ${problem}, skipping`, { filePath, pattern });
+                this.refuseLoadedHook(filePath, pattern, def, problem);
                 continue;
               }
               const loaded = def as HookDefinition;
@@ -237,6 +249,32 @@ export class HookDispatcher {
         error: summarizeError(err),
       });
     }
+  }
+
+  /**
+   * A hooks-file entry that was not loaded: logged at warn and listed in the
+   * hook activity, so a hook the owner believes is active is not silently absent.
+   */
+  private refuseLoadedHook(filePath: string, pattern: string, def: unknown, reason: string): void {
+    logger.warn(`HookDispatcher: hook under "${pattern}" not loaded because ${reason}`, { filePath, pattern });
+    const fields = typeof def === 'object' && def !== null ? def as Record<string, unknown> : {};
+    const hookType = typeof fields.type === 'string' && VALID_HOOK_TYPES.has(fields.type) ? fields.type as HookType : 'command';
+    this.activityTracker.record({
+      path: pattern as HookEventPath,
+      phase: 'Lifecycle',
+      category: 'config',
+      specific: 'hooks-load',
+      sessionId: '',
+      timestamp: Date.now(),
+      payload: { filePath },
+    }, {
+      pattern,
+      hookName: typeof fields.name === 'string' ? fields.name : undefined,
+      hookType,
+      result: { ok: false, error: `not loaded from ${filePath}: ${reason}` },
+      durationMs: 0,
+      async: false,
+    });
   }
 
   /** Register a hook programmatically */

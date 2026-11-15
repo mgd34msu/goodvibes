@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 /** The 5 lifecycle phases */
 export type HookPhase = 'Pre' | 'Post' | 'Fail' | 'Change' | 'Lifecycle';
 
@@ -7,10 +5,13 @@ export type HookPhase = 'Pre' | 'Post' | 'Fail' | 'Change' | 'Lifecycle';
 export type HookCategory =
   | 'tool' | 'file' | 'git' | 'agent' | 'compact'
   | 'llm' | 'mcp' | 'config' | 'budget' | 'session' | 'contract'
-  | 'permission' | 'transport' | 'communication';
+  | 'permission' | 'transport' | 'communication' | 'webhook';
 
 /** A fully qualified hook event path: Phase:Category:Specific */
 export type HookEventPath = `${HookPhase}:${HookCategory}:${string}`;
+
+/** A Phase:Category:Specific pattern; any segment may be the wildcard `*`. */
+export type HookPattern = `${HookPhase | '*'}:${HookCategory | '*'}:${string}`;
 
 /** Event payload passed to hooks */
 export interface HookEvent {
@@ -48,8 +49,12 @@ export type HookType = 'command' | 'prompt' | 'agent' | 'http' | 'ts';
 
 /** Hook definition in hooks.json */
 export interface HookDefinition {
-  /** Which event path to match. Supports wildcards: Pre:tool:* */
-  match: string;
+  /**
+   * A hook fires on the key it is listed under in hooks.json. `match` is
+   * optional there and, when present, must equal that key. A chain's action
+   * uses it as the event path the action reports.
+   */
+  match?: string | undefined;
   /** Further filter within the match (e.g., specific tool name) */
   matcher?: string | undefined;
   /** Hook type */

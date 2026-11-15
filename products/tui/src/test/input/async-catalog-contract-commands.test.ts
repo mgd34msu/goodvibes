@@ -117,12 +117,20 @@ function harness() {
 }
 
 describe('async hook contract command', () => {
+  test('words that match a hook point locally list it without a decision request', async () => {
+    const env = harness();
+    const { port, requests } = fakePort(() => noulAnswer(0.02));
+    installJudgmentPort(port);
+    await env.run('hooks', ['contracts', 'Intercept', 'TOOLS']);
+    expect(env.output.join('\n')).toContain('Hook Contracts (1)');
+    expect(env.output.join('\n')).toContain('Pre:tool:*');
+    expect(requests).toHaveLength(0);
+  });
+
   test('waits for the platform filter before printing and reading managed entries', async () => {
     const env = harness();
-    const gate = delayedPort((_name, _question, state) => noulAnswer(
-      (state as { candidate: { pattern: string } }).candidate.pattern === 'Pre:tool:*' ? 0.95 : 0.02,
-    ));
-    const pending = env.run('hooks', ['contracts', 'Intercept', 'TOOLS']);
+    const gate = delayedPort((name) => noulAnswer(name === 'Pre:tool:*' ? 0.95 : 0.02));
+    const pending = env.run('hooks', ['contracts', 'Stop', 'TOOLS', 'early']);
     await gate.started;
     expect(env.output).toEqual([]);
     expect(env.managedReads()).toBe(0);
@@ -132,7 +140,8 @@ describe('async hook contract command', () => {
     expect(env.output.join('\n')).toContain('Pre:tool:*');
     expect(env.output.join('\n')).not.toContain('Post:tool:*');
     expect(env.managedReads()).toBe(2);
-    expect(gate.requests[0]!.state).toMatchObject({ query: 'intercept tools' });
+    expect(gate.requests).toHaveLength(1);
+    expect(gate.requests[0]!.state).toMatchObject({ query: 'stop tools early' });
   });
 
   test('preserves the empty filtered result and the unfiltered catalog', async () => {
@@ -146,16 +155,15 @@ describe('async hook contract command', () => {
     expect(env.output.join('\n')).toContain(`Hook Contracts (${env.contracts.length})`);
   });
 
-  test('propagates a rejected filter without printing or reading managed entries', async () => {
+  test('a failed decision request lists the literal ranking instead of failing the command', async () => {
     const env = harness();
     const gate = delayedPort();
-    const pending = env.run('hooks', ['contracts', 'tools']);
+    const pending = env.run('hooks', ['contracts', 'stop', 'tools', 'early']);
     const outcome = pending.then(() => undefined, error => error);
     await gate.started;
     gate.reject(new Error('hook reader unavailable'));
-    expect(await outcome).toMatchObject({ message: 'hook reader unavailable' });
-    expect(env.output).toEqual([]);
-    expect(env.managedReads()).toBe(0);
+    expect(await outcome).toBeUndefined();
+    expect(env.output).toHaveLength(1);
   });
 });
 

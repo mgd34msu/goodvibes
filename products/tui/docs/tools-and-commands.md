@@ -509,13 +509,15 @@ The category names which subsystem's events the hook watches:
 | `config` | Config changes |
 | `budget` | Budget changes and breaches |
 | `session` | Session lifecycle |
-| `workflow` | Workflow lifecycle |
-| `orchestration` | Orchestration state and lifecycle |
+| `contract` | Work contract lifecycle and spawn-guard refusals |
 | `communication` | Communication state and lifecycle |
 | `permission` | Permission requests and decisions |
 | `transport` | Transport lifecycle |
+| `webhook` | Events posted to the daemon's webhook route (any phase the sender names) |
 
-Wildcards are supported: `Pre:tool:*` matches all pre-tool events.
+Wildcards are supported: `Pre:tool:*` matches all pre-tool events. `/hooks contracts` lists every hook point; `/hooks contracts <words>` filters the list.
+
+A hook fires on the key it is listed under in `hooks.json`. A key that is not exactly `Phase:Category:Specific`, or that no hook point matches (segments are case-sensitive, so `pre:tool:exec` never fires), is not loaded: the reason is logged as a warning and shown in the hook activity list, and `goodvibes hooks validate` reports it.
 
 ### Hook types
 
@@ -568,6 +570,7 @@ Chains trigger an action only after a sequence of events occurs, with optional t
         { "match": "Lifecycle:agent:completed", "within": "5m" }
       ],
       "action": {
+        "match": "Lifecycle:agent:completed",
         "type": "command",
         "command": "notify-send 'Agent finished'"
       }
@@ -580,7 +583,7 @@ A hook definition supports these properties:
 
 | Property | Meaning |
 | --- | --- |
-| `match` | The event path to match; wildcards supported |
+| `match` | Optional; when present it must equal the key the hook is listed under, or the hook is not loaded. In a chain's `action` it is the event path the action reports |
 | `matcher` | A further filter within the match, such as a specific tool name |
 | `type` | One of the five hook types above |
 | `command` / `prompt` / `url` / `path` | The action payload for `command`, `prompt`/`agent`, `http`, and `ts` hooks respectively |

@@ -8,7 +8,7 @@ function event(phase: HookPhase, category: HookCategory, specific = 'dynamic-ext
 }
 
 test('every category and dynamic phase path observes actual runner start and settlement, while absent hooks remain idle', async () => {
-  const categories = Object.values({ tool: 'tool', file: 'file', git: 'git', agent: 'agent', compact: 'compact', llm: 'llm', mcp: 'mcp', config: 'config', budget: 'budget', session: 'session', contract: 'contract', permission: 'permission', transport: 'transport', communication: 'communication' } satisfies Record<HookCategory, HookCategory>);
+  const categories = Object.values({ tool: 'tool', file: 'file', git: 'git', agent: 'agent', compact: 'compact', llm: 'llm', mcp: 'mcp', config: 'config', budget: 'budget', session: 'session', contract: 'contract', permission: 'permission', transport: 'transport', communication: 'communication', webhook: 'webhook' } satisfies Record<HookCategory, HookCategory>);
   const phases = Object.values({ Pre: 'Pre', Post: 'Post', Fail: 'Fail', Change: 'Change', Lifecycle: 'Lifecycle' } satisfies Record<HookPhase, HookPhase>);
   for (const category of categories) for (const phase of phases) {
     const gate = Promise.withResolvers<string>();

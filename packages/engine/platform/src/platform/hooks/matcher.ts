@@ -1,5 +1,3 @@
-/** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
-
 /**
  * Match a hook's match pattern against a concrete event path.
  * Supports wildcards: "Pre:tool:*" matches "Pre:tool:read", "Pre:tool:exec", etc.
@@ -24,6 +22,18 @@ export function matchesEventPath(pattern: string, eventPath: string): boolean {
   }
 
   return true;
+}
+
+/**
+ * Whether two Phase:Category:Specific patterns can match a common event path:
+ * each segment is equal or a wildcard on either side. Both must have exactly
+ * three parts.
+ */
+export function patternsOverlap(a: string, b: string): boolean {
+  const left = a.split(':');
+  const right = b.split(':');
+  if (left.length !== 3 || right.length !== 3) return false;
+  return left.every((segment, i) => segment === '*' || right[i] === '*' || segment === right[i]);
 }
 
 /**

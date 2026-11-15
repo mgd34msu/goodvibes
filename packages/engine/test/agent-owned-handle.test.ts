@@ -6,7 +6,6 @@ import { run } from '../platform/src/platform/hooks/runners/agent.js';
 import { HookActivityTracker } from '../platform/src/platform/hooks/activity.js';
 import { HookDispatcher } from '../platform/src/platform/hooks/dispatcher.js';
 import { TurnHookOwner } from '../platform/src/platform/hooks/turn-ownership.js';
-import { run as runHook } from '../platform/src/platform/hooks/runner.js';
 import type { HookDefinition, HookEvent } from '../platform/src/platform/hooks/types.js';
 
 let previousPort: ReturnType<typeof installJudgmentPort>;
@@ -163,9 +162,8 @@ test('owned parent signal is installed before synchronous spawn publication', as
 });
 
 
-test('owned capability diagnostic survives runner, dispatcher aggregation, and activity recording', async () => {
+test('owned capability diagnostic survives dispatcher aggregation and activity recording', async () => {
   expect(new OwnedAgentExecutionUnavailableError('unsupported').code).toBe('OWNED_AGENT_EXECUTION_UNSUPPORTED');
-  expect((await runHook(hook, event, undefined, {})).code).toBe('OWNED_AGENT_EXECUTION_UNSUPPORTED');
   for (const async of [false, true]) {
     const activity = new HookActivityTracker();
     const dispatcher = new HookDispatcher({}, activity);

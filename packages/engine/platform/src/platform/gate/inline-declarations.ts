@@ -75,16 +75,81 @@ export function* inlineDeclarations(text: string, flags: boolean): Generator<Inl
   }
 }
 
-/** Match exactly the existing quoted literal/reference/marker rules using spans.
- * A safe reference chain must not repeatedly scan every remaining path suffix.
+const VALUE_QUOTE = /["'`]/;
+const AUTH_SCHEME = /^(?:bearer|basic|token|digest|bot|apikey)$/i;
+const EXPANSION = /^\$[{(]?[A-Za-z_]|\$\{|\{\{|<%|#\{|^%[A-Za-z_]\w*%$/;
+const PLACEHOLDER = /^(?:x+|\*+|\.{3}|-+|changeme|change[-_]?me|placeholder|example|redacted|secret|password|passwd|token|none|null|nil|undefined|todo|tbd|dummy|fake|test|sample|your[-_].*|<[^>]*>|\[[^\]]*\])$/i;
+const IDENTIFIER = /^[A-Za-z_$][\w$]*$/;
+
+/**
+ * Text that names where a credential comes from instead of holding one: a
+ * shell or template expansion (`$TOKEN`, `${DB_PASSWORD}`, `{{ token }}`), a
+ * member expression or call (`process.env.API_KEY`, `form.password.value`,
+ * `getToken()`), or a placeholder word (`changeme`, `<your key>`).
  */
-export function literalDeclarationValue(text: string, declaration: InlineDeclaration, allowEvidenceMarker: boolean): boolean {
+export function credentialReferenceText(value: string): boolean {
+  const text = value.trim();
+  if (text.length === 0) return true;
+  if (EXPANSION.test(text) || PLACEHOLDER.test(text)) return true;
+  const expression = text.replace(/\(.*\)[;,)]*$/, '').replace(/[;,)]+$/, '');
+  const segments = expression.split(/\??\.|\[[^\]]*\]/).filter(segment => segment.length > 0);
+  // A JWT also has dotted segments; a member path has short identifier ones.
+  return segments.length > 0 && (segments.length > 1 || expression !== text) && !text.startsWith('eyJ')
+    && segments.every(segment => IDENTIFIER.test(segment) && !secretLiteral(segment));
+}
+
+/**
+ * A literal shaped like a real key or token: a JWT, or at least 16 visible
+ * characters mixing letters and digits with ten or more distinct characters
+ * (issuer tokens, hex and base64 keys, UUIDs). A short or plain word such as
+ * a test password is not; whether text is sensitive in meaning is the gate's
+ * own `secrets` reading.
+ */
+export function secretLiteral(value: string): boolean {
+  if (value.length < 16 || !/^[\x21-\x7e]+$/.test(value)) return false;
+  if (/^eyJ[\w-]+\.[\w-]+\./.test(value)) return true;
+  if (!/[A-Za-z]/.test(value) || !/[0-9]/.test(value)) return false;
+  return new Set(value).size >= 10;
+}
+
+export interface DeclaredValueRule {
+  /** A credential value counts only when it is a secret-shaped literal; a card value counts whenever it is literal. */
+  readonly kind: 'credential' | 'card';
+  /** Redaction markers are allowed in observational evidence only. */
+  readonly evidence: boolean;
+  /** An HTTP authentication header: the credential is the token after a scheme word. */
+  readonly authHeader?: boolean;
+}
+
+function unquoted(text: string, start: number, end: number): string {
+  if (VALUE_QUOTE.test(text.charAt(start))) start++;
+  if (end > start && VALUE_QUOTE.test(text.charAt(end - 1))) end--;
+  return start >= end ? '' : text.slice(start, end);
+}
+
+/**
+ * Whether a declaration's value is literal material of its kind. A secret
+ * reference, an empty value, an expansion, a member expression or a
+ * placeholder is not. A safe reference chain must not repeatedly scan every
+ * remaining path suffix.
+ */
+export function literalDeclarationValue(text: string, declaration: InlineDeclaration, rule: DeclaredValueRule): boolean {
   let start = declaration.valueStart, end = declaration.valueEnd;
-  if (QUOTE.test(text.charAt(start))) start++;
-  if (end > start && QUOTE.test(text.charAt(end - 1))) end--;
-  if (start >= end) return false;
+  if (VALUE_QUOTE.test(text.charAt(start))) start++;
+  if (end > start && VALUE_QUOTE.test(text.charAt(end - 1))) end--;
   if (end > start + SECRET_REFERENCE_PREFIX.length && text.startsWith(SECRET_REFERENCE_PREFIX, start)
     && declaration.lastReferenceSeparator < start) return false;
-  if (allowEvidenceMarker && EVIDENCE_CREDENTIAL_MARKERS.some(marker => marker.length === end - start && text.startsWith(marker, start))) return false;
-  return true;
+  let value = unquoted(text, declaration.valueStart, declaration.valueEnd);
+  if (value.length === 0) return false;
+  if (rule.kind === 'credential' && rule.evidence && EVIDENCE_CREDENTIAL_MARKERS.some(marker => marker === value)) return false;
+  if (rule.authHeader && AUTH_SCHEME.test(value)) {
+    let next = declaration.valueEnd;
+    while (SPACE.test(text.charAt(next))) next++;
+    let tokenEnd = next;
+    while (tokenEnd < text.length && !TOKEN_END.test(text.charAt(tokenEnd))) tokenEnd++;
+    value = unquoted(text, next, tokenEnd);
+    if (value.length === 0) return false;
+  }
+  if (credentialReferenceText(value)) return false;
+  return rule.kind === 'card' || secretLiteral(value);
 }

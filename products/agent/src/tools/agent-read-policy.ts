@@ -1,10 +1,5 @@
-/** Agent read compatibility surface; the engine owns both observations and admission checks. */
+/** Agent read surface: the engine owns the admission check. */
 export {
-  AGENT_READ_IMAGE_MODES,
-  AGENT_MAX_READ_FILES,
-  AGENT_MAX_READ_IMAGE_SIZE_BYTES,
-  AGENT_READ_POLICY_DENIAL_MESSAGE,
-  validateReadToolInvocationForAgentPolicy,
-  validateAgentReadMechanics,
+  AGENT_READ_ADMISSION_DENIAL_MESSAGE,
   wrapReadToolForAdmittedAgentPolicy as wrapReadToolForAgentPolicy,
 } from '@goodvibes-jev/engine/platform/platform/gate/policy';

@@ -1,12 +1,11 @@
 import { withDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.ts';
 import { JudgmentError, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
-// The execution ledger hoisted from goodvibes-agent src/runtime/execution-ledger.ts.
-// Its route kind is Jev's side-effect kind reading (the agent's tool-name
-// keyword ladder is gone), answered here by a fake port. The reading is
-// asynchronous, so these tests also pin that a call's later events are
-// applied after its record exists, in order, and that a failed reading still
-// records the call.
+// The execution ledger. An engine tool's record is decided by code (no
+// reading, in every mode); any other tool's route kind is Jev's side-effect
+// kind reading, answered here by a fake port. That reading is asynchronous, so
+// these tests also pin that a call's later events are applied after its record
+// exists, in order, and that a failed reading still records the call.
 import { describe, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.ts';
@@ -45,7 +44,7 @@ function received(bus: RuntimeEventBus, callId: string, tool: string, args: Reco
 }
 
 describe('AgentExecutionLedger', () => {
-  test('each record\'s route kind is Jev\'s reading of the call, asked at the ledger site', async () => {
+  test('an engine tool\'s kind is a fact; any other tool\'s is Jev\'s reading, asked at the ledger site', async () => {
     const bus = new RuntimeEventBus();
     const ledger = new AgentExecutionLedger(bus);
     received(bus, 'c1', 'browser', { action: 'click' });
@@ -59,7 +58,7 @@ describe('AgentExecutionLedger', () => {
     expect(kinds).toEqual({ browser: 'browser', exec: 'shell', read: 'read', fetch: 'network', sleep: 'other' });
     expect(ledger.getSnapshot().records.find((record) => record.callId === 'c2')?.commandPreview).toBe('git status');
     const routeRequests = readings.requests.filter((request) => JSON.stringify(request.state).includes('"arguments"'));
-    expect(routeRequests).toHaveLength(5);
+    expect(routeRequests).toHaveLength(2);
     expect(JSON.stringify(routeRequests[0])).toContain(EXECUTION_LEDGER_SITE);
   });
 
@@ -129,7 +128,7 @@ describe('AgentExecutionLedger', () => {
     const ledger = new AgentExecutionLedger(bus);
     const previous = installJudgmentPort(undefined);
     try {
-      received(bus, 'c1', 'exec', { commands: [{ cmd: 'ls' }] });
+      received(bus, 'c1', 'sleep', { seconds: 1 });
       await settle(ledger);
     } finally {
       installJudgmentPort(previous);
@@ -230,7 +229,7 @@ describe('AgentExecutionLedger', () => {
     ledger.subscribe(() => { notified += 1; });
     received(bus, 'c1', 'read');
     await settle(ledger);
-    expect(notified).toBe(3);
+    expect(notified).toBe(2);
 
     ledger.dispose();
     received(bus, 'c2', 'read');
@@ -241,7 +240,7 @@ describe('AgentExecutionLedger', () => {
 
 
 describe('native Classic execution ledger', () => {
-  test('records successful lifecycle and actual permission with zero semantic requests or verification claims', async () => {
+  test('records an engine tool completely from code, with zero semantic requests', async () => {
     let asks = 0;
     const previous = installJudgmentPort({ model: 'fixture', async ask() { asks++; throw new Error('Classic must not ask'); } });
     const bus = new RuntimeEventBus(), ledger = new AgentExecutionLedger(bus);
@@ -253,10 +252,9 @@ describe('native Classic execution ledger', () => {
         await settle(ledger);
         const record = ledger.getSnapshot().records[0];
         expect(record).toMatchObject({ callId: 'classic', status: 'succeeded', permissionApproved: true,
-          operationProvenance: 'classic', semanticAssessment: 'not-evaluated', routeKind: 'other' });
-        expect(record?.verification).toBeUndefined(); expect(record?.autonomousDecision).toBeUndefined();
+          operationProvenance: 'classic', routeKind: 'shell', commandPreview: 'echo native', verification: false });
+        expect(record?.autonomousDecision).toBeUndefined();
         expect(record?.routeKindError).toBeUndefined(); expect(record?.argsReadingError).toBeUndefined();
-        expect(record?.argsPreview).toContain('Classic'); expect(record?.argsPreview).not.toContain('echo native');
         expect(asks).toBe(0);
       });
     } finally { ledger.dispose(); installJudgmentPort(previous); }
@@ -268,12 +266,12 @@ describe('native Classic execution ledger', () => {
     const bus = new RuntimeEventBus(), ledger = new AgentExecutionLedger(bus);
     try {
       await withDecisionModelPolicy(() => 'Preferred', async () => {
-        received(bus, 'preferred', 'exec', { nativeFieldForExhaustion: 'opaque' });
+        received(bus, 'preferred', 'sleep', { nativeFieldForExhaustion: 'opaque' });
         await settle(ledger);
         expect(asks).toBe(1);
         expect(decisionModelPolicyState()).toMatchObject({ operation: 'classic', reason: 'unavailable' });
         expect(ledger.getSnapshot().records[0]).toMatchObject({ operationProvenance: 'classic', semanticAssessment: 'not-evaluated' });
-        emitToolCancelled(bus, CTX, { callId: 'preferred', turnId: 'turn-1', tool: 'exec', reason: 'owner cancelled execution' });
+        emitToolCancelled(bus, CTX, { callId: 'preferred', turnId: 'turn-1', tool: 'sleep', reason: 'owner cancelled execution' });
         await settle(ledger);
         expect(ledger.getSnapshot().records[0]?.status).toBe('cancelled');
         expect(asks).toBe(1);

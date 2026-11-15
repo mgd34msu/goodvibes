@@ -1,4 +1,3 @@
-import { readFileSync } from 'node:fs';
 import type { ConfigManager } from '../../config/manager.js';
 import type { ConfigKey } from '../../config/schema-types.js';
 import { CONFIG_SCHEMA } from '../../config/schema.js';
@@ -9,16 +8,11 @@ import { effectivePermissionMode, gatePresetLabel } from '../presets.js';
 // /permissions provenance panel.
 //
 // Shows every permission-relevant setting in effect AND where each value came
-// from. Provenance is taken from the platform's own ConfigManager.
-// describeConfigKeySource (the recorded on-disk tier: shared / project / global
-// / default), never a guess. Because CLI --config overrides mutate the config
-// in memory WITHOUT touching any file, we additionally compare the live value
-// against the recorded on-disk / built-in-default value: when they diverge, the
-// value was changed at runtime and its true origin is NOT recorded on disk, so
-// the line is labelled exactly that rather than mis-attributed to a file.
-//
-// Hoisted from the TUI (src/input/commands/permissions-provenance.ts) into the
-// engine gate; the rendered text is unchanged.
+// from, as the ConfigManager accepted it (describeConfigKeySource: the tier and
+// the effective origin), never by rereading a file. A value overridden at
+// runtime (--config) names the tier underneath it and that tier's file. The
+// evaluator row also shows the evaluator in force, which changes only at a
+// restart.
 // ---------------------------------------------------------------------------
 
 /** A permission-relevant setting, its live value, and where that value came from. */
@@ -34,8 +28,10 @@ export interface PermissionProvenanceRow {
   readonly recorded: boolean;
   /** True when the live value diverges from the recorded on-disk / default value (an in-memory runtime override). */
   readonly overridden: boolean;
-  /** The recorded on-disk / default value, shown alongside the effective value when overridden. */
-  readonly recordedValue?: unknown;
+  /** For a runtime override: the tier the accepted settings hold underneath it. */
+  readonly underlay?: string;
+  /** Set when the value in force differs from the configured one until a restart. */
+  readonly inForce?: string;
   readonly note?: string;
 }
 
@@ -55,36 +51,6 @@ const PERMISSION_KEYS: readonly { readonly key: string; readonly label: string; 
     note: 'Deny restricts safe execution modes; other values follow the selected mode.',
   })),
 ];
-
-/** Read a dotted key out of a parsed JSON object; segments may themselves contain hyphens. */
-function readDotPath(obj: unknown, key: string): { present: boolean; value: unknown } {
-  let cursor: unknown = obj;
-  for (const part of key.split('.')) {
-    if (cursor == null || typeof cursor !== 'object' || !(part in (cursor as object))) {
-      return { present: false, value: undefined };
-    }
-    cursor = (cursor as Record<string, unknown>)[part];
-  }
-  return { present: true, value: cursor };
-}
-
-/** The value a config key resolves to from a single on-disk file, or null when the file is unreadable. */
-function fileValue(path: string, key: string): { present: boolean; value: unknown } | null {
-  try {
-    return readDotPath(JSON.parse(readFileSync(path, 'utf-8')), key);
-  } catch {
-    return null;
-  }
-}
-
-function schemaDefault(key: string): { known: boolean; value: unknown } {
-  const setting = CONFIG_SCHEMA.find((s) => s.key === key);
-  return setting ? { known: true, value: setting.default } : { known: false, value: undefined };
-}
-
-function sameValue(a: unknown, b: unknown): boolean {
-  return JSON.stringify(a) === JSON.stringify(b);
-}
 
 export type ConfigProvenanceManager = Pick<ConfigManager, 'get' | 'describeConfigKeySource' | 'getConfigPath' | 'getProjectConfigPath'>;
 
@@ -123,63 +89,33 @@ function buildRow(
     : tier === 'global' ? globalPath
     : null;
 
-  // Runtime-aware managers report accepted snapshot provenance, including a
-  // last-good value after refusal. Never mislabel an unaccepted disk edit as
-  // the live origin by rereading the file here.
-  if (src.effectiveOrigin) {
-    if (src.effectiveOrigin === 'runtime' || src.effectiveOrigin === 'runtime-default') {
-      return { ...base, origin: src.effectiveOrigin === 'runtime' ? 'runtime override (in-memory; origin not recorded on disk)' : 'frontend runtime default',
-        originPath: null, recorded: false, overridden: src.effectiveOrigin === 'runtime' };
-    }
-    return { ...base, origin: tier === 'default' ? 'built-in default' : `${tier} config file`,
-      originPath, recorded: true, overridden: false, recordedValue: live };
+  const tierLabel = tier === 'default' ? 'built-in default' : `${tier} config file`;
+  if (src.effectiveOrigin === 'runtime') {
+    return { ...base, origin: 'runtime override (in-memory; origin not recorded on disk)', originPath, recorded: false, overridden: true, underlay: tierLabel };
   }
-
-  // The value the recorded layer actually holds on disk (or the built-in default).
-  let recordedValue: unknown;
-  let recordedSource: string;
-  if (tier === 'default') {
-    const def = schemaDefault(key);
-    recordedValue = def.value;
-    recordedSource = def.known ? 'built-in default' : 'built-in default (not in schema)';
-  } else if (originPath) {
-    const fv = fileValue(originPath, key);
-    if (!fv || !fv.present) {
-      // The tier says this file carries the key, but we could not read it back,
-      // do not guess; report the origin as unrecorded.
-      return { ...base, origin: `origin not recorded (${tier} config file could not be read back)`, originPath, recorded: false, overridden: false };
-    }
-    recordedValue = fv.value;
-    recordedSource = `${tier} config file`;
-  } else {
-    return { ...base, origin: `origin not recorded (no path for ${tier} tier)`, originPath: null, recorded: false, overridden: false };
+  if (src.effectiveOrigin === 'runtime-default') {
+    return { ...base, origin: 'frontend runtime default', originPath: null, recorded: false, overridden: false };
   }
-
-  const overridden = !sameValue(live, recordedValue);
-  if (overridden) {
-    // A CLI --config override (or any in-memory set that did not persist) sits on
-    // top of the recorded value. There is no on-disk record of where it came from.
-    return {
-      ...base,
-      origin: 'runtime override (in-memory; origin not recorded on disk)',
-      originPath,
-      recorded: false,
-      overridden: true,
-      recordedValue,
-    };
-  }
-
-  return { ...base, origin: recordedSource, originPath, recorded: true, overridden: false, recordedValue };
+  return { ...base, origin: tierLabel, originPath, recorded: true, overridden: false };
 }
 
-export function buildPermissionProvenance(configManager: ConfigProvenanceManager): PermissionProvenance {
+/** What the running process uses for the evaluator, when the surface can say. */
+export interface PermissionProvenanceOptions {
+  readonly evaluatorInForce?: 'baseline' | 'policy-engine' | undefined;
+}
+
+export function buildPermissionProvenance(configManager: ConfigProvenanceManager, options: PermissionProvenanceOptions = {}): PermissionProvenance {
   const savedAutoApprove = configManager.get('behavior.autoApprove');
   const mode = effectivePermissionMode(configManager.get('permissions.mode'), savedAutoApprove === true);
+  const withInForce = (row: PermissionProvenanceRow): PermissionProvenanceRow =>
+    row.key === 'permissions.engine' && options.evaluatorInForce !== undefined && options.evaluatorInForce !== row.value
+      ? { ...row, inForce: `${options.evaluatorInForce} until restart (restart to apply ${String(row.value)})` }
+      : row;
   return {
     sessionMode: mode,
     sessionModeLabel: gatePresetLabel(mode),
     rows: [
-      ...PERMISSION_KEYS.map((entry) => buildRow(configManager, entry)),
+      ...PERMISSION_KEYS.map((entry) => withInForce(buildRow(configManager, entry))),
       ...(savedAutoApprove === true ? [buildRow(configManager, {
         key: 'behavior.autoApprove', label: 'Saved YOLO alias',
         note: 'Legacy saved setting selects YOLO. Selecting an execution mode clears this alias.',
@@ -212,11 +148,12 @@ export function renderPermissionProvenance(provenance: PermissionProvenance): st
     lines.push(`  ${row.label.padEnd(keyWidth)} : ${valueText}${flag}`);
     if (row.overridden) {
       lines.push(`  ${' '.repeat(keyWidth)}   origin: ${row.origin}`);
-      lines.push(`  ${' '.repeat(keyWidth)}   on disk: ${displayValue(row.recordedValue)} (${row.originPath ?? 'no file'})`);
+      if (row.underlay) lines.push(`  ${' '.repeat(keyWidth)}   underneath: ${row.underlay}${row.originPath ? ` (${row.originPath})` : ''}`);
     } else {
       const pathText = row.originPath ? ` (${row.originPath})` : '';
       lines.push(`  ${' '.repeat(keyWidth)}   origin: ${row.origin}${pathText}`);
     }
+    if (row.inForce) lines.push(`  ${' '.repeat(keyWidth)}   in force: ${row.inForce}`);
     if (row.note) lines.push(`  ${' '.repeat(keyWidth)}   note: ${row.note}`);
   }
   lines.push('');

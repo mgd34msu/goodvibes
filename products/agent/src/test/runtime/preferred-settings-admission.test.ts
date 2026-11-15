@@ -35,7 +35,6 @@ import { CodeIntelligence } from '@goodvibes-jev/engine/platform/platform/intell
 import { withTurnSurface } from '@goodvibes-jev/engine/platform/platform/security';
 import { RuntimeEventBus } from '@/runtime/index.ts';
 import { composeAgentToolRegistry } from '../../runtime/agent-tool-registry.ts';
-import { composeAgentPermissionManager } from '../../runtime/bootstrap-core.ts';
 import { type RuntimeServices } from '../../runtime/services.ts';
 import { createRuntimeStore } from '../../runtime/store/index.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
@@ -152,7 +151,7 @@ async function fixture(remote?: 'normal' | 'lost-response', readOnly = false, co
   registerAgentHarnessTool(registry, commands, context);
   registerAgentSettingsTool(registry, commands, context);
   registerAgentSettingsImportTool(registry, context);
-  const manager = composeAgentPermissionManager(runtime);
+  const manager = runtime.permissionManager;
   const admit = manager.admitAutonomous.bind(manager);
   const admissionTap = spyOn(manager, 'admitAutonomous').mockImplementation(async (...args) => {
     const result = await admit(...args); await afterAdmission?.(); return result;

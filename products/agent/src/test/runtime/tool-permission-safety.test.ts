@@ -13,11 +13,9 @@ import type { PermissionManager, PermissionCheckResult, PermissionExecutionOptio
 import { JudgmentError, SqliteDecisionLog, withDecisionLog, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { RuntimeEventBus } from '@/runtime/index.ts';
-import { composeAgentPermissionManager } from '../../runtime/bootstrap-core.ts';
 import { type RuntimeServices } from '../../runtime/services.ts';
 import { createRuntimeStore } from '../../runtime/store/index.ts';
 
-import { installPermissionManagerSafetyGuard as sharedGuard } from '@goodvibes-jev/engine/platform/platform/gate/policy';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
 const runtimes: RuntimeServices[] = [];
@@ -60,7 +58,7 @@ function pipeline(services: RuntimeServices, signal?: AbortSignal) {
     definition: { name, description: 'Nonexecuting fixture', parameters: { type: 'object', additionalProperties: true } },
     execute: async (args) => { executed.push(args); return { success: true, output: 'fixture' }; },
   });
-  const manager = composeAgentPermissionManager(services);
+  const manager = services.permissionManager;
   const deps: ToolExecutionDeps = {
     autonomousSource: () => ({ goal: 'Read the synthetic fixture through the Agent permission pipeline', criteria: ['Execute only the requested fixture action'] }),
     toolRegistry: registry, permissionManager: manager,
@@ -112,42 +110,6 @@ describe('Agent adopts the shared permission gate without alternate authority', 
     await expect(gate.run('read', { path: 'fixture.txt' })).rejects.toThrow('No judgment port');
     expect(gate.executed).toHaveLength(0);
   });
-
-  for (const method of ['check', 'checkDetailed'] as const) {
-    test(`${method}: full execution options, attribution, and immutable arguments reach the authoritative check`, async () => {
-      const args = Object.freeze({ nested: Object.freeze({ path: 'fixture.txt' }) });
-      const attribution = { kind: 'background-agent', agentId: 'fixture', template: 'reader' } as const;
-      const controller = new AbortController();
-      const hookOwner = new TurnHookOwner('fixture', 'turn', controller.signal);
-      const options: PermissionExecutionOptions & { fixtureOption: string } = { signal: controller.signal, hookOwner, fixtureOption: 'preserved' };
-      let received: unknown[] = [];
-      const manager: Pick<PermissionManager, 'check' | 'checkDetailed' | 'getCategory'> = {
-        async check(...input) { received = input; return true; },
-        async checkDetailed(...input) { received = input; return allowed; },
-        getCategory: () => 'read',
-      };
-      sharedGuard(manager);
-      const result = await manager[method]('read', args, attribution, options);
-      expect(received[1]).toBe(args);
-      expect(received[2]).toBe(attribution);
-      expect(received[3]).toEqual(options);
-      expect(result).toBe(method === 'check' ? true : allowed);
-      await hookOwner.closeAndDrain();
-    });
-  }
-
-  for (const method of ['check', 'checkDetailed'] as const) {
-    for (const failure of ['unavailable', 'throwing'] as const) test(`${method}: the retained guard propagates the exact ${failure} authority failure`, async () => {
-      const error = failure === 'unavailable' ? new JudgmentError('unavailable', 'fixture unavailable') : new Error('fixture manager failed');
-      const manager: Pick<PermissionManager, 'check' | 'checkDetailed' | 'getCategory'> = {
-        check: async () => { throw error; },
-        checkDetailed: async () => { throw error; },
-        getCategory: () => 'read',
-      };
-      sharedGuard(manager);
-      await expect(manager[method]('read', {})).rejects.toBe(error);
-    });
-  }
 
   test.each(['revoke', 'cancel'] as const)('%s during the actual admission await prevents execution of a late approval', async mode => {
     const services = (await runtime()); const entered = deferred(); const release = deferred();

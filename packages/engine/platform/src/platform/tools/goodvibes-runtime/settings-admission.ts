@@ -2,8 +2,8 @@
 import type { ConfigWriteRoute } from '../../config/daemon-config-route.js';
 import { preparedReceiptWrites, type ConfigManager, type PreparedConfigMutationFacts } from '../../config/manager.js';
 import { isValidConfigKey } from '../../config/schema.js';
-import { isSecretBearingConfigKey, isSecretReferenceValue } from '../../config/secret-bearing-config-keys.js';
-import { isStructuredCredentialReferenceConfigKey } from '../../config/structured-credential-config.js';
+import { isSecretBearingConfigKey } from '../../config/secret-bearing-config-keys.js';
+import { agentSettingsWriteRefusal } from '../../gate/policy/agent-settings-refusals.js';
 import { configKeyScope, describeConfigOwnership } from '../../config/config-ownership.js';
 import { captureOwnedJson } from '../../gate/judgment-input.js';
 import { applyRemoteSettingsPrecondition, assertRemoteSettingsPrecondition, captureRemoteSettingsPrecondition,
@@ -49,15 +49,9 @@ export function createAgentSettingsInputProjector(configManager: ConfigManager, 
       if ((args.mode !== 'set' && args.mode !== 'reset') || typeof args.key !== 'string') throw new ToolInputProjectionError('invalid');
       const key = args.key.trim();
       if (!isValidConfigKey(key)) throw new ToolInputProjectionError('invalid');
-      // Validate the declared credential storage format before preparing any local or remote write.
-      // A literal is refused whatever its shape (the legacy path refuses objects and numbers the same way);
-      // a structured credential key carries its own reference shape and validates it itself.
-      if (args.mode === 'set' && isSecretBearingConfigKey(key) && !isStructuredCredentialReferenceConfigKey(key)) {
-        const raw = typeof args.value === 'string'
-          ? args.value.trim() !== '' && !isSecretReferenceValue(args.value)
-          : args.value !== undefined && args.value !== null && args.value !== '';
-        if (raw) throw new ToolInputProjectionError('held');
-      }
+      // The one refusal of a settings write, before any local or remote write is prepared.
+      const refusal = agentSettingsWriteRefusal({ mode: args.mode, key, value: args.value });
+      if (refusal) throw new ToolInputProjectionError('held', refusal);
       // Hosted originating-surface files have a separate owner contract. The
       // main Agent composition never supplies this override; never borrow the
       // hosting manager's authority for a distinct file.

@@ -31,32 +31,40 @@ test('span scanning preserves the prior flag and field declaration grammar, incl
 });
 
 /**
- * Explicit cases rather than a restatement of the rule: each row is one declaration the scanner finds,
- * and whether its value is a literal (a real inline secret) or a secret-store reference, with and
- * without evidence that the text was already redacted.
+ * Explicit cases rather than a restatement of the rule: each row is one credential declaration the
+ * scanner finds, and whether its value is literal secret material (a key- or token-shaped literal) or
+ * something that only names one (a secret-store reference, an expansion, a member expression, a
+ * placeholder, a short plain word), with and without evidence that the text was already redacted.
  */
+const TOKEN = 'Zx9kQ2vL7mN4pR8sT1';
 const LITERAL_CASES: readonly { text: string; flags: boolean; key: string; value: string; literal: boolean; literalWhenRedactedEvidence?: boolean }[] = [
-  { text: 'password=hunter2', flags: false, key: 'password', value: 'hunter2', literal: true },
-  { text: 'password="hunter2"', flags: false, key: 'password', value: '"hunter2"', literal: true },
-  { text: '--password hunter2', flags: true, key: 'password', value: 'hunter2', literal: true },
+  { text: `password=${TOKEN}`, flags: false, key: 'password', value: TOKEN, literal: true },
+  { text: `password="${TOKEN}"`, flags: false, key: 'password', value: `"${TOKEN}"`, literal: true },
+  { text: `--password ${TOKEN}`, flags: true, key: 'password', value: TOKEN, literal: true },
+  { text: 'password=hunter2', flags: false, key: 'password', value: 'hunter2', literal: false },
+  { text: 'password=$DB_PASSWORD', flags: false, key: 'password', value: '$DB_PASSWORD', literal: false },
+  { text: 'password: ${DB_PASSWORD}', flags: false, key: 'password', value: '${DB_PASSWORD', literal: false },
+  { text: 'apiKey: process.env.OPENAI_API_KEY', flags: false, key: 'apiKey', value: 'process.env.OPENAI_API_KEY', literal: false },
+  { text: 'API_KEY=changeme', flags: false, key: 'API_KEY', value: 'changeme', literal: false },
   { text: 'password=goodvibes://secrets/key', flags: false, key: 'password', value: 'goodvibes://secrets/key', literal: false },
   { text: 'password="goodvibes://secrets/key"', flags: false, key: 'password', value: '"goodvibes://secrets/key"', literal: false },
   { text: 'note=?password=goodvibes://secrets/key', flags: false, key: 'password', value: 'goodvibes://secrets/key', literal: false },
   { text: 'password=goodvibes://secrets/a=password=goodvibes://secrets/key', flags: false, key: 'password', value: 'goodvibes://secrets/a=password=goodvibes://secrets/key', literal: false },
-  // A reference followed by a query or fragment is not a bare reference: the tail is unknown text.
-  { text: 'password=goodvibes://secrets/key?other=value', flags: false, key: 'password', value: 'goodvibes://secrets/key?other=value', literal: true },
-  { text: 'password=goodvibes://secrets/key#fragment', flags: false, key: 'password', value: 'goodvibes://secrets/key#fragment', literal: true },
-  // No key name after the scheme path: nothing is being referenced.
-  { text: 'password=goodvibes://secrets/', flags: false, key: 'password', value: 'goodvibes://secrets/', literal: true },
   { text: "password=''", flags: false, key: 'password', value: "''", literal: false },
-  { text: 'password=[REDACTED]', flags: false, key: 'password', value: '[REDACTED]', literal: true, literalWhenRedactedEvidence: false },
+  { text: 'password=[REDACTED]', flags: false, key: 'password', value: '[REDACTED]', literal: false, literalWhenRedactedEvidence: false },
 ];
 
-test('literalDeclarationValue separates real inline values from references and empty values', () => {
+test('literalDeclarationValue separates literal credentials from references, expansions and placeholders', () => {
   for (const row of LITERAL_CASES) {
     const span = [...inlineDeclarations(row.text, row.flags)].find(candidate => candidate.key === row.key && row.text.slice(candidate.valueStart, candidate.valueEnd) === row.value);
     expect(span, row.text).toBeDefined();
-    expect(literalDeclarationValue(row.text, span!, false), row.text).toBe(row.literal);
-    expect(literalDeclarationValue(row.text, span!, true), `${row.text} with redaction evidence`).toBe(row.literalWhenRedactedEvidence ?? row.literal);
+    expect(literalDeclarationValue(row.text, span!, { kind: 'credential', evidence: false }), row.text).toBe(row.literal);
+    expect(literalDeclarationValue(row.text, span!, { kind: 'credential', evidence: true }), `${row.text} with redaction evidence`).toBe(row.literalWhenRedactedEvidence ?? row.literal);
   }
+});
+
+test('a card value is literal whenever it is written out, however short', () => {
+  const text = 'cvv=123';
+  const span = [...inlineDeclarations(text, false)].find(candidate => candidate.key === 'cvv')!;
+  expect(literalDeclarationValue(text, span, { kind: 'card', evidence: false })).toBe(true);
 });

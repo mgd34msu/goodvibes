@@ -3,7 +3,6 @@ import { createExecTool, OverflowHandler, ProcessManager, ToolRegistry } from '@
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import {
   AGENT_CHANNEL_ACTION_DENIAL_MESSAGE,
-  AGENT_READ_ONLY_REGISTRY_TOOL_MODES,
   explainAgentToolPolicyInvocation,
   installAgentToolPolicyGuard,
 } from '../../tools/agent-tool-policy-guard.ts';
@@ -92,18 +91,13 @@ describe('core tool parameters keep what teaches the call', () => {
 });
 
 describe('policy explanation follows the wrapper outcome', () => {
-  test('a registry content mode is explained as denied, the same as the wrapper refuses it', async () => {
+  test('registry carries no Agent restriction: the tool\'s own scope applies, and the explanation says so', async () => {
     const registry = guardedRegistry(['registry']);
-    const args = { mode: 'content', path: '/etc/passwd' };
-    const executed = await registry.execute('call-registry', 'registry', args);
-    const explained = explainAgentToolPolicyInvocation('registry', args);
-    expect(executed.success).toBe(false);
-    expect(explained.status).toBe('denied');
-    expect(executed.error).toBe(explained.reason);
-  });
-
-  test('an allowed registry mode is explained as allowed', () => {
-    expect(explainAgentToolPolicyInvocation('registry', { mode: AGENT_READ_ONLY_REGISTRY_TOOL_MODES[0] }).status).toBe('allowed');
+    const executed = await registry.execute('call-registry', 'registry', { mode: 'content', path: '.goodvibes/skills/a/SKILL.md' });
+    expect(executed.success).toBe(true);
+    const explained = explainAgentToolPolicyInvocation('registry', { mode: 'content' });
+    expect(explained.status).toBe('allowed');
+    expect(explained.reason).toContain('No Agent restriction');
   });
 });
 

@@ -65,7 +65,9 @@ describe('shared execution ledger delivery and privacy', () => {
     const record = subject.getSnapshot().records[0]!;
     expect(record.routeKind).toBe('network');
     expect(record.targetPreview).toBe('initial-safe-target'); expect(record.commandPreview).toBeUndefined();
-    expect(requests.at(-1)?.context?.battery).toBe('engine.gate.execution-purpose');
+    // A network call cannot be a verification: no purpose reading is asked for it.
+    expect(record.verification).toBe(false);
+    expect(requests.some(request => request.context?.battery === 'engine.gate.execution-purpose')).toBe(false);
     expect(requests.some(request => request.context?.battery === 'engine.gate.side-effect')).toBe(true);
   });
 

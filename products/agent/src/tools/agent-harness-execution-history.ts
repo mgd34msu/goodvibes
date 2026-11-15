@@ -25,7 +25,7 @@ type ExecutionHistoryResolution =
 
 type ActivityCardStatus = AgentExecutionStatus | 'mixed';
 type VerificationStatus = 'passed' | 'failed' | 'running' | 'cancelled' | 'not_recorded' | 'held' | 'not-evaluated';
-/** Whether a record is a verification attempt, as the execution ledger recorded it when the call ran. */
+/** Whether a record is a verification attempt, as the execution ledger recorded it. */
 type VerificationObservation = { readonly status: 'settled'; readonly verification: boolean }
   | { readonly status: 'held' }
   | { readonly status: 'not-evaluated'; readonly provenance: 'classic' };
@@ -493,10 +493,11 @@ async function matchingRecords(all: readonly AgentExecutionRecord[], query: stri
 }
 
 /**
- * The verification role of each record is the ledger's own reading, taken
- * once when the call ran (`record.verification`); a history view reads it
- * and asks nothing. A record whose reading has not settled is held; one
- * recorded during Classic operation is not evaluated.
+ * The verification role of each record is the ledger's own answer
+ * (`record.verification`), decided by code when a known tool's call was
+ * recorded and read once for any other tool; a history view reads it and asks
+ * nothing. A record whose reading has not settled is held; an unknown tool's
+ * record made during Classic operation is not evaluated.
  */
 function verificationObservations(all: readonly AgentExecutionRecord[]): VerificationObservations {
   return new Map(all.map((record): [string, VerificationObservation] => [record.id,

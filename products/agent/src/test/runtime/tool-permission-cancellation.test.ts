@@ -6,11 +6,9 @@ import { join } from 'node:path';
 import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import {
   createPermissionConfigReader, PermissionManager, UserPermissionRuleStore,
-  type PermissionAttribution, type PermissionCheckResult,
+  type PermissionAttribution,
 } from '@goodvibes-jev/engine/platform/platform/permissions';
 import { security } from '@goodvibes-jev/engine/platform/platform/runtime';
-import { JudgmentError } from '@goodvibes-jev/judgment';
-import { installPermissionManagerSafetyGuard } from '../../runtime/tool-permission-safety.ts';
 
 function deferred() {
   let resolve!: () => void;
@@ -27,10 +25,6 @@ async function within<T>(promise: Promise<T>): Promise<T> {
   } finally { clearTimeout(timer); }
 }
 
-const ALLOWED: PermissionCheckResult = {
-  approved: true, persisted: false, sourceLayer: 'config_policy', reasonCode: 'config_allow',
-  analysis: { classification: 'generic', riskLevel: 'low', summary: 'fixture read', reasons: [] },
-};
 
 for (const method of ['check', 'checkDetailed'] as const) {
   test(`${method} preserves real-manager attribution and cancellation during a pending pre-permission hook`, async () => {
@@ -45,7 +39,7 @@ for (const method of ['check', 'checkDetailed'] as const) {
     const hooks = { async fire() { entered.resolve(); await release.promise; returned.resolve(); return { ok: true, decision: 'allow' }; } } as unknown as Pick<HookDispatcher, 'fire'>;
     const manager = new PermissionManager(async () => { prompts++; return { approved: true }; },
       createPermissionConfigReader(config), new security.PolicyRuntimeState(), hooks, null, store);
-    const original = spyOn(manager, method); installPermissionManagerSafetyGuard(manager);
+    const original = spyOn(manager, method);
     const pending = manager[method]('read', { files: [{ path }] }, attribution, options).then(decision => {
       if (typeof decision === 'boolean' ? decision : decision.approved) { fileReads++; readFileSync(path, 'utf8'); }
       return decision;
@@ -64,37 +58,4 @@ for (const method of ['check', 'checkDetailed'] as const) {
       expect(fileReads).toBe(0); expect(store.list()).toHaveLength(0);
     } finally { release.resolve(); controller.abort(); await within(outcome).catch(() => undefined); original.mockRestore(); rmSync(root, { recursive: true, force: true }); }
   });
-
-  for (const error of [new DOMException('cancelled', 'AbortError'), new JudgmentError('aborted', 'the permission request was cancelled')]) {
-    test(`${method} does not turn ${error.name} into a read-only fallback grant`, async () => {
-      const manager: Pick<PermissionManager, 'check' | 'checkDetailed' | 'getCategory'> = {
-        check: async () => { throw error; },
-        checkDetailed: async () => { throw error; },
-        getCategory: () => 'read',
-      };
-      installPermissionManagerSafetyGuard(manager);
-      await expect(manager[method]('read', {})).rejects.toBe(error);
-    });
-  }
-
-  for (const fails of [false, true]) {
-    test(`${method} rejects cancellation racing a late ${fails ? 'ordinary failure' : 'allowance'}`, async () => {
-      const controller = new AbortController();
-      const options = { signal: controller.signal };
-      const manager: Pick<PermissionManager, 'check' | 'checkDetailed' | 'getCategory'> = {
-        async check() { cancel(); return true; },
-        async checkDetailed() { cancel(); return ALLOWED; },
-        getCategory: () => 'read',
-      };
-      function cancel() {
-        options.signal = new AbortController().signal;
-        controller.abort(new Error('synthetic private racing reason'));
-        if (fails) throw new Error('ordinary lookup failure after cancellation');
-      }
-      installPermissionManagerSafetyGuard(manager);
-      const outcome = manager[method]('read', {}, undefined, options).catch((error: unknown) => error);
-      expect(await outcome).toMatchObject({ name: 'JudgmentError', kind: 'aborted', message: 'the permission request was cancelled' });
-      expect(JSON.stringify(await outcome)).not.toContain('synthetic private racing reason');
-    });
-  }
 }

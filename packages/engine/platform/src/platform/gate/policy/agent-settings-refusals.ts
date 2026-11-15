@@ -1,14 +1,26 @@
 /**
- * Settings writes the Agent's settings tool refuses outright. The owner makes these
- * changes in the settings screens; nothing the Agent reads or is told can authorize
- * them, so there is no confirmation path here.
+ * Settings writes an agent's settings tool refuses outright, decided by code
+ * from the key and the value: card material (entered only through the secure
+ * card setup), a credential destination (which host receives a stored
+ * credential), and a secret-bearing key given a literal or another key's
+ * secret (which would send one service's credential to another). The settings
+ * tool's input projector calls this once, before any effect is prepared.
+ * Every other write, payments limits included, goes on to the normal admission,
+ * which allows a change the owner asked for in the turn.
  */
 import { CREDENTIAL_DESTINATION_KEYS } from '../../config/credential-destination-keys.js';
 import { daemonSecretKeyFor } from '../../config/daemon-secret-keys.js';
 import { isSecretBearingConfigKey } from '../../config/secret-bearing-config-keys.js';
 import { isStructuredCredentialReferenceConfigKey } from '../../config/structured-credential-config.js';
 import { SURFACE_EMAIL_PASSWORD_REF, SURFACE_EMAIL_SMTP_PASSWORD_REF } from '../../email/surface-config.js';
-import type { SettingsToolArgs } from './settings-write-evidence.js';
+import { configKeyFacts } from '../../config/config-key-facts.js';
+
+/** The settings tool's argument shape. */
+export type SettingsToolArgs = {
+  readonly mode?: unknown;
+  readonly key?: unknown;
+  readonly [name: string]: unknown;
+};
 
 /** The only references besides the key's own derived one that a key may point at. */
 const SHARED_REFERENCES: Readonly<Record<string, string>> = {
@@ -30,17 +42,20 @@ function referencedSecretKey(value: string): string | null {
 export function agentSettingsWriteRefusal(args: SettingsToolArgs): string | null {
   if (typeof args.key !== 'string') return null;
   const key = args.key.trim();
-  const writing = args.mode === 'set' || args.mode === 'reset';
-  if (writing && key.startsWith('payments.')) {
-    return `Settings under payments.* (${key}) hold spending limits, retailer lists, cards and addresses, and only the owner changes them, in the settings screen. Nothing was changed. Read the value if you need it, and ask the owner to make the change.`;
-  }
   if (args.mode !== 'set') return null;
+  if (configKeyFacts(key).cardMaterial) {
+    return `${key} holds payment card material, which is entered only through the local terminal or web UI secure card setup. Nothing was changed. Ask the owner to enter the card there and use the stored card id.`;
+  }
   if (CREDENTIAL_DESTINATION_KEYS.has(key)) {
     return `${key} decides which host receives this service's stored credential, so only the owner changes it, in the settings screen. Nothing was changed. Tell the owner the value you were given and ask them to set it.`;
   }
-  if (isSecretBearingConfigKey(key) && !isStructuredCredentialReferenceConfigKey(key) && typeof args.value === 'string' && args.value.trim() !== '') {
-    const secretKey = referencedSecretKey(args.value);
+  if (isSecretBearingConfigKey(key) && !isStructuredCredentialReferenceConfigKey(key) && args.value !== undefined && args.value !== null && args.value !== '') {
     const own = daemonSecretKeyFor(key);
+    if (typeof args.value !== 'string') {
+      return `${key} takes only a stored secret reference, ${SECRET_REF_PREFIX}${encodeURIComponent(own)}, never a literal value. Nothing was changed. Store the credential for this key first, then set that reference, or ask the owner to enter it in the settings screen.`;
+    }
+    if (args.value.trim() === '') return null;
+    const secretKey = referencedSecretKey(args.value);
     const shared = SHARED_REFERENCES[key];
     const allowed = secretKey !== null && (secretKey === own || (shared !== undefined && referencedSecretKey(shared) === secretKey));
     if (!allowed) {

@@ -9,7 +9,6 @@ import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/test
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { RuntimeEventBus } from '@/runtime/index.ts';
 import { composeAgentToolRegistry } from '../../runtime/agent-tool-registry.ts';
-import { composeAgentPermissionManager } from '../../runtime/bootstrap-core.ts';
 import { createRuntimeStore } from '../../runtime/store/index.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
@@ -43,7 +42,7 @@ test.each(['safe-owner', 'safe-jev', 'yolo'] as const)('%s publishes a non-mode 
     installJudgmentPort(withDecisionLog(fake.port, log));
     const registry = composeAgentToolRegistry({ services: runtime, configManager: config, homeDirectory: home,
       resolveSessionId: () => 'mode-settings', getLastUserMessage: () => 'Set the scratch theme to nord' }).toolRegistry;
-    const manager = composeAgentPermissionManager(runtime);
+    const manager = runtime.permissionManager;
     const [result] = await executeToolCalls({ toolRegistry: registry, permissionManager: manager,
       autonomousSource: () => ({ goal: 'Set the scratch theme to nord', criteria: ['Persist nord in the scratch settings file'] }),
       hookDispatcher: null, runtimeBus: null, sessionId: 'mode-settings',

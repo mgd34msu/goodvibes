@@ -38,7 +38,6 @@ import { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { Tool, ToolCall, ToolResult } from '@goodvibes-jev/engine/platform/platform/types';
 import { RuntimeEventBus } from '@/runtime/index.ts';
 import { composeAgentToolRegistry } from '../../runtime/agent-tool-registry.ts';
-import { composeAgentPermissionManager } from '../../runtime/bootstrap-core.ts';
 import type { McpApi, McpToolSchema } from '@goodvibes-jev/engine/platform/platform/mcp';
 import { installAgentMcpCallRoute } from '../../tools/agent-mcp-call-route.ts';
 import { type RuntimeServices } from '../../runtime/services.ts';
@@ -135,7 +134,6 @@ function composeAgentExecPipeline(services: RuntimeServices): ToolRegistry {
     resolveSessionId: () => 'exec-refusal-and-kill',
     getLastUserMessage: () => LAST_USER_MESSAGE,
   });
-  composeAgentPermissionManager(services);
   return toolRegistry;
 }
 

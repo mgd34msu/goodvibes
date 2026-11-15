@@ -1,11 +1,9 @@
 /**
- * `/permissions`, the permission settings surface, as engine logic.
- *
- * Hoisted from the TUI (src/input/commands/permissions-runtime.ts). The
- * product keeps its command registration and hands this module a narrow
- * context: a print sink, the remembered-rule store, the config manager and,
- * when the surface has one, a selection picker. Every printed line is
- * unchanged.
+ * `/permissions`, the permission settings surface, as engine logic shared by
+ * the terminal apps. Each product registers `PERMISSIONS_COMMAND` with a
+ * handler that hands this module a narrow context: a print sink, the
+ * remembered-rule store, the config manager, the evaluator in force and, when
+ * the surface has one, a selection picker.
  *
  * With no arguments it prints every permission-relevant setting in effect and
  * where each value came from (provenance; read-only). `rules` lists the
@@ -39,6 +37,8 @@ export interface PermissionsCommandContext {
   /** Absent on a surface without remembered rules. */
   readonly ruleStore?: RememberedRuleStore | undefined;
   readonly configManager: ConfigProvenanceManager;
+  /** The permission evaluator the running process uses (it changes only at a restart). */
+  readonly evaluatorInForce?: (() => 'baseline' | 'policy-engine' | undefined) | undefined;
   /** The surface's selection picker, when it has one. */
   readonly openSelection?: ((
     title: string,
@@ -55,6 +55,7 @@ export const PERMISSIONS_COMMAND = {
   description: 'Show permission settings and provenance, and list or revoke remembered approval rules',
   usage: '[rules | revoke <rule-id>]',
   argsHint: '[rules|revoke]',
+  subcommands: { rules: '', revoke: '<rule-id>' },
 } as const;
 
 /** One remembered-rule row: what it does, and how/when it was remembered. */
@@ -137,7 +138,7 @@ export async function runPermissionsCommand(args: readonly string[], ctx: Permis
     await revokeRememberedRule(ctx, args[1] ?? '');
     return;
   }
-  const provenance = buildPermissionProvenance(ctx.configManager);
+  const provenance = buildPermissionProvenance(ctx.configManager, { evaluatorInForce: ctx.evaluatorInForce?.() });
   ctx.print(renderPermissionProvenance(provenance));
   const ruleCount = ctx.ruleStore?.list().length ?? 0;
   ctx.print(ruleCount > 0

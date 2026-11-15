@@ -11,7 +11,6 @@ import { nativeMemoryWorkPrivacy } from '../helpers/native-memory-work-readings.
 import { getTestRuntimeServices, resetTestRuntimeServices } from '../helpers/runtime-services.ts';
 import { AgentExecutionLedger as CompatibilityLedger } from '../../runtime/execution-ledger.ts';
 import type { RuntimeServices } from '../../runtime/services.ts';
-import { composeAgentPermissionManager } from '../../runtime/bootstrap-core.ts';
 import { executionHistorySummary } from '../../tools/agent-harness-execution-history.ts';
 import type { CommandContext } from '../../input/command-registry.ts';
 
@@ -94,7 +93,7 @@ test('the real tool execution path combines the shared permission guard and ledg
   });
   const results = await executeToolCalls({
     autonomousSource: () => ({ goal: 'Read the fixture target and record its execution history', criteria: ['Preserve the recorded tool decision'] }),
-    toolRegistry: registry, permissionManager: composeAgentPermissionManager(runtime),
+    toolRegistry: registry, permissionManager: runtime.permissionManager,
     hookDispatcher: null, runtimeBus: runtime.runtimeBus,
     sessionId: ctx.sessionId, emitterContext: () => ctx,
   }, 'live-turn', [{ id: 'live-call', name: 'read_local', arguments: { recipient: 'fixture-target' } }]);

@@ -79,7 +79,7 @@ test('canceling a pending uncooperative reading returns no injection', async () 
 });
 test('entire source privacy is checked before clipping or port access', async () => {
   const fake = fakePort(() => noulAnswer(0.99)); use(fake.port);
-  const code = ' '.repeat(7000) + '\nAuthorization: Bearer synthetic-not-a-real-credential';
+  const code = ' '.repeat(7000) + '\nAuthorization: Bearer synthetic9NotReal7Q2kLmXz';
   await expect(run(source([irrelevant], { code }))).rejects.toThrow('Refused before judgment');
   expect(fake.requests).toHaveLength(0);
 });

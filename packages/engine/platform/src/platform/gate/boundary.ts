@@ -44,7 +44,7 @@ import type { JudgmentPort } from '@goodvibes-jev/judgment';
  * Which tool calls are outward is Jev's `outward` reading alone. The earlier
  * judgment-input check protects the judgment transmission independently.
  */
-import { judgmentInputProblem, snapshotJudgmentInput, JudgmentInputError } from './judgment-input.js';
+import { judgmentInputRefusal, snapshotJudgmentInput, JudgmentInputError } from './judgment-input.js';
 import { checkOwnerApproval, type OwnerApproval } from '../security/owner-approval.js';
 import { assessOutwardContent, getProcessUntrustedContentLedger, type UntrustedContentLedger } from '../security/untrusted-content.js';
 import type { GateReading } from './reading.js';
@@ -157,14 +157,9 @@ async function outwardCheck(input: BoundaryInput, content: Record<string, string
 
 /** The privacy check runs before a judgment, hook, analysis or approval can see arguments. */
 export function judgmentInputBoundary(toolName: string, args: Record<string, unknown>, workingDirectory?: string): BoundaryVerdict {
-  const problem = judgmentInputProblem({ args, workingDirectory }, toolName);
-  if (!problem) return { passed: true, checks: [{ check: 'judgment-input', result: 'pass' }] };
-  return {
-    passed: false,
-    checks: [{ check: 'judgment-input', result: 'refuse', detail: problem }],
-    refusedBy: 'judgment-input',
-    reason: new JudgmentInputError(problem).message,
-  };
+  const refusal = judgmentInputRefusal({ args, workingDirectory }, toolName);
+  if (!refusal) return { passed: true, checks: [{ check: 'judgment-input', result: 'pass' }] };
+  return snapshotRefusal(refusal);
 }
 
 /** Match the public boundary's value-free refusal when preparing owned data. */

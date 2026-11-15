@@ -3,36 +3,60 @@
  * outward transmission, even when the eventual tool call would be refused.
  *
  * This does not decide what a command means or try to discover every secret.
- * It refuses declared credential/card fields, known wire operations, literal
- * authentication syntax and the existing deterministic PAN shapes. The owner
- * must enter that material through the secure credential/card UI instead.
- * Ordinary arguments (including paths to secrets and secret references) still
- * need Jev's semantic reading. Nothing here is a substitute or fallback for it.
+ * It refuses declared credential/card fields of structured arguments, known
+ * wire operations, card numbers, private key blocks and, in free text (file
+ * content, commands), a credential declaration or URL whose value is a
+ * key- or token-shaped literal. Text that only names a credential (an
+ * environment variable, a member expression, a placeholder) is ordinary code;
+ * whether free text is sensitive in meaning is the gate's `secrets` reading.
  *
  * Inspect the complete JSON tree and complete strings BEFORE any reading size
- * cap. Findings and errors carry only a fixed kind, never an argument, path,
- * matched value, length or fingerprint. No secret store or environment is read.
+ * cap. A refusal names the field and the kind of material seen, never the
+ * value, its length or a fingerprint. No secret store or environment is read.
  */
 import { findCredentialScopeDeclaration, isDaemonNeededSecretKey } from '../config/credential-scope-registry.js';
 import { isSecretBearingConfigKey, isSecretReferenceValue } from '../config/secret-bearing-config-keys.js';
 import { CARD_FIELD_NAMES } from '../payments/card-material.js';
 import { findCardNumbersInContext } from '../security/card-shapes.js';
 import type { EntryType, JsonValue } from '@goodvibes-jev/judgment';
-import { evidenceCredentialMarker, inlineDeclarations, literalDeclarationValue } from './inline-declarations.js';
+import { credentialReferenceText, evidenceCredentialMarker, inlineDeclarations, literalDeclarationValue, secretLiteral } from './inline-declarations.js';
 
 export type JudgmentInputProblem = 'credential-material' | 'card-material' | 'unsupported-input';
 
-const REASONS: Readonly<Record<JudgmentInputProblem, string>> = {
-  'credential-material': 'Refused before judgment: inline credential material must use the secure credential setup path. Pass a stored secret reference instead of a raw value.',
-  'card-material': 'Refused before judgment: payment card material must be entered through the local terminal or web UI secure card setup path. Use the stored card id for tool calls.',
-  'unsupported-input': 'Refused before judgment: arguments must be plain JSON data without accessors or cycles.',
+/** Where the material was found and what it looked like; never the value. */
+export interface JudgmentInputFinding {
+  readonly problem: JudgmentInputProblem;
+  readonly field?: string | undefined;
+  readonly seen?: string | undefined;
+}
+
+const NEXT: Readonly<Record<JudgmentInputProblem, string>> = {
+  'credential-material': 'Credentials are not sent to the decision model. Refer to the credential by an environment variable or a stored secret reference (goodvibes://secrets/...), or store it through the secure credential setup.',
+  'card-material': 'Card details are entered through the local terminal or web UI secure card setup; use the stored card id in tool calls.',
+  'unsupported-input': 'Pass plain JSON data without accessors or cycles.',
 };
+const SEEN: Readonly<Record<JudgmentInputProblem, string>> = {
+  'credential-material': 'credential material',
+  'card-material': 'payment card material',
+  'unsupported-input': 'data that is not plain JSON',
+};
+
+function refusalText(finding: JudgmentInputFinding): string {
+  const seen = finding.seen ?? SEEN[finding.problem];
+  const where = finding.field !== undefined && finding.field.length > 0 ? `\`${finding.field.slice(0, 80)}\` holds ${seen}` : `the arguments hold ${seen}`;
+  return `Refused before judgment: ${where}. ${NEXT[finding.problem]}`;
+}
 
 /** A value-free refusal, including when a reading is called without a manager. */
 export class JudgmentInputError extends Error {
-  constructor(readonly problem: JudgmentInputProblem) {
-    super(REASONS[problem]);
+  readonly problem: JudgmentInputProblem;
+  readonly field: string | undefined;
+  constructor(problem: JudgmentInputProblem | JudgmentInputFinding) {
+    const finding = typeof problem === 'string' ? { problem } : problem;
+    super(refusalText(finding));
     this.name = 'JudgmentInputError';
+    this.problem = finding.problem;
+    this.field = finding.field;
   }
 }
 
@@ -249,7 +273,19 @@ function reference(value: unknown): boolean {
 }
 
 function safeReference(value: unknown, problem: JudgmentInputProblem | undefined, evidence: boolean): boolean {
-  return reference(value) || (problem === 'credential-material' && evidenceCredentialMarker(value, evidence));
+  return reference(value) || (problem === 'credential-material' && evidenceCredentialMarker(value, evidence))
+    || (typeof value === 'string' && credentialReferenceText(value));
+}
+
+const LITERAL_SEEN: Readonly<Record<JudgmentInputProblem, string>> = {
+  'credential-material': 'a literal credential value',
+  'card-material': 'a literal card value',
+  'unsupported-input': 'data that is not plain JSON',
+};
+const TOKEN_SEEN = 'a literal value shaped like a key or token';
+
+function found(problem: JudgmentInputProblem, field?: string, seen?: string): JudgmentInputFinding {
+  return { problem, field, seen };
 }
 
 // Syntax screening is deterministic for an immutable string and these two
@@ -260,11 +296,11 @@ const clearInlineText = new Map<string, number>();
 const MAX_INLINE_CACHE_CHARS = 4 * 1024 * 1024;
 const MAX_INLINE_CACHE_ENTRIES = 2048;
 let inlineCacheChars = 0;
-function inlineProblem(text: string, cardOnly = false, evidence = false): JudgmentInputProblem | undefined {
+function inlineProblem(text: string, cardOnly = false, evidence = false, field?: string): JudgmentInputFinding | undefined {
   const mode = 1 << ((cardOnly ? 1 : 0) + (evidence ? 2 : 0));
   const known = clearInlineText.get(text) ?? 0;
   if (known & mode) return undefined;
-  const problem = inspectInlineProblem(text, cardOnly, evidence);
+  const problem = inspectInlineProblem(text, cardOnly, evidence, field);
   // Never retain rejected credential/card material in the cache.
   if (problem === undefined && text.length <= MAX_INLINE_CACHE_CHARS) {
     if (known) clearInlineText.delete(text);
@@ -283,14 +319,18 @@ function inlineProblem(text: string, cardOnly = false, evidence = false): Judgme
  * HTTP authentication headers. Refusing the entire call avoids pretending a
  * redacted shell program has the same effects as the original program.
  */
-function inspectInlineProblem(text: string, cardOnly = false, evidence = false): JudgmentInputProblem | undefined {
-  if (findCardNumbersInContext(text, 1).length > 0) return 'card-material';
-  if (!cardOnly && /-----BEGIN (?:RSA |EC |OPENSSH |ENCRYPTED )?PRIVATE KEY-----/.test(text)) return 'credential-material';
+function inspectInlineProblem(text: string, cardOnly = false, evidence = false, field?: string): JudgmentInputFinding | undefined {
+  if (findCardNumbersInContext(text, 1).length > 0) return found('card-material', field, 'a payment card number');
+  if (!cardOnly && /-----BEGIN (?:RSA |EC |OPENSSH |ENCRYPTED )?PRIVATE KEY-----/.test(text)) return found('credential-material', field, 'a private key block');
   for (const flags of [true, false]) {
     for (const declaration of inlineDeclarations(text, flags)) {
       const problem = protectedKey(declaration.key);
       if (problem && (!cardOnly || problem === 'card-material')
-        && literalDeclarationValue(text, declaration, problem === 'credential-material' && evidence)) return problem;
+        && literalDeclarationValue(text, declaration, {
+          kind: problem === 'card-material' ? 'card' : 'credential',
+          evidence: problem === 'credential-material' && evidence,
+          authHeader: AUTH_HEADERS.has(declaration.key.toLowerCase()),
+        })) return found(problem, declaration.key, problem === 'card-material' ? LITERAL_SEEN[problem] : TOKEN_SEEN);
     }
   }
   // Start once per contiguous scheme-character run, rather than restarting a
@@ -300,10 +340,14 @@ function inspectInlineProblem(text: string, cardOnly = false, evidence = false):
   for (const match of text.matchAll(/(?<![A-Za-z0-9+.-])[0-9+.-]*([A-Za-z][A-Za-z0-9+.-]*:\/\/[^\s"'<>]+)/g)) {
     try {
       const url = new URL(match[1]!);
-      if (!cardOnly && url.password.length > 0) return 'credential-material';
+      const password = decodeURIComponent(url.password);
+      if (!cardOnly && password.length > 0 && !credentialReferenceText(password) && secretLiteral(password)) {
+        return found('credential-material', 'URL password', TOKEN_SEEN);
+      }
       for (const [key, value] of url.searchParams) {
         const problem = protectedKey(key);
-        if (problem && (!cardOnly || problem === 'card-material') && present(value) && !reference(value)) return problem;
+        if (problem && (!cardOnly || problem === 'card-material') && present(value) && !reference(value) && !credentialReferenceText(value)
+          && (problem === 'card-material' || secretLiteral(value))) return found(problem, key, problem === 'card-material' ? LITERAL_SEEN[problem] : TOKEN_SEEN);
       }
     } catch { /* Not a URL; its meaning remains Jev's question. */ }
   }
@@ -315,7 +359,8 @@ function inspectInlineProblem(text: string, cardOnly = false, evidence = false):
  * are inspected even in nested tool/params wrappers and JSON-encoded bodies.
  * Empty credential fields and goodvibes secret references carry no raw value.
  */
-function snapshotProblem(value: unknown, toolName: string, cardOnly = false, evidence = false): JudgmentInputProblem | undefined {
+function snapshotProblem(value: unknown, toolName: string, cardOnly = false, evidence = false): JudgmentInputFinding | undefined {
+  const unsupported = found('unsupported-input');
   const ancestors = new Set<object>();
   type Entry = { entry: unknown; suffixes: readonly string[]; parentKey: string | undefined; operation: string };
   type Work = Entry | { leave: object } | { field: string; child: unknown; parent: Entry };
@@ -327,7 +372,7 @@ function snapshotProblem(value: unknown, toolName: string, cardOnly = false, evi
     if ('leave' in work) { ancestors.delete(work.leave); continue; }
     if ('field' in work) {
       const { field: key, child, parent: { suffixes, parentKey, operation } } = work;
-        const keyProblem = inlineProblem(key, cardOnly, evidence);
+        const keyProblem = inlineProblem(key, cardOnly, evidence, 'a property name');
         if (keyProblem) return keyProblem;
         const fullSuffixes = [...suffixes.map(suffix => `${suffix}.${key}`), key];
         const cardField = (parentKey === 'cardMaterial' && (CARD_FIELD_NAMES as readonly string[]).includes(key)) || (parentKey === 'card' && (key === 'number' || key === 'expiry'));
@@ -338,7 +383,7 @@ function snapshotProblem(value: unknown, toolName: string, cardOnly = false, evi
             if (declared !== undefined) break;
           }
         }
-        if (declared && (!cardOnly || declared === 'card-material') && present(child) && !safeReference(child, declared, evidence) && !fieldDeclaration(child)) return declared;
+        if (declared && (!cardOnly || declared === 'card-material') && present(child) && !safeReference(child, declared, evidence) && !fieldDeclaration(child)) return found(declared, fullSuffixes[0] ?? key, LITERAL_SEEN[declared]);
         pending.push({ entry: child, suffixes: fullSuffixes, parentKey: key, operation });
       continue;
     }
@@ -347,33 +392,33 @@ function snapshotProblem(value: unknown, toolName: string, cardOnly = false, evi
       const trimmed = entry.trim();
       if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
         let decoded: unknown;
-        try { decoded = JSON.parse(entry); } catch { const problem = inlineProblem(entry, cardOnly, evidence); if (problem) return problem; continue; }
+        try { decoded = JSON.parse(entry); } catch { const problem = inlineProblem(entry, cardOnly, evidence, parentKey); if (problem) return problem; continue; }
         pending.push({ entry: decoded, suffixes, parentKey, operation });
         continue;
       }
-      const problem = inlineProblem(entry, cardOnly, evidence);
+      const problem = inlineProblem(entry, cardOnly, evidence, parentKey);
       if (problem) return problem;
       continue;
     }
     if (entry === null || entry === undefined || typeof entry === 'boolean') continue;
     if (typeof entry === 'number') {
-      if (!Number.isFinite(entry)) return 'unsupported-input';
-      const problem = inlineProblem(String(entry), cardOnly);
-      if (problem) return problem;
+      // A card number arrives as text; a JSON number is a count, an id or a
+      // clock (a declared card field holding one is refused by its name).
+      if (!Number.isFinite(entry)) return unsupported;
       continue;
     }
-    if (typeof entry !== 'object' || ancestors.has(entry)) return 'unsupported-input';
+    if (typeof entry !== 'object' || ancestors.has(entry)) return unsupported;
     const array = Array.isArray(entry);
     const prototype: unknown = Object.getPrototypeOf(entry);
-    if (array ? prototype !== Array.prototype : prototype !== Object.prototype && prototype !== null) return 'unsupported-input';
+    if (array ? prototype !== Array.prototype : prototype !== Object.prototype && prototype !== null) return unsupported;
     ancestors.add(entry);
     pending.push({ leave: entry });
     {
       const descriptors = Object.getOwnPropertyDescriptors(entry);
       // Array.map consults constructor[Symbol.species], and JSON hooks can run
       // even when non-enumerable. Plain JSON must not supply executable hooks.
-      if (Object.getOwnPropertySymbols(descriptors).length > 0 || (array && Object.hasOwn(descriptors, 'constructor'))) return 'unsupported-input';
-      if (Object.values(descriptors).some((descriptor) => !('value' in descriptor) || typeof descriptor.value === 'function')) return 'unsupported-input';
+      if (Object.getOwnPropertySymbols(descriptors).length > 0 || (array && Object.hasOwn(descriptors, 'constructor'))) return unsupported;
+      if (Object.values(descriptors).some((descriptor) => !('value' in descriptor) || typeof descriptor.value === 'function')) return unsupported;
       // Array.map and JSON read array slots regardless of enumerability. Inspect
       // every own array value; only an array's structural length is omitted.
       const fields: Record<string, unknown> = Object.fromEntries(Object.entries(descriptors)
@@ -381,22 +426,26 @@ function snapshotProblem(value: unknown, toolName: string, cardOnly = false, evi
         .map(([key, descriptor]) => [key, descriptor.value as unknown]));
       const selected = OPERATION_FIELDS.map((field) => fields[field]).find((field) => field === CARD_CREATE || field === SECURITY_CODE || field === CREDENTIAL_SET);
       const op = typeof selected === 'string' ? selected : operation;
-      if (op === CARD_CREATE && CARD_FIELD_NAMES.some((field) => present(fields[field]) && !reference(fields[field]) && !fieldDeclaration(fields[field]))) return 'card-material';
-      if (op === SECURITY_CODE && present(fields['code'])) return 'card-material';
+      const cardField = CARD_FIELD_NAMES.find((field) => present(fields[field]) && !reference(fields[field]) && !fieldDeclaration(fields[field]));
+      if (op === CARD_CREATE && cardField !== undefined) return found('card-material', cardField, `card fields of ${CARD_CREATE}`);
+      if (op === SECURITY_CODE && present(fields['code'])) return found('card-material', 'code', 'a card security code');
       const typedValue = fields['value'] ?? fields['text'];
       const targetField = fields['field'];
+      const typedKey = fields['value'] !== undefined ? 'value' : 'text';
       if (present(typedValue) && !reference(typedValue)) {
-        if (typeof targetField === 'string' && (CARD_FIELD_NAMES as readonly string[]).includes(targetField)) return 'card-material';
+        if (typeof targetField === 'string' && (CARD_FIELD_NAMES as readonly string[]).includes(targetField)) return found('card-material', typedKey, `text typed into the card field ${targetField}`);
         const control = declaredControl(fields['selector']);
-        if (control && (!cardOnly || control === 'card-material')) return control;
-        if (!cardOnly && fields['type'] === 'password') return 'credential-material';
-        if (typeof fields['autocomplete'] === 'string' && fields['autocomplete'].split(/\s+/).some((token) => CARD_FIELDS.has(token))) return 'card-material';
+        if (control && (!cardOnly || control === 'card-material')) return found(control, typedKey, `text typed into a ${control === 'card-material' ? 'card' : 'password'} control`);
+        if (!cardOnly && fields['type'] === 'password') return found('credential-material', typedKey, 'text typed into a password control');
+        if (typeof fields['autocomplete'] === 'string' && fields['autocomplete'].split(/\s+/).some((token) => CARD_FIELDS.has(token))) return found('card-material', typedKey, 'text typed into a card control');
       }
       const namedKey = fields['key'] ?? fields['configKey'] ?? fields['secretKey'] ?? fields['name'];
       if (cardOnly && present(fields['value']) && !reference(fields['value']) && !fieldDeclaration(fields['value'])
-        && typeof namedKey === 'string' && protectedKey(namedKey) === 'card-material') return 'card-material';
+        && typeof namedKey === 'string' && protectedKey(namedKey) === 'card-material') return found('card-material', namedKey, LITERAL_SEEN['card-material']);
       const namedProblem = op === CREDENTIAL_SET ? 'credential-material' : typeof namedKey === 'string' ? protectedKey(namedKey) : undefined;
-      if (!cardOnly && present(fields['value']) && !safeReference(fields['value'], namedProblem, evidence) && !fieldDeclaration(fields['value']) && namedProblem) return 'credential-material';
+      if (!cardOnly && present(fields['value']) && !safeReference(fields['value'], namedProblem, evidence) && !fieldDeclaration(fields['value']) && namedProblem) {
+        return found('credential-material', typeof namedKey === 'string' ? namedKey : 'value', LITERAL_SEEN['credential-material']);
+      }
       for (const [key, child] of Object.entries(fields).reverse()) pending.push({ field: key, child, parent: { entry, suffixes, parentKey, operation: op } });
     }
   }
@@ -406,7 +455,7 @@ function snapshotProblem(value: unknown, toolName: string, cardOnly = false, evi
 /** Native evidence inspection only: no credential exception, projection or admission is produced. */
 export function judgmentInputCardProblem(value: unknown, toolName = ''): 'card-material' | 'unsupported-input' | undefined {
   try {
-    const problem = snapshotProblem(captureOwnedJson(value), toolName, true);
+    const problem = snapshotProblem(captureOwnedJson(value), toolName, true)?.problem;
     return problem === 'card-material' || problem === 'unsupported-input' ? problem : undefined;
   } catch (error) {
     if (error instanceof JudgmentInputError) return 'unsupported-input';
@@ -498,13 +547,18 @@ export function snapshotJudgmentEntry(value: unknown, toolName = ''): EntryType 
   return entryOf(snapshotJudgmentJson(value, toolName));
 }
 
-/** Return a fixed refusal kind without exposing input or executing its accessors. */
-export function judgmentInputProblem(value: unknown, toolName = ''): JudgmentInputProblem | undefined {
+/** The refusal for this input (its kind, field and message), or undefined when it passes. */
+export function judgmentInputRefusal(value: unknown, toolName = ''): JudgmentInputError | undefined {
   try { snapshotJudgmentInput(value, toolName); return undefined; }
   catch (error) {
-    if (error instanceof JudgmentInputError) return error.problem;
+    if (error instanceof JudgmentInputError) return error;
     throw error;
   }
+}
+
+/** Return a fixed refusal kind without exposing input or executing its accessors. */
+export function judgmentInputProblem(value: unknown, toolName = ''): JudgmentInputProblem | undefined {
+  return judgmentInputRefusal(value, toolName)?.problem;
 }
 
 /** Must run before accessing the port, not only before awaiting a request. */

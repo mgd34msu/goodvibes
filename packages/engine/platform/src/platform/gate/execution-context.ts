@@ -1,7 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { normalizePermissionMode, type GatePresetName } from './presets.js';
 
-const executionMode = new AsyncLocalStorage<{ readonly mode: GatePresetName; readonly assertCurrent: (() => void) | undefined; readonly retainedCurrent: (() => void) | undefined; active: boolean; checking: boolean; readDecisionsVerifiedUntil: number }>();
+const executionMode = new AsyncLocalStorage<{ readonly mode: GatePresetName; readonly assertCurrent: (() => void) | undefined; readonly retainedCurrent: (() => void) | undefined; active: boolean; checking: boolean }>();
 export { isInvocationAdmitted } from '../tools/registry.js';
 
 export interface ExecutionModeOwner {
@@ -18,7 +18,7 @@ export function withExecutionMode(mode: unknown, run: () => unknown, assertCurre
 }
 
 function runInMode(mode: unknown, run: () => unknown, assertCurrent?: () => void, retainedCurrent?: () => void): unknown {
-  const scope = { mode: normalizePermissionMode(mode), assertCurrent, retainedCurrent, active: true, checking: false, readDecisionsVerifiedUntil: 0 };
+  const scope = { mode: normalizePermissionMode(mode), assertCurrent, retainedCurrent, active: true, checking: false };
   return executionMode.run(scope, () => {
     try {
       const result = run();
@@ -37,42 +37,34 @@ const EXECUTION_MODE_ENDED = 'Execution mode is no longer current. Host error: t
   + 'before the tool finished (for example the turn or mode changed). Not caused by your arguments or paths; '
   + 'retry once unchanged, and if it repeats, report the tool as unavailable.';
 
-const READ_DECISION_MIN_MS = 50;
-const READ_DECISION_MAX_MS = 250;
-function readExecutionMode(forReadDecision: boolean): GatePresetName | undefined {
+function activeScope() {
   const scope = executionMode.getStore();
   if (scope && !scope.active) throw new Error(EXECUTION_MODE_ENDED);
-  if (scope?.assertCurrent && !(forReadDecision && performance.now() < scope.readDecisionsVerifiedUntil)) {
-    if (scope.checking) throw new Error('Execution mode owner reentered its currentness check');
-    scope.checking = true;
-    scope.readDecisionsVerifiedUntil = 0;
-    const startedAt = performance.now();
-    try { scope.assertCurrent(); }
-    finally { scope.checking = false; }
-    const finishedAt = performance.now();
-    scope.readDecisionsVerifiedUntil = finishedAt + Math.min(READ_DECISION_MAX_MS, Math.max(READ_DECISION_MIN_MS, (finishedAt - startedAt) * 8));
-  }
-  return scope?.mode ?? currentExecutionModeOwner()?.getMode();
+  return scope;
 }
 
 /** The invocation's selected mode, after a complete check of its owner. */
 export function currentExecutionMode(): GatePresetName | undefined {
-  return readExecutionMode(false);
+  const scope = activeScope();
+  if (scope?.assertCurrent) {
+    // The owner's check can sample authority that asks for the mode again.
+    if (scope.checking) throw new Error('Execution mode owner reentered its currentness check');
+    scope.checking = true;
+    try { scope.assertCurrent(); }
+    finally { scope.checking = false; }
+  }
+  return scope?.mode ?? currentExecutionModeOwner()?.getMode();
 }
 
 /**
- * For a caller deciding only whether one path may be read. A captured tool
- * asks that for every path its agent has read, before and after every call,
- * and the owner check behind this scope re-captures the whole permission owner
- * each time: one complete check per path made that sweep cost seconds per call
- * and grow with everything the agent had read. Here a complete check stands
- * for the read decisions of a short following window (longer when the check
- * itself is slow, never more than READ_DECISION_MAX_MS). Anything that gates an
- * effect or selects behaviour by mode uses {@link currentExecutionMode}, which
- * checks completely on every call.
+ * For a caller deciding only whether one path may be read: the mode the
+ * invocation was admitted under, with no owner check. A read changes nothing,
+ * so a mode change during the call matters only to the next call, which is
+ * admitted under the new mode. Anything that gates an effect or selects
+ * behaviour by mode uses {@link currentExecutionMode}.
  */
 export function currentExecutionModeForReadDecision(): GatePresetName | undefined {
-  return readExecutionMode(true);
+  return activeScope()?.mode ?? currentExecutionModeOwner()?.getMode();
 }
 
 /** Transfer host mode checks into a separately owned asynchronous lifetime. */

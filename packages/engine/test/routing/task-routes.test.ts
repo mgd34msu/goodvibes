@@ -116,7 +116,7 @@ describe('judgment port', () => {
   test('protected material after the former cutoff holds before any route or slot request', async () => {
     const fake = scriptedPort({ pick: 'none' });
     installJudgmentPort(fake.port);
-    const query = 'Background context. '.repeat(250) + ' apiKey=private-example';
+    const query = 'Background context. '.repeat(250) + ' apiKey=private9Example7Q2kLm';
     await expect(planTaskRoute({ query })).rejects.toThrow('Refused before judgment');
     expect(fake.requests).toHaveLength(0);
   });

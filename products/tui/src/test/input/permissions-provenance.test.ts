@@ -46,8 +46,9 @@ describe('permission provenance', () => {
     expect(mode.overridden).toBe(true);
     expect(mode.recorded).toBe(false);
     expect(mode.origin).toContain('not recorded on disk');
-    // The recorded on-disk / default value is preserved for the reader.
-    expect(mode.recordedValue).not.toBe('yolo');
+    // The accepted tier underneath the override is named, with no file reread.
+    expect(mode.underlay).toBe('built-in default');
+    expect(renderPermissionProvenance(buildPermissionProvenance(cm))).toContain('underneath: built-in default');
   });
 
   test('render traces the execution mode and explicit tool restrictions', () => {

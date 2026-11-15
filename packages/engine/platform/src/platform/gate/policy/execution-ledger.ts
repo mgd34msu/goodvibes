@@ -5,30 +5,26 @@ import { decisionOrClassic, isClassicOperation, withConfiguredDecisionModelPolic
  * from the `tools` event domain, for the execution surfaces to list and
  * filter.
  *
- * Hoisted from the agent (src/runtime/execution-ledger.ts) into the engine
- * gate. A record's route kind is a fact for the engine's own tools
- * (`ENGINE_TOOL_ROUTES`); only for any other tool is it Jev's reading of the
- * call (`readSideEffectKind`, the side-effect battery's `kind` question, at
- * the `engine.gate.execution-ledger` site). Whether the call is a verification
- * attempt (`record.verification`) is likewise a fact for the engine tools that
- * never verify, and one reading (`engine.gate.execution-purpose`) for the
- * rest; it is the one answer every history view shows, and nothing asks it
- * again.
+ * A tool code knows (the engine's own tools, `ENGINE_TOOL_ROUTES`, and any
+ * registered tool whose definition declares its effects or category) is
+ * recorded entirely by code, in every mode, with no reading: its kind, its
+ * target (the declared subject argument), its command, an argument preview
+ * with credential and owner-profile fields withheld by name
+ * (`withheldFieldKind`), and whether it is a verification attempt (a shell
+ * command whose program or script is a test, type check, lint or build
+ * check; every other kind never verifies). `record.verification` is the one
+ * answer every history view shows, and nothing asks it again.
  *
- * Readings asynchronously enrich an immediately visible, value-free record.
- * Lifecycle events apply in delivery order without waiting for judgment.
- * When the reading itself fails, the record is still
- * added so the call is never lost, with the kind `other` and the failure
- * stated in `routeKindError`.
- *
- * Which top-level arguments carry a credential (redacted from the preview)
- * and which one the call acts on (the target preview) are read per tool and
- * argument name (`engine.gate.ledger-arg`) and remembered for the process; a
- * key nested inside an argument is part of that argument's value, shown with
- * it unless its name is a credential or owner-profile field name by the local
- * check (`withheldFieldKind`). A name not read as a confident no is
- * redacted, and when the reading fails every value is redacted and the
- * failure is stated in `argsReadingError`.
+ * Only a tool with no declared facts (an MCP or plugin tool) is read: its
+ * argument roles per tool and top-level argument name (`engine.gate.ledger-arg`,
+ * remembered for the process), its route kind (`readSideEffectKind` at the
+ * `engine.gate.execution-ledger` site) and, when it reads as a shell or other
+ * tool, its purpose (`engine.gate.execution-purpose`). Those readings enrich
+ * an immediately visible, value-free record in the background; lifecycle
+ * events never wait for them. A name not read as a confident no is redacted,
+ * and when a reading fails every value stays withheld and the failure is
+ * stated in `argsReadingError` / `routeKindError`. YOLO and Classic take no
+ * reading: such a tool's values stay withheld there.
  */
 import type { JevDecision } from '@goodvibes-jev/judgment/decisions';
 import type { ToolEvent } from '../../../events/tools.js';
@@ -43,6 +39,8 @@ import { isYoloExecution } from '../execution-context.js';
 import { mapLimit } from '@goodvibes-jev/judgment';
 import { ledgerArg } from '../batteries/ledger-arg.js';
 import { withheldFieldKind } from '../../utils/field-kind-reading.js';
+import { declaredValues } from '../classify.js';
+import type { ToolArgumentPath, ToolDefinition } from '../../types/tools.js';
 
 /** The decision site the ledger's route-kind readings are logged under. */
 export const EXECUTION_LEDGER_SITE = 'engine.gate.execution-ledger';
@@ -148,20 +146,86 @@ const ARG_DEPTH_LIMIT = 64;
 const ARG_READ_CONCURRENCY = 8;
 const roleKey = (tool: string, argument: string): string => JSON.stringify([tool, argument]);
 
-/**
- * The route kind of the engine's own tools, a fact of their definitions; any
- * other tool's kind is read. `verifies: false` marks a tool that never runs a
- * check of correctness, so no purpose reading is taken for it.
- */
-const ENGINE_TOOL_ROUTES: Readonly<Record<string, { readonly kind: AgentExecutionRouteKind; readonly verifies?: false }>> = {
-  read: { kind: 'read', verifies: false }, find: { kind: 'read', verifies: false }, inspect: { kind: 'read', verifies: false },
-  repo_map: { kind: 'read', verifies: false }, context_accounting: { kind: 'read', verifies: false },
-  goodvibes_context: { kind: 'read', verifies: false }, analyze: { kind: 'read' },
-  write: { kind: 'write', verifies: false }, edit: { kind: 'write', verifies: false }, goodvibes_settings: { kind: 'write', verifies: false },
+/** What code knows about a tool: its kind and where its target and commands sit in its arguments. */
+interface ToolFacts {
+  readonly kind: AgentExecutionRouteKind;
+  readonly targets?: readonly ToolArgumentPath[] | undefined;
+  readonly commands?: readonly ToolArgumentPath[] | undefined;
+}
+
+/** The engine's own tools, facts of their definitions. */
+const ENGINE_TOOL_ROUTES: Readonly<Record<string, ToolFacts>> = {
+  read: { kind: 'read', targets: ['files[].path'] }, find: { kind: 'read' }, inspect: { kind: 'read', targets: ['file', 'projectRoot'] },
+  repo_map: { kind: 'read' }, context_accounting: { kind: 'read' }, goodvibes_context: { kind: 'read' }, analyze: { kind: 'read' },
+  write: { kind: 'write', targets: ['files[].path'] }, edit: { kind: 'write', targets: ['edits[].path'] }, goodvibes_settings: { kind: 'write', targets: ['key'] },
   exec: { kind: 'shell' },
-  fetch: { kind: 'network', verifies: false }, web_search: { kind: 'network', verifies: false },
-  agent: { kind: 'delegation', verifies: false }, delegate: { kind: 'delegation', verifies: false }, workflow: { kind: 'delegation' },
+  fetch: { kind: 'network', targets: ['urls[].url', 'url'] }, web_search: { kind: 'network', targets: ['query'] },
+  agent: { kind: 'delegation', targets: ['task'] }, delegate: { kind: 'delegation', targets: ['task'] }, workflow: { kind: 'delegation', targets: ['workflowId'] },
 };
+
+/** A registered tool's facts from its declared effects or category; undefined when it declares neither. */
+function definitionFacts(definition: ToolDefinition | undefined): ToolFacts | undefined {
+  if (!definition) return undefined;
+  const effects = definition.sideEffects ?? [];
+  const category = definition.category;
+  const kind: AgentExecutionRouteKind | undefined = effects.includes('exec') ? 'shell'
+    : effects.includes('network') ? 'network'
+      : effects.includes('agent') || effects.includes('workflow') ? 'delegation'
+        : effects.includes('write_fs') || effects.includes('state') ? 'write'
+          : effects.length > 0 ? 'read'
+            : category === 'execute' ? 'shell' : category === 'write' ? 'write' : category === 'read' ? 'read' : category === 'delegate' ? 'delegation' : undefined;
+  if (kind === undefined) return undefined;
+  const subjects = definition.subjects;
+  return { kind, targets: subjects?.paths ?? subjects?.hosts ?? subjects?.recipients, commands: subjects?.commands };
+}
+
+const CHECK_VERBS = new Set(['test', 'tests', 'spec', 'typecheck', 'type-check', 'tsc', 'lint', 'check', 'verify', 'validate', 'ci', 'clippy', 'vet']);
+const CHECK_PROGRAMS = new Set(['tsc', 'eslint', 'vitest', 'jest', 'mocha', 'ava', 'pytest', 'mypy', 'pyright', 'rspec', 'phpunit', 'ctest', 'shellcheck', 'golangci-lint', 'tox', 'nox']);
+const RUNNERS = new Set(['bun', 'npm', 'pnpm', 'yarn', 'deno', 'node', 'cargo', 'go', 'mvn', 'gradle', 'gradlew', './gradlew', 'make', 'dotnet', 'swift', 'mix', 'rake', 'just', 'task', 'ruff', 'biome', 'prettier', 'playwright', 'cypress', 'python', 'python3', 'uv', 'poetry']);
+const LAUNCHERS = new Set(['npx', 'bunx', 'exec', 'dlx', 'run', 'env', 'time', 'nice']);
+
+/** The name a word gives a check: a script path's base name without its extension, or `name:variant` before the colon. */
+function checkWord(word: string): string {
+  const base = word.split('/').pop() ?? word;
+  return base.replace(/\.(?:[cm]?[jt]sx?|py|sh)$/, '').split(':')[0]!.toLowerCase();
+}
+
+/**
+ * Whether a shell command runs a check of correctness: some simple command in
+ * it is a test, type-check or lint program, or a runner (`bun`, `npm run`,
+ * `cargo`, `go`, `make`, `python -m`, ...) whose subcommand or script is one.
+ * Printing or naming a check (`echo tests passed`) is not.
+ */
+function runsCheck(command: string): boolean {
+  for (const simple of command.split(/&&|\|\||[;|\n]/)) {
+    const words = simple.trim().split(/\s+/).filter((word) => word.length > 0 && !/^[A-Za-z_][A-Za-z0-9_]*=/.test(word));
+    while (words.length > 0 && LAUNCHERS.has(words[0]!)) words.shift();
+    const program = (words[0] ?? '').split('/').pop() ?? '';
+    if (CHECK_PROGRAMS.has(program)) return true;
+    if (!RUNNERS.has(program) && !RUNNERS.has(words[0] ?? '')) continue;
+    for (const word of words.slice(1)) {
+      if (word === '--test') return true;
+      if (word.startsWith('-') || LAUNCHERS.has(word)) continue;
+      if (CHECK_VERBS.has(checkWord(word)) || CHECK_PROGRAMS.has(checkWord(word)) || word === 'unittest') return true;
+      // The first non-flag word decides: `bun install`, `npm start`, `go build` are not checks.
+      if (program !== 'python' && program !== 'python3' && program !== 'uv' && program !== 'poetry') break;
+    }
+  }
+  return false;
+}
+
+/** Top-level argument roles decided by name alone: a credential or owner-profile field is withheld. */
+function namedRoles(args: Record<string, unknown>): ReadonlyMap<string, ArgRole> {
+  return new Map(Object.keys(args).map((key) => [key, { credential: withheldFieldKind(key) !== undefined, target: false }]));
+}
+
+function firstDeclared(args: Record<string, unknown>, paths: readonly ToolArgumentPath[] | undefined): string | undefined {
+  for (const path of paths ?? []) {
+    const value = declaredValues(args, [path])?.find((entry) => entry.trim().length > 0);
+    if (value !== undefined) return value;
+  }
+  return undefined;
+}
 
 /** Reads the roles of the call's top-level argument names not read yet for this tool. A JudgmentError propagates. */
 async function readArgRoles(tool: string, args: Record<string, unknown>, signal: AbortSignal): Promise<ReadonlyMap<string, ArgRole>> {
@@ -266,8 +330,6 @@ const READING_CANCELLED = 'Execution judgment cancelled; values withheld.';
 
 /** Reads the call's route kind; uncertainty never becomes a guessed kind. */
 async function readRouteKind(tool: string, args: Record<string, unknown>, signal: AbortSignal): Promise<{ routeKind: AgentExecutionRouteKind; routeKindError?: string; classic?: true }> {
-  const known = ENGINE_TOOL_ROUTES[tool];
-  if (known) return { routeKind: known.kind };
   try {
     signal.throwIfAborted();
     return await decisionOrClassic<{ routeKind: AgentExecutionRouteKind; routeKindError?: string; classic?: true }>(async () => {
@@ -318,6 +380,11 @@ function immutable(record: MutableAgentExecutionRecord): AgentExecutionRecord {
   };
 }
 
+export interface AgentExecutionLedgerOptions {
+  /** The registered definition of a tool, so its declared effects and subjects decide its record with no reading. */
+  readonly describeTool?: ((name: string) => ToolDefinition | undefined) | undefined;
+}
+
 export class AgentExecutionLedger {
   private readonly records = new Map<string, MutableAgentExecutionRecord>();
   private readonly order: string[] = [];
@@ -331,6 +398,7 @@ export class AgentExecutionLedger {
   public constructor(
     runtimeBus: RuntimeEventBus,
     private readonly limit: number = DEFAULT_LIMIT,
+    private readonly options: AgentExecutionLedgerOptions = {},
   ) {
     this.unsubscribe = runtimeBus.onDomain('tools', (envelope) => {
       this.handleToolEvent(envelope.payload as ToolEvent, envelope.ts);
@@ -360,6 +428,13 @@ export class AgentExecutionLedger {
   public subscribe(callback: () => void): () => void {
     this.subscribers.add(callback);
     return () => { this.subscribers.delete(callback); };
+  }
+
+  private toolFacts(tool: string): ToolFacts | undefined {
+    const known = ENGINE_TOOL_ROUTES[tool];
+    if (known) return known;
+    try { return definitionFacts(this.options.describeTool?.(tool)); }
+    catch { return undefined; }
   }
 
   /** Resolves once every route-kind reading started so far has been applied. */
@@ -475,7 +550,8 @@ export class AgentExecutionLedger {
     const record: MutableAgentExecutionRecord = {
       ...(startedClassic ? { operationProvenance: 'classic' as const, semanticAssessment: 'not-evaluated' as const } : {}),
       id: recordId, callId: event.callId, turnId: event.turnId,
-      tool: refusal ? '[protected tool call]' : event.tool,
+      // A known tool's name is not input; only an unknown one could carry the refused text.
+      tool: refusal && !this.toolFacts(event.tool) ? '[protected tool call]' : event.tool,
       routeKind: 'other', status: 'running', phase: event.type,
       receivedAt: timestamp, updatedAt: timestamp,
       argsPreview: refusal ? '[redacted: protected input]' : startedClassic ? '[Classic: argument values withheld; semantic roles unassessed]' : '[judgment pending: values withheld]',
@@ -496,6 +572,22 @@ export class AgentExecutionLedger {
     }
     this.notify();
     if (this.disposed || refusal || this.records.get(record.id) !== record) return;
+    const facts = this.toolFacts(event.tool);
+    if (facts) {
+      // Decided by code from the tool's own facts, in every mode, with no reading.
+      const roles = namedRoles(args);
+      const commands = facts.kind === 'shell' ? (facts.commands ? declaredValues(args, facts.commands) ?? [] : shellCommandsIn(args)) : [];
+      const command = commands.find((entry) => entry.trim().length > 0);
+      const target = firstDeclared(args, facts.targets);
+      record.routeKind = facts.kind;
+      record.argsPreview = argsPreview(args, roles);
+      record.argsKeys = Object.keys(args).filter((key) => roles.get(key)?.credential === false).sort();
+      record.commandPreview = command ? truncateText(command, 180) : undefined;
+      record.targetPreview = target ? truncateText(target, 180) : undefined;
+      record.verification = commands.some(runsCheck);
+      this.notify();
+      return;
+    }
     const markClassic = (partial: boolean): void => {
       record.operationProvenance = 'classic'; record.semanticAssessment = partial ? 'partial' : 'not-evaluated';
       record.argsPreview = '[Classic: argument values withheld; semantic roles unassessed]';
@@ -534,7 +626,8 @@ export class AgentExecutionLedger {
       record.commandPreview = command && command !== '[redacted]' && command.trim() ? truncateText(command, 180) : undefined;
       record.targetPreview = targetPreview(args, roles.roles);
       this.notify();
-      if (!roles.error && ENGINE_TOOL_ROUTES[record.tool]?.verifies === false) {
+      // Only a shell-like or unrecognised tool can run a check of correctness.
+      if (!roles.error && route.routeKind !== 'shell' && route.routeKind !== 'other') {
         record.verification = false; this.notify();
       } else if (!roles.error) {
         try {

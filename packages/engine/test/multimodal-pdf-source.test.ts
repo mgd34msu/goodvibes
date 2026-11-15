@@ -26,7 +26,7 @@ test('ordinary compressed PDF text is fully local before entity judgment admissi
 
 test('compressed late credentials, excessive expansion and malformed lengths hold without decoding models', async () => {
   // Forty-five lines of page text, then the credential on the page (text placed off the page is never extracted).
-  const lateCredential = `BT /F1 12 Tf 72 720 Td ${'(safe safe safe safe safe safe safe safe safe safe) Tj 0 -14 Td '.repeat(45)}(password=late-credential) Tj ET`;
+  const lateCredential = `BT /F1 12 Tf 72 720 Td ${'(safe safe safe safe safe safe safe safe safe safe) Tj 0 -14 Td '.repeat(45)}(password=late9Credential7Q2kLm) Tj ET`;
   await expect(readMultimodalPdf(pdf('', lateCredential), () => {})).rejects.toThrow('Refused before judgment');
   // Compressed streams that expand beyond 64 MiB are refused before the reader decodes them.
   await expect(readMultimodalPdf(pdf('', 'q Q '.repeat(17_000_000)), () => {})).rejects.toThrow('plain JSON');
@@ -52,6 +52,6 @@ test('a page with an inline picture is read for its text', async () => {
 });
 
 test('decoded PDF metadata and real numeric content remain privacy screened', async () => {
-  await expect(readMultimodalPdf(pdf('AI', undefined, 'password=metadata-credential'), () => {})).rejects.toThrow('Refused before judgment');
+  await expect(readMultimodalPdf(pdf('AI', undefined, 'password=metadata9Credential7Q2'), () => {})).rejects.toThrow('Refused before judgment');
   await expect(readMultimodalPdf(pdf('4111 1111 1111 1111'), () => {})).rejects.toThrow('payment card');
 });

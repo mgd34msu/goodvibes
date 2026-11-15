@@ -1,10 +1,12 @@
-/** The Agent settings tool's mechanical checks and the schema its admitted wrapper leaves. */
+/** The settings write refusal (the projector's one check) and the schema the admitted wrapper leaves. */
 import { describe, expect, test } from 'bun:test';
 import type { Tool } from '../platform/src/platform/types/tools.ts';
 import {
   validateAgentSettingsMechanics,
   wrapSettingsToolForAdmittedAgentPolicy,
 } from '../platform/src/platform/gate/policy/settings-write-policy.ts';
+import { PAYMENTS_CARD_NUMBER_CONFIG_KEY } from '../platform/src/platform/config/payment-config-keys.ts';
+import { agentSettingsWriteRefusal } from '../platform/src/platform/gate/policy/agent-settings-refusals.ts';
 
 interface SettingsCall {
   readonly key: unknown;
@@ -57,12 +59,10 @@ describe('the admitted settings wrapper', () => {
     expect(tool.definition.description).not.toContain('Blocked');
   });
 
-  test('a write that is not a settings set or reset, or names no registered key, never reaches the tool', async () => {
-    const { tool, calls } = guardedSettingsTool();
+  test('a write that is not a settings set or reset, or names no registered key, is explained as refused', () => {
     for (const args of [{ mode: 'list' }, { mode: 'set', key: '   ', value: 'x' }, { mode: 'set', key: 'no.such.key', value: 'x' }]) {
-      expect((await tool.execute(args)).success).toBe(false);
+      expect(validateAgentSettingsMechanics(args)).not.toBeNull();
     }
-    expect(calls).toEqual([]);
   });
 
   test('ordinary registered keys pass the mechanics check', () => {
@@ -75,32 +75,17 @@ describe('the admitted settings wrapper', () => {
 describe('writes no permission can authorize', () => {
   const ownRef = 'goodvibes://secrets/goodvibes/GOODVIBES_SURFACES_NTFY_TOKEN';
 
-  test('the settings tool refuses a payments write, set or reset, and never reaches the underlying tool', async () => {
-    const { tool, calls } = guardedSettingsTool();
-    for (const mode of ['set', 'reset']) {
-      const result = await tool.execute({ mode, key: 'payments.majorRetailersAdditional', value: 'evil-shop.com', confirm: true });
-      expect(result.success).toBe(false);
-      expect(result.error).toContain('only the owner changes them');
-      expect(result.error).toContain('Nothing was changed');
+  test('payments limits go on to the normal admission; card material is refused by its key', () => {
+    for (const key of ['payments.budget.dailyItem', 'payments.windows.vetoMinutes', 'payments.defaultCardId']) {
+      expect(validateAgentSettingsMechanics({ mode: 'set', key, value: '1' })).toBeNull();
     }
-    expect(calls).toEqual([]);
+    expect(agentSettingsWriteRefusal({ mode: 'set', key: PAYMENTS_CARD_NUMBER_CONFIG_KEY, value: '4111111111111111' })).toContain('secure card setup');
   });
 
-  test('the mechanics check refuses every payments key and leaves other keys alone', () => {
-    for (const key of ['payments.budget.dailyItem', 'payments.windows.vetoMinutes', 'payments.defaultCardId', 'payments.shippingAddress.line1']) {
-      expect(validateAgentSettingsMechanics({ mode: 'set', key, value: '1' })).toContain('payments.*');
-    }
-    expect(validateAgentSettingsMechanics({ mode: 'set', key: 'provider.model', value: 'x' })).toBeNull();
-  });
-
-  test('a credential destination is refused, so a stored token cannot be redirected to another host', async () => {
-    const { tool, calls } = guardedSettingsTool();
+  test('a credential destination is refused, so a stored token cannot be redirected to another host', () => {
     for (const key of ['surfaces.ntfy.baseUrl', 'surfaces.calendar.caldavUrl', 'surfaces.signal.bridgeUrl', 'surfaces.matrix.homeserverUrl']) {
-      const result = await tool.execute({ mode: 'set', key, value: 'https://attacker.example', confirm: true });
-      expect(result.success).toBe(false);
-      expect(result.error).toContain('only the owner changes it');
+      expect(validateAgentSettingsMechanics({ mode: 'set', key, value: 'https://attacker.example' })).toContain('only the owner changes it');
     }
-    expect(calls).toEqual([]);
     expect(validateAgentSettingsMechanics({ mode: 'reset', key: 'surfaces.ntfy.baseUrl' })).toBeNull();
   });
 
@@ -116,6 +101,8 @@ describe('writes no permission can authorize', () => {
       expect(denial).toContain(ownRef);
       expect(denial).toContain('Nothing was changed');
     }
+    expect(validateAgentSettingsMechanics({ mode: 'set', key: 'surfaces.ntfy.token', value: 'raw-token-value' })).toContain(ownRef);
+    expect(validateAgentSettingsMechanics({ mode: 'set', key: 'surfaces.ntfy.token', value: 12345 })).toContain('never a literal value');
   });
 
   test('the mail password references keep pointing at the daemon mailbox password', () => {

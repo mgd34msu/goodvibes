@@ -3,9 +3,7 @@ import type { Question } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import type { SideEffectKind } from '../platform/src/platform/gate/batteries/side-effect.ts';
-import type { PermissionCategory, PermissionCheckResult } from '../platform/src/platform/permissions/types.ts';
 import {
-  installPermissionManagerSafetyGuard,
   readPermissionCategory,
   TOOL_PERMISSION_SAFETY_SITE,
 } from '../platform/src/platform/gate/policy/tool-permission-safety.ts';
@@ -38,34 +36,6 @@ beforeEach(() => {
 afterEach(() => {
   installJudgmentPort(previous);
 });
-
-type TestPermissionManager = {
-  check(toolName: string, args: Record<string, unknown>): Promise<boolean>;
-  checkDetailed(toolName: string, args: Record<string, unknown>): Promise<PermissionCheckResult>;
-  getCategory(toolName: string, args?: Record<string, unknown>): PermissionCategory;
-};
-
-function throwingPermissionManager(): TestPermissionManager {
-  return {
-    check: async () => { throw new Error('category table unavailable'); },
-    checkDetailed: async (): Promise<PermissionCheckResult> => { throw new Error('category table unavailable'); },
-    getCategory: (): PermissionCategory => 'delegate',
-  };
-}
-
-function denyingPermissionManager(): TestPermissionManager {
-  return {
-    check: async () => false,
-    checkDetailed: async (): Promise<PermissionCheckResult> => ({
-      approved: false,
-      persisted: false,
-      sourceLayer: 'runtime_mode',
-      reasonCode: 'config_deny',
-      analysis: { classification: 'generic', riskLevel: 'high', summary: 'deny', reasons: [] },
-    }),
-    getCategory: (): PermissionCategory => 'delegate',
-  };
-}
 
 describe('readPermissionCategory: the side-effect kind, mapped to a category', () => {
   test('each kind maps to its category, with the reading\'s confidence', async () => {
@@ -119,37 +89,5 @@ describe('readPermissionCategory: the side-effect kind, mapped to a category', (
     await readPermissionCategory('agent_harness', { mode: 'summary' });
     expect(requests).toHaveLength(1);
     expect(JSON.stringify(requests[0])).toContain(TOOL_PERMISSION_SAFETY_SITE);
-  });
-});
-
-describe('installPermissionManagerSafetyGuard', () => {
-  test('a working manager answers for itself; no reading is asked', async () => {
-    const manager = denyingPermissionManager();
-    installPermissionManagerSafetyGuard(manager);
-    await expect(manager.check('agent_harness', { mode: 'summary' })).resolves.toBe(false);
-    expect((await manager.checkDetailed('agent_harness', { mode: 'summary' })).reasonCode).toBe('config_deny');
-    expect(requests).toHaveLength(0);
-  });
-
-  for (const tool of ['read', 'fetch', 'agent_harness']) {
-    test(`${tool}: a manager failure is never replaced by a category allowance`, async () => {
-      const manager = throwingPermissionManager();
-      installPermissionManagerSafetyGuard(manager);
-      await expect(manager.check(tool, { mode: 'summary' })).rejects.toThrow('category table unavailable');
-      await expect(manager.checkDetailed(tool, { mode: 'summary' })).rejects.toThrow('category table unavailable');
-      expect(requests).toHaveLength(0);
-    });
-  }
-
-  test('installing twice wraps once and leaves category authority untouched', async () => {
-    const manager = denyingPermissionManager();
-    const getCategory = manager.getCategory;
-    installPermissionManagerSafetyGuard(manager);
-    const check = manager.check;
-    installPermissionManagerSafetyGuard(manager);
-    expect(manager.check).toBe(check);
-    expect(manager.getCategory).toBe(getCategory);
-    expect(await manager.check('read', {})).toBe(false);
-    expect(requests).toHaveLength(0);
   });
 });

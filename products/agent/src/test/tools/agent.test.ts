@@ -25,7 +25,6 @@ import {
   AGENT_READ_ONLY_MCP_TOOL_MODES,
   AGENT_READ_ONLY_PACKET_TOOL_MODES,
   AGENT_READ_ONLY_QUERY_TOOL_MODES,
-  AGENT_READ_ONLY_REGISTRY_TOOL_MODES,
   AGENT_READ_ONLY_REMOTE_TOOL_MODES,
   AGENT_READ_ONLY_STATE_ANALYTICS_ACTIONS,
   AGENT_READ_ONLY_STATE_HOOK_ACTIONS,
@@ -37,7 +36,6 @@ import {
   AGENT_READ_ONLY_TOOL_MODES,
   AGENT_READ_ONLY_WORKLIST_TOOL_MODES,
   AGENT_REMOTE_MUTATION_DENIAL_MESSAGE,
-  AGENT_REGISTRY_CONTENT_DENIAL_MESSAGE,
   AGENT_STATE_MUTATION_DENIAL_MESSAGE,
   installAgentToolPolicyGuard,
   normalizeAgentToolInvocationForAgentPolicy,
@@ -49,7 +47,6 @@ import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/test
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { executeToolCalls, type ToolExecutionDeps } from '@goodvibes-jev/engine/platform/platform/core';
 import { composeAgentToolRegistry } from '../../runtime/agent-tool-registry.ts';
-import { composeAgentPermissionManager } from '../../runtime/bootstrap-core.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
 // ---------------------------------------------------------------------------
@@ -96,7 +93,7 @@ async function settingsGuardRuntime() {
   const source = { goal: 'Apply the exact synthetic fixture setting', criteria: ['Only the temporary fixture store may change'] };
   const registry = composeAgentToolRegistry({ services, configManager: services.configManager,
     homeDirectory: services.homeDirectory, resolveSessionId: () => 'settings-guard', getLastUserMessage: () => source.goal }).toolRegistry;
-  const manager = composeAgentPermissionManager(services);
+  const manager = services.permissionManager;
   const deps: ToolExecutionDeps = { toolRegistry: registry, permissionManager: manager, autonomousSource: () => source,
     hookDispatcher: null, runtimeBus: null, sessionId: 'settings-guard',
     emitterContext: () => { throw new Error('No emitter is used by this fixture'); } };
@@ -1068,7 +1065,7 @@ describe('spawn mode', () => {
     expect(registryDefinition?.sideEffects).toEqual(['read_fs']);
     const properties = registryDefinition?.parameters.properties as Record<string, unknown>;
     const modeProperty = getRecordProperty(properties, 'mode');
-    expect(modeProperty?.enum).toEqual([...AGENT_READ_ONLY_REGISTRY_TOOL_MODES]);
+    expect(modeProperty?.enum).toEqual(['search', 'recommend', 'dependencies', 'preview', 'content']);
 
     const search = await registry.execute('call-registry-search', 'registry', { mode: 'search', query: 'setup' });
     expect(search.success).toBe(true);
@@ -1091,13 +1088,6 @@ describe('spawn mode', () => {
     });
     expect(content.success).toBe(true);
 
-    const arbitraryPreview = await registry.execute('call-registry-arbitrary-preview', 'registry', {
-      mode: 'preview',
-      path: '.goodvibes/secrets/token.md',
-    });
-    expect(arbitraryPreview.success).toBe(false);
-    expect(arbitraryPreview.error).toBe(AGENT_REGISTRY_CONTENT_DENIAL_MESSAGE);
-    expect(arbitraryPreview.error).toContain('approved through the Agent approval flow is not limited');
   });
 
   test('Agent runtime guard preserves shared search options', async () => {

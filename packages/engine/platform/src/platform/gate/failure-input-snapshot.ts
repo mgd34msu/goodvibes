@@ -1,61 +1,92 @@
 import { assertJudgmentInput, captureOwnedJson, JudgmentInputError } from './judgment-input.js';
 
-/**
- * Capture the complete fields the canonical failure reader consumes, before
- * display projection or any getter can change the admitted wording. This is
- * input admission, not a second failure classifier.
- */
-export function captureJudgmentFailureInput(input: unknown, rejectObject?: (value: object) => boolean): unknown {
-  return captureFailure(input, true, rejectObject);
-}
+/** Replaces text the privacy screen refuses; the structured fields still decide. */
+const WITHHELD = '[withheld]';
 
 /**
- * Descriptor-only snapshot for local structured failure facts. This is NOT
- * privacy admission: pass the snapshot through captureJudgmentFailureInput before
- * any semantic transmission. It never invokes source accessors; hosts may also reject proxies before inspection.
+ * The failure fields the transience reader and the summary use (`name`,
+ * `message`, `code`, `status`, `statusCode`, `retryAfterMs` and the `cause`
+ * chain), privacy-screened for a reading. Never throws for an Error: a field
+ * it cannot read is left out, and text the screen refuses becomes
+ * "[withheld]" so the status, code and error class can still decide.
  */
-export function captureFailureSnapshot(input: unknown, rejectObject?: (value: object) => boolean): unknown {
-  return captureFailure(input, false, rejectObject);
+export function captureJudgmentFailureInput(input: unknown): unknown {
+  return captureFailure(input, true);
 }
 
-function captureFailure(input: unknown, screen: boolean, rejectObject?: (value: object) => boolean): unknown {
-  const ancestors = new Set<object>();
-  const unsupported = (): never => { throw new JudgmentInputError('unsupported-input'); };
-  const field = (object: object, key: string): unknown => {
-    let owner: object | null = object;
-    for (let depth = 0; owner && depth < 64; depth++) {
-      if (rejectObject?.(owner)) return unsupported();
-      const descriptor = Object.getOwnPropertyDescriptor(owner, key);
-      if (descriptor) return 'value' in descriptor ? descriptor.value : unsupported();
-      owner = Object.getPrototypeOf(owner) as object | null;
-    }
-    if (owner) return unsupported();
-    return undefined;
-  };
+/** The same fields for local use only (no privacy screen); screen before any transmission. */
+export function captureFailureSnapshot(input: unknown): unknown {
+  return captureFailure(input, false);
+}
+
+function read(object: object, key: string): unknown {
+  try { return (object as Record<string, unknown>)[key]; } catch { return undefined; }
+}
+
+function text(value: unknown): string | undefined {
+  return typeof value === 'string' ? value : typeof value === 'number' || typeof value === 'bigint' ? String(value) : undefined;
+}
+
+function finite(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function passesScreen(value: unknown): boolean {
+  try { assertJudgmentInput(value); return true; }
+  catch (error) {
+    if (error instanceof JudgmentInputError) return false;
+    throw error;
+  }
+}
+
+/** Plain data with every refused text field replaced; a field is screened with its name so declared credential fields stay refused. */
+function withheld(value: unknown, key?: string): unknown {
+  if (Array.isArray(value)) return Object.freeze(value.map(item => withheld(item, key)));
+  if (value && typeof value === 'object') {
+    const copy = Object.create(null) as Record<string, unknown>;
+    for (const [childKey, child] of Object.entries(value)) copy[childKey] = withheld(child, childKey);
+    return Object.freeze(copy);
+  }
+  if (typeof value !== 'string') return value;
+  return passesScreen(key === undefined ? value : { [key]: value }) ? value : WITHHELD;
+}
+
+function captureFailure(input: unknown, screen: boolean): unknown {
+  const visiting = new Set<object>();
   const plain = (value: unknown): unknown => {
-    // These primitive renderings are precisely the canonical fallback's full
-    // String result. Functions, exotic objects and accessors fail closed.
-    const source = typeof value === 'bigint' || typeof value === 'symbol' ? String(value) : value;
-    const snapshot = captureOwnedJson(source, rejectObject);
-    if (screen) assertJudgmentInput(snapshot);
-    return snapshot;
+    let snapshot: unknown;
+    try { snapshot = captureOwnedJson(typeof value === 'bigint' || typeof value === 'symbol' ? String(value) : value); }
+    catch (error) {
+      if (!(error instanceof JudgmentInputError)) throw error;
+      // A thrown value that is not plain data (a class instance, a cycle) is described, not refused.
+      let described: string;
+      try { described = String(value); } catch { described = 'an unreadable failure value'; }
+      snapshot = described;
+    }
+    return screen && !passesScreen(snapshot) ? withheld(snapshot) : snapshot;
   };
   const capture = (value: unknown, depth: number): unknown => {
-    if (depth > 16 || (value !== null && typeof value === 'object' && rejectObject?.(value))) return unsupported();
     if (!(value instanceof Error)) return plain(value);
-    if (ancestors.has(value)) return unsupported();
-    ancestors.add(value);
+    if (depth > 16 || visiting.has(value)) return undefined;
+    visiting.add(value);
     try {
-      const message = field(value, 'message') ?? '';
-      const name = field(value, 'name') ?? 'Error';
-      if (typeof message !== 'string' || typeof name !== 'string') return unsupported();
-      const facts = plain({ message, name, code: field(value, 'code'), status: field(value, 'status'),
-        statusCode: field(value, 'statusCode'), retryAfterMs: field(value, 'retryAfterMs') }) as Record<string, unknown>;
-      const cause = capture(field(value, 'cause'), depth + 1);
-      const snapshot = new Error(message, { cause });
+      const screened = (field: string | undefined, fallback: string | undefined) =>
+        field === undefined || !screen || passesScreen(field) ? field : fallback;
+      const message = screened(text(read(value, 'message')) ?? '', WITHHELD) ?? '';
+      const name = screened(text(read(value, 'name')), undefined) ?? 'Error';
+      const code = screened(text(read(value, 'code')), undefined);
+      let cause: unknown;
+      try { cause = capture(read(value, 'cause'), depth + 1); } catch { cause = undefined; }
+      const snapshot = cause === undefined ? new Error(message) : new Error(message, { cause });
+      const facts: Record<string, unknown> = { name };
+      if (code !== undefined) facts.code = code;
+      for (const key of ['status', 'statusCode', 'retryAfterMs'] as const) {
+        const number = finite(read(value, key));
+        if (number !== undefined) facts[key] = number;
+      }
       Object.assign(snapshot, facts);
       return Object.freeze(snapshot);
-    } finally { ancestors.delete(value); }
+    } finally { visiting.delete(value); }
   };
   return capture(input, 0);
 }

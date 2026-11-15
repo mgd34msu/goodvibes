@@ -129,7 +129,7 @@ test('no decision model leaves the analysis whole, with entities not assessed', 
 
 test('full image, audio, document and video text is screened before clipping, budget or port lookup', async () => {
   const fake = centralPort(); usePort(fake.port);
-  const text = `${'receipt '.repeat(600)}password=inline-credential`;
+  const text = `${'receipt '.repeat(600)}password=inline9Credential7Q2kL`;
   for (const kind of ['image', 'audio', 'document', 'video'] as const) {
     const fixture = multimodalFixture(kind, text);
     if (kind === 'video') fixture.add('transcript', 'document', text);
@@ -186,7 +186,7 @@ test('Office admission reads late XML text and refuses expansion bombs before a 
   const fake = centralPort(); usePort(fake.port);
   const descriptor = { id: 'office', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', filename: 'source.xlsx' };
   const archive = new JSZip();
-  archive.file('xl/worksheets/sheet99.xml', `<row>${'safe '.repeat(2_000)}password=late-credential</row>`);
+  archive.file('xl/worksheets/sheet99.xml', `<row>${'safe '.repeat(2_000)}password=late9Credential7Q2kLm</row>`);
   const bytes = await archive.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
   await expect(readKnowledgeArtifactJudgmentSource(descriptor, bytes)).rejects.toThrow('Refused before judgment');
   const bomb = new JSZip(); bomb.file('xl/sharedStrings.xml', 'safe '.repeat(200_000));

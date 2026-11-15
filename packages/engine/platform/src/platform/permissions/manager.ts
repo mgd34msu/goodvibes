@@ -1387,15 +1387,15 @@ export class PermissionManager {
   }
 
   private async readAccessForPath(rawPath: string, sessionId: string | undefined): Promise<'allow' | 'restricted'> {
-    this.assertSelectedModeCurrent(true);
+    // A read decision uses the mode its invocation was admitted under.
+    const mode = currentExecutionModeForReadDecision() ?? this.getMode();
     const assertWorkspace = await this.autonomousWorkspaceConstraint('read');
     assertWorkspace();
-    if (this.getMode() === 'yolo') return 'allow';
+    if (mode === 'yolo') return 'allow';
     const permissions = (this.configReader.getAutonomousSnapshot?.() ?? this.configReader.getSnapshot()).permissions;
     if (permissions?.tools?.read === 'deny') return 'restricted';
     if (typeof rawPath !== 'string' || rawPath.length === 0) return 'allow';
     const args = { path: rawPath };
-    const mode = this.getMode();
     if (this.configReader.isAutoApproveEnabled()) return 'allow';
     if (this.featureFlags?.isEnabled('permissions-policy-engine') === true) {
       const mapped = this.mapEvaluatorDecision(await this.evaluateRuntimePolicy('read', args, mode, 'read'), analyzePermissionRequest('read', args, 'read'));
@@ -1498,8 +1498,8 @@ export class PermissionManager {
     } });
   }
 
-  private assertSelectedModeCurrent(forReadDecision = false): void {
-    const selected = forReadDecision ? currentExecutionModeForReadDecision() : currentExecutionMode();
+  private assertSelectedModeCurrent(): void {
+    const selected = currentExecutionMode();
     if (selected !== undefined && selected !== this.getMode()) throw new Error('Execution mode changed during the invocation');
   }
 

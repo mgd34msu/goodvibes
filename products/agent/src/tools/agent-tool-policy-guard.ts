@@ -3,28 +3,20 @@ import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { assertCurrentToolExecution } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import {
-  wrapAnalyzeToolForAgentPolicy,
-  wrapRegistryToolForAgentPolicy,
-} from './agent-analysis-registry-policy.ts';
-import {
   wrapAgentContextToolForAgentPolicy,
 } from './agent-context-policy.ts';
-import { wrapFindToolForAgentPolicy } from './agent-find-policy.ts';
 import { AGENT_MCP_CALL_MODE, isAgentMcpCallRouteInstalled } from './agent-mcp-call-route.ts';
-import { wrapReadToolForAgentPolicy, validateAgentReadMechanics } from './agent-read-policy.ts';
+import { wrapReadToolForAgentPolicy } from './agent-read-policy.ts';
 import {
-  AGENT_READ_ONLY_REGISTRY_TOOL_MODES,
-  validateAnalyzeToolInvocationForAgentPolicy,
-  validateRegistryToolInvocationForAgentPolicy,
-} from './agent-analysis-registry-policy.ts';
-import { validateFindToolInvocationForAgentPolicy } from './agent-find-policy.ts';
-import { validateWebSearchToolInvocationForAgentPolicy } from './agent-web-search-policy.ts';
-import {
+  READ_ONLY_STATE_ANALYTICS_ACTIONS,
+  READ_ONLY_STATE_HOOK_ACTIONS,
+  READ_ONLY_STATE_MEMORY_ACTIONS,
+  READ_ONLY_STATE_MODE_ACTIONS,
+  READ_ONLY_STATE_TOOL_MODES,
   wrapSettingsToolForAdmittedAgentPolicy,
   validateAgentSettingsMechanics,
   type SettingsToolArgs,
 } from '@goodvibes-jev/engine/platform/platform/gate/policy';
-import { wrapWebSearchToolForAgentPolicy } from './agent-web-search-policy.ts';
 import type {
   AgentToolArgs,
   AgentToolPolicyGuardOptions,
@@ -65,11 +57,6 @@ const READ_ONLY_REMOTE_TOOL_MODES = ['pools', 'contracts', 'artifacts', 'review'
 const READ_ONLY_CHANNEL_TOOL_MODES = ['accounts', 'directory', 'resolve_target', 'capabilities', 'tools', 'agent_tools', 'actions'] as const;
 const READ_ONLY_MCP_TOOL_MODES = ['servers', 'tools', 'schema', 'resources', 'security', 'auth'] as const;
 const READ_ONLY_FETCH_METHODS = ['GET', 'HEAD', 'OPTIONS'] as const;
-const READ_ONLY_STATE_TOOL_MODES = ['get', 'list', 'budget', 'context', 'memory', 'telemetry', 'hooks', 'mode', 'analytics'] as const;
-const READ_ONLY_STATE_MEMORY_ACTIONS = ['list', 'get'] as const;
-const READ_ONLY_STATE_HOOK_ACTIONS = ['list'] as const;
-const READ_ONLY_STATE_MODE_ACTIONS = ['get', 'list'] as const;
-const READ_ONLY_STATE_ANALYTICS_ACTIONS = ['summary', 'query', 'dashboard'] as const;
 const READ_ONLY_TASK_TOOL_MODES = ['list', 'show', 'handoffs'] as const;
 const READ_ONLY_TEAM_TOOL_MODES = ['list', 'show'] as const;
 const READ_ONLY_WORKLIST_TOOL_MODES = ['list', 'show'] as const;
@@ -160,9 +147,11 @@ const CONTROL_MUTATION_DENIAL = [
 
 /**
  * The only Agent tool guard installer; the engine no longer carries a second copy.
- * The shared read, find, web search, analysis and settings wrappers come from the
- * engine gate. Under yolo execution every wrapper here passes the call through, by
- * design: yolo is the owner's explicit decision to run without these narrowings.
+ * The read admission and settings wrappers come from the engine gate; find,
+ * web search, analyze and registry carry no Agent restriction (each tool's own
+ * schema and scope apply). Under yolo execution every wrapper here passes the
+ * call through, by design: yolo is the owner's explicit decision to run
+ * without these narrowings.
  */
 export function installAgentToolPolicyGuard(registry: ToolRegistry, options: AgentToolPolicyGuardOptions = {}): void {
   const agentTool = registry.list().find((tool) => tool.definition.name === 'agent');
@@ -197,14 +186,6 @@ export function installAgentToolPolicyGuard(registry: ToolRegistry, options: Age
       wrapSettingsToolForAdmittedAgentPolicy(tool);
     } else if (tool.definition.name === 'inspect') {
       wrapInspectToolForAgentPolicy(tool);
-    } else if (tool.definition.name === 'analyze') {
-      wrapAnalyzeToolForAgentPolicy(tool);
-    } else if (tool.definition.name === 'registry') {
-      wrapRegistryToolForAgentPolicy(tool);
-    } else if (tool.definition.name === 'find') {
-      wrapFindToolForAgentPolicy(tool);
-    } else if (tool.definition.name === 'web_search') {
-      wrapWebSearchToolForAgentPolicy(tool);
     } else if (tool.definition.name === 'control') {
       wrapModeRestrictedToolForAgentPolicy(tool, {
         allowedModes: READ_ONLY_CONTROL_TOOL_MODES,
@@ -523,9 +504,7 @@ export function explainAgentToolPolicyInvocation(
     return denied ? deniedByAgentPolicy(denied) : allowedByAgentPolicy('Agent policy preserves the shared shell execution options.');
   }
   if (toolName === 'read') {
-    const denied = validateAgentReadMechanics(args);
-    return denied ? deniedByAgentPolicy(denied)
-      : allowedByAgentPolicy('Read requires a current bound admission for its actual non-secret, requested subjects. This explanation grants no execution authority.');
+    return allowedByAgentPolicy('Read requires a current bound admission for its actual non-secret, requested subjects. This explanation grants no execution authority.');
   }
   if (toolName === 'remote') return explainModeRestrictedAgentPolicy(args as ModeToolArgs, READ_ONLY_REMOTE_TOOL_MODES, READ_ONLY_REMOTE_TOOL_MODE_SET, REMOTE_MUTATION_DENIAL);
   if (toolName === 'channel') {
@@ -559,21 +538,8 @@ export function explainAgentToolPolicyInvocation(
       ? deniedByAgentPolicy(denied)
       : allowedByAgentPolicy('Mechanical settings checks pass; the original host source and resolved effect still require current recorded admission. This explanation grants no authority.');
   }
-  if (toolName === 'analyze') {
-    const denied = validateAnalyzeToolInvocationForAgentPolicy(args);
-    return denied ? deniedByAgentPolicy(denied) : allowedByAgentPolicy('Agent policy adds no restriction here; the shared analysis schema decides which modes and providers apply.');
-  }
-  if (toolName === 'registry') {
-    const denied = validateRegistryToolInvocationForAgentPolicy(args);
-    return denied ? deniedByAgentPolicy(denied, AGENT_READ_ONLY_REGISTRY_TOOL_MODES) : allowedByAgentPolicy('Agent policy allows registry discovery without content modes.', AGENT_READ_ONLY_REGISTRY_TOOL_MODES);
-  }
-  if (toolName === 'find') {
-    const denied = validateFindToolInvocationForAgentPolicy(args);
-    return denied ? deniedByAgentPolicy(denied) : allowedByAgentPolicy('Agent policy allows find.');
-  }
-  if (toolName === 'web_search') {
-    const denied = validateWebSearchToolInvocationForAgentPolicy(args);
-    return denied ? deniedByAgentPolicy(denied) : allowedByAgentPolicy('Agent policy allows web search.');
+  if (toolName === 'analyze' || toolName === 'registry' || toolName === 'find' || toolName === 'web_search') {
+    return allowedByAgentPolicy('No Agent restriction; the tool\'s own schema and scope apply.');
   }
   if (toolName === 'inspect') {
     const denied = validateInspectToolInvocationForAgentPolicy(args as InspectToolArgs);
@@ -623,43 +589,7 @@ export {
   wrapAgentContextToolForAgentPolicy,
 } from './agent-context-policy.ts';
 
-export {
-  AGENT_READ_ONLY_ANALYZE_TOOL_MODES,
-  AGENT_READ_ONLY_REGISTRY_TOOL_MODES,
-  AGENT_REGISTRY_CONTENT_DENIAL_MESSAGE,
-  validateAnalyzeToolInvocationForAgentPolicy,
-  validateRegistryToolInvocationForAgentPolicy,
-  wrapAnalyzeToolForAgentPolicy,
-  wrapRegistryToolForAgentPolicy,
-} from './agent-analysis-registry-policy.ts';
-
-export {
-  AGENT_MAX_READ_FILES,
-  AGENT_MAX_READ_IMAGE_SIZE_BYTES,
-  AGENT_READ_IMAGE_MODES,
-  AGENT_READ_POLICY_DENIAL_MESSAGE,
-  validateReadToolInvocationForAgentPolicy,
-  wrapReadToolForAgentPolicy,
-} from './agent-read-policy.ts';
-
-export {
-  AGENT_FIND_POLICY_DENIAL_MESSAGE,
-  AGENT_READ_ONLY_FIND_OUTPUT_FORMATS,
-  normalizeFindToolInvocationForAgentPolicy,
-  validateFindToolInvocationForAgentPolicy,
-  wrapFindToolForAgentPolicy,
-} from './agent-find-policy.ts';
-
-export {
-  AGENT_MAX_WEB_SEARCH_EVIDENCE_TOP_N,
-  AGENT_MAX_WEB_SEARCH_RESULTS,
-  AGENT_READ_ONLY_WEB_SEARCH_EVIDENCE_EXTRACTS,
-  AGENT_READ_ONLY_WEB_SEARCH_VERBOSITIES,
-  AGENT_WEB_SEARCH_POLICY_DENIAL_MESSAGE,
-  normalizeWebSearchToolInvocationForAgentPolicy,
-  validateWebSearchToolInvocationForAgentPolicy,
-  wrapWebSearchToolForAgentPolicy,
-} from './agent-web-search-policy.ts';
+export { AGENT_READ_ADMISSION_DENIAL_MESSAGE, wrapReadToolForAgentPolicy } from './agent-read-policy.ts';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);

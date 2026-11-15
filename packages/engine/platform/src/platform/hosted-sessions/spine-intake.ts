@@ -170,7 +170,7 @@ interface PendingDelivery {
   readonly attempts: number;
   /** Failed attempts to classify the current failure; bounded like delivery attempts. */
   readonly readingFailures?: number | undefined;
-  readonly failure?: { readonly error: unknown; readonly detail: string; readonly blocked?: boolean; readonly reading?: FailureReadOptions } | undefined;
+  readonly failure?: { readonly error: unknown; readonly detail: string; readonly reading?: FailureReadOptions } | undefined;
 }
 
 /**
@@ -604,13 +604,10 @@ export class HostedSessionSpineIntake {
       if (this.stopped || this.fenced.has(pending.sessionId)) { await this.abandon(spine, pending); return; }
       const known = knownDeliveryFailure(error);
       if (known !== undefined) { await this.settleKnownFailure(spine, pending, known, summarizeError(error)); return; }
-      // Keep the input collected even if the evidence is unsafe to read. It must
-      // never be retried merely because privacy admission failed.
-      const blocked: PendingDelivery = { ...pending, attempts: pending.attempts + 1,
-        failure: { error: undefined, blocked: true, detail: 'Delivery failed; failure evidence has not been admitted.' } };
-      this.pending.set(key, blocked);
+      // The capture keeps the fields that decide a retry (status, code, a
+      // timeout or abort) even when its wording is withheld from a reading.
       const captured = captureJudgmentFailure(error);
-      const failed: PendingDelivery = { ...blocked,
+      const failed: PendingDelivery = { ...pending, attempts: pending.attempts + 1,
         failure: { error: captured, detail: summarizeError(captured), ...(this.failureReading ? { reading: this.failureReading } : {}) } };
       this.pending.set(key, failed);
       await this.classifyFailure(spine, failed, assertCurrent);
@@ -686,7 +683,6 @@ export class HostedSessionSpineIntake {
   private async resolveOwnedFailure(spine: HostedSessionSpine, pending: PendingDelivery, assertCurrent: () => void): Promise<void> {
     assertCurrent();
     const failure = pending.failure!;
-    if (failure.blocked) throw new Error('Hosted delivery failure evidence could not be admitted');
     let owner = this.sessionLifetimes.get(pending.sessionId);
     if (!owner) { owner = new AbortController(); this.sessionLifetimes.set(pending.sessionId, owner); }
     const captured = await decisionOrClassic<FailureReadOptions | undefined>(async () => failure.reading ?? { port: judgmentPort('engine.hosted-session.spine-delivery') }, () => undefined);

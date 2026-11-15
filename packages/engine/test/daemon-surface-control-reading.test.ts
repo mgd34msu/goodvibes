@@ -172,7 +172,7 @@ describe('the real daemon surface control caller', () => {
     expect(requests).toEqual([]);
   });
   test('protected text is refused before the model even when a command-looking prefix exists', async () => {
-    const h = harness(); const text = 'cancel run-1 Authorization: Bearer synthetic-secret'; await h.authorize(text);
+    const h = harness(); const text = 'cancel run-1 Authorization: Bearer synthetic9Secret7Q2kLmXz'; await h.authorize(text);
     await expect(h.context.parseSurfaceControlCommand(text)).rejects.toThrow('Refused before judgment'); expect(requests).toEqual([]);
   });
   for (const invalidate of ['policy', 'target', 'supersession']) test(`${invalidate} changes while pending prevent a late control and retention`, async () => {

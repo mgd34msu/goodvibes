@@ -400,7 +400,7 @@ describe('authorization and failures are fail closed', () => {
 
 
 describe('approval judgment never receives protected input', () => {
-  const SECRET = 'SYNTHETIC_APPROVAL_SECRET_DO_NOT_TRANSMIT';
+  const SECRET = 'SYNTHETIC-Appr0val-S3cret-9x7Q2kLm-DO-NOT-TRANSMIT';
 
   function assertNoProtectedJudgment() {
     expect(readings.requests).toHaveLength(0);

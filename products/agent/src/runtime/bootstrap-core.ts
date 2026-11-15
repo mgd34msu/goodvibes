@@ -54,7 +54,6 @@ import { formatMemoryFoldReport } from '@goodvibes-jev/engine/platform/platform/
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { createUiRuntimeServices, type UiRuntimeServices } from './ui-services.ts';
 import { getTerminalSize } from '../shell/terminal-size.ts';
-import { installPermissionManagerSafetyGuard } from '@goodvibes-jev/engine/platform/platform/gate/policy';
 import { composeAgentToolRegistry, decorateAgentWorkerRegistry } from './agent-tool-registry.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import { registerAgentRuntimeEvents } from './agent-runtime-events.ts';
@@ -109,13 +108,6 @@ export {
   companionMessageToOrchestratorInputOptions,
   registerWebhookNotifier,
 } from './bootstrap-core-helpers.ts';
-
-/** The live Agent permission composition, shared by main and background calls. */
-export function composeAgentPermissionManager(services: Pick<RuntimeServices, 'permissionManager'>): PermissionManager {
-  const manager = services.permissionManager;
-  installPermissionManagerSafetyGuard(manager);
-  return manager;
-}
 
 /**
  * The runtime state object of an Agent process. Its `sessionId` is not a plain
@@ -254,7 +246,7 @@ export async function initializeBootstrapCore(
   // mapping. Built before the orchestrator is handed its dependencies: the
   // platform's gateBackgroundToolCall() approves every call when the context has
   // no manager, so a spawned agent must never exist without one.
-  const permissionManager = composeAgentPermissionManager(services);
+  const permissionManager = services.permissionManager;
   installAgentOrchestratorDependencies(
     services.agentOrchestrator,
     {

@@ -82,8 +82,7 @@ type Category = 'missing-library' | 'program-not-installed' | 'network-blocked' 
 function evidence(command: string, phase: string, outcome: CommandOutcome) {
   // Complete raw stdout, stderr and spawn error are admitted BEFORE port lookup,
   // token extraction or size limits. Never send a display-sanitized projection.
-  const captured = captureJudgmentFailure(outcome) as CommandOutcome;
-  return captureJudgmentFailure({ command, phase, ...captured }) as {
+  return captureJudgmentFailure({ command, phase, ...outcome }) as {
     readonly command: string; readonly phase: string;
   } & CommandOutcome;
 }
@@ -145,7 +144,6 @@ async function readDecisionCategory(command: string, phase: string, outcome: Com
 export async function programNotInstalled(command: string, outcome: CommandOutcome, lifetime: BrowserProvisionLifetime = {}): Promise<boolean> {
   lifetime = ownProvisionLifetime(lifetime);
   assertProvisionCurrent(lifetime);
-  outcome = captureJudgmentFailure(outcome) as CommandOutcome;
   if (outcome.spawnError === null) return false;
   // A structured spawn errno is a fact, never a substring of failure prose.
   if (outcome.spawnCode === 'ENOENT') return true;

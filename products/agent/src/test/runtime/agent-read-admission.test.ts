@@ -23,7 +23,6 @@ import { PolicyRuntimeState, RuntimeEventBus } from '@/runtime/index.ts';
 import { PermissionManager, createPermissionConfigReader, UserPermissionRuleStore } from '@goodvibes-jev/engine/platform/platform/permissions';
 import { composeAgentToolRegistry } from '../../runtime/agent-tool-registry.ts';
 import { explainAgentToolPolicyInvocation } from '../../tools/agent-tool-policy-guard.ts';
-import { composeAgentPermissionManager } from '../../runtime/bootstrap-core.ts';
 import { type RuntimeServices } from '../../runtime/services.ts';
 import { createRuntimeStore } from '../../runtime/store/index.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
@@ -123,7 +122,7 @@ async function fixture() {
   const sourceOf = () => source;
   const registry = composeAgentToolRegistry({ services: runtime, configManager: runtime.configManager,
     homeDirectory: home, resolveSessionId: () => 'adoption-session', getLastUserMessage: () => source.goal }).toolRegistry;
-  const manager = composeAgentPermissionManager(runtime);
+  const manager = runtime.permissionManager;
   const deps: ToolExecutionDeps = { toolRegistry: registry, permissionManager: manager, autonomousSource: sourceOf,
     hookDispatcher: null, runtimeBus: null, sessionId: 'adoption-session',
     emitterContext: () => { throw new Error('No runtime emitter is used by this fixture'); } };

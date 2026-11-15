@@ -19,7 +19,8 @@ import { runBoundary } from '../platform/src/platform/gate/boundary.ts';
 import { UntrustedContentLedger } from '../platform/src/platform/security/untrusted-content.ts';
 import { McpPermissionManager } from '../platform/src/platform/runtime/mcp/permissions.ts';
 
-const SECRET = 'SYNTHETIC_PROTECTED_VALUE_DO_NOT_TRANSMIT';
+// Shaped like a real token (mixed letters and digits): a plain word in free text is not refused.
+const SECRET = 'SYNTHETIC-Pr0tected-V4lue-9x7Q2kLm-DO-NOT-TRANSMIT';
 const PAN = '4111111111111111';
 const REF = 'goodvibes://secrets/goodvibes/OPENAI_API_KEY';
 
@@ -97,7 +98,6 @@ const protectedCalls: readonly [string, string, Record<string, unknown>][] = [
   ['HTML payment descriptor', 'browser', { autocomplete: 'section-pay cc-number', value: SECRET }],
   ['CVV field', 'state', { values: [{ cvv: SECRET }] }],
   ['PAN in prose', 'channel', { text: `Use ${PAN} for the card` }],
-  ['numeric PAN', 'state', { values: { unrelated: Number(PAN) } }],
   ['PAN adjacent to expiry', 'channel', { text: `Card ${PAN} 07/29` }],
   ['shell assignment', 'exec', { command: `OPENAI_API_KEY='${SECRET}' curl https://example.test` }],
   ['shell command list', 'exec', { commands: [{ cmd: `export OPENAI_API_KEY=${SECRET}` }] }],
@@ -157,7 +157,6 @@ describe('pre-judgment protected input refusal', () => {
   for (const [name, value] of [
     ['inline credential', `password=${SECRET}`],
     ['PAN in text', `Card ${PAN}`],
-    ['numeric PAN', Number(PAN)],
     ['nested declared credential', { password: SECRET }],
     ['nested declared card field', { cvv: SECRET }],
     ['nested hidden array', hiddenArrayValue({ apiKey: SECRET })],
@@ -175,7 +174,7 @@ describe('pre-judgment protected input refusal', () => {
   }
 
   test('enumerable object length fields are scanned before any battery request', async () => {
-    for (const args of [{ length: `password=${SECRET}` }, { nested: { length: Number(PAN) } }]) {
+    for (const args of [{ length: `password=${SECRET}` }, { nested: { length: `Card ${PAN}` } }]) {
       await expect(readToolCall({ toolName: 'test', args })).rejects.toBeInstanceOf(JudgmentInputError);
       expect(() => readingArguments(args)).toThrow(JudgmentInputError);
     }
@@ -279,18 +278,18 @@ describe('pre-judgment protected input refusal', () => {
   test('long unbroken document text is scanned linearly without a partial prefix shortcut', () => {
     const long = 'x'.repeat(128 * 1024);
     expect(judgmentInputProblem({ content: long })).toBeUndefined();
-    expect(judgmentInputProblem({ content: `${long} https://user:synthetic@example.test` })).toBe('credential-material');
-    expect(judgmentInputProblem({ content: `${long} https://example.test?api%5Fkey=synthetic` })).toBe('credential-material');
-    expect(judgmentInputProblem({ content: `${'+.'.repeat(64 * 1024)}https://user:synthetic@example.test` })).toBe('credential-material');
+    expect(judgmentInputProblem({ content: `${long} https://user:Synth3tic9x7Q2kLmPw@example.test` })).toBe('credential-material');
+    expect(judgmentInputProblem({ content: `${long} https://example.test?api%5Fkey=Synth3tic9x7Q2kLmKey` })).toBe('credential-material');
+    expect(judgmentInputProblem({ content: `${'+.'.repeat(64 * 1024)}https://user:Synth3tic9x7Q2kLmPw@example.test` })).toBe('credential-material');
     // A regression formerly took tens of seconds for just the first value.
     expect(log.requests).toEqual([]);
   });
 
   test('linear URL scan preserves embedded scheme and multiple URL behavior', () => {
     for (const prefix of ['', '1', '123+..', '://', '@', '/', ' abc+']) {
-      expect(judgmentInputProblem({ content: `${prefix}https://user:synthetic@example.test` })).toBe('credential-material');
+      expect(judgmentInputProblem({ content: `${prefix}https://user:Synth3tic9x7Q2kLmPw@example.test` })).toBe('credential-material');
     }
-    expect(judgmentInputProblem({ content: 'https://example.test/safe https://user:synthetic@example.test' })).toBe('credential-material');
+    expect(judgmentInputProblem({ content: 'https://example.test/safe https://user:Synth3tic9x7Q2kLmPw@example.test' })).toBe('credential-material');
     expect(judgmentInputProblem({ content: '123+..https://example.test/safe' })).toBeUndefined();
     expect(judgmentInputProblem({ content: 'https://example.test?view=docs' })).toBeUndefined();
     expect(log.requests).toEqual([]);
@@ -432,7 +431,7 @@ describe('secondary reading paths and errors', () => {
     const bus = new RuntimeEventBus();
     const ledger = new AgentExecutionLedger(bus);
     try {
-      emitToolReceived(bus, { sessionId: 'test', traceId: 'test', source: 'test' }, { callId: 'proxy-call', turnId: 'turn', tool: 'read', args: { value } });
+      emitToolReceived(bus, { sessionId: 'test', traceId: 'test', source: 'test' }, { callId: 'proxy-call', turnId: 'turn', tool: 'read_everything', args: { value } });
       await new Promise((resolve) => setTimeout(resolve, 0));
       await ledger.settled();
       expect(log.requests.filter((request) => JSON.stringify(request.state).includes(SECRET))).toHaveLength(0);
@@ -544,6 +543,11 @@ describe('secondary reading paths and errors', () => {
   });
 });
 
+
+test('a JSON number is never card material; a card field holding one is', () => {
+  expect(judgmentInputProblem({ createdAt: 1731600000000, id: Number(PAN) })).toBeUndefined();
+  expect(judgmentInputProblem({ cardNumber: Number(PAN) })).toBe('card-material');
+});
 
 test('explicit credential field syntax remains protected across casing, with references preserved', () => {
   for (const key of ['API_KEY', 'Api_Key', 'PASSWORD', 'Access_Token', 'CLIENT-SECRET', 'PrivateKey']) {

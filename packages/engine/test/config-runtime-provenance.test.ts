@@ -33,7 +33,7 @@ test('permission provenance uses the accepted source after a failed load rather 
   writeFileSync(config.getDaemonTierPath()!, '{invalid');
   expect(() => config.load()).toThrow();
   const row = buildPermissionProvenance(config).rows.find(entry => entry.key === 'permissions.mode')!;
-  expect(row).toMatchObject({ value: 'plan', origin: 'global config file', recorded: true, overridden: false, recordedValue: 'plan' });
+  expect(row).toMatchObject({ value: 'plan', origin: 'global config file', recorded: true, overridden: false });
   config.setRuntimeOverride('permissions.mode', 'plan');
   expect(buildPermissionProvenance(config).rows.find(entry => entry.key === 'permissions.mode')).toMatchObject({ value: 'plan', recorded: false, overridden: true });
 });

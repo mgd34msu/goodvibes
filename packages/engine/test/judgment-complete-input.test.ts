@@ -20,7 +20,7 @@ describe('complete input for payment and content derivation judgments', () => {
   });
 
   test('protected brief tails fail before looking up a port', async () => {
-    const brief = 'Background context. '.repeat(350) + ' apiKey=private-example';
+    const brief = 'Background context. '.repeat(350) + ' apiKey=private9Example7Q2kLm';
     await expect(readRequest({ purpose: 'unit', brief })).rejects.toThrow('Refused before judgment');
   });
   test('renewal terms beyond the budget cannot disappear into an acted no', async () => {
@@ -40,10 +40,10 @@ describe('complete input for payment and content derivation judgments', () => {
   test('protected payment or source material is rejected before any hosted reading', async () => {
     const fake = fakePort(() => noulAnswer(0.01));
     installJudgmentPort(fake.port);
-    await expect(detectRecurringCharge('Order details: api_key=private-value')).rejects.toThrow('Refused before judgment');
+    await expect(detectRecurringCharge('Order details: api_key=private9Value7Q2kLmX')).rejects.toThrow('Refused before judgment');
     await expect(findContentTaint({ body: 'An ordinary reply' }, [
       { surface: 'web', origin: 'first', text: 'Ordinary source' },
-      { surface: 'web', origin: 'last', text: 'api_key=private-value' },
+      { surface: 'web', origin: 'last', text: 'api_key=private9Value7Q2kLmX' },
     ], { port: fake.port })).rejects.toThrow('Refused before judgment');
     expect(fake.requests).toHaveLength(0);
   });

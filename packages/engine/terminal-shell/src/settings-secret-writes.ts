@@ -42,7 +42,7 @@ export async function setSecretBackedSettingValue(args: {
     // Re-read authority from the captured owner, including after storage waits.
     // A modal opened against another owner must not supply this metadata.
     for (const setting of configManager.getHostSettingsSchema?.() ?? []) {
-      configManager.getHostBooleanSetting(setting.key).getResolved();
+      if (setting.type === 'boolean') configManager.getHostBooleanSetting(setting.key).getResolved();
     }
   };
   try {

@@ -371,6 +371,11 @@ export type ConfigValue<K extends ConfigKey> =
   K extends 'update.releasesUrl' ? string :
   K extends 'update.rollbackAfterFailedStarts' ? number :
   K extends 'update.alertAfterFailedChecks' ? number :
+  K extends 'checkpoints.preferGitRoot' ? boolean :
+  K extends 'checkpoints.allowBroadRoot' ? boolean :
+  K extends 'checkpoints.allowLargeFirstSnapshot' ? boolean :
+  K extends 'checkpoints.maxFirstSnapshotFiles' ? number :
+  K extends 'checkpoints.autoRetention' ? boolean :
   K extends 'network.outboundTls.mode' ? 'bundled' | 'bundled+custom' | 'custom' :
   K extends 'network.outboundTls.customCaFile' ? string :
   K extends 'network.outboundTls.customCaDir' ? string :

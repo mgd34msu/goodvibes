@@ -21,8 +21,7 @@ export function createWorkspaceCheckpointing(opts: {
   runtimeBus: RuntimeEventBus;
   configManager: ConfigManager;
 }): WorkspaceCheckpointManager {
-  // Checkpoint root-guard from the user's `checkpoints.*` config (docs/configuration.md;
-  // inert until the platform platform's checkpoint manager exposes the keys, see the reader's note).
+  // Checkpoint root-guard from the `checkpoints.*` settings (docs/configuration.md).
   const manager = new WorkspaceCheckpointManager(
     withCheckpointGuardSettings({ workspaceRoot: opts.workspaceRoot, surface: opts.surface, runtimeBus: opts.runtimeBus }, opts.configManager),
   );

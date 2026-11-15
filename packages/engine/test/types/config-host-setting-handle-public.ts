@@ -1,4 +1,4 @@
-import { ConfigManager, type ConfigKey, type HostBooleanSetting, type HostBooleanSettingHandle, type HostBooleanSettingResolved } from '@goodvibes-jev/engine/platform/platform/config';
+import { ConfigManager, type ConfigKey, type HostBooleanSettingHandle, type HostBooleanSettingResolved, type HostSetting } from '@goodvibes-jev/engine/platform/platform/config';
 import { getSettingsControlPlaneSnapshot } from '@goodvibes-jev/engine/platform/platform/runtime/settings';
 
 const config = new ConfigManager({
@@ -8,7 +8,7 @@ const config = new ConfigManager({
 const handle: HostBooleanSettingHandle = config.getHostBooleanSetting('behavior.consumerPrivacy');
 const value: boolean = handle.get();
 const key: string = handle.key;
-const hostSchema: readonly HostBooleanSetting[] = config.getHostSettingsSchema();
+const hostSchema: readonly HostSetting[] = config.getHostSettingsSchema();
 const builtinKey: ConfigKey = config.getSchema()[0]!.key;
 const snapshotKey: ConfigKey = getSettingsControlPlaneSnapshot(config).resolvedEntries[0]!.key;
 const builtinLockKey: ConfigKey = getSettingsControlPlaneSnapshot(config).managedLocks[0]!.key;

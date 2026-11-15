@@ -58,11 +58,13 @@ export function ingestManagerSettings(
   knownHostKeys?: ReadonlySet<string>,
 ): Record<string, unknown> {
   const noticedKeys = new Set<string>();
-  const result = ingestSettingsFile(parsed, file, { diagnosticMode: sink.diagnosticMode, ...(migrate ? { migrate } : {}), onNotice: (entry) => { noticedKeys.add(entry.key); noticeTo(sink, entry); } });
-  const unknownKeys = knownHostKeys ? result.unknownKeys.filter((entry) => !knownHostKeys.has(entry.key)) : result.unknownKeys;
-  for (const entry of unknownKeys) noticedKeys.add(entry.key);
+  const result = ingestSettingsFile(parsed, file, {
+    diagnosticMode: sink.diagnosticMode, ...(migrate ? { migrate } : {}), ...(knownHostKeys ? { hostKeys: knownHostKeys } : {}),
+    onNotice: (entry) => { noticedKeys.add(entry.key); noticeTo(sink, entry); },
+  });
+  for (const entry of result.unknownKeys) noticedKeys.add(entry.key);
   forgetFixedKeyReceipts(sink, file, noticedKeys);
-  for (const entry of unknownSettingNotices(file, unknownKeys)) {
+  for (const entry of unknownSettingNotices(file, result.unknownKeys, knownHostKeys)) {
     announceIngestionNotice(entry);
     noticeTo(sink, entry);
   }

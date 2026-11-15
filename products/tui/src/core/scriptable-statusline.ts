@@ -21,7 +21,7 @@ import { readStatuslineSettings, STATUSLINE_DEFAULT_TIMEOUT_MS, type StatuslineS
 export type StatuslineCommandRunner = (command: string, cwd: string, timeoutMs: number) => Promise<string>;
 
 export interface ScriptableStatuslineOptions {
-  readonly configManager: Pick<ConfigManager, 'getRaw'>;
+  readonly configManager: Pick<ConfigManager, 'get'>;
   readonly cwd: string;
   /** Turn-boundary event subscription surface. */
   readonly turns: { on(event: string, handler: () => void): () => void };
@@ -30,7 +30,7 @@ export interface ScriptableStatuslineOptions {
   /** Injectable command runner (defaults to a Bun.spawn-based POSIX shell runner). Test seam. */
   readonly runner?: StatuslineCommandRunner;
   /** Read settings each refresh so live config edits take effect. Test seam / override. */
-  readonly readSettings?: (configManager: Pick<ConfigManager, 'getRaw'>) => StatuslineSettings;
+  readonly readSettings?: (configManager: Pick<ConfigManager, 'get'>) => StatuslineSettings;
 }
 
 export interface ScriptableStatusline {

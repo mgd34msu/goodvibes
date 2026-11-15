@@ -272,7 +272,7 @@ export class SettingsModal extends TerminalSettingsModalState<
     this.searchFocused = false;
     this.contextScroll = 0;
     this.active = true;
-    const unsubscribes = configManager.getHostSettingsSchema().map((setting) =>
+    const unsubscribes = configManager.getHostSettingsSchema().filter((setting) => setting.type === 'boolean').map((setting) =>
       configManager.getHostBooleanSetting(setting.key).subscribe(() => {
         refreshSettingsPolicyAvailability(this.groups, configManager);
         this.requestRender?.();

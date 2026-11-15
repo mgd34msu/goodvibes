@@ -133,7 +133,7 @@ export function refreshHostSettingEntry(entry: SettingEntry, configManager: Conf
  * Host metadata reads are pure; defer legacy builtin recovery until they work.
  */
 export function refreshSettingsPolicyAvailability(groups: Map<string, SettingEntry[]>, configManager: ConfigManager): boolean {
-  const schema = configManager.getHostSettingsSchema();
+  const schema = configManager.getHostSettingsSchema().filter((setting) => setting.type === 'boolean');
   if (schema.length === 0) return true;
   let unavailable = false;
   for (const setting of schema) {
@@ -165,6 +165,14 @@ export function refreshSettingsPolicyAvailability(groups: Map<string, SettingEnt
   return !unavailable;
 }
 
+/** A host setting under a section of the TUI's own is listed in the category its section belongs to. */
+const HOST_SECTION_CATEGORY: Readonly<Record<string, SettingsCategory>> = { statusline: 'ui', session: 'behavior' };
+
+function hostSettingCategory(key: string): SettingsCategory {
+  const root = key.split('.')[0] ?? '';
+  return HOST_SECTION_CATEGORY[root] ?? root as SettingsCategory;
+}
+
 export function buildSettingGroups(
   configManager: ConfigManager,
   featureFlagManager?: FeatureFlagManager | null,
@@ -175,14 +183,27 @@ export function buildSettingGroups(
   for (const cat of SETTINGS_CATEGORIES) groups.set(cat, []);
 
   // Host descriptors are a separate readonly schema, not builtin ConfigKeys.
-  const hostEntries = configManager.getHostSettingsSchema().map(setting => {
+  const hostSchema = configManager.getHostSettingsSchema();
+  const hostEntries = hostSchema.flatMap((setting): HostSettingEntry[] => {
+    if (setting.type !== 'boolean') return [];
     const entry: HostSettingEntry = {
       kind: 'host', setting, currentValue: setting.default, isDefault: true,
     };
     refreshHostSettingEntry(entry, configManager);
-    return entry;
+    return [entry];
   });
   const hostMetadataUnavailable = hostEntries.some(entry => entry.metadataUnavailable !== undefined);
+  // A number or string host setting is edited like a schema row: the manager's
+  // getStored, setDynamic and validation take a registered host key.
+  const hostValueEntries = hostSchema.flatMap((setting): BuiltinSettingEntry[] => {
+    if (setting.type === 'boolean') return [];
+    const row: ConfigSetting = { key: setting.key as ConfigKey, type: setting.type, default: setting.default, description: setting.description };
+    const currentValue = configManager.getStored(row.key);
+    return [{
+      setting: row, currentValue, isDefault: deepEqual(currentValue, row.default),
+      metadataUnavailable: hostMetadataUnavailable ? POLICY_METADATA_UNAVAILABLE : undefined,
+    }];
+  });
 
   // The legacy builtin governance reader can quarantine malformed policy.
   // Keep that recovery out of this read pass when pure host metadata is
@@ -226,10 +247,12 @@ export function buildSettingGroups(
     // its own it would match nothing and drop out of the workspace entirely,
     // reachable only by hand-editing a settings file.
     if (rawCat === 'cluster' && groups.has('network')) groups.get('network')!.push(entry);
+    // checkpoints.* bound what a workspace checkpoint may store, beside the other local-storage rows.
+    if (rawCat === 'checkpoints' && groups.has('storage')) groups.get('storage')!.push(entry);
   }
 
-  for (const entry of hostEntries) {
-    groups.get(entry.setting.key.split('.')[0] as SettingsCategory)?.push(entry);
+  for (const entry of [...hostEntries, ...hostValueEntries]) {
+    groups.get(hostSettingCategory(entry.setting.key))?.push(entry);
   }
 
   const uiEntries = groups.get('ui');

@@ -43,10 +43,14 @@ export type { SettingsFocusRegion as SettingsFocusPane } from '@goodvibes-jev/en
  * key-rotation windows all describe how this node finds and trusts its peers.
  * That is the same subject `fleet.*` already covers, so they are listed
  * together rather than under a category of their own.
+ *
+ * `checkpoints`, the workspace checkpoint guards, bound what this machine
+ * stores for a workspace, so they sit with the other local-storage rows.
  */
 export const CROSS_LISTED_SETTING_ROOTS: Readonly<Record<string, SettingsCategory>> = {
   push: 'notifications',
   cluster: 'fleet',
+  checkpoints: 'storage',
 };
 
 export const SETTINGS_CATEGORY_GROUPS: ReadonlyArray<{

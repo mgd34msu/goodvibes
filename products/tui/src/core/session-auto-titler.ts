@@ -30,14 +30,14 @@ export type TitlerModel = SessionTitleModel;
 export interface SessionAutoTitlerOptions {
   readonly conversation: TitlerConversation;
   readonly model: TitlerModel;
-  readonly configManager: Pick<ConfigManager, 'getRaw'>;
+  readonly configManager: Pick<ConfigManager, 'get'>;
   readonly turns: { on(event: string, handler: () => void): () => void };
   /** Called with the generated title after it is applied (for a system message / repaint). */
   readonly onTitled?: (title: string) => void;
   readonly getSessionId?: () => string;
   readonly isActive?: () => boolean;
   /** Test seams. */
-  readonly readSettings?: (configManager: Pick<ConfigManager, 'getRaw'>) => { autoTitle?: boolean };
+  readonly readSettings?: (configManager: Pick<ConfigManager, 'get'>) => { autoTitle?: boolean };
 }
 
 export interface SessionAutoTitler {

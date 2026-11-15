@@ -27,6 +27,7 @@
  * These modules are already imported for their values below, so this adds no
  * runtime cost and no new dependency; it only pins them into the declarations.
  */
+import './schema-domain-checkpoints.js';
 import './schema-domain-cluster.js';
 import './schema-domain-connectors.js';
 import './schema-domain-conversation-gate.js';
@@ -67,6 +68,7 @@ import { surfaceConfigDefaults, surfaceConfigSettings } from './schema-domain-su
 import { featureConfigDefaults, featureConfigSettings } from './schema-domain-features.js';
 import { featureControlSettings } from './schema-domain-feature-controls.js';
 import { updateConfigDefaults, updateConfigSettings } from './schema-domain-update.js';
+import { checkpointsConfigDefaults, checkpointsConfigSettings } from './schema-domain-checkpoints.js';
 import { pricingConfigDefaults, pricingConfigSettings } from './schema-domain-pricing.js';
 import { paymentsConfigDefaults, paymentsConfigSettings } from './schema-domain-payments.js';
 import { daemonLocationConfigSettings } from './schema-domain-daemon-location.js';
@@ -96,6 +98,7 @@ export const DEFAULT_CONFIG = {
   watchers: { ...runtimeConfigDefaults.watchers, ...triggersConfigDefaults },
   service: runtimeConfigDefaults.service,
   update: updateConfigDefaults.update,
+  checkpoints: checkpointsConfigDefaults.checkpoints,
   network: runtimeConfigDefaults.network,
   relay: runtimeConfigDefaults.relay,
   runtime: runtimeConfigDefaults.runtime,
@@ -159,6 +162,7 @@ export const CONFIG_SCHEMA: ConfigSetting[] = [
   ...runtimeSecondaryConfigSettings,
   ...triggersConfigSettings,
   ...updateConfigSettings,
+  ...checkpointsConfigSettings,
   ...coreTailConfigSettings,
   ...contractConfigSettings,
   ...judgmentConfigSettings,

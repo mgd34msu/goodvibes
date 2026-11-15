@@ -63,11 +63,21 @@ export function nearestKnownSettingName(name: string, known: readonly string[]):
   return extended[0];
 }
 
-/** One skipped-key notice per unknown key: the nearest known setting, or the section's known names. */
-export function unknownSettingNotices(file: string, unknownKeys: readonly UnknownSettingKey[]): SettingsIngestionNotice[] {
+/**
+ * One skipped-key notice per unknown key: the nearest known setting, or the
+ * section's known names. `hostKeys` are the reading surface's own settings, so
+ * a misspelt leaf beside one of them is answered with it.
+ */
+export function unknownSettingNotices(file: string, unknownKeys: readonly UnknownSettingKey[], hostKeys?: ReadonlySet<string>): SettingsIngestionNotice[] {
   const sections = knownSettingNamesBySection();
+  const hostNames = new Map<string, string[]>();
+  for (const key of hostKeys ?? []) {
+    const cut = key.lastIndexOf('.');
+    const section = cut < 0 ? '' : key.slice(0, cut);
+    hostNames.set(section, [...(hostNames.get(section) ?? []), key.slice(cut + 1)]);
+  }
   return unknownKeys.map((unknown) => {
-    const known = [...(sections.get(unknown.section) ?? [])].sort();
+    const known = [...new Set([...(sections.get(unknown.section) ?? []), ...(hostNames.get(unknown.section) ?? [])])].sort();
     const nearest = nearestKnownSettingName(unknown.name, known);
     const qualify = (name: string) => unknown.section ? `${unknown.section}.${name}` : name;
     const listed = known.slice(0, LISTED_NAMES).join(', ');

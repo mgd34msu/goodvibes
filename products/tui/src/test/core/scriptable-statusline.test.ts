@@ -3,7 +3,8 @@ import { createScriptableStatusline, sanitizeStatuslineOutput, type StatuslineCo
 import type { StatuslineSettings } from '@/config/tui-extension-settings.ts';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 
-const emptyConfig: Pick<ConfigManager, 'getRaw'> = { getRaw: () => ({} as ReturnType<ConfigManager['getRaw']>) };
+// Every case injects readSettings, so the manager is never read.
+const emptyConfig = {} as Pick<ConfigManager, 'get'>;
 
 /** A minimal turn-event emitter matching the subscription surface the statusline needs. */
 function makeTurns() {

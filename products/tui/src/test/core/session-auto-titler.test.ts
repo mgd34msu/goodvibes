@@ -3,7 +3,8 @@ import { createSessionAutoTitler, sanitizeTitle, type TitlerConversation } from 
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { ConversationMessageSnapshot } from '@goodvibes-jev/engine/platform/platform/core';
 
-const cfg: Pick<ConfigManager, 'getRaw'> = { getRaw: () => ({} as ReturnType<ConfigManager['getRaw']>) };
+// Every case injects readSettings, so the manager is never read.
+const cfg = {} as Pick<ConfigManager, 'get'>;
 
 function fakeConversation(overrides: Partial<{
   titleSource: 'system' | 'user';

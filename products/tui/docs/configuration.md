@@ -129,14 +129,16 @@ An adjacent trust layer grades plugins into trust tiers, can quarantine a plugin
 The workspace checkpoint manager takes whole-workspace snapshots at turn and
 agent boundaries so a session can rewind. These keys tune the root guard that
 decides where and how much it snapshots. All keys are optional; an omitted key
-uses the manager's own default.
+uses the manager's own default. They are listed in Settings under Storage. A
+value of the wrong type or out of range is reported at start and the default
+applies.
 
 | Key | Type | Default | Meaning |
 | --- | --- | --- | --- |
 | `checkpoints.preferGitRoot` | boolean | `true` | Prefer the enclosing git repository's top level over the raw workspace root when the working directory is inside one. Keeps a session started in a subdirectory snapshotting the whole repo. Set `false` to snapshot exactly the working directory. |
 | `checkpoints.allowBroadRoot` | boolean | `false` | Opt in to snapshotting a broad root (the filesystem root, your home directory, or `~/.goodvibes`). Such roots are refused by default to avoid an unbounded store. Set `true` only when a broad root is genuinely intended. |
 | `checkpoints.allowLargeFirstSnapshot` | boolean | `false` | Opt in to a first snapshot whose full file sweep exceeds `maxFirstSnapshotFiles`. Refused by default with a message stating the count. |
-| `checkpoints.maxFirstSnapshotFiles` | number | `50000` | Ceiling for the first-ever snapshot's file sweep. Must be a positive integer. |
+| `checkpoints.maxFirstSnapshotFiles` | number | `50000` | Ceiling for the first-ever snapshot's file sweep, a whole number from 1 to 10000000. |
 | `checkpoints.autoRetention` | boolean | `true` | Run a retention sweep automatically after each snapshot and once at startup. Set `false` to drive retention only via manual garbage collection. |
 
 Example (`.goodvibes/tui/settings.json`):
@@ -151,22 +153,19 @@ Example (`.goodvibes/tui/settings.json`):
 }
 ```
 
-> **Compatibility note.** These root-guard keys take effect only with a platform
-> build whose checkpoint manager exposes them. On an older pinned build the
-> keys are read and validated but ignored by the manager until it is upgraded.
-
 ## `statusline.*`: scriptable status line
 
 Point `statusline.command` at any command and its output renders as a dim line
 in the status area (just above the prompt). The command runs as a POSIX shell
 command (`/bin/sh -c <command>`) in your working directory at each turn
 boundary, when a turn completes, errors, or is cancelled, and once at
-startup.
+startup. Both keys are listed in Settings under UI and can be set with
+`/config set statusline.command <command>`.
 
 | Key | Type | Default | Meaning |
 | --- | --- | --- | --- |
-| `statusline.command` | string | *(unset)* | Shell command to run. Its first stdout line is shown. Unset or empty disables the feature. |
-| `statusline.timeoutMs` | number | `2000` | Per-run timeout in milliseconds. Clamped to `[100, 15000]`. A command that exceeds it is killed and the line is cleared. |
+| `statusline.command` | string | *(empty)* | Shell command to run. Its first stdout line is shown. Empty disables the feature. |
+| `statusline.timeoutMs` | number | `2000` | Per-run timeout in milliseconds, a whole number from 100 to 15000; a value outside that range is reported at start and the default applies. A command that exceeds it is killed and the line is cleared. |
 
 Behavior notes:
 
@@ -213,6 +212,8 @@ of them.
 
 ## `session.*`: session behavior
 
+Listed in Settings under Behavior.
+
 | Key | Type | Default | Meaning |
 | --- | --- | --- | --- |
 | `session.autoTitle` | boolean | `false` | Auto-title an untitled session using the configured tool/helper (weak/fast) model after the first turn completes. Off by default because it spends a small model call. Only ever sets a system title (a title you set yourself is never overwritten), and it runs at most once per session. Requires the tool LLM to be configured (`/config` → tools). |
@@ -238,7 +239,7 @@ Package-manager and from-source runs never self-update at launch.
 | --- | --- | --- | --- |
 | `update.autoUpdateAtLaunch` | boolean | `true` | Check for and install a newer release at TUI launch. Set `false` to only update when you run `/update apply` yourself. |
 | `update.launchCheckTimeoutMs` | number | `2500` | Budget for the launch-time version check, a whole number from 250 to 30000; a value outside that range is reported at start and the default applies. A check that outlives it is skipped and the current version starts. |
-| `update.applyTimeoutMs` | number | `45000` | Budget for the launch-time download, verify, and swap. Clamped to `[5000, 300000]`. An apply that outlives it is deferred to the next launch. |
+| `update.applyTimeoutMs` | number | `45000` | Budget for the launch-time download, verify, and swap, a whole number from 5000 to 300000; a value outside that range is reported at start and the default applies. An apply that outlives it is deferred to the next launch. |
 
 ```json
 {

@@ -19,7 +19,7 @@ export function getAgentSettingsSchema(config: AgentSettingsCatalog): AgentConfi
   const hosts: AgentHostSetting[] = [];
   for (const setting of config.getHostSettingsSchema?.() ?? []) {
     const key = setting.key;
-    if (isAgentHostSettingKey(key)) hosts.push({ ...setting, kind: 'host', key });
+    if (setting.type === 'boolean' && isAgentHostSettingKey(key)) hosts.push({ ...setting, kind: 'host', key });
   }
   return [...builtin, ...hosts];
 }

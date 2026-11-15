@@ -2,6 +2,7 @@ import { installedDataWriter } from '../runtime/native-data-writer.ts';
 import { ConfigManager, daemonConfigPathForHome, resolveGoodVibesDaemonHome, type ConfigKey, type HostBooleanSetting } from '@goodvibes-jev/engine/platform/platform/config';
 import { NOTIFICATIONS_METADATA_ONLY_KEY, NOTIFICATIONS_METADATA_ONLY_SETTING } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { MEMORY_SHOW_PROVENANCE_SETTING } from '../core/memory-provenance.ts';
+import { TUI_EXTENSION_SETTINGS } from './tui-extension-settings.ts';
 
 export const TUI_NOTIFICATIONS_METADATA_ONLY_KEY = NOTIFICATIONS_METADATA_ONLY_KEY;
 
@@ -21,7 +22,7 @@ export class TuiConfigManager extends ConfigManager {
     // The daemon reads the store under its own resolved home, which GOODVIBES_DAEMON_HOME can move;
     // a client left on the default path would save daemon-owned settings where the daemon never looks.
     const daemonTierPath = options.daemonTierPath ?? (options.homeDir ? daemonConfigPathForHome(resolveGoodVibesDaemonHome(options.homeDir)) : undefined);
-    super({ ...options, daemonTierPath, nativeDataWriter: options.nativeDataWriter ?? installedDataWriter, hostSettings: [...(options.hostSettings ?? []), NOTIFICATIONS_METADATA_ONLY_SETTING, TERMINAL_TURN_END_SETTING, MEMORY_SHOW_PROVENANCE_SETTING] });
+    super({ ...options, daemonTierPath, nativeDataWriter: options.nativeDataWriter ?? installedDataWriter, hostSettings: [...(options.hostSettings ?? []), NOTIFICATIONS_METADATA_ONLY_SETTING, TERMINAL_TURN_END_SETTING, MEMORY_SHOW_PROVENANCE_SETTING, ...TUI_EXTENSION_SETTINGS] });
   }
 }
 

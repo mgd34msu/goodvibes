@@ -75,7 +75,7 @@ describe('public instance-owned boolean host settings', () => {
     expect(Object.hasOwn(bare.getCategory('behavior'), 'hostPrivacyExample')).toBe(false);
   });
 
-  test.each(['display.showThinking', 'behavior.__proto__', '__proto__.host', 'behavior.constructor', 'behavior.prototype', 'behavior.nested.host', 'unknown.host', 'surfaces.hostExample'])('rejects invalid or colliding descriptor %s', (key) => {
+  test.each(['display.showThinking', 'behavior.__proto__', '__proto__.host', 'behavior.constructor', 'behavior.prototype', 'behavior.nested.host', 'surfaces.hostExample'])('rejects invalid or colliding descriptor %s', (key) => {
     expect(() => fixture([{ ...definition, key }])).toThrow();
   });
   test('rejects duplicate and malformed descriptors before loading', () => {

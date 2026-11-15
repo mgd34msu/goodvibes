@@ -15,7 +15,7 @@ export type { JudgmentFallbackSettings } from './schema-types-judgment.js';
 export type { PreparedConfigMutation, PreparedConfigMutationTransition, PreparedConfigMutationRequest,
   PreparedConfigMutationFacts, PreparedConfigMutationDestination, PreparedConfigMutationTransitionFacts,
   PreparedConfigMutationReceipt } from './prepared-mutation.js';
-export type { HostBooleanSetting, HostBooleanSettingHandle, HostBooleanSettingResolved } from './host-settings.js';
+export type { HostBooleanSetting, HostBooleanSettingHandle, HostBooleanSettingResolved, HostNumberSetting, HostSetting, HostSettingValue, HostStringSetting } from './host-settings.js';
 export type { DeepReadonly, ConfigKeyTier, ConfigKeySource, DaemonConfigPatch } from './manager.js';
 export type { ConfigChange, SetResult, WriteOrigin } from './manager.js';
 export { configKeyFacts, isProtectedConfigValue, isProjectRestrictedKey } from './config-key-facts.js';

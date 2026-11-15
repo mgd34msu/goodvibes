@@ -7,16 +7,17 @@ import type { ConfigSetOptions, ConfigUnsubscribe } from './manager.js';
 import type { ManagedSettingLock } from '../runtime/settings/control-plane-store.js';
 
 /**
- * A surface-owned scalar leaf under an existing config category. Registration
- * is per instance, never a change to the platform's shared schema/defaults. The host
+ * A surface-owned scalar leaf, under an existing config category or under a
+ * section of the surface's own (`statusline.command`). Registration is per
+ * instance, never a change to the platform's shared schema/defaults. The host
  * owner chooses the default and must choose a restrictive fallback for a
- * policy-sensitive setting; the platform cannot determine what either boolean means.
+ * policy-sensitive setting; the platform cannot determine what a value means.
  * Absent preferences, malformed stored values, and failed reloads resolve to it.
  *
  * set/setDynamic edit an existing explicit project leaf, otherwise the global
  * leaf. setProjectValue remains explicitly project-scoped. Bulk saves preserve
  * the destination's own host leaves rather than copying effective permissions
- * between tiers. Only literal booleans may be written through scalar setters.
+ * between tiers. Only a value of the declared type (and range) may be written.
  */
 export interface HostBooleanSetting {
   readonly key: string;
@@ -24,6 +25,28 @@ export interface HostBooleanSetting {
   readonly default: boolean;
   readonly description: string;
 }
+
+/** A surface-owned number leaf; `integer`, `min` and `max` bound what is accepted. */
+export interface HostNumberSetting {
+  readonly key: string;
+  readonly type: 'number';
+  readonly default: number;
+  readonly description: string;
+  readonly integer?: boolean;
+  readonly min?: number;
+  readonly max?: number;
+}
+
+/** A surface-owned string leaf; any string is accepted, the empty string included. */
+export interface HostStringSetting {
+  readonly key: string;
+  readonly type: 'string';
+  readonly default: string;
+  readonly description: string;
+}
+
+export type HostSetting = HostBooleanSetting | HostNumberSetting | HostStringSetting;
+export type HostSettingValue = HostSetting['default'];
 
 /** A validated boolean setting bound to the manager that registered its key. */
 export interface HostBooleanSettingHandle {
@@ -49,7 +72,56 @@ export interface HostBooleanSettingResolved {
   readonly managedLock: Readonly<Omit<ManagedSettingLock, 'key'>> | null;
 }
 
-export type HostSettingValues = Map<string, boolean>;
+export type HostSettingValues = Map<string, HostSettingValue>;
+
+function acceptsValue(definition: HostSetting, value: unknown): boolean {
+  switch (definition.type) {
+    case 'boolean': return typeof value === 'boolean';
+    case 'string': return typeof value === 'string';
+    case 'number':
+      return typeof value === 'number' && Number.isFinite(value)
+        && (!definition.integer || Number.isInteger(value))
+        && (definition.min === undefined || value >= definition.min)
+        && (definition.max === undefined || value <= definition.max);
+  }
+}
+
+function valueHint(definition: HostSetting): string {
+  if (definition.type === 'boolean') return 'literal boolean';
+  if (definition.type === 'string') return 'string';
+  const kind = definition.integer ? 'integer' : 'finite number';
+  if (definition.min !== undefined && definition.max !== undefined) return `${kind} in [${definition.min}, ${definition.max}]`;
+  if (definition.min !== undefined) return `${kind} of at least ${definition.min}`;
+  if (definition.max !== undefined) return `${kind} of at most ${definition.max}`;
+  return kind;
+}
+
+function freezeDefinition(definition: HostSetting): Readonly<HostSetting> {
+  const { key, description } = definition;
+  if (typeof description !== 'string' || !description.trim()) {
+    throw new ConfigError(`Host setting ${key} requires a description.`);
+  }
+  switch (definition.type) {
+    case 'boolean':
+      if (typeof definition.default === 'boolean') return Object.freeze({ key, type: 'boolean' as const, default: definition.default, description });
+      break;
+    case 'string':
+      if (typeof definition.default === 'string') return Object.freeze({ key, type: 'string' as const, default: definition.default, description });
+      break;
+    case 'number': {
+      const { integer, min, max } = definition;
+      const bounds = [min, max].every((bound) => bound === undefined || (typeof bound === 'number' && Number.isFinite(bound)))
+        && (min === undefined || max === undefined || min <= max) && (integer === undefined || typeof integer === 'boolean');
+      const frozen: HostNumberSetting = Object.freeze({
+        key, type: 'number' as const, default: definition.default, description,
+        ...(integer ? { integer } : {}), ...(min !== undefined ? { min } : {}), ...(max !== undefined ? { max } : {}),
+      });
+      if (bounds && acceptsValue(frozen, definition.default)) return frozen;
+      break;
+    }
+  }
+  throw new ConfigError(`Host setting ${key} requires a boolean, number or string descriptor whose default is an accepted value.`);
+}
 
 export function isHostSettingsObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -57,10 +129,10 @@ export function isHostSettingsObject(value: unknown): value is Record<string, un
 
 /** Internal, immutable per-manager registration. Live values stay in config. */
 export class HostSettings {
-  readonly definitions: readonly Readonly<HostBooleanSetting>[];
-  private readonly byKey: ReadonlyMap<string, Readonly<HostBooleanSetting>>;
+  readonly definitions: readonly Readonly<HostSetting>[];
+  private readonly byKey: ReadonlyMap<string, Readonly<HostSetting>>;
 
-  constructor(definitions: readonly HostBooleanSetting[] = []) {
+  constructor(definitions: readonly HostSetting[] = []) {
     const keys = new Set<string>();
     this.definitions = Object.freeze(definitions.map((definition) => {
       const key = definition.key;
@@ -68,21 +140,20 @@ export class HostSettings {
       const root = parts[0];
       const leaf = parts[1];
       const unsafe = new Set(['__proto__', 'prototype', 'constructor']);
+      // A root the platform does not define is the surface's own section; a
+      // platform root must be an object category.
       if (parts.length !== 2 || parts.some((part) => !/^[A-Za-z][A-Za-z0-9_]*$/.test(part) || unsafe.has(part))
-        || !root || !leaf || !Object.hasOwn(DEFAULT_CONFIG, root)
-        || !isHostSettingsObject((DEFAULT_CONFIG as unknown as Record<string, unknown>)[root])) {
-        throw new ConfigError('A host setting must be a new scalar leaf under an existing config object category.');
+        || !root || !leaf || (Object.hasOwn(DEFAULT_CONFIG, root)
+        && !isHostSettingsObject((DEFAULT_CONFIG as unknown as Record<string, unknown>)[root]))) {
+        throw new ConfigError('A host setting must be a new scalar leaf under a config object category or a section of its own.');
       }
       if (keys.has(key) || CONFIG_SCHEMA.some((entry) => entry.key === key)
         || readDotPath(DEFAULT_CONFIG, key).present || configKeyScope(key) !== 'client') {
         throw new ConfigError(`Host setting ${key} collides with a registered or non-client config path.`);
       }
-      if (definition.type !== 'boolean' || typeof definition.default !== 'boolean'
-        || typeof definition.description !== 'string' || !definition.description.trim()) {
-        throw new ConfigError(`Host setting ${key} requires a boolean descriptor, default, and description.`);
-      }
+      const frozen = freezeDefinition(definition);
       keys.add(key);
-      return Object.freeze({ key, type: 'boolean' as const, default: definition.default, description: definition.description });
+      return frozen;
     }));
     this.byKey = new Map(this.definitions.map((definition) => [definition.key, definition]));
   }
@@ -91,11 +162,17 @@ export class HostSettings {
   has(key: string): boolean { return this.byKey.has(key); }
   keys(): IterableIterator<string> { return this.byKey.keys(); }
 
+  /** True when `value` is of the registered key's type and within its range. */
+  accepts(key: string, value: unknown): boolean {
+    const definition = this.byKey.get(key);
+    return definition !== undefined && acceptsValue(definition, value);
+  }
+
   schema(key: string): Omit<ConfigSetting, 'key'> | undefined {
     const definition = this.byKey.get(key);
     return definition ? {
       type: definition.type, default: definition.default, description: definition.description,
-      validate: (value: unknown) => typeof value === 'boolean', validationHint: 'literal boolean',
+      validate: (value: unknown) => acceptsValue(definition, value), validationHint: valueHint(definition),
     } : undefined;
   }
 
@@ -106,7 +183,7 @@ export class HostSettings {
   snapshot(config: GoodVibesConfig): HostSettingValues {
     return new Map(this.definitions.map((definition) => {
       const value = readDotPath(config, definition.key).value;
-      return [definition.key, typeof value === 'boolean' ? value : definition.default];
+      return [definition.key, acceptsValue(definition, value) ? value as HostSettingValue : definition.default];
     }));
   }
 
@@ -127,8 +204,9 @@ export class HostSettings {
         malformed.push(definition.key);
       } else if (Object.hasOwn(category, leaf)) {
         const value = category[leaf];
-        values.set(definition.key, typeof value === 'boolean' ? value : definition.default);
-        if (typeof value !== 'boolean') malformed.push(definition.key);
+        const accepted = acceptsValue(definition, value);
+        values.set(definition.key, accepted ? value as HostSettingValue : definition.default);
+        if (!accepted) malformed.push(definition.key);
       }
     }
     return malformed;

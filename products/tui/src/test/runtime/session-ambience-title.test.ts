@@ -7,7 +7,7 @@ import { makeTestSurface } from '../helpers/session-surface.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 import { rmSync } from 'node:fs';
 
-function fixture(raw: object = { session: { autoTitle: true } }) {
+function fixture(raw: { session?: { autoTitle?: boolean } } = { session: { autoTitle: true } }) {
   const listeners = new Map<string, Set<(event: unknown) => void>>();
   const turns = { on(type: string, handler: (event: unknown) => void) {
     const handlers = listeners.get(type) ?? new Set(); handlers.add(handler); listeners.set(type, handlers);
@@ -18,7 +18,7 @@ function fixture(raw: object = { session: { autoTitle: true } }) {
   let release!: (value: string) => void;
   const messages: string[] = [];
   const deps = {
-    configManager: { getRaw: () => raw, get: () => false },
+    configManager: { get: (key: string) => key === 'session.autoTitle' ? raw.session?.autoTitle === true : false },
     events: { turns }, conversation,
     toolLLM: { chat: () => { calls++; return new Promise<string>(resolve => { release = resolve; }); } },
     voiceService: {}, orchestrator: { runTurn: async () => undefined, setCoreServices: () => {} }, providerRegistry: {}, workingDir: '.',

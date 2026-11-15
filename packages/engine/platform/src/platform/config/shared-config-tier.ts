@@ -15,11 +15,11 @@
  */
 
 import { existsSync, readFileSync } from 'node:fs';
-import { writeJsonFileAtomic as writeJsonFileAtomicUnacknowledged } from '../utils/atomic-json-store.js';
-import { acknowledgeConfigFileWrite } from './config-file-watcher.js';
+import { writeJsonFileAtomic } from '../utils/atomic-json-store.js';
+import { ProcessLockUnavailableError, withProcessLockSync } from '../utils/process-lock.js';
+import { logger } from '../utils/logger.js';
 import type { ConfigKey } from './schema.js';
 import { raiseSettingsReaderFloor } from './settings-reader-floor.js';
-import { withSyncFileLock } from './sync-file-lock.js';
 
 /**
  * The keys that ride the shared, surface-root-independent tier. Currently the
@@ -40,10 +40,25 @@ export function isSharedConfigKey(key: string): key is ConfigKey {
   return SHARED_CONFIG_KEY_SET.has(key);
 }
 
-/** A write by this process is not an outside change: tell any watcher it already holds it. */
-function writeJsonFileAtomic(path: string, value: unknown): void {
-  writeJsonFileAtomicUnacknowledged(path, value);
-  acknowledgeConfigFileWrite(path);
+/** How long a settings write waits for another process's write to the same file. */
+const SETTINGS_LOCK_WAIT_MS = 1_000;
+
+/**
+ * Hold the one lock every writer of a settings file takes around its read and
+ * rename, so a key another process saved in between is never dropped. The lock
+ * is released by the kernel when its holder exits, so a crash leaves nothing
+ * held. A file whose directory cannot hold the lock (a filesystem without byte
+ * locks) is written unlocked with a warning: the owner's change is the intent.
+ * Throws ProcessLockBusyError when another process holds it past the wait.
+ */
+export function withSettingsFileLock<T>(path: string, operation: () => T): T {
+  try {
+    return withProcessLockSync(`${path}.writer.sqlite`, operation, { waitMs: SETTINGS_LOCK_WAIT_MS });
+  } catch (error) {
+    if (!(error instanceof ProcessLockUnavailableError)) throw error;
+    logger.warn('Settings file lock is unavailable here; saving without it', { path, reason: error.message });
+    return operation();
+  }
 }
 
 /**
@@ -124,7 +139,7 @@ export function writeTierDotPath(root: Record<string, unknown>, key: string, val
 export function persistSharedKey(path: string, key: string, value: unknown): void {
   // Every surface writes this file: the read and the rename must be one step, or
   // a key another process saved in between is dropped.
-  withSyncFileLock(path, () => {
+  withSettingsFileLock(path, () => {
     const existing = readSharedTierFile(path);
     writeDotPath(existing, key, value);
     writeJsonFileAtomic(path, existing);
@@ -151,7 +166,7 @@ export function persistSharedKey(path: string, key: string, value: unknown): voi
  */
 export function raiseReaderFloorInFile(path: string, minReaderVersion: string, setBy: string): boolean {
   if (!existsSync(path)) return false;
-  return withSyncFileLock(path, () => {
+  return withSettingsFileLock(path, () => {
     const existing = readSharedTierFile(path);
     const { raised } = raiseSettingsReaderFloor(existing, minReaderVersion, setBy);
     if (!raised) return false;
@@ -167,7 +182,7 @@ export function raiseReaderFloorInFile(path: string, minReaderVersion: string, s
  */
 export function removeSharedKey(path: string, key: string): void {
   if (!existsSync(path)) return;
-  withSyncFileLock(path, () => removeSharedKeyLocked(path, key));
+  withSettingsFileLock(path, () => removeSharedKeyLocked(path, key));
 }
 
 function removeSharedKeyLocked(path: string, key: string): void {

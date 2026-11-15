@@ -1,16 +1,16 @@
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { postalConfigKey, POSTAL_PARTS, PostalAddressHeldError, type ProfilePostalReader, type PostalKind, type PostalReadOptions, type PreparedPostalAddress, type PostalParts } from './postal-address.js';
-import { DurablePolicyEpochOwner, OwnerLockBusyError } from './durable-policy-epoch.js';
-import { observeImportFile } from './prepared-import.js';
-import { PreparedSettingsTarget } from './prepared-target.js';
+import { DurablePolicyEpochOwner } from './durable-policy-epoch.js';
+import { PreparedSettingsTarget, settingsFileIdentity } from './prepared-target.js';
+import { createHash } from 'node:crypto';
 import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
-import { isDeepStrictEqual, types as nativeTypes } from 'node:util';
+import { isDeepStrictEqual } from 'node:util';
 import { VERSION } from '../version.js';
 import { JudgmentAuthorityRetiredError } from '@goodvibes-jev/engine/errors';
 import { decisionOrClassic, isClassicOperation, withDecisionModelPolicy } from '../runtime/decision-policy.js';
-import { writeJsonFileAtomic as writeJsonFileAtomicUnacknowledged, type AtomicJsonWriteOptions } from '../utils/atomic-json-store.js';
-import { acknowledgeConfigFileWrite } from './config-file-watcher.js';
+import { writeJsonFileAtomic } from '../utils/atomic-json-store.js';
+import { ProcessLockBusyError } from '../utils/process-lock.js';
 import type { GoodVibesConfig, ConfigKey, ConfigValue, ConfigSetting } from './schema.js';
 import { CONFIG_SCHEMA } from './schema.js';
 import { ConfigError } from '../types/errors.js';
@@ -27,11 +27,9 @@ import { runDaemonTierMigrationPasses, runLoadMigrationPasses } from './manager-
 import {
   SHARED_CONFIG_KEYS,
   isSharedConfigKey,
-  persistSharedKey,
   readDotPath,
   readSharedTierFile,
-  removeSharedKey,
-  writeTierDotPath,
+  withSettingsFileLock,
 } from './shared-config-tier.js';
 import {
   deleteRawDotPath,
@@ -41,7 +39,7 @@ import {
 import { watchConfigFiles, reloadAndNotifyChanges, type ConfigFileWatchHandle } from './config-file-watcher.js';
 import { isDaemonOwnedConfigKey, listDaemonOwnedConfigPaths, type DaemonOwnedConfigPath } from './config-ownership.js';
 import { resolveOrCreateDaemonPath } from './daemon-tier-paths.js';
-import { clearDaemonTierForReset, daemonConfigPath, overlayDaemonTierFrom, persistDaemonKey, readDaemonTierFile } from './daemon-config-tier.js';
+import { daemonConfigPath, overlayDaemonTierFrom, readDaemonTierFile } from './daemon-config-tier.js';
 import { describeKeySource, type ConfigKeySource } from './manager-key-source.js';
 import { DEFAULT_CONFIG_SNAPSHOT, cloneDefaultConfig, coerceSchemaValue, ensureSharedConfig, requireAbsoluteOwnedPath, sanitizeConfigShape } from './manager-bootstrap.js';
 import { resolveWithProfileFallback, type ConfigProfileFallbackReader } from './profile-fallback.js';
@@ -49,10 +47,9 @@ import { ingestManagerSettings, toConfigLoadFailure, UnknownSettingFormsQueue, t
 import { persistCategoryKeyRemoval, persistCategoryPatch, type CategoryIoDeps } from './manager-category-io.js';
 import { isSecretReferenceValue } from './secret-bearing-config-keys.js';
 import { configKeyFacts } from './config-key-facts.js';
-import { withSyncFileLock } from './sync-file-lock.js';
 import { refusal as buildRefusal, type Refusal } from '@goodvibes-jev/engine/errors';
 import type { ToolDecision } from '../types/tools.js';
-import { HostSettings, type HostBooleanSetting, type HostBooleanSettingHandle, type HostSettingValues } from './host-settings.js';
+import { HostSettings, type HostBooleanSettingHandle, type HostSetting, type HostSettingValue, type HostSettingValues } from './host-settings.js';
 import { HostSettingsReadError, hostSettingsFileExists, readHostSettingValues, readHostSettingsFile, recoverHostSettingsWriteFailure } from './manager-host-settings.js';
 import { ConfigRuntimeState, captureRuntimeValue } from './manager-runtime-state.js';
 import { announceIngestionNotice } from './settings-ingestion.js';
@@ -71,40 +68,20 @@ export type { PreparedConfigMutation, PreparedConfigMutationTransition, Prepared
 // Keep schema identity stable for prepared settings and catalog ownership checks.
 const visibleConfigSchema = CONFIG_SCHEMA.filter(setting => !setting.deprecated);
 
-// These are the existing module-acquisition primitives, not a callable authenticity test.
-const scalarGlobal = globalThis;
-const scalarObject = Object;
-const scalarReflect = Reflect;
-const scalarOwnDescriptor = Object.getOwnPropertyDescriptor;
-const scalarPrototype = Object.getPrototypeOf;
-const scalarOwnKeys = Reflect.ownKeys;
-const scalarHasOwn = Object.hasOwn;
-const scalarIs = Object.is;
-const scalarSafeInteger = Number.isSafeInteger;
-const scalarProxy = nativeTypes.isProxy;
-const scalarStringPrototype = String.prototype;
-const scalarSplit = String.prototype.split;
-const scalarSplitKey: typeof Symbol.split = Symbol.split;
-const scalarFunctionPrototype = Function.prototype;
-const scalarFunctionCall = Function.prototype.call;
-
 type SelectedScalar = string | number | boolean | null | undefined;
-type SelectedScalarSlots<T> = { readonly __proto__?: null; [index: number]: T | undefined };
 export interface ConfigScalarSelection { readonly key: string; readonly value: unknown; }
-/** False requests the caller's original per-key path; successful checks never survive a boundary. */
+/**
+ * Runs the caller's boundary check at entry and exit, confirming after each
+ * that the selected settings still hold the captured values. Throws
+ * JudgmentAuthorityRetiredError when a setting changed; returns true otherwise.
+ */
 export type ConfigSelectedScalarGuard = (assertBoundary: () => void) => boolean;
-let selectedScalarProducer: (receiver: unknown, selections: readonly ConfigScalarSelection[]) => ConfigSelectedScalarGuard | undefined;
 
 /** Native permission state has one owner and one revision across all mutations. */
 export interface PermissionConfigurationOwner {
   readMode(): Readonly<{ mode: GoodVibesConfig['permissions']['mode']; autoApprove: boolean }>;
   captureRevision(): () => boolean;
 }
-// These are source-declared public literals, captured before any owner input.
-const DURABLE_PUBLIC_DEFAULTS = structuredClone(DEFAULT_CONFIG_SNAPSHOT);
-const DURABLE_REPLAY_FIELDS = new Map(CONFIG_SCHEMA.map(setting => [setting.key,
-  { type: setting.type, enumValues: setting.enumValues ? [...setting.enumValues] : undefined }]));
-
 let permissionConfigurationOwner: (receiver: unknown, snapshotAccessor: unknown) => PermissionConfigurationOwner | undefined;
 
 /** Available only for the real manager and its original permission snapshot accessor. */
@@ -112,24 +89,30 @@ export function retainPermissionConfigurationOwner(receiver: unknown, snapshotAc
   return permissionConfigurationOwner(receiver, snapshotAccessor);
 }
 
-/** Native, local selected-data observation. Caller values are compared with the actual owner. */
+/**
+ * Capture a few scalar settings once. Every change, reload and save moves the
+ * configuration revision, so the guard compares one integer instead of the
+ * values. Works for any reader with `get` and `getConfigurationIncarnation`,
+ * including a wrapped manager; undefined when a value already differs.
+ */
 export function captureConfigSelectedScalars(receiver: unknown, selections: readonly ConfigScalarSelection[]): ConfigSelectedScalarGuard | undefined {
-  return selectedScalarProducer(receiver, selections);
-}
-function scalarData(owner: object, key: PropertyKey): PropertyDescriptor | undefined {
-  const descriptor = scalarOwnDescriptor(owner, key);
-  return descriptor && scalarHasOwn(descriptor, 'value') ? descriptor : undefined;
-}
-function scalarReflectionCurrent(): boolean {
-  return scalarData(scalarGlobal, 'Object')?.value === scalarObject
-    && scalarData(scalarGlobal, 'Reflect')?.value === scalarReflect
-    && scalarData(scalarObject, 'getOwnPropertyDescriptor')?.value === scalarOwnDescriptor
-    && scalarData(scalarObject, 'getPrototypeOf')?.value === scalarPrototype
-    && scalarData(scalarReflect, 'ownKeys')?.value === scalarOwnKeys
-    && scalarData(scalarObject, 'hasOwn')?.value === scalarHasOwn
-    && scalarData(scalarObject, 'is')?.value === scalarIs
-    && scalarData(nativeTypes, 'isProxy')?.value === scalarProxy
-    && scalarData(scalarStringPrototype, 'split')?.value === scalarSplit;
+  const reader = receiver as { readonly get?: unknown; readonly getConfigurationIncarnation?: unknown } | null;
+  if (reader === null || typeof reader !== 'object' || typeof reader.get !== 'function'
+    || typeof reader.getConfigurationIncarnation !== 'function' || !Array.isArray(selections) || selections.length === 0) return undefined;
+  const get = (reader.get as (key: string) => unknown).bind(reader);
+  const revisionOf = (reader.getConfigurationIncarnation as () => number).bind(reader);
+  const revision = revisionOf();
+  try {
+    if (!selections.every(({ key, value }) => scalarValue(value) && Object.is(get(key), value))) return undefined;
+  } catch { return undefined; }
+  // The caller's boundary runs at entry and exit; either may change settings.
+  return assertBoundary => {
+    assertBoundary();
+    if (revisionOf() !== revision) throw new JudgmentAuthorityRetiredError();
+    assertBoundary();
+    if (revisionOf() !== revision) throw new JudgmentAuthorityRetiredError();
+    return true;
+  };
 }
 function scalarValue(value: unknown): value is SelectedScalar {
   return value === null || value === undefined || typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean';
@@ -153,8 +136,8 @@ export type DeepReadonly<T> = {
 interface ConfigCliOverrides {
   /** Installation-admitted data publisher, supplied by the actual executable root. */
   readonly nativeDataWriter?: import('../runtime/native-reader-compatibility.js').NativeDataWriteOwner | undefined;
-  /** Per-instance surface-owned boolean leaves; their declared defaults must be restrictive. */
-  hostSettings?: readonly HostBooleanSetting[] | undefined;
+  /** Per-instance surface-owned scalar leaves; a policy-sensitive one declares a restrictive default. */
+  hostSettings?: readonly HostSetting[] | undefined;
   /** Read without filesystem effects; persistent mutators refuse, runtime inputs are allowed. */
   readOnly?: boolean | undefined;
   /** Withhold borrowed parse-error text from unreadable-settings diagnostics; private errors retain it. */
@@ -254,13 +237,26 @@ function ownerSettled(decision: ToolDecision | undefined): boolean {
     && (decision.decidedBy === 'owner' || decision.decidedBy === 'rule' || decision.decidedBy === 'mode');
 }
 
-/**
- * Every settings write this manager makes goes through here, so the file watcher
- * does not report the process's own write back as an outside edit.
- */
-function writeJsonFileAtomic(path: string, value: unknown, options?: AtomicJsonWriteOptions): void {
-  writeJsonFileAtomicUnacknowledged(path, value, options);
-  acknowledgeConfigFileWrite(path);
+/** One setting as a committed prepared change wrote it, read from the document it persisted. */
+export interface PreparedSettingWrite { readonly path: string; readonly key: string; readonly present: boolean; readonly value?: unknown }
+/** A prepared change's receipt with what it wrote; `written` is present on a committed change. */
+export type PreparedConfigMutationCommit = PreparedConfigMutationReceipt & { readonly written?: readonly PreparedSettingWrite[] };
+/** What a committed prepared change wrote, so a caller reports it without reading the files again. */
+export function preparedReceiptWrites(receipt: object): readonly PreparedSettingWrite[] {
+  return (receipt as { readonly written?: readonly PreparedSettingWrite[] }).written ?? [];
+}
+
+/** Digest of the shipped defaults, taken once: part of the durable revision, since a new build may ship new defaults. */
+let defaultsDigest: string | undefined;
+function shippedDefaultsDigest(): string {
+  return defaultsDigest ??= createHash('sha256').update(JSON.stringify(DEFAULT_CONFIG_SNAPSHOT)).digest('hex');
+}
+
+/** Refused write of a daemon-owned setting from a process that does not own the daemon's file. */
+function daemonOwnedRefusal(key: string): ConfigError {
+  return new ConfigError(`${key} is a daemon setting, and only the daemon writes its settings file. `
+    + `Change it with \`goodvibes-daemon config set ${key} <value>\`, or with /config or the settings screen in a terminal app, `
+    + 'which send it to the daemon (or, with no daemon running, write it for the daemon to read when it starts).');
 }
 
 /** Callback invoked when a watched config key changes. */
@@ -282,15 +278,6 @@ export class ConfigManager {
     projectConfigPath: string | null;
     homeDirectory: string | null;
   }>;
-  readonly #workspaceSlots: readonly { readonly key: string; readonly slot: PropertyDescriptor }[];
-  static readonly #workspaceMethods = [
-    ['getWorkingDirectory', ConfigManager.prototype.getWorkingDirectory],
-    ['getControlPlaneConfigDir', ConfigManager.prototype.getControlPlaneConfigDir],
-    ['getProjectConfigPath', ConfigManager.prototype.getProjectConfigPath],
-    ['getHomeDirectory', ConfigManager.prototype.getHomeDirectory],
-    ['retainConfiguredWorkspace', ConfigManager.prototype.retainConfiguredWorkspace],
-  ] as const;
-  readonly #selectedScalarWorkspace: { readonly workingDirectory: string | null; readonly configDir: string; readonly projectConfigPath: string | null; readonly homeDirectory: string | null };
   static {
     const permissionSnapshot = ConfigManager.prototype.getAutonomousPermissionSnapshot;
     permissionConfigurationOwner = (receiver, accessor) => {
@@ -299,127 +286,10 @@ export class ConfigManager {
       return Object.freeze({
         readMode: () => ({ mode: receiver.#config.permissions.mode, autoApprove: receiver.#config.behavior.autoApprove }),
         captureRevision: () => {
-          const revision = receiver.#permissionIncarnation, config = receiver.#config;
-          const directory = scalarData(receiver, 'workingDirectory')?.value;
-          return () => receiver.#permissionIncarnation === revision && receiver.#config === config
-            && scalarData(receiver, 'workingDirectory')?.value === directory;
+          const revision = receiver.#permissionIncarnation;
+          return () => receiver.#permissionIncarnation === revision;
         },
       });
-    };
-    const get = ConfigManager.prototype.get;
-    const getAll = ConfigManager.prototype.getAll;
-    const revision = ConfigManager.prototype.getConfigurationIncarnation;
-    const method = (receiver: object, key: string, original: unknown): boolean => {
-      let owner: object | null = receiver;
-      for (let depth = 0; owner && depth < 64; depth++) {
-        if (scalarProxy(owner)) return false;
-        const slot = scalarOwnDescriptor(owner, key);
-        if (slot) return scalarHasOwn(slot, 'value') && slot.value === original;
-        owner = scalarPrototype(owner);
-      }
-      return false;
-    };
-    const getCallCurrent = (): boolean => {
-      if (scalarPrototype(get) !== scalarFunctionPrototype) return false;
-      const own = scalarOwnDescriptor(get, 'call');
-      return (!own || scalarHasOwn(own, 'value') && own.value === scalarFunctionCall)
-        && scalarData(scalarFunctionPrototype, 'call')?.value === scalarFunctionCall;
-    };
-    const separatorCurrent = (): boolean => {
-      let owner: object | null = scalarStringPrototype;
-      for (let depth = 0; owner && depth < 64; depth++) {
-        if (scalarProxy(owner)) return false;
-        const slot = scalarOwnDescriptor(owner, scalarSplitKey);
-        if (slot) return scalarHasOwn(slot, 'value') && slot.value === undefined;
-        owner = scalarPrototype(owner);
-      }
-      return owner === null;
-    };
-    selectedScalarProducer = (receiver, selections) => {
-      // No receiver-supplied slot, method, getter or callback precedes this brand check.
-      if (receiver === null || typeof receiver !== 'object' || !(#workspaceOwner in receiver)) return undefined;
-      const owner = receiver.#workspaceOwner;
-      const workspace = receiver.#selectedScalarWorkspace;
-      if (!workspace) return undefined;
-      const nativeMode = (): boolean => scalarReflectionCurrent() && getCallCurrent() && separatorCurrent()
-        && method(receiver, 'get', get) && method(receiver, 'getAll', getAll)
-        && method(receiver, 'getConfigurationIncarnation', revision)
-        && scalarData(receiver, 'profileFallback')?.value === null
-        && scalarData(receiver, 'workingDirectory')?.value === workspace.workingDirectory
-        && scalarData(receiver, 'configDir')?.value === workspace.configDir
-        && scalarData(receiver, 'projectConfigPath')?.value === workspace.projectConfigPath
-        && scalarData(receiver, 'homeDirectory')?.value === workspace.homeDirectory;
-      if (!nativeMode() || selections === null || typeof selections !== 'object' || scalarProxy(selections)) return undefined;
-      const length = scalarData(selections, 'length')?.value;
-      if (typeof length !== 'number' || !scalarSafeInteger(length) || length < 1) return undefined;
-      const keys = scalarOwnKeys(selections);
-      if (keys.length !== length + 1) return undefined;
-      const paths: SelectedScalarSlots<{ readonly parts: SelectedScalarSlots<string>; readonly count: number; readonly value: SelectedScalar }> = { __proto__: null };
-      for (let index = 0; index < length; index++) {
-        const value: unknown = scalarData(selections, index)?.value;
-        if (value === null || typeof value !== 'object' || scalarProxy(value)) return undefined;
-        const fields = scalarOwnKeys(value);
-        const key: unknown = scalarData(value, 'key')?.value;
-        const expected: unknown = scalarData(value, 'value')?.value;
-        if (fields.length !== 2 || typeof key !== 'string' || !scalarValue(expected)
-          || !scalarData(value, 'value')) return undefined;
-        const parts: SelectedScalarSlots<string> = { __proto__: null };
-        let part = '', count = 0;
-        for (let characterIndex = 0; characterIndex < key.length; characterIndex++) {
-          const character = key[characterIndex];
-          if (character === '.') { parts[count++] = part; part = ''; } else part += character;
-        }
-        parts[count++] = part;
-        paths[index] = { parts, count, value: expected };
-      }
-      const initialRevision = receiver.#permissionIncarnation;
-      const matches = (): boolean | undefined => {
-        if (receiver.#workspaceOwner !== owner || !nativeMode()) return undefined;
-        if (receiver.#permissionIncarnation !== initialRevision) return false;
-        for (let index = 0; index < length; index++) {
-          const entry = paths[index];
-          if (!entry) return undefined;
-          let value: unknown = receiver.#config;
-          for (let part = 0; part < entry.count; part++) {
-            if (value === null || typeof value !== 'object' || scalarProxy(value)) return undefined;
-            const key = entry.parts[part];
-            if (key === undefined) return undefined;
-            let owner: object | null = value, slot: PropertyDescriptor | undefined;
-            for (let depth = 0; owner && depth < 64; depth++) {
-              if (scalarProxy(owner)) return undefined;
-              slot = scalarOwnDescriptor(owner, key);
-              if (slot) break;
-              owner = scalarPrototype(owner);
-            }
-            if (!slot) {
-              if (owner !== null || part !== entry.count - 1) return undefined;
-              value = undefined;
-            } else {
-              if (!scalarHasOwn(slot, 'value')) return undefined;
-              value = slot.value;
-            }
-          }
-          if (!scalarValue(value)) return undefined;
-          if (!scalarIs(value, entry.value)) return false;
-        }
-        return true;
-      };
-      if (matches() !== true) return undefined;
-      return assertBoundary => {
-        // Unsupported mode is detected before any actual caller boundary is consumed.
-        if (!nativeMode()) return false;
-        if (typeof assertBoundary !== 'function' || scalarProxy(assertBoundary)) throw new JudgmentAuthorityRetiredError();
-        const boundary = (): void => {
-          const returned: unknown = assertBoundary();
-          if (returned !== undefined) throw new JudgmentAuthorityRetiredError();
-        };
-        boundary();
-        if (matches() !== true) throw new JudgmentAuthorityRetiredError();
-        boundary();
-        // The exit guard can itself change selected data or the native source owner.
-        if (matches() !== true) throw new JudgmentAuthorityRetiredError();
-        return true;
-      };
     };
   }
   private profilePostalReader: ProfilePostalReader | null = null;
@@ -454,7 +324,14 @@ export class ConfigManager {
   private readonly invalidationListeners = new Set<() => void>();
   #permissionIncarnation = 0;
   readonly #revisionSource = revisionSource('settings', () => this.#permissionIncarnation);
-  private durablePolicy: DurablePolicyEpochOwner | undefined;
+  /** The durable revision of the settings files this manager reads. */
+  private readonly durablePolicy: DurablePolicyEpochOwner;
+  /** This process wrote a settings file; the durable revision moves before it is next read. */
+  #durableDirty = false;
+  /** The durable revision has read the files since the last load. */
+  #durableObserved = false;
+  #durableCache: { readonly incarnation: number; readonly value: string } | undefined;
+  readonly #catalogDigests = new WeakMap<object, string>();
   private hydrating = true;
   private readonly incarnationListeners = new Set<() => void>();
   // Private identities contain no authority grant and cannot be copied or forged.
@@ -495,14 +372,8 @@ export class ConfigManager {
     this.projectConfigPath = this.workingDirectory
       ? resolveSurfaceDirectory(this.workingDirectory, surfaceRoot!, 'settings.json')
       : null;
-    this.#selectedScalarWorkspace = { workingDirectory, configDir: base, projectConfigPath: this.projectConfigPath, homeDirectory };
     this.#workspaceOwner = Object.freeze({ workingDirectory, configDir: base,
       projectConfigPath: this.projectConfigPath, homeDirectory });
-    this.#workspaceSlots = Object.keys(this.#workspaceOwner).map(key => {
-      const slot = Object.getOwnPropertyDescriptor(this, key);
-      if (!slot || !('value' in slot)) throw new JudgmentAuthorityRetiredError();
-      return { key, slot };
-    });
     this.#config = cloneDefaultConfig();
     this.hostSettings.apply(this.#config, this.hostSettings.defaults());
     this.runtimeState = new ConfigRuntimeState(structuredClone(this.#config));
@@ -534,7 +405,7 @@ export class ConfigManager {
     this.daemonTierOwner = !this.readOnly && overrides.ownsDaemonTier === true;
 
     this.durablePolicy = new DurablePolicyEpochOwner([this.configPath, this.projectConfigPath, this.sharedTierPath, this.daemonTierPath, join(this.configDir, 'settings-sync.json')]
-      .filter((path): path is string => path !== null), !this.readOnly, format => this.nativeDataWriter?.declare(format));
+      .filter((path): path is string => path !== null), !this.readOnly);
     try { this.load(); } finally { this.hydrating = false; }
 
     // Apply constructor overrides (CLI args, etc.) after load
@@ -565,35 +436,14 @@ export class ConfigManager {
     return this.workingDirectory;
   }
 
-  /** Used through the pinned internal bridge, never a receiver-supplied getter. */
+  /**
+   * The directories this manager was built for. They are fixed at construction,
+   * so `assertCurrent` has nothing to re-check; it stays for callers that hold
+   * the reference across awaits.
+   */
   retainConfiguredWorkspace(): ConfiguredWorkspaceReference {
-    // The private brand is checked before inspecting any receiver-owned slot.
     const owner = this.#workspaceOwner;
-    const assertCurrent = () => {
-      if (this.#workspaceOwner !== owner) throw new JudgmentAuthorityRetiredError();
-      for (const { key, slot } of this.#workspaceSlots) {
-        const current = Object.getOwnPropertyDescriptor(this, key);
-        if (!current || !('value' in current) || current.value !== slot.value
-          || current.writable !== slot.writable || current.enumerable !== slot.enumerable
-          || current.configurable !== slot.configurable) throw new JudgmentAuthorityRetiredError();
-      }
-      for (const [key, method] of ConfigManager.#workspaceMethods) {
-        let object: object | null = this;
-        let found = false;
-        while (object) {
-          if (nativeTypes.isProxy(object)) throw new JudgmentAuthorityRetiredError();
-          const slot = Object.getOwnPropertyDescriptor(object, key);
-          if (slot) {
-            if (!('value' in slot) || slot.value !== method) throw new JudgmentAuthorityRetiredError();
-            found = true; break;
-          }
-          object = Object.getPrototypeOf(object);
-        }
-        if (!found) throw new JudgmentAuthorityRetiredError();
-      }
-    };
-    assertCurrent();
-    return Object.freeze({ directory: owner.workingDirectory, configDirectory: owner.configDir, assertCurrent });
+    return Object.freeze({ directory: owner.workingDirectory, configDirectory: owner.configDir, assertCurrent: () => {} });
   }
 
   getHomeDirectory(): string | null {
@@ -619,7 +469,7 @@ export class ConfigManager {
     if (this.profileFallback === reader) return;
     this.profileFallback = reader;
     // Unset keys now read through a different fallback. Nothing is persisted,
-    // so the durable epoch stays; only the in-memory incarnation moves.
+    // so the durable revision stays; only the in-memory incarnation moves.
     this.#permissionIncarnation++;
     for (const listener of [...this.incarnationListeners]) {
       try { listener(); } catch { /* A lifetime observer cannot defeat revocation. */ }
@@ -707,9 +557,9 @@ export class ConfigManager {
 
   /** Validate registration and return an immutable, manager-bound boolean handle. */
   getHostBooleanSetting(key: string): HostBooleanSettingHandle {
-    if (!this.hostSettings.has(key)) throw new ConfigError(`Host boolean setting ${key} is not registered on this manager.`);
+    const definition = this.hostSettings.definitions.find(entry => entry.key === key);
+    if (definition?.type !== 'boolean') throw new ConfigError(`Host boolean setting ${key} is not registered on this manager.`);
     const registeredKey = key as ConfigKey;
-    const definition = this.hostSettings.definitions.find(entry => entry.key === key)!;
     const handle: HostBooleanSettingHandle = {
       key,
       get: () => this.get(registeredKey) as boolean,
@@ -740,49 +590,66 @@ export class ConfigManager {
   /** The configuration incarnation as a revision source: every setting change, reload from disk and save moves it. */
   get revisionSource(): RevisionSource { return this.#revisionSource; }
 
-  /** Actual persisted policy owners, safe to compare after restart. Never a permission grant. */
-  getDurableConfigurationIncarnation(version: 1 | 2 = 2): string {
-    if (!this.durablePolicy) throw new Error('Durable configuration policy ownership is unavailable');
-    return this.durablePolicy.current(this.#config, version === 1 ? undefined : this.durablePolicyReplay(), version);
+  /**
+   * The durable configuration revision: equal across restarts while every
+   * settings file holds the same bytes and the process runs with the same
+   * invocation values and build; different after any change, even one that was
+   * later undone. A grant saved under it compares this string; never a
+   * permission grant by itself. One string compare per check; the files are
+   * read only the first time after a load. `version` is accepted for callers
+   * that still pass it: a grant saved in the historical format compares
+   * unequal and is issued again.
+   */
+  getDurableConfigurationIncarnation(_version?: 1 | 2): string {
+    if (this.#durableDirty) { this.#durableDirty = false; this.durablePolicy.advance(); this.#durableObserved = true; this.#durableCache = undefined; }
+    if (!this.#durableObserved) { this.durablePolicy.observe(); this.#durableObserved = true; this.#durableCache = undefined; }
+    const cached = this.#durableCache;
+    if (cached?.incarnation === this.#permissionIncarnation) return cached.value;
+    const value = `${this.durablePolicy.current()}:${this.#invocationDigest()}`;
+    this.#durableCache = { incarnation: this.#permissionIncarnation, value };
+    return value;
   }
 
-  /** Establish durable owner history for a live new source, never for recovery. */
-  captureDurableConfigurationIncarnation(): string {
-    if (!this.durablePolicy) throw new Error('Durable configuration policy ownership is unavailable');
-    return this.durablePolicy.capture(this.#config, this.durablePolicyReplay());
-  }
+  /** The same revision, read when a new grant is issued. */
+  captureDurableConfigurationIncarnation(): string { return this.getDurableConfigurationIncarnation(); }
 
-  /** Exact public loading recipe, never the private effective configuration.
-   * Source epochs already bind every accepted persisted contribution. Unknown
-   * string/object runtime inputs cannot be proven after restart and stay cold. */
-  private durablePolicyReplay(): unknown | undefined {
-    if (!isDeepStrictEqual(DEFAULT_CONFIG_SNAPSHOT, DURABLE_PUBLIC_DEFAULTS) || !/^\d+\.\d+\.\d+(?:-[a-z0-9.-]+)?$/i.test(VERSION)) return undefined;
+  /** What the files do not hold: the build, the registered host defaults and the invocation values. */
+  #invocationDigest(): string {
     const overlays: Array<readonly [string, string, unknown]> = [];
     for (const [kind, values] of [['default', this.runtimeState.defaults], ['override', this.runtimeState.overrides]] as const) {
       for (const [key, value] of values) {
         if (kind === 'default' && this.runtimeState.sources.has(key)) continue;
         if (isDeepStrictEqual(readDotPath(this.runtimeState.nonRuntime, key).value, value)) continue;
-        const schema = DURABLE_REPLAY_FIELDS.get(key);
-        const safe = schema?.type === 'boolean' && typeof value === 'boolean'
-          || schema?.type === 'number' && typeof value === 'number' && Number.isFinite(value) && !Object.is(value, -0)
-          || schema?.type === 'enum' && typeof value === 'string' && schema.enumValues?.includes(value);
-        if (!safe) return undefined;
         overlays.push([kind, key, value]);
       }
     }
-    return { code: 1, platformVersion: VERSION, defaults: DURABLE_PUBLIC_DEFAULTS,
-      hostDefaults: [...this.hostSettings.defaults()].sort(([a], [b]) => a.localeCompare(b)),
-      overlays: overlays.sort(([a, keyA], [b, keyB]) => a.localeCompare(b) || keyA.localeCompare(keyB)) };
+    overlays.sort(([a, keyA], [b, keyB]) => a.localeCompare(b) || keyA.localeCompare(keyB));
+    const hostDefaults = [...this.hostSettings.defaults()].sort(([a], [b]) => a.localeCompare(b));
+    return createHash('sha256').update(JSON.stringify([VERSION, shippedDefaultsDigest(), hostDefaults, overlays])).digest('hex').slice(0, 32);
   }
 
-  /** Native catalog composition supplies only registered public descriptor data. */
+  /**
+   * A gateway catalog's revision: its registered descriptors bound to the
+   * durable configuration revision. The catalog hands over one frozen snapshot
+   * per registration state, so it is hashed once and later checks are lookups.
+   */
   getDurableGatewayPolicyRevision(snapshot: unknown): string {
-    if (!this.durablePolicy) throw new Error('Durable configuration policy ownership is unavailable');
-    return this.durablePolicy.snapshotRevision('gateway', snapshot);
+    const held = snapshot !== null && typeof snapshot === 'object' ? this.#catalogDigests.get(snapshot) : undefined;
+    const catalog = held ?? createHash('sha256').update(JSON.stringify(snapshot) ?? '').digest('hex').slice(0, 32);
+    if (held === undefined && snapshot !== null && typeof snapshot === 'object') this.#catalogDigests.set(snapshot, catalog);
+    return `${catalog}:${this.getDurableConfigurationIncarnation()}`;
   }
 
-  /** Actual host policy owners call this synchronously before runtime policy effects. */
-  invalidateExternalPolicy(): void { this.invalidateLifetimes(); }
+  /**
+   * A policy outside the settings files (the gateway catalog) is about to
+   * change: move the durable revision now, so a grant saved under the old
+   * policy is refused after a restart even if the policy changes back.
+   */
+  invalidateExternalPolicy(): void {
+    this.invalidateLifetimes();
+    this.durablePolicy.advance();
+    this.#durableDirty = false; this.#durableObserved = true; this.#durableCache = undefined;
+  }
 
   /** Observe every revision without changing existing setting/invalidation subscriptions. */
   onDidChangeIncarnation(listener: () => void): () => void {
@@ -791,43 +658,18 @@ export class ConfigManager {
   }
 
   private advanceConfigurationIncarnation(): void {
-    let durableFailure: unknown;
-    let durableFailed = false;
-    try { if (!this.hydrating) this.durablePolicy?.advance(); }
-    catch (error) {
-      // Another live process briefly holding the epoch lock refused this change
-      // before anything moved: no permission source or host setting is touched.
-      if (error instanceof OwnerLockBusyError) throw error;
-      durableFailed = true; durableFailure = error;
-    }
     this.#permissionIncarnation++;
     for (const listener of [...this.incarnationListeners]) {
       try { listener(); } catch { /* A lifetime observer cannot defeat revocation. */ }
-    }
-    if (durableFailed) {
-      // A failed durable intent cannot leave an in-memory permission source
-      // live, or bypass the host settings' existing restrictive projection.
-      // No requested config value or persistent write has been applied.
-      try { this.applyHostValues(this.hostSettings.defaults(), this.hostSettings.snapshot(this.#config), true, new Set(this.hostSettings.keys())); }
-      catch { /* Preserve the durable failure even if a subscriber throws. */ }
-      throw durableFailure;
     }
   }
 
   private invalidateLifetimes(): void {
     // Publish before observers run, even if a mutation subsequently restores
     // the same value. Outstanding admission cannot survive an A -> B -> A turn.
-    let refused = false;
-    try { this.advanceConfigurationIncarnation(); }
-    catch (error) {
-      // Refused by a briefly busy epoch lock before anything changed: nothing to revoke.
-      refused = error instanceof OwnerLockBusyError;
-      throw error;
-    }
-    finally {
-      if (!refused) for (const listener of [...this.invalidationListeners]) {
-        try { listener(); } catch { /* One subscriber must not defeat revocation. */ }
-      }
+    this.advanceConfigurationIncarnation();
+    for (const listener of [...this.invalidationListeners]) {
+      try { listener(); } catch { /* One subscriber must not defeat revocation. */ }
     }
   }
 
@@ -851,7 +693,6 @@ export class ConfigManager {
       : this.hostSettings.has(request.key) ? schema.default : readDotPath(DEFAULT_CONFIG_SNAPSHOT, request.key).value;
     const value = normalizePreparedValue(request.key, schema, requested);
     const destinations = this.preparedDestinations(request.operation, request.key);
-    for (const destination of destinations) readHostSettingsFile(destination.path);
     const handle = Object.freeze({}) as PreparedConfigMutation;
     const record: PreparedMutationRecord = {
       facts: freezePreparedData({ operation: request.operation, key: request.key, value, destinations, incarnation }),
@@ -923,15 +764,13 @@ export class ConfigManager {
     this.movePrepared(record, 'beginning');
     try {
       this.assertPreparedCurrent(record, record.facts.incarnation);
-      this.invalidateLifetimes();
-      this.assertPreparedCurrent(record, record.facts.incarnation + 1);
       for (const current of record.steps ? record.steps.map(step => this.preparedRecord(step)) : [record]) {
         const { schema } = this.preparedSchema(current.facts.key);
         const next = normalizePreparedValue(current.facts.key, schema, current.facts.value);
         if (JSON.stringify(next) !== current.normalizedJson) throw new ConfigError('Prepared value changed.');
       }
-      this.assertPreparedCurrent(record, record.facts.incarnation + 1);
-      for (const destination of record.facts.destinations) readHostSettingsFile(destination.path);
+      this.invalidateLifetimes();
+      // Invalidation listeners run caller code; nothing they did may have moved the owner.
       this.assertPreparedCurrent(record, record.facts.incarnation + 1);
       const transition = Object.freeze({}) as PreparedConfigMutationTransition;
       this.movePrepared(record, 'begun'); record.transition = transition;
@@ -991,7 +830,7 @@ export class ConfigManager {
       if (child?.phase !== 'spent' || child.completion?.receipt.status !== 'committed'
         || child.completion.incarnation !== completion.incarnation) throw new ConfigError('Prepared plan completion is stale.');
     }
-    for (const store of completion.stores) if (observeImportFile(store.path).stamp !== store.stamp) {
+    for (const store of completion.stores) if (settingsFileIdentity(store.path) !== store.stamp) {
       throw new ConfigError('Prepared mutation completion store changed.');
     }
   }
@@ -1002,7 +841,7 @@ export class ConfigManager {
       record.completion = { receipt, incarnation: this.#permissionIncarnation, runtimeJson: JSON.stringify(this.#config),
         stores: [...new Set([this.configPath, this.projectConfigPath, this.sharedTierPath, this.daemonTierPath,
           ...record.facts.destinations.map(destination => destination.path)].filter((path): path is string => path !== null))]
-          .map(path => ({ path, stamp: observeImportFile(path).stamp })) };
+          .map(path => ({ path, stamp: settingsFileIdentity(path) })) };
     } catch { /* A receipt remains honest when resulting owner currentness cannot be retained. */ }
   }
 
@@ -1024,6 +863,7 @@ export class ConfigManager {
       // finish calls cannot repeat a step; unrelated mutation stops the tail.
       this.movePrepared(record, 'committing');
       const completedPaths: string[] = [];
+      const written: PreparedSettingWrite[] = [];
       for (const step of record.steps) {
         const child = this.preparedRecord(step);
         let receipt: PreparedConfigMutationReceipt;
@@ -1040,29 +880,19 @@ export class ConfigManager {
             ...(child.facts.destinations[0] ? { uncertainPath: child.facts.destinations[0].path } : {}) });
         }
         completedPaths.push(...receipt.completedPaths);
+        written.push(...preparedReceiptWrites(receipt));
         if (receipt.status !== 'committed') { this.spendPrepared(record); return freezePreparedData({ ...receipt,
-          status: completedPaths.length ? 'partial' : 'unknown', completedPaths }); }
+          status: completedPaths.length ? 'partial' : 'unknown', completedPaths, written }); }
       }
       this.spendPrepared(record);
-      const receipt: PreparedConfigMutationReceipt = freezePreparedData({ status: 'committed', completedPaths });
+      const receipt: PreparedConfigMutationCommit = freezePreparedData({ status: 'committed', completedPaths, written });
       this.capturePreparedCompletion(record, receipt);
       return receipt;
     }
     // A finish re-entered from its own beforeEffect callback must not publish twice.
     this.requirePreparedMove(record, 'committing');
-    let stores: Map<string, Record<string, unknown>>;
-    try {
-      this.assertPreparedMutationTransition(handle, transition);
-      stores = new Map(record.facts.destinations.map(destination => [destination.path, readHostSettingsFile(destination.path)]));
-      // A host mutation also preserves the current effective project/global
-      // resolution, without running ingestion announcements or recovery hooks.
-      if (this.hostSettings.has(record.facts.key)) {
-        for (const path of [this.configPath, this.projectConfigPath]) {
-          if (path && !stores.has(path)) stores.set(path, readHostSettingsFile(path));
-        }
-      }
-      this.assertPreparedMutationTransition(handle, transition);
-    } catch (error) { this.spendPrepared(record); throw error; }
+    try { this.assertPreparedMutationTransition(handle, transition); }
+    catch (error) { this.spendPrepared(record); throw error; }
     this.movePrepared(record, 'committing');
     const { key, value, destinations } = record.facts;
     const previousValue = this.#resolvePath(key).parent[this.#resolvePath(key).field];
@@ -1075,26 +905,23 @@ export class ConfigManager {
     staged.retire(key);
     staged.mark(key, record.facts.operation === 'set' ? destinations[0]!.tier : undefined);
     const effective = staged.compose();
+    // Each destination is read once, under its lock, right before it is written.
+    const stores = new Map<string, Record<string, unknown>>();
     const completedPaths: string[] = [];
+    const written: PreparedSettingWrite[] = [];
     let uncertainPath: string | undefined;
     for (const destination of destinations) {
-      const raw = stores.get(destination.path)!;
-      const candidate = structuredClone(raw);
-      const removed = destination.operation === 'remove' ? deleteRawDotPath(candidate, key) : false;
-      if (destination.operation === 'set') writeRawDotPath(candidate, key, structuredClone(value));
-      // Legacy local reset always rewrites global; tier reset skips absent keys.
-      if (destination.operation === 'remove' && !removed && destination.tier !== 'global') {
-        if (destination.tier === 'daemon') this.daemonKeysPresent.delete(key);
-        if (destination.tier === 'shared') this.sharedKeysPresent.delete(key);
-        continue;
-      }
+      let skipped = false, read = false;
       try {
-        writeJsonFileAtomic(destination.path, candidate, { cleanupStaleTemps: false, assertCurrent: () => {
+        const raw = this.#updateSettingsFile(destination.path, candidate => {
+          read = true;
           beforeEffect?.(); this.assertPreparedMutationTransition(handle, transition);
-        } });
-        stores.set(destination.path, candidate);
-        completedPaths.push(destination.path);
-        record.targets?.find(target => target.path === destination.path)?.acceptPublication(key, destination.operation === 'set', value);
+          const removed = destination.operation === 'remove' ? deleteRawDotPath(candidate, key) : false;
+          if (destination.operation === 'set') writeRawDotPath(candidate, key, structuredClone(value));
+          // Legacy local reset always rewrites global; tier reset skips absent keys.
+          else if (!removed && destination.tier !== 'global') { skipped = true; return false; }
+        }, readHostSettingsFile);
+        stores.set(destination.path, raw);
         if (destination.tier === 'daemon') {
           if (destination.operation === 'set') this.daemonKeysPresent.add(key);
           else this.daemonKeysPresent.delete(key);
@@ -1103,26 +930,49 @@ export class ConfigManager {
           if (destination.operation === 'set') this.sharedKeysPresent.add(key);
           else this.sharedKeysPresent.delete(key);
         }
-      } catch { uncertainPath = destination.path; break; }
+        if (skipped) continue;
+        completedPaths.push(destination.path);
+        const found = readDotPath(raw, key);
+        written.push(Object.freeze({ path: destination.path, key, present: found.present, ...(found.present ? { value: structuredClone(found.value) } : {}) }));
+        record.targets?.find(target => target.path === destination.path)?.acceptPublication(key, destination.operation === 'set', value);
+      } catch (error) {
+        // A destination that could not be read was not written: with nothing written yet, that is a refusal.
+        if (!read && completedPaths.length === 0) { this.spendPrepared(record); throw error; }
+        uncertainPath = destination.path; break;
+      }
     }
     // Record the actual effect BEFORE any user callback. A later subscriber
     // failure, cancellation or supersession cannot rewrite this receipt.
-    const receipt: PreparedConfigMutationReceipt = freezePreparedData({
+    const receipt: PreparedConfigMutationCommit = freezePreparedData({
       status: uncertainPath === undefined ? 'committed' : completedPaths.length > 0 ? 'partial' : 'unknown',
-      completedPaths, ...(uncertainPath === undefined ? {} : { uncertainPath }),
+      completedPaths, ...(uncertainPath === undefined ? {} : { uncertainPath }), written,
     });
     this.spendPrepared(record);
     if (receipt.status === 'committed' || completedPaths.length > 0) {
       if (previousHost) {
-        const values = this.hostSettings.defaults();
-        this.hostSettings.overlay(values, stores.get(this.configPath)!);
-        if (this.projectConfigPath) this.hostSettings.overlay(values, stores.get(this.projectConfigPath)!);
-        this.hostSettings.apply(staged.nonRuntime, values);
-        const hostDefaultOrigins = this.updateHostSources(staged, stores);
-        this.publishState(staged, staged.compose());
-        this.capturePreparedCompletion(record, receipt);
-        // No callback may escape after persistence, including logging failures.
-        try { this.applyHostValues(values, previousHost, true, hostDefaultOrigins); } catch { /* Receipt remains truthful. */ }
+        // A host mutation also preserves the current effective project/global
+        // resolution, without running ingestion announcements or recovery hooks.
+        let hostStores: Map<string, Record<string, unknown>> | undefined = stores;
+        try {
+          for (const path of [this.configPath, this.projectConfigPath]) {
+            if (path && !hostStores.has(path)) hostStores.set(path, readHostSettingsFile(path));
+          }
+        } catch { hostStores = undefined; }
+        if (hostStores) {
+          const values = this.hostSettings.defaults();
+          this.hostSettings.overlay(values, hostStores.get(this.configPath)!);
+          if (this.projectConfigPath) this.hostSettings.overlay(values, hostStores.get(this.projectConfigPath)!);
+          this.hostSettings.apply(staged.nonRuntime, values);
+          const hostDefaultOrigins = this.updateHostSources(staged, hostStores);
+          this.publishState(staged, staged.compose());
+          this.capturePreparedCompletion(record, receipt);
+          // No callback may escape after persistence, including logging failures.
+          try { this.applyHostValues(values, previousHost, true, hostDefaultOrigins); } catch { /* Receipt remains truthful. */ }
+        } else {
+          // The file was written but cannot be read back: registered host settings fall back to their restrictive defaults.
+          this.publishState(staged, effective);
+          try { this.refreshHostSettings(previousHost, true); } catch { /* Receipt remains truthful. */ }
+        }
       } else {
         this.publishState(staged, effective);
         this.capturePreparedCompletion(record, receipt);
@@ -1228,7 +1078,7 @@ export class ConfigManager {
 
   /** Publish every part of a staged mutation before any observer can run. */
   private publishState(staged: ConfigRuntimeState, effective: GoodVibesConfig): void {
-    this.durablePolicy?.reconcile();
+    this.#settleDurable();
     this.runtimeState = staged;
     this.#config = effective;
     this.sharedKeysPresent.clear();
@@ -1237,6 +1087,44 @@ export class ConfigManager {
       if (tier === 'shared') this.sharedKeysPresent.add(key as ConfigKey);
       if (tier === 'daemon') this.daemonKeysPresent.add(key as DaemonOwnedConfigPath);
     }
+  }
+
+  /** Move the durable revision once for everything this process wrote since it last moved. */
+  #settleDurable(): void {
+    if (!this.#durableDirty) return;
+    this.#durableDirty = false; this.#durableObserved = true; this.#durableCache = undefined;
+    this.durablePolicy.advance();
+  }
+
+  /**
+   * The one writer of every settings file: under the file's lock, read it,
+   * apply `mutate` (return false to write nothing), write it atomically, and
+   * mark the durable revision to move. When the file held a change this
+   * manager had not loaded yet (an edit by hand or by another process since
+   * the watcher last looked), that change was merged on disk with this one;
+   * the write is then not acknowledged and the watcher is polled right after
+   * the caller publishes, so memory matches the file and the change's
+   * subscribers are told. Returns the document as written.
+   */
+  #updateSettingsFile(path: string, mutate: (raw: Record<string, unknown>) => boolean | void,
+    read: (path: string) => Record<string, unknown> = this.#readerFor(path)): Record<string, unknown> {
+    return withSettingsFileLock(path, () => {
+      const foreign = this._fileWatch?.changedSinceBaseline(path) ?? false;
+      const raw = read(path);
+      if (mutate(raw) === false) return raw;
+      writeJsonFileAtomic(path, raw);
+      this.#durableDirty = true;
+      if (!foreign) this._fileWatch?.acknowledge(path);
+      else queueMicrotask(() => this._fileWatch?.poll());
+      return raw;
+    });
+  }
+
+  /** The tier files refuse an unreadable file; the surface and project files set one aside and start fresh. */
+  #readerFor(path: string): (path: string) => Record<string, unknown> {
+    if (path === this.daemonTierPath) return readDaemonTierFile;
+    if (path === this.sharedTierPath) return readSharedTierFile;
+    return readRawSettingsFile;
   }
 
   private notifyPersistedChange(key: ConfigKey, previous: unknown): void {
@@ -1325,6 +1213,7 @@ export class ConfigManager {
       return;
     }
     value = this.validateSetValue(key, value, options, false) as ConfigValue<K>;
+    const useDaemonTier = this.daemonTierPath !== null && isDaemonOwnedConfigKey(key);
     this.refuseBehindStricterProjectValue(key, value);
 
     if (key === 'permissions.mode' && this.get('behavior.autoApprove')) {
@@ -1336,15 +1225,13 @@ export class ConfigManager {
     const staged = this.runtimeState.fork();
     const { parent, field } = this.#resolvePath(key, staged.nonRuntime);
     parent[field] = structuredClone(value);
-    const useDaemonTier = this.daemonTierPath !== null && isDaemonOwnedConfigKey(key);
     const useSharedTier = !useDaemonTier && this.sharedTierPath !== null && isSharedConfigKey(key);
     staged.retire(key);
     staged.mark(key, useDaemonTier ? 'daemon' : useSharedTier ? 'shared' : 'global');
     const effective = staged.compose();
     try {
-      if (useDaemonTier) persistDaemonKey(this.daemonTierPath!, key, parent[field]);
-      else if (useSharedTier) persistSharedKey(this.sharedTierPath!, key, parent[field]);
-      else this.persistGlobalKey(key, parent[field]);
+      const target = useDaemonTier ? this.daemonTierPath! : useSharedTier ? this.sharedTierPath! : this.configPath;
+      this.#updateSettingsFile(target, raw => { writeRawDotPath(raw, key, structuredClone(parent[field])); });
     } catch (error) {
       if (previousHost) recoverHostSettingsWriteFailure(error, () => this.refreshHostSettings(previousHost, true));
       throw error;
@@ -1476,22 +1363,22 @@ export class ConfigManager {
       }
     }
 
-    try { this.invalidateLifetimes(); }
-    catch (error) {
-      return error instanceof OwnerLockBusyError
-        ? refuse({ code: 'CONFIG_BUSY', reason: 'Another process is saving settings right now.', next: ['Try again in a moment.'], retryable: true, status: 409 })
-        : refuse({ code: 'CONFIG_WRITE_FAILED', reason: 'Could not record the settings change; the update was not applied.', next: ['Check that the settings directory is writable, then try again.'], status: 500 });
+    const daemonChange = admitted.find(change => change.tier === 'daemon');
+    if (daemonChange && !this.daemonTierOwner) {
+      return refuse({ code: 'CONFIG_DAEMON_OWNED', reason: daemonOwnedRefusal(daemonChange.key).message,
+        next: [`goodvibes-daemon config set ${daemonChange.key} <value>`], status: 409 });
     }
+    this.invalidateLifetimes();
 
     const previousHost = admitted.some(change => this.hostSettings.has(change.key)) ? this.hostSettings.snapshot(this.#config) : null;
     const previous = new Map(admitted.map(change => [change.key, readDotPath(this.#config, change.key).value] as const));
     const written: AdmittedChange[] = [];
-    let failedTier: SetTier | undefined;
+    let failedTier: SetTier | undefined, busy = false;
     for (const tier of SET_TIER_ORDER) {
       const group = admitted.filter(change => change.tier === tier);
       if (group.length === 0) continue;
       try { this.#writeSettingsFile(tier, group); }
-      catch { failedTier = tier; break; }
+      catch (error) { failedTier = tier; busy = error instanceof ProcessLockBusyError; break; }
       written.push(...group);
     }
 
@@ -1515,6 +1402,10 @@ export class ConfigManager {
     }
     if (failedTier !== undefined) {
       const unsaved = admitted.filter(change => !written.includes(change)).map(change => change.key);
+      if (busy) {
+        return refuse({ code: 'CONFIG_BUSY', reason: `Another process is saving the ${SET_TIER_LABEL[failedTier]} settings file right now; ${unsaved.join(', ')} ${unsaved.length === 1 ? 'was' : 'were'} not applied.`,
+          next: ['Send the unsaved settings again in a moment.'], retryable: true, status: 409 }, saved);
+      }
       return refuse({ code: 'CONFIG_WRITE_FAILED',
         reason: `Could not save the ${SET_TIER_LABEL[failedTier]} settings file; ${unsaved.join(', ')} ${unsaved.length === 1 ? 'was' : 'were'} not applied.`,
         next: ['Check that the settings directory is writable, then send the unsaved settings again.'], status: 500 }, saved);
@@ -1528,20 +1419,9 @@ export class ConfigManager {
 
   /** Write one settings file with every change of one update that lands in it. */
   #writeSettingsFile(tier: SetTier, changes: readonly AdmittedChange[]): void {
-    if (tier === 'daemon' || tier === 'shared') {
-      const path = tier === 'daemon' ? this.daemonTierPath! : this.sharedTierPath!;
-      // Every surface writes these files: the read and the rename are one step.
-      withSyncFileLock(path, () => {
-        const raw = tier === 'daemon' ? readDaemonTierFile(path) : readSharedTierFile(path);
-        for (const change of changes) writeTierDotPath(raw, change.key, structuredClone(change.value));
-        writeJsonFileAtomic(path, raw);
-      });
-      return;
-    }
-    const path = tier === 'project' ? this.projectConfigPath! : this.configPath;
-    const raw = readRawSettingsFile(path);
-    for (const change of changes) writeRawDotPath(raw, change.key, structuredClone(change.value));
-    writeJsonFileAtomic(path, raw);
+    const path = tier === 'daemon' ? this.daemonTierPath! : tier === 'shared' ? this.sharedTierPath!
+      : tier === 'project' ? this.projectConfigPath! : this.configPath;
+    this.#updateSettingsFile(path, raw => { for (const change of changes) writeRawDotPath(raw, change.key, structuredClone(change.value)); });
   }
 
   /**
@@ -1571,9 +1451,7 @@ export class ConfigManager {
     const effective = staged.compose();
     // Raw-file preparation is inside the same refusal boundary as the write.
     try {
-      const raw = readRawSettingsFile(this.projectConfigPath);
-      writeRawDotPath(raw, key, parent[field]);
-      writeJsonFileAtomic(this.projectConfigPath, raw);
+      this.#updateSettingsFile(this.projectConfigPath, raw => { writeRawDotPath(raw, key, structuredClone(parent[field])); });
     } catch (error) {
       if (previousHost) recoverHostSettingsWriteFailure(error, () => this.refreshHostSettings(previousHost, true));
       throw error;
@@ -1707,8 +1585,8 @@ export class ConfigManager {
     return visibleConfigSchema;
   }
 
-  /** Immutable descriptors for the boolean settings registered by this host. */
-  getHostSettingsSchema(): readonly HostBooleanSetting[] { return this.hostSettings.definitions; }
+  /** Immutable descriptors for the settings registered by this host. */
+  getHostSettingsSchema(): readonly HostSetting[] { return this.hostSettings.definitions; }
 
   /**
    * True when the project settings file explicitly holds a key whose ordinary
@@ -1731,18 +1609,13 @@ export class ConfigManager {
     catch { return false; }
   }
 
-  /**
-   * Persist a single key to the global settings file by read-merge-write, so
-   * hand edits and other keys survive and no default reaches disk unless set.
-   */
-  private persistGlobalKey(key: ConfigKey, value: unknown): void {
-    const raw = readRawSettingsFile(this.configPath);
-    writeRawDotPath(raw, key, value);
-    this.writeRawGlobal(raw);
-  }
-
-  private writeRawGlobal(raw: Record<string, unknown>): void {
-    writeJsonFileAtomic(this.configPath, raw);
+  /** Replace a settings file's whole content (a bulk save or a full reset), under its lock. */
+  #replaceSettingsFile(path: string, content: () => Record<string, unknown>): void {
+    this.#updateSettingsFile(path, raw => {
+      const next = content();
+      for (const key of Object.keys(raw)) delete raw[key];
+      Object.assign(raw, next);
+    });
   }
 
   /**
@@ -1752,13 +1625,15 @@ export class ConfigManager {
    */
   save(): void {
     this.requireWritable();
+    // A bulk save writes the working view: load any outside edit first, so it is kept, not erased.
+    this._fileWatch?.poll();
     this.advanceConfigurationIncarnation();
     const minimal = this.destinationSnapshot('global', this.configPath);
     this.preserveHostSettingsForBulkSave(minimal, this.configPath);
     const staged = this.runtimeState.fork();
     staged.acceptBulkSnapshot(this.withoutDaemonOwned(minimal), 'global', this.hostSettings.keys());
     const effective = staged.compose();
-    this.writeRawGlobal(minimal);
+    this.#replaceSettingsFile(this.configPath, () => minimal);
     this.publishState(staged, effective);
   }
 
@@ -1822,6 +1697,7 @@ export class ConfigManager {
   /** Persist the non-runtime working view to project settings. Runtime maps survive. */
   saveProject(): void {
     this.requireWritable();
+    this._fileWatch?.poll();
     this.advanceConfigurationIncarnation();
     if (!this.projectConfigPath) {
       throw new Error('ConfigManager.saveProject requires an explicit workingDir.');
@@ -1831,7 +1707,7 @@ export class ConfigManager {
     const staged = this.runtimeState.fork();
     staged.acceptBulkSnapshot(this.withoutDaemonOwned(minimal), 'project', this.hostSettings.keys());
     const effective = staged.compose();
-    writeJsonFileAtomic(this.projectConfigPath, minimal);
+    this.#replaceSettingsFile(this.projectConfigPath, () => minimal);
     this.publishState(staged, effective);
   }
 
@@ -1881,7 +1757,7 @@ export class ConfigManager {
       if (hostSource) this.hostLoadSources?.set(file, hostSource);
       for (const key of malformedHostKeys) {
         const notice: SettingsIngestionNotice = {
-          file, key, action: 'skipped', reason: 'Host setting requires a literal boolean or object category',
+          file, key, action: 'skipped', reason: 'Host setting value is not of its declared type and range, or its section is not an object',
           remedy: 'Fix the stored value; until then this host setting uses its declared restrictive default',
         };
         announceIngestionNotice(notice);
@@ -1931,6 +1807,11 @@ export class ConfigManager {
       const hostDefaultOrigins = this.hostLoadSources ? this.updateHostSources(staged, this.hostLoadSources) : new Set<string>();
       const effective = staged.compose();
       this.publishState(staged, effective);
+      // A later load (a file changed outside this process) reads the files for
+      // the durable revision at once; the first one leaves it to the first read.
+      this.#durableCache = undefined;
+      if (this.hydrating) this.#durableObserved = false;
+      else { this.durablePolicy.observe(); this.#durableObserved = true; }
       if (this.hostLoadValues) this.applyHostValues(this.hostLoadValues, previousHost, true, hostDefaultOrigins);
     } catch (error) {
       // Candidate values, invocation maps, and accepted origins were never
@@ -1947,7 +1828,7 @@ export class ConfigManager {
     try {
       const stored = this.ingest(readDaemonTierFile(this.daemonTierPath), this.daemonTierPath,
         raw => runDaemonTierMigrationPasses(raw, this.daemonTierPath!,
-          (id, text) => this.migrationReceipt(id, text), { ownsFile: this.daemonTierOwner, beforeWrite: () => this.beforeMigrationWrite() }));
+          (id, text) => this.migrationReceipt(id, text), { ownsFile: this.daemonTierOwner }));
       const applied = overlayDaemonTierFrom(stored, (key, value) => {
         const { parent, field } = resolveOrCreateDaemonPath(staged.nonRuntime as unknown as Record<string, unknown>, key);
         parent[field] = value;
@@ -2012,13 +1893,7 @@ export class ConfigManager {
 
   /** Apply the canonical migration order, persisting only for a writable reader. */
   private applyLoadMigrations(parsed: Record<string, unknown>, sourcePath: string): Record<string, unknown> {
-    return runLoadMigrationPasses(parsed, sourcePath, (id, text) => this.migrationReceipt(id, text), { ownsFile: !this.readOnly, beforeWrite: () => this.beforeMigrationWrite() });
-  }
-  /** Hydration itself is read-only; a real migration must own intent before its first write. */
-  private beforeMigrationWrite(): boolean {
-    if (!this.hydrating) return true; // Explicit load() already committed mutation intent.
-    try { this.durablePolicy?.advance(); return true; }
-    catch { return false; } // Preserve ordinary in-memory recovery without persistence or a write receipt.
+    return runLoadMigrationPasses(parsed, sourcePath, (id, text) => this.migrationReceipt(id, text), { ownsFile: !this.readOnly });
   }
   private requireWritable(): void {
     if (this.readOnly) throw new PreparedMutationRefusal('read-only', 'ConfigManager is read-only.');
@@ -2041,7 +1916,7 @@ export class ConfigManager {
         const found = readDotPath(raw, key);
         if (!found.present) continue;
         staged.mark(key, tier);
-        if (typeof found.value === 'boolean') defaultOrigins.delete(key);
+        if (this.hostSettings.accepts(key, found.value)) defaultOrigins.delete(key);
       }
     }
     return defaultOrigins;
@@ -2093,7 +1968,7 @@ export class ConfigManager {
     }
   }
 
-  private resetHostSetting(key: ConfigKey, value: boolean): void {
+  private resetHostSetting(key: ConfigKey, value: HostSettingValue): void {
     if (this.hostSettingHasProjectValue(key)) this.setProjectValue(key, value as never);
     const lock = getManagedSettingLock(key, this.configDir);
     if (lock) throw new ConfigError(`Setting ${key} is locked by ${lock.source}: ${lock.reason}`);
@@ -2101,7 +1976,7 @@ export class ConfigManager {
     // Reset must revoke the global copy too even when ordinary host set() edits
     // an existing higher-priority project leaf. This is the same owned scalar
     // persistence used by set(), with its read-only and managed-lock guards.
-    try { this.persistGlobalKey(key, value); }
+    try { this.#updateSettingsFile(this.configPath, raw => { writeRawDotPath(raw, key, value); }); }
     catch (error) { recoverHostSettingsWriteFailure(error, () => this.refreshHostSettings(previous, true)); }
     this.refreshHostSettings(previous, true);
   }
@@ -2178,21 +2053,15 @@ export class ConfigManager {
     return {
       configPath: this.configPath,
       daemonTierPath: this.daemonTierPath,
-      writeRawGlobal: (raw) => this.writeRawGlobal(raw),
+      update: (path, mutate) => this.#updateSettingsFile(path, mutate),
       markDaemonKey: (key, present) => { staged.mark(key, present ? 'daemon' : undefined); },
     };
   }
 
   private resetDynamicToolPermission(key: ConfigKey): void {
     this.invalidateLifetimes();
-    const raw = readRawSettingsFile(this.configPath);
-    deleteRawDotPath(raw, key);
-    this.writeRawGlobal(raw);
-    if (this.projectOverridesKey(key, true)) {
-      const project = readRawSettingsFile(this.projectConfigPath!);
-      deleteRawDotPath(project, key);
-      writeJsonFileAtomic(this.projectConfigPath!, project);
-    }
+    this.#updateSettingsFile(this.configPath, raw => { deleteRawDotPath(raw, key); });
+    if (this.projectOverridesKey(key, true)) this.#updateSettingsFile(this.projectConfigPath!, raw => deleteRawDotPath(raw, key));
     this.load();
   }
 
@@ -2210,6 +2079,9 @@ export class ConfigManager {
       this.resetDynamicToolPermission(key);
       return;
     }
+    // A full reset from another process resets this surface's settings and
+    // leaves the daemon's file alone: only the daemon resets all of its settings.
+    const clearsDaemonTier = this.daemonTierPath !== null && (this.daemonTierOwner || key !== undefined);
     this.invalidateLifetimes();
     for (const definition of this.hostSettings.definitions) {
       if (key !== undefined && key !== definition.key) continue;
@@ -2236,30 +2108,30 @@ export class ConfigManager {
       staged.mark(key);
     }
     const effective = staged.compose();
-    if (key === undefined) this.writeRawGlobal({});
+    if (key === undefined) this.#replaceSettingsFile(this.configPath, () => ({}));
     else {
-      const raw = readRawSettingsFile(this.configPath);
-      deleteRawDotPath(raw, key);
-      this.writeRawGlobal(raw);
+      this.#updateSettingsFile(this.configPath, raw => { deleteRawDotPath(raw, key); });
       // A project value would put the key straight back at the next load.
-      if (this.projectOverridesKey(key, true)) {
-        const project = readRawSettingsFile(this.projectConfigPath!);
-        deleteRawDotPath(project, key);
-        writeJsonFileAtomic(this.projectConfigPath!, project);
-      }
+      if (this.projectOverridesKey(key, true)) this.#updateSettingsFile(this.projectConfigPath!, raw => deleteRawDotPath(raw, key));
     }
-    if (this.daemonTierPath) clearDaemonTierForReset(this.daemonTierPath, key);
+    const daemonKeys: readonly string[] = key === undefined ? listDaemonOwnedConfigPaths() : isDaemonOwnedConfigKey(key) ? [key] : [];
+    if (this.daemonTierPath && clearsDaemonTier && daemonKeys.length > 0) {
+      this.#updateSettingsFile(this.daemonTierPath, raw => daemonKeys.map(entry => deleteRawDotPath(raw, entry)).some(Boolean));
+    }
     if (this.sharedTierPath) {
-      const resetKeys = key === undefined ? SHARED_CONFIG_KEYS : (isSharedConfigKey(key) ? [key] : []);
-      for (const sharedKey of resetKeys) removeSharedKey(this.sharedTierPath, sharedKey);
+      const resetKeys: readonly string[] = key === undefined ? SHARED_CONFIG_KEYS : (isSharedConfigKey(key) ? [key] : []);
+      if (resetKeys.length > 0) this.#updateSettingsFile(this.sharedTierPath, raw => resetKeys.map(entry => deleteRawDotPath(raw, entry)).some(Boolean));
     }
     // Earlier files can have been replaced if a later write throws. Preserve
     // the complete live state; the next accepted load reconciles those bytes.
     this.publishState(staged, effective);
     for (const previous of previousValues) this.notifyPersistedChange(previous.key, previous.value);
-    // A full reset leaves the project file alone, and its values win at every load: show them now, not at the next start.
-    if (key === undefined && this.projectConfigPath && this.projectConfigPath !== this.configPath && existsSync(this.projectConfigPath)) {
-      try { this.load(); } catch { /* the reset is written; an unreadable project file is reported by the next load */ }
+    // A full reset leaves the project file (and, from another process, the
+    // daemon's file) alone, and their values win at every load: show them now.
+    const keptFile = (this.projectConfigPath && this.projectConfigPath !== this.configPath && existsSync(this.projectConfigPath))
+      || (this.daemonTierPath !== null && !clearsDaemonTier);
+    if (key === undefined && keptFile) {
+      try { this.load(); } catch { /* the reset is written; an unreadable file is reported by the next load */ }
     }
   }
 }

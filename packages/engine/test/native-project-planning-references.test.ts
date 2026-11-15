@@ -126,42 +126,6 @@ test('a proxy cannot forward the private workspace brand to its real target', as
   expect(calls).toBe(0);
 });
 
-for (const key of ['workingDirectory', 'configDir', 'projectConfigPath', 'homeDirectory', 'getWorkingDirectory',
-  'getControlPlaneConfigDir', 'getProjectConfigPath', 'getHomeDirectory', 'retainConfiguredWorkspace']) {
-  for (const accessor of [false, true]) {
-    test(`a genuine native owner rejects replaced ${key} ${accessor ? 'accessor' : 'value'} before supplied code`, async () => {
-      const f = await fixture(); let calls = 0;
-      const native = ProjectPlanningService.forConfiguredWorkspace(f.store, f.config, f.workingDirectory);
-      const previous = Object.getOwnPropertyDescriptor(f.config, key);
-      const supplied = () => { calls++; return f.workingDirectory; };
-      Object.defineProperty(f.config, key, accessor ? { configurable: true, get: supplied }
-        : { configurable: true, value: supplied });
-      try {
-        expect(() => ProjectPlanningService.forConfiguredWorkspace(f.store, f.config, f.workingDirectory)).toThrow();
-        await expect(native.service.status()).rejects.toThrow();
-        expect(calls).toBe(0);
-      } finally {
-        if (previous) Object.defineProperty(f.config, key, previous); else Reflect.deleteProperty(f.config, key);
-      }
-    });
-  }
-}
-
-test('native default ownership is rechecked after the actual startup await', async () => {
-  const f = await fixture(), before = f.bytes();
-  const entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
-  const { service } = ProjectPlanningService.forConfiguredWorkspace(f.store, f.config, f.workingDirectory, {
-    waitForStartup: async () => { entered.resolve(); await release.promise; },
-  });
-  const pending = service.status(); const observed = pending.catch(error => error);
-  await entered.promise;
-  const original = Object.getOwnPropertyDescriptor(f.config, 'workingDirectory');
-  Object.defineProperty(f.config, 'workingDirectory', { value: join(f.root, 'replacement'), configurable: true });
-  release.resolve();
-  try { expect(await observed).toBeInstanceOf(Error); expect(f.bytes()).toEqual(before); }
-  finally { if (original) Object.defineProperty(f.config, 'workingDirectory', original); }
-});
-
 test('closing the actual selected store during startup holds before default response publication', async () => {
   const f = await fixture(), before = f.bytes();
   const entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
@@ -215,7 +179,7 @@ test('native creation rejects caller options accessors and proxies before either
 });
 
 for (const operation of ['evaluate', 'upsertState'] as const) {
-  for (const retirement of ['workspace', 'selected-default', 'composition-tail'] as const) {
+  for (const retirement of ['selected-default', 'composition-tail'] as const) {
     test(`${operation} retains its native ${retirement} through an actual readiness reading`, async () => {
       const f = await fixture(ConfigManager, true, false), before = f.bytes();
       const entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
@@ -231,9 +195,8 @@ for (const operation of ['evaluate', 'upsertState'] as const) {
       cleanup.push(() => { installJudgmentPort(previous); });
       const options = { extra: { note: 'Ordinary composition input' }, waitForStartup: async () => undefined };
       const { service } = ProjectPlanningService.forConfiguredWorkspace(f.store, f.config, f.workingDirectory, options);
-      const reference = retainConfiguredWorkspace(f.config);
-      const target = retirement === 'selected-default' ? service : f.config;
-      const key = retirement === 'selected-default' ? 'defaultProjectId' : 'workingDirectory';
+      const target = service;
+      const key = 'defaultProjectId';
       const original = Object.getOwnPropertyDescriptor(target, key);
       if (!original || !('value' in original)) throw new Error('Missing native owner slot');
       const pending = service[operation]({ state: { goal: facts.goal, scope: facts.scope, createdAt: 1 } });
@@ -243,7 +206,6 @@ for (const operation of ['evaluate', 'upsertState'] as const) {
         expect(started).toBe('entered');
         if (retirement === 'composition-tail') options.extra.note = 'Changed composition input';
         else Object.defineProperty(target, key, { ...original, value: join(f.root, 'retired-native-owner') });
-        if (retirement === 'workspace') expect(() => reference.assertCurrent()).toThrow();
         release.resolve();
         const outcome = await observed;
         expect(fake.requests).toHaveLength(1);

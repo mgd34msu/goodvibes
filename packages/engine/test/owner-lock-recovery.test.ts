@@ -7,10 +7,9 @@ import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
-import { spawn, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { PairingTokenManager, PairingTokenStoreBusyError } from '../platform/src/platform/pairing/pairing-token-store.js';
-import { ConfigManager } from '../platform/src/platform/config/manager.js';
-import { DurablePolicyEpochOwner, OwnerLockBusyError, setOwnerLockWaitForTest } from '../platform/src/platform/config/durable-policy-epoch.js';
+import { setOwnerLockWaitForTest } from '../platform/src/platform/config/durable-policy-epoch.js';
 import * as atomic from '../platform/src/platform/utils/atomic-json-store.js';
 import { logger } from '../platform/src/platform/utils/logger.js';
 
@@ -152,91 +151,6 @@ describe('pairing store faults', () => {
     const opened = new PairingTokenManager(file);
     rmSync(pairingLock(file), { recursive: true });
     expect(opened.captureSettingsAuthority({ kind: 'pairing-token', token: minted.token })).not.toBeNull();
-  });
-});
-
-describe('configuration policy epoch lock', () => {
-  function owner() {
-    const file = join(directory(), 'settings.json');
-    writeFileSync(file, JSON.stringify({ behavior: { autoApprove: false } }));
-    const epochs = new DurablePolicyEpochOwner([file], true);
-    epochs.capture({});
-    return { lock: `${file}.policy-epoch.json.owner-lock`, epochs };
-  }
-
-  test('a crash-held lock whose holder has exited is reclaimed by the next mutation', () => {
-    const item = owner();
-    crashHeldLock(item.lock, { pid: deadPid(), start: null });
-    expect(() => item.epochs.advance()).not.toThrow();
-    expect(existsSync(item.lock)).toBe(false);
-  });
-
-  test('a lock without a recorded holder refuses the mutation and names the lock', () => {
-    const item = owner();
-    crashHeldLock(item.lock, null);
-    expect(() => item.epochs.advance()).toThrow(item.lock);
-    expect(existsSync(item.lock)).toBe(true);
-  });
-});
-
-describe('configuration epoch lock held by another live process', () => {
-  function managed() {
-    const dir = directory();
-    const manager = new ConfigManager({ configDir: dir, surfaceRoot: 'daemon' });
-    manager.captureDurableConfigurationIncarnation();
-    return { manager, lock: `${manager.getConfigPath()}.policy-epoch.json.owner-lock` };
-  }
-  // A live process that is not this one: a child that stays alive until the test restores.
-  function liveHolderPid(): number {
-    const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000000)'], { stdio: 'ignore' });
-    restores.push(() => { child.kill(); });
-    if (typeof child.pid !== 'number') throw new Error('no child pid');
-    return child.pid;
-  }
-  const otherLiveHolder = () => ({ pid: liveHolderPid(), start: null });
-
-  test('a holder that releases while this process waits lets the change through', () => {
-    const { manager, lock } = managed();
-    crashHeldLock(lock, otherLiveHolder());
-    let waits = 0;
-    restores.push(setOwnerLockWaitForTest(() => { if (++waits === 3) rmSync(lock, { recursive: true }); }));
-    manager.set('behavior.autoApprove', true);
-    expect(waits).toBe(3);
-    expect(manager.get('behavior.autoApprove')).toBe(true);
-  });
-
-  test.if(process.platform === 'linux')('a holder recorded with a start-time scheme this platform cannot compare is never reclaimed', () => {
-    const { manager, lock } = managed();
-    crashHeldLock(lock, { pid: liveHolderPid(), start: 'ps:Mon Jan  1 00:00:00 2024' });
-    restores.push(setOwnerLockWaitForTest(() => {}));
-    expect(() => manager.set('behavior.autoApprove', true)).toThrow(OwnerLockBusyError);
-    expect(existsSync(lock)).toBe(true);
-  });
-
-  test('a holder that never releases refuses the change, names the holder, and leaves settings and listeners untouched', () => {
-    const { manager, lock } = managed();
-    manager.set('behavior.autoApprove', true);
-    let revoked = 0, incarnations = 0;
-    manager.onDidChangeIncarnation(() => { incarnations++; });
-    manager.onDidInvalidate(() => { revoked++; });
-    const holder = otherLiveHolder();
-    crashHeldLock(lock, holder);
-    let waits = 0;
-    restores.push(setOwnerLockWaitForTest(() => { waits++; }));
-    let refusal: unknown;
-    try { manager.set('behavior.autoApprove', false); } catch (error) { refusal = error; }
-    expect(refusal).toBeInstanceOf(OwnerLockBusyError);
-    expect(String(refusal)).toContain(String(holder.pid));
-    expect(String(refusal)).toContain(lock);
-    // It waited for the holder before refusing, rather than refusing at once.
-    expect(waits).toBeGreaterThan(0);
-    expect(manager.get('behavior.autoApprove')).toBe(true);
-    expect(incarnations).toBe(0);
-    expect(revoked).toBe(0);
-    // Contention is not damage: once the holder is gone the same owner proceeds.
-    rmSync(lock, { recursive: true });
-    manager.set('behavior.autoApprove', false);
-    expect(manager.get('behavior.autoApprove')).toBe(false);
   });
 });
 

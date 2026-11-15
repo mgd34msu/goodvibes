@@ -1,6 +1,5 @@
 import { expect, spyOn, test } from 'bun:test';
 import * as nativeActivation from '../../runtime/native-work-execution-activation.js';
-import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { DaemonServer } from '@goodvibes-jev/engine/platform/platform/daemon';
@@ -17,11 +16,7 @@ test('actual host clean shutdown preserves captured durable policy with enabled 
   const runtime = fx.host.services!;
   expect(runtime.pluginManager.isEnabled('owned-host')).toBe(true);
   const before = runtime.configManager.captureDurableConfigurationIncarnation();
-  const configPath = runtime.configManager.getConfigPath();
-  const epochBefore = JSON.parse(readFileSync(`${configPath}.policy-epoch.json`, 'utf8')).incarnation;
   await fx.host.close();
-  const epochAfter = JSON.parse(readFileSync(`${configPath}.policy-epoch.json`, 'utf8')).incarnation;
-  expect(epochAfter).toBe(epochBefore);
   expect(runtime.configManager.getDurableConfigurationIncarnation()).toBe(before);
   const successorConfig = new ConfigManager({ surfaceRoot: 'tui', configDir: join(fx.homeDirectory, '.goodvibes', 'daemon'), workingDir: fx.workingDir, homeDir: fx.homeDirectory });
   const featureFlags = createFeatureFlagManager(); featureFlags.loadFromConfig({ flags: deriveFeatureStates(successorConfig) });

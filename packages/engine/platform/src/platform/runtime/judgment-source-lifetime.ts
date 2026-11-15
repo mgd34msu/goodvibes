@@ -7,8 +7,11 @@ import { captureJudgmentBackendSettings } from '@goodvibes-jev/judgment/decision
  * The real composition owns this observation. Credential values are compared
  * only inside this closure; they never become cache identities or log facts.
  * Config/credential mutation intent invalidates before publication, including
- * ABA and failed/no-op mutation. Raw legacy sources without observers retain
- * their value-snapshot contract, not a fabricated ABA guarantee.
+ * ABA and failed/no-op mutation: the two change subscriptions abort the
+ * lifetime's signal, and a capture's check reads that signal and nothing else.
+ * The settings and credentials are sampled once per capture, which also keeps
+ * a source with no observers, and a credential replaced by another process,
+ * from outliving a change: the next capture sees it.
  */
 export function createJudgmentSourceLifetime(source: Pick<JudgmentSettingsSource, 'config' | 'env'> & {
   readonly secrets: Omit<JudgmentSettingsSource['secrets'], 'get'>;
@@ -66,8 +69,7 @@ export function createJudgmentSourceLifetime(source: Pick<JudgmentSettingsSource
       const captured = identity;
       const signal = controller.signal;
       return Object.freeze({ identity: captured, signal, assertCurrent() {
-        sample();
-        if (signal.aborted || identity !== captured) throw new JudgmentAuthorityRetiredError();
+        if (disposed || signal.aborted || identity !== captured) throw new JudgmentAuthorityRetiredError();
       } });
     },
     dispose() {

@@ -17,14 +17,20 @@ import { ConfigError } from '../types/errors.js';
 import { coerceMoneyAmount } from './money-value.js';
 import { parsePermissionMode } from '../gate/presets.js';
 
+function deepFreeze<T>(value: T): T {
+  if (value !== null && typeof value === 'object') {
+    for (const nested of Object.values(value)) deepFreeze(nested);
+    Object.freeze(value);
+  }
+  return value;
+}
+
 /**
- * Cloned ONCE at module load, then cloned again per manager.
- *
- * The snapshot exists so a manager that mutates its own config can never reach
- * back into the exported `DEFAULT_CONFIG` object and change what the next
- * manager in this process starts from.
+ * The one copy of the shipped defaults every config module reads, cloned once
+ * at module load and frozen, so no manager can change what the next one in
+ * this process starts from. Managers take their own copy with cloneDefaultConfig().
  */
-export const DEFAULT_CONFIG_SNAPSHOT = structuredClone(DEFAULT_CONFIG) as GoodVibesConfig;
+export const DEFAULT_CONFIG_SNAPSHOT: Readonly<GoodVibesConfig> = deepFreeze(structuredClone(DEFAULT_CONFIG) as GoodVibesConfig);
 const PERMISSION_TOOL_KEYS = new Set(Object.keys(DEFAULT_CONFIG.permissions.tools));
 
 /** A fresh, fully-owned copy of the defaults. */
@@ -49,15 +55,20 @@ export function sanitizeConfigShape(config: GoodVibesConfig): GoodVibesConfig {
   return sanitized;
 }
 
-/** An absolute, resolved path, or `undefined` when the caller supplied none. */
-export function requireAbsoluteOwnedPath(path: string | undefined, name: string): string | undefined {
+/**
+ * An absolute, resolved path, or `undefined` when the caller supplied none.
+ * `owner` names the class in the refusal (ConfigManager, SecretsManager).
+ */
+export function requireAbsoluteOwnedPath(path: string, name: string, owner?: string): string;
+export function requireAbsoluteOwnedPath(path: string | undefined, name: string, owner?: string): string | undefined;
+export function requireAbsoluteOwnedPath(path: string | undefined, name: string, owner = 'ConfigManager'): string | undefined {
   if (path === undefined) return undefined;
   const trimmed = path.trim();
   if (!trimmed) {
-    throw new Error(`ConfigManager ${name} must be a non-empty absolute path.`);
+    throw new Error(`${owner} ${name} must be a non-empty absolute path.`);
   }
   if (!isAbsolute(trimmed)) {
-    throw new Error(`ConfigManager ${name} must be an absolute path.`);
+    throw new Error(`${owner} ${name} must be an absolute path.`);
   }
   return resolve(trimmed);
 }

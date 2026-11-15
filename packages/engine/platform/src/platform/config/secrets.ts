@@ -33,7 +33,7 @@ import { assertSecurityReadSource, captureSecurityReadBindings, captureSecurityR
  * Secret values are never logged.
  */
 
-import { dirname, isAbsolute, resolve } from 'path';
+import { dirname } from 'path';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readFileSync, statSync, writeFileSync, type Stats } from 'fs';
@@ -55,6 +55,7 @@ import {
   type EncryptedStoreEnvelope,
 } from './secrets-keyfile.js';
 export { SecretStoreUnreadableError } from './secrets-keyfile.js';
+import { requireAbsoluteOwnedPath } from './manager-bootstrap.js';
 import { decodeLiteralSecret, encodeLiteralSecret, shouldStoreAsLiteral } from './secret-literal-codec.js';
 import { getSecretRefSource, isSecretRefInput, normalizeSecretRef, resolveSecretRef } from './secret-refs.js';
 import { listMigratableSecrets, migratableStores } from './secrets-migration-view.js';
@@ -201,19 +202,8 @@ export interface SecretsManagerOptions {
   readonly keyFilePath?: string | undefined;
 }
 
-function requireAbsoluteOwnedPath(path: string, name: string): string {
-  const trimmed = path.trim();
-  if (!trimmed) {
-    throw new Error(`SecretsManager ${name} must be a non-empty absolute path.`);
-  }
-  if (!isAbsolute(trimmed)) {
-    throw new Error(`SecretsManager ${name} must be an absolute path.`);
-  }
-  return resolve(trimmed);
-}
-
 function normalizeOptionalOwnedPath(path: string | undefined, name: string): string | undefined {
-  return path === undefined ? undefined : requireAbsoluteOwnedPath(path, name);
+  return requireAbsoluteOwnedPath(path, name, 'SecretsManager');
 }
 
 function loadConfiguredSecretPolicy(configManager?: Pick<ConfigManager, 'get'>): SecretStorageMode {
@@ -737,10 +727,10 @@ export class SecretsManager {
 
   constructor(options: SecretsManagerOptions) {
     this.surfaceRoot = requireSurfaceRoot(options.surfaceRoot, 'SecretsManager surfaceRoot');
-    const globalHome = requireAbsoluteOwnedPath(options.globalHome, 'globalHome');
+    const globalHome = requireAbsoluteOwnedPath(options.globalHome, 'globalHome', 'SecretsManager');
     this.options = {
       ...options,
-      projectRoot: requireAbsoluteOwnedPath(options.projectRoot, 'projectRoot'),
+      projectRoot: requireAbsoluteOwnedPath(options.projectRoot, 'projectRoot', 'SecretsManager'),
       globalHome,
       daemonHome: normalizeOptionalOwnedPath(options.daemonHome, 'daemonHome')
         ?? defaultDaemonSecretHome(globalHome),

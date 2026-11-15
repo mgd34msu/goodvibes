@@ -36,17 +36,24 @@ export interface ConfigFileWatchHandle {
    * Call it right after the write; a write by anyone else is still reported.
    */
   acknowledge(path: string): void;
+  /**
+   * True when the file differs from the last state this watch knows: someone
+   * else wrote it since the last poll. A writer asks this before its own
+   * read-merge-write; when true it must not acknowledge its write, so the next
+   * poll loads the other writer's change instead of hiding it.
+   */
+  changedSinceBaseline(path: string): boolean;
   stop(): void;
 }
 
-/** Every live watch, so a writer can acknowledge a file without holding a handle. */
+/** Every live watch, so a load-time migration can acknowledge a file without holding a handle. */
 const activeWatches = new Set<ConfigFileWatchHandle>();
 
 /**
  * Tell every live watcher that this process just wrote `path` and already holds
- * what it wrote. Without it the next poll sees a changed mtime, reloads, and
- * revokes every configuration-bound lifetime a second time for a change nothing
- * outside the process made.
+ * what it wrote. Only for a write made while loading (a migration rewriting the
+ * file it is loading); an ordinary settings write acknowledges its own
+ * manager's watch, so other managers in the process still reload it.
  */
 export function acknowledgeConfigFileWrite(path: string): void {
   for (const watch of activeWatches) watch.acknowledge(path);
@@ -106,7 +113,10 @@ export function watchConfigFiles(
     baselines.set(path, readSnapshot(path, trackReadErrors));
   }
   if (baselines.size === 0) {
-    return { poll(): void { /* nothing watched */ }, acknowledge(): void { /* nothing watched */ }, stop(): void { /* nothing watched */ } };
+    return {
+      poll(): void { /* nothing watched */ }, acknowledge(): void { /* nothing watched */ },
+      changedSinceBaseline(): boolean { return false; }, stop(): void { /* nothing watched */ },
+    };
   }
 
   let stopped = false;
@@ -142,6 +152,10 @@ export function watchConfigFiles(
     acknowledge(path: string): void {
       if (stopped || !baselines.has(path)) return;
       baselines.set(path, readSnapshot(path, trackReadErrors));
+    },
+    changedSinceBaseline(path: string): boolean {
+      const baseline = baselines.get(path);
+      return !stopped && baseline !== undefined && !sameSnapshot(baseline, readSnapshot(path, trackReadErrors));
     },
     stop(): void {
       stopped = true;

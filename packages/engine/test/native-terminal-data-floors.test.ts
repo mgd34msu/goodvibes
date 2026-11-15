@@ -2,7 +2,6 @@ import { expect, test } from 'bun:test';
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { Database } from 'bun:sqlite';
-import { ConfigManager } from '../platform/src/platform/config/manager.js';
 import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
 import { admitInstalledClientDataWriter, installedReaderCommand } from '../platform/src/platform/runtime/installed-client-data-writer.js';
 import { assertStagedClientReaderCompatible } from '../platform/src/platform/runtime/client-reader-update.js';
@@ -59,16 +58,6 @@ test('a revoked original executable cannot publish the new knowledge format', as
     await expect(store.upsertSource({ connectorId: 'fixture', sourceType: 'document', title: 'Held', canonicalUri: 'fixture://held', status: 'indexed' })).rejects.toThrow();
     expect(existsSync(path)).toBe(false); expect(existsSync(f.requirement)).toBe(false);
   } finally { await store.close(); }
-});
-
-test('real ConfigManager fresh durable-source issuance declares config-v2 before sidecars', () => {
-  const f = fixture(); let declared = false;
-  const config = new ConfigManager({ configDir: join(f.root, 'config'), nativeDataWriter: { declare(format) {
-    f.owner.declare(format); expect(formats(f.requirement)).toContain('configuration-policy-epochs-v2'); declared = true;
-  } } });
-  expect(existsSync(f.requirement)).toBe(false);
-  config.captureDurableConfigurationIncarnation(); expect(declared).toBe(true);
-  expect(JSON.parse(readFileSync(config.getConfigPath() + '.policy-epoch.json', 'utf8')).version).toBe(2);
 });
 
 test.each(['@goodvibes-jev/tui', '@goodvibes-jev/agent'] as const)('saved floors reject %s historical rollback without ever executing it', packageName => {

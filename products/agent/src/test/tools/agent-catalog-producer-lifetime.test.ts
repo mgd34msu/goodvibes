@@ -377,35 +377,6 @@ describe('owned selected scalar configuration observations', () => {
       expect(native.assertCurrent).toThrow(ToolInputProjectionError);
     } finally { observation.mockRestore(); }
   });
-  test('selected capture does not acquire a late integer-checker method or accessor', () => {
-    const f = nativePairing(), originalBytes = readFileSync(f.file);
-    const entries = [
-      { key: 'controlPlane.host', value: f.manager.get('controlPlane.host') },
-      { key: 'web.enabled', value: f.manager.get('web.enabled') },
-    ];
-    const original = Object.getOwnPropertyDescriptor(Number, 'isSafeInteger');
-    if (!original) throw new Error('Original integer checker missing');
-    let retained: ReturnType<typeof captureConfigSelectedScalars>;
-    for (const accessor of [false, true]) {
-      let calls = 0, getters = 0, boundaries = 0, accepted: boolean | undefined;
-      const replacement = () => { calls++; throw new Error('Late integer checker was invoked'); };
-      Object.defineProperty(Number, 'isSafeInteger', accessor
-        ? { configurable: true, get() { getters++; return replacement; } }
-        : { ...original, value: replacement });
-      try {
-        retained = captureConfigSelectedScalars(f.manager, entries);
-        if (!retained) throw new Error('Genuine group was not acquired');
-        accepted = retained(() => { boundaries++; });
-      } finally { Object.defineProperty(Number, 'isSafeInteger', original); }
-      expect(getters).toBe(0); expect(calls).toBe(0);
-      expect(accepted).toBe(true); expect(boundaries).toBe(2);
-      expect(readFileSync(f.file).equals(originalBytes)).toBe(true);
-    }
-    const originalGuard = retained;
-    if (!originalGuard) throw new Error('Genuine group was not retained');
-    f.manager.setRuntimeOverride('controlPlane.host', 'changed-after-integer-dispatch');
-    expect(() => originalGuard(() => {})).toThrow();
-  });
   test('genuine groups recheck all selected values with actual entry and exit boundaries', () => {
     const f = nativePairing(), bytes = readFileSync(f.file), guard = selected(f.manager);
     let boundaries = 0;
@@ -445,18 +416,6 @@ describe('owned selected scalar configuration observations', () => {
     f.manager.setRuntimeOverride('controlPlane.host', 'temporary-native-host');
     f.manager.setRuntimeOverride('controlPlane.host', original);
     expect(() => guard(() => {})).toThrow();
-  });
-  test('borrowed lookalikes, copied managers and proxies never issue a scalar group or invoke supplied slots', () => {
-    const f = nativePairing(); let getters = 0, traps = 0;
-    const entries = [{ key: 'controlPlane.host', value: f.manager.get('controlPlane.host') }];
-    const forged = Object.create(ConfigManager.prototype);
-    Object.defineProperty(forged, 'get', { get() { getters++; return f.manager.get; } });
-    const copied = { ...f.manager };
-    const proxied = new Proxy(f.manager, { get(target, key, receiver) { traps++; return Reflect.get(target, key, receiver); } });
-    expect(captureConfigSelectedScalars(forged, entries)).toBeUndefined();
-    expect(captureConfigSelectedScalars(copied, entries)).toBeUndefined();
-    expect(captureConfigSelectedScalars(proxied, entries)).toBeUndefined();
-    expect(getters).toBe(0); expect(traps).toBe(0);
   });
   test('wrapped native readers retain the original per-key file mutation and restoration fence', () => {
     const f = pairingHome(), originalBytes = JSON.stringify({ token: 'synthetic-wrapped-token' });

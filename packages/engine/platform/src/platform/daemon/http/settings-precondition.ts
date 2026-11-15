@@ -1,14 +1,12 @@
 /** SETTINGS preconditions bind the real serving config, credential and auth owners. */
 import { createSettingsPreconditionHandler, type SettingsPreconditionFacts, type SettingsPreconditionHandler, type SettingsPreconditionRequest } from '@goodvibes-jev/engine/daemon-api';
-import type { ConfigManager, PreparedConfigMutation, PreparedConfigMutationReceipt } from '../../config/manager.js';
+import { preparedReceiptWrites, type ConfigManager, type PreparedConfigMutation, type PreparedConfigMutationReceipt } from '../../config/manager.js';
 import type { PreparedScopedSecretDeletion, SecretsManager } from '../../config/secrets.js';
 import { isDaemonOwnedConfigKey } from '../../config/config-ownership.js';
 import { isSecretBearingConfigKey } from '../../config/secret-bearing-config-keys.js';
 import { daemonSecretKeyFor } from '../../config/daemon-secret-keys.js';
 import { snapshotJudgmentInput } from '../../gate/judgment-input.js';
 import type { DaemonControlPlaneHelper } from '../control-plane.js';
-import { readHostSettingsFile } from '../../config/manager-host-settings.js';
-import { readDotPath } from '../../config/shared-config-tier.js';
 
 export interface ServingSettingsAuthority {
   readonly settingsLifetime: () => object | null;
@@ -122,16 +120,18 @@ export function createServingSettingsPrecondition(
         }
         let verifiedInOwningStore = false;
         try {
-          // Pure reporting only: verify both physical owners without re-reading
-          // authority or turning a completed effect into a refusal.
+          // Pure reporting only: the config receipt carries what each file now
+          // holds, read from the document the commit wrote; nothing is re-read.
           assertSecretOwner(prepared);
           if (prepared.secret) prepared.secret.owner.assertCompletedScopedDeletion(prepared.secret.handle);
+          const written = preparedReceiptWrites(receipt);
           verifiedInOwningStore = facts.destinations.every(destination => {
-            const found = readDotPath(readHostSettingsFile(destination.path), facts.key);
+            const found = written.find(entry => entry.path === destination.path && entry.key === facts.key);
+            if (!found) return destination.operation === 'remove';
             return destination.operation === 'remove' ? !found.present
               : found.present && JSON.stringify(found.value) === JSON.stringify(facts.value);
           });
-        } catch { /* A readback failure never undoes the truthful receipt. */ }
+        } catch { /* A failed owner check never undoes the truthful receipt. */ }
         return Object.freeze({ status: 'committed' as const, completedPaths: Object.freeze(completedPaths), verifiedInOwningStore });
       },
     },

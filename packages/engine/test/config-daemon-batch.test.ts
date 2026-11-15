@@ -9,7 +9,7 @@ function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'daemon-config-batch-'));
   const configDir = join(root, 'surface');
   const daemonTierPath = join(root, 'daemon', 'settings.json');
-  const manager = new ConfigManager({ configDir, daemonTierPath });
+  const manager = new ConfigManager({ configDir, daemonTierPath, ownsDaemonTier: true });
   return { root, configDir, daemonTierPath, manager,
     close: () => rmSync(root, { recursive: true, force: true }),
   };

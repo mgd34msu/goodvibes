@@ -9,10 +9,9 @@
  * makes the persistence rules independently testable.
  */
 import { readJsonFileOrQuarantine } from '../utils/atomic-json-store.js';
-import { CONFIG_SCHEMA, DEFAULT_CONFIG } from './schema.js';
-import type { GoodVibesConfig } from './schema.js';
+import { CONFIG_SCHEMA } from './schema.js';
+import { DEFAULT_CONFIG_SNAPSHOT } from './manager-bootstrap.js';
 
-const DEFAULT_CONFIG_SNAPSHOT = structuredClone(DEFAULT_CONFIG) as GoodVibesConfig;
 const ATOMIC_ARRAY_SETTINGS = new Set<string>(CONFIG_SCHEMA.filter(setting => Array.isArray(setting.default)).map(setting => setting.key));
 
 /**

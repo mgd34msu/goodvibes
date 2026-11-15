@@ -1,11 +1,10 @@
 /** Backend-owned SETTINGS preparation. All semantic observations precede common admission. */
 import type { ConfigWriteRoute } from '../../config/daemon-config-route.js';
-import type { ConfigManager, PreparedConfigMutationFacts } from '../../config/manager.js';
+import { preparedReceiptWrites, type ConfigManager, type PreparedConfigMutationFacts } from '../../config/manager.js';
 import { isValidConfigKey } from '../../config/schema.js';
 import { isSecretBearingConfigKey, isSecretReferenceValue } from '../../config/secret-bearing-config-keys.js';
 import { isStructuredCredentialReferenceConfigKey } from '../../config/structured-credential-config.js';
 import { configKeyScope, describeConfigOwnership } from '../../config/config-ownership.js';
-import { readHostSettingsFile } from '../../config/manager-host-settings.js';
 import { captureOwnedJson } from '../../gate/judgment-input.js';
 import { applyRemoteSettingsPrecondition, assertRemoteSettingsPrecondition, captureRemoteSettingsPrecondition,
   inspectRemoteSettingsPrecondition, resolvePreparedConfigWriteRoute, assertPreparedConfigWriteRoute, type RemoteSettingsPrecondition } from '../../config/settings-precondition-client.js';
@@ -119,15 +118,6 @@ export function assertAdmittedAgentSettings(args: Record<string, unknown>, optio
   assertCapture(capture);
 }
 
-function leaf(raw: Record<string, unknown>, key: string): { present: boolean; value?: unknown } {
-  let value: unknown = raw;
-  for (const segment of key.split('.')) {
-    if (!value || typeof value !== 'object' || !Object.hasOwn(value, segment)) return { present: false };
-    value = (value as Record<string, unknown>)[segment];
-  }
-  return { present: true, value };
-}
-
 /** Actual adopted backend. No semantic read, route resolution or refreshed retry after claim. */
 export async function executeAdmittedAgentSettings(args: Record<string, unknown>, options?: ToolExecuteOptions): Promise<{ success: boolean; output?: string; error?: string }> {
   assertAdmittedAgentSettings(args, options);
@@ -143,13 +133,15 @@ export async function executeAdmittedAgentSettings(args: Record<string, unknown>
   let verified = !capture.localFacts && receipt.status === 'committed'
     && 'verifiedInOwningStore' in receipt && receipt.verifiedInOwningStore === true;
   if (receipt.status === 'committed' && capture.localFacts) {
-    try {
-      verified = capture.localFacts.destinations.every(destination => {
-        const found = leaf(readHostSettingsFile(destination.path), capture.key);
-        return destination.operation === 'remove' ? !found.present
-          : found.present && JSON.stringify(found.value) === JSON.stringify(capture.localFacts!.value);
-      });
-    } catch { /* A committed effect cannot be relabeled no-effect because readback failed. */ }
+    // The receipt carries what each file holds after the commit, read from the
+    // document it wrote; a later write by another process cannot relabel it.
+    const written = preparedReceiptWrites(receipt);
+    verified = capture.localFacts.destinations.every(destination => {
+      const found = written.find(entry => entry.path === destination.path && entry.key === capture.key);
+      if (!found) return destination.operation === 'remove';
+      return destination.operation === 'remove' ? !found.present
+        : found.present && JSON.stringify(found.value) === JSON.stringify(capture.localFacts!.value);
+    });
   }
   const refused = 'refused' in receipt && receipt.refused === true;
   return { success: receipt.status === 'committed', output: JSON.stringify({ key: capture.key, action: capture.operation,

@@ -106,239 +106,96 @@ export function captureJudgmentPort(site: string, options: JudgmentReadingOption
   }
 }
 
-function retainPropertyPlan(subject: object, keys: readonly string[]): () => void {
-  const chain: { readonly owner: object; readonly prototype: object | null;
-    readonly fields: readonly { readonly key: string; readonly descriptor: PropertyDescriptor | undefined }[] }[] = [];
-  let owner: object | null = subject;
-  while (owner !== null) {
-    if (chain.length >= 64) throw new JudgmentAuthorityRetiredError();
-    const prototype: unknown = Object.getPrototypeOf(owner);
-    if (prototype !== null && typeof prototype !== 'object' && typeof prototype !== 'function') throw new JudgmentAuthorityRetiredError();
-    chain.push({ owner, prototype, fields: keys.map(key => ({ key, descriptor: Object.getOwnPropertyDescriptor(owner, key) })) });
-    owner = prototype;
-  }
-  return () => {
-    for (const { owner, prototype, fields } of chain) {
-      if (Object.getPrototypeOf(owner) !== prototype) throw new JudgmentAuthorityRetiredError();
-      for (const { key, descriptor } of fields) {
-        const current = Object.getOwnPropertyDescriptor(owner, key);
-        if ((descriptor === undefined) !== (current === undefined)
-          || descriptor?.value !== current?.value || descriptor?.get !== current?.get || descriptor?.set !== current?.set
-          || descriptor?.writable !== current?.writable || descriptor?.enumerable !== current?.enumerable
-          || descriptor?.configurable !== current?.configurable) throw new JudgmentAuthorityRetiredError();
-      }
-    }
-  };
-}
-
-/** A slot that resolves to a data property cannot run foreign code when read. */
-function isPureSlot(subject: object | undefined, key: string): boolean {
-  let owner: object | null = subject ?? null;
-  for (let depth = 0; owner !== null; depth++) {
-    if (depth >= 64) throw new JudgmentAuthorityRetiredError();
-    const descriptor = Object.getOwnPropertyDescriptor(owner, key);
-    if (descriptor) return 'value' in descriptor;
-    owner = Object.getPrototypeOf(owner) as object | null;
-  }
-  return true;
-}
-
-function readCurrentProperty<T>(assertCurrent: () => void, read: () => T): T {
-  assertCurrent();
-  try { return read(); }
-  finally { assertCurrent(); }
-}
-
+/**
+ * One owner of staleness: the capture's signal. The installation, the owner
+ * binding, the source lifetime (aborted by the configuration and credential
+ * change subscriptions) and the caller's signal all feed it. A check is a few
+ * boolean reads plus the source's and caller's own checks; nothing re-reads
+ * settings or secrets, and nothing re-proves the port object's own methods.
+ */
 function capture(site: string, options: JudgmentReadingOptions): JudgmentPortCapture {
   const installation = judgmentPortInstallation(site);
   const base = installation.port;
   const binding = ownerBinding(base);
   let consumed = false;
-  let observationSignal: AbortSignal | undefined;
-  const assertLifetime = () => {
-    if (installation.signal.aborted || binding.controller.signal.aborted || owners.get(base) !== binding
-      || (!consumed && observationSignal?.aborted)) throw new JudgmentAuthorityRetiredError();
-  };
-  assertLifetime();
+  const installed = (): boolean => !installation.signal.aborted && !binding.controller.signal.aborted && owners.get(base) === binding;
+  if (!installed()) throw new JudgmentAuthorityRetiredError();
   const owner = binding.capture?.();
-  assertLifetime();
-  const assertPortProperties = retainPropertyPlan(base, ['model', 'ask', 'health', 'recorder']);
-  const assertOwnerProperties = owner ? retainPropertyPlan(owner, ['identity', 'signal', 'assertCurrent']) : undefined;
-  let assertRecorderProperties: (() => void) | undefined;
-  const assertProperties = () => {
-    assertLifetime(); assertPortProperties(); assertOwnerProperties?.(); assertRecorderProperties?.(); assertLifetime();
-  };
-  const read = <T>(property: () => T): T => readCurrentProperty(assertProperties, property);
-  const readOwnerIdentity = () => owner?.identity, readOwnerSignal = () => owner?.signal, readSourceCurrent = () => owner?.assertCurrent;
-  const ownerIdentity = read(readOwnerIdentity), ownerSignal = read(readOwnerSignal), sourceCurrent = read(readSourceCurrent);
-  const signal = AbortSignal.any([installation.signal, binding.controller.signal, ...(ownerSignal ? [ownerSignal] : []),
+  if (!installed()) throw new JudgmentAuthorityRetiredError();
+  const ownerIdentity = owner?.identity, sourceCurrent = owner?.assertCurrent;
+  const signal = AbortSignal.any([installation.signal, binding.controller.signal, ...(owner?.signal ? [owner.signal] : []),
     ...(options.signal ? [options.signal] : [])]);
-  observationSignal = signal;
-  const readPortModel = () => base.model, readPortAsk = () => base.ask, readPortHealth = () => base.health, readPortRecorder = () => base.recorder;
-  const model = read(readPortModel);
-  const ask = read(readPortAsk), health = read(readPortHealth), recorder = read(readPortRecorder);
-  assertRecorderProperties = recorder ? retainPropertyPlan(recorder, ['recordReadings', 'recordAction']) : undefined;
-  const ownedAsk = ask.bind(base);
-  const readRecorderReadings = () => recorder?.recordReadings, readRecorderAction = () => recorder?.recordAction;
-  const recordReadings = read(readRecorderReadings), recordAction = read(readRecorderAction);
+  const { model, health, recorder } = base;
+  const ownedAsk = base.ask.bind(base);
+  const recordReadings = recorder?.recordReadings, recordAction = recorder?.recordAction;
   const callerCurrent = options.assertCurrent, assertResult = options.assertResult, captureResult = options.captureResult, prepareResultCapture = options.prepareResultCapture;
-  const assertObservationProperties = () => {
-    if (consumed || signal.aborted) throw new JudgmentAuthorityRetiredError();
-    assertProperties();
-    if (consumed || signal.aborted) throw new JudgmentAuthorityRetiredError();
-  };
-  // Reading a data slot runs no code, so the descriptor proof that precedes a
-  // group of reads already covers them. Only an accessor is fenced on each side.
-  const pure = new Set<() => unknown>();
-  for (const [reader, subject, key] of [[readOwnerIdentity, owner, 'identity'], [readOwnerSignal, owner, 'signal'], [readSourceCurrent, owner, 'assertCurrent'],
-    [readPortModel, base, 'model'], [readPortAsk, base, 'ask'], [readPortHealth, base, 'health'], [readPortRecorder, base, 'recorder'],
-    [readRecorderReadings, recorder, 'recordReadings'], [readRecorderAction, recorder, 'recordAction']] as const) {
-    if (isPureSlot(subject, key)) pure.add(reader);
-  }
-  const readObservation = <T>(property: () => T): T => pure.has(property) ? property() : readCurrentProperty(assertObservationProperties, property);
-  const installationCurrent = (observation = false) => {
-    const readInstalled = <T>(property: () => T): T => pure.has(property) ? property() : readCurrentProperty(observation ? assertObservationProperties : assertProperties, property);
-    if (observation) assertObservationProperties(); else assertProperties();
-    if (installation.signal.aborted || binding.controller.signal.aborted || owners.get(base) !== binding
-      || readInstalled(readOwnerIdentity) !== ownerIdentity || readInstalled(readOwnerSignal) !== ownerSignal || readInstalled(readSourceCurrent) !== sourceCurrent
-      || readInstalled(readPortModel) !== model || readInstalled(readPortAsk) !== ask || readInstalled(readPortHealth) !== health || readInstalled(readPortRecorder) !== recorder
-      || readInstalled(readRecorderReadings) !== recordReadings || readInstalled(readRecorderAction) !== recordAction) throw new JudgmentAuthorityRetiredError();
-  };
   const current = () => {
-    try {
-      if (consumed || signal.aborted) throw new JudgmentAuthorityRetiredError();
-      installationCurrent(true);
-      if (consumed || signal.aborted || owners.get(base) !== binding || readObservation(readOwnerIdentity) !== ownerIdentity
-        || readObservation(readOwnerSignal) !== ownerSignal || readObservation(readSourceCurrent) !== sourceCurrent) throw new JudgmentAuthorityRetiredError();
-      synchronous(sourceCurrent);
-      synchronous(callerCurrent);
-      installationCurrent(true);
-      if (consumed) throw new JudgmentAuthorityRetiredError();
-      if (readObservation(readPortModel) !== model || readObservation(readPortAsk) !== ask || readObservation(readPortHealth) !== health || readObservation(readPortRecorder) !== recorder
-        || readObservation(readRecorderReadings) !== recordReadings || readObservation(readRecorderAction) !== recordAction || signal.aborted) throw new JudgmentAuthorityRetiredError();
-    } catch (error) { drainOwned(error); throw new JudgmentAuthorityRetiredError(); }
+    if (consumed || signal.aborted || !installed()) throw new JudgmentAuthorityRetiredError();
+    synchronous(sourceCurrent);
+    synchronous(callerCurrent);
   };
   current();
   const decisionChecks = new Map<string, () => void>();
-  const checkDecision = (id: string) => { current(); decisionChecks.get(id)?.(); current(); };
-  current();
+  const checkDecision = (id: string) => { current(); decisionChecks.get(id)?.(); };
   const port: JudgmentPort = {
     get model() { current(); return model; },
     ...(recorder ? { recorder: {
-      recordReadings(id, readings) { checkDecision(id); recordReadings!.call(recorder, id, readings); checkDecision(id); },
-      recordAction(id, action) { checkDecision(id); recordAction!.call(recorder, id, action); checkDecision(id); },
+      recordReadings(id, readings) { checkDecision(id); recordReadings!.call(recorder, id, readings); },
+      recordAction(id, action) { checkDecision(id); recordAction!.call(recorder, id, action); },
     } satisfies NonNullable<JudgmentPort['recorder']> } : {}),
-    ...(health ? { health: () => { current(); const result = health.call(base); current(); return result; } } : {}),
+    ...(health ? { health: () => { current(); return health.call(base); } } : {}),
     async ask<const Q extends Questions>(request: JudgmentRequest<Q>): Promise<JudgmentResult<Q>> {
       current();
-      // Scoped strict consumers bind the ORIGINAL data property before any
-      // property read or deferred dispatch. Materialize descriptors, not a
-      // spread of a borrowed request that may grow accessors while awaiting.
       const strictResultCapture = Boolean(prepareResultCapture || captureResult || assertResult);
-      let assertOriginalResultCapture: (() => void) | undefined;
-      const originalResultCapture = (() => {
-        if (!strictResultCapture) return undefined;
-        assertOriginalResultCapture = retainPropertyPlan(request, ['captureResult']);
-        assertOriginalResultCapture();
-        // Retain the actual hook before any preparer runs. Its public contract
-        // also permits non-enumerable and inherited native data methods.
-        let owner: object | null = request, depth = 0, selected = false;
-        let original: unknown;
-        while (owner !== null) {
-          if (depth++ >= 64) throw new JudgmentAuthorityRetiredError();
-          const descriptor = Object.getOwnPropertyDescriptor(owner, 'captureResult');
-          if (!selected && descriptor) {
-            if (!('value' in descriptor)) throw new JudgmentAuthorityRetiredError();
-            original = descriptor.value; selected = true;
-          }
-          const prototype: unknown = Object.getPrototypeOf(owner);
-          if (prototype !== null && typeof prototype !== 'object' && typeof prototype !== 'function') throw new JudgmentAuthorityRetiredError();
-          owner = prototype;
-        }
-        assertOriginalResultCapture();
-        if (original !== undefined && typeof original !== 'function') throw new JudgmentAuthorityRetiredError();
-        return original;
-      })();
-      const descriptors = prepareResultCapture ? Object.getOwnPropertyDescriptors(request) : undefined;
-      if (descriptors && (!descriptors.questions || !('value' in descriptors.questions)
-        || !descriptors.questions.enumerable || Object.values(descriptors).some(d => !('value' in d)))) throw new JudgmentAuthorityRetiredError();
-      const input = descriptors ? Object.fromEntries(Object.entries(descriptors).filter(([, d]) => d.enumerable).map(([key, d]) => [key, d.value])) as typeof request : request;
-      const originalQuestions = input.questions;
-      const resultFrame = prepareResultCapture?.(originalQuestions);
-      assertOriginalResultCapture?.();
-      const dispatchedQuestions = (resultFrame?.questions ?? originalQuestions) as typeof request.questions;
-      let ownedRequest: typeof request | undefined;
-      let assertOwnedResultCapture: (() => void) | undefined;
-      const questionsCurrent = (value: typeof request, expected: Questions) => {
-        const descriptor = Object.getOwnPropertyDescriptor(value, 'questions');
-        if (!descriptor || !('value' in descriptor) || !descriptor.enumerable || descriptor.value !== expected) throw new JudgmentAuthorityRetiredError();
-      };
-      const requestSignal = input.signal;
-      const active = requestSignal ? AbortSignal.any([signal, requestSignal]) : signal;
+      const originalResultCapture = request.captureResult;
+      const resultFrame = prepareResultCapture?.(request.questions);
+      const dispatchedQuestions = (resultFrame?.questions ?? request.questions) as typeof request.questions;
+      const active = request.signal ? AbortSignal.any([signal, request.signal]) : signal;
       const check = () => {
         if (active.aborted) throw new JudgmentAuthorityRetiredError();
-        if (resultFrame) { questionsCurrent(request, originalQuestions); if (ownedRequest) questionsCurrent(ownedRequest, dispatchedQuestions); }
-        assertOriginalResultCapture?.(); assertOwnedResultCapture?.();
         current(); synchronous(resultFrame?.assertCurrent);
-        // Caller/source checks are arbitrary callbacks; validate again afterward.
-        if (resultFrame) { questionsCurrent(request, originalQuestions); if (ownedRequest) questionsCurrent(ownedRequest, dispatchedQuestions); }
-        assertOriginalResultCapture?.(); assertOwnedResultCapture?.();
       };
-      const beforeAttempt = input.beforeAttempt;
-      const beforeAsyncAttempt = input.beforeAsyncAttempt;
-      const assertLogCurrent = input.assertLogCurrent;
-      const onRetry = input.onRetry;
+      const admit = <T extends JudgmentResult<Q>>(original: T): T => {
+        assertResult?.(original);
+        return reuseObservedJudgmentResult(original, resultFrame ? resultFrame.capture(original) : captureResult ? captureResult(original) : original);
+      };
+      const { beforeAttempt, beforeAsyncAttempt, assertLogCurrent } = request;
       check();
-      const result = await interrupt(Promise.resolve().then(() => {
-        check();
-        ownedRequest = { ...input, questions: dispatchedQuestions, signal: active,
-          beforeAttempt: () => { check(); synchronous(beforeAttempt); check(); },
-          beforeAsyncAttempt: async () => { check(); const checked = await beforeAsyncAttempt?.(); check(); return checked; },
-          assertLogCurrent: () => { check(); synchronous(assertLogCurrent); check(); },
-          onRetry: async (progress: Parameters<NonNullable<typeof onRetry>>[0]) => { check(); await onRetry?.(progress); check(); },
-          ...(strictResultCapture ? { captureResult: <T extends JudgmentResult<Q>>(original: T): T => {
-            check(); assertResult?.(original); check();
-            const admitted = reuseObservedJudgmentResult(original, resultFrame ? resultFrame.capture(original) : captureResult ? captureResult(original) : original);
-            check();
-            // A caller restriction cannot replace, project or bypass the
-            // scope-owned complete original admission. It sees its snapshot.
-            if (originalResultCapture) {
-              const restricted: unknown = originalResultCapture(admitted);
-              if (restricted !== admitted) {
-                try { void Promise.prototype.then.call(restricted, undefined, () => {}); } catch { /* Only genuine promises need rejection draining. */ }
-                throw new JudgmentAuthorityRetiredError();
-              }
-              check();
+      const ownedRequest: JudgmentRequest<Q> = { ...request, questions: dispatchedQuestions, signal: active,
+        // The last point before a request leaves the process.
+        beforeAttempt: () => { check(); synchronous(beforeAttempt); },
+        beforeAsyncAttempt: async () => { check(); return beforeAsyncAttempt?.(); },
+        assertLogCurrent: () => { check(); synchronous(assertLogCurrent); },
+        ...(strictResultCapture ? { captureResult: <T extends JudgmentResult<Q>>(original: T): T => {
+          const admitted = admit(original);
+          // A caller restriction cannot replace or project the scope-owned admission. It sees its snapshot.
+          if (originalResultCapture) {
+            const restricted: unknown = originalResultCapture(admitted);
+            if (restricted !== admitted) {
+              try { void Promise.prototype.then.call(restricted, undefined, () => {}); } catch { /* Only genuine promises need rejection draining. */ }
+              throw new JudgmentAuthorityRetiredError();
             }
-            check(); return admitted;
-          } } : {}),
-        };
-        assertOwnedResultCapture = strictResultCapture ? retainPropertyPlan(ownedRequest, ['captureResult']) : undefined;
-        check();
-        return ownedAsk(ownedRequest);
-      }), active);
+          }
+          return admitted;
+        } } : {}),
+      };
+      const result = await interrupt(Promise.resolve().then(() => ownedAsk(ownedRequest)), active);
       check();
       // Admission runs on the untouched provider object. Never evaluate an
       // accessor or retain a site-rejected decision identifier first.
-      assertResult?.(result);
-      check();
-      const admitted = reuseObservedJudgmentResult(result, resultFrame ? resultFrame.capture(result) : captureResult ? captureResult(result) : result);
-      check();
+      const admitted = admit(result);
       const decision = Object.getOwnPropertyDescriptor(admitted, 'decisionId');
       if (decision?.get || decision?.set || (decision?.value !== undefined && typeof decision.value !== 'string')) throw new JudgmentAuthorityRetiredError();
       const decisionId = decision?.value as string | undefined;
-      check();
       if (decisionId !== undefined) decisionChecks.set(decisionId, check);
       return admitted;
     },
   };
-  current();
   const sourceIdentity = ownerIdentity ?? ordinaryIdentity(base, model);
   let identity = binding.identities.get(sourceIdentity);
   if (!identity) { identity = Object.freeze({}); binding.identities.set(sourceIdentity, identity); }
-  current();
   return Object.freeze({ identity: installation.identityFor(identity), port, signal, assertCurrent: current, consumeObservation: () => {
     current(); consumed = true;
-    return Object.freeze({ assertCurrent: () => installationCurrent() });
+    return Object.freeze({ assertCurrent: () => { if (!installed()) throw new JudgmentAuthorityRetiredError(); } });
   } });
 }

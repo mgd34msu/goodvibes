@@ -1,12 +1,15 @@
 /**
- * timing.ts, every interval the state machine uses, derived from four
+ * timing.ts, every interval the state machine uses, derived from three
  * operator-facing settings.
  *
  * Only `heartbeatSeconds`, `masterTimeoutSeconds` and `bootProbeSeconds` are
- * configurable. Everything else is derived PROPORTIONALLY from them rather
- * than hard-coded, so shortening the timeouts (which is exactly what a test
- * rig and a live sandbox both do) shortens the whole protocol coherently
- * instead of leaving a 30-second grace window inside a 4-second election.
+ * configurable. Their ranges are the config schema's, and the rules between
+ * them are applied once by resolveClusterSettings; they are used here as
+ * given. Everything else is derived PROPORTIONALLY from them rather than
+ * hard-coded, so shortening the timeouts (which is exactly what a test rig and
+ * a live sandbox both do) shortens the whole protocol coherently instead of
+ * leaving a 30-second grace window inside a 4-second election. A test that
+ * needs sub-second timing passes a ClusterTiming directly.
  */
 import type { ClusterSettings } from './types.js';
 
@@ -91,9 +94,9 @@ function clamp(value: number, min: number, max: number): number {
 }
 
 export function deriveClusterTiming(settings: ClusterSettings): ClusterTiming {
-  const heartbeatMs = clamp(settings.heartbeatSeconds * 1_000, 100, 3_600_000);
-  const masterTimeoutMs = clamp(settings.masterTimeoutSeconds * 1_000, heartbeatMs * 2, 86_400_000);
-  const bootProbeMs = clamp(settings.bootProbeSeconds * 1_000, 50, masterTimeoutMs);
+  const heartbeatMs = settings.heartbeatSeconds * 1_000;
+  const masterTimeoutMs = settings.masterTimeoutSeconds * 1_000;
+  const bootProbeMs = settings.bootProbeSeconds * 1_000;
   const electionWindowMs = clamp(masterTimeoutMs / 4, 100, 5_000);
   return {
     bootProbeMs,

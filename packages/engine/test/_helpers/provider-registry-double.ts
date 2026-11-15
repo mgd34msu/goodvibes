@@ -5,24 +5,19 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ProviderRegistry } from '../../platform/src/platform/providers/registry.ts';
-import type { LLMProvider } from '../../platform/src/platform/providers/interface.ts';
+import type { RegistrableProvider } from '../../platform/src/platform/providers/interface.ts';
 
-export function makeProvider(name: string, models: readonly string[] = []): LLMProvider {
+export function makeProvider(name: string, models: readonly string[] = []): RegistrableProvider {
   return {
     name,
     models: [...models],
-    // Every provider, whether its models array starts empty or already
-    // populated, needs a declared modelSource to pass the registration-time
-    // contract check (model-source-contract.ts): a non-empty array is no
-    // longer accepted by itself now that the bare-array escape hatch is
-    // closed, so this test double always declares 'live-discovery', the same
-    // as any real provider whose list starts empty (e.g. Anthropic).
+    // ProviderRegistry.register() takes only a provider that names its model source.
     modelSource: { kind: 'live-discovery' },
     // Registration-time credential contract: doubles declare 'anonymous'.
     credentialAuthority: 'anonymous',
     chat: async () => { throw new Error('not implemented'); },
     stream: async function* () { /* empty */ },
-  } as unknown as LLMProvider;
+  } as unknown as RegistrableProvider;
 }
 
 /** Build a ProviderRegistry with the minimum required options provided by test doubles. */

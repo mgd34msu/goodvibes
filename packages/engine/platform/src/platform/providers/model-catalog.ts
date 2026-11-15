@@ -81,7 +81,7 @@ function identityFor(models: readonly CatalogModel[]): ModelIdentityResolver {
  * Legacy string-keyed catalog price lookup. An id with no exact entry is
  * matched through published canonical identities; an unresolved identity remains unpriced. Returns null when the model is
  * absent from the catalog or its entry carries no cost, absent must never
- * look free. Prefer ProviderRegistry.resolveModelPricing (model-pricing.ts),
+ * look free; a metered provider's listed zero is unpriced too. Prefer ProviderRegistry.resolveModelPricing (model-pricing.ts),
  * which resolves per (provider, model) with manual/provider/catalog
  * precedence and an explicit source.
  */
@@ -93,13 +93,11 @@ export function getCostFromPricingCatalog(
 ): CatalogModelPricing | null {
   const exact = catalog.models.find((model) => model.id === modelId);
   if (exact) {
-    if (exact.tier === 'free') return { input: 0, output: 0 };
     return exact.pricing ? { ...exact.pricing } : null;
   }
   const same = catalog.models.length > 0 ? identityFor(catalog.models).lookup({ id: modelId }, 'providers.model-catalog.cost-identity') : null;
   const match = same === null ? undefined : catalog.models.find((model) => model.id === same);
   if (match) {
-    if (match.tier === 'free') return { input: 0, output: 0 };
     return match.pricing ? { ...match.pricing } : null;
   }
   if (catalog.models.length === 0) {

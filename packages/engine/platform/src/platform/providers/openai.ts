@@ -35,7 +35,7 @@ import {
 } from './tool-formats.js';
 import type { OpenAIToolCall } from './tool-formats.js';
 import { accumOpenAIToolCall, finalizeOpenAIToolCalls, applyOpenAIChunkUsage, resolveOpenAIToolCallsAndFallback } from './openai-stream-helpers.js';
-import { resolveCompletedStopReason, withProviderStopReason } from './provider-stop-reason.js';
+import { withProviderStopReason } from './provider-stop-reason.js';
 import { isOpenAiSpentQuota, openAiRetryAfterMs, parseRateLimitHeaders } from './rate-limit-headers.js';
 import type { CacheHitTracker } from './cache-strategy.js';
 import { extractOpenAIStreamTextDelta } from './openai-stream-delta.js';
@@ -198,7 +198,8 @@ export class OpenAIProvider implements LLMProvider {
             model,
             messages: openaiMessages as Parameters<OpenAIChatCreate>[0]['messages'],
             ...(openaiTools ? { tools: openaiTools as Parameters<OpenAIChatCreate>[0]['tools'] } : {}),
-            ...(maxTokens ? { max_tokens: maxTokens } : {}),
+            // Chat completions takes max_completion_tokens from every current model; the GPT-5 and o-series models refuse max_tokens.
+            ...(maxTokens ? { max_completion_tokens: maxTokens } : {}),
             ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
             stream: true,
             stream_options: { include_usage: true },
@@ -293,11 +294,11 @@ export class OpenAIProvider implements LLMProvider {
           outputTokens,
           ...(cacheReadTokens > 0 ? { cacheReadTokens } : {}),
         },
-        stopReason: resolveCompletedStopReason(stopReason, responseText),
+        stopReason,
         ...withProviderStopReason(rawStopReason),
         ...(rateLimit ? { rateLimit } : {}),
       };
-    }, { ...(signal ? { signal } : {}), ...(params.beforeAttempt ? { beforeAttempt: params.beforeAttempt } : {}), canRetry }, onRetry), { provider: this.name, model })).result;
+    }, { ...(signal ? { signal } : {}), ...(params.beforeAttempt ? { beforeAttempt: params.beforeAttempt } : {}), ...(params.maxRetries !== undefined ? { maxRetries: params.maxRetries } : {}), canRetry }, onRetry), { provider: this.name, model })).result;
   }
 
   async embed(request: ProviderEmbeddingRequest): Promise<ProviderEmbeddingResult> {
@@ -487,7 +488,7 @@ export class OpenAIProvider implements LLMProvider {
       model: params.model,
       messages: openaiMessages,
       ...(openaiTools ? { tools: openaiTools } : {}),
-      ...(params.maxTokens ? { max_tokens: params.maxTokens } : {}),
+      ...(params.maxTokens ? { max_completion_tokens: params.maxTokens } : {}),
       stream: false,
     };
   }

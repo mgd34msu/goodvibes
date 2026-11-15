@@ -14,6 +14,7 @@ export type {
   ProviderRuntimeMetadata,
   ProviderRuntimeMetadataDeps,
   ProviderUsageCostMetadata,
+  RegistrableProvider,
   StreamDelta,
 } from './interface.js';
 export {
@@ -26,11 +27,6 @@ export type {
   ModelProviderSource,
   OnboardingModelCopy,
 } from './keyless-default.js';
-export {
-  verifyProviderModelSource,
-  formatProviderModelSourceRejection,
-} from './model-source-contract.js';
-export type { ModelSourceCheckable, ProviderModelSourceViolation } from './model-source-contract.js';
 export {
   buildProviderNativeModelDefinition,
   diffModelIds,

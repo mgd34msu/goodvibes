@@ -1,14 +1,14 @@
 import { DecisionRouterProvider } from './decision-router.js';
 import { installCatalogModelFacts } from './model-catalog-facts.js';
 import { isDeepStrictEqual } from 'node:util';
-import type { LLMProvider, ProviderRuntimeMetadata, ProviderRuntimeMetadataDeps } from './interface.js';
+import type { LLMProvider, ProviderRuntimeMetadata, ProviderRuntimeMetadataDeps, RegistrableProvider } from './interface.js';
 import { ProviderNotFoundError } from './provider-not-found-error.js';
 import { join } from 'node:path';
 import { logger } from '../utils/logger.js';
 import { ProviderCapabilityRegistry, type ProviderCapability, type RequestProfile, type RouteExplanation } from './capabilities.js';
 import { recordProviderAdapterKind } from './adapter-kind.js';
 import type { DiscoveredServer } from '../discovery/scanner.js';
-import { createDiscoveredProvider, getDiscoveredReasoningFormat } from './discovered-factory.js';
+import { createDiscoveredProvider } from './discovered-factory.js';
 import { getDiscoveredTraits } from './discovered-traits.js';
 import { getConfiguredApiKeys, getConfiguredModelId, resolveApiKeys } from '../config/index.js';
 import type { RuntimeEventBus } from '../runtime/events/index.js';
@@ -44,7 +44,6 @@ import { initProviderCatalog, refreshProviderCatalog } from './registry-catalog-
 import { findAlternativeModel, RegistryRoutingReadings } from './registry-routing.js';
 import type { ModelTierStore } from '../routing/model-tiers.js';
 import { buildModelRegistry, diffCustomModels, findModelDefinition, findModelDefinitionForProvider } from './registry-models.js';
-import { assertProviderModelSource } from './model-source-contract.js';
 import { assertProviderCredentialAuthority } from './credential-authority-contract.js';
 import { resolveModelReference } from './model-id-resolution.js';
 import { ConfiguredModelFollower } from './registry-configured-model.js';
@@ -71,11 +70,16 @@ export class ProviderRegistry {
   private runtimeProviderNames: Set<string> = new Set();
   private liveModelDiscoveryTail: Promise<void> = Promise.resolve();
   /**
-   * Providers the custom-provider loader put in `providers`, by name, with the
-   * provider each one replaced (a built-in of the same name), if any. A reload
-   * that no longer lists a name removes it and puts the replaced one back.
+   * Providers the custom-provider loader put in `providers`, by name. A reload
+   * that no longer lists a name removes it.
    */
-  private customProviderNames: Map<string, LLMProvider | undefined> = new Map();
+  private customProviderNames: Set<string> = new Set();
+  /**
+   * The API key each builtin was last built with, by provider id (the same
+   * names `apiKey(name)` is asked for). A credential refresh rebuilds only the
+   * providers whose entry changed.
+   */
+  private builtinKeys: Readonly<Record<string, string>> = {};
   private customModels: ModelDefinition[] = [];
   private runtimeModels: ModelDefinition[] = [];
   private discoveredModels: ModelDefinition[] = [];
@@ -167,10 +171,25 @@ export class ProviderRegistry {
     }
   }
 
-  private registerBuiltins(resolvedKeys?: Record<string, string>): void {
-    // Construction: env keys (sync). Refresh: resolver map (env -> secrets), force-overwriting builtins.
-    const apiKey = (name: string): string => resolvedKeys?.[name] ?? getConfiguredApiKeys()[name] ?? '';
-    registerBuiltinProviders(this, (name) => (resolvedKeys ? false : this.providers.has(name)), apiKey, {
+  /**
+   * Construction registers every builtin with the environment's keys. A
+   * credential refresh passes the resolved keys and the provider ids whose key
+   * changed: only those are rebuilt and replaced, so every other provider keeps
+   * its live model list, its Gemini tool-loop signatures, its warm caches and
+   * its exchanged sessions.
+   */
+  private registerBuiltins(refresh?: { readonly keys: Readonly<Record<string, string>>; readonly changed: ReadonlySet<string> }): void {
+    if (!refresh) this.builtinKeys = getConfiguredApiKeys();
+    const keys = this.builtinKeys;
+    const apiKey = (name: string): string => keys[name] ?? '';
+    // A plugin's runtime provider under a builtin's name stays in place.
+    const replaceChanged = (provider: RegistrableProvider): void => {
+      if (refresh?.changed.has(provider.name) && !this.runtimeProviderNames.has(provider.name)) this.register(provider);
+    };
+    const registrar = refresh ? { register(provider: RegistrableProvider): void { replaceChanged(provider); } } : this;
+    // The compat loop builds a provider only when this says it is missing.
+    const hasProvider = refresh ? (name: string) => !refresh.changed.has(name) : (name: string) => this.providers.has(name);
+    registerBuiltinProviders(registrar, hasProvider, apiKey, {
       cacheHitTracker: this.cacheHitTracker,
       resolveProvider: (providerName) => this.require(providerName),
       getCatalogModels: () => this.syntheticCanonicalModels,
@@ -180,6 +199,7 @@ export class ProviderRegistry {
       runtimeBus: this.runtimeBus,
       persistenceRoot: this.getPersistenceRoot(),
       cachePolicy: this.configManager, // cache.enabled / cache.stableTtl, read per request like their hit-rate siblings
+      settings: this.configManager, // cloudflare.accountId for the Cloudflare AI Gateway base URL
     });
     if (!this.providers.has('decision-router')) this.register(new DecisionRouterProvider({
       settings: () => this.configManager.get('provider.decisionRouter'),
@@ -194,16 +214,32 @@ export class ProviderRegistry {
 
   /**
    * Live credential refresh: re-resolves every builtin key (env -> secrets
-   * store) and force re-registers builtins, so a key written to the secrets
-   * store is usable in the SAME process. Runs at boot and on secrets changes.
+   * store) and replaces only the builtins whose key changed, so a key written
+   * to the secrets store is usable in the SAME process and an unrelated secret
+   * change replaces nothing. Runs at boot and on secrets changes.
    */
   async refreshProviderCredentials(): Promise<void> {
     const resolved = await resolveApiKeys(this.runtimeMetadataDeps.secretsManager);
-    this.registerBuiltins(resolved);
-    this._invalidateModelRegistry();
-    if (this.runtimeBus) {
-      emitProvidersChanged(this.runtimeBus, { sessionId: 'system', traceId: `providers:credentials:${Date.now()}`, source: 'provider-registry' }, { added: [], removed: [], updated: [...this.providers.keys()] });
+    const previous = this.builtinKeys;
+    const changed = new Set<string>();
+    for (const name of new Set([...Object.keys(previous), ...Object.keys(resolved)])) {
+      if ((previous[name] ?? '') !== (resolved[name] ?? '')) changed.add(name);
     }
+    if (changed.size === 0) return;
+    this.builtinKeys = { ...resolved };
+    this.registerBuiltins({ keys: this.builtinKeys, changed });
+    // Which failover groups have a callable backend follows the keys.
+    this.syntheticCanonicalModels = buildSyntheticCanonicalModels(this.catalogModels, this.catalogProviderUsable);
+    this._invalidateModelRegistry();
+    const updated = [...changed].filter((name) => this.providers.has(name));
+    if (this.runtimeBus && updated.length > 0) {
+      emitProvidersChanged(this.runtimeBus, { sessionId: 'system', traceId: `providers:credentials:${Date.now()}`, source: 'provider-registry' }, { added: [], removed: [], updated });
+    }
+  }
+
+  /** Release what providers hold outside this process (Gemini's server-side cache resources). Call once at shutdown. */
+  async disposeProviders(): Promise<void> {
+    await Promise.all([...this.providers.values()].map((provider) => disposeProvider(provider)));
   }
 
   private getPersistenceRoot(): string {
@@ -227,10 +263,16 @@ export class ProviderRegistry {
     this.catalogModels = [...models];
     installCatalogModelFacts(this.catalogModels);
     this.pricingCatalog = { fetchedAt, models: this.catalogModels };
-    this.syntheticCanonicalModels = buildSyntheticCanonicalModels(this.catalogModels, this.routingReadings.synthetic);
+    this.syntheticCanonicalModels = buildSyntheticCanonicalModels(this.catalogModels, this.catalogProviderUsable);
     this.capabilityRegistry.setModelFactsSource(modelCapabilityFactsFromCatalog(this.catalogModels));
     this._invalidateModelRegistry();
   }
+
+  /** A catalog provider can be called when a provider answers for it and says it is configured (environment or stored key). */
+  private readonly catalogProviderUsable = (providerId: string): boolean => {
+    const provider = this.tryGet(providerId);
+    return provider !== undefined && (provider.isConfigured?.() ?? true);
+  };
 
   private getSuppressedCatalogModelRegistryKeys(): Set<string> {
     return new Set([...this.runtimeCatalogSuppressedRegistryKeys.values()].flat());
@@ -265,14 +307,31 @@ export class ProviderRegistry {
     return this._contextWindowOverrideStore;
   }
 
-  /** Register a provider. Overwrites any existing entry with the same name. Fails closed on a dead model source (model-source-contract.ts). */
-  register(provider: LLMProvider): void {
-    assertProviderModelSource(provider);
+  /**
+   * Register a provider. Overwrites any existing entry with the same name. The
+   * type requires a declared model source; the credential authority is checked
+   * at admission.
+   */
+  register(provider: RegistrableProvider): void {
+    this.admit(provider, { nativeModels: true });
+    this._invalidateModelRegistry();
+  }
+
+  /**
+   * The one way into `providers`, shared by builtin, custom, runtime and
+   * discovered registration: the credential authority is checked, the adapter
+   * kind recorded, the provider's own model list seeded (unless the caller
+   * lists its models itself) and a replaced provider disposed.
+   */
+  private admit(provider: LLMProvider, options: { readonly nativeModels: boolean }): void {
     assertProviderCredentialAuthority(provider);
+    const replaced = this.providers.get(provider.name);
     this.providers.set(provider.name, provider);
     recordProviderAdapterKind(provider);
-    this.providerNativeModels = applyProviderNativeModelBaseline(this.providerNativeModels, provider);
-    this._invalidateModelRegistry();
+    this.providerNativeModels = options.nativeModels
+      ? applyProviderNativeModelBaseline(this.providerNativeModels, provider)
+      : removeProviderNativeModels(this.providerNativeModels, provider.name);
+    if (replaced && replaced !== provider) void disposeProvider(replaced);
   }
 
   /** The picker-open re-check hook (see registry-live-model-discovery.ts): force bypasses each provider's TTL cache. */
@@ -305,12 +364,9 @@ export class ProviderRegistry {
     if (this.providers.has(provider.name) && !this.runtimeProviderNames.has(provider.name) && !replace) {
       throw new Error(`Provider '${provider.name}' is already registered.`);
     }
-    // A plugin's model source may be the explicit `models` list below (this.runtimeModels)
-    // rather than the LLMProvider's own fields, only contract-check when both are empty.
-    if (models.length === 0) assertProviderModelSource(provider);
-    this.providers.set(provider.name, provider);
-    recordProviderAdapterKind(provider);
-    this.providerNativeModels = applyProviderNativeModelBaseline(this.providerNativeModels, provider);
+    // A plugin's models are the explicit `models` list below (this.runtimeModels);
+    // the provider's own list is seeded too when it declares a model source.
+    this.admit(provider, { nativeModels: true });
     this.runtimeProviderNames.add(provider.name);
     const incoming = models.map((model) => withRegistryKey({
       ...model,
@@ -373,6 +429,7 @@ export class ProviderRegistry {
     // Unregister previously discovered providers
     for (const name of this.discoveredProviderNames) {
       this.providers.delete(name);
+      recordProviderAdapterKind({ name });
     }
     this.discoveredProviderNames.clear();
     this.discoveredModels = [];
@@ -382,12 +439,10 @@ export class ProviderRegistry {
       // Skip servers with no models, defaultModel would be undefined
       if (server.models.length === 0) continue;
 
-      const reasoningFormat = getDiscoveredReasoningFormat(server.serverType);
       const traits = getDiscoveredTraits(server.serverType);
-
-      const provider = createDiscoveredProvider(server);
-
-      this.providers.set(server.name, provider);
+      // The scanner's answer carries each model's window and output limit, so
+      // its definitions below are the model list, not the provider's own.
+      this.admit(createDiscoveredProvider(server), { nativeModels: false });
       this.discoveredProviderNames.add(server.name);
 
       for (const modelId of server.models) {
@@ -427,7 +482,7 @@ export class ProviderRegistry {
   }
 
   /**
-   * Retrieve a provider by name, applying subscription route aliasing.
+   * Retrieve a provider by name (or its catalog alias).
    * Throws a {@link ProviderNotFoundError} if no provider with that name is registered.
    *
    * The error message includes the list of all currently registered provider IDs
@@ -444,7 +499,9 @@ export class ProviderRegistry {
   }
 
   /**
-   * Retrieve a provider by name, applying subscription route aliasing.
+   * Retrieve the provider registered under a name (or its catalog alias). An
+   * `openai:` model is the API-key provider and an `openai-subscriber:` model the
+   * subscription; a stored subscription never redirects `openai`.
    * Returns `undefined` if no provider with that name (or its catalog alias) is registered.
    *
    * Prefer {@link require} when you know the provider must exist and want a clear
@@ -453,9 +510,6 @@ export class ProviderRegistry {
    * @param name - Provider name as registered (e.g. `'anthropic'`, `'openai'`).
    */
   tryGet(name: string): LLMProvider | undefined {
-    if (name === 'openai' && this.subscriptionManager.get('openai')) {
-      return this.providers.get('openai-subscriber');
-    }
     const p = this.providers.get(name);
     if (p) return p;
     // A subscription is an authentication route, not permission to use API billing.
@@ -474,11 +528,8 @@ export class ProviderRegistry {
   }
 
   /**
-   * Retrieve the directly-registered provider without subscription route aliasing.
-   * Throws if no provider with that name (or its catalog alias) is registered.
-   *
-   * Note: Unlike {@link require}, this method does NOT apply subscription route aliasing
-   * (e.g. the openai-subscriber redirect). Prefer {@link require} for general use.
+   * Retrieve the directly-registered provider. Throws if no provider with that
+   * name (or its catalog alias) is registered.
    */
   getRegistered(name: string): LLMProvider {
     const p = this.providers.get(name);
@@ -803,37 +854,23 @@ export class ProviderRegistry {
     const loadedNames = new Set<string>();
     for (const { provider } of result.providers) {
       try {
-        const shadowed = this.customProviderNames.has(provider.name)
-          ? this.customProviderNames.get(provider.name)
-          : this.providers.get(provider.name);
         this.register(provider);
-        this.customProviderNames.set(provider.name, shadowed);
+        this.customProviderNames.add(provider.name);
         loadedNames.add(provider.name);
       } catch (err) {
         warnings.push(`[registry] Custom provider '${provider.name}' rejected at registration: ${summarizeError(err)}`);
       }
     }
-    // A provider whose file was deleted or renamed is no longer offered; a
-    // built-in it had replaced comes back.
-    for (const [name, shadowed] of [...this.customProviderNames]) {
+    // A provider whose file was deleted or renamed is no longer offered. A
+    // file can never hold a built-in's name (`reservedNames`), so nothing is
+    // restored in its place.
+    for (const name of [...this.customProviderNames]) {
       if (loadedNames.has(name)) continue;
       this.customProviderNames.delete(name);
       if (this.runtimeProviderNames.has(name)) continue;
-      // Drop what the custom provider left behind (its native models and recorded adapter kind) so the
-      // restored built-in, or the absence of one, is not described by the removed provider.
       this.providerNativeModels = removeProviderNativeModels(this.providerNativeModels, name);
       recordProviderAdapterKind({ name });
-      if (shadowed) {
-        try {
-          this.register(shadowed);
-        } catch (err) {
-          warnings.push(`[registry] Built-in provider '${name}' was restored without re-checking it: ${summarizeError(err)}`);
-          this.providers.set(name, shadowed);
-          recordProviderAdapterKind(shadowed);
-        }
-      } else {
-        this.providers.delete(name);
-      }
+      this.providers.delete(name);
     }
 
     this.customModels = result.models;
@@ -1037,5 +1074,14 @@ export class ProviderRegistry {
       refreshCatalog: () => this.refreshCatalog({ contextWindowEnrichment }),
       afterCatalogApplied: () => {},
     };
+  }
+}
+
+/** A provider's own cleanup, logged and never thrown: a replaced or closing provider must not fail its caller. */
+async function disposeProvider(provider: LLMProvider): Promise<void> {
+  try {
+    await provider.dispose?.();
+  } catch (error) {
+    logger.warn('[registry] provider cleanup failed', { provider: provider.name, error: summarizeError(error) });
   }
 }

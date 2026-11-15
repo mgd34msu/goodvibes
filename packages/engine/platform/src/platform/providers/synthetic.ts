@@ -30,21 +30,8 @@ export interface SyntheticBackend {
   envVars?: string[] | undefined;
 }
 
-/**
- * Returns true if the backend has at least one configured API key.
- * Backends with empty envVars (or undefined) are always available (no key needed).
- *
- * Inlined here to avoid the circular import chain:
- * synthetic.ts -> model-catalog.ts -> registry.ts -> synthetic.ts
- */
-function hasKey(backend: SyntheticBackend): boolean {
-  const vars = backend.envVars;
-  if (!vars || vars.length === 0) return true;
-  return vars.some(v => {
-    const val = process.env[v]!;
-    return typeof val === 'string' && val.length > 0;
-  });
-}
+/** Whether a backend can be called now: its provider is registered and configured. */
+type BackendUsable = (backend: SyntheticBackend) => boolean;
 
 /** True when the call ended because the caller cancelled it. */
 function isAbort(err: unknown, signal: AbortSignal | undefined): boolean {
@@ -117,13 +104,14 @@ export function getSyntheticModelInfo(
 function buildBackendList(
   syntheticId: string,
   getCatalogModels: SyntheticCatalogAccessor,
+  isUsable: BackendUsable,
 ): { backends: SyntheticBackend[]; canonical: CanonicalModel } | null {
   const catalog = [...getCatalogModels()];
   const canonical = catalog.find(m => m.id === syntheticId);
   if (!canonical) return null;
 
-  // Key-aware filtering: skip backends without configured keys
-  const keyed = canonical.backends.filter(hasKey);
+  // Only backends whose provider is configured (a key in the environment or the credential store).
+  const keyed = canonical.backends.filter(isUsable);
 
   // Sort: context desc → maxOutput desc
   const sorted = keyed.slice().sort((a, b) => {
@@ -159,6 +147,7 @@ function bestCompositeScoreForModelWithLookup(
 function resolveBestFree(
   getCatalogModels: SyntheticCatalogAccessor,
   getBenchmarks: BenchmarkLookup,
+  isUsable: BackendUsable,
 ): string | null {
   const catalog = [...getCatalogModels()];
   const freeModels = catalog.filter(m => m.tier === 'free');
@@ -167,7 +156,7 @@ function resolveBestFree(
   let bestScore = -Infinity;
 
   for (const model of freeModels) {
-    const hasAnyKey = model.backends.some(hasKey);
+    const hasAnyKey = model.backends.some(isUsable);
     if (!hasAnyKey) continue;
 
     const effectiveScore = bestCompositeScoreForModelWithLookup(model, getBenchmarks);
@@ -189,6 +178,7 @@ function resolveNextBestFree(
   excludeIds: Set<string>,
   getCatalogModels: SyntheticCatalogAccessor,
   getBenchmarks: BenchmarkLookup,
+  isUsable: BackendUsable,
 ): string | null {
   const catalog = [...getCatalogModels()];
   const freeModels = catalog.filter(m => m.tier === 'free' && !excludeIds.has(m.id));
@@ -197,7 +187,7 @@ function resolveNextBestFree(
   let bestScore = -Infinity;
 
   for (const model of freeModels) {
-    const hasAnyKey = model.backends.some(hasKey);
+    const hasAnyKey = model.backends.some(isUsable);
     if (!hasAnyKey) continue;
 
     const effectiveScore = bestCompositeScoreForModelWithLookup(model, getBenchmarks);
@@ -225,9 +215,9 @@ export function boundedCooldownMs(waitMs: number | undefined): number {
 const TRANSIENT_COOLDOWN_MS = 5_000;
 
 /**
- * Maximum duration to transparently wait for a cooling-down backend before
- * surfacing a 429 error to the caller. Waits of up to 2 minutes are hidden;
- * longer cooldowns are escalated immediately.
+ * Maximum duration to wait for a cooling-down backend before surfacing a 429
+ * error to the caller. A wait of up to 2 minutes is taken and reported through
+ * `onRetry` (who is cooling down and for how long); a longer one is escalated.
  */
 const MAX_AUTO_WAIT_MS = 120_000;
 
@@ -242,10 +232,7 @@ export class SyntheticProvider implements LLMProvider {
   /**
    * The `models` getter below is intentionally secondary, this provider's
    * real selectable models are sourced from the shared, independently
-   * refreshed model catalog (`getCatalogModels`) plus the `best-free` alias,
-   * exactly the `catalog-backed` case the model-source contract
-   * (`model-source-contract.ts`) documents this provider as the canonical
-   * example of.
+   * refreshed model catalog (`getCatalogModels`) plus the `best-free` alias.
    */
   readonly modelSource: ProviderModelSource = { kind: 'catalog-backed' };
   private readonly getCatalogModels: SyntheticCatalogAccessor;
@@ -289,20 +276,50 @@ export class SyntheticProvider implements LLMProvider {
     this.runtimeBus = options.runtimeBus ?? null;
   }
 
+  /** A backend is usable when its provider is registered and says it is configured (environment or stored key). */
+  private readonly isUsable: BackendUsable = (backend) => {
+    let provider: LLMProvider | undefined;
+    try {
+      provider = this.resolveProvider(backend.providerName);
+    } catch {
+      return false;
+    }
+    if (!provider) return false;
+    return provider.isConfigured?.() ?? true;
+  };
+
   async chat(params: ChatRequest): Promise<ChatResponse> {
     let syntheticId = params.model;
+    const isUsable = this.isUsable;
+    // This layer is the one that retries: each backend gets one attempt, and
+    // every rotation and cooldown wait is reported through the caller's onRetry.
+    let attempt = 0;
+    const report = (maxAttempts: number, delayMs: number, message: string, cause?: unknown): void => {
+      attempt += 1;
+      params.onRetry?.(attempt, Math.max(maxAttempts, attempt), delayMs, new Error(message, cause === undefined ? undefined : { cause }));
+    };
+    const backendRequest = (modelId: string, onDelivered: () => void): ChatRequest => ({
+      ...params,
+      model: modelId,
+      maxRetries: 0,
+      onRetry: undefined,
+      ...(params.onDelta
+        ? { onDelta: (delta: StreamDelta) => { onDelivered(); params.onDelta!(delta); } }
+        : {}),
+    });
 
     // Resolve 'best-free' alias
     if (syntheticId === 'best-free') {
-      const resolved = resolveBestFree(this.getCatalogModels, this.getBenchmarks);
+      const resolved = resolveBestFree(this.getCatalogModels, this.getBenchmarks, isUsable);
       if (!resolved) {
         throw new ProviderError(
-          'No API keys configured for any provider offering free models',
+          'No configured provider offers a free model, so best-free has nothing to run on.',
           {
             statusCode: 400,
             provider: this.name,
             operation: 'chat',
             phase: 'routing',
+            guidance: 'Add an API key for a provider that serves free models (for example OpenRouter), or pick another model.',
           },
         );
       }
@@ -310,7 +327,7 @@ export class SyntheticProvider implements LLMProvider {
       syntheticId = resolved;
     }
 
-    const result = buildBackendList(syntheticId, this.getCatalogModels);
+    const result = buildBackendList(syntheticId, this.getCatalogModels, isUsable);
 
     if (!result) {
       throw new ProviderError(`Unknown synthetic model: ${syntheticId}`, {
@@ -325,12 +342,13 @@ export class SyntheticProvider implements LLMProvider {
 
     if (backends.length === 0) {
       throw new ProviderError(
-        `No API keys configured for any provider offering ${canonical.id}`,
+        `None of the ${canonical.backendCount} providers offering ${canonical.id} is configured.`,
         {
           statusCode: 400,
           provider: this.name,
           operation: 'chat',
           phase: 'routing',
+          guidance: `Add an API key for one of: ${[...new Set(canonical.backends.map((backend) => backend.providerName))].join(', ')}.`,
         },
       );
     }
@@ -394,13 +412,7 @@ export class SyntheticProvider implements LLMProvider {
       // from that point the failure is surfaced instead of rotated past.
       let delivered = false;
       try {
-        const response = await provider.chat({
-          ...params,
-          model: backend.modelId,
-          ...(params.onDelta
-            ? { onDelta: (delta: StreamDelta) => { delivered = true; params.onDelta!(delta); } }
-            : {}),
-        });
+        const response = await provider.chat(backendRequest(backend.modelId, () => { delivered = true; }));
 
         // Success, update active backend
         this.activeBackend.set(syntheticId, idx);
@@ -432,6 +444,7 @@ export class SyntheticProvider implements LLMProvider {
 
           logger.info(`[Synthetic] ${backend.providerName} ${outOfCredit ? 'out of credit' : 'rate-limited'} for ${syntheticId}, cooldown ${Math.round(cooldownMs / 1000)}s`);
           errors.push({ backend, error: err as Error });
+          report(backends.length, 0, `${backend.providerName} is ${outOfCredit ? 'out of credit' : 'rate-limited'} for ${syntheticId}; trying the next provider.`, err);
           continue;
         }
         // 400 Bad Request, the request itself is malformed, no point trying other backends
@@ -455,6 +468,7 @@ export class SyntheticProvider implements LLMProvider {
           this.cooldowns.set(syntheticId, cooldownArr);
           logger.info(`[Synthetic] ${backend.providerName} returned ${(err as ProviderError).statusCode} for ${syntheticId}, trying next backend`);
           errors.push({ backend, error: err as Error });
+          report(backends.length, 0, `${backend.providerName} refused ${syntheticId} (${(err as ProviderError).statusCode}); trying the next provider.`, err);
           continue;
         }
 
@@ -465,6 +479,7 @@ export class SyntheticProvider implements LLMProvider {
         if (TRANSIENT_COOLDOWN_MS < shortestCooldown) shortestCooldown = TRANSIENT_COOLDOWN_MS;
         logger.debug(`[Synthetic] ${backend.providerName} failed for ${syntheticId}: ${summarizeError(err) ?? err}, trying next backend`);
         errors.push({ backend, error: err as Error });
+        report(backends.length, 0, `${backend.providerName} failed for ${syntheticId}: ${summarizeError(err)}; trying the next provider.`, err);
         continue;
       }
     }
@@ -490,6 +505,8 @@ export class SyntheticProvider implements LLMProvider {
           Math.round(waitMs / 1000)
         }s for ${waitBackend.providerName}…`,
       );
+      report(backends.length + 1, waitMs + COOLDOWN_BUFFER_MS,
+        `Every provider for ${syntheticId} is cooling down; waiting ${Math.ceil(waitMs / 1000)} s for ${waitBackend.providerName}'s rate limit.`);
 
       // Wait with AbortSignal support
       await new Promise<void>((resolve, reject) => {
@@ -526,13 +543,7 @@ export class SyntheticProvider implements LLMProvider {
       let retryDelivered = false;
       try {
         const waitProvider = this.resolveProvider(waitBackend.providerName);
-        const response = await waitProvider.chat({
-          ...params,
-          model: waitBackend.modelId,
-          ...(params.onDelta
-            ? { onDelta: (delta: StreamDelta) => { retryDelivered = true; params.onDelta!(delta); } }
-            : {}),
-        });
+        const response = await waitProvider.chat(backendRequest(waitBackend.modelId, () => { retryDelivered = true; }));
         this.activeBackend.set(syntheticId, waitIdx);
         logger.info(
           `[Synthetic] ${syntheticId} served by ${waitBackend.providerName} (${waitBackend.modelId}) after auto-wait`,
@@ -557,27 +568,22 @@ export class SyntheticProvider implements LLMProvider {
     // Cross-model failover for free tier only
     if (canonical.tier === 'free') {
       const tried = new Set<string>([syntheticId]);
-      let fallbackId = resolveNextBestFree(tried, this.getCatalogModels, this.getBenchmarks);
+      let fallbackId = resolveNextBestFree(tried, this.getCatalogModels, this.getBenchmarks, isUsable);
 
       while (fallbackId) {
         tried.add(fallbackId);
-        const fallbackResult = buildBackendList(fallbackId, this.getCatalogModels);
+        const fallbackResult = buildBackendList(fallbackId, this.getCatalogModels, isUsable);
         if (!fallbackResult || fallbackResult.backends.length === 0) {
-          fallbackId = resolveNextBestFree(tried, this.getCatalogModels, this.getBenchmarks);
+          fallbackId = resolveNextBestFree(tried, this.getCatalogModels, this.getBenchmarks, isUsable);
           continue;
         }
+        report(attempt + 1, 0, `Every provider for ${syntheticId} is unavailable; trying the free model ${fallbackId}.`);
 
         for (const backend of fallbackResult.backends) {
           let fallbackDelivered = false;
           try {
             const provider = this.resolveProvider(backend.providerName);
-            const response = await provider.chat({
-              ...params,
-              model: backend.modelId,
-              ...(params.onDelta
-                ? { onDelta: (delta: StreamDelta) => { fallbackDelivered = true; params.onDelta!(delta); } }
-                : {}),
-            });
+            const response = await provider.chat(backendRequest(backend.modelId, () => { fallbackDelivered = true; }));
 
             this.activeBackend.set(fallbackId, 0);
             logger.info(`[Synthetic] ${syntheticId} exhausted, fell back to ${fallbackId} via ${backend.providerName}`);
@@ -607,7 +613,7 @@ export class SyntheticProvider implements LLMProvider {
         }
 
         // All backends for this fallback exhausted, try next model
-        fallbackId = resolveNextBestFree(tried, this.getCatalogModels, this.getBenchmarks);
+        fallbackId = resolveNextBestFree(tried, this.getCatalogModels, this.getBenchmarks, isUsable);
       }
 
       // All free models exhausted

@@ -15,6 +15,7 @@ import type {
   ProviderEmbeddingRequest,
   ProviderEmbeddingResult,
   ProviderMessage,
+  ProviderModelSource,
   ProviderRuntimeMetadata,
   ProviderRuntimeMetadataDeps,
 } from './interface.js';
@@ -62,6 +63,8 @@ export interface OllamaProviderOptions extends OpenAICompatOptions {
 export class OllamaProvider implements LLMProvider {
   readonly name: string;
   readonly credentialAuthority = 'anonymous' as const;
+  /** The model list is the server's own answer to discovery or its configuration. */
+  readonly modelSource: ProviderModelSource = { kind: 'live-discovery' };
   readonly models: string[];
   readonly capabilities?: Partial<ProviderCapability> | undefined;
 
@@ -115,7 +118,7 @@ export class OllamaProvider implements LLMProvider {
             }
             return null;
           }
-        }, { ...(params.signal ? { signal: params.signal } : {}), ...(params.beforeAttempt ? { beforeAttempt: params.beforeAttempt } : {}), canRetry }, params.onRetry),
+        }, { ...(params.signal ? { signal: params.signal } : {}), ...(params.beforeAttempt ? { beforeAttempt: params.beforeAttempt } : {}), ...(params.maxRetries !== undefined ? { maxRetries: params.maxRetries } : {}), canRetry }, params.onRetry),
         // A null result hands the request to the compat provider, which records it.
         { provider: this.name, model, isHandover: (result) => result === null },
       )).result;

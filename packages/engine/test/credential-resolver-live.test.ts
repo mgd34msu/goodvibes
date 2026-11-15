@@ -21,7 +21,7 @@ import {
   assertProviderCredentialAuthority,
   verifyProviderCredentialAuthority,
 } from '../platform/src/platform/providers/credential-authority-contract.js';
-import type { LLMProvider } from '../platform/src/platform/providers/interface.js';
+import type { RegistrableProvider } from '../platform/src/platform/providers/interface.js';
 
 const GROQ_ENV = 'GROQ_API_KEY';
 let savedEnv: string | undefined;
@@ -108,6 +108,25 @@ describe('request-time credential resolution', () => {
     }
   });
 
+  test('a refresh replaces only the provider whose key changed', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'gv-cred-live-'));
+    try {
+      const secrets = makeSecrets(root);
+      const registry = makeRegistry(root, secrets);
+      const gemini = registry.getRegistered('gemini');
+      const groq = registry.getRegistered('groq');
+      await registry.refreshProviderCredentials();
+      expect(registry.getRegistered('gemini')).toBe(gemini);
+      expect(registry.getRegistered('groq')).toBe(groq);
+      await secrets.set(GROQ_ENV, 'gsk_only_this_one');
+      await registry.refreshProviderCredentials();
+      expect(registry.getRegistered('gemini')).toBe(gemini);
+      expect(registry.getRegistered('groq')).not.toBe(groq);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   test('env var absent + secrets present works (boot refresh applies the stored key)', async () => {
     const root = mkdtempSync(join(tmpdir(), 'gv-cred-live-'));
     try {
@@ -169,12 +188,10 @@ describe('credential-authority registration contract', () => {
       const rogue = {
         name: 'rogue-auth-provider',
         models: ['rogue-model'],
-        // Declared so this fixture fails ONLY the credential-authority check
-        // this test targets, not the separate model-source-contract check
-        // (model-source-contract.ts) that now runs first.
+        // register() takes only a provider that names its model source.
         modelSource: { kind: 'live-discovery' },
         chat: async () => { throw new Error('nope'); },
-      } as unknown as LLMProvider;
+      } as unknown as RegistrableProvider;
       expect(() => registry.register(rogue)).toThrow(/credential authority/i);
       expect(registry.has('rogue-auth-provider')).toBe(false);
 
@@ -182,7 +199,7 @@ describe('credential-authority registration contract', () => {
         ...rogue,
         name: 'declared-auth-provider',
         credentialAuthority: 'anonymous',
-      } as unknown as LLMProvider;
+      } as unknown as RegistrableProvider;
       expect(() => registry.register(declared)).not.toThrow();
     } finally {
       rmSync(root, { recursive: true, force: true });

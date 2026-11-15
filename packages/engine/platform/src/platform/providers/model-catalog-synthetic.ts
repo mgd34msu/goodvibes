@@ -39,16 +39,18 @@ export function nameToSlug(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]/g, '');
 }
 
-function hasConfiguredEnvVar(envVars: readonly string[]): boolean {
-  return envVars.some((envVar) => {
-    const value = process.env[envVar]!;
+/**
+ * Whether a catalog model's provider can be called. The registry answers it
+ * from the provider itself (`isConfigured()`, which sees keys in the credential
+ * store too); this environment reading is only the answer without a registry.
+ */
+export type CatalogProviderUsable = (providerId: string, model: CatalogModel) => boolean;
+
+function isKeyedByEnvironment(_providerId: string, model: CatalogModel): boolean {
+  return model.providerEnvVars.length === 0 || model.providerEnvVars.some((envVar) => {
+    const value = process.env[envVar];
     return typeof value === 'string' && value.length > 0;
   });
-}
-
-/** Whether a catalog model's provider can be called: it needs no key, or one of its key variables is set. */
-function isKeyed(model: CatalogModel): boolean {
-  return model.providerEnvVars.length === 0 || hasConfiguredEnvVar(model.providerEnvVars);
 }
 
 const registryKeyOf = (model: CatalogModel): string => `${model.providerId}:${model.id}`;
@@ -65,8 +67,9 @@ export class SyntheticIdentities {
         const models = options.models();
         if (models !== this.#candidatesFrom) {
           this.#candidatesFrom = models;
+          // Identity is a catalog fact; whether an offering can be called is decided where groups are built.
           this.#candidates = models
-            .filter((model) => model.canonicalModelId && isKeyed(model))
+            .filter((model) => model.canonicalModelId)
             .map((model) => ({ key: registryKeyOf(model), id: model.id, name: model.name, provider: model.providerId,
               canonicalModelId: model.canonicalModelId }));
         }
@@ -91,41 +94,22 @@ export class SyntheticIdentities {
   }
 }
 
-/** Published models available from at least two callable providers. */
-function syntheticCandidatesOf(models: readonly CatalogModel[]): CatalogModel[] {
-  const providersByIdentity = new Map<string, Set<string>>();
-  for (const model of models) {
-    if (!model.canonicalModelId || !isKeyed(model)) continue;
-    const providers = providersByIdentity.get(model.canonicalModelId) ?? new Set<string>();
-    providers.add(model.providerId);
-    providersByIdentity.set(model.canonicalModelId, providers);
-  }
-  return models.filter((model) => model.canonicalModelId && isKeyed(model) && (providersByIdentity.get(model.canonicalModelId)?.size ?? 0) >= 2);
-}
-
-/** Group provider offerings with the same published model identity. */
-export function buildSyntheticCanonicalModels(models: readonly CatalogModel[], identities: Pick<SyntheticIdentities, 'known'>): CanonicalModel[] {
-  const candidates = syntheticCandidatesOf(models);
-  const byKey = new Map(candidates.map((model) => [registryKeyOf(model), model]));
-  const parent = new Map<string, string>();
-  const root = (key: string): string => {
-    let node = key;
-    while (parent.has(node) && parent.get(node) !== node) node = parent.get(node)!;
-    return node;
-  };
-  for (const model of candidates) {
-    const same = identities.known(model);
-    if (!same || !byKey.has(same)) continue;
-    const a = root(registryKeyOf(model));
-    const b = root(same);
-    if (a !== b) parent.set(a < b ? b : a, a < b ? a : b);
-  }
+/**
+ * Group callable provider offerings with the same published model identity
+ * (`canonical_model_id`); a group needs at least two providers. `isUsable`
+ * says which offerings can be called; the registry passes the providers' own
+ * answer, so a key in the credential store counts like one in the environment.
+ */
+export function buildSyntheticCanonicalModels(
+  models: readonly CatalogModel[],
+  isUsable: CatalogProviderUsable = isKeyedByEnvironment,
+): CanonicalModel[] {
   const groups = new Map<string, CatalogModel[]>();
-  for (const model of candidates) {
-    const key = root(registryKeyOf(model));
-    const group = groups.get(key) ?? [];
+  for (const model of models) {
+    if (!model.canonicalModelId || !isUsable(model.providerId, model)) continue;
+    const group = groups.get(model.canonicalModelId) ?? [];
     group.push(model);
-    groups.set(key, group);
+    groups.set(model.canonicalModelId, group);
   }
 
   const canonical: CanonicalModel[] = [];

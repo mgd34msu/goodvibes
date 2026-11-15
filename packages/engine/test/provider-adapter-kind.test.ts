@@ -9,7 +9,7 @@
  */
 import { describe, expect, test } from 'bun:test';
 import { ProviderRegistry } from '../platform/src/platform/providers/registry.js';
-import type { LLMProvider } from '../platform/src/platform/providers/interface.js';
+import type { RegistrableProvider } from '../platform/src/platform/providers/interface.js';
 import type { ProviderAdapterKind } from '../platform/src/platform/providers/adapter-kind.js';
 import { providerAdapterKind } from '../platform/src/platform/providers/adapter-kind.js';
 import { AnthropicCompatProvider } from '../platform/src/platform/providers/anthropic-compat.js';
@@ -35,7 +35,7 @@ function makeRegistry(): ProviderRegistry {
   });
 }
 
-function stubProvider(name: string, adapterKind?: ProviderAdapterKind): LLMProvider {
+function stubProvider(name: string, adapterKind?: ProviderAdapterKind): RegistrableProvider {
   return {
     name,
     models: ['m'],
@@ -43,7 +43,7 @@ function stubProvider(name: string, adapterKind?: ProviderAdapterKind): LLMProvi
     modelSource: { kind: 'live-discovery' },
     credentialAuthority: 'anonymous',
     chat: async () => { throw new Error('not used'); },
-  } as unknown as LLMProvider;
+  } as unknown as RegistrableProvider;
 }
 
 const BUDGET_SPEC: ReasoningEffortSpec = { kind: 'budget_tokens', values: ['low', 'high'], source: 'family', minBudgetTokens: 1024, canDisableReasoning: true };

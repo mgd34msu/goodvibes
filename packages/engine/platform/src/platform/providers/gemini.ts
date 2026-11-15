@@ -513,6 +513,18 @@ export class GeminiProvider implements LLMProvider {
         reader.releaseLock();
       }
 
+      // Gemini closes every candidate with a finishReason; a stream that ends
+      // without one was cut and its text is a truncated answer. Retryable only
+      // while nothing was shown (canRetry).
+      if (!lastFinishReason) {
+        throw new ProviderError('Gemini stream ended without a finish reason; the answer may be truncated.', {
+          statusCode: 502,
+          provider: this.name,
+          operation: 'chat',
+          phase: 'stream',
+        });
+      }
+
       // Use streamed text directly if available (avoids re-parsing duplicated text parts)
       const { text: parsedText, toolCalls, signatures } = fromGeminiParts(allParts);
       for (const [callId, signature] of signatures) {
@@ -545,7 +557,7 @@ export class GeminiProvider implements LLMProvider {
         ...(lastFinishReason ? { providerStopReason: lastFinishReason } : {}),
         ...(rateLimit ? { rateLimit } : {}),
       };
-    }, { ...this.retryConfig, ...(signal ? { signal } : {}), ...(params.beforeAttempt ? { beforeAttempt: params.beforeAttempt } : {}), canRetry }, onRetry), { provider: 'gemini', model: model })).result;
+    }, { ...this.retryConfig, ...(signal ? { signal } : {}), ...(params.beforeAttempt ? { beforeAttempt: params.beforeAttempt } : {}), ...(params.maxRetries !== undefined ? { maxRetries: params.maxRetries } : {}), canRetry }, onRetry), { provider: 'gemini', model: model })).result;
   }
 
   async embed(request: ProviderEmbeddingRequest): Promise<ProviderEmbeddingResult> {

@@ -11,11 +11,13 @@ import type {
   PartialToolCall,
   ProviderEmbeddingRequest,
   ProviderEmbeddingResult,
-  ProviderMessage,
+  ProviderModelSource,
   ProviderRuntimeMetadata,
   ProviderRuntimeMetadataDeps,
 } from './interface.js';
-import { OpenAICompatProvider, type OpenAICompatOptions } from './openai-compat.js';
+import { buildCompatChatRequest, OpenAICompatProvider, type OpenAICompatOptions } from './openai-compat.js';
+import { getCacheCapability } from './cache-capability.js';
+import { StreamTextAccumulator } from './inline-reasoning.js';
 import { LOCAL_SERVER_EFFORT } from './discovered-traits.js';
 import { reasoningEffortLevels } from './reasoning-effort.js';
 import { mapLlamaCppStopReason } from './stop-reason-maps.js';
@@ -25,8 +27,6 @@ import { instrumentedFetch } from '../utils/fetch-with-timeout.js';
 import {
   extractTextToolCalls,
   fromOpenAIToolCalls,
-  toOpenAIMessages,
-  toOpenAITools,
   type OpenAIToolCall,
 } from './tool-formats.js';
 
@@ -59,9 +59,21 @@ export interface LlamaCppProviderOptions extends OpenAICompatOptions {
   compatProvider?: LLMProvider | undefined;
 }
 
+/**
+ * Whether a llama.cpp server streams tool turns, by chat URL, for this process:
+ * true once a streamed tool turn succeeded, false once the server refused one
+ * and the buffered request answered instead. Unknown servers stream.
+ */
+const toolStreamingByServer = new Map<string, boolean>();
+
+/** Statuses an older llama.cpp server answers a streamed tool request with ("Cannot use tools with stream"). */
+const STREAMED_TOOLS_REFUSAL_STATUSES: ReadonlySet<number> = new Set([400, 500, 501]);
+
 export class LlamaCppProvider implements LLMProvider {
   readonly name: string;
   readonly credentialAuthority = 'anonymous' as const;
+  /** The model list is the server's own answer to discovery or its configuration. */
+  readonly modelSource: ProviderModelSource = { kind: 'live-discovery' };
   readonly models: string[];
   readonly capabilities?: Partial<ProviderCapability> | undefined;
 
@@ -90,13 +102,49 @@ export class LlamaCppProvider implements LLMProvider {
     return this.compatProvider.isConfigured?.() ?? true;
   }
 
+  /**
+   * Every turn streams through the compat provider, tool turns included
+   * (current llama.cpp servers stream tool calls). A server that refuses a
+   * streamed tool request is answered once by the buffered request; when that
+   * succeeds, the server's tool turns take the buffered request for the rest of
+   * the process.
+   */
   async chat(params: ChatRequest): Promise<ChatResponse> {
+    const tools = carriesTools(params);
+    const streamsTools = toolStreamingByServer.get(this.nativeChatUrl);
     // The compat provider retries and records the call itself; wrapping it
     // again would square the attempts and count the call twice.
-    if (!shouldUseNonStreamingLlamaCpp(params)) return this.compatProvider.chat(params);
+    if (!tools || streamsTools !== false) {
+      try {
+        const response = await this.compatProvider.chat(params);
+        if (tools) toolStreamingByServer.set(this.nativeChatUrl, true);
+        return response;
+      } catch (error) {
+        if (!tools || streamsTools === true || !isStreamedToolsRefusal(error)) throw error;
+        let buffered: ChatResponse;
+        try {
+          buffered = await this.chatBuffered(params);
+        } catch {
+          // The buffered request failed too: the refusal was not about streaming.
+          throw error;
+        }
+        toolStreamingByServer.set(this.nativeChatUrl, false);
+        return buffered;
+      }
+    }
+    return this.chatBuffered(params);
+  }
+
+  /** True unless this server refused a streamed tool turn in this process. */
+  streamsToolTurns(): boolean {
+    return toolStreamingByServer.get(this.nativeChatUrl) !== false;
+  }
+
+  private async chatBuffered(params: ChatRequest): Promise<ChatResponse> {
+    const model = params.model || this.defaultModel;
     return (await instrumentedLlmCall(
-      () => withRetry(async () => this.chatViaNonStreamingCompat(params, params.model || this.defaultModel),
-        { ...(params.signal ? { signal: params.signal } : {}), ...(params.beforeAttempt ? { beforeAttempt: params.beforeAttempt } : {}) }, params.onRetry), { provider: this.name, model: params.model || this.defaultModel })).result;
+      () => withRetry(async () => this.chatViaNonStreamingCompat(params, model),
+        { ...(params.signal ? { signal: params.signal } : {}), ...(params.beforeAttempt ? { beforeAttempt: params.beforeAttempt } : {}), ...(params.maxRetries !== undefined ? { maxRetries: params.maxRetries } : {}) }, params.onRetry), { provider: this.name, model })).result;
   }
 
   async embed(request: ProviderEmbeddingRequest): Promise<ProviderEmbeddingResult> {
@@ -137,7 +185,11 @@ export class LlamaCppProvider implements LLMProvider {
         toolCalling: true,
         parallelTools: true,
         promptCaching: false,
-        notes: ['llama.cpp uses a non-streaming recovery path for tool turns and delegates embeddings to the configured embedding provider.'],
+        notes: [
+          this.streamsToolTurns()
+            ? 'Every turn streams, tool turns included; embeddings go to the configured embedding provider.'
+            : 'This server refused streamed tool requests, so its tool turns arrive whole when the model finishes; other turns stream. Embeddings go to the configured embedding provider.',
+        ],
       },
       policy: {
         local: true,
@@ -153,22 +205,19 @@ export class LlamaCppProvider implements LLMProvider {
     params: ChatRequest,
     model: string,
   ): Promise<ChatResponse> {
-    const extraBody = buildReasoningBody(this.reasoningFormat, params.reasoningEffort);
-    const body: Record<string, unknown> = {
+    const request = buildCompatChatRequest(
+      { name: this.name, reasoningFormat: this.reasoningFormat ?? 'none', cacheCapability: getCacheCapability(this.name) },
+      params,
       model,
-      messages: toOpenAIMessages(params.messages, params.systemPrompt),
-      ...(params.tools && params.tools.length > 0 ? { tools: toOpenAITools(params.tools) } : {}),
-      ...(params.maxTokens ? { max_tokens: params.maxTokens } : {}),
-      stream: false,
-      ...extraBody,
-    };
+    );
+    const body: Record<string, unknown> = { ...request.body, stream: false };
 
     if (params.beforeAttempt) await revalidateProviderAttempt(params.beforeAttempt);
-      let response: Response;
+    let response: Response;
     try {
       response = await this.nativeFetch(this.nativeChatUrl, {
         method: 'POST',
-        headers: buildHeaders(this.apiKey, this.defaultHeaders),
+        headers: { ...buildHeaders(this.apiKey, this.defaultHeaders), ...request.headers },
         body: JSON.stringify(body),
         ...(params.signal !== undefined ? { signal: params.signal } : {}),
       } as RequestInit);
@@ -197,9 +246,15 @@ export class LlamaCppProvider implements LLMProvider {
 
     const choice = payload.choices?.[0];
     const message = choice?.message ?? {};
-    const reasoningText = extractMessageText(message.reasoning_content) ?? extractMessageText(message.reasoning) ?? '';
-    let responseText = extractMessageText(message.content) ?? '';
-    let structuredToolCalls = normalizeOpenAIToolCalls(message.tool_calls);
+    // The same split the streamed path runs: reasoning returned inline in the
+    // content (<think> blocks) stays out of the answer.
+    const text = new StreamTextAccumulator();
+    const separateReasoning = extractMessageText(message.reasoning_content) ?? extractMessageText(message.reasoning);
+    text.push({ content: [extractMessageText(message.content) ?? ''], reasoning: separateReasoning ? [separateReasoning] : [] });
+    const split = text.finish();
+    const reasoningText = split.reasoning;
+    let responseText = split.content;
+    const structuredToolCalls = normalizeOpenAIToolCalls(message.tool_calls);
     let finalToolCalls = structuredToolCalls.length > 0 ? fromOpenAIToolCalls(structuredToolCalls) : [];
 
     if (reasoningText) {
@@ -252,7 +307,7 @@ export class LlamaCppProvider implements LLMProvider {
   }
 }
 
-function shouldUseNonStreamingLlamaCpp(params: ChatRequest): boolean {
+function carriesTools(params: ChatRequest): boolean {
   if ((params.tools?.length ?? 0) > 0) return true;
   return params.messages.some((message) => (
     message.role === 'tool'
@@ -260,29 +315,17 @@ function shouldUseNonStreamingLlamaCpp(params: ChatRequest): boolean {
   ));
 }
 
+/** The server answered the streamed request itself with an error, before any output (not a cut stream, not a transport failure). */
+function isStreamedToolsRefusal(error: unknown): boolean {
+  if (!(error instanceof ProviderError)) return false;
+  return error.phase === 'request' && error.statusCode !== undefined && STREAMED_TOOLS_REFUSAL_STATUSES.has(error.statusCode);
+}
+
 function deriveLlamaCppChatUrl(baseURL: string): string {
   const trimmed = baseURL.replace(/\/+$/, '');
   if (trimmed.endsWith('/chat/completions')) return trimmed;
   if (trimmed.endsWith('/v1')) return `${trimmed}/chat/completions`;
   return `${trimmed}/v1/chat/completions`;
-}
-
-function buildReasoningBody(
-  reasoningFormat: OpenAICompatOptions['reasoningFormat'],
-  reasoningEffort: ChatRequest['reasoningEffort'],
-): Record<string, unknown> {
-  if (reasoningFormat === 'llamacpp') {
-    return {
-      enable_thinking: reasoningEffort !== undefined && reasoningEffort !== 'instant',
-    };
-  }
-  if (reasoningFormat === 'openrouter' && reasoningEffort) {
-    return { reasoning: { effort: reasoningEffort } };
-  }
-  if (reasoningFormat === 'mercury' && reasoningEffort) {
-    return { reasoning_effort: reasoningEffort };
-  }
-  return {};
 }
 
 function buildHeaders(

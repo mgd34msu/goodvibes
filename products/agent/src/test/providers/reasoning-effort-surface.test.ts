@@ -14,7 +14,7 @@
 // ---------------------------------------------------------------------------
 
 import { describe, expect, test } from 'bun:test';
-import type { LLMProvider, ReasoningEffortSpec } from '@goodvibes-jev/engine/platform/platform/providers';
+import type { RegistrableProvider, ReasoningEffortSpec } from '@goodvibes-jev/engine/platform/platform/providers';
 import { createTestProviderRegistry } from '../helpers/test-managers.ts';
 import {
   describeConfiguredEffort,
@@ -152,7 +152,7 @@ describe('the /effort explainer is generated from the resolved spec', () => {
 
   test('a registered Anthropic adapter is explained with its own field regardless of provider name', () => {
     const registry = createTestProviderRegistry();
-    const provider: LLMProvider = {
+    const provider: RegistrableProvider = {
       name: 'agent-effort-wire-fixture', adapterKind: 'anthropic', models: [UNKNOWN_ID],
       credentialAuthority: 'anonymous', modelSource: { kind: 'dated-static', asOf: '2026-01-01' },
       chat: async () => { throw new Error('presentation fixture must not call a provider'); },

@@ -35,7 +35,7 @@ import {
   normalizeAnthropicModel,
 } from './tool-formats.js';
 import { createAnthropicSSEState, readAnthropicSSEStream, assembleAnthropicContentBlocks } from './anthropic-sse-assembler.js';
-import { resolveCompletedStopReason, withProviderStopReason } from './provider-stop-reason.js';
+import { withProviderStopReason } from './provider-stop-reason.js';
 import type { AnthropicContentBlock } from './tool-formats.js';
 import { summarizeError, toProviderError } from '../utils/error-display.js';
 import { instrumentedFetch } from '../utils/fetch-with-timeout.js';
@@ -228,11 +228,11 @@ export class AnthropicProvider implements LLMProvider {
         let bp2MessageIdx = -1;
         if (bp2 && anthropicMessages.length >= 3) {
           for (let i = anthropicMessages.length - 2; i >= 0; i--) {
-            const msg = toRecord(anthropicMessages[i]);
+            const msg = anthropicMessages[i]!;
             if (msg.role === 'assistant') {
-              const content = msg.content as Array<Record<string, unknown>>;
-              if (content?.length) {
-                content[content.length - 1]!['cache_control'] = { type: 'ephemeral' };
+              const last = msg.content[msg.content.length - 1];
+              if (last) {
+                last.cache_control = { type: 'ephemeral' };
                 bp2MessageIdx = i;
                 breakpointsPlaced++;
               }
@@ -251,35 +251,23 @@ export class AnthropicProvider implements LLMProvider {
           for (let i = 0; i < anthropicMessages.length - 1; i++) {
             // Skip messages too close to BP2 to avoid proximity waste.
             if (bp2MessageIdx >= 0 && Math.abs(i - bp2MessageIdx) <= 2) continue;
-            const msg = toRecord(anthropicMessages[i]);
-            if (msg.role === 'user') {
-              const content = msg.content as Array<Record<string, unknown>>;
-              if (content) {
-                // Skip messages that already have cache_control on any content block.
-                const alreadyCached = content.some(b => b['cache_control'] != null);
-                if (alreadyCached) continue;
-                for (let j = 0; j < content.length; j++) {
-                  const block = content[j]!;
-                  if (block['type'] === 'tool_result') {
-                    const size = typeof block['content'] === 'string'
-                      ? block['content'].length
-                      : JSON.stringify(block['content']).length;
-                    if (size > largestSize) {
-                      largestSize = size;
-                      largestIdx = i;
-                      largestBlockIdx = j;
-                    }
-                  }
-                }
+            const msg = anthropicMessages[i]!;
+            if (msg.role !== 'user') continue;
+            // Skip messages that already have cache_control on any content block.
+            if (msg.content.some((block) => block.cache_control != null)) continue;
+            for (let j = 0; j < msg.content.length; j++) {
+              const block = msg.content[j]!;
+              if (block.type === 'tool_result' && block.content.length > largestSize) {
+                largestSize = block.content.length;
+                largestIdx = i;
+                largestBlockIdx = j;
               }
             }
           }
           // Only place BP3 if the tool result is substantial (>500 chars ~ 125 tokens).
           if (largestIdx >= 0 && largestBlockIdx >= 0 && largestSize > 500) {
-            const msg = toRecord(anthropicMessages[largestIdx]);
-            const content = msg.content as Array<Record<string, unknown>>;
             // Target the specific tool_result block, not the last block in the message.
-            content[largestBlockIdx]!['cache_control'] = { type: 'ephemeral' };
+            anthropicMessages[largestIdx]!.content[largestBlockIdx]!.cache_control = { type: 'ephemeral' };
             breakpointsPlaced++;
           }
         }
@@ -376,7 +364,7 @@ export class AnthropicProvider implements LLMProvider {
         content: text,
         toolCalls,
         usage: { inputTokens: state.inputTokens, outputTokens: state.outputTokens, cacheReadTokens: state.cacheReadTokens, cacheWriteTokens: state.cacheWriteTokens },
-        stopReason: resolveCompletedStopReason(state.stopReason, text),
+        stopReason: state.stopReason,
         ...withProviderStopReason(state.rawStopReason),
         cacheMetrics: {
           strategy: cap.type === 'explicit' ? `explicit-${cap.maxBreakpoints}bp` : cap.type,
@@ -385,7 +373,7 @@ export class AnthropicProvider implements LLMProvider {
         },
         ...(rateLimit ? { rateLimit } : {}),
       };
-    }, { ...(signal ? { signal } : {}), ...(params.beforeAttempt ? { beforeAttempt: params.beforeAttempt } : {}), canRetry }, onRetry), { provider: 'anthropic', model: model })).result;
+    }, { ...(signal ? { signal } : {}), ...(params.beforeAttempt ? { beforeAttempt: params.beforeAttempt } : {}), ...(params.maxRetries !== undefined ? { maxRetries: params.maxRetries } : {}), canRetry }, onRetry), { provider: 'anthropic', model: model })).result;
   }
 
   async describeRuntime(deps: ProviderRuntimeMetadataDeps): Promise<ProviderRuntimeMetadata> {

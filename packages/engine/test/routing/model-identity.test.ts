@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { ModelIdentityResolver, type IdentityCandidate } from '../../platform/src/platform/routing/model-identity.js';
-import { buildSyntheticCanonicalModels, SyntheticIdentities } from '../../platform/src/platform/providers/model-catalog-synthetic.js';
+import { buildSyntheticCanonicalModels } from '../../platform/src/platform/providers/model-catalog-synthetic.js';
 import type { CatalogModel } from '../../platform/src/platform/providers/model-catalog.js';
 
 describe('published model identity', () => {
@@ -52,7 +52,7 @@ test('failover joins published identities without merging same-family variants o
     providerEnvVars: [], pricing: { input, output: 2 * input }, tier: 'paid', contextWindow: input * 16000,
   });
   const models = [model('a', 'first', 'lab/model-v2', 1), model('b', 'second', 'lab/model-v2', 3), model('b', 'mini', 'lab/model-v2-mini', 2)];
-  const groups = buildSyntheticCanonicalModels(models, new SyntheticIdentities({ models: () => models }));
+  const groups = buildSyntheticCanonicalModels(models);
   expect(groups).toHaveLength(1);
   expect(groups[0]!.backends.map(backend => backend.registryKey)).toEqual(['a:first', 'b:second']);
   expect(groups[0]!.backends.map(backend => backend.contextWindow)).toEqual([16000, 48000]);

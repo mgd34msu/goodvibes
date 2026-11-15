@@ -190,10 +190,10 @@ export interface ProviderBatchAdapter {
 }
 
 /**
- * Declares where a provider's model list comes from, so the registration-time
- * contract check (`model-source-contract.ts`) can tell a genuinely-empty,
- * undated model list (the stale/dead-array anti-pattern) apart from a
- * provider that is legitimately populated some other way:
+ * Declares where a provider's model list comes from, so a caller can tell a
+ * live-refreshed list from a hand-maintained, dated one and both from one the
+ * shared catalog supplies. `ProviderRegistry.register()` takes only a provider
+ * that declares one ({@link RegistrableProvider}):
  *
  * - `live-discovery` , the provider fetches its own model list from a live
  *   API (its `models` array may start empty and populate asynchronously;
@@ -224,7 +224,7 @@ export interface LLMProvider {
   /**
    * Optional self-declared capability overrides for this provider instance.
    * When present, these take precedence over the built-in `PROVIDER_DEFAULTS`
-   * table in `capabilities.ts` but are overridden by the per-model tables (`MODEL_LIMIT_FALLBACKS`,
+   * table in `capabilities.ts` but are overridden by the per-model tables (`MODEL_REASONING_FALLBACKS`,
    * live facts and `MODEL_QUIRKS`) in `capabilities.ts`.
    *
    * @remarks Useful for custom / dynamically-discovered providers that know
@@ -232,16 +232,10 @@ export interface LLMProvider {
    */
   readonly capabilities?: Partial<ProviderCapability> | undefined;
   /**
-   * Declares this provider's model source for the registration-time contract
-   * check (`model-source-contract.ts`). Optional at the type level only for
-   * providers that go through a registration path the contract doesn't gate
-   * (e.g. `ProviderRegistry.registerRuntimeProvider` with an explicit
-   * non-empty `models` list, or `registerDiscoveredProviders`, whose local
-   * network-scanned providers never pass through the check at all). Every
-   * provider registered via `ProviderRegistry.register()` MUST declare one
-   * of the three kinds above regardless of whether its `models` array is
-   * currently empty or populated, a non-empty array with no declared
-   * source is rejected exactly like an empty one, or registration throws.
+   * Where this provider's model list comes from. Required by the type
+   * `ProviderRegistry.register()` accepts ({@link RegistrableProvider});
+   * optional here for a plugin provider registered through
+   * `registerRuntimeProvider`, whose explicit `models` list is its source.
    */
   readonly modelSource?: ProviderModelSource | undefined;
   /**
@@ -254,9 +248,8 @@ export interface LLMProvider {
    *   - 'anonymous'   , local/keyless endpoints (ollama, lm-studio, ...).
    *   - 'subscription', OAuth subscription tokens resolved per request.
    *   - 'oauth'       , service-OAuth flows outside the subscription store.
-   * ProviderRegistry.register() REFUSES a provider that declares none (same
-   * fail-closed mechanism as the model-source contract): an auth path the
-   * resolver cannot see would let status say green while chat 401s.
+   * The registry REFUSES a provider that declares none, on every way in: an
+   * auth path the resolver cannot see would let status say green while chat 401s.
    */
   readonly credentialAuthority?: 'resolver' | 'anonymous' | 'subscription' | 'oauth' | undefined;
   chat(params: ChatRequest): Promise<ChatResponse>;
@@ -277,7 +270,16 @@ export interface LLMProvider {
    * don't implement it are treated per {@link isConfigured} alone.
    */
   describeAuthState?(): ProviderAuthState;
+  /**
+   * Release what this provider holds outside the process (Gemini's server-side
+   * cache resources). The registry calls it when it replaces the provider and
+   * at shutdown; optional, most providers hold nothing.
+   */
+  dispose?(): Promise<void>;
 }
+
+/** A provider `ProviderRegistry.register()` accepts: one that says where its model list comes from. */
+export type RegistrableProvider = LLMProvider & { readonly modelSource: ProviderModelSource };
 
 /**
  * A provider's registration-time auth state, the single source keyless-UX
@@ -354,6 +356,12 @@ export interface ChatRequest {
    * UI) without re-triggering the resubmission themselves.
    */
   onRetry?: ((attempt: number, maxAttempts: number, delayMs: number, error: Error) => void) | undefined;
+  /**
+   * Retries the adapter may make of a retryable failure; omitted, it uses its
+   * own default. A caller that owns retrying (the failover provider, which
+   * rotates to another backend instead) passes 0 so only one layer retries.
+   */
+  maxRetries?: number | undefined;
 }
 
 /**

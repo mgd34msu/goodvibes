@@ -94,9 +94,11 @@ variable → secrets store → subscription accounts. Writing, rotating, or
 deleting a key in the secrets store re-registers the affected providers in
 the same process (`SecretsManager.onDidChange` →
 `ProviderRegistry.refreshProviderCredentials()`), so a provider becomes
-usable the moment its key is stored. No restart anywhere. Status badges,
+usable the moment its key is stored. No restart anywhere. Only the providers
+whose key changed are rebuilt; storing an unrelated secret leaves every
+provider, its discovered models and its warm caches as they were. Status badges,
 the model picker, and chat all read the same refreshed provider instances,
-so status can never be green while chat fails auth. The one exception is `cohere`, `deepinfra`, `opencode-zen`, `perplexity`, `sambanova`, `zenmux` and `zenmux-anthropic`: they take their key from the environment variable only, so a key stored in the secrets store does not activate them. Every registered
+so status can never be green while chat fails auth. Every registered
 provider must declare how its credentials are obtained
 (`credentialAuthority: 'resolver' | 'anonymous' | 'subscription' | 'oauth'`);
 registration is refused otherwise.

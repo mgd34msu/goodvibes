@@ -457,7 +457,7 @@ export async function chatWithOpenAICodex(
           phase: 'stream',
         });
       }
-    }, { ...(params.signal ? { signal: params.signal } : {}), ...(params.beforeAttempt ? { beforeAttempt: params.beforeAttempt } : {}), canRetry }, params.onRetry);
+    }, { ...(params.signal ? { signal: params.signal } : {}), ...(params.beforeAttempt ? { beforeAttempt: params.beforeAttempt } : {}), ...(params.maxRetries !== undefined ? { maxRetries: params.maxRetries } : {}), canRetry }, params.onRetry);
 }
 
 export class OpenAICodexProvider implements LLMProvider {

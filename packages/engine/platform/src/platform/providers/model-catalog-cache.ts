@@ -5,7 +5,7 @@ import { writeJsonFileAtomic } from '../utils/atomic-json-store.js';
 import type { CatalogModel } from './model-catalog.js';
 import { summarizeError } from '../utils/error-display.js';
 import { isTtlCacheStale, validateTtlCacheEnvelope } from './json-ttl-cache.js';
-import { fetchModelCatalogRepository } from './model-catalog-repository.js';
+import { modelCatalogSource, readModelCatalogArchive } from './model-catalog-repository.js';
 import type { ModelsDevReasoningOption } from './reasoning-effort.js';
 import { ProviderAccessReadings, type ProviderAccess, type ProviderFacts } from '../routing/catalog-access.js';
 
@@ -23,6 +23,10 @@ interface CatalogCacheFile {
   fetchedAt: number;
   ttlMs: number;
   models: CatalogModel[];
+  /** The archive's ETag, sent back as If-None-Match on the next daily check. */
+  etag?: string | undefined;
+  /** The snapshot the models came from: a pinned commit id, or `dev`. A new pin makes the cache stale. */
+  source?: string | undefined;
 }
 
 interface ModelsDevModelCost {
@@ -63,7 +67,8 @@ interface ModelsDevModel {
 
 type ModelsDevResponse = Record<string, CatalogProviderShape>;
 
-const CATALOG_TTL_MS = 60 * 60 * 1000;
+/** The catalog is checked once a day; an unchanged archive answers the check with a 304. */
+const CATALOG_TTL_MS = 24 * 60 * 60 * 1000;
 /** Repository-backed cache with canonical identities, model types and capability facts. */
 const CATALOG_CACHE_VERSION = 7;
 
@@ -85,8 +90,9 @@ export function getCatalogTmpPath(cacheDir: string): string {
  * (routing.catalog-provider-access) and its listed cost: a plan or a local
  * server is not metered ('subscription': the listed per-token price is not
  * what the user pays), a metered model listed at zero input and output cost
- * is free, and everything else, including a provider whose access reading
- * did not settle, is paid. The zero test is arithmetic; the access is judged.
+ * is offered in the free failover tier, and everything else, including a
+ * provider whose access reading did not settle, is paid. The listed zero never
+ * becomes a price: such a model is unpriced (see transformModelsDevResponse).
  */
 function catalogTier(access: ProviderAccess | undefined, cost: ModelsDevModelCost | undefined): 'free' | 'paid' | 'subscription' {
   if (access === 'subscription' || access === 'local') return 'subscription';
@@ -204,9 +210,13 @@ function transformModelsDevResponse(input: unknown, access: ReadonlyMap<string, 
         ? getStringArray(modelData.modalities.input)
         : undefined;
 
+      const tier = catalogTier(providerAccess, cost);
+
       // Honest pricing: a missing cost stays null (unpriced). Coercing to $0
-      // made absent-from-catalog models look free downstream.
-      const pricing = typeof cost?.input === 'number' && typeof cost?.output === 'number'
+      // made absent-from-catalog models look free downstream. A metered
+      // provider's listed zero is a remote claim, not what the account is
+      // billed, so it is unpriced too and spend on it is never reported as $0.
+      const pricing = tier !== 'free' && typeof cost?.input === 'number' && typeof cost?.output === 'number'
         ? {
           input: cost.input,
           output: cost.output,
@@ -215,8 +225,6 @@ function transformModelsDevResponse(input: unknown, access: ReadonlyMap<string, 
         }
         : null;
       const contextWindow = typeof limit?.context === 'number' && limit.context > 0 ? limit.context : undefined;
-
-      const tier = catalogTier(providerAccess, cost);
 
       const maxOutputTokens = typeof limit?.output === 'number' ? limit.output : undefined;
 
@@ -286,8 +294,17 @@ function loadCatalogCache(cachePath: string): CatalogCacheFile | null {
   }
 }
 
-/** `_tmpPath` is kept for existing callers; the write picks its own unique temporary file so two processes refreshing at once cannot collide. */
-function saveCatalogCache(models: CatalogModel[], cachePath: string, _tmpPath?: string): void {
+/**
+ * `_tmpPath` is kept for existing callers; the write picks its own unique
+ * temporary file so two processes refreshing at once cannot collide. `archive`
+ * is the ETag and snapshot id the models came from (the feed's own fields).
+ */
+function saveCatalogCache(
+  models: CatalogModel[],
+  cachePath: string,
+  _tmpPath?: string,
+  archive: { readonly etag?: string | undefined; readonly source?: string | undefined } = {},
+): void {
   try {
     fs.mkdirSync(dirname(cachePath), { recursive: true });
     const payload: CatalogCacheFile = {
@@ -295,6 +312,8 @@ function saveCatalogCache(models: CatalogModel[], cachePath: string, _tmpPath?: 
       fetchedAt: Date.now(),
       ttlMs: CATALOG_TTL_MS,
       models,
+      ...(archive.etag ? { etag: archive.etag } : {}),
+      ...(archive.source ? { source: archive.source } : {}),
     };
     writeJsonFileAtomic(cachePath, payload);
   } catch (err) {
@@ -302,21 +321,55 @@ function saveCatalogCache(models: CatalogModel[], cachePath: string, _tmpPath?: 
   }
 }
 
+/** Stale after a day, or when the cache came from another snapshot than the one this build pins. */
 function isCatalogCacheStale(cache: CatalogCacheFile): boolean {
+  if (cache.source !== undefined && cache.source !== modelCatalogSource().id) return true;
   return cache.ttlMs <= 0 || isTtlCacheStale(cache);
+}
+
+/** Restamp a cache the daily check found unchanged (a 304), so it is fresh for another day. */
+function touchCatalogCache(cachePath: string): void {
+  const cache = loadCatalogCache(cachePath);
+  if (!cache) return;
+  saveCatalogCache(cache.models, cachePath, undefined, { etag: cache.etag, source: cache.source });
 }
 
 /** The raw models.dev feed and the published facts of each of its providers. */
 export interface CatalogFeed {
   readonly json: unknown;
   readonly providers: readonly ProviderFacts[];
+  /** The archive's ETag and snapshot id, to store with the cache (saveCatalogCache's `archive`). */
+  readonly etag?: string | undefined;
+  readonly source?: string | undefined;
+}
+
+function feedOf(read: { readonly catalog: unknown; readonly etag?: string | undefined; readonly source: string }): CatalogFeed {
+  const json = read.catalog;
+  const providers = json !== null && typeof json === 'object' && !Array.isArray(json) ? providerFactsOf(json as ModelsDevResponse) : [];
+  return { json, providers, ...(read.etag ? { etag: read.etag } : {}), source: read.source };
 }
 
 /** Read the models.dev GitHub repository. Uses a 30-second timeout for the fetch. */
 export async function fetchCatalogFeed(): Promise<CatalogFeed> {
-  const json = await fetchModelCatalogRepository() as unknown;
-  const providers = json !== null && typeof json === 'object' && !Array.isArray(json) ? providerFactsOf(json as ModelsDevResponse) : [];
-  return { json, providers };
+  const read = await readModelCatalogArchive();
+  if (read.status !== 'fetched') throw new Error('Model catalog repository answered not-modified to an unconditional request');
+  return feedOf(read);
+}
+
+/**
+ * The daily check: a conditional read with the cached copy's ETag. Null when
+ * the archive is unchanged; the cache is then restamped fresh for another day.
+ * A cache from another snapshot than the pinned one is read unconditionally.
+ */
+export async function fetchCatalogFeedIfChanged(cachePath: string): Promise<CatalogFeed | null> {
+  const cached = loadCatalogCache(cachePath);
+  const sameSource = cached?.source !== undefined && cached.source === modelCatalogSource().id;
+  const read = await readModelCatalogArchive(sameSource && cached?.etag ? { etag: cached.etag } : {});
+  if (read.status === 'not-modified') {
+    touchCatalogCache(cachePath);
+    return null;
+  }
+  return feedOf(read);
 }
 
 /**

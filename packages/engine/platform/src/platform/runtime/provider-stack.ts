@@ -43,14 +43,8 @@ import type { ShellPathService } from './shell-paths.js';
 export type ProviderRegistryConstructionOptions = ConstructorParameters<typeof ProviderRegistry>[0];
 
 /**
- * How the registry itself is built.
- *
- * The default is `new ProviderRegistry(...)`. A product that must survive a boot
- * with broken or absent provider credentials passes
- * `createLaunchTolerantProviderRegistry` here instead, it constructs under
- * placeholder env vars so a misconfigured key is a degraded provider rather than
- * a crash before the first frame. That is a real product posture, not a
- * preference, so it is an injection point rather than a second composition.
+ * How the registry itself is built. The default is `new ProviderRegistry(...)`;
+ * a product that needs the option bag shaped differently passes its own factory.
  */
 export type ProviderRegistryFactory = (options: ProviderRegistryConstructionOptions) => ProviderRegistry;
 
@@ -163,7 +157,8 @@ export function createProviderStack(options: ProviderStackOptions): ProviderStac
     providerRegistry.initProviderModelDiscovery();
     benchmarkStore.initBenchmarks();
   }
-  // ONE credential chain (env -> secrets -> subscription): boot applies secrets-backed keys; every secrets write/delete re-registers builtins LIVE (no restart); badges/picker/chat read the same instances.
+  // ONE credential chain (env -> secrets -> subscription): boot applies secrets-backed keys; a secrets write/delete
+  // replaces LIVE (no restart) only the builtins whose key changed; badges/picker/chat read the same instances.
   coalesceCredentialRefreshes(providerRegistry);
   const stopCredentialWatch = options.secretsManager.onDidChange(() => void providerRegistry.refreshProviderCredentials().catch((error) => logger.warn('live credential refresh failed', { error: summarizeError(error) })));
   void providerRegistry.refreshProviderCredentials().catch((error) => logger.warn('boot credential refresh failed', { error: summarizeError(error) }));
@@ -181,6 +176,8 @@ export function createProviderStack(options: ProviderStackOptions): ProviderStac
     stopCredentialWatch();
     unbindOptimizerFlag();
     liveCredentialRegistries.delete(providerRegistry);
+    // Server-side resources a provider created (Gemini's prompt caches) are released, not left to expire.
+    void providerRegistry.disposeProviders();
   });
   return {
     providerCapabilityRegistry,

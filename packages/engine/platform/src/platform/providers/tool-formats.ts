@@ -119,15 +119,27 @@ export interface AnthropicTool {
   input_schema: Record<string, unknown>;
 }
 
-export type AnthropicContentBlock =
+/** A prompt-cache breakpoint on a content block: everything up to and including the block is cached. */
+export interface AnthropicCacheControl {
+  type: 'ephemeral';
+  ttl?: string;
+}
+
+export type AnthropicContentBlock = (
   | { type: 'text'; text: string }
   | { type: 'image'; source: { type: 'base64'; media_type: 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp'; data: string } }
   | { type: 'tool_use'; id: string; name: string; input: Record<string, unknown> }
-  | { type: 'tool_result'; tool_use_id: string; content: string };
+  | { type: 'tool_result'; tool_use_id: string; content: string }
+) & { cache_control?: AnthropicCacheControl };
 
+/**
+ * One message on the Messages API wire. Content is always a block array (the
+ * API accepts a bare string too), so cache breakpoints can be placed on any
+ * message without a shape check.
+ */
 export interface AnthropicMessage {
   role: 'user' | 'assistant';
-  content: string | AnthropicContentBlock[];
+  content: AnthropicContentBlock[];
 }
 
 /** Convert internal ToolDefinitions to Anthropic tools array. */
@@ -184,9 +196,9 @@ export function toAnthropicMessages(messages: ProviderMessage[]): AnthropicMessa
             source: { type: 'base64' as const, media_type: part.mediaType as 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp', data: part.data },
           };
         });
-        result.push({ role: 'user', content: blocks });
-      } else {
-        result.push({ role: 'user', content: msg.content });
+        if (blocks.length > 0) result.push({ role: 'user', content: blocks });
+      } else if (msg.content) {
+        result.push({ role: 'user', content: [{ type: 'text', text: msg.content }] });
       }
     } else if (msg.role === 'assistant') {
       flushToolResults();
@@ -197,8 +209,8 @@ export function toAnthropicMessages(messages: ProviderMessage[]): AnthropicMessa
           blocks.push({ type: 'tool_use', id: tc.id, name: tc.name, input: tc.arguments });
         }
         result.push({ role: 'assistant', content: blocks });
-      } else {
-        result.push({ role: 'assistant', content: msg.content });
+      } else if (msg.content) {
+        result.push({ role: 'assistant', content: [{ type: 'text', text: msg.content }] });
       }
     } else if (msg.role === 'tool') {
       pendingToolResults.push({

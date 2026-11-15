@@ -9,7 +9,7 @@
 
 import { OpenAICompatProvider } from './openai-compat.js';
 import { AnthropicCompatProvider } from './anthropic-compat.js';
-import type { LLMProvider } from './interface.js';
+import type { RegistrableProvider } from './interface.js';
 import type { ProviderRegistry } from './registry.js';
 import { hasKeyForProvider } from './model-catalog.js';
 import type { CatalogProvider } from './model-catalog.js';
@@ -91,7 +91,7 @@ export function resolveApiKey(entry: AutoRegisterEntry): string {
  * Create an LLMProvider instance from an AutoRegisterEntry.
  * Routes to the correct provider class based on apiFormat.
  */
-export function createProviderFromEntry(entry: AutoRegisterEntry, apiKey: string): LLMProvider {
+export function createProviderFromEntry(entry: AutoRegisterEntry, apiKey: string): RegistrableProvider {
   const models = entry.seedModels ?? [entry.defaultModel];
 
   if (entry.apiFormat === 'anthropic') {

@@ -24,7 +24,7 @@ test('repository model inheritance preserves canonical identity, provider overri
   try {
     saveCatalogCache(models, join(root, 'models.json'), join(root, 'models.tmp'));
     const cached = loadCatalogCache(join(root, 'models.json'))!;
-    expect(cached.models).toEqual(models); expect(cached.ttlMs).toBe(3600000);
+    expect(cached.models).toEqual(models); expect(cached.ttlMs).toBe(86400000);
     installCatalogModelFacts(cached.models);
     expect(knownCatalogChatCapability('a', 'alias')).toBe(true);
     expect(knownCatalogChatCapability('a', 'embedding')).toBe(false);
@@ -78,6 +78,37 @@ test('downloads a repository archive, supports long model IDs and rejects a fail
     expect(requested).toEqual([MODEL_CATALOG_REPOSITORY_URL]);
     globalThis.fetch = (async () => new Response('unavailable', { status: 503 })) as unknown as typeof fetch;
     await expect(fetchModelCatalogRepository()).rejects.toThrow('HTTP 503');
+  } finally { globalThis.fetch = originalFetch; rmSync(root, { recursive: true, force: true }); }
+});
+
+test('a metered provider listing a model at zero cost leaves it unpriced, never $0', () => {
+  const feed = { m: { name: 'Metered', env: ['M_KEY'], models: { listed: { name: 'Listed', cost: { input: 0, output: 0 } } } } };
+  const [model] = transformModelsDevResponse(feed, new Map([['m', 'metered']]));
+  expect(model!.tier).toBe('free');
+  expect(model!.pricing).toBeNull();
+});
+
+test('a pinned catalog refuses an archive whose bytes do not match the pinned checksum', async () => {
+  const { readModelCatalogArchive } = await import('../platform/src/platform/providers/model-catalog-repository.js');
+  const { c } = await import('tar');
+  const { mkdirSync, writeFileSync } = await import('node:fs');
+  const { createHash } = await import('node:crypto');
+  const root = mkdtempSync(join(tmpdir(), 'catalog-pin-'));
+  const originalFetch = globalThis.fetch;
+  try {
+    mkdirSync(join(root, 'snapshot/providers/test/models'), { recursive: true });
+    writeFileSync(join(root, 'snapshot/providers/test/provider.toml'), 'name="Test"\nenv=[]');
+    writeFileSync(join(root, 'snapshot/providers/test/models/one.toml'), 'name="One"');
+    const chunks: Buffer[] = []; for await (const chunk of c({ gzip: true, cwd: root }, ['snapshot'])) chunks.push(Buffer.from(chunk));
+    const archive = Buffer.concat(chunks);
+    const commit = 'a'.repeat(40);
+    const requested: string[] = [];
+    globalThis.fetch = (async (url: string | URL | Request) => { requested.push(String(url)); return new Response(archive); }) as unknown as typeof fetch;
+    await expect(readModelCatalogArchive({ pin: { commit, sha256: '0'.repeat(64) } })).rejects.toThrow('does not match its pinned checksum');
+    const sha256 = createHash('sha256').update(archive).digest('hex');
+    const read = await readModelCatalogArchive({ pin: { commit, sha256 } });
+    expect(read.status).toBe('fetched');
+    expect(requested.every((url) => url.endsWith(`/tar.gz/${commit}`))).toBe(true);
   } finally { globalThis.fetch = originalFetch; rmSync(root, { recursive: true, force: true }); }
 });
 

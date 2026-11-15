@@ -5,7 +5,7 @@ import type { RuntimeEventBus } from '../runtime/events/index.js';
 import { emitProviderWarning } from '../runtime/emitters/index.js';
 import { OpenAICompatProvider } from './openai-compat.js';
 import { AnthropicCompatProvider } from './anthropic-compat.js';
-import type { LLMProvider } from './interface.js';
+import type { RegistrableProvider } from './interface.js';
 import type { ModelDefinition } from './registry.js';
 import { reasoningEffortSpecFromLevels } from './reasoning-effort.js';
 import { summarizeError } from '../utils/error-display.js';
@@ -75,7 +75,7 @@ export interface CustomProviderConfig {
 
 /** Result of loading all custom providers from disk. */
 export interface LoadCustomProvidersResult {
-  providers: Array<{ config: CustomProviderConfig; provider: LLMProvider }>;
+  providers: Array<{ config: CustomProviderConfig; provider: RegistrableProvider }>;
   models: ModelDefinition[];
   warnings: string[];
 }
@@ -87,7 +87,7 @@ export interface LoadCustomProvidersOptions {
   /**
    * When true, attempts to fetch max_context_length from each provider's
    * /v1/models endpoint and uses the reported value with 'provider_api'
-   * provenance. Falls back to the configured contextWindow or DEFAULT_CONTEXT_WINDOW.
+   * provenance. Falls back to the configured contextWindow or FALLBACK_CONTEXT_WINDOW.
    * Defaults to false.
    */
   ingestContextWindows?: boolean | undefined;
@@ -254,7 +254,7 @@ export async function loadCustomProviders(
   options: LoadCustomProvidersOptions,
 ): Promise<LoadCustomProvidersResult> {
   const warnings: string[] = [];
-  const providers: Array<{ config: CustomProviderConfig; provider: LLMProvider }> = [];
+  const providers: Array<{ config: CustomProviderConfig; provider: RegistrableProvider }> = [];
   const models: ModelDefinition[] = [];
   const { providersDir } = options;
 
@@ -276,7 +276,7 @@ export async function loadCustomProviders(
   }
 
   // Collect valid entries; skip invalid ones with warnings.
-  const validConfigs: Array<{ cfg: CustomProviderConfig; provider: LLMProvider; apiKey: string; filename: string }> = [];
+  const validConfigs: Array<{ cfg: CustomProviderConfig; provider: RegistrableProvider; apiKey: string; filename: string }> = [];
   const nameOwners = new Map<string, string>();
 
   for (const filename of entries) {
@@ -332,7 +332,7 @@ export async function loadCustomProviders(
     const apiKey = resolveApiKey(cfg);
     const modelIds = cfg.models.map((m) => m.id);
 
-    let provider: LLMProvider;
+    let provider: RegistrableProvider;
     try {
       if (cfg.type === 'anthropic-compat') {
         provider = new AnthropicCompatProvider({

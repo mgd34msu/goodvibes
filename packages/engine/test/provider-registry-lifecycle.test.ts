@@ -2,7 +2,7 @@ import { describe, expect, spyOn, test } from 'bun:test';
 import { mkdtempSync, rmSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { LLMProvider } from '../platform/src/platform/providers/interface.ts';
+import type { RegistrableProvider } from '../platform/src/platform/providers/interface.ts';
 import { logger } from '../platform/src/platform/utils/logger.ts';
 import { providerAdapterKind } from '../platform/src/platform/providers/adapter-kind.ts';
 import { makeProvider, makeRegistry, writeCustomProvider } from './_helpers/provider-registry-double.ts';
@@ -41,7 +41,7 @@ describe('custom providers that are removed', () => {
 
   test('a custom file named like a built-in is refused and leaves the built-in and its adapter kind alone', () => withRoot(async (root) => {
     const registry = makeRegistry(root);
-    const builtin = { ...makeProvider('shadowed', []), adapterKind: 'anthropic', modelSource: { kind: 'catalog-backed' } } as unknown as LLMProvider;
+    const builtin = { ...makeProvider('shadowed', []), adapterKind: 'anthropic', modelSource: { kind: 'catalog-backed' } } as unknown as RegistrableProvider;
     registry.register(builtin);
     writeCustomProvider(root, 'shadowed', 'custom-model');
     const result = await registry.loadCustomProviders();

@@ -159,19 +159,13 @@ describe('synthetic model ids', () => {
   const offering = (providerId: string, id: string, canonicalModelId: string, name: string): CatalogModel => ({
     id, canonicalModelId, name, provider: providerId, providerId, providerEnvVars: [], pricing: null, tier: 'paid',
   });
-  const identities = (models: readonly CatalogModel[]) => ({
-    known: (model: CatalogModel): string | null => {
-      const other = models.find((candidate) => candidate.canonicalModelId === model.canonicalModelId && candidate.providerId !== model.providerId);
-      return other ? `${other.providerId}:${other.id}` : null;
-    },
-  });
   const catalog = [
     offering('p1', 'x', 'lab/x', 'Same Name'), offering('p2', 'x', 'lab/x', 'Same Name'),
     offering('p1', 'y', 'lab/y', 'Same Name'), offering('p2', 'y', 'lab/y', 'Same Name'),
     offering('p1', 'z', 'lab/z', 'Same Name'), offering('p2', 'z', 'lab/z', 'Same Name'),
   ];
   const idsByBackends = (models: readonly CatalogModel[]) => Object.fromEntries(
-    buildSyntheticCanonicalModels(models, identities(models)).map((group) => [group.backends.map((backend) => backend.registryKey).join(','), group.id]),
+    buildSyntheticCanonicalModels(models).map((group) => [group.backends.map((backend) => backend.registryKey).join(','), group.id]),
   );
 
   test('the same model keeps its id when the catalog order changes', () => {

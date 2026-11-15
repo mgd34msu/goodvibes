@@ -31,7 +31,7 @@ import {
 import type { OpenAIToolCall } from './tool-formats.js';
 import { accumOpenAIToolCall, finalizeOpenAIToolCalls, applyOpenAIChunkUsage, resolveOpenAIToolCallsAndFallback } from './openai-stream-helpers.js';
 import type { OpenAIChunkUsage } from './openai-stream-helpers.js';
-import { resolveCompletedStopReason, withProviderStopReason } from './provider-stop-reason.js';
+import { withProviderStopReason } from './provider-stop-reason.js';
 import { isOpenAiSpentQuota, openAiRetryAfterMs, parseRateLimitHeaders } from './rate-limit-headers.js';
 import { getCacheCapability } from './cache-capability.js';
 import type { ProviderCacheCapability } from './cache-capability.js';
@@ -159,6 +159,57 @@ export interface OpenAICompatOptions {
  * Configured for InceptionLabs Mercury-2 with reasoning_effort and
  * reasoning_summary extensions, but usable with any OAI-compatible API.
  */
+/** What decides the shape of a compat chat request: the provider's name, reasoning wire format and cache capability. */
+export interface CompatChatRequestShape {
+  readonly name: string;
+  readonly reasoningFormat: NonNullable<OpenAICompatOptions['reasoningFormat']>;
+  readonly cacheCapability: ProviderCacheCapability;
+}
+
+/**
+ * The chat-completions body (without `stream`/`stream_options`) and per-request
+ * headers for one compat request. The streamed path and llama.cpp's buffered
+ * fallback both build from it, so the reasoning switch and the cache header are
+ * the same on either path.
+ */
+export function buildCompatChatRequest(
+  shape: CompatChatRequestShape,
+  params: Pick<ChatRequest, 'messages' | 'tools' | 'maxTokens' | 'systemPrompt' | 'reasoningEffort' | 'reasoningEffortSpec' | 'reasoningSummary'>,
+  model: string,
+): { readonly body: Record<string, unknown>; readonly headers: Record<string, string>; readonly effortValue: string | undefined } {
+  const tools = params.tools && params.tools.length > 0 ? toOpenAITools(params.tools) : undefined;
+  // The requested level is first mapped onto what this exact model accepts, so
+  // a level it does not offer snaps down instead of earning a provider-side 400.
+  const effortValue: string | undefined = resolveEffortForRequest(params.reasoningEffort, {
+    provider: shape.name, modelId: model,
+    ...(params.reasoningEffortSpec ? { spec: params.reasoningEffortSpec } : {}),
+  }).value;
+  const body: Record<string, unknown> = {
+    model,
+    messages: toOpenAIMessages(params.messages, params.systemPrompt),
+    ...(tools ? { tools } : {}),
+    ...(params.maxTokens ? { max_tokens: params.maxTokens } : {}),
+  };
+  if (effortValue && (shape.reasoningFormat === 'mercury' || shape.reasoningFormat === 'reasoning-effort')) {
+    body['reasoning_effort'] = effortValue;
+  } else if (effortValue && shape.reasoningFormat === 'openrouter') {
+    body['reasoning'] = { effort: effortValue };
+  } else if (shape.reasoningFormat === 'llamacpp') {
+    // llama.cpp auto-enables thinking for capable models; explicitly control it
+    body['enable_thinking'] = effortValue !== undefined && effortValue !== 'instant' && effortValue !== 'none';
+  }
+  if (params.reasoningSummary && shape.reasoningFormat === 'mercury') {
+    body['reasoning_summary'] = true;
+    // Wait for the full reasoning summary before streaming text
+    body['reasoning_summary_wait'] = true;
+  }
+  const headers: Record<string, string> = {};
+  if (shape.cacheCapability.type === 'automatic' && shape.cacheCapability.sessionAffinityHeader) {
+    headers[shape.cacheCapability.sessionAffinityHeader] = 'true';
+  }
+  return { body, headers, effortValue };
+}
+
 export class OpenAICompatProvider implements LLMProvider {
   readonly name: string;
   readonly adapterKind = 'openai-compat' as const;
@@ -341,17 +392,7 @@ export class OpenAICompatProvider implements LLMProvider {
   }
 
   async chat(params: ChatRequest): Promise<ChatResponse> {
-    const {
-      messages,
-      tools,
-      model,
-      maxTokens,
-      signal,
-      systemPrompt,
-      reasoningEffort,
-      reasoningSummary,
-      onRetry,
-    } = params;
+    const { model, signal, onRetry } = params;
     const { onDelta, canRetry } = trackDeliveredOutput(params.onDelta);
     this.assertConfiguredForChat(model);
 
@@ -366,46 +407,18 @@ export class OpenAICompatProvider implements LLMProvider {
       let cacheReadTokens = 0;
       let rawStopReason: string | undefined;
       let stopReason: ChatStopReason = 'unknown';
+      let sawUsage = false;
       let reasoningSummaryText: string | undefined;
       let rateLimit: ChatResponse['rateLimit'];
       let rawToolCalls: OpenAIToolCall[] = [];
       const selectedModel = model ?? this.defaultModel;
       const requestFingerprint = buildChatRequestFingerprint(params, selectedModel);
 
-      const openaiMessages = toOpenAIMessages(messages, systemPrompt);
-      const openaiTools = tools && tools.length > 0 ? toOpenAITools(tools) : undefined;
-
-      // Provider-specific reasoning params. The requested level is first mapped
-      // onto what this exact model accepts, so a level it does not offer snaps
-      // down instead of earning a provider-side 400.
-      const effortValue = resolveEffortForRequest(reasoningEffort, {
-        provider: this.name, modelId: selectedModel,
-        ...(params.reasoningEffortSpec ? { spec: params.reasoningEffortSpec } : {}),
-      }).value;
-      const extraBody: Record<string, unknown> = {};
-      if (effortValue && (this.reasoningFormat === 'mercury' || this.reasoningFormat === 'reasoning-effort')) {
-        extraBody['reasoning_effort'] = effortValue;
-      } else if (effortValue && this.reasoningFormat === 'openrouter') {
-        extraBody['reasoning'] = { effort: effortValue };
-      } else if (this.reasoningFormat === 'llamacpp') {
-        // llama.cpp auto-enables thinking for capable models; explicitly control it
-        extraBody['enable_thinking'] = effortValue !== undefined
-          && effortValue !== 'instant'
-          && effortValue !== 'none';
-      }
-      // reasoningFormat === 'none': don't send anything
-
-      if (reasoningSummary && this.reasoningFormat === 'mercury') {
-        extraBody['reasoning_summary'] = true;
-        // Wait for the full reasoning summary before streaming text
-        extraBody['reasoning_summary_wait'] = true;
-      }
-
-      // Build per-request headers for cache optimization
-      const requestHeaders: Record<string, string> = {};
-      if (this.cacheCapability.type === 'automatic' && this.cacheCapability.sessionAffinityHeader) {
-        requestHeaders[this.cacheCapability.sessionAffinityHeader] = 'true';
-      }
+      const { body: requestBody, headers: requestHeaders, effortValue } = buildCompatChatRequest(
+        { name: this.name, reasoningFormat: this.reasoningFormat, cacheCapability: this.cacheCapability },
+        params,
+        selectedModel,
+      );
 
       let streamOpened = false;
       logger.debug('OpenAICompatProvider.chat request', {
@@ -422,14 +435,10 @@ export class OpenAICompatProvider implements LLMProvider {
         if (params.beforeAttempt) await revalidateProviderAttempt(params.beforeAttempt);
         const created = await client.chat.completions.create(
           {
-            model: selectedModel,
-            messages: openaiMessages as Parameters<OpenAICompatChatCreate>[0]['messages'],
-            ...(openaiTools ? { tools: openaiTools as Parameters<OpenAICompatChatCreate>[0]['tools'] } : {}),
-            ...(maxTokens ? { max_tokens: maxTokens } : {}),
+            ...requestBody,
             stream: true,
             stream_options: { include_usage: true },
-            ...extraBody,
-          } as Parameters<OpenAICompatChatCreate>[0],
+          } as unknown as Parameters<OpenAICompatChatCreate>[0],
           // withRetry is the one retry owner; the SDK's own retries would multiply the requests it reports.
           {
             ...(signal !== undefined ? { signal } : {}),
@@ -480,6 +489,7 @@ export class OpenAICompatProvider implements LLMProvider {
             stopReason = mapOpenAIStopReason(finishReason);
           }
 
+          if (raw.usage) sawUsage = true;
           ({ inputTokens, outputTokens, cacheReadTokens } = applyOpenAIChunkUsage(
             raw.usage as OpenAIChunkUsage | undefined,
             { inputTokens, outputTokens, cacheReadTokens },
@@ -525,6 +535,19 @@ export class OpenAICompatProvider implements LLMProvider {
         });
       }
 
+      // A completion closes with a finish reason, or at least the usage chunk
+      // `include_usage` asks for; a stream that ends with neither was cut (a
+      // gateway timeout, a local server unloading its model), and its text is a
+      // truncated answer. Retryable only while nothing was shown (canRetry).
+      if (rawStopReason === undefined && !sawUsage) {
+        throw new ProviderError(`${this.name} stream ended without a finish reason; the answer may be truncated.`, {
+          statusCode: 502,
+          provider: this.name,
+          operation: 'chat',
+          phase: 'stream',
+        });
+      }
+
       // Some models (e.g. kimi-k2-thinking via ollama-cloud) emit tool calls as
       // raw text tokens instead of the OpenAI function-calling wire format.
       // Fall back to text extraction when no structured tool calls were found.
@@ -549,7 +572,7 @@ export class OpenAICompatProvider implements LLMProvider {
           outputTokens,
           ...(cacheReadTokens > 0 ? { cacheReadTokens } : {}),
         },
-        stopReason: resolveCompletedStopReason(stopReason, responseText),
+        stopReason,
         ...withProviderStopReason(rawStopReason),
         ...(rateLimit ? { rateLimit } : {}),
       };
@@ -564,7 +587,7 @@ export class OpenAICompatProvider implements LLMProvider {
       });
 
       return response;
-    }, { ...(signal ? { signal } : {}), ...(params.beforeAttempt ? { beforeAttempt: params.beforeAttempt } : {}), canRetry }, onRetry), { provider: this.name, model: model ?? this.defaultModel })).result;
+    }, { ...(signal ? { signal } : {}), ...(params.beforeAttempt ? { beforeAttempt: params.beforeAttempt } : {}), ...(params.maxRetries !== undefined ? { maxRetries: params.maxRetries } : {}), canRetry }, onRetry), { provider: this.name, model: model ?? this.defaultModel })).result;
   }
 
   async embed(request: ProviderEmbeddingRequest): Promise<ProviderEmbeddingResult> {

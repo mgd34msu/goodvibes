@@ -33,7 +33,7 @@ Native providers carry their own client for a vendor's first-party API, rather t
 
 ## Compatible and gateway providers
 
-The runtime also supports a broad compatible/gateway layer. Each entry below is registered with a fixed base URL and activates when its API key is present, in the environment variable shown or in `/secrets`, with one exception: `cohere`, `deepinfra`, `opencode-zen`, `perplexity`, `sambanova`, `zenmux` and `zenmux-anthropic` take their key from the environment variable only, so export the variable before launching; a key stored with `/secrets` does not activate them. The current built-ins:
+The runtime also supports a broad compatible/gateway layer. Each entry below is registered with a fixed base URL and activates when its API key is present, in the environment variable shown or in `/secrets`. The current built-ins:
 
 | Provider | Display name | API key variable |
 | --- | --- | --- |
@@ -110,7 +110,7 @@ export OPENROUTER_API_KEY="..."
 export AIHUBMIX_API_KEY="..."
 ```
 
-Then pick any model from the `synthetic` provider. Keys can equally be stored with `/secrets set <NAME> <value>` for the providers that accept stored keys (see the exception under compatible and gateway providers); environment variables win when both are set.
+Then pick any model from the `synthetic` provider. Keys can equally be stored with `/secrets set <NAME> <value>`; environment variables win when both are set.
 
 ### What synthetic models are
 
@@ -120,7 +120,7 @@ Models with different naming across providers (for example `GPT-4o` vs `gpt 4o`)
 
 ### Transparent failover rules
 
-Within a single synthetic model, backends are tried in order (best context window first, then best max output tokens as a tiebreaker), skipping any backend without a configured key. A failed backend is marked on a cooldown and the next backend in the list is tried immediately, in the same call, with no wait:
+Within a single synthetic model, backends are tried in order (best context window first, then best max output tokens as a tiebreaker), skipping any backend whose provider is not configured (a key in the environment or stored with `/secrets` both count). Each backend gets one attempt; this layer does the retrying. A failed backend is marked on a cooldown and the next backend in the list is tried immediately, in the same call, with no wait:
 
 - **Rate limit (429) or an out-of-credit/billing error.** The failed backend is put on cooldown (the provider's own retry-after when it sends one, otherwise 60 seconds by default) and the next backend is tried right away.
 - **Other 4xx errors from the provider (401, 403, 404, and similar).** Treated as provider-specific rather than the caller's fault: the backend gets a 60-second cooldown and the next backend is tried.
@@ -128,7 +128,7 @@ Within a single synthetic model, backends are tried in order (best context windo
 - **Client error (400).** Does not trigger failover. A 400 means the request itself is malformed, not the provider, so switching providers would not help.
 - **All backends cooling down, shortest remaining cooldown 120 seconds or less.** The turn waits out that cooldown and makes one retry attempt on the backend that just came off it. Longer cooldowns are not waited out; the error surfaces immediately instead.
 
-Failover is silent by default: the model name in the status bar does not change when the runtime switches backends for the same synthetic model.
+The model name in the status bar does not change when the runtime switches backends for the same synthetic model, but every rotation and every cooldown wait is reported as a retry of the turn, naming the provider and the reason (for example "Every provider for kimik25 is cooling down; waiting 45 s for groq's rate limit.").
 
 ### Cross-model failover (free tier only)
 

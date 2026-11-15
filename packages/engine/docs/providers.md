@@ -42,9 +42,7 @@ finally the provider id itself with its first letter capitalized. Env vars
 come from the built-in provider env-key map. A provider is reported as
 `configured` when any of its environment variables is set, or when
 credentials are supplied through the `SecretsManager` or an OAuth/subscription
-route. `cohere`, `deepinfra`, `opencode-zen`, `perplexity`, `sambanova`,
-`zenmux` and `zenmux-anthropic` take their key from the environment variable
-only; a stored secret does not activate them. A Bedrock provider counts as
+route. A Bedrock provider counts as
 configured only with a bearer token, a complete access-key pair or a profile:
 `AWS_ACCESS_KEY_ID` alone does not configure it.
 

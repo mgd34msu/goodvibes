@@ -1,11 +1,32 @@
+import { createHash } from 'node:crypto';
 import { Parser } from 'tar';
 import { parse } from 'smol-toml';
 import { instrumentedFetch } from '../utils/fetch-with-timeout.js';
 import { logger } from '../utils/logger.js';
+import { MODEL_CATALOG_PIN, type ModelCatalogPin } from './model-catalog-pin.js';
 
 type Table = Record<string, unknown>;
 export type RepositoryCatalog = Record<string, Table & { models: Record<string, Table> }>;
+/** The moving development head, read only while the build ships no pin. */
 export const MODEL_CATALOG_REPOSITORY_URL = 'https://codeload.github.com/anomalyco/models.dev/tar.gz/refs/heads/dev';
+
+/** Where the catalog archive is read from: the pinned commit, or the development head when no pin is set. */
+export interface ModelCatalogSource {
+  readonly url: string;
+  /** The commit id, or `dev` for the moving head; stored with the cache so a new pin refetches. */
+  readonly id: string;
+  readonly sha256?: string | undefined;
+}
+
+export function modelCatalogSource(pin: ModelCatalogPin | null = MODEL_CATALOG_PIN): ModelCatalogSource {
+  if (!pin) return { url: MODEL_CATALOG_REPOSITORY_URL, id: 'dev' };
+  return { url: `https://codeload.github.com/anomalyco/models.dev/tar.gz/${pin.commit}`, id: pin.commit, sha256: pin.sha256.toLowerCase() };
+}
+
+/** One conditional read of the catalog archive. */
+export type ModelCatalogArchiveRead =
+  | { readonly status: 'fetched'; readonly catalog: RepositoryCatalog; readonly etag?: string | undefined; readonly source: string }
+  | { readonly status: 'not-modified'; readonly source: string };
 
 function table(value: unknown): value is Table {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -67,9 +88,35 @@ export async function parseModelCatalogRepository(files: ReadonlyMap<string, str
 }
 
 /** Read data only from one coherent GitHub repository snapshot; never execute repository code. */
-export async function fetchModelCatalogRepository(): Promise<RepositoryCatalog> {
-  const response = await instrumentedFetch(MODEL_CATALOG_REPOSITORY_URL, { headers: { Accept: 'application/gzip' }, signal: AbortSignal.timeout(30_000) });
+export async function fetchModelCatalogRepository(options: { readonly pin?: ModelCatalogPin | null | undefined } = {}): Promise<RepositoryCatalog> {
+  const read = await readModelCatalogArchive({ ...(options.pin !== undefined ? { pin: options.pin } : {}) });
+  if (read.status !== 'fetched') throw new Error('Model catalog repository answered not-modified to an unconditional request');
+  return read.catalog;
+}
+
+/**
+ * Read the catalog archive, conditionally when `etag` is the one the cached
+ * copy came with (a 304 costs one small request). With a pin, the archive's
+ * SHA-256 must match the pinned one or the read is refused, so a moved branch
+ * or an altered archive never replaces the cached catalog.
+ */
+export async function readModelCatalogArchive(options: {
+  readonly etag?: string | undefined;
+  readonly pin?: ModelCatalogPin | null | undefined;
+} = {}): Promise<ModelCatalogArchiveRead> {
+  const source = modelCatalogSource(options.pin === undefined ? MODEL_CATALOG_PIN : options.pin);
+  if (!source.sha256) logger.debug('[model-catalog] No catalog pin is set; reading the unverified development head', { url: source.url });
+  const response = await instrumentedFetch(source.url, {
+    headers: { Accept: 'application/gzip', ...(options.etag ? { 'If-None-Match': options.etag } : {}) },
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (response.status === 304) {
+    await response.body?.cancel().catch(() => {});
+    return { status: 'not-modified', source: source.id };
+  }
   if (!response.ok) throw new Error(`Model catalog repository returned HTTP ${response.status}`);
+  const etag = response.headers.get('etag') ?? undefined;
+  const digest = createHash('sha256');
   const files = new Map<string, string>();
   let totalBytes = 0;
   await new Promise<void>((resolve, rejectOnce) => {
@@ -99,6 +146,7 @@ export async function fetchModelCatalogRepository(): Promise<RepositoryCatalog> 
           const { done, value } = await reader.read(); if (done) break;
           compressedBytes += value.byteLength;
           if (compressedBytes > 32 * 1024 * 1024) throw new Error('Model catalog archive exceeds its download budget');
+          digest.update(value);
           parser.write(value);
         }
         if (!failed) parser.end();
@@ -106,7 +154,13 @@ export async function fetchModelCatalogRepository(): Promise<RepositoryCatalog> 
     };
     void consume().catch(error => { parser.abort(error instanceof Error ? error : new Error('Model catalog download failed')); reject(error); });
   });
+  if (source.sha256) {
+    const actual = digest.digest('hex');
+    if (actual !== source.sha256) {
+      throw new Error(`Model catalog archive for commit ${source.id} does not match its pinned checksum (got ${actual}); the cached catalog is kept.`);
+    }
+  }
   const catalog = await parseModelCatalogRepository(files);
   if (Object.keys(catalog).length === 0) throw new Error('Model catalog repository contains no provider data');
-  return catalog;
+  return { status: 'fetched', catalog, ...(etag ? { etag } : {}), source: source.id };
 }

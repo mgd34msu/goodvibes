@@ -40,9 +40,3 @@ export function createDiscoveredProvider(server: DiscoveredServer): LLMProvider 
       });
   }
 }
-
-export function getDiscoveredReasoningFormat(
-  serverType: DiscoveredServer['serverType'],
-): 'llamacpp' | 'none' {
-  return getDiscoveredTraits(serverType).reasoningFormat;
-}

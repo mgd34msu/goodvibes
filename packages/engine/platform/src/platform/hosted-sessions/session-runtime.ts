@@ -19,6 +19,7 @@ import { ToolRegistry } from '../tools/registry.js';
 import { registerAllTools } from '../tools/index.js';
 import { registerDevicePhoneTool } from '../devices/device-phone-tool.js';
 import { ContextAccountingHolder } from '../tools/context-accounting/index.js';
+import { bindSessionContextAccounting } from '../tools/context-accounting/session-source.js';
 import { FeatureAnnouncementStore, featureAnnouncementsPath } from '../runtime/feature-announcements.js';
 import { createApprovalDerivedHandlers } from '../runtime/permissions/permission-composition.js';
 import { readSessionContextUsage, type SessionLiveTurnControls } from '../control-plane/routes/session-runtime.js';
@@ -317,6 +318,17 @@ export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions)
     contractHooks: options.floor.contractRunner.hooks(),
   });
 
+  // context_accounting answers for this session: its injections, token use and compaction.
+  const unbindContextAccounting = bindSessionContextAccounting(contextAccountingHolder, {
+    orchestrator,
+    getSessionId: () => sessionId,
+    getContextWindow: () => {
+      const known = providerRegistry.getKnownContextWindowForModel(providerRegistry.getCurrentModel());
+      return known !== null && known > 0 ? known : null;
+    },
+    runtimeBus: services.runtimeBus,
+  });
+
   // The contracts this session starts talk back to it: their questions for the
   // owner and their outcomes are the session's replies.
   const contracts = options.contracts;
@@ -434,6 +446,7 @@ export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions)
       modeRevision++;
       promptLifetime.abort();
       stopContracts();
+      unbindContextAccounting();
       try {
         orchestrator.dispose();
       } catch (error) {

@@ -19,7 +19,9 @@
  *   reason and next steps for a person or an agent to act on.
  *
  * The route each method is served on comes from the operator contract the Agent
- * was built with, through `@goodvibes-jev/engine/operator-client`.
+ * was built with, through `@goodvibes-jev/engine/operator-client`; a method the
+ * contract publishes for the WebSocket only goes to the host's invoke-by-id
+ * endpoint.
  */
 
 import { lstatSync } from 'node:fs';
@@ -36,7 +38,7 @@ import {
   type ConnectedHostOperatorToken,
 } from '../runtime/connected-host-auth.ts';
 import { agentHostPairingStorePath } from '../runtime/connected-host-pairing-store.ts';
-import { assertSafeOperatorPathValue, findOperatorHttpBinding, READ_ONLY_HTTP_METHODS } from './operator-contract-routes.ts';
+import { assertSafeOperatorPathValue, findOperatorContractMethod, findOperatorHttpBinding, READ_ONLY_HTTP_METHODS } from './operator-contract-routes.ts';
 
 export type ConnectedHostSource = ConnectedHostCredentialSource;
 
@@ -559,8 +561,15 @@ export function createConnectedHost(
     callOptions: ConnectedHostInvokeOptions = {},
   ): Promise<OperatorMethodOutput<M>> {
     const binding = findOperatorHttpBinding(methodId);
-    const route = binding ? `${binding.httpMethod} ${binding.pathTemplate}` : methodId;
-    const isRead = binding ? READ_ONLY_HTTP_METHODS.has(binding.httpMethod) : false;
+    // A method published for the WebSocket only has no REST route; the host
+    // serves it through its invoke-by-id endpoint, behind the same access gate.
+    const listed = binding ? null : findOperatorContractMethod(methodId);
+    const invokePath = `/api/control-plane/methods/${encodeURIComponent(methodId)}/invoke`;
+    const route = binding ? `${binding.httpMethod} ${binding.pathTemplate}` : listed ? `POST ${invokePath}` : methodId;
+    const scopes = listed?.scopes ?? [];
+    const isRead = binding
+      ? READ_ONLY_HTTP_METHODS.has(binding.httpMethod)
+      : scopes.length > 0 && scopes.every((scope) => scope.startsWith('read:'));
     let resolved: ConnectedHostConnection;
     try {
       resolved = connection();
@@ -577,15 +586,15 @@ export function createConnectedHost(
         reason: 'the caller stopped waiting before the request was sent', next: ['call again when it is still wanted'],
       });
     }
-    if (!binding) {
+    if (!binding && !listed) {
       return refuse('connected_host_error', {
         code: 'method_unknown', retryable: false,
         state: `${methodId} is not in the operator contract this Agent was built with`,
-        reason: 'no HTTP route is known for this method', next: ['update the Agent, or call a method the contract lists'],
+        reason: 'no route is known for this method', next: ['update the Agent, or call a method the contract lists'],
       });
     }
     try {
-      for (const match of binding.pathTemplate.matchAll(/\{([^}]+)\}/g)) {
+      for (const match of (binding?.pathTemplate ?? '').matchAll(/\{([^}]+)\}/g)) {
         const name = match[1]!.trim();
         const value = (input as Record<string, unknown> | undefined)?.[name];
         if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') assertSafeOperatorPathValue(String(value), name);
@@ -633,7 +642,11 @@ export function createConnectedHost(
       : { [EXPLICIT_USER_REQUEST_HEADER]: String(callOptions.explicitUserRequest) };
     let pending: Promise<OperatorMethodOutput<M>>;
     try {
-      pending = call(methodId, input, headers ? { signal, headers } : { signal });
+      pending = binding
+        ? call(methodId, input, headers ? { signal, headers } : { signal })
+        : client.transport.requestJson<OperatorMethodOutput<M>>(invokePath, {
+          method: 'POST', body: { body: input ?? {} }, methodId, signal, ...(headers ? { headers } : {}),
+        });
     } catch (error) {
       pending = Promise.reject(error);
     }

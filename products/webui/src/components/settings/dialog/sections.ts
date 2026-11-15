@@ -192,10 +192,10 @@ export const SETTINGS_SECTIONS: readonly SettingsSectionDef[] = [
     id: 'network',
     label: 'Network',
     page: 'general',
-    description: 'How devices reach your daemon: Tailscale, the relay and the listeners.',
+    description: 'How devices reach your daemon: Tailscale, Cloudflare, the relay and the listeners.',
     namespaces: ['network', 'relay', 'httpListener', 'controlPlane', 'web', 'cloudflare', 'service'],
-    keywords: ['tailscale', 'https', 'serve', 'lan', 'relay', 'port', 'listener'],
-    items: ['Tailscale'],
+    keywords: ['tailscale', 'cloudflare', 'tunnel', 'worker', 'https', 'serve', 'lan', 'relay', 'port', 'listener'],
+    items: ['Tailscale', 'Cloudflare'],
   },
   {
     id: 'all',

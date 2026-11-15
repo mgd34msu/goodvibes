@@ -28,6 +28,7 @@ import { NotificationSettings } from '../../NotificationSettings';
 import { PairingTokensSettings } from '../../PairingTokensSettings';
 import { PowerSettings } from '../../PowerSettings';
 import { TailscaleSettings } from '../../TailscaleSettings';
+import { CloudflareSettings } from '../../CloudflareSettings';
 import { PrincipalsView } from '../../../../views/principals/PrincipalsView';
 import { ConfigGroupList, useConfigSettings } from '../ConfigSettings';
 import { ReadableValue, SettingRow, SettingsBlock } from '../parts';
@@ -193,6 +194,7 @@ export function NetworkSection() {
   return (
     <>
       <TailscaleSettings />
+      <CloudflareSettings />
       <SectionConfig id="network" />
     </>
   );

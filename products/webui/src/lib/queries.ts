@@ -163,6 +163,8 @@ export const queryKeys = {
   // exists for this verb yet, so TailscaleSettings polls/refetches manually, same
   // standing gap pairingTokens/fleetGraph document above.
   tailscale: ['tailscale', 'get'] as const,
+  // cloudflare.status: no wire event; CloudflareSettings refetches after its own disable.
+  cloudflare: ['cloudflare', 'status'] as const,
   // memory.consolidation.receipts (platform 1.8.0), retained consolidation run receipts
   // + pending judgment proposals. No wire event exists for this verb yet either,
   // same standing gap; the panel refetches manually/on demand.

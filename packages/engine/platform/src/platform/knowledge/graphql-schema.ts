@@ -425,20 +425,6 @@ export const KNOWLEDGE_GRAPHQL_SDL = `
     updatedAt: Float!
   }
 
-  input KnowledgeJobRunInput {
-    mode: KnowledgeJobMode
-  }
-
-  input KnowledgePacketInput {
-    task: String!
-    writeScope: [String!]
-    limit: Int
-    detail: KnowledgePacketDetail
-    budgetLimit: Int
-    knowledgeSpaceId: String
-    includeAllSpaces: Boolean
-  }
-
   type Query {
     status(knowledgeSpaceId: String, includeAllSpaces: Boolean): KnowledgeStatus!
     connectors: [KnowledgeConnector!]!
@@ -456,26 +442,28 @@ export const KNOWLEDGE_GRAPHQL_SDL = `
     jobs: [KnowledgeJob!]!
     job(id: String!): KnowledgeJob
     jobRuns(limit: Int, jobId: String): [KnowledgeJobRun!]!
-    usage(limit: Int, targetKind: String, targetId: String, usageKind: String): [KnowledgeUsageRecord!]!
+    usage(limit: Int, targetKind: String, targetId: String, usageKind: String): [KnowledgeUsageRecord!]! @deprecated(reason: "Same as usageRecords; use usageRecords.")
     usageRecords(limit: Int, targetKind: String, targetId: String, usageKind: String): [KnowledgeUsageRecord!]!
-    consolidationCandidates(limit: Int, status: String): [KnowledgeConsolidationCandidate!]!
+    consolidationCandidates(limit: Int, status: String, subjectKind: String, subjectId: String): [KnowledgeConsolidationCandidate!]!
     consolidationReports(limit: Int): [KnowledgeConsolidationReport!]!
     schedules(limit: Int): [KnowledgeSchedule!]!
     sourceExtraction(sourceId: String!): KnowledgeExtraction
   }
 
   type Mutation {
-    ingestUrl(url: String!, sourceType: String, connectorId: String, folderPath: String, tags: [String!], sessionId: String, allowPrivateHosts: Boolean): KnowledgeSource!
-    ingestArtifact(path: String!, connectorId: String, tags: [String!], sessionId: String, allowPrivateHosts: Boolean): KnowledgeSource!
+    ingestUrl(url: String!, title: String, sourceType: String, connectorId: String, folderPath: String, tags: [String!], sessionId: String, allowPrivateHosts: Boolean, metadata: JSON): KnowledgeSource!
+    "Ingest a stored artifact by artifactId, a local file by path, or a document by uri; give exactly one."
+    ingestArtifact(artifactId: String, path: String, uri: String, title: String, sourceType: String, folderPath: String, connectorId: String, tags: [String!], sessionId: String, allowPrivateHosts: Boolean, metadata: JSON): KnowledgeSource!
     importBookmarksFromFile(path: String!, sessionId: String, allowPrivateHosts: Boolean): KnowledgeBatchIngestResult!
     importUrlsFromFile(path: String!, sessionId: String, allowPrivateHosts: Boolean): KnowledgeBatchIngestResult!
     ingestBookmarkSeeds(seeds: [String!]!, connectorId: String, sessionId: String): KnowledgeBatchIngestResult!
-    ingestWithConnector(connectorId: String!, input: String!, sessionId: String, allowPrivateHosts: Boolean): KnowledgeBatchIngestResult!
-    ingestConnectorInput(input: String!, connectorId: String, sessionId: String, allowPrivateHosts: Boolean): KnowledgeBatchIngestResult!
+    ingestWithConnector(connectorId: String!, input: String!, sessionId: String, allowPrivateHosts: Boolean, metadata: JSON): KnowledgeBatchIngestResult!
+    "Ingest through a connector from inline input, inline content, or a local file path; give exactly one."
+    ingestConnectorInput(connectorId: String!, input: String, content: String, path: String, sessionId: String, allowPrivateHosts: Boolean, metadata: JSON): KnowledgeBatchIngestResult!
     renderProjection(kind: KnowledgeProjectionKind!, id: String, limit: Int, knowledgeSpaceId: String, includeAllSpaces: Boolean): KnowledgeProjectionBundle!
-    materializeProjection(kind: KnowledgeProjectionKind!, id: String, limit: Int, knowledgeSpaceId: String, includeAllSpaces: Boolean): KnowledgeMaterializedProjection!
+    materializeProjection(kind: KnowledgeProjectionKind!, id: String, limit: Int, filename: String, knowledgeSpaceId: String, includeAllSpaces: Boolean): KnowledgeMaterializedProjection!
     reindex: KnowledgeStatus!
-    runJob(id: String!, mode: KnowledgeJobMode): KnowledgeJobRun!
+    runJob(id: String!, mode: KnowledgeJobMode, sourceIds: [String!], limit: Int): KnowledgeJobRun!
     saveSchedule(id: String, jobId: String!, label: String!, enabled: Boolean!, schedule: JSON!, metadata: JSON): KnowledgeSchedule!
     deleteSchedule(id: String!): Boolean!
     setScheduleEnabled(id: String!, enabled: Boolean!): KnowledgeSchedule
@@ -627,12 +615,17 @@ export function mapJobRun<T extends { mode?: string }>(run: T): T & { mode: stri
   };
 }
 
+/** Largest list a GraphQL field returns in one call; page with `offset` for more. */
+export const KNOWLEDGE_GRAPHQL_MAX_LIMIT = 1_000;
+
+/** A list limit between 0 and `KNOWLEDGE_GRAPHQL_MAX_LIMIT`, or the fallback when none is given. */
 export function clampInt(value: number | null | undefined, fallback: number): number {
-  return typeof value === 'number' && Number.isFinite(value) ? Math.trunc(value) : fallback;
+  const chosen = typeof value === 'number' && Number.isFinite(value) ? Math.trunc(value) : fallback;
+  return Math.min(KNOWLEDGE_GRAPHQL_MAX_LIMIT, Math.max(0, chosen));
 }
 
 export function clampOffset(value: number | null | undefined): number {
-  return Math.max(0, clampInt(value, 0));
+  return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.trunc(value)) : 0;
 }
 
 export function pickOperation(document: DocumentNode, operationName?: string): 'query' | 'mutation' {

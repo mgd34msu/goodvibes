@@ -128,31 +128,8 @@ describe('Home Graph full-candidate search judgments (authored synthetic proof)'
     expect(answer.answer.text).toBe('- Source identity');
     expect(answer.answer.text).not.toContain('unselected');
     expect(answer.results[0]!.summary).toBe('An unselected claim must not reappear.');
-    expect(fake.requests.some((request) => 'readable' in request.questions)).toBe(true);
-  });
-  test('a negative shared readability result omits summary metadata without an excerpt fallback', async () => {
-    const f = await fixture();
-    await source(f.store, 'empty', 'Source identity', body, { summary: 'An unreadable synthetic summary.' });
-    const fake = readings({ evidence: { 'Source identity': 0.99 }, spans: [], readability: 0.01 });
-    const answer = await f.service.ask({ knowledgeSpaceId: spaceId, query });
-    expect(answer.results[0]!.summary).toBeUndefined();
-    expect(answer.results[0]!.excerpt).toBe('');
-    expect(answer.answer.text).toBe('- Source identity');
-    expect(fake.requests.some((request) => 'readable' in request.questions)).toBe(true);
-  });
-  test('readability configuration changes hold before excerpt dispatch', async () => {
-    const f = await fixture();
-    await source(f.store, 'summary', 'Source identity', body, { summary: 'A readable summary.' });
-    const fake = readings({ evidence: { 'Source identity': 0.99 } });
-    installJudgmentPort({ ...fake.port, async ask(request) {
-      const result = await fake.port.ask(request);
-      if ('readable' in request.questions) installJudgmentPort(fakePort(() => noulAnswer(0.99)).port);
-      return result;
-    } });
-    const before = records(f.store);
-    await expect(select(f)).rejects.toMatchObject({ reason: 'stale' });
-    expect(fake.requests.some((request) => 'excerptUseful' in request.questions)).toBe(false);
-    expect(records(f.store)).toBe(before);
+    // Readability is stored with the extraction; a search asks no readability question.
+    expect(fake.requests.some((request) => 'readable' in request.questions)).toBe(false);
   });
   test.each([false, true])('settled empty search stays empty through answer composition, semantic=%s', async (semantic) => {
     const f = await fixture(semantic); await source(f.store, 'denied', 'Unrelated source', body);

@@ -1,22 +1,17 @@
-import { decisionOrClassic } from '../runtime/decision-policy.js';
-import { KnowledgeExtractionJudgmentHoldError } from './extraction-policy.js';
-import { captureJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { prepareRepairJudgmentResult } from './semantic/web-gap-repair/admission.js';
+import { judge } from '../runtime/judge.js';
 import { assertJudgmentInput } from '../gate/judgment-input.js';
-import { entityAlias } from './batteries/entity-alias.js';
+import { ENTITY_ALIAS_SLOTS, entityAlias } from './batteries/entity-alias.js';
+import { splitKnowledgePassages } from './passages.js';
+import { KnowledgeExtractionJudgmentHoldError } from './extraction-policy.js';
 
-// Transport/work budgets, never semantic acceptance or word-frequency thresholds.
-/**
- * One reading per entity and candidate word, run in sequence. The ceiling stops a source with many
- * entities and a long section list from spending hundreds of calls: it is split evenly across the
- * entities and each entity reads only its earliest distinct words. Classic mode makes no reading.
- */
-export const MAX_ENTITY_ALIAS_REQUESTS = 1024;
-export const MAX_ENTITY_ALIAS_CANDIDATES = Number.POSITIVE_INFINITY;
-export const MAX_ENTITY_ALIAS_EVIDENCE_CHARS = Number.POSITIVE_INFINITY;
-export const MAX_ENTITY_ALIAS_NAME_CHARS = Number.POSITIVE_INFINITY;
-export const MAX_ENTITY_ALIAS_WORD_CHARS = Number.POSITIVE_INFINITY;
-const MAX_ALIASES_PER_ENTITY = Number.POSITIVE_INFINITY;
+/** Names nominated per entity; one request reads them all. */
+export const MAX_ENTITY_ALIAS_CANDIDATES = ENTITY_ALIAS_SLOTS.length;
+/** Passages that mention the entity, sent with its one request. */
+export const MAX_ENTITY_ALIAS_EVIDENCE_BYTES = 2_048;
+/** A nominated name longer than this is a phrase, not a name. */
+export const MAX_ENTITY_ALIAS_NAME_CHARS = 64;
+const PASSAGE_CHARS = 600;
+const SITE = 'knowledge.ingest.entity-alias';
 
 interface EntityIdentity {
   readonly kind: string;
@@ -26,21 +21,66 @@ interface AliasEvidence {
   readonly title: string;
   readonly summary: string;
   readonly extractionSummary: string;
+  readonly excerpt?: string | undefined;
   readonly sections: readonly string[];
 }
 
+/** The caller stopped wanting the aliases (aborted or its source moved); nothing is kept. */
 export class KnowledgeEntityAliasHoldError extends Error {
   constructor() {
-    super('Knowledge entity aliases are on hold: the required alias readings did not settle within the request budget.');
+    super('Knowledge entity aliases are on hold: the ingest that asked for them was cancelled or its source changed.');
     this.name = 'KnowledgeEntityAliasHoldError';
   }
 }
 
+function escape(value: string): string { return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+
+const ALIAS_WORDS = String.raw`(?:also\s+)?(?:called|known\s+as|named|nicknamed|abbreviated(?:\s+as)?|short\s+for|stands\s+for|or\s+simply)|aka|a\.k\.a\.`;
+
+function clean(raw: string): string {
+  const words = raw.replace(/^[\s"'“”‘’`]+|[\s"'“”‘’`]+$/gu, '').replace(/\s+/g, ' ').split(' ');
+  return words.slice(0, 4).join(' ');
+}
+
 /**
- * Complete prospective input is checked before clipping or the first request.
- * Only entity identity and lexical candidates with title/summary/section evidence
- * leave; unrelated metadata, provenance, artifact bytes and tags are not sent.
- * No alias or graph mutation is returned until the whole reading batch settles.
+ * Names a passage states for the entity: `Title (X)`, `X (Title)`, `Title, also
+ * called X`, `X, known as Title`, and the title's initials where they occur as a
+ * word. Every candidate is a literal span of the evidence.
+ */
+function nominate(title: string, evidence: string): string[] {
+  const t = escape(title);
+  const found: string[] = [];
+  const patterns = [
+    new RegExp(`${t}\\s*\\(\\s*([^()\\n]{1,${MAX_ENTITY_ALIAS_NAME_CHARS}}?)\\s*\\)`, 'giu'),
+    new RegExp(`([\\p{L}\\p{N}][\\p{L}\\p{N}\\p{M}._'’-]*)\\s*\\(\\s*${t}\\s*\\)`, 'giu'),
+    new RegExp(`${t}[,]?\\s+(?:is\\s+)?(?:${ALIAS_WORDS})\\s+["“'‘]?([^"”'’,.;:()\\n]{1,${MAX_ENTITY_ALIAS_NAME_CHARS}})`, 'giu'),
+    new RegExp(`["“'‘]?([^"”'’,.;:()\\n]{1,${MAX_ENTITY_ALIAS_NAME_CHARS}}?)["”'’]?[,]?\\s+(?:is\\s+)?(?:${ALIAS_WORDS})\\s+${t}\\b`, 'giu'),
+  ];
+  for (const pattern of patterns) for (const match of evidence.matchAll(pattern)) if (match[1]) found.push(clean(match[1]));
+  const words = title.split(/\s+/).filter(Boolean);
+  if (words.length >= 2) {
+    const initials = words.map((word) => word[0]!.toUpperCase()).join('');
+    if (new RegExp(`(?<![\\p{L}\\p{N}])${escape(initials)}(?![\\p{L}\\p{N}])`, 'u').test(evidence)) found.push(initials);
+  }
+  const seen = new Set([title.toLowerCase()]);
+  const out: string[] = [];
+  for (const candidate of found) {
+    const key = candidate.toLowerCase();
+    if (!candidate || candidate.length > MAX_ENTITY_ALIAS_NAME_CHARS || seen.has(key) || !evidence.includes(candidate)) continue;
+    seen.add(key);
+    out.push(candidate);
+    if (out.length === MAX_ENTITY_ALIAS_CANDIDATES) break;
+  }
+  return out;
+}
+
+/**
+ * Aliases for each structured entity a source names. Code nominates candidate
+ * names from the passages that mention the entity; an entity with none makes
+ * no request; otherwise one request reads all of its candidates, and each
+ * confident yes that is a literal span of the passages is kept. An entity whose
+ * reading does not settle (unsure, deadline, no decision model) keeps no
+ * inferred alias; the other entities keep theirs and the ingest goes on.
  */
 export async function readKnowledgeEntityAliases(
   entities: readonly EntityIdentity[],
@@ -49,97 +89,54 @@ export async function readKnowledgeEntityAliases(
   retainGuard?: (assertCurrent: () => void) => void,
   ownerCurrent?: () => void,
 ): Promise<readonly (readonly string[])[]> {
-  ownerCurrent?.();
-  if (signal?.aborted) throw new KnowledgeEntityAliasHoldError();
+  const current = () => {
+    if (signal?.aborted) throw new KnowledgeEntityAliasHoldError();
+    // The host's own extraction hold keeps its kind; any other owner failure is this hold, without its detail.
+    try { ownerCurrent?.(); } catch (error) { if (error instanceof KnowledgeExtractionJudgmentHoldError) throw error; throw new KnowledgeEntityAliasHoldError(); }
+  };
+  current();
   if (entities.length === 0) return [];
-  assertJudgmentInput({ entities, evidence: input });
-  const identities = entities.map(({ kind, title }) => ({ kind, title }));
-  if (identities.some((entity) => entity.title.length > MAX_ENTITY_ALIAS_NAME_CHARS)) {
-    throw new KnowledgeEntityAliasHoldError();
-  }
-  const complete = [input.title, input.summary, input.extractionSummary, ...input.sections].join('\n');
-  assertJudgmentInput(complete);
-  // Do not fabricate a candidate by cutting through a word at the sample boundary.
-  const evidence = complete.slice(0, MAX_ENTITY_ALIAS_EVIDENCE_CHARS);
-  const candidateLimit = Number.POSITIVE_INFINITY;
-  const candidates: string[] = [];
-  const seenWords = new Set<string>();
-  for (const match of complete.matchAll(/[\p{L}\p{N}\p{M}]+(?:[-_.'’][\p{L}\p{N}\p{M}]+)*/gu)) {
-    if (match.index + match[0].length > evidence.length) break;
-    const word = match[0];
-    if (word.length > MAX_ENTITY_ALIAS_WORD_CHARS || seenWords.has(word)) continue;
-    seenWords.add(word);
-    candidates.push(word);
-    if (candidates.length === candidateLimit) break;
-  }
-  const aliases: string[][] = identities.map(() => []);
-  // Each entity reads at most its share of the call budget (the earliest distinct words), so a long source
-  // with several entities still ingests; later words are simply not considered as aliases.
-  const perEntity = Math.floor(MAX_ENTITY_ALIAS_REQUESTS / identities.length);
-  const requests = identities.flatMap((entity, index) => candidates
-    .filter((candidate) => candidate !== entity.title) // The exact identifier is already the node title.
-    .slice(0, perEntity)
-    .map((candidate) => ({ index, state: { entity, candidate, evidence } })));
-  // Check every complete prospective request before any request, including joined text.
-  for (const request of requests) assertJudgmentInput(request.state);
-  if (requests.length === 0) return aliases;
-  const actions: Array<{ readonly record: (action: string) => void; readonly action: string }> = [];
-  try {
-    return await decisionOrClassic<readonly (readonly string[])[]>(async () => {
-      const captured = captureJudgmentPort('knowledge.ingest.entity-alias', { signal, assertCurrent: ownerCurrent, prepareResultCapture: prepareRepairJudgmentResult });
-      const port = captured.port;
-      const assertCurrent = () => {
-        try {
-          if (signal?.aborted) throw new KnowledgeEntityAliasHoldError();
-          ownerCurrent?.(); captured.assertCurrent();
-        } catch { throw new KnowledgeEntityAliasHoldError(); }
-      };
-      retainGuard?.(assertCurrent);
-      // Every retained alias has its own reading; the owner can cancel the pass.
-      for (const { index, state } of requests) {
-        assertCurrent();
-        const run = await abortableAliasRead(entityAlias.run(port, state, { site: 'knowledge.ingest.entity-alias', ...(signal ? { signal } : {}), beforeAttempt: assertCurrent }), signal);
-        assertCurrent();
-        const reading = run.readings.alias;
-        if (reading.outcome !== 'act' || reading.verdict === 'uncertain') {
-          run.recordAction('held: unresolved alias identity');
-          throw new KnowledgeEntityAliasHoldError();
-        }
-        const selected = reading.verdict === 'yes' && aliases[index]!.length < MAX_ALIASES_PER_ENTITY;
-        if (selected) aliases[index]!.push(state.candidate);
-        actions.push({ record: run.recordAction, action: selected ? 'selected: entity alias' : reading.verdict === 'yes' ? 'not selected: alias count budget' : 'not an alias' });
-      }
-      for (const { record, action } of actions) record(action);
-      return aliases;
-    }, () => {
-      const current = () => { ownerCurrent?.(); if (signal?.aborted) throw new KnowledgeEntityAliasHoldError(); };
-      current(); retainGuard?.(current);
-      // Exact declared titles remain available. No additional alias is inferred.
-      return identities.map(() => []);
-    });
-  } catch {
-    // Lower captured ports normalize retirement. Recover only the host's
-    // CURRENT typed extraction hold, never a provider-supplied error class.
-    // Recheck the already captured callback before any attempted log effect.
-    try { ownerCurrent?.(); }
-    catch (error) { if (error instanceof KnowledgeExtractionJudgmentHoldError) throw error; }
-    for (const { record } of actions) {
-      try { record('held: alias batch incomplete'); } catch { /* Keep the hold value-free if recording also fails. */ }
+  retainGuard?.(current);
+  const passages = splitKnowledgePassages([[input.title, input.summary, input.extractionSummary, input.excerpt, ...input.sections]], PASSAGE_CHARS);
+  const encoder = new TextEncoder();
+  const requests = entities.map(({ kind, title }) => {
+    const lower = title.toLowerCase();
+    const chosen: string[] = [];
+    let bytes = 0;
+    for (const passage of passages) {
+      if (!passage.text.toLowerCase().includes(lower)) continue;
+      const size = encoder.encode(passage.text).byteLength;
+      if (bytes + size > MAX_ENTITY_ALIAS_EVIDENCE_BYTES) continue;
+      bytes += size;
+      chosen.push(passage.text);
     }
-    // No heuristic retry, logging of input/error text, or partial alias set on outages.
-    throw new KnowledgeEntityAliasHoldError();
-  }
-}
-
-/** Cancellation holds even when a provider does not honor its AbortSignal. */
-async function abortableAliasRead<T>(read: Promise<T>, signal?: AbortSignal): Promise<T> {
-  if (!signal) return read;
-  let abort = () => {};
-  const stopped = new Promise<never>((_resolve, reject) => {
-    abort = () => reject(new KnowledgeEntityAliasHoldError());
-    signal.addEventListener('abort', abort, { once: true });
-    if (signal.aborted) abort();
+    const evidence = chosen.join('\n');
+    return { entity: { kind, title }, evidence, candidates: evidence ? nominate(title, evidence) : [] };
   });
-  try { return await Promise.race([read, stopped]); }
-  finally { signal.removeEventListener('abort', abort); }
+  // Only the passages and names that leave are scanned.
+  for (const request of requests) if (request.candidates.length) assertJudgmentInput(request);
+  const aliases = await Promise.all(requests.map(async ({ entity, evidence, candidates }) => {
+    current();
+    if (!candidates.length) return [] as readonly string[];
+    const slots = ENTITY_ALIAS_SLOTS.slice(0, candidates.length);
+    const outcome = await judge({
+      site: SITE, battery: entityAlias, only: slots,
+      state: { entity, candidates, evidence },
+      ...(signal ? { signal } : {}),
+      settle: (readings) => slots.flatMap((slot, index) => {
+        const reading = readings[slot];
+        const candidate = candidates[index]!;
+        return reading?.outcome === 'act' && reading.verdict === 'yes' && evidence.includes(candidate) ? [candidate] : [];
+      }),
+      fallback: () => [],
+      describe: (kept) => kept.length ? `aliases: ${kept.length} of ${candidates.length}` : 'no alias',
+    });
+    return outcome.value;
+  })).catch((error: unknown) => {
+    // Only the caller's abort rejects `judge`; report it as this hold.
+    if (signal?.aborted) throw new KnowledgeEntityAliasHoldError();
+    throw error;
+  });
+  current();
+  return aliases;
 }

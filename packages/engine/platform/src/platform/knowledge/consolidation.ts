@@ -3,6 +3,7 @@ import { decisionOrClassic } from '../runtime/decision-policy.js';
 import { assertJudgmentInput } from '../gate/judgment-input.js';
 import { consolidationReading } from './batteries/consolidation.js';
 import type { MemoryClass, MemoryRegistry, MemoryScope } from '../state/index.js';
+import { assertValidMemoryFields } from '../state/memory-store-helpers.js';
 import type { KnowledgeStore } from './store.js';
 import { knowledgeConsolidationCandidateLifecycle } from './types.js';
 import type {
@@ -23,6 +24,8 @@ export interface KnowledgeConsolidationContext {
   readonly store: KnowledgeStore;
   readonly memoryRegistry: Pick<MemoryRegistry, 'add' | 'getStore'>;
   readonly syncReviewedMemory: () => Promise<void>;
+  /** Re-fetches one source now (what the refresh-stale job does for it); resolves to the number refreshed. */
+  readonly refreshSource?: ((sourceId: string) => Promise<number>) | undefined;
 }
 
 interface CandidateDecisionInput {
@@ -32,19 +35,21 @@ interface CandidateDecisionInput {
   readonly detail?: string | undefined;
 }
 
-// Exhaustive by construction: adding a class or scope to the memory store fails
-// to compile here until it is listed, so a valid value is never refused.
-const MEMORY_CLASSES = { decision: true, constraint: true, incident: true, pattern: true, fact: true, risk: true, runbook: true, architecture: true, ownership: true } satisfies Record<MemoryClass, true>;
-const MEMORY_SCOPES = { session: true, project: true, team: true } satisfies Record<MemoryScope, true>;
-
+/**
+ * The class and scope a decision stores on the candidate (and, on accept, on
+ * the memory) are checked against the memory store's own lists before anything
+ * is written; a reject or supersede writes them too, and only here.
+ */
 function assertDecisionMemoryTarget(input: CandidateDecisionInput): void {
-  if (input.memoryClass !== undefined && !Object.hasOwn(MEMORY_CLASSES, input.memoryClass)) {
-    throw new Error(`Unknown memory class "${input.memoryClass}". Use one of: ${Object.keys(MEMORY_CLASSES).join(', ')}. Nothing was changed.`);
-  }
-  if (input.scope !== undefined && !Object.hasOwn(MEMORY_SCOPES, input.scope)) {
-    throw new Error(`Unknown memory scope "${input.scope}". Use one of: ${Object.keys(MEMORY_SCOPES).join(', ')}. Nothing was changed.`);
-  }
+  assertValidMemoryFields({ cls: input.memoryClass, scope: input.scope }, 'consolidation decision');
 }
+
+/**
+ * Subjects whose worth reading said no, by the subject revision it was read at.
+ * The next run skips them until the subject changes, so its reading budget moves
+ * down the usage list instead of re-reading the same newest subjects.
+ */
+const declinedReadings = new WeakMap<KnowledgeStore, Map<string, string>>();
 
 const decisions = new WeakMap<KnowledgeStore, Map<string, Promise<KnowledgeConsolidationCandidateRecord>>>();
 
@@ -81,11 +86,12 @@ async function applyDecision(context: KnowledgeConsolidationContext, id: string,
   assertDecisionMemoryTarget(input);
   const target = decision === 'accept' ? 'accepted' : decision === 'reject' ? 'rejected' : 'superseded';
   if (candidate.status === target) return candidate;
-  // Accepting is what writes the memory. The other candidate types have no
-  // action behind accept, so it would only mark a stale source or memory as
-  // handled while it stays stale, and the lifecycle then forbids a second try.
-  if (decision === 'accept' && candidate.candidateType !== 'memory-promotion') {
-    throw new Error(`A ${candidate.candidateType} candidate cannot be accepted: accepting performs no ${candidate.candidateType === 'source-refresh' ? 'source refresh' : 'memory review'}. Run the ${candidate.candidateType === 'source-refresh' ? 'refresh-stale job' : 'memory review'} yourself, then reject or supersede this candidate. Nothing was changed.`);
+  // Accepting performs the candidate's action: a memory promotion writes the
+  // memory, a source refresh re-fetches the source, a memory review marks the
+  // memory reviewed. Without a refresh owner wired in, a source refresh cannot
+  // run here and accepting it changes nothing.
+  if (decision === 'accept' && candidate.candidateType === 'source-refresh' && !context.refreshSource) {
+    throw new Error('A source-refresh candidate cannot be accepted here: this host has no source refresh. Run the refresh-stale job, then reject or supersede this candidate. Nothing was changed.');
   }
   const move = knowledgeConsolidationCandidateLifecycle.check(candidate.status, target);
   if (!move.ok) {
@@ -96,6 +102,23 @@ async function applyDecision(context: KnowledgeConsolidationContext, id: string,
   if (decision === 'accept' && !isCandidateCurrent(context, candidate)) throw new Error('Knowledge candidate is stale; refresh it before accepting.');
   const decidedAt = Date.now();
   let acceptedMemoryId: string | undefined;
+  let actionResult: Record<string, unknown> = {};
+  if (decision === 'accept' && candidate.candidateType === 'source-refresh') {
+    if (candidate.subjectKind !== 'source') throw new Error('A source-refresh candidate must name a source. Nothing was changed.');
+    const refreshed = await context.refreshSource!(candidate.subjectId);
+    if (refreshed < 1) throw new Error(`Source ${candidate.subjectId} was not refreshed (it is no longer due, or the fetch failed). The candidate stays open; check the source and try again.`);
+    actionResult = { refreshedAt: Date.now() };
+  }
+  if (decision === 'accept' && candidate.candidateType === 'memory-review') {
+    const record = captureSubject(context, candidate.subjectKind, candidate.subjectId);
+    const memoryId = record.node?.metadata.memoryId;
+    if (typeof memoryId !== 'string') throw new Error('The memory behind this review candidate is gone. Reject or supersede the candidate. Nothing was changed.');
+    const memoryStore = context.memoryRegistry.getStore();
+    await memoryStore.init();
+    const reviewed = memoryStore.review(memoryId, { state: 'reviewed', ...(input.decidedBy ? { reviewedBy: input.decidedBy } : {}) });
+    if (!reviewed) throw new Error(`Memory ${memoryId} could not be marked reviewed; it no longer exists. Reject or supersede the candidate.`);
+    actionResult = { reviewedMemoryId: memoryId };
+  }
   if (decision === 'accept' && candidate.candidateType === 'memory-promotion') {
     const record = captureSubject(context, candidate.subjectKind, candidate.subjectId);
     if (!record.source && !record.node) throw new Error('Knowledge candidate source is missing; no memory was written.');
@@ -155,9 +178,10 @@ async function applyDecision(context: KnowledgeConsolidationContext, id: string,
       ...candidate.metadata,
       decisionAuthority: automatic ? 'automatic' : 'operator',
       ...(acceptedMemoryId ? { acceptedMemoryId } : {}),
+      ...actionResult,
     },
   });
-  if (acceptedMemoryId) await context.syncReviewedMemory();
+  if (acceptedMemoryId || actionResult.reviewedMemoryId) await context.syncReviewedMemory();
   return decided;
 }
 
@@ -177,6 +201,8 @@ async function refreshDecisionKnowledgeConsolidationCandidates(context: Knowledg
   // A request budget, not a worth threshold. Usage records arrive newest first.
   const readingLimit = Math.min(64, Math.max(1, Number.isFinite(limit) ? Math.floor(limit) : 24));
   let readings = 0;
+  const declined = declinedReadings.get(context.store) ?? new Map<string, string>();
+  declinedReadings.set(context.store, declined);
 
   for (const [key, stats] of usageStats.entries()) {
     const separator = key.indexOf(':');
@@ -198,6 +224,9 @@ async function refreshDecisionKnowledgeConsolidationCandidates(context: Knowledg
           : 'memory-promotion';
     const settled = context.store.getConsolidationCandidateBySubject(subjectKind, subjectId, candidateType);
     if (settled && settled.status !== 'open') { proposals.push(settled); continue; }
+    // Already read at this revision: an open candidate stands, a declined subject stays declined.
+    if (settled && settled.metadata.subjectRevision === item.revision) { proposals.push(settled); continue; }
+    if (declined.get(key) === item.revision) continue;
     if (readings >= readingLimit) break;
     const snapshot = item.revision;
     const state = {
@@ -213,6 +242,7 @@ async function refreshDecisionKnowledgeConsolidationCandidates(context: Knowledg
       continue;
     }
     if (keep.verdict !== 'yes') {
+      if (keep.verdict === 'no') declined.set(key, snapshot);
       run.recordAction(`no candidate: ${keep.verdict} (${keep.outcome})`);
       continue;
     }

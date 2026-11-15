@@ -7,7 +7,6 @@ import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { ArtifactStore } from '../platform/src/platform/artifacts/store.js';
 import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
-import { homeAssistantKnowledgeSpaceId } from '../platform/src/platform/knowledge/spaces.js';
 import { HomeGraphService } from '../platform/src/platform/knowledge/home-graph/service.js';
 import { KnowledgeConnectorRegistry } from '../platform/src/platform/knowledge/connectors.js';
 import { recompileKnowledgeSource } from '../platform/src/platform/knowledge/ingest-compile.js';
@@ -76,42 +75,25 @@ describe('extraction holds preserve artifacts and stored knowledge', () => {
       expect(store.status()).toEqual(indexedStatus);
     });
 
-    test(`recompile and reindex preserve the prior extraction when judgment is ${mode}`, async () => {
-      const ctx = context();
-      await ctx.store.init();
-      const source = await ctx.store.upsertSource({ connectorId: 'manual', sourceType: 'document', title: 'Manual', status: 'indexed', artifactId: 'kept-artifact', tags: [] });
-      const extraction = await ctx.store.upsertExtraction({ sourceId: source.id, extractorId: 'text', format: 'text', summary: 'Existing useful-looking text', structure: { searchText: 'Existing useful-looking text' }, metadata: { extractorVersion: KNOWLEDGE_EXTRACTOR_VERSION } });
-      const before = ctx.store.status();
-      hold(mode);
-      await expect(recompileKnowledgeSource(ctx, source)).rejects.toBeInstanceOf(KnowledgeExtractionJudgmentHoldError);
-      let extracts = 0;
-      await expect(reindexHomeGraphSources({
-        spaceId: 'test-home', sources: [source], artifactStore: ctx.artifactStore,
-        extractionBySourceId: new Map([[source.id, extraction]]),
-        extract: async () => { extracts += 1; return undefined; },
-      })).rejects.toBeInstanceOf(KnowledgeExtractionJudgmentHoldError);
-      expect(extracts).toBe(0);
-      expect(ctx.store.status()).toEqual(before);
-      expect(ctx.store.getExtractionBySourceId(source.id)).toEqual(extraction);
-      expect(ctx.store.listEdges()).toHaveLength(0);
-    });
   }
 
-  test('ask repair finishes all readability checks before replacing its extraction or linking nodes', async () => {
+  test('decision-model readability requests for recompile and reindex of a current extraction: 0', async () => {
     const ctx = context();
-    const artifact = await ctx.artifactStore.createFromStream({ kind: 'document', filename: 'manual.pdf', mimeType: 'application/pdf', stream: [createCompressedPdfBuffer('Manual features include local control.')] });
-    const spaceId = homeAssistantKnowledgeSpaceId('test-home');
-    const source = await ctx.store.upsertSource({ connectorId: 'homeassistant', sourceType: 'manual', title: 'Manual features', status: 'indexed', artifactId: artifact.id, tags: [], metadata: { knowledgeSpaceId: spaceId } });
-    const old = await ctx.store.upsertExtraction({ sourceId: source.id, artifactId: artifact.id, extractorId: 'pdf', format: 'pdf', summary: 'PDF extraction produced limited text', metadata: { extractorVersion: KNOWLEDGE_EXTRACTOR_VERSION } });
-    const before = ctx.store.status();
-    let calls = 0;
-    installJudgmentPort(fakePort(() => noulAnswer(++calls === 3 ? 0.5 : 0.99)).port);
-    service = new HomeGraphService(ctx.store, ctx.artifactStore);
-    await expect(service.ask({ installationId: 'test-home', query: 'manual features' })).rejects.toBeInstanceOf(KnowledgeExtractionJudgmentHoldError);
-    expect(calls).toBe(3);
-    expect(ctx.store.getExtractionBySourceId(source.id)).toEqual(old);
-    expect(ctx.store.status()).toEqual(before);
-    expect(ctx.store.listEdges()).toHaveLength(0);
+    await ctx.store.init();
+    const source = await ctx.store.upsertSource({ connectorId: 'manual', sourceType: 'document', title: 'Manual', status: 'indexed', artifactId: 'kept-artifact', tags: [] });
+    const extraction = await ctx.store.upsertExtraction({ sourceId: source.id, extractorId: 'text', format: 'text', summary: 'Existing useful-looking text', structure: { searchText: 'Existing useful-looking text' }, metadata: { extractorVersion: KNOWLEDGE_EXTRACTOR_VERSION, readable: true } });
+    const fake = fakePort(() => noulAnswer(0.99));
+    installJudgmentPort(fake.port);
+    await recompileKnowledgeSource(ctx, source);
+    let extracts = 0;
+    await reindexHomeGraphSources({
+      spaceId: 'test-home', sources: [source], artifactStore: ctx.artifactStore,
+      extractionBySourceId: new Map([[source.id, extraction]]),
+      extract: async () => { extracts += 1; return undefined; },
+    });
+    expect(fake.requests.filter((request) => 'readable' in request.questions)).toHaveLength(0);
+    expect(extracts).toBe(0);
+    expect(ctx.store.getExtractionBySourceId(source.id)?.summary).toBe(extraction.summary);
   });
 
   test('older extractor versions regenerate from the same retained artifact', async () => {

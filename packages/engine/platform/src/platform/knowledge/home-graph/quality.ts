@@ -8,7 +8,8 @@ import type { KnowledgeStore } from '../store.js';
 import { isLegacyHomeGraphQualityIssue, KnowledgeIssueReplacementHeldError } from '../store-issue-replacement.js';
 import { buildHomeGraphMetadata, readRecord } from './helpers.js';
 import { readHomeGraphState, sourcesLinkedToNode } from './state.js';
-import { readHomeGraphQuality, HomeGraphQualityHeldError, HOME_GRAPH_QUALITY_LIMITS, type HomeGraphQualityQuestion, type HomeGraphQualityReading, type HomeGraphQualityInput } from './quality/reader.js';
+import { readHomeGraphQuality, HomeGraphQualityHeldError, type HomeGraphQualityQuestion, type HomeGraphQualityReading, type HomeGraphQualityInput } from './quality/reader.js';
+import { captureHomeGraphRows } from './rows-current.js';
 import { preserveLegacyQualityAuthority } from './quality/fingerprint.js';
 import { createQualityRevisionPlans, readQualitySubjectState, type QualityRevisionPlan } from './quality/revision.js';
 import { projectHomeGraphQualityInput, readHomeGraphDeclaredBoolean } from './quality/projection.js';
@@ -35,13 +36,11 @@ export async function refreshHomeGraphQualityReport(
 ): Promise<{ readonly issues: readonly KnowledgeIssueRecord[]; readonly retainedLegacyIssues: number; readonly unansweredDeviceIds: readonly string[] }> {
   requireDecisionFeature('semantic Home Graph quality assessment');
   await store.init();
-  const originalState = readHomeGraphState(store, spaceId);
-  const originals = new Map(originalState.nodes.map(node => [node.id,node]));
-  const state = structuredClone(originalState);
+  const state = readHomeGraphState(store, spaceId);
+  const originals = new Map(state.nodes.map(node => [node.id,node]));
   // Capture the full read-set, including hidden/terminal issues, BEFORE readings.
   const originalIssues = store.listIssuesInSpace(spaceId);
-  const allIssues = structuredClone(originalIssues);
-  const version = JSON.stringify({ state, issues: allIssues });
+  const allIssues = originalIssues;
   for (const issue of allIssues) if (issue.metadata.namespace === homeGraphQualityNamespace(spaceId)
     && (issue.metadata.homeGraphQualityIdentityVersion !== undefined && issue.metadata.homeGraphQualityIdentityVersion !== 1
       || issue.metadata.qualityFingerprintVersion !== undefined && ![1,2].includes(issue.metadata.qualityFingerprintVersion as number)
@@ -62,11 +61,24 @@ export async function refreshHomeGraphQualityReport(
     previousBySubject.set(tuple, issue);
   }
   const revisions = createQualityRevisionPlans(store);
+  const devices = state.nodes.filter((node) => node.kind === 'ha_device');
+  // The rows this pass reads: each device, its entities, its linked sources and
+  // the links at each device. A write anywhere else in the space does not make
+  // this pass stale. Compared before the first reading and at the commit.
+  const rowsCurrent = captureHomeGraphRows(store, {
+    nodes: devices.flatMap((node) => [node.id, ...relatedEntities(node, state).map((entity) => entity.id)]),
+    sources: devices.flatMap((node) => sourcesLinkedToNode(node.id, state).map((source) => source.id)),
+    edgeEndpoints: devices.map((node) => `node:${node.id}`),
+  }, () => new HomeGraphQualityHeldError('stale'));
+  // Issues are what this pass replaces: an operator review or any other issue
+  // write in the space since the read stops it (ids and update times, no bodies).
+  const issueStamp = (issues: readonly KnowledgeIssueRecord[]) => issues.map((issue) => `${issue.id}:${issue.updatedAt}`).join('|');
+  const originalIssueStamp = issueStamp(originalIssues);
+  const aborted = () => { if (options.signal?.aborted) throw new HomeGraphQualityHeldError('aborted'); };
   const guard = () => {
-    if (options.signal?.aborted) throw new HomeGraphQualityHeldError('aborted');
-    if (JSON.stringify({ state: readHomeGraphState(store, spaceId), issues: store.listIssuesInSpace(spaceId) }) !== version) {
-      throw new HomeGraphQualityHeldError('stale');
-    }
+    aborted();
+    rowsCurrent();
+    if (issueStamp(store.listIssuesInSpace(spaceId)) !== originalIssueStamp) throw new HomeGraphQualityHeldError('stale');
     try { store.assertRecordSnapshotFrame(() => { revisions.assertCurrent(); return undefined; }); }
     catch (error) {
       if (error instanceof SQLiteObservationRetiredError || error instanceof KnowledgeRecordAdmissionHeldError) throw new HomeGraphQualityHeldError('stale');
@@ -74,8 +86,6 @@ export async function refreshHomeGraphQualityReport(
     }
   };
   guard();
-  const devices = state.nodes.filter((node) => node.kind === 'ha_device');
-  if (devices.length > HOME_GRAPH_QUALITY_LIMITS.devices) throw new HomeGraphQualityHeldError('budget');
   const selected = devices.map((node, index) => {
     const battery = readNonEmptyString(node.metadata.batteryType) ? false : readHomeGraphDeclaredBoolean(node.metadata.batteryPowered);
     const manual = sourcesLinkedToNode(node.id, state).length > 0 ? false : readHomeGraphDeclaredBoolean(node.metadata.manualRequired);
@@ -104,8 +114,7 @@ export async function refreshHomeGraphQualityReport(
     if (error instanceof SQLiteObservationRetiredError || error instanceof SemanticIdentityHeldError || error instanceof KnowledgeRecordAdmissionHeldError) throw new HomeGraphQualityHeldError('stale');
     throw error;
   }
-  const readings = await readHomeGraphQuality(selected.map(({ input }) => input), { ...options, assertCurrent: guard, leaveUnsettledUnanswered: true });
-  guard();
+  const readings = await readHomeGraphQuality(selected.map(({ input }) => input), { ...options, assertCurrent: aborted, leaveUnsettledUnanswered: true });
   const issues: KnowledgeIssueUpsertInput[] = [];
   const unansweredDeviceIds: string[] = [];
   try { store.assertRecordSnapshotFrame(() => {
@@ -143,7 +152,7 @@ export async function refreshHomeGraphQualityReport(
   let written: readonly KnowledgeIssueRecord[];
   try { written = await store.replaceIssuesGuarded(issues.filter((issue) => !preserveLegacyQualityAuthority(previous.get(issue.id!))
       && !isSuppressedGeneratedIssue(previous.get(issue.id!) ?? null, issue)),
-    homeGraphQualityNamespace(spaceId), () => { guard(); identities.assertCurrent(); for (const reading of readings) reading.assertCurrent(); }, legacy); }
+    homeGraphQualityNamespace(spaceId), () => { guard(); identities.assertCurrent(); readings[0]?.assertCurrent(); }, legacy); }
   catch (error) { if (error instanceof KnowledgeIssueReplacementHeldError) throw new HomeGraphQualityHeldError(error.reason);
     if (error instanceof SQLiteObservationRetiredError || error instanceof SemanticIdentityHeldError) throw new HomeGraphQualityHeldError('stale'); throw error; }
   return { issues: written, retainedLegacyIssues, unansweredDeviceIds };
@@ -177,7 +186,8 @@ function qualityIssue(
       ...revision.metadata(),
       homeGraphQualityIdentityVersion: 1,
       qualityReading: input.questions.includes(question)
-        ? { origin: 'automatic-judgment', question, answer: reading.answers[question], ...reading.provenance[question] }
+        ? { origin: 'automatic-judgment', question, answer: reading.answers[question], ...reading.provenance[question],
+          ...(reading.omitted ? { omitted: reading.omitted } : {}) }
         : { origin: 'declared-fields' },
     },
   };

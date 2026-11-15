@@ -1,12 +1,10 @@
 import { judgmentPort, JudgmentPortMissingError, DecisionModelsDisabledError } from '@goodvibes-jev/engine/errors';
-import { JudgmentError, drainOwned, type JsonValue, type JudgmentPort } from '@goodvibes-jev/judgment';
+import { JudgmentError, drainOwned, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { activateClassicFallback, decisionOrClassic, isClassicOperation, requireDecisionFeature, withConfiguredDecisionModelPolicy } from '../../runtime/decision-policy.js';
-import { assertJudgmentInput } from '../../gate/judgment-input.js';
 import { freezeSupport } from '../semantic/verification/projection.js';
-import { snapshotNodeInput } from './projection.js';
 import { nodeServingWithoutReview } from './battery.js';
 import { KnowledgeNodeActivationHeldError as Held, NODE_ACTIVATION_LIMITS as LIMITS,
-  type KnowledgeNodeActivationOptions, type NodeActivationReading, type NodeActivationReason } from './types.js';
+  type KnowledgeNodeActivationOptions, type NodeActivationReading, type NodeActivationReason, type NodeActivationRequest } from './types.js';
 
 /** Native pending state, with no model, probability, battery or decision receipt. */
 export function classicNodeActivation(): NodeActivationReading {
@@ -27,9 +25,7 @@ function checkedPort(port: JudgmentPort, current: () => void): JudgmentPort {
   };
   return { ...port, model, async ask(request) {
     check(); requireDecisionFeature('automatic knowledge serving without owner review');
-    const frozen = Object.freeze({ ...request, state: freezeSupport(structuredClone(request.state)),
-      questions: freezeSupport(structuredClone(request.questions)), ...(request.context ? { context: freezeSupport(structuredClone(request.context)) } : {}) });
-    const result = await port.ask(frozen);
+    const result = await port.ask(request);
     check();
     const answer = result?.answers?.serve;
     if (!answer || answer.type !== 'noul' || !Number.isFinite(answer.noul) || answer.noul < 0 || answer.noul > 1
@@ -38,11 +34,18 @@ function checkedPort(port: JudgmentPort, current: () => void): JudgmentPort {
     return result;
   } };
 }
-/** One bounded pass. Preflight ALL model-bound inputs before obtaining a port or sending any request. */
-export async function readNodeActivations(inputs: readonly { readonly state: Record<string, JsonValue>; readonly reason?: 'missing-evidence' | 'foreign-space' }[], options: KnowledgeNodeActivationOptions = {}): Promise<readonly NodeActivationReading[]> {
+/**
+ * One pass over projected readings. Each input was built and privacy-scanned by
+ * `projectNodeActivation` within its size limits; an input that carries a
+ * reason holds without a request.
+ */
+export async function readNodeActivations(inputs: readonly NodeActivationRequest[], options: KnowledgeNodeActivationOptions = {}): Promise<readonly NodeActivationReading[]> {
   return withConfiguredDecisionModelPolicy(() => readOwnedNodeActivations(inputs, options));
 }
-async function readOwnedNodeActivations(inputs: readonly { readonly state: Record<string, JsonValue>; readonly reason?: 'missing-evidence' | 'foreign-space' }[], options: KnowledgeNodeActivationOptions): Promise<readonly NodeActivationReading[]> {
+function heldReading(input: NodeActivationRequest, reason: NodeActivationReason): NodeActivationReading {
+  return { outcome: 'pending-review', reason, ...(input.detail ? { detail: input.detail } : {}), ...(input.omitted ? { omitted: input.omitted } : {}) };
+}
+async function readOwnedNodeActivations(snapshots: readonly NodeActivationRequest[], options: KnowledgeNodeActivationOptions): Promise<readonly NodeActivationReading[]> {
   const signal = options.signal, assertCurrent = options.assertCurrent;
   let retired = false;
   const callerCurrent = () => {
@@ -57,18 +60,12 @@ async function readOwnedNodeActivations(inputs: readonly { readonly state: Recor
     if (signal?.aborted) throw new Held('aborted');
   };
   callerCurrent();
-  const snapshots = freezeSupport(snapshotNodeInput(inputs));
-  if (!isClassicOperation()) snapshots.forEach(({ state }) => assertJudgmentInput(state));
-  if (snapshots.length > LIMITS.nodes) throw new Held('budget');
   const timeoutMs = options.timeoutMs;
   if (timeoutMs !== undefined && (!Number.isInteger(timeoutMs) || timeoutMs < 0 || timeoutMs > LIMITS.timeoutMs)) throw new Held('budget');
   if (isClassicOperation()) {
     callerCurrent();
-    return freezeSupport(snapshots.map(input => ({ ...classicNodeActivation(), ...(input.reason ? { reason: input.reason } : {}) })));
+    return freezeSupport(snapshots.map(input => ({ ...classicNodeActivation(), ...(input.reason ? { reason: input.reason } : {}), ...(input.detail ? { detail: input.detail } : {}) })));
   }
-  const questions = Object.fromEntries(Object.entries(nodeServingWithoutReview.items).map(([name, item]) => [name, item.question]));
-  const requestBytes = snapshots.reduce((sum, { state }) => sum + new TextEncoder().encode(JSON.stringify({ state, questions })).byteLength + 1_024, 0);
-  if (requestBytes > LIMITS.bytes) throw new Held('budget');
   if (!snapshots.length) return [];
   const controller = new AbortController();
   let failure: Held | undefined, rejectStop: (error: Held) => void = () => {};
@@ -97,7 +94,7 @@ async function readOwnedNodeActivations(inputs: readonly { readonly state: Recor
     await Promise.all(Array.from({ length: Math.min(LIMITS.concurrency, snapshots.length) }, async () => {
       while (next < snapshots.length) {
         check(); const index = next++, input = snapshots[index]!;
-        if (input.reason || unavailable) { readings[index] = { outcome: 'pending-review', reason: input.reason ?? unavailable }; continue; }
+        if (input.reason || unavailable) { readings[index] = heldReading(input, input.reason ?? unavailable!); continue; }
         try {
           readings[index] = await decisionOrClassic<NodeActivationReading>(async () => {
             check();
@@ -106,6 +103,7 @@ async function readOwnedNodeActivations(inputs: readonly { readonly state: Recor
             const accepted = reading.outcome === 'act' && reading.verdict === 'yes';
             const result: NodeActivationReading = { outcome: accepted ? 'accepted' : 'pending-review',
               ...(!accepted ? { reason: reading.outcome === 'act' && reading.verdict === 'no' ? 'no' as const : 'uncertain' as const } : {}),
+              ...(input.omitted ? { omitted: input.omitted } : {}),
               probability: reading.probability, decisionId: read.result.decisionId, model: read.result.model, requestedModel: read.result.requestedModel };
             read.recordAction(accepted ? 'prepared automatic serving judgment; exact write guard still required; no operator authority or taint removal'
               : 'held for review; no serving authority');
@@ -115,7 +113,7 @@ async function readOwnedNodeActivations(inputs: readonly { readonly state: Recor
           check();
           const reason = failureReason(error);
           if (reason === 'aborted' || reason === 'stale' || reason === 'budget') throw new Held(reason);
-          readings[index] = { outcome: 'pending-review', reason };
+          readings[index] = heldReading(input, reason);
         }
       }
     }));

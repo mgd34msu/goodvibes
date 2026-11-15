@@ -6,7 +6,7 @@ import { guessMimeType } from '../artifacts/types.js';
 import { describeHtmlReadabilityAvailability, extractReadableHtml, extractLightweightReadableHtml, type ReadableHtmlExtraction } from './html-readability.js';
 import { extractPdf } from './pdf-extractor.js';
 import { assertJudgmentInput, JudgmentInputError } from '../gate/judgment-input.js';
-import { KNOWLEDGE_MAX_STRUCTURE_SEARCH_TEXT_CHARS, KnowledgeExtractionJudgmentHoldError } from './extraction-policy.js';
+import { KNOWLEDGE_EXTRACTOR_VERSION, KNOWLEDGE_MAX_STRUCTURE_SEARCH_TEXT_CHARS, KnowledgeExtractionJudgmentHoldError, newKnowledgeExtractionIsReadable } from './extraction-policy.js';
 import type { KnowledgeExtractionFormat } from './types.js';
 import { summarizeError } from '../utils/error-display.js';
 import { logger } from '../utils/logger.js';
@@ -67,17 +67,31 @@ function cleanText(value: string): string {
     .trim();
 }
 
-function searchTextPayload(value: string): string | undefined {
+/**
+ * The search text stored for a document: all of its text up to
+ * `KNOWLEDGE_MAX_STRUCTURE_SEARCH_TEXT_CHARS`. A cut is recorded with the
+ * total and retained character counts so search results can say they are partial.
+ */
+function searchTextStructure(value: string): { readonly searchText?: string; readonly searchTextTruncated?: true; readonly searchTextTotalChars?: number; readonly searchTextRetainedChars?: number } {
   const cleaned = cleanText(value);
-  if (!cleaned) return undefined;
-  return cleaned.length <= KNOWLEDGE_MAX_STRUCTURE_SEARCH_TEXT_CHARS
-    ? cleaned
-    : cleaned.slice(0, KNOWLEDGE_MAX_STRUCTURE_SEARCH_TEXT_CHARS);
+  if (!cleaned) return {};
+  if (cleaned.length <= KNOWLEDGE_MAX_STRUCTURE_SEARCH_TEXT_CHARS) return { searchText: cleaned };
+  return { searchText: cleaned.slice(0, KNOWLEDGE_MAX_STRUCTURE_SEARCH_TEXT_CHARS), searchTextTruncated: true,
+    searchTextTotalChars: cleaned.length, searchTextRetainedChars: KNOWLEDGE_MAX_STRUCTURE_SEARCH_TEXT_CHARS };
 }
 
-function searchTextStructure(value: string): { readonly searchText?: string } {
-  const searchText = searchTextPayload(value);
-  return searchText ? { searchText } : {};
+/** The limitation line for a cut search text, for `metadata.limitations`. */
+function searchTextLimitations(structure: { readonly searchTextTruncated?: true; readonly searchTextTotalChars?: number; readonly searchTextRetainedChars?: number }): string[] {
+  return structure.searchTextTruncated
+    ? [`Search text keeps the first ${structure.searchTextRetainedChars} of ${structure.searchTextTotalChars} characters.`]
+    : [];
+}
+
+/** Lines of a document in order, empty ones dropped; repeated lines are kept (they are content). */
+function contentLines(values: Iterable<string>): string[] {
+  const out: string[] = [];
+  for (const value of values) { const cleaned = cleanText(value); if (cleaned) out.push(cleaned); }
+  return out;
 }
 
 function estimateTokens(...chunks: Array<string | undefined | null>): number {
@@ -195,6 +209,8 @@ function extractTextLike(
     Array.from(text.matchAll(/\bhttps?:\/\/[^\s)>"']+/g), (match) => match[0]),
     50,
   );
+  const search = searchTextStructure(text);
+  const limitations = searchTextLimitations(search);
   return {
     extractorId,
     format,
@@ -207,9 +223,9 @@ function extractTextLike(
     structure: {
       lineCount: lines.length,
       headingCount: headings.length,
-      ...searchTextStructure(text),
+      ...search,
     },
-    metadata: {},
+    metadata: limitations.length ? { limitations } : {},
   };
 }
 
@@ -358,13 +374,13 @@ async function extractDocx(buffer: Buffer): Promise<KnowledgeExtractionResult> {
   const JSZip = await loadJsZip();
   const zip = await JSZip.loadAsync(buffer);
   const file = zip.file('word/document.xml');
-  if (!file) return extractTextLike(buffer, 'docx', 'docx-fallback');
+  if (!file) throw new Error('the archive has no word/document.xml');
   const xml = await file.async('string');
   const paragraphXml = Array.from(xml.matchAll(/<w:p[\s>][\s\S]*?<\/w:p>/g), (match) => match[0]);
   const paragraphText = (paragraph: string): string => Array.from(
     paragraph.matchAll(/<w:t[^>]*>([\s\S]*?)<\/w:t>/g), (part) => decodeHtmlEntities(part[1] ?? ''),
   ).join('');
-  const paragraphs = uniqueStrings(paragraphXml.map(paragraphText), 48);
+  const paragraphs = contentLines(paragraphXml.map(paragraphText));
   // Test each paragraph on its own: a pattern that starts at the first `<w:p`
   // and looks ahead for a heading style would swallow every paragraph before it.
   const headings = uniqueStrings(
@@ -372,6 +388,8 @@ async function extractDocx(buffer: Buffer): Promise<KnowledgeExtractionResult> {
     12,
   );
   const text = paragraphs.join('\n\n');
+  const search = searchTextStructure(text);
+  const limitations = searchTextLimitations(search);
   return {
     extractorId: 'docx',
     format: 'docx',
@@ -384,9 +402,9 @@ async function extractDocx(buffer: Buffer): Promise<KnowledgeExtractionResult> {
     structure: {
       paragraphCount: paragraphs.length,
       headingCount: headings.length,
-      ...searchTextStructure(text),
+      ...search,
     },
-    metadata: {},
+    metadata: limitations.length ? { limitations } : {},
   };
 }
 
@@ -404,11 +422,11 @@ async function extractXlsx(buffer: Buffer): Promise<KnowledgeExtractionResult> {
     Array.from(workbookXml.matchAll(/<sheet[^>]+name="([^"]+)"/g), (match) => decodeHtmlEntities(match[1] ?? '')),
     20,
   );
-  const sampleSheets: Array<{ name: string; rows: string[][] }> = [];
+  const sheets: Array<{ name: string; rows: string[][] }> = [];
+  const sheetNumber = (name: string) => Number(name.match(/sheet(\d+)\.xml$/i)?.[1] ?? 0);
   const sheetEntries = Object.keys(zip.files)
     .filter((name) => /^xl\/worksheets\/sheet\d+\.xml$/i.test(name))
-    .sort((a, b) => a.localeCompare(b))
-    .slice(0, 3);
+    .sort((a, b) => sheetNumber(a) - sheetNumber(b));
   for (const [index, sheetPath] of sheetEntries.entries()) {
     const xml = await zip.file(sheetPath)?.async('string');
     if (!xml) continue;
@@ -427,13 +445,17 @@ async function extractXlsx(buffer: Buffer): Promise<KnowledgeExtractionResult> {
           : decodeHtmlEntities(raw);
         return cleanText(value);
       }).filter(Boolean);
-    }).filter((row) => row.length > 0).slice(0, 6);
-    sampleSheets.push({
+    }).filter((row) => row.length > 0);
+    sheets.push({
       name: sheetNames[index] ?? sheetPath,
       rows,
     });
   }
-  const flatText = sampleSheets.flatMap((sheet) => [sheet.name, ...sheet.rows.flatMap((row) => row)]).join('\n');
+  // Every row of every sheet is searchable; the structure keeps a small sample to show.
+  const sampleSheets = sheets.slice(0, 3).map((sheet) => ({ name: sheet.name, rows: sheet.rows.slice(0, 6) }));
+  const flatText = sheets.flatMap((sheet) => [sheet.name, ...sheet.rows.map((row) => row.join('\t'))]).join('\n');
+  const search = searchTextStructure(flatText);
+  const limitations = searchTextLimitations(search);
   return {
     extractorId: 'xlsx',
     format: 'xlsx',
@@ -447,25 +469,27 @@ async function extractXlsx(buffer: Buffer): Promise<KnowledgeExtractionResult> {
     estimatedTokens: estimateTokens(flatText),
     structure: {
       sheetNames,
+      sheetCount: sheets.length,
+      rowCount: sheets.reduce((sum, sheet) => sum + sheet.rows.length, 0),
       sampleSheets,
-      ...searchTextStructure(flatText),
+      ...search,
     },
-    metadata: {},
+    metadata: limitations.length ? { limitations } : {},
   };
 }
 
 async function extractPptx(buffer: Buffer): Promise<KnowledgeExtractionResult> {
   const JSZip = await loadJsZip();
   const zip = await JSZip.loadAsync(buffer);
+  const slideNumber = (name: string) => Number(name.match(/slide(\d+)\.xml$/i)?.[1] ?? 0);
   const slideEntries = Object.keys(zip.files)
     .filter((name) => /^ppt\/slides\/slide\d+\.xml$/i.test(name))
-    .sort((a, b) => a.localeCompare(b))
-    .slice(0, 12);
+    .sort((a, b) => slideNumber(a) - slideNumber(b));
   const slides: Array<{ title: string; text: string }> = [];
   for (const path of slideEntries) {
     const xml = await zip.file(path)?.async('string');
     if (!xml) continue;
-    const text = uniqueStrings(Array.from(xml.matchAll(/<a:t[^>]*>([\s\S]*?)<\/a:t>/g), (match) => decodeHtmlEntities(match[1] ?? '')), 64).join('\n');
+    const text = contentLines(Array.from(xml.matchAll(/<a:t[^>]*>([\s\S]*?)<\/a:t>/g), (match) => decodeHtmlEntities(match[1] ?? ''))).join('\n');
     if (!text) continue;
     slides.push({
       title: firstNonEmptyLine(text) ?? path,
@@ -473,6 +497,8 @@ async function extractPptx(buffer: Buffer): Promise<KnowledgeExtractionResult> {
     });
   }
   const combined = slides.map((slide) => `${slide.title}\n${slide.text}`).join('\n\n');
+  const search = searchTextStructure(combined);
+  const limitations = searchTextLimitations(search);
   return {
     extractorId: 'pptx',
     format: 'pptx',
@@ -485,9 +511,9 @@ async function extractPptx(buffer: Buffer): Promise<KnowledgeExtractionResult> {
     structure: {
       slideCount: slides.length,
       slides: slides.slice(0, 6),
-      ...searchTextStructure(combined),
+      ...search,
     },
-    metadata: {},
+    metadata: limitations.length ? { limitations } : {},
   };
 }
 
@@ -521,7 +547,11 @@ function chooseFormat(artifact: Pick<ArtifactDescriptor, 'mimeType' | 'filename'
   return 'unknown';
 }
 
-async function extractOfficeWithFallback(
+/**
+ * An Office file that cannot be read is not extracted, the same as an unreadable
+ * PDF: decoding its compressed archive as text would index noise.
+ */
+async function extractOffice(
   buffer: Buffer,
   format: 'docx' | 'xlsx' | 'pptx',
   extractor: (input: Buffer) => Promise<KnowledgeExtractionResult>,
@@ -529,19 +559,8 @@ async function extractOfficeWithFallback(
   try {
     return await extractor(buffer);
   } catch (error) {
-    const parseWarning = `${format} parsing failed; used text fallback: ${summarizeError(error)}`;
-    logger.debug('Knowledge extraction: office parse failed; using text fallback', {
-      format,
-      error: summarizeError(error),
-    });
-    const fallback = extractTextLike(buffer, format, `${format}-fallback`);
-    return {
-      ...fallback,
-      metadata: {
-        ...fallback.metadata,
-        warnings: [parseWarning],
-      },
-    };
+    logger.debug('Knowledge extraction: office parse failed', { format, error: summarizeError(error) });
+    throw new Error(`${format.toUpperCase()} extraction failed: the file could not be read as a ${format.toUpperCase()} document (${summarizeError(error)}). Re-save or re-export the file and ingest it again.`);
   }
 }
 
@@ -598,8 +617,16 @@ export async function extractKnowledgeArtifact(
   owner: KnowledgeExtractionOwner = createKnowledgeExtractionOwner(),
 ): Promise<KnowledgeExtractionResult> {
   return withConfiguredDecisionModelPolicy(async () => {
-    const extraction = await extractArtifactUnderPolicy(artifact, buffer, owner);
+    const extracted = await extractArtifactUnderPolicy(artifact, buffer, owner);
     owner.assertCurrent();
+    // Readability is decided once here and stored with the extractor version, so
+    // compile, search and reindex read the field instead of asking again.
+    const readable = typeof extracted.metadata.readable === 'boolean'
+      ? extracted.metadata.readable : newKnowledgeExtractionIsReadable(extracted);
+    const existing = Array.isArray(extracted.metadata.limitations) ? extracted.metadata.limitations.filter((line): line is string => typeof line === 'string') : [];
+    const cut = searchTextLimitations(extracted.structure as Parameters<typeof searchTextLimitations>[0]).filter((line) => !existing.includes(line));
+    const extraction = { ...extracted, metadata: { ...extracted.metadata, ...(cut.length ? { limitations: [...existing, ...cut] } : {}),
+      readable, extractorVersion: KNOWLEDGE_EXTRACTOR_VERSION } };
     return isClassicOperation() ? { ...extraction, metadata: { ...extraction.metadata,
       provenance: 'classic', semanticAssessment: 'not-evaluated' } } : extraction;
   });
@@ -628,11 +655,11 @@ async function extractArtifactUnderPolicy(
     case 'yaml':
       return extractYaml(buffer);
     case 'docx':
-      return extractOfficeWithFallback(buffer, 'docx', extractDocx);
+      return extractOffice(buffer, 'docx', extractDocx);
     case 'xlsx':
-      return extractOfficeWithFallback(buffer, 'xlsx', extractXlsx);
+      return extractOffice(buffer, 'xlsx', extractXlsx);
     case 'pptx':
-      return extractOfficeWithFallback(buffer, 'pptx', extractPptx);
+      return extractOffice(buffer, 'pptx', extractPptx);
     case 'pdf':
       // PDFs must reject when no readable text can be extracted. extractPdf already
       // performs its own pdfjs -> raw-stream fallbacks internally and only throws as a

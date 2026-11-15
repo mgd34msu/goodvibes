@@ -25,12 +25,23 @@ function cleanText(value: string): string {
     .trim();
 }
 
-async function searchTextPayload(value: string, owner: KnowledgeExtractionOwner): Promise<string | undefined> {
+/**
+ * The one readability reading of a PDF's text, taken over the whole extraction
+ * (not per line). Unreadable text yields no search text; a cut records the
+ * total and retained character counts.
+ */
+async function searchTextPayload(value: string, owner: KnowledgeExtractionOwner): Promise<Record<string, unknown> | undefined> {
   const cleaned = cleanText(value);
   if (!(await hasUsefulKnowledgeExtractionText(value, owner))) return undefined;
   return cleaned.length <= KNOWLEDGE_MAX_STRUCTURE_SEARCH_TEXT_CHARS
-    ? cleaned
-    : cleaned.slice(0, KNOWLEDGE_MAX_STRUCTURE_SEARCH_TEXT_CHARS);
+    ? { searchText: cleaned }
+    : { searchText: cleaned.slice(0, KNOWLEDGE_MAX_STRUCTURE_SEARCH_TEXT_CHARS), searchTextTruncated: true,
+      searchTextTotalChars: cleaned.length, searchTextRetainedChars: KNOWLEDGE_MAX_STRUCTURE_SEARCH_TEXT_CHARS };
+}
+
+/** Raw stream strings that hold text: no control or replacement characters, and at least one letter. */
+function isPrintableText(value: string): boolean {
+  return /\p{L}/u.test(value) && !/[\u0000-\u0008\u000e-\u001f\u007f-\u009f\ufffd]/u.test(value);
 }
 
 function estimateTokens(...chunks: Array<string | undefined | null>): number {
@@ -61,12 +72,12 @@ function excerptText(text: string, maxLength = 480): string | undefined {
   return cleaned.length <= maxLength ? cleaned : `${cleaned.slice(0, maxLength - 1).trim()}...`;
 }
 
-async function uniqueStrings(values: Iterable<string>, limit: number, owner: KnowledgeExtractionOwner): Promise<string[]> {
+function uniqueStrings(values: Iterable<string>, limit: number): string[] {
   const seen = new Set<string>();
   const result: string[] = [];
   for (const value of values) {
     const trimmed = cleanText(value);
-    if (!trimmed || seen.has(trimmed) || !(await hasUsefulKnowledgeExtractionText(value, owner))) continue;
+    if (!trimmed || seen.has(trimmed)) continue;
     seen.add(trimmed);
     result.push(trimmed);
     if (result.length >= limit) break;
@@ -143,8 +154,8 @@ async function extractPdfWithPdfJs(buffer: Buffer, owner: KnowledgeExtractionOwn
   // Parsing fallback is allowed; a judgment outage or uncertain reading is not.
   const uncleaned = pageTexts.join('\n\n');
   assertJudgmentInput(uncleaned);
-  const searchText = await searchTextPayload(uncleaned, owner);
-  if (!searchText) return {};
+  const search = await searchTextPayload(uncleaned, owner);
+  if (!search) return {};
   const text = cleanText(uncleaned);
   return {
     result: {
@@ -153,11 +164,11 @@ async function extractPdfWithPdfJs(buffer: Buffer, owner: KnowledgeExtractionOwn
       title: firstNonEmptyLine(text) ?? 'PDF document',
       summary: summarizeText(text) ?? 'PDF document.',
       excerpt: excerptText(text),
-      sections: await uniqueStrings(text.split(/\n+/), 24, owner),
-      links: await uniqueStrings(Array.from(text.matchAll(/\bhttps?:\/\/[^\s)]+/g), (match) => match[0]), 50, owner),
+      sections: uniqueStrings(text.split(/\n+/), 24),
+      links: uniqueStrings(Array.from(text.matchAll(/\bhttps?:\/\/[^\s)]+/g), (match) => match[0]), 50),
       estimatedTokens: estimateTokens(text),
-      structure: { pageCount, extractedTextChars: text.length, searchText },
-      metadata: { limitations: ['PDF text extraction does not perform OCR for scanned images.'] },
+      structure: { pageCount, extractedTextChars: text.length, ...search },
+      metadata: { limitations: ['PDF text extraction does not perform OCR for scanned images.'], readable: true },
     },
   };
 }
@@ -198,11 +209,11 @@ async function extractPdfRawStreams(buffer: Buffer, initialWarnings: readonly st
   }
   texts.length = Math.min(texts.length, MAX_RAW_PDF_TEXT_CANDIDATES);
   assertJudgmentInput(texts);
-  const readable = await uniqueStrings(texts, 512, owner);
+  const readable = uniqueStrings(texts.filter(isPrintableText), 512);
   const combined = readable.slice(0, 64).join('\n');
   const searchable = readable.join('\n');
-  const searchText = await searchTextPayload(searchable, owner);
-  if (!searchText) return undefined;
+  const search = await searchTextPayload(searchable, owner);
+  if (!search) return undefined;
   const warnings = [...initialWarnings];
   if (diagnostics.failedFlateDecodeStreams > 0) {
     warnings.push(
@@ -216,14 +227,15 @@ async function extractPdfRawStreams(buffer: Buffer, initialWarnings: readonly st
     title: firstNonEmptyLine(combined) ?? 'PDF document',
     summary: summarizeText(combined) ?? 'PDF document text extracted from raw streams.',
     excerpt: excerptText(combined),
-    sections: await uniqueStrings(combined.split(/\n+/), 8, owner),
-    links: await uniqueStrings(Array.from(combined.matchAll(/\bhttps?:\/\/[^\s)]+/g), (linkMatch) => linkMatch[0]), 50, owner),
+    sections: uniqueStrings(combined.split(/\n+/), 8),
+    links: uniqueStrings(Array.from(combined.matchAll(/\bhttps?:\/\/[^\s)]+/g), (linkMatch) => linkMatch[0]), 50),
     estimatedTokens: estimateTokens(combined),
     structure: {
       extractedStringCount: texts.length,
-      ...(searchText ? { searchText } : {}),
+      ...search,
     },
     metadata: {
+      readable: true,
       limitations: texts.length === 0
         ? ['No readable text streams were found. Complex PDFs need OCR or a dedicated provider.']
         : ['PDF text extraction does not perform OCR for scanned images.'],

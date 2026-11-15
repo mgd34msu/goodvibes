@@ -243,12 +243,14 @@ describe('complete original source and judgment response admission regressions',
         return base.port.ask(input);
       } });
       const running = readKnowledgeEntityAliases([{ kind: 'project', title: 'Aurora' }], {
-        title: 'AR', summary: '', extractionSummary: '', sections: [],
+        title: 'Aurora (AR)', summary: '', extractionSummary: '', sections: [],
       }, undefined, undefined, () => {
         if (retired && cause === 'owner-extraction') throw hostHold;
         if (retired && cause === 'owner-other') throw new Error('host detail must not escape');
       });
       if (cause === 'owner-extraction') await expect(running).rejects.toBe(hostHold);
+      // A provider failure is the reading's fallback (no alias), never a hold the provider can choose.
+      else if (cause === 'provider-extraction') expect(await running).toEqual([[]]);
       else await expect(running).rejects.toBeInstanceOf(KnowledgeEntityAliasHoldError);
     }
   });
@@ -333,31 +335,6 @@ describe('complete original source and judgment response admission regressions',
     const result = await owner.port('knowledge.extraction.test').ask({ state: {}, questions: { relevant: webGapRelevance.items.relevant.question } });
     Object.assign(original!, { noul: 0.99 });
     expect(result.answers.relevant.noul).toBe(fraction); expect(Object.isFrozen(result.answers.relevant)).toBe(true);
-  });
-  test('alias batch records detached decisions after a later response changes the earlier original', async () => {
-    const base = fakePort(() => noulAnswer(0.99));
-    const originals: object[] = [], recorded: string[] = []; let reads = 0, mutationQueued = false;
-    installJudgmentPort({ ...base.port, recorder: {
-      recordReadings() {}, recordAction(id) { recorded.push(id); },
-    }, async ask(input) {
-      if (originals.length === 1) Object.defineProperty(originals[0]!, 'decisionId', { enumerable: true, get() { reads++; throw new Error('borrowed decision'); } });
-      const result = { ...await base.port.ask(input), decisionId: `alias-decision-${originals.length}` };
-      originals.push(result); return result;
-    } });
-    const aliases = await readKnowledgeEntityAliases([{ kind: 'project', title: 'Aurora' }], {
-      title: 'AR Dawn', summary: '', extractionSummary: '', sections: [],
-    }, undefined, undefined, () => {
-      // The lower-port await must hand consumers a detached envelope even if
-      // the provider changes its original before the battery continuation.
-      if (originals.length === 1 && !mutationQueued) {
-        mutationQueued = true;
-        queueMicrotask(() => Object.defineProperty(originals[0]!, 'decisionId', {
-          enumerable: true, configurable: true, get() { reads++; throw new Error('late original'); },
-        }));
-      }
-    });
-    expect(aliases).toEqual([['AR', 'Dawn']]); expect(originals).toHaveLength(2);
-    expect(recorded).toEqual(['alias-decision-0', 'alias-decision-1']); expect(reads).toBe(0);
   });
   test('extraction owner returns a deeply frozen admitted envelope before consumer continuations', async () => {
     const base = fakePort(() => noulAnswer(0.99)); let original: object | undefined; let reads = 0;

@@ -146,7 +146,8 @@ describe('Home Graph whole-pass quality authority', () => {
     const fake = readings(); await expect(run()).rejects.toThrow(); expect(fake.requests).toHaveLength(0);
   });
   test('snapshots nodes, entities, relations, source membership and operator issues before awaited reads', async () => {
-    for (const changed of ['node', 'entity', 'edge', 'source', 'review'] as const) {
+    // A new source elsewhere in the home is not a row this pass read, so it does not stop it.
+    for (const changed of ['node', 'entity', 'edge', 'review'] as const) {
       const { store, node, entity, run, snapshot } = await fixture(); readings(); const issues = await run();
       const fake = readings(0.01, 0.01); let done = false, afterChange = ''; let mutationError: unknown;
       installJudgmentPort({ ...fake.port, async ask(request) {
@@ -154,7 +155,6 @@ describe('Home Graph whole-pass quality authority', () => {
         if (!done) { done = true; try {
           if (changed === 'node' || changed === 'entity') { const current = changed === 'node' ? node : entity; await seedHomeAssistantObservation(store, { ...current, summary: 'Concurrent correction.' }); }
           if (changed === 'edge') await store.upsertEdge({ fromKind: 'node', fromId: entity.id, toKind: 'node', toId: node.id, relation: 'related_to', metadata: { knowledgeSpaceId: spaceId } });
-          if (changed === 'source') await store.upsertSource({ connectorId: 'manual', sourceType: 'manual', title: 'New source', status: 'indexed', canonicalUri: 'manual://new-source', metadata: { knowledgeSpaceId: spaceId } });
           if (changed === 'review') await reviewHomeGraphFact(store, spaceId, installationId, { knowledgeSpaceId: spaceId, issueId: issues[0]!.id, action: 'accept', reviewer: 'owner' });
           afterChange = snapshot();
         } catch (error) { mutationError = error; throw error; } }

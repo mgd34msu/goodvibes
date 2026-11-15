@@ -22,6 +22,8 @@ export interface HomeGraphQualityReading {
   readonly requestedModel?: string | undefined;
   /** The device's readings did not settle; it has no answers and keeps its existing issues. */
   readonly unanswered?: 'unsettled' | undefined;
+  /** Entities and facts of the device that were over the limits and not sent with its reading. */
+  readonly omitted?: { readonly entities: number; readonly facts: number } | undefined;
 }
 export type HomeGraphQualityHoldReason = 'unconfigured' | 'unavailable' | 'unsettled' | 'malformed' | 'stale' | 'aborted' | 'budget' | 'protected-input';
 export class HomeGraphQualityHeldError extends Error {
@@ -30,4 +32,9 @@ export class HomeGraphQualityHeldError extends Error {
     super(`Home Graph derived quality held (${reason}); existing issues and passport fields were not replaced.`);
   }
 }
-export const HOME_GRAPH_QUALITY_LIMITS = Object.freeze({ devices: Number.POSITIVE_INFINITY, entities: Number.POSITIVE_INFINITY, facts: Number.POSITIVE_INFINITY, concurrency: 4, timeoutMs: 2_147_483_647, defaultTimeoutMs: 0 });
+/**
+ * What one device's quality reading may carry: its first `entities` entities and
+ * `facts` facts (the rest are counted in the reading's `omitted`). The number of
+ * devices in a pass is not limited; each device is its own bounded request.
+ */
+export const HOME_GRAPH_QUALITY_LIMITS = Object.freeze({ entities: 48, facts: 32, concurrency: 4, timeoutMs: 2_147_483_647, defaultTimeoutMs: 0 });

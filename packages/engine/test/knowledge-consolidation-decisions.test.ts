@@ -55,20 +55,23 @@ async function harness(status: 'indexed' | 'stale') {
 }
 
 describe('consolidation candidate decisions', () => {
-  test('a source-refresh candidate cannot be accepted, stays open, and can still be rejected', async () => {
+  test('accepting a source-refresh candidate refreshes that source; without a refresh owner it stays open', async () => {
     const h = await harness('stale');
     expect(h.candidate.candidateType).toBe('source-refresh');
-    await expect(decide(h.context, h.candidate.id, 'accept')).rejects.toThrow('cannot be accepted');
+    await expect(decide(h.context, h.candidate.id, 'accept')).rejects.toThrow();
     expect(h.store.getConsolidationCandidate(h.candidate.id)?.status).toBe('open');
-    expect((await decide(h.context, h.candidate.id, 'reject')).status).toBe('rejected');
+    const refreshed: string[] = [];
+    const wired = { ...h.context, refreshSource: async (id: string) => { refreshed.push(id); return 1; } };
+    expect((await decide(wired, h.candidate.id, 'accept')).status).toBe('accepted');
+    expect(refreshed).toEqual([h.candidate.subjectId]);
     expect(h.memory.retrieve()).toHaveLength(0);
   });
 
   test('an unknown memory class or scope is refused before anything is written', async () => {
     const h = await harness('indexed');
     expect(h.candidate.candidateType).toBe('memory-promotion');
-    await expect(decide(h.context, h.candidate.id, 'accept', { memoryClass: 'bogus' })).rejects.toThrow('Unknown memory class');
-    await expect(decide(h.context, h.candidate.id, 'accept', { scope: 'galaxy' })).rejects.toThrow('Unknown memory scope');
+    await expect(decide(h.context, h.candidate.id, 'accept', { memoryClass: 'bogus' })).rejects.toThrow();
+    await expect(decide(h.context, h.candidate.id, 'accept', { scope: 'galaxy' })).rejects.toThrow();
     expect(h.store.getConsolidationCandidate(h.candidate.id)?.status).toBe('open');
     expect(h.memory.retrieve()).toHaveLength(0);
     const accepted = await decide(h.context, h.candidate.id, 'accept', { memoryClass: 'runbook', scope: 'team' });

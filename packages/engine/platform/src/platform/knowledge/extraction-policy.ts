@@ -13,7 +13,7 @@ import type { KnowledgeExtractionRecord } from './types.js';
  * retained lake into a compounding asset. Extractions written before versioning
  * carry no stamp and resolve to version 0, so they re-extract once.
  */
-export const KNOWLEDGE_EXTRACTOR_VERSION = 4;
+export const KNOWLEDGE_EXTRACTOR_VERSION = 5;
 
 export function readKnowledgeExtractorVersion(metadata: Record<string, unknown>): number {
   const value = readDocumentFields(metadata, ['extractorVersion']).extractorVersion;
@@ -41,39 +41,68 @@ const LIMITED_EXTRACTION_MARKERS = [
   'has no specialized in-core extractor',
 ];
 
-export async function knowledgeExtractionNeedsRefresh(
+/** Any extracted text at all, and none of it this codebase's own placeholder messages. */
+function hasExtractedText(extraction: Pick<KnowledgeExtractionRecord, 'excerpt' | 'summary' | 'sections' | 'structure' | 'metadata'>): boolean {
+  const values = [extraction.structure?.searchText, extraction.structure?.text, extraction.structure?.content,
+    extraction.metadata?.searchText, extraction.metadata?.text, extraction.metadata?.content, extraction.excerpt, extraction.summary, ...(extraction.sections ?? [])];
+  return values.some((value) => typeof value === 'string' && value.trim().length > 0
+    && !LIMITED_EXTRACTION_MARKERS.some((marker) => value.toLowerCase().includes(marker)));
+}
+
+/**
+ * Whether a stored extraction's text is readable. Read once when the extraction
+ * is written (`metadata.readable`, beside `extractorVersion`); an extraction
+ * written before that field existed counts as readable when it holds extracted
+ * text. No model request.
+ */
+export function knowledgeExtractionIsReadable(extraction: Pick<KnowledgeExtractionRecord, 'excerpt' | 'summary' | 'sections' | 'structure' | 'metadata'> | null | undefined): boolean {
+  if (!extraction) return false;
+  const stored = extraction.metadata?.readable;
+  return typeof stored === 'boolean' ? stored : hasExtractedText(extraction);
+}
+
+/**
+ * True when the extraction must be produced again from its stored artifact:
+ * there is none, an older extractor wrote it, or it was read as unreadable when
+ * written. Decided from stored fields; no model request.
+ */
+export function knowledgeExtractionNeedsRefresh(
   extraction: KnowledgeExtractionRecord | null,
   currentExtractorVersion: number = KNOWLEDGE_EXTRACTOR_VERSION,
-  signal?: AbortSignal,
-): Promise<boolean> {
-  if (signal?.aborted) throw new KnowledgeExtractionJudgmentHoldError();
+): boolean {
   if (!extraction) return true;
-  if (readKnowledgeExtractorVersion(readDocumentFields(extraction, ['metadata']).metadata) < currentExtractorVersion) return true;
-  // Inspect all candidate fields before a bounded sample of any field leaves.
-  assertKnowledgeExtractionInput(extraction);
-  const searchText = await readKnowledgeSearchText(extraction.structure, signal) ?? await readKnowledgeSearchText(extraction.metadata, signal);
-  if (searchText) return false;
-  for (const text of [extraction.excerpt, extraction.summary, ...extraction.sections]) {
-    if (await readKnowledgeExtractionTextUsability(text, signal)) return false;
-  }
-  return true;
+  if (readKnowledgeExtractorVersion(extraction.metadata) < currentExtractorVersion) return true;
+  return !knowledgeExtractionIsReadable(extraction);
 }
 
-export async function readKnowledgeSearchText(record: Record<string, unknown>, signal?: AbortSignal): Promise<string | undefined> {
-  if (signal?.aborted) throw new KnowledgeExtractionJudgmentHoldError();
+/** The stored search text of an extraction container (`searchText`, `text` or `content`). */
+export function readKnowledgeSearchText(record: Record<string, unknown>): string | undefined {
   const candidates = readDocumentFields(record, ['searchText', 'text', 'content']);
-  assertJudgmentInput(candidates);
   const value = candidates.searchText ?? candidates.text ?? candidates.content;
-  return typeof value === 'string' && await readKnowledgeExtractionTextUsability(value, signal) ? value : undefined;
+  return typeof value === 'string' && value.trim() ? value : undefined;
 }
 
+/**
+ * Readability of a newly extracted non-PDF document, decided in code when it is
+ * written: it holds extracted text, and that text did not decode into
+ * replacement or control characters (what a binary file read as text yields).
+ * Office, HTML and markup text comes from a parser; PDF text has its own reading
+ * in the PDF extractor, which stamps `metadata.readable` itself.
+ */
+export function newKnowledgeExtractionIsReadable(extraction: Pick<KnowledgeExtractionRecord, 'excerpt' | 'summary' | 'sections' | 'structure' | 'metadata'>): boolean {
+  if (!hasExtractedText(extraction)) return false;
+  const text = readKnowledgeSearchText(extraction.structure) ?? readKnowledgeSearchText(extraction.metadata)
+    ?? [extraction.excerpt, extraction.summary, ...extraction.sections].filter((value) => typeof value === 'string').join('\n');
+  const undecodable = text.match(/[\u0000-\u0008\u000e-\u001f\ufffd]/gu)?.length ?? 0;
+  return undecodable * 100 <= text.length;
+}
+
+/** The readability reading for one extracted text, used while an extraction is being produced. */
 export function hasUsefulKnowledgeExtractionText(value: string | undefined, owner?: KnowledgeExtractionOwner): Promise<boolean> {
   return readKnowledgeExtractionTextUsability(value, owner?.signal, owner);
 }
 
-/** Shared readability operation with caller-owned cancellation. The public
- * compatibility helper above retains its existing signature and policy.
- */
+/** Shared readability operation with caller-owned cancellation. */
 export async function readKnowledgeExtractionTextUsability(value: string | undefined, signal?: AbortSignal, owner: KnowledgeExtractionOwner = createKnowledgeExtractionOwner({ signal })): Promise<boolean> {
   owner.assertCurrent();
   if (signal?.aborted) throw new KnowledgeExtractionJudgmentHoldError();
@@ -101,16 +130,6 @@ export async function readKnowledgeExtractionTextUsability(value: string | undef
     // semantic readability certificate; extraction metadata records that limit.
     return Boolean(value.trim());
   }));
-}
-
-/** Compatibility name: the same readability judgment, never a PDF-token scan. */
-export async function looksLikeRawPdfPayload(value: string): Promise<boolean> {
-  return !(await hasUsefulKnowledgeExtractionText(value));
-}
-
-/** Compatibility name: the same readability judgment, never character ratios. */
-export async function looksBinaryLikeText(value: string): Promise<boolean> {
-  return !(await hasUsefulKnowledgeExtractionText(value));
 }
 
 /** Normalize all port failures to an explicit, value-free hold for ingest callers. */

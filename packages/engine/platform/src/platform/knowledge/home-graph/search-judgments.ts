@@ -1,6 +1,6 @@
 import { assertJudgmentInput, JudgmentInputError } from '../../gate/judgment-input.js';
 import { snapshotNodeInput } from '../activation/projection.js';
-import { assertKnowledgeExtractionInput, readKnowledgeExtractionTextUsability } from '../extraction-policy.js';
+import { assertKnowledgeExtractionInput, knowledgeExtractionIsReadable } from '../extraction-policy.js';
 import { getKnowledgeSpaceId } from '../spaces.js';
 import { prepareKnowledgeScopeSelection, KnowledgeScopeSelectionHeldError } from '../scope-selection.js';
 import { knowledgeSourceJudgmentUris } from '../source-structural-references.js';
@@ -191,24 +191,15 @@ export async function readHomeGraphSearchSelection(input: {
       checkObjects();
       const byReference = new Map(candidates.map((candidate, index) => [candidate.reference, items[index]!]));
       const selected = relevance.accepted.slice(0, Math.max(1, input.query.limit ?? 8)).map((reading) => byReference.get(reading.reference)!);
-      // Keep the existing shared readability boundary for result-summary
-      // metadata. It is not a relevance filter or an answer-text fallback:
-      // exact-span selection below remains authoritative for literal excerpts.
+      // Result-summary metadata: the extraction's summary when the extraction was
+      // read as readable when it was written, else the source's own summary.
+      // Exact-span selection below remains authoritative for literal excerpts.
       const summaries = new Map<string, string>();
       for (const item of selected) if (item.source) {
         const extraction = input.state.extractionBySourceId.get(item.id);
-        for (const value of [extraction?.summary, item.source.summary]) {
-          if (typeof value !== 'string' || !value.trim()) continue;
-          checkObjects();
-          let usable: boolean;
-          try { usable = await readKnowledgeExtractionTextUsability(value, signal); }
-          catch (error) {
-            checkObjects();
-            throw error;
-          }
-          checkObjects();
-          if (usable) { summaries.set(item.id, value.trim()); break; }
-        }
+        const value = [knowledgeExtractionIsReadable(extraction) ? extraction?.summary : undefined, item.source.summary]
+          .find((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0);
+        if (value) summaries.set(item.id, value.trim());
       }
       // The reader's probability orders accepted rows; zero explicitly means no
       // legacy retrieval-point score was computed, never answer confidence.

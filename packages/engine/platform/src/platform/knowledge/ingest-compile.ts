@@ -192,7 +192,7 @@ export async function recompileKnowledgeSource(context: KnowledgeIngestContext, 
   const assertCurrent = () => { sourceCurrent(); uris.assertCurrent(); };
   let refreshed: KnowledgeExtractionUpsertInput | undefined;
   let assertExtractionCurrent = () => {};
-  if (source.artifactId && await abortableCompileRead(knowledgeExtractionNeedsRefresh(extraction, undefined, signal), signal)) {
+  if (source.artifactId && knowledgeExtractionNeedsRefresh(extraction)) {
     assertCurrent();
     uris.reserveSource(source.id);
     uris.attachArtifact(source.artifactId);
@@ -496,7 +496,7 @@ interface CompiledEntityHint {
 
 async function prepareKnowledgeStructuredEntityHints(
   source: Pick<KnowledgeSourceRecord, 'id' | 'sourceType' | 'sourceUri' | 'title' | 'summary' | 'tags' | 'metadata'>,
-  extraction: Pick<KnowledgeExtractionRecord, 'summary' | 'sections'> | null | undefined,
+  extraction: Pick<KnowledgeExtractionRecord, 'summary' | 'excerpt' | 'sections'> | null | undefined,
   signal?: AbortSignal,
   retainGuard?: (assertCurrent: () => void) => void,
   ownerCurrent?: () => void,
@@ -579,7 +579,7 @@ async function prepareKnowledgeStructuredEntityHints(
     .filter((entity) => entity.title.length > 0));
   const aliases = await readKnowledgeEntityAliases(entities, {
     title: source.title ?? '', summary: source.summary ?? '',
-    extractionSummary: extraction?.summary ?? '', sections: extraction?.sections ?? [],
+    extractionSummary: extraction?.summary ?? '', excerpt: extraction?.excerpt, sections: extraction?.sections ?? [],
   }, signal, retainGuard, ownerCurrent);
   return entities.map((entity, index) => ({ ...entity, aliases: aliases[index]! }));
 }

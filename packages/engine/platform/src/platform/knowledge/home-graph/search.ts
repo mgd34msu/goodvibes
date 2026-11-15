@@ -69,7 +69,7 @@ export async function selectHomeGraphExtractionRepairCandidates(
   const results = await mapLimit(structuredClone(snapshots), 4, async (state, index) => {
     const source = eligible[index]!;
     signal?.throwIfAborted();
-    if (!source.artifactId || !(await homeGraphExtractionNeedsRepair(extractionBySourceId(source.id), signal))) return undefined;
+    if (!source.artifactId || !homeGraphExtractionNeedsRepair(extractionBySourceId(source.id))) return undefined;
     const run = await readKnowledgeBattery(repairSourceRelevance, state, signal);
     decisionGuards.push(run.assertDecisionCurrent);
     return run.readings.relevant.verdict === 'yes' ? { source, score: run.readings.relevant.probability } : undefined;
@@ -81,8 +81,9 @@ export async function selectHomeGraphExtractionRepairCandidates(
     .sort((a, b) => b.score - a.score || a.source.id.localeCompare(b.source.id))
     .slice(0, Math.max(1, limit)).map((entry) => entry.source);
 }
-export async function homeGraphExtractionNeedsRepair(extraction: KnowledgeExtractionRecord | null | undefined, signal?: AbortSignal): Promise<boolean> {
-  return knowledgeExtractionNeedsRefresh(extraction ?? null, undefined, signal);
+/** Decided from the extraction's stored version and readability; the signal is accepted for older callers and unused. */
+export function homeGraphExtractionNeedsRepair(extraction: KnowledgeExtractionRecord | null | undefined, _signal?: AbortSignal): boolean {
+  return knowledgeExtractionNeedsRefresh(extraction ?? null);
 }
 function assertExtractionInputs(
   sources: readonly KnowledgeSourceRecord[],

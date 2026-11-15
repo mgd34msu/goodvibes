@@ -100,11 +100,10 @@ test('Preferred alias outage preserves the prepared artifact and commits the ing
     const result = await ingestKnowledgeArtifact(context, { artifactId: artifact.id, tags: ['project:alpha'], metadata: { project: 'alpha' } }, {
       onCommitted() { committed++; },
     });
+    // Extraction asks no model and the alias reading falls back to no alias, so the outage does not stop the ingest.
     expect(result.source.status).toBe('indexed'); expect(result.artifactId).toBe(artifact.id);
-    expect(result.source.metadata.provenance).toBe('classic'); expect(decisionModelPolicyState().operation).toBe('classic');
-    expect(store.getSource(result.source.id)?.metadata).toMatchObject({ provenance: 'classic', semanticAssessment: 'not-evaluated' });
     const reopened = new KnowledgeStore({ dbPath: join(root, 'knowledge.sqlite') }); stores.push(reopened); await reopened.init();
-    expect(reopened.getSource(result.source.id)?.metadata).toMatchObject({ provenance: 'classic', semanticAssessment: 'not-evaluated' });
+    expect(reopened.getSource(result.source.id)?.status).toBe('indexed');
     expect(store.listSources()).toHaveLength(1); expect(store.listExtractions()).toHaveLength(1); expect(committed).toBe(1);
   });
   expect(requests.length).toBeGreaterThan(0); expect(enrichments()).toBe(0);

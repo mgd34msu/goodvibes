@@ -58,10 +58,7 @@ describe('Home Graph page priority', () => {
     });
   });
 
-  test('candidate mutation and model replacement cannot publish an earlier ranking', async () => {
-    const candidates = [{ title: 'Vela', description: 'Original description' }];
-    const changed = fakePort(() => { candidates[0]!.description = 'Changed description'; return noulAnswer(0.99); });
-    await withPort(changed.port, async () => { await expect(rank(candidates)).rejects.toMatchObject({ reason: 'stale' }); });
+  test('model replacement cannot publish an earlier ranking', async () => {
     const next = fakePort(() => noulAnswer(0.99));
     const retired = fakePort(() => { installJudgmentPort(next.port); return noulAnswer(0.99); });
     await withPort(retired.port, async () => {

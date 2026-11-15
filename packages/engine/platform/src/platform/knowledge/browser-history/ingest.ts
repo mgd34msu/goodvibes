@@ -6,9 +6,7 @@ import {
   emitKnowledgeIngestFailed,
   emitKnowledgeIngestStarted,
 } from '../../runtime/emitters/index.js';
-import { readNormalizedError } from '../../utils/error-display.js';
-import { createSemanticWriteGuard } from '../semantic/primary-source-plan.js';
-import { retainOwnedJson } from '../../gate/judgment-input.js';
+import { summarizeError } from '../../utils/error-display.js';
 import { compileKnowledgeSource } from '../ingest-compile.js';
 import { KnowledgeEntityAliasHoldError } from '../entity-aliases.js';
 import { KnowledgeNodeActivationHeldError } from '../activation/types.js';
@@ -198,6 +196,7 @@ async function captureAggregate(
   onSourceStored: (source: KnowledgeSourceRecord) => void,
   uris: KnowledgeUriCanonicalizer,
   sourceId: string,
+  profileNodes: Map<string, string>,
 ): Promise<{ source: KnowledgeSourceRecord; extraction: KnowledgeExtractionRecord }> {
   uris.assertCurrent();
   const existing = context.store.getSourceByCanonicalUri(aggregate.canonicalUri);
@@ -256,28 +255,34 @@ async function captureAggregate(
     if (!observed.has(key)) observed.set(key, entry);
   }
   for (const entry of observed.values()) {
-    const browserInput = prepareObservedKnowledgeNodeInput(context.store, {
-      kind: 'source_group',
-      slug: slugify(`browser-${entry.browser}-${entry.profileName}`),
-      title: `${entry.browser} ${entry.profileName}`,
-      summary: `Local ${entry.browser} browser profile imported from ${entry.profilePath}.`,
-      aliases: [entry.browser, entry.profileName],
-      status: 'active',
-      confidence: 85,
-      metadata: {
-        browser: entry.browser,
-        browserFamily: entry.family,
-        browserProfilePath: entry.profilePath,
-      },
-    }, 'browser-profile', source, () => context.store.getSource(source.id));
-    const nodes = await context.store.prepareNodeWrites([browserInput], { assertCurrent: uris.assertCurrent });
-    const browserNode = await context.store.upsertPreparedNode(nodes, 0);
-    uris.assertCurrent();
+    // Each browser profile's node is written once per run; later URLs of the
+    // same profile only add their edge to it.
+    const profileKey = JSON.stringify([entry.browser, entry.profilePath, entry.profileName]);
+    let browserNodeId = profileNodes.get(profileKey);
+    if (!browserNodeId) {
+      const browserInput = prepareObservedKnowledgeNodeInput(context.store, {
+        kind: 'source_group',
+        slug: slugify(`browser-${entry.browser}-${entry.profileName}`),
+        title: `${entry.browser} ${entry.profileName}`,
+        summary: `Local ${entry.browser} browser profile imported from ${entry.profilePath}.`,
+        aliases: [entry.browser, entry.profileName],
+        status: 'active',
+        confidence: 85,
+        metadata: {
+          browser: entry.browser,
+          browserFamily: entry.family,
+          browserProfilePath: entry.profilePath,
+        },
+      }, 'browser-profile', source, () => context.store.getSource(source.id));
+      const nodes = await context.store.prepareNodeWrites([browserInput], { assertCurrent: uris.assertCurrent });
+      browserNodeId = (await context.store.upsertPreparedNode(nodes, 0)).id;
+      profileNodes.set(profileKey, browserNodeId);
+    }
     await context.store.upsertEdge({
       fromKind: 'source',
       fromId: source.id,
       toKind: 'node',
-      toId: browserNode.id,
+      toId: browserNodeId,
       relation: entry.sourceKind === 'history' ? 'visited_in_browser_profile' : 'bookmarked_in_browser_profile',
       weight: timestampForEntry(entry) ? 1.2 : 1,
       metadata: {
@@ -288,7 +293,6 @@ async function captureAggregate(
         ...(entry.sourceKind === 'bookmark' && entry.folderPath ? { folderPath: entry.folderPath } : {}),
       },
     }, uris.assertCurrent);
-    uris.assertCurrent();
   }
 
   return { source, extraction };
@@ -336,12 +340,13 @@ export async function ingestBrowserKnowledge(
   await context.store.init();
   const uris = createKnowledgeIngestUriCanonicalizer(context, options);
   const { signal: _signal, assertCurrent: _assertCurrent, ...filter } = options;
-  const retainedOptions = retainOwnedJson(filter);
+  // The collected entries are this run's own values; nothing else holds them,
+  // so they are not re-checked per URL. The signal and the URI owner are.
   const collected = await collectBrowserKnowledge(filter);
-  uris.assertCurrent(); retainedOptions.assertCurrent();
-  const retainedEntries = retainOwnedJson(collected.entries);
+  uris.assertCurrent();
   const aggregates = await aggregateBrowserEntries(collected.entries, uris);
-  uris.assertCurrent(); retainedEntries.assertCurrent();
+  uris.assertCurrent();
+  const profileNodes = new Map<string, string>();
   const sources: KnowledgeSourceRecord[] = [];
   const capturedSources: KnowledgeSourceRecord[] = [];
   const outcomes: BrowserKnowledgeIngestOutcome[] = [];
@@ -350,7 +355,8 @@ export async function ingestBrowserKnowledge(
   let failed = 0;
 
   for (const aggregate of aggregates) {
-    uris.assertCurrent(); retainedOptions.assertCurrent(); retainedEntries.assertCurrent();
+    options.signal?.throwIfAborted();
+    uris.assertCurrent();
     let sourceId: string | undefined;
     let captureCompleted = false;
     // One id names the operation in STARTED, COMPLETED and FAILED, so a
@@ -363,7 +369,7 @@ export async function ingestBrowserKnowledge(
         sourceType: sourceTypeForAggregate(aggregate),
         uri: aggregate.canonicalUri,
       }), options.sessionId);
-      const { source, extraction } = await captureAggregate(context, aggregate, options, (stored) => { sourceId = stored.id; }, uris, operationId);
+      const { source, extraction } = await captureAggregate(context, aggregate, options, (stored) => { sourceId = stored.id; }, uris, operationId, profileNodes);
       captureCompleted = true;
       capturedSources.push(source);
       await compileKnowledgeSource(context, source, extraction, { signal: options.signal, assertCurrent: uris.assertCurrent });
@@ -378,16 +384,7 @@ export async function ingestBrowserKnowledge(
     } catch (error) {
       if (error instanceof KnowledgeUriCanonicalizationHeldError || options.signal?.aborted) throw error;
       uris.assertCurrent();
-      const store = context.store, artifactStore = context.artifactStore, emit = context.emitIfReady;
-      const selectedOptions = retainOwnedJson(filter), selectedAggregate = retainOwnedJson(aggregate);
-      const sourceGuard = createSemanticWriteGuard(store);
-      if (sourceId) sourceGuard.source(sourceId);
-      const assertDiagnosticCurrent = () => {
-        uris.assertCurrent(); selectedOptions.assertCurrent(); selectedAggregate.assertCurrent(); sourceGuard.assertCurrent();
-        if (context.store !== store || context.artifactStore !== artifactStore || context.emitIfReady !== emit) throw new KnowledgeEntityAliasHoldError();
-      };
-      const diagnostic = await readNormalizedError(error, { site: 'engine.knowledge.browser-ingest-failure', assertCurrent: assertDiagnosticCurrent });
-      assertDiagnosticCurrent();
+      const diagnostic = { summary: summarizeError(error) };
       failed += 1;
       const held = error instanceof KnowledgeEntityAliasHoldError || error instanceof KnowledgeNodeActivationHeldError
         || error instanceof KnowledgeNodeMutationHeldError || error instanceof JudgmentInputError;

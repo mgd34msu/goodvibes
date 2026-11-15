@@ -1,5 +1,5 @@
 import { activateClassicFallback, requireDecisionFeature } from '../../../runtime/decision-policy.js';
-import { retainStrictJudgmentJson, prepareJudgmentResult } from '../../../gate/judgment-result.js';
+import { prepareJudgmentResult } from '../../../gate/judgment-result.js';
 import { captureJudgmentPort, JudgmentAuthorityRetiredError, JudgmentPortMissingError, type JudgmentPortCapture } from '@goodvibes-jev/engine/errors';
 import { fanOut, toJson, type JudgmentPort, type JsonValue, type YesNoReading } from '@goodvibes-jev/judgment';
 import { assertJudgmentInput, JudgmentInputError } from '../../../gate/judgment-input.js';
@@ -25,9 +25,10 @@ function checkSubject(value: unknown, entity = false): void {
   }
   if (typeof value.kind !== 'string' || typeof value.title !== 'string') throw new Held('malformed');
 }
-function checkedInputs(inputs: readonly HomeGraphQualityInput[]): readonly HomeGraphQualityInput[] {
+/** Each input cut to the entity and fact limits, with what was cut. */
+function checkedInputs(inputs: readonly HomeGraphQualityInput[]): readonly { readonly input: HomeGraphQualityInput; readonly omitted?: { readonly entities: number; readonly facts: number } }[] {
   assertJudgmentInput(inputs);
-  if (!Array.isArray(inputs) || inputs.length > LIMITS.devices) throw new Held('budget');
+  if (!Array.isArray(inputs)) throw new Held('malformed');
   const refs = new Set<string>();
   for (const input of inputs) {
     if (!record(input) || Object.keys(input).some((key) => !['reference', 'subject', 'entities', 'facts', 'questions'].includes(key))
@@ -35,7 +36,6 @@ function checkedInputs(inputs: readonly HomeGraphQualityInput[]): readonly HomeG
       || !Array.isArray(input.entities) || !Array.isArray(input.facts) || !Array.isArray(input.questions)
       || new Set(input.questions).size !== input.questions.length || input.questions.some((key) => !Object.hasOwn(homeGraphQualityBatteries, key))) throw new Held('malformed');
     refs.add(input.reference);
-    if (input.entities.length > LIMITS.entities || input.facts.length > LIMITS.facts) throw new Held('budget');
     checkSubject(input.subject);
     input.entities.forEach((entity) => checkSubject(entity, true));
     for (const fact of input.facts) {
@@ -49,7 +49,12 @@ function checkedInputs(inputs: readonly HomeGraphQualityInput[]): readonly HomeG
       }
     }
   }
-  return freezeSupport(structuredClone(inputs));
+  return freezeSupport(structuredClone(inputs).map((input) => {
+    const entities = Math.max(0, input.entities.length - LIMITS.entities), facts = Math.max(0, input.facts.length - LIMITS.facts);
+    return entities || facts
+      ? { input: { ...input, entities: input.entities.slice(0, LIMITS.entities), facts: input.facts.slice(0, LIMITS.facts) }, omitted: { entities, facts } }
+      : { input };
+  }));
 }
 function validatedPort(port: JudgmentPort): JudgmentPort {
   return { ...port, model: port.model, async ask(request) {
@@ -73,7 +78,6 @@ export async function readHomeGraphQuality(inputs: readonly HomeGraphQualityInpu
 } = {}): Promise<readonly HomeGraphQualityReading[]> {
   requireDecisionFeature('semantic Home Graph quality assessment');
   if (options.signal?.aborted) throw new Held('aborted');
-  const original = retainStrictJudgmentJson(inputs, () => new JudgmentInputError('unsupported-input'));
   const snapshots = checkedInputs(inputs);
   const callerSignal = options.signal, callerCurrent = options.assertCurrent;
   let owner: JudgmentPortCapture | undefined;
@@ -90,7 +94,6 @@ export async function readHomeGraphQuality(inputs: readonly HomeGraphQualityInpu
   const timer = timeoutMs === undefined || timeoutMs === 0 ? undefined : setTimeout(() => stop(new Held('budget')), timeoutMs);
   const checkSource = () => {
     if (held) throw held; if (callerSignal?.aborted) throw new Held('aborted');
-    try { original.assertCurrent(); } catch { throw new Held('stale'); }
     // Preserve the caller's typed stale-fact signal so its bounded recovery
     // can re-read changed evidence; never turn it into a generic page failure.
     callerCurrent?.();
@@ -108,13 +111,13 @@ export async function readHomeGraphQuality(inputs: readonly HomeGraphQualityInpu
   const run = async () => {
     check();
     // Fully structural passes need no semantic port.
-    if (snapshots.some(input => input.questions.length)) owner = captureJudgmentPort('engine.knowledge.homegraph-quality', { signal: controller.signal, assertCurrent: ownedSource,
+    if (snapshots.some(({ input }) => input.questions.length)) owner = captureJudgmentPort('engine.knowledge.homegraph-quality', { signal: controller.signal, assertCurrent: ownedSource,
       prepareResultCapture: questions => prepareJudgmentResult(questions, reason => new Held(reason)) });
     const port = owner ? validatedPort(owner.port) : undefined;
     const readings: HomeGraphQualityReading[] = []; let next = 0;
     await Promise.all(Array.from({ length: Math.min(LIMITS.concurrency, snapshots.length) }, async () => {
       while (next < snapshots.length) {
-        check(); const index = next++; const input = snapshots[index]!;
+        check(); const index = next++; const { input, omitted } = snapshots[index]!;
         const { questions, ...projected } = input;
         const state = freezeSupport(toJson(projected) as Record<string, JsonValue>);
         const answers: Partial<Record<typeof questions[number], boolean>> = {};
@@ -144,13 +147,13 @@ export async function readHomeGraphQuality(inputs: readonly HomeGraphQualityInpu
             const failure = error instanceof Held ? error : new Held('unavailable');
             // One device whose readings do not settle is left unanswered; the other devices still refresh.
             if (failure.reason === 'unsettled' && options.leaveUnsettledUnanswered === true) {
-              readings[index] = { assertCurrent: check, reference: input.reference, answers: {}, provenance: {}, decisionIds: [], batteries: [], model, requestedModel, unanswered: 'unsettled' };
+              readings[index] = { assertCurrent: check, reference: input.reference, answers: {}, provenance: {}, decisionIds: [], batteries: [], model, requestedModel, unanswered: 'unsettled', ...(omitted ? { omitted } : {}) };
               continue;
             }
             stop(failure); throw failure;
           }
         }
-        readings[index] = { assertCurrent: check, reference: input.reference, answers, provenance, decisionIds, batteries, model, requestedModel };
+        readings[index] = { assertCurrent: check, reference: input.reference, answers, provenance, decisionIds, batteries, model, requestedModel, ...(omitted ? { omitted } : {}) };
       }
     }));
     check(); return freezeSupport(readings);

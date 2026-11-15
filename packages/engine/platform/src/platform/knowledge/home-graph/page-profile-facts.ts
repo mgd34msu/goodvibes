@@ -7,10 +7,12 @@ import { createSemanticWriteGuard } from '../semantic/primary-source-plan.js';
 import { semanticSlug } from '../semantic/utils.js';
 import type { SourceLinkedRepairProfileFactInput } from '../semantic/self-improvement-promotion.js';
 import { buildHomeGraphMetadata } from './helpers.js';
+import { logger } from '../../utils/logger.js';
 import type { HomeGraphPageSourceReader } from './page-quality.js';
 
 type ExtractionBySourceId = ReadonlyMap<string, ReturnType<KnowledgeStore['getExtractionBySourceId']>>;
-const MAX_PROFILE_SOURCES_PER_DEVICE_PAGE = Infinity;
+/** Linked sources whose text is read for a device page's profile facts; the rest are counted, not read. */
+export const MAX_PROFILE_SOURCES_PER_DEVICE_PAGE = 8;
 function throwIfAborted(signal?: AbortSignal): void {
   if (signal?.aborted) throw new GoodVibesError('Home Graph device passport refresh was cancelled.', {
     category: 'timeout', source: 'runtime', operation: 'homegraph.refreshDevicePassport',
@@ -28,6 +30,9 @@ export interface DevicePageProfileFactPlan {
   readonly authority: 'official-vendor' | 'vendor' | 'secondary';
 }
 
+/** The page's profile fact plans, and how many linked sources were over the limit and not read. */
+export type DevicePageProfileFactPlans = DevicePageProfileFactPlan[] & { readonly omittedSources: number };
+
 export async function buildDevicePageProfileFacts(input: {
   readonly store: KnowledgeStore;
   readonly spaceId: string;
@@ -37,12 +42,18 @@ export async function buildDevicePageProfileFacts(input: {
   readonly sourceReader: HomeGraphPageSourceReader;
   readonly extractionsBySourceId?: ExtractionBySourceId | undefined;
   readonly signal?: AbortSignal | undefined;
-}): Promise<DevicePageProfileFactPlan[]> {
+}): Promise<DevicePageProfileFactPlans> {
   throwIfAborted(input.signal);
   const facts: DevicePageProfileFactPlan[] = [];
   const guard = createSemanticWriteGuard(input.store, input.signal);
   guard.watch(`node:${input.device.id}`, () => input.store.getNode(input.device.id), input.device);
+  // The caller passes the passport's sources best first; only the first few are read.
   const sources = input.sources.slice(0, MAX_PROFILE_SOURCES_PER_DEVICE_PAGE);
+  const omittedSources = input.sources.length - sources.length;
+  if (omittedSources > 0) {
+    logger.info('Home Graph device page read the profile facts of its first linked sources only', {
+      deviceId: input.device.id, read: sources.length, omitted: omittedSources });
+  }
   const entries = sources.flatMap((source) => {
     guard.watch(`source:${source.id}`, () => input.store.getSource(source.id), source);
     const extraction = input.extractionsBySourceId?.get(source.id) ?? input.store.getExtractionBySourceId(source.id);
@@ -103,7 +114,7 @@ export async function buildDevicePageProfileFacts(input: {
       });
     }
   }
-  return facts;
+  return Object.assign(facts, { omittedSources });
 }
 
 export function devicePageProfileFactInput(

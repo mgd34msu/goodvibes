@@ -1,5 +1,4 @@
 import { activateClassicFallback, decisionOrClassic } from '../../runtime/decision-policy.js';
-import { knowledgeJudgmentRepresentation, sameKnowledgeRecord } from '../store-record-representation.js';
 import { captureJudgmentPort, DecisionModelsDisabledError, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
 import { toJson, type JsonValue } from '@goodvibes-jev/judgment';
 import { assertJudgmentInput, captureOwnedJson, JudgmentInputError } from '../../gate/judgment-input.js';
@@ -22,37 +21,17 @@ export async function rankHomeGraphPageCandidates<T>(input: {
   readonly assertCurrent?: (() => void) | undefined;
   readonly store?: KnowledgeStore | undefined;
 }): Promise<readonly T[]> {
-  const signal = input.signal, callerCurrent = input.assertCurrent;
-  const purpose = input.purpose, offered = input.candidates, project = input.content, store = input.store;
-  const rawCandidates = () => captureOwnedJson(input.candidates);
-  const originalCandidates = rawCandidates();
-  const admissionCandidates = () => {
-    const complete = captureOwnedJson(knowledgeJudgmentRepresentation(input.candidates));
-    if (!Array.isArray(complete)) throw new JudgmentInputError('unsupported-input');
-    const result: unknown[] = new Array(complete.length);
-    for (const [key, descriptor] of Object.entries(Object.getOwnPropertyDescriptors(complete))) {
-      if (key === 'length') continue;
-      const index = Number(key);
-      const indexed = Number.isSafeInteger(index) && index >= 0 && String(index) === key && index < complete.length;
-      Object.defineProperty(result, key, { value: indexed ? knowledgePageCandidateRepresentation(store, input.candidates[index]) : descriptor.value,
-        enumerable: descriptor.enumerable === true });
-    }
-    return captureOwnedJson(result);
-  };
-  const originalAdmission = admissionCandidates();
-  assertJudgmentInput({ purpose: input.purpose, candidates: originalAdmission });
+  const signal = input.signal, callerCurrent = input.assertCurrent, store = input.store;
+  // The candidate list and its content are read once; the inputs are this
+  // call's own values, so checks only ask whether the caller still wants it.
+  assertJudgmentInput({ purpose: input.purpose, candidates: input.candidates.map((candidate) => knowledgePageCandidateRepresentation(store, candidate)) });
   const content = input.candidates.map(candidate => captureOwnedJson(input.content(candidate)));
   assertJudgmentInput(content);
-  const original = captureOwnedJson(content);
   const timeout = new AbortController();
 
   const check = () => {
     if (signal?.aborted) throw new HomeGraphPagePriorityHeldError('aborted');
     callerCurrent?.();
-    if (input.signal !== signal || input.assertCurrent !== callerCurrent || input.purpose !== purpose || input.candidates !== offered || input.content !== project || input.store !== store
-      || !sameKnowledgeRecord(rawCandidates(), originalCandidates)
-      || !sameKnowledgeRecord(admissionCandidates(), originalAdmission)
-      || !sameKnowledgeRecord(input.candidates.map(candidate => captureOwnedJson(input.content(candidate))), original)) throw new HomeGraphPagePriorityHeldError('stale');
   };
   check();
   if (!content.length) return [];

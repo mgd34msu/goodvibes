@@ -1,18 +1,17 @@
-import { decisionOrClassic } from '../../runtime/decision-policy.js';
-import { sameKnowledgeRecord } from '../store-record-representation.js';
-import { assertKnowledgeArrayExtras, prepareKnowledgeRecordAdmission } from '../store-record-snapshot.js';
-import { assertJudgmentInput, captureOwnedJson } from '../../gate/judgment-input.js';
-import { snapshotNodeInput } from '../activation/projection.js';
-import { assertKnowledgeExtractionInput } from '../extraction-policy.js';
+import { isClassicOperation } from '../../runtime/decision-policy.js';
+import { assertJudgmentInput } from '../../gate/judgment-input.js';
 import { getKnowledgeSpaceId } from '../spaces.js';
-import { captureKnowledgeSourceReferences, knowledgeSourceJudgmentUris } from '../source-structural-references.js';
+import { knowledgeSourceJudgmentUris } from '../source-structural-references.js';
 import { guardKnowledgeEdgeInput } from '../store-edge-writes.js';
+import { knowledgeTerms, selectKnowledgePassages, splitKnowledgePassages } from '../passages.js';
 import type { KnowledgeStore } from '../store.js';
 import type { KnowledgeEdgeRecord, KnowledgeExtractionRecord, KnowledgeNodeRecord, KnowledgeSourceRecord } from '../types.js';
 import { buildHomeGraphMetadata, edgeIsActive, isGeneratedPageSource } from './helpers.js';
-import { readHomeGraphState, type HomeGraphState } from './state.js';
+import type { HomeGraphState } from './state.js';
 import { projectHomeGraphQualityInput } from './quality/projection.js';
-import { createHomeGraphAutoLinkReader, HomeGraphAutoLinkHeldError as Held, type AutoLinkReadingInput } from './auto-link/reader.js';
+import { captureHomeGraphRows } from './rows-current.js';
+import { createHomeGraphAutoLinkReader, HomeGraphAutoLinkHeldError as Held, MAX_AUTO_LINK_CANDIDATES,
+  type AutoLinkReading, type AutoLinkReadingInput } from './auto-link/reader.js';
 
 export interface HomeGraphAutoLinkResult {
   readonly edge: KnowledgeEdgeRecord;
@@ -21,6 +20,21 @@ export interface HomeGraphAutoLinkResult {
   /** Compatibility field: no legacy point score or confidence is manufactured. */
   readonly score: number;
   readonly reasons: readonly string[];
+}
+/** What linking established for one document; returned to the caller, and remembered so an unchanged document is not read again. */
+export type HomeGraphAutoLinkStatus = 'linked' | 'none' | 'ambiguous' | 'unread';
+export interface HomeGraphAutoLinkOutcome {
+  readonly sourceId: string;
+  readonly status: HomeGraphAutoLinkStatus;
+  readonly reason?: string | undefined;
+  /** Candidates code shortlisted from the home (0 means nothing in the home matched the document). */
+  readonly shortlisted: number;
+}
+export interface HomeGraphAutoLinkReport {
+  readonly linked: readonly HomeGraphAutoLinkResult[];
+  readonly outcomes: readonly HomeGraphAutoLinkOutcome[];
+  /** Counts by status, for sync and ingest results. */
+  readonly counts: Readonly<Record<HomeGraphAutoLinkStatus, number>>;
 }
 interface AutoLinkContext {
   readonly store: KnowledgeStore;
@@ -39,6 +53,10 @@ interface AutoLinkSourcesInput extends AutoLinkContext {
   readonly extractionBySourceId: ReadonlyMap<string, KnowledgeExtractionRecord>;
 }
 
+/** Document text sent with the one reading: the passages that mention the shortlisted candidates. */
+const SOURCE_EVIDENCE_BYTES = 16 * 1024;
+const PASSAGE_CHARS = 800;
+
 function skipped(source: KnowledgeSourceRecord): boolean {
   return isGeneratedPageSource(source) || source.metadata.homeGraphSourceKind === 'snapshot'
     || source.metadata.homeGraphSourceKind === 'generated-page';
@@ -48,150 +66,153 @@ function hasActiveSourceLink(sourceId: string, edges: readonly KnowledgeEdgeReco
     (edge.fromKind === 'source' && edge.fromId === sourceId && edge.toKind === 'node')
     || (edge.fromKind === 'node' && edge.toKind === 'source' && edge.toId === sourceId)));
 }
+/** Devices and integrations are what a document is about; entities ride with their device. */
 function candidate(node: KnowledgeNodeRecord): boolean {
-  return ['ha_device', 'ha_entity', 'ha_integration', 'ha_area', 'ha_room'].includes(node.kind);
+  return node.kind === 'ha_device' || node.kind === 'ha_integration';
 }
-function projectSource(store: KnowledgeStore, source: KnowledgeSourceRecord, extraction: KnowledgeExtractionRecord | undefined, admissions: { assertCurrent(): void }[]): unknown {
-  assertKnowledgeExtractionInput(extraction ?? null);
-  const original = snapshotNodeInput(source);
-  const projected = { title: original.title, summary: original.summary, description: original.description,
-    sourceType: original.sourceType, tags: original.tags, ...knowledgeSourceJudgmentUris(source),
-    ...(extraction ? { extraction: { title: extraction.title, summary: extraction.summary, excerpt: extraction.excerpt,
-      sections: extraction.sections, structure: extraction.structure, metadata: extraction.metadata } } : {}) };
-  // Complete extractor containers and source fields, including protected tails,
-  // are checked before the candidate list, transport cap or first model request.
-  const proof = { source, extraction: extraction ?? null, proof: captureKnowledgeSourceReferences(store, source, extraction ?? null) };
-  admissions.push(prepareKnowledgeRecordAdmission(store, 'source', source, proof));
-  if (extraction) admissions.push(prepareKnowledgeRecordAdmission(store, 'extraction', extraction, proof));
-  assertJudgmentInput(projected);
-  return snapshotNodeInput(projected);
+/**
+ * Outcomes other than `linked`, per store and source, with what they were read
+ * from. Held in memory, not written to the source row: rewriting the source
+ * would change its generation and retire every reference minted for it. A
+ * daemon restart reads each unlinked document once more.
+ */
+interface RecordedOutcome { readonly status: Exclude<HomeGraphAutoLinkStatus, 'linked'>; readonly pool: number; readonly sourceUpdatedAt: number; readonly extractionId: string | null; readonly extractionUpdatedAt: number | null }
+const recordedOutcomes = new WeakMap<KnowledgeStore, Map<string, RecordedOutcome>>();
+function outcomesFor(store: KnowledgeStore): Map<string, RecordedOutcome> {
+  let map = recordedOutcomes.get(store);
+  if (!map) recordedOutcomes.set(store, map = new Map());
+  return map;
 }
-function currentContext(input: AutoLinkContext) {
-  const original = { spaceId: input.spaceId, installationId: input.installationId, state: input.state,
-    signal: input.signal, shouldStop: input.shouldStop };
-  const state = input.state;
-  const stateContent = JSON.stringify({ sources: state.sources, nodes: state.nodes, extractions: state.extractions, edges: state.edges });
-  if (state.spaceId !== input.spaceId) throw new Held('stale');
-  const sources = [...state.sources], nodes = [...state.nodes], extractions = [...state.extractions];
-  let edges = [...state.edges];
-  const content = JSON.stringify({ sources, nodes, extractions });
-  const edgeVersion = (rows: readonly KnowledgeEdgeRecord[]) => JSON.stringify([...rows].sort((a, b) => a.id.localeCompare(b.id)));
-  let edgeContent = edgeVersion(edges);
-  const same = <T>(left: readonly T[], right: readonly T[]) => left.length === right.length && left.every((row, index) => row === right[index]);
-  const assertCurrent = () => {
-    if (original.signal?.aborted || original.shouldStop?.()) throw new Held('aborted');
-    if (input.spaceId !== original.spaceId || input.installationId !== original.installationId
-      || input.state !== original.state || input.signal !== original.signal || input.shouldStop !== original.shouldStop) throw new Held('stale');
-    if (JSON.stringify({ sources: state.sources, nodes: state.nodes, extractions: state.extractions, edges: state.edges }) !== stateContent) throw new Held('stale');
-    const now = readHomeGraphState(input.store, original.spaceId);
-    // Reference identity detects equal-content ABA replacements; complete values
-    // also detect in-place mutation, including identities never sent to a model.
-    if (!same(now.sources, sources) || !same(now.nodes, nodes) || !same(now.extractions, extractions) || !(now.edges.length === edges.length && now.edges.every(edge => edges.includes(edge)))
-      || JSON.stringify({ sources: now.sources, nodes: now.nodes, extractions: now.extractions }) !== content
-      || edgeVersion(now.edges) !== edgeContent) throw new Held('stale');
-  };
-  assertCurrent();
-  return { assertCurrent, acknowledge(edge: KnowledgeEdgeRecord) {
-    edges = [...edges, edge]; edgeContent = edgeVersion(edges);
-  } };
+function sourceText(source: KnowledgeSourceRecord, extraction: KnowledgeExtractionRecord | undefined): unknown[] {
+  return [source.title, source.summary, source.description, ...source.tags, extraction?.title, extraction?.summary, extraction?.excerpt,
+    ...(extraction?.sections ?? []), extraction?.structure.searchText];
 }
 
-/** Preparation is read-only. Every source is screened before any selection starts. */
-async function linkSources(input: AutoLinkSourcesInput): Promise<readonly HomeGraphAutoLinkResult[]> {
-  const context = currentContext(input);
-  const admissions: { assertCurrent(): void }[] = [];
-  assertKnowledgeArrayExtras(input.sources);
-  const sourceListSnapshot = captureOwnedJson(input.sources);
-  const sourceList = [...input.sources];
-  const assertCurrent = () => {
-    context.assertCurrent();
-    for (const admission of admissions) admission.assertCurrent();
-    if (input.sources.length !== sourceList.length || input.sources.some((source, index) => source !== sourceList[index])
-      || !sameKnowledgeRecord(input.sources, sourceListSnapshot)) throw new Held('stale');
-  };
-  const sourcePlans = sourceList.filter((source) => !skipped(source) && !hasActiveSourceLink(source.id, input.state.edges))
-    .map((source) => {
-      if (input.store.getSource(source.id) !== source || getKnowledgeSpaceId(source) !== input.spaceId
-        || source.status === 'stale') throw new Held('stale');
-      const extraction = input.extractionBySourceId.get(source.id);
-      if ((input.store.getExtractionBySourceId(source.id) ?? undefined) !== extraction
-        || (extraction && (extraction.sourceId !== source.id || getKnowledgeSpaceId(extraction) !== input.spaceId))) throw new Held('stale');
-      return { source, extraction, projected: projectSource(input.store, source, extraction, admissions) };
+interface Candidate { readonly node: KnowledgeNodeRecord; readonly entities: readonly KnowledgeNodeRecord[]; readonly terms: readonly string[] }
+
+/** Identity words of a device or integration and its entities: names, model, manufacturer, ids. */
+function candidateTerms(node: KnowledgeNodeRecord, entities: readonly KnowledgeNodeRecord[]): string[] {
+  const identity = (record: KnowledgeNodeRecord) => [record.title, ...record.aliases, record.metadata.model, record.metadata.modelId,
+    record.metadata.model_id, record.metadata.manufacturer, record.metadata.vendor, record.metadata.brand];
+  return knowledgeTerms([...identity(node), ...entities.flatMap((entity) => [entity.title, ...entity.aliases])]);
+}
+
+/**
+ * The shortlist: candidates ranked by how many of their identity words the
+ * document contains, model and long words counting double. A candidate whose
+ * words appear nowhere in the document is not a candidate.
+ */
+function shortlist(candidates: readonly Candidate[], text: string): Candidate[] {
+  const lower = text.toLowerCase();
+  return candidates.map((entry, index) => ({ entry, index, score: entry.terms.reduce((sum, term) => sum
+    + (lower.includes(term) ? (term.length >= 5 || /\d/.test(term) ? 2 : 1) : 0), 0) }))
+    .filter((ranked) => ranked.score > 0)
+    .sort((left, right) => right.score - left.score || left.index - right.index)
+    .slice(0, MAX_AUTO_LINK_CANDIDATES).map((ranked) => ranked.entry);
+}
+
+function counts(outcomes: readonly HomeGraphAutoLinkOutcome[]): Record<HomeGraphAutoLinkStatus, number> {
+  const result: Record<HomeGraphAutoLinkStatus, number> = { linked: 0, none: 0, ambiguous: 0, unread: 0 };
+  for (const outcome of outcomes) result[outcome.status] += 1;
+  return result;
+}
+
+/**
+ * Links each unlinked document to the device or integration it is about. Code
+ * shortlists candidates from the home; one request per document reads the
+ * document kind and the shortlist together. A document with no shortlist makes
+ * no request. Anything but a single settled subject (`none`, `ambiguous`, or
+ * `unread` with the reason) is returned, never thrown, and is not read again
+ * until the document or the set of devices changes (`unread` is retried). The
+ * edge write compares the generations of the rows that reading used.
+ */
+async function linkSources(input: AutoLinkSourcesInput): Promise<HomeGraphAutoLinkReport> {
+  const stopped = () => input.signal?.aborted || input.shouldStop?.();
+  if (stopped()) throw new Held('aborted');
+  const pool = input.state.nodes.filter(candidate);
+  const outcomes = outcomesFor(input.store);
+  const plans = input.sources.filter((source) => !skipped(source) && source.status !== 'stale'
+    && getKnowledgeSpaceId(source) === input.spaceId && !hasActiveSourceLink(source.id, input.state.edges))
+    .map((source) => ({ source, extraction: input.extractionBySourceId.get(source.id) }))
+    .filter(({ source, extraction }) => {
+      const recorded = outcomes.get(source.id);
+      return !recorded || recorded.status === 'unread' || recorded.pool !== pool.length || recorded.sourceUpdatedAt !== source.updatedAt
+        || recorded.extractionId !== (extraction?.id ?? null) || recorded.extractionUpdatedAt !== (extraction?.updatedAt ?? null);
     });
-  // Snapshot and generated-page sources are deliberately ineligible. With no
-  // source to link there is no semantic operation or candidate transmission.
-  if (sourcePlans.length === 0) return [];
-  const nodes = input.state.nodes.filter(candidate);
-  // All candidates remain in the reading, including generic titles and close
-  // siblings. Exact device/entity identities are evidence, never a bypass.
-  const candidates = nodes.map((node, index) => {
-    const entityIds = new Set(input.state.edges.filter((edge) => edgeIsActive(edge) && edge.fromKind === 'node'
-      && edge.toKind === 'node' && edge.toId === node.id && edge.relation === 'belongs_to_device').map((edge) => edge.fromId));
-    const entities = input.state.nodes.filter((entity) => entity.kind === 'ha_entity' && entityIds.has(entity.id));
-    admissions.push(prepareKnowledgeRecordAdmission(input.store, 'node', node));
-    for (const entity of entities) admissions.push(prepareKnowledgeRecordAdmission(input.store, 'node', entity));
-    const projected = projectHomeGraphQualityInput(`device-${index + 1}`, node, entities, [], []);
-    const identity = snapshotNodeInput(node.metadata);
-    const subject = { ...projected.subject, modelId: identity.modelId, model_id: identity.model_id, vendor: identity.vendor };
-    assertJudgmentInput(subject);
-    return { reference: `candidate-${index + 1}`, subject, entities: projected.entities };
-  });
-  const plans = sourcePlans.map((plan) => ({ ...plan, reading: { source: plan.projected, candidates } satisfies AutoLinkReadingInput }));
-  for (const plan of plans) assertJudgmentInput(plan.reading);
-  if (!plans.length || !candidates.length) return [];
-  if (plans.length > 128 || candidates.length > 128 || plans.length * (candidates.length + 1) > 512
-    || plans.reduce((bytes, plan) => bytes + new TextEncoder().encode(JSON.stringify(plan.reading)).byteLength
-      * (candidates.length + 1) + 4_096 * (candidates.length + 1), 0) > 16 * 1024 * 1024) throw new Held('budget');
-  let check = assertCurrent;
-  const selected = await decisionOrClassic(async () => {
-    const reader = createHomeGraphAutoLinkReader();
-    check = () => { assertCurrent(); reader.assertCurrent();
-      for (const plan of plans) if (input.extractionBySourceId.get(plan.source.id) !== plan.extraction) throw new Held('stale');
-    };
-    const selected: { source: KnowledgeSourceRecord; node: KnowledgeNodeRecord; relation: string; provenance: NonNullable<ReturnType<typeof reader.provenance>> }[] = [];
-    for (const plan of plans) {
-      const selection = await reader.read(plan.reading, { signal: input.signal, assertCurrent: check });
-      check();
-      if (selection) {
-        const index = candidates.findIndex((candidate) => candidate.reference === selection.reference);
-        if (index < 0) throw new Held('malformed');
-        const provenance = reader.provenance(selection);
-        if (!provenance) throw new Held('malformed');
-        selected.push({ source: plan.source, node: nodes[index]!, relation: selection.relation, provenance });
-      }
-    }
-    return selected;
-  }, () => {
-    check = assertCurrent; check();
-    // Omit optional inference; no guessed target or relation is published.
-    return [];
-  });
-  // A held later source can never leave earlier links behind. The commit guard
-  // is checked inside upsertEdge after its init await, at the synchronous write.
-  const linked: HomeGraphAutoLinkResult[] = [];
-  for (const selection of selected) {
-    check();
-    const edge = await input.store.upsertEdge(guardKnowledgeEdgeInput({
-      fromKind: 'source', fromId: selection.source.id, toKind: 'node', toId: selection.node.id,
-      relation: selection.relation, weight: 1,
-      metadata: buildHomeGraphMetadata(input.spaceId, input.installationId, { linkStatus: 'active',
-        linkMethod: 'homegraph-auto-link', ...selection.provenance, autoLinkedAt: Date.now(), autoLinkReasons: ['settled-document-subject'] }),
-    }, check));
-    context.acknowledge(edge);
-    linked.push({ edge, node: selection.node, relation: selection.relation, score: 0, reasons: ['settled-document-subject'] });
+  if (plans.length === 0) return { linked: [], outcomes: [], counts: counts([]) };
+  const belongsTo = new Map<string, KnowledgeNodeRecord[]>();
+  const nodeById = new Map(input.state.nodes.map((node) => [node.id, node]));
+  for (const edge of input.state.edges) {
+    if (!edgeIsActive(edge) || edge.relation !== 'belongs_to_device' || edge.fromKind !== 'node' || edge.toKind !== 'node') continue;
+    const entity = nodeById.get(edge.fromId);
+    if (entity?.kind === 'ha_entity') belongsTo.set(edge.toId, [...(belongsTo.get(edge.toId) ?? []), entity]);
   }
-  return linked;
+  const candidates: Candidate[] = pool.map((node) => {
+    const entities = belongsTo.get(node.id) ?? [];
+    return { node, entities, terms: candidateTerms(node, entities) };
+  });
+  const reader = isClassicOperation() ? undefined : createHomeGraphAutoLinkReader();
+  const linked: HomeGraphAutoLinkResult[] = [];
+  const reported: HomeGraphAutoLinkOutcome[] = [];
+  for (const { source, extraction } of plans) {
+    if (stopped()) throw new Held('aborted');
+    const passages = splitKnowledgePassages([sourceText(source, extraction)], PASSAGE_CHARS);
+    const listed = shortlist(candidates, passages.map((passage) => passage.text).join('\n'));
+    let reading: AutoLinkReading;
+    let rowsCurrent: (() => void) | undefined;
+    if (!listed.length) reading = { status: 'none' };
+    else if (!reader) reading = { status: 'unread', reason: 'off' };
+    else {
+      const evidence = selectKnowledgePassages(passages, knowledgeTerms(listed.flatMap((entry) => entry.terms)), SOURCE_EVIDENCE_BYTES);
+      const projectedSource = { title: source.title, summary: source.summary, description: source.description, sourceType: source.sourceType,
+        tags: source.tags, ...knowledgeSourceJudgmentUris(source),
+        ...(extraction ? { extraction: { title: extraction.title, summary: extraction.summary } } : {}),
+        passages: evidence.passages.map((passage) => passage.text),
+        ...(evidence.omitted.passages ? { omitted: { passages: evidence.omitted.passages, characters: evidence.omitted.characters } } : {}) };
+      const projected: AutoLinkReadingInput = { source: projectedSource, candidates: listed.map((entry, index) => {
+        const quality = projectHomeGraphQualityInput(`candidate-${index + 1}`, entry.node, entry.entities, [], []);
+        return { reference: `candidate-${index + 1}`, subject: { ...quality.subject, modelId: entry.node.metadata.modelId ?? null,
+          vendor: entry.node.metadata.vendor ?? null }, entities: quality.entities };
+      }) };
+      assertJudgmentInput(projected);
+      rowsCurrent = captureHomeGraphRows(input.store, { sources: [source.id], extractions: extraction ? [extraction.id] : [],
+        nodes: listed.flatMap((entry) => [entry.node.id, ...entry.entities.map((entity) => entity.id)]) }, () => new Held('stale'));
+      reading = await reader.read(projected, { signal: input.signal, assertCurrent: () => { if (stopped()) throw new Held('aborted'); } });
+    }
+    if (reading.status === 'linked') {
+      const node = listed[Number(reading.reference.slice('candidate-'.length)) - 1]?.node;
+      if (!node) throw new Held('malformed');
+      const commit = rowsCurrent!;
+      const edge = await input.store.upsertEdge(guardKnowledgeEdgeInput({
+        fromKind: 'source', fromId: source.id, toKind: 'node', toId: node.id,
+        relation: reading.relation, weight: 1,
+        metadata: buildHomeGraphMetadata(input.spaceId, input.installationId, { linkStatus: 'active',
+          linkMethod: 'homegraph-auto-link', ...reading.provenance, autoLinkedAt: Date.now(), autoLinkReasons: ['settled-document-subject'] }),
+      }, commit));
+      linked.push({ edge, node, relation: reading.relation, score: 0, reasons: ['settled-document-subject'] });
+      reported.push({ sourceId: source.id, status: 'linked', shortlisted: listed.length });
+      outcomes.delete(source.id);
+      continue;
+    }
+    const reason = reading.status === 'unread' ? reading.reason : undefined;
+    reported.push({ sourceId: source.id, status: reading.status, ...(reason ? { reason } : {}), shortlisted: listed.length });
+    // Not read again until the document, its extraction or the home's device list changes.
+    outcomes.set(source.id, { status: reading.status, pool: pool.length, sourceUpdatedAt: source.updatedAt,
+      extractionId: extraction?.id ?? null, extractionUpdatedAt: extraction?.updatedAt ?? null });
+  }
+  return { linked, outcomes: reported, counts: counts(reported) };
+}
+
+export async function autoLinkHomeGraphSourceWithOutcome(input: AutoLinkSourceInput): Promise<HomeGraphAutoLinkReport> {
+  return linkSources({ ...input, sources: [input.source],
+    extractionBySourceId: new Map(input.extraction ? [[input.source.id, input.extraction]] : []) });
 }
 export async function autoLinkHomeGraphSource(input: AutoLinkSourceInput): Promise<HomeGraphAutoLinkResult | undefined> {
-  const original = { source: input.source, extraction: input.extraction, spaceId: input.spaceId, installationId: input.installationId,
-    state: input.state, signal: input.signal, shouldStop: input.shouldStop };
-  const check = () => { if (input.source !== original.source || input.extraction !== original.extraction
-      || input.spaceId !== original.spaceId || input.installationId !== original.installationId || input.state !== original.state
-      || input.signal !== original.signal || input.shouldStop !== original.shouldStop) throw new Held('stale');
-    return original.shouldStop?.() ?? false; };
-  return (await linkSources({ ...input, shouldStop: check, sources: [input.source],
-    extractionBySourceId: new Map(input.extraction ? [[input.source.id, input.extraction]] : []) }))[0];
+  return (await autoLinkHomeGraphSourceWithOutcome(input)).linked[0];
 }
-export function autoLinkHomeGraphSources(input: AutoLinkSourcesInput): Promise<readonly HomeGraphAutoLinkResult[]> {
+export function autoLinkHomeGraphSourcesWithOutcomes(input: AutoLinkSourcesInput): Promise<HomeGraphAutoLinkReport> {
   return linkSources(input);
+}
+export async function autoLinkHomeGraphSources(input: AutoLinkSourcesInput): Promise<readonly HomeGraphAutoLinkResult[]> {
+  return (await linkSources(input)).linked;
 }

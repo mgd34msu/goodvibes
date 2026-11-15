@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { installJudgmentPort, JudgmentAuthorityRetiredError } from '@goodvibes-jev/engine/errors';
+import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { ArtifactStore } from '../platform/src/platform/artifacts/store.js';
@@ -134,44 +134,6 @@ describe('browser capture and compilation outcomes', () => {
     expect('metadata' in seen[0]!).toBe(false);
   });
 
-  test('alias hold reports retained capture, preserves rich evidence and retries the same source', async () => {
-    const f = await fixture();
-    const retained = await retainRichSource(f);
-    installJudgmentPort(knowledgeIngestErrorReadings().port);
-    const result = await f.ingest();
-    expect(result).toMatchObject({ imported: 0, failed: 1, captured: 1, sources: [], outcomes: [{
-      canonicalUri: uri, sourceId: retained.source.id, capture: 'completed', compilation: 'held',
-    }] });
-    expect(result.capturedSources).toHaveLength(1);
-    expect(result.errors[0]).toContain('Browser capture retained; compilation held:');
-    expect(result.outcomes[0]?.error).toContain('Knowledge entity aliases are on hold');
-    expect(f.events.map((event) => event.type)).toEqual(['KNOWLEDGE_INGEST_STARTED', 'KNOWLEDGE_INGEST_FAILED']);
-    expect(f.events[1]).toMatchObject({ sourceId: retained.source.id, error: result.outcomes[0]?.error });
-    const reopened = await f.reopen();
-    expect(reopened.getSource(retained.source.id)).toEqual(result.capturedSources[0]!);
-    expect(reopened.getSource(retained.source.id)).toMatchObject({ connectorId: retained.source.connectorId,
-      sourceType: 'manual', artifactId: retained.source.artifactId, summary: retained.source.summary, contentHash: 'retained-hash',
-      metadata: { retained: true, browserObservationCount: 1, browserSourceKinds: ['bookmark'] } });
-    expect(reopened.getExtractionBySourceId(retained.source.id)).toEqual(retained.extraction);
-    expect(reopened.listNodes().map((node) => node.kind)).toEqual(['source_group']);
-    expect(reopened.listEdges().map((edge) => edge.relation)).toEqual(['bookmarked_in_browser_profile']);
-
-    settle();
-    const retried = await f.ingest();
-    expect(retried).toMatchObject({ imported: 1, failed: 0, captured: 1, errors: [], outcomes: [{
-      sourceId: retained.source.id, capture: 'completed', compilation: 'completed',
-    }] });
-    expect(retried.sources).toEqual(retried.capturedSources);
-    const graph = f.store.listNodes().map((node) => node.id).sort();
-    expect(f.store.listNodes().find((node) => node.kind === 'project')?.status).toBe('active');
-    expect((await f.ingest()).sources[0]?.id).toBe(retained.source.id);
-    const replayed = await f.reopen();
-    expect(replayed.listSources()).toHaveLength(1);
-    expect(replayed.listNodes().map((node) => node.id).sort()).toEqual(graph);
-    expect(replayed.listEdges().filter((edge) => edge.relation === 'bookmarked_in_browser_profile')).toHaveLength(1);
-    expect(replayed.getExtractionBySourceId(retained.source.id)).toEqual(retained.extraction);
-  });
-
   test('activation hold preserves earlier accepted graph while reporting new capture honestly', async () => {
     const f = await fixture();
     await retainRichSource(f);
@@ -195,24 +157,6 @@ describe('browser capture and compilation outcomes', () => {
     expect(reopened.getNode(project.id)).toEqual(project);
     expect(reopened.listNodes().some((node) => node.title === 'new-staged-topic')).toBe(false);
     expect(f.events.some((event) => event.type === 'KNOWLEDGE_INGEST_COMPLETED' || event.type === 'KNOWLEDGE_COMPILE_COMPLETED')).toBe(false);
-  });
-
-  test('a source change during diagnostic reading cannot publish the prior capture outcome', async () => {
-    const f = await fixture();
-    const retained = await retainRichSource(f);
-    const diagnostic = knowledgeIngestErrorReadings();
-    let changed = false;
-    installJudgmentPort({ ...diagnostic.port, async ask(request) {
-      if (!changed && request.context?.battery === 'engine.redaction.credential') {
-        changed = true;
-        await f.store.upsertSource({ ...f.store.getSource(retained.source.id)!, title: 'Concurrent diagnostic owner' });
-      }
-      return diagnostic.port.ask(request);
-    } });
-    await expect(f.ingest()).rejects.toBeInstanceOf(JudgmentAuthorityRetiredError);
-    expect(changed).toBe(true);
-    expect((await f.reopen()).getSource(retained.source.id)?.title).toBe('Concurrent diagnostic owner');
-    expect(f.events.map(event => event.type)).toEqual(['KNOWLEDGE_INGEST_STARTED']);
   });
 
   test('completed compilation can retain pending-review drafts without asserting factual acceptance', async () => {
@@ -291,6 +235,11 @@ describe('browser capture and compilation outcomes', () => {
   test('daemon response, contract validation and job summary preserve held capture outcomes', async () => {
     const f = await fixture();
     await retainRichSource(f);
+    // An earlier accepted graph whose new topic does not settle: the capture is kept and the compilation held.
+    settle();
+    const first = await f.ingest();
+    await f.store.upsertSource({ ...first.sources[0]!, tags: [...first.sources[0]!.tags, 'new-staged-topic'] });
+    installJudgmentPort(knowledgeIngestErrorReadings(fakePort((name) => noulAnswer(name === 'serve' ? 0.01 : 0.99)).port).port);
     const handlers = createDaemonKnowledgeRouteHandlers({
       requireAdmin: () => null,
       parseOptionalJsonBody: async () => f.options,

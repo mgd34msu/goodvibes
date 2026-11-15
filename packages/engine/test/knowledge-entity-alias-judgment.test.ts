@@ -1,168 +1,52 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { ArtifactStore } from '../platform/src/platform/artifacts/store.js';
-import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
-import { KnowledgeConnectorRegistry } from '../platform/src/platform/knowledge/connectors.js';
-import { compileKnowledgeSource, compileKnowledgeStructuredEntityHints } from '../platform/src/platform/knowledge/ingest-compile.js';
-import { JudgmentInputError } from '../platform/src/platform/gate/judgment-input.js';
-import { KnowledgeEntityAliasHoldError, readKnowledgeEntityAliases, MAX_ENTITY_ALIAS_REQUESTS, MAX_ENTITY_ALIAS_EVIDENCE_CHARS } from '../platform/src/platform/knowledge/entity-aliases.js';
+import { readKnowledgeEntityAliases } from '../platform/src/platform/knowledge/entity-aliases.js';
 import { entityAlias } from '../platform/src/platform/knowledge/batteries/entity-alias.js';
 import { registry } from '../platform/src/platform/knowledge/aliases/judgment-registry.js';
 
 let previous: JudgmentPort | undefined;
-let root: string;
-beforeEach(() => {
-  previous = installJudgmentPort(undefined);
-  root = mkdtempSync(join(tmpdir(), 'knowledge-entity-alias-'));
-});
-const stores: KnowledgeStore[] = [];
-afterEach(async () => { installJudgmentPort(previous); for (const store of stores.splice(0)) await store.close(); rmSync(root, { recursive: true, force: true }); });
-function context() {
-  const store = new KnowledgeStore({ dbPath: join(root, 'knowledge.sqlite') });
-  stores.push(store);
-  return {
-    store,
-    artifactStore: new ArtifactStore({ rootDir: join(root, 'artifacts') }),
-    connectorRegistry: new KnowledgeConnectorRegistry(),
-    emitIfReady: () => {}, syncReviewedMemory: async () => {}, lint: async () => [], listConnectors: () => [],
-  };
-}
-const entity = { kind: 'project', title: 'Aurora Runtime' };
-const evidence = { title: 'AR deployment', summary: 'Aurora Runtime (AR) requires deployment deployment deployment.', extractionSummary: '', sections: [] };
-function answers(read: (state: { entity: { kind: string; title: string }; candidate: string; evidence: string }) => number) {
-  const fake = fakePort((name, _question, state) => {
-    expect(name).toBe('alias');
-    return noulAnswer(read(state as Parameters<typeof read>[0]));
-  });
-  installJudgmentPort(fake.port);
-  return fake;
-}
+beforeEach(() => { previous = installJudgmentPort(undefined); });
+afterEach(() => { installJudgmentPort(previous); });
+
+type AliasState = { entity: { title: string }; candidates: string[]; evidence: string };
 
 describe('knowledge entity alias readings', () => {
-  test('registers labelled yes/no fixtures and exercises them with deterministic fixture answers', async () => {
+  test('registers fixtures for every candidate slot', async () => {
     expect(registry.get(entityAlias.name)).toBe(entityAlias);
-    const table = new Map(entityAlias.fixtures.map((fixture) => [JSON.stringify(fixture.state), fixture.expect.alias]));
-    const fake = fakePort((_name, _question, state) => {
-      const expected = table.get(JSON.stringify(state));
-      expect(expected).toBeDefined();
-      return noulAnswer(expected === 'yes' ? 0.99 : 0.01);
+    const fake = fakePort((name, _question, state) => {
+      const fixture = entityAlias.fixtures.find((entry) => JSON.stringify(entry.state) === JSON.stringify(state));
+      return noulAnswer((fixture?.expect as Record<string, string> | undefined)?.[name] === 'yes' ? 0.99 : 0.01);
     });
     const checks = await entityAlias.checkFixtures(fake.port);
-    expect(checks.length).toBe(entityAlias.fixtures.length);
     expect(checks.every((check) => check.correct)).toBe(true);
   });
 
-  test('aliases belong only to the judged entity; frequency and nearby topics confer no identity', async () => {
-    const ctx = context();
-    const tags = ['project:Aurora Runtime', 'project:Borealis', 'repo:acme/core', 'owner:Writer'];
-    const source = await ctx.store.upsertSource({ connectorId: 'manual', sourceType: 'document', ...evidence, tags, status: 'indexed', metadata: { knowledgeSpaceId: 'lab', apiKey: 'synthetic-local-only' } });
-    const fake = answers(({ entity: target, candidate }) => target.title === entity.title && candidate === 'AR' ? 0.99 : 0.01);
-    await compileKnowledgeSource(ctx, source);
-    const nodes = ctx.store.listNodes(100).filter((node) => node.kind !== 'topic');
-    expect(nodes).toHaveLength(4);
-    expect(nodes.find((node) => node.title === entity.title)?.aliases).toEqual(['AR']);
-    for (const node of nodes.filter((node) => node.title !== entity.title)) expect(node.aliases).toEqual([]);
-    expect(nodes.map((node) => node.title)).toEqual(expect.arrayContaining(['Aurora Runtime', 'Borealis', 'acme/core', 'Writer']));
-    for (const node of nodes) {
-      expect(node.metadata.compiledFrom).toBe(source.id);
-      expect(node.metadata.tags).toEqual(tags);
-      expect(node.metadata.knowledgeSpaceId).toBe('lab');
-      expect(ctx.store.listEdges().some((edge) => edge.fromId === source.id && edge.toId === node.id)).toBe(true);
-    }
-    expect(fake.requests.every((request) => request.context?.battery === entityAlias.name && request.context.site === 'knowledge.ingest.entity-alias')).toBe(true);
-    const wire = JSON.stringify(fake.requests);
-    expect(wire).not.toContain('synthetic-local-only');
-    expect(wire).not.toContain(source.id);
-    expect(wire).not.toContain('project:Aurora');
-  });
-
-  test('short and multilingual candidates are kept verbatim when their readings accept them', async () => {
-    const fake = answers(({ candidate }) => ['A', 'TS', '朝日'].includes(candidate) ? 0.99 : 0.01);
-    expect(await readKnowledgeEntityAliases([entity], { ...evidence, title: 'A TS 朝日' })).toEqual([['A', 'TS', '朝日']]);
-    expect(fake.requests.some((request) => (request.state as { candidate: string }).candidate === 'A')).toBe(true);
-  });
-
-  test('confident no leaves deterministic entities and provenance intact with no guessed aliases', async () => {
-    const ctx = context();
-    const source = await ctx.store.upsertSource({ connectorId: 'manual', sourceType: 'repo', title: 'acme/core', tags: ['env:prod'], status: 'indexed' });
-    answers(() => 0.01);
-    await compileKnowledgeStructuredEntityHints(ctx, source);
-    const nodes = ctx.store.listNodes(100);
-    expect(nodes.map((node) => node.title)).toEqual(expect.arrayContaining(['acme/core', 'prod']));
-    expect(nodes.every((node) => node.aliases.length === 0 && node.metadata.compiledFrom === source.id)).toBe(true);
-    expect(ctx.store.listEdges().map((edge) => edge.relation)).toEqual(expect.arrayContaining(['references_repo', 'references_environment']));
-  });
-
-  for (const mode of ['uncertain', 'confirm', 'missing', 'unavailable', 'malformed'] as const) {
-    test(`${mode} readings never create aliases or mutate existing compiled graph records`, async () => {
-      const ctx = context();
-      const source = await ctx.store.upsertSource({ connectorId: 'manual', sourceType: 'document', ...evidence, tags: ['project:Aurora Runtime'], status: 'indexed', sourceUri: 'https://example.invalid/document', artifactId: 'artifact-1' });
-      answers(({ candidate }) => candidate === 'AR' ? 0.99 : 0.01);
-      await compileKnowledgeSource(ctx, source);
-      const nodes = ctx.store.listNodes(100);
-      const edges = ctx.store.listEdges();
-      if (mode === 'missing') installJudgmentPort(undefined);
-      else if (mode === 'unavailable') installJudgmentPort(fakePort(() => { throw new Error('synthetic-outage-private-detail'); }).port);
-      else if (mode === 'malformed') installJudgmentPort(fakePort(() => ({ type: 'noul', noul: Number.NaN })).port);
-      else {
-        let count = 0;
-        answers(() => ++count === 1 ? 0.99 : mode === 'confirm' ? 0.8 : 0.5);
-      }
-      await expect(compileKnowledgeSource(ctx, source)).rejects.toBeInstanceOf(KnowledgeEntityAliasHoldError);
-      expect(ctx.store.listNodes(100)).toEqual(nodes);
-      expect(ctx.store.listEdges()).toEqual(edges);
-      expect(ctx.store.getSource(source.id)).toEqual(source);
+  test('at most one request per tagged entity, whatever the document length; none without a stated name', async () => {
+    const fake = fakePort((name, _question, state) => {
+      const { candidates } = state as AliasState;
+      return noulAnswer(candidates[Number(name.slice(1)) - 1] === 'AR' ? 0.99 : 0.01);
     });
-  }
-
-  test('late held readings also create no new graph nodes, edges, or partial aliases', async () => {
-    const ctx = context();
-    const source = await ctx.store.upsertSource({ connectorId: 'manual', sourceType: 'document', ...evidence, tags: ['project:Aurora Runtime', 'project:Borealis'], status: 'indexed', sourceUri: 'https://example.invalid/document' });
-    answers(({ entity: target }) => target.title === entity.title ? 0.99 : 0.5);
-    await expect(compileKnowledgeSource(ctx, source)).rejects.toBeInstanceOf(KnowledgeEntityAliasHoldError);
-    expect(ctx.store.listNodes()).toEqual([]);
-    expect(ctx.store.listEdges()).toEqual([]);
+    installJudgmentPort(fake.port);
+    const words = Array.from({ length: 3_000 }, (_, index) => `word${index}`).join(' ');
+    const aliases = await readKnowledgeEntityAliases(
+      [{ kind: 'project', title: 'Aurora Runtime' }, { kind: 'project', title: 'Borealis' }],
+      { title: 'Notes', summary: `Aurora Runtime (AR) ships weekly. ${words}`, extractionSummary: '', sections: ['Borealis is a separate project.'] },
+    );
+    expect(fake.requests).toHaveLength(1);
+    expect((fake.requests[0]!.state as AliasState).candidates).toContain('AR');
+    expect(aliases).toEqual([['AR'], []]);
   });
 
-  test('preflights every complete field and later entity before any request or graph write', async () => {
-    const ctx = context();
-    const fake = answers(() => 0.99);
-    const tail = 'ordinary '.repeat(700) + 'password=synthetic-fixture';
-    for (const input of [
-      { ...evidence, title: tail }, { ...evidence, summary: tail },
-      { ...evidence, extractionSummary: tail }, { ...evidence, sections: ['safe', tail] },
-      { ...evidence, sections: ['4111 1111 1111 1111'] },
-    ]) await expect(readKnowledgeEntityAliases([entity], input)).rejects.toBeInstanceOf(JudgmentInputError);
-    await expect(readKnowledgeEntityAliases([entity, { kind: 'user', title: tail }], evidence)).rejects.toBeInstanceOf(JudgmentInputError);
-    const source = await ctx.store.upsertSource({ connectorId: 'manual', sourceType: 'document', ...evidence, tags: ['project:Aurora Runtime', 'owner:password=synthetic-fixture'], status: 'indexed' });
-    await expect(compileKnowledgeSource(ctx, source)).rejects.toBeInstanceOf(JudgmentInputError);
-    expect(fake.requests).toHaveLength(0);
-    expect(ctx.store.listNodes()).toEqual([]);
-  });
-
-  test('empty entity or lexical candidate sets and exact identity need no judgment port', async () => {
-    expect(await readKnowledgeEntityAliases([], evidence)).toEqual([]);
-    expect(await readKnowledgeEntityAliases([entity], { title: '', summary: '', extractionSummary: '', sections: [] })).toEqual([[]]);
-    expect(await readKnowledgeEntityAliases([{ kind: 'project', title: 'AR' }], { title: 'AR', summary: '', extractionSummary: '', sections: [] })).toEqual([[]]);
-  });
-
-  test('all candidate aliases retain complete evidence and exact entity identities without implicit caps', async () => {
-    const fake = answers(() => 0.99);
-    const entities = Array.from({ length: 56 }, (_, index) => ({ kind: 'project', title: `Exact Entity ${index}` }));
-    const fullEvidence = { title: 'alpha beta gamma delta epsilon', summary: 'complete '.repeat(1000), extractionSummary: '', sections: [] };
-    const result = await readKnowledgeEntityAliases(entities, fullEvidence);
-    expect(fake.requests).toHaveLength(56 * 6);
-    expect(result.every(aliases => aliases.length === 6)).toBe(true);
-    expect(fake.requests.every(request => (request.state as { evidence: string }).evidence === [fullEvidence.title, fullEvidence.summary, ''].join('\n'))).toBe(true);
-    const many = Array.from({ length: 129 }, (_, index) => ({ kind: 'project', title: `Entity ${index}` }));
-    expect(await readKnowledgeEntityAliases(many, { title: 'alias', summary: '', extractionSummary: '', sections: [] })).toHaveLength(129);
-    const long = { kind: 'project', title: 'x'.repeat(513) };
-    await readKnowledgeEntityAliases([long], { title: 'alias', summary: '', extractionSummary: '', sections: [] });
-    expect(fake.requests.at(-1)!.state).toMatchObject({ entity: long });
+  test('an entity whose reading does not settle keeps no inferred alias; the others keep theirs', async () => {
+    const fake = fakePort((_name, _question, state) => noulAnswer((state as AliasState).entity.title === 'Aurora Runtime' ? 0.99 : 0.5));
+    installJudgmentPort(fake.port);
+    const aliases = await readKnowledgeEntityAliases(
+      [{ kind: 'project', title: 'Aurora Runtime' }, { kind: 'project', title: 'Borealis' }],
+      { title: '', summary: 'Aurora Runtime (AR) and Borealis (BX) are both maintained here.', extractionSummary: '', sections: [] },
+    );
+    expect(fake.requests).toHaveLength(2);
+    expect(aliases).toEqual([['AR'], []]);
   });
 });

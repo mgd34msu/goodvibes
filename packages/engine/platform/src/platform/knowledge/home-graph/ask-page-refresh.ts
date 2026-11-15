@@ -1,6 +1,5 @@
 import { knowledgeRawRepresentation } from '../store-record-representation.js';
 import { createAskPageRecovery } from './ask-page-recovery.js';
-import { snapshotNodeInput } from '../activation/projection.js';
 import { KnowledgeGeneratedFactSupportHeldError } from '../semantic/verification/types.js';
 import { restoreKnowledgeSourceAnswerAliases } from '../source-structural-references.js';
 import type { ArtifactStore } from '../../artifacts/index.js';
@@ -27,11 +26,12 @@ import type { HomeGraphAskResult } from './types.js';
 
 // Passport pages are regenerated inside the ask request, each with model
 // readings; the cap keeps latency bounded when an answer links many devices.
-// Fact-subject links are still written for every linked device.
 const MAX_ASK_PAGE_REFRESHES = 3;
-const MAX_ASK_REFRESH_DEVICES = Infinity;
-const MAX_ASK_PAGE_SOURCES_TO_CONSIDER = Infinity;
-const MAX_ASK_PAGE_SOURCES_TO_LINK = Infinity;
+// Devices named as subjects in the fact reading, and answer sources read for
+// page usefulness, are sent to the model; the rest are counted as omitted.
+// Links for accepted sources are local writes and are not limited.
+const MAX_ASK_REFRESH_DEVICES = 8;
+const MAX_ASK_PAGE_SOURCES_TO_CONSIDER = 8;
 const ASK_FACT_SOURCE_WEIGHT = 0.82;
 const ASK_FACT_DESCRIBES_WEIGHT = 0.8;
 
@@ -42,24 +42,24 @@ export async function refreshDevicePagesForHomeGraphAsk(input: {
   readonly installationId: string;
   readonly answer: HomeGraphAskResult;
   readonly signal?: AbortSignal | undefined;
-}): Promise<{ readonly requested: boolean; readonly refreshed: number }> {
+}): Promise<{ readonly requested: boolean; readonly refreshed: number; readonly omitted?: { readonly devices: number; readonly sources: number } }> {
   if ((input.answer.answer.facts?.length ?? 0) === 0 && input.answer.answer.sources.length === 0) return { requested: false, refreshed: 0 };
-  const devices = input.answer.answer.linkedObjects.filter((node) => node.kind === 'ha_device' && getKnowledgeSpaceId(node) === input.spaceId).slice(0, MAX_ASK_REFRESH_DEVICES);
-  // The answer selected these exact rows. A fresh current-row baseline cannot
-  // silently rebind that selection to a different device or installation.
-  const selectedDevices = createSemanticWriteGuard(input.store);
-  for (const device of devices) selectedDevices.watch(`selected-device:${device.id}`,
-    () => input.store.getNode(device.id), snapshotNodeInput(device));
-  selectedDevices.assertCurrent();
-  const store = input.store, artifactStore = input.artifactStore, signal = input.signal;
-  const request = JSON.stringify({ spaceId: input.spaceId, installationId: input.installationId, answer: input.answer });
-  const selected = devices.map((device) => ({ device, current: store.getNode(device.id) }));
-  const recovery = createAskPageRecovery(store, input.spaceId, () => {
-    selectedDevices.assertCurrent();
-    if (input.store !== store || input.artifactStore !== artifactStore || input.signal !== signal
-      || JSON.stringify({ spaceId: input.spaceId, installationId: input.installationId, answer: input.answer }) !== request
-      || selected.some(({ device, current }) => store.getNode(device.id) !== current)) throw new KnowledgeGeneratedFactSupportHeldError('stale');
-  }, signal);
+  const linkedDevices = input.answer.answer.linkedObjects.filter((node) => node.kind === 'ha_device' && getKnowledgeSpaceId(node) === input.spaceId);
+  const devices = linkedDevices.slice(0, MAX_ASK_REFRESH_DEVICES);
+  const answerSources = (input.answer.answer.sources ?? []).filter((source) => getKnowledgeSpaceId(source) === input.spaceId);
+  const omitted = { devices: linkedDevices.length - devices.length, sources: Math.max(0, answerSources.length - MAX_ASK_PAGE_SOURCES_TO_CONSIDER) };
+  const signal = input.signal;
+  // The answer selected these device rows; one replaced since then (or moved
+  // to another home) cannot be refreshed in their name.
+  for (const device of devices) {
+    const current = input.store.getNode(device.id);
+    if (!current || current.updatedAt !== device.updatedAt || getKnowledgeSpaceId(current) !== input.spaceId) throw new KnowledgeGeneratedFactSupportHeldError('stale');
+  }
+  // The store generations of the selected device rows and answer sources are
+  // the baseline: a change to one of them (not to the rest of the space) stops
+  // the refresh.
+  const recovery = createAskPageRecovery(input.store, input.spaceId, { nodes: devices.map((device) => device.id),
+    sources: answerSources.slice(0, MAX_ASK_PAGE_SOURCES_TO_CONSIDER).map((source) => source.id) }, () => {}, signal);
   try {
     await persistAnswerFactSubjectLinks({
       store: input.store,
@@ -70,7 +70,7 @@ export async function refreshDevicePagesForHomeGraphAsk(input: {
       assertSelectedDevicesCurrent: recovery.assertCurrent,
       sourceWritten: recovery.acknowledgeSourceWritten,
       facts: input.answer.answer.facts ?? [],
-      sources: input.answer.answer.sources ?? [],
+      sources: answerSources.slice(0, MAX_ASK_PAGE_SOURCES_TO_CONSIDER),
     });
   } catch (error) {
     if (isKnowledgeSourceQualityFailure(error)) throw error;
@@ -83,7 +83,6 @@ export async function refreshDevicePagesForHomeGraphAsk(input: {
   }
   let refreshed = 0;
   for (const device of devices.slice(0, MAX_ASK_PAGE_REFRESHES)) {
-    selectedDevices.assertCurrent();
     const deviceId = readHomeAssistantMetadataString(device, 'objectId', 'deviceId') ?? device.id;
     try {
       await recovery.run(() => refreshHomeGraphDevicePassport({
@@ -99,7 +98,6 @@ export async function refreshDevicePagesForHomeGraphAsk(input: {
           metadata: { automation: 'ask-refresh' },
         },
       }));
-      selectedDevices.assertCurrent();
       refreshed += 1;
     } catch (error) {
       if (isKnowledgeSourceQualityFailure(error)) throw error;
@@ -112,8 +110,9 @@ export async function refreshDevicePagesForHomeGraphAsk(input: {
       recovery.assertCurrent();
     }
   }
-  recovery.assertUnchanged();
-  return { requested: devices.length > 0, refreshed };
+  recovery.assertCurrent();
+  if (omitted.devices || omitted.sources) logger.info('Home Graph Ask page refresh left part of the answer out of its readings', { spaceId: input.spaceId, ...omitted });
+  return { requested: devices.length > 0, refreshed, ...(omitted.devices || omitted.sources ? { omitted } : {}) };
 }
 
 async function persistAnswerFactSubjectLinks(input: {
@@ -140,7 +139,7 @@ async function persistAnswerFactSubjectLinks(input: {
     .filter((source) => {
       const existing = guard.source(source.id);
       return !existing || getKnowledgeSpaceId(existing) === input.spaceId;
-    }).slice(0, MAX_ASK_PAGE_SOURCES_TO_CONSIDER).map((responseSource) => {
+    }).map((responseSource) => {
     const source = restoreKnowledgeSourceAnswerAliases(input.store, responseSource);
     if (source !== responseSource) {
       restoredSources.add(source);
@@ -151,8 +150,7 @@ async function persistAnswerFactSubjectLinks(input: {
   });
   const readings = await reader.readCandidates(candidates);
   const pageSources = readings.filter((reading) => reading.useful)
-    .sort((a, b) => b.probability! - a.probability! || a.source.id.localeCompare(b.source.id))
-    .slice(0, MAX_ASK_PAGE_SOURCES_TO_LINK);
+    .sort((a, b) => b.probability! - a.probability! || a.source.id.localeCompare(b.source.id));
   const acceptedSourceIds = new Set(pageSources.map((reading) => reading.source.id));
   const factReader = createHomeGraphPageFactReader(input.store, {
     spaceId: input.spaceId, query: 'Useful device reference facts selected by a Home Graph answer', subjects: input.devices, signal: input.signal,

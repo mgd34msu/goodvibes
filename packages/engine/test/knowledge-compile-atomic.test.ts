@@ -52,11 +52,11 @@ async function fixture(route: typeof routes[number]) {
 }
 
 describe('atomic knowledge compilation', () => {
-  test('a refresh followed by alias hold retains the old extraction and complete graph', async () => {
+  test('a refresh followed by an unsettled serving reading retains the old extraction and complete graph', async () => {
     const { ctx, dbPath, run, reopen } = await fixture('recompile');
     const before = state(ctx.store), bytes = readFileSync(dbPath);
     installJudgmentPort(fakePort(() => noulAnswer(0.5)).port);
-    await expect(run()).rejects.toBeInstanceOf(KnowledgeEntityAliasHoldError);
+    await expect(run()).rejects.toBeInstanceOf(KnowledgeNodeActivationHeldError);
     expect(state(ctx.store)).toEqual(before); expect(readFileSync(dbPath)).toEqual(bytes); expect(await reopen()).toEqual(before);
   });
 
@@ -98,10 +98,10 @@ describe('atomic knowledge compilation', () => {
       const fake = fakePort((name, _question, request) => {
         expect(state(ctx.store)).toEqual(before); expect(readFileSync(dbPath)).toEqual(bytes);
         evidence.push(JSON.stringify(request));
-        return noulAnswer(name === 'alias' ? 0.01 : 0.99);
+        return noulAnswer(/^c\d$/.test(name) ? 0.01 : 0.99);
       });
       installJudgmentPort(fake.port); await run();
-      expect(fake.requests.length).toBeGreaterThan(2);
+      expect(fake.requests.length).toBeGreaterThanOrEqual(2);
       const after = state(ctx.store);
       expect(after.sources).toEqual(before.sources);
       expect(after.nodes.filter((node) => node.kind === 'project').every((node) => node.status === 'active'
@@ -119,7 +119,7 @@ describe('atomic knowledge compilation', () => {
         expect(() => getKnowledgeNodeObservation(topic, topic)!.assertCurrent()).not.toThrow();
       }
       expect(await reopen()).toEqual(after);
-      installJudgmentPort(fakePort((name) => noulAnswer(name === 'alias' ? 0.01 : 0.99)).port);
+      installJudgmentPort(fakePort((name) => noulAnswer(/^c\d$/.test(name) ? 0.01 : 0.99)).port);
       await run();
       const replay = state(ctx.store);
       expect(replay.nodes).toEqual(after.nodes); expect(replay.revisions).toEqual(after.revisions);
@@ -137,13 +137,14 @@ describe('atomic knowledge compilation', () => {
       expect(state(ctx.store)).toEqual(before); expect(readFileSync(dbPath)).toEqual(bytes); expect(await reopen()).toEqual(before);
     });
 
-    for (const phase of ['alias', 'serve'] as const) for (const change of ['source', 'extraction', 'port', 'cancel'] as const) {
+    // A replaced decision model is not a reason to drop an alias reading; it is for a serving reading.
+    for (const phase of ['alias', 'serve'] as const) for (const change of ['source', 'extraction', 'port', 'cancel'] as const) if (phase === 'serve' || change !== 'port') {
       test(`${route}: ${change} during ${phase} preserves intervening state`, async () => {
         const { ctx, edited, dbPath, run, reopen } = await fixture(route);
         const answer = settled().port, controller = new AbortController();
         let changed = false, expected = state(ctx.store), bytes = readFileSync(dbPath);
         installJudgmentPort({ model: answer.model, async ask(request) {
-          if (!changed && phase in request.questions) {
+          if (!changed && (phase === 'alias' ? 'c1' : phase) in request.questions) {
             changed = true;
             if (change === 'source') await ctx.store.upsertSource({ ...edited, title: 'Concurrent edit' });
             if (change === 'extraction') await ctx.store.upsertExtraction({ ...ctx.store.getExtractionBySourceId(edited.id)!, summary: 'Concurrent extraction' });

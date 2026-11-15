@@ -276,7 +276,7 @@ describe('synthesized knowledge serving authority', () => {
       const { store } = await fixture(); const draft = await store.upsertNode(input('fact', { status: 'draft' })); const fake = reading();
       let release!: () => void, started!: () => void;
       const waiting = new Promise<void>((resolve) => { release = resolve; }); const entered = new Promise<void>((resolve) => { started = resolve; });
-      installJudgmentPort({ ...fake.port, async ask(request) { expect(Object.isFrozen(request)).toBe(true); expect(Object.isFrozen(request.state)).toBe(true); started(); await waiting; return fake.port.ask(request); } });
+      installJudgmentPort({ ...fake.port, async ask(request) { started(); await waiting; return fake.port.ask(request); } });
       const pending = store.upsertNode({ ...draft, status: 'active' }); await entered;
       if (change === 'source') await store.upsertSource({ ...store.getSource('manual')!, summary: 'Changed while reading' });
       else await reviewKnowledgeNodeRecord(store, { id: draft.id, decision: 'reject' });

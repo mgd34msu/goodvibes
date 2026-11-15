@@ -444,8 +444,7 @@ describe('knowledge wiki honesty: unlink is a real reversal (unlink sub-defect)'
     const clock = spyOn(Date, 'now').mockReturnValue(4_222_222_222_668);
     try { await service.syncSnapshot({ installationId: 'house', devices: [{ id: 'tv', name: 'TV' }] }); }
     finally { clock.mockRestore(); installJudgmentPort(previousPriority); }
-    // This exact generic note is unrelated to the sole TV candidate. Keep the
-    // automatic-link reading real so unlink still exercises persisted state.
+    // This exact generic note is unrelated to the sole TV candidate.
     const body = 'A note body long enough to index.';
     const document = {
       title: 'Note', sourceType: 'document', tags: ['homeassistant', 'home-graph', 'note'],
@@ -478,7 +477,8 @@ describe('knowledge wiki honesty: unlink is a real reversal (unlink sub-defect)'
     } finally {
       installJudgmentPort(previous);
     }
-    expect(readNames).toEqual(['manual', 'integrationDocumentation', 'relation', 'selected']);
+    // The note shares no identity word with the TV, so linking shortlists nothing and asks nothing.
+    expect(readNames).toEqual([]);
     const nodesBefore = store.listNodes(100_000).length;
     const edgesBefore = store.listEdges().length;
 

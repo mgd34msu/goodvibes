@@ -146,10 +146,17 @@ describe('knowledge consolidation reading', () => {
   });
 
   test('unsettled worth does not stage, supersede or write', async () => {
-    const h = await harness(); await h.source(); readings(); const [before] = await refresh(h.context);
+    const h = await harness(); await h.source();
     readings(0.5); await run(h.context, 'deep-consolidation', { autoPromote: true });
-    expect(h.store.getConsolidationCandidate(before!.id)).toEqual(before!);
+    expect(h.store.listConsolidationCandidates()).toHaveLength(0);
     expect(h.memory.isReady).toBe(false);
+  });
+
+  test('decision-model requests for a second run over unchanged subjects: 0', async () => {
+    const h = await harness(); await h.source(); const fake = readings(); await refresh(h.context);
+    const first = fake.requests.length;
+    await refresh(h.context);
+    expect(fake.requests.length).toBe(first);
   });
 
   test('missing and failed ports preserve state and fail visibly', async () => {
@@ -256,7 +263,9 @@ describe('knowledge consolidation reading', () => {
   });
 
   test('an operator decision during the reading preserves the complete terminal record', async () => {
-    const h = await harness(); await h.source(); const fake = readings(); const [candidate] = await refresh(h.context);
+    const h = await harness(); const source = await h.source(); const fake = readings(); const [candidate] = await refresh(h.context);
+    // A changed subject is read again; the operator decides while that reading is out.
+    await h.store.upsertSource({ ...source, tags: [...source.tags, 'reviewed-again'] });
     const paused = pauseReading(fake); const refreshing = refresh(h.context); await paused.started;
     const rejected = await decide(h.context, candidate!.id, 'reject', { decidedBy: 'owner', memoryClass: 'ownership' });
     paused.release(); await refreshing;

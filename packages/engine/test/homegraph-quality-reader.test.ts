@@ -5,6 +5,7 @@ import type { JudgmentPort, JudgmentResult } from '@goodvibes-jev/judgment';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { JudgmentInputError } from '../platform/src/platform/gate/judgment-input.js';
 import { readHomeGraphQuality, HomeGraphQualityHeldError, type HomeGraphQualityInput, type HomeGraphQualityHoldReason } from '../platform/src/platform/knowledge/home-graph/quality/reader.js';
+import { HOME_GRAPH_QUALITY_LIMITS } from '../platform/src/platform/knowledge/home-graph/quality/types.js';
 import { projectHomeGraphQualityInput, readHomeGraphDeclaredBoolean } from '../platform/src/platform/knowledge/home-graph/quality/projection.js';
 import { homeGraphQualityBatteries } from '../platform/src/platform/knowledge/home-graph/quality/batteries.js';
 import { registry } from '../platform/src/platform/knowledge/home-graph/quality/judgment-registry.js';
@@ -103,11 +104,12 @@ describe('Home Graph registered applicability and completeness', () => {
     await held(readHomeGraphQuality([{ ...input(), questions: ['batteryApplicable', 'batteryApplicable'] }]), 'malformed');
     expect(fake.requests).toHaveLength(0);
   });
-  test('large fact sets are preserved without an implicit cap', async () => {
+  test('a fact set over the limit sends the first facts and says how many were left out', async () => {
     const fake = good();
     const facts = Array.from({ length: 501 }, (_, index) => ({ reference: `fact-${index + 1}`, title: 'Synthetic fact' }));
-    expect(await readHomeGraphQuality([{ ...input(), facts }])).toHaveLength(1);
-    expect(fake.requests[0]!.state).toMatchObject({ facts });
+    const [reading] = await readHomeGraphQuality([{ ...input(), facts }]);
+    expect(reading!.omitted).toEqual({ entities: 0, facts: 501 - HOME_GRAPH_QUALITY_LIMITS.facts });
+    expect((fake.requests[0]!.state as { facts: unknown[] }).facts).toEqual(facts.slice(0, HOME_GRAPH_QUALITY_LIMITS.facts));
   });
   test('whole-pass deadline/cancellation stop ports that ignore their signal', async () => {
     const fake = good(); installJudgmentPort({ ...fake.port, ask: async () => new Promise(() => {}) });

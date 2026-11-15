@@ -11,6 +11,7 @@ import {
   belongsToSpace,
   buildHomeGraphMetadata,
   nodeKindForHomeGraphObject,
+  objectKindForNodeKind,
   targetToReference,
 } from './helpers.js';
 import type { HomeGraphKnowledgeTarget, HomeGraphLinkInput, HomeGraphLinkResult, HomeGraphUnlinkResult } from './types.js';
@@ -195,7 +196,7 @@ async function ensureHomeGraphLinkTarget(
     confidence: 60,
     metadata: buildHomeGraphMetadata(spaceId, installationId, {
       homeGraphIdentityVersion: 1, homeGraphIdentitySpace: homeGraphIdentitySpace(spaceId),
-      homeAssistant: { installationId, objectKind: kind, objectId: identity.objectId },
+      homeAssistant: { installationId, objectKind: objectKindForNodeKind(kind), objectId: identity.objectId },
       // Marks a node the link itself materialized, so unlink can cleanly remove it
       // (and only it) on reversal.
       linkCreated: true,

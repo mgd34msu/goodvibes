@@ -271,7 +271,7 @@ test('unrelated fact churn cannot turn generic stale into Ask retry permission',
   const context = await fixture();
   const { createAskPageRecovery } = await import('../platform/src/platform/knowledge/home-graph/ask-page-recovery.js');
   const { KnowledgeRepairFactUsefulnessHeldError } = await import('../platform/src/platform/knowledge/semantic/repair-usefulness/types.js');
-  const recovery = createAskPageRecovery(context.store, spaceId, () => {}); let calls = 0;
+  const recovery = createAskPageRecovery(context.store, spaceId, { nodes: [], sources: [] }, () => {}); let calls = 0;
   await expect(recovery.run(async () => {
     calls += 1; await context.store.replaceNodeRecord({ ...context.fact, summary: 'Changed unrelated fact.' });
     throw new KnowledgeRepairFactUsefulnessHeldError('stale');

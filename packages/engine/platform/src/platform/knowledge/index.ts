@@ -17,9 +17,8 @@ export {
   KNOWLEDGE_EXTRACTION_SAMPLE_CHARS,
   KnowledgeExtractionJudgmentHoldError,
   hasUsefulKnowledgeExtractionText,
+  knowledgeExtractionIsReadable,
   knowledgeExtractionNeedsRefresh,
-  looksBinaryLikeText,
-  looksLikeRawPdfPayload,
   readKnowledgeSearchText,
 } from './extraction-policy.js';
 export {

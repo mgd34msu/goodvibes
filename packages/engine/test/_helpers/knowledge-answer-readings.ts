@@ -117,13 +117,16 @@ export function useKnowledgeAnswerReadings(defaults: Pick<AnswerFixtureReadings,
       if (JSON.stringify(question) === JSON.stringify(homeGraphDocumentKind.items.manual.question)
         || JSON.stringify(question) === JSON.stringify(homeGraphDocumentKind.items.integrationDocumentation.question)
         || JSON.stringify(question) === JSON.stringify(homeGraphDocumentKind.items.relation.question)
-        || JSON.stringify(question) === JSON.stringify(homeGraphDocumentSubject.items.selected.question)) {
-        const input = state as { source?: { title?: string }; candidate?: { subject?: { title?: string; kind?: string } } };
+        || Object.values(homeGraphDocumentSubject.items).some((item) => JSON.stringify(question) === JSON.stringify(item.question))) {
+        const input = state as { source?: { title?: string }; candidates?: { subject?: { title?: string; kind?: string } }[] };
         const link = table.autoLinks?.find(([source]) => source === input.source?.title);
-        if (name === 'manual') return noulAnswer(link?.[3] === 'has_manual' ? 0.99 : 0.01);
-        if (name === 'integrationDocumentation') return noulAnswer(0.01);
-        if (name === 'relation') return choiceAnswer(question, link?.[3] ?? 'source_for', 0.99);
-        return noulAnswer(link && input.candidate?.subject?.title === link[1] && input.candidate.subject.kind === link[2] ? 0.99 : 0.01);
+        // One request carries both batteries; their items arrive as `kind__manual`, `subject__s1`.
+        const item = name.slice(name.indexOf('__') + 2);
+        if (item === 'manual') return noulAnswer(link?.[3] === 'has_manual' ? 0.99 : 0.01);
+        if (item === 'integrationDocumentation') return noulAnswer(0.01);
+        if (item === 'relation') return choiceAnswer(question, link?.[3] ?? 'source_for', 0.99);
+        const candidate = input.candidates?.[Number(item.slice(1)) - 1];
+        return noulAnswer(link && candidate?.subject?.title === link[1] && candidate.subject.kind === link[2] ? 0.99 : 0.01);
       }
       if (JSON.stringify(question) === JSON.stringify(repairSourceRelevance.items.relevant.question)) {
         const input = state as { request: string; source: { title: string } };

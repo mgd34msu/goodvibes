@@ -454,10 +454,13 @@ are two durable review lanes:
   memory-promotion/review/source-refresh candidates. Accepted memory-promotion
   candidates are written into reviewed memory with provenance; an optional
   `memoryClass` or `scope` must be a known memory class or scope, or the request
-  is refused before anything is written. A source-refresh or memory-review
-  candidate cannot be accepted, because accepting performs no refresh or review:
-  run the `refresh-stale` job or review the memory, then reject or supersede the
-  candidate. An accepted or
+  is refused before anything is written. Accepting a source-refresh candidate
+  re-fetches that source now (where the host has no source refresh, accepting is
+  refused and the `refresh-stale` job does it); accepting a memory-review
+  candidate marks the memory reviewed. A consolidation run reads each subject
+  once per revision: a subject with an open candidate, or one it declined while
+  the daemon has been running, is not read again until it changes, so later
+  runs reach further down the usage list. An accepted or
   superseded candidate is final: rejecting it afterwards is refused with its
   current state, and a promotion is undone by forgetting the memory through
   memory review. A rejected candidate can still be accepted.

@@ -11,7 +11,7 @@
  * once per process. See ./graphql-schema.js and utils/optional-dependency.ts.
  */
 
-import type { GraphQLSchema } from 'graphql';
+import type { DocumentNode, GraphQLSchema } from 'graphql';
 import type { KnowledgeService } from './service.js';
 import {
   KNOWLEDGE_GRAPHQL_SDL,
@@ -39,15 +39,34 @@ export interface KnowledgeGraphqlAccessProfile {
   readonly adminRequired: boolean;
 }
 
+/**
+ * Parsed documents by source text, so the route's access check and the
+ * executor parse a request once. Small: clients send a handful of distinct
+ * documents.
+ */
+const parsedDocuments = new Map<string, DocumentNode>();
+const PARSED_DOCUMENT_CACHE_SIZE = 64;
+
+function parseDocument(source: string): DocumentNode {
+  const cached = parsedDocuments.get(source);
+  if (cached) { parsedDocuments.delete(source); parsedDocuments.set(source, cached); return cached; }
+  const document = graphqlModule().parse(source);
+  parsedDocuments.set(source, document);
+  if (parsedDocuments.size > PARSED_DOCUMENT_CACHE_SIZE) parsedDocuments.delete(parsedDocuments.keys().next().value!);
+  return document;
+}
+
+function accessFor(operation: 'query' | 'mutation'): KnowledgeGraphqlAccessProfile {
+  return operation === 'mutation'
+    ? { operation, requiredScopes: ['write:knowledge'], adminRequired: true }
+    : { operation, requiredScopes: ['read:knowledge'], adminRequired: false };
+}
+
 export function inspectKnowledgeGraphqlAccess(
   source: string,
   operationName?: string,
 ): KnowledgeGraphqlAccessProfile {
-  const document = graphqlModule().parse(source);
-  const operation = pickOperation(document, operationName);
-  return operation === 'mutation'
-    ? { operation, requiredScopes: ['write:knowledge'], adminRequired: true }
-    : { operation, requiredScopes: ['read:knowledge'], adminRequired: false };
+  return accessFor(pickOperation(parseDocument(source), operationName));
 }
 
 interface KnowledgeGraphqlContext {
@@ -56,14 +75,11 @@ interface KnowledgeGraphqlContext {
   readonly scopes: readonly string[];
 }
 
-function assertWriteAccess(context: KnowledgeGraphqlContext): void {
-  const { GraphQLError } = graphqlModule();
-  if (!context.admin) {
-    throw new GraphQLError('Knowledge GraphQL mutation requires admin access.');
-  }
-  if (!context.scopes.includes('write:knowledge')) {
-    throw new GraphQLError('Knowledge GraphQL mutation requires write:knowledge.');
-  }
+/** The one write-access decision for a request, made before any resolver runs. */
+function writeAccessRefusal(context: KnowledgeGraphqlContext): string | undefined {
+  if (!context.admin) return 'Knowledge GraphQL mutation requires admin access.';
+  if (!context.scopes.includes('write:knowledge')) return 'Knowledge GraphQL mutation requires write:knowledge.';
+  return undefined;
 }
 
 export interface KnowledgeGraphqlExecuteInput {
@@ -135,11 +151,24 @@ export class KnowledgeGraphqlService {
     const primed = await primeGraphqlModule();
     assertCurrent();
     if (!primed.available) throw new Error(primed.reason);
-    const { graphql } = graphqlModule();
+    const { execute, validate, GraphQLError } = graphqlModule();
+    let document: DocumentNode;
+    try { document = parseDocument(input.query); }
+    catch (error) { return { errors: [error instanceof GraphQLError ? error : new GraphQLError(String(error))] }; }
+    const schema = KnowledgeGraphqlService.schema;
+    const invalid = validate(schema, document);
+    if (invalid.length > 0) return { errors: invalid };
+    let operation: 'query' | 'mutation';
+    try { operation = pickOperation(document, input.operationName); }
+    catch (error) { return { errors: [error instanceof GraphQLError ? error : new GraphQLError(String(error))] }; }
+    if (operation === 'mutation') {
+      const refusal = writeAccessRefusal(context);
+      if (refusal) return { errors: [new GraphQLError(refusal)] };
+    }
     const rootValue = this.createRootValue({ signal, shouldStop, assertCurrent });
-    const result = await graphql({
-      schema: KnowledgeGraphqlService.schema,
-      source: input.query,
+    const result = await execute({
+      schema,
+      document,
       rootValue,
       contextValue: context,
       variableValues: input.variables,
@@ -268,9 +297,7 @@ export class KnowledgeGraphqlService {
           allowPrivateHosts?: boolean | undefined;
           metadata?: Record<string, unknown> | undefined;
         },
-        context: KnowledgeGraphqlContext,
       ) => {
-        assertWriteAccess(context);
         const result = await this.service.ingestUrl({
           url: args.url,
           title: args.title,
@@ -298,9 +325,7 @@ export class KnowledgeGraphqlService {
           allowPrivateHosts?: boolean | undefined;
           metadata?: Record<string, unknown> | undefined;
         },
-        context: KnowledgeGraphqlContext,
       ) => {
-        assertWriteAccess(context);
         const result = await this.service.ingestArtifact({
           artifactId: args.artifactId,
           path: args.path,
@@ -316,16 +341,13 @@ export class KnowledgeGraphqlService {
         });
         return result.source;
       },
-      importBookmarksFromFile: async (args: { path: string; sessionId?: string; allowPrivateHosts?: boolean }, context: KnowledgeGraphqlContext) => {
-        assertWriteAccess(context);
+      importBookmarksFromFile: async (args: { path: string; sessionId?: string; allowPrivateHosts?: boolean }) => {
         return this.service.importBookmarksFromFile(args);
       },
-      importUrlsFromFile: async (args: { path: string; sessionId?: string; allowPrivateHosts?: boolean }, context: KnowledgeGraphqlContext) => {
-        assertWriteAccess(context);
+      importUrlsFromFile: async (args: { path: string; sessionId?: string; allowPrivateHosts?: boolean }) => {
         return this.service.importUrlsFromFile(args);
       },
-      ingestBookmarkSeeds: async (args: { seeds: string[]; connectorId?: string; sessionId?: string }, context: KnowledgeGraphqlContext) => {
-        assertWriteAccess(context);
+      ingestBookmarkSeeds: async (args: { seeds: string[]; connectorId?: string; sessionId?: string }) => {
         return this.service.ingestBookmarkSeeds(
           args.seeds.map((url) => ({ url })),
           args.sessionId,
@@ -333,38 +355,30 @@ export class KnowledgeGraphqlService {
           args.connectorId ?? 'bookmark',
         );
       },
-      ingestWithConnector: async (args: { connectorId: string; input: string; sessionId?: string; allowPrivateHosts?: boolean }, context: KnowledgeGraphqlContext) => {
-        assertWriteAccess(context);
-        return this.service.ingestWithConnector(args.connectorId, args.input, args.sessionId, args.allowPrivateHosts);
+      ingestWithConnector: async (args: { connectorId: string; input: string; sessionId?: string; allowPrivateHosts?: boolean; metadata?: Record<string, unknown> }) => {
+        return this.service.ingestWithConnector(args.connectorId, args.input, args.sessionId, args.allowPrivateHosts, args.metadata);
       },
-      ingestConnectorInput: async (args: { input: string; connectorId?: string; sessionId?: string; allowPrivateHosts?: boolean }, context: KnowledgeGraphqlContext) => {
-        assertWriteAccess(context);
-        if (!args.connectorId) throw new (graphqlModule().GraphQLError)('ingestConnectorInput needs a connectorId; list the available ones with the connectors query.');
+      ingestConnectorInput: async (args: { connectorId: string; input?: string; content?: string; path?: string; sessionId?: string; allowPrivateHosts?: boolean; metadata?: Record<string, unknown> }) => {
         return this.service.ingestConnectorInput({
           connectorId: args.connectorId,
-          content: args.input,
+          ...(args.input !== undefined ? { input: args.input } : {}),
+          ...(args.content !== undefined ? { content: args.content } : {}),
+          ...(args.path !== undefined ? { path: args.path } : {}),
           ...(args.sessionId !== undefined ? { sessionId: args.sessionId } : {}),
           ...(args.allowPrivateHosts !== undefined ? { allowPrivateHosts: args.allowPrivateHosts } : {}),
+          ...(args.metadata !== undefined ? { metadata: args.metadata } : {}),
         });
       },
-      lint: async (_args: Record<string, never>, context: KnowledgeGraphqlContext) => {
-        assertWriteAccess(context);
-        return this.service.lint();
-      },
-      reindex: async (_args: Record<string, never>, context: KnowledgeGraphqlContext) => {
-        assertWriteAccess(context);
-        return this.service.reindex();
-      },
-      runJob: async (args: { id: string; mode?: string; sourceIds?: string[]; limit?: number }, context: KnowledgeGraphqlContext) => {
-        assertWriteAccess(context);
+      lint: async () => this.service.lint(),
+      reindex: async () => this.service.reindex(),
+      runJob: async (args: { id: string; mode?: string; sourceIds?: string[]; limit?: number }) => {
         return mapJobRun(await this.service.runJob(args.id, {
           ...(args.mode ? { mode: toJobMode(args.mode) } : {}),
           ...(args.sourceIds ? { sourceIds: args.sourceIds } : {}),
-          ...(typeof args.limit === 'number' ? { limit: args.limit } : {}),
+          ...(typeof args.limit === 'number' ? { limit: clampInt(args.limit, args.limit) } : {}),
         }));
       },
-      decideConsolidationCandidate: async (args: { id: string; status: string; decidedBy?: string; memoryClass?: string; scope?: string; detail?: string }, context: KnowledgeGraphqlContext) => {
-        assertWriteAccess(context);
+      decideConsolidationCandidate: async (args: { id: string; status: string; decidedBy?: string; memoryClass?: string; scope?: string; detail?: string }) => {
         const decision = CANDIDATE_DECISIONS[args.status];
         if (!decision) {
           throw new (graphqlModule().GraphQLError)(`Unsupported candidate status "${args.status}". Use accepted, rejected or superseded.`);
@@ -376,29 +390,25 @@ export class KnowledgeGraphqlService {
           detail: args.detail,
         });
       },
-      saveSchedule: async (args: { id?: string; jobId: string; label?: string; enabled?: boolean; schedule: Record<string, unknown> }, context: KnowledgeGraphqlContext) => {
-        assertWriteAccess(context);
+      saveSchedule: async (args: { id?: string; jobId: string; label?: string; enabled?: boolean; schedule: Record<string, unknown>; metadata?: Record<string, unknown> }) => {
         return this.service.saveSchedule({
           id: args.id,
           jobId: args.jobId,
           label: args.label,
           enabled: args.enabled,
           schedule: args.schedule as unknown as Parameters<KnowledgeService['saveSchedule']>[0]['schedule'],
+          ...(args.metadata ? { metadata: args.metadata } : {}),
         });
       },
-      deleteSchedule: async (args: { id: string }, context: KnowledgeGraphqlContext) => {
-        assertWriteAccess(context);
+      deleteSchedule: async (args: { id: string }) => {
         return this.service.deleteSchedule(args.id);
       },
-      setScheduleEnabled: async (args: { id: string; enabled: boolean }, context: KnowledgeGraphqlContext) => {
-        assertWriteAccess(context);
+      setScheduleEnabled: async (args: { id: string; enabled: boolean }) => {
         return this.service.setScheduleEnabled(args.id, args.enabled);
       },
       renderProjection: async (
         args: { kind: string; id?: string; limit?: number; knowledgeSpaceId?: string; includeAllSpaces?: boolean },
-        context: KnowledgeGraphqlContext,
       ) => {
-        assertWriteAccess(context);
         return mapProjectionBundle(await this.service.renderProjection({
           kind: toProjectionKind(args.kind),
           id: args.id,
@@ -408,9 +418,7 @@ export class KnowledgeGraphqlService {
       },
       materializeProjection: async (
         args: { kind: string; id?: string; limit?: number; filename?: string; knowledgeSpaceId?: string; includeAllSpaces?: boolean },
-        context: KnowledgeGraphqlContext,
       ) => {
-        assertWriteAccess(context);
         const materialized = await this.service.materializeProjection({
           kind: toProjectionKind(args.kind),
           id: args.id,

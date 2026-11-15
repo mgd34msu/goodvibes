@@ -11,9 +11,7 @@ import { KnowledgeConnectorRegistry } from '../platform/src/platform/knowledge/c
 import { ingestKnowledgeArtifact, ingestKnowledgeUrl } from '../platform/src/platform/knowledge/ingest-inputs.js';
 import { KnowledgeEntityAliasHoldError } from '../platform/src/platform/knowledge/entity-aliases.js';
 import { KnowledgeNodeActivationHeldError } from '../platform/src/platform/knowledge/activation/types.js';
-import { createKnowledgeNodeOperatorMutation, KnowledgeNodeMutationHeldError } from '../platform/src/platform/knowledge/store-node-authority.js';
 import { getKnowledgeNodeObservation, prepareStagedObservedKnowledgeNodeInput } from '../platform/src/platform/knowledge/store-node-observation.js';
-import { KnowledgeExtractionJudgmentHoldError } from '../platform/src/platform/knowledge/extraction-policy.js';
 import { createCompressedPdfBuffer } from './_helpers/homegraph-service-fixtures.js';
 import { settleEvents } from './_helpers/test-timeout.js';
 import { knowledgeIngestErrorReadings } from './_helpers/knowledge-ingest-error-readings.js';
@@ -53,34 +51,19 @@ async function fixture(route: typeof routes[number]) {
 function settled() { const fake = fakePort(() => noulAnswer(0.99)); installJudgmentPort(fake.port); return fake; }
 
 for (const route of routes) describe(`${route} aliases before source publication`, () => {
-  for (const mode of ['missing', 'failed', 'uncertain', 'late-hold'] as const) {
-    test(`${mode} aliases preserve first-ingest and reingest state in memory and SQLite`, async () => {
-      const { ctx, ingest, reopen, first, replacement, fetch } = await fixture(route);
+  for (const mode of ['missing', 'failed', 'uncertain'] as const) {
+    test(`${mode} alias readings keep no inferred alias and the ingest still publishes`, async () => {
+      const { ctx, ingest, reopen, fetch } = await fixture(route);
       try {
-        const hold = () => {
-          let aliases = 0;
-          installJudgmentPort(mode === 'missing' ? undefined : fakePort((name) => {
-            expect(name).toBe('alias');
-            if (mode === 'failed') throw new Error('Synthetic port outage');
-            return noulAnswer(mode === 'late-hold' && ++aliases === 1 ? 0.99 : 0.5);
-          }).port);
-        };
-        const empty = snapshot(ctx.store);
-        hold();
-        await expect(ingest()).rejects.toBeInstanceOf(KnowledgeEntityAliasHoldError);
-        expect(snapshot(ctx.store)).toEqual(empty);
-        expect(await reopen()).toEqual(empty);
-        settled();
+        installJudgmentPort(mode === 'missing' ? undefined : fakePort((name) => {
+          if (/^c\d$/.test(name)) { if (mode === 'failed') throw new Error('Synthetic port outage'); return noulAnswer(0.5); }
+          return noulAnswer(0.99);
+        }).port);
         const indexed = await ingest();
         expect(indexed.source.status).toBe('indexed');
-        expect(indexed.extraction?.metadata.knowledgeSpaceId).toBe('alias-lab');
-        const before = snapshot(ctx.store);
-        hold();
-        await expect(ingest(true)).rejects.toBeInstanceOf(KnowledgeEntityAliasHoldError);
-        expect(snapshot(ctx.store)).toEqual(before);
-        expect(await reopen()).toEqual(before);
-        expect((await ctx.artifactStore.readContent(first.id)).buffer.toString()).toContain('original usable knowledge');
-        expect((await ctx.artifactStore.readContent(replacement.id)).buffer.toString()).toContain('replacement information');
+        const project = ctx.store.listNodes().find((node) => node.kind === 'project')!;
+        expect(project.aliases).not.toContain('AR');
+        expect(await reopen()).toEqual(snapshot(ctx.store));
       } finally { fetch.mockRestore(); }
     });
   }
@@ -133,7 +116,7 @@ for (const route of routes) describe(`${route} aliases before source publication
       const before = snapshot(ctx.store);
       const aliasEvidence: string[] = [];
       installJudgmentPort(fakePort((name, _question, state) => {
-        if (name === 'alias') {
+        if (/^c\d$/.test(name)) {
           expect(snapshot(ctx.store)).toEqual(before);
           aliasEvidence.push((state as { evidence: string }).evidence);
         }
@@ -144,21 +127,17 @@ for (const route of routes) describe(`${route} aliases before source publication
       expect(result.source.title).toBe('Replacement title');
       expect(result.source.artifactId).toBe(replacement.id);
       expect(result.extraction?.summary).toContain('replacement information');
-      expect(aliasEvidence.length).toBeGreaterThan(1);
-      expect(aliasEvidence.every((evidence) => evidence.includes('Replacement title') && evidence.includes('replacement information'))).toBe(true);
+      expect(aliasEvidence.length).toBeGreaterThan(0);
+      expect(aliasEvidence.every((evidence) => evidence.includes('replacement information'))).toBe(true);
       expect(await reopen()).toEqual(snapshot(ctx.store));
     } finally { fetch.mockRestore(); }
   });
 
-  for (const mode of ['uncertain', 'failed', 'reviewed-node', 'cancelled'] as const) {
+  for (const mode of ['uncertain', 'failed', 'cancelled'] as const) {
     test(`a ${mode} structured-node dependency holds the whole replacement before publication`, async () => {
       const { ctx, ingest, reopen, fetch } = await fixture(route);
       try {
         settled(); await ingest();
-        if (mode === 'reviewed-node') {
-          const project = ctx.store.listNodes().find((node) => node.kind === 'project')!;
-          await ctx.store.upsertNode(project, createKnowledgeNodeOperatorMutation(project, { action: 'accept', reviewer: 'synthetic-reviewer' }));
-        }
         const before = snapshot(ctx.store);
         const controller = new AbortController();
         let serving = 0;
@@ -172,8 +151,8 @@ for (const route of routes) describe(`${route} aliases before source publication
           }
           return noulAnswer(0.99);
         }).port);
-        await expect(ingest(true, controller.signal)).rejects.toBeInstanceOf(mode === 'reviewed-node' ? KnowledgeNodeMutationHeldError : KnowledgeNodeActivationHeldError);
-        if (mode !== 'reviewed-node') expect(serving).toBeGreaterThan(0);
+        await expect(ingest(true, controller.signal)).rejects.toBeInstanceOf(KnowledgeNodeActivationHeldError);
+        expect(serving).toBeGreaterThan(0);
         expect(snapshot(ctx.store)).toEqual(before);
         expect(await reopen()).toEqual(before);
       } finally { fetch.mockRestore(); }
@@ -219,7 +198,7 @@ for (const route of routes) describe(`${route} aliases before source publication
     } finally { fetch.mockRestore(); }
   });
 
-  for (const change of ['source', 'extraction', 'artifact', 'port', 'cancellation'] as const) {
+  for (const change of ['source', 'extraction', 'artifact', 'cancellation'] as const) {
     test(`a ${change} change during alias preparation never publishes the proposed replacement`, async () => {
       const { ctx, ingest, reopen, replacement, fetch } = await fixture(route);
       let restoreRecord = () => {};
@@ -240,7 +219,6 @@ for (const route of routes) describe(`${route} aliases before source publication
               // The fixture uses only this artifact after the pending read began.
               restoreRecord = () => changedRecord.mockRestore();
             }
-            if (change === 'port') installJudgmentPort(answer);
             if (change === 'cancellation') controller.abort();
             expected = snapshot(ctx.store);
           }

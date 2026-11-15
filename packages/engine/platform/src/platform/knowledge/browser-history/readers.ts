@@ -38,6 +38,19 @@ function bunSqliteDatabase(): typeof import('bun:sqlite').Database {
   return (bunDatabaseCtor ??= createRequire(import.meta.url)('bun:sqlite').Database);
 }
 
+type BrowserDb = InstanceType<typeof import('bun:sqlite').Database>;
+
+/** Copy a browser database once (it is locked while the browser runs), open it read-only, and clean up after `read`. */
+async function withBrowserDb<T>(path: string, read: (db: BrowserDb) => T): Promise<T> {
+  const copy = await copyLockedBrowserSqlite(path);
+  try {
+    const db = new (bunSqliteDatabase())(copy.copiedDbPath, { readonly: true });
+    try { return read(db); } finally { db.close(); }
+  } finally {
+    await copy.cleanup();
+  }
+}
+
 export interface BrowserKnowledgeReadOptions {
   readonly limit?: number | undefined;
   readonly sinceMs?: number | undefined;
@@ -108,49 +121,36 @@ function normalizeLimit(limit: number | undefined, fallback = 1000): number {
   return Math.max(1, Math.min(50_000, Math.floor(candidate)));
 }
 
-type ChromiumUrlRow = { id: number; url: string; title: string | null; visit_count: number };
-type ChromiumVisitRow = { url: number; visit_time: number; transition: number };
+type ChromiumVisitRow = { id: number; url: string | null; title: string | null; visit_count: number; visit_time: number; transition: number };
 
+/** Only the newest `limit` visits, joined to their URL rows; the rest of the tables stay on disk. */
 async function readChromiumHistory(profile: BrowserKnowledgeProfile, options: BrowserKnowledgeReadOptions): Promise<BrowserHistoryEntry[]> {
   if (!profile.historyPath) return [];
   const limit = normalizeLimit(options.limit);
   const since = typeof options.sinceMs === 'number' ? msToChromiumMicros(options.sinceMs) : 0;
-  const copy = await copyLockedBrowserSqlite(profile.historyPath);
-  try {
-    const db = new (bunSqliteDatabase())(copy.copiedDbPath, { readonly: true });
-    try {
-      const urlRows = db.query<ChromiumUrlRow, []>('SELECT id, url, title, visit_count FROM urls').all();
-      const urlMap = new Map(urlRows.map((row) => [row.id, row]));
-      const visitRows = db.query<ChromiumVisitRow, [number, number]>(
-        `SELECT url, visit_time, transition
-         FROM visits
-         WHERE visit_time >= ?
-         ORDER BY visit_time DESC
-         LIMIT ?`,
-      ).all(since, limit);
-      return visitRows.flatMap((visit) => {
-        const url = urlMap.get(visit.url);
-        if (!url?.url) return [];
-        return [{
-          sourceKind: 'history' as const,
-          url: url.url,
-          ...(cleanOptionalText(url.title) ? { title: cleanOptionalText(url.title) } : {}),
-          browser: profile.browser,
-          family: profile.family,
-          profileName: profile.profileName,
-          profilePath: profile.profilePath,
-          visitedAtMs: chromiumMicrosToMs(visit.visit_time),
-          visitCount: url.visit_count,
-          transition: decodeChromiumTransition(visit.transition),
-          rawId: url.id,
-        }];
-      });
-    } finally {
-      db.close();
-    }
-  } finally {
-    await copy.cleanup();
-  }
+  return withBrowserDb(profile.historyPath, (db) => db.query<ChromiumVisitRow, [number, number]>(
+    `SELECT u.id, u.url, u.title, u.visit_count, v.visit_time, v.transition
+     FROM visits v
+     JOIN urls u ON u.id = v.url
+     WHERE v.visit_time >= ?
+     ORDER BY v.visit_time DESC
+     LIMIT ?`,
+  ).all(since, limit).flatMap((visit) => {
+    if (!visit.url) return [];
+    return [{
+      sourceKind: 'history' as const,
+      url: visit.url,
+      ...(cleanOptionalText(visit.title) ? { title: cleanOptionalText(visit.title) } : {}),
+      browser: profile.browser,
+      family: profile.family,
+      profileName: profile.profileName,
+      profilePath: profile.profilePath,
+      visitedAtMs: chromiumMicrosToMs(visit.visit_time),
+      visitCount: visit.visit_count,
+      transition: decodeChromiumTransition(visit.transition),
+      rawId: visit.id,
+    }];
+  }));
 }
 
 interface ChromiumBookmarkNode {
@@ -222,44 +222,33 @@ type GeckoVisitRow = {
   visit_type: number;
 };
 
-async function readGeckoHistory(profile: BrowserKnowledgeProfile, options: BrowserKnowledgeReadOptions): Promise<BrowserHistoryEntry[]> {
-  if (!profile.historyPath) return [];
-  const copy = await copyLockedBrowserSqlite(profile.historyPath);
-  try {
-    const db = new (bunSqliteDatabase())(copy.copiedDbPath, { readonly: true });
-    try {
-      const since = typeof options.sinceMs === 'number' ? Math.floor(options.sinceMs * 1000) : 0;
-      const rows = db.query<GeckoVisitRow, [number, number]>(
-        `SELECT p.id AS place_id, p.url, p.title, p.visit_count, h.visit_date, h.visit_type
-         FROM moz_historyvisits h
-         JOIN moz_places p ON p.id = h.place_id
-         WHERE p.hidden = 0 AND h.visit_date >= ?
-         ORDER BY h.visit_date DESC
-         LIMIT ?`,
-      ).all(since, normalizeLimit(options.limit));
-      return rows.map((row) => ({
-        sourceKind: 'history',
-        url: row.url,
-        ...(cleanOptionalText(row.title) ? { title: cleanOptionalText(row.title) } : {}),
-        browser: profile.browser,
-        family: profile.family,
-        profileName: profile.profileName,
-        profilePath: profile.profilePath,
-        visitedAtMs: geckoMicrosToMs(row.visit_date),
-        visitCount: row.visit_count,
-        transition: decodeGeckoVisitType(row.visit_type),
-        rawId: row.place_id,
-      }));
-    } finally {
-      db.close();
-    }
-  } finally {
-    await copy.cleanup();
-  }
+function readGeckoHistory(profile: BrowserKnowledgeProfile, options: BrowserKnowledgeReadOptions, db: BrowserDb): BrowserHistoryEntry[] {
+  const since = typeof options.sinceMs === 'number' ? Math.floor(options.sinceMs * 1000) : 0;
+  const rows = db.query<GeckoVisitRow, [number, number]>(
+    `SELECT p.id AS place_id, p.url, p.title, p.visit_count, h.visit_date, h.visit_type
+     FROM moz_historyvisits h
+     JOIN moz_places p ON p.id = h.place_id
+     WHERE p.hidden = 0 AND h.visit_date >= ?
+     ORDER BY h.visit_date DESC
+     LIMIT ?`,
+  ).all(since, normalizeLimit(options.limit));
+  return rows.map((row) => ({
+    sourceKind: 'history',
+    url: row.url,
+    ...(cleanOptionalText(row.title) ? { title: cleanOptionalText(row.title) } : {}),
+    browser: profile.browser,
+    family: profile.family,
+    profileName: profile.profileName,
+    profilePath: profile.profilePath,
+    visitedAtMs: geckoMicrosToMs(row.visit_date),
+    visitCount: row.visit_count,
+    transition: decodeGeckoVisitType(row.visit_type),
+    rawId: row.place_id,
+  }));
 }
 
 type GeckoBookmarkRow = { id: number; type: number; parent: number; title: string | null; fk: number | null; dateAdded: number };
-type GeckoPlaceRow = { id: number; url: string; title: string | null };
+type GeckoBookmarkPlaceRow = GeckoBookmarkRow & { url: string | null; place_title: string | null };
 
 const GECKO_ROOT_LABELS: Record<number, string> = {
   1: 'root',
@@ -289,48 +278,39 @@ function geckoFolderPath(parent: number, rows: Map<number, GeckoBookmarkRow>): s
   return segments.length ? `/${segments.join('/')}` : undefined;
 }
 
-async function readGeckoBookmarks(profile: BrowserKnowledgeProfile, options: BrowserKnowledgeReadOptions): Promise<BrowserBookmarkEntry[]> {
-  const path = profile.bookmarksPath ?? profile.historyPath;
-  if (!path) return [];
-  const copy = await copyLockedBrowserSqlite(path);
-  try {
-    const db = new (bunSqliteDatabase())(copy.copiedDbPath, { readonly: true });
-    try {
-      const rows = db.query<GeckoBookmarkRow, []>('SELECT id, type, parent, title, fk, dateAdded FROM moz_bookmarks ORDER BY id').all();
-      const places = db.query<GeckoPlaceRow, []>('SELECT id, url, title FROM moz_places').all();
-      const rowById = new Map(rows.map((row) => [row.id, row]));
-      const placeById = new Map(places.map((place) => [place.id, place]));
-      const out: BrowserBookmarkEntry[] = [];
-      for (const row of rows) {
-        if (out.length >= normalizeLimit(options.limit)) break;
-        if (row.type !== 1 || row.fk === null) continue;
-        const place = placeById.get(row.fk);
-        if (!place?.url) continue;
-        const addedAtMs = Math.max(0, Math.floor(row.dateAdded / 1000));
-        out.push({
-          sourceKind: 'bookmark',
-          url: place.url,
-          ...(cleanOptionalText(row.title ?? place.title) ? { title: cleanOptionalText(row.title ?? place.title) } : {}),
-          browser: profile.browser,
-          family: profile.family,
-          profileName: profile.profileName,
-          profilePath: profile.profilePath,
-          ...(geckoFolderPath(row.parent, rowById) ? { folderPath: geckoFolderPath(row.parent, rowById) } : {}),
-          ...(addedAtMs > 0 ? { addedAtMs } : {}),
-          rawId: row.id,
-        });
-      }
-      return out;
-    } finally {
-      db.close();
-    }
-  } finally {
-    await copy.cleanup();
+/** The first `limit` bookmarks joined to their places; folders (a small table slice) give each its path. */
+function readGeckoBookmarks(profile: BrowserKnowledgeProfile, options: BrowserKnowledgeReadOptions, db: BrowserDb): BrowserBookmarkEntry[] {
+  const folders = db.query<GeckoBookmarkRow, []>('SELECT id, type, parent, title, fk, dateAdded FROM moz_bookmarks WHERE type = 2').all();
+  const rows = db.query<GeckoBookmarkPlaceRow, [number]>(
+    `SELECT b.id, b.type, b.parent, b.title, b.fk, b.dateAdded, p.url, p.title AS place_title
+     FROM moz_bookmarks b
+     JOIN moz_places p ON p.id = b.fk
+     WHERE b.type = 1 AND p.url IS NOT NULL
+     ORDER BY b.id
+     LIMIT ?`,
+  ).all(normalizeLimit(options.limit));
+  const rowById = new Map(folders.map((row) => [row.id, row]));
+  const out: BrowserBookmarkEntry[] = [];
+  for (const row of rows) {
+    if (!row.url) continue;
+    const addedAtMs = Math.max(0, Math.floor(row.dateAdded / 1000));
+    out.push({
+      sourceKind: 'bookmark',
+      url: row.url,
+      ...(cleanOptionalText(row.title ?? row.place_title) ? { title: cleanOptionalText(row.title ?? row.place_title) } : {}),
+      browser: profile.browser,
+      family: profile.family,
+      profileName: profile.profileName,
+      profilePath: profile.profilePath,
+      ...(geckoFolderPath(row.parent, rowById) ? { folderPath: geckoFolderPath(row.parent, rowById) } : {}),
+      ...(addedAtMs > 0 ? { addedAtMs } : {}),
+      rawId: row.id,
+    });
   }
+  return out;
 }
 
-type SafariHistoryItem = { id: number; url: string; visit_count: number; title: string | null };
-type SafariHistoryVisit = { history_item: number; visit_time: number; title: string | null };
+type SafariHistoryVisit = { id: number; url: string | null; visit_count: number; item_title: string | null; visit_time: number; title: string | null };
 type EphyUrlRow = { id: number; url: string; title: string | null; visit_count: number; last_visit_time: number };
 
 async function readWebKitHistory(profile: BrowserKnowledgeProfile, options: BrowserKnowledgeReadOptions): Promise<BrowserHistoryEntry[]> {
@@ -357,26 +337,28 @@ async function readWebKitHistory(profile: BrowserKnowledgeProfile, options: Brow
           rawId: row.id,
         }));
       }
-      const items = db.query<SafariHistoryItem, []>('SELECT id, url, visit_count, title FROM history_items').all();
-      const itemById = new Map(items.map((item) => [item.id, item]));
       const since = typeof options.sinceMs === 'number' ? msToMacAbsoluteSeconds(options.sinceMs) : 0;
       const rows = db.query<SafariHistoryVisit, [number, number]>(
-        'SELECT history_item, visit_time, title FROM history_visits WHERE visit_time >= ? ORDER BY visit_time DESC LIMIT ?',
+        `SELECT i.id, i.url, i.visit_count, i.title AS item_title, v.visit_time, v.title
+         FROM history_visits v
+         JOIN history_items i ON i.id = v.history_item
+         WHERE v.visit_time >= ?
+         ORDER BY v.visit_time DESC
+         LIMIT ?`,
       ).all(since, normalizeLimit(options.limit));
       return rows.flatMap((visit) => {
-        const item = itemById.get(visit.history_item);
-        if (!item?.url) return [];
+        if (!visit.url) return [];
         return [{
           sourceKind: 'history' as const,
-          url: item.url,
-          ...(cleanOptionalText(visit.title ?? item.title) ? { title: cleanOptionalText(visit.title ?? item.title) } : {}),
+          url: visit.url,
+          ...(cleanOptionalText(visit.title ?? visit.item_title) ? { title: cleanOptionalText(visit.title ?? visit.item_title) } : {}),
           browser: profile.browser,
           family: profile.family,
           profileName: profile.profileName,
           profilePath: profile.profilePath,
           visitedAtMs: macAbsoluteTimeToMs(visit.visit_time),
-          visitCount: item.visit_count,
-          rawId: item.id,
+          visitCount: visit.visit_count,
+          rawId: visit.id,
         }];
       });
     } finally {
@@ -449,14 +431,27 @@ export async function readBrowserKnowledgeProfile(
   const limit = normalizeLimit(options.limit, 2000);
   const history: BrowserKnowledgeEntry[] = [];
   const bookmarks: BrowserKnowledgeEntry[] = [];
+  let geckoBookmarksRead = false;
   if (kinds.has('history')) {
     if (profile.family === 'chromium') history.push(...await readChromiumHistory(profile, options));
-    if (profile.family === 'gecko') history.push(...await readGeckoHistory(profile, options));
+    if (profile.family === 'gecko' && profile.historyPath) {
+      // Firefox keeps history and bookmarks in the same places.sqlite: copy it once for both.
+      const bookmarksPath = profile.bookmarksPath ?? profile.historyPath;
+      const both = kinds.has('bookmark') && bookmarksPath === profile.historyPath;
+      await withBrowserDb(profile.historyPath, (db) => {
+        history.push(...readGeckoHistory(profile, options, db));
+        if (both) bookmarks.push(...readGeckoBookmarks(profile, options, db));
+      });
+      if (both) geckoBookmarksRead = true;
+    }
     if (profile.family === 'webkit') history.push(...await readWebKitHistory(profile, options));
   }
   if (kinds.has('bookmark')) {
     if (profile.family === 'chromium') bookmarks.push(...await readChromiumBookmarks(profile, options));
-    if (profile.family === 'gecko') bookmarks.push(...await readGeckoBookmarks(profile, options));
+    const geckoBookmarksPath = profile.bookmarksPath ?? profile.historyPath;
+    if (profile.family === 'gecko' && !geckoBookmarksRead && geckoBookmarksPath) {
+      bookmarks.push(...await withBrowserDb(geckoBookmarksPath, (db) => readGeckoBookmarks(profile, options, db)));
+    }
     if (profile.family === 'webkit') bookmarks.push(...await readWebKitBookmarks(profile, options));
   }
   // The limit applies to each kind. A shared cut would let a long visit

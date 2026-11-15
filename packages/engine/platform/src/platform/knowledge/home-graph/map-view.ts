@@ -1,6 +1,6 @@
 import { snapshotNodeInput } from '../activation/projection.js';
 import { prepareKnowledgeScopeSelection, KnowledgeScopeSelectionHeldError } from '../scope-selection.js';
-import { sameKnowledgeRecord } from '../store-record-representation.js';
+import { captureHomeGraphRows } from './rows-current.js';
 import type { KnowledgeStore } from '../store.js';
 import { renderHomeGraphMap } from './rendering.js';
 import { resolveReadableHomeGraphSpace } from './space-selection.js';
@@ -16,8 +16,6 @@ export async function mapHomeGraph(input: HomeGraphMapInput & {
   const options = snapshotNodeInput(request);
   const requestCurrent = () => {
     if (signal?.aborted) throw new KnowledgeScopeSelectionHeldError('aborted');
-    const { store: currentStore, assertCurrent: currentOwner, signal: currentSignal, ...current } = input;
-    if (currentStore !== store || currentOwner !== callerCurrent || currentSignal !== signal || !sameKnowledgeRecord(snapshotNodeInput(current), options)) throw new KnowledgeScopeSelectionHeldError('stale');
     callerCurrent?.();
   };
   requestCurrent();
@@ -25,36 +23,12 @@ export async function mapHomeGraph(input: HomeGraphMapInput & {
   requestCurrent();
   const { spaceId } = resolveReadableHomeGraphSpace(store, options);
   const state = renderHomeGraphState(store, spaceId, 'Home Graph Map');
-  const edgeGenerations = new Map<string, string | null>();
-  const edgeWindowKeys = [...state.sources.map(source => `source:${source.id}`), ...state.nodes.map(node => `node:${node.id}`)];
-  let edgeWindowGeneration: string | undefined;
-  store.assertRecordSnapshotFrame(() => {
-    edgeWindowGeneration = store.getEdgeWindowGeneration(edgeWindowKeys);
-    const physical = new Map(store.getEdgeSnapshots().flatMap(snapshot => snapshot.record ? [[snapshot.record.id, snapshot] as const] : []));
-    for (const edge of state.edges) {
-      const snapshot = physical.get(edge.id);
-      if (!snapshot || !sameKnowledgeRecord(snapshot.record, edge)) throw new KnowledgeScopeSelectionHeldError('stale');
-      edgeGenerations.set(edge.id, snapshot.generation);
-    }
-  });
-  if (edgeWindowGeneration === undefined) throw new KnowledgeScopeSelectionHeldError('stale');
-  const originalEdgeWindowGeneration = edgeWindowGeneration;
-  const assertCurrent = () => {
-    requestCurrent();
-    for (const source of state.sources) if (!sameKnowledgeRecord(store.getSource(source.id), source)) throw new KnowledgeScopeSelectionHeldError('stale');
-    for (const node of state.nodes) if (!sameKnowledgeRecord(store.getNode(node.id), node)) throw new KnowledgeScopeSelectionHeldError('stale');
-    for (const issue of state.issues) if (!sameKnowledgeRecord(store.getIssue(issue.id), issue)) throw new KnowledgeScopeSelectionHeldError('stale');
-    const edges = new Map(store.listEdges().map(edge => [edge.id, edge]));
-    for (const edge of state.edges) if (!sameKnowledgeRecord(edges.get(edge.id), edge)) throw new KnowledgeScopeSelectionHeldError('stale');
-    store.assertRecordSnapshotFrame(() => {
-      if (store.getEdgeWindowGeneration(edgeWindowKeys) !== originalEdgeWindowGeneration) throw new KnowledgeScopeSelectionHeldError('stale');
-      const physical = new Map(store.getEdgeSnapshots().flatMap(snapshot => snapshot.record ? [[snapshot.record.id, snapshot] as const] : []));
-      for (const edge of state.edges) {
-        const snapshot = physical.get(edge.id);
-        if (!snapshot || snapshot.generation !== edgeGenerations.get(edge.id) || !sameKnowledgeRecord(snapshot.record, edge)) throw new KnowledgeScopeSelectionHeldError('stale');
-      }
-    });
-  };
+  // The map is a read: one generation compare of the rows it shows (and the
+  // links at them) tells whether what it renders is still what is stored.
+  const rowsCurrent = captureHomeGraphRows(store, { sources: state.sources.map(source => source.id), nodes: state.nodes.map(node => node.id),
+    edgeEndpoints: [...state.sources.map(source => `source:${source.id}`), ...state.nodes.map(node => `node:${node.id}`)] },
+  () => new KnowledgeScopeSelectionHeldError('stale'));
+  const assertCurrent = () => { requestCurrent(); rowsCurrent(); };
   const selection = await prepareKnowledgeScopeSelection(store, { knowledgeSpaceId: spaceId }, {
     sourceIds: state.sources.map(source => source.id), nodeIds: state.nodes.map(node => node.id), issueIds: state.issues.map(issue => issue.id), assertCurrent, signal,
   });
@@ -62,7 +36,6 @@ export async function mapHomeGraph(input: HomeGraphMapInput & {
   const edgesCurrent = selection.retainEdges(state.edges.filter(edge => selectedEdgeIds.has(edge.id)), {
     sourceIds: state.sources.map(source => source.id), nodeIds: state.nodes.map(node => node.id),
   });
-  assertCurrent(); selection.assertCurrent(); edgesCurrent();
   const result = renderHomeGraphMap(state, selection, {
     ...options,
     ha: {

@@ -19,10 +19,8 @@ import { logger } from '../../utils/logger.js';
 import { scheduleBackground, yieldEvery, yieldToEventLoop } from '../cooperative.js';
 import type { KnowledgeStore } from '../store.js';
 import type {
-  KnowledgeEdgeRecord,
   KnowledgeExtractionRecord,
   KnowledgeIssueRecord,
-  KnowledgeNodeRecord,
   KnowledgeSourceRecord,
   KnowledgeSourceType,
 } from '../types.js';
@@ -45,6 +43,7 @@ import { answerHomeGraphQuery } from './ask.js';
 import type { KnowledgeSemanticService } from '../semantic/index.js';
 import {
   autoLinkHomeGraphSource,
+  autoLinkHomeGraphSourceWithOutcome,
 } from './auto-link.js';
 import {
   generateHomeGraphPacket,
@@ -68,7 +67,7 @@ import {
   runHomeGraphRefinement,
 } from './refinement.js';
 import type { HomeGraphTriageOptions } from './triage.js';
-import { readKnowledgeExtractionTextUsability } from '../extraction-policy.js';
+import { knowledgeExtractionIsReadable } from '../extraction-policy.js';
 import {
   readHomeGraphSearchState,
   selectHomeGraphExtractionRepairCandidates,
@@ -424,7 +423,7 @@ export class HomeGraphService {
         artifactStore: this.artifactStore,
         reportBackgroundError: this.reportBackgroundError.bind(this),
       }, source.id, artifact, spaceId, owner);
-      const searchable = prepared ? await extractionHasSearchableText(prepared, this.autoLinkController.signal) : false;
+      const searchable = prepared ? extractionHasSearchableText(prepared) : false;
       owner.assertCurrent();
       const extraction = await storeHomeGraphArtifactExtraction(this.store, source, artifact, spaceId, installationId, prepared, owner);
       if (extraction) {
@@ -540,11 +539,7 @@ export class HomeGraphService {
     });
   }
 
-  async listSources(input: HomeGraphSpaceInput & { readonly limit?: number } = {}): Promise<{
-    readonly ok: true;
-    readonly spaceId: string;
-    readonly sources: readonly KnowledgeSourceRecord[];
-  }> {
+  async listSources(input: HomeGraphSpaceInput & { readonly limit?: number; readonly cursor?: string } = {}): Promise<Awaited<ReturnType<typeof listHomeGraphSources>>> {
     return this.ownForegroundOperation(async () => {
       return listHomeGraphSources({ ...input, store: this.store });
     });
@@ -627,14 +622,7 @@ export class HomeGraphService {
     });
   }
 
-  async browse(input: HomeGraphSpaceInput & { readonly limit?: number } = {}): Promise<{
-    readonly ok: true;
-    readonly spaceId: string;
-    readonly nodes: readonly KnowledgeNodeRecord[];
-    readonly edges: readonly KnowledgeEdgeRecord[];
-    readonly sources: readonly KnowledgeSourceRecord[];
-    readonly issues: readonly KnowledgeIssueRecord[];
-  }> {
+  async browse(input: HomeGraphSpaceInput & { readonly limit?: number; readonly cursor?: string } = {}): Promise<Awaited<ReturnType<typeof browseHomeGraph>>> {
     return this.ownForegroundOperation(async () => {
       return browseHomeGraph({ ...input, store: this.store });
     });
@@ -836,31 +824,38 @@ export class HomeGraphService {
         ...(!input.sourceUri && !input.artifact.sourceUri && source.sourceUri === canonicalUri ? { sourceUri: canonicalUri } : {}) });
       if (!atomic) extraction = await storeHomeGraphArtifactExtraction(this.store, source, input.artifact, input.spaceId, input.installationId, prepared);
       assertOwned();
+      // A document with no named target is linked when its subject settles; any
+      // other outcome (none, ambiguous, unread) is reported here and recorded on
+      // the source, and the ingest still succeeds.
+      const autoLink = input.target ? undefined : await autoLinkHomeGraphSourceWithOutcome({
+        signal: ownership.signal ? AbortSignal.any([this.autoLinkController.signal, ownership.signal]) : this.autoLinkController.signal,
+        ...(owned ? { shouldStop: () => { assertOwned(); return false; } } : {}),
+        store: this.store,
+        spaceId: input.spaceId,
+        installationId: input.installationId,
+        source,
+        ...(extraction ? { extraction } : {}),
+        state: readHomeGraphState(this.store, input.spaceId),
+      });
       const linked = input.target
         ? (await this.linkKnowledge({ knowledgeSpaceId: input.spaceId, sourceId: source.id, target: input.target })).edge
-        : (await autoLinkHomeGraphSource({
-            signal: ownership.signal ? AbortSignal.any([this.autoLinkController.signal, ownership.signal]) : this.autoLinkController.signal,
-            ...(owned ? { shouldStop: () => { assertOwned(); return false; } } : {}),
-            store: this.store,
-            spaceId: input.spaceId,
-            installationId: input.installationId,
-            source,
-            ...(extraction ? { extraction } : {}),
-            state: readHomeGraphState(this.store, input.spaceId),
-          }))?.edge;
+        : autoLink?.linked[0]?.edge;
       assertOwned();
       // Owned repairs already run enrichment/promotion in their guarded caller.
       // Do not detach a second publisher from the owner when returning its receipt.
       if (!ownership.deferSemanticEnrichment) this.queueIngestEnrichment(input.spaceId, source.id);
-      return {
-        ok: true,
+      const outcome = autoLink?.outcomes[0];
+      const result = {
+        ok: true as const,
         spaceId: input.spaceId,
         ...(isClassicOperation() ? { provenance: 'classic' as const, ...(!input.target ? { autoLinkAssessment: 'not-evaluated' as const } : {}) } : {}),
         source,
         artifactId: input.artifact.id,
         extraction,
         ...(linked ? { linked } : {}),
+        ...(outcome ? { autoLink: { status: outcome.status, ...(outcome.reason ? { reason: outcome.reason } : {}), shortlisted: outcome.shortlisted } } : {}),
       };
+      return result;
     } finally {
       if (published && supersededOriginal) {
         try {
@@ -1174,7 +1169,7 @@ function withHomeGraphAskPageRefresh(
   };
 }
 
-async function extractionHasSearchableText(extraction: Pick<KnowledgeExtractionRecord, 'structure'>, signal?: AbortSignal): Promise<boolean> {
+function extractionHasSearchableText(extraction: Pick<KnowledgeExtractionRecord, 'excerpt' | 'summary' | 'sections' | 'structure' | 'metadata'>): boolean {
   const structure = readRecord(extraction.structure);
-  return typeof structure.searchText === 'string' && await readKnowledgeExtractionTextUsability(structure.searchText, signal);
+  return typeof structure.searchText === 'string' && structure.searchText.trim().length > 0 && knowledgeExtractionIsReadable(extraction);
 }

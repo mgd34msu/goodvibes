@@ -9,7 +9,6 @@ import { isHomeGraphPageFactCandidate } from './page-quality.js';
 import { readHomeGraphSearchState } from './search.js';
 import { readHomeGraphState } from './state.js';
 
-const MAX_DEVICE_PAGE_REPAIRS_PER_REFRESH = Infinity;
 const SYNC_SELF_IMPROVEMENT_INGEST_LIMIT = 0;
 const SYNC_SELF_IMPROVEMENT_FAST_SLEEP_MS = 5_000;
 const SYNC_SELF_IMPROVEMENT_SLOW_SLEEP_MS = 15_000;
@@ -167,7 +166,7 @@ export async function refreshHomeGraphDevicePagesForSourceIds(
       if (device?.kind === 'ha_device') deviceNodeIds.add(device.id);
     }
   }
-  for (const [index, deviceNodeId] of [...deviceNodeIds].slice(0, MAX_DEVICE_PAGE_REPAIRS_PER_REFRESH).entries()) {
+  for (const [index, deviceNodeId] of [...deviceNodeIds].entries()) {
     if (signal?.aborted) return;
     const device = nodesById.get(deviceNodeId);
     if (!device) continue;

@@ -11,7 +11,7 @@ import type { ArtifactStore } from '../../artifacts/index.js';
 import { updateHomeGraphSnapshotGroups, type KnowledgeStore } from '../store.js';
 import type { KnowledgeNodeRecord, KnowledgeSourceRecord } from '../types.js';
 import { yieldEvery } from '../cooperative.js';
-import { autoLinkHomeGraphSources } from './auto-link.js';
+import { autoLinkHomeGraphSourcesWithOutcomes, type HomeGraphAutoLinkReport } from './auto-link.js';
 import { upsertIntegrationDocumentationCandidates } from './documentation.js';
 import { generateAutomaticHomeGraphPages } from './generated-pages.js';
 import {
@@ -108,7 +108,7 @@ export async function runHomeGraphSnapshotSync(input: {
     // A later enrichment hold preserves this captured prefix but cannot publish
     // an unvalidated link or generated page. Imports retain their own atomic seam.
     const { source, home, beforeNodeIds, beforeEdgeIds, groups } = captured;
-    await autoLinkExistingSources(store, spaceId, installationId, input.signal);
+    const autoLink = await autoLinkExistingSources(store, spaceId, installationId, input.signal);
     return await store.batch(async () => {
       let issueCount = 0;
       let quality: NonNullable<HomeGraphSyncResult['quality']>;
@@ -135,8 +135,8 @@ export async function runHomeGraphSnapshotSync(input: {
         signal: input.signal,
       });
       const after = readHomeGraphState(store, spaceId);
-      return {
-        ok: true,
+      const result = {
+        ok: true as const,
         ...(isClassicOperation() ? { provenance: 'classic' as const } : {}),
         spaceId,
         installationId,
@@ -150,7 +150,11 @@ export async function runHomeGraphSnapshotSync(input: {
         generated,
         quality,
         counts: groups,
+        // How documents were linked to devices on this sync: linked, none (nothing
+        // in the home matched), ambiguous, or unread (with the reason on the source).
+        autoLink: autoLink.counts,
       };
+      return result;
     });
   });
 }
@@ -160,10 +164,10 @@ async function autoLinkExistingSources(
   spaceId: string,
   installationId: string,
   signal?: AbortSignal,
-): Promise<void> {
+): Promise<HomeGraphAutoLinkReport> {
   const state = readHomeGraphState(store, spaceId);
   const extractionBySourceId = new Map(state.extractions.map((extraction) => [extraction.sourceId, extraction]));
-  await autoLinkHomeGraphSources({
+  return autoLinkHomeGraphSourcesWithOutcomes({
     signal,
     store,
     spaceId,

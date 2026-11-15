@@ -15,10 +15,12 @@ const readers = [
     const [plan] = await prepareHomeGraphTriageReadings([{ reference: 'issue-1', issue: { code: 'custom', message: 'Fixture', severity: 'warning' } }]);
     expect(plan?.action).toBe('reject'); expect(plan?.probability).toBe(0.97);
   } },
-  { name: 'auto-link', async read() {
+  // A damaged reading leaves the document unread (recorded on the source), it never throws.
+  { name: 'auto-link', recordsDamage: true, async read(scenario?: string) {
     const result = await createHomeGraphAutoLinkReader().read({ source: { title: 'Fixture' },
       candidates: [{ reference: 'candidate-1', subject: { title: 'Fixture' }, entities: [] }] }, { assertCurrent() {} });
-    expect(result).toEqual({ reference: 'candidate-1', relation: 'source_for' });
+    if (scenario === 'approximate') expect(result).toMatchObject({ status: 'linked', reference: 'candidate-1', relation: 'source_for' });
+    else expect(result).toMatchObject({ status: 'unread' });
   } },
   { name: 'source authority', async read() {
     const result = await createRepairSourceAuthorityReader().read([{ reference: 'source-1', query: 'Fixture', subjects: [],
@@ -36,7 +38,7 @@ for (const reader of readers) for (const scenario of ['approximate', 'missing ma
   test(`${reader.name} shares canonical Choice admission: ${scenario}`, async () => {
     let choicesServed = 0;
     const fake = fakePort((name, question) => {
-      if (question.type !== 'choice') return noulAnswer(['manual', 'integrationDocumentation'].includes(name) ? 0.01 : 0.99);
+      if (question.type !== 'choice') return noulAnswer(['manual', 'integrationDocumentation'].includes(name.slice(name.indexOf('__') + 2)) ? 0.01 : 0.99);
       const choice = ['reject', 'source_for', 'official-vendor', 'supported'].find(key => Object.hasOwn(question.criteria, key));
       if (!choice) throw new Error('Unexpected choice fixture');
       const other = Object.keys(question.criteria).find(key => key !== choice);
@@ -47,7 +49,7 @@ for (const reader of readers) for (const scenario of ['approximate', 'missing ma
       return { type: 'choice', choice, confidence: 0.97, probabilities };
     });
     installJudgmentPort(fake.port);
-    if (scenario === 'approximate') await reader.read();
+    if (scenario === 'approximate' || 'recordsDamage' in reader) await reader.read(scenario);
     else await expect(reader.read()).rejects.toMatchObject({ reason: 'malformed' });
     // Every other answer in the fake is valid, so the refusal can only come from
     // the reader having been served the damaged choice distribution.

@@ -5,7 +5,8 @@ import { getKnowledgeSpaceId } from '../spaces.js';
 import { isGeneratedKnowledgeSource } from '../generated-projections.js';
 import { freezeSupport } from '../semantic/verification/projection.js';
 import type { KnowledgeExtractionRecord, KnowledgeNodeRecord, KnowledgeSourceRecord } from '../types.js';
-import { KnowledgeNodeActivationHeldError as Held, NODE_ACTIVATION_LIMITS as LIMITS } from './types.js';
+import { KnowledgeNodeActivationHeldError as Held, NODE_ACTIVATION_LIMITS as LIMITS, type NodeActivationRequest } from './types.js';
+import { knowledgeTerms, selectKnowledgePassages, splitKnowledgePassages } from '../passages.js';
 
 /** Content read by the knowledge serving/rendering paths. Administrative metadata stays local. */
 const CONTENT_KEYS = ['semanticKind', 'factKind', 'entityKind', 'value', 'evidence', 'labels', 'subject', 'targetHints',
@@ -45,8 +46,21 @@ export interface ActivationEvidence {
   readonly source: KnowledgeSourceRecord | null;
   readonly extraction: KnowledgeExtractionRecord | null;
 }
-/** Database IDs, timestamps and unrelated metadata are never transmitted or generically exempted from privacy checks. */
-export function projectNodeActivation(node: KnowledgeNodeRecord, evidence: readonly ActivationEvidence[], subjects: readonly ActivationSubject[] = [], observed?: { readonly record: KnowledgeNodeRecord; readonly origin: string }, references: readonly (object | undefined)[] = []): { readonly state: Record<string, JsonValue>; readonly reason?: 'missing-evidence' | 'foreign-space' } {
+/** Extracted text fields an extraction may carry besides its excerpt and sections. */
+function extractionTexts(extraction: KnowledgeExtractionRecord): unknown[] {
+  const texts: unknown[] = [];
+  for (const container of [extraction.structure, extraction.structure.structure, extraction.structure.metadata, extraction.metadata]) {
+    if (record(container)) for (const key of ['text', 'content', 'searchText']) if (container[key] !== undefined) texts.push(container[key]);
+  }
+  return texts;
+}
+/**
+ * Database IDs, timestamps and unrelated metadata are never transmitted or generically exempted from privacy checks.
+ * Each source contributes the passages that mention the candidate's terms, within `evidenceBytes` for the whole
+ * reading; what was left out is counted on the state and the result. A state still over `requestBytes` holds as
+ * `budget` with its size and the limit, without a request.
+ */
+export function projectNodeActivation(node: KnowledgeNodeRecord, evidence: readonly ActivationEvidence[], subjects: readonly ActivationSubject[] = [], observed?: { readonly record: KnowledgeNodeRecord; readonly origin: string }, references: readonly (object | undefined)[] = []): NodeActivationRequest {
   const content: Record<string, unknown> = {};
   for (const key of CONTENT_KEYS) if (node.metadata[key] !== undefined) content[key] = node.metadata[key];
   // Structural node references get request-local labels, but semantic identity text remains complete.
@@ -62,9 +76,10 @@ export function projectNodeActivation(node: KnowledgeNodeRecord, evidence: reado
   const candidate = { kind: node.kind, title: node.title, summary: node.summary, aliases: [...node.aliases], content,
     producerConfidence: { value: node.confidence, units: '0-100 descriptive producer score, never activation authority' },
     claimedTrust, trust: 'untrusted synthesized reference material' };
-  let reason: 'missing-evidence' | 'foreign-space' | undefined;
+  let reason: 'missing-evidence' | 'foreign-space' | 'budget' | undefined;
   let hasExtractedEvidence = false;
-  const sources = evidence.map(({ id, source, extraction }, index) => {
+  const extracted: { readonly index: number; readonly extraction: KnowledgeExtractionRecord }[] = [];
+  const sources: Record<string, unknown>[] = evidence.map(({ id, source, extraction }, index) => {
     if (!source || isGeneratedKnowledgeSource(source) || !['indexed', 'pending'].includes(source.status)) {
       reason ??= 'missing-evidence'; return { reference: `source-${index + 1}`, missing: true };
     }
@@ -76,15 +91,31 @@ export function projectNodeActivation(node: KnowledgeNodeRecord, evidence: reado
       sourceUri: structural?.omitSourceUri ? undefined : source.sourceUri, canonicalUri: structural?.omitCanonicalUri ? undefined : source.canonicalUri, claimedTrust: trust, trust: 'untrusted source reference; only actual extraction supplies evidence' };
     if (!extraction) return { ...context, unverified: 'missing-extraction' };
     if (getKnowledgeSpaceId(extraction) !== getKnowledgeSpaceId(node)) reason = 'foreign-space';
-    const texts: Record<string, unknown> = {};
-    for (const [path, container] of [['structure', extraction.structure], ['structure.structure', extraction.structure.structure],
-      ['structure.metadata', extraction.structure.metadata], ['metadata', extraction.metadata]] as const) {
-      if (record(container)) for (const key of ['text', 'content', 'searchText']) if (container[key] !== undefined) texts[`${path}.${key}`] = container[key];
-    }
-    const hasText = [extraction.excerpt, ...extraction.sections, ...Object.values(texts)].some((value) => typeof value === 'string' && value.trim());
+    const hasText = [extraction.excerpt, ...extraction.sections, ...extractionTexts(extraction)].some((value) => typeof value === 'string' && value.trim());
     hasExtractedEvidence ||= hasText;
-    return { ...context, ...(!hasText ? { unverified: 'no-extracted-text' } : {}),
-      extraction: { title: extraction.title, summary: extraction.summary, excerpt: extraction.excerpt, sections: extraction.sections, texts } };
+    if (hasText) extracted.push({ index, extraction });
+    return { ...context, ...(!hasText ? { unverified: 'no-extracted-text' } : {}) };
+  });
+  // Only the passages that bear on the candidate travel; the whole document never does.
+  const terms = knowledgeTerms([node.title, node.summary, node.aliases, content]);
+  const quotes: string[] = [];
+  const collectQuotes = (value: unknown, depth: number): void => {
+    if (typeof value === 'string') quotes.push(value);
+    else if (depth < 3 && Array.isArray(value)) value.forEach((entry) => collectQuotes(entry, depth + 1));
+    else if (depth < 3 && record(value)) Object.values(value).forEach((entry) => collectQuotes(entry, depth + 1));
+  };
+  collectQuotes(content.evidence, 0);
+  const passages = splitKnowledgePassages(extracted.map(({ extraction }) => [extraction.excerpt, ...extraction.sections, ...extractionTexts(extraction)]), LIMITS.passageChars);
+  const selection = selectKnowledgePassages(passages, terms, LIMITS.evidenceBytes, quotes);
+  extracted.forEach(({ index, extraction }, origin) => {
+    const own = passages.filter((passage) => passage.origin === origin);
+    const chosen = selection.passages.filter((passage) => passage.origin === origin);
+    const chosenIndexes = new Set(chosen.map((passage) => passage.index));
+    const omitted = own.filter((passage) => !chosenIndexes.has(passage.index));
+    sources[index] = { ...sources[index], extraction: { title: extraction.title, summary: extraction.summary,
+      passages: chosen.map((passage) => passage.text),
+      ...(omitted.length ? { omitted: { passages: omitted.length, characters: omitted.reduce((sum, passage) => sum + passage.text.length, 0),
+        note: 'passages that do not mention the candidate were not sent' } } : {}) } };
   });
   const subjectStates = subjects.map(({ node: subject }, index) => {
     if (!subject) { reason ??= 'missing-evidence'; return { reference: `subject-${index + 1}`, missing: true }; }
@@ -106,11 +137,18 @@ export function projectNodeActivation(node: KnowledgeNodeRecord, evidence: reado
   }
   if (!hasExtractedEvidence && !observed) reason ??= 'missing-evidence';
   const projected = { candidate, evidence: sources, subjects: subjectStates, ...(observedEvidence ? { observedEvidence } : {}) };
-  // Complete selected fields are scanned before ANY clipping, byte limit or provider access.
+  // The selected fields are scanned before any provider access.
   assertJudgmentInput(projected);
-  if (evidence.length > LIMITS.sources) throw new Held('budget');
-  const state = JSON.parse(JSON.stringify(projected)) as Record<string, JsonValue>;
-  return freezeSupport({ state, ...(reason ? { reason } : {}) });
+  const serialized = JSON.stringify(projected);
+  const size = new TextEncoder().encode(serialized).byteLength;
+  let detail: string | undefined;
+  if (size > LIMITS.requestBytes) {
+    reason ??= 'budget';
+    detail = `The serving reading is ${size} bytes; the limit is ${LIMITS.requestBytes} bytes. Review the node by hand.`;
+  }
+  const state = JSON.parse(serialized) as Record<string, JsonValue>;
+  const omitted = selection.omitted.passages ? selection.omitted : undefined;
+  return freezeSupport({ state, ...(reason ? { reason } : {}), ...(detail ? { detail } : {}), ...(omitted ? { omitted } : {}) });
 }
 /** Detach caller data before the first await without scaling, inventing or serializing nonfinite confidence. */
 export function snapshotNodeInput<T>(input: T): T {

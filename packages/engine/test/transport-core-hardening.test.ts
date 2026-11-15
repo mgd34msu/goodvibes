@@ -5,7 +5,9 @@ import { injectTraceparent } from '../transport-core/src/otel.ts';
 import { readCachedOtelApi, resetOtelState } from '../transport-core/src/otel-state.ts';
 import { decodeTunnelFrame, encodeTunnelFrame } from '../transport-core/src/relay/tunnel.ts';
 import { createRelayPairingPayload, decodeRelayPairingString, encodeRelayPairingString } from '../transport-core/src/relay/pairing.ts';
-import { RELAY_PROTOCOL_VERSION } from '../transport-core/src/relay/protocol.ts';
+import { RELAY_PROTOCOL_VERSION, createRelayChallenge, deriveRendezvousId, proveRelayRegistration, verifyRelayRegistration } from '../transport-core/src/relay/protocol.ts';
+import { exportRawPublicKey } from '../transport-core/src/relay/crypto.ts';
+import { generateRelayIdentity } from '../transport-core/src/relay/identity.ts';
 import { WEBSOCKET_CHUNK_CHARS, WebSocketMessageAssembler, sendWebSocketMessage } from '../transport-core/src/websocket-messages.ts';
 
 afterEach(() => resetOtelState());
@@ -44,13 +46,28 @@ describe('relay pairing', () => {
   });
 });
 
+describe('relay id ownership', () => {
+  test('only the holder of the identity key the id was derived from can register it', async () => {
+    const owner = await generateRelayIdentity();
+    const squatter = await generateRelayIdentity();
+    const rid = await deriveRendezvousId(await exportRawPublicKey(owner.publicKey));
+    const { nonce } = createRelayChallenge();
+    expect(await verifyRelayRegistration(rid, nonce, await proveRelayRegistration(owner, rid, nonce))).toBe(true);
+    expect(await verifyRelayRegistration(rid, nonce, await proveRelayRegistration(squatter, rid, nonce))).toBe(false);
+    // A proof captured from one connection does not register on another.
+    expect(await verifyRelayRegistration(rid, createRelayChallenge().nonce, await proveRelayRegistration(owner, rid, nonce))).toBe(false);
+  });
+});
+
 describe('WebSocket message framing', () => {
   const chunk = (index: number, final = false) => ({ type: 'chunk', id: 'm', index, final, data: 'x'.repeat(WEBSOCKET_CHUNK_CHARS) });
 
   test('a peer that never sends the final chunk is cut off at the size limit and the partial message is dropped', () => {
     const assembler = new WebSocketMessageAssembler();
     let accepted = 0;
-    expect(() => { for (let i = 0; i < 100_000; i++) { assembler.accept(chunk(i)); accepted++; } }).toThrow('size limit');
+    let refused: unknown;
+    try { for (let i = 0; i < 100_000; i++) { assembler.accept(chunk(i)); accepted++; } } catch (error) { refused = error; }
+    expect((refused as { code?: unknown } | undefined)?.code).toBe('WEBSOCKET_MESSAGE_TOO_LARGE');
     expect(accepted).toBeLessThan(2000);
     // The next message starts clean at index 0.
     expect(assembler.accept({ type: 'chunk', id: 'n', index: 0, final: true, data: '{"ok":true}' })).toEqual({ ok: true });

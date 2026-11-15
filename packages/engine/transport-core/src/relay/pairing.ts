@@ -98,14 +98,7 @@ export function decodeRelayPairingString(text: string): RelayPairingPayload {
     throw new GoodVibesError('Relay pairing string is missing required fields.', { category: 'bad_request', source: 'transport', recoverable: false });
   }
   const w = wire as WirePairing;
-  if (w.p !== RELAY_PROTOCOL_VERSION) {
-    throw new GoodVibesError(`This pairing code is for relay protocol ${w.p}; this build speaks protocol ${RELAY_PROTOCOL_VERSION}.`, {
-      category: 'bad_request',
-      source: 'transport',
-      recoverable: false,
-      hint: 'Generate a new pairing code from a daemon of the same release line, or update this client.',
-    });
-  }
+  assertPairingProtocol(w.p);
   return {
     protocol: w.p,
     relayUrl: w.u,
@@ -113,4 +106,27 @@ export function decodeRelayPairingString(text: string): RelayPairingPayload {
     daemonPublicKey: w.k,
     ...(typeof w.l === 'string' ? { label: w.l } : {}),
   };
+}
+
+/**
+ * A pairing as a client receives it, either the encoded string or the decoded
+ * object, checked once: a code minted by a daemon of another protocol is
+ * refused here, before any connection, with the reason and the next step.
+ */
+export function resolveRelayPairing(pairing: RelayPairingPayload | string): RelayPairingPayload {
+  if (typeof pairing === 'string') return decodeRelayPairingString(pairing);
+  assertPairingProtocol(pairing.protocol);
+  return pairing;
+}
+
+// The relay would only report this as an offline daemon, so it is told here.
+function assertPairingProtocol(protocol: number): void {
+  if (protocol === RELAY_PROTOCOL_VERSION) return;
+  throw new GoodVibesError(`This pairing code is for relay protocol ${String(protocol)}; this build speaks protocol ${RELAY_PROTOCOL_VERSION}.`, {
+    category: 'bad_request',
+    source: 'transport',
+    recoverable: false,
+    state: 'not connected',
+    next: ['Pair again from /relay pair on a daemon of the same release line, or update this program.'],
+  });
 }

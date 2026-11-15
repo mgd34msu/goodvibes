@@ -1,10 +1,15 @@
+import { GoodVibesError } from '@goodvibes-jev/engine/errors';
+
 /** Logical messages are split into small frames; frame size is not a work limit. */
 export const WEBSOCKET_CHUNK_CHARS = 64 * 1024;
 /** Largest logical message either side will carry; the receiver refuses to buffer more than this. */
 export const WEBSOCKET_MAX_MESSAGE_CHARS = 64 * 1024 * 1024;
 export function* encodeWebSocketMessage(text: string): Generator<string> {
   if (text.length > WEBSOCKET_MAX_MESSAGE_CHARS) {
-    throw new Error(`WebSocket message of ${text.length} characters exceeds the ${WEBSOCKET_MAX_MESSAGE_CHARS} character limit`);
+    throw new GoodVibesError(`WebSocket message of ${text.length} characters exceeds the ${WEBSOCKET_MAX_MESSAGE_CHARS} character limit`, {
+      category: 'bad_request', source: 'transport', code: 'WEBSOCKET_MESSAGE_TOO_LARGE', recoverable: false,
+      state: 'not sent', next: ['Send the content in smaller parts, or attach it as a file'],
+    });
   }
   if (text.length <= WEBSOCKET_CHUNK_CHARS) { yield text; return; }
   const id = crypto.randomUUID();
@@ -27,7 +32,11 @@ export class WebSocketMessageAssembler {
       this.reset(); throw new Error('Invalid or out-of-order WebSocket chunk');
     }
     if (this.chars + chunk.data.length > WEBSOCKET_MAX_MESSAGE_CHARS) {
-      this.reset(); throw new Error('WebSocket message exceeds the size limit');
+      this.reset();
+      throw new GoodVibesError(`WebSocket message exceeds the ${WEBSOCKET_MAX_MESSAGE_CHARS} character limit`, {
+        category: 'protocol', source: 'transport', code: 'WEBSOCKET_MESSAGE_TOO_LARGE', recoverable: false,
+        state: 'the partial message was discarded', next: ['Send the content in smaller parts, or attach it as a file'],
+      });
     }
     this.id = chunk.id;
     this.chars += chunk.data.length;

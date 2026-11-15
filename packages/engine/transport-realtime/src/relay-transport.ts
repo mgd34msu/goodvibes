@@ -21,7 +21,6 @@ import { createUuidV4, type FetchLike } from '@goodvibes-jev/engine/transport-co
 import {
   RelaySecureChannel,
   decodeControlFrame,
-  decodeRelayPairingString,
   decodeTunnelFrame,
   encodeControlFrame,
   encodeTunnelFrame,
@@ -29,6 +28,8 @@ import {
   finishInitiatorHandshake,
   fromBase64Url,
   RELAY_PROTOCOL_VERSION,
+  relayErrorAdvice,
+  resolveRelayPairing,
   startInitiatorHandshake,
   type RelayInitiatorState,
   type RelayPairingPayload,
@@ -99,19 +100,6 @@ function streamCloseFailure(reason: string | undefined): GoodVibesError | undefi
   });
 }
 
-function resolvePairing(pairing: RelayPairingPayload | string): RelayPairingPayload {
-  if (typeof pairing === 'string') return decodeRelayPairingString(pairing);
-  if (pairing.protocol !== RELAY_PROTOCOL_VERSION) {
-    throw new GoodVibesError(`This pairing is for relay protocol ${String(pairing.protocol)}; this build speaks protocol ${RELAY_PROTOCOL_VERSION}.`, {
-      category: 'config',
-      source: 'transport',
-      recoverable: false,
-      hint: 'Pair again from a daemon running the same release line.',
-    });
-  }
-  return pairing;
-}
-
 function defaultWebSocket(url: string): RelayWebSocketLike {
   const Ctor = (globalThis as { WebSocket?: new (url: string) => RelayWebSocketLike }).WebSocket;
   if (!Ctor) {
@@ -148,7 +136,7 @@ async function whileActive<T>(work: Promise<T>, signal: AbortSignal): Promise<T>
  * tunnels every request through the zero-knowledge channel.
  */
 export function createRelayClient(options: RelayClientOptions): RelayClient {
-  const pairing = resolvePairing(options.pairing);
+  const pairing = resolveRelayPairing(options.pairing);
   const daemonPubRaw = fromBase64Url(pairing.daemonPublicKey);
   const ridBytes = encodeUtf8(pairing.rid);
   const connectTimeoutMs = options.connectTimeoutMs ?? 15_000;
@@ -348,11 +336,14 @@ export function createRelayClient(options: RelayClientOptions): RelayClient {
                 initiatorState = started.state;
                 ws.send(started.message1);
               } else if (frame.t === 'error') {
+                const advice = relayErrorAdvice(frame.code);
                 done(new GoodVibesError(`Relay refused the connection: ${frame.message}`, {
                   category: frame.code === 'daemon-offline' ? 'not_found' : 'service',
                   source: 'transport',
-                  recoverable: frame.code !== 'daemon-offline',
-                  hint: frame.code === 'daemon-offline' ? 'The daemon is not registered on the relay (offline or wrong rendezvous id).' : undefined,
+                  code: `RELAY_${frame.code.toUpperCase().replace(/-/g, '_')}`,
+                  recoverable: advice.retryable,
+                  state: advice.state,
+                  next: advice.next,
                 }));
               } else if (frame.t === 'pipe-close') {
                 done(new GoodVibesError('Relay pipe closed.', { category: 'network', source: 'transport', recoverable: true }));

@@ -33,6 +33,13 @@ export {
 export {
   RELAY_PROTOCOL_VERSION,
   RELAY_PIPE_ID_BYTES,
+  RELAY_CHALLENGE_BYTES,
+  RELAY_ERROR_ADVICE,
+  relayErrorAdvice,
+  deriveRendezvousId,
+  createRelayChallenge,
+  proveRelayRegistration,
+  verifyRelayRegistration,
   encodeControlFrame,
   decodeControlFrame,
   framePipePayload,
@@ -42,7 +49,10 @@ export {
   type RelayRole,
   type RelayErrorCode,
   type RelayControlFrame,
+  type RelayErrorAdvice,
   type RelayRegisterFrame,
+  type RelayChallengeFrame,
+  type RelayProveFrame,
   type RelayRegisteredFrame,
   type RelayConnectFrame,
   type RelayConnectedFrame,
@@ -74,6 +84,7 @@ export {
   createRelayPairingPayload,
   encodeRelayPairingString,
   decodeRelayPairingString,
+  resolveRelayPairing,
   type RelayPairingPayload,
 } from './pairing.js';
 

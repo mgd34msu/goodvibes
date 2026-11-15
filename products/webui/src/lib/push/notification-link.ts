@@ -5,17 +5,16 @@
  * `{ kind: 'approval', approvalId }` (platform push/service.ts). A tap should land
  * the operator on the view where that action lives, not just the app root.
  *
- * This is the PURE, unit-tested source of truth for that mapping. The service
- * worker (public/sw.js) carries a hand-kept copy of the same logic in
- * `linkForNotification`, a SW cannot import app modules without a bundler
- * step, so the two are kept deliberately in sync and this file's tests pin the
- * behavior both must share.
+ * This is the PURE source of truth for that mapping. The service worker
+ * (public/sw.js) carries a copy in `linkForNotification`, because a SW cannot
+ * import app modules without a bundler step; sw.test.ts runs that copy against
+ * this function for every notification kind, so the two cannot drift apart.
  */
 
 export interface NotificationData {
   readonly kind?: string;
   readonly approvalId?: string;
-  /** needs-input deep link (a fleet node blocked on the operator). */
+  /** needs-input and completion deep link (the fleet node blocked or finished). */
   readonly sessionId?: string;
   readonly nodeId?: string;
   readonly url?: string;
@@ -50,8 +49,9 @@ export function linkForNotification(data: NotificationData | undefined | null, a
   // Fleet view focused on that node (and carry its session id when the push knew
   // it), so a tap lands on exactly the process that summoned them. The node id is
   // required for a focus; without it we still open the Fleet view rather than a
-  // dead end. FleetView reads the fragment via parseFleetFocusFromHash.
-  if (data?.kind === 'needs-input') {
+  // dead end. A completion lands on the run that finished the same way.
+  // FleetView reads the fragment via parseFleetFocusFromHash.
+  if (data?.kind === 'needs-input' || data?.kind === 'completion') {
     if (typeof data.nodeId === 'string' && data.nodeId.length > 0) {
       const nodePart = `fleet-node=${encodeURIComponent(data.nodeId)}`;
       const sessionPart = typeof data.sessionId === 'string' && data.sessionId.length > 0

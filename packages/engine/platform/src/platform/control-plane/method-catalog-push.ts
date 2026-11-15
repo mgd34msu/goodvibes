@@ -52,6 +52,16 @@ const PUBLIC_PUSH_SUBSCRIPTION_SCHEMA = objectSchema({
   consecutiveFailures: NUMBER_SCHEMA,
 }, ['id', 'principalId', 'endpointOrigin', 'createdAt']);
 
+/** Why a device was removed: the push service said it was gone or kept rejecting it, or the record was unusable. */
+const PUSH_SUBSCRIPTION_REMOVAL_SCHEMA = objectSchema({
+  subscriptionId: STRING_SCHEMA,
+  principalId: STRING_SCHEMA,
+  endpointOrigin: STRING_SCHEMA,
+  reason: STRING_SCHEMA,
+  evidence: STRING_SCHEMA,
+  removedAt: NUMBER_SCHEMA,
+}, ['subscriptionId', 'principalId', 'endpointOrigin', 'reason', 'evidence', 'removedAt']);
+
 const PUSH_DELIVERY_RECEIPT_SCHEMA = objectSchema({
   subscriptionId: STRING_SCHEMA,
   endpointOrigin: STRING_SCHEMA,
@@ -104,12 +114,13 @@ export const builtinGatewayPushMethodDescriptors: readonly GatewayMethodDescript
   methodDescriptor({
     id: 'push.subscriptions.list',
     title: 'List Web Push Subscriptions',
-    description: 'List the authenticated operator\'s registered push devices as redacted subscription views (id, deviceId when the record has one, endpoint origin, timestamps, last delivery outcome; two records on the same push service share an origin, so tell them apart by id or deviceId). The capability URL and key material are never included.',
+    description: 'List the authenticated operator\'s registered push devices as redacted subscription views (id, deviceId when the record has one, endpoint origin, timestamps, last delivery outcome; two records on the same push service share an origin, so tell them apart by id or deviceId), plus lastRemoval: the most recent device the daemon removed and why (reason gone: the push service answered 404/410; failure-threshold: the push service rejected the endpoint push.subscriptions.failureThreshold times in a row; unusable or malformed: the stored record could never receive a push). Network errors, timeouts, rate limits and push-service outages never remove a device. The capability URL and key material are never included.',
     category: 'push',
     scopes: ['read:push'],
     transport: ['ws'],
     outputSchema: objectSchema({
       subscriptions: arraySchema(PUBLIC_PUSH_SUBSCRIPTION_SCHEMA),
+      lastRemoval: PUSH_SUBSCRIPTION_REMOVAL_SCHEMA,
     }, ['subscriptions']),
   }),
   methodDescriptor({
@@ -128,7 +139,7 @@ export const builtinGatewayPushMethodDescriptors: readonly GatewayMethodDescript
   methodDescriptor({
     id: 'push.subscriptions.verify',
     title: 'Send Test Web Push',
-    description: 'Send a live test notification to one of the authenticated operator\'s subscriptions and return an honest delivery receipt (delivered / pruned / failed). A subscription whose endpoint reports 404/410 gone is pruned as part of the attempt and the receipt says so. An unknown id, or one owned by another principal, is a 404 SUBSCRIPTION_NOT_FOUND.',
+    description: 'Send a live test notification to one of the authenticated operator\'s subscriptions and return an honest delivery receipt (delivered / pruned / failed). A subscription whose endpoint reports 404/410 gone, or that the push service has now rejected push.subscriptions.failureThreshold times in a row, is pruned as part of the attempt and the receipt says so; a network error, timeout, 408, 413, 429 or 5xx is reported as failed and never counts against the device. An unknown id, or one owned by another principal, is a 404 SUBSCRIPTION_NOT_FOUND.',
     category: 'push',
     scopes: ['write:push'],
     transport: ['ws'],

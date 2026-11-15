@@ -38,10 +38,10 @@ export interface StoredPushSubscription {
   /** Outcome of the last delivery attempt, if any. */
   readonly lastOutcome?: PushDeliveryOutcome | undefined;
   /**
-   * Consecutive non-gone delivery failures since the last success. The delivery
-   * path prunes a record whose failures cross the bounded-retry threshold (a
-   * dead endpoint that never answers 404/410), reported as an honest `pruned`
-   * receipt. Reset to 0 on any delivered outcome or a re-register.
+   * Consecutive deliveries the push service rejected (a 4xx other than 404,
+   * 408, 410, 413 and 429) since the last success. At the configured bound the
+   * record is removed and the receipt says `pruned`. Network errors, timeouts,
+   * rate limits and 5xx never count. Reset to 0 on a delivery or a re-register.
    */
   readonly consecutiveFailures?: number | undefined;
 }
@@ -61,7 +61,7 @@ export interface PublicPushSubscription {
   readonly createdAt: number;
   readonly lastDeliveryAt?: number | undefined;
   readonly lastOutcome?: PushDeliveryOutcome | undefined;
-  /** Consecutive non-gone delivery failures since the last success (0 when healthy). */
+  /** Consecutive push-service rejections since the last success (0 when healthy). */
   readonly consecutiveFailures?: number | undefined;
 }
 
@@ -97,7 +97,8 @@ export type PushUrgency = 'very-low' | 'low' | 'normal' | 'high';
  * - 'needs-input', a fleet node is blocked waiting on the operator (deep link:
  *   sessionId/nodeId).
  * - 'completion' , a tracked run reached a terminal state (deep link:
- *   sessionId/nodeId; fan-out via attachCompletionSource).
+ *   sessionId/nodeId, the same Fleet focus as needs-input; fan-out via
+ *   attachCompletionSource).
  */
 export type PushNotificationCategory = 'approval' | 'needs-input' | 'completion';
 
@@ -118,7 +119,9 @@ export interface PushNotificationData {
   /**
    * True on a 'needs-input' push that fired as an escalation, a block that
    * waited past its grace with no human response, delivered regardless of an
-   * attached surface. Lets the service worker render it as a stronger reminder.
+   * attached surface. The service worker re-alerts for it (`renotify`) and
+   * keeps it on screen (`requireInteraction`) instead of silently replacing the
+   * earlier notification that carries the same tag.
    */
   readonly escalated?: boolean | undefined;
 }

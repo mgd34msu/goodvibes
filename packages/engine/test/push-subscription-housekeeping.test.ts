@@ -8,18 +8,17 @@
  *    oversized endpoint, and a non-http(s) scheme are each refused with a plain
  *    reason, so a record that could never receive a push is never stored.
  *  - The per-principal figure is a WARNING, not a cap. Passing it accepts the
- *    new device anyway and discloses the crowding, nothing that still works is
- *    ever removed to make room, so nobody has to resubscribe.
- *  - Only PROVABLY dead records are reaped: unusable key material, a torn
- *    record, or an endpoint the push service refused past the bounded-failure
- *    threshold. Age alone never removes anything.
- *  - Reaping happens on recovery AND on the periodic sweep, is idempotent, and
- *    every removal is disclosed with the evidence.
+ *    new device anyway; nothing that still works is ever removed to make room,
+ *    so nobody has to resubscribe.
+ *  - Only PROVABLY dead records leave: unusable key material, a torn record, or
+ *    an endpoint the push service rejected past the bound. Age alone never
+ *    removes anything. Reads leave them out; the next write drops them and the
+ *    list reports the latest removal.
  *  - The VAPID `sub` contact: a configured one is signed into the JWT and the
  *    signature still verifies; an invalid one is rejected rather than signed.
  */
 
-import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { allowLocalPushEndpoints } from './_helpers/local-push-endpoints.ts';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -29,7 +28,6 @@ import {
   createPushService,
   createPushSubscriptionStore,
 } from '../platform/src/platform/control-plane/routes/push-composition.ts';
-import { createDisposalScope } from '../platform/src/platform/runtime/disposal.ts';
 import type { ConfigKey } from '../platform/src/platform/config/schema.ts';
 import {
   DEFAULT_VAPID_SUBJECT,
@@ -39,8 +37,8 @@ import {
   VapidManager,
   VAPID_SECRET_KEY,
   isValidVapidSubject,
+  PushService,
   type PushSubscriptionPolicy,
-  type PushSubscriptionSweepReport,
   type StoredPushSubscription,
 } from '../platform/src/platform/push/index.ts';
 
@@ -67,12 +65,10 @@ const REAL_WORK_BUDGET_MS = 60_000;
 
 let dir: string;
 let storePath: string;
-let disclosurePath: string;
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'gv-push-housekeeping-'));
   storePath = join(dir, 'push-subscriptions.json');
-  disclosurePath = join(dir, 'push-subscriptions-housekeeping.json');
 });
 
 afterEach(() => {
@@ -107,12 +103,6 @@ test('reconcile compares actual keys and endpoint without rewriting an unchanged
   expect((await store.listPublic('operator'))[0]).not.toHaveProperty('endpoint');
   expect((await store.listPublic('operator'))[0]).not.toHaveProperty('keys');
 });
-
-function readDisclosures(): PushSubscriptionSweepReport[] {
-  if (!existsSync(disclosurePath)) return [];
-  const parsed = JSON.parse(readFileSync(disclosurePath, 'utf-8')) as { reports: PushSubscriptionSweepReport[] };
-  return parsed.reports;
-}
 
 function makeStore(policy?: Partial<PushSubscriptionPolicy>): PushSubscriptionStore {
   return new PushSubscriptionStore(storePath, {
@@ -226,220 +216,69 @@ describe('a working subscription is never removed to make room', () => {
     // Every device registered is still addressable, nothing was evicted.
     expect(all.map((r) => r.id).sort()).toEqual([...ids].sort());
   });
-
-  test('the crowding is disclosed rather than acted on', async () => {
-    const store = makeStore({ warnAbovePerPrincipal: 2 });
-    for (const name of ['a', 'b', 'c']) {
-      await store.register({
-        principalId: 'op-1',
-        deviceId: `dev-${name}`,
-        endpoint: `https://push.example/${name}`,
-        keys: realKeys(),
-      });
-    }
-    const reports = readDisclosures();
-    expect(reports.length).toBeGreaterThan(0);
-    const latest = reports[reports.length - 1] as PushSubscriptionSweepReport;
-    expect(latest.removed).toHaveLength(0);
-    expect(latest.crowded).toEqual([{ principalId: 'op-1', count: 3, warnAbove: 2 }]);
-    expect(latest.summary).toContain('a working device is never removed to make room');
-  });
-
-  test('a sweep over a crowded principal removes nothing', async () => {
-    const store = makeStore({ warnAbovePerPrincipal: 1 });
-    for (const name of ['a', 'b', 'c']) {
-      await store.register({
-        principalId: 'op-1',
-        deviceId: `dev-${name}`,
-        endpoint: `https://push.example/${name}`,
-        keys: realKeys(),
-      });
-    }
-    const report = await store.sweep('manual');
-    expect(report.removed).toHaveLength(0);
-    expect(report.retained).toBe(3);
-    expect(await store.all()).toHaveLength(3);
-  });
 });
 
 // ---------------------------------------------------------------------------
-// Only provably dead records are reaped
+// Only provably dead records leave, in the next write, and the list says why
 // ---------------------------------------------------------------------------
-describe('reaping requires evidence the subscription is already dead', () => {
-  test('age alone never removes a subscription that has never had a delivery', async () => {
+describe('removal requires evidence the subscription is already dead', () => {
+  test('age alone never removes a subscription', async () => {
     const ancient = Date.now() - 400 * 24 * 60 * 60 * 1000;
-    seed([record({ id: 'push-old', createdAt: ancient })]);
-    const store = makeStore();
-    const report = await store.runRecoverySweep();
-    expect(report.removed).toHaveLength(0);
-    expect(await store.all()).toHaveLength(1);
-  });
-
-  test('age since the last successful delivery never removes one either', async () => {
-    const ancient = Date.now() - 400 * 24 * 60 * 60 * 1000;
-    seed([record({ id: 'push-quiet', createdAt: ancient, lastDeliveryAt: ancient, lastOutcome: 'delivered' })]);
-    const store = makeStore();
-    const report = await store.runRecoverySweep();
-    expect(report.removed).toHaveLength(0);
-    expect(await store.all()).toHaveLength(1);
-  });
-
-  test('a record past the bounded-failure threshold is reaped on recovery with its evidence', async () => {
     seed([
+      record({ id: 'push-old', createdAt: ancient }),
+      record({ id: 'push-quiet', createdAt: ancient, lastDeliveryAt: ancient, lastOutcome: 'delivered' }),
+    ]);
+    const store = makeStore();
+    await store.register({ principalId: 'op-2', endpoint: 'https://push.example/new', keys: realKeys() });
+    expect((await store.all()).map((r) => r.id)).toContain('push-old');
+    expect((await store.all()).map((r) => r.id)).toContain('push-quiet');
+  });
+
+  test('a read never serves a dead record, and the next write drops it and keeps the removal for the list', async () => {
+    seed([
+      record({ id: 'push-junk', keys: { p256dh: 'p', auth: 'a' } }),
       record({ id: 'push-dead', consecutiveFailures: 5 }),
-      record({ id: 'push-live', consecutiveFailures: 1 }),
+      { id: 'push-torn' },
+      record({ id: 'push-ok' }),
     ]);
     const store = makeStore({ failureThreshold: 5 });
-    const report = await store.runRecoverySweep();
-    expect(report.trigger).toBe('recovery');
-    expect(report.removed).toHaveLength(1);
-    expect(report.removed[0]?.subscriptionId).toBe('push-dead');
-    expect(report.removed[0]?.reason).toBe('failure-threshold');
-    expect(report.removed[0]?.evidence).toContain('5 consecutive deliveries');
-    // The capability URL never appears in disclosure, origin + hash only.
-    expect(report.removed[0]?.endpointOrigin).toBe('https://push.example');
-    expect(JSON.stringify(report)).not.toContain('/push-dead');
-    const remaining = await store.all();
-    expect(remaining.map((r) => r.id)).toEqual(['push-live']);
-  });
-
-  test('legacy junk key material is reaped as unusable, with the same wording registration refuses it in', async () => {
-    seed([record({ id: 'push-junk', keys: { p256dh: 'p', auth: 'a' } })]);
-    const store = makeStore();
-    const report = await store.runRecoverySweep();
-    expect(report.removed).toHaveLength(1);
-    expect(report.removed[0]?.reason).toBe('unusable');
-    expect(report.removed[0]?.evidence).toContain('65-byte uncompressed P-256 point');
-    expect(readStored()).toHaveLength(0);
-  });
-
-  test('a torn record is reaped as malformed rather than served', async () => {
-    seed([{ id: 'push-torn' }, record({ id: 'push-ok' })]);
-    const store = makeStore();
-    const report = await store.runRecoverySweep();
-    expect(report.removed.map((r) => r.reason)).toEqual(['malformed']);
     expect((await store.all()).map((r) => r.id)).toEqual(['push-ok']);
+    expect(await store.get('push-junk')).toBeNull();
+    expect(readStored()).toHaveLength(4);
+
+    await store.register({ principalId: 'op-1', endpoint: 'https://push.example/new', keys: realKeys() });
+    const ids = readStored().map((r) => (r as { id: string }).id);
+    expect(ids).toHaveLength(2);
+    expect(ids).toContain('push-ok');
+    const status = await store.status('op-1');
+    expect(status.subscriptions).toHaveLength(2);
+    expect(status.lastRemoval?.subscriptionId).toBe('push-dead');
+    expect(status.lastRemoval?.reason).toBe('failure-threshold');
+    // The capability URL never appears in the removal, origin only.
+    expect(status.lastRemoval?.endpointOrigin).toBe('https://push.example');
+    expect(JSON.stringify(status.lastRemoval)).not.toContain('/push-dead');
   });
 
-  test('a raising of the failure threshold keeps a record the old bound would have reaped', async () => {
+  test('raising the failure threshold keeps a record the old bound would have removed', async () => {
     seed([record({ id: 'push-flaky', consecutiveFailures: 5 })]);
     const store = makeStore({ failureThreshold: 10 });
-    const report = await store.runRecoverySweep();
-    expect(report.removed).toHaveLength(0);
     expect(await store.all()).toHaveLength(1);
   });
 
-  test('the sweep is idempotent: a second pass removes nothing', async () => {
-    seed([record({ id: 'push-dead', consecutiveFailures: 7 }), record({ id: 'push-live' })]);
-    const store = makeStore({ failureThreshold: 5 });
-    expect((await store.sweep('manual')).removed).toHaveLength(1);
-    const second = await store.sweep('manual');
-    expect(second.removed).toHaveLength(0);
-    expect(second.retained).toBe(1);
-  });
-
-  test('a record written to the file after the sweep read it survives the sweep', async () => {
-    seed([record({ id: 'push-dead', consecutiveFailures: 9 })]);
-    const store = makeStore({ failureThreshold: 5 });
-    // Hold the sweep right after its first read: a writer that does not honour
-    // the lock lands a record in the window between that read and the write.
-    const file = (store as unknown as { store: { load(): Promise<unknown> } }).store;
-    const realLoad = file.load.bind(file);
-    let loads = 0;
-    const load = spyOn(file, 'load').mockImplementation(async () => {
-      const snapshot = await realLoad();
-      if (++loads === 1) seed([...readStored(), record({ id: 'push-new', principalId: 'op-2' })]);
-      return snapshot;
-    });
-    try {
-      const report = await store.sweep('manual');
-      expect(report.removed.map((r) => r.subscriptionId)).toEqual(['push-dead']);
-    } finally {
-      load.mockRestore();
-    }
-    const ids = readStored().map((r) => (r as { id: string }).id);
-    expect(ids).toEqual(['push-new']);
-  });
-
-  test('a second store registering while a sweep holds the file waits its turn and both outcomes land', async () => {
-    seed([record({ id: 'push-dead', consecutiveFailures: 9 })]);
-    const store = makeStore({ failureThreshold: 5 });
-    const other = makeStore({ failureThreshold: 5 });
+  test('two stores writing the same file at once both land', async () => {
+    const store = makeStore();
+    const other = makeStore();
     // Two independent store instances over the same file, as two processes would be.
-    const [sweepReport] = await Promise.all([
-      store.sweep('manual'),
-      other.register({ principalId: 'op-2', endpoint: 'https://push.example/new', keys: realKeys() }),
+    await Promise.all([
+      store.register({ principalId: 'op-1', endpoint: 'https://push.example/one', keys: realKeys() }),
+      other.register({ principalId: 'op-2', endpoint: 'https://push.example/two', keys: realKeys() }),
     ]);
-    expect(sweepReport.removed.map((r) => r.subscriptionId)).toEqual(['push-dead']);
-    const all = await store.all();
-    expect(all.map((r) => r.principalId)).toContain('op-2');
-    expect(all.some((r) => r.id === 'push-dead')).toBe(false);
+    expect((await store.all()).map((r) => r.principalId).sort()).toEqual(['op-1', 'op-2']);
   });
 
   test('a delete of an already-absent id is honest about it', async () => {
     const store = makeStore();
     expect(await store.remove('push-nope')).toBe(false);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Disclosure + periodic sweeping
-// ---------------------------------------------------------------------------
-describe('housekeeping discloses and repeats', () => {
-  test('a removal is written to the disclosure file beside the store', async () => {
-    seed([record({ id: 'push-dead', consecutiveFailures: 6 })]);
-    const store = makeStore({ failureThreshold: 5 });
-    await store.runRecoverySweep();
-    const reports = readDisclosures();
-    expect(reports).toHaveLength(1);
-    expect(reports[0]?.trigger).toBe('recovery');
-    expect(reports[0]?.removed[0]?.subscriptionId).toBe('push-dead');
-    expect(reports[0]?.summary).toContain('1 dead subscription(s) removed');
-  });
-
-  test('a pass that removed nothing writes no disclosure noise', async () => {
-    seed([record({ id: 'push-live' })]);
-    const store = makeStore();
-    await store.runRecoverySweep();
-    expect(readDisclosures()).toHaveLength(0);
-  });
-
-  test('the periodic sweep reaps without a restart', async () => {
-    const store = makeStore({ failureThreshold: 5 });
-    await store.register({ principalId: 'op-1', endpoint: 'https://push.example/live', keys: realKeys() });
-    // A record goes dead AFTER the recovery sweep already ran.
-    seed([...readStored(), record({ id: 'push-dead-later', consecutiveFailures: 8 })]);
-    // A sweep publishes two effects, strictly in order: the store file first,
-    // the disclosure record after it. Waiting on the store alone returned while
-    // the disclosure write was still in flight, and the assertion below then
-    // read an empty disclosure file. Unloaded that gap is microseconds, so the
-    // test passed; under load it widened past the poll and the test failed for
-    // a reason that had nothing to do with sweeping. Wait for BOTH effects.
-    store.startPeriodicSweep(15);
-    try {
-      const deadline = Date.now() + 30_000;
-      while (Date.now() < deadline) {
-        const swept = readStored().length === 1
-          && readDisclosures().some((entry) => entry.trigger === 'periodic');
-        if (swept) break;
-        await new Promise((resolve) => setTimeout(resolve, 10));
-      }
-    } finally {
-      store.stopPeriodicSweep();
-    }
-    expect(readStored()).toHaveLength(1);
-    const periodic = readDisclosures().filter((r) => r.trigger === 'periodic');
-    expect(periodic.length).toBeGreaterThan(0);
-    expect(periodic[0]?.removed[0]?.subscriptionId).toBe('push-dead-later');
-  }, 60_000);
-
-  test('a read never serves a record that is provably dead', async () => {
-    seed([record({ id: 'push-junk', keys: { p256dh: 'p', auth: 'a' } }), record({ id: 'push-ok' })]);
-    const store = makeStore();
-    // No sweep run yet, the read still refuses to hand back the dead record.
-    expect((await store.all()).map((r) => r.id)).toEqual(['push-ok']);
-    expect(await store.get('push-junk')).toBeNull();
-    expect(await store.listPublic('op-1')).toHaveLength(1);
   });
 });
 
@@ -540,11 +379,7 @@ describe('push.vapidSubject reaches a real delivery', () => {
     const config: Partial<Record<ConfigKey, unknown>> = {
       'push.vapidSubject': 'mailto:ops@example.test',
     };
-    // The composition root registers its periodic sweep on this scope, so
-    // disposing it stops the sweep before the directory is removed.
-    const disposal = createDisposalScope('push-vapid-delivery-test');
     const deps = {
-      disposal: disposal.registry,
       secretsManager: {
         get: async (key: string): Promise<string | null> => secrets.get(key) ?? null,
         set: async (key: string, value: string): Promise<void> => {
@@ -574,7 +409,6 @@ describe('push.vapidSubject reaches a real delivery', () => {
       expect(payload.sub).toBe('mailto:ops@example.test');
       expect(payload.aud).toBe(sinkOrigin);
     } finally {
-      disposal.dispose();
       sink.stop(true);
     }
   }, REAL_WORK_BUDGET_MS);
@@ -583,9 +417,7 @@ describe('push.vapidSubject reaches a real delivery', () => {
     const config: Partial<Record<ConfigKey, unknown>> = {
       'push.vapidSubject': 'ops@example.test',
     };
-    const disposal = createDisposalScope('push-invalid-subject-test');
     const deps = {
-      disposal: disposal.registry,
       secretsManager: {
         get: async (): Promise<string | null> => null,
         set: async (): Promise<void> => undefined,
@@ -596,11 +428,7 @@ describe('push.vapidSubject reaches a real delivery', () => {
     };
     // Construction succeeds (a hand-edited config file must not wedge the
     // daemon) and the bad contact is dropped rather than signed into a JWT.
-    try {
-      expect(createPushService(deps)).toBeDefined();
-    } finally {
-      disposal.dispose();
-    }
+    expect(createPushService(deps)).toBeDefined();
   });
 });
 
@@ -637,5 +465,22 @@ describe('the stored VAPID key pair', () => {
     const store = storeHolding('{not json');
     await expect(new VapidManager(store).getPublicKey()).rejects.toThrow('not valid JSON');
     expect(store.values.get(VAPID_SECRET_KEY)).toBe('{not json');
+  });
+
+  test('an approval that reaches no device because the pair is unreadable leaves a daemon receipt for the next surface', async () => {
+    const subscriptions = makeStore();
+    await subscriptions.register({ principalId: 'op-1', endpoint: 'https://push.example/phone', keys: realKeys() });
+    let listener: ((approval: { id: string; status: string }) => void) | undefined;
+    const recorded = new Promise<string>((resolve) => {
+      const service = new PushService({
+        vapid: new VapidManager(storeHolding('{not json')),
+        store: subscriptions,
+        transport: async () => ({ status: 201 }),
+        receipts: { record: (text) => { resolve(text); } },
+      });
+      service.attachApprovalSource({ subscribe: (fn) => { listener = fn; return () => undefined; } });
+    });
+    listener?.({ id: 'apr-1', status: 'pending' });
+    expect(await recorded).toContain(VAPID_SECRET_KEY);
   });
 });

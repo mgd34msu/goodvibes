@@ -100,15 +100,39 @@ describe('a failure before anything is sent is not the device failing', () => {
     expect(sent).toBeLessThanOrEqual(4096);
   });
 
-  test('a push service that keeps refusing still prunes the endpoint', async () => {
+  test('an outage never costs a device its subscription', async () => {
+    const vapid = new VapidManager(memorySecrets());
+    const outages: PushTransport[] = [
+      async () => { throw new Error('getaddrinfo ENOTFOUND push.example'); },
+      async () => ({ status: 503 }),
+      async () => ({ status: 429 }),
+      async () => ({ status: 408 }),
+    ];
+    for (const transport of outages) {
+      const store = makeStore();
+      const sub = await register(store, 'https://push.example/a');
+      for (let attempt = 0; attempt < 6; attempt++) {
+        expect((await deliverToSubscription(sub, message, { vapid, store, transport })).outcome).toBe('failed');
+      }
+      const stored = await store.get(sub.id);
+      expect(stored?.lastOutcome).toBe('failed');
+      expect(stored?.consecutiveFailures ?? 0).toBe(0);
+    }
+  });
+
+  test('a push service that keeps rejecting the endpoint removes it at the bound, and the list says why', async () => {
     const store = makeStore();
     const sub = await register(store, 'https://push.example/a');
     const vapid = new VapidManager(memorySecrets());
-    const refuse: PushTransport = async () => ({ status: 503 });
-    let last = await deliverToSubscription(sub, message, { vapid, store, transport: refuse });
-    for (let attempt = 1; attempt < 5; attempt++) last = await deliverToSubscription(sub, message, { vapid, store, transport: refuse });
+    const reject: PushTransport = async () => ({ status: 403 });
+    let last = await deliverToSubscription(sub, message, { vapid, store, transport: reject });
+    for (let attempt = 1; attempt < 5; attempt++) last = await deliverToSubscription(sub, message, { vapid, store, transport: reject });
     expect(last.outcome).toBe('pruned');
     expect(await store.get(sub.id)).toBeNull();
+    const status = await store.status('op');
+    expect(status.subscriptions).toHaveLength(0);
+    expect(status.lastRemoval?.subscriptionId).toBe(sub.id);
+    expect(status.lastRemoval?.reason).toBe('failure-threshold');
   });
 });
 
@@ -128,23 +152,31 @@ describe('one bad endpoint does not hold back the others', () => {
     const receipts = await deliverToAll(message, { vapid: new VapidManager(memorySecrets()), store, transport, requestTimeoutMs: 20 });
     expect(receipts.map((r) => [r.subscriptionId, r.outcome])).toEqual([[hung.id, 'failed'], [live.id, 'delivered']]);
     expect(reached).toEqual(['https://push.example/live']);
-    // A timeout is a real transport failure and is counted toward pruning.
-    expect((await store.get(hung.id))?.consecutiveFailures).toBe(1);
+    // A timeout says nothing about the endpoint and is never counted toward removal.
+    expect((await store.get(hung.id))?.consecutiveFailures ?? 0).toBe(0);
   });
 
-  test('a store write that throws becomes that subscription\'s failed receipt, not a lost fan-out', async () => {
+  test('one fan-out to four devices stamps every outcome in one store write', async () => {
+    const store = makeStore();
+    for (const name of ['one', 'two', 'three', 'four']) await register(store, `https://push.example/${name}`);
+    let writes = 0;
+    const counted = Object.create(store) as PushSubscriptionStore;
+    counted.applyOutcomes = async (stamps, bound) => { writes++; return store.applyOutcomes(stamps, bound); };
+    const receipts = await deliverToAll(message, { vapid: new VapidManager(memorySecrets()), store: counted, transport: ok });
+    expect(receipts.map((r) => r.outcome)).toEqual(['delivered', 'delivered', 'delivered', 'delivered']);
+    expect(writes).toBe(1);
+    expect((await store.all()).every((r) => r.lastOutcome === 'delivered')).toBe(true);
+  });
+
+  test('a store write that throws keeps every receipt and says the outcome was not saved', async () => {
     const store = makeStore();
     const first = await register(store, 'https://push.example/one');
     const second = await register(store, 'https://push.example/two');
     const flaky = Object.create(store) as PushSubscriptionStore;
-    flaky.recordOutcome = async (id, outcome) => {
-      if (id === first.id) throw new Error('disk full');
-      return store.recordOutcome(id, outcome);
-    };
+    flaky.applyOutcomes = async () => { throw new Error('disk full'); };
     const receipts = await deliverToAll(message, { vapid: new VapidManager(memorySecrets()), store: flaky, transport: ok });
-    expect(receipts.map((r) => r.outcome)).toEqual(['failed', 'delivered']);
+    expect(receipts.map((r) => [r.subscriptionId, r.outcome])).toEqual([[first.id, 'delivered'], [second.id, 'delivered']]);
     expect(receipts[0]?.detail).toContain('disk full');
-    expect(receipts[1]?.subscriptionId).toBe(second.id);
   });
 
   test('two records for one endpoint receive the message once', async () => {
@@ -169,6 +201,7 @@ describe('which endpoints may be registered and sent to', () => {
       'https://169.254.169.254/latest/meta-data/',
       'https://10.0.0.5/x',
       'http://push.example/x',
+      'https://user:secret@push.example/x',
     ]) {
       await expect(register(store, endpoint)).rejects.toBeInstanceOf(PushSubscriptionValidationError);
     }

@@ -201,9 +201,11 @@ self.addEventListener('fetch', (event) => {
 // ─── Web Push ─────────────────────────────────────────────────────────
 //
 // The daemon sends a JSON payload shaped like the platform's PushMessage
-// ({ title, body, data }). For an approval the daemon sets
-// data = { kind: 'approval', approvalId }. We render the notification and, on
-// tap, deep-link to the view that action lives in.
+// ({ title, body, data }). data.kind is 'approval' (with approvalId),
+// 'needs-input' or 'completion' (with nodeId and, when known, sessionId); a
+// needs-input reminder sent because nobody answered carries escalated: true.
+// We render the notification and, on tap, deep-link to the view that action
+// lives in.
 
 self.addEventListener('push', (event) => {
   let payload;
@@ -221,15 +223,21 @@ self.addEventListener('push', (event) => {
   // buttons do NOT approve in the background: notificationclick hands off to the
   // authenticated app, which makes the real call (see docs/push-approval-actions.md).
   const isApproval = data.kind === 'approval' && typeof data.approvalId === 'string' && data.approvalId;
-  // needs-input carries no in-notification action (the operator has to look at the
-  // process to answer it), a tap just deep-links to the focused Fleet node. Tag it
-  // by node id so repeated blocks on the same node coalesce instead of stacking.
-  const isNeedsInput = data.kind === 'needs-input' && typeof data.nodeId === 'string' && data.nodeId;
+  // needs-input and completion carry no in-notification action, a tap just
+  // deep-links to the focused Fleet node. Tag them by node id so repeated pushes
+  // about the same node coalesce instead of stacking.
+  const hasNode = typeof data.nodeId === 'string' && data.nodeId;
   const tag = typeof data.approvalId === 'string'
     ? `approval-${data.approvalId}`
-    : isNeedsInput
+    : hasNode && data.kind === 'needs-input'
       ? `needs-input-${data.nodeId}`
-      : undefined;
+      : hasNode && data.kind === 'completion'
+        ? `completion-${data.nodeId}`
+        : undefined;
+  // An escalated reminder replaces the earlier notification under the same tag;
+  // renotify makes it sound and vibrate again instead of updating silently, and
+  // requireInteraction keeps it on screen where the platform supports that.
+  const escalated = data.escalated === true && tag !== undefined;
   event.waitUntil(
     self.registration.showNotification(title, {
       body,
@@ -237,6 +245,8 @@ self.addEventListener('push', (event) => {
       icon: '/icons/icon-192.png',
       badge: '/icons/icon-192.png',
       tag,
+      renotify: escalated ? true : undefined,
+      requireInteraction: escalated ? true : undefined,
       actions: isApproval
         ? [
             { action: 'approve', title: 'Allow' },
@@ -248,8 +258,9 @@ self.addEventListener('push', (event) => {
 });
 
 // Map a notification's data onto an in-app URL. Kept in sync with the pure
-// helper src/lib/push/notification-link.ts (unit-tested there); this copy is
-// what the service-worker runtime actually executes. The `.startsWith('/')` guard
+// helper src/lib/push/notification-link.ts; src/lib/push/sw.test.ts runs this
+// copy against that helper for every notification kind. This copy is what the
+// service-worker runtime actually executes. The `.startsWith('/')` guard
 // is load-bearing, not decorative: without it an absolute `data.url` (e.g. from a
 // malicious or malformed push payload) would have the SW open an external site on
 // a notification tap. src/lib/push/sw.test.ts loads and executes THIS file (not a
@@ -268,10 +279,11 @@ function linkForNotification(data, action) {
     return '/?view=approvals-tasks#approval-action=' + action + '&approval-id=' + encodeURIComponent(data.approvalId);
   }
   if (data && data.kind === 'approval') return '/?view=approvals-tasks';
-  // needs-input: a fleet node blocked on the operator. Deep-link to the Fleet view
-  // focused on that node (carrying its session id when known). Kept in sync with the
-  // pure helper src/lib/push/notification-link.ts (unit-tested there).
-  if (data && data.kind === 'needs-input') {
+  // needs-input (a fleet node blocked on the operator) and completion (a tracked
+  // run that finished): deep-link to the Fleet view focused on that node (carrying
+  // its session id when known). Kept in sync with the pure helper
+  // src/lib/push/notification-link.ts; src/lib/push/sw.test.ts compares the two.
+  if (data && (data.kind === 'needs-input' || data.kind === 'completion')) {
     if (typeof data.nodeId === 'string' && data.nodeId.length > 0) {
       var nodePart = 'fleet-node=' + encodeURIComponent(data.nodeId);
       var sessionPart = typeof data.sessionId === 'string' && data.sessionId.length > 0

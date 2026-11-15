@@ -2,18 +2,17 @@
  * routes/push-composition.ts
  *
  * Builds the daemon's one `PushService`: VAPID key custody, the subscription
- * store with its housekeeping wired, and the live config reads the delivery and
- * escalation paths make per event.
+ * store, and the live config reads the delivery and escalation paths make per
+ * event.
  *
  * Split out of register-gateway-verb-groups.ts so the composition root stays a
  * registration index rather than also being the place push policy is assembled.
  *
- * Every config read here is LIVE, evaluated per event or per sweep, never
+ * Every config read here is LIVE, evaluated per event or per write, never
  * captured at construction, so changing `push.*` or `notifications.push*`
- * takes effect without restarting the daemon. The exceptions are
- * `push.subscriptions.sweepIntervalMinutes` (the sweep timer is created once)
- * and `push.vapidSubject` (the VAPID manager is built with it once); a new
- * value for either applies from the next daemon start.
+ * takes effect without restarting the daemon. The exception is
+ * `push.vapidSubject` (the VAPID manager is built with it once); a new value
+ * applies from the next daemon start.
  */
 import {
   DEFAULT_PUSH_ESCALATION,
@@ -27,7 +26,6 @@ import {
 } from '../../push/index.js';
 import type { ConfigManager } from '../../config/manager.js';
 import type { ConfigKey } from '../../config/schema.js';
-import type { DisposalRegistry } from '../../runtime/disposal.js';
 import { logger } from '../../utils/logger.js';
 import { controlPlaneStorePath } from '../control-plane-store-paths.js';
 
@@ -43,15 +41,11 @@ export interface PushCompositionDeps {
   /** Explicit VAPID `sub` override; absent ⇒ the `push.vapidSubject` config key. */
   readonly vapidSubject?: string | undefined;
   /**
-   * Where the subscription store's periodic sweep registers its stop. Present
-   * when composed from a runtime graph that can be torn down; absent in narrow
-   * compositions, whose caller owns the store directly.
+   * The daemon's receipt store: a reason the daemon itself cannot send pushes
+   * (an unreadable key pair) is recorded there for the next attached surface.
    */
-  readonly disposal?: DisposalRegistry | undefined;
+  readonly daemonReceipts?: { record(text: string): unknown } | undefined;
 }
-
-/** Default sweep cadence when the config key is absent or nonsense (minutes). */
-const DEFAULT_SWEEP_INTERVAL_MINUTES = 60;
 
 function readNumber(deps: PushCompositionDeps, key: ConfigKey, fallback: number): number {
   const value = deps.configManager?.get(key);
@@ -59,9 +53,9 @@ function readNumber(deps: PushCompositionDeps, key: ConfigKey, fallback: number)
 }
 
 /**
- * The consecutive-failure bound both the housekeeping sweep and the delivery
- * path prune on. One reading of the config key for both, so a hand-edited 0 or
- * negative value cannot make the sweep treat every subscription (with zero
+ * The consecutive-rejection bound both the store's read filter and the delivery
+ * path remove on. One reading of the config key for both, so a hand-edited 0 or
+ * negative value cannot make the store treat every subscription (with zero
  * failures) as dead while delivery falls back to its default.
  */
 export function resolveFailureThreshold(deps: PushCompositionDeps): number {
@@ -93,9 +87,8 @@ export function resolveVapidSubject(deps: PushCompositionDeps): string | undefin
 }
 
 /**
- * The subscription store with housekeeping running: reaped on recovery before
- * any push verb is served, then swept on the configured interval, a daemon
- * that only swept at boot would never sweep at all.
+ * The subscription store. Dead records are left out of every read and dropped
+ * by the next write, so it needs no timer.
  *
  * `warnAbovePerPrincipal` is a WARNING line, never a cap: nothing that still
  * works is ever removed to make room (see push/subscription-housekeeping.ts).
@@ -109,19 +102,10 @@ export function createPushSubscriptionStore(deps: PushCompositionDeps): PushSubs
     ),
     failureThreshold: resolveFailureThreshold(deps),
   });
-  const store = new PushSubscriptionStore(
+  return new PushSubscriptionStore(
     controlPlaneStorePath(deps.shellPaths, deps.surfaceRoot, 'push-subscriptions.json'),
     { policy },
   );
-  void store.runRecoverySweep().catch((error) => {
-    logger.warn('Push subscription recovery sweep failed', {
-      error: error instanceof Error ? error.message : String(error),
-    });
-  });
-  const minutes = readNumber(deps, 'push.subscriptions.sweepIntervalMinutes', DEFAULT_SWEEP_INTERVAL_MINUTES);
-  store.startPeriodicSweep((minutes > 0 ? minutes : DEFAULT_SWEEP_INTERVAL_MINUTES) * 60_000);
-  deps.disposal?.add('push subscription sweep', () => store.stopPeriodicSweep());
-  return store;
 }
 
 /** The daemon's one PushService, with every policy read wired live to config. */
@@ -130,8 +114,9 @@ export function createPushService(deps: PushCompositionDeps): PushService {
   return new PushService({
     vapid: new VapidManager(deps.secretsManager, { subject: resolveVapidSubject(deps) }),
     store,
-    // The bounded-failure threshold the delivery path prunes on, read live from
-    // the same config key housekeeping uses so the two cannot disagree about
+    receipts: deps.daemonReceipts,
+    // The rejection bound the delivery path removes on, read live from the same
+    // config key the store's read filter uses so the two cannot disagree about
     // when a push service has proved an endpoint dead.
     failureThreshold: () => resolveFailureThreshold(deps),
     // Per-class silencing toggles (notifications.push*), read live per event.

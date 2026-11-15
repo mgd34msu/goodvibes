@@ -7,41 +7,33 @@
  * daemon's own state directory, never on the wire.
  *
  * Delete means delete: `remove()` drops the record entirely (it does not flag a
- * tombstone), and `list()` cannot return it afterward. Pruning a dead endpoint
- * uses the same `remove()` path.
+ * tombstone), and `list()` cannot return it afterward.
  *
- * Housekeeping (see subscription-housekeeping.ts for the full rationale):
- *  - Content is validated at REGISTRATION, so a record that could never receive
- *    a push is refused with a plain reason instead of being stored and failing
- *    weeks later at delivery time.
- *  - `sweep()` removes only records that are PROVABLY dead, unusable key
- *    material, a torn record, or a push service that has refused it past the
- *    bounded-failure threshold. There is no age TTL and no eviction to make
- *    room: a quiet device that still works is never removed, so nobody ever has
- *    to resubscribe.
- *  - Every sweep discloses what it removed and the evidence, and runs on
- *    recovery AND on a timer.
+ * Dead records (see subscription-housekeeping.ts for what counts as evidence)
+ * are left out of every read, and dropped from the file by whichever write
+ * happens next: a registration, a delete, or the outcome stamp of a delivery.
+ * There is no timer and no separate sweep. The latest removal per principal is
+ * kept in the same file so `push.subscriptions.list` can say why a device
+ * stopped receiving.
  *
  * Concurrency: there is no process-local cache. Every read goes to disk, so a
  * revocation takes effect on the very next lookup rather than after a restart.
- * Every read-modify-write runs under BOTH an in-process queue and the advisory
- * lock file the checkpoint store uses (`<store>.json.lock`), so a second
- * daemon's registration cannot be clobbered by this one's sweep, and two sweeps
- * over the same file cannot interleave.
+ * Every read-modify-write runs under an in-process queue and the process lock
+ * (`<store>.json.writer.sqlite`, released by the kernel if the process dies),
+ * so a second daemon's registration cannot be clobbered by this one's write.
  */
 
 import { randomUUID } from 'node:crypto';
 import { PersistentStore } from '../state/persistent-store.js';
-import { acquireCrossProcessLock } from '../workspace/checkpoint/cross-process-lock.js';
+import { withProcessLock } from '../utils/process-lock.js';
 import { logger } from '../utils/logger.js';
 import {
   DEFAULT_PUSH_SUBSCRIPTION_POLICY,
-  PushHousekeepingDisclosure,
-  decidePushSweep,
-  housekeepingPathFor,
-  summarizePushSweep,
+  endpointOriginOf,
+  findDeadPushRecords,
+  removalOf,
   type PushSubscriptionPolicy,
-  type PushSubscriptionSweepReport,
+  type PushSubscriptionRemoval,
 } from './subscription-housekeeping.js';
 import { assertUsableSubscription } from './subscription-validation.js';
 import type {
@@ -53,6 +45,8 @@ import type {
 
 interface SubscriptionSnapshot extends Record<string, unknown> {
   readonly subscriptions: readonly StoredPushSubscription[];
+  /** The latest removal of each principal's devices, keyed by principal id. */
+  readonly lastRemovals?: Readonly<Record<string, PushSubscriptionRemoval>> | undefined;
 }
 
 export interface RegisterSubscriptionInput {
@@ -71,20 +65,40 @@ export interface ReconcileResult {
 
 /** Construction knobs; all optional so the stock store is one path argument. */
 export interface PushSubscriptionStoreOptions {
-  /** Housekeeping policy; absent ⇒ {@link DEFAULT_PUSH_SUBSCRIPTION_POLICY}. */
+  /** Policy; absent ⇒ {@link DEFAULT_PUSH_SUBSCRIPTION_POLICY}. */
   readonly policy?: (() => PushSubscriptionPolicy) | PushSubscriptionPolicy | undefined;
-  /** Where sweep disclosure is written; absent ⇒ `<store>-housekeeping.json`. */
-  readonly disclosurePath?: string | undefined;
-  /** Clock seam so disclosure timestamps are deterministic under test. */
+  /** Clock seam so removal timestamps are deterministic under test. */
   readonly now?: (() => number) | undefined;
 }
 
-function endpointOrigin(endpoint: string): string {
-  try {
-    return new URL(endpoint).origin;
-  } catch {
-    return 'invalid';
-  }
+/**
+ * What one delivery attempt proved about a subscription, applied by
+ * {@link PushSubscriptionStore.applyOutcomes}.
+ *  - `delivered`: the push service accepted it; the rejection count resets.
+ *  - `unproven`: it failed for a reason that says nothing about the endpoint (a
+ *    network error, a timeout, 408, 413, 429, a 5xx); recorded, never counted.
+ *  - `rejected`: the push service refused the endpoint; counted toward the bound.
+ *  - `gone`: the push service answered 404 or 410; the record is removed.
+ */
+export interface PushOutcomeStamp {
+  readonly subscriptionId: string;
+  readonly evidence: 'delivered' | 'unproven' | 'rejected' | 'gone';
+  /** Plain-language reason, written into the removal when the record is dropped. */
+  readonly detail: string;
+}
+
+/** What a stamp did to its record. */
+export interface AppliedPushOutcome {
+  /** Consecutive rejections after the stamp (0 after a delivery). */
+  readonly consecutiveFailures: number;
+  /** Present when the stamp removed the record. */
+  readonly removed?: PushSubscriptionRemoval | undefined;
+}
+
+/** A principal's devices and the latest removal among them: the push status. */
+export interface PushSubscriptionStatus {
+  readonly subscriptions: PublicPushSubscription[];
+  readonly lastRemoval?: PushSubscriptionRemoval | undefined;
 }
 
 /** The redacted, wire-safe projection of a stored subscription. */
@@ -93,7 +107,7 @@ export function toPublicSubscription(record: StoredPushSubscription): PublicPush
     id: record.id,
     principalId: record.principalId,
     ...(record.deviceId !== undefined ? { deviceId: record.deviceId } : {}),
-    endpointOrigin: endpointOrigin(record.endpoint),
+    endpointOrigin: endpointOriginOf(record.endpoint),
     createdAt: record.createdAt,
     lastDeliveryAt: record.lastDeliveryAt,
     lastOutcome: record.lastOutcome,
@@ -103,20 +117,16 @@ export function toPublicSubscription(record: StoredPushSubscription): PublicPush
 
 export class PushSubscriptionStore {
   private readonly store: PersistentStore<SubscriptionSnapshot>;
-  /** `<store>.json.lock`, the cross-process mutex, or null for an in-memory store. */
+  /** The cross-process lock file, or null for an in-memory store. */
   private readonly lockPath: string | null;
-  private readonly disclosure: PushHousekeepingDisclosure;
   private readonly policy: () => PushSubscriptionPolicy;
   private readonly now: () => number;
-  /** Serializes in-process mutations so a sweep and a register cannot interleave. */
+  /** Serializes in-process mutations so two writes cannot interleave. */
   private queue: Promise<unknown> = Promise.resolve();
-  private timer: ReturnType<typeof setInterval> | null = null;
-  private lastReport: PushSubscriptionSweepReport | null = null;
 
   constructor(filePath: string, options: PushSubscriptionStoreOptions = {}) {
     this.store = new PersistentStore<SubscriptionSnapshot>(filePath);
-    this.lockPath = filePath === ':memory:' ? null : `${filePath}.lock`;
-    this.disclosure = new PushHousekeepingDisclosure(options.disclosurePath ?? housekeepingPathFor(filePath));
+    this.lockPath = filePath === ':memory:' ? null : `${filePath}.writer.sqlite`;
     const policy = options.policy;
     this.policy = typeof policy === 'function'
       ? policy
@@ -124,38 +134,28 @@ export class PushSubscriptionStore {
     this.now = options.now ?? ((): number => Date.now());
   }
 
-  /** Raw records straight from disk, unfiltered. */
-  private async loadRaw(): Promise<unknown[]> {
+  private async loadSnapshot(): Promise<{ raw: unknown[]; lastRemovals: Record<string, PushSubscriptionRemoval> }> {
     const snapshot = await this.store.load();
-    return Array.isArray(snapshot?.subscriptions) ? [...snapshot.subscriptions] : [];
+    const raw = Array.isArray(snapshot?.subscriptions) ? [...snapshot.subscriptions] : [];
+    const stored = snapshot?.lastRemovals;
+    const lastRemovals = stored !== null && typeof stored === 'object' && !Array.isArray(stored) ? { ...stored } : {};
+    return { raw, lastRemovals };
   }
 
-  /**
-   * Records from disk with the provably-dead ones filtered out of the RESULT
-   * (they are removed from the file by `sweep()`, not by a read). A read never
-   * serves a record that could not receive a push.
-   */
+  /** Records from disk with the provably dead ones left out. A read never serves a dead record. */
   private async loadUsable(): Promise<StoredPushSubscription[]> {
-    return decidePushSweep(await this.loadRaw(), this.policy(), this.now()).kept;
+    return findDeadPushRecords((await this.loadSnapshot()).raw, this.policy(), this.now()).kept;
   }
 
   /**
    * Run `fn` as the only read-modify-write against this file, in this process
-   * AND across processes. The in-process chain orders callers here; the
-   * advisory lock file (the same one the checkpoint store uses) keeps a second
-   * daemon's registration from being clobbered by this one's sweep. An
-   * in-memory store has no file to contend on and takes the chain only.
+   * and across processes. An in-memory store has no file to contend on and
+   * takes the in-process chain only.
    */
   private run<T>(fn: () => Promise<T>): Promise<T> {
-    const guarded = async (): Promise<T> => {
+    const guarded = (): Promise<T> => {
       const lockPath = this.lockPath;
-      if (!lockPath) return fn();
-      const release = await acquireCrossProcessLock(lockPath, { totalTimeoutMs: 10_000 });
-      try {
-        return await fn();
-      } finally {
-        release();
-      }
+      return lockPath ? withProcessLock(lockPath, fn) : fn();
     };
     const next = this.queue.then(guarded, guarded);
     // Keep the chain alive after a rejection so one failure does not wedge the store.
@@ -163,8 +163,40 @@ export class PushSubscriptionStore {
     return next;
   }
 
-  private async persist(records: readonly StoredPushSubscription[]): Promise<void> {
-    await this.store.persist({ subscriptions: records });
+  /**
+   * Read the file for a write: the live records, the removal history, and the
+   * dead records this write drops along the way.
+   */
+  private async loadForWrite(): Promise<{
+    records: StoredPushSubscription[];
+    lastRemovals: Record<string, PushSubscriptionRemoval>;
+    removed: PushSubscriptionRemoval[];
+  }> {
+    const { raw, lastRemovals } = await this.loadSnapshot();
+    const decision = findDeadPushRecords(raw, this.policy(), this.now());
+    return { records: decision.kept, lastRemovals, removed: decision.removed };
+  }
+
+  /** Write the records, noting and logging every removal this write carries. */
+  private async persist(
+    records: readonly StoredPushSubscription[],
+    lastRemovals: Record<string, PushSubscriptionRemoval>,
+    removed: readonly PushSubscriptionRemoval[],
+  ): Promise<void> {
+    for (const removal of removed) {
+      lastRemovals[removal.principalId] = removal;
+      logger.info('Push subscription removed', {
+        subscriptionId: removal.subscriptionId,
+        principalId: removal.principalId,
+        endpointOrigin: removal.endpointOrigin,
+        reason: removal.reason,
+        evidence: removal.evidence,
+      });
+    }
+    await this.store.persist({
+      subscriptions: records,
+      ...(Object.keys(lastRemovals).length > 0 ? { lastRemovals } : {}),
+    });
   }
 
   /**
@@ -203,19 +235,16 @@ export class PushSubscriptionStore {
    * identity, healing a stale record in place, and report what drifted so the
    * client learns whether the daemon had been holding an out-of-date endpoint.
    *
-   * A registration is NEVER refused for crowding. When a principal is already
-   * above the warning threshold, housekeeping first removes anything provably
-   * dead; if that frees nothing, the new device is accepted anyway and the
-   * crowding is logged and disclosed. Trading a working device for a new one
-   * would silently stop notifications on a device nobody unsubscribed.
+   * A registration is NEVER refused for crowding: above the warning threshold
+   * the new device is accepted and the count is logged. Trading a working
+   * device for a new one would silently stop notifications on a device nobody
+   * unsubscribed.
    */
   async reconcile(input: RegisterSubscriptionInput): Promise<ReconcileResult> {
     assertUsableSubscription({ endpoint: input.endpoint, keys: input.keys });
     return this.run(async () => {
       const policy = this.policy();
-      const now = this.now();
-      const decision = decidePushSweep(await this.loadRaw(), policy, now);
-      const records = decision.kept;
+      const { records, lastRemovals, removed } = await this.loadForWrite();
       let existingIndex = this.matchIndex(records, input);
       let mergedDuplicates = false;
       if (existingIndex >= 0) {
@@ -234,8 +263,7 @@ export class PushSubscriptionStore {
         const keysChanged = prior.keys.p256dh !== input.keys.p256dh || prior.keys.auth !== input.keys.auth;
         const deviceIdAdopted = input.deviceId !== undefined && prior.deviceId !== input.deviceId;
         if (!endpointChanged && !keysChanged && !deviceIdAdopted && !mergedDuplicates
-          && (prior.consecutiveFailures ?? 0) === 0 && decision.removed.length === 0) {
-          await this.discloseRegistrationPass(decision, now);
+          && (prior.consecutiveFailures ?? 0) === 0 && removed.length === 0) {
           return { record: prior, drift: 'unchanged' };
         }
         const updated: StoredPushSubscription = {
@@ -243,12 +271,11 @@ export class PushSubscriptionStore {
           endpoint: input.endpoint,
           keys: input.keys,
           ...(input.deviceId !== undefined ? { deviceId: input.deviceId } : {}),
-          // A live client resets the bounded-retry failure counter.
+          // A live client resets the rejection counter.
           consecutiveFailures: 0,
         };
         records[existingIndex] = updated;
-        await this.persist(records);
-        await this.discloseRegistrationPass(decision, now);
+        await this.persist(records, lastRemovals, removed);
         const drift: PushReconcileDrift = endpointChanged
           ? 'endpoint-updated'
           : keysChanged
@@ -262,10 +289,10 @@ export class PushSubscriptionStore {
         ...(input.deviceId !== undefined ? { deviceId: input.deviceId } : {}),
         endpoint: input.endpoint,
         keys: input.keys,
-        createdAt: now,
+        createdAt: this.now(),
       };
       records.push(record);
-      await this.persist(records);
+      await this.persist(records, lastRemovals, removed);
       const held = records.filter((r) => r.principalId === input.principalId).length;
       if (held > policy.warnAbovePerPrincipal) {
         logger.warn('Push subscriptions above the per-principal warning threshold', {
@@ -275,44 +302,30 @@ export class PushSubscriptionStore {
           note: 'accepted anyway, no working subscription is ever removed to make room',
         });
       }
-      await this.discloseRegistrationPass(
-        {
-          kept: records,
-          removed: decision.removed,
-          crowded: held > policy.warnAbovePerPrincipal
-            ? [{ principalId: input.principalId, count: held, warnAbove: policy.warnAbovePerPrincipal }]
-            : [],
-        },
-        now,
-      );
       return { record, drift: 'created' };
     });
   }
 
-  /** Disclose whatever a registration-time pass reaped or flagged. */
-  private async discloseRegistrationPass(
-    decision: { kept: StoredPushSubscription[]; removed: PushSubscriptionSweepReport['removed']; crowded: PushSubscriptionSweepReport['crowded'] },
-    now: number,
-  ): Promise<void> {
-    if (decision.removed.length === 0 && decision.crowded.length === 0) return;
-    const report: PushSubscriptionSweepReport = {
-      sweptAt: now,
-      trigger: 'registration',
-      removed: decision.removed,
-      retained: decision.kept.length,
-      crowded: decision.crowded,
-      summary: summarizePushSweep({ kept: decision.kept, removed: [...decision.removed], crowded: [...decision.crowded] }),
-    };
-    this.lastReport = report;
-    await this.disclosure.record(report);
-  }
-
   /** All subscriptions for a principal, redacted for the wire. */
   async listPublic(principalId: string): Promise<PublicPushSubscription[]> {
-    const records = await this.loadUsable();
-    return records
-      .filter((r) => r.principalId === principalId)
-      .map(toPublicSubscription);
+    return (await this.status(principalId)).subscriptions;
+  }
+
+  /** A principal's devices and the latest removal among them, from one read. */
+  async status(principalId: string): Promise<PushSubscriptionStatus> {
+    const { raw, lastRemovals } = await this.loadSnapshot();
+    const now = this.now();
+    const decision = findDeadPushRecords(raw, this.policy(), now);
+    // A record that is dead but not yet dropped by a write is already gone for
+    // every reader, so it is reported as the removal it is about to be.
+    let lastRemoval = lastRemovals[principalId];
+    for (const pending of decision.removed) {
+      if (pending.principalId === principalId) lastRemoval = pending;
+    }
+    return {
+      subscriptions: decision.kept.filter((r) => r.principalId === principalId).map(toPublicSubscription),
+      ...(lastRemoval ? { lastRemoval } : {}),
+    };
   }
 
   /** The full record (endpoint + keys) for a delivery. Not for the wire. */
@@ -334,116 +347,76 @@ export class PushSubscriptionStore {
    */
   async remove(id: string, principalId?: string): Promise<boolean> {
     return this.run(async () => {
-      const records = (await this.loadRaw()).filter((r): r is StoredPushSubscription => r !== null && typeof r === 'object');
+      const { records, lastRemovals, removed } = await this.loadForWrite();
       const index = records.findIndex(
         (r) => r.id === id && (principalId === undefined || r.principalId === principalId),
       );
-      if (index < 0) return false;
+      if (index < 0) {
+        if (removed.length > 0) await this.persist(records, lastRemovals, removed);
+        return false;
+      }
       records.splice(index, 1);
-      await this.persist(records);
+      await this.persist(records, lastRemovals, removed);
       return true;
     });
   }
 
   /**
-   * Record the outcome of the last delivery attempt against a subscription. A
-   * `delivered` outcome resets the consecutive-failure counter; a `failed`
-   * outcome increments it (the bounded-retry counter the delivery path prunes
-   * on). Returns the resulting consecutive-failure count so the delivery path
-   * can decide whether the bounded retries are exhausted.
+   * Stamp the outcomes of one delivery attempt (one device, or a whole fan-out)
+   * in one write. A `gone` stamp removes its record; a `rejected` stamp counts
+   * toward `failureThreshold` and removes the record at the bound; `unproven`
+   * records the attempt and leaves the count alone; `delivered` resets it. A
+   * stamp for a record that is no longer stored is ignored.
    */
-  async recordOutcome(id: string, outcome: StoredPushSubscription['lastOutcome']): Promise<number> {
+  async applyOutcomes(
+    stamps: readonly PushOutcomeStamp[],
+    failureThreshold: number,
+  ): Promise<ReadonlyMap<string, AppliedPushOutcome>> {
+    const applied = new Map<string, AppliedPushOutcome>();
+    if (stamps.length === 0) return applied;
     return this.run(async () => {
-      const records = (await this.loadRaw()).filter((r): r is StoredPushSubscription => r !== null && typeof r === 'object');
-      const index = records.findIndex((r) => r.id === id);
-      if (index < 0) return 0;
-      const prior = records[index] as StoredPushSubscription;
-      const consecutiveFailures = outcome === 'failed'
-        ? (prior.consecutiveFailures ?? 0) + 1
-        : outcome === 'delivered'
-          ? 0
-          : (prior.consecutiveFailures ?? 0);
-      records[index] = { ...prior, lastDeliveryAt: this.now(), lastOutcome: outcome, consecutiveFailures };
-      await this.persist(records);
-      return consecutiveFailures;
-    });
-  }
-
-  /** The most recent report this process produced, or null before the first pass. */
-  getLastReport(): PushSubscriptionSweepReport | null {
-    return this.lastReport;
-  }
-
-  /** Disclosure history from disk, newest last. */
-  listDisclosures(): Promise<readonly PushSubscriptionSweepReport[]> {
-    return this.disclosure.list();
-  }
-
-  /**
-   * One housekeeping pass: remove every record that is provably dead, keep
-   * everything else, and disclose the result. Idempotent, a second pass over
-   * the same file removes nothing. Safe to run concurrently with another
-   * process: removals are computed by id and applied to a fresh read, so a
-   * record registered in between survives.
-   */
-  async sweep(trigger: PushSubscriptionSweepReport['trigger'] = 'manual'): Promise<PushSubscriptionSweepReport> {
-    return this.run(async () => {
-      const policy = this.policy();
       const now = this.now();
-      const decision = decidePushSweep(await this.loadRaw(), policy, now);
-      if (decision.removed.length > 0) {
-        const doomed = new Set(decision.removed.map((r) => r.subscriptionId));
-        const fresh = decidePushSweep(await this.loadRaw(), policy, now).kept;
-        await this.persist(fresh.filter((r) => !doomed.has(r.id)));
-      }
-      const report: PushSubscriptionSweepReport = {
-        sweptAt: now,
-        trigger,
-        removed: decision.removed,
-        retained: decision.kept.length,
-        crowded: decision.crowded,
-        summary: summarizePushSweep(decision),
-      };
-      this.lastReport = report;
-      await this.disclosure.record(report);
-      if (decision.removed.length > 0 || decision.crowded.length > 0) {
-        logger.info('Push subscription housekeeping', { trigger, summary: report.summary });
-      }
-      return report;
-    });
-  }
-
-  /**
-   * The recovery pass. Runs before any push verb is served, so a record left
-   * torn by a crash, or one the delivery path had already proved dead when the
-   * process died mid-prune, is removed rather than served.
-   */
-  runRecoverySweep(): Promise<PushSubscriptionSweepReport> {
-    return this.sweep('recovery');
-  }
-
-  /**
-   * Keep sweeping on an interval. A long-lived daemon that only swept at boot
-   * would never sweep at all, so this is not optional wiring. The timer is
-   * unref'd, a pending sweep never holds the process open.
-   */
-  startPeriodicSweep(intervalMs: number): void {
-    this.stopPeriodicSweep();
-    if (!Number.isFinite(intervalMs) || intervalMs <= 0) return;
-    this.timer = setInterval(() => {
-      void this.sweep('periodic').catch((error) => {
-        logger.warn('Push subscription sweep failed', {
-          error: error instanceof Error ? error.message : String(error),
+      const { records, lastRemovals, removed } = await this.loadForWrite();
+      const byId = new Map(stamps.map((stamp) => [stamp.subscriptionId, stamp]));
+      const kept: StoredPushSubscription[] = [];
+      for (const prior of records) {
+        const stamp = byId.get(prior.id);
+        if (!stamp) {
+          kept.push(prior);
+          continue;
+        }
+        if (stamp.evidence === 'gone') {
+          const removal = removalOf(prior, 'gone', stamp.detail, now);
+          removed.push(removal);
+          applied.set(prior.id, { consecutiveFailures: prior.consecutiveFailures ?? 0, removed: removal });
+          continue;
+        }
+        const consecutiveFailures = stamp.evidence === 'delivered'
+          ? 0
+          : stamp.evidence === 'rejected'
+            ? (prior.consecutiveFailures ?? 0) + 1
+            : (prior.consecutiveFailures ?? 0);
+        if (stamp.evidence === 'rejected' && consecutiveFailures >= failureThreshold) {
+          const removal = removalOf(
+            prior,
+            'failure-threshold',
+            `${stamp.detail}; the push service rejected ${consecutiveFailures} consecutive deliveries (bound ${failureThreshold})`,
+            now,
+          );
+          removed.push(removal);
+          applied.set(prior.id, { consecutiveFailures, removed: removal });
+          continue;
+        }
+        kept.push({
+          ...prior,
+          lastDeliveryAt: now,
+          lastOutcome: stamp.evidence === 'delivered' ? 'delivered' : 'failed',
+          consecutiveFailures,
         });
-      });
-    }, intervalMs);
-    this.timer.unref?.();
-  }
-
-  stopPeriodicSweep(): void {
-    if (this.timer) {
-      clearInterval(this.timer);
-      this.timer = null;
-    }
+        applied.set(prior.id, { consecutiveFailures });
+      }
+      await this.persist(kept, lastRemovals, removed);
+      return applied;
+    });
   }
 }

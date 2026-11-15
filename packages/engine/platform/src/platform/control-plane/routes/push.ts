@@ -26,7 +26,7 @@ import { readInvocationParams } from './invocation-params.js';
 /** The narrow slice of PushService these verbs need. */
 export type PushGatewayService = Pick<
   PushService,
-  'getPublicKey' | 'subscribe' | 'reconcile' | 'listSubscriptions' | 'unsubscribe' | 'verify'
+  'getPublicKey' | 'subscribe' | 'reconcile' | 'status' | 'unsubscribe' | 'verify'
 >;
 
 function requirePrincipal(invocation: GatewayMethodInvocation): string {
@@ -132,7 +132,7 @@ function createReconcileHandler(service: PushGatewayService): GatewayMethodHandl
 function createListHandler(service: PushGatewayService): GatewayMethodHandler {
   return async (invocation) => {
     const principalId = requirePrincipal(invocation);
-    return { subscriptions: await service.listSubscriptions(principalId) };
+    return await service.status(principalId);
   };
 }
 

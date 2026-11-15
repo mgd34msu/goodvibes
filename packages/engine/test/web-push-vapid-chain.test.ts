@@ -554,13 +554,13 @@ describe('web push: failure handling distinguishes gone from broken', () => {
     expect(receipt.outcome).toBe('failed');
     expect(receipt.httpStatus).toBe(500);
 
-    // Still there, with an honest failure counter, not deleted, not retried away.
+    // Still there, the failure recorded; a 5xx says nothing about the endpoint, so it is not counted.
     const list = await invokeVerb('push.subscriptions.list');
     const mine = (list.json.subscriptions as ReadonlyArray<{ id: string; consecutiveFailures?: number; lastOutcome?: string }>)
       .find((s) => s.id === id);
     expect(mine).toBeDefined();
     expect(mine?.lastOutcome).toBe('failed');
-    expect(mine?.consecutiveFailures).toBe(1);
+    expect(mine?.consecutiveFailures ?? 0).toBe(0);
 
     await invokeVerb('push.subscriptions.delete', { subscriptionId: id });
   });

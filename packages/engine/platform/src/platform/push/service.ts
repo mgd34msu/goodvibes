@@ -11,6 +11,10 @@
  *    faked as sent.
  *  - A subscription whose endpoint is gone (404/410) is pruned by the delivery
  *    path and reported as `pruned`.
+ *  - An approval, needs-input or completion push that reaches no registered
+ *    device logs one warning naming the causes; when the cause is the daemon's
+ *    own (an unreadable key pair, say) it is also recorded as a daemon receipt,
+ *    so the next attached surface shows it with its recovery step.
  *  - VAPID keys are minted lazily on first real need; a daemon that never uses
  *    push never generates or stores a key.
  */
@@ -18,7 +22,7 @@
 import { logger } from '../utils/logger.js';
 import { deliverToAll, deliverToSubscription, type DeliveryDeps, type PushTransport } from './delivery.js';
 import type { DeliveryLifetime } from '../utils/delivery-lifetime.js';
-import { PushSubscriptionStore, toPublicSubscription } from './subscription-store.js';
+import { PushSubscriptionStore, toPublicSubscription, type PushSubscriptionStatus } from './subscription-store.js';
 import { VapidManager } from './vapid.js';
 import type {
   PublicPushSubscription,
@@ -181,14 +185,20 @@ export interface PushServiceDeps {
    */
   readonly escalation?: (() => PushEscalationConfig) | undefined;
   /**
-   * Consecutive refused deliveries after which an endpoint is treated as dead,
+   * Consecutive push-service rejections after which an endpoint is removed,
    * read LIVE per delivery (the composition root wires it to
-   * `push.subscriptions.failureThreshold`, the same key the subscription sweep
-   * reads). Absent ⇒ the delivery module's own bound.
+   * `push.subscriptions.failureThreshold`, the same key the store's read filter
+   * uses). Absent ⇒ the delivery module's own bound.
    */
   readonly failureThreshold?: (() => number) | undefined;
   /** Timer seam for escalation; absent ⇒ real `setTimeout`-based scheduler. */
   readonly scheduler?: EscalationScheduler | undefined;
+  /**
+   * The daemon's receipt store (platform/daemon/receipts.ts): a reason the
+   * daemon itself cannot send pushes is recorded here once, for the next
+   * surface that attaches. Absent ⇒ the warning in the log is all there is.
+   */
+  readonly receipts?: { record(text: string): unknown } | undefined;
   /** Clock seam so "how long has it waited" is deterministic under test. */
   readonly now?: (() => number) | undefined;
 }
@@ -224,6 +234,11 @@ export class PushService {
   private readonly escalationConfig: () => PushEscalationConfig;
   private readonly scheduler: EscalationScheduler;
   private readonly now: () => number;
+  private readonly receipts?: { record(text: string): unknown } | undefined;
+  /** The daemon's own reason it could not send, since the last report read it. */
+  private notSent: string | null = null;
+  /** The daemon-side cause last recorded as a receipt, so a repeat is not recorded again. */
+  private recordedNotSent: string | null = null;
 
   constructor(deps: PushServiceDeps) {
     this.vapid = deps.vapid;
@@ -234,6 +249,7 @@ export class PushService {
     this.escalationConfig = deps.escalation ?? ((): PushEscalationConfig => DEFAULT_PUSH_ESCALATION);
     this.scheduler = deps.scheduler ?? defaultEscalationScheduler();
     this.now = deps.now ?? Date.now;
+    this.receipts = deps.receipts;
   }
 
   /** The public VAPID key clients subscribe with. */
@@ -258,6 +274,11 @@ export class PushService {
 
   listSubscriptions(principalId: string): Promise<PublicPushSubscription[]> {
     return this.store.listPublic(principalId);
+  }
+
+  /** The principal's devices and the latest removal among them (`push.subscriptions.list`). */
+  status(principalId: string): Promise<PushSubscriptionStatus> {
+    return this.store.status(principalId);
   }
 
   /** Delete a subscription for a principal. False when the id was already absent. */
@@ -311,6 +332,45 @@ export class PushService {
     this.trackedBlocks.clear();
   }
 
+  /**
+   * Fan an event's push out without holding the event up, and say so when it
+   * reached no device: one warning per fan-out naming the distinct causes, and
+   * a daemon receipt the first time the daemon itself is the cause. A fan-out
+   * with no registered device is not a failure (push was never turned on).
+   */
+  private announce(event: string, context: Record<string, string>, message: PushMessage): void {
+    void this.deliver(message).then(
+      (receipts) => this.reportReach(event, context, receipts),
+      (error) => {
+        logger.warn(`PushService: ${event} fan-out failed`, {
+          ...context,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      },
+    );
+  }
+
+  private reportReach(event: string, context: Record<string, string>, receipts: readonly PushDeliveryReceipt[]): void {
+    const cause = this.notSent;
+    this.notSent = null;
+    if (receipts.length === 0) return;
+    if (receipts.some((receipt) => receipt.outcome === 'delivered')) {
+      this.recordedNotSent = null;
+      return;
+    }
+    const causes = [...new Set(receipts.flatMap((receipt) => (receipt.detail ? [receipt.detail] : [receipt.outcome])))];
+    logger.warn(`PushService: the ${event} push reached no device`, { ...context, devices: receipts.length, causes });
+    if (cause === null || cause === this.recordedNotSent) return;
+    this.recordedNotSent = cause;
+    try {
+      this.receipts?.record(`push notifications are not reaching any device: ${cause}`);
+    } catch (error) {
+      logger.warn('PushService: the push failure could not be recorded as a receipt', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
   /** Delivery dependencies with the bounded-failure threshold read live. */
   private deliveryDeps(): DeliveryDeps {
     const threshold = this.failureThreshold?.();
@@ -318,6 +378,7 @@ export class PushService {
       vapid: this.vapid,
       store: this.store,
       transport: this.transport,
+      onNotSent: (reason) => { this.notSent = reason; },
       ...(typeof threshold === 'number' ? { failureThreshold: threshold } : {}),
     };
   }
@@ -335,18 +396,12 @@ export class PushService {
       remember(this.notifiedApprovals, approval.id);
       const tool = approval.request?.tool ?? 'a tool';
       const summary = approval.request?.analysis?.summary ?? 'A pending action needs your decision.';
-      // Fire-and-forget: an approval must never block on a push, and a delivery
-      // failure is already captured as an honest receipt/outcome inside deliver().
-      void this.deliver({
+      // An approval must never wait on a push.
+      this.announce('approval', { approvalId: approval.id }, {
         title: 'Approval required',
         body: `${tool}: ${summary}`,
         data: { kind: 'approval', approvalId: approval.id },
         urgency: 'high',
-      }).catch((error) => {
-        logger.warn('PushService: approval fan-out failed', {
-          approvalId: approval.id,
-          error: error instanceof Error ? error.message : String(error),
-        });
       });
     });
   }
@@ -471,7 +526,7 @@ export class PushService {
     const body = escalated
       ? `${label} has been waiting ${formatWaited(waitedMs ?? 0)} and still ${reason}.`
       : `${label} ${reason}.`;
-    void this.deliver({
+    this.announce('needs-input', { nodeId: notice.nodeId }, {
       title: escalated ? 'Still waiting on you' : 'Input needed',
       body,
       data: {
@@ -481,11 +536,6 @@ export class PushService {
         ...(escalated ? { escalated: true } : {}),
       },
       urgency: 'high',
-    }).catch((error) => {
-      logger.warn('PushService: needs-input fan-out failed', {
-        nodeId: notice.nodeId,
-        error: error instanceof Error ? error.message : String(error),
-      });
     });
   }
 
@@ -516,7 +566,7 @@ export class PushService {
           : notice.state === 'killed'
             ? 'was killed'
             : 'finished';
-      void this.deliver({
+      this.announce('completion', { nodeId: notice.nodeId }, {
         title: notice.state === 'done' ? 'Run completed' : 'Run finished',
         body: `${label} ${outcome}.`,
         data: {
@@ -525,11 +575,6 @@ export class PushService {
           nodeId: notice.nodeId,
         },
         urgency: 'normal',
-      }).catch((error) => {
-        logger.warn('PushService: completion fan-out failed', {
-          nodeId: notice.nodeId,
-          error: error instanceof Error ? error.message : String(error),
-        });
       });
     });
   }

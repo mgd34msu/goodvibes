@@ -15,6 +15,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
+import { linkForNotification, type NotificationData } from './notification-link';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SW_PATH = resolve(__dirname, '../../../public/sw.js');
@@ -35,52 +36,38 @@ function loadServiceWorkerHandlePushSubscriptionChange(): (event: unknown) => Pr
 }
 
 describe('sw.js linkForNotification (loaded and executed from the real file, not a hand copy)', () => {
-  test('an approval push deep-links to the approvals view', () => {
-    const linkForNotification = loadServiceWorkerLinkForNotification();
-    expect(linkForNotification({ kind: 'approval', approvalId: 'apr-1' })).toBe('/?view=approvals-tasks');
+  // Every notification kind the daemon sends (PushNotificationCategory), with and
+  // without its ids and an action, plus the fallbacks: the service worker's copy
+  // must answer exactly what the app's helper answers.
+  const cases: ReadonlyArray<readonly [unknown, string | undefined]> = [
+    [{ kind: 'approval', approvalId: 'apr-1' }, undefined],
+    [{ kind: 'approval', approvalId: 'apr-1' }, 'approve'],
+    [{ kind: 'approval', approvalId: 'a/b c' }, 'deny'],
+    [{ kind: 'approval', approvalId: 'apr-1' }, 'snooze'],
+    [{ kind: 'approval' }, 'approve'],
+    [{ kind: 'needs-input', nodeId: 'agent-7', sessionId: 's-1' }, undefined],
+    [{ kind: 'needs-input', nodeId: 'a/b', sessionId: 'x y', escalated: true }, undefined],
+    [{ kind: 'needs-input' }, undefined],
+    [{ kind: 'completion', nodeId: 'run-3', sessionId: 's-2' }, undefined],
+    [{ kind: 'completion', nodeId: 'run-3' }, undefined],
+    [{ kind: 'completion' }, undefined],
+    [{ url: '/?view=sessions' }, undefined],
+    [{ url: 'https://evil.example/phish' }, undefined],
+    [{}, undefined],
+    [undefined, undefined],
+    [null, undefined],
+  ];
+
+  test('answers exactly what notification-link.ts answers for every kind', () => {
+    const serviceWorkerLink = loadServiceWorkerLinkForNotification();
+    for (const [data, action] of cases) {
+      expect(serviceWorkerLink(data, action)).toBe(linkForNotification(data as NotificationData | undefined | null, action));
+    }
   });
 
-  test('an explicit in-app url is honored', () => {
-    const linkForNotification = loadServiceWorkerLinkForNotification();
-    expect(linkForNotification({ url: '/?view=sessions' })).toBe('/?view=sessions');
-  });
-
-  test('an off-site (non-relative) url is refused, falling back to the app root, the guard notification-link.ts documents as shared', () => {
-    const linkForNotification = loadServiceWorkerLinkForNotification();
-    expect(linkForNotification({ url: 'https://evil.example/phish' })).toBe('/');
-  });
-
-  test('unknown / empty data falls back to the app root, never a dead tap', () => {
-    const linkForNotification = loadServiceWorkerLinkForNotification();
-    expect(linkForNotification({})).toBe('/');
-    expect(linkForNotification(undefined)).toBe('/');
-    expect(linkForNotification(null)).toBe('/');
-  });
-
-  test('an Allow/Deny action tap carries the action + approval id in the fragment (real sw.js copy)', () => {
-    const linkForNotification = loadServiceWorkerLinkForNotification();
-    expect(linkForNotification({ kind: 'approval', approvalId: 'apr-1' }, 'approve')).toBe(
-      '/?view=approvals-tasks#approval-action=approve&approval-id=apr-1',
-    );
-    expect(linkForNotification({ kind: 'approval', approvalId: 'apr-1' }, 'deny')).toBe(
-      '/?view=approvals-tasks#approval-action=deny&approval-id=apr-1',
-    );
-    // A body tap (no action) and an unknown action fall back to the plain view.
-    expect(linkForNotification({ kind: 'approval', approvalId: 'apr-1' })).toBe('/?view=approvals-tasks');
-    expect(linkForNotification({ kind: 'approval', approvalId: 'apr-1' }, 'snooze')).toBe('/?view=approvals-tasks');
-  });
-
-  test('a needs-input push deep-links to the focused Fleet node (real sw.js copy, in sync with notification-link.ts)', () => {
-    const linkForNotification = loadServiceWorkerLinkForNotification();
-    expect(linkForNotification({ kind: 'needs-input', nodeId: 'agent-7', sessionId: 's-1' })).toBe(
-      '/?view=fleet#fleet-node=agent-7&fleet-session=s-1',
-    );
-    expect(linkForNotification({ kind: 'needs-input', nodeId: 'agent-7' })).toBe('/?view=fleet#fleet-node=agent-7');
-    // No node id → still opens the Fleet view rather than a dead tap.
-    expect(linkForNotification({ kind: 'needs-input' })).toBe('/?view=fleet');
-    // The ids are url-encoded, same as the pure helper.
-    expect(linkForNotification({ kind: 'needs-input', nodeId: 'a/b', sessionId: 'x y' })).toBe(
-      '/?view=fleet#fleet-node=a%2Fb&fleet-session=x%20y',
+  test('a completion push opens the run that finished, not the app root', () => {
+    expect(loadServiceWorkerLinkForNotification()({ kind: 'completion', sessionId: 's', nodeId: 'n' })).toBe(
+      '/?view=fleet#fleet-node=n&fleet-session=s',
     );
   });
 });

@@ -133,7 +133,7 @@ beforeAll(async () => {
       const status = url.pathname.startsWith('/gone')
         ? 410
         : url.pathname.startsWith('/fail')
-          ? 500
+          ? 403
           : 201;
       return new Response(null, { status });
     },
@@ -358,15 +358,15 @@ describe('web push: self-heal on open (device-identity reconcile)', () => {
   });
 });
 
-describe('web push: bounded retries then prune on a dead (non-gone) endpoint', () => {
-  test('repeated 500s prune the record after the bounded retries, with an honest receipt', async () => {
+describe('web push: bounded rejections then prune on a dead (non-gone) endpoint', () => {
+  test('repeated rejections prune the record at the bound, with an honest receipt', async () => {
     const endpoint = `${sinkOrigin}/fail/device-flaky`;
     const created = await invokeVerb('push.subscriptions.create', { endpoint, keys: { p256dh, auth } });
     const failId = (created.json.subscription as { id: string }).id;
 
     let lastReceipt: Record<string, unknown> = {};
-    // The endpoint never answers 404/410, it just keeps 500ing. Each verify is a
-    // failed delivery until the bounded-retry counter is crossed, then a prune.
+    // The endpoint never answers 404/410, the push service just keeps rejecting
+    // it. Each verify is a failed delivery until the bound is crossed, then a prune.
     for (let i = 0; i < 10; i++) {
       const verify = await invokeVerb('push.subscriptions.verify', { subscriptionId: failId });
       lastReceipt = verify.json.receipt as Record<string, unknown>;
@@ -374,7 +374,7 @@ describe('web push: bounded retries then prune on a dead (non-gone) endpoint', (
       expect(lastReceipt.outcome).toBe('failed');
     }
     expect(lastReceipt.outcome).toBe('pruned');
-    expect(String(lastReceipt.detail)).toContain('consecutive delivery failures');
+    expect(lastReceipt.httpStatus).toBe(403);
 
     // Pruned means gone from the list.
     const list = await invokeVerb('push.subscriptions.list');

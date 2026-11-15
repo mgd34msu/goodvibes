@@ -6,9 +6,13 @@
  * through `deliverToSubscription`, so the honesty rules live in one spot:
  *
  *  - A push service that answers 404/410 means the browser subscription is gone;
- *    the record is pruned and the receipt says `pruned`, never a fake success.
+ *    the record is removed and the receipt says `pruned`, never a fake success.
  *  - Any other non-2xx (or a transport error) is reported as `failed` with the
- *    status/reason, never swallowed into a success.
+ *    status/reason, never swallowed into a success. Only the push service
+ *    rejecting the endpoint itself (a 4xx other than 408, 413 and 429) counts
+ *    toward removal; a network error, a timeout, a rate limit or a 5xx never
+ *    does, so an outage cannot cost a device its subscription.
+ *  - One fan-out stamps every device's outcome in one store write.
  *  - The request carries the RFC 8188 `Content-Encoding: aes128gcm` body plus
  *    the `TTL`, `Urgency`, and VAPID `Authorization` headers a push service
  *    requires.
@@ -22,7 +26,8 @@ import { encryptPushPayload, PUSH_MAX_PLAINTEXT_BYTES } from './encryption.js';
 import { localPushEndpointsAllowed } from './subscription-validation.js';
 import { assertDeliveryCurrent, runDeliveryPublication, type DeliveryLifetime } from '../utils/delivery-lifetime.js';
 import type { VapidManager } from './vapid.js';
-import type { PushSubscriptionStore } from './subscription-store.js';
+import type { AppliedPushOutcome, PushOutcomeStamp, PushSubscriptionStore } from './subscription-store.js';
+import { logger } from '../utils/logger.js';
 import type {
   PushDeliveryReceipt,
   PushMessage,
@@ -38,16 +43,24 @@ export type PushTransport = (
 const DEFAULT_TTL_SECONDS = 24 * 60 * 60;
 const GONE_STATUSES = new Set([404, 410]);
 /**
- * Bounded retries before a dead endpoint that never answers 404/410 is pruned.
- * A push service that keeps returning 5xx/timeouts is treated as gone once the
- * consecutive-failure counter crosses this bound, reported as an honest `pruned`
- * receipt rather than an endless string of `failed`s.
+ * Answers that say nothing about the endpoint: the request timed out (408), the
+ * message was too large (413), or the service is rate limiting (429). Like a
+ * 5xx or a network error, they are reported but never counted toward removal.
+ */
+const UNPROVEN_STATUSES = new Set([408, 413, 429]);
+/**
+ * Consecutive push-service rejections of an endpoint after which it is removed
+ * when the composition root supplies no bound (`push.subscriptions.failureThreshold`).
  */
 export const DELIVERY_FAILURE_PRUNE_THRESHOLD = 5;
 
-/** How long one push request may take before it counts as a failed delivery. */
+/**
+ * How long one push request may take. A push service that never answers would
+ * otherwise hold its slot in the fan-out and the `verify` caller forever; a
+ * timeout is reported as `failed` and does not count against the device.
+ */
 export const DEFAULT_PUSH_REQUEST_TIMEOUT_MS = 10_000;
-/** Subscriptions delivered to at the same time in one fan-out. */
+/** Subscriptions sent to at the same time in one fan-out. */
 const FAN_OUT_CONCURRENCY = 4;
 
 /**
@@ -111,15 +124,16 @@ export interface DeliveryDeps {
   readonly store: PushSubscriptionStore;
   readonly transport?: PushTransport | undefined;
   /**
-   * Consecutive refused deliveries after which the endpoint is treated as dead.
+   * Consecutive push-service rejections after which the endpoint is removed.
    * Absent ⇒ {@link DELIVERY_FAILURE_PRUNE_THRESHOLD}. The composition root
-   * wires it to `push.subscriptions.failureThreshold`, the same key the
-   * subscription sweep reads, so delivery and housekeeping cannot disagree
-   * about when a push service has proved an endpoint gone.
+   * wires it to `push.subscriptions.failureThreshold`, the same key the store's
+   * read filter uses, so the two cannot disagree.
    */
   readonly failureThreshold?: number | undefined;
   /** Per-request time limit; absent means {@link DEFAULT_PUSH_REQUEST_TIMEOUT_MS}. */
   readonly requestTimeoutMs?: number | undefined;
+  /** Told the daemon's own reason whenever a message could not be sent at all (key custody, the message itself). */
+  readonly onNotSent?: ((reason: string) => void) | undefined;
 }
 
 /** The effective bound: the configured value when sane, else the module default. */
@@ -130,18 +144,27 @@ function failureBound(deps: DeliveryDeps): number {
     : DELIVERY_FAILURE_PRUNE_THRESHOLD;
 }
 
-/**
- * Encrypt and send one message to one subscription, prune-on-gone, and return
- * an honest receipt. The subscription's `lastOutcome` is stamped either way.
- */
-export async function deliverToSubscription(
+/** One send, before anything is written to the store. */
+interface SendResult {
+  readonly receipt: PushDeliveryReceipt;
+  /** What the attempt proved about the endpoint; absent when nothing was sent. */
+  readonly stamp?: PushOutcomeStamp | undefined;
+}
+
+function errorText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/** Encrypt and send one message to one subscription. Writes nothing. */
+async function send(
   subscription: StoredPushSubscription,
   message: PushMessage,
   deps: DeliveryDeps,
-  lifetime: DeliveryLifetime = {},
-): Promise<PushDeliveryReceipt> {
+  lifetime: DeliveryLifetime,
+): Promise<SendResult> {
   const origin = endpointOrigin(subscription.endpoint);
   const transport = deps.transport ?? defaultTransport();
+  const base = { subscriptionId: subscription.id, endpointOrigin: origin };
 
   let httpStatus: number;
   let dispatched = false;
@@ -172,83 +195,104 @@ export async function deliverToSubscription(
       assertDeliveryCurrent(lifetime);
       if (lifetime.withPublication) throw error;
       // The message or the daemon's own key custody failed before anything was
-      // sent. That says nothing about the device, so it is reported but never
-      // counted toward pruning a healthy subscription.
+      // sent. That says nothing about the device, so nothing is written.
+      const reason = errorText(error);
+      deps.onNotSent?.(reason);
       return {
-        subscriptionId: subscription.id,
-        endpointOrigin: origin,
-        outcome: 'failed',
-        detail: `not sent: ${error instanceof Error ? error.message : String(error)} (this is not counted against the device)`,
+        receipt: { ...base, outcome: 'failed', detail: `not sent: ${reason} (this is not counted against the device)` },
       };
     }
-    const failures = await deps.store.recordOutcome(subscription.id, 'failed');
-    const reason = `delivery request failed: ${error instanceof Error ? error.message : String(error)}`;
-    return prunedOrFailed(subscription, origin, deps, failures, reason);
+    // The request never got an answer from the push service (DNS, a refused
+    // connection, the timeout): nothing is known about the endpoint.
+    const detail = `delivery request failed: ${errorText(error)}`;
+    return {
+      receipt: { ...base, outcome: 'failed', detail: `${detail} (not counted against the device)` },
+      stamp: { subscriptionId: subscription.id, evidence: 'unproven', detail },
+    };
   }
 
   if (httpStatus >= 200 && httpStatus < 300) {
-    await deps.store.recordOutcome(subscription.id, 'delivered');
-    return { subscriptionId: subscription.id, endpointOrigin: origin, outcome: 'delivered', httpStatus };
-  }
-
-  if (GONE_STATUSES.has(httpStatus)) {
-    // The subscription is gone at the push service, prune it (delete means
-    // delete) and report the prune with the status that proved it dead.
-    await deps.store.remove(subscription.id);
     return {
-      subscriptionId: subscription.id,
-      endpointOrigin: origin,
-      outcome: 'pruned',
-      httpStatus,
-      detail: `push endpoint reported ${httpStatus} gone; subscription removed`,
+      receipt: { ...base, outcome: 'delivered', httpStatus },
+      stamp: { subscriptionId: subscription.id, evidence: 'delivered', detail: `push service accepted it (${httpStatus})` },
     };
   }
-
-  const failures = await deps.store.recordOutcome(subscription.id, 'failed');
-  return prunedOrFailed(subscription, origin, deps, failures, `push service returned ${httpStatus}`, httpStatus);
-}
-
-/**
- * A non-gone delivery failure: report `failed` while the bounded retries remain,
- * but once the consecutive-failure counter crosses the threshold, prune the
- * dead endpoint (delete means delete) and report an honest `pruned` receipt.
- */
-async function prunedOrFailed(
-  subscription: StoredPushSubscription,
-  origin: string,
-  deps: DeliveryDeps,
-  failures: number,
-  reason: string,
-  httpStatus?: number,
-): Promise<PushDeliveryReceipt> {
-  const bound = failureBound(deps);
-  if (failures >= bound) {
-    await deps.store.remove(subscription.id);
+  if (GONE_STATUSES.has(httpStatus)) {
+    const detail = `push endpoint reported ${httpStatus} gone`;
     return {
-      subscriptionId: subscription.id,
-      endpointOrigin: origin,
-      outcome: 'pruned',
-      ...(httpStatus !== undefined ? { httpStatus } : {}),
-      detail: `${reason}; pruned after ${failures} consecutive delivery failures`,
+      receipt: { ...base, outcome: 'pruned', httpStatus, detail: `${detail}; subscription removed` },
+      stamp: { subscriptionId: subscription.id, evidence: 'gone', detail },
+    };
+  }
+  const detail = `push service returned ${httpStatus}`;
+  if (httpStatus >= 500 || httpStatus < 400 || UNPROVEN_STATUSES.has(httpStatus)) {
+    return {
+      receipt: { ...base, outcome: 'failed', httpStatus, detail: `${detail} (not counted against the device)` },
+      stamp: { subscriptionId: subscription.id, evidence: 'unproven', detail },
     };
   }
   return {
-    subscriptionId: subscription.id,
-    endpointOrigin: origin,
-    outcome: 'failed',
-    ...(httpStatus !== undefined ? { httpStatus } : {}),
-    detail: `${reason} (failure ${failures} of ${bound} before prune)`,
+    receipt: { ...base, outcome: 'failed', httpStatus, detail },
+    stamp: { subscriptionId: subscription.id, evidence: 'rejected', detail },
   };
+}
+
+/** The receipt as the store's write left it: a rejection at the bound becomes `pruned`. */
+function settle(result: SendResult, applied: ReadonlyMap<string, AppliedPushOutcome>, bound: number): PushDeliveryReceipt {
+  const { receipt, stamp } = result;
+  if (!stamp || stamp.evidence !== 'rejected') return receipt;
+  const outcome = applied.get(stamp.subscriptionId);
+  if (!outcome) return receipt;
+  if (outcome.removed) {
+    return {
+      ...receipt,
+      outcome: 'pruned',
+      detail: `${stamp.detail}; removed after ${outcome.consecutiveFailures} consecutive rejections by the push service`,
+    };
+  }
+  return { ...receipt, detail: `${stamp.detail} (rejection ${outcome.consecutiveFailures} of ${bound} before removal)` };
+}
+
+/**
+ * Stamp every outcome in one store write and settle the receipts. A write that
+ * fails leaves each receipt saying what the push service did, plus that the
+ * outcome was not saved.
+ */
+async function record(results: readonly SendResult[], deps: DeliveryDeps): Promise<PushDeliveryReceipt[]> {
+  const stamps = results.flatMap((result) => (result.stamp ? [result.stamp] : []));
+  const bound = failureBound(deps);
+  try {
+    const applied = await deps.store.applyOutcomes(stamps, bound);
+    return results.map((result) => settle(result, applied, bound));
+  } catch (error) {
+    const reason = errorText(error);
+    logger.warn('Push delivery outcomes could not be saved', { devices: stamps.length, error: reason });
+    return results.map((result) => (result.stamp
+      ? { ...result.receipt, detail: `${result.receipt.detail ?? result.receipt.outcome}; the outcome could not be saved: ${reason}` }
+      : result.receipt));
+  }
+}
+
+/**
+ * Encrypt and send one message to one subscription and return an honest
+ * receipt. The subscription's outcome is stamped in the same call.
+ */
+export async function deliverToSubscription(
+  subscription: StoredPushSubscription,
+  message: PushMessage,
+  deps: DeliveryDeps,
+  lifetime: DeliveryLifetime = {},
+): Promise<PushDeliveryReceipt> {
+  const [receipt] = await record([await send(subscription, message, deps, lifetime)], deps);
+  return receipt!;
 }
 
 /**
  * Fan one message out to every stored subscription, a few at a time so one
- * endpoint that never answers cannot hold back the rest. Returns one receipt
- * per subscription, in store order, an empty array when there are no
- * subscriptions at all (the honest "nobody to notify" result, not a silent
- * success). A bookkeeping failure on one subscription becomes that
- * subscription's `failed` receipt; it never loses the other receipts. A revoked
- * lifetime still ends the whole fan-out.
+ * endpoint that never answers cannot hold back the rest, and stamp every
+ * outcome in one store write. One receipt per subscription, in store order; an
+ * empty list when there are no subscriptions at all. A revoked lifetime ends
+ * the fan-out; the outcomes of the sends already made are still stamped.
  */
 export async function deliverToAll(
   message: PushMessage,
@@ -256,17 +300,19 @@ export async function deliverToAll(
   lifetime: DeliveryLifetime = {},
 ): Promise<PushDeliveryReceipt[]> {
   const subscriptions = await deps.store.all();
-  const receipts = new Array<PushDeliveryReceipt>(subscriptions.length);
+  const results = new Array<SendResult>(subscriptions.length);
   // One device registered twice is still one device: send it the message once.
   const firstByEndpoint = new Map<string, number>();
   const work: number[] = [];
   subscriptions.forEach((subscription, index) => {
     if (firstByEndpoint.has(subscription.endpoint)) {
-      receipts[index] = {
-        subscriptionId: subscription.id,
-        endpointOrigin: endpointOrigin(subscription.endpoint),
-        outcome: 'skipped',
-        detail: 'another subscription for the same endpoint was sent this message',
+      results[index] = {
+        receipt: {
+          subscriptionId: subscription.id,
+          endpointOrigin: endpointOrigin(subscription.endpoint),
+          outcome: 'skipped',
+          detail: 'another subscription for the same endpoint was sent this message',
+        },
       };
       return;
     }
@@ -280,28 +326,18 @@ export async function deliverToAll(
   const worker = async (): Promise<void> => {
     while (ended.error === undefined && next < work.length) {
       const index = work[next++]!;
-      const subscription = subscriptions[index]!;
       try {
-        receipts[index] = await deliverToSubscription(subscription, message, deps, lifetime);
+        results[index] = await send(subscriptions[index]!, message, deps, lifetime);
       } catch (error) {
-        try {
-          // Revocation, or a publication that owns failure handling, ends the fan-out.
-          assertDeliveryCurrent(lifetime);
-          if (lifetime.withPublication) throw error;
-        } catch (ending) {
-          ended.error ??= { cause: ending };
-          return;
-        }
-        receipts[index] = {
-          subscriptionId: subscription.id,
-          endpointOrigin: endpointOrigin(subscription.endpoint),
-          outcome: 'failed',
-          detail: `delivery could not be recorded: ${error instanceof Error ? error.message : String(error)}`,
-        };
+        // Revocation, or a publication that owns failure handling, ends the fan-out.
+        ended.error ??= { cause: error };
+        return;
       }
     }
   };
   await Promise.all(Array.from({ length: Math.min(FAN_OUT_CONCURRENCY, work.length) }, worker));
+  const finished = results.filter((result): result is SendResult => result !== undefined);
+  const receipts = await record(finished, deps);
   if (ended.error) throw ended.error.cause;
   return receipts;
 }

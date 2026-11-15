@@ -18,8 +18,7 @@
  * the same message.
  */
 
-import { isIP } from 'node:net';
-import { classifyResolvedAddress } from '../tools/fetch/trust-tiers.js';
+import { validatePublicWebhookUrl } from '../utils/url-safety.js';
 
 /**
  * Set to `1` to let a push endpoint be a plain-http or loopback/private address,
@@ -34,12 +33,18 @@ export function localPushEndpointsAllowed(): boolean {
   return process.env[PUSH_ALLOW_LOCAL_ENDPOINTS_ENV] === '1';
 }
 
-/** A loopback name, or an address literal in a loopback, private, link-local or metadata range. */
-function isNonPublicHost(hostname: string): boolean {
-  const host = hostname.toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
-  if (host === 'localhost' || host.endsWith('.localhost')) return true;
-  return isIP(host) !== 0 && classifyResolvedAddress(host) !== null;
-}
+/**
+ * The public-URL rule's refusals in push wording. The rule itself (https, no
+ * user name or password, no loopback name or non-public address literal) lives
+ * in utils/url-safety.ts, the same check delivery runs before it resolves the
+ * name, so registration and delivery refuse exactly the same endpoints.
+ */
+const PUBLIC_URL_REFUSALS: Readonly<Record<string, string>> = {
+  'Invalid webhook URL': 'Push endpoint is not a valid URL',
+  'Webhook URL must use https': 'Push endpoint must use https',
+  'Webhook URL must not include credentials': 'Push endpoint must not include a user name or password',
+  'Webhook URL host is not allowed': 'Push endpoint must be a public host, not a loopback, private or link-local address',
+};
 
 /** RFC 8291: the receiver's public key is an uncompressed P-256 point. */
 export const P256DH_POINT_BYTES = 65;
@@ -128,13 +133,13 @@ export function describeEndpointProblem(value: unknown): string | null {
     return 'Push endpoint must be an http(s) URL';
   }
   if (parsed.hostname.length === 0) return 'Push endpoint has no host';
-  if (localPushEndpointsAllowed()) return null;
-  if (parsed.protocol !== 'https:') return 'Push endpoint must use https';
-  // A name is judged again, after resolution, when the push is sent.
-  if (isNonPublicHost(parsed.hostname)) {
-    return 'Push endpoint must be a public host, not a loopback, private or link-local address';
+  if (localPushEndpointsAllowed()) {
+    return parsed.username || parsed.password ? PUBLIC_URL_REFUSALS['Webhook URL must not include credentials']! : null;
   }
-  return null;
+  // A name is judged again, after resolution, when the push is sent.
+  const verdict = validatePublicWebhookUrl(value);
+  if (verdict.ok) return null;
+  return PUBLIC_URL_REFUSALS[verdict.error] ?? `Push endpoint refused: ${verdict.error}`;
 }
 
 /** The structural slice validated, the wire shape of a subscription offer. */

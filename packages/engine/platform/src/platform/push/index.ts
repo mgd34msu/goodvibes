@@ -19,21 +19,19 @@ export type {
   RegisterSubscriptionInput,
   ReconcileResult,
   PushSubscriptionStoreOptions,
+  PushOutcomeStamp,
+  AppliedPushOutcome,
+  PushSubscriptionStatus,
 } from './subscription-store.js';
 export {
   DEFAULT_PUSH_SUBSCRIPTION_POLICY,
-  PushHousekeepingDisclosure,
-  decidePushSweep,
-  housekeepingPathFor,
-  summarizePushSweep,
+  findDeadPushRecords,
 } from './subscription-housekeeping.js';
 export type {
   PushSubscriptionPolicy,
   PushSubscriptionRemoval,
   PushSubscriptionRemovalReason,
-  PushSubscriptionCrowding,
-  PushSubscriptionSweepReport,
-  PushSweepDecision,
+  PushRecordsDecision,
 } from './subscription-housekeeping.js';
 export {
   PushSubscriptionValidationError,

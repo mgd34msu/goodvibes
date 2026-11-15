@@ -60,24 +60,6 @@ describe('a write does not erase an entry the parser rejected', () => {
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 
-  test('a document the parser rejects stays in the file when another document is written', () => {
-    const root = makeProjectTempDir('gv-loss-docs');
-    try {
-      const paths = createShellPathService({ workingDirectory: root, homeDirectory: root });
-      const registry = AgentDocumentRegistry.fromShellPaths(paths);
-      const path = documentStorePath(paths);
-      mkdirSync(dirname(path), { recursive: true });
-      const rejected = { id: 'empty-body', title: 'Empty body', body: '' };
-      writeFileSync(path, `${JSON.stringify({ version: 1, documents: [rejected] })}\n`);
-
-      registry.create({ title: 'Fresh', body: 'Some text.' });
-
-      expect(registry.list().map((d) => d.id)).toEqual(['fresh']);
-      expect(JSON.parse(readFileSync(path, 'utf8')).documents.at(-1)).toEqual(rejected);
-      expect(registry.lastWriteReport()?.keptAsFound).toBe(1);
-    } finally { rmSync(root, { recursive: true, force: true }); }
-  });
-
   test('a calendar entry the parser rejects stays in the file when another event is written', () => {
     const root = makeProjectTempDir('gv-loss-cal');
     try {
@@ -114,10 +96,11 @@ describe('document version ids', () => {
       let last = registry.get('long-lived')!;
       for (let i = 0; i < 60; i += 1) last = registry.update('long-lived', { body: `revision ${i}` });
 
-      const ids = last.versions.map((v) => v.id);
+      const ids = registry.versions('long-lived').map((v) => v.id);
       expect(ids).toHaveLength(50);
       expect(new Set(ids).size).toBe(50);
       expect(ids.at(-1)).toBe('v61');
+      expect(last.versionCount).toBe(50);
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 });

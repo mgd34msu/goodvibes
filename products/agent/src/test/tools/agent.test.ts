@@ -978,26 +978,12 @@ describe('spawn mode', () => {
       query: 'tools',
     });
     expect(result.success).toBe(true);
-    const payload = JSON.parse(result.output ?? '{}') as {
-      readonly runtime?: string;
-      readonly currentContract?: Record<string, unknown>;
-      readonly canDoNow?: readonly Record<string, unknown>[];
-      readonly commonRoutes?: Record<string, unknown>;
-    };
+    const payload = JSON.parse(result.output ?? '{}') as { readonly runtime?: string; readonly registeredTools?: readonly string[]; readonly capabilityIndex?: string };
     expect(payload.runtime).toBe('GoodVibes Agent');
-    expect(payload.currentContract?.autonomy).toContain('Operator agent working on the owner');
-    expect(payload.canDoNow?.map((entry) => entry.area)).toContain('Harness operation');
-    expect(payload.canDoNow?.map((entry) => entry.area)).toContain('Personal operations');
-    expect(payload.canDoNow?.map((entry) => entry.area)).toContain('Device, voice, and browser surfaces');
-    expect(payload.canDoNow?.map((entry) => entry.area)).toContain('Documents and artifacts');
-    expect(payload.commonRoutes?.personalOps).toContain('personal_ops action:"briefing"');
-    expect(payload.commonRoutes?.device).toContain('device action:"status"');
-    expect(payload.commonRoutes?.models).toContain('models action:"status"');
-    expect(payload.commonRoutes?.documentOps).toContain('agent_harness mode:"document_ops"');
-    expect(payload.commonRoutes?.researchWorkflow).toContain('research action:"briefing"');
-    expect(payload.commonRoutes?.webResearch).toContain('multi-step: research action:"briefing"');
-    const webResearchCapability = payload.canDoNow?.find((entry) => entry.area === 'Web research') as { readonly inspect?: string } | undefined;
-    expect(webResearchCapability?.inspect).toContain('research action:"briefing"');
+    expect(payload.registeredTools).toContain('goodvibes_context');
+    // Read from the running registry: a tool this registry lacks is not claimed.
+    expect(payload.registeredTools).not.toContain('google');
+    expect(payload.capabilityIndex).toContain('capability_status is not registered');
 
     const legacy = await registry.execute('call-context-legacy', 'goodvibes_context', {
       mode: ['home', 'graph'].join(''),

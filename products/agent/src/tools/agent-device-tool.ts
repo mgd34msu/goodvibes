@@ -1,8 +1,9 @@
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { CommandContext, CommandRegistry } from '../input/command-registry.ts';
-import { createAgentHarnessTool } from './agent-harness-tool.ts';
 import { forwardHarnessCatalogCall } from './agent-harness-catalog-ingress.ts';
+import { createHarnessFacade, registerHarnessFacade, type HarnessFacadeDeps } from './agent-harness-facade.ts';
+import { createAgentComputerTool } from './agent-computer-tool.ts';
 
 type AgentDeviceAction =
   | 'status'
@@ -32,12 +33,7 @@ interface AgentDeviceToolArgs {
   readonly explicitUserRequest?: unknown;
 }
 
-interface AgentDeviceToolDeps {
-  readonly commandRegistry: CommandRegistry;
-  readonly commandContext: CommandContext;
-  readonly toolRegistry: ToolRegistry;
-  readonly harnessTool?: Tool;
-}
+type AgentDeviceToolDeps = HarnessFacadeDeps;
 
 function error(message: string): { readonly success: false; readonly error: string } {
   return { success: false, error: message };
@@ -116,27 +112,15 @@ function capabilityArgs(args: AgentDeviceToolArgs): Record<string, unknown> {
   });
 }
 
-function browserArgs(args: AgentDeviceToolArgs): Record<string, unknown> {
+/**
+ * `browser`, `open_browser` and `control` are the `computer` tool's routes,
+ * kept here as plain forwards so an existing `device` call still works.
+ */
+function computerArgs(action: 'browser' | 'open_browser' | 'control', args: AgentDeviceToolArgs): Record<string, unknown> {
   return compactArgs({
-    mode: 'ui_surface',
-    surfaceId: 'connected-browser-cockpit',
-    includeParameters: args.includeParameters ?? true,
-  });
-}
-
-function openBrowserArgs(args: AgentDeviceToolArgs): Record<string, unknown> {
-  return compactArgs({
-    mode: 'open_ui_surface',
-    surfaceId: 'connected-browser-cockpit',
-    ...confirmedArgs(args),
-  });
-}
-
-function controlArgs(args: AgentDeviceToolArgs): Record<string, unknown> {
-  return compactArgs({
-    mode: 'execution_route',
-    executionRouteId: 'browser-or-desktop-control',
-    includeParameters: args.includeParameters ?? true,
+    action,
+    includeParameters: args.includeParameters,
+    ...(action === 'open_browser' ? confirmedArgs(args) : {}),
   });
 }
 
@@ -178,13 +162,10 @@ function openTtsVoiceArgs(args: AgentDeviceToolArgs): Record<string, unknown> {
 }
 
 export function createAgentDeviceTool(deps: AgentDeviceToolDeps): Tool {
-  const harnessTool = deps.harnessTool ?? createAgentHarnessTool({
-    commandRegistry: deps.commandRegistry,
-    commandContext: deps.commandContext,
-    toolRegistry: deps.toolRegistry,
-  });
-
-  return {
+  let builtComputer: Tool | undefined;
+  const computer = () => deps.toolRegistry.list().find((tool) => tool.definition.name === 'computer')
+    ?? (builtComputer ??= createAgentComputerTool(deps));
+  return createHarnessFacade<AgentDeviceToolArgs>(deps, {
     definition: {
       name: 'device',
       description: 'Inspect/open device, voice, and browser routes.',
@@ -194,7 +175,7 @@ export function createAgentDeviceTool(deps: AgentDeviceToolDeps): Tool {
           action: {
             type: 'string',
             enum: ['status', 'capability', 'browser', 'open_browser', 'control', 'voice', 'provider', 'open_tts_provider', 'open_tts_voice'],
-            description: 'Read device/browser/voice posture, or open a visible route (needs the owner\'s current recorded effect admission).',
+            description: 'Read device/voice posture, or open a visible route (needs the owner\'s current recorded effect admission). browser, open_browser and control are the computer tool\'s routes.',
           },
           mode: { type: 'string', description: 'Alias for action.' },
           id: { type: 'string', description: 'Capability, route, or provider id alias.' },
@@ -215,25 +196,20 @@ export function createAgentDeviceTool(deps: AgentDeviceToolDeps): Tool {
       sideEffects: ['state'],
       concurrency: 'serial',
     },
-    execute: async (rawArgs, options) => {
-      const args = (rawArgs && typeof rawArgs === 'object' && !Array.isArray(rawArgs) ? rawArgs : {}) as AgentDeviceToolArgs;
-      const forward = (translated: Record<string, unknown>) => forwardHarnessCatalogCall(harnessTool, rawArgs, translated, options);
+    route({ args, rawArgs, options, forward }) {
       const action = readAction(args);
       if (action === null) return error('Unknown device action. Use action (or mode) as one of: status, capability, browser, open_browser, control, voice, provider, open_tts_provider, open_tts_voice.');
-
+      if (action === 'browser' || action === 'open_browser' || action === 'control') {
+        return forwardHarnessCatalogCall(computer(), rawArgs, computerArgs(action, args), options);
+      }
       if (action === 'status') return forward(statusArgs(args));
       if (action === 'capability') return forward(capabilityArgs(args));
-      if (action === 'browser') return forward(browserArgs(args));
-      if (action === 'open_browser') return forward(openBrowserArgs(args));
-      if (action === 'control') return forward(controlArgs(args));
       if (action === 'voice') return forward(voiceArgs(args));
       if (action === 'provider') return forward(providerArgs(args));
       if (action === 'open_tts_provider') return forward(openTtsProviderArgs(args));
-      if (action === 'open_tts_voice') return forward(openTtsVoiceArgs(args));
-
-      return error('Unknown device action. Use action:"status" for the device capability map.');
+      return forward(openTtsVoiceArgs(args));
     },
-  };
+  });
 }
 
 export function registerAgentDeviceTool(
@@ -241,5 +217,5 @@ export function registerAgentDeviceTool(
   commandRegistry: CommandRegistry,
   commandContext: CommandContext,
 ): void {
-  if (!registry.has('device')) registry.register(createAgentDeviceTool({ commandRegistry, commandContext, toolRegistry: registry }));
+  registerHarnessFacade(registry, createAgentDeviceTool({ commandRegistry, commandContext, toolRegistry: registry }), commandContext);
 }

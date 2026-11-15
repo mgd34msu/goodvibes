@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
 import { createShellPathService } from '@/runtime/index.ts';
 import { AgentDocumentRegistry, agentDocumentCommentLifecycle, agentDocumentLifecycle, agentDocumentSuggestionLifecycle, documentStorePath, renderAgentDocumentMarkdown } from '../../agent/document-registry.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
@@ -38,8 +39,9 @@ describe('AgentDocumentRegistry', () => {
       summary: 'Added the second step.',
     });
 
-    expect(updated.versions.map((version) => version.id)).toEqual(['v1', 'v2']);
-    expect(updated.versions[1]?.summary).toBe('Added the second step.');
+    expect(documents.versions(created.id).map((version) => version.id)).toEqual(['v1', 'v2']);
+    expect(updated.versions.at(-1)?.summary).toBe('Added the second step.');
+    expect(updated.versionCount).toBe(2);
     expect(updated.body).toContain('Step two.');
     expect(documents.search('Step two')[0]?.id).toBe(created.id);
   });
@@ -115,19 +117,18 @@ describe('AgentDocumentRegistry', () => {
     expect(markdown).toContain('a1: Reviewed chart (artifact-123, chart.png / image/png / image)');
   });
 
-  test('a store that is not JSON is copied aside before the next write, not lost', () => {
-    const root = makeProjectTempDir('goodvibes-agent-documents-corrupt');
+  test('documents from the earlier single-file store are brought over once, and the file is left in place', () => {
+    const root = makeProjectTempDir('goodvibes-agent-documents-import');
     const shellPaths = createShellPathService({ workingDirectory: root, homeDirectory: root });
-    const storePath = documentStorePath(shellPaths);
+    const legacyPath = documentStorePath(shellPaths).replace(/\.db$/, '.json');
+    mkdirSync(dirname(legacyPath), { recursive: true });
+    const legacy = JSON.stringify({ version: 1, documents: [{ id: 'old', title: 'Old', body: 'Kept.', versions: [{ id: 'v1', title: 'Old', body: 'Kept.', summary: 'Initial draft.', createdAt: '2026-01-01T00:00:00.000Z' }] }] });
+    writeFileSync(legacyPath, legacy, 'utf-8');
+
     const documents = AgentDocumentRegistry.fromShellPaths(shellPaths);
-    documents.create({ title: 'Init Doc', body: 'Body.' });
-    writeFileSync(storePath, '{corrupt json', 'utf-8');
-
-    documents.create({ title: 'Next Doc', body: 'Body.' });
-
-    const copyPath = documents.lastWriteReport()?.copyPath;
-    expect(copyPath).toBeDefined();
-    expect(readFileSync(copyPath!, 'utf-8')).toBe('{corrupt json');
+    expect(documents.get('old')?.body).toBe('Kept.');
+    expect(documents.versions('old').map((version) => version.id)).toEqual(['v1']);
+    expect(readFileSync(legacyPath, 'utf-8')).toBe(legacy);
   });
 
   test('accepting a suggestion written against an older version is refused, naming both versions', () => {
@@ -170,8 +171,8 @@ describe('AgentDocumentRegistry', () => {
     const accepted = documents.acceptSuggestion(created.id, 's1');
     expect(accepted.body).toBe('Suggested replacement body.');
     expect(accepted.tags).toEqual(['draft', 'accepted']);
-    expect(accepted.versions.map((version) => version.id)).toEqual(['v1', 'v2']);
-    expect(accepted.versions[1]?.summary).toBe('Rewrite for clarity.');
+    expect(documents.versions(created.id).map((version) => version.id)).toEqual(['v1', 'v2']);
+    expect(accepted.versions.at(-1)?.summary).toBe('Rewrite for clarity.');
     expect(accepted.suggestions[0]?.status).toBe('accepted');
     const acceptedMarkdown = renderAgentDocumentMarkdown(accepted);
     expect(acceptedMarkdown).toContain('Suggestions: 0 proposed / 1 total');
@@ -186,7 +187,7 @@ describe('AgentDocumentRegistry', () => {
     expect(second.suggestions[1]?.status).toBe('proposed');
     expect(rejected.suggestions[1]?.status).toBe('rejected');
     expect(rejected.body).toBe('Suggested replacement body.');
-    expect(rejected.versions).toHaveLength(2);
+    expect(rejected.versionCount).toBe(2);
   });
   test('a decided suggestion cannot be flipped and the refusal names the legal moves', () => {
     const documents = registry();

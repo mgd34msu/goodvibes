@@ -56,7 +56,10 @@ export interface AgentDocumentRecord {
   readonly status: AgentDocumentStatus;
   readonly createdAt: string;
   readonly updatedAt: string;
+  /** The newest version. The retained history is read separately (`AgentDocumentRegistry.versions`). */
   readonly versions: readonly AgentDocumentVersion[];
+  /** How many versions are retained. */
+  readonly versionCount: number;
   readonly comments: readonly AgentDocumentComment[];
   readonly suggestions: readonly AgentDocumentSuggestion[];
   readonly attachments: readonly AgentDocumentAttachment[];

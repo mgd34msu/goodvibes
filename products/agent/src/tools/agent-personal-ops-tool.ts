@@ -2,7 +2,7 @@ import { createPersonalOpsInputProjector } from './agent-personal-ops-ingress.ts
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { CommandContext, CommandRegistry } from '../input/command-registry.ts';
-import { createAgentHarnessTool } from './agent-harness-tool.ts';
+import { facadeHarness } from './agent-harness-facade.ts';
 import { captureCatalogData } from './agent-harness-catalog-ranking.ts';
 import { forwardHarnessCatalogCall, protectHarnessCatalogTool } from './agent-harness-catalog-ingress.ts';
 
@@ -144,11 +144,7 @@ function readArgs(args: AgentPersonalOpsToolArgs): Record<string, unknown> {
 }
 
 export function createAgentPersonalOpsTool(deps: AgentPersonalOpsToolDeps): Tool {
-  const harnessTool = deps.harnessTool ?? createAgentHarnessTool({
-    commandRegistry: deps.commandRegistry,
-    commandContext: deps.commandContext,
-    toolRegistry: deps.toolRegistry,
-  });
+  const harnessTool = facadeHarness(deps);
 
   const tool: Tool = {
     definition: {
@@ -189,12 +185,12 @@ export function createAgentPersonalOpsTool(deps: AgentPersonalOpsToolDeps): Tool
         return error(`Unknown Personal Ops action '${normalizePersonalOpsAction(args.action) ? readString(args.mode) : readString(args.action)}'. Use one of: ${PERSONAL_OPS_ACTIONS.join(', ')}. Nothing was read or changed.`);
       }
 
-      if (action === 'briefing') return forwardHarnessCatalogCall(harnessTool, rawArgs, briefingArgs(args), options);
-      if (action === 'status') return forwardHarnessCatalogCall(harnessTool, rawArgs, statusArgs(args), options);
-      if (action === 'queue') return forwardHarnessCatalogCall(harnessTool, rawArgs, queueArgs(args), options);
-      if (action === 'intake') return forwardHarnessCatalogCall(harnessTool, rawArgs, intakeArgs(args), options);
-      if (action === 'lane') return forwardHarnessCatalogCall(harnessTool, rawArgs, laneArgs(args), options);
-      if (action === 'read') return forwardHarnessCatalogCall(harnessTool, rawArgs, readArgs(args), options);
+      if (action === 'briefing') return forwardHarnessCatalogCall(harnessTool(), rawArgs, briefingArgs(args), options);
+      if (action === 'status') return forwardHarnessCatalogCall(harnessTool(), rawArgs, statusArgs(args), options);
+      if (action === 'queue') return forwardHarnessCatalogCall(harnessTool(), rawArgs, queueArgs(args), options);
+      if (action === 'intake') return forwardHarnessCatalogCall(harnessTool(), rawArgs, intakeArgs(args), options);
+      if (action === 'lane') return forwardHarnessCatalogCall(harnessTool(), rawArgs, laneArgs(args), options);
+      if (action === 'read') return forwardHarnessCatalogCall(harnessTool(), rawArgs, readArgs(args), options);
 
       return error(`Unknown Personal Ops action. Use one of: ${PERSONAL_OPS_ACTIONS.join(', ')}.`);
     },

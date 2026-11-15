@@ -124,7 +124,7 @@ describe('agent_knowledge_ingest tool', () => {
       }, { assertCurrent() {}, inputProjectionContext: Object.freeze({}) });
 
       expect(result.success).toBe(false);
-      expect(result.error).toContain('current recorded effect admission');
+      expect(result.error).toContain('admission');
       expect(calls).toBe(0);
     } finally {
       globalThis.fetch = originalFetch;
@@ -170,17 +170,13 @@ describe('agent_knowledge_ingest tool', () => {
     }
   });
 
-  test('ingests local files through only the isolated Agent Knowledge artifact route', async () => {
+  test('ingests a local file by sending its bytes to the isolated Agent Knowledge artifact upload route', async () => {
     const paths = shellPaths();
     const tool = admittedTool(paths);
-    const requests: CapturedRequest[] = [];
+    const uploads: { url: string; form: FormData }[] = [];
     const originalFetch = globalThis.fetch;
     globalThis.fetch = mockFetch(async (input, init) => {
-      requests.push({
-        url: inputUrl(input),
-        method: init?.method ?? 'GET',
-        body: typeof init?.body === 'string' ? init.body : null,
-      });
+      if (init?.body instanceof FormData) uploads.push({ url: inputUrl(input), form: init.body });
       return ingestResponse();
     });
 
@@ -192,21 +188,20 @@ describe('agent_knowledge_ingest tool', () => {
         path: filePath,
         title: 'Agent notes',
         tags: ['notes'],
-        confirm: true,
-        explicitUserRequest: 'Add this local notes file to your Agent Knowledge.',
       });
 
       expect(result.success).toBe(true);
       expect(result.output).toContain('Agent Knowledge file ingest accepted');
-      expect(requests).toHaveLength(1);
-      expect(requests[0]?.url).toBe('http://127.0.0.1:3421/api/goodvibes-agent/knowledge/ingest/artifact');
-      expect(requests[0]?.url).not.toContain('/api/knowledge');
-      const payload = JSON.parse(requests[0]?.body ?? '{}') as IngestPayload;
-      expect(payload.path).toBe(filePath);
-      expect(payload.title).toBe('Agent notes');
-      expect(payload.tags).toEqual(['notes']);
-      expect(payload.connectorId).toBe('goodvibes-agent-main-conversation-file');
-      expect(payload.metadata?.originSurface).toBe('goodvibes-agent');
+      expect(uploads).toHaveLength(1);
+      expect(uploads[0]?.url).toBe('http://127.0.0.1:3421/api/goodvibes-agent/knowledge/ingest/artifact');
+      const form = uploads[0]!.form;
+      // The host is sent the bytes, never a path to open on its own machine.
+      expect(form.has('path')).toBe(false);
+      expect(await (form.get('file') as Blob).text()).toBe('# Agent notes\nKeep knowledge isolated.');
+      expect(form.get('title')).toBe('Agent notes');
+      expect(JSON.parse(String(form.get('tags')))).toEqual(['notes']);
+      expect(form.get('connectorId')).toBe('goodvibes-agent-main-conversation-file');
+      expect(JSON.parse(String(form.get('metadata')))).toMatchObject({ originSurface: 'goodvibes-agent' });
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -288,18 +283,15 @@ describe('agent_knowledge_ingest tool', () => {
       expect(urls.success).toBe(true);
       expect(bookmarks.success).toBe(true);
       expect(requests.map((request) => request.url)).toEqual([
-        'http://127.0.0.1:3421/api/goodvibes-agent/knowledge/ingest/urls',
-        'http://127.0.0.1:3421/api/goodvibes-agent/knowledge/ingest/bookmarks',
+        'http://127.0.0.1:3421/api/goodvibes-agent/knowledge/ingest/connector',
+        'http://127.0.0.1:3421/api/goodvibes-agent/knowledge/ingest/connector',
       ]);
-      for (const request of requests) {
-        expect(request.url).not.toContain('/api/knowledge');
-        const payload: unknown = JSON.parse(request.body ?? '{}');
-        if (payload === null || typeof payload !== 'object' || !('path' in payload) || typeof payload.path !== 'string') {
-          throw new Error('Expected the original native file-ingest path.');
-        }
-        expect([urlsPath, bookmarksPath]).toContain(payload.path);
-        expect(payload).toMatchObject({ metadata: { originSurface: 'goodvibes-agent' } });
-      }
+      // The file's text goes as the connector's content; the host opens no path.
+      expect(requests.map((request) => JSON.parse(request.body ?? '{}') as IngestPayload)).toMatchObject([
+        { connectorId: 'url-list', content: 'https://example.com/agent-docs', metadata: { originSurface: 'goodvibes-agent' } },
+        { connectorId: 'bookmark', content: '<a href="https://example.com/agent-docs">Docs</a>', metadata: { originSurface: 'goodvibes-agent' } },
+      ]);
+      for (const request of requests) expect(request.body).not.toContain('"path"');
     } finally {
       globalThis.fetch = originalFetch;
     }

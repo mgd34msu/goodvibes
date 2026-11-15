@@ -13,6 +13,10 @@ import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
+/** An admission problem is thrown to the tool runtime, which words it; either way the call did not succeed. */
+async function settled(result: Promise<{ success: boolean; error?: string | undefined }>) {
+  return result.catch((error: unknown) => ({ success: false, error: String(error) }));
+}
 function root() { const directory = makeProjectTempDir('agent-document-effect-authority'); roots.push(directory); return directory; }
 function sourceStore(afterRead: () => void = () => {}) {
   const buffer = Buffer.from('Exact reviewed bytes');
@@ -63,7 +67,7 @@ test.each(['existing', 'dangling'] as const)('artifact export refuses a %s symli
 test('an export parent retargeted while acquiring bytes cannot write outside the physical workspace', async () => {
   const directory = root(), outside = root(); const parent = join(directory, 'exports'); mkdirSync(parent);
   const store = sourceStore(() => { rmSync(parent, { recursive: true }); symlinkSync(outside, parent); });
-  const result = await executeAdmitted(createAgentArtifactsTool(store, { projectRoot: directory }), { mode: 'export', artifactId: 'reviewed', destinationPath: 'exports/copy.txt' }, { directory });
+  const result = await settled(executeAdmitted(createAgentArtifactsTool(store, { projectRoot: directory }), { mode: 'export', artifactId: 'reviewed', destinationPath: 'exports/copy.txt' }, { directory }));
   expect(result.success).toBe(false); expect(existsSync(join(outside, 'copy.txt'))).toBe(false);
 });
 
@@ -71,13 +75,13 @@ test('an inside-workspace directory replaced while acquiring bytes retires the c
   const directory = root(); const parent = join(directory, 'exports'); mkdirSync(parent);
   const retired = join(directory, 'retired');
   const store = sourceStore(() => { renameSync(parent, retired); mkdirSync(parent); });
-  const result = await executeAdmitted(createAgentArtifactsTool(store, { projectRoot: directory }), { mode: 'export', artifactId: 'reviewed', destinationPath: 'exports/copy.txt' }, { directory });
+  const result = await settled(executeAdmitted(createAgentArtifactsTool(store, { projectRoot: directory }), { mode: 'export', artifactId: 'reviewed', destinationPath: 'exports/copy.txt' }, { directory }));
   expect(result.success).toBe(false); expect(existsSync(join(parent, 'copy.txt'))).toBe(false);
 });
 
 test('an artifact whose byte count contradicts its retained receipt cannot be exported', async () => {
   const directory = root(); const owned = sourceStore(); const store = { ...owned, async readContent() { const source = await owned.readContent(); return { ...source, record: { ...source.record, sizeBytes: source.record.sizeBytes + 1 } }; } };
-  const result = await executeAdmitted(createAgentArtifactsTool(store, { projectRoot: directory }), { mode: 'export', artifactId: 'reviewed', destinationPath: 'copy.txt' }, { directory });
+  const result = await settled(executeAdmitted(createAgentArtifactsTool(store, { projectRoot: directory }), { mode: 'export', artifactId: 'reviewed', destinationPath: 'copy.txt' }, { directory }));
   expect(result.success).toBe(false); expect(existsSync(join(directory, 'copy.txt'))).toBe(false);
 });
 

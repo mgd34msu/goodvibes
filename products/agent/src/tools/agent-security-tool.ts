@@ -1,9 +1,7 @@
-import { snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { CommandContext, CommandRegistry } from '../input/command-registry.ts';
-import { createAgentHarnessTool } from './agent-harness-tool.ts';
-import { forwardHarnessCatalogCall } from './agent-harness-catalog-ingress.ts';
+import { createHarnessFacade, registerHarnessFacade, type HarnessFacadeDeps } from './agent-harness-facade.ts';
 import { explainAgentPolicyDecision } from './agent-policy-explanation.ts';
 
 type AgentSecurityAction = 'status' | 'finding' | 'explain';
@@ -23,12 +21,7 @@ interface AgentSecurityToolArgs {
   readonly limit?: unknown;
 }
 
-interface AgentSecurityToolDeps {
-  readonly commandRegistry: CommandRegistry;
-  readonly commandContext: CommandContext;
-  readonly toolRegistry: ToolRegistry;
-  readonly harnessTool?: Tool;
-}
+type AgentSecurityToolDeps = HarnessFacadeDeps;
 
 function error(message: string): { readonly success: false; readonly error: string } {
   return { success: false, error: message };
@@ -86,13 +79,7 @@ function findingArgs(args: AgentSecurityToolArgs): Record<string, unknown> {
 }
 
 export function createAgentSecurityTool(deps: AgentSecurityToolDeps): Tool {
-  const harnessTool = deps.harnessTool ?? createAgentHarnessTool({
-    commandRegistry: deps.commandRegistry,
-    commandContext: deps.commandContext,
-    toolRegistry: deps.toolRegistry,
-  });
-
-  return {
+  return createHarnessFacade<AgentSecurityToolArgs>(deps, {
     definition: {
       name: 'security',
       description: 'Read security posture, findings, and policy explanations.',
@@ -121,10 +108,7 @@ export function createAgentSecurityTool(deps: AgentSecurityToolDeps): Tool {
       sideEffects: [],
       concurrency: 'parallel',
     },
-    execute: async (rawArgs, options) => {
-      // Capture before routing: even action/mode must never invoke caller accessors.
-      const args = snapshotJudgmentInput(rawArgs && typeof rawArgs === 'object' && !Array.isArray(rawArgs) ? rawArgs : {}) as AgentSecurityToolArgs;
-      const forward = (translated: Record<string, unknown>) => forwardHarnessCatalogCall(harnessTool, rawArgs, translated, options);
+    async route({ args, options, forward }) {
       const action = readAction(args);
       if (!action) return error(UNKNOWN_SECURITY_ACTION);
 
@@ -139,7 +123,7 @@ export function createAgentSecurityTool(deps: AgentSecurityToolDeps): Tool {
 
       return error(UNKNOWN_SECURITY_ACTION);
     },
-  };
+  });
 }
 
 export function registerAgentSecurityTool(
@@ -147,5 +131,5 @@ export function registerAgentSecurityTool(
   commandRegistry: CommandRegistry,
   commandContext: CommandContext,
 ): void {
-  if (!registry.has('security')) registry.register(createAgentSecurityTool({ commandRegistry, commandContext, toolRegistry: registry }));
+  registerHarnessFacade(registry, createAgentSecurityTool({ commandRegistry, commandContext, toolRegistry: registry }), commandContext);
 }

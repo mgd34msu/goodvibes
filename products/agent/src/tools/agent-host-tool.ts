@@ -1,8 +1,8 @@
-import { catalogRoutingInput, createHarnessCatalogInputProjector, forwardHarnessCatalogCall, protectHarnessCatalogTool } from './agent-harness-catalog-ingress.ts';
+import { catalogRoutingInput } from './agent-harness-catalog-ingress.ts';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { CommandContext, CommandRegistry } from '../input/command-registry.ts';
-import { createAgentHarnessTool } from './agent-harness-tool.ts';
+import { createHarnessFacade, registerHarnessFacade, type HarnessFacadeDeps } from './agent-harness-facade.ts';
 
 type AgentHostAction =
   | 'status'
@@ -25,12 +25,7 @@ interface AgentHostToolArgs {
   readonly limit?: unknown;
 }
 
-interface AgentHostToolDeps {
-  readonly commandRegistry: CommandRegistry;
-  readonly commandContext: CommandContext;
-  readonly toolRegistry: ToolRegistry;
-  readonly harnessTool?: Tool;
-}
+type AgentHostToolDeps = HarnessFacadeDeps;
 
 function readString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
@@ -69,13 +64,7 @@ function isHostCatalogQuery(input: Record<string, unknown>): boolean {
 }
 
 export function createAgentHostTool(deps: AgentHostToolDeps): Tool {
-  const harnessTool = deps.harnessTool ?? createAgentHarnessTool({
-    commandRegistry: deps.commandRegistry,
-    commandContext: deps.commandContext,
-    toolRegistry: deps.toolRegistry,
-  });
-
-  const tool: Tool = {
+  return createHarnessFacade<AgentHostToolArgs>(deps, {
     definition: {
       name: 'host',
       description: 'Inspect GoodVibes host status, services, and methods.',
@@ -101,9 +90,8 @@ export function createAgentHostTool(deps: AgentHostToolDeps): Tool {
       sideEffects: [],
       concurrency: 'parallel',
     },
-    execute: async (rawArgs, options) => {
-      const dispatch = (input: Record<string, unknown>) => forwardHarnessCatalogCall(harnessTool, rawArgs, input, options);
-      const args = (rawArgs && typeof rawArgs === 'object' && !Array.isArray(rawArgs) ? rawArgs : {}) as AgentHostToolArgs;
+    selected: isHostCatalogQuery,
+    route({ args, forward: dispatch }) {
       const requestedVerb = readString(args.action) || readString(args.mode);
       if (requestedVerb && !normalizeHostAction(args.action) && !normalizeHostAction(args.mode)) {
         return { success: false, error: `Unknown host action "${requestedVerb}". The host tool only reads: use action status, capabilities, capability, services, service, methods or method. It cannot restart or change the connected host.` };
@@ -159,8 +147,7 @@ export function createAgentHostTool(deps: AgentHostToolDeps): Tool {
         query: args.query,
       }));
     },
-  };
-  return protectHarnessCatalogTool(tool, deps.toolRegistry, isHostCatalogQuery, deps.commandContext);
+  });
 }
 
 export function registerAgentHostTool(
@@ -168,5 +155,5 @@ export function registerAgentHostTool(
   commandRegistry: CommandRegistry,
   commandContext: CommandContext,
 ): void {
-  if (!registry.has('host')) registry.register(createAgentHostTool({ commandRegistry, commandContext, toolRegistry: registry }), { inputProjection: createHarnessCatalogInputProjector(registry, undefined, isHostCatalogQuery, commandContext) });
+  registerHarnessFacade(registry, createAgentHostTool({ commandRegistry, commandContext, toolRegistry: registry }), commandContext, isHostCatalogQuery);
 }

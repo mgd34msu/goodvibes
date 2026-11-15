@@ -1,15 +1,15 @@
 import type { ArtifactDescriptor, ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
-import { agentArtifactEffectGuard, assertAgentArtifactBytes, captureAgentArtifactSource, captureAgentExportPath } from './agent-artifact-effect.ts';
+import { agentArtifactEffectGuard, assertAgentArtifactBytes } from './agent-artifact-effect.ts';
+import { toolErrorText } from './tool-error-text.ts';
 import type { ShellPathService } from '@/runtime/index.ts';
-import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import {
   AgentDocumentRegistry,
   renderAgentDocumentMarkdown,
   type AgentDocumentRecord,
   type AgentDocumentStatus,
+  type AgentDocumentVersion,
 } from '../agent/document-registry.ts';
 import { clampReadLimit } from './agent-harness-read-helpers.ts';
 
@@ -112,23 +112,6 @@ function requireSuggestionId(args: AgentDocumentsToolArgs): string {
   return id;
 }
 
-/**
- * A suggestion carries a full replacement of title, body and tags, so accepting one made against
- * older text would silently drop the edits made since. Refuse instead and name the way forward.
- */
-function assertSuggestionStillFits(document: AgentDocumentRecord | null | undefined, suggestionId: string): void {
-  const suggestion = document?.suggestions.find((entry) => entry.id === suggestionId);
-  if (!document || !suggestion || suggestion.status !== 'proposed') return;
-  const suggestedAt = Date.parse(suggestion.createdAt);
-  const edited = document.versions.some((version) => Date.parse(version.createdAt) > suggestedAt);
-  if (edited) {
-    throw new Error(
-      `Document ${document.id} was edited after suggestion ${suggestion.id} was made, and accepting it would replace those edits. `
-      + `Nothing changed. Use mode:"rejectSuggestion" and then mode:"suggest" against the current text, or mode:"show" to compare first.`,
-    );
-  }
-}
-
 function formatDocumentSummary(document: AgentDocumentRecord): string {
   const tags = document.tags.length > 0 ? ` tags ${document.tags.join(', ')}` : '';
   const artifact = document.lastArtifactId ? ` artifact ${document.lastArtifactId}` : '';
@@ -137,7 +120,7 @@ function formatDocumentSummary(document: AgentDocumentRecord): string {
   const proposedSuggestions = document.suggestions.filter((suggestion) => suggestion.status === 'proposed').length;
   const suggestions = document.suggestions.length > 0 ? ` suggestions ${proposedSuggestions}/${document.suggestions.length}` : '';
   const attachments = document.attachments.length > 0 ? ` attachments ${document.attachments.length}` : '';
-  return `${document.id}  ${document.status}  versions ${document.versions.length}${comments}${suggestions}${attachments}  updated ${document.updatedAt}${tags}${artifact}  ${document.title}`;
+  return `${document.id}  ${document.status}  versions ${document.versionCount}${comments}${suggestions}${attachments}  updated ${document.updatedAt}${tags}${artifact}  ${document.title}`;
 }
 
 function formatList(documents: readonly AgentDocumentRecord[], total: number, query: string): string {
@@ -156,7 +139,7 @@ function formatList(documents: readonly AgentDocumentRecord[], total: number, qu
   ].join('\n');
 }
 
-function formatShow(document: AgentDocumentRecord, includeVersions: boolean): string {
+function formatShow(document: AgentDocumentRecord, versions: readonly AgentDocumentVersion[] | undefined): string {
   const openComments = document.comments.filter((comment) => comment.status === 'open').length;
   const proposedSuggestions = document.suggestions.filter((suggestion) => suggestion.status === 'proposed').length;
   const lines = [
@@ -165,7 +148,7 @@ function formatShow(document: AgentDocumentRecord, includeVersions: boolean): st
     `  title ${document.title}`,
     `  status ${document.status}`,
     `  tags ${document.tags.join(', ') || '(none)'}`,
-    `  versions ${document.versions.length}`,
+    `  versions ${document.versionCount}`,
     `  comments ${openComments}/${document.comments.length}`,
     `  suggestions ${proposedSuggestions}/${document.suggestions.length}`,
     `  attachments ${document.attachments.length}`,
@@ -175,11 +158,11 @@ function formatShow(document: AgentDocumentRecord, includeVersions: boolean): st
     '',
     document.body,
   ];
-  if (includeVersions) {
+  if (versions) {
     lines.push(
       '',
       'Versions',
-      ...document.versions.map((version) => `  - ${version.id}  ${version.createdAt}  ${version.summary}`),
+      ...versions.map((version) => `  - ${version.id}  ${version.createdAt}  ${version.summary}`),
     );
   }
   if (document.comments.length > 0) {
@@ -261,7 +244,7 @@ async function loadArtifactForInsert(
   throw new Error(`Unknown artifact ${artifactId}. Use agent_artifacts mode:"list" to inspect available artifacts.`);
 }
 
-/** Every save rewrites the whole document file and keeps earlier versions, so one inserted artifact must stay small. */
+/** Each version keeps the whole body, up to fifty of them per document, so one inserted artifact must stay small. */
 const MAX_INSERTED_ARTIFACT_TEXT_BYTES = 64 * 1024;
 
 type InsertedArtifactContent = 'text' | 'truncated-text' | 'reference' | 'text-unreadable';
@@ -352,8 +335,7 @@ async function exportDocument(
   const proposedSuggestions = document.suggestions.filter((suggestion) => suggestion.status === 'proposed').length;
   const acceptedSuggestions = document.suggestions.filter((suggestion) => suggestion.status === 'accepted').length;
   const rejectedSuggestions = document.suggestions.filter((suggestion) => suggestion.status === 'rejected').length;
-  const assertDocument = () => { assertCurrent(); if (JSON.stringify(registry.get(document.id)) !== JSON.stringify(document)) throw new ToolInputProjectionError('stale'); };
-  assertDocument();
+  assertCurrent();
   const artifact = await artifactStore.create({
     kind: 'document',
     mimeType: 'text/markdown',
@@ -383,9 +365,15 @@ async function exportDocument(
         exportedReviewAppendix: document.comments.length > 0 || document.suggestions.length > 0,
       },
     },
-  }, { signal, assertCurrent: assertDocument });
-  assertDocument();
-  registry.updateArtifactId(document.id, artifact.id);
+  }, { signal, assertCurrent });
+  // The artifact exists now whatever happens next, so the result names it; its
+  // metadata carries the document and version ids. A failed link is reported,
+  // not turned into a failure that invites a second export.
+  try {
+    registry.updateArtifactId(document.id, artifact.id);
+  } catch (error) {
+    return `${formatExport(document, artifact)}\n  link not recorded on the document: ${error instanceof Error ? error.message : String(error)}. The artifact above is the export; do not export again.`;
+  }
   return formatExport({ ...document, lastArtifactId: artifact.id }, artifact);
 }
 
@@ -399,10 +387,9 @@ async function attachArtifactToDocument(
   const artifactId = requireArtifactId(args);
   const document = registry.get(documentId);
   if (!document) throw new Error(`Unknown Agent document ${documentId}.`);
+  const expectedRevision = registry.revisionOf(document.id);
   const loaded = await loadArtifactForInsert(artifactStore, artifactId, false);
-  const assertSource = captureAgentArtifactSource(artifactStore ?? {}, loaded.descriptor);
-  assertCurrent(); assertSource();
-  if (JSON.stringify(registry.get(document.id)) !== JSON.stringify(document)) throw new ToolInputProjectionError('stale');
+  assertCurrent();
   const updated = registry.attachArtifact(document.id, {
     artifactId: loaded.descriptor.id,
     label: readString(args.attachmentLabel) || loaded.descriptor.filename || loaded.descriptor.id,
@@ -411,7 +398,7 @@ async function attachArtifactToDocument(
     mimeType: loaded.descriptor.mimeType,
     kind: loaded.descriptor.kind,
     sizeBytes: loaded.descriptor.sizeBytes,
-  });
+  }, { ...(expectedRevision === undefined ? {} : { expectedRevision }) });
   const attachment = updated.attachments.find((entry) => entry.artifactId === loaded.descriptor.id);
   return [
     'Attached artifact to Agent document',
@@ -419,7 +406,7 @@ async function attachArtifactToDocument(
     `  attachment ${attachment?.id ?? '(unknown)'}`,
     `  artifact ${loaded.descriptor.id}`,
     `  attachments ${updated.attachments.length}`,
-    `  versions ${updated.versions.length}`,
+    `  versions ${updated.versionCount}`,
     '  body unchanged',
   ].join('\n');
 }
@@ -434,6 +421,7 @@ async function insertArtifactIntoDocument(
   const artifactId = requireArtifactId(args);
   const document = registry.get(documentId);
   if (!document) throw new Error(`Unknown Agent document ${documentId}.`);
+  const expectedRevision = registry.revisionOf(document.id);
   const includeContent = readBoolean(args.includeContent, true);
   const placement = readPlacement(args.placement);
   const loaded = await loadArtifactForInsert(artifactStore, artifactId, includeContent);
@@ -443,19 +431,19 @@ async function insertArtifactIntoDocument(
     sectionTitle: readString(args.sectionTitle),
     includeContent,
   });
-  const assertSource = captureAgentArtifactSource(artifactStore ?? {}, loaded.descriptor);
-  assertCurrent(); assertSource();
-  if (JSON.stringify(registry.get(document.id)) !== JSON.stringify(document)) throw new ToolInputProjectionError('stale');
+  assertCurrent();
+  // The new body is built from the text read before the artifact load; the
+  // revision makes a write that landed meanwhile refuse this one, not vanish.
   const updated = registry.update(document.id, {
     body: insertBlock(document.body, rendered.text, placement),
     summary: readString(args.changeSummary) || `Inserted artifact ${artifactId}.`,
-  });
+  }, { ...(expectedRevision === undefined ? {} : { expectedRevision }) });
   return [
     'Inserted artifact into Agent document',
     `  document ${updated.id}`,
     `  artifact ${loaded.descriptor.id}`,
     `  placement ${placement}`,
-    `  versions ${updated.versions.length}`,
+    `  versions ${updated.versionCount}`,
     `  inserted ${describeInserted(rendered.inserted, loaded.buffer?.length)}`,
   ].join('\n');
 }
@@ -579,9 +567,7 @@ export function createAgentDocumentsTool(
       if (mode === null) return failure(`mode must be one of ${MODES.join(', ')}.`);
 
       try {
-        const path = shellPaths.resolveProjectPath(GOODVIBES_AGENT_SURFACE_ROOT, 'documents', 'documents.json');
-        const target = captureAgentExportPath(shellPaths.workingDirectory, path);
-        const registry = AgentDocumentRegistry.fromShellPaths(shellPaths, () => { assertCurrent(); target.assertCurrent(); });
+        const registry = AgentDocumentRegistry.fromShellPaths(shellPaths, assertCurrent);
         if (mode === 'list') {
           const query = readString(args.query);
           const matches = query ? registry.search(query) : registry.list();
@@ -591,7 +577,7 @@ export function createAgentDocumentsTool(
         if (mode === 'show') {
           const document = registry.get(requireDocumentId(args));
           if (!document) return failure(`Unknown Agent document ${readString(args.documentId)}.`);
-          return output(formatShow(document, readBoolean(args.includeVersions, true)));
+          return output(formatShow(document, readBoolean(args.includeVersions, true) ? registry.versions(document.id) : undefined));
         }
         if (mode === 'create') {
           assertCurrent();
@@ -607,7 +593,7 @@ export function createAgentDocumentsTool(
             'Created Agent document',
             `  id ${document.id}`,
             `  title ${document.title}`,
-            `  versions ${document.versions.length}`,
+            `  versions ${document.versionCount}`,
           ].join('\n'));
         }
         if (mode === 'update') {
@@ -624,7 +610,7 @@ export function createAgentDocumentsTool(
             'Updated Agent document',
             `  id ${document.id}`,
             `  title ${document.title}`,
-            `  versions ${document.versions.length}`,
+            `  versions ${document.versionCount}`,
           ].join('\n'));
         }
         if (mode === 'review') {
@@ -634,7 +620,7 @@ export function createAgentDocumentsTool(
             'Reviewed Agent document',
             `  id ${document.id}`,
             `  status ${document.status}`,
-            `  versions ${document.versions.length}`,
+            `  versions ${document.versionCount}`,
           ].join('\n'));
         }
         if (mode === 'comment') {
@@ -674,19 +660,18 @@ export function createAgentDocumentsTool(
             `  document ${document.id}`,
             `  suggestion ${latest?.id ?? '(unknown)'}`,
             `  proposed ${document.suggestions.filter((suggestion) => suggestion.status === 'proposed').length}/${document.suggestions.length}`,
-            `  versions ${document.versions.length}`,
+            `  versions ${document.versionCount}`,
           ].join('\n'));
         }
         if (mode === 'acceptSuggestion') {
           assertCurrent();
           const acceptId = requireDocumentId(args), acceptSuggestionId = requireSuggestionId(args);
-          assertSuggestionStillFits(registry.get(acceptId), acceptSuggestionId);
           const document = registry.acceptSuggestion(acceptId, acceptSuggestionId);
           return output([
             'Accepted Agent document suggestion',
             `  document ${document.id}`,
             `  suggestion ${readString(args.suggestionId)}`,
-            `  versions ${document.versions.length}`,
+            `  versions ${document.versionCount}`,
             `  proposed ${document.suggestions.filter((suggestion) => suggestion.status === 'proposed').length}/${document.suggestions.length}`,
           ].join('\n'));
         }
@@ -697,7 +682,7 @@ export function createAgentDocumentsTool(
             'Rejected Agent document suggestion',
             `  document ${document.id}`,
             `  suggestion ${readString(args.suggestionId)}`,
-            `  versions ${document.versions.length}`,
+            `  versions ${document.versionCount}`,
             `  proposed ${document.suggestions.filter((suggestion) => suggestion.status === 'proposed').length}/${document.suggestions.length}`,
           ].join('\n'));
         }
@@ -714,7 +699,7 @@ export function createAgentDocumentsTool(
         if (!document) return failure(`Unknown Agent document ${readString(args.documentId)}.`);
         return output(await exportDocument(registry, artifactStore, document, assertCurrent, executionOptions?.signal));
       } catch (error) {
-        return failure(error instanceof Error ? error.message : String(error));
+        return failure(toolErrorText(error));
       }
     },
   };

@@ -1,13 +1,7 @@
+import { existsSync, readFileSync } from 'node:fs';
 import { defineLifecycle } from '@goodvibes-jev/engine/platform/platform/utils';
+import { openSqliteFile, type SqliteFile } from '@goodvibes-jev/engine/platform/platform/state';
 import type { ShellPathService } from '@/runtime/index.ts';
-import {
-  readJsonStore,
-  runStoreFileUpdateSync,
-  writeJsonStore,
-  type JsonStoreContents,
-  type JsonStoreSpec,
-  type JsonStoreWriteReport,
-} from '@/utils/store-file.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import { assertNoSecretLikeText } from './persona-registry.ts';
 import type {
@@ -43,11 +37,6 @@ export type {
   AgentDocumentVersion,
 } from './document-registry-types.ts';
 
-interface DocumentStoreFile {
-  readonly version: 1;
-  readonly documents: readonly AgentDocumentRecord[];
-}
-
 type AgentDocumentStorePaths = Pick<ShellPathService, 'resolveProjectPath'>;
 
 /** Document status is a label the owner may set freely (including un-archiving); no move is illegal. */
@@ -70,7 +59,6 @@ export const agentDocumentSuggestionLifecycle = defineLifecycle<AgentDocumentSug
   rejected: [],
 });
 
-const STORE_VERSION = 1;
 const MAX_VERSIONS = 50;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -242,6 +230,9 @@ function parseDocument(value: unknown): AgentDocumentRecord | null {
     ? value.attachments.map(parseAttachment).filter((entry): entry is AgentDocumentAttachment => entry !== null)
     : [];
   const lastArtifactId = readString(value.lastArtifactId).trim();
+  const versionCount = typeof value.versionCount === 'number' && Number.isSafeInteger(value.versionCount) && value.versionCount >= versions.length
+    ? value.versionCount
+    : versions.length;
   return {
     id,
     title,
@@ -251,6 +242,7 @@ function parseDocument(value: unknown): AgentDocumentRecord | null {
     createdAt,
     updatedAt: readString(value.updatedAt, createdAt),
     versions,
+    versionCount,
     comments,
     suggestions,
     attachments,
@@ -258,26 +250,20 @@ function parseDocument(value: unknown): AgentDocumentRecord | null {
   };
 }
 
-const DOCUMENT_STORE: JsonStoreSpec<AgentDocumentRecord> = {
-  label: 'document store',
-  entriesKey: 'documents',
-  version: STORE_VERSION,
-  parseEntry: parseDocument,
-};
-
 /** The version a document is at now. */
 function currentVersionId(document: AgentDocumentRecord): string {
   return document.versions.at(-1)?.id ?? 'v1';
 }
 
 /**
- * The next version id: one past the highest present, not one past the count.
+ * The next version id: one past the highest given, not one past the count.
  * Only the newest MAX_VERSIONS are kept, so the count stops growing at the cap
- * and a count-based id would repeat for every later revision.
+ * and a count-based id would repeat for every later revision. Ids only grow,
+ * so the newest version's number and the retained count are enough.
  */
-function nextVersionId(versions: readonly AgentDocumentVersion[]): string {
-  let highest = versions.length;
-  for (const version of versions) {
+function nextVersionId(document: Pick<AgentDocumentRecord, 'versions' | 'versionCount'>): string {
+  let highest = document.versionCount;
+  for (const version of document.versions) {
     const number = /^v(\d+)$/.exec(version.id)?.[1];
     if (number !== undefined) highest = Math.max(highest, Number(number));
   }
@@ -307,7 +293,65 @@ function renderSuggestionSummary(suggestion: AgentDocumentSuggestion): string {
 }
 
 export function documentStorePath(shellPaths: AgentDocumentStorePaths): string {
-  return shellPaths.resolveProjectPath(GOODVIBES_AGENT_SURFACE_ROOT, 'documents', 'documents.json');
+  return shellPaths.resolveProjectPath(GOODVIBES_AGENT_SURFACE_ROOT, 'documents', 'documents.db');
+}
+
+/**
+ * Documents are rows: one per document, holding its current text, comments,
+ * suggestions, attachments and newest version, and one row per retained
+ * version. A list or a lookup reads document rows only; the version history is
+ * read only when it is asked for, so a document's edit history never slows a
+ * list. A write is one transaction over the rows it changes.
+ */
+const DOCUMENT_MIGRATIONS = (legacyPath: string) => [
+  { toVersion: 1, up(db: SqliteFile['db']) {
+    db.run('CREATE TABLE documents (id TEXT PRIMARY KEY, id_key TEXT NOT NULL UNIQUE, title_key TEXT NOT NULL, updated_at TEXT NOT NULL, revision INTEGER NOT NULL, record TEXT NOT NULL)');
+    db.run('CREATE INDEX documents_title ON documents (title_key)');
+    db.run('CREATE TABLE versions (document_id TEXT NOT NULL, seq INTEGER NOT NULL, version TEXT NOT NULL, PRIMARY KEY (document_id, seq))');
+    importLegacyDocuments(db, legacyPath);
+  } },
+];
+
+/**
+ * Bring the documents of the earlier single-file store over once, when the
+ * database is first created. The old file is left where it was.
+ */
+function importLegacyDocuments(db: SqliteFile['db'], legacyPath: string): void {
+  if (!existsSync(legacyPath)) return;
+  let parsed: unknown;
+  try { parsed = JSON.parse(readFileSync(legacyPath, 'utf8')); } catch { return; }
+  const entries = isRecord(parsed) && Array.isArray(parsed.documents) ? parsed.documents : [];
+  const insertDocument = db.query('INSERT OR IGNORE INTO documents (id, id_key, title_key, updated_at, revision, record) VALUES (?, ?, ?, ?, 1, ?)');
+  const insertVersion = db.query('INSERT OR IGNORE INTO versions (document_id, seq, version) VALUES (?, ?, ?)');
+  for (const entry of entries) {
+    const document = parseDocument(entry);
+    if (!document) continue;
+    const versions = document.versions.slice(-MAX_VERSIONS);
+    insertDocument.run(document.id, document.id.toLowerCase(), document.title.toLowerCase(), document.updatedAt,
+      JSON.stringify(storedRecord({ ...document, versions, versionCount: versions.length })));
+    versions.forEach((version, index) => insertVersion.run(document.id, index, JSON.stringify(version)));
+  }
+}
+
+/** The document row: everything but the version history, which keeps only the newest version. */
+function parseRow(record: string): AgentDocumentRecord | null {
+  try { return parseDocument(JSON.parse(record)); } catch { return null; }
+}
+
+function storedRecord(document: AgentDocumentRecord): Record<string, unknown> {
+  return { ...document, versions: document.versions.slice(-1) };
+}
+
+const openStores = new Map<string, SqliteFile>();
+
+/** One open handle per store file for the life of the process. */
+function documentStore(path: string): SqliteFile {
+  let store = openStores.get(path);
+  if (!store) {
+    store = openSqliteFile(path, { name: 'document store', migrations: DOCUMENT_MIGRATIONS(path.replace(/\.db$/, '.json')) });
+    openStores.set(path, store);
+  }
+  return store;
 }
 
 export function renderAgentDocumentMarkdown(document: AgentDocumentRecord): string {
@@ -363,21 +407,31 @@ export function renderAgentDocumentMarkdown(document: AgentDocumentRecord): stri
   return lines.join('\n');
 }
 
-export class AgentDocumentRegistry {
-  private held: JsonStoreContents<AgentDocumentRecord> | null = null;
-  private lastWrite: JsonStoreWriteReport | undefined;
+export interface AgentDocumentWriteOptions {
+  /**
+   * The document's revision when the caller read it. A write that would
+   * replace text read before an await is refused when another write landed
+   * in between, instead of undoing it.
+   */
+  readonly expectedRevision?: number;
+}
 
+export class AgentDocumentRegistry {
   public constructor(private readonly storePath: string, private readonly assertWriteCurrent?: () => void) {}
 
   public static fromShellPaths(shellPaths: AgentDocumentStorePaths, assertWriteCurrent?: () => void): AgentDocumentRegistry {
     return new AgentDocumentRegistry(documentStorePath(shellPaths), assertWriteCurrent);
   }
 
+  private get store(): SqliteFile {
+    return documentStore(this.storePath);
+  }
+
   public snapshot(): AgentDocumentSnapshot {
-    const store = this.readStore();
+    const rows = this.store.db.query('SELECT record FROM documents ORDER BY updated_at DESC').all() as { record: string }[];
     return {
       path: this.storePath,
-      documents: [...store.documents].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)),
+      documents: rows.map((row) => parseRow(row.record)).filter((document): document is AgentDocumentRecord => document !== null),
     };
   }
 
@@ -409,26 +463,34 @@ export class AgentDocumentRegistry {
     ].some((field) => field.toLowerCase().includes(normalized)));
   }
 
+  /** One document by id or title. `versions` holds the newest version only; see {@link versions}. */
   public get(idOrTitle: string): AgentDocumentRecord | null {
-    const lookup = idOrTitle.trim().toLowerCase();
-    if (!lookup) return null;
-    return this.list().find((document) => (
-      document.id.toLowerCase() === lookup
-      || document.title.toLowerCase() === lookup
-    )) ?? null;
+    return this.find(idOrTitle)?.document ?? null;
+  }
+
+  /** The retained version history of one document, oldest first. */
+  public versions(id: string): readonly AgentDocumentVersion[] {
+    const rows = this.store.db.query('SELECT version FROM versions WHERE document_id = ? ORDER BY seq').all(id) as { version: string }[];
+    return rows.map((row) => { try { return parseVersion(JSON.parse(row.version)); } catch { return null; } })
+      .filter((version): version is AgentDocumentVersion => version !== null);
+  }
+
+  /** The document's write revision: it moves by one on every write to that document. */
+  public revisionOf(id: string): number | undefined {
+    const row = this.store.db.query('SELECT revision FROM documents WHERE id = ?').get(id) as { revision: number } | null;
+    return row?.revision;
   }
 
   public create(input: AgentDocumentCreateInput): AgentDocumentRecord {
-    return this.locked(() => {
-      const store = this.readStore();
+    return this.write(() => {
       const title = normalizeTitle(input.title);
       const body = input.body.trim();
       this.validateRequired(title, body);
       const tags = normalizeList(input.tags);
       const summary = input.summary?.trim() || 'Initial draft.';
       assertDocumentContentSafe([title, body, summary, ...tags]);
-      const duplicate = store.documents.find((document) => document.title.toLowerCase() === title.toLowerCase());
-      if (duplicate) throw new Error(`Document already exists ${duplicate.id}`);
+      const duplicate = this.find(title);
+      if (duplicate) throw new Error(`Document already exists ${duplicate.document.id}`);
       const timestamp = nowIso();
       const version: AgentDocumentVersion = {
         id: 'v1',
@@ -438,7 +500,7 @@ export class AgentDocumentRegistry {
         createdAt: timestamp,
       };
       const document: AgentDocumentRecord = {
-        id: this.nextId(title, store.documents),
+        id: this.nextId(title),
         title,
         body,
         tags,
@@ -446,36 +508,35 @@ export class AgentDocumentRegistry {
         createdAt: timestamp,
         updatedAt: timestamp,
         versions: [version],
+        versionCount: 1,
         comments: [],
         suggestions: [],
         attachments: [],
       };
-      this.writeStore({ ...store, documents: [...store.documents, document] });
+      this.save(document, 0, version);
       return document;
     });
   }
 
-  public update(idOrTitle: string, input: AgentDocumentUpdateInput): AgentDocumentRecord {
-    return this.locked(() => {
-      const store = this.readStore();
-      const existing = this.findInStore(store, idOrTitle);
-      if (!existing) throw new Error(`Unknown document ${idOrTitle}`);
+  public update(idOrTitle: string, input: AgentDocumentUpdateInput, options: AgentDocumentWriteOptions = {}): AgentDocumentRecord {
+    return this.write(() => {
+      const { document: existing, revision } = this.require(idOrTitle, options);
       const title = input.title === undefined ? existing.title : normalizeTitle(input.title);
       const body = input.body === undefined ? existing.body : input.body.trim();
       this.validateRequired(title, body);
       const tags = input.tags === undefined ? existing.tags : normalizeList(input.tags);
       const summary = input.summary?.trim() || 'Updated draft.';
       assertDocumentContentSafe([title, body, summary, ...tags]);
-      const duplicate = store.documents.find((document) => document.id !== existing.id && document.title.toLowerCase() === title.toLowerCase());
-      if (duplicate) throw new Error(`Document already exists ${duplicate.id}`);
+      const duplicate = this.find(title);
+      if (duplicate && duplicate.document.id !== existing.id) throw new Error(`Document already exists ${duplicate.document.id}`);
       const timestamp = nowIso();
       // A version records content; a change of status or artifact alone adds none,
       // so marking a document reviewed does not push its history out of the window.
       const contentChanged = title !== existing.title || body !== existing.body
         || tags.length !== existing.tags.length || tags.some((tag, index) => tag !== existing.tags[index]);
-      const versions = contentChanged
-        ? [...existing.versions, { id: nextVersionId(existing.versions), title, body, summary, createdAt: timestamp }].slice(-MAX_VERSIONS)
-        : existing.versions;
+      const version: AgentDocumentVersion | undefined = contentChanged
+        ? { id: nextVersionId(existing), title, body, summary, createdAt: timestamp }
+        : undefined;
       const updated: AgentDocumentRecord = {
         ...existing,
         title,
@@ -483,40 +544,30 @@ export class AgentDocumentRegistry {
         tags,
         status: input.status ?? existing.status,
         updatedAt: timestamp,
-        versions,
+        ...(version ? { versions: [version], versionCount: Math.min(existing.versionCount + 1, MAX_VERSIONS) } : {}),
         lastArtifactId: input.lastArtifactId === undefined ? existing.lastArtifactId : input.lastArtifactId || undefined,
       };
-      this.writeStore({
-        ...store,
-        documents: store.documents.map((document) => document.id === existing.id ? updated : document),
-      });
+      this.save(updated, revision, version);
       return updated;
     });
   }
 
   public updateArtifactId(idOrTitle: string, artifactId: string): AgentDocumentRecord {
-    return this.locked(() => {
-      const store = this.readStore();
-      const existing = this.findInStore(store, idOrTitle);
-      if (!existing) throw new Error(`Unknown document ${idOrTitle}`);
+    return this.write(() => {
+      const { document: existing, revision } = this.require(idOrTitle);
       const updated: AgentDocumentRecord = {
         ...existing,
         lastArtifactId: artifactId,
         updatedAt: nowIso(),
       };
-      this.writeStore({
-        ...store,
-        documents: store.documents.map((document) => document.id === existing.id ? updated : document),
-      });
+      this.save(updated, revision);
       return updated;
     });
   }
 
   public addComment(idOrTitle: string, input: AgentDocumentCommentInput): AgentDocumentRecord {
-    return this.locked(() => {
-      const store = this.readStore();
-      const existing = this.findInStore(store, idOrTitle);
-      if (!existing) throw new Error(`Unknown document ${idOrTitle}`);
+    return this.write(() => {
+      const { document: existing, revision } = this.require(idOrTitle);
       const body = input.body.trim();
       if (!body) throw new Error('Comment body is required.');
       assertDocumentContentSafe([body]);
@@ -533,19 +584,14 @@ export class AgentDocumentRegistry {
         comments: [...existing.comments, comment],
         updatedAt: timestamp,
       };
-      this.writeStore({
-        ...store,
-        documents: store.documents.map((document) => document.id === existing.id ? updated : document),
-      });
+      this.save(updated, revision);
       return updated;
     });
   }
 
   public resolveComment(idOrTitle: string, commentId: string): AgentDocumentRecord {
-    return this.locked(() => {
-      const store = this.readStore();
-      const existing = this.findInStore(store, idOrTitle);
-      if (!existing) throw new Error(`Unknown document ${idOrTitle}`);
+    return this.write(() => {
+      const { document: existing, revision } = this.require(idOrTitle);
       const lookup = commentId.trim().toLowerCase();
       if (!lookup) throw new Error('commentId is required.');
       const target = existing.comments.find((comment) => comment.id.toLowerCase() === lookup);
@@ -558,19 +604,14 @@ export class AgentDocumentRegistry {
           ? { ...comment, status: 'resolved', updatedAt: timestamp, resolvedAt: timestamp }
           : comment),
       };
-      this.writeStore({
-        ...store,
-        documents: store.documents.map((document) => document.id === existing.id ? updated : document),
-      });
+      this.save(updated, revision);
       return updated;
     });
   }
 
   public suggestUpdate(idOrTitle: string, input: AgentDocumentSuggestionInput): AgentDocumentRecord {
-    return this.locked(() => {
-      const store = this.readStore();
-      const existing = this.findInStore(store, idOrTitle);
-      if (!existing) throw new Error(`Unknown document ${idOrTitle}`);
+    return this.write(() => {
+      const { document: existing, revision } = this.require(idOrTitle);
       const title = input.title === undefined ? existing.title : normalizeTitle(input.title);
       const body = input.body.trim();
       this.validateRequired(title, body);
@@ -597,19 +638,14 @@ export class AgentDocumentRegistry {
         suggestions: [...existing.suggestions, suggestion],
         updatedAt: timestamp,
       };
-      this.writeStore({
-        ...store,
-        documents: store.documents.map((document) => document.id === existing.id ? updated : document),
-      });
+      this.save(updated, revision);
       return updated;
     });
   }
 
   public acceptSuggestion(idOrTitle: string, suggestionId: string): AgentDocumentRecord {
-    return this.locked(() => {
-      const store = this.readStore();
-      const existing = this.findInStore(store, idOrTitle);
-      if (!existing) throw new Error(`Unknown document ${idOrTitle}`);
+    return this.write(() => {
+      const { document: existing, revision } = this.require(idOrTitle);
       const target = this.findSuggestion(existing, suggestionId);
       if (!target) throw new Error(`Unknown document suggestion ${suggestionId}`);
       if (target.status === 'accepted') return existing;
@@ -618,12 +654,17 @@ export class AgentDocumentRegistry {
       // A suggestion is a whole replacement written against one version; accepting it
       // over a later version would silently undo the edits made in between.
       const current = currentVersionId(existing);
-      if (target.baseVersionId && target.baseVersionId !== current) {
-        throw new Error(`Document suggestion ${target.id} was proposed against ${target.baseVersionId}, and ${existing.id} is now at ${current}; accepting it would undo the changes made since. Propose the revision again against ${current}, or reject ${target.id}.`);
+      // A suggestion saved before it carried its base version is judged by time:
+      // a version newer than the suggestion means the text moved on.
+      const movedOn = target.baseVersionId
+        ? target.baseVersionId !== current
+        : Date.parse(existing.versions.at(-1)?.createdAt ?? '') > Date.parse(target.createdAt);
+      if (movedOn) {
+        throw new Error(`Document suggestion ${target.id} was proposed against ${target.baseVersionId ?? 'an earlier version'}, and ${existing.id} is now at ${current}; accepting it would undo the changes made since. Nothing changed. Propose the revision again against ${current} (mode:"suggest"), or reject ${target.id} (mode:"rejectSuggestion").`);
       }
       const timestamp = nowIso();
       const version: AgentDocumentVersion = {
-        id: nextVersionId(existing.versions),
+        id: nextVersionId(existing),
         title: target.title,
         body: target.body,
         summary: target.summary,
@@ -636,24 +677,20 @@ export class AgentDocumentRegistry {
         tags: [...target.tags],
         status: target.documentStatus ?? existing.status,
         updatedAt: timestamp,
-        versions: [...existing.versions, version].slice(-MAX_VERSIONS),
+        versions: [version],
+        versionCount: Math.min(existing.versionCount + 1, MAX_VERSIONS),
         suggestions: existing.suggestions.map((suggestion) => suggestion.id === target.id
           ? { ...suggestion, status: 'accepted', updatedAt: timestamp, resolvedAt: timestamp }
           : suggestion),
       };
-      this.writeStore({
-        ...store,
-        documents: store.documents.map((document) => document.id === existing.id ? updated : document),
-      });
+      this.save(updated, revision, version);
       return updated;
     });
   }
 
   public rejectSuggestion(idOrTitle: string, suggestionId: string): AgentDocumentRecord {
-    return this.locked(() => {
-      const store = this.readStore();
-      const existing = this.findInStore(store, idOrTitle);
-      if (!existing) throw new Error(`Unknown document ${idOrTitle}`);
+    return this.write(() => {
+      const { document: existing, revision } = this.require(idOrTitle);
       const target = this.findSuggestion(existing, suggestionId);
       if (!target) throw new Error(`Unknown document suggestion ${suggestionId}`);
       if (target.status === 'rejected') return existing;
@@ -667,19 +704,14 @@ export class AgentDocumentRegistry {
           ? { ...suggestion, status: 'rejected', updatedAt: timestamp, resolvedAt: timestamp }
           : suggestion),
       };
-      this.writeStore({
-        ...store,
-        documents: store.documents.map((document) => document.id === existing.id ? updated : document),
-      });
+      this.save(updated, revision);
       return updated;
     });
   }
 
-  public attachArtifact(idOrTitle: string, input: AgentDocumentAttachmentInput): AgentDocumentRecord {
-    return this.locked(() => {
-      const store = this.readStore();
-      const existing = this.findInStore(store, idOrTitle);
-      if (!existing) throw new Error(`Unknown document ${idOrTitle}`);
+  public attachArtifact(idOrTitle: string, input: AgentDocumentAttachmentInput, options: AgentDocumentWriteOptions = {}): AgentDocumentRecord {
+    return this.write(() => {
+      const { document: existing, revision } = this.require(idOrTitle, options);
       const artifactId = input.artifactId.trim();
       if (!artifactId) throw new Error('artifactId is required.');
       const label = normalizeTitle(input.label?.trim() || input.filename?.trim() || artifactId);
@@ -709,10 +741,7 @@ export class AgentDocumentRegistry {
         attachments,
         updatedAt: timestamp,
       };
-      this.writeStore({
-        ...store,
-        documents: store.documents.map((document) => document.id === existing.id ? updated : document),
-      });
+      this.save(updated, revision);
       return updated;
     });
   }
@@ -722,43 +751,51 @@ export class AgentDocumentRegistry {
   }
 
   public delete(idOrTitle: string): boolean {
-    return this.locked(() => {
-      const store = this.readStore();
-      const existing = this.findInStore(store, idOrTitle);
-      if (!existing) return false;
-      this.writeStore({
-        ...store,
-        documents: store.documents.filter((document) => document.id !== existing.id),
-      });
+    return this.write(() => {
+      const found = this.find(idOrTitle);
+      if (!found) return false;
+      this.assertWriteCurrent?.();
+      this.store.db.query('DELETE FROM versions WHERE document_id = ?').run(found.document.id);
+      this.store.db.query('DELETE FROM documents WHERE id = ?').run(found.document.id);
       return true;
     });
   }
 
-  /** What the last write reported: documents this version cannot read that were kept, or a copy of an unreadable file. */
-  public lastWriteReport(): JsonStoreWriteReport | undefined {
-    return this.lastWrite;
+  /** One immediate transaction: a read-modify-write cannot interleave with another process's write. */
+  private write<T>(update: () => T): T {
+    return this.store.tx(update);
   }
 
-  private readStore(): DocumentStoreFile {
-    const store = this.held ?? readJsonStore(this.storePath, DOCUMENT_STORE);
-    return { version: STORE_VERSION, documents: store.entries };
+  private find(idOrTitle: string): { readonly document: AgentDocumentRecord; readonly revision: number } | null {
+    const lookup = idOrTitle.trim().toLowerCase();
+    if (!lookup) return null;
+    const row = this.store.db.query('SELECT record, revision FROM documents WHERE id_key = ?1 OR title_key = ?1 ORDER BY id_key = ?1 DESC LIMIT 1')
+      .get(lookup) as { record: string; revision: number } | null;
+    const document = row ? parseRow(row.record) : null;
+    return row && document ? { document, revision: row.revision } : null;
   }
 
-  /** One read-modify-write at a time across the CLI and every agent process; the file is read once per operation. */
-  private locked<T>(update: () => T): T {
-    return runStoreFileUpdateSync(this.storePath, () => {
-      this.held = readJsonStore(this.storePath, DOCUMENT_STORE);
-      try {
-        return update();
-      } finally {
-        this.held = null;
-      }
-    });
+  private require(idOrTitle: string, options: AgentDocumentWriteOptions = {}): { readonly document: AgentDocumentRecord; readonly revision: number } {
+    const found = this.find(idOrTitle);
+    if (!found) throw new Error(`Unknown document ${idOrTitle}`);
+    if (options.expectedRevision !== undefined && found.revision !== options.expectedRevision) {
+      throw new Error(`Document ${found.document.id} changed while this call was working on it. Nothing changed. Read it again with mode:"show" and repeat the call.`);
+    }
+    return found;
   }
 
-  private writeStore(store: DocumentStoreFile): void {
+  /** Write one document row and, for a content change, its new version; older versions past the cap go. */
+  private save(document: AgentDocumentRecord, revision: number, version?: AgentDocumentVersion): void {
     this.assertWriteCurrent?.();
-    this.lastWrite = writeJsonStore(this.held ?? readJsonStore(this.storePath, DOCUMENT_STORE), DOCUMENT_STORE, { entries: store.documents });
+    const db = this.store.db;
+    db.query(`INSERT INTO documents (id, id_key, title_key, updated_at, revision, record) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+      ON CONFLICT (id) DO UPDATE SET title_key = excluded.title_key, updated_at = excluded.updated_at, revision = excluded.revision, record = excluded.record`)
+      .run(document.id, document.id.toLowerCase(), document.title.toLowerCase(), document.updatedAt, revision + 1, JSON.stringify(storedRecord(document)));
+    if (!version) return;
+    const last = db.query('SELECT MAX(seq) AS seq FROM versions WHERE document_id = ?').get(document.id) as { seq: number | null };
+    const seq = (last.seq ?? -1) + 1;
+    db.query('INSERT INTO versions (document_id, seq, version) VALUES (?, ?, ?)').run(document.id, seq, JSON.stringify(version));
+    db.query('DELETE FROM versions WHERE document_id = ? AND seq <= ?').run(document.id, seq - MAX_VERSIONS);
   }
 
   private validateRequired(title: string, body: string): void {
@@ -766,13 +803,13 @@ export class AgentDocumentRegistry {
     if (!body) throw new Error('Document body is required.');
   }
 
-  private nextId(title: string, documents: readonly AgentDocumentRecord[]): string {
+  private nextId(title: string): string {
     const base = slugify(title);
-    const existing = new Set(documents.map((document) => document.id));
-    if (!existing.has(base)) return base;
+    const taken = this.store.db.query('SELECT 1 FROM documents WHERE id = ?');
+    if (!taken.get(base)) return base;
     for (let index = 2; index < 10_000; index += 1) {
       const candidate = `${base}-${index}`;
-      if (!existing.has(candidate)) return candidate;
+      if (!taken.get(candidate)) return candidate;
     }
     throw new Error('Unable to allocate a unique document id.');
   }
@@ -810,12 +847,4 @@ export class AgentDocumentRegistry {
     return document.suggestions.find((suggestion) => suggestion.id.toLowerCase() === lookup) ?? null;
   }
 
-  private findInStore(store: DocumentStoreFile, idOrTitle: string): AgentDocumentRecord | null {
-    const lookup = idOrTitle.trim().toLowerCase();
-    if (!lookup) return null;
-    return store.documents.find((document) => (
-      document.id.toLowerCase() === lookup
-      || document.title.toLowerCase() === lookup
-    )) ?? null;
-  }
 }

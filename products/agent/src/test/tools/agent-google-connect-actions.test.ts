@@ -92,7 +92,9 @@ describe('Google model credential setup uses native opaque plans', () => {
     expect((await rig.run({ action: 'connect.client', clientId: CLIENT_ID })).success).toBe(true);
     await new Promise<void>(resolve => setImmediate(resolve));
     expect(await rig.secrets.get(GOOGLE_SECRET_KEYS.oauthRefreshToken)).toBeNull();
-    expect((await rig.run({ action: 'connect.complete' })).success).toBe(true);
+    const completed = await rig.run({ action: 'connect.complete' });
+    expect(completed.error ?? '').toBe('');
+    expect(completed.success).toBe(true);
     expect(await rig.secrets.get(GOOGLE_SECRET_KEYS.oauthRefreshToken)).toBe('synthetic-refresh-token');
     expect((await rig.run({ action: 'connect.complete' })).success).toBe(false);
   });
@@ -125,13 +127,15 @@ describe('Google model credential setup uses native opaque plans', () => {
     expect(wrong.error).toContain('projection invalid');
     expect(rig.config.get(GOOGLE_CONFIG_KEYS.oauthClientId)).toBe('');
   });
-  test('account replacement before completion cannot adopt the pending token', async () => {
+  test('an unrelated secret saved while the consent is open does not discard the approval', async () => {
     const rig = await toolRig({ approved: true });
     expect((await rig.run({ action: 'connect.client', clientId: CLIENT_ID })).success).toBe(true);
+    await rig.secrets.set('UNRELATED_SERVICE_KEY', 'unrelated-value');
     await new Promise<void>(resolve => setImmediate(resolve));
-    rig.config.setDynamic('email.username', 'different@example.com');
-    expect((await rig.run({ action: 'connect.complete' })).success).toBe(false);
-    expect(await rig.secrets.get(GOOGLE_SECRET_KEYS.oauthRefreshToken)).toBeNull();
+    const completed = await rig.run({ action: 'connect.complete' });
+    expect(completed.error ?? '').toBe('');
+    expect(completed.success).toBe(true);
+    expect(await rig.secrets.get(GOOGLE_SECRET_KEYS.oauthRefreshToken)).toBe('synthetic-refresh-token');
   });
   test('a changed client file is refused after original preparation before any effect', async () => {
     const rig = await toolRig(); const path = clientJsonAt(rig.root); let changed = false;

@@ -44,7 +44,7 @@ import {
   runGoogleSetup,
 } from './google-connection-actions.ts';
 import type { GoogleProgressPort, GoogleSetupPath, GoogleSetupStepSpec, GoogleStepResult } from '@goodvibes-jev/engine/platform/platform/google';
-import { getOutwardApprovalStore, takeRefusedOutwardAction } from '../../trust/outward-approvals.ts';
+import { getOutwardApprovalStore, listRefusedOutwardActions, takeRefusedOutwardAction, type PendingOutwardAction } from '../../trust/outward-approvals.ts';
 
 const USAGE = [
   'Usage: /google <subcommand>',
@@ -64,8 +64,8 @@ const USAGE = [
   '  setup [--path app-password|oauth|existing-client]',
   '                                  Run one specific path. /google connect picks for you.',
   '  runbook                         Print the written step-by-step instructions.',
-  '  approve                         Approve the outward action that was just refused. Type it yourself;',
-  '                                  it is ignored when the model runs it.',
+  '  approve [<n>] [--yes|--drop]    Show the sends that were refused; --yes sends the one shown (or number n)',
+  '                                  exactly as shown. Type it yourself; it is ignored when the model runs it.',
   '',
   'The same routes are cards in the Agent workspace, under Personal Ops.',
 ].join('\n');
@@ -180,16 +180,28 @@ async function setCalendarAddress(args: readonly string[], ctx: CommandContext, 
   ctx.print(`Stored the private calendar address in the encrypted secret store and subscribed to it as '${subscribed.name}' (${subscribed.eventCount} events loaded). Update it with: /calendar refresh`);
 }
 
+function describePending(entry: PendingOutwardAction): string[] {
+  const lines = [`${entry.id}. ${entry.description}`];
+  for (const [field, value] of Object.entries(entry.content)) {
+    if (value === undefined || value === '') continue;
+    const [first = '', ...rest] = value.split('\n');
+    lines.push(`   ${field}: ${first}`, ...rest.map((line) => `   ${' '.repeat(field.length)}  ${line}`));
+  }
+  return lines;
+}
+
 /**
- * `/google approve`, the gesture that clears an outward-effect refusal.
+ * `/google approve`, the gesture that clears an outward-effect refusal. It
+ * shows the refused actions, then sends (or creates) the one the owner names,
+ * exactly as shown. The bytes approved are the bytes sent: nothing waits on
+ * the model to repeat its call word for word.
  *
  * Refuses when the MODEL got here. `agent_harness mode:"run_command"` can run
  * any registered command, so without this check the remedy would be reachable
  * by exactly the route it exists to defend against: content steers the model,
- * the model runs the command, the approval appears. That the refusal message
- * tells the owner to type it himself is advice; this is the enforcement.
+ * the model runs the command, the approval appears.
  */
-function approveRefusedOutwardAction(ctx: CommandContext): void {
+async function approveRefusedOutwardAction(rest: readonly string[], ctx: CommandContext): Promise<void> {
   if (ctx.invokedByModel === true) {
     ctx.print(
       'Refused: /google approve grants authority, so it only counts when you type it yourself. '
@@ -197,27 +209,49 @@ function approveRefusedOutwardAction(ctx: CommandContext): void {
     );
     return;
   }
-  const refused = takeRefusedOutwardAction();
-  if (refused === null) {
-    ctx.print('Nothing is waiting for approval. Approvals name one specific message and last five minutes.');
+  const waiting = listRefusedOutwardActions();
+  if (waiting.length === 0) {
+    ctx.print('Nothing is waiting for approval. A refused send stays here for five minutes.');
     return;
   }
-  const approval = getOutwardApprovalStore().grant({
-    action: refused.action,
-    // Supplied by this code path, which knows it ran from the owner's own
-    // keystrokes. It is never read from an argument or from any content.
-    surface: 'owner-direct',
-    content: refused.content,
-  });
-  if (approval === null) {
-    ctx.print('Could not record the approval.');
+  const numbers = rest.filter((arg) => /^\d+$/.test(arg)).map(Number);
+  const chosen = numbers.length > 0 ? waiting.find((entry) => entry.id === numbers[0]) : waiting.length === 1 ? waiting[0] : undefined;
+  if (rest.includes('--drop')) {
+    const dropped = chosen && takeRefusedOutwardAction(chosen.id);
+    ctx.print(dropped ? `Dropped ${dropped.id}: ${dropped.description}. Nothing was sent.` : 'Name the one to drop: /google approve <n> --drop');
     return;
   }
-  ctx.print([
-    `Approved: ${refused.description}.`,
-    'It is tied to that exact message, good once, and expires in five minutes.',
-    'Re-issue the action now.',
-  ].join(' '));
+  if (!chosen || !saidYes(rest)) {
+    ctx.print([
+      'Refused by the content check, waiting for your approval:',
+      ...waiting.flatMap(describePending),
+      '',
+      waiting.length === 1
+        ? 'Send it exactly as shown with: /google approve --yes   (or drop it: /google approve 1 --drop)'
+        : 'Send one exactly as shown with: /google approve <n> --yes   (or drop one: /google approve <n> --drop)',
+    ].join('\n'));
+    return;
+  }
+  const approved = takeRefusedOutwardAction(chosen.id);
+  if (!approved) {
+    ctx.print('That approval expired. Ask for the send again.');
+    return;
+  }
+  if (!approved.perform) {
+    // No way to perform it from here: grant a one-use approval for the exact
+    // content instead, which the next identical call spends.
+    const approval = getOutwardApprovalStore().grant({ action: approved.action, surface: 'owner-direct', content: approved.content });
+    ctx.print(approval === null
+      ? 'Could not record the approval.'
+      : `Approved: ${approved.description}. It is tied to that exact content, good once, and expires in five minutes.`);
+    return;
+  }
+  const outcome = await approved.perform();
+  ctx.print(outcome.ok ? `Approved and done: ${outcome.text}` : `Approved, but it did not go through: ${outcome.text}`);
+  // The model asked for this; it learns how it ended on its next request.
+  ctx.session.conversationManager.hostInstructions.set('replay',
+    `The owner approved "${approved.description}" with /google approve. ${outcome.ok ? 'Done' : 'It failed'}: ${outcome.text} Do not send it again.`,
+    { once: true, append: true });
 }
 
 /** `fetcher` replaces the real HTTP feed fetch, for tests. */
@@ -268,7 +302,7 @@ export async function runGoogleCommand(args: readonly string[], ctx: CommandCont
       ctx.print(renderGoogleSetupRunbook());
       return;
     }
-    if (sub === 'approve') return approveRefusedOutwardAction(ctx);
+    if (sub === 'approve') return await approveRefusedOutwardAction(rest, ctx);
     if (sub === 'client-file') {
       const path = (rest[0] ?? '').trim();
       if (path.length === 0) {
@@ -297,7 +331,7 @@ export function registerGoogleRuntimeCommands(registry: CommandRegistry): void {
     name: 'google',
     aliases: ['gmail'],
     description: 'Connect Gmail and Google Calendar: one command, one consent link, proven by use',
-    usage: 'connect | status | reauthorize | forget [--yes] | adopt [--yes] | setup [--path app-password|oauth|existing-client] | client-file <path> | client <id> <secret> | account <address> | calendar-address <url> | runbook | approve',
+    usage: 'connect | status | reauthorize | forget [--yes] | adopt [--yes] | setup [--path app-password|oauth|existing-client] | client-file <path> | client <id> <secret> | account <address> | calendar-address <url> | runbook | approve [<n>] [--yes|--drop]',
     argsHint: 'connect|status|reauthorize|forget|adopt|setup|client-file|client|account|calendar-address|runbook|approve',
     handler: (args, ctx) => runGoogleCommand(args, ctx),
   });

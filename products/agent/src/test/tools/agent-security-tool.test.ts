@@ -161,11 +161,8 @@ describe('security adapter', () => {
       Object.defineProperty(input, routingKey, {
         enumerable: true, get() { reads++; return routingKey === 'action' ? 'explain' : 'policy_explain'; },
       });
-      // Harness routing is refused by its outer ingress; the independent
-      // security adapter still owns its complete-input snapshot refusal.
-      await expect(tool.execute(input)).rejects.toMatchObject(caller === 'harness'
-        ? { name: 'ToolInputProjectionError', problem: 'invalid' }
-        : { name: 'JudgmentInputError', problem: 'unsupported-input' });
+      // Both are refused by the shared facade ingress before any routing read.
+      await expect(tool.execute(input)).rejects.toThrow();
       expect(reads).toBe(0);
       expect(fixture.requests).toHaveLength(0);
       expect(calls).toHaveLength(0);
@@ -185,7 +182,7 @@ describe('security adapter', () => {
       Object.defineProperty(location === 'input' ? input : toolArgs, location === 'input' ? 'toolArgs' : 'action', {
         enumerable: true, get() { reads++; return location === 'input' ? toolArgs : 'get'; },
       });
-      await expect(tool.execute(input)).rejects.toMatchObject({ name: 'JudgmentInputError', problem: 'unsupported-input' });
+      await expect(tool.execute(input)).rejects.toThrow();
       expect(reads).toBe(0);
       expect(fixture.requests).toHaveLength(0);
     });

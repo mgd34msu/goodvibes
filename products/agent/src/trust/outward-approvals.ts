@@ -41,7 +41,8 @@ import { OwnerApprovalStore } from '@goodvibes-jev/engine/platform/platform/secu
  * looking at the same pending approvals or the gesture clears nothing.
  */
 let store: OwnerApprovalStore | null = null;
-let pending: PendingOutwardAction | null = null;
+let pending: PendingOutwardAction[] = [];
+let nextPendingId = 1;
 
 export function getOutwardApprovalStore(): OwnerApprovalStore {
   store ??= new OwnerApprovalStore();
@@ -50,21 +51,47 @@ export function getOutwardApprovalStore(): OwnerApprovalStore {
 
 export function resetOutwardApprovalStoreForTests(): void {
   store = null;
-  pending = null;
+  pending = [];
+  nextPendingId = 1;
 }
 
 /** The gesture, in the owner's words. Named once so the refusal cannot drift from it. */
 export const OUTWARD_APPROVAL_GESTURE =
-  'type /google approve at the prompt yourself, then re-issue the send. '
+  'type /google approve at the prompt yourself to see the refused message and send it. '
   + 'It is a keystroke rather than a phrase on purpose: anything you could be talked into typing, '
   + 'content that was just read could talk the agent into producing.';
 
-/** What the last refused outward action was, so the gesture has something to approve. */
+/** What performing an approved action came to. */
+export interface OutwardActionOutcome {
+  readonly ok: boolean;
+  readonly text: string;
+}
+
+/** A refused outward action the owner can still approve. */
 export interface PendingOutwardAction {
+  /** Its number in `/google approve`. */
+  readonly id: number;
   readonly action: string;
   readonly description: string;
+  /** Exactly what would leave the machine; this is what the owner is shown and what is sent. */
   readonly content: Readonly<Record<string, string | undefined>>;
   readonly at: number;
+  /**
+   * Performs this exact action with the recorded content. Run only from the
+   * owner's own `/google approve`, so the bytes approved are the bytes sent.
+   */
+  readonly perform?: (() => Promise<OutwardActionOutcome>) | undefined;
+}
+
+/** How long a refused action stays approvable, matching the approval's own window. */
+const PENDING_TTL_MS = 5 * 60 * 1000;
+/** Refusals kept for approval; older ones drop off. */
+const MAX_PENDING = 5;
+
+function live(): PendingOutwardAction[] {
+  const now = Date.now();
+  pending = pending.filter((entry) => now - entry.at <= PENDING_TTL_MS);
+  return pending;
 }
 
 /**
@@ -72,31 +99,29 @@ export interface PendingOutwardAction {
  *
  * The owner approves an action he has been SHOWN, so the thing he approves has
  * to be recorded at the moment of refusal, otherwise `/google approve` would
- * be approving whatever came next, which is a blank cheque.
+ * be approving whatever came next, which is a blank cheque. Several refusals
+ * in one turn each stay approvable.
  */
-export function rememberRefusedOutwardAction(input: Omit<PendingOutwardAction, 'at'>): void {
-  pending = { ...input, at: Date.now() };
+export function rememberRefusedOutwardAction(input: Omit<PendingOutwardAction, 'at' | 'id'>): PendingOutwardAction {
+  const entry: PendingOutwardAction = { ...input, id: nextPendingId++, at: Date.now() };
+  pending = [...live(), entry].slice(-MAX_PENDING);
+  return entry;
 }
 
-/** How long a refused action stays approvable, matching the approval's own window. */
-const PENDING_TTL_MS = 5 * 60 * 1000;
+/** Every refusal still approvable, oldest first. */
+export function listRefusedOutwardActions(): readonly PendingOutwardAction[] {
+  return [...live()];
+}
 
-export function takeRefusedOutwardAction(): PendingOutwardAction | null {
-  if (pending === null) return null;
-  if (Date.now() - pending.at > PENDING_TTL_MS) {
-    pending = null;
-    return null;
-  }
-  const held = pending;
-  pending = null;
+/** Remove and return one refusal by number, or the newest when no number is given. */
+export function takeRefusedOutwardAction(id?: number): PendingOutwardAction | null {
+  const entries = live();
+  const held = id === undefined ? entries.at(-1) : entries.find((entry) => entry.id === id);
+  if (!held) return null;
+  pending = entries.filter((entry) => entry !== held);
   return held;
 }
 
 export function peekRefusedOutwardAction(): PendingOutwardAction | null {
-  if (pending === null) return null;
-  if (Date.now() - pending.at > PENDING_TTL_MS) {
-    pending = null;
-    return null;
-  }
-  return pending;
+  return live().at(-1) ?? null;
 }

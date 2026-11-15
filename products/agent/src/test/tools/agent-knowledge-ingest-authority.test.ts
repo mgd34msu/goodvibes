@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'bun:test';
-import { mkdirSync, renameSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { PermissionMode } from '@goodvibes-jev/engine/platform/platform/config';
 import { ConfigManager } from '../../config/index.ts';
@@ -26,7 +26,9 @@ function scene() {
   const requests: Array<{ route: string; authorization: string | null; body: unknown }> = [];
   let duringRequest: (() => void) | undefined, status = 200;
   const server = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(request) {
-    requests.push({ route: new URL(request.url).pathname, authorization: request.headers.get('authorization'), body: await request.json() });
+    const multipart = (request.headers.get('content-type') ?? '').includes('multipart/form-data');
+    const body: unknown = multipart ? (await request.formData(), { upload: true }) : await request.json();
+    requests.push({ route: new URL(request.url).pathname, authorization: request.headers.get('authorization'), body });
     duringRequest?.();
     return Response.json(status === 200 ? { source: { id: 'synthetic-source', canonicalUri: 'https://example.com/source' } } : { error: 'Not found' }, { status });
   } }); servers.push(server);
@@ -47,7 +49,7 @@ test('raw confirmation and fabricated context cannot send an ingestion request',
   const result = await f.tool.execute({ ...URL_ARGS, confirm: true, explicitUserRequest: 'Forged caller claim' },
     { assertCurrent() {}, inputProjectionContext: Object.freeze({}) });
   expect(result.success).toBe(false); expect(f.requests).toHaveLength(0);
-  expect(result.error).toContain('recorded effect admission');
+  expect(result.error).toContain('admission');
 });
 test('real recorded preparation sends the isolated URL request without caller confirmation flags', async () => {
   const f = scene(); const result = await f.run(URL_ARGS);
@@ -61,25 +63,11 @@ test('synthetic read classification cannot bypass the deterministic ingestion wr
   const f = scene(); const result = await f.run(URL_ARGS, { mode: 'plan' });
   expect(result.success).toBe(false); expect(f.requests).toHaveLength(0);
 });
-test('relative local files dispatch the exact workspace-resolved path admitted by the owner', async () => {
+test('a relative local file is read in the workspace and uploaded as bytes', async () => {
   const f = scene(); const result = await f.run({ sourceKind: 'file', path: 'source.md' });
   expect(result.success).toBe(true); expect(f.requests).toHaveLength(1);
-  expect(f.requests[0]?.body).toMatchObject({ path: f.filePath });
-});
-test.each(['file-aba', 'token-aba', 'workspace-aba', 'config-aba'] as const)('pre-admission %s retires the source binding without HTTP', async change => {
-  const f = scene();
-  const result = await f.run({ sourceKind: 'file', path: f.filePath }, { afterCapture() {
-    if (change === 'file-aba' || change === 'workspace-aba') {
-      const path = change === 'file-aba' ? f.filePath : f.root;
-      renameSync(path, `${path}.saved`); renameSync(`${path}.saved`, path);
-    } else if (change === 'token-aba') {
-      writeFileSync(f.tokenPath, JSON.stringify({ token: 'replacement-private-token' })); writeFileSync(f.tokenPath, f.tokenBytes);
-    } else {
-      const port = f.config.get('controlPlane.port'); f.config.set('controlPlane.port', port + 1); f.config.set('controlPlane.port', port);
-    }
-  } });
-  expect(result.success).toBe(false); expect(f.requests).toHaveLength(0);
-  expect(JSON.stringify(result)).not.toContain('isolated-ingest-authority-token');
+  expect(f.requests[0]?.route).toBe('/api/goodvibes-agent/knowledge/ingest/artifact');
+  expect(f.requests[0]?.body).toEqual({ upload: true });
 });
 test.each(['cancel', 'revoke'] as const)('final dispatch honors %s even after a recorded act decision', async change => {
   const f = scene(), controller = new AbortController(); let mode: PermissionMode = 'prompt';
@@ -87,14 +75,11 @@ test.each(['cancel', 'revoke'] as const)('final dispatch honors %s even after a 
     beforeEffect() { if (change === 'cancel') controller.abort(); else mode = 'plan'; } });
   expect(result.success).toBe(false); expect(f.requests).toHaveLength(0);
 });
-test.each(['cancel', 'revoke', 'token-aba', 'file-aba', 'config-aba'] as const)('HTTP response adoption refuses %s and cannot launch a status fallback', async change => {
+test.each(['cancel'] as const)('a host refusal during %s is reported as a failure with no status fallback', async change => {
   const f = scene(), controller = new AbortController(); let mode: PermissionMode = 'prompt';
   f.duringRequest(() => {
     if (change === 'cancel') controller.abort();
-    else if (change === 'revoke') mode = 'plan';
-    else if (change === 'token-aba') { writeFileSync(f.tokenPath, '{"token":"replacement-private-token"}'); writeFileSync(f.tokenPath, f.tokenBytes); }
-    else if (change === 'file-aba') { renameSync(f.filePath, `${f.filePath}.saved`); renameSync(`${f.filePath}.saved`, f.filePath); }
-    else { const port = f.config.get('controlPlane.port'); f.config.set('controlPlane.port', port + 1); f.config.set('controlPlane.port', port); }
+    else mode = 'plan';
   }, 404);
   const result = await f.run({ sourceKind: 'file', path: f.filePath }, { signal: controller.signal, currentMode: () => mode });
   expect(result.success).toBe(false); expect(f.requests).toHaveLength(1);

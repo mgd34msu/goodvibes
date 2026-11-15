@@ -235,6 +235,55 @@ export async function postAgentKnowledgeJson<TData>(
   return invokeKnowledgeRoute<TData>(connection, route, body, options);
 }
 
+/** A local file sent as bytes: the host stores exactly what was read here. */
+export interface AgentKnowledgeUploadFile {
+  readonly bytes: Uint8Array;
+  readonly filename: string;
+}
+
+/**
+ * Post a file to an upload route as multipart form data, with the same
+ * deadline, no redirect and no retry as every other knowledge call. The host
+ * never opens a path of its own, so the ingest is the same on a host on
+ * another machine.
+ */
+export async function postAgentKnowledgeUpload<TData>(
+  connection: AgentKnowledgeConnection,
+  route: string,
+  file: AgentKnowledgeUploadFile,
+  fields: JsonRecord,
+  options: AgentKnowledgeRequestOptions = {},
+): Promise<TData> {
+  options.assertCurrent?.();
+  const form = new FormData();
+  for (const [key, value] of Object.entries(compactInput(fields))) {
+    form.append(key, typeof value === 'string' ? value : JSON.stringify(value));
+  }
+  form.append('file', new Blob([new Uint8Array(file.bytes)]), file.filename);
+  const deadline = AbortSignal.timeout(AGENT_KNOWLEDGE_WRITE_DEADLINE_MS);
+  let response: Response;
+  try {
+    response = await fetch(new URL(route, connection.baseUrl), {
+      method: 'POST',
+      body: form,
+      redirect: 'error',
+      signal: AbortSignal.any([deadline, ...(options.signal ? [options.signal] : [])]),
+      headers: connection.token ? { Authorization: `Bearer ${connection.token}` } : {},
+    });
+  } catch (error) {
+    if (deadline.aborted && !options.signal?.aborted) throw new KnowledgeDeadlineError(AGENT_KNOWLEDGE_WRITE_DEADLINE_MS, true, error);
+    throw error;
+  }
+  const text = await response.text();
+  let body: unknown = text;
+  try { body = JSON.parse(text) as unknown; } catch { /* the host answered with text; keep it as the body */ }
+  if (!response.ok) {
+    const message = isRecord(body) && typeof body.error === 'string' ? body.error : text.trim() || `HTTP ${response.status}`;
+    throw Object.assign(new Error(message), { status: response.status, body });
+  }
+  return normalizeAgentKnowledgeData(body as TData);
+}
+
 export async function getAgentKnowledgeJson<TData>(
   connection: AgentKnowledgeConnection,
   route: string,

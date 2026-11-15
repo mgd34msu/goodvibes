@@ -1,4 +1,3 @@
-import { PERSONAL_OPS_LIVE_READ_TEMPLATE } from '../../tools/agent-harness-personal-ops-records.ts';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { SqliteDecisionLog, withDecisionLog, type JudgmentPort } from '@goodvibes-jev/judgment';
@@ -14,7 +13,6 @@ import { autonomyQueueCatalogStatus } from '../../tools/agent-harness-autonomy-q
 import type { CommandContext } from '../../input/command-registry.ts';
 import { createHarnessFixtureReadings, makeFixture } from './agent-harness-tool-fixture.ts';
 
-type JsonRecord = Record<string, unknown>;
 
 async function schemaProperty(name: string): Promise<{ readonly enum?: readonly string[] }> {
   resetTestRuntimeServices();
@@ -38,35 +36,14 @@ describe('orchestration lists follow the real agent tool', () => {
   });
 });
 
-describe('capabilities contract teaches only what the tools accept', () => {
-  async function contractText(): Promise<string> {
+describe('capabilities come from the running build', () => {
+  test('a build without the google tool is not told Gmail is built in', async () => {
     const tool: Tool = { definition: { name: 'goodvibes_context', description: '', parameters: { type: 'object', properties: {} } }, execute: async () => ({ success: true, output: '' }) };
     wrapAgentContextToolForAgentPolicy(tool);
     const result = await tool.execute({ mode: 'capabilities' });
     expect(result.success).toBe(true);
-    return result.output ?? '';
-  }
-
-  test('never tells the model to pass a client secret to google', async () => {
-    const text = await contractText();
-    expect(text).not.toContain('with both');
-    expect(text).toContain('Never take a client secret as a tool argument');
-  });
-
-  test('does not present confirm:true as authority for a settings write or import', async () => {
-    const payload = JSON.parse(await contractText()) as { readonly commonRoutes: JsonRecord; readonly currentContract: JsonRecord };
-    for (const key of ['settings', 'settingsImport', 'setSetting']) {
-      expect(String(payload.commonRoutes[key])).not.toContain('confirm:true');
-    }
-    expect(String(payload.currentContract.confirmations)).toContain('are context, not authority');
-  });
-
-  test('teaches the live personal_ops read as the route the tool accepts, without confirm arguments', async () => {
-    const payload = JSON.parse(await contractText()) as { readonly commonRoutes: JsonRecord };
-    const route = String(payload.commonRoutes.personalOps);
-    expect(route).toContain(PERSONAL_OPS_LIVE_READ_TEMPLATE);
-    expect(route).not.toContain('confirm:true');
-    expect(route).not.toContain('explicitUserRequest:');
+    expect(result.output).not.toContain('google tool reads and sends Gmail');
+    expect(result.output).not.toContain('confirm:true');
   });
 });
 

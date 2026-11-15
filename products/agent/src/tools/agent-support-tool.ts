@@ -1,8 +1,7 @@
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { CommandContext, CommandRegistry } from '../input/command-registry.ts';
-import { createAgentHarnessTool } from './agent-harness-tool.ts';
-import { forwardHarnessCatalogCall } from './agent-harness-catalog-ingress.ts';
+import { createHarnessFacade, registerHarnessFacade, type HarnessFacadeDeps } from './agent-harness-facade.ts';
 
 type AgentSupportAction = 'status' | 'bundle';
 
@@ -17,12 +16,7 @@ interface AgentSupportToolArgs {
   readonly limit?: unknown;
 }
 
-interface AgentSupportToolDeps {
-  readonly commandRegistry: CommandRegistry;
-  readonly commandContext: CommandContext;
-  readonly toolRegistry: ToolRegistry;
-  readonly harnessTool?: Tool;
-}
+type AgentSupportToolDeps = HarnessFacadeDeps;
 
 function error(message: string): { readonly success: false; readonly error: string } {
   return { success: false, error: message };
@@ -72,13 +66,7 @@ function bundleArgs(args: AgentSupportToolArgs): Record<string, unknown> {
 }
 
 export function createAgentSupportTool(deps: AgentSupportToolDeps): Tool {
-  const harnessTool = deps.harnessTool ?? createAgentHarnessTool({
-    commandRegistry: deps.commandRegistry,
-    commandContext: deps.commandContext,
-    toolRegistry: deps.toolRegistry,
-  });
-
-  return {
+  return createHarnessFacade<AgentSupportToolArgs>(deps, {
     definition: {
       name: 'support',
       description: 'Read support-bundle routes and redacted bundle summaries.',
@@ -103,16 +91,14 @@ export function createAgentSupportTool(deps: AgentSupportToolDeps): Tool {
       sideEffects: [],
       concurrency: 'parallel',
     },
-    execute: async (rawArgs, options) => {
-      const args = (rawArgs && typeof rawArgs === 'object' && !Array.isArray(rawArgs) ? rawArgs : {}) as AgentSupportToolArgs;
-      const forward = (translated: Record<string, unknown>) => forwardHarnessCatalogCall(harnessTool, rawArgs, translated, options);
+    route({ args, forward }) {
       const action = readAction(args);
       if (!action) return error('Unknown support action. Use one of: status, bundle.');
       if (action === 'status') return forward(statusArgs(args));
       if (action === 'bundle') return forward(bundleArgs(args));
       return error('Unknown support action. Use one of: status, bundle.');
     },
-  };
+  });
 }
 
 export function registerAgentSupportTool(
@@ -120,5 +106,5 @@ export function registerAgentSupportTool(
   commandRegistry: CommandRegistry,
   commandContext: CommandContext,
 ): void {
-  if (!registry.has('support')) registry.register(createAgentSupportTool({ commandRegistry, commandContext, toolRegistry: registry }));
+  registerHarnessFacade(registry, createAgentSupportTool({ commandRegistry, commandContext, toolRegistry: registry }), commandContext);
 }

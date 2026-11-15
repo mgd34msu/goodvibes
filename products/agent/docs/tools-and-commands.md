@@ -49,7 +49,7 @@ An agent or a background process can take over the whole terminal. `Enter` on an
 | `agent` | Spawn, batch-spawn, inspect, message, wait, cancel, and report visible Agent subagents. |
 | `agent_harness` | Discover and operate Agent harness routes, including visible surfaces and operator/audit inspection. |
 | `agent_knowledge` | Read isolated Agent Knowledge: status, ask/search, lists, item, map, connectors. |
-| `agent_knowledge_ingest` | Confirmed URL, file, artifact-id, browser, bookmark, or connector ingest into isolated Agent Knowledge. File and import paths must be inside the workspace, browser-history imports are capped at 500 rows, and private-host sources are ingested by the owner, not the model. |
+| `agent_knowledge_ingest` | Confirmed URL, file, artifact-id, browser, bookmark, or connector ingest into isolated Agent Knowledge. File and import paths must be inside the workspace; the file is read once by the Agent and its bytes are sent, so a connected host on another machine ingests exactly that file. Browser-history imports are capped at 500 rows, and private-host sources are ingested by the owner, not the model. |
 | `agent_learning_consolidation` | Preview, apply, rollback, or exact-id recreate one confirmed Agent-local duplicate-consolidation phase with receipts. |
 | `agent_local_registry` | Inspect or update Agent-local memory, notes, personas, skills, bundles, and routines. |
 | `agent_work_plan` | Keep the visible Agent-local work plan current and dispatch approved plan items to visible agents with confirmation and receipts. |
@@ -60,7 +60,7 @@ An agent or a background process can take over the whole terminal. `Enter` on an
 | `vibe` | Inspect VIBE.md status/show, create project/global VIBE.md, or import VIBE.md as an Agent-local persona through existing gates. |
 | `browser` | Drive a real web browser: open pages, take an element snapshot, click, type, select, scroll, wait, read the page text, extract data by selector or ref, screenshot, and manage tabs. Provisions its own browser on first use and keeps sign-ins in a saved profile. It runs no caller-supplied script in a page: `extract` names the fields it wants, so a page cannot be made to transmit anything. |
 | `computer` | Inspect browser/PWA readiness, plan browser/screenshot/desktop-control workflows, inspect MCP/setup posture, and open the browser cockpit through confirmation-gated visible routes. |
-| `device` | Inspect device capability, companion/mobile, voice/media, and provider posture; open TTS pickers through confirmation-gated visible routes. Browser/PWA and desktop-control compatibility routes remain available, but `computer` is the primary route. |
+| `device` | Inspect device capability, companion/mobile, voice/media, and provider posture; open TTS pickers through confirmation-gated visible routes. Its `browser`, `open_browser` and `control` actions forward to the `computer` tool, the primary route for them. |
 | `import_goodvibes_settings` | Preview or apply shared GoodVibes settings import through the existing redacted import plan and confirmation gate, including source-package ownership metadata. |
 | `agent_operator_action` | Run exact confirmed approval/automation/schedule actions. |
 | `agent_schedule_edit` | Edit one confirmed connected schedule by id. |

@@ -1,11 +1,9 @@
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { CommandContext, CommandRegistry } from '../input/command-registry.ts';
-import { createAgentHarnessTool } from './agent-harness-tool.ts';
-import { forwardHarnessCatalogCall, harnessCatalogExecutionGuard, retainHarnessCatalogCurrent } from './agent-harness-catalog-ingress.ts';
-
+import { harnessCatalogExecutionGuard, retainHarnessCatalogCurrent } from './agent-harness-catalog-ingress.ts';
+import { createHarnessFacade, registerHarnessFacade, type HarnessFacadeDeps } from './agent-harness-facade.ts';
 import { selectHarnessCatalog } from './agent-harness-catalog-selection.ts';
-import { captureCatalogSnapshot } from './agent-harness-catalog-ranking.ts';
 import { agentResearchSourceOwner } from '../agent/protected-research-report.ts';
 
 type AgentAuditAction = 'readiness' | 'item' | 'evidence' | 'artifact';
@@ -22,12 +20,7 @@ interface AgentAuditToolArgs {
   readonly limit?: unknown;
 }
 
-interface AgentAuditToolDeps {
-  readonly commandRegistry: CommandRegistry;
-  readonly commandContext: CommandContext;
-  readonly toolRegistry: ToolRegistry;
-  readonly harnessTool?: Tool;
-}
+type AgentAuditToolDeps = HarnessFacadeDeps;
 
 function error(message: string): { readonly success: false; readonly error: string } {
   return { success: false, error: message };
@@ -108,13 +101,7 @@ function artifactArgs(args: AgentAuditToolArgs): Record<string, unknown> {
 }
 
 export function createAgentAuditTool(deps: AgentAuditToolDeps): Tool {
-  const harnessTool = deps.harnessTool ?? createAgentHarnessTool({
-    commandRegistry: deps.commandRegistry,
-    commandContext: deps.commandContext,
-    toolRegistry: deps.toolRegistry,
-  });
-
-  return {
+  return createHarnessFacade<AgentAuditToolArgs>(deps, {
     definition: {
       name: 'audit',
       description: 'Read release readiness and packaged release evidence.',
@@ -140,16 +127,14 @@ export function createAgentAuditTool(deps: AgentAuditToolDeps): Tool {
       sideEffects: [],
       concurrency: 'parallel',
     },
-    execute: async (rawArgs, options) => {
-      const source = captureCatalogSnapshot(rawArgs);
-      const args: AgentAuditToolArgs = source.captured;
+    async route({ args, rawArgs, options, forward: forwardCall }) {
       const executionCurrent = harnessCatalogExecutionGuard(rawArgs, options);
       const sourceOwner = agentResearchSourceOwner(deps.toolRegistry);
       const current = () => {
-        executionCurrent(); source.assertCurrent(rawArgs);
+        executionCurrent();
         if (agentResearchSourceOwner(deps.toolRegistry) !== sourceOwner) throw new Error('Audit source owner changed.');
       };
-      const forward = (translated: Record<string, unknown>) => forwardHarnessCatalogCall(harnessTool, rawArgs, translated, options, current);
+      const forward = (translated: Record<string, unknown>) => forwardCall(translated, current);
       let action = readExplicitAction(args);
       if (!action && !readString(args.action) && !readString(args.mode)) {
         // A bare id names either a release item or an evidence artifact and there
@@ -177,7 +162,7 @@ export function createAgentAuditTool(deps: AgentAuditToolDeps): Tool {
       if (action === 'artifact') return forward(artifactArgs(args));
       return error('Unknown audit action. Use action:"readiness", "item", "evidence", or "artifact".');
     },
-  };
+  });
 }
 
 export function registerAgentAuditTool(
@@ -185,5 +170,5 @@ export function registerAgentAuditTool(
   commandRegistry: CommandRegistry,
   commandContext: CommandContext,
 ): void {
-  if (!registry.has('audit')) registry.register(createAgentAuditTool({ commandRegistry, commandContext, toolRegistry: registry }));
+  registerHarnessFacade(registry, createAgentAuditTool({ commandRegistry, commandContext, toolRegistry: registry }), commandContext);
 }

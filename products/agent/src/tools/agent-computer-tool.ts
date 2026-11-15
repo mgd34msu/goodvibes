@@ -1,9 +1,8 @@
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { CommandContext, CommandRegistry } from '../input/command-registry.ts';
-import { createAgentHarnessTool } from './agent-harness-tool.ts';
 import { captureModelReadingInput } from './agent-harness-model-reading-source.ts';
-import { createHarnessCatalogInputProjector, protectHarnessCatalogTool, forwardHarnessCatalogCall } from './agent-harness-catalog-ingress.ts';
+import { createHarnessFacade, registerHarnessFacade, type HarnessFacadeDeps } from './agent-harness-facade.ts';
 
 type AgentComputerAction =
   | 'status'
@@ -24,12 +23,7 @@ interface AgentComputerToolArgs {
   readonly explicitUserRequest?: unknown;
 }
 
-interface AgentComputerToolDeps {
-  readonly commandRegistry: CommandRegistry;
-  readonly commandContext: CommandContext;
-  readonly toolRegistry: ToolRegistry;
-  readonly harnessTool?: Tool;
-}
+type AgentComputerToolDeps = HarnessFacadeDeps;
 
 function error(message: string): { readonly success: false; readonly error: string } {
   return { success: false, error: message };
@@ -114,13 +108,7 @@ function mcpArgs(args: AgentComputerToolArgs): Record<string, unknown> {
 }
 
 export function createAgentComputerTool(deps: AgentComputerToolDeps): Tool {
-  const harnessTool = deps.harnessTool ?? createAgentHarnessTool({
-    commandRegistry: deps.commandRegistry,
-    commandContext: deps.commandContext,
-    toolRegistry: deps.toolRegistry,
-  });
-
-  const tool: Tool = {
+  return createHarnessFacade<AgentComputerToolArgs>(deps, {
     definition: {
       name: 'computer',
       description: 'Inspect/open browser, desktop, and computer-use routes.',
@@ -144,23 +132,18 @@ export function createAgentComputerTool(deps: AgentComputerToolDeps): Tool {
       sideEffects: ['state'],
       concurrency: 'serial',
     },
-    execute: async (rawArgs, options) => {
-      const args = captureModelReadingInput(rawArgs);
-      const forward = (translated: Record<string, unknown>) => forwardHarnessCatalogCall(harnessTool, rawArgs, translated, options);
+    selected: isComputerWorkflowQuery,
+    route({ args, forward }) {
       const action = readAction(args);
-      if (!action) return error('Unknown computer action. Use action:"status" for browser/desktop control posture.');
-
       if (action === 'status' || action === 'control') return forward(controlArgs(args));
       if (action === 'plan') return forward(planArgs(args));
       if (action === 'browser') return forward(browserArgs(args));
       if (action === 'open_browser') return forward(openBrowserArgs(args));
       if (action === 'setup') return forward(setupArgs(args));
       if (action === 'mcp') return forward(mcpArgs(args));
-
-      return error('Unknown computer action. Use action:"status" for browser/desktop control posture.');
+      return error('Unknown computer action. Use action (or mode) as one of: status, plan, control, browser, open_browser, setup, mcp.');
     },
-  };
-  return protectHarnessCatalogTool(tool, deps.toolRegistry, isComputerWorkflowQuery, deps.commandContext);
+  });
 }
 
 export function isComputerWorkflowQuery(input: Record<string, unknown>): boolean {
@@ -172,5 +155,5 @@ export function registerAgentComputerTool(
   commandRegistry: CommandRegistry,
   commandContext: CommandContext,
 ): void {
-  if (!registry.has('computer')) registry.register(createAgentComputerTool({ commandRegistry, commandContext, toolRegistry: registry }), { inputProjection: createHarnessCatalogInputProjector(registry, undefined, isComputerWorkflowQuery, commandContext) });
+  registerHarnessFacade(registry, createAgentComputerTool({ commandRegistry, commandContext, toolRegistry: registry }), commandContext, isComputerWorkflowQuery);
 }

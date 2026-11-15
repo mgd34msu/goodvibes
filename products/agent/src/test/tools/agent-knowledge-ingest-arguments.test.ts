@@ -155,13 +155,11 @@ describe('agent_knowledge_ingest argument and path handling', () => {
     expect(result.output).toContain('capped at 500');
   });
 
-  test('a source that changes while the host is ingesting is never reported as not ingested', async () => {
+  test('a file edited while the host is ingesting is reported as ingested: the bytes read once are what was sent', async () => {
     const paths = shellPaths(), tool = admittedTool(paths), path = ingestFile(paths);
     const result = await withFetch(async () => { appendFileSync(path, ' Edited meanwhile.'); return ingestResponse(); },
       () => tool.execute({ sourceKind: 'file', path }));
-    expect(result.output ?? result.error).not.toContain('held');
-    const text = `${result.output ?? ''}${result.error ?? ''}`;
-    expect(text.includes('Note:') || text.includes('before retrying')).toBe(true);
+    expect(result.success, result.error).toBe(true);
   });
 
   test('a file above the size limit is refused before it is read', async () => {

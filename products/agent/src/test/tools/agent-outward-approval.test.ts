@@ -118,8 +118,11 @@ function run(tool: ReturnType<typeof createAgentGoogleTool>, args: Record<string
 }
 
 /** A command context the way the owner's own keystrokes produce one. */
-function ownerTypedContext(printed: string[]): CommandContext {
-  return { print: (text: string) => { printed.push(text); } } as unknown as CommandContext;
+function ownerTypedContext(printed: string[], notes: string[] = []): CommandContext {
+  return {
+    print: (text: string) => { printed.push(text); },
+    session: { conversationManager: { hostInstructions: { set: (_key: string, text: string) => { notes.push(text); } } } },
+  } as unknown as CommandContext;
 }
 
 /** A command context the way `agent_harness mode:"run_command"` produces one. */
@@ -164,38 +167,48 @@ describe('model refusal and separate native approval records', () => {
     expect(refused.error ?? '').toContain('Tell the owner');
   });
 
-  test('typing the gesture clears the gate, and the send then goes', async () => {
+  test('the owner is shown the refused message and the command sends exactly that', async () => {
     const { tool, sent } = googleTool();
     startTurnForOwnerInput(undefined, getSessionUntrustedContentLedger());
     await run(tool, { action: 'mail.read', id: 'm1' });
+    expect((await run(tool, TAINTED_SEND)).success).toBe(false);
 
-    const refused = await run(tool, TAINTED_SEND);
-    expect(refused.success).toBe(false);
+    const shown: string[] = [];
+    await runGoogleCommand(['approve'], ownerTypedContext(shown));
+    expect(shown.join('\n')).toContain('accounts@thirdparty.example');
+    expect(shown.join('\n')).toContain('Payment');
+    expect(shown.join('\n')).toContain('Northgate Bank');
     expect(sent).toHaveLength(0);
 
-    // The separate native owner control records only this exact payload.
-    const printed: string[] = [];
-    await runGoogleCommand(['approve'], ownerTypedContext(printed));
-    expect(printed.join(' ')).toContain('Approved');
+    const notes: string[] = [];
+    const done: string[] = [];
+    await runGoogleCommand(['approve', '--yes'], ownerTypedContext(done, notes));
+    expect(done.join(' ')).toContain('Approved and done');
+    expect(sent).toHaveLength(1);
+    expect(notes.join(' ')).toContain('Do not send it again');
 
-    const retried = await run(tool, TAINTED_SEND);
-    expect(retried.error ?? '').toBe('');
-    expect(retried.success).toBe(true);
+    // Sent once; nothing is left to approve.
+    const again: string[] = [];
+    await runGoogleCommand(['approve', '--yes'], ownerTypedContext(again));
+    expect(again.join(' ')).toContain('Nothing is waiting');
     expect(sent).toHaveLength(1);
   });
 
-  test('an approval is spent once, so it does not authorize a second send', async () => {
+  test('two refused sends each stay approvable by number', async () => {
     const { tool, sent } = googleTool();
     startTurnForOwnerInput(undefined, getSessionUntrustedContentLedger());
     await run(tool, { action: 'mail.read', id: 'm1' });
     await run(tool, TAINTED_SEND);
-    await runGoogleCommand(['approve'], ownerTypedContext([]));
+    await run(tool, { ...TAINTED_SEND, subject: 'Second payment' });
 
-    expect((await run(tool, TAINTED_SEND)).success).toBe(true);
-    // Same payload, same turn, no new gesture. One answered prompt is one
-    // action, not a standing permit for the rest of the session.
-    expect((await run(tool, TAINTED_SEND)).success).toBe(false);
+    const shown: string[] = [];
+    await runGoogleCommand(['approve'], ownerTypedContext(shown));
+    expect(shown.join('\n')).toContain('1. sending mail to');
+    expect(shown.join('\n')).toContain('2. sending mail to');
+
+    await runGoogleCommand(['approve', '1', '--yes'], ownerTypedContext([]));
     expect(sent).toHaveLength(1);
+    expect(sent[0]).not.toContain('Second payment');
   });
 });
 

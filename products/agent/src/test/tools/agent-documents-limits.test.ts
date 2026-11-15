@@ -60,7 +60,7 @@ describe('agent_documents suggestions', () => {
     await executeAdmitted(tool, { mode: 'update', documentId: 'plan', body: 'Owner edit made after the suggestion.' });
     const accepted = await executeAdmitted(tool, { mode: 'acceptSuggestion', documentId: 'plan', suggestionId: 's1' });
     expect(accepted.success).toBe(false);
-    expect(accepted.error ?? '').toContain('would replace those edits');
+    expect(accepted.error ?? '').toContain('would undo the changes made since');
     expect(documents.get('plan')!.body).toBe('Owner edit made after the suggestion.');
   });
 

@@ -1,8 +1,7 @@
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { CommandContext, CommandRegistry } from '../input/command-registry.ts';
-import { createAgentHarnessTool } from './agent-harness-tool.ts';
-import { forwardHarnessCatalogCall } from './agent-harness-catalog-ingress.ts';
+import { createHarnessFacade, registerHarnessFacade, type HarnessFacadeDeps } from './agent-harness-facade.ts';
 
 type AgentSessionsAction = 'list' | 'get';
 
@@ -17,12 +16,7 @@ interface AgentSessionsToolArgs {
   readonly limit?: unknown;
 }
 
-interface AgentSessionsToolDeps {
-  readonly commandRegistry: CommandRegistry;
-  readonly commandContext: CommandContext;
-  readonly toolRegistry: ToolRegistry;
-  readonly harnessTool?: Tool;
-}
+type AgentSessionsToolDeps = HarnessFacadeDeps;
 
 function error(message: string): { readonly success: false; readonly error: string } {
   return { success: false, error: message };
@@ -74,13 +68,7 @@ function getArgs(args: AgentSessionsToolArgs): Record<string, unknown> {
 }
 
 export function createAgentSessionsTool(deps: AgentSessionsToolDeps): Tool {
-  const harnessTool = deps.harnessTool ?? createAgentHarnessTool({
-    commandRegistry: deps.commandRegistry,
-    commandContext: deps.commandContext,
-    toolRegistry: deps.toolRegistry,
-  });
-
-  return {
+  return createHarnessFacade<AgentSessionsToolArgs>(deps, {
     definition: {
       name: 'sessions',
       description: 'Read saved sessions, bookmarks, and transcript continuity.',
@@ -105,16 +93,14 @@ export function createAgentSessionsTool(deps: AgentSessionsToolDeps): Tool {
       sideEffects: [],
       concurrency: 'parallel',
     },
-    execute: async (rawArgs, options) => {
-      const args = (rawArgs && typeof rawArgs === 'object' && !Array.isArray(rawArgs) ? rawArgs : {}) as AgentSessionsToolArgs;
-      const forward = (translated: Record<string, unknown>) => forwardHarnessCatalogCall(harnessTool, rawArgs, translated, options);
+    route({ args, forward }) {
       const action = readAction(args);
       if (!action) return error(UNKNOWN_SESSIONS_ACTION);
       if (action === 'list') return forward(listArgs(args));
       if (action === 'get') return forward(getArgs(args));
       return error(UNKNOWN_SESSIONS_ACTION);
     },
-  };
+  });
 }
 
 export function registerAgentSessionsTool(
@@ -122,5 +108,5 @@ export function registerAgentSessionsTool(
   commandRegistry: CommandRegistry,
   commandContext: CommandContext,
 ): void {
-  if (!registry.has('sessions')) registry.register(createAgentSessionsTool({ commandRegistry, commandContext, toolRegistry: registry }));
+  registerHarnessFacade(registry, createAgentSessionsTool({ commandRegistry, commandContext, toolRegistry: registry }), commandContext);
 }

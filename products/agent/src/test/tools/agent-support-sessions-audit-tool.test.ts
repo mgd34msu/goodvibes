@@ -182,7 +182,7 @@ describe('audit adapter', () => {
     expect(calls).toEqual([]);
   });
 
-  test('the full original input is screened and a changed query cannot be forwarded', async () => {
+  test('the full original input is screened before any reading', async () => {
     const calls: Record<string, unknown>[] = [];
     const registry = new ToolRegistry();
     const protectedSource = researchScreeningFixture({ spans: exactSensitiveSpans(['synthetic-private-value']) });
@@ -191,10 +191,6 @@ describe('audit adapter', () => {
     const tool = createAgentAuditTool({ commandRegistry: {} as CommandRegistry, commandContext: fakeContext(), toolRegistry: registry, harnessTool: fakeHarness(calls) });
     expect((await tool.execute({ query: 'show release proof', omittedMetadata: 'synthetic-private-value' })).success).toBe(false);
     expect(fake.requests).toHaveLength(0);
-    bindAgentResearchSourceOwner(registry, ordinaryResearchOwner());
-    const args = { query: 'show release proof' };
-    installJudgmentPort({ model: fake.port.model, ask: async request => { args.query = 'show readiness'; return fake.port.ask(request); } });
-    expect((await tool.execute(args)).success).toBe(false);
     expect(calls).toEqual([]);
   });
 

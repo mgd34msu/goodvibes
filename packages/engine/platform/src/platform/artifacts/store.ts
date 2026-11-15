@@ -56,6 +56,11 @@ export interface ArtifactStoreConfig {
 }
 
 const DEFAULT_ARTIFACT_MAX_BYTES = 512 * 1024 * 1024;
+/** How often a listing may sweep the store for expired or vanished artifacts. */
+const PRUNE_INTERVAL_MS = 60_000;
+function isExpired(record: ArtifactRecord, now: number): boolean {
+  return typeof record.expiresAt === 'number' && record.expiresAt <= now;
+}
 const DEFAULT_ARTIFACT_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const DEFAULT_MAX_RETENTION_MS = 90 * 24 * 60 * 60 * 1000;
 const REMOTE_FETCH_MODES = new Set<ArtifactFetchMode>(['public-only', 'allow-private-hosts']);
@@ -376,6 +381,7 @@ export class ArtifactStore {
   private readonly savedChecksumPins = new Map<string, string>();
   private readonly recordFiles = new Map<string, { readonly content: string; readonly metadata: string }>();
   private readonly records = new Map<string, ArtifactRecord>();
+  private lastPrunedAt = 0;
   private readonly maxBytes: number;
   private readonly defaultRetentionMs: number;
   private readonly maxRetentionMs: number;
@@ -410,29 +416,36 @@ export class ArtifactStore {
   }
 
   list(limit = 100): ArtifactDescriptor[] {
-    this.pruneExpired();
+    const now = Date.now();
+    this.pruneExpired(now);
     return [...this.records.values()]
+      .filter((record) => !isExpired(record, now))
       .sort((a, b) => b.createdAt - a.createdAt || a.id.localeCompare(b.id))
       .slice(0, Math.max(1, limit))
       .map((record) => this.toDescriptor(record));
   }
 
   get(id: string): ArtifactDescriptor | null {
-    this.pruneExpired();
-    const record = this.records.get(id);
+    const record = this.liveRecord(id);
     return record ? this.toDescriptor(record) : null;
   }
 
   getRecord(id: string): ArtifactRecord | null {
-    this.pruneExpired();
-    return this.records.get(id) ?? null;
+    return this.liveRecord(id) ?? null;
   }
 
   delete(id: string): boolean {
-    this.pruneExpired();
     const record = this.records.get(id);
     if (!record) return false;
     return this.#removeRecordFiles(record);
+  }
+
+  /** One map lookup; an expired record found here is removed and reads as absent. */
+  private liveRecord(id: string, now = Date.now()): ArtifactRecord | undefined {
+    const record = this.records.get(id);
+    if (!record || !isExpired(record, now)) return record;
+    this.#removeRecordFiles(record);
+    return undefined;
   }
 
   deleteMany(ids: Iterable<string>): number {
@@ -506,7 +519,7 @@ export class ArtifactStore {
   }
 
   async readContent(id: string): Promise<ArtifactContentRead> {
-    this.pruneExpired(); const record = nativeApply(nativeMapGet, this.#originalOwner.records, [id]) as ArtifactRecord | undefined;
+    const record = this.liveRecord(id);
     if (!record) throw new Error(`Unknown artifact: ${id}`);
     const observation = this.captureOriginal(id), assertCurrent = observation.assertCurrent;
     assertCurrent(); const buffer = await readFile(record.contentPath); assertCurrent();
@@ -851,7 +864,14 @@ export class ArtifactStore {
     }
   }
 
+  /**
+   * Sweep the whole store at most once per {@link PRUNE_INTERVAL_MS}, from a
+   * listing. One `stat` per stored artifact is paid by a list now and then,
+   * never by a lookup; a lookup checks only its own record's expiry.
+   */
   private pruneExpired(now = Date.now()): void {
+    if (now - this.lastPrunedAt < PRUNE_INTERVAL_MS) return;
+    this.lastPrunedAt = now;
     for (const record of this.records.values()) {
       // Another process sharing this root may have removed the files; a record
       // with no content behind it is dropped rather than listed forever.

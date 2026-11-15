@@ -1,16 +1,15 @@
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
-import { assertCurrentToolEffect, assertProjectionExecution, ToolInputProjectionError, type ToolRegistry, type ToolInputProjector } from '@goodvibes-jev/engine/platform/platform/tools';
+import { assertCurrentToolEffect, ToolInputProjectionError, type ToolInputProjector, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { captureStrictJudgmentJson } from '@goodvibes-jev/engine/platform/platform/gate';
-import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync, realpathSync, type BigIntStats } from 'node:fs';
-import { dirname, relative, isAbsolute } from 'node:path';
-import { isDeepStrictEqual } from 'node:util';
-import { captureOperatorConnection } from '../agent/operator-connection-owner.ts';
-import { captureCatalogMethods } from './agent-harness-catalog-ranking.ts';
+import { closeSync, constants, fstatSync, openSync, readFileSync, realpathSync, statSync } from 'node:fs';
+import { basename, relative, isAbsolute } from 'node:path';
 import type { ShellPathService } from '@/runtime/index.ts';
 import type { AgentConnectedHostConfigReader } from '../agent/routine-schedule-promotion.ts';
 import {
   classifyKnowledgeError,
   postAgentKnowledgeJson,
+  postAgentKnowledgeUpload,
+  resolveConnectedHostConnection,
   type AgentKnowledgeFailure,
 } from '../cli/agent-knowledge-runtime.ts';
 import { AGENT_KNOWLEDGE_METHODS } from '../cli/agent-knowledge-methods.ts';
@@ -63,7 +62,7 @@ interface AgentKnowledgeIngestRequest {
 
 /** The daemon clamps a browser-history import to this many rows. */
 const BROWSER_HISTORY_LIMIT_MAX = 500;
-/** A captured file is held in memory and compared again before the send. */
+/** A local file is read once into memory and sent as bytes; this bounds that read. */
 const MAX_INGEST_FILE_BYTES = 64 * 1024 * 1024;
 
 /** Every source kind the tool accepts; the connected-host capability map lists the same set. */
@@ -331,112 +330,77 @@ function requestForArgs(args: AgentKnowledgeIngestToolArgs): AgentKnowledgeInges
   };
 }
 
-interface IngestCapture {
-  readonly shellPaths: ShellPathService;
-  readonly configManager: AgentConnectedHostConfigReader;
-  readonly connection: ReturnType<typeof captureOperatorConnection>;
-  readonly request: AgentKnowledgeIngestRequest;
-  readonly assertCurrent: () => void;
+/** The model picks local paths, so they stay inside the workspace; a file elsewhere is the owner's to hand over. */
+function workspacePath(shellPaths: ShellPathService, selected: string, field: string): string {
+  const workspace = realpathSync(shellPaths.workingDirectory);
+  let target: string;
+  try { target = realpathSync(shellPaths.resolveWorkspacePath(selected)); } catch { throw new IngestArgumentError(`The ${field} does not name an existing file.`); }
+  const rel = relative(workspace, target);
+  if (rel.startsWith('..') || isAbsolute(rel)) throw new IngestArgumentError(`The ${field} must be inside the workspace.`);
+  return target;
 }
-const ingestCaptures = new WeakMap<object, IngestCapture>();
 
-function fileSignature(stat: BigIntStats): string {
-  return `${stat.dev}:${stat.ino}:${stat.mode}:${stat.uid}:${stat.gid}:${stat.nlink}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`;
-}
-/** The argument names something this tool cannot ingest; the problem is the arguments, not the host. */
-const invalidSelection = (detail?: string) => new ToolInputProjectionError('invalid', detail);
-
-function captureIngestFile(path: string): () => void {
-  let before: BigIntStats;
-  try { before = lstatSync(path, { bigint: true }); } catch { throw invalidSelection('The path does not name an existing file.'); }
-  // A single-link regular file only: another name for the same bytes could change them unseen.
-  if (!before.isFile() || before.isSymbolicLink()) throw invalidSelection('The path must name a regular file, not a directory or symbolic link.');
-  if (before.nlink !== 1n) throw invalidSelection('The file has more than one hard link, so its content could change unseen. Ingest a copy with a single link.');
-  if (before.size > BigInt(MAX_INGEST_FILE_BYTES)) throw invalidSelection(`The file is larger than the ${MAX_INGEST_FILE_BYTES / (1024 * 1024)} MiB limit.`);
-  const signature = fileSignature(before);
-  const fd = openSync(path, constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW);
-  let bytes: Buffer;
+/** Read a workspace file once, bounded; these bytes are what the host ingests. */
+function readIngestFile(path: string): Buffer {
+  const fd = openSync(path, constants.O_RDONLY | constants.O_NONBLOCK);
   try {
-    if (fileSignature(fstatSync(fd, { bigint: true })) !== signature) throw new ToolInputProjectionError('stale');
-    bytes = readFileSync(fd);
-    if (fileSignature(fstatSync(fd, { bigint: true })) !== signature
-      || fileSignature(lstatSync(path, { bigint: true })) !== signature) throw new ToolInputProjectionError('stale');
+    const stat = fstatSync(fd);
+    if (!stat.isFile()) throw new IngestArgumentError('The path must name a regular file, not a directory.');
+    if (stat.size > MAX_INGEST_FILE_BYTES) throw new IngestArgumentError(`The file is larger than the ${MAX_INGEST_FILE_BYTES / (1024 * 1024)} MiB limit.`);
+    return readFileSync(fd);
   } finally { closeSync(fd); }
-  const parents: Array<{ readonly path: string; readonly identity: string }> = [];
-  for (let current = dirname(path); ; current = dirname(current)) {
-    const stat = lstatSync(current, { bigint: true });
-    if (!stat.isDirectory() || stat.isSymbolicLink()) throw invalidSelection('A directory on the path is a symbolic link; use the real path inside the workspace.');
-    parents.push({ path: current, identity: `${stat.dev}:${stat.ino}:${stat.mode}` });
-    if (current === dirname(current)) break;
-  }
-  return () => {
-    for (const parent of parents) {
-      const stat = lstatSync(parent.path, { bigint: true });
-      if (!stat.isDirectory() || stat.isSymbolicLink()
-        || `${stat.dev}:${stat.ino}:${stat.mode}` !== parent.identity) throw new ToolInputProjectionError('stale');
-    }
-    const current = lstatSync(path, { bigint: true });
-    if (!current.isFile() || current.isSymbolicLink() || fileSignature(current) !== signature) throw new ToolInputProjectionError('stale');
-    const checkFd = openSync(path, constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW);
-    try {
-      if (fileSignature(fstatSync(checkFd, { bigint: true })) !== signature
-        || !readFileSync(checkFd).equals(bytes)
-        || fileSignature(fstatSync(checkFd, { bigint: true })) !== signature
-        || fileSignature(lstatSync(path, { bigint: true })) !== signature) throw new ToolInputProjectionError('stale');
-    } finally { closeSync(checkFd); }
-  };
 }
 
-/** Capture the complete original acquisition selection before admission; this grants no effects. */
-export function createAgentKnowledgeIngestInputProjector(shellPaths: ShellPathService,
-  configManager: AgentConnectedHostConfigReader): ToolInputProjector {
+/** What leaves for the host: the JSON body, or the file bytes for an upload. */
+type IngestSend =
+  | { readonly kind: 'json'; readonly route: string; readonly payload: JsonRecord }
+  | { readonly kind: 'upload'; readonly route: string; readonly bytes: Buffer; readonly filename: string; readonly fields: JsonRecord };
+
+/**
+ * Local files are read here and sent as bytes, never as a path the host would
+ * open on its own machine. A single file becomes an uploaded artifact; a URL
+ * or bookmarks list and a connector's file go as the connector's content.
+ */
+function sendFor(request: AgentKnowledgeIngestRequest, shellPaths: ShellPathService, sourceKind: string): IngestSend {
+  const payload = request.payload;
+  const homeOverride = readOptionalString(payload.homeOverride);
+  if (homeOverride) workspacePath(shellPaths, homeOverride, 'homeOverride');
+  const selected = readOptionalString(payload.path);
+  if (!selected) return { kind: 'json', route: request.method.route, payload };
+  const path = workspacePath(shellPaths, selected, 'path');
+  const bytes = readIngestFile(path);
+  if (request.method === AGENT_KNOWLEDGE_METHODS.ingestArtifact) {
+    const { path: _path, ...fields } = payload;
+    return { kind: 'upload', route: request.method.route, bytes, filename: basename(path), fields };
+  }
+  const { path: _path, ...rest } = payload;
+  if (request.method === AGENT_KNOWLEDGE_METHODS.ingestConnector) {
+    return { kind: 'json', route: request.method.route, payload: { ...rest, ...(rest.content === undefined && rest.input === undefined ? { content: bytes.toString('utf8') } : {}) } };
+  }
+  return { kind: 'json', route: AGENT_KNOWLEDGE_METHODS.ingestConnector.route, payload: {
+    ...rest, connectorId: sourceKind === 'bookmarks_file' ? 'bookmark' : 'url-list', content: bytes.toString('utf8'),
+  } };
+}
+
+/**
+ * Argument and path problems are refused before the gate is asked anything:
+ * they are facts about the arguments, settled here with no host call.
+ */
+export function createAgentKnowledgeIngestInputProjector(shellPaths: ShellPathService): ToolInputProjector {
   return { async project(request) {
-    request.assertCurrent(); request.signal?.throwIfAborted();
-    const original = captureStrictJudgmentJson(request.args);
-    // Argument problems are refused as `invalid` (check the arguments); anything else would read as a host outage.
-    let ingest: AgentKnowledgeIngestRequest;
-    try { ingest = requestForArgs(original); } catch (error) { throw invalidSelection(error instanceof IngestArgumentError ? error.message : undefined); }
-    const method = ingest.method, methodSnapshot = captureStrictJudgmentJson(method);
-    const assertMethods = captureCatalogMethods(AGENT_KNOWLEDGE_METHODS, ['ingestUrl', 'ingestArtifact', 'ingestUrls', 'ingestBookmarks', 'ingestBrowserHistory', 'ingestConnector']);
-    const assertShellPaths = captureCatalogMethods(shellPaths, ['workingDirectory', 'homeDirectory', 'resolveWorkspacePath']);
-    const workspace = shellPaths.workingDirectory, home = shellPaths.homeDirectory;
-    const physicalWorkspace = realpathSync(workspace), workspaceStat = lstatSync(physicalWorkspace, { bigint: true });
-    if (!workspaceStat.isDirectory()) throw new ToolInputProjectionError('held');
-    const workspaceIdentity = `${workspaceStat.dev}:${workspaceStat.ino}:${workspaceStat.mode}:${workspaceStat.ctimeNs}`;
-    const resolveWorkspacePath = shellPaths.resolveWorkspacePath;
-    const selectedPath = readOptionalString(ingest.payload.path);
-    const localPath = selectedPath ? resolveWorkspacePath.call(shellPaths, selectedPath) : undefined;
-    // The model picks this path, so it stays inside the workspace; a file elsewhere is the owner's to hand over.
-    const inWorkspace = (target: string) => { const rel = relative(physicalWorkspace, target); return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel)); };
-    if (localPath && !inWorkspace(localPath)) throw invalidSelection('The path must be inside the workspace.');
-    const homeOverride = readOptionalString(ingest.payload.homeOverride);
-    if (homeOverride && !inWorkspace(resolveWorkspacePath.call(shellPaths, homeOverride))) throw invalidSelection('homeOverride must be inside the workspace.');
-    const assertFile = localPath ? captureIngestFile(localPath) : undefined;
-    const retainedRequest = captureStrictJudgmentJson({ ...ingest,
-      payload: { ...ingest.payload, ...(localPath ? { path: localPath } : {}) } });
-    let released = false;
-    const assertSelection = () => {
-      request.assertCurrent(); request.signal?.throwIfAborted(); assertShellPaths(); assertMethods();
-      const current = lstatSync(physicalWorkspace, { bigint: true });
-      if (released || shellPaths.workingDirectory !== workspace || shellPaths.homeDirectory !== home
-        || realpathSync(workspace) !== physicalWorkspace || !current.isDirectory()
-        || `${current.dev}:${current.ino}:${current.mode}:${current.ctimeNs}` !== workspaceIdentity
-        || (selectedPath && resolveWorkspacePath.call(shellPaths, selectedPath) !== localPath)
-        || !isDeepStrictEqual(captureStrictJudgmentJson(method), methodSnapshot)) throw new ToolInputProjectionError('stale');
-      assertFile?.(); assertShellPaths(); request.assertCurrent();
-    };
-    const connection = captureOperatorConnection(shellPaths, configManager, assertSelection);
-    const assertCurrent = () => { assertSelection(); connection.assertCurrent(); assertSelection(); };
-    assertCurrent();
-    const context = Object.freeze({});
-    ingestCaptures.set(context, { shellPaths, configManager, connection, request: retainedRequest, assertCurrent });
-    return { status: 'projected', args: request.args, executionContext: context, assertCurrent,
-      assertRepairedArgs(args) {
-        if (!isDeepStrictEqual(captureStrictJudgmentJson(args), original)) throw new ToolInputProjectionError('binding-changed');
-        assertCurrent();
-      },
-      async release() { released = true; ingestCaptures.delete(context); },
-    };
+    request.signal?.throwIfAborted();
+    try {
+      const ingest = requestForArgs(captureStrictJudgmentJson(request.args) as AgentKnowledgeIngestToolArgs);
+      const path = readOptionalString(ingest.payload.path), homeOverride = readOptionalString(ingest.payload.homeOverride);
+      if (path && statSync(workspacePath(shellPaths, path, 'path')).size > MAX_INGEST_FILE_BYTES) {
+        throw new IngestArgumentError(`The file is larger than the ${MAX_INGEST_FILE_BYTES / (1024 * 1024)} MiB limit.`);
+      }
+      if (homeOverride) workspacePath(shellPaths, homeOverride, 'homeOverride');
+    } catch (error) {
+      if (error instanceof IngestArgumentError) throw new ToolInputProjectionError('invalid', error.message);
+      throw error;
+    }
+    return { status: 'projected', args: request.args };
   } };
 }
 
@@ -534,46 +498,42 @@ export function createAgentKnowledgeIngestTool(
     },
     execute: async (rawArgs, options) => {
       let request: AgentKnowledgeIngestRequest;
-      try { request = requestForArgs(captureStrictJudgmentJson(rawArgs)); }
+      const args = captureStrictJudgmentJson(rawArgs) as AgentKnowledgeIngestToolArgs;
+      try { request = requestForArgs(args); }
       catch (error) { return failure(error instanceof Error ? error.message : 'Agent Knowledge ingest input is invalid.'); }
-      const context = options?.inputProjectionContext;
-      const capture = context && ingestCaptures.get(context);
+      const admitted = () => assertCurrentToolEffect(rawArgs, options, 'write') && assertCurrentToolEffect(rawArgs, options, 'send');
+      let wasAdmitted = false;
+      try { wasAdmitted = admitted(); } catch { wasAdmitted = false; }
+      if (!wasAdmitted) {
+        return failure(`${preview(request)}\n\nNothing was ingested: this call ran without the owner's admission of an ingest. Ask the owner to allow it, then call again.`);
+      }
+      let send: IngestSend;
+      try { send = sendFor(request, shellPaths, readString(args.sourceKind) || 'url'); }
+      catch (error) { return failure(error instanceof IngestArgumentError ? error.message : `The file could not be read: ${error instanceof Error ? error.message : String(error)}`); }
+      const connection = resolveConnectedHostConnection({ configManager, homeDirectory: shellPaths.homeDirectory });
+      if (!connection.token) return failure(formatKnowledgeFailure({ ok: false, kind: 'auth_required',
+        error: connection.unavailable?.reason ?? 'No connected-host operator token found.', baseUrl: connection.baseUrl, route: send.route,
+        ...(connection.unavailable ? { next: connection.unavailable.next } : {}) }));
       const assertCurrent = () => {
         options?.signal?.throwIfAborted();
-        if (!assertCurrentToolEffect(rawArgs, options, 'write') || !assertCurrentToolEffect(rawArgs, options, 'send')
-          || !context || !capture || capture.shellPaths !== shellPaths || capture.configManager !== configManager) {
-          throw new ToolInputProjectionError('held');
-        }
-        assertProjectionExecution(context, rawArgs); capture.assertCurrent();
+        if (!admitted()) throw new Error('The ingest admission ended before the request left. Nothing was sent.');
       };
-      try { assertCurrent(); }
-      catch { return failure(`${preview(request)}\n\nIngestion requires current recorded effect admission and unchanged sources.`); }
-      if (!capture) return failure('Agent Knowledge ingest held.');
-      request = capture.request;
-      const connection = capture.connection;
-      if (!connection.token) return failure(formatKnowledgeFailure({ ok: false, kind: 'auth_required',
-        error: 'No connected-host operator token found.', baseUrl: connection.baseUrl, route: request.method.route }));
-      const restrictions = { signal: options?.signal, assertCurrent };
-      const unconfirmed = 'The request may already have reached the host. List the Agent Knowledge sources before retrying, so the same source is not ingested twice.';
+      const restrictions = { ...(options?.signal ? { signal: options.signal } : {}), assertCurrent };
       let data: unknown;
       try {
-        data = await postAgentKnowledgeJson(connection, request.method.route, request.payload, restrictions);
+        data = send.kind === 'upload'
+          ? await postAgentKnowledgeUpload(connection, send.route, { bytes: send.bytes, filename: send.filename }, send.fields, restrictions)
+          : await postAgentKnowledgeJson(connection, send.route, send.payload, restrictions);
       } catch (error) {
         try {
-          assertCurrent();
-          const classified = await classifyKnowledgeError(error, connection, request.method.route, restrictions);
-          assertCurrent();
-          const text = formatKnowledgeFailure(classified);
-          assertCurrent();
-          return failure(text);
-        } catch { return failure(`Agent Knowledge ingest outcome could not be confirmed: admission, request, or source stopped being current. ${unconfirmed}`); }
+          return failure(formatKnowledgeFailure(await classifyKnowledgeError(error, connection, send.route, restrictions.signal ? { signal: restrictions.signal } : {})));
+        } catch {
+          return failure('Agent Knowledge ingest was cancelled. The request may already have reached the host. List the Agent Knowledge sources before retrying, so the same source is not ingested twice.');
+        }
       }
-      // The host has accepted the ingest. Whatever changed locally since, the result is reported, never turned into "held".
       const text = request.batch ? formatBatchIngest(data, request.label)
         : formatIngest(data, request.target, request.label, request.method.route, request.targetLabel);
-      let changedNote = '';
-      try { assertCurrent(); } catch { changedNote = '\nNote: admission, the connection or the source file changed while the host was ingesting; the host\'s answer above is reported as received.'; }
-      return output([text, ...(request.notes ?? [])].join('\n') + changedNote);
+      return output([text, ...(request.notes ?? [])].join('\n'));
     },
   };
 }
@@ -584,6 +544,6 @@ export function registerAgentKnowledgeIngestTool(
   configManager: AgentConnectedHostConfigReader,
 ): void {
   registry.register(createAgentKnowledgeIngestTool(shellPaths, configManager), {
-    inputProjection: createAgentKnowledgeIngestInputProjector(shellPaths, configManager),
+    inputProjection: createAgentKnowledgeIngestInputProjector(shellPaths),
   });
 }

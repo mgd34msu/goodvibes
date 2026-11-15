@@ -1,8 +1,7 @@
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { CommandContext, CommandRegistry } from '../input/command-registry.ts';
-import { createAgentHarnessTool } from './agent-harness-tool.ts';
-import { forwardHarnessCatalogCall } from './agent-harness-catalog-ingress.ts';
+import { createHarnessFacade, registerHarnessFacade, type HarnessFacadeDeps } from './agent-harness-facade.ts';
 
 type AgentChannelsAction = 'status' | 'channel' | 'setup' | 'triage' | 'deliveries';
 
@@ -17,12 +16,7 @@ interface AgentChannelsToolArgs {
   readonly limit?: unknown;
 }
 
-interface AgentChannelsToolDeps {
-  readonly commandRegistry: CommandRegistry;
-  readonly commandContext: CommandContext;
-  readonly toolRegistry: ToolRegistry;
-  readonly harnessTool?: Tool;
-}
+type AgentChannelsToolDeps = HarnessFacadeDeps;
 
 function error(message: string): { readonly success: false; readonly error: string } {
   return { success: false, error: message };
@@ -61,13 +55,7 @@ function channelIdArg(args: AgentChannelsToolArgs): unknown {
 }
 
 export function createAgentChannelsTool(deps: AgentChannelsToolDeps): Tool {
-  const harnessTool = deps.harnessTool ?? createAgentHarnessTool({
-    commandRegistry: deps.commandRegistry,
-    commandContext: deps.commandContext,
-    toolRegistry: deps.toolRegistry,
-  });
-
-  return {
+  return createHarnessFacade<AgentChannelsToolArgs>(deps, {
     definition: {
       name: 'channels',
       description: 'Inspect channel readiness, setup, triage, and receipts.',
@@ -92,9 +80,7 @@ export function createAgentChannelsTool(deps: AgentChannelsToolDeps): Tool {
       sideEffects: [],
       concurrency: 'parallel',
     },
-    execute: async (rawArgs, options) => {
-      const args = (rawArgs && typeof rawArgs === 'object' && !Array.isArray(rawArgs) ? rawArgs : {}) as AgentChannelsToolArgs;
-      const forward = (translated: Record<string, unknown>) => forwardHarnessCatalogCall(harnessTool, rawArgs, translated, options);
+    route({ args, forward }) {
       const action = readAction(args);
       if (action === null) return error('Unknown channels action. Use action (or mode) as one of: status, channel, setup, triage, deliveries.');
 
@@ -137,7 +123,7 @@ export function createAgentChannelsTool(deps: AgentChannelsToolDeps): Tool {
         includeParameters: args.includeParameters,
       }));
     },
-  };
+  });
 }
 
 export function registerAgentChannelsTool(
@@ -145,5 +131,5 @@ export function registerAgentChannelsTool(
   commandRegistry: CommandRegistry,
   commandContext: CommandContext,
 ): void {
-  if (!registry.has('channels')) registry.register(createAgentChannelsTool({ commandRegistry, commandContext, toolRegistry: registry }));
+  registerHarnessFacade(registry, createAgentChannelsTool({ commandRegistry, commandContext, toolRegistry: registry }), commandContext);
 }

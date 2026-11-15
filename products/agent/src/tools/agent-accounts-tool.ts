@@ -1,6 +1,5 @@
-import { assertAgentMemoryInput } from './agent-memory-input-guard.ts';
-import { agentAccountsWriteGuard, assertAgentAccountsRead, createAgentAccountsInputProjector } from './agent-accounts-admission.ts';
-import { captureCatalogData } from './agent-harness-catalog-ranking.ts';
+import { agentAccountsWriteGuard, createAgentAccountsInputProjector } from './agent-accounts-admission.ts';
+import { toolErrorText } from './tool-error-text.ts';
 /**
  * The `accounts` tool: the durable record of every account the agent created.
  *
@@ -15,15 +14,15 @@ import { captureCatalogData } from './agent-harness-catalog-ranking.ts';
  * an account created today would leave no trace. This is the caller.
  *
  * Only the secret-store key NAME belongs in `credentialSecretKey`. Record
- * fields are screened before the taint policy receives them, and the registry
- * independently refuses protected values again at the durable boundary.
+ * fields are screened once, before the taint policy receives them, with a
+ * refusal that says where the secret goes instead.
  *
  * The one boundary that does not move: an outward effect refused because
  * untrusted content was read this turn stays refused. A web page describing a
  * signup form cannot cause a signup.
  */
 
-import { ToolInputProjectionError, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { AgentAccountRegistry, type AgentAccountRecord } from '@goodvibes-jev/engine/platform/platform/google';
 import { mintAddressFor } from '@goodvibes-jev/engine/platform/platform/google';
@@ -59,7 +58,7 @@ function renderAccount(account: AgentAccountRecord): string {
 
 export interface AgentAccountsToolOptions {
   readonly registry: AgentAccountRegistry;
-  /** Construction-owned workspace, independent of caller action arguments. */
+  /** Accepted from the runtime wiring; the register's path is the registry's own. */
   readonly shellPaths?: ShellPathService;
   /**
    * The owner's own mailbox, which per-signup aliases are minted from. Read at
@@ -103,10 +102,9 @@ export function createAgentAccountsTool(options: AgentAccountsToolOptions): Tool
       const cancelled = (): ToolOutput => ({ success: false, cancelled: true, error: 'Account action cancelled.' });
       if (execution?.signal?.aborted) return cancelled();
       try {
-        assertAgentMemoryInput(rawArgs);
         const action = readString(rawArgs.action).toLowerCase();
         if (!ACCOUNT_ACTIONS.some(candidate => candidate === action)) return failure(`accounts needs one of: ${ACCOUNT_ACTIONS.join(', ')}.`);
-        const write = agentAccountsWriteGuard(options, rawArgs, execution);
+        const write = agentAccountsWriteGuard(rawArgs, execution);
         if (action === 'alias') {
           // Each signup gets its own delivery address. That address is the
           // correlation key a verification mail is later matched on, so it must
@@ -121,13 +119,11 @@ export function createAgentAccountsTool(options: AgentAccountsToolOptions): Tool
           // Opening the expectation here is what lets the verification mail
           // this signup provokes be recognised later. Nothing else opens one,
           // so unsolicited "verify your account" mail is never acted on.
-          write.assertCurrent();
           const expectation = getSessionExpectationBook().openExpectation({
             serviceDomain: alias.serviceDomain,
             recipientAddress: alias.address,
             purpose: readString(rawArgs.purpose) || `signing up at ${alias.serviceDomain}`,
           }, write.assertCurrent);
-          write.assertCurrent();
           return ok([
             `Use ${alias.address} as the email address for this signup.`,
             `It delivers to ${alias.baseAddress}, and it is what a verification mail for ${alias.serviceDomain} will be matched on.`,
@@ -137,9 +133,7 @@ export function createAgentAccountsTool(options: AgentAccountsToolOptions): Tool
         }
 
         if (action === 'list') {
-          assertAgentAccountsRead(options, rawArgs, execution);
           const snapshot = registry.snapshot();
-          assertAgentAccountsRead(options, rawArgs, execution);
           if (snapshot.unreadable !== undefined) {
             return failure(`The account register at ${snapshot.path} could not be read (${snapshot.unreadable}), so the list is unknown rather than empty. The file was not changed; repair or restore it before relying on this list.`);
           }
@@ -157,9 +151,8 @@ export function createAgentAccountsTool(options: AgentAccountsToolOptions): Tool
 
         if (action === 'record') {
           // Refuse protected values before the taint policy can send field text
-          // to judgment. Capture once so policy and persistence see identical
-          // inputs even across the awaited reading. The registry checks again
-          // at its durable boundary; this preflight does not grant authority.
+          // to judgment. Read once so policy and persistence see the same
+          // values across the awaited reading.
           const input = {
             serviceDomain: readString(rawArgs.serviceDomain),
             serviceUrl: readString(rawArgs.serviceUrl),
@@ -170,7 +163,6 @@ export function createAgentAccountsTool(options: AgentAccountsToolOptions): Tool
           if (Object.values(input).some(containsSecretLikeText)) {
             return failure('The account registry cannot store secret-looking values. Store the secret in the secret store and record only its key name.');
           }
-          write.assertCurrent();
           // Recording is the visible half of an outward effect that already
           // happened, so it is gated the same way the signup itself is: page
           // text cannot drive the agent into registering an account.
@@ -215,48 +207,32 @@ export function createAgentAccountsTool(options: AgentAccountsToolOptions): Tool
           if (execution?.signal?.aborted) return cancelled();
           if (!decision.allowed) return failure(`${decision.reason} ${decision.fix}`);
 
-          write.assertCurrent();
           const account = registry.record(input, write);
-          write.assertCurrent();
           return ok(`Recorded:\n${renderAccount(account)}`);
         }
 
         if (action === 'forget') {
           const id = readString(rawArgs.id);
           if (!id) return failure('accounts action:"forget" needs the record id, from accounts action:"list".');
-          write.assertCurrent();
           const removed = registry.forget(id, write);
-          write.assertCurrent();
           return ok(
             `Forgot the record for ${removed.serviceDomain}. This removed the RECORD only, the account at ${removed.serviceUrl} still exists, and its credential is still under secret-store key ${removed.credentialSecretKey}.`,
           );
         }
 
-        write.assertCurrent();
-        const known = options.knownSecretKeys ? await options.knownSecretKeys() : undefined;
-        if (execution?.signal?.aborted) return cancelled();
-        const capturedKnown = known === undefined ? undefined : captureCatalogData(known);
-        const knownRevision = JSON.stringify(capturedKnown);
-        const assertKnown = () => {
-          if (JSON.stringify(known === undefined ? undefined : captureCatalogData(known)) !== knownRevision) throw new ToolInputProjectionError('stale');
-        };
-        const sweepWrite = {
-          assertCurrent() { write.assertCurrent(); assertKnown(); },
-          didWrite(stage: 'lock' | 'unlock' | 'parent' | 'temporary' | 'store', content: string) { write.didWrite(stage, content); assertKnown(); },
-        };
-        sweepWrite.assertCurrent();
         // Zero or a negative age puts the cutoff at or after now, which would
         // reap every record, so only a positive finite number is an age.
         if (rawArgs.maxAgeDays !== undefined && !(typeof rawArgs.maxAgeDays === 'number' && Number.isFinite(rawArgs.maxAgeDays) && rawArgs.maxAgeDays > 0)) {
           return failure('accounts action:"sweep" needs maxAgeDays to be a number greater than 0 (records older than that many days are dropped). No record was removed.');
         }
         const maxAgeDays = rawArgs.maxAgeDays;
+        const known = options.knownSecretKeys ? [...await options.knownSecretKeys()] : undefined;
+        if (execution?.signal?.aborted) return cancelled();
         const result = registry.sweep({
-          ...(capturedKnown === undefined ? {} : { knownSecretKeys: capturedKnown }),
+          ...(known === undefined ? {} : { knownSecretKeys: known }),
           ...(maxAgeDays === undefined ? {} : { maxAgeDays }),
-        }, sweepWrite);
-        sweepWrite.assertCurrent();
-        const credentialCheck = capturedKnown === undefined
+        }, write);
+        const credentialCheck = known === undefined
           ? ' Credential presence could not be checked (the secret store is not connected), so only the age rule was applied.'
           : '';
         return ok(
@@ -266,12 +242,12 @@ export function createAgentAccountsTool(options: AgentAccountsToolOptions): Tool
         );
       } catch (error) {
         if (execution?.signal?.aborted) return cancelled();
-        return failure(error instanceof Error ? error.message : String(error));
+        return failure(toolErrorText(error));
       }
     },
   };
 }
 
 export function registerAgentAccountsTool(registry: ToolRegistry, options: AgentAccountsToolOptions): void {
-  if (!registry.has('accounts')) registry.register(createAgentAccountsTool(options), { inputProjection: createAgentAccountsInputProjector(options) });
+  if (!registry.has('accounts')) registry.register(createAgentAccountsTool(options), { inputProjection: createAgentAccountsInputProjector() });
 }

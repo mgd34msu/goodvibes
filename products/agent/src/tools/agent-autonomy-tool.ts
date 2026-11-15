@@ -1,9 +1,8 @@
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { CommandContext, CommandRegistry } from '../input/command-registry.ts';
-import { createAgentHarnessTool } from './agent-harness-tool.ts';
 import { captureModelReadingInput } from './agent-harness-model-reading-source.ts';
-import { createHarnessCatalogInputProjector, protectHarnessCatalogTool, forwardHarnessCatalogCall } from './agent-harness-catalog-ingress.ts';
+import { createHarnessFacade, registerHarnessFacade, type HarnessFacadeDeps } from './agent-harness-facade.ts';
 
 type AgentAutonomyAction = 'intake' | 'queue' | 'item' | 'status';
 
@@ -18,12 +17,7 @@ interface AgentAutonomyToolArgs {
   readonly limit?: unknown;
 }
 
-interface AgentAutonomyToolDeps {
-  readonly commandRegistry: CommandRegistry;
-  readonly commandContext: CommandContext;
-  readonly toolRegistry: ToolRegistry;
-  readonly harnessTool?: Tool;
-}
+type AgentAutonomyToolDeps = HarnessFacadeDeps;
 
 function error(message: string): { readonly success: false; readonly error: string } {
   return { success: false, error: message };
@@ -91,13 +85,7 @@ function itemArgs(args: AgentAutonomyToolArgs): Record<string, unknown> {
 }
 
 export function createAgentAutonomyTool(deps: AgentAutonomyToolDeps): Tool {
-  const harnessTool = deps.harnessTool ?? createAgentHarnessTool({
-    commandRegistry: deps.commandRegistry,
-    commandContext: deps.commandContext,
-    toolRegistry: deps.toolRegistry,
-  });
-
-  const tool: Tool = {
+  return createHarnessFacade<AgentAutonomyToolArgs>(deps, {
     definition: {
       name: 'autonomy',
       description: 'Route ongoing work and inspect visible autonomy.',
@@ -122,9 +110,8 @@ export function createAgentAutonomyTool(deps: AgentAutonomyToolDeps): Tool {
       sideEffects: [],
       concurrency: 'parallel',
     },
-    execute: async (rawArgs, options) => {
-      const args = captureModelReadingInput(rawArgs);
-      const forward = (translated: Record<string, unknown>) => forwardHarnessCatalogCall(harnessTool, rawArgs, translated, options);
+    selected: isAutonomyCatalogCall,
+    route({ args, forward }) {
       const action = readAction(args);
       if (action === null) return error('Unknown autonomy action. Use action (or mode) as one of: intake, queue, item, status.');
 
@@ -134,8 +121,7 @@ export function createAgentAutonomyTool(deps: AgentAutonomyToolDeps): Tool {
 
       return error('Unknown autonomy action. Use action:"intake" for ongoing work or action:"queue" for visible autonomous work.');
     },
-  };
-  return protectHarnessCatalogTool(tool, deps.toolRegistry, isAutonomyCatalogCall, deps.commandContext);
+  });
 }
 
 function isAutonomyCatalogCall(input: Record<string, unknown>): boolean {
@@ -148,5 +134,5 @@ export function registerAgentAutonomyTool(
   commandRegistry: CommandRegistry,
   commandContext: CommandContext,
 ): void {
-  if (!registry.has('autonomy')) registry.register(createAgentAutonomyTool({ commandRegistry, commandContext, toolRegistry: registry }), { inputProjection: createHarnessCatalogInputProjector(registry, undefined, isAutonomyCatalogCall, commandContext) });
+  registerHarnessFacade(registry, createAgentAutonomyTool({ commandRegistry, commandContext, toolRegistry: registry }), commandContext, isAutonomyCatalogCall);
 }

@@ -1,9 +1,8 @@
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { CommandContext, CommandRegistry } from '../input/command-registry.ts';
-import { createAgentHarnessTool } from './agent-harness-tool.ts';
 import { captureModelReadingInput } from './agent-harness-model-reading-source.ts';
-import { createHarnessCatalogInputProjector, protectHarnessCatalogTool, forwardHarnessCatalogCall } from './agent-harness-catalog-ingress.ts';
+import { createHarnessFacade, registerHarnessFacade, type HarnessFacadeDeps } from './agent-harness-facade.ts';
 
 type AgentDelegationAction = 'status' | 'routes' | 'route';
 
@@ -18,12 +17,7 @@ interface AgentDelegationToolArgs {
   readonly limit?: unknown;
 }
 
-interface AgentDelegationToolDeps {
-  readonly commandRegistry: CommandRegistry;
-  readonly commandContext: CommandContext;
-  readonly toolRegistry: ToolRegistry;
-  readonly harnessTool?: Tool;
-}
+type AgentDelegationToolDeps = HarnessFacadeDeps;
 
 function error(message: string): { readonly success: false; readonly error: string } {
   return { success: false, error: message };
@@ -80,13 +74,7 @@ function routeArgs(args: AgentDelegationToolArgs): Record<string, unknown> {
 }
 
 export function createAgentDelegationTool(deps: AgentDelegationToolDeps): Tool {
-  const harnessTool = deps.harnessTool ?? createAgentHarnessTool({
-    commandRegistry: deps.commandRegistry,
-    commandContext: deps.commandContext,
-    toolRegistry: deps.toolRegistry,
-  });
-
-  const tool: Tool = {
+  return createHarnessFacade<AgentDelegationToolArgs>(deps, {
     definition: {
       name: 'delegation',
       description: 'Inspect build delegation routes and policy.',
@@ -111,9 +99,8 @@ export function createAgentDelegationTool(deps: AgentDelegationToolDeps): Tool {
       sideEffects: [],
       concurrency: 'parallel',
     },
-    execute: async (rawArgs, options) => {
-      const args = captureModelReadingInput(rawArgs);
-      const forward = (translated: Record<string, unknown>) => forwardHarnessCatalogCall(harnessTool, rawArgs, translated, options);
+    selected: isDelegationCatalogCall,
+    route({ args, forward }) {
       const action = readAction(args);
       if (action === null) return error('Unknown delegation action. Use action (or mode) as one of: status, routes, route.');
 
@@ -122,8 +109,7 @@ export function createAgentDelegationTool(deps: AgentDelegationToolDeps): Tool {
 
       return error('Unknown delegation action. Use action:"status" for policy or action:"route" for one delegation route.');
     },
-  };
-  return protectHarnessCatalogTool(tool, deps.toolRegistry, isDelegationCatalogCall, deps.commandContext);
+  });
 }
 
 function isDelegationCatalogCall(input: Record<string, unknown>): boolean {
@@ -136,5 +122,5 @@ export function registerAgentDelegationTool(
   commandRegistry: CommandRegistry,
   commandContext: CommandContext,
 ): void {
-  if (!registry.has('delegation')) registry.register(createAgentDelegationTool({ commandRegistry, commandContext, toolRegistry: registry }), { inputProjection: createHarnessCatalogInputProjector(registry, undefined, isDelegationCatalogCall, commandContext) });
+  registerHarnessFacade(registry, createAgentDelegationTool({ commandRegistry, commandContext, toolRegistry: registry }), commandContext, isDelegationCatalogCall);
 }

@@ -34,6 +34,30 @@ export function retainGoogleConnectionOwners(owners: GoogleAdmissionOwners): () 
     }
   };
 }
+/** Where the owner enters a client secret; never the conversation. */
+export const GOOGLE_CLIENT_SECRET_ENTRY = 'The owner enters the client id and secret with /google client <client-id> <client-secret> in the terminal, or names the downloaded client JSON for connect.clientFile.';
+export const NO_GOOGLE_CLIENT_SECRET = `No OAuth client secret is stored, so connect.client has nothing to register. Nothing was stored. ${GOOGLE_CLIENT_SECRET_ENTRY}`;
+
+/**
+ * A consent in flight depends on the two Google credentials only: it fails
+ * when the client secret or the refresh token is replaced, and an unrelated
+ * secret saved meanwhile leaves it alone.
+ */
+export function retainGoogleCredentials(secrets: SecretsManager): () => void {
+  const keys = [GOOGLE_SECRET_KEYS.oauthClientSecret, GOOGLE_SECRET_KEYS.oauthRefreshToken];
+  // The stored value, not the store's revision: that revision moves on any
+  // credential write, and an unrelated one must not end the consent.
+  const revisionOf = (key: string) => { const snapshot = secrets.resolveLocalCredentialSnapshot(key); return snapshot.state === 'resolved' ? `resolved:${snapshot.value}` : snapshot.state; };
+  const revisions = keys.map(revisionOf);
+  return () => {
+    keys.forEach((key, index) => {
+      if (revisionOf(key) !== revisions[index]) {
+        throw new ToolInputProjectionError('stale', 'A Google credential was replaced while the consent was open. Call connect.client again for a new consent link.');
+      }
+    });
+  };
+}
+
 export interface GooglePendingCredential {
   readonly clientId: string;
   readonly clientSecret: string;
@@ -85,7 +109,9 @@ export function createGoogleSettingsProjector(owners: GoogleAdmissionOwners, pen
       };
     }
     if (!['connect.client', 'connect.clientfile', 'connect.complete'].includes(action)) return { status: 'projected', args: request.args };
-    if (Object.hasOwn(request.args, 'clientSecret')) throw new ToolInputProjectionError('invalid');
+    if (Object.hasOwn(request.args, 'clientSecret')) {
+      throw new ToolInputProjectionError('invalid', `A client secret is never taken as a tool argument, and the one sent was not stored. ${GOOGLE_CLIENT_SECRET_ENTRY}`);
+    }
     request.assertCurrent(); request.signal?.throwIfAborted();
     const methods = retainSurfaceMethods(config, ['prepareSettingMutationPlan', 'inspectPreparedMutation', 'assertPreparedMutation', 'assertCompletedMutation', 'get', 'getConfigurationIncarnation']);
     const secretMethods = retainSurfaceMethods(secrets, ['prepareImport', 'inspectPreparedImport', 'assertPreparedImport', 'assertCompletedImport', 'resolveLocalCredentialSnapshot']);
@@ -114,9 +140,13 @@ export function createGoogleSettingsProjector(owners: GoogleAdmissionOwners, pen
       importedSecret = { key: GOOGLE_SECRET_KEYS.oauthClientSecret, value: clientSecret, scope: 'daemon' };
     } else {
       const reference = text(request.args.clientSecretRef) || secretReferenceFor(GOOGLE_SECRET_KEYS.oauthClientSecret);
-      if (reference !== secretReferenceFor(GOOGLE_SECRET_KEYS.oauthClientSecret)) throw new ToolInputProjectionError('invalid');
+      if (reference !== secretReferenceFor(GOOGLE_SECRET_KEYS.oauthClientSecret)) {
+        throw new ToolInputProjectionError('invalid', 'clientSecretRef names a different secret; omit it so the stored Google client secret is used.');
+      }
       const observation = secrets.resolveLocalCredentialSnapshot(GOOGLE_SECRET_KEYS.oauthClientSecret);
-      if (observation.state !== 'resolved') throw new ToolInputProjectionError('unconfigured');
+      // No stored secret: nothing to prepare. The tool answers with where the
+      // owner enters one, instead of a refusal that reads as "no google tool".
+      if (observation.state !== 'resolved') return { status: 'projected', args: request.args };
       const parsed = clientCredentialsFromInput({ clientId: text(request.args.clientId), clientSecret: observation.value });
       if (!parsed.ok) throw new ToolInputProjectionError('invalid');
       clientId = parsed.credentials.clientId; clientSecret = parsed.credentials.clientSecret;

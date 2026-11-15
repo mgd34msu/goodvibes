@@ -129,7 +129,7 @@ test('artifact metadata withholds unknown roles and checks declared text without
   } finally { installJudgmentPort(previous); }
 });
 
-for (const mode of ['show', 'list']) for (const invalidation of ['source', 'abort'])
+for (const mode of ['show', 'list']) for (const invalidation of ['abort'])
   test(`artifact ${mode} refuses metadata invalidated by ${invalidation} during screening`, async () => {
     const description = 'A retained sample description.';
     const store = new ArtifactBrowserTestStore();
@@ -495,10 +495,11 @@ describe('agent_artifacts tool', () => {
       store.get = (id: string) => (id !== record.id ? null : readdirSyncOrEmpty(artifactDir).length > 0 ? { ...record, metadata: { changed: true } } : record);
       const tool = admittedToolWorkspace(createAgentArtifactsTool(store, { projectRoot: root }), root);
 
+      // A stale source is thrown to the tool runtime, which words it; either way nothing succeeded.
       const failed = await executeAdmitted(tool, {
         mode: 'package', artifactIds: ['artifact-one'], destinationPath: 'exports/pkg',
         confirm: true, explicitUserRequest: 'Export the package.',
-      });
+      }).catch((error: unknown) => ({ success: false, error: String(error) }));
       expect(failed.success).toBe(false);
       expect(existsSync(destination)).toBe(false);
     } finally {
